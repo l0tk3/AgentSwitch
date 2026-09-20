@@ -12,8 +12,9 @@ describe("default policy", () => {
     expect(classify("把这段话翻译成英文")).toBe("chat");
   });
 
-  it("browser goes to the first browser-capable harness, chat to the router default", () => {
+  it("browser goes to the browser-capable harness with the most quota, chat to the router default", () => {
     expect(defaultTarget("打开网页登录", t, {})).toEqual({ harness: "claude-code", model: "claude-sonnet-5" });
+    expect(defaultTarget("打开网页登录", t, { "claude-code": 0 })).toEqual({ harness: "codex", model: "gpt-6-astra" });
     expect(defaultTarget("总结一下这篇文章", t, {})).toEqual({ harness: "opencode", model: "deepseek/deepseek-flash" });
   });
 

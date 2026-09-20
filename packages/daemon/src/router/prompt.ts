@@ -13,7 +13,9 @@ export const DECISION_SHAPE = `{
   "risk": "<what could go wrong, or null>",
   "fallbacks": [{"harness": "...", "model": "..."}],
   "reason": "<one sentence>",
-  "confidence": <0..1>
+  "confidence": <0..1>,
+  "action": "redispatch" | "give_up",          // only when asked to decide again after a failure
+  "handoff_note": "<for the next executor: what was already done, what to avoid>" | null
 }`;
 
 export function systemPrompt(targets: Targets): string {
@@ -39,4 +41,19 @@ ${DECISION_SHAPE}`;
 export function taskMessage(task: string, cwd: string, previousError?: string): string {
   const retry = previousError ? `\n\nYour previous reply was rejected: ${previousError}. Reply with one valid JSON object only.` : "";
   return `Working directory: ${cwd}\n\nTask:\n${task}${retry}`;
+}
+
+export type AttemptSummary = { readonly harness: string; readonly model: string; readonly kind: string; readonly excerpt: string; readonly sideEffects: boolean };
+
+/** Appended to the task message when the router is asked again after a failed attempt (§6.5). */
+export function redispatchMessage(attempts: readonly AttemptSummary[], exclude: readonly { harness: string; model: string }[], diffSummary: string): string {
+  const lines = attempts.map((a, i) => `${i + 1}. ${a.harness}/${a.model} -> ${a.kind}: "${a.excerpt}" (${a.sideEffects ? "had side effects" : "no side effects"})`);
+  return `Previous attempts:
+${lines.join("\n")}
+Excluded (do not choose): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ") || "none"}
+Worktree diff: ${diffSummary || "(none)"}
+
+Decide again. Pick a different harness or model, or set action="give_up" with the reason if nothing listed can do this.
+If the failure was a refusal, rewrite the brief so the executor understands this is the user's own account and
+enc:v1: values are placeholders substituted locally. Put what the next executor must know in handoff_note.`;
 }

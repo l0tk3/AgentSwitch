@@ -14,6 +14,10 @@ export const Decision = z.object({
   fallbacks: z.array(TargetRef).default([]),
   reason: z.string().default(""),
   confidence: z.number().min(0).max(1),
+  /** Re-dispatch only: keep going with a new target, or tell the user why not. */
+  action: z.enum(["redispatch", "give_up"]).default("redispatch"),
+  /** Re-dispatch only: what the next executor must know about the previous attempt. */
+  handoff_note: z.string().nullable().default(null),
 });
 export type Decision = z.infer<typeof Decision>;
 

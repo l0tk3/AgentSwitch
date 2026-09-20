@@ -163,12 +163,63 @@ router:
 
 这些原则本身要进路由测试集（§8）验证，改一次提示词跑一次集。
 
-## 6. 派发与回流
+## 6. 派发、失败与重派
 
+### 6.1 派发与回流
 - 三个执行器接法沿用 design §3.4：claude-code 走 Agent SDK 的 `canUseTool` 做审批；codex 走 app-server 的 `mcpServer/elicitation/request` 和 `execCommandApproval`；opencode 走 serve 的 permission 事件。
-- 派发参数：`{ brief, cwd, model, secret_gate: {proxy, mcp, browser}, timeout, approval_policy }`。secret-gate 配置按 harness 从 `packages/secret-gate/config/*` 生成，同 demo 脚本。
+- 派发参数：`{ brief, cwd, model, effort, secret_gate: {proxy, mcp, browser}, timeout, approval_policy }`。secret-gate 配置按 harness 从 `packages/secret-gate/config/*` 生成，同 demo 脚本。
 - 回流事件统一成 design §3.4 的 `Event`；`done` 时记录 tokens、耗时、审批次数、是否被 403。
-- **v1 不做二次分诊**：执行失败就是失败，推手机。v2 再考虑"路由器看结果决定换目标重跑"，且必须经用户批准，因为重跑会重复副作用。
+
+### 6.2 执行失败的分类（代码做，不问模型）
+
+每次执行结束，daemon 把结果归一成 `ExecutionOutcome {exitCode, httpStatus, stderr, lastText, sideEffects, events}`，用模式表判成一种 `FailureKind`：
+
+| kind | 信号（按 harness 各自映射） | 含义 |
+|---|---|---|
+| `refusal` | 模型文本 "I can't help / 无法协助 / against policy / safety"；Claude SDK 的 refusal stop reason；Codex 的 policy 拒绝 | 被围栏拦下，换模型大概率能过 |
+| `quota` | HTTP 429 / 402；"rate limit / insufficient balance / quota exceeded / usage limit"；Codex `rateLimits` 归零；DeepSeek `/user/balance` 为 0 | 这个 harness 暂时不能用 |
+| `transport` | 代理连不上、ECONNREFUSED / ETIMEDOUT、TLS 错、harness 进程崩溃或超时无输出 | 环境问题，与任务无关 |
+| `gate_denied` | secret-gate 返回 403 `X-Secret-Gate: denied` | **安全信号，不重派**，推手机 |
+| `task_failed` | 执行者正常结束但自己报告失败（测试没过、找不到文件） | 任务本身的问题，交给用户或路由器判断 |
+| `unknown` | 其他 | 按 task_failed 处理 |
+
+### 6.3 重派策略（`nextStep`，纯函数）
+
+输入：原 Decision、尝试历史 `[{harness, model, kind, excerpt, sideEffects}]`、当前额度/不可用表。输出四种之一：
+
+| kind | 有副作用？ | 动作 |
+|---|---|---|
+| `transport` | 无 | 同一目标退避后重试一次；再失败把该 harness 标 `unavailable` 10 分钟，走下一条 |
+| `quota` | 任意 | 该 harness 额度记 0，沿原 Decision 的 fallback 链取下一个能过校验的目标（代码就能决定，不问路由器） |
+| `refusal` | 任意 | **问路由器**：带上拒绝原文、已尝试的目标（排除）、工作树 diff 摘要，让它改写简报或换 harness |
+| `task_failed` / `unknown` | 无 | 问路由器一次 |
+| `task_failed` / `unknown` | 有 | 停止，推手机；用户可从手机"换个模型继续" |
+| `gate_denied` | — | 停止，推手机，记 security 事件 |
+
+上限：每个任务最多 3 次尝试、最多 2 次问路由器；超过即停止并推手机。fallback 链走完也停止。
+
+### 6.4 副作用与交接
+
+- 任务在 git worktree 里跑（design 附录 B.5），所以"做了多少"有据可查：`sideEffects = {filesChanged, commandsRun, approvalsGranted}` 从执行器事件累加。
+- 重派时下一位执行者拿到的不是原简报，而是 **交接简报**：原简报 + 上一位做到哪（diff 摘要、最后几条输出）+ 失败原因 + "从这里继续，不要重做已完成的部分"。
+- 有 `approvalsGranted` 的尝试（用户批过危险动作）失败后，一律停止推手机，不自动接力。
+
+### 6.5 路由器的再决策
+
+再决策仍然是同一个 `router` agent，多一段消息：
+
+```
+Previous attempts:
+1. claude-code/claude-sonnet-5 -> refusal: "I can't help with automating logins to..." (no side effects)
+Excluded: claude-code/claude-sonnet-5
+Worktree diff: (none)
+Decide again: pick a different harness or model, and rewrite the brief so the executor understands
+this is the user's own account and credentials are enc:v1: placeholders.
+```
+
+Decision 多两个可选字段：`action: "redispatch" | "give_up"`（默认 redispatch），`handoff_note`（写给下一位的交接说明）。`give_up` 时 daemon 停止并把 `reason` 推给用户。校验规则不变，被排除的目标在校验里视为 unavailable。
+
+路由器自己失败（DeepSeek 挂了）→ 和首次分诊一样落到默认表，且默认表也排除已失败的 harness。
 
 ## 7. 可观测与自我改进
 
@@ -194,6 +245,8 @@ router:
 `packages/daemon`（TypeScript，vitest 31 例，覆盖率 90%）：`targets.yaml`、Decision schema、`validateDecision` / `validatePin`、默认策略、`opencode run --agent router` 真路由、routing_log（node:sqlite）、CLI `npm run route`、评估脚本 `npm run eval` + 12 条起步样本。没做：HTTP、执行器、额度采集（quota 目前传空表）、手机打分。
 
 首次真跑（本仓库为 cwd）：DeepSeek 读了 log.ts、vitest 配置和文档后给出 claude-sonnet-5 + 一份含验收条件和禁区的简报，19 s。评估 4 条：3 命中；未命中的是"翻译 README 里的表格"，路由器置信度 0.45 触发默认表，而默认表的正则把 "Testing" 识别成代码任务派给了 claude-code。两个待改：默认表的关键词太粗；路由器对"改文档"类任务信心偏低，提示词里补一条。
+
+失败重派（§6.2–6.5）同日实现：`failure.ts`（分类模式表）、`reroute.ts`（`nextStep` 纯函数）、`route.ts` 的 `reroute()`、CLI `reroute` 子命令；52 例测试，覆盖率 92%。真跑一次：模拟 claude-sonnet-5 拒绝登录任务，DeepSeek 改派 codex/gpt-5.6-luna，交接说明正确解释了 enc:v1: 占位符和"用户自己的账号"，16 s。
 
 ## 10. 待拍板
 

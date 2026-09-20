@@ -9,7 +9,7 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "route": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts route",
+    "route": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts",
     "eval": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx scripts/router_eval.ts"
   },
   "dependencies": {

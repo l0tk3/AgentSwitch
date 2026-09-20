@@ -2,9 +2,10 @@
 
 import { parseDecision, type Decision } from "./decision.js";
 import { defaultTarget } from "./defaultPolicy.js";
-import { systemPrompt, taskMessage } from "./prompt.js";
+import { redispatchMessage, systemPrompt, taskMessage } from "./prompt.js";
+import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
 import type { Router } from "./routers/types.js";
-import type { TargetRef, Targets } from "./targets.js";
+import { markUnavailable, type TargetRef, type Targets } from "./targets.js";
 import { validateDecision, validatePin, type Quota, type Running, type Verdict } from "./validate.js";
 
 export type RouteRequest = {
@@ -45,8 +46,9 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
   const asked = await askRouter(req, deps);
   if (asked.decision) {
     const verdict = validateDecision(asked.decision, ctx);
-    const source = verdict.ok && verdict.chosen !== "default" ? "router" : "default";
-    return { ...asked, verdict, source };
+    if (verdict.ok) return { ...asked, verdict, source: verdict.chosen !== "default" ? "router" : "default" };
+    const last = validatePin(fallback, ctx, asked.decision.needs_browser);
+    return { ...asked, verdict: last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict, source: "default" };
   }
   const verdict = validatePin(fallback, ctx, req.needsBrowser ?? false);
   return { ...asked, verdict, source: "default" };
@@ -54,7 +56,60 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
 
 type Asked = { decision: Decision | null; routerError: string | null; routerMs: number; attempts: number };
 
-async function askRouter(req: RouteRequest, deps: RouteDeps): Promise<Asked> {
+export type RerouteRequest = RouteRequest & {
+  readonly decision: Decision | null;
+  readonly attempts: readonly Attempt[];
+  readonly routerAsks: number;
+  readonly diffSummary?: string;
+  readonly limits?: Limits;
+};
+
+export type RerouteResult =
+  | { readonly step: Extract<NextStep, { kind: "retry" | "switch" | "stop" }>; readonly decision: Decision | null; readonly routerError: null; readonly routerMs: 0 }
+  | { readonly step: { readonly kind: "redispatch"; readonly verdict: Verdict; readonly source: "router" | "default" }; readonly decision: Decision | null; readonly routerError: string | null; readonly routerMs: number }
+  | { readonly step: { readonly kind: "give_up"; readonly reason: string }; readonly decision: Decision; readonly routerError: null; readonly routerMs: number };
+
+/** After a failed attempt (router-v0 §6.3-6.5): code decides retry/switch/stop; refusals go back to the router. */
+export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<RerouteResult> {
+  const tried = req.attempts.map((a) => ({ harness: a.harness, model: a.model }));
+  const fallback = defaultTargetExcluding(req, deps, tried);
+  const step = nextStep({ decision: req.decision, attempts: req.attempts, routerAsks: req.routerAsks, targets: deps.targets,
+    quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, ...(req.limits ? { limits: req.limits } : {}) });
+  if (step.kind !== "ask-router") return { step, decision: req.decision, routerError: null, routerMs: 0 };
+
+  const targets = markUnavailable(deps.targets, step.exclude);
+  const summaries = req.attempts.map((a) => ({ harness: a.harness, model: a.model, kind: a.kind, excerpt: a.excerpt,
+    sideEffects: a.sideEffects.filesChanged + a.sideEffects.commandsRun + a.sideEffects.approvalsGranted > 0 }));
+  const extra = redispatchMessage(summaries, step.exclude, req.diffSummary ?? "");
+  const asked = await askRouter(req, { ...deps, targets }, extra);
+  const excludedFallback = defaultTargetExcluding(req, deps, step.exclude);
+  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: excludedFallback };
+  if (asked.decision?.action === "give_up") {
+    return { step: { kind: "give_up", reason: asked.decision.reason || "router gave up" }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
+  }
+  if (asked.decision) {
+    const verdict = validateDecision(asked.decision, ctx);
+    if (verdict.ok) {
+      const source = verdict.chosen !== "default" ? "router" : "default";
+      return { step: { kind: "redispatch", verdict, source }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
+    }
+    const last = validatePin(excludedFallback, ctx, asked.decision.needs_browser);
+    const merged = last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict;
+    return { step: { kind: "redispatch", verdict: merged, source: "default" }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
+  }
+  const verdict = validatePin(excludedFallback, ctx, req.needsBrowser ?? false);
+  return { step: { kind: "redispatch", verdict, source: "default" }, decision: null, routerError: asked.routerError, routerMs: asked.routerMs };
+}
+
+/** Default-policy target that avoids harnesses already tried. */
+function defaultTargetExcluding(req: RouteRequest, deps: RouteDeps, exclude: readonly TargetRef[]): TargetRef {
+  const tried = new Set(exclude.map((e) => e.harness));
+  const quota: Record<string, number> = { ...deps.quota };
+  for (const h of tried) quota[h] = 0;
+  return defaultTarget(req.task, deps.targets, quota);
+}
+
+async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Promise<Asked> {
   const system = systemPrompt(deps.targets);
   let error: string | null = null;
   let ms = 0;
@@ -62,7 +117,8 @@ async function askRouter(req: RouteRequest, deps: RouteDeps): Promise<Asked> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error("router timed out")), deps.targets.router.timeout_ms);
     try {
-      const input = { task: taskMessage(req.task, req.cwd, error ?? undefined), cwd: req.cwd, system, ...(error ? { previousError: error } : {}) };
+      const body = taskMessage(req.task, req.cwd, error ?? undefined) + (extra ? `\n\n${extra}` : "");
+      const input = { task: body, cwd: req.cwd, system, ...(error ? { previousError: error } : {}) };
       const reply = await deps.router.route(input, controller.signal);
       ms += reply.elapsedMs;
       const parsed = parseDecision(reply.text);

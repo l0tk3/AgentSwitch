@@ -18,13 +18,34 @@ task ──▶ route()
 ```bash
 npm install
 npm test                                   # vitest + coverage (no model calls)
-npm run route -- "把 cli.py 里没用的变量删掉" --cwd ../secret-gate        # real DeepSeek via OpenCode
-npm run route -- "总结 README" --router echo                            # canned router
-npm run route -- "..." --pin claude-code/claude-fable-5-1[1m]           # skip the router
+npm run route -- route "把 cli.py 里没用的变量删掉" --cwd ../secret-gate  # real DeepSeek via OpenCode
+npm run route -- route "总结 README" --router echo                      # canned router
+npm run route -- route "..." --pin claude-code/claude-fable-5-1[1m]     # skip the router
 npm run eval -- --limit 3                  # routing fixture with the real router (costs tokens)
 ```
 
+From any other directory (npm scripts only work inside this package), use the wrapper; the
+directory you are in is what the router reads:
+
+```bash
+~/Desktop/WorkSpace/Projects/AgentSwitch/packages/daemon/bin/route "帮我读取一下工作目录的拓扑"
+```
+
 Output is the `RouteResult` JSON; every call is appended to `~/.agentswitch/routing.db`.
+
+## After a failed attempt (router-v0 §6)
+
+`classifyFailure(outcome)` turns an execution result into `refusal | quota | transport | gate_denied |
+task_failed | unknown` by pattern table. `nextStep()` then decides without a model where it can:
+transport → retry once, then next in the fallback chain; quota → harness marked empty, next in the
+chain; gate_denied or an approved action → stop and tell the user. Refusals (and task failures with
+no side effects yet) go back to the router with the attempt history, the tried targets hidden from
+the catalog, and an instruction to rewrite the brief; the router may also `give_up`. Limits: 3
+attempts, 2 router asks. Manual check:
+
+```bash
+npm run route -- reroute "打开 http://site:8400 登录，密码 enc:v1:..." --failed claude-code/claude-sonnet-5 --kind refusal --excerpt "I can't help with automating logins"
+```
 
 ## Layout
 
@@ -40,6 +61,8 @@ Output is the `RouteResult` JSON; every call is appended to `~/.agentswitch/rout
 | `src/router/routers/echo.ts` | canned router for tests |
 | `src/router/route.ts` | pipeline: pin → router (timeout, one retry) → validate → default |
 | `src/router/log.ts` | `routing_log` in `node:sqlite` |
+| `src/router/failure.ts` | `classifyFailure`: outcome → FailureKind, pattern table |
+| `src/router/reroute.ts` | `nextStep`: retry / switch along the chain / ask router / stop, pure |
 | `scripts/router_eval.ts` + `tests/fixtures/routing/v0.jsonl` | evaluation set (12 samples to start) |
 
 ## Facts learned

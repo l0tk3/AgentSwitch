@@ -26,7 +26,9 @@ function bestCodeHarness(targets: Targets, quota: Quota): string {
 export function defaultTarget(task: string, targets: Targets, quota: Quota): TargetRef {
   const cap = classify(task);
   if (cap === "browser") {
-    const h = Object.entries(targets.harnesses).find(([, spec]) => spec.browser);
+    const capable = Object.entries(targets.harnesses).filter(([, spec]) => spec.browser);
+    const ranked = [...capable].sort(([a], [b]) => (quota[b] ?? 1) - (quota[a] ?? 1));
+    const h = ranked[0];
     if (h) return { harness: h[0], model: h[1].default_model };
   }
   if (cap === "code" || cap === "browser") {
