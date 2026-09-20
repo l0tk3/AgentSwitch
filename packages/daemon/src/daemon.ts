@@ -4,6 +4,7 @@ import { serve as listen } from "@hono/node-server";
 import { join, resolve } from "node:path";
 import { createApp } from "./api/app.js";
 import { Bus } from "./engine/bus.js";
+import { defaultCleanupPaths } from "./engine/cleanup.js";
 import { Engine } from "./engine/engine.js";
 import { Store } from "./engine/store.js";
 import { claudeExecutor } from "./executors/claude.js";
@@ -72,9 +73,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
     deepseekQuota({ key: findDeepSeekKey() }),
     claudeQuota(store),
   ], cfg.quotaTtlMs);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath) });
+  const workRoot = join(cfg.home, "work");
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot } });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath) });
-  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, version: VERSION });
+  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, workRoot, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 

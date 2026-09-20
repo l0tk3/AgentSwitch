@@ -34,6 +34,28 @@ Environment: `AGENTSWITCH_HOME` (default `~/.agentswitch`: `agentswitch.db`, `ro
 Development executor: put an `@echo {...}` directive in the task text to script the run:
 `{"delayMs":50,"approval":"rm -rf /tmp/x","fail":"quota","failTimes":1,"result":"ok","tokens":123}`.
 
+## Phone draft UI
+
+`http://127.0.0.1:4711/ui` (`/` redirects there): one static page, `ui/index.html`, no build step,
+mobile-first. Task list with status, task detail with live events (SSE), approval cards with
+允许/拒绝, new-task form (leave the directory empty for an ephemeral work dir), quota panel. It
+only uses the API below, so it is the wireframe for the iOS app and the development console until
+then. Later: served over Tailscale behind bearer auth.
+
+## Ephemeral tasks
+
+`POST /tasks` without `cwd` (CLI: `task "..." --ephemeral`) runs in `~/.agentswitch/work/<id>` and,
+when the task ends, `cleanupEphemeral` deletes the work dir, Claude Code's transcript directory for
+it (`~/.claude/projects/<path with non-alphanumerics → "-">`, both `/var` and `/private/var`
+spellings) and any `history.jsonl` lines for it, and OpenCode's `session_v2` / messages / project /
+worktree rows plus `snapshot/` and `tool-output/` for that directory. Codex runs in a private
+`CODEX_HOME` that is removed after every run, so nothing is left there. The work dir is only ever
+deleted when it is under the OS temp dir or `~/.agentswitch/work`; a persistent project passed with
+`ephemeral: true` keeps its files and only loses the harness records. The task's own event log in
+`~/.agentswitch/tasks/<id>.jsonl` is kept (that is AgentSwitch's record, not the harness's).
+Executors also remove their own temp files (Claude browser profile, OpenCode config dir, router
+config dir).
+
 ## Executors
 
 `AGENTSWITCH_EXECUTORS=real` (default `echo`); `AGENTSWITCH_BROWSER=1` adds the gated Playwright
@@ -52,7 +74,7 @@ one executor on a trivial file task in a temp dir.
 
 | method | path | what |
 |---|---|---|
-| POST | `/tasks` | `{task, cwd, pin?, needs_browser?}` → task (queued) |
+| POST | `/tasks` | `{task, cwd?, pin?, needs_browser?, ephemeral?}` → task (queued); no `cwd` = ephemeral work dir |
 | GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
 | GET | `/tasks/:id/events?after=N` | SSE: queued, routed, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, done, failed, cancelled |
 | POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |
@@ -84,7 +106,8 @@ ask the router with the history; gate_denied or an approved action → stop. The
 
 | path | what |
 |---|---|
-| `src/engine/{types,store,bus,engine}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop |
+| `src/engine/{types,store,bus,engine,cleanup}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop, ephemeral cleanup |
+| `ui/index.html` | phone-draft UI served at `/ui` |
 | `src/executors/{types,echo,gate,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, the three real executors |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
 | `src/quota/{codex,deepseek,claude,index}.ts` | providers and the cached service |

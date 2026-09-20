@@ -6,7 +6,7 @@
  *  such tasks here; Codex and Claude carry the approval protocol. */
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
@@ -92,6 +92,7 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
       const exitCode = await new Promise<number | null>((resolve) => { child.on("error", (e) => { stderr += e.message; resolve(null); }); child.on("close", resolve); });
       clearTimeout(timer);
       input.signal.removeEventListener("abort", onAbort);
+      rmSync(dir, { recursive: true, force: true });
       return outcomeFromRun(summarizeRun(stdout), exitCode, stderr, timedOut);
     },
   };

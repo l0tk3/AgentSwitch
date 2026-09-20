@@ -11,6 +11,8 @@ export type NewTask = {
   readonly cwd: string;
   readonly pin?: TargetRef;
   readonly needsBrowser?: boolean;
+  /** Not a persistent project: delete the work dir and every harness record of it when the task ends. */
+  readonly ephemeral?: boolean;
 };
 
 export type Task = {
@@ -22,6 +24,7 @@ export type Task = {
   readonly cwd: string;
   readonly pin: TargetRef | null;
   readonly needsBrowser: boolean;
+  readonly ephemeral: boolean;
   readonly harness: string | null;
   readonly model: string | null;
   readonly effort: string | null;
@@ -45,7 +48,8 @@ export type TaskEventType =
   | "redispatch"
   | "done"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "cleaned";
 
 export type TaskEvent = {
   readonly taskId: string;

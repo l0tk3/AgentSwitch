@@ -12,7 +12,17 @@ import { lintContext, loadContext } from "../router/context.js";
 import type { RoutingLog } from "../router/log.js";
 import { route, type RouteDeps } from "../router/route.js";
 import { TargetRef, type Targets } from "../router/targets.js";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+
+const UI_PATH = new URL("../../ui/index.html", import.meta.url).pathname;
+
+function newWorkDir(root: string): string {
+  const dir = join(root, randomUUID().slice(0, 8));
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 export type ApiDeps = {
   readonly store: Store;
@@ -23,14 +33,16 @@ export type ApiDeps = {
   readonly routingLog: RoutingLog;
   readonly routeDeps: () => RouteDeps;
   readonly contextPath: string;
+  readonly workRoot: string;
   readonly version: string;
 };
 
 const NewTaskBody = z.object({
   task: z.string().min(1),
-  cwd: z.string().min(1),
+  cwd: z.string().min(1).optional(),
   pin: TargetRef.optional(),
   needs_browser: z.boolean().optional(),
+  ephemeral: z.boolean().optional(),
 });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
 const ContextBody = z.object({ text: z.string() });
@@ -40,11 +52,16 @@ export function createApp(deps: ApiDeps): Hono {
 
   app.get("/healthz", (c) => c.json({ ok: true, version: deps.version, pendingApprovals: deps.store.pendingApprovals().length }));
 
+  // Development console / phone draft: one static page that only uses the API below.
+  app.get("/", (c) => c.redirect("/ui"));
+  app.get("/ui", (c) => c.html(readFileSync(UI_PATH, "utf8")));
+
   app.post("/tasks", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
-    const { pin, needs_browser, ...rest } = body.data;
-    const task = deps.engine.submit({ ...rest, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
+    const { pin, needs_browser, ephemeral, cwd, ...rest } = body.data;
+    const workDir = cwd ?? newWorkDir(deps.workRoot);
+    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: ephemeral ?? cwd === undefined, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
     return c.json(task, 201);
   });
 
@@ -97,9 +114,10 @@ export function createApp(deps: ApiDeps): Hono {
   app.post("/route/preview", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "task and cwd required" }, 400);
-    const { pin, needs_browser, ...rest } = body.data;
-    const result = await route({ ...rest, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) }, deps.routeDeps());
-    deps.routingLog.record(rest.task, rest.cwd, result);
+    const { pin, needs_browser, ephemeral: _e, cwd, ...rest } = body.data;
+    if (!cwd) return c.json({ error: "cwd required for preview" }, 400);
+    const result = await route({ ...rest, cwd, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) }, deps.routeDeps());
+    deps.routingLog.record(rest.task, cwd, result);
     return c.json(result);
   });
 

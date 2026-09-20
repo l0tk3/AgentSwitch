@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>AgentSwitch</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --fg:#e6e8ee; --dim:#8b93a4; --ok:#3ddc84; --warn:#ffb020; --bad:#ff5a5a; --acc:#5b8cff; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f5f6f8; --card:#fff; --line:#e3e6eb; --fg:#161922; --dim:#6b7280; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif; padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
+  header { position:sticky; top:0; background:var(--bg); padding:calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; z-index:2; }
+  header h1 { font-size:17px; margin:0; flex:1; }
+  header .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); }
+  header .dot.on { background:var(--ok); }
+  main { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .row { display:flex; align-items:center; gap:8px; }
+  .grow { flex:1; min-width:0; }
+  .dim { color:var(--dim); font-size:13px; }
+  .ellipsis { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .badge { font-size:11px; padding:2px 7px; border-radius:999px; background:var(--line); color:var(--dim); white-space:nowrap; }
+  .badge.done { background:rgba(61,220,132,.15); color:var(--ok); }
+  .badge.failed,.badge.cancelled { background:rgba(255,90,90,.15); color:var(--bad); }
+  .badge.running,.badge.routing,.badge.queued { background:rgba(91,140,255,.15); color:var(--acc); }
+  .badge.waiting_approval { background:rgba(255,176,32,.18); color:var(--warn); }
+  button { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:10px; padding:10px 14px; }
+  button.primary { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button.ok { background:var(--ok); border-color:var(--ok); color:#062; }
+  button.bad { background:transparent; border-color:var(--bad); color:var(--bad); }
+  button:disabled { opacity:.5; }
+  input,textarea,select { font:inherit; width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  textarea { min-height:90px; resize:vertical; }
+  label { display:block; font-size:13px; color:var(--dim); margin:8px 0 4px; }
+  nav { position:fixed; bottom:0; left:0; right:0; display:flex; background:var(--card); border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); }
+  nav button { flex:1; border:0; border-radius:0; background:transparent; color:var(--dim); padding:12px 0; font-size:13px; }
+  nav button.active { color:var(--acc); }
+  .events { font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; max-height:50vh; overflow:auto; }
+  .ev { padding:3px 0; border-bottom:1px dashed var(--line); }
+  .ev.approval_request { color:var(--warn); }
+  .ev.done { color:var(--ok); } .ev.failed,.ev.cancelled { color:var(--bad); } .ev.attempt_failed,.ev.redispatch { color:var(--warn); }
+  .approval { border-color:var(--warn); }
+  .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+  .hidden { display:none; }
+  .empty { text-align:center; color:var(--dim); padding:30px 0; }
+</style>
+</head>
+<body>
+<header><span class="dot" id="dot"></span><h1 id="title">任务</h1><button id="refresh" style="padding:6px 10px">刷新</button></header>
+<main id="main"></main>
+<nav>
+  <button data-view="tasks" class="active">任务</button>
+  <button data-view="new">新建</button>
+  <button data-view="approvals">审批<span id="apCount"></span></button>
+  <button data-view="quota">额度</button>
+</nav>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const state = { view: "tasks", tasks: [], task: null, events: [], approvals: [], quota: [], es: null, health: false };
+const api = async (method, path, body) => {
+  const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const t = await r.text(); const d = t ? JSON.parse(t) : {};
+  if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+  return d;
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const when = (ts) => new Date(ts).toLocaleTimeString("zh-CN", { hour12: false });
+const titles = { tasks: "任务", new: "新建任务", approvals: "待审批", quota: "额度", task: "任务详情" };
+
+function eventLine(ev) {
+  const p = ev.payload || {};
+  switch (ev.type) {
+    case "routed": { const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + p.routerMs + "ms" : ""})`; }
+    case "dispatched": return `派发 ${p.harness}/${p.model}${p.effort ? " effort=" + p.effort : ""}`;
+    case "text": return p.text;
+    case "tool_call": return `工具 ${p.tool}: ${p.command || JSON.stringify(p.input || p).slice(0, 160)}`;
+    case "approval_request": return `⚠ 需要审批：${p.action}\n${p.evidence || ""}`;
+    case "approval_resolved": return `审批 ${p.decision} (${p.status})`;
+    case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"`;
+    case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}`;
+    case "done": return `✓ 完成：${p.result}`;
+    case "failed": return `✗ 失败：${p.error}${p.security ? "  [安全事件]" : ""}`;
+    case "cancelled": return "已取消";
+    case "cleaned": return `已清理 workdir=${p.workDirRemoved} claude=${(p.claudeProjectsRemoved || []).length} opencode=${p.opencodeSessionsRemoved}`;
+    default: return `${ev.type} ${JSON.stringify(p).slice(0, 160)}`;
+  }
+}
+
+function render() {
+  $("#title").textContent = titles[state.view];
+  $("#dot").classList.toggle("on", state.health);
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === state.view || (state.view === "task" && b.dataset.view === "tasks")));
+  $("#apCount").textContent = state.approvals.length ? ` ${state.approvals.length}` : "";
+  const m = $("#main");
+  if (state.view === "tasks") {
+    m.innerHTML = state.tasks.length ? state.tasks.map((t) => `
+      <div class="card row" data-open="${t.id}">
+        <div class="grow"><div class="ellipsis">${esc(t.task)}</div><div class="dim ellipsis">${t.harness ? esc(t.harness + "/" + t.model) : "—"} · ${when(t.createdAt)}${t.ephemeral ? " · 临时目录" : ""}</div></div>
+        <span class="badge ${t.status}">${t.status}</span>
+      </div>`).join("") : `<div class="empty">还没有任务</div>`;
+  } else if (state.view === "new") {
+    m.innerHTML = `<div class="card">
+      <label>任务</label><textarea id="f-task" placeholder="修一下 cli.py 的 bug / 打开 core 控制台看首页标题"></textarea>
+      <label>工作目录（留空 = 临时目录，用完即删）</label><input id="f-cwd" placeholder="/Users/you/Projects/x">
+      <label>指定模型（可选，harness/model）</label><input id="f-pin" placeholder="claude-code/claude-opus-5">
+      <label class="row" style="margin-top:10px"><input type="checkbox" id="f-browser" style="width:auto"> 需要浏览器</label>
+      <div class="row" style="margin-top:12px"><button class="primary grow" id="f-submit">提交</button></div>
+      <div class="dim" id="f-msg" style="margin-top:8px"></div>
+    </div>`;
+  } else if (state.view === "approvals") {
+    m.innerHTML = state.approvals.length ? state.approvals.map((a) => approvalCard(a)).join("") : `<div class="empty">没有待审批</div>`;
+  } else if (state.view === "quota") {
+    m.innerHTML = (state.quota.length ? state.quota.map((q) => `
+      <div class="card"><div class="row"><b class="grow">${esc(q.harness)}</b><span class="dim">${q.remaining === null ? "?" : Math.round(q.remaining * 100) + "%"}</span></div>
+      <div class="bar" style="margin:8px 0"><i style="width:${q.remaining === null ? 0 : Math.round(q.remaining * 100)}%"></i></div>
+      <div class="dim">${q.error ? "错误：" + esc(q.error) : esc(JSON.stringify(q.detail))}</div><div class="dim">${esc(q.source)}</div></div>`).join("") : `<div class="empty">加载中…</div>`)
+      + `<div class="row"><button class="grow" id="q-refresh">强制刷新</button></div>`;
+  } else if (state.view === "task" && state.task) {
+    const t = state.task;
+    const pending = state.approvals.filter((a) => a.taskId === t.id);
+    m.innerHTML = `<div class="card"><div>${esc(t.task)}</div><div class="dim">${esc(t.cwd)}</div>
+        <div class="row" style="margin-top:8px"><span class="badge ${t.status}">${t.status}</span><span class="dim grow">${t.harness ? esc(t.harness + "/" + t.model) : ""}</span>
+        ${["done","failed","cancelled"].includes(t.status) ? "" : `<button class="bad" id="t-cancel">取消</button>`}</div>
+        ${t.brief && t.brief !== t.task ? `<details style="margin-top:8px"><summary class="dim">简报</summary><div class="dim" style="white-space:pre-wrap">${esc(t.brief)}</div></details>` : ""}
+        ${t.result ? `<div style="margin-top:8px">${esc(t.result)}</div>` : ""}${t.error ? `<div style="margin-top:8px;color:var(--bad)">${esc(t.error)}</div>` : ""}</div>
+      ${pending.map((a) => approvalCard(a)).join("")}
+      <div class="card events" id="events">${state.events.map((e) => `<div class="ev ${e.type}">${when(e.ts)} ${esc(eventLine(e))}</div>`).join("")}</div>`;
+    const ev = $("#events"); ev.scrollTop = ev.scrollHeight;
+  }
+}
+function approvalCard(a) {
+  return `<div class="card approval"><div><b>${esc(a.action)}</b></div><div class="dim" style="white-space:pre-wrap">${esc(a.evidence)}</div><div class="dim">任务 ${a.taskId} · ${when(a.createdAt)}</div>
+    <div class="row" style="margin-top:10px"><button class="ok grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">允许</button><button class="bad grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">拒绝</button></div></div>`;
+}
+
+async function loadTasks() { state.tasks = await api("GET", "/tasks?limit=50"); }
+async function loadApprovals() { state.approvals = await api("GET", "/approvals"); }
+async function loadQuota(refresh) { state.quota = await api("GET", "/quota" + (refresh ? "?refresh=1" : "")); }
+async function health() { try { await api("GET", "/healthz"); state.health = true; } catch { state.health = false; } }
+
+function openTask(id) {
+  state.view = "task"; state.task = state.tasks.find((t) => t.id === id) || null; state.events = [];
+  if (state.es) state.es.close();
+  api("GET", "/tasks/" + id).then((t) => { state.task = t; render(); });
+  const es = new EventSource(`/tasks/${id}/events`);
+  state.es = es;
+  es.onmessage = () => {};
+  ["queued","routed","dispatched","text","tool_call","approval_request","approval_resolved","attempt_failed","redispatch","done","failed","cancelled","cleaned"].forEach((type) => es.addEventListener(type, async (m) => {
+    const ev = JSON.parse(m.data); state.events.push(ev);
+    if (["approval_request","approval_resolved","done","failed","cancelled","redispatch","dispatched"].includes(type)) { await Promise.all([loadApprovals(), api("GET", "/tasks/" + id).then((t) => (state.task = t))]); }
+    render();
+  }));
+  es.onerror = () => { es.close(); };
+  render();
+}
+
+document.addEventListener("click", async (e) => {
+  const nav = e.target.closest("nav button"); if (nav) { state.view = nav.dataset.view; if (state.es) { state.es.close(); state.es = null; } if (state.view === "quota") loadQuota().then(render); if (state.view === "tasks") loadTasks().then(render); render(); return; }
+  const open = e.target.closest("[data-open]"); if (open) return openTask(open.dataset.open);
+  const ap = e.target.closest("[data-approve]"); if (ap) { ap.disabled = true; try { await api("POST", `/tasks/${ap.dataset.task}/approve`, { approval_id: ap.dataset.approve, decision: ap.dataset.decision }); } catch (err) { alert(err.message); } await loadApprovals(); render(); return; }
+  if (e.target.id === "f-submit") {
+    const task = $("#f-task").value.trim(); if (!task) return;
+    const cwd = $("#f-cwd").value.trim(); const pin = $("#f-pin").value.trim();
+    const body = { task, needs_browser: $("#f-browser").checked, ...(cwd ? { cwd } : { ephemeral: true }) };
+    if (pin.includes("/")) body.pin = { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) };
+    try { const t = await api("POST", "/tasks", body); await loadTasks(); openTask(t.id); } catch (err) { $("#f-msg").textContent = err.message; }
+    return;
+  }
+  if (e.target.id === "t-cancel") { await api("POST", `/tasks/${state.task.id}/cancel`); return; }
+  if (e.target.id === "q-refresh") { await loadQuota(true); render(); return; }
+  if (e.target.id === "refresh") { await Promise.all([health(), loadTasks(), loadApprovals()]); render(); return; }
+});
+
+(async () => { await Promise.all([health(), loadTasks(), loadApprovals()]); render(); setInterval(async () => { await Promise.all([health(), loadApprovals(), state.view === "tasks" ? loadTasks() : null]); render(); }, 5000); })();
+</script>
+</body>
+</html>

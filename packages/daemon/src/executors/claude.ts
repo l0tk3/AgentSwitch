@@ -3,7 +3,7 @@
  *  User settings are not loaded (settingSources: []); the gate proxy goes into the tool env. */
 
 import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
@@ -116,6 +116,7 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
         if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: approvals } };
       } finally {
         input.signal.removeEventListener("abort", onAbort);
+        rmSync(profile, { recursive: true, force: true });
       }
       return outcomeFromFold(state, approvals, input.signal.aborted);
     },

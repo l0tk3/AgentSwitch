@@ -1,7 +1,7 @@
 /** agentswitch CLI. Daemon-backed commands talk to http://127.0.0.1:4711; `route`/`reroute`/`context init` run locally.
  *
  *   serve                       start the daemon (AGENTSWITCH_ROUTER=echo, AGENTSWITCH_PORT=...)
- *   task "<text>" [--cwd d] [--pin h/m] [--browser] [--no-watch]
+ *   task "<text>" [--cwd d | --ephemeral] [--pin h/m] [--browser] [--no-watch]   (--ephemeral: temp work dir, wiped after)
  *   tasks | show <id> | watch <id> | approve <task> <approval> --allow|--deny | cancel <id>
  *   approvals | quota [--refresh] | preview "<text>" [--cwd d] | log
  *   route "<text>" ... (local, no daemon) | reroute ... | context init
@@ -30,7 +30,8 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   allowNegative: true,
   options: {
-    cwd: { type: "string", default: process.cwd() },
+    cwd: { type: "string" },
+    ephemeral: { type: "boolean", default: false },
     router: { type: "string", default: cfg.router },
     pin: { type: "string" },
     browser: { type: "boolean", default: false },
@@ -73,6 +74,7 @@ function showEvent(ev: TaskEvent): void {
     case "done": console.log(`${t} DONE     ${p.result}`); break;
     case "failed": console.log(`${t} FAILED   ${p.error}${p.security ? "  [security]" : ""}`); break;
     case "cancelled": console.log(`${t} CANCELLED`); break;
+    case "cleaned": console.log(`${t} cleaned  workdir=${p.workDirRemoved} claude=${(p.claudeProjectsRemoved as string[]).length} opencode=${p.opencodeSessionsRemoved}${(p.errors as string[]).length ? `  ${(p.errors as string[]).join("; ")}` : ""}`); break;
     default: console.log(`${t} ${ev.type} ${JSON.stringify(p)}`);
   }
 }
@@ -103,7 +105,8 @@ async function main(): Promise<number> {
     }
     case "task": {
       if (!a1) throw new Error('task "<text>"');
-      const task = await client.submit(a1, resolve(values.cwd), { ...(values.pin ? { pin: splitPin(values.pin) } : {}), needsBrowser: values.browser });
+      const cwd = values.ephemeral ? undefined : resolve(values.cwd ?? process.cwd());
+      const task = await client.submit(a1, cwd, { ...(values.pin ? { pin: splitPin(values.pin) } : {}), needsBrowser: values.browser, ephemeral: values.ephemeral });
       if (values.json && !values.watch) return (out(task), 0);
       console.log(`task ${task.id} queued`);
       if (values.watch) await watchInteractive(task.id);
@@ -129,7 +132,7 @@ async function main(): Promise<number> {
       for (const r of q) console.log(`${r.harness.padEnd(12)} ${r.remaining === null ? "  ?  " : `${Math.round(r.remaining * 100)}%`.padStart(5)}  ${r.error ? `ERROR ${r.error}` : JSON.stringify(r.detail)}`);
       return 0;
     }
-    case "preview": { if (!a1) throw new Error('preview "<text>"'); out(await client.preview(a1, resolve(values.cwd))); return 0; }
+    case "preview": { if (!a1) throw new Error('preview "<text>"'); out(await client.preview(a1, resolve(values.cwd ?? process.cwd()))); return 0; }
     case "log": { out(await client.routingLog()); return 0; }
     case "health": { out(await client.health()); return 0; }
     case "context": {
@@ -159,13 +162,14 @@ async function localRoute(kind: "route" | "reroute", task: string | undefined): 
   if (kind === "reroute") {
     if (!values.failed) throw new Error("reroute needs --failed harness/model");
     const attempt = { ...splitPin(values.failed), kind: values.kind as FailureKind, excerpt: values.excerpt, sideEffects: NO_SIDE_EFFECTS };
-    out(await reroute({ task, cwd: resolve(values.cwd), needsBrowser: values.browser, decision: null, attempts: [attempt], routerAsks: 0 }, deps));
+    out(await reroute({ task, cwd: resolve(values.cwd ?? process.cwd()), needsBrowser: values.browser, decision: null, attempts: [attempt], routerAsks: 0 }, deps));
     return 0;
   }
   const pin = values.pin ? splitPin(values.pin) : undefined;
-  const result = await route({ task, cwd: resolve(values.cwd), ...(pin ? { pin } : {}), needsBrowser: values.browser }, deps);
+  const cwd = resolve(values.cwd ?? process.cwd());
+  const result = await route({ task, cwd, ...(pin ? { pin } : {}), needsBrowser: values.browser }, deps);
   const log = new RoutingLog(values.log);
-  const id = log.record(task, values.cwd, result);
+  const id = log.record(task, cwd, result);
   log.close();
   out({ id, ...result });
   return result.verdict.ok ? 0 : 1;

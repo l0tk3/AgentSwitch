@@ -14,8 +14,8 @@ export class Client {
   }
 
   health() { return this.call<{ ok: boolean; version: string }>("GET", "/healthz"); }
-  submit(task: string, cwd: string, opts: { pin?: { harness: string; model: string }; needsBrowser?: boolean } = {}) {
-    return this.call<Task>("POST", "/tasks", { task, cwd, ...(opts.pin ? { pin: opts.pin } : {}), ...(opts.needsBrowser ? { needs_browser: true } : {}) });
+  submit(task: string, cwd: string | undefined, opts: { pin?: { harness: string; model: string }; needsBrowser?: boolean; ephemeral?: boolean } = {}) {
+    return this.call<Task>("POST", "/tasks", { task, ...(cwd ? { cwd } : {}), ...(opts.pin ? { pin: opts.pin } : {}), ...(opts.needsBrowser ? { needs_browser: true } : {}), ...(opts.ephemeral ? { ephemeral: true } : {}) });
   }
   tasks(limit = 20) { return this.call<Task[]>("GET", `/tasks?limit=${limit}`); }
   task(id: string) { return this.call<Task & { approvals: Approval[] }>("GET", `/tasks/${id}`); }

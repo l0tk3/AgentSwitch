@@ -7,6 +7,7 @@ import type { TargetRef } from "../router/targets.js";
 import type { Verdict } from "../router/validate.js";
 import type { ApprovalDecision, Executor } from "../executors/types.js";
 import type { Bus } from "./bus.js";
+import { cleanupEphemeral, defaultCleanupPaths, type CleanupPaths } from "./cleanup.js";
 import type { Store } from "./store.js";
 import type { NewTask, Task, TaskEventType } from "./types.js";
 
@@ -17,6 +18,7 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   readonly quota: () => RouteDeps["quota"];
   readonly approvalTimeoutMs?: number;
   readonly retryBackoffMs?: number;
+  readonly cleanupPaths?: CleanupPaths;
 };
 
 type Waiter = { resolve: (d: ApprovalDecision) => void; timer: NodeJS.Timeout };
@@ -73,7 +75,7 @@ export class Engine {
   }
 
   private routeDeps(): RouteDeps {
-    const { store: _s, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, ...rest } = this.deps;
+    const { store: _s, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, ...rest } = this.deps;
     return { ...rest, quota: quota(), running: { ...this.running } };
   }
 
@@ -88,7 +90,13 @@ export class Engine {
       if (this.deps.store.getTask(id)?.status !== "cancelled") this.fail(id, (err as Error).message);
     } finally {
       this.controllers.delete(id);
+      if (task.ephemeral) this.cleanup(task);
     }
+  }
+
+  private cleanup(task: Task): void {
+    const report = cleanupEphemeral(task.cwd, this.deps.cleanupPaths ?? defaultCleanupPaths());
+    this.emit(task.id, "cleaned", { ...report });
   }
 
   private async runTask(task: Task, signal: AbortSignal): Promise<void> {

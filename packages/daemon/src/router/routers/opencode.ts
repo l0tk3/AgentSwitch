@@ -6,7 +6,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Router, RouterInput, RouterReply } from "./types.js";
@@ -62,8 +62,12 @@ export function opencodeRouter(opts: OpenCodeRouterOptions): Router {
       const message = input.previousError ? `${input.task}\n\n(previous reply rejected: ${input.previousError})` : input.task;
       const env = { ...stripProxy(process.env), PWD: input.cwd, OPENCODE_CONFIG: configPath, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
       const started = Date.now();
-      const stdout = await run(binary, ["run", "--standalone", "--format", "json", "--agent", agent, "-m", opts.model, message], input.cwd, env, signal);
-      return { text: textFromEvents(stdout), elapsedMs: Date.now() - started };
+      try {
+        const stdout = await run(binary, ["run", "--standalone", "--format", "json", "--agent", agent, "-m", opts.model, message], input.cwd, env, signal);
+        return { text: textFromEvents(stdout), elapsedMs: Date.now() - started };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
   };
 }

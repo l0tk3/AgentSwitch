@@ -9,7 +9,7 @@ import type { Approval, ApprovalStatus, NewTask, Task, TaskEvent, TaskEventType 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, status TEXT NOT NULL,
-  task TEXT NOT NULL, cwd TEXT NOT NULL, pin TEXT, needs_browser INTEGER NOT NULL DEFAULT 0,
+  task TEXT NOT NULL, cwd TEXT NOT NULL, pin TEXT, needs_browser INTEGER NOT NULL DEFAULT 0, ephemeral INTEGER NOT NULL DEFAULT 0,
   harness TEXT, model TEXT, effort TEXT, brief TEXT, decision TEXT, attempts TEXT NOT NULL DEFAULT '[]',
   router_asks INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT
 );
@@ -45,8 +45,8 @@ export class Store {
     const ts = this.now();
     const id = randomUUID().slice(0, 8);
     this.db.prepare(
-      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?)`,
-    ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0);
+      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
+    ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0, input.ephemeral ? 1 : 0);
     return this.getTask(id)!;
   }
 
@@ -145,6 +145,7 @@ function toTask(r: Row): Task {
     cwd: String(r.cwd),
     pin: r.pin ? JSON.parse(String(r.pin)) : null,
     needsBrowser: Number(r.needs_browser) === 1,
+    ephemeral: Number(r.ephemeral ?? 0) === 1,
     harness: (r.harness as string | null) ?? null,
     model: (r.model as string | null) ?? null,
     effort: (r.effort as string | null) ?? null,

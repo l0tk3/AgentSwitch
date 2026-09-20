@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -64,6 +64,34 @@ describe("HTTP API", () => {
     await new Promise((r) => setTimeout(r, 30));
     expect((await client.cancel(t.id)).status).toBe("cancelled");
     await d.engine.idle();
+    d.close();
+  });
+
+  it("omitting cwd creates an ephemeral work dir that is wiped when the task ends", async () => {
+    const { d, client, home } = daemon();
+    const t = await client.submit("do x", undefined);
+    expect(t.ephemeral).toBe(true);
+    expect(t.cwd.startsWith(join(home, "work"))).toBe(true);
+    const seen: string[] = [];
+    await client.watch(t.id, (ev) => { seen.push(ev.type); });
+    await d.engine.idle();
+    expect((await client.task(t.id)).status).toBe("done");
+    expect(d.store.eventsSince(t.id).map((e) => e.type).at(-1)).toBe("cleaned");
+    expect(existsSync(t.cwd)).toBe(false);
+    const persistent = await client.submit("keep", "/tmp");
+    expect(persistent.ephemeral).toBe(false);
+    await d.engine.idle();
+    d.close();
+  });
+
+  it("serves the phone-draft UI, which only talks to the API", async () => {
+    const { d } = daemon();
+    const res = await d.app.request("/ui");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("<title>AgentSwitch</title>");
+    expect(html).toContain("/tasks/${id}/events");
+    expect((await d.app.request("/")).status).toBe(302);
     d.close();
   });
 
