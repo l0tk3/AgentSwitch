@@ -1,0 +1,12 @@
+{"id":"r-001","input":"把 packages/secret-gate 的 README 里 Testing 表格翻译成英文，其他不动","expect":{"harness":"opencode"},"tags":["chat","translate"]}
+{"id":"r-002","input":"总结一下 docs/design-v0.md 的威胁模型一节，300 字以内","expect":{"harness":"opencode"},"tags":["chat","summarize"]}
+{"id":"r-003","input":"secret-gate 的 proxy_addon.py 里 _text_body 对 gzip 请求体会怎样？只回答，不改代码","expect":{"harness":"opencode"},"tags":["chat","question"]}
+{"id":"r-004","input":"在 packages/daemon 里新建 executors/ 目录，实现 Executor 接口和 echo 执行器，带 vitest 测试","expect":{"harness":["claude-code","codex"]},"tags":["code","new-module"]}
+{"id":"r-005","input":"把 packages/secret-gate/secret_gate/cli.py 里未使用的变量 info 删掉","expect":{"harness":["claude-code","codex"],"cost":["low","mid"]},"tags":["code","tiny"]}
+{"id":"r-006","input":"重构 packages/secret-gate 的 browser_policy.py，把 oracle 检查拆成独立模块，保持全部测试通过和覆盖率","expect":{"harness":["claude-code","codex"],"cost":["high","top"]},"tags":["code","refactor"]}
+{"id":"r-007","input":"给 secret-gate-ui 的 KeypairsView 加一个删除密钥对的按钮，要二次确认，Swift 测试补上","expect":{"harness":["claude-code","codex"]},"tags":["code","swift"]}
+{"id":"r-008","input":"打开 http://core.internal.cworkspace.tech:8400/ 登录，密码用 enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA，登录后告诉我首页标题","expect":{"harness":["claude-code","codex"],"needs_browser":true},"tags":["browser","login"]}
+{"id":"r-009","input":"用浏览器打开 https://example.com 把页面上所有链接列出来","expect":{"needs_browser":true},"tags":["browser"]}
+{"id":"r-010","input":"把 packages/daemon 整个仓库读一遍，画一张模块依赖图写进 docs/","expect":{"harness":["claude-code","codex","opencode"]},"tags":["code","whole-repo"]}
+{"id":"r-011","input":"Write a haiku about proxies","expect":{"harness":"opencode"},"tags":["chat","en"]}
+{"id":"r-012","input":"Add a --version flag to packages/daemon/src/cli.ts that prints package.json's version, with a test","expect":{"harness":["claude-code","codex"],"cost":["low","mid"]},"tags":["code","small","en"]}

@@ -1,0 +1,52 @@
+# Routing catalog. One entry per harness listing every selectable model.
+# `cost` / `strengths` are prose for the router; `quota`, `max_concurrent`, `browser`,
+# `models` keys and `efforts` are enforced in code (src/router/validate.ts).
+harnesses:
+  claude-code:
+    quota: local-count
+    max_concurrent: 1
+    browser: true
+    default_model: claude-sonnet-5
+    models:                          # "[1m]" = Claude Code's 1M-context variant of the same model
+      claude-fable-5-1:          {cost: top,  strengths: [hardest, longest-agentic, architecture]}
+      claude-fable-5-1[1m]:      {cost: top,  strengths: [hardest, whole-repo-context]}
+      claude-opus-5:             {cost: high, strengths: [complex-code, refactor, review]}
+      claude-opus-5[1m]:         {cost: high, strengths: [complex-code, whole-repo-context]}
+      claude-opus-4-8:           {cost: high, strengths: [complex-code, refactor]}
+      claude-opus-4-8[1m]:       {cost: high, strengths: [complex-code, whole-repo-context]}
+      claude-opus-4-7:           {cost: high, strengths: [complex-code]}
+      claude-opus-4-7[1m]:       {cost: high, strengths: [complex-code, whole-repo-context]}
+      claude-opus-4-6:           {cost: high, strengths: [complex-code]}
+      claude-opus-4-6[1m]:       {cost: high, strengths: [complex-code, whole-repo-context]}
+      claude-sonnet-5:           {cost: mid,  strengths: [code, browser, general]}
+      claude-sonnet-5[1m]:       {cost: mid,  strengths: [code, whole-repo-context]}
+      claude-sonnet-4-6:         {cost: mid,  strengths: [code, general]}
+      claude-sonnet-4-6[1m]:     {cost: mid,  strengths: [code, whole-repo-context]}
+      claude-haiku-4-5-20251001: {cost: low,  strengths: [small-edit, quick-answer]}
+  codex:
+    quota: rate-limits
+    max_concurrent: 1
+    browser: true
+    default_model: gpt-6-astra
+    binary: /Applications/ChatGPT.app/Contents/Resources/codex   # 0.155; homebrew 0.142 only knows gpt-5.5
+    models:                          # app-server model/list, 2026-09-20
+      gpt-6-astra:   {cost: top,  strengths: [complex-code, large-repo, test-heavy], efforts: [low, medium, high, xhigh, max, ultra]}
+      gpt-5.6-sol:   {cost: high, strengths: [code, general],                        efforts: [low, medium, high, xhigh, max, ultra]}
+      gpt-5.6-terra: {cost: high, strengths: [code, general],                        efforts: [low, medium, high, xhigh, max, ultra]}
+      gpt-5.6-luna:  {cost: mid,  strengths: [code, general],                        efforts: [low, medium, high, xhigh, max]}
+      gpt-5.5:       {cost: mid,  strengths: [code, shell],                          efforts: [low, medium, high, xhigh]}
+  opencode:
+    quota: balance
+    max_concurrent: 2
+    browser: false
+    default_model: deepseek/deepseek-flash
+    models:                          # models.dev: deepseek-flash = "DeepSeek V4.1 Flash", 1M ctx
+      deepseek/deepseek-flash: {cost: low, strengths: [chat, summarize, long-context, cheap-code]}
+
+router:
+  harness: opencode
+  model: deepseek/deepseek-flash
+  timeout_ms: 45000                # the agent reads the repo first; a real run took 19 s
+  min_confidence: 0.5
+  quota_threshold: 0.05
+  default: {harness: opencode, model: deepseek/deepseek-flash}

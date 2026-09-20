@@ -74,6 +74,8 @@ iPhone (SwiftUI)                                   Mac (launchd 守护)
 - 并发：第一版单任务串行，避免多个 agent 抢同一工作目录。
 
 ### 3.3 路由器（两阶段，分类器不决定目的地）
+> 2026-09-20：路由改为 OpenCode 里的 DeepSeek V4.1 Flash 分诊台 + 代码校验，**取消敏感度分类和本地可信模型**：凭据和 PII 由用户先做成 secret-gate 密文，任务文本视为可出门。"可信模型"合并进路由器：以后要不出门就把 router agent 的 model 换成本地模型。细节见 `router-v0.md`；本节其余内容为原始思路，冲突处以 `router-v0.md` 为准。
+
 ```
 输入任务 ──▶ 阶段1 分类器 ──▶ {sensitivity, capability, size, needs_browser}
                                       │ (JSON, schema 校验)
