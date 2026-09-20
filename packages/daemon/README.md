@@ -1,86 +1,86 @@
 # agentswitch-daemon
 
-TypeScript daemon for AgentSwitch. **v1 = the router only** (design: `docs/router-v0.md`): no HTTP,
-no executors yet.
+TypeScript daemon for AgentSwitch: task engine, router, HTTP API, quota. The phone is just another
+client of the API; during development the CLI plays that role. Design: `docs/design-v0.md`,
+`docs/router-v0.md`.
 
 ```
-task ──▶ route()
-          ├─ pin?            validatePin ─────────────────────────────┐
-          ├─ router (OpenCode `router` agent, DeepSeek V4.1 Flash)     │
-          │    parse JSON → validateDecision (catalog, browser,        ├─▶ Verdict {harness, model, effort, queue}
-          │    quota, concurrency, effort, confidence) → fallbacks     │
-          └─ failure / timeout / low confidence → defaultTarget ───────┘
-                                                        └─▶ routing_log (SQLite)
+CLI / phone ──HTTP──▶ agentswitchd (127.0.0.1:4711)
+                        ├─ engine/   queue → route → dispatch → (fail → reroute)* → done; approvals; SQLite + JSONL
+                        ├─ router/   targets.yaml, DeepSeek dispatcher (OpenCode agent), policy floor, CONTEXT.md, routing_log
+                        ├─ executors/ echo (scriptable, for development); claude-code / codex / opencode: next
+                        ├─ quota/    codex app-server rateLimits, DeepSeek /user/balance, Claude local token count
+                        └─ api/      Hono: /tasks (+SSE events, approve, cancel), /quota, /targets, /route/preview, /context
 ```
 
 ## Run
 
 ```bash
-npm install
-npm test                                   # vitest + coverage (no model calls)
-npm run route -- route "把 cli.py 里没用的变量删掉" --cwd ../secret-gate  # real DeepSeek via OpenCode
-npm run route -- route "总结 README" --router echo                      # canned router
-npm run route -- route "..." --pin claude-code/claude-fable-5-1[1m]     # skip the router
-npm run eval -- --limit 3                  # routing fixture with the real router (costs tokens)
+npm install && npm test                       # vitest + coverage, no model calls
+bin/agentswitch serve                         # daemon; AGENTSWITCH_ROUTER=echo to skip DeepSeek
+bin/agentswitch task "修一下 cli.py 的 bug" --cwd ~/proj      # submit + follow events; approvals prompt y/N in a TTY
+bin/agentswitch task "..." --pin claude-code/claude-opus-5[1m] # skip the router
+bin/agentswitch tasks | show <id> | watch <id> | cancel <id>
+bin/agentswitch approvals | approve <task> <approval> --allow|--deny
+bin/agentswitch quota --refresh               # three harnesses
+bin/agentswitch preview "..." | log | context | health
+bin/agentswitch route "..." [--router echo]   # local routing without the daemon (also `reroute`, `context init`)
 ```
 
-From any other directory (npm scripts only work inside this package), use the wrapper; the
-directory you are in is what the router reads:
+Environment: `AGENTSWITCH_HOME` (default `~/.agentswitch`: `agentswitch.db`, `routing.db`, `tasks/<id>.jsonl`,
+`CONTEXT.md`), `AGENTSWITCH_PORT` (4711), `AGENTSWITCH_ROUTER` (`opencode`|`echo`), `DEEPSEEK_API_KEY`
+(else the key from OpenCode's credential store is used, read-only).
 
-```bash
-~/Desktop/WorkSpace/Projects/AgentSwitch/packages/daemon/bin/route "帮我读取一下工作目录的拓扑"
-```
+Development executor: put an `@echo {...}` directive in the task text to script the run:
+`{"delayMs":50,"approval":"rm -rf /tmp/x","fail":"quota","failTimes":1,"result":"ok","tokens":123}`.
 
-Output is the `RouteResult` JSON; every call is appended to `~/.agentswitch/routing.db`.
+## API
 
-## Context file (router-v0 §2b)
+| method | path | what |
+|---|---|---|
+| POST | `/tasks` | `{task, cwd, pin?, needs_browser?}` → task (queued) |
+| GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
+| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, done, failed, cancelled |
+| POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |
+| POST | `/tasks/:id/cancel` | abort; pending approvals denied |
+| GET | `/approvals` | pending across tasks |
+| POST | `/route/preview` | route without executing |
+| GET/POST | `/quota`, `/quota/refresh` | readings per harness (`remaining` 0..1, detail, source, error) |
+| GET | `/targets` | catalog + current quota map |
+| GET | `/routing/log` | recent decisions |
+| GET/PUT | `/context` | CONTEXT.md (PUT lints) |
+| GET | `/healthz` | |
 
-`~/.agentswitch/CONTEXT.md` (template: `npm run route -- context init`, or `--context <file>`) is the
-router's CLAUDE.md: sites, accounts, secret-gate tokens, environment quirks, preferences. It goes
-into the router's system prompt on every dispatch; entries the task refers to are copied verbatim
-into the brief. Only `enc:v1:` tokens may appear as credentials: list entries whose password/token
-value is not a token are removed at load time with a warning on stderr.
+Later for the phone: bind to the Tailscale address, add bearer auth and pairing. Routes stay.
 
-## After a failed attempt (router-v0 §6)
+## Router (router-v0)
 
-`classifyFailure(outcome)` turns an execution result into `refusal | quota | transport | gate_denied |
-task_failed | unknown` by pattern table. `nextStep()` then decides without a model where it can:
-transport → retry once, then ask the router (the environment may be broken for every harness; it
-can switch to a path that avoids the broken piece, request a registered repair tool via
-`action="repair"`, or give up with what the user should check); quota → harness marked empty, next
-in the chain; gate_denied or an approved action → stop and tell the user. Refusals (and task
-failures with no side effects yet) go back to the router with the attempt history and the tried
-targets hidden from the catalog; no extra coaching, the history is the input.
-Limits: 3 attempts, 2 router asks. Repair tools are passed as `deps.repairs` (none registered yet;
-see router-v0 §6.6). Manual check:
-
-```bash
-npm run route -- reroute "打开 http://site:8400 登录，密码 enc:v1:..." --failed claude-code/claude-sonnet-5 --kind refusal --excerpt "I can't help with automating logins"
-```
+`config/targets.yaml` lists every selectable model per harness (Claude Code 15 incl. `[1m]`,
+Codex 5 × effort, OpenCode deepseek-flash). The router is an OpenCode `router` agent (DeepSeek V4.1
+Flash, read-only tools, injected via `OPENCODE_CONFIG`) that returns a Decision (harness, model,
+effort, brief, fallbacks, confidence). `validateDecision` is the floor: catalog, browser, quota,
+concurrency (queue, never switch), effort, low confidence → default policy. `CONTEXT.md` (sites,
+accounts as secret-gate tokens, environment, preferences) goes into the router prompt; list entries
+with plaintext credentials are stripped at load. After a failure, `classifyFailure` + `nextStep`
+decide: transport → retry once then ask the router; quota → fallback chain; refusal / task_failed →
+ask the router with the history; gate_denied or an approved action → stop. The router may
+`give_up` or request a registered repair tool (`action=repair`; none registered yet).
 
 ## Layout
 
-| file | what |
+| path | what |
 |---|---|
-| `config/targets.yaml` | catalog: every selectable model per harness, quota/browser/concurrency, router settings |
-| `src/router/targets.ts` | schema, loader, wildcard lookup, `markUnavailable`, prompt catalog text |
-| `src/router/decision.ts` | Decision schema; pulls the first JSON object out of a chatty reply |
-| `src/router/validate.ts` | the floor: `validateDecision` / `validatePin`, pure |
-| `src/router/defaultPolicy.ts` | coarse code/chat/browser classifier and the no-router target |
-| `src/router/prompt.ts` | router system prompt (catalog + rules) and task message |
-| `src/router/routers/opencode.ts` | real router: `opencode run --agent router` with a read-only agent injected via `OPENCODE_CONFIG`, in the task's cwd |
-| `src/router/routers/echo.ts` | canned router for tests |
-| `src/router/route.ts` | pipeline: pin → router (timeout, one retry) → validate → default |
-| `src/router/log.ts` | `routing_log` in `node:sqlite` |
-| `src/router/context.ts` | CONTEXT.md loader + plaintext-credential lint |
-| `config/CONTEXT.example.md` | template for `~/.agentswitch/CONTEXT.md` |
-| `src/router/failure.ts` | `classifyFailure`: outcome → FailureKind, pattern table |
-| `src/router/reroute.ts` | `nextStep`: retry / switch along the chain / ask router / stop, pure |
-| `scripts/router_eval.ts` + `tests/fixtures/routing/v0.jsonl` | evaluation set (12 samples to start) |
+| `src/engine/{types,store,bus,engine}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop |
+| `src/executors/{types,echo}.ts` | executor interface; scriptable echo executor |
+| `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
+| `src/quota/{codex,deepseek,claude,index}.ts` | providers and the cached service |
+| `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
+| `tests/` | 84 tests; API tests run in-process via Hono `request()` |
+| `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
 
 ## Facts learned
 
-- `OPENCODE_CONFIG=<file>` + `--agent router` works with OpenCode 2.0.8; the agent's `tools` map
-  disables bash/edit/write/webfetch and `permission.read` denies the gate home and key files.
-- A real routing call on this repo took 19 s (the agent reads files first); `timeout_ms` is 45 s.
-- `node:sqlite` prints an ExperimentalWarning on Node 24; the npm scripts silence it.
+- `OPENCODE_CONFIG=<file>` + `--agent router` works with OpenCode 2.0.8; a real routing call on this repo took 19 s (`timeout_ms` 45 s).
+- Codex `account/rateLimits/read` returns `rateLimits.primary.usedPercent` per window plus `planType`; the ChatGPT.app bundled codex (0.155) must be used, homebrew 0.142 only knows gpt-5.5.
+- DeepSeek `/user/balance` works with the key OpenCode stores in `~/.local/share/opencode/opencode.db` (`credential` table, JSON `{"type":"key","key":...}`).
+- Node's `parseArgs` needs `allowNegative: true` for `--no-watch`; `node:sqlite` prints an ExperimentalWarning on Node 24, silenced in the wrappers.

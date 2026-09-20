@@ -19,6 +19,8 @@ export type ExecutionOutcome = {
   readonly timedOut?: boolean;
   readonly gateDenied?: boolean;
   readonly sideEffects?: SideEffects;
+  /** Tokens consumed, when the harness reports them (feeds the local Claude quota count). */
+  readonly tokens?: number;
 };
 
 const REFUSAL = /(I can(?:'|’)?t help|I cannot help|I can(?:'|’)?t assist|unable to assist|won(?:'|’)?t be able to help|against (?:my|our|the) (?:policy|guidelines)|safety (?:policy|guidelines|reasons)|无法协助|不能帮助|不能帮你|无法帮助|违反.{0,6}(政策|准则|规范)|安全(政策|准则)|refus(?:e|al)|stop_reason["']?\s*[:=]\s*["']?refusal)/i;

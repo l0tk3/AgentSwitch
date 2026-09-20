@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# agentswitch CLI from anywhere. `agentswitch serve` starts the daemon; other commands talk to it.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+[ -d "$DIR/node_modules" ] || { echo "run: (cd $DIR && npm install)" >&2; exit 1; }
+exec env NODE_OPTIONS=--no-warnings=ExperimentalWarning "$DIR/node_modules/.bin/tsx" "$DIR/src/cli.ts" "$@"

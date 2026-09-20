@@ -4,15 +4,21 @@
   "private": true,
   "type": "module",
   "description": "AgentSwitch daemon: task routing (v1: router only)",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "route": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts",
+    "serve": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts serve",
+    "cli": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx src/cli.ts",
     "eval": "NODE_OPTIONS=--no-warnings=ExperimentalWarning tsx scripts/router_eval.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.8",
     "yaml": "^2.6.0",
     "zod": "^3.24.0"
   },

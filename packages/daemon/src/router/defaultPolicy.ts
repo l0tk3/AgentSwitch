@@ -31,7 +31,7 @@ export function defaultTarget(task: string, targets: Targets, quota: Quota): Tar
     const h = ranked[0];
     if (h) return { harness: h[0], model: h[1].default_model };
   }
-  if (cap === "code" || cap === "browser") {
+  if (cap === "code" || cap === "browser" || (quota[targets.router.default.harness] ?? 1) <= 0) {
     const h = bestCodeHarness(targets, quota);
     const spec = targets.harnesses[h];
     if (spec) return { harness: h, model: spec.default_model };

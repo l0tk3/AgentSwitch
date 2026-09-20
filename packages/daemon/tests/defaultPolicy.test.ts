@@ -16,6 +16,7 @@ describe("default policy", () => {
     expect(defaultTarget("打开网页登录", t, {})).toEqual({ harness: "claude-code", model: "claude-sonnet-5" });
     expect(defaultTarget("打开网页登录", t, { "claude-code": 0 })).toEqual({ harness: "codex", model: "gpt-6-astra" });
     expect(defaultTarget("总结一下这篇文章", t, {})).toEqual({ harness: "opencode", model: "deepseek/deepseek-flash" });
+    expect(defaultTarget("总结一下这篇文章", t, { opencode: 0, codex: 0.9, "claude-code": 0.5 })).toEqual({ harness: "codex", model: "gpt-6-astra" });
   });
 
   it("code goes to whichever code harness has more quota left", () => {

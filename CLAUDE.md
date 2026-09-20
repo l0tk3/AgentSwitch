@@ -6,7 +6,7 @@
 - `docs/` 设计与决策记录
 - `packages/secret-gate/` 凭据层（Python）：模型只拿密文，网络层解密。自带 venv、pytest、AGENTS.md
 - `packages/secret-gate-ui/` macOS 原生界面（SwiftUI + SwiftPM）：管理命名密钥对、单条/批量生成密文，全部通过 secret-gate CLI，不自己做密码学
-- `packages/daemon/` TypeScript 守护进程。v1 只有路由器（`docs/router-v0.md`）：targets.yaml、校验、OpenCode 真路由、routing_log；API/执行器未建
+- `packages/daemon/` TypeScript 守护进程：任务引擎（SQLite + SSE + 审批）、路由器（`docs/router-v0.md`）、HTTP API、额度、CLI `bin/agentswitch`。执行器目前只有 echo，真执行器（claude-code / codex / opencode）待接
 
 ## 约定
 - 每个 package 自包含：自己的依赖、测试、README；跨 package 只通过进程/网络接口

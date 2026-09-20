@@ -89,5 +89,5 @@ function switchAlongChain(input: RerouteInput, failed: TargetRef): NextStep {
   if (verdict.ok) return { kind: "switch", target: { harness: verdict.harness, model: verdict.model }, notes: verdict.notes };
   const lastResort = validatePin(input.lowConfidenceTarget, ctx, decision.needs_browser);
   if (lastResort.ok) return { kind: "switch", target: input.lowConfidenceTarget, notes: [...verdict.notes, "default policy target"] };
-  return { kind: "stop", reason: `no remaining target: ${[...verdict.notes, ...lastResort.notes].join("; ")}`, security: false };
+  return { kind: "stop", reason: `no remaining target: ${[...new Set([...verdict.notes, ...lastResort.notes])].join("; ")}`, security: false };
 }
