@@ -62,13 +62,17 @@ export function nextStep(input: RerouteInput): NextStep {
   if (last.kind === "transport" && sameTargetTransportFailures === 1 && !hasSideEffects(last.sideEffects)) {
     return { kind: "retry", target, backoffMs: TRANSPORT_BACKOFF_MS };
   }
-  if (last.kind === "transport" || last.kind === "quota") return switchAlongChain(input, target);
+  if (last.kind === "quota") return switchAlongChain(input, target);
 
-  // refusal, task_failed, unknown
-  if (last.kind !== "refusal" && hasSideEffects(last.sideEffects)) {
+  // transport (after the retry): the environment may be broken for every harness; let the router
+  // judge and, once repair tools exist, fix it. refusal / task_failed / unknown: the router judges.
+  if (last.kind !== "refusal" && last.kind !== "transport" && hasSideEffects(last.sideEffects)) {
     return { kind: "stop", reason: `${last.kind} after side effects; hand over to the user`, security: false };
   }
-  if (input.routerAsks >= limits.maxRouterAsks) return { kind: "stop", reason: `router already asked ${input.routerAsks} times`, security: false };
+  if (input.routerAsks >= limits.maxRouterAsks) {
+    // Out of router asks: transport can still move along the chain by itself; the rest stops.
+    return last.kind === "transport" ? switchAlongChain(input, target) : { kind: "stop", reason: `router already asked ${input.routerAsks} times`, security: false };
+  }
   return { kind: "ask-router", exclude: excludedTargets(input.attempts) };
 }
 
@@ -79,7 +83,7 @@ function switchAlongChain(input: RerouteInput, failed: TargetRef): NextStep {
   const ctx = { targets, quota, running: input.running, lowConfidenceTarget: input.lowConfidenceTarget };
   const decision = input.decision ?? {
     harness: failed.harness, model: failed.model, effort: null, brief: "", needs_browser: false, expected_size: "medium" as const,
-    risk: null, fallbacks: [], reason: "", confidence: 1, action: "redispatch" as const, handoff_note: null,
+    risk: null, fallbacks: [], reason: "", confidence: 1, action: "redispatch" as const, repair: null, handoff_note: null,
   };
   const verdict = validateDecision({ ...decision, confidence: Math.max(decision.confidence, targets.router.min_confidence) }, ctx);
   if (verdict.ok) return { kind: "switch", target: { harness: verdict.harness, model: verdict.model }, notes: verdict.notes };

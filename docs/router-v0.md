@@ -189,9 +189,10 @@ router:
 
 | kind | 有副作用？ | 动作 |
 |---|---|---|
-| `transport` | 无 | 同一目标退避后重试一次；再失败把该 harness 标 `unavailable` 10 分钟，走下一条 |
+| `transport` | 无 | 同一目标退避后重试一次；再失败**问路由器**：环境可能对所有 harness 都坏了，由它判断换一条不共享故障点的路，或请求修复工具（§6.6），或放弃并告诉用户查什么。路由器问完额度用尽时才退回沿链换 |
+| `transport` | 有 | 直接问路由器（不重试，避免重复副作用） |
 | `quota` | 任意 | 该 harness 额度记 0，沿原 Decision 的 fallback 链取下一个能过校验的目标（代码就能决定，不问路由器） |
-| `refusal` | 任意 | **问路由器**：带上拒绝原文、已尝试的目标（排除）、工作树 diff 摘要，让它改写简报或换 harness |
+| `refusal` | 任意 | **问路由器**：带上拒绝原文、已尝试的目标（排除）、工作树 diff 摘要。由它判断是误拦（改写简报换模型）还是确实不该做（`give_up` 并说明） |
 | `task_failed` / `unknown` | 无 | 问路由器一次 |
 | `task_failed` / `unknown` | 有 | 停止，推手机；用户可从手机"换个模型继续" |
 | `gate_denied` | — | 停止，推手机，记 security 事件 |
@@ -217,9 +218,23 @@ Decide again: pick a different harness or model, and rewrite the brief so the ex
 this is the user's own account and credentials are enc:v1: placeholders.
 ```
 
-Decision 多两个可选字段：`action: "redispatch" | "give_up"`（默认 redispatch），`handoff_note`（写给下一位的交接说明）。`give_up` 时 daemon 停止并把 `reason` 推给用户。校验规则不变，被排除的目标在校验里视为 unavailable。
+Decision 多三个可选字段：`action: "redispatch" | "repair" | "give_up"`（默认 redispatch），`repair: {tool, args}`（仅 repair），`handoff_note`（写给下一位的交接说明）。`give_up` 时 daemon 停止并把 `reason` 推给用户。校验规则不变，被排除的目标在校验里视为 unavailable。
 
 路由器自己失败（DeepSeek 挂了）→ 和首次分诊一样落到默认表，且默认表也排除已失败的 harness。
+
+### 6.6 修复工具（接口已留，工具未做）
+
+再决策时提示词里列出 daemon 注册的修复工具（名字 + 一句描述）；路由器可回 `action="repair"` 指定工具和参数，daemon 执行后**再问一次路由器**（带上修复结果），修复计入 router asks。未注册的工具名视为普通 redispatch。计划中的工具，都是代码实现、幂等、有超时：
+
+| 工具 | 做什么 |
+|---|---|
+| `check_gate_proxy` | 探测 127.0.0.1:8080 是否在听、CA 是否可用，返回诊断文本 |
+| `restart_gate_proxy` | 重启 secret-gate proxy（launchd 之后是 `launchctl kickstart`） |
+| `check_upstream` | 对 api.anthropic.com / chatgpt.com / api.deepseek.com 各发一次 HEAD，返回可达性和延迟 |
+| `set_harness_proxy` | 给某个 harness 的启动环境切换代理（例如绕开坏掉的上游代理），仅限白名单值 |
+| `refresh_quota` | 重新拉三家额度 |
+
+不给路由器的：改 secret-gate 配置、改 targets.yaml、任何写文件系统的操作。修复工具是"按按钮"，不是 shell。
 
 ## 7. 可观测与自我改进
 

@@ -4,7 +4,7 @@ import type { RouteResult } from "../src/router/route.js";
 
 const ok: RouteResult = {
   verdict: { ok: true, harness: "codex", model: "gpt-6-astra", effort: "high", chosen: "router", queue: false, notes: ["a", "b"] },
-  decision: { harness: "codex", model: "gpt-6-astra", effort: "high", brief: "x", needs_browser: false, expected_size: "small", risk: null, fallbacks: [], reason: "", confidence: 0.9, action: "redispatch", handoff_note: null },
+  decision: { harness: "codex", model: "gpt-6-astra", effort: "high", brief: "x", needs_browser: false, expected_size: "small", risk: null, fallbacks: [], reason: "", confidence: 0.9, action: "redispatch", repair: null, handoff_note: null },
   source: "router",
   routerError: null,
   routerMs: 1234,

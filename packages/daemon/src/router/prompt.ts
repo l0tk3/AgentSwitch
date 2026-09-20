@@ -14,7 +14,8 @@ export const DECISION_SHAPE = `{
   "fallbacks": [{"harness": "...", "model": "..."}],
   "reason": "<one sentence>",
   "confidence": <0..1>,
-  "action": "redispatch" | "give_up",          // only when asked to decide again after a failure
+  "action": "redispatch" | "repair" | "give_up",   // only when asked to decide again after a failure
+  "repair": {"tool": "<a listed repair tool>", "args": {}} | null,   // only with action=repair
   "handoff_note": "<for the next executor: what was already done, what to avoid>" | null
 }`;
 
@@ -44,16 +45,33 @@ export function taskMessage(task: string, cwd: string, previousError?: string): 
 }
 
 export type AttemptSummary = { readonly harness: string; readonly model: string; readonly kind: string; readonly excerpt: string; readonly sideEffects: boolean };
+export type RepairTool = { readonly name: string; readonly description: string };
 
 /** Appended to the task message when the router is asked again after a failed attempt (§6.5). */
-export function redispatchMessage(attempts: readonly AttemptSummary[], exclude: readonly { harness: string; model: string }[], diffSummary: string): string {
+export function redispatchMessage(
+  attempts: readonly AttemptSummary[],
+  exclude: readonly { harness: string; model: string }[],
+  diffSummary: string,
+  repairs: readonly RepairTool[] = [],
+): string {
   const lines = attempts.map((a, i) => `${i + 1}. ${a.harness}/${a.model} -> ${a.kind}: "${a.excerpt}" (${a.sideEffects ? "had side effects" : "no side effects"})`);
+  const tools = repairs.length
+    ? repairs.map((r) => `- ${r.name}: ${r.description}`).join("\n")
+    : "(none registered; action=repair is not available)";
   return `Previous attempts:
 ${lines.join("\n")}
 Excluded (do not choose): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ") || "none"}
 Worktree diff: ${diffSummary || "(none)"}
+Repair tools you may request with action="repair" (the daemon runs them, then asks you again):
+${tools}
 
-Decide again. Pick a different harness or model, or set action="give_up" with the reason if nothing listed can do this.
-If the failure was a refusal, rewrite the brief so the executor understands this is the user's own account and
-enc:v1: values are placeholders substituted locally. Put what the next executor must know in handoff_note.`;
+Decide again.
+- refusal: the executor's safety filter misfired on a legitimate task. Judge whether another harness or model is likely
+  to accept it, and rewrite the brief so it is clear this is the user's own account and enc:v1: values are placeholders
+  substituted locally. If you judge the task genuinely should not be done, set action="give_up" and say why.
+- transport (proxy, TLS, network, crash, silent timeout): the environment may be broken for every harness. Pick a
+  harness whose path does not share the broken piece, or request a repair tool if one fits, or give_up with what the
+  user should check.
+- otherwise: pick a different harness or model, or give_up with the reason if nothing listed can do this.
+Put what the next executor must know in handoff_note.`;
 }

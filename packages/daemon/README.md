@@ -37,11 +37,14 @@ Output is the `RouteResult` JSON; every call is appended to `~/.agentswitch/rout
 
 `classifyFailure(outcome)` turns an execution result into `refusal | quota | transport | gate_denied |
 task_failed | unknown` by pattern table. `nextStep()` then decides without a model where it can:
-transport → retry once, then next in the fallback chain; quota → harness marked empty, next in the
-chain; gate_denied or an approved action → stop and tell the user. Refusals (and task failures with
-no side effects yet) go back to the router with the attempt history, the tried targets hidden from
-the catalog, and an instruction to rewrite the brief; the router may also `give_up`. Limits: 3
-attempts, 2 router asks. Manual check:
+transport → retry once, then ask the router (the environment may be broken for every harness; it
+can switch to a path that avoids the broken piece, request a registered repair tool via
+`action="repair"`, or give up with what the user should check); quota → harness marked empty, next
+in the chain; gate_denied or an approved action → stop and tell the user. Refusals (and task
+failures with no side effects yet) go back to the router with the attempt history and the tried
+targets hidden from the catalog; it judges misfire vs. genuine and rewrites the brief or gives up.
+Limits: 3 attempts, 2 router asks. Repair tools are passed as `deps.repairs` (none registered yet;
+see router-v0 §6.6). Manual check:
 
 ```bash
 npm run route -- reroute "打开 http://site:8400 登录，密码 enc:v1:..." --failed claude-code/claude-sonnet-5 --kind refusal --excerpt "I can't help with automating logins"

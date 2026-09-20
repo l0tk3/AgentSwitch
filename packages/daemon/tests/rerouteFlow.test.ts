@@ -47,7 +47,7 @@ describe("reroute()", () => {
     expect(out.routerError).toBe("no JSON object in reply");
   });
 
-  it("quota and transport never reach the router", async () => {
+  it("quota, first transport failure and gate denial never reach the router", async () => {
     const r = echoRouter([decisionJson()]);
     const quota = await reroute({ ...base, attempts: [{ ...refused, kind: "quota" }] }, { targets, router: r, quota: {}, running: {} });
     expect(quota.step).toMatchObject({ kind: "switch", target: { harness: "codex", model: "gpt-6-astra" } });  // browser task: opencode cannot
@@ -58,5 +58,23 @@ describe("reroute()", () => {
     const denied = await reroute({ ...base, attempts: [{ ...refused, kind: "gate_denied" }] }, { targets, router: r, quota: {}, running: {} });
     expect(denied.step).toMatchObject({ kind: "stop", security: true });
     expect(r.calls).toHaveLength(0);
+  });
+
+  it("repeated transport failure: router is asked, sees the repair tools, and may request one", async () => {
+    const proxyDown = { ...refused, kind: "transport" as const, excerpt: "connect ECONNREFUSED 127.0.0.1:8080" };
+    const repairs = [{ name: "restart_gate_proxy", description: "restart the secret-gate proxy on :8080" }];
+    const r = echoRouter([decisionJson({ action: "repair", repair: { tool: "restart_gate_proxy", args: { port: 8080 } }, reason: "proxy is down" })]);
+    const out = await reroute({ ...base, attempts: [proxyDown, proxyDown] }, { targets, router: r, quota: {}, running: {}, repairs });
+    expect(out.step).toEqual({ kind: "repair", tool: "restart_gate_proxy", args: { port: 8080 } });
+    expect(r.calls[0]!.task).toContain("- restart_gate_proxy: restart the secret-gate proxy");
+    expect(r.calls[0]!.task).toContain("transport (proxy, TLS, network");
+  });
+
+  it("repair requested for an unregistered tool degrades to a plain re-dispatch", async () => {
+    const proxyDown = { ...refused, kind: "transport" as const, excerpt: "ETIMEDOUT" };
+    const r = echoRouter([decisionJson({ harness: "codex", model: "gpt-6-astra", effort: "high", needs_browser: true, action: "repair", repair: { tool: "reboot_mac", args: {} } })]);
+    const out = await reroute({ ...base, attempts: [proxyDown, proxyDown] }, { targets, router: r, quota: {}, running: {} });
+    expect(out.step).toMatchObject({ kind: "redispatch", source: "router", verdict: { ok: true, harness: "codex" } });
+    expect(r.calls[0]!.task).toContain("(none registered; action=repair is not available)");
   });
 });

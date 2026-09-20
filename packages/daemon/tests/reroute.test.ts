@@ -14,14 +14,19 @@ const input = (attempts: Attempt[], over: Partial<RerouteInput> = {}): RerouteIn
   ({ decision, attempts, routerAsks: 0, targets, quota: {}, running: {}, lowConfidenceTarget: { harness: "claude-code", model: "claude-sonnet-5" }, ...over });
 
 describe("nextStep", () => {
-  it("transport without side effects: retry the same target once, then switch", () => {
+  it("transport without side effects: retry the same target once, then ask the router", () => {
     expect(nextStep(input([attempt()]))).toEqual({ kind: "retry", target: { harness: "codex", model: "gpt-6-astra" }, backoffMs: 5000 });
     const twice = nextStep(input([attempt(), attempt()]));
-    expect(twice).toMatchObject({ kind: "switch", target: { harness: "claude-code", model: "claude-opus-5" } });
+    expect(twice).toEqual({ kind: "ask-router", exclude: [{ harness: "codex", model: "gpt-6-astra" }] });
   });
 
-  it("transport with side effects goes straight to the fallback chain", () => {
+  it("transport with side effects skips the retry and asks the router", () => {
     const s = nextStep(input([attempt({ sideEffects: { ...NO_SIDE_EFFECTS, filesChanged: 2 } })]));
+    expect(s).toMatchObject({ kind: "ask-router" });
+  });
+
+  it("transport when the router asks are used up still moves along the chain", () => {
+    const s = nextStep(input([attempt(), attempt()], { routerAsks: 2 }));
     expect(s).toMatchObject({ kind: "switch", target: { harness: "claude-code", model: "claude-opus-5" } });
   });
 
@@ -56,7 +61,7 @@ describe("nextStep", () => {
   });
 
   it("limits: attempts and router asks", () => {
-    expect(nextStep(input([attempt(), attempt(), attempt()]))).toMatchObject({ kind: "stop", reason: expect.stringContaining("max attempts") });
+    expect(nextStep(input([attempt({ kind: "quota" }), attempt({ kind: "quota" }), attempt({ kind: "quota" })]))).toMatchObject({ kind: "stop", reason: expect.stringContaining("max attempts") });
     expect(nextStep(input([attempt({ kind: "refusal" })], { routerAsks: 2 }))).toMatchObject({ kind: "stop", reason: expect.stringContaining("router already asked") });
     expect(nextStep(input([]))).toMatchObject({ kind: "stop" });
   });

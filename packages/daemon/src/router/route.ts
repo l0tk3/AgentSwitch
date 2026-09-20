@@ -2,7 +2,7 @@
 
 import { parseDecision, type Decision } from "./decision.js";
 import { defaultTarget } from "./defaultPolicy.js";
-import { redispatchMessage, systemPrompt, taskMessage } from "./prompt.js";
+import { redispatchMessage, systemPrompt, taskMessage, type RepairTool } from "./prompt.js";
 import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
 import type { Router } from "./routers/types.js";
 import { markUnavailable, type TargetRef, type Targets } from "./targets.js";
@@ -20,7 +20,8 @@ export type RouteDeps = {
   readonly router: Router;
   readonly quota: Quota;
   readonly running: Running;
-  readonly now?: () => number;
+  /** Repair tools the router may request during a re-dispatch (none registered yet). */
+  readonly repairs?: readonly RepairTool[];
 };
 
 export type RouteResult = {
@@ -67,7 +68,8 @@ export type RerouteRequest = RouteRequest & {
 export type RerouteResult =
   | { readonly step: Extract<NextStep, { kind: "retry" | "switch" | "stop" }>; readonly decision: Decision | null; readonly routerError: null; readonly routerMs: 0 }
   | { readonly step: { readonly kind: "redispatch"; readonly verdict: Verdict; readonly source: "router" | "default" }; readonly decision: Decision | null; readonly routerError: string | null; readonly routerMs: number }
-  | { readonly step: { readonly kind: "give_up"; readonly reason: string }; readonly decision: Decision; readonly routerError: null; readonly routerMs: number };
+  | { readonly step: { readonly kind: "give_up"; readonly reason: string }; readonly decision: Decision; readonly routerError: null; readonly routerMs: number }
+  | { readonly step: { readonly kind: "repair"; readonly tool: string; readonly args: Record<string, unknown> }; readonly decision: Decision; readonly routerError: null; readonly routerMs: number };
 
 /** After a failed attempt (router-v0 §6.3-6.5): code decides retry/switch/stop; refusals go back to the router. */
 export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<RerouteResult> {
@@ -80,12 +82,20 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
   const targets = markUnavailable(deps.targets, step.exclude);
   const summaries = req.attempts.map((a) => ({ harness: a.harness, model: a.model, kind: a.kind, excerpt: a.excerpt,
     sideEffects: a.sideEffects.filesChanged + a.sideEffects.commandsRun + a.sideEffects.approvalsGranted > 0 }));
-  const extra = redispatchMessage(summaries, step.exclude, req.diffSummary ?? "");
+  const repairs = deps.repairs ?? [];
+  const extra = redispatchMessage(summaries, step.exclude, req.diffSummary ?? "", repairs);
   const asked = await askRouter(req, { ...deps, targets }, extra);
   const excludedFallback = defaultTargetExcluding(req, deps, step.exclude);
   const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: excludedFallback };
   if (asked.decision?.action === "give_up") {
     return { step: { kind: "give_up", reason: asked.decision.reason || "router gave up" }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
+  }
+  if (asked.decision?.action === "repair") {
+    const wanted = asked.decision.repair;
+    if (wanted && repairs.some((r) => r.name === wanted.tool)) {
+      return { step: { kind: "repair", tool: wanted.tool, args: wanted.args }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
+    }
+    // Unknown or unregistered tool: treat the decision as a plain re-dispatch of its harness/model.
   }
   if (asked.decision) {
     const verdict = validateDecision(asked.decision, ctx);
