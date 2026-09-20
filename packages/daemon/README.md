@@ -42,7 +42,7 @@ can switch to a path that avoids the broken piece, request a registered repair t
 `action="repair"`, or give up with what the user should check); quota → harness marked empty, next
 in the chain; gate_denied or an approved action → stop and tell the user. Refusals (and task
 failures with no side effects yet) go back to the router with the attempt history and the tried
-targets hidden from the catalog; it judges misfire vs. genuine and rewrites the brief or gives up.
+targets hidden from the catalog; no extra coaching, the history is the input.
 Limits: 3 attempts, 2 router asks. Repair tools are passed as `deps.repairs` (none registered yet;
 see router-v0 §6.6). Manual check:
 

@@ -67,7 +67,7 @@ describe("reroute()", () => {
     const out = await reroute({ ...base, attempts: [proxyDown, proxyDown] }, { targets, router: r, quota: {}, running: {}, repairs });
     expect(out.step).toEqual({ kind: "repair", tool: "restart_gate_proxy", args: { port: 8080 } });
     expect(r.calls[0]!.task).toContain("- restart_gate_proxy: restart the secret-gate proxy");
-    expect(r.calls[0]!.task).toContain("transport (proxy, TLS, network");
+    expect(r.calls[0]!.task).toContain("transport failures (proxy, TLS, network");
   });
 
   it("repair requested for an unregistered tool degrades to a plain re-dispatch", async () => {

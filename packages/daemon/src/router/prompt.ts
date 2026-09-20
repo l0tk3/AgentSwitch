@@ -65,13 +65,7 @@ Worktree diff: ${diffSummary || "(none)"}
 Repair tools you may request with action="repair" (the daemon runs them, then asks you again):
 ${tools}
 
-Decide again.
-- refusal: the executor's safety filter misfired on a legitimate task. Judge whether another harness or model is likely
-  to accept it, and rewrite the brief so it is clear this is the user's own account and enc:v1: values are placeholders
-  substituted locally. If you judge the task genuinely should not be done, set action="give_up" and say why.
-- transport (proxy, TLS, network, crash, silent timeout): the environment may be broken for every harness. Pick a
-  harness whose path does not share the broken piece, or request a repair tool if one fits, or give_up with what the
-  user should check.
-- otherwise: pick a different harness or model, or give_up with the reason if nothing listed can do this.
-Put what the next executor must know in handoff_note.`;
+Decide again from the history above: a different harness or model, a repair tool, or give_up with the reason.
+For transport failures (proxy, TLS, network, crash, silent timeout) the environment may be broken for every harness;
+prefer a path that does not share the broken piece. Put what the next executor must know in handoff_note.`;
 }
