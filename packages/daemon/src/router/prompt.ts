@@ -1,5 +1,6 @@
 /** The router agent's instructions and the per-task message. Kept as plain text so it can be diffed. */
 
+import { contextSection, EMPTY_CONTEXT, type LoadedContext } from "./context.js";
 import type { Targets } from "./targets.js";
 import { catalogText } from "./targets.js";
 
@@ -19,7 +20,7 @@ export const DECISION_SHAPE = `{
   "handoff_note": "<for the next executor: what was already done, what to avoid>" | null
 }`;
 
-export function systemPrompt(targets: Targets): string {
+export function systemPrompt(targets: Targets, context: LoadedContext = EMPTY_CONTEXT): string {
   return `You are the dispatcher for AgentSwitch. A task arrives; you decide which coding agent and model
 should execute it and write a brief for that executor. You do not execute anything yourself.
 
@@ -36,7 +37,7 @@ Rules:
 - You may read files under the working directory to judge size and language. Do not modify anything.
 - If unsure, lower confidence instead of guessing.
 - Reply with exactly one JSON object and nothing else, of this shape:
-${DECISION_SHAPE}`;
+${DECISION_SHAPE}${contextSection(context)}`;
 }
 
 export function taskMessage(task: string, cwd: string, previousError?: string): string {

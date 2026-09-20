@@ -1,10 +1,12 @@
-/** `route "<task>" [--cwd dir] [--router echo|opencode] [--pin harness/model] [--browser]`
+/** `route "<task>" [--cwd dir] [--router echo|opencode] [--pin harness/model] [--browser] [--context file]`
  *  `reroute "<task>" --failed harness/model --kind refusal|quota|transport|task_failed --excerpt "..."`
+ *  `context init` writes the CONTEXT.md template to ~/.agentswitch if missing.
  *  Prints the result as JSON; `route` also appends to the routing log. */
 
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { resolve } from "node:path";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { loadContext } from "./router/context.js";
 import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
 import { RoutingLog } from "./router/log.js";
@@ -28,15 +30,28 @@ async function main(): Promise<number> {
       failed: { type: "string" },
       kind: { type: "string", default: "refusal" },
       excerpt: { type: "string", default: "" },
+      context: { type: "string", default: join(process.env.HOME ?? ".", ".agentswitch", "CONTEXT.md") },
     },
   });
   const [cmd, task] = positionals;
+  if (cmd === "context" && task === "init") {
+    if (existsSync(values.context)) {
+      console.log(`exists: ${values.context}`);
+    } else {
+      mkdirSync(dirname(values.context), { recursive: true });
+      copyFileSync(resolve(HERE, "..", "config", "CONTEXT.example.md"), values.context);
+      console.log(`written: ${values.context}`);
+    }
+    return 0;
+  }
   if ((cmd !== "route" && cmd !== "reroute") || !task) {
     console.error('usage: route "<task>" [--cwd dir] [--router echo|opencode] [--pin harness/model] [--browser]\n'
       + '       reroute "<task>" --failed harness/model --kind refusal|quota|transport|task_failed --excerpt "..."');
     return 2;
   }
   const targets = loadTargets(values.targets);
+  const context = loadContext(values.context);
+  for (const w of context.warnings) console.error(`context warning: ${w}`);
   const router = values.router === "echo"
     ? echoRouter([JSON.stringify({ harness: targets.router.default.harness, model: null, brief: task, confidence: 0.9 })])
     : opencodeRouter({ model: targets.router.model });
@@ -46,7 +61,7 @@ async function main(): Promise<number> {
     const attempt = { ...failed, kind: values.kind as FailureKind, excerpt: values.excerpt, sideEffects: NO_SIDE_EFFECTS };
     const out = await reroute(
       { task, cwd: resolve(values.cwd), needsBrowser: values.browser, decision: null, attempts: [attempt], routerAsks: 0 },
-      { targets, router, quota: {}, running: {} },
+      { targets, router, quota: {}, running: {}, context },
     );
     console.log(JSON.stringify(out, null, 2));
     return 0;
@@ -54,7 +69,7 @@ async function main(): Promise<number> {
   const pin = values.pin ? splitPin(values.pin) : undefined;
   const result = await route(
     { task, cwd: resolve(values.cwd), ...(pin ? { pin } : {}), needsBrowser: values.browser },
-    { targets, router, quota: {}, running: {} },
+    { targets, router, quota: {}, running: {}, context },
   );
   const log = new RoutingLog(values.log);
   const id = log.record(task, values.cwd, result);

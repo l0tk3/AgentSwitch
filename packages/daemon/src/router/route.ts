@@ -1,5 +1,6 @@
 /** The pipeline: pin → validate; otherwise router (with timeout and one retry) → validate → default. */
 
+import type { LoadedContext } from "./context.js";
 import { parseDecision, type Decision } from "./decision.js";
 import { defaultTarget } from "./defaultPolicy.js";
 import { redispatchMessage, systemPrompt, taskMessage, type RepairTool } from "./prompt.js";
@@ -22,6 +23,8 @@ export type RouteDeps = {
   readonly running: Running;
   /** Repair tools the router may request during a re-dispatch (none registered yet). */
   readonly repairs?: readonly RepairTool[];
+  /** The user's CONTEXT.md, already linted (see context.ts). */
+  readonly context?: LoadedContext;
 };
 
 export type RouteResult = {
@@ -120,7 +123,7 @@ function defaultTargetExcluding(req: RouteRequest, deps: RouteDeps, exclude: rea
 }
 
 async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Promise<Asked> {
-  const system = systemPrompt(deps.targets);
+  const system = systemPrompt(deps.targets, deps.context);
   let error: string | null = null;
   let ms = 0;
   for (let attempt = 1; attempt <= 2; attempt++) {

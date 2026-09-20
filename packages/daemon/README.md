@@ -33,6 +33,14 @@ directory you are in is what the router reads:
 
 Output is the `RouteResult` JSON; every call is appended to `~/.agentswitch/routing.db`.
 
+## Context file (router-v0 §2b)
+
+`~/.agentswitch/CONTEXT.md` (template: `npm run route -- context init`, or `--context <file>`) is the
+router's CLAUDE.md: sites, accounts, secret-gate tokens, environment quirks, preferences. It goes
+into the router's system prompt on every dispatch; entries the task refers to are copied verbatim
+into the brief. Only `enc:v1:` tokens may appear as credentials: list entries whose password/token
+value is not a token are removed at load time with a warning on stderr.
+
 ## After a failed attempt (router-v0 §6)
 
 `classifyFailure(outcome)` turns an execution result into `refusal | quota | transport | gate_denied |
@@ -64,6 +72,8 @@ npm run route -- reroute "打开 http://site:8400 登录，密码 enc:v1:..." --
 | `src/router/routers/echo.ts` | canned router for tests |
 | `src/router/route.ts` | pipeline: pin → router (timeout, one retry) → validate → default |
 | `src/router/log.ts` | `routing_log` in `node:sqlite` |
+| `src/router/context.ts` | CONTEXT.md loader + plaintext-credential lint |
+| `config/CONTEXT.example.md` | template for `~/.agentswitch/CONTEXT.md` |
 | `src/router/failure.ts` | `classifyFailure`: outcome → FailureKind, pattern table |
 | `src/router/reroute.ts` | `nextStep`: retry / switch along the chain / ask router / stop, pure |
 | `scripts/router_eval.ts` + `tests/fixtures/routing/v0.jsonl` | evaluation set (12 samples to start) |
