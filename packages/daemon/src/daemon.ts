@@ -6,7 +6,11 @@ import { createApp } from "./api/app.js";
 import { Bus } from "./engine/bus.js";
 import { Engine } from "./engine/engine.js";
 import { Store } from "./engine/store.js";
+import { claudeExecutor } from "./executors/claude.js";
+import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
+import { defaultGate } from "./executors/gate.js";
+import { opencodeExecutor } from "./executors/opencode.js";
 import type { Executor } from "./executors/types.js";
 import { claudeQuota } from "./quota/claude.js";
 import { codexQuota } from "./quota/codex.js";
@@ -28,7 +32,8 @@ export type DaemonConfig = {
   readonly targetsPath: string;
   readonly port: number;
   readonly router: "opencode" | "echo";
-  readonly executors: "echo" | "real";   // "real" is not wired yet: falls back to echo for every harness
+  readonly executors: "echo" | "real";   // real = claude-code (Agent SDK), codex (app-server), opencode (run)
+  readonly browser: boolean;             // give real executors the gated Playwright browser
   readonly quotaTtlMs: number;
 };
 
@@ -40,6 +45,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     port: Number(env.AGENTSWITCH_PORT ?? DEFAULT_PORT),
     router: env.AGENTSWITCH_ROUTER === "echo" ? "echo" : "opencode",
     executors: env.AGENTSWITCH_EXECUTORS === "real" ? "real" : "echo",
+    browser: env.AGENTSWITCH_BROWSER === "1",
     quotaTtlMs: 60_000,
   };
 }
@@ -60,7 +66,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
   const contextPath = join(cfg.home, "CONTEXT.md");
   const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : opencodeRouter({ model: targets.router.model }));
-  const executors = overrides.executors ?? Object.keys(targets.harnesses).map((h) => echoExecutor(h));
+  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
   const quota = overrides.quota ?? new QuotaService([
     codexQuota({ binary: targets.harnesses.codex?.binary ?? "codex" }),
     deepseekQuota({ key: findDeepSeekKey() }),
@@ -70,6 +76,16 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath) });
   const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
+}
+
+export function realExecutors(targets: Targets, browser: boolean): Executor[] {
+  const gate = defaultGate();
+  if (!gate) console.error("secret-gate venv not found: executors run without the gate (no proxy, no MCP)");
+  return [
+    claudeExecutor({ gate, browser }),
+    codexExecutor({ binary: targets.harnesses.codex?.binary ?? "codex", gate, browser }),
+    opencodeExecutor({ gate, browser }),
+  ];
 }
 
 function defaultEchoRouter(targets: Targets): Router {

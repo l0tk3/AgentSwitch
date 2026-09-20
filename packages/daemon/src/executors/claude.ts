@@ -1,0 +1,123 @@
+/** Claude Code executor via the Agent SDK. `canUseTool` is the approval hook: read-only tools and
+ *  edits inside cwd are allowed, everything else (Bash, writes outside cwd, web) asks the engine.
+ *  User settings are not loaded (settingSources: []); the gate proxy goes into the tool env. */
+
+import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
+import { claudeMcpServers, gateEnv, type GateOptions } from "./gate.js";
+import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
+
+export type ClaudeExecutorOptions = {
+  readonly gate?: GateOptions | null;
+  readonly browser?: boolean;
+  readonly maxTurns?: number;
+  readonly executable?: string;
+};
+
+const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "WebSearch", "NotebookRead"]);
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+export type ToolDecision = { kind: "allow" } | { kind: "ask"; action: string; evidence: string };
+
+/** Real path of `p` even when it does not exist yet: realpath of the nearest existing ancestor + the rest.
+ *  macOS reports the temp dir as /var/... and /private/var/... interchangeably. */
+export function canonical(p: string): string {
+  let head = p;
+  const tail: string[] = [];
+  while (!existsSync(head)) {
+    const parent = dirname(head);
+    if (parent === head) return p;
+    tail.unshift(basename(head));
+    head = parent;
+  }
+  try { head = realpathSync(head); } catch { return p; }
+  return tail.length ? join(head, ...tail) : head;
+}
+
+/** Policy: what needs a human. `cwd` should already be canonical. */
+export function decideTool(toolName: string, input: Record<string, unknown>, cwd: string): ToolDecision {
+  if (READ_ONLY.has(toolName) || toolName.startsWith("mcp__secret-gate__") || toolName.startsWith("mcp__playwright__")) return { kind: "allow" };
+  if (EDIT_TOOLS.has(toolName)) {
+    const raw = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : null;
+    const p = raw === null ? null : canonical(resolve(cwd, raw));
+    if (p && (p === cwd || p.startsWith(cwd + sep))) return { kind: "allow" };
+    return { kind: "ask", action: `${toolName} outside cwd: ${p ?? "?"}`, evidence: JSON.stringify(input).slice(0, 1000) };
+  }
+  if (toolName === "Bash") return { kind: "ask", action: `Bash: ${String(input.command ?? "")}`, evidence: String(input.description ?? "") };
+  return { kind: "ask", action: `${toolName}`, evidence: JSON.stringify(input).slice(0, 1000) };
+}
+
+export type Folded = { text: string[]; tools: number; edits: number; result: Extract<SDKMessage, { type: "result" }> | null; refusal: boolean; rateLimited: boolean };
+
+export function foldMessage(state: Folded, msg: SDKMessage): Folded {
+  if (msg.type === "assistant") {
+    const blocks = (msg.message as { content?: { type: string; text?: string; name?: string }[] }).content ?? [];
+    const text = blocks.filter((b) => b.type === "text" && b.text).map((b) => b.text!);
+    const tools = blocks.filter((b) => b.type === "tool_use");
+    const edits = tools.filter((b) => b.name && EDIT_TOOLS.has(b.name)).length;
+    return { ...state, text: [...state.text, ...text], tools: state.tools + tools.length, edits: state.edits + edits };
+  }
+  if (msg.type === "result") return { ...state, result: msg };
+  if (msg.type === "system" && (msg as { subtype?: string }).subtype === "model_refusal_no_fallback") return { ...state, refusal: true };
+  if (msg.type === "rate_limit_event") return { ...state, rateLimited: true };
+  return state;
+}
+
+export function outcomeFromFold(state: Folded, approvals: number, cancelled: boolean): ExecutionOutcome {
+  const r = state.result;
+  const usage = r ? (r.usage as { input_tokens?: number; output_tokens?: number }) : undefined;
+  const tokens = (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
+  const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: state.edits, commandsRun: state.tools - state.edits, approvalsGranted: approvals };
+  if (state.refusal) return { ok: false, exitCode: 0, lastText: `refusal: ${state.text.at(-1) ?? "model refused"}`, sideEffects, tokens };
+  if (!r) return { ok: false, exitCode: cancelled ? null : 1, stderr: cancelled ? "cancelled" : "no result message", lastText: state.text.join("\n"), timedOut: !cancelled, sideEffects, tokens };
+  if (r.subtype === "success" && !r.is_error) return { ok: true, exitCode: 0, lastText: r.result, sideEffects, tokens };
+  const errText = r.subtype === "success" ? r.result : `${r.subtype}${state.rateLimited ? " (rate limited)" : ""}`;
+  return { ok: false, exitCode: 1, stderr: state.rateLimited ? `rate limit: ${errText}` : errText, lastText: state.text.join("\n"), sideEffects, tokens };
+}
+
+export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
+  return {
+    harness: "claude-code",
+    async run(input: ExecutionInput): Promise<ExecutionOutcome> {
+      const cwd = canonical(resolve(input.cwd));
+      let approvals = 0;
+      const canUseTool: CanUseTool = async (toolName, toolInput) => {
+        const d = decideTool(toolName, toolInput, cwd);
+        if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
+        const decision: ApprovalDecision = await input.approve(d.action, d.evidence);
+        if (decision === "allow") { approvals++; return { behavior: "allow", updatedInput: toolInput }; }
+        return { behavior: "deny", message: "denied by the user via AgentSwitch" };
+      };
+      const profile = mkdtempSync(join(tmpdir(), "agentswitch-claude-profile-"));
+      const abort = new AbortController();
+      const onAbort = () => abort.abort();
+      input.signal.addEventListener("abort", onAbort, { once: true });
+      const options: Options = {
+        cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
+        maxTurns: opts.maxTurns ?? 200, abortController: abort, includePartialMessages: false,
+        ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
+        ...(opts.gate ? { env: { ...process.env, ...gateEnv(opts.gate) } as Record<string, string>, mcpServers: claudeMcpServers(opts.gate, profile, opts.browser ?? false) } : {}),
+        ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
+      };
+      const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
+      let state: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: false, rateLimited: false };
+      try {
+        for await (const msg of query({ prompt, options })) {
+          const before = state;
+          state = foldMessage(state, msg);
+          for (const t of state.text.slice(before.text.length)) input.emit("text", { text: t });
+          if (state.tools > before.tools) input.emit("tool_call", { tool: "claude", count: state.tools - before.tools });
+        }
+      } catch (err) {
+        if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: approvals } };
+      } finally {
+        input.signal.removeEventListener("abort", onAbort);
+      }
+      return outcomeFromFold(state, approvals, input.signal.aborted);
+    },
+  };
+}

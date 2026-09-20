@@ -257,7 +257,7 @@ secret-gate 自身待办（不属于 AgentSwitch）：路径前缀绑定（同�
 - 验收：人在外面，蜂窝网络，对 Siri 说一句，Mac 上 Claude 跑完，手机收到推送。
 - 这一步验证的是三个最不确定的东西：Tailscale 穿透、异步任务持久化、推送。
 
-> 2026-09-20 进度：daemon 侧的 M0 + M1 已在 echo 执行器上跑通：`POST /tasks`、`GET /tasks/:id/events`（SSE）、审批回路（approval_request → `/approve`，超时即拒）、取消、额度（Codex/DeepSeek 真接口 + Claude 本地计数）、CLI。手机侧（快捷指令、Tailscale 绑定、Bark）和真执行器未做。开发期用 `bin/agentswitch` 走同一套 API。
+> 2026-09-20 进度：daemon 侧的 M0 + M1 已在 echo 执行器上跑通：`POST /tasks`、`GET /tasks/:id/events`（SSE）、审批回路（approval_request → `/approve`，超时即拒）、取消、额度（Codex/DeepSeek 真接口 + Claude 本地计数）、CLI。手机侧（快捷指令、Tailscale 绑定、Bark）未做。三个真执行器已接（`AGENTSWITCH_EXECUTORS=real`）：Claude Agent SDK（`canUseTool` 审批）、Codex app-server（协议审批）、OpenCode `run`（无审批，静态权限）；均已用真模型在临时目录跑通建文件任务。开发期用 `bin/agentswitch` 走同一套 API。
 
 **M1 审批**：Agent SDK `canUseTool` → approval 模块 → 推送 → 手机（仍是快捷指令或网页）批准。
 **M2 多后端 + 规则路由 + 路由测试集**：codex / deepseek / trusted 接入；policy.yaml；§5.3 的 150 条。

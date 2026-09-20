@@ -17,7 +17,7 @@ export const Decision = z.object({
   /** Re-dispatch only: keep going with a new target, run a repair tool first, or tell the user why not. */
   action: z.enum(["redispatch", "repair", "give_up"]).default("redispatch"),
   /** action=repair only: which registered repair tool to run, with its arguments. */
-  repair: z.object({ tool: z.string().min(1), args: z.record(z.unknown()).default({}) }).nullable().default(null),
+  repair: z.object({ tool: z.string().min(1), args: z.record(z.string(), z.unknown()).default({}) }).nullable().default(null),
   /** Re-dispatch only: what the next executor must know about the previous attempt. */
   handoff_note: z.string().nullable().default(null),
 });

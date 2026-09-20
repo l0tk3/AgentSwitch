@@ -8,7 +8,7 @@ client of the API; during development the CLI plays that role. Design: `docs/des
 CLI / phone ──HTTP──▶ agentswitchd (127.0.0.1:4711)
                         ├─ engine/   queue → route → dispatch → (fail → reroute)* → done; approvals; SQLite + JSONL
                         ├─ router/   targets.yaml, DeepSeek dispatcher (OpenCode agent), policy floor, CONTEXT.md, routing_log
-                        ├─ executors/ echo (scriptable, for development); claude-code / codex / opencode: next
+                        ├─ executors/ echo (dev), claude-code (Agent SDK), codex (app-server), opencode (run); secret-gate wired in
                         ├─ quota/    codex app-server rateLimits, DeepSeek /user/balance, Claude local token count
                         └─ api/      Hono: /tasks (+SSE events, approve, cancel), /quota, /targets, /route/preview, /context
 ```
@@ -33,6 +33,20 @@ Environment: `AGENTSWITCH_HOME` (default `~/.agentswitch`: `agentswitch.db`, `ro
 
 Development executor: put an `@echo {...}` directive in the task text to script the run:
 `{"delayMs":50,"approval":"rm -rf /tmp/x","fail":"quota","failTimes":1,"result":"ok","tokens":123}`.
+
+## Executors
+
+`AGENTSWITCH_EXECUTORS=real` (default `echo`); `AGENTSWITCH_BROWSER=1` adds the gated Playwright
+browser as an MCP server; `AGENTSWITCH_BROWSER_ORIGINS=a;b` restricts it. When
+`packages/secret-gate/.venv` exists, every executor gets the gate: proxy in the tool env (both
+cases), `secret-gate mcp`, gate home unreadable. `scripts/executor_smoke.ts <harness> [model]` runs
+one executor on a trivial file task in a temp dir.
+
+| harness | how | approvals | failure signals mapped |
+|---|---|---|---|
+| claude-code | Agent SDK `query()`; `settingSources: []` so your `~/.claude` is not loaded; model + effort from the verdict | `canUseTool`: Read/Glob/Grep, gate + browser MCP tools and edits inside cwd are allowed; Bash, writes outside cwd, web → engine approval | result subtype, `model_refusal_no_fallback` → refusal, `rate_limit_event` → quota, usage → tokens |
+| codex | `codex app-server` JSON-RPC (bundled ChatGPT.app binary); private `CODEX_HOME` with 0600 auth copy + our config.toml, removed after the run; `model_reasoning_effort` from the verdict | `item/*/requestApproval`, `execCommandApproval`, `applyPatchApproval` → engine; MCP elicitations accepted | `turn/completed` error, `error` notifications, process exit |
+| opencode | `opencode run --standalone --format json -m <model>`; config via `OPENCODE_CONFIG` | none: `run` cannot surface prompts (design A.3). Edits and shell allowed, webfetch denied, gate home unreadable | `error` events, exit code, stderr |
 
 ## API
 
@@ -71,7 +85,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | path | what |
 |---|---|
 | `src/engine/{types,store,bus,engine}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop |
-| `src/executors/{types,echo}.ts` | executor interface; scriptable echo executor |
+| `src/executors/{types,echo,gate,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, the three real executors |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
 | `src/quota/{codex,deepseek,claude,index}.ts` | providers and the cached service |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
