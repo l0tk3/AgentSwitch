@@ -1,0 +1,21 @@
+# ~/.codex/config.toml — merge these sections
+#
+# Proxy variables go ONLY here (shell tool env). Do not export them in the shell that launches
+# codex: Codex's own websocket to chatgpt.com honours them and would be captured by the gate.
+# MCP tools are cancelled in `codex exec` (openai/codex#24135); they work in the TUI and app-server.
+
+[shell_environment_policy]
+inherit = "all"
+# Both cases on purpose: curl honours lowercase http_proxy only (httpoxy mitigation).
+set = { HTTPS_PROXY = "http://127.0.0.1:8080", https_proxy = "http://127.0.0.1:8080", HTTP_PROXY = "http://127.0.0.1:8080", http_proxy = "http://127.0.0.1:8080", NO_PROXY = "api.openai.com,api.anthropic.com,api.deepseek.com,localhost", no_proxy = "api.openai.com,api.anthropic.com,api.deepseek.com,localhost", SSL_CERT_FILE = "/Users/YOU/.secret-gate/ca.pem", REQUESTS_CA_BUNDLE = "/Users/YOU/.secret-gate/ca.pem", NODE_EXTRA_CA_CERTS = "/Users/YOU/.secret-gate/ca.pem" }
+
+# Codex sandbox blocks all sockets by default, including localhost: the proxy needs this.
+[sandbox_workspace_write]
+network_access = true
+
+[mcp_servers.secret-gate]
+command = "/Users/YOU/Desktop/WorkSpace/Projects/AgentSwitch/packages/secret-gate/.venv/bin/secret-gate"
+args = ["mcp"]
+
+[mcp_servers.secret-gate.env]
+SECRET_GATE_HOME = "/Users/YOU/.secret-gate"

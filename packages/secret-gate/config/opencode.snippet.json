@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "mcp": {
+    "secret-gate": {
+      "type": "local",
+      "command": [
+        "/Users/YOU/Desktop/WorkSpace/Projects/AgentSwitch/packages/secret-gate/.venv/bin/secret-gate",
+        "mcp"
+      ],
+      "enabled": true,
+      "environment": {
+        "SECRET_GATE_HOME": "/Users/YOU/.secret-gate"
+      }
+    }
+  },
+  "permission": {
+    "read": {
+      "*": "allow",
+      "/Users/YOU/.secret-gate/*": "deny"
+    },
+    "bash": {
+      "*": "allow",
+      "secret-gate keygen*": "deny",
+      "cat /Users/YOU/.secret-gate/*": "deny"
+    }
+  }
+}
