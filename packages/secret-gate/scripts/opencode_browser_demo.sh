@@ -18,9 +18,10 @@
 # Your ~/.config/opencode is not touched. --standalone avoids the background service, which
 # would keep its own (proxy-less) environment.
 #
-# The Playwright MCP entry clears the proxy for its own process (npx would otherwise contact the
-# npm registry through the gate and hang); the browser it launches still uses --proxy-server.
-# First run needs the package cached: `npx -y @playwright/mcp@0.0.82 --help`.
+# Playwright MCP runs behind `secret-gate browser` (secret_fill, redacted snapshots, JS/file/
+# screenshot leaks blocked). The gate strips the proxy from the Playwright process env (npx would
+# hang behind the gate); the browser still uses --proxy-server. First run needs the package
+# cached: `npx -y @playwright/mcp@0.0.82 --help`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -64,16 +65,14 @@ cat > "$WORK/opencode.json" <<JSON
     },
     "playwright": {
       "type": "local",
-      "command": ["npx", "-y", "--prefer-offline", "@playwright/mcp@$PW_MCP_VERSION",
+      "command": ["$GATE", "browser", "--",
+                  "npx", "-y", "--prefer-offline", "@playwright/mcp@$PW_MCP_VERSION",
                   "--proxy-server=$PROXY",
                   "--ignore-https-errors",
                   "--user-data-dir=$PROFILE",
                   "--allowed-origins=$ORIGINS"],
       "enabled": true,
-      "environment": {
-        "HTTP_PROXY": "", "http_proxy": "", "HTTPS_PROXY": "", "https_proxy": "",
-        "NO_PROXY": "*", "no_proxy": "*"
-      }
+      "environment": {"SECRET_GATE_HOME": "$SECRET_GATE_HOME"}
     }
   },
   "permission": {

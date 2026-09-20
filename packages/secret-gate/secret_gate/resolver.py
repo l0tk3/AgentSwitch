@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .constants import KIND_TOTP, USE_HTTP, USE_OTP, VALID_USES
 from .errors import PolicyViolation, TokenError, ValidationError
 from .otp import totp
 from .policy import SecretPayload
-from .tokens import find_tokens, replace_token, open_token
+from .tokens import find_tokens, open_token, replace_token
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class Resolver:
         raise last
 
     @classmethod
-    def from_home(cls, home, clock: Callable[[], float] = time.time) -> "Resolver":
+    def from_home(cls, home, clock: Callable[[], float] = time.time) -> Resolver:
         from .keystore import load_all_private_keys
 
         keys = load_all_private_keys(home)

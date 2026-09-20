@@ -82,6 +82,8 @@ Give the token to the agent as if it were the password. Uses: `http` (proxy and
 | **real headless OpenCode (DeepSeek) as the agent** | `.venv/bin/python scripts/opencode_e2e.py` | yes (deepseek-flash, 4 short runs) |
 | **real headless Codex as the agent** | `.venv/bin/python scripts/codex_e2e.py` | yes (CLI default model, 4 short runs; S3/S4 XFAIL, see below) |
 | **Codex over `codex app-server` (JSON-RPC)** | `.venv/bin/python scripts/codex_appserver_e2e.py` | yes (3 scenarios: rate limits, MCP describe, MCP OTP) |
+| gated browser: policy, gate, real MCP stdio round trip (fake Playwright) | part of `.venv/bin/pytest` | no |
+| **gated browser with real Chromium** (client-side e-mail validation, redaction, screenshot block) | `SG_BROWSER_E2E=1 .venv/bin/pytest tests/test_browser_fill_real.py` | no (Playwright MCP + headless Chromium, ~10 s) |
 
 `claude_code_e2e.py` proves the thing unit tests cannot: that Claude Code's Bash tool actually
 inherits the proxy from `--settings env`, that MCP wiring works, and that an injected page
@@ -167,12 +169,12 @@ scripts/browser_demo.sh https://site.example.com https://login.site.example.com
 ```
 
 `browser_demo.sh` launches an interactive `claude` with two MCP servers: secret-gate and
-Playwright MCP configured with `--proxy-server` = the gate, `--ignore-https-errors` (no CA
-install needed), a throw-away Chromium profile and `--allowed-origins` limited to what you list.
-Claude Code hands the settings env, proxy included, to MCP server processes as well; any
-npx-based MCP would then reach the npm registry through the gate and hang. The script therefore
-clears the proxy for the Playwright MCP process itself (its browser still uses `--proxy-server`)
-and pins the version with `--prefer-offline`.
+Playwright MCP wrapped by `secret-gate browser` (see "Browser fill" below), configured with
+`--proxy-server` = the gate, `--ignore-https-errors` (no CA install needed), a throw-away Chromium
+profile and `--allowed-origins` limited to what you list. Claude Code hands the settings env,
+proxy included, to MCP server processes as well; the gate strips it from the Playwright process
+(npx would otherwise reach the npm registry through the gate and hang) and the version is pinned
+with `--prefer-offline`.
 
 Permissions: a global `permissions.defaultMode` of `dontAsk` in `~/.claude/settings.json` makes
 an unqualified session silently deny every Playwright / secret-gate / Bash call. The demo forces
@@ -180,36 +182,48 @@ an unqualified session silently deny every Playwright / secret-gate / Bash call.
 and passes `--no-chrome` so the model cannot pick the un-proxied Chrome integration over the
 gated Playwright browser. Anything else still prompts.
 
-Type the password field as the `enc:v1:` token; the gate swaps it in the POST. Works for sites
-that send the password in the request body (the vast majority); not for client-side hashing,
-WebSocket logins, Passkey-only sites, or CAPTCHA walls. Start with a low-value test account.
+Type the `enc:v1:` token into the field (or call `secret_fill`); the gate puts the real value
+into the page, so client-side validation and hashing see the real value, and the proxy still
+covers curl / `secret_http`. Not for WebSocket logins, Passkey-only sites, or CAPTCHA walls.
+Start with a low-value test account.
 
-## Real-site demo from OpenCode
-
-```bash
-scripts/opencode_browser_demo.sh http://site.example.com:8400
-```
-
-Same idea for OpenCode (DeepSeek by default, override with `SG_MODEL=provider/model`): a throw-away
-work dir with `opencode.json` (secret-gate + Playwright MCP through the gate, gate home unreadable,
-`webfetch` denied because it does not honour the proxy, bash asks except `curl`), `AGENTS.md`, and
-the proxy in the process env for the bash tool. Runs `opencode --standalone` so the background
-service's proxy-less environment is not used. Type the password as the `enc:v1:` token, as above.
-
-## Real-site demo from Codex
+## Browser fill (`secret-gate browser`)
 
 ```bash
-scripts/codex_browser_demo.sh http://site.example.com:8400
-CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex scripts/codex_browser_demo.sh ...   # newer bundled CLI
+secret-gate browser -- npx -y @playwright/mcp@0.0.82 --proxy-server=http://127.0.0.1:8080 ...
 ```
 
-Same idea for the Codex TUI: a private `CODEX_HOME` (0600 copy of `~/.codex/auth.json`, removed
-on exit, plus our `config.toml`; your real config is never loaded), approval `on-request`,
-workspace-write sandbox with `network_access` (otherwise localhost is blocked), proxy for the
-shell tool via `[shell_environment_policy] set` only, secret-gate and Playwright as MCP servers,
-and a git-initialised work dir holding `AGENTS.md`. The proxy is never exported into the codex
-process itself. `SG_MODEL` picks the model. MCP calls work in the TUI (they are cancelled only in
-`codex exec`).
+An MCP stdio server that spawns another MCP server (the unmodified Playwright MCP) and gates it:
+
+- `secret_fill(target, token, element?, submit?)`, and `browser_type` / `browser_fill_form` with a
+  token as the text: the gate reads the live page URL (`### Result` of a `location.href` probe,
+  nothing else is trusted), checks the token's host policy against `host:port` (same rules as the
+  proxy, `http` use), and types the **real value** into the element. The model still only ever
+  handles the token. Because the value is in the DOM, browser-side e-mail/length checks and JS
+  hashing work.
+- Every text result is redacted with every value filled in the session, in every encoding a
+  browser produces (raw, `%xx`, `+`, JSON/JS-escaped, HTML entities). The `### Ran Playwright code`
+  echo of a fill and Playwright's `- [Snapshot](...)` file links are dropped outright.
+- Never advertised: `browser_evaluate`, `browser_run_code_unsafe`.
+- Refused always: any `filename` argument (unredacted file), any `paths` argument (would upload
+  Playwright's own output files), non-http(s) URLs in `browser_navigate` / `browser_tabs`
+  (`data:` pages are model-authored JavaScript; `--allowed-origins` does not cover them).
+- Refused once a value has been filled: copy/cut chords in `browser_press_key`, `regex` search,
+  and any `text` / `textGone` / selector `target` sharing 4 consecutive characters with a filled
+  value (substring oracles on echoed text).
+- `browser_take_screenshot`: refused on any page that ever held a filled value (history restores
+  form state) and on any page whose current snapshot contains one (post-login "Welcome <user>").
+- Fail closed: no page URL, a non-http page, or a wrong host means nothing is typed.
+- The downstream runs with the parent env minus proxy variables (its browser gets the proxy from
+  `--proxy-server`), with cwd and `--output-dir` in `$SECRET_GATE_HOME/browser-out` (0700), and
+  every file it persists there (unredacted page snapshots, console and network logs) is deleted
+  after each call.
+
+Verified against real Playwright MCP 0.0.82 by an adversarial review: a `data:` page plus
+`Meta+c`/`Meta+v` exfiltrated a filled value base64-encoded, and `browser_file_upload` could feed
+`page-*.yml` to such a page. Both are closed by the rules above. Remaining: a headed browser puts
+whatever the user copies on the OS clipboard as usual, and the gate under a separate macOS user is
+still the control that keeps the private key and `browser-out` away from the harness.
 
 ## Wire an agent
 
@@ -236,8 +250,8 @@ scripts/env.sh   proxy + CA environment
 
 ## Limits
 
-- Sites that hash the password in browser JS, WebSocket/gRPC logins, request signing
-  derived from the password: the proxy cannot see a placeholder there. Use `secret_fill`
-  (planned: CDP-based DOM fill) or a template under `secret_exec`.
+- Sites that hash the password in browser JS or validate the field format: the proxy cannot
+  see a placeholder there. Use `secret_fill` (browser section above). WebSocket/gRPC logins and
+  request signing outside the browser: a template under `secret_exec`.
 - Responses are redacted by exact value match; a site that returns a transformed value
   (e.g. masked) is not detected, which is fine.

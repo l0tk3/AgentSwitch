@@ -7,7 +7,7 @@
 # $GATE_PORT (default 8080) with the same SECRET_GATE_HOME as this shell.
 #
 # What it sets up, all in a throw-away work dir under $TMPDIR:
-#   * Playwright MCP: separate Chromium profile, proxy = gate, https errors ignored (so the
+#   * Playwright MCP behind secret-gate browser: separate Chromium profile, proxy = gate, https errors ignored (so the
 #     mitmproxy CA does not need to be trusted), navigation restricted to the origins you list.
 #   * secret-gate MCP (secret_describe / secret_otp / secret_http / secret_exec).
 #   * Bash tools also go through the gate; ~/.secret-gate is deny-listed for Read.
@@ -18,10 +18,11 @@
 # Playwright and secret-gate tools plus curl are pre-allowed; everything else prompts.
 # Claude in Chrome is disabled (--no-chrome) so the model uses the proxied Playwright browser.
 #
-# Claude Code passes the settings env (including the proxy) to MCP server processes too. npx would
-# then contact the npm registry through the gate and hang, so the Playwright entry clears the
-# proxy for its own process (the browser it launches still uses --proxy-server) and pins the
-# version with --prefer-offline. First run needs the package cached: `npx -y @playwright/mcp@0.0.82 --help`.
+# Playwright MCP runs behind `secret-gate browser`: enc:v1: values typed into the page are swapped
+# for the real value by the gate (secret_fill / browser_type / browser_fill_form), snapshots are
+# redacted, and JS evaluation / file output / screenshots-with-values are blocked. The gate strips
+# the proxy from the Playwright process env (npx would hang behind the gate); the browser still
+# uses --proxy-server. First run needs the package cached: `npx -y @playwright/mcp@0.0.82 --help`.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -68,16 +69,14 @@ cat > "$WORK/mcp.json" <<EOF
   "mcpServers": {
     "secret-gate": {"command": "$GATE", "args": ["mcp"], "env": {"SECRET_GATE_HOME": "$SECRET_GATE_HOME"}},
     "playwright": {
-      "command": "npx",
-      "args": ["-y", "--prefer-offline", "@playwright/mcp@$PW_MCP_VERSION",
+      "command": "$GATE",
+      "args": ["browser", "--",
+               "npx", "-y", "--prefer-offline", "@playwright/mcp@$PW_MCP_VERSION",
                "--proxy-server=$PROXY",
                "--ignore-https-errors",
                "--user-data-dir=$PROFILE",
                "--allowed-origins=$ORIGINS"],
-      "env": {
-        "HTTP_PROXY": "", "http_proxy": "", "HTTPS_PROXY": "", "https_proxy": "",
-        "NO_PROXY": "*", "no_proxy": "*"
-      }
+      "env": {"SECRET_GATE_HOME": "$SECRET_GATE_HOME"}
     }
   }
 }

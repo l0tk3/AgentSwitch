@@ -29,5 +29,11 @@ and the user does not expect you to.
   2FA code) or `secret_exec` instead of raw shell commands.
 - `secret_describe(value)` shows a value's label, allowed hosts and uses, so you can check you
   have the right one.
+- In the browser (Playwright tools): put the value into a field with `secret_fill(target, token)`,
+  or pass it as the `text` of `browser_type` / a field `value` of `browser_fill_form`. The gate
+  types the real value into the page for you; the page's own validation sees the real value.
+  Snapshots then show `[REDACTED:label]` where the value is, which is expected. Screenshots,
+  copy shortcuts, `data:` pages, file uploads and searching for parts of a value are refused
+  after a fill; use `browser_snapshot` to read the page instead.
 - The gate's key directory (`~/.secret-gate/`, or `$SECRET_GATE_HOME`) belongs to the gate
   process; there is no reason for you to read it or to run `secret-gate keygen`.

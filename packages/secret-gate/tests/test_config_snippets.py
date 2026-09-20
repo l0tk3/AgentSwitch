@@ -79,7 +79,6 @@ def test_opencode_browser_demo_config():
     for name in REQUIRED:
         assert re.search(rf"\b{name}=", text), name
     assert "127.0.0.1" in text and "api.deepseek.com" in text
-    assert '"NO_PROXY": "*"' in text
     assert '"webfetch": "deny"' in text
     assert '"$SECRET_GATE_HOME/*": "deny"' in text
     assert "--standalone" in text
@@ -104,3 +103,14 @@ def test_codex_browser_demo_config():
     assert "trap 'rm -rf \"$CODEX_HOME\"' EXIT" in body
     assert "dangerously" not in body
     assert "~/.codex/config.toml" not in body
+
+
+@pytest.mark.parametrize("script", ["browser_demo.sh", "opencode_browser_demo.sh", "codex_browser_demo.sh"])
+def test_demos_run_playwright_behind_the_gate(script):
+    """Every demo must launch Playwright MCP through `secret-gate browser` so secret_fill exists,
+    snapshots are redacted and browser_evaluate is hidden. A raw npx entry would type tokens
+    verbatim into the page and let the model read the DOM."""
+    text = (ROOT / "scripts" / script).read_text()
+    assert "@playwright/mcp@" in text
+    assert re.search(r'"browser",\s*"--",?\s*\n?\s*"npx"', text), "playwright must be wrapped by secret-gate browser"
+    assert not re.search(r'command(\s*=\s*|":\s*)"npx"', text)

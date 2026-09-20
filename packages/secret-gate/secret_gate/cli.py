@@ -154,6 +154,13 @@ def _cmd_mcp(_: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_browser(args: argparse.Namespace) -> int:
+    from .browser_mcp import main as browser_main
+
+    browser_main(args.command)
+    return 0
+
+
 def _cmd_install_ca(_: argparse.Namespace) -> int:
     if not MITMPROXY_CA_PATH.exists():
         print(f"{MITMPROXY_CA_PATH} not found; run `secret-gate proxy` once to generate it", file=sys.stderr)
@@ -212,6 +219,9 @@ def build_parser() -> argparse.ArgumentParser:
     pr.set_defaults(fn=_cmd_proxy)
 
     sub.add_parser("mcp", help="run the MCP stdio server").set_defaults(fn=_cmd_mcp)
+    b = sub.add_parser("browser", help="run a gated MCP server in front of a browser MCP (Playwright)")
+    b.add_argument("command", nargs=argparse.REMAINDER, help="-- <downstream MCP command...>")
+    b.set_defaults(fn=_cmd_browser)
     sub.add_parser("install-ca", help="copy mitmproxy CA and trust it").set_defaults(fn=_cmd_install_ca)
     return p
 

@@ -14,6 +14,7 @@
 #   * config.toml: approval on-request, workspace-write sandbox with network_access (the sandbox
 #     blocks localhost otherwise, so the gate would be unreachable), proxy for the shell tool via
 #     [shell_environment_policy] set (both cases), MCP servers secret-gate and Playwright
+#     behind `secret-gate browser` (secret_fill, redacted snapshots)
 #     (separate Chromium profile, proxy = gate, https errors ignored, navigation restricted to
 #     the origins you list).
 #   * A work dir (git init so the TUI does not warn) with AGENTS.md = this package's AGENTS.md.
@@ -85,8 +86,11 @@ args = ["mcp"]
 SECRET_GATE_HOME = "$SECRET_GATE_HOME"
 
 [mcp_servers.playwright]
-command = "npx"
-args = ["-y", "--prefer-offline", "@playwright/mcp@$PW_MCP_VERSION", "--proxy-server=$PROXY", "--ignore-https-errors", "--user-data-dir=$PROFILE", "--allowed-origins=$ORIGINS"]
+command = "$GATE"
+args = ["browser", "--", "npx", "-y", "--prefer-offline", "@playwright/mcp@$PW_MCP_VERSION", "--proxy-server=$PROXY", "--ignore-https-errors", "--user-data-dir=$PROFILE", "--allowed-origins=$ORIGINS"]
+
+[mcp_servers.playwright.env]
+SECRET_GATE_HOME = "$SECRET_GATE_HOME"
 TOML
 } > "$CODEX_HOME/config.toml"
 

@@ -87,7 +87,7 @@ class SecretPayload:
         uses: frozenset[str] | set[str] | list[str],
         label: str,
         kind: str = KIND_SECRET,
-    ) -> "SecretPayload":
+    ) -> SecretPayload:
         if not isinstance(value, str) or not value:
             raise ValidationError("value must be a non-empty string")
         if not isinstance(label, str) or not LABEL_PATTERN.match(label):
@@ -115,7 +115,7 @@ class SecretPayload:
         )
 
     @classmethod
-    def from_json(cls, raw: str | bytes) -> "SecretPayload":
+    def from_json(cls, raw: str | bytes) -> SecretPayload:
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
