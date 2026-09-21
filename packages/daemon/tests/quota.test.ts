@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Store } from "../src/engine/store.js";
 import { claudeQuota } from "../src/quota/claude.js";
+import { labelForMinutes, RateLimitCache, remainingFromWindows } from "../src/quota/windows.js";
 import { parseRateLimits } from "../src/quota/codex.js";
 import { deepseekQuota, findDeepSeekKey, parseBalance } from "../src/quota/deepseek.js";
 import { QuotaService } from "../src/quota/index.js";
@@ -9,7 +10,7 @@ describe("quota parsing", () => {
   it("codex rateLimits → remaining from the worst window", () => {
     const r = parseRateLimits({ rateLimits: { primary: { usedPercent: 13, windowDurationMins: 10080, resetsAt: 1 }, secondary: { usedPercent: 40 }, planType: "pro", credits: { balance: "0" } } });
     expect(r.remaining).toBeCloseTo(0.6);
-    expect(r.detail).toMatchObject({ planType: "pro", primary: { usedPercent: 13 } });
+    expect(r.detail).toMatchObject({ planType: "pro", windows: [{ label: "7d", usedPercent: 13 }, { label: "?", usedPercent: 40 }] });
     expect(parseRateLimits({ rateLimits: { primary: { usedPercent: 100 } } }).remaining).toBe(0);
     expect(parseRateLimits({ rateLimits: {} }).remaining).toBeNull();
     expect(parseRateLimits({ primary: { usedPercent: 50 } }).remaining).toBe(0.5);
@@ -40,14 +41,44 @@ describe("quota parsing", () => {
     expect(findDeepSeekKey({}, "/nonexistent.db")).toBeNull();
   });
 
-  it("claude local count against a daily budget", async () => {
+  it("codex detail exposes labelled windows (5h / 7d)", () => {
+    const r = parseRateLimits({ rateLimits: { primary: { usedPercent: 13, windowDurationMins: 10080, resetsAt: 5 }, secondary: { usedPercent: 60, windowDurationMins: 300, resetsAt: 6 } } });
+    expect(r.detail.windows).toEqual([{ label: "7d", usedPercent: 13, resetsAt: 5 }, { label: "5h", usedPercent: 60, resetsAt: 6 }]);
+    expect(labelForMinutes(90)).toBe("90m");
+    expect(labelForMinutes(undefined)).toBe("?");
+  });
+
+  it("claude: windows from rate_limit events win over the token count; probe fills an empty cache", async () => {
     const store = new Store({ dbPath: ":memory:" });
     const t = store.createTask({ task: "x", cwd: "/" });
     store.updateTask(t.id, { harness: "claude-code" });
     store.appendEvent(t.id, "done", { tokens: 250 });
-    const r = await claudeQuota(store, { dailyTokenBudget: 1000 }).read();
-    expect(r.remaining).toBe(0.75);
-    expect(r.detail).toMatchObject({ usedTokens24h: 250 });
+    const cache = new RateLimitCache(() => 1000);
+    const noProbe = await claudeQuota(store, { cache, dailyTokenBudget: 1000 }).read();
+    expect(noProbe.remaining).toBe(0.75);
+    expect(noProbe.source).toContain("local token count");
+    let probes = 0;
+    const probe = async () => { probes++; return [{ rateLimitType: "five_hour", utilization: 0.4, resetsAt: 99 }, { rateLimitType: "seven_day", utilization: 12, resetsAt: 100 }, { rateLimitType: "overage" }]; };
+    const q = claudeQuota(store, { cache, probe, dailyTokenBudget: 1000 });
+    const r = await q.read();
+    expect(probes).toBe(1);
+    expect(r.detail.windows).toEqual([{ label: "5h", usedPercent: 40, resetsAt: 99 }, { label: "7d", usedPercent: 12, resetsAt: 100 }]);
+    expect(r.remaining).toBe(0.6);
+    expect(r.source).toContain("subscription windows");
+    await q.read();            // cached: no probe
+    await q.read(true);        // force but fresh: no probe
+    expect(probes).toBe(1);
+    cache.record({ rateLimitType: "five_hour", status: "rejected" });
+    expect(remainingFromWindows(cache.list())).toBe(0);
+    // the shape the CLI actually sends: unifiedWindows, no top-level utilization
+    const real = new RateLimitCache(() => 1);
+    real.record({ status: "allowed", resetsAt: 1789974000, rateLimitType: "five_hour", unifiedWindows: { five_hour: { utilization: 0.13, resetsAt: 1789974000 }, seven_day: { utilization: 0.12, resetsAt: 1790485200 } } });
+    expect(real.list()).toEqual([{ label: "5h", usedPercent: 13, resetsAt: 1789974000 }, { label: "7d", usedPercent: 12, resetsAt: 1790485200 }]);
+    expect(remainingFromWindows(real.list())).toBe(0.87);
+    real.record({ status: "allowed" });   // nothing usable: no change
+    expect(real.list()).toHaveLength(2);
+    const failing = claudeQuota(store, { cache: new RateLimitCache(), probe: async () => { throw new Error("offline"); } });
+    expect((await failing.read()).error).toBe("probe: offline");
     store.close();
   });
 

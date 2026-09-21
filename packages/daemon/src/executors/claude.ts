@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
+import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { claudeMcpServers, gateEnv, type GateOptions } from "./gate.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
 
@@ -15,6 +16,7 @@ export type ClaudeExecutorOptions = {
   readonly browser?: boolean;
   readonly maxTurns?: number;
   readonly executable?: string;
+  readonly rateLimits?: RateLimitCache;
 };
 
 const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "WebSearch", "NotebookRead"]);
@@ -109,6 +111,7 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
         for await (const msg of query({ prompt, options })) {
           const before = state;
           state = foldMessage(state, msg);
+          if (msg.type === "rate_limit_event") opts.rateLimits?.record(msg.rate_limit_info);
           for (const t of state.text.slice(before.text.length)) input.emit("text", { text: t });
           if (state.tools > before.tools) input.emit("tool_call", { tool: "claude", count: state.tools - before.tools });
         }
@@ -121,4 +124,14 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       return outcomeFromFold(state, approvals, input.signal.aborted);
     },
   };
+}
+
+/** One-turn query whose only purpose is the rate_limit_event it emits (subscription windows). */
+export async function probeRateLimits(model = "claude-haiku-4-5-20251001", executable?: string): Promise<RateLimitInfo[]> {
+  const infos: RateLimitInfo[] = [];
+  const options: Options = { model, maxTurns: 1, permissionMode: "default", settingSources: [], canUseTool: async () => ({ behavior: "deny", message: "probe" }), ...(executable ? { pathToClaudeCodeExecutable: executable } : {}) };
+  for await (const msg of query({ prompt: "Reply with the single word: ok", options })) {
+    if (msg.type === "rate_limit_event") infos.push(msg.rate_limit_info);
+  }
+  return infos;
 }

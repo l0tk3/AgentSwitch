@@ -37,9 +37,11 @@ Development executor: put an `@echo {...}` directive in the task text to script 
 ## Phone draft UI
 
 `http://127.0.0.1:4711/ui` (`/` redirects there): one static page, `ui/index.html`, no build step,
-mobile-first. Task list with status, task detail with live events (SSE), approval cards with
-允许/拒绝, new-task form (leave the directory empty for an ephemeral work dir), quota panel. It
-only uses the API below, so it is the wireframe for the iOS app and the development console until
+mobile-first. Home = composer (just type what you want; the router decides) with 高级选项 for
+working directory, pinned model and browser, above a feed of pending approvals / running / recent
+tasks; task detail with live events (SSE), brief, routing reason and approval buttons; 额度 tab with
+5h / 7d windows per harness (reset countdowns), DeepSeek balance, Claude local count; 路由日志 tab.
+It only uses the API below, so it is the wireframe for the iOS app and the development console until
 then. Later: served over Tailscale behind bearer auth.
 
 ## Ephemeral tasks
@@ -110,7 +112,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `ui/index.html` | phone-draft UI served at `/ui` |
 | `src/executors/{types,echo,gate,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, the three real executors |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
-| `src/quota/{codex,deepseek,claude,index}.ts` | providers and the cached service |
+| `src/quota/{codex,deepseek,claude,windows,index}.ts` | providers, 5h/7d windows (Codex app-server windows; Claude `rate_limit_event` from runs or a one-turn probe), cached service |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
 | `tests/` | 84 tests; API tests run in-process via Hono `request()` |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
@@ -121,3 +123,4 @@ ask the router with the history; gate_denied or an approved action → stop. The
 - Codex `account/rateLimits/read` returns `rateLimits.primary.usedPercent` per window plus `planType`; the ChatGPT.app bundled codex (0.155) must be used, homebrew 0.142 only knows gpt-5.5.
 - DeepSeek `/user/balance` works with the key OpenCode stores in `~/.local/share/opencode/opencode.db` (`credential` table, JSON `{"type":"key","key":...}`).
 - Node's `parseArgs` needs `allowNegative: true` for `--no-watch`; `node:sqlite` prints an ExperimentalWarning on Node 24, silenced in the wrappers.
+- Claude's `rate_limit_event` (subscription accounts) carries the 5h / 7d windows in `unifiedWindows`, not in the declared top-level fields; one Haiku turn is enough to receive it. Codex `rateLimits` on this pro plan reports only the 7d window (`secondary` is null).

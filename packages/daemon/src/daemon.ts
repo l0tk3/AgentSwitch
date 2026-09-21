@@ -7,7 +7,7 @@ import { Bus } from "./engine/bus.js";
 import { defaultCleanupPaths } from "./engine/cleanup.js";
 import { Engine } from "./engine/engine.js";
 import { Store } from "./engine/store.js";
-import { claudeExecutor } from "./executors/claude.js";
+import { claudeExecutor, probeRateLimits } from "./executors/claude.js";
 import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
 import { defaultGate } from "./executors/gate.js";
@@ -17,6 +17,7 @@ import { claudeQuota } from "./quota/claude.js";
 import { codexQuota } from "./quota/codex.js";
 import { deepseekQuota, findDeepSeekKey } from "./quota/deepseek.js";
 import { QuotaService } from "./quota/index.js";
+import { RateLimitCache } from "./quota/windows.js";
 import { loadContext } from "./router/context.js";
 import { RoutingLog } from "./router/log.js";
 import { echoRouter } from "./router/routers/echo.js";
@@ -67,11 +68,12 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
   const contextPath = join(cfg.home, "CONTEXT.md");
   const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : opencodeRouter({ model: targets.router.model }));
-  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
+  const rateLimits = new RateLimitCache();
+  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser, rateLimits) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
   const quota = overrides.quota ?? new QuotaService([
     codexQuota({ binary: targets.harnesses.codex?.binary ?? "codex" }),
     deepseekQuota({ key: findDeepSeekKey() }),
-    claudeQuota(store),
+    claudeQuota(store, { cache: rateLimits, ...(cfg.executors === "real" ? { probe: () => probeRateLimits() } : {}) }),
   ], cfg.quotaTtlMs);
   const workRoot = join(cfg.home, "work");
   const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot } });
@@ -80,11 +82,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
-export function realExecutors(targets: Targets, browser: boolean): Executor[] {
+export function realExecutors(targets: Targets, browser: boolean, rateLimits?: RateLimitCache): Executor[] {
   const gate = defaultGate();
   if (!gate) console.error("secret-gate venv not found: executors run without the gate (no proxy, no MCP)");
   return [
-    claudeExecutor({ gate, browser }),
+    claudeExecutor({ gate, browser, ...(rateLimits ? { rateLimits } : {}) }),
     codexExecutor({ binary: targets.harnesses.codex?.binary ?? "codex", gate, browser }),
     opencodeExecutor({ gate, browser }),
   ];

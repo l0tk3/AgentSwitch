@@ -15,7 +15,7 @@ export class QuotaService {
     if (!force && fresh) return [...this.readings.values()];
     if (this.inflight) return this.inflight;
     this.inflight = Promise.all(this.providers.map(async (p) => {
-      const r = await p.read();
+      const r = await p.read(force);
       const reading: QuotaReading = { harness: p.harness, fetchedAt: this.now(), ...r };
       this.readings.set(p.harness, reading);
       return reading;

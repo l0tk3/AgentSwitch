@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { QuotaProvider } from "./types.js";
+import { labelForMinutes, type Window } from "./windows.js";
 
 type Json = Record<string, unknown>;
 
@@ -14,12 +15,15 @@ export function parseRateLimits(result: Json): { remaining: number | null; detai
   const secondary = limits.secondary as Json | null | undefined;
   const usedSecondary = typeof secondary?.usedPercent === "number" ? secondary.usedPercent : null;
   const worst = Math.max(used ?? 0, usedSecondary ?? 0);
+  const windows: Window[] = [];
+  for (const w of [primary, secondary]) {
+    if (w && typeof w.usedPercent === "number") windows.push({ label: labelForMinutes(w.windowDurationMins as number | undefined), usedPercent: w.usedPercent, resetsAt: typeof w.resetsAt === "number" ? w.resetsAt : null });
+  }
   return {
     remaining: used === null && usedSecondary === null ? null : Math.max(0, Math.min(1, 1 - worst / 100)),
     detail: {
       planType: limits.planType ?? null,
-      primary: primary ?? null,
-      secondary: secondary ?? null,
+      windows,
       credits: limits.credits ?? null,
       rateLimitReachedType: limits.rateLimitReachedType ?? null,
     },

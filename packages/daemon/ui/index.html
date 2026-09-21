@@ -9,12 +9,15 @@
   :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --fg:#e6e8ee; --dim:#8b93a4; --ok:#3ddc84; --warn:#ffb020; --bad:#ff5a5a; --acc:#5b8cff; }
   @media (prefers-color-scheme: light) { :root { --bg:#f5f6f8; --card:#fff; --line:#e3e6eb; --fg:#161922; --dim:#6b7280; } }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif; padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif; }
   header { position:sticky; top:0; background:var(--bg); padding:calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; z-index:2; }
   header h1 { font-size:17px; margin:0; flex:1; }
   header .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); }
   header .dot.on { background:var(--ok); }
-  main { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+  header button { padding:6px 10px; font-size:13px; }
+  main { padding:12px 16px calc(150px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:10px; }
+  h2 { font-size:13px; color:var(--dim); margin:8px 0 0; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
   .row { display:flex; align-items:center; gap:8px; }
   .grow { flex:1; min-width:0; }
@@ -31,34 +34,65 @@
   button.bad { background:transparent; border-color:var(--bad); color:var(--bad); }
   button:disabled { opacity:.5; }
   input,textarea,select { font:inherit; width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
-  textarea { min-height:90px; resize:vertical; }
   label { display:block; font-size:13px; color:var(--dim); margin:8px 0 4px; }
-  nav { position:fixed; bottom:0; left:0; right:0; display:flex; background:var(--card); border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); }
+  nav { position:fixed; bottom:0; left:0; right:0; display:flex; background:var(--card); border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); z-index:3; }
   nav button { flex:1; border:0; border-radius:0; background:transparent; color:var(--dim); padding:12px 0; font-size:13px; }
   nav button.active { color:var(--acc); }
-  .events { font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; max-height:50vh; overflow:auto; }
+  /* composer docked above the nav on the home view */
+  .composer { position:fixed; left:0; right:0; bottom:calc(46px + env(safe-area-inset-bottom)); background:var(--card); border-top:1px solid var(--line); padding:10px 16px; z-index:3; }
+  .composer textarea { min-height:44px; max-height:160px; resize:none; border-radius:14px; }
+  .composer .row { align-items:flex-end; }
+  .composer .send { border-radius:14px; padding:11px 16px; }
+  .composer details { margin-top:8px; }
+  .composer summary { color:var(--dim); font-size:13px; cursor:pointer; list-style:none; }
+  .composer summary::before { content:"▸ "; } .composer details[open] summary::before { content:"▾ "; }
+  .composer .adv { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
+  .composer .adv .full { grid-column:1/-1; }
+  .composer .hint { font-size:12px; color:var(--dim); margin-top:6px; }
+  .events { font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
   .ev { padding:3px 0; border-bottom:1px dashed var(--line); }
   .ev.approval_request { color:var(--warn); }
   .ev.done { color:var(--ok); } .ev.failed,.ev.cancelled { color:var(--bad); } .ev.attempt_failed,.ev.redispatch { color:var(--warn); }
   .approval { border-color:var(--warn); }
-  .bar { height:6px; background:var(--line); border-radius:3px; overflow:hidden; }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; }
   .bar i { display:block; height:100%; background:var(--ok); }
-  .hidden { display:none; }
-  .empty { text-align:center; color:var(--dim); padding:30px 0; }
+  .bar i.warn { background:var(--warn); } .bar i.bad { background:var(--bad); }
+  .win { margin-top:8px; }
+  .win .row { font-size:13px; }
+  .empty { text-align:center; color:var(--dim); padding:24px 0; }
+  .task-head { display:flex; gap:8px; align-items:center; }
+  .task-head .who { font-size:12px; color:var(--dim); }
+  .result { margin-top:8px; white-space:pre-wrap; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:13px; }
+  .kv b { color:var(--dim); font-weight:500; }
 </style>
 </head>
 <body>
-<header><span class="dot" id="dot"></span><h1 id="title">任务</h1><button id="refresh" style="padding:6px 10px">刷新</button></header>
+<header><span class="dot" id="dot"></span><h1 id="title">AgentSwitch</h1><button id="refresh">刷新</button></header>
 <main id="main"></main>
+<div class="composer" id="composer">
+  <div class="row">
+    <textarea id="c-task" class="grow" placeholder="跟路由器说要做什么…" rows="1"></textarea>
+    <button class="primary send" id="c-send">发送</button>
+  </div>
+  <details id="c-adv">
+    <summary>高级选项</summary>
+    <div class="adv">
+      <div class="full"><label>工作目录（留空 = 临时目录，用完即删）</label><input id="c-cwd" placeholder="/Users/you/Projects/x"></div>
+      <div><label>指定 harness/model</label><input id="c-pin" placeholder="路由器决定"></div>
+      <div><label>浏览器</label><select id="c-browser"><option value="">路由器决定</option><option value="1">需要浏览器</option></select></div>
+    </div>
+    <div class="hint" id="c-hint"></div>
+  </details>
+</div>
 <nav>
-  <button data-view="tasks" class="active">任务</button>
-  <button data-view="new">新建</button>
-  <button data-view="approvals">审批<span id="apCount"></span></button>
+  <button data-view="home" class="active">首页<span id="apCount"></span></button>
   <button data-view="quota">额度</button>
+  <button data-view="log">路由日志</button>
 </nav>
 <script>
 const $ = (s, r = document) => r.querySelector(s);
-const state = { view: "tasks", tasks: [], task: null, events: [], approvals: [], quota: [], es: null, health: false };
+const state = { view: "home", tasks: [], task: null, events: [], approvals: [], quota: [], log: [], es: null, health: false };
 const api = async (method, path, body) => {
   const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   const t = await r.text(); const d = t ? JSON.parse(t) : {};
@@ -66,78 +100,101 @@ const api = async (method, path, body) => {
   return d;
 };
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const when = (ts) => new Date(ts).toLocaleTimeString("zh-CN", { hour12: false });
-const titles = { tasks: "任务", new: "新建任务", approvals: "待审批", quota: "额度", task: "任务详情" };
+const when = (ts) => new Date(ts).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+const ago = (ts) => { const s = Math.max(0, (Date.now() - ts) / 1000); return s < 60 ? "刚刚" : s < 3600 ? `${Math.floor(s / 60)} 分钟前` : s < 86400 ? `${Math.floor(s / 3600)} 小时前` : `${Math.floor(s / 86400)} 天前`; };
+const until = (epochSec) => { if (!epochSec) return ""; const ms = epochSec * 1000 - Date.now(); if (ms <= 0) return "已重置"; const h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000); return h >= 24 ? `${Math.floor(h / 24)} 天 ${h % 24} 小时后重置` : h ? `${h} 小时 ${m} 分后重置` : `${m} 分后重置`; };
+const ACTIVE = new Set(["queued", "routing", "running", "waiting_approval"]);
 
 function eventLine(ev) {
   const p = ev.payload || {};
   switch (ev.type) {
-    case "routed": { const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + p.routerMs + "ms" : ""})`; }
+    case "queued": return "已排队";
+    case "routed": { const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + (p.routerMs / 1000).toFixed(1) + "s" : ""})${v.notes && v.notes.length ? "\n  " + v.notes.join("; ") : ""}`; }
     case "dispatched": return `派发 ${p.harness}/${p.model}${p.effort ? " effort=" + p.effort : ""}`;
     case "text": return p.text;
-    case "tool_call": return `工具 ${p.tool}: ${p.command || JSON.stringify(p.input || p).slice(0, 160)}`;
+    case "tool_call": return `工具 ${p.tool}: ${p.command || (p.input ? JSON.stringify(p.input).slice(0, 160) : "")}`;
     case "approval_request": return `⚠ 需要审批：${p.action}\n${p.evidence || ""}`;
-    case "approval_resolved": return `审批 ${p.decision} (${p.status})`;
-    case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"`;
-    case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}`;
+    case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"} (${p.status})`;
+    case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;
+    case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
     case "done": return `✓ 完成：${p.result}`;
     case "failed": return `✗ 失败：${p.error}${p.security ? "  [安全事件]" : ""}`;
     case "cancelled": return "已取消";
-    case "cleaned": return `已清理 workdir=${p.workDirRemoved} claude=${(p.claudeProjectsRemoved || []).length} opencode=${p.opencodeSessionsRemoved}`;
+    case "cleaned": return `已清理临时目录与 harness 记录 (workdir=${p.workDirRemoved}, claude=${(p.claudeProjectsRemoved || []).length}, opencode=${p.opencodeSessionsRemoved})`;
     default: return `${ev.type} ${JSON.stringify(p).slice(0, 160)}`;
   }
 }
 
+function taskCard(t) {
+  const who = t.harness ? `${t.harness}/${t.model}` : (t.status === "routing" ? "分诊中…" : "—");
+  const last = t.status === "done" ? esc((t.result || "").slice(0, 120)) : t.status === "failed" ? `<span style="color:var(--bad)">${esc((t.error || "").slice(0, 120))}</span>` : "";
+  return `<div class="card" data-open="${t.id}">
+    <div class="task-head"><span class="badge ${t.status}">${t.status}</span><span class="who grow ellipsis">${esc(who)}${t.ephemeral ? " · 临时目录" : ""}</span><span class="dim">${ago(t.createdAt)}</span></div>
+    <div style="margin-top:6px">${esc(t.task)}</div>
+    ${last ? `<div class="dim" style="margin-top:4px">${last}</div>` : ""}
+  </div>`;
+}
+function approvalCard(a, showTask) {
+  const t = state.tasks.find((x) => x.id === a.taskId);
+  return `<div class="card approval"><div class="dim">${showTask && t ? esc(t.task.slice(0, 80)) + " · " : ""}${when(a.createdAt)}</div><div style="margin-top:4px"><b>${esc(a.action)}</b></div><div class="dim" style="white-space:pre-wrap">${esc(a.evidence)}</div>
+    <div class="row" style="margin-top:10px"><button class="ok grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">允许</button><button class="bad grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">拒绝</button></div></div>`;
+}
+function bar(pct) { const p = Math.max(0, Math.min(100, Math.round(pct))); return `<div class="bar"><i class="${p >= 90 ? "bad" : p >= 70 ? "warn" : ""}" style="width:${p}%"></i></div>`; }
+function quotaCard(q) {
+  const d = q.detail || {};
+  const wins = (d.windows || []).map((w) => `<div class="win"><div class="row"><span class="grow">${esc(w.label)} 已用 ${w.usedPercent}%</span><span class="dim">${until(w.resetsAt)}</span></div>${bar(w.usedPercent)}</div>`).join("");
+  let extra = "";
+  if (q.harness === "opencode" && d.balances) extra = d.balances.map((b) => `<div class="kv"><b>余额</b><span>${esc(b.total)} ${esc(b.currency || "")}（充值 ${esc(b.topped_up)}，赠送 ${esc(b.granted)}）</span></div>`).join("") + (q.remaining !== null ? `<div class="win">${bar(100 - q.remaining * 100)}</div>` : "");
+  if (q.harness === "claude-code") extra += `<div class="kv"><b>24h 本地统计</b><span>${(d.usedTokens24h || 0).toLocaleString()} tokens</span>${d.windowsAgeMs === null || d.windowsAgeMs === undefined ? `<b>窗口</b><span class="dim">还没看到额度事件，跑一次 Claude 任务或点强制刷新</span>` : ""}</div>`;
+  if (q.harness === "codex") extra += `<div class="kv"><b>计划</b><span>${esc(d.planType || "?")}</span>${d.credits ? `<b>credits</b><span>${esc(d.credits.balance)}${d.credits.unlimited ? " (unlimited)" : ""}</span>` : ""}${d.rateLimitReachedType ? `<b>状态</b><span style="color:var(--bad)">${esc(d.rateLimitReachedType)}</span>` : ""}</div>`;
+  const names = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode · DeepSeek" };
+  return `<div class="card"><div class="row"><b class="grow">${names[q.harness] || esc(q.harness)}</b><span class="badge">${q.remaining === null ? "未知" : "剩 " + Math.round(q.remaining * 100) + "%"}</span></div>
+    ${wins}${extra}${q.error ? `<div class="dim" style="color:var(--bad);margin-top:6px">${esc(q.error)}</div>` : ""}<div class="dim" style="margin-top:6px">${esc(q.source)} · ${ago(q.fetchedAt)}</div></div>`;
+}
+
 function render() {
-  $("#title").textContent = titles[state.view];
   $("#dot").classList.toggle("on", state.health);
-  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === state.view || (state.view === "task" && b.dataset.view === "tasks")));
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === state.view || (state.view === "task" && b.dataset.view === "home")));
   $("#apCount").textContent = state.approvals.length ? ` ${state.approvals.length}` : "";
+  $("#composer").style.display = state.view === "home" ? "" : "none";
+  $("#main").style.paddingBottom = state.view === "home" ? "" : "calc(70px + env(safe-area-inset-bottom))";
   const m = $("#main");
-  if (state.view === "tasks") {
-    m.innerHTML = state.tasks.length ? state.tasks.map((t) => `
-      <div class="card row" data-open="${t.id}">
-        <div class="grow"><div class="ellipsis">${esc(t.task)}</div><div class="dim ellipsis">${t.harness ? esc(t.harness + "/" + t.model) : "—"} · ${when(t.createdAt)}${t.ephemeral ? " · 临时目录" : ""}</div></div>
-        <span class="badge ${t.status}">${t.status}</span>
-      </div>`).join("") : `<div class="empty">还没有任务</div>`;
-  } else if (state.view === "new") {
-    m.innerHTML = `<div class="card">
-      <label>任务</label><textarea id="f-task" placeholder="修一下 cli.py 的 bug / 打开 core 控制台看首页标题"></textarea>
-      <label>工作目录（留空 = 临时目录，用完即删）</label><input id="f-cwd" placeholder="/Users/you/Projects/x">
-      <label>指定模型（可选，harness/model）</label><input id="f-pin" placeholder="claude-code/claude-opus-5">
-      <label class="row" style="margin-top:10px"><input type="checkbox" id="f-browser" style="width:auto"> 需要浏览器</label>
-      <div class="row" style="margin-top:12px"><button class="primary grow" id="f-submit">提交</button></div>
-      <div class="dim" id="f-msg" style="margin-top:8px"></div>
-    </div>`;
-  } else if (state.view === "approvals") {
-    m.innerHTML = state.approvals.length ? state.approvals.map((a) => approvalCard(a)).join("") : `<div class="empty">没有待审批</div>`;
+  if (state.view === "home") {
+    $("#title").textContent = "AgentSwitch";
+    const active = state.tasks.filter((t) => ACTIVE.has(t.status));
+    const recent = state.tasks.filter((t) => !ACTIVE.has(t.status));
+    m.innerHTML = [
+      state.approvals.length ? `<h2>待审批 ${state.approvals.length}</h2>` + state.approvals.map((a) => approvalCard(a, true)).join("") : "",
+      active.length ? `<h2>进行中</h2>` + active.map(taskCard).join("") : "",
+      recent.length ? `<h2>最近</h2>` + recent.map(taskCard).join("") : "",
+      state.tasks.length ? "" : `<div class="empty">下面输入任务，路由器会决定交给谁</div>`,
+    ].join("");
   } else if (state.view === "quota") {
-    m.innerHTML = (state.quota.length ? state.quota.map((q) => `
-      <div class="card"><div class="row"><b class="grow">${esc(q.harness)}</b><span class="dim">${q.remaining === null ? "?" : Math.round(q.remaining * 100) + "%"}</span></div>
-      <div class="bar" style="margin:8px 0"><i style="width:${q.remaining === null ? 0 : Math.round(q.remaining * 100)}%"></i></div>
-      <div class="dim">${q.error ? "错误：" + esc(q.error) : esc(JSON.stringify(q.detail))}</div><div class="dim">${esc(q.source)}</div></div>`).join("") : `<div class="empty">加载中…</div>`)
-      + `<div class="row"><button class="grow" id="q-refresh">强制刷新</button></div>`;
+    $("#title").textContent = "额度";
+    m.innerHTML = (state.quota.length ? state.quota.map(quotaCard).join("") : `<div class="empty">加载中…</div>`) + `<div class="row"><button class="grow" id="q-refresh">强制刷新</button></div><div class="dim">Claude 的 5h / 7d 窗口来自订阅的限额事件；Codex 来自 app-server；DeepSeek 是账户余额。</div>`;
+  } else if (state.view === "log") {
+    $("#title").textContent = "路由日志";
+    m.innerHTML = state.log.length ? state.log.map((r) => `<div class="card"><div class="row"><span class="badge">${esc(r.source)}</span><span class="grow ellipsis">${r.harness ? esc(r.harness + "/" + r.model) : "无目标"}</span><span class="dim">${ago(r.ts)}</span></div>${r.notes ? `<div class="dim" style="margin-top:4px">${esc(r.notes)}</div>` : ""}${r.routerError ? `<div class="dim" style="color:var(--bad)">${esc(r.routerError)}</div>` : ""}${r.decision ? `<details><summary class="dim">决策</summary><div class="dim" style="white-space:pre-wrap">${esc(JSON.stringify(JSON.parse(r.decision), null, 1))}</div></details>` : ""}</div>`).join("") : `<div class="empty">还没有路由记录</div>`;
   } else if (state.view === "task" && state.task) {
     const t = state.task;
+    $("#title").textContent = "任务 " + t.id;
     const pending = state.approvals.filter((a) => a.taskId === t.id);
-    m.innerHTML = `<div class="card"><div>${esc(t.task)}</div><div class="dim">${esc(t.cwd)}</div>
-        <div class="row" style="margin-top:8px"><span class="badge ${t.status}">${t.status}</span><span class="dim grow">${t.harness ? esc(t.harness + "/" + t.model) : ""}</span>
-        ${["done","failed","cancelled"].includes(t.status) ? "" : `<button class="bad" id="t-cancel">取消</button>`}</div>
-        ${t.brief && t.brief !== t.task ? `<details style="margin-top:8px"><summary class="dim">简报</summary><div class="dim" style="white-space:pre-wrap">${esc(t.brief)}</div></details>` : ""}
-        ${t.result ? `<div style="margin-top:8px">${esc(t.result)}</div>` : ""}${t.error ? `<div style="margin-top:8px;color:var(--bad)">${esc(t.error)}</div>` : ""}</div>
-      ${pending.map((a) => approvalCard(a)).join("")}
-      <div class="card events" id="events">${state.events.map((e) => `<div class="ev ${e.type}">${when(e.ts)} ${esc(eventLine(e))}</div>`).join("")}</div>`;
-    const ev = $("#events"); ev.scrollTop = ev.scrollHeight;
+    m.innerHTML = `<div class="card"><div>${esc(t.task)}</div>
+        <div class="row" style="margin-top:8px"><span class="badge ${t.status}">${t.status}</span><span class="dim grow ellipsis">${t.harness ? esc(t.harness + "/" + t.model) : ""}${t.effort ? " · " + esc(t.effort) : ""}</span>${ACTIVE.has(t.status) ? `<button class="bad" id="t-cancel">取消</button>` : ""}</div>
+        <div class="dim ellipsis" style="margin-top:4px">${esc(t.cwd)}${t.ephemeral ? " · 临时目录" : ""}</div>
+        ${t.brief && t.brief !== t.task ? `<details style="margin-top:8px"><summary class="dim">路由器给执行者的简报</summary><div class="dim" style="white-space:pre-wrap">${esc(t.brief)}</div></details>` : ""}
+        ${t.decision && t.decision.reason ? `<div class="dim" style="margin-top:6px">路由理由：${esc(t.decision.reason)}</div>` : ""}
+        ${t.result ? `<div class="result">${esc(t.result)}</div>` : ""}${t.error ? `<div class="result" style="color:var(--bad)">${esc(t.error)}</div>` : ""}</div>
+      ${pending.map((a) => approvalCard(a, false)).join("")}
+      <h2>事件</h2><div class="card events" id="events">${state.events.map((e) => `<div class="ev ${e.type}">${when(e.ts)} ${esc(eventLine(e))}</div>`).join("") || '<span class="dim">等待事件…</span>'}</div>`;
+    const ev = $("#events"); if (ev) ev.scrollTop = ev.scrollHeight;
   }
-}
-function approvalCard(a) {
-  return `<div class="card approval"><div><b>${esc(a.action)}</b></div><div class="dim" style="white-space:pre-wrap">${esc(a.evidence)}</div><div class="dim">任务 ${a.taskId} · ${when(a.createdAt)}</div>
-    <div class="row" style="margin-top:10px"><button class="ok grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">允许</button><button class="bad grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">拒绝</button></div></div>`;
 }
 
 async function loadTasks() { state.tasks = await api("GET", "/tasks?limit=50"); }
 async function loadApprovals() { state.approvals = await api("GET", "/approvals"); }
 async function loadQuota(refresh) { state.quota = await api("GET", "/quota" + (refresh ? "?refresh=1" : "")); }
+async function loadLog() { state.log = await api("GET", "/routing/log?limit=50"); }
 async function health() { try { await api("GET", "/healthz"); state.health = true; } catch { state.health = false; } }
 
 function openTask(id) {
@@ -146,34 +203,39 @@ function openTask(id) {
   api("GET", "/tasks/" + id).then((t) => { state.task = t; render(); });
   const es = new EventSource(`/tasks/${id}/events`);
   state.es = es;
-  es.onmessage = () => {};
   ["queued","routed","dispatched","text","tool_call","approval_request","approval_resolved","attempt_failed","redispatch","done","failed","cancelled","cleaned"].forEach((type) => es.addEventListener(type, async (m) => {
     const ev = JSON.parse(m.data); state.events.push(ev);
-    if (["approval_request","approval_resolved","done","failed","cancelled","redispatch","dispatched"].includes(type)) { await Promise.all([loadApprovals(), api("GET", "/tasks/" + id).then((t) => (state.task = t))]); }
+    if (["approval_request","approval_resolved","done","failed","cancelled","redispatch","dispatched","routed"].includes(type)) { await Promise.all([loadApprovals(), api("GET", "/tasks/" + id).then((t) => (state.task = t))]); }
     render();
   }));
   es.onerror = () => { es.close(); };
   render();
 }
 
-document.addEventListener("click", async (e) => {
-  const nav = e.target.closest("nav button"); if (nav) { state.view = nav.dataset.view; if (state.es) { state.es.close(); state.es = null; } if (state.view === "quota") loadQuota().then(render); if (state.view === "tasks") loadTasks().then(render); render(); return; }
-  const open = e.target.closest("[data-open]"); if (open) return openTask(open.dataset.open);
-  const ap = e.target.closest("[data-approve]"); if (ap) { ap.disabled = true; try { await api("POST", `/tasks/${ap.dataset.task}/approve`, { approval_id: ap.dataset.approve, decision: ap.dataset.decision }); } catch (err) { alert(err.message); } await loadApprovals(); render(); return; }
-  if (e.target.id === "f-submit") {
-    const task = $("#f-task").value.trim(); if (!task) return;
-    const cwd = $("#f-cwd").value.trim(); const pin = $("#f-pin").value.trim();
-    const body = { task, needs_browser: $("#f-browser").checked, ...(cwd ? { cwd } : { ephemeral: true }) };
-    if (pin.includes("/")) body.pin = { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) };
-    try { const t = await api("POST", "/tasks", body); await loadTasks(); openTask(t.id); } catch (err) { $("#f-msg").textContent = err.message; }
-    return;
-  }
-  if (e.target.id === "t-cancel") { await api("POST", `/tasks/${state.task.id}/cancel`); return; }
-  if (e.target.id === "q-refresh") { await loadQuota(true); render(); return; }
-  if (e.target.id === "refresh") { await Promise.all([health(), loadTasks(), loadApprovals()]); render(); return; }
-});
+async function send() {
+  const task = $("#c-task").value.trim(); if (!task) return;
+  const cwd = $("#c-cwd").value.trim(); const pin = $("#c-pin").value.trim(); const browser = $("#c-browser").value === "1";
+  const body = { task, ...(cwd ? { cwd } : { ephemeral: true }), ...(browser ? { needs_browser: true } : {}) };
+  if (pin.includes("/")) body.pin = { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) };
+  $("#c-send").disabled = true;
+  try { const t = await api("POST", "/tasks", body); $("#c-task").value = ""; await loadTasks(); openTask(t.id); }
+  catch (err) { $("#c-hint").textContent = err.message; $("#c-adv").open = true; }
+  finally { $("#c-send").disabled = false; }
+}
 
-(async () => { await Promise.all([health(), loadTasks(), loadApprovals()]); render(); setInterval(async () => { await Promise.all([health(), loadApprovals(), state.view === "tasks" ? loadTasks() : null]); render(); }, 5000); })();
+document.addEventListener("click", async (e) => {
+  const nav = e.target.closest("nav button"); if (nav) { state.view = nav.dataset.view; if (state.es) { state.es.close(); state.es = null; } if (state.view === "quota") loadQuota().then(render); if (state.view === "log") loadLog().then(render); if (state.view === "home") loadTasks().then(render); render(); return; }
+  const open = e.target.closest("[data-open]"); if (open) return openTask(open.dataset.open);
+  const ap = e.target.closest("[data-approve]"); if (ap) { ap.disabled = true; try { await api("POST", `/tasks/${ap.dataset.task}/approve`, { approval_id: ap.dataset.approve, decision: ap.dataset.decision }); } catch (err) { alert(err.message); } await Promise.all([loadApprovals(), loadTasks()]); render(); return; }
+  if (e.target.id === "c-send") return send();
+  if (e.target.id === "t-cancel") { await api("POST", `/tasks/${state.task.id}/cancel`); return; }
+  if (e.target.id === "q-refresh") { e.target.disabled = true; await loadQuota(true); render(); return; }
+  if (e.target.id === "refresh") { await Promise.all([health(), loadTasks(), loadApprovals()]); if (state.view === "quota") await loadQuota(); if (state.view === "log") await loadLog(); render(); return; }
+});
+$("#c-task").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); });
+$("#c-task").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(160, e.target.scrollHeight) + "px"; });
+
+(async () => { await Promise.all([health(), loadTasks(), loadApprovals()]); render(); setInterval(async () => { await Promise.all([health(), loadApprovals(), state.view === "home" ? loadTasks() : null]); render(); }, 5000); })();
 </script>
 </body>
 </html>

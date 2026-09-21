@@ -11,5 +11,5 @@ export type QuotaReading = {
 
 export interface QuotaProvider {
   readonly harness: string;
-  read(): Promise<Omit<QuotaReading, "harness" | "fetchedAt">>;
+  read(force?: boolean): Promise<Omit<QuotaReading, "harness" | "fetchedAt">>;
 }
