@@ -14,7 +14,7 @@ import { parseArgs } from "node:util";
 import { Client } from "./client.js";
 import { defaultConfig, serve } from "./daemon.js";
 import type { TaskEvent } from "./engine/types.js";
-import { loadContext } from "./router/context.js";
+import { CONTEXT_EXAMPLE, loadContext } from "./router/context.js";
 import { NO_SIDE_EFFECTS, type FailureKind } from "./router/failure.js";
 import { RoutingLog } from "./router/log.js";
 import { reroute, route } from "./router/route.js";
@@ -141,7 +141,7 @@ async function main(): Promise<number> {
     case "context": {
       if (a1 !== "init") { out(await client.context()); return 0; }
       if (existsSync(values.context)) console.log(`exists: ${values.context}`);
-      else { mkdirSync(dirname(values.context), { recursive: true }); copyFileSync(resolve(HERE, "..", "config", "CONTEXT.example.md"), values.context); console.log(`written: ${values.context}`); }
+      else { mkdirSync(dirname(values.context), { recursive: true }); copyFileSync(CONTEXT_EXAMPLE, values.context); console.log(`written: ${values.context}`); }
       return 0;
     }
     case "route":

@@ -115,7 +115,8 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 | GET/POST | `/quota`, `/quota/refresh` | readings per harness (`remaining` 0..1, detail, source, error) |
 | GET | `/targets` | catalog + current quota map |
 | GET | `/routing/log` | recent decisions (every engine dispatch and re-dispatch, plus previews) |
-| GET/PUT | `/context` | CONTEXT.md (PUT lints) |
+| GET/PUT | `/context` | CONTEXT.md (GET returns the linted text the router sees; PUT lints and reports warnings) |
+| GET | `/context/example` | the `config/CONTEXT.example.md` template (UI "载入示例模板") |
 | GET | `/mcp` | registered MCP servers |
 | PUT/DELETE | `/mcp/:name` | upsert (body = the entry without `name`) / remove |
 | GET | `/skills`, `/skills/:name` | list / one with its SKILL.md in `content` |
@@ -134,7 +135,8 @@ Flash, read-only tools, injected via `OPENCODE_CONFIG`) that returns a Decision 
 effort, brief, fallbacks, confidence). `validateDecision` is the floor: catalog, browser, quota,
 concurrency (queue, never switch), effort, low confidence → default policy. `CONTEXT.md` (sites,
 accounts as secret-gate tokens, environment, preferences) goes into the router prompt; list entries
-with plaintext credentials are stripped at load. After a failure, `classifyFailure` + `nextStep`
+with plaintext credentials are stripped at load. Edit it in the UI's 上下文 tab (shows the linted
+text and the stripped lines), with `agentswitch context init`, or by hand. After a failure, `classifyFailure` + `nextStep`
 decide: transport → retry once then ask the router; quota → fallback chain; refusal / task_failed →
 ask the router with the history; gate_denied or an approved action → stop. The router may
 `give_up` or request a registered repair tool (`action=repair`; none registered yet).

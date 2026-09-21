@@ -35,6 +35,8 @@
   button:disabled { opacity:.5; }
   input,textarea,select { font:inherit; width:100%; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
   label { display:block; font-size:13px; color:var(--dim); margin:8px 0 4px; }
+  textarea.doc { min-height:55vh; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; resize:vertical; }
+  .warn-list { color:var(--warn); font-size:13px; white-space:pre-wrap; }
   nav { position:fixed; bottom:0; left:0; right:0; display:flex; background:var(--card); border-top:1px solid var(--line); padding-bottom:env(safe-area-inset-bottom); z-index:3; }
   nav button { flex:1; border:0; border-radius:0; background:transparent; color:var(--dim); padding:12px 0; font-size:13px; }
   nav button.active { color:var(--acc); }
@@ -102,10 +104,11 @@
   <button data-view="quota">额度</button>
   <button data-view="log">路由日志</button>
   <button data-view="ext">扩展</button>
+  <button data-view="ctx">上下文</button>
 </nav>
 <script>
 const $ = (s, r = document) => r.querySelector(s);
-const state = { view: "home", tasks: [], task: null, events: [], approvals: [], quota: [], log: [], es: null, health: false, mcp: [], skills: [], discovered: [], edit: { mcp: null, skill: null }, extHint: "" };
+const state = { view: "home", tasks: [], task: null, events: [], approvals: [], quota: [], log: [], es: null, health: false, mcp: [], skills: [], discovered: [], edit: { mcp: null, skill: null }, extHint: "", ctx: { path: "", text: "", warnings: [], draft: null, hint: "", saved: false } };
 const HARNESSES = ["claude-code", "codex", "opencode"];
 const api = async (method, path, body) => {
   const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -197,6 +200,9 @@ function render() {
   } else if (state.view === "ext") {
     $("#title").textContent = "扩展";
     m.innerHTML = renderExt();
+  } else if (state.view === "ctx") {
+    $("#title").textContent = "路由器上下文";
+    m.innerHTML = renderCtx();
   } else if (state.view === "task" && state.task) {
     const t = state.task;
     $("#title").textContent = "任务 " + t.id;
@@ -269,6 +275,25 @@ function renderExt() {
     `<div class="dim">MCP 和 skill 每次任务运行时注入到执行器的私有配置里，不改你自己的 ~/.claude、~/.codex、OpenCode 配置。</div>`,
   ].join("");
 }
+function renderCtx() {
+  const c = state.ctx;
+  const text = c.draft ?? c.text;
+  return [
+    c.hint ? `<div class="card" style="color:var(--bad)">${esc(c.hint)}</div>` : "",
+    c.warnings.length ? `<div class="card warn-list">加载时被删掉的行（疑似明文凭据，路由器看不到）：\n${c.warnings.map(esc).join("\n")}</div>` : "",
+    `<textarea id="ctx-text" class="doc" placeholder="站点与账号（密码只放 enc:v1: 密文）、环境限制、哪个项目偏好哪个 harness…" spellcheck="false">${esc(text)}</textarea>`,
+    `<div class="row"><button class="primary grow" id="ctx-save"${c.draft === null ? " disabled" : ""}>${c.saved ? "已保存" : "保存"}</button>${text.trim() ? "" : `<button id="ctx-example">载入示例模板</button>`}</div>`,
+    `<div class="dim">${esc(c.path)}。路由器每次分诊都重新读，改完立即生效。上限 64KB。这里显示的是 lint 之后的内容，即路由器实际看到的。</div>`,
+  ].join("");
+}
+async function loadCtx() { const r = await api("GET", "/context"); state.ctx = { ...state.ctx, path: r.path, text: r.text, warnings: r.warnings, draft: null, hint: "" }; }
+async function saveCtx() {
+  const text = $("#ctx-text").value;
+  state.ctx = { ...state.ctx, hint: "", saved: false };
+  try { await api("PUT", "/context", { text }); await loadCtx(); state.ctx = { ...state.ctx, saved: true }; }
+  catch (err) { state.ctx = { ...state.ctx, hint: err.message }; }
+  render();
+}
 async function loadExt() { [state.mcp, state.skills, state.discovered] = await Promise.all([api("GET", "/mcp"), api("GET", "/skills"), api("GET", "/skills/discover")]); }
 const pickedHarnesses = (id) => [...document.querySelectorAll(`#${id} .chip.on`)].map((c) => c.dataset.h);
 async function saveMcp() {
@@ -318,8 +343,10 @@ async function send() {
 }
 
 document.addEventListener("click", async (e) => {
-  const nav = e.target.closest("nav button"); if (nav) { state.view = nav.dataset.view; if (state.es) { state.es.close(); state.es = null; } $("#c-task").style.height = ""; if (state.view === "quota") loadQuota().then(render); if (state.view === "log") loadLog().then(render); if (state.view === "home") loadTasks().then(render); if (state.view === "ext") loadExt().then(render); render(); return; }
+  const nav = e.target.closest("nav button"); if (nav) { state.view = nav.dataset.view; if (state.es) { state.es.close(); state.es = null; } $("#c-task").style.height = ""; if (state.view === "quota") loadQuota().then(render); if (state.view === "log") loadLog().then(render); if (state.view === "home") loadTasks().then(render); if (state.view === "ext") loadExt().then(render); if (state.view === "ctx") loadCtx().then(render); render(); return; }
   const chip = e.target.closest(".chip[data-h]"); if (chip) { chip.classList.toggle("on"); return; }
+  if (e.target.id === "ctx-save") return saveCtx();
+  if (e.target.id === "ctx-example") { const r = await api("GET", "/context/example"); state.ctx = { ...state.ctx, draft: r.text, saved: false }; render(); return; }
   if (e.target.id === "mcp-new") { state.edit.mcp = undefined; render(); return; }
   if (e.target.id === "m-cancel") { state.edit.mcp = null; render(); return; }
   if (e.target.id === "m-save") return extAction(saveMcp);
@@ -338,9 +365,11 @@ document.addEventListener("click", async (e) => {
   if (e.target.id === "c-send") return send();
   if (e.target.id === "t-cancel") { await api("POST", `/tasks/${state.task.id}/cancel`); return; }
   if (e.target.id === "q-refresh") { e.target.disabled = true; await loadQuota(true); render(); return; }
-  if (e.target.id === "refresh") { await Promise.all([health(), loadTasks(), loadApprovals()]); if (state.view === "quota") await loadQuota(); if (state.view === "log") await loadLog(); if (state.view === "ext") await loadExt(); render(); return; }
+  if (e.target.id === "refresh") { await Promise.all([health(), loadTasks(), loadApprovals()]); if (state.view === "quota") await loadQuota(); if (state.view === "log") await loadLog(); if (state.view === "ext") await loadExt(); if (state.view === "ctx") await loadCtx(); render(); return; }
 });
 $("#c-task").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); });
+document.addEventListener("input", (e) => { if (e.target.id === "ctx-text") { state.ctx = { ...state.ctx, draft: e.target.value, saved: false }; $("#ctx-save").disabled = false; $("#ctx-save").textContent = "保存"; } });
+document.addEventListener("keydown", (e) => { if (e.target.id === "ctx-text" && e.key === "s" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveCtx(); } });
 function fitMain() {
   const c = $("#composer");
   const h = c.style.display === "none" ? 56 : c.offsetHeight + 56;

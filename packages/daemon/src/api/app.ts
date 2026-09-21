@@ -10,7 +10,7 @@ import type { Engine } from "../engine/engine.js";
 import type { Store } from "../engine/store.js";
 import { TERMINAL } from "../engine/types.js";
 import type { QuotaService } from "../quota/index.js";
-import { lintContext, loadContext } from "../router/context.js";
+import { exampleContext, lintContext, loadContext } from "../router/context.js";
 import type { RoutingLog } from "../router/log.js";
 import { route, type RouteDeps } from "../router/route.js";
 import { TargetRef, type Targets } from "../router/targets.js";
@@ -139,6 +139,7 @@ export function createApp(deps: ApiDeps): Hono {
   app.get("/targets", (c) => c.json({ ...deps.targets, quota: deps.quota.map() }));
   app.get("/routing/log", (c) => c.json(deps.routingLog.recent(Number(c.req.query("limit") ?? 50))));
 
+  app.get("/context/example", (c) => c.json({ text: exampleContext() }));
   app.get("/context", (c) => {
     const ctx = loadContext(deps.contextPath);
     return c.json({ path: deps.contextPath, text: ctx.text, warnings: ctx.warnings });
@@ -147,7 +148,7 @@ export function createApp(deps: ApiDeps): Hono {
     const body = ContextBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "text required" }, 400);
     const lint = lintContext(body.data.text);
-    writeFileSync(deps.contextPath, body.data.text);
+    writeFileSync(deps.contextPath, lint.text, { mode: 0o600 }); // the stripped lines never reach disk
     return c.json({ path: deps.contextPath, warnings: lint.warnings });
   });
 

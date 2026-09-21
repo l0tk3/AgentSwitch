@@ -4,8 +4,11 @@
  *  guard against slips, not a boundary: prose lines are not inspected. */
 
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 export const MAX_CONTEXT_BYTES = 64 * 1024;
+/** Template copied by `agentswitch context init` and offered by the UI when CONTEXT.md is empty. */
+export const CONTEXT_EXAMPLE = resolve(new URL(".", import.meta.url).pathname, "..", "..", "config", "CONTEXT.example.md");
 const TOKEN = /enc:v1:[A-Za-z0-9_-]{16,}={0,2}/;
 /** A credential label (not part of a hyphenated/underscored word) followed by a value. */
 const CRED_LABEL = /(?<![\w-])(密码|口令|password|passwd|pwd|secret|token|api[-_ ]?key|2fa|totp|seed)(?![\w-])\s*[:：=]?\s*(\S.*)$/i;
@@ -47,6 +50,10 @@ export function loadContext(path: string | undefined): LoadedContext {
   if (!path || !existsSync(path)) return EMPTY_CONTEXT;
   const { text, warnings } = lintContext(readFileSync(path, "utf8"));
   return { text, warnings, source: path };
+}
+
+export function exampleContext(path = CONTEXT_EXAMPLE): string {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
 /** Prompt section; empty when there is no context so the prompt stays stable in tests. */

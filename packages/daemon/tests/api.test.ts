@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -127,6 +127,9 @@ describe("HTTP API", () => {
     expect(((await put.json()) as { warnings: string[] }).warnings).toHaveLength(1);
     expect((await client.context()).path).toBe(join(home, "CONTEXT.md"));
     expect((await client.context()).text).toContain("[removed");
+    expect(readFileSync(join(home, "CONTEXT.md"), "utf8")).not.toContain("plain123");
+    const example = (await (await d.app.request("/context/example")).json()) as { text: string };
+    expect(example.text).toContain("enc:v1:REPLACE_WITH_TOKEN");
     d.close();
   });
 });
