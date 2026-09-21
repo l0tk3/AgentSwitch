@@ -33,7 +33,18 @@ export function eventLine(ev) {
   }
 }
 
-function meta(t) {
+/** When the floor overrode the router (low confidence, quota, catalog…), say so next to the router's reason. */
+function overrideNote(t, events) {
+  const routed = [...events].reverse().find((e) => e.type === "routed" || (e.type === "redispatch" && e.payload && e.payload.verdict));
+  const v = routed && routed.payload.verdict;
+  if (!v || !v.ok || !t.decision) return "";
+  const picked = `${t.decision.harness}/${t.decision.model || "默认"}`;
+  const actual = `${v.harness}/${v.model}`;
+  if (picked === actual && !(v.notes || []).length) return "";
+  return `<div class="card warn"><div class="dim">校验层改写了路由结果</div><div style="margin-top:4px">路由器选 <span class="mono">${esc(picked)}</span>，实际派给 <span class="mono">${esc(actual)}</span>（${esc(v.chosen)}）</div>${(v.notes || []).length ? `<div class="dim" style="margin-top:4px">${v.notes.map(esc).join("<br>")}</div>` : ""}</div>`;
+}
+
+function meta(t, events) {
   const d = t.decision || {};
   const attempts = (t.attempts || []).map((a, i) => `<div class="dim">${i + 1}. ${esc(a.harness)}/${esc(a.model)} → ${esc(a.kind)}${a.excerpt ? `：${esc(a.excerpt.slice(0, 120))}` : ""}</div>`).join("");
   return `<div class="card kv">
@@ -44,6 +55,7 @@ function meta(t) {
       <b>创建</b><span>${stamp(t.createdAt)}</span>
       ${t.pin ? `<b>指定</b><span>${esc(t.pin.harness)}/${esc(t.pin.model)}</span>` : ""}
     </div>
+    ${overrideNote(t, events)}
     ${d.reason ? `<div class="card"><div class="dim">路由理由</div><div>${esc(d.reason)}</div>${d.confidence !== undefined ? `<div class="dim" style="margin-top:4px">置信度 ${d.confidence}${d.expected_size ? " · " + esc(d.expected_size) : ""}${d.needs_browser ? " · 需要浏览器" : ""}</div>` : ""}</div>` : ""}
     ${t.brief && t.brief !== t.task ? `<div class="card"><div class="dim">路由器给执行者的简报</div><div class="pre" style="margin-top:4px;font-size:13px">${esc(t.brief)}</div></div>` : ""}
     ${attempts ? `<div class="card"><div class="dim">尝试</div>${attempts}</div>` : ""}
@@ -107,7 +119,7 @@ export function render(s) {
         ${followUp(s.hint, s.pending)}
         ${t.harness ? handoffBar(t) : ""}
       </div>
-      <aside class="stack">${threadCard(t, s.thread)}${filesCards(t, s.files)}${meta(t)}</aside>
+      <aside class="stack">${threadCard(t, s.thread)}${filesCards(t, s.files)}${meta(t, s.events)}</aside>
     </div>`;
 }
 

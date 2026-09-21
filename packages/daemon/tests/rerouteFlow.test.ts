@@ -29,7 +29,7 @@ describe("reroute()", () => {
     expect(out.step.kind).toBe("redispatch");
     if (out.step.kind === "redispatch") {
       expect(out.step.source).toBe("default");
-      expect(out.step.verdict).toMatchObject({ ok: true, harness: "codex", model: "gpt-6-astra", chosen: "pin" });
+      expect(out.step.verdict).toMatchObject({ ok: true, harness: "codex", model: "gpt-5.6-luna", chosen: "pin" });   // browser default with Claude excluded: cheapest browser-capable model
       expect(out.step.verdict.notes[0]).toContain("unavailable");
     }
   });
@@ -50,7 +50,7 @@ describe("reroute()", () => {
   it("quota, first transport failure and gate denial never reach the router", async () => {
     const r = echoRouter([decisionJson()]);
     const quota = await reroute({ ...base, attempts: [{ ...refused, kind: "quota" }] }, { targets, router: r, quota: {}, running: {} });
-    expect(quota.step).toMatchObject({ kind: "switch", target: { harness: "codex", model: "gpt-6-astra" } });  // browser task: opencode cannot
+    expect(quota.step).toMatchObject({ kind: "switch", target: { harness: "codex", model: "gpt-5.6-luna" } });  // browser task: opencode cannot; cheapest codex model, not the top one
     const chat = await reroute({ ...base, task: "总结一下", decision: { ...first, needs_browser: false }, attempts: [{ ...refused, kind: "quota" }] }, { targets, router: r, quota: {}, running: {} });
     expect(chat.step).toMatchObject({ kind: "switch", target: { harness: "opencode" } });
     const transport = await reroute({ ...base, attempts: [{ ...refused, kind: "transport" }] }, { targets, router: r, quota: {}, running: {} });

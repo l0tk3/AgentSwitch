@@ -180,7 +180,7 @@ router:
 |---|---|
 | code | 额度剩余最多的 harness 的 `default_model`（claude-code / codex 二选一） |
 | chat / summarize | opencode / deepseek-flash |
-| browser | claude-code / claude-sonnet-5 |
+| browser | claude-code / claude-sonnet-5；Claude 无额度时取其他带浏览器 harness 里**最便宜**的模型（2026-09-21：原实现按额度最多的 harness 取默认模型，一次低置信兜底落到了 gpt-6-astra，已改） |
 
 ## 5. 路由提示词的原则（写进 `router` agent 的 prompt）
 
