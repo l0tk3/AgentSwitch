@@ -1,6 +1,7 @@
 /** Composition root: config → store, bus, engine, executors, quota, API. `serve()` listens on 127.0.0.1. */
 
 import { serve as listen } from "@hono/node-server";
+import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createApp } from "./api/app.js";
 import { Bus } from "./engine/bus.js";
@@ -94,10 +95,12 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   sweepDir(artifactsDir, ARTIFACT_TTL_MS);
   sweepThreads(store);
   // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
-  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(router);
+  // The summarizer is a text-only agent on the router's model, run in a scratch dir so it never explores the repo.
+  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(opencodeRouter({ model: targets.router.model, agentName: "summarizer", tools: "none", runIn: join(cfg.home, "summarizer") }), targets.router.timeout_ms);
+  mkdirSync(join(cfg.home, "summarizer"), { recursive: true });
   const extensionsSummary = () => summarizeExtensions(extensions);
   const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, ...(summarizer ? { summarizer } : {}) });
-  const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary() });
+  const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }

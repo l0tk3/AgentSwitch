@@ -30,3 +30,14 @@ describe("opencode router helpers", () => {
     expect(cfg.permission.read["**/.env"]).toBe("deny");
   });
 });
+
+describe("routerConfig: text-only agent", () => {
+  it('tools "none" disables read/glob/grep/list too and allows a single step', () => {
+    const cfg = routerConfig("SYS", "deepseek/deepseek-flash", "/h/.secret-gate", "summarizer", "none") as { agent: Record<string, { tools: Record<string, boolean>; steps: number }> };
+    expect(cfg.agent.summarizer!.tools).toMatchObject({ read: false, glob: false, grep: false, list: false, bash: false, edit: false });
+    expect(cfg.agent.summarizer!.steps).toBe(1);
+    const ro = routerConfig("SYS", "deepseek/deepseek-flash", "/h/.secret-gate") as { agent: Record<string, { tools: Record<string, boolean>; steps: number }> };
+    expect(ro.agent.router!.tools.read).toBeUndefined();
+    expect(ro.agent.router!.steps).toBe(12);
+  });
+});

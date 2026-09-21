@@ -9,7 +9,7 @@ import { lintContext } from "../router/context.js";
 import type { Router } from "../router/routers/types.js";
 import type { Summary } from "./types.js";
 
-export const SUMMARY_TIMEOUT_MS = 20_000;
+export const SUMMARY_TIMEOUT_MS = 45_000;
 const MAX_FIELD = 1200;
 const MAX_LIST = 30;
 

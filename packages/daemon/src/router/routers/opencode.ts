@@ -16,14 +16,19 @@ export type OpenCodeRouterOptions = {
   readonly model: string;
   readonly agentName?: string;
   readonly gateHome?: string;
+  /** "read-only" (default): read/glob/grep/list so the dispatcher can look at the repo. "none": text only, one step (the summarizer). */
+  readonly tools?: "read-only" | "none";
+  /** Directory the agent runs in; default: the request's cwd. The summarizer uses a scratch dir so it cannot wander. */
+  readonly runIn?: string;
 };
 
-export function routerConfig(system: string, model: string, gateHome: string, agentName = "router"): object {
+export function routerConfig(system: string, model: string, gateHome: string, agentName = "router", tools: "read-only" | "none" = "read-only"): object {
   const noTools = { bash: false, edit: false, write: false, patch: false, webfetch: false, websearch: false, todowrite: false };
+  const none = { ...noTools, read: false, glob: false, grep: false, list: false };
   return {
     $schema: "https://opencode.ai/config.json",
     agent: {
-      [agentName]: { mode: "primary", description: "AgentSwitch dispatcher", model, prompt: system, tools: noTools, steps: 12 },
+      [agentName]: { mode: "primary", description: "AgentSwitch dispatcher", model, prompt: system, tools: tools === "none" ? none : noTools, steps: tools === "none" ? 1 : 12 },
     },
     permission: {
       read: { "*": "allow", [`${gateHome}/*`]: "deny", "**/.env": "deny", "**/*.pem": "deny", "**/*.key": "deny" },
@@ -58,12 +63,13 @@ export function opencodeRouter(opts: OpenCodeRouterOptions): Router {
     async route(input: RouterInput, signal: AbortSignal): Promise<RouterReply> {
       const dir = mkdtempSync(join(tmpdir(), "agentswitch-router-"));
       const configPath = join(dir, "opencode.json");
-      writeFileSync(configPath, JSON.stringify(routerConfig(input.system, opts.model, gateHome, agent)));
+      writeFileSync(configPath, JSON.stringify(routerConfig(input.system, opts.model, gateHome, agent, opts.tools ?? "read-only")));
       const message = input.previousError ? `${input.task}\n\n(previous reply rejected: ${input.previousError})` : input.task;
-      const env = { ...stripProxy(process.env), PWD: input.cwd, OPENCODE_CONFIG: configPath, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+      const cwd = opts.runIn ?? input.cwd;
+      const env = { ...stripProxy(process.env), PWD: cwd, OPENCODE_CONFIG: configPath, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
       const started = Date.now();
       try {
-        const stdout = await run(binary, ["run", "--standalone", "--format", "json", "--agent", agent, "-m", opts.model, message], input.cwd, env, signal);
+        const stdout = await run(binary, ["run", "--standalone", "--format", "json", "--agent", agent, "-m", opts.model, message], cwd, env, signal);
         return { text: textFromEvents(stdout), elapsedMs: Date.now() - started };
       } finally {
         rmSync(dir, { recursive: true, force: true });

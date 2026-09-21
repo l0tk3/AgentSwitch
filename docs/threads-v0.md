@@ -181,6 +181,8 @@ browser:        claude/haiku 5 次 3 成功（2 次 transport）
 
 第 4 步同日完成：线程在**路由时**分配（submit 时只有显式 `thread_id` 或父任务的线程），路由器看最近 20 条未归档线程（标题、摘要一行、上次执行者、目录），Decision 多 `thread` / `thread_confidence`；≥ `router.thread_confidence`（0.6）归入，低于则复用审批卡片问用户（允许 = 归入，拒绝/超时 = 新开），`new` 或未知 id 新开。临时任务归入线程时搬进线程目录（空临时目录删掉，带附件的不搬）。追问若在父任务尚未路由时就提交，也在路由时补取父线程。首页线程列表在前，任务表折叠在后；独立线程页面未做（点线程打开其最新任务，任务页右栏有线程卡片）。剩余：OpenCode 私有目录；第 5 步手机侧。
 
+真链路验证（2026-09-21，开发 daemon + 真 DeepSeek）：第一条任务新开线程 → 追问被路由器归入该线程（置信度 0.85，理由提到沿用上次执行者以便续接）→ 摘要 4.5 s 生成并起标题 → MEMORY.md 追加 2 条事实 → records 记 kind。坑：摘要器起初复用带 read/glob/grep 的 router agent 并在仓库目录里跑，DeepSeek 会去翻文件，20 s 超时；改为无工具、单步、在 `$AGENTSWITCH_HOME/summarizer/` 里跑的 `summarizer` agent，超时沿用 `router.timeout_ms`。摘要器给的 facts 里会混进代码层知识（"daemon 用 hono"），提示词后续可再收紧，页面上可删。
+
 ## 11. 测试
 
 | 层 | 内容 | 调云模型？ |
