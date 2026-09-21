@@ -46,6 +46,8 @@ export const Targets = z
       timeout_ms: z.number().int().positive().default(20_000),
       min_confidence: z.number().min(0).max(1).default(0.5),
       quota_threshold: z.number().min(0).max(1).default(0.05),
+      /** Below this the router's thread assignment is not trusted: the user is asked (threads-v0 §6). */
+      thread_confidence: z.number().min(0).max(1).default(0.6),
       default: TargetRef,
     }),
   })

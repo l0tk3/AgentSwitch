@@ -214,8 +214,9 @@ export class Store {
     const map: Record<string, (v: unknown) => unknown> = {
       status: (v) => v, harness: (v) => v, model: (v) => v, effort: (v) => v, brief: (v) => v, result: (v) => v, error: (v) => v,
       decision: (v) => (v === null ? null : JSON.stringify(v)), attempts: (v) => JSON.stringify(v), routerAsks: (v) => v,
+      threadId: (v) => v, cwd: (v) => v, ephemeral: (v) => (v ? 1 : 0),
     };
-    const columns: Record<string, string> = { routerAsks: "router_asks" };
+    const columns: Record<string, string> = { routerAsks: "router_asks", threadId: "thread_id" };
     for (const [key, value] of Object.entries(patch)) {
       const conv = map[key];
       if (!conv) continue;

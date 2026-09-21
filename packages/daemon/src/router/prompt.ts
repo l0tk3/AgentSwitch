@@ -3,6 +3,7 @@
 import { contextSection, EMPTY_CONTEXT, type LoadedContext } from "./context.js";
 import type { Targets } from "./targets.js";
 import { catalogText } from "./targets.js";
+import type { ThreadBrief } from "../threads/types.js";
 
 /** What the router is told about the world besides the catalog: user context, learned memory, track record, extensions. */
 export type PromptExtras = {
@@ -11,6 +12,8 @@ export type PromptExtras = {
   /** Pre-rendered `recordText()` over the last 30 days. */
   readonly record?: string;
   readonly extensions?: ExtensionsSummary;
+  /** Open threads the task might continue. */
+  readonly threads?: readonly ThreadBrief[];
 };
 
 export type ExtensionsSummary = {
@@ -26,6 +29,8 @@ export const DECISION_SHAPE = `{
   "needs_browser": <true|false>,
   "category": "<a category name listed under the catalog, or null>",
   "kind": "code-multifile" | "code-small" | "browser" | "chat" | "translate" | "other",
+  "thread": "<id of the open thread this continues, or \"new\">",
+  "thread_confidence": <0..1>,
   "expected_size": "small" | "medium" | "large",
   "risk": "<what could go wrong, or null>",
   "fallbacks": [{"harness": "...", "model": "..."}],
@@ -57,7 +62,22 @@ Rules:
 - Label the task's "kind" for the track record: code-multifile, code-small, browser, chat, translate or other.
 - If unsure, lower confidence instead of guessing.
 - Reply with exactly one JSON object and nothing else, of this shape:
-${DECISION_SHAPE}${contextSection(x.context ?? EMPTY_CONTEXT)}${memorySection(x.memory)}${recordSection(x.record)}${extensionsSection(x.extensions)}`;
+${DECISION_SHAPE}${contextSection(x.context ?? EMPTY_CONTEXT)}${memorySection(x.memory)}${recordSection(x.record)}${extensionsSection(x.extensions)}${threadsSection(x.threads)}`;
+}
+
+export function threadsSection(threads: readonly ThreadBrief[] | undefined): string {
+  if (!threads?.length) return "";
+  const lines = threads.map((t) => {
+    const age = t.lastActivity ? `${Math.max(1, Math.round((Date.now() - t.lastActivity) / 60_000))} min ago` : "no activity";
+    const last = t.lastTarget ? `${t.lastTarget.harness}/${t.lastTarget.model}` : "nobody yet";
+    return `- ${t.id} "${t.title ?? "(untitled)"}" cwd ${t.cwd}; last: ${last}, ${age}${t.goal ? `; goal: ${t.goal.slice(0, 200)}` : ""}${t.progress ? `; progress: ${t.progress.slice(0, 200)}` : ""}`;
+  });
+  return `
+
+Open threads (ongoing jobs). If the task continues one of them, set "thread" to its id and say how sure you are in
+"thread_confidence"; otherwise "thread": "new". When it continues a thread, prefer that thread's last target so the
+conversation can be resumed natively, unless its quota is gone or the model is clearly wrong for the task:
+${lines.join("\n")}`;
 }
 
 export function memorySection(memory: LoadedContext | undefined): string {

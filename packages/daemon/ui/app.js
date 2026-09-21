@@ -2,7 +2,7 @@
  *  bindings, and polls the daemon. Typed-in fields marked data-keep survive re-renders. */
 
 import { get, subscribe } from "./lib/state.js";
-import { addPending, goto, health, loadApprovals, loadQuota, loadTasks, refresh, removePending } from "./lib/actions.js";
+import { addPending, goto, health, loadApprovals, loadQuota, loadTasks, loadThreads, refresh, removePending } from "./lib/actions.js";
 import * as home from "./views/home.js";
 import * as task from "./views/task.js";
 import * as log from "./views/log.js";
@@ -97,6 +97,7 @@ async function tick(n) {
   await Promise.all([
     health(), loadApprovals(),
     s.view === "home" ? loadTasks() : null,
+    s.view === "home" && n % 3 === 0 ? loadThreads().catch(() => undefined) : null,
     s.view === "home" && n % 6 === 0 ? loadQuota() : null,
   ]);
 }

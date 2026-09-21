@@ -69,7 +69,8 @@ export type TaskEventType =
   | "cancelled"
   | "cleaned"
   | "summary"
-  | "handoff";
+  | "handoff"
+  | "thread";
 
 export type TaskEvent = {
   readonly taskId: string;

@@ -17,6 +17,13 @@ function daemon(replies: string[]) {
   return { d, client: new Client("http://test", fetchImpl), home };
 }
 
+const tid = async (client: Client, id: string): Promise<string> => (await client.task(id)).threadId!;
+/** Wait until routing has put the task in a thread (the echo router answers within a tick). */
+async function waitThread(client: Client, id: string): Promise<string> {
+  for (let i = 0; i < 50; i++) { const t = await client.task(id); if (t.threadId) return t.threadId; await new Promise((r) => setTimeout(r, 10)); }
+  throw new Error("no thread assigned");
+}
+
 describe("threads over HTTP", () => {
   it("tasks open threads; handoff makes a follow-up in the same thread excluding the executor; thread detail lists both", async () => {
     const { d, client, home } = daemon([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null }), decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null })]);
@@ -24,19 +31,19 @@ describe("threads over HTTP", () => {
     await client.watch(a.id, () => undefined);
     const list = await client.threads();
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ id: a.threadId, cwd: "/tmp", status: "open", taskCount: 1, lastTarget: { harness: "codex", model: "gpt-5.5" } });
+    expect(list[0]).toMatchObject({ id: (await tid(client, a.id)), cwd: "/tmp", status: "open", taskCount: 1, lastTarget: { harness: "codex", model: "gpt-5.5" } });
     expect(list[0]!.home.startsWith(join(home, "threads"))).toBe(true);
     const b = await client.handoff(a.id);
-    expect(b).toMatchObject({ threadId: a.threadId, parentId: a.id, exclude: [{ harness: "codex", model: "gpt-5.5" }] });
+    expect(b).toMatchObject({ threadId: (await tid(client, a.id)), parentId: a.id, exclude: [{ harness: "codex", model: "gpt-5.5" }] });
     await client.watch(b.id, () => undefined);
-    const detail = await client.thread(a.threadId!);
+    const detail = await client.thread((await tid(client, a.id)));
     expect(detail.tasks.map((t) => t.id)).toEqual([a.id, b.id]);
     expect(detail.state.handoffs).toHaveLength(1);
     expect(detail.state.tasks.map((t) => t.status)).toEqual(["done", "done"]);
     expect((await client.task(b.id)).harness).toBe("claude-code");
     // a task can be submitted straight into the thread
-    const c = await client.submit("more", "/tmp", { threadId: a.threadId! });
-    expect(c.threadId).toBe(a.threadId);
+    const c = await client.submit("more", "/tmp", { threadId: (await tid(client, a.id)) });
+    expect(c.threadId).toBe((await tid(client, a.id)));
     await client.watch(c.id, () => undefined);
     await expect(client.submit("x", "/tmp", { threadId: "nope" })).rejects.toThrow(/thread not found/);
     await expect(client.handoff("nope")).rejects.toThrow(/not found/);
@@ -61,7 +68,7 @@ describe("threads over HTTP", () => {
     const { d, client } = daemon([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
     const a = await client.submit("do z", "/tmp");
     await client.watch(a.id, () => undefined);
-    const id = a.threadId!;
+    const id = (await tid(client, a.id));
     const renamed = await client.patchThread(id, { title: "我的线程" });
     expect(renamed.title).toBe("我的线程");
     const archived = await client.archiveThread(id);
@@ -80,9 +87,9 @@ describe("threads over HTTP", () => {
     await expect(client.thread(id)).rejects.toThrow(/not found/);
     const b = await client.submit("again", "/tmp");
     await client.watch(b.id, () => undefined);
-    expect((await client.reopenThread(b.threadId!)).status).toBe("open");
-    expect(await client.deleteThread(b.threadId!)).toEqual({ ok: true });
-    await expect(client.deleteThread(b.threadId!)).rejects.toThrow(/not found/);
+    expect((await client.reopenThread((await tid(client, b.id)))).status).toBe("open");
+    expect(await client.deleteThread((await tid(client, b.id)))).toEqual({ ok: true });
+    await expect(client.deleteThread((await tid(client, b.id)))).rejects.toThrow(/not found/);
     await expect(client.patchThread("nope", { title: "x" })).rejects.toThrow(/not found/);
     d.close();
   });
@@ -90,10 +97,11 @@ describe("threads over HTTP", () => {
   it("archive/delete refuse while a task in the thread is still running", async () => {
     const { d, client } = daemon([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
     const a = await client.submit('slow @echo {"delayMs":300}', "/tmp");
-    await expect(client.archiveThread(a.threadId!)).rejects.toThrow(/still/);
-    await expect(client.deleteThread(a.threadId!)).rejects.toThrow(/still/);
+    const threadId = await waitThread(client, a.id);
+    await expect(client.archiveThread(threadId)).rejects.toThrow(/still/);
+    await expect(client.deleteThread(threadId)).rejects.toThrow(/still/);
     await client.watch(a.id, () => undefined);
-    expect((await client.archiveThread(a.threadId!)).status).toBe("archived");
+    expect((await client.archiveThread((await tid(client, a.id)))).status).toBe("archived");
     d.close();
   });
 });

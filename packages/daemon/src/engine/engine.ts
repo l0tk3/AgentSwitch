@@ -21,7 +21,10 @@ import type { ExtensionsSummary } from "../router/prompt.js";
 import type { LoadedContext } from "../router/context.js";
 import type { HandoffReason, ThreadState } from "../threads/types.js";
 import type { Bus } from "./bus.js";
-import { cleanupEphemeral, defaultCleanupPaths, type CleanupPaths } from "./cleanup.js";
+import { cleanupEphemeral, defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
+import { existsSync, rmSync } from "node:fs";
+import type { Decision } from "../router/decision.js";
+import type { ThreadBrief } from "../threads/types.js";
 import type { Store } from "./store.js";
 import type { HandoffFrom, NewTask, Task, TaskEventType } from "./types.js";
 
@@ -62,12 +65,13 @@ export class Engine {
     this.deps = deps;
   }
 
-  /** Persist and enqueue; resolves with the queued task immediately. Every task lives in a thread:
-   *  the one given, the parent's, or a new one for this cwd. */
+  /** Persist and enqueue; resolves with the queued task immediately. Every task ends up in a thread: the one
+   *  given, the parent's, or (decided at routing time, threads-v0 §6) an open thread the router recognises or
+   *  a new one. */
   submit(input: NewTask): Task {
     const parent = input.parentId ? this.deps.store.getTask(input.parentId) : undefined;
-    const threadId = input.threadId ?? parent?.threadId ?? this.deps.store.createThread(input.cwd).id;
-    const task = this.deps.store.createTask({ ...input, threadId });
+    const threadId = input.threadId ?? parent?.threadId ?? null;
+    const task = this.deps.store.createTask({ ...input, ...(threadId ? { threadId } : {}) });
     this.emit(task.id, "queued", { task: task.task, cwd: task.cwd, threadId });
     this.chain = this.chain.then(() => this.process(task.id)).catch(() => undefined);
     return task;
@@ -134,7 +138,7 @@ export class Engine {
   private routeDeps(): RouteDeps {
     const { store, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, routingLog: _l, artifactsDir: _d, summarizer: _m, protected: _p, memoryPath, extensionsSummary, now: _n, ...rest } = this.deps;
     const memory: LoadedContext | undefined = memoryPath ? loadMemory(memoryPath) : undefined;
-    return { ...rest, quota: quota(), running: { ...this.running }, records: store.recordsSince(this.now() - RECORD_WINDOW_MS), ...(memory ? { memory } : {}), ...(extensionsSummary ? { extensions: extensionsSummary() } : {}) };
+    return { ...rest, quota: quota(), running: { ...this.running }, records: store.recordsSince(this.now() - RECORD_WINDOW_MS), threads: this.threadBriefs(), ...(memory ? { memory } : {}), ...(extensionsSummary ? { extensions: extensionsSummary() } : {}) };
   }
 
   private now(): number {
@@ -153,8 +157,47 @@ export class Engine {
     } finally {
       this.controllers.delete(id);
       await this.finishThread(id);          // before cleanup: the diff needs the work dir
-      if (task.ephemeral) this.cleanup(task);
+      const final = this.deps.store.getTask(id) ?? task;   // joining a thread may have moved the task out of its temp dir
+      if (final.ephemeral) this.cleanup(final);
     }
+  }
+
+  /** Open threads as the router sees them: newest 20, title + one line of summary + last target. */
+  threadBriefs(limit = 20): ThreadBrief[] {
+    return this.deps.store.listThreads({ status: "open", limit }).map((t) => {
+      const st = this.threadState(t.id);
+      return { id: t.id, title: t.title ?? st.title, cwd: t.cwd, goal: st.summary?.goal ?? "", progress: st.summary?.progress ?? "", lastTarget: st.lastTarget, lastActivity: st.lastActivity ?? t.updatedAt };
+    });
+  }
+
+  /** threads-v0 §6: trust the router's thread above the threshold, ask the user below it, else open a new thread.
+   *  An ephemeral task that joins a thread moves into the thread's cwd (its empty temp dir is dropped). */
+  private async assignThread(task: Task, decision: Decision | null): Promise<Task> {
+    if (task.threadId) return task;
+    const parent = task.parentId ? this.deps.store.getTask(task.parentId) : undefined;
+    if (parent?.threadId) {
+      const updated = this.deps.store.updateTask(task.id, { threadId: parent.threadId, status: "routing" });
+      this.emit(task.id, "thread", { threadId: parent.threadId, source: "parent", confidence: null, cwd: updated.cwd });
+      return updated;
+    }
+    const wanted = decision?.thread && decision.thread !== "new" ? this.deps.store.getThread(decision.thread) : undefined;
+    const confidence = decision?.thread_confidence ?? 0;
+    let source: "router" | "user" | "new" = "new";
+    let thread = wanted && wanted.status === "open" ? wanted : undefined;
+    if (thread && confidence >= this.deps.targets.router.thread_confidence) source = "router";
+    else if (thread) {
+      const answer = await this.requestApproval(task.id, `归到线程「${thread.title ?? thread.id}」？允许 = 归入并接着做，拒绝 = 新开线程`, `路由器置信度 ${confidence}；线程目录 ${thread.cwd}`);
+      if (answer === "allow") source = "user"; else thread = undefined;
+    }
+    const target = thread ?? this.deps.store.createThread(task.cwd);
+    let patch: Partial<Task> = { threadId: target.id, status: "routing" };
+    if (thread && task.ephemeral && !task.attachments.length && existsSync(thread.cwd) && thread.cwd !== task.cwd) {
+      if (isDeletableWorkDir(task.cwd, this.deps.cleanupPaths ?? defaultCleanupPaths())) rmSync(task.cwd, { recursive: true, force: true });
+      patch = { ...patch, cwd: thread.cwd, ephemeral: false };
+    }
+    const updated = this.deps.store.updateTask(task.id, patch);
+    this.emit(task.id, "thread", { threadId: target.id, source, confidence: decision?.thread_confidence ?? null, cwd: updated.cwd });
+    return updated;
   }
 
   /** Thread bookkeeping at the end of every execution: the task record, then the summary (never blocking on failure). */
@@ -209,13 +252,16 @@ export class Engine {
     return `This is a follow-up in an ongoing conversation. Earlier turns:\n\n${history}\n\nUser now says:\n${task.task}${attachmentsNote(task.attachments)}`;
   }
 
-  private async runTask(task: Task, signal: AbortSignal): Promise<void> {
+  private async runTask(initial: Task, signal: AbortSignal): Promise<void> {
+    let task = initial;
     this.deps.store.updateTask(task.id, { status: "routing" });
     const composed = this.composeTask(task);
     const routed = await route({ task: composed, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser, exclude: task.exclude }, this.routeDeps());
     this.deps.routingLog?.record(task.task, task.cwd, routed);
     this.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
     if (!routed.verdict.ok) return this.fail(task.id, `no target: ${routed.verdict.notes.join("; ")}`);
+    task = await this.assignThread(task, routed.decision);
+    if (signal.aborted) return;
     let current = this.deps.store.updateTask(task.id, { decision: routed.decision, brief: routed.decision?.brief ?? composed });
     let verdict: Verdict = routed.verdict;
     let attempts: Attempt[] = [];

@@ -20,6 +20,7 @@ export function eventLine(ev) {
     case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"} (${p.status})`;
     case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;
     case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
+    case "thread": return `归入线程 ${p.threadId}（${p.source === "router" ? "路由器判断" + (p.confidence !== null ? "，置信度 " + p.confidence : "") : p.source === "user" ? "你确认的" : p.source === "parent" ? "追问自父任务" : "新开"}）${p.cwd ? "，目录 " + p.cwd : ""}`;
     case "handoff": return `交接 ${p.from ? p.from.harness + "/" + p.from.model + " → " : ""}${p.to && p.to.harness ? p.to.harness + "/" + (p.to.model || "?") : "由路由器选"} (${p.reason})${p.taskId && p.taskId !== ev.taskId ? "，新任务 " + p.taskId : ""}`;
     case "summary": return p.ok ? `线程摘要已更新：「${p.title}」(${((p.ms || 0) / 1000).toFixed(1)}s)` : `线程摘要失败：${p.error}`;
     case "done": return (p.result || "").length > 200 ? "✓ 完成（结果见上方）" : `✓ 完成：${p.result}`;

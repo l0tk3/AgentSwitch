@@ -179,6 +179,8 @@ browser:        claude/haiku 5 次 3 成功（2 次 transport）
 
 第 3 步同日完成：`records` 表 + `src/threads/record.ts`（按 kind × 目标聚合成几行进提示词；`guardsFor` 出两条兜底：同 kind 同目标连续 3 次 refusal/task_failed → 30 天内该目标排到 fallback 之后；用户交接过的组合 → 路由器无 reason 时记 note），Decision 加 `kind`（路由器标，pin/失效时 `classify()` 兜底），摘要器多出 `facts` 字段 → `MEMORY.md`（`src/threads/memory.ts`，lint + 去重 + 64KB 上限，页面「上下文」tab 可编辑），MCP/skill 清单以名字 + 一句话进提示词。审批超时策略原本就在引擎里。
 
+第 4 步同日完成：线程在**路由时**分配（submit 时只有显式 `thread_id` 或父任务的线程），路由器看最近 20 条未归档线程（标题、摘要一行、上次执行者、目录），Decision 多 `thread` / `thread_confidence`；≥ `router.thread_confidence`（0.6）归入，低于则复用审批卡片问用户（允许 = 归入，拒绝/超时 = 新开），`new` 或未知 id 新开。临时任务归入线程时搬进线程目录（空临时目录删掉，带附件的不搬）。追问若在父任务尚未路由时就提交，也在路由时补取父线程。首页线程列表在前，任务表折叠在后；独立线程页面未做（点线程打开其最新任务，任务页右栏有线程卡片）。剩余：OpenCode 私有目录；第 5 步手机侧。
+
 ## 11. 测试
 
 | 层 | 内容 | 调云模型？ |

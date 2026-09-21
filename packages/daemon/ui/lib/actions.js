@@ -5,6 +5,7 @@ import { get, set } from "./state.js";
 import { releasePending, toPending, uploadPending } from "./files.js";
 
 export const loadTasks = async () => set({ tasks: await api("GET", "/tasks?limit=50") });
+export const loadThreads = async () => set({ threads: await api("GET", "/threads?status=open&limit=30") });
 export const loadApprovals = async () => set({ approvals: await api("GET", "/approvals") });
 export const loadQuota = async (refresh = false) => set({ quota: await api("GET", "/quota" + (refresh ? "?refresh=1" : "")) });
 export const loadLog = async () => set({ log: await api("GET", "/routing/log?limit=50") });
@@ -37,7 +38,7 @@ export function closeStream() {
   set({ es: null });
 }
 
-const LOADERS = { home: [loadTasks, loadQuota], log: [loadLog], ext: [loadExt], ctx: [loadCtx] };
+const LOADERS = { home: [loadTasks, loadThreads, loadQuota], log: [loadLog], ext: [loadExt], ctx: [loadCtx] };
 
 export async function goto(view) {
   closeStream();
@@ -51,8 +52,8 @@ export async function refresh() {
   await Promise.all([health(), loadTasks(), loadApprovals(), ...(LOADERS[view] || []).map((f) => f())]);
 }
 
-const EVENT_TYPES = ["queued", "routed", "dispatched", "text", "tool_call", "approval_request", "approval_resolved", "attempt_failed", "redispatch", "handoff", "summary", "done", "failed", "cancelled", "cleaned"];
-const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "failed", "cancelled", "redispatch", "dispatched", "routed", "cleaned", "handoff", "summary"]);
+const EVENT_TYPES = ["queued", "routed", "thread", "dispatched", "text", "tool_call", "approval_request", "approval_resolved", "attempt_failed", "redispatch", "handoff", "summary", "done", "failed", "cancelled", "cleaned"];
+const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "failed", "cancelled", "redispatch", "dispatched", "routed", "cleaned", "handoff", "summary", "thread"]);
 
 /** Open the task view and follow its event stream (`/tasks/${id}/events`, SSE). */
 export function openTask(id) {
@@ -82,7 +83,7 @@ export async function submitTask(body) {
   const attachments = await uploadPending(get().pending);
   const t = await api("POST", "/tasks", attachments.length ? { ...body, attachments } : body);
   clearPending();
-  await loadTasks();
+  await Promise.all([loadTasks(), loadThreads().catch(() => undefined)]);
   openTask(t.id);
 }
 

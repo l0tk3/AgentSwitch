@@ -1,6 +1,7 @@
 /** The pipeline: pin → validate; otherwise router (with timeout and one retry) → validate → default. */
 
 import { aggregateRecords, guardsFor, recordText, type RecordRow } from "../threads/record.js";
+import type { ThreadBrief } from "../threads/types.js";
 import { EMPTY_CONTEXT, type LoadedContext } from "./context.js";
 import { parseDecision, type Decision } from "./decision.js";
 import { classify, defaultTarget } from "./defaultPolicy.js";
@@ -33,6 +34,8 @@ export type RouteDeps = {
   /** Track record rows (last 30 days) for the prompt and the guards. */
   readonly records?: readonly RecordRow[];
   readonly extensions?: ExtensionsSummary;
+  /** Open threads for the router's thread assignment (threads-v0 §6). */
+  readonly threads?: readonly ThreadBrief[];
 };
 
 /** The router's label, else the default policy's coarse class. */
@@ -139,7 +142,7 @@ function defaultTargetExcluding(req: RouteRequest, deps: RouteDeps, exclude: rea
 }
 
 async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Promise<Asked> {
-  const system = systemPrompt(deps.targets, { context: deps.context ?? EMPTY_CONTEXT, memory: deps.memory ?? EMPTY_CONTEXT, record: recordText(aggregateRecords(deps.records ?? [])), extensions: deps.extensions ?? { mcp: [], skills: [] } });
+  const system = systemPrompt(deps.targets, { context: deps.context ?? EMPTY_CONTEXT, memory: deps.memory ?? EMPTY_CONTEXT, record: recordText(aggregateRecords(deps.records ?? [])), extensions: deps.extensions ?? { mcp: [], skills: [] }, threads: deps.threads ?? [] });
   let error: string | null = null;
   let ms = 0;
   for (let attempt = 1; attempt <= 2; attempt++) {

@@ -76,6 +76,7 @@ function showEvent(ev: TaskEvent): void {
     case "approval_resolved": console.log(`${t} approval ${p.approvalId} -> ${p.decision} (${p.status})`); break;
     case "attempt_failed": console.log(`${t} FAILED   ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (side effects)" : ""}`); break;
     case "redispatch": console.log(`${t} reroute  ${p.kind}${p.target ? ` -> ${(p.target as { harness: string; model: string }).harness}/${(p.target as { model: string }).model}` : ""}${p.source ? ` (${p.source})` : ""}`); break;
+    case "thread": console.log(`${t} thread   ${p.threadId} (${p.source}${p.confidence !== null && p.confidence !== undefined ? `, confidence ${p.confidence}` : ""})`); break;
     case "handoff": console.log(`${t} handoff  ${p.from ? `${(p.from as { harness: string }).harness} -> ` : ""}${p.to ? `${(p.to as { harness?: string }).harness ?? "?"}/${(p.to as { model?: string }).model ?? "?"}` : "router"} (${p.reason})${p.taskId ? `  task ${p.taskId}` : ""}`); break;
     case "summary": console.log(`${t} summary  ${p.ok ? `"${p.title}" (${p.ms} ms)` : `failed: ${p.error}`}`); break;
     case "done": console.log(`${t} DONE     ${p.result}`); break;

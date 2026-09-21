@@ -90,6 +90,17 @@ export type ThreadState = {
   readonly lastActivity: number | null;
 };
 
+/** What the router sees of an open thread (threads-v0 §6): a title, a line of summary, who did it last. */
+export type ThreadBrief = {
+  readonly id: string;
+  readonly title: string | null;
+  readonly cwd: string;
+  readonly goal: string;
+  readonly progress: string;
+  readonly lastTarget: TargetRef | null;
+  readonly lastActivity: number | null;
+};
+
 export const EMPTY_THREAD_STATE: ThreadState = {
   tasks: [], sessions: {}, summary: null, summarySeq: null, title: null, handoffs: [], cost: {}, progress: [], lastTarget: null, lastActivity: null,
 };

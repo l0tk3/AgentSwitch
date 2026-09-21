@@ -13,6 +13,9 @@ export const Decision = z.object({
   category: z.string().min(1).nullable().default(null),
   /** Task kind for the track record (threads-v0 §7): code-multifile | code-small | browser | chat | translate | other. */
   kind: z.string().min(1).max(40).nullable().default(null),
+  /** Which open thread this task continues (threads-v0 §6): a listed thread id, or "new". */
+  thread: z.string().min(1).nullable().default(null),
+  thread_confidence: z.number().min(0).max(1).nullable().default(null),
   expected_size: z.enum(["small", "medium", "large"]).default("medium"),
   risk: z.string().nullable().default(null),
   fallbacks: z.array(TargetRef).default([]),

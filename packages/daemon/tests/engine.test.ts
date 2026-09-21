@@ -31,7 +31,7 @@ describe("Engine", () => {
     expect(t.status).toBe("queued");
     await engine.idle();
     expect(store.getTask(t.id)).toMatchObject({ status: "done", harness: "codex", model: "gpt-5.5", effort: "low", brief: "rewritten brief" });
-    expect(types(events, t.id)).toEqual(["queued", "routed", "dispatched", "text", "done"]);
+    expect(types(events, t.id)).toEqual(["queued", "routed", "thread", "dispatched", "text", "done"]);
     expect(executors.find((e) => e.harness === "codex")!.runs[0]).toMatchObject({ brief: "rewritten brief", model: "gpt-5.5", effort: "low", browser: false });
   });
 

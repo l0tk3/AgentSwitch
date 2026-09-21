@@ -62,8 +62,12 @@ config dir).
 ## Threads (threads-v0)
 
 Every task runs in a thread: one piece of work from first message to done. A follow-up (`parent_id`)
-joins its parent's thread, `thread_id` picks one explicitly, otherwise a new thread opens for the
-cwd. AgentSwitch stores only handles, an append-only `thread_events` log (`task`, `session`,
+joins its parent's thread, `thread_id` picks one explicitly; otherwise the router decides at routing
+time (`thread` + `thread_confidence` in its Decision, from a list of open threads with title, one
+line of summary and last target). Above `router.thread_confidence` (0.6) the task joins; below it
+the user is asked through the normal approval card (allow = join, deny or timeout = new thread);
+"new" or an unknown id opens a thread for the cwd. An ephemeral task that joins a thread moves into
+the thread's cwd. The home page lists open threads first (click opens the latest task). AgentSwitch stores only handles, an append-only `thread_events` log (`task`, `session`,
 `summary`, `title`, `handoff`, `cost`, `progress`, each with its fold policy; `foldThread` is pure)
 and a last-wins summary. Conversation history stays with each harness, in the thread's private home
 `$AGENTSWITCH_HOME/threads/<id>/`:
@@ -150,7 +154,7 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 | POST | `/threads/:id/archive`, `/threads/:id/reopen` | archive = delete after 7 days (refused while a task runs) / reopen |
 | DELETE | `/threads/:id` | delete now, private home included |
 | GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
-| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
+| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, thread, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
 | POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |
 | POST | `/tasks/:id/cancel` | abort; pending approvals denied |
 | GET | `/approvals` | pending across tasks |
@@ -204,7 +208,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `src/files/*` | names (limits, MIME), uploads (staging → `<cwd>/in/`), artifacts (tree, safe download path, `out/` → `artifacts/<id>` before an ephemeral cwd is deleted, sweeps), notes (attachment paragraph for router + executor) |
 | `src/extensions/*`, `src/executors/extensions.ts` | MCP + skill registries and their per-harness shapes |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
-| `tests/` | 180 tests; API tests run in-process via Hono `request()` |
+| `tests/` | 182 tests; API tests run in-process via Hono `request()` |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
 | `scripts/resume_experiment.ts`, `scripts/executor_resume_smoke.ts` | real-model checks that Claude / Codex resume from a thread's private home (costs cents) |
 
