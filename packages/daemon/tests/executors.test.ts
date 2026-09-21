@@ -163,3 +163,17 @@ describe("claude executor helpers", () => {
     expect(foldMessage(empty, { type: "user" } as never)).toEqual(empty);
   });
 });
+
+describe("executor instructions", () => {
+  it("concatenates AgentSwitch notes and secret-gate's AGENTS.md; missing files are skipped", async () => {
+    const { executorInstructions, EXECUTOR_MD, GATE_AGENTS_MD } = await import("../src/executors/instructions.js");
+    const text = executorInstructions();
+    expect(text).toContain("You are being run by AgentSwitch");
+    expect(text).toContain("enc:v1:");
+    expect(text).toContain("secret_fill");
+    expect(executorInstructions({ executor: EXECUTOR_MD, gate: "/nonexistent" })).not.toContain("secret_fill");
+    expect(executorInstructions({ executor: "/nonexistent", gate: GATE_AGENTS_MD })).toContain("secret-gate");
+    const cfg = opencodeExecConfig(null, "/p", false, "/x/AGENTS.md") as { instructions: string[] };
+    expect(cfg.instructions).toEqual(["/x/AGENTS.md"]);
+  });
+});

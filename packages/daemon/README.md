@@ -61,11 +61,17 @@ config dir).
 
 ## Executors
 
-`AGENTSWITCH_EXECUTORS=real` (default `echo`); `AGENTSWITCH_BROWSER=1` adds the gated Playwright
-browser as an MCP server; `AGENTSWITCH_BROWSER_ORIGINS=a;b` restricts it. When
-`packages/secret-gate/.venv` exists, every executor gets the gate: proxy in the tool env (both
-cases), `secret-gate mcp`, gate home unreadable. `scripts/executor_smoke.ts <harness> [model]` runs
-one executor on a trivial file task in a temp dir.
+`AGENTSWITCH_EXECUTORS=real` (default `echo`). When `packages/secret-gate/.venv` exists, every
+executor gets the gate: proxy in the tool env (both cases), `secret-gate mcp`, gate home unreadable,
+and, for tasks that need a browser (`needs_browser` on the task or in the router's decision), the
+gated Playwright MCP (`AGENTSWITCH_BROWSER=0` disables; `AGENTSWITCH_BROWSER_ORIGINS=a;b` restricts
+navigation). The gate proxy must be running on :8080 (`secret-gate proxy`).
+
+Every executor also receives the same global guidance, `config/EXECUTOR.md` followed by
+`packages/secret-gate/AGENTS.md` (how to treat `enc:v1:` values, `secret_fill`, 403s): Claude via
+the SDK system-prompt append, Codex as `$CODEX_HOME/AGENTS.md` in its private home, OpenCode via
+the `instructions` config. `scripts/executor_smoke.ts <harness> [model]` runs one executor on a
+trivial file task in a temp dir.
 
 | harness | how | approvals | failure signals mapped |
 |---|---|---|---|
@@ -86,7 +92,7 @@ one executor on a trivial file task in a temp dir.
 | POST | `/route/preview` | route without executing |
 | GET/POST | `/quota`, `/quota/refresh` | readings per harness (`remaining` 0..1, detail, source, error) |
 | GET | `/targets` | catalog + current quota map |
-| GET | `/routing/log` | recent decisions |
+| GET | `/routing/log` | recent decisions (every engine dispatch and re-dispatch, plus previews) |
 | GET/PUT | `/context` | CONTEXT.md (PUT lints) |
 | GET | `/healthz` | |
 
@@ -111,7 +117,8 @@ ask the router with the history; gate_denied or an approved action → stop. The
 |---|---|
 | `src/engine/{types,store,bus,engine,cleanup}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop, ephemeral cleanup |
 | `ui/index.html` | phone-draft UI served at `/ui` |
-| `src/executors/{types,echo,gate,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, the three real executors |
+| `src/executors/{types,echo,gate,instructions,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, global guidance, the three real executors |
+| `config/EXECUTOR.md` | AgentSwitch's part of the guidance every executor gets |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
 | `src/quota/{codex,deepseek,claude,windows,index}.ts` | providers, 5h/7d windows (Codex app-server windows; Claude `rate_limit_event` from runs or a one-turn probe), cached service |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |

@@ -5,6 +5,7 @@ import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import { echoExecutor } from "../src/executors/echo.js";
 import { echoRouter } from "../src/router/routers/echo.js";
+import { RoutingLog } from "../src/router/log.js";
 import { decisionJson, realTargets } from "./helpers.js";
 
 const targets = realTargets();
@@ -16,8 +17,9 @@ function build(routerReplies: string[] | ((input: { task: string }, n: number) =
   bus.subscribe("*", (e) => events.push(e));
   const executors = Object.keys(targets.harnesses).map((h) => echoExecutor(h));
   const router = echoRouter(routerReplies);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => opts.quota ?? {}, approvalTimeoutMs: 200, retryBackoffMs: 1 });
-  return { store, bus, engine, events, executors, router };
+  const routingLog = new RoutingLog(":memory:");
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => opts.quota ?? {}, approvalTimeoutMs: 200, retryBackoffMs: 1, routingLog });
+  return { store, bus, engine, events, executors, router, routingLog };
 }
 
 const types = (events: TaskEvent[], id: string) => events.filter((e) => e.taskId === id).map((e) => e.type);
@@ -30,7 +32,20 @@ describe("Engine", () => {
     await engine.idle();
     expect(store.getTask(t.id)).toMatchObject({ status: "done", harness: "codex", model: "gpt-5.5", effort: "low", brief: "rewritten brief" });
     expect(types(events, t.id)).toEqual(["queued", "routed", "dispatched", "text", "done"]);
-    expect(executors.find((e) => e.harness === "codex")!.runs[0]).toMatchObject({ brief: "rewritten brief", model: "gpt-5.5", effort: "low" });
+    expect(executors.find((e) => e.harness === "codex")!.runs[0]).toMatchObject({ brief: "rewritten brief", model: "gpt-5.5", effort: "low", browser: false });
+  });
+
+  it("every routing decision lands in the routing log; browser flag reaches the executor", async () => {
+    const { engine, routingLog, executors, router } = build([
+      decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null, needs_browser: true }),
+      decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, needs_browser: true }),
+    ]);
+    engine.submit({ task: 'open the site @echo {"fail":"refusal","failTimes":1}', cwd: "/tmp" });
+    await engine.idle();
+    expect(router.calls).toHaveLength(2);
+    expect(routingLog.recent().map((r) => [r.source, r.harness])).toEqual([["router", "codex"], ["router", "claude-code"]]);
+    expect(executors.find((e) => e.harness === "claude-code")!.runs[0]!.browser).toBe(true);
+    expect(executors.find((e) => e.harness === "codex")!.runs[0]!.browser).toBe(true);
   });
 
   it("approval: task waits, allow continues to done; deny ends in task_failed → router → done", async () => {

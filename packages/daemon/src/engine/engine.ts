@@ -3,6 +3,7 @@
 import { classifyFailure, excerpt, hasSideEffects, NO_SIDE_EFFECTS } from "../router/failure.js";
 import type { Attempt } from "../router/reroute.js";
 import { reroute, route, type RouteDeps } from "../router/route.js";
+import type { RoutingLog } from "../router/log.js";
 import type { TargetRef } from "../router/targets.js";
 import type { Verdict } from "../router/validate.js";
 import type { ApprovalDecision, Executor } from "../executors/types.js";
@@ -19,6 +20,7 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   readonly approvalTimeoutMs?: number;
   readonly retryBackoffMs?: number;
   readonly cleanupPaths?: CleanupPaths;
+  readonly routingLog?: RoutingLog;
 };
 
 type Waiter = { resolve: (d: ApprovalDecision) => void; timer: NodeJS.Timeout };
@@ -75,7 +77,7 @@ export class Engine {
   }
 
   private routeDeps(): RouteDeps {
-    const { store: _s, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, ...rest } = this.deps;
+    const { store: _s, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, routingLog: _l, ...rest } = this.deps;
     return { ...rest, quota: quota(), running: { ...this.running } };
   }
 
@@ -113,6 +115,7 @@ export class Engine {
     this.deps.store.updateTask(task.id, { status: "routing" });
     const composed = this.composeTask(task);
     const routed = await route({ task: composed, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser }, this.routeDeps());
+    this.deps.routingLog?.record(task.task, task.cwd, routed);
     this.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
     if (!routed.verdict.ok) return this.fail(task.id, `no target: ${routed.verdict.notes.join("; ")}`);
     let current = this.deps.store.updateTask(task.id, { decision: routed.decision, brief: routed.decision?.brief ?? composed });
@@ -142,6 +145,7 @@ export class Engine {
       }
       if (step.kind === "redispatch") {
         current = this.deps.store.updateTask(task.id, { routerAsks: current.routerAsks + 1, decision: next.decision ?? current.decision, brief: next.decision?.brief ?? current.brief });
+        this.deps.routingLog?.record(task.task, task.cwd, { verdict: step.verdict, decision: next.decision, source: step.source, routerError: next.routerError, routerMs: next.routerMs, attempts: attempts.length });
         this.emit(task.id, "redispatch", { kind: "router", source: step.source, verdict: step.verdict, decision: next.decision, routerError: next.routerError });
         verdict = step.verdict;
         continue;
@@ -167,7 +171,7 @@ export class Engine {
     try {
       const outcome = await executor.run({
         taskId: task.id, task: task.task, brief: task.brief ?? task.task, cwd: task.cwd, model: verdict.model, effort: verdict.effort,
-        handoffNote: task.decision?.handoff_note ?? null, signal,
+        handoffNote: task.decision?.handoff_note ?? null, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal,
         emit: (type, payload) => this.emit(task.id, type, payload),
         approve: (action, evidence) => this.requestApproval(task.id, action, evidence),
       });

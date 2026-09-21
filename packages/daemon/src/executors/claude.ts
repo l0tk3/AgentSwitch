@@ -9,6 +9,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { claudeMcpServers, gateEnv, type GateOptions } from "./gate.js";
+import { executorInstructions } from "./instructions.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
 
 export type ClaudeExecutorOptions = {
@@ -98,11 +99,13 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       const abort = new AbortController();
       const onAbort = () => abort.abort();
       input.signal.addEventListener("abort", onAbort, { once: true });
+      const browser = (opts.browser ?? true) && input.browser;
       const options: Options = {
         cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
+        systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },
         maxTurns: opts.maxTurns ?? 200, abortController: abort, includePartialMessages: false,
         ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
-        ...(opts.gate ? { env: { ...process.env, ...gateEnv(opts.gate) } as Record<string, string>, mcpServers: claudeMcpServers(opts.gate, profile, opts.browser ?? false) } : {}),
+        ...(opts.gate ? { env: { ...process.env, ...gateEnv(opts.gate) } as Record<string, string>, mcpServers: claudeMcpServers(opts.gate, profile, browser) } : {}),
         ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
       };
       const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;

@@ -47,7 +47,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     port: Number(env.AGENTSWITCH_PORT ?? DEFAULT_PORT),
     router: env.AGENTSWITCH_ROUTER === "echo" ? "echo" : "opencode",
     executors: env.AGENTSWITCH_EXECUTORS === "real" ? "real" : "echo",
-    browser: env.AGENTSWITCH_BROWSER === "1",
+    browser: env.AGENTSWITCH_BROWSER !== "0",   // gated Playwright MCP attached to browser tasks when the gate exists
     quotaTtlMs: 60_000,
   };
 }
@@ -76,7 +76,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
     claudeQuota(store, { cache: rateLimits, ...(cfg.executors === "real" ? { probe: () => probeRateLimits() } : {}) }),
   ], cfg.quotaTtlMs);
   const workRoot = join(cfg.home, "work");
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot } });
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath) });
   const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, workRoot, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };

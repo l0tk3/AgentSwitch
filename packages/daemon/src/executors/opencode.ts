@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import { gateEnv, opencodeGateConfig, stripProxy, type GateOptions } from "./gate.js";
+import { executorInstructions } from "./instructions.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
 export type OpenCodeExecutorOptions = {
@@ -20,10 +21,11 @@ export type OpenCodeExecutorOptions = {
   readonly browser?: boolean;
 };
 
-export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean): object {
+export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean, instructionsPath?: string): object {
   const g = gate ? opencodeGateConfig(gate, profile, browser) : { mcp: {}, readDeny: {} };
   return {
     $schema: "https://opencode.ai/config.json",
+    ...(instructionsPath ? { instructions: [instructionsPath] } : {}),
     mcp: g.mcp,
     permission: {
       read: { "*": "allow", ...g.readDeny, "**/.env": "deny", "**/*.pem": "deny", "**/*.key": "deny" },
@@ -66,7 +68,9 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
     async run(input: ExecutionInput): Promise<ExecutionOutcome> {
       const dir = mkdtempSync(join(tmpdir(), "agentswitch-oc-"));
       const configPath = join(dir, "opencode.json");
-      writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), opts.browser ?? false)));
+      const instructionsPath = join(dir, "AGENTS.md");
+      writeFileSync(instructionsPath, executorInstructions());
+      writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath)));
       const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath };
       const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
       const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });

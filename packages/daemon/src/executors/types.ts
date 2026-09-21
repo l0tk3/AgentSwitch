@@ -12,6 +12,8 @@ export type ExecutionInput = {
   readonly model: string;
   readonly effort: string | null;
   readonly handoffNote: string | null;
+  /** Task or router asked for a browser: attach the gated Playwright MCP. */
+  readonly browser: boolean;
   readonly signal: AbortSignal;
   /** Stream progress; the engine persists and fans out. */
   readonly emit: (type: "text" | "tool_call", payload: Record<string, unknown>) => void;

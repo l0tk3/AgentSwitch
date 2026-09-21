@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import { AppServerClient, type Json } from "./appserver.js";
 import { codexGateToml, stripProxy, type GateOptions } from "./gate.js";
+import { executorInstructions } from "./instructions.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
 export type CodexExecutorOptions = {
@@ -72,7 +73,7 @@ export function outcomeFromTurn(state: TurnState, extraError: string | null): Ex
   };
 }
 
-function prepareHome(opts: CodexExecutorOptions, effort: string | null): { home: string; profile: string } {
+function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser: boolean): { home: string; profile: string } {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-codex-"));
   chmodSync(home, 0o700);
   const auth = opts.authPath ?? join(process.env.HOME ?? "", ".codex", "auth.json");
@@ -80,7 +81,8 @@ function prepareHome(opts: CodexExecutorOptions, effort: string | null): { home:
   copyFileSync(auth, join(home, "auth.json"));
   chmodSync(join(home, "auth.json"), 0o600);
   const profile = join(home, "chromium-profile");
-  writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, opts.browser ?? false, effort));
+  writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, browser, effort));
+  writeFileSync(join(home, "AGENTS.md"), executorInstructions());   // Codex's global instructions live in $CODEX_HOME/AGENTS.md
   return { home, profile };
 }
 
@@ -88,7 +90,7 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
   return {
     harness: "codex",
     async run(input: ExecutionInput): Promise<ExecutionOutcome> {
-      const { home } = prepareHome(opts, input.effort);
+      const { home } = prepareHome(opts, input.effort, (opts.browser ?? true) && input.browser);
       const env = { ...stripProxy(process.env), CODEX_HOME: home };
       let child: ChildProcess | null = null;
       let state: TurnState = { text: [], tools: 0, edits: 0, approvals: 0, completed: null, errors: [] };
