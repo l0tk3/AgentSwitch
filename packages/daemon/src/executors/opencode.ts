@@ -53,15 +53,16 @@ export function opencodeExecConfig(gate: GateOptions | null | undefined, profile
   };
 }
 
-export type RunSummary = { text: string; tools: { tool: string; input: unknown }[]; errors: string[] };
+export type RunSummary = { text: string; tools: { tool: string; input: unknown }[]; errors: string[]; sessionId: string | null };
 
-/** Fold the `--format json` event stream into text, tool calls and errors. */
+/** Fold the `--format json` event stream into text, tool calls, errors and the session id (every event carries `sessionID`). */
 export function summarizeRun(stdout: string): RunSummary {
-  const out: RunSummary = { text: "", tools: [], errors: [] };
+  const out: RunSummary = { text: "", tools: [], errors: [], sessionId: null };
   for (const line of stdout.split("\n")) {
     if (!line.trim().startsWith("{")) continue;
-    let ev: { type?: string; part?: Record<string, unknown>; error?: unknown; message?: string };
+    let ev: { type?: string; sessionID?: string; part?: Record<string, unknown>; error?: unknown; message?: string };
     try { ev = JSON.parse(line); } catch { continue; }
+    if (typeof ev.sessionID === "string" && !out.sessionId) out.sessionId = ev.sessionID;
     if (ev.type === "text" && typeof ev.part?.text === "string") out.text += ev.part.text;
     else if (ev.type === "tool_use" && ev.part) out.tools.push({ tool: String(ev.part.tool ?? "?"), input: ev.part.input ?? ev.part.state ?? null });
     else if (ev.type === "error") out.errors.push(typeof ev.error === "string" ? ev.error : ev.message ?? JSON.stringify(ev.error ?? ev));
@@ -75,7 +76,12 @@ export function outcomeFromRun(summary: RunSummary, exitCode: number | null, std
   const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: edits, commandsRun: shells };
   const errText = [...summary.errors, stderr.trim()].filter(Boolean).join("\n");
   const ok = !timedOut && exitCode === 0 && summary.errors.length === 0 && summary.text.trim().length > 0;
-  return { ok, exitCode, stderr: errText, lastText: summary.text.trim(), timedOut, sideEffects };
+  return { ok, exitCode, stderr: errText, lastText: summary.text.trim(), timedOut, sideEffects, ...(summary.sessionId ? { sessionId: summary.sessionId } : {}) };
+}
+
+/** A resume that OpenCode refused (session gone from its db, or a different directory): retry without it. */
+export function resumeRefused(summary: RunSummary, exitCode: number | null, stderr: string): boolean {
+  return exitCode !== 0 && !summary.text.trim() && /session/i.test(`${summary.errors.join(" ")} ${stderr}`);
 }
 
 export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
@@ -97,31 +103,47 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
       writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath, extras)));
       const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
       const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
-      const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, opts.maxMs ?? 30 * 60_000);
-      const onAbort = () => child.kill("SIGTERM");
-      input.signal.addEventListener("abort", onAbort, { once: true });
-      let buffered = "";
-      child.stdout.on("data", (d: Buffer) => {
-        stdout += d.toString();
-        buffered += d.toString();
-        let i;
-        while ((i = buffered.indexOf("\n")) >= 0) {
-          const line = buffered.slice(0, i); buffered = buffered.slice(i + 1);
-          const one = summarizeRun(line);
-          if (one.text) input.emit("text", { text: one.text });
-          for (const t of one.tools) input.emit("tool_call", { tool: t.tool, input: t.input });
-        }
+      // Native continuation (verified: `--session <id>` in a later `run --standalone` process picks the conversation up;
+      // sessions live in OpenCode's shared db, keyed by directory, so the engine only offers a resume for the same cwd).
+      const once = (resume: string | null) => new Promise<{ summary: RunSummary; exitCode: number | null; stderr: string; timedOut: boolean }>((done) => {
+        if (resume) input.emit("text", { text: `(resuming OpenCode session ${resume})` });
+        const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, ...(resume ? ["--session", resume] : []), prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, opts.maxMs ?? 30 * 60_000);
+        const onAbort = () => child.kill("SIGTERM");
+        input.signal.addEventListener("abort", onAbort, { once: true });
+        let buffered = "";
+        child.stdout.on("data", (d: Buffer) => {
+          stdout += d.toString();
+          buffered += d.toString();
+          let i;
+          while ((i = buffered.indexOf("\n")) >= 0) {
+            const line = buffered.slice(0, i); buffered = buffered.slice(i + 1);
+            const one = summarizeRun(line);
+            if (one.text) input.emit("text", { text: one.text });
+            for (const t of one.tools) input.emit("tool_call", { tool: t.tool, input: t.input });
+          }
+        });
+        child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+        child.on("error", (e) => { stderr += e.message; });
+        child.on("close", (exitCode) => {
+          clearTimeout(timer);
+          input.signal.removeEventListener("abort", onAbort);
+          done({ summary: summarizeRun(stdout), exitCode, stderr, timedOut });
+        });
       });
-      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      const exitCode = await new Promise<number | null>((resolve) => { child.on("error", (e) => { stderr += e.message; resolve(null); }); child.on("close", resolve); });
-      clearTimeout(timer);
-      input.signal.removeEventListener("abort", onAbort);
-      rmSync(dir, { recursive: true, force: true });
-      return outcomeFromRun(summarizeRun(stdout), exitCode, stderr, timedOut);
+      try {
+        let r = await once(input.resume);
+        if (input.resume && !input.signal.aborted && resumeRefused(r.summary, r.exitCode, r.stderr)) {
+          input.emit("text", { text: `(OpenCode refused to resume ${input.resume}: ${r.stderr.trim().slice(0, 120)}; starting a new session)` });
+          r = await once(null);
+        }
+        return outcomeFromRun(r.summary, r.exitCode, r.stderr, r.timedOut);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
   };
 }

@@ -76,7 +76,10 @@ and a last-wins summary. Conversation history stays with each harness, in the th
   login still applies); the next task in the thread by Claude Code passes `resume: <session_id>`.
 - `codex/` is `CODEX_HOME` (auth.json re-copied, config regenerated per run); threads start
   non-ephemeral and the next Codex task calls `thread/resume {threadId}`.
-- OpenCode keeps no private home yet (its auth lives in the same XDG data dir as its sessions).
+- OpenCode has no private home: its provider credentials sit in the same `opencode.db` as its sessions,
+  so a private data dir would lose the DeepSeek key. Sessions stay in the shared db (ephemeral tasks
+  still purge theirs); the next OpenCode task in the thread passes `--session <id>` (verified), and a
+  refused resume falls back to a fresh session.
 
 Same harness, same thread, same cwd → native resume, no summary involved. Any change of harness
 carries a handoff package instead: the thread summary + files touched + `git status`/`diff --stat`

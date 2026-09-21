@@ -7,7 +7,7 @@ import { AppServerClient, type Json } from "../src/executors/appserver.js";
 import { canonical, decideTool, foldMessage, outcomeFromFold, type Folded } from "../src/executors/claude.js";
 import { applyNotification, approvalAnswer, codexConfigToml, describeApproval, outcomeFromTurn, type TurnState } from "../src/executors/codex.js";
 import { claudeMcpServers, codexGateToml, gateEnv, opencodeGateConfig, type GateOptions } from "../src/executors/gate.js";
-import { opencodeExecConfig, outcomeFromRun, summarizeRun } from "../src/executors/opencode.js";
+import { opencodeExecConfig, outcomeFromRun, resumeRefused, summarizeRun } from "../src/executors/opencode.js";
 import { classifyFailure } from "../src/router/failure.js";
 
 const gate: GateOptions = { bin: "/g/secret-gate", home: "/h/.secret-gate", proxy: "http://127.0.0.1:8080", playwrightVersion: "0.0.82", allowedOrigins: ["http://a:8400"] };
@@ -57,6 +57,13 @@ describe("opencode executor helpers", () => {
     expect(classifyFailure(outcomeFromRun(s, 1, "connect ECONNREFUSED", false))).toBe("transport");
     expect(outcomeFromRun(summarizeRun(JSON.stringify({ type: "error", error: "rate limit exceeded" })), 0, "", false)).toMatchObject({ ok: false, stderr: "rate limit exceeded" });
     expect(outcomeFromRun(summarizeRun(""), null, "", true)).toMatchObject({ ok: false, timedOut: true });
+    expect(s.sessionId).toBeNull();
+    const withId = summarizeRun([JSON.stringify({ type: "text", sessionID: "ses_abc", part: { text: "x" } }), JSON.stringify({ type: "text", sessionID: "ses_other", part: { text: "y" } })].join("\n"));
+    expect(withId.sessionId).toBe("ses_abc");
+    expect(outcomeFromRun(withId, 0, "", false).sessionId).toBe("ses_abc");
+    expect(resumeRefused(summarizeRun(""), 1, "Error: session ses_abc not found")).toBe(true);
+    expect(resumeRefused(withId, 1, "session gone")).toBe(false);      // it produced text: not a refused resume
+    expect(resumeRefused(summarizeRun(""), 1, "connect ECONNREFUSED")).toBe(false);
   });
 });
 

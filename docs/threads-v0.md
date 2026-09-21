@@ -50,7 +50,7 @@ threads/<id>/
 > 2026-09-21 实测（`scripts/resume_experiment.ts`、`scripts/executor_resume_smoke.ts`）：
 > - Claude：`CLAUDE_CONFIG_DIR` 生效，但 claude 2.1.278 会改查钥匙串条目 `Claude Code-credentials-<hash>` 而报 "Not logged in"；再传 `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` 即复用用户登录。transcript 落在 `<dir>/projects/<cwd realpath key>/<session_id>.jsonl`，`resume` 要求同 cwd。`~/.claude` 零新增。
 > - Codex：`thread/start` 必须 `ephemeral:false` 才写 rollout；`thread/resume {threadId}` 从 `$CODEX_HOME/sessions/` + `thread_history_1.sqlite` 重载，`~/.codex/sessions` 零新增。每次启动往 CODEX_HOME 灌 `skills/.system/` 和几个 sqlite，噪音随线程删除。
-> - OpenCode 未做私有目录：它的 auth.json 与会话同在 XDG 数据目录，改 `XDG_DATA_HOME` 会丢凭据；同线程换回 OpenCode 时走交接包而不是 resume。
+> - OpenCode 不做私有目录：provider 凭据和会话同在 `~/.local/share/opencode/opencode.db`，换 `XDG_DATA_HOME` 就没有 DeepSeek key。改为在共享库里续接：`--format json` 每条事件带 `sessionID`，下次同线程同 cwd 传 `run --session <id>`（实测第二轮零工具 1.5 s 答出随机词，`scripts/opencode_resume_experiment.ts`）；续接被拒则退回新会话。临时任务结束仍按 cwd 清理共享库里的会话行。
 
 ## 2. 事件日志与折叠策略
 
