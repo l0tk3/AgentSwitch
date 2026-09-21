@@ -14,11 +14,23 @@ import { exampleContext, lintContext, loadContext } from "../router/context.js";
 import type { RoutingLog } from "../router/log.js";
 import { route, type RouteDeps } from "../router/route.js";
 import { TargetRef, type Targets } from "../router/targets.js";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { extname, join, resolve, sep } from "node:path";
 
-const UI_PATH = new URL("../../ui/index.html", import.meta.url).pathname;
+const UI_DIR = resolve(new URL("../../ui/", import.meta.url).pathname);
+const UI_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
+
+/** A file under ui/ by its URL path, or null when it does not exist or escapes the directory. */
+export function uiFile(urlPath: string): { body: string; type: string } | null {
+  let rel: string;
+  try { rel = decodeURIComponent(urlPath); } catch { return null; }
+  const file = resolve(UI_DIR, "." + (rel === "" || rel === "/" ? "/index.html" : rel));
+  if (file !== UI_DIR && !file.startsWith(UI_DIR + sep)) return null;
+  const type = UI_TYPES[extname(file)];
+  if (!type || !existsSync(file) || !statSync(file).isFile()) return null;
+  return { body: readFileSync(file, "utf8"), type };
+}
 
 function newWorkDir(root: string): string {
   const dir = join(root, randomUUID().slice(0, 8));
@@ -62,7 +74,11 @@ export function createApp(deps: ApiDeps): Hono {
 
   // Development console / phone draft: one static page that only uses the API below.
   app.get("/", (c) => c.redirect("/ui"));
-  app.get("/ui", (c) => c.html(readFileSync(UI_PATH, "utf8")));
+  app.get("/ui", (c) => c.html(uiFile("/index.html")!.body));
+  app.get("/ui/*", (c) => {
+    const f = uiFile(c.req.path.slice("/ui".length));
+    return f ? c.body(f.body, 200, { "content-type": f.type, "cache-control": "no-cache" }) : c.notFound();
+  });
 
   app.post("/tasks", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));

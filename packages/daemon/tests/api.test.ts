@@ -107,7 +107,15 @@ describe("HTTP API", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("<title>AgentSwitch</title>");
-    expect(html).toContain("/tasks/${id}/events");
+    expect(html).toContain('src="/ui/app.js"');
+    const js = await d.app.request("/ui/lib/actions.js");
+    expect(js.status).toBe(200);
+    expect(js.headers.get("content-type")).toContain("javascript");
+    expect(await js.text()).toContain("/tasks/${id}/events");
+    expect((await d.app.request("/ui/app.css")).headers.get("content-type")).toContain("text/css");
+    expect((await d.app.request("/ui/../package.json")).status).toBe(404);
+    expect((await d.app.request("/ui/%2e%2e/package.json")).status).toBe(404);
+    expect((await d.app.request("/ui/nope.js")).status).toBe(404);
     expect((await d.app.request("/")).status).toBe(302);
     d.close();
   });

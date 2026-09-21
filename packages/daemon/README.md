@@ -36,7 +36,7 @@ Development executor: put an `@echo {...}` directive in the task text to script 
 
 ## Phone draft UI
 
-`http://127.0.0.1:4711/ui` (`/` redirects there): one static page, `ui/index.html`, no build step,
+`http://127.0.0.1:4711/ui` (`/` redirects there): a desktop console served from `ui/` (plain ES modules, no build step; `/ui/*` serves only files inside that directory),
 mobile-first. Home = composer (just type what you want; the router decides) with 高级选项 for
 working directory, pinned model and browser, above a feed of pending approvals / running / recent
 tasks; task detail with live events (SSE), brief, routing reason, approval buttons and a reply box
@@ -146,7 +146,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | path | what |
 |---|---|
 | `src/engine/{types,store,bus,engine,cleanup}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop, ephemeral cleanup |
-| `ui/index.html` | phone-draft UI served at `/ui` |
+| `ui/` | desktop console at `/ui`: `index.html` shell, `app.css`, `app.js` (render loop, click routing, polling), `lib/{api,state,actions}.js`, `views/{home,task,log,ext,ctx,quota}.js` |
 | `src/executors/{types,echo,gate,instructions,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, global guidance, the three real executors |
 | `config/EXECUTOR.md` | AgentSwitch's part of the guidance every executor gets |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
