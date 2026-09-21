@@ -95,7 +95,9 @@ const $ = (s, r = document) => r.querySelector(s);
 const state = { view: "home", tasks: [], task: null, events: [], approvals: [], quota: [], log: [], es: null, health: false };
 const api = async (method, path, body) => {
   const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  const t = await r.text(); const d = t ? JSON.parse(t) : {};
+  const t = await r.text();
+  let d = {};
+  try { d = t ? JSON.parse(t) : {}; } catch { throw new Error(`HTTP ${r.status}: ${t.slice(0, 120)}（服务端异常，看 daemon 日志）`); }
   if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
   return d;
 };

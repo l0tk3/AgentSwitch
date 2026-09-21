@@ -25,6 +25,25 @@ CREATE INDEX IF NOT EXISTS tasks_created ON tasks(created_at DESC);`;
 
 type Row = Record<string, unknown>;
 
+/** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
+const ADDED_COLUMNS: Record<string, string[]> = {
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT"],
+};
+
+export function migrate(db: DatabaseSync): string[] {
+  const applied: string[] = [];
+  for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
+    const present = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+    for (const def of columns) {
+      const name = def.split(" ")[0]!;
+      if (present.has(name)) continue;
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${def}`);
+      applied.push(`${table}.${name}`);
+    }
+  }
+  return applied;
+}
+
 export type StoreOptions = { readonly dbPath: string; readonly tasksDir?: string; readonly now?: () => number };
 
 export class Store {
@@ -37,6 +56,7 @@ export class Store {
     if (opts.tasksDir) mkdirSync(opts.tasksDir, { recursive: true });
     this.db = new DatabaseSync(opts.dbPath);
     this.db.exec(SCHEMA);
+    migrate(this.db);
     this.tasksDir = opts.tasksDir;
     this.now = opts.now ?? Date.now;
   }

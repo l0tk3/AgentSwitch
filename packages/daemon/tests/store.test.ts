@@ -2,7 +2,8 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { Store } from "../src/engine/store.js";
+import { migrate, Store } from "../src/engine/store.js";
+import { DatabaseSync } from "node:sqlite";
 
 describe("Store", () => {
   it("creates, updates and lists tasks with JSON columns round-tripping", () => {
@@ -46,5 +47,24 @@ describe("Store", () => {
     expect(store.usageSince(1_500)).toEqual({ "claude-code": 200 });
     expect(store.usageSince(3_000)).toEqual({});
     store.close();
+  });
+});
+
+describe("migration", () => {
+  it("adds columns introduced later to a database created by an older daemon", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-migrate-"));
+    const path = join(dir, "old.sqlite");
+    const old = new DatabaseSync(path);
+    old.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, status TEXT NOT NULL,
+      task TEXT NOT NULL, cwd TEXT NOT NULL, pin TEXT, needs_browser INTEGER NOT NULL DEFAULT 0,
+      harness TEXT, model TEXT, effort TEXT, brief TEXT, decision TEXT, attempts TEXT NOT NULL DEFAULT '[]', router_asks INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT)`);
+    old.exec("INSERT INTO tasks (id, created_at, updated_at, status, task, cwd) VALUES ('a', 1, 1, 'done', 'old task', '/tmp')");
+    old.close();
+    const store = new Store({ dbPath: path });
+    expect(store.getTask("a")).toMatchObject({ ephemeral: false, parentId: null, task: "old task" });
+    const t = store.createTask({ task: "new", cwd: "/tmp", parentId: "a", ephemeral: true });
+    expect(store.getTask(t.id)).toMatchObject({ parentId: "a", ephemeral: true });
+    store.close();
+    expect(migrate(new DatabaseSync(path))).toEqual([]);   // idempotent
   });
 });
