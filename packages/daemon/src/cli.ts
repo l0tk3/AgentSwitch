@@ -80,7 +80,7 @@ function showEvent(ev: TaskEvent): void {
     case "agent": console.log(`${t}   agent ${p.status} ${p.description ?? p.agentId ?? ""}${p.summary ? `: ${String(p.summary).slice(0, 120)}` : ""}`); break;
     case "thread": console.log(`${t} thread   ${p.threadId} (${p.source}${p.confidence !== null && p.confidence !== undefined ? `, confidence ${p.confidence}` : ""})`); break;
     case "handoff": console.log(`${t} handoff  ${p.from ? `${(p.from as { harness: string }).harness} -> ` : ""}${p.to ? `${(p.to as { harness?: string }).harness ?? "?"}/${(p.to as { model?: string }).model ?? "?"}` : "router"} (${p.reason})${p.taskId ? `  task ${p.taskId}` : ""}`); break;
-    case "summary": console.log(`${t} summary  ${p.ok ? `"${p.title}" (${p.ms} ms)` : `failed: ${p.error}`}`); break;
+    case "summary": console.log(`${t} summary  ${p.ok ? `"${p.title}"${p.spoken ? ` — ${p.spoken}` : ""} (${p.ms} ms)` : `failed: ${p.error}`}`); break;
     case "done": console.log(`${t} DONE     ${p.result}`); break;
     case "failed": console.log(`${t} FAILED   ${p.error}${p.security ? "  [security]" : ""}`); break;
     case "cancelled": console.log(`${t} CANCELLED`); break;

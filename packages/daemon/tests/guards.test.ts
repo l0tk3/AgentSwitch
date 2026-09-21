@@ -77,7 +77,7 @@ describe("Engine: records and memory", () => {
       decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null, kind: "code-small" }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, kind: "chat" }),
     ]);
-    const summarizer: Summarizer = async (input) => ({ summary: { title: "T", goal: "g", progress: "p", files: [], unresolved: [], decisions: [], facts: input.status === "done" ? ["this repo's tests take four minutes", "password: plaintextsecret"] : [] }, error: null, ms: 1 });
+    const summarizer: Summarizer = async (input) => ({ summary: { title: "T", goal: "g", progress: "p", files: [], unresolved: [], decisions: [], facts: input.status === "done" ? ["this repo's tests take four minutes", "password: plaintextsecret"] : [], spoken: "" }, error: null, ms: 1 });
     const engine = new Engine({ store, bus, executors: Object.keys(targets.harnesses).map((h) => echoExecutor(h)), targets, router, quota: () => ({}), approvalTimeoutMs: 200, retryBackoffMs: 1, summarizer, memoryPath, extensionsSummary: () => ({ mcp: [{ name: "github", note: "", harnesses: ["codex"] }], skills: [] }) });
     const a = engine.submit({ task: "small fix", cwd: "/tmp" });
     await engine.idle();

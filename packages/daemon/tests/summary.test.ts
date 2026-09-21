@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { parseSummary, renderSummary, routerSummarizer, summaryMessage, SUMMARY_SYSTEM } from "../src/threads/summary.js";
 import type { Router } from "../src/router/routers/types.js";
 
-const good = { title: "Fix login form", goal: "Make the React login work", progress: "Form found; submit still fails", files: ["src/login.tsx"], unresolved: ["submit returns 400"], decisions: ["use secret_fill for the password box"], facts: ["core login form is React"] };
+const good = { title: "Fix login form", goal: "Make the React login work", progress: "Form found; submit still fails", files: ["src/login.tsx"], unresolved: ["submit returns 400"], decisions: ["use secret_fill for the password box"], facts: ["core login form is React"], spoken: "登录成功，首页标题是 MailLab" };
 
 describe("summary", () => {
   it("parses a JSON object even when wrapped in prose, applies defaults", () => {
     const r = parseSummary(`Sure! ${JSON.stringify({ title: "T", goal: "G" })} done`);
-    expect(r).toEqual({ ok: true, summary: { title: "T", goal: "G", progress: "", files: [], unresolved: [], decisions: [], facts: [] } });
+    expect(r).toEqual({ ok: true, summary: { title: "T", goal: "G", progress: "", files: [], unresolved: [], decisions: [], facts: [], spoken: "" } });
   });
 
   it("rejects missing fields and non-JSON", () => {

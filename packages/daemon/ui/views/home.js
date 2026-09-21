@@ -5,6 +5,7 @@ import { approve, loadQuota, openTask, submitTask } from "../lib/actions.js";
 import { set } from "../lib/state.js";
 import { pendingList } from "../lib/files.js";
 import { quotaPanel } from "./quota.js";
+import { firstLine } from "../lib/feedback.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -34,8 +35,8 @@ export function approvalCard(a, task) {
 
 function taskRow(t) {
   const who = target(t) || (t.status === "routing" ? "分诊中…" : "—");
-  const tail = t.status === "done" ? `<div class="dim ellipsis">${esc((t.result || "").slice(0, 160))}</div>`
-    : t.status === "failed" ? `<div class="dim error ellipsis">${esc((t.error || "").slice(0, 160))}</div>` : "";
+  const tail = t.status === "done" ? `<div class="dim ellipsis">${esc(t.spoken || firstLine(t.result).slice(0, 160))}</div>`
+    : t.status === "failed" ? `<div class="dim error ellipsis">${esc(t.spoken || firstLine(t.error).slice(0, 160))}</div>` : "";
   return `<tr data-open="${t.id}">
     <td class="nowrap"><span class="badge ${t.status}">${t.status}</span></td>
     <td class="task-cell"><div class="t">${esc(t.task)}</div>${tail}</td>

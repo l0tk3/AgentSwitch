@@ -21,6 +21,7 @@ export const SummarySchema = z.object({
   unresolved: z.array(z.string().min(1)).max(MAX_LIST).default([]),
   decisions: z.array(z.string().min(1)).max(MAX_LIST).default([]),
   facts: z.array(z.string().min(1)).max(MAX_LIST).default([]),
+  spoken: z.string().max(200).default(""),
 });
 
 export type SummaryInput = {
@@ -47,7 +48,8 @@ Reply with exactly one JSON object and nothing else:
   "files": ["<paths touched or central to the job>"],
   "unresolved": ["<open questions, failing tests, things the next agent must handle>"],
   "decisions": ["<choices made that the next agent must not undo>"],
-  "facts": ["<durable facts about the environment worth remembering for future tasks, e.g. a site's login form needs secret_fill, a project's tests take four minutes; empty if none>"]
+  "facts": ["<durable facts about the environment worth remembering for future tasks, e.g. a site's login form needs secret_fill, a project's tests take four minutes; empty if none>"],
+  "spoken": "<one plain sentence, at most 40 characters, in the user's language, saying what this run produced or why it failed, as it would be read aloud to the user>"
 }
 Keep the whole object under 500 tokens. Merge the previous summary with the new run; drop nothing that is still true.
 "facts" are for the dispatcher's long-term memory, not a recap of this run: only what would change how a future task is routed or briefed.`;
@@ -85,7 +87,7 @@ export function parseSummary(text: string): ParsedSummary {
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
   const s = parsed.data;
   const clean = (v: string) => lintContext(`- ${v}`).text.replace(/^- /, "");
-  return { ok: true, summary: { title: s.title, goal: clean(s.goal), progress: clean(s.progress), files: s.files, unresolved: s.unresolved.map(clean), decisions: s.decisions.map(clean), facts: s.facts.map(clean) } };
+  return { ok: true, summary: { title: s.title, goal: clean(s.goal), progress: clean(s.progress), files: s.files, unresolved: s.unresolved.map(clean), decisions: s.decisions.map(clean), facts: s.facts.map(clean), spoken: clean(s.spoken).slice(0, 200) } };
 }
 
 export type Summarizer = (input: SummaryInput, signal?: AbortSignal) => Promise<{ summary: Summary | null; error: string | null; ms: number }>;

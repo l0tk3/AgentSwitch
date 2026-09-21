@@ -5,6 +5,7 @@ import { approve, archiveThread, cancelTask, goto, handoffTask, openTask, submit
 import { set } from "../lib/state.js";
 import { approvalCard } from "./home.js";
 import { fileList, pendingList } from "../lib/files.js";
+import { feedbackStrip } from "../lib/feedback.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -110,6 +111,7 @@ export function render(s) {
     <div class="cols">
       <div class="stack">
         ${parent ? `<div class="card dim" data-open="${parent.id}" style="cursor:pointer">↩ 追问自：${esc(parent.task.slice(0, 120))}</div>` : ""}
+        ${feedbackStrip(t, s.events)}
         <div class="card"><div class="task-text">${esc(t.task)}</div></div>
         ${t.result ? `<div class="card ok"><div class="dim">结果</div><div class="pre" style="margin-top:4px">${esc(t.result)}</div></div>` : ""}
         ${t.error ? `<div class="card bad"><div class="dim">错误</div><div class="pre error" style="margin-top:4px">${esc(t.error)}</div></div>` : ""}

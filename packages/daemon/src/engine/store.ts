@@ -48,7 +48,7 @@ type Row = Record<string, unknown>;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT"],
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT"],
 };
 
 export function migrate(db: DatabaseSync): string[] {
@@ -214,7 +214,7 @@ export class Store {
     const map: Record<string, (v: unknown) => unknown> = {
       status: (v) => v, harness: (v) => v, model: (v) => v, effort: (v) => v, brief: (v) => v, result: (v) => v, error: (v) => v,
       decision: (v) => (v === null ? null : JSON.stringify(v)), attempts: (v) => JSON.stringify(v), routerAsks: (v) => v,
-      threadId: (v) => v, cwd: (v) => v, ephemeral: (v) => (v ? 1 : 0),
+      threadId: (v) => v, cwd: (v) => v, ephemeral: (v) => (v ? 1 : 0), spoken: (v) => v,
     };
     const columns: Record<string, string> = { routerAsks: "router_asks", threadId: "thread_id" };
     for (const [key, value] of Object.entries(patch)) {
@@ -310,6 +310,7 @@ function toTask(r: Row): Task {
     routerAsks: Number(r.router_asks ?? 0),
     result: (r.result as string | null) ?? null,
     error: (r.error as string | null) ?? null,
+    spoken: (r.spoken as string | null) ?? null,
   };
 }
 

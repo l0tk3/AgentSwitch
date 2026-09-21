@@ -10,7 +10,7 @@ export function summaryFromPayload(p: Readonly<Record<string, unknown>>): Summar
   const title = str(p.title);
   const goal = str(p.goal);
   if (title === null || goal === null) return null;
-  return { title, goal, progress: str(p.progress) ?? "", files: strs(p.files), unresolved: strs(p.unresolved), decisions: strs(p.decisions), facts: strs(p.facts) };
+  return { title, goal, progress: str(p.progress) ?? "", files: strs(p.files), unresolved: strs(p.unresolved), decisions: strs(p.decisions), facts: strs(p.facts), spoken: str(p.spoken) ?? "" };
 }
 
 function applyOne(state: ThreadState, ev: ThreadEvent): ThreadState {

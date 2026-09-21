@@ -292,8 +292,9 @@ export class Engine {
     if (!r.summary) { this.emit(task.id, "summary", { ok: false, error: r.error, ms: r.ms }); return; }
     const ev = this.deps.store.appendThreadEvent(task.threadId, "summary", { ...r.summary });
     if (!previous) this.deps.store.updateThread(task.threadId, { title: r.summary.title });
+    if (r.summary.spoken) this.deps.store.updateTask(task.id, { spoken: r.summary.spoken });
     const memory = this.deps.memoryPath && r.summary.facts.length ? appendMemory(this.deps.memoryPath, r.summary.facts, { taskId: task.id, ts: this.now() }) : null;
-    this.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, ms: r.ms, ...(memory ? { remembered: memory.added } : {}) });
+    this.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, spoken: r.summary.spoken, ms: r.ms, ...(memory ? { remembered: memory.added } : {}) });
   }
 
   private tokensOf(taskId: string): number {

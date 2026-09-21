@@ -27,7 +27,7 @@ function build(replies: string[], opts: { summarizer?: Summarizer; executors?: E
 
 const tid = (store: Store, id: string): string => store.getTask(id)!.threadId!;
 
-const fakeSummarizer = (calls: unknown[]): Summarizer => async (input) => { calls.push(input); return { summary: { title: `Sum of ${input.task}`, goal: "g", progress: `after ${input.target} ${input.status}`, files: ["a.ts"], unresolved: [], decisions: [], facts: input.status === "done" ? [`fact from ${input.task.slice(0, 12)}`] : [] }, error: null, ms: 1 }; };
+const fakeSummarizer = (calls: unknown[]): Summarizer => async (input) => { calls.push(input); return { summary: { title: `Sum of ${input.task}`, goal: "g", progress: `after ${input.target} ${input.status}`, files: ["a.ts"], unresolved: [], decisions: [], facts: input.status === "done" ? [`fact from ${input.task.slice(0, 12)}`] : [], spoken: `做完了：${input.task.slice(0, 10)}` }, error: null, ms: 1 }; };
 
 describe("Engine: threads", () => {
   it("a task opens a thread; a follow-up joins the parent's; both land in the thread log", async () => {
@@ -57,6 +57,7 @@ describe("Engine: threads", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.previous).toBeNull();
     expect(store.getThread(tid(store, a.id))!.title).toBe(`Sum of login @echo {"fail":"refusal","failTimes":1}`);
+    expect(store.getTask(a.id)!.spoken).toBe("做完了：login @ech");   // the one-sentence feedback lands on the task row
     const summaryEv = events.find((e) => e.taskId === a.id && e.type === "summary");
     expect(summaryEv?.payload).toMatchObject({ ok: true, seq: expect.any(Number) });
     // the mid-task re-dispatch carried a handoff package to codex (no summary yet at that point, but the note and reason)

@@ -52,6 +52,8 @@ export type Task = {
   readonly routerAsks: number;
   readonly result: string | null;
   readonly error: string | null;
+  /** The summarizer's one-sentence account of the outcome (feedback line on the page, push text later). */
+  readonly spoken: string | null;
 };
 
 export type TaskEventType =

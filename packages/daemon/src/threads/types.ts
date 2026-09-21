@@ -65,6 +65,8 @@ export type Summary = {
   readonly decisions: readonly string[];
   /** Durable, routing-level facts worth keeping in MEMORY.md (may be empty). */
   readonly facts: readonly string[];
+  /** One sentence for a phone notification or a voice reply: what came out of this run. */
+  readonly spoken: string;
 };
 
 export type HandoffReason = "user" | `failure:${string}` | "quota";
