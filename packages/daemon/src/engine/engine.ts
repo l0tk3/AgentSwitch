@@ -99,12 +99,23 @@ export class Engine {
     this.emit(task.id, "cleaned", { ...report });
   }
 
+  /** Follow-ups carry the conversation: parent chain (oldest first) as context, then the new message. */
+  composeTask(task: Task): string {
+    const chain: Task[] = [];
+    let cur = task.parentId ? this.deps.store.getTask(task.parentId) : undefined;
+    while (cur && chain.length < 5) { chain.unshift(cur); cur = cur.parentId ? this.deps.store.getTask(cur.parentId) : undefined; }
+    if (!chain.length) return task.task;
+    const history = chain.map((t) => `User: ${t.task}\nAssistant (${t.harness ?? "?"}/${t.model ?? "?"}, ${t.status}): ${(t.result ?? t.error ?? "(no result)").slice(0, 2000)}`).join("\n\n");
+    return `This is a follow-up in an ongoing conversation. Earlier turns:\n\n${history}\n\nUser now says:\n${task.task}`;
+  }
+
   private async runTask(task: Task, signal: AbortSignal): Promise<void> {
     this.deps.store.updateTask(task.id, { status: "routing" });
-    const routed = await route({ task: task.task, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser }, this.routeDeps());
+    const composed = this.composeTask(task);
+    const routed = await route({ task: composed, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser }, this.routeDeps());
     this.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
     if (!routed.verdict.ok) return this.fail(task.id, `no target: ${routed.verdict.notes.join("; ")}`);
-    let current = this.deps.store.updateTask(task.id, { decision: routed.decision, brief: routed.decision?.brief ?? task.task });
+    let current = this.deps.store.updateTask(task.id, { decision: routed.decision, brief: routed.decision?.brief ?? composed });
     let verdict: Verdict = routed.verdict;
     let attempts: Attempt[] = [];
 
@@ -116,7 +127,7 @@ export class Engine {
       if (outcome.kind === "done") return;
       attempts = [...attempts, outcome.attempt];
       current = this.deps.store.updateTask(task.id, { attempts, status: "routing" });
-      const next = await reroute({ task: current.task, cwd: current.cwd, needsBrowser: current.needsBrowser, decision: current.decision, attempts, routerAsks: current.routerAsks }, this.routeDeps());
+      const next = await reroute({ task: composed, cwd: current.cwd, needsBrowser: current.needsBrowser, decision: current.decision, attempts, routerAsks: current.routerAsks }, this.routeDeps());
       const step = next.step;
       if (step.kind === "retry") {
         this.emit(task.id, "redispatch", { kind: "retry", target: step.target, backoffMs: step.backoffMs });

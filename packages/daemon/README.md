@@ -39,7 +39,8 @@ Development executor: put an `@echo {...}` directive in the task text to script 
 `http://127.0.0.1:4711/ui` (`/` redirects there): one static page, `ui/index.html`, no build step,
 mobile-first. Home = composer (just type what you want; the router decides) with 高级选项 for
 working directory, pinned model and browser, above a feed of pending approvals / running / recent
-tasks; task detail with live events (SSE), brief, routing reason and approval buttons; 额度 tab with
+tasks; task detail with live events (SSE), brief, routing reason, approval buttons and a reply box
+(追问: a follow-up task that carries the conversation); 额度 tab with
 5h / 7d windows per harness (reset countdowns), DeepSeek balance, Claude local count; 路由日志 tab.
 It only uses the API below, so it is the wireframe for the iOS app and the development console until
 then. Later: served over Tailscale behind bearer auth.
@@ -76,7 +77,7 @@ one executor on a trivial file task in a temp dir.
 
 | method | path | what |
 |---|---|---|
-| POST | `/tasks` | `{task, cwd?, pin?, needs_browser?, ephemeral?}` → task (queued); no `cwd` = ephemeral work dir |
+| POST | `/tasks` | `{task, cwd?, pin?, needs_browser?, ephemeral?, parent_id?}` → task (queued); no `cwd` = ephemeral work dir; `parent_id` = follow-up (router and executor see the parent chain's text and results; cwd inherited unless the parent was ephemeral) |
 | GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
 | GET | `/tasks/:id/events?after=N` | SSE: queued, routed, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, done, failed, cancelled |
 | POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |

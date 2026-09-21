@@ -84,6 +84,23 @@ describe("HTTP API", () => {
     d.close();
   });
 
+  it("parent_id: inherits a persistent parent's cwd, gets a fresh ephemeral dir after an ephemeral parent, 404 on unknown", async () => {
+    const { d, client } = daemon();
+    const p1 = await client.submit("first", "/tmp");
+    await d.engine.idle();
+    const c1 = await client.submit("again", undefined, { parentId: p1.id });
+    expect(c1).toMatchObject({ parentId: p1.id, cwd: "/tmp", ephemeral: false });
+    await d.engine.idle();
+    const p2 = await client.submit("eph", undefined);
+    await d.engine.idle();
+    const c2 = await client.submit("again", undefined, { parentId: p2.id });
+    expect(c2.ephemeral).toBe(true);
+    expect(c2.cwd).not.toBe(p2.cwd);
+    await d.engine.idle();
+    await expect(client.submit("x", undefined, { parentId: "nope" })).rejects.toThrow(/parent task not found/);
+    d.close();
+  });
+
   it("serves the phone-draft UI, which only talks to the API", async () => {
     const { d } = daemon();
     const res = await d.app.request("/ui");

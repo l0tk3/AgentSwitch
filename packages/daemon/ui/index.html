@@ -117,7 +117,7 @@ function eventLine(ev) {
     case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"} (${p.status})`;
     case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;
     case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
-    case "done": return `✓ 完成：${p.result}`;
+    case "done": return (p.result || "").length > 200 ? "✓ 完成（结果见上方卡片）" : `✓ 完成：${p.result}`;
     case "failed": return `✗ 失败：${p.error}${p.security ? "  [安全事件]" : ""}`;
     case "cancelled": return "已取消";
     case "cleaned": return `已清理临时目录与 harness 记录 (workdir=${p.workDirRemoved}, claude=${(p.claudeProjectsRemoved || []).length}, opencode=${p.opencodeSessionsRemoved})`;
@@ -156,8 +156,11 @@ function render() {
   $("#dot").classList.toggle("on", state.health);
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === state.view || (state.view === "task" && b.dataset.view === "home")));
   $("#apCount").textContent = state.approvals.length ? ` ${state.approvals.length}` : "";
-  $("#composer").style.display = state.view === "home" ? "" : "none";
-  $("#main").style.paddingBottom = state.view === "home" ? "" : "calc(70px + env(safe-area-inset-bottom))";
+  const composing = state.view === "home" || state.view === "task";
+  $("#composer").style.display = composing ? "" : "none";
+  $("#main").style.paddingBottom = composing ? "" : "calc(70px + env(safe-area-inset-bottom))";
+  $("#c-task").placeholder = state.view === "task" ? "接着说（带上这条任务的上下文）…" : "跟路由器说要做什么…";
+  $("#c-send").textContent = state.view === "task" ? "追问" : "发送";
   const m = $("#main");
   if (state.view === "home") {
     $("#title").textContent = "AgentSwitch";
@@ -179,7 +182,8 @@ function render() {
     const t = state.task;
     $("#title").textContent = "任务 " + t.id;
     const pending = state.approvals.filter((a) => a.taskId === t.id);
-    m.innerHTML = `<div class="card"><div>${esc(t.task)}</div>
+    const parent = t.parentId ? state.tasks.find((x) => x.id === t.parentId) : null;
+    m.innerHTML = `${parent ? `<div class="card dim" data-open="${parent.id}">↩ 追问自：${esc(parent.task.slice(0, 80))}</div>` : ""}<div class="card"><div>${esc(t.task)}</div>
         <div class="row" style="margin-top:8px"><span class="badge ${t.status}">${t.status}</span><span class="dim grow ellipsis">${t.harness ? esc(t.harness + "/" + t.model) : ""}${t.effort ? " · " + esc(t.effort) : ""}</span>${ACTIVE.has(t.status) ? `<button class="bad" id="t-cancel">取消</button>` : ""}</div>
         <div class="dim ellipsis" style="margin-top:4px">${esc(t.cwd)}${t.ephemeral ? " · 临时目录" : ""}</div>
         ${t.brief && t.brief !== t.task ? `<details style="margin-top:8px"><summary class="dim">路由器给执行者的简报</summary><div class="dim" style="white-space:pre-wrap">${esc(t.brief)}</div></details>` : ""}
@@ -215,7 +219,8 @@ function openTask(id) {
 async function send() {
   const task = $("#c-task").value.trim(); if (!task) return;
   const cwd = $("#c-cwd").value.trim(); const pin = $("#c-pin").value.trim(); const browser = $("#c-browser").value === "1";
-  const body = { task, ...(cwd ? { cwd } : { ephemeral: true }), ...(browser ? { needs_browser: true } : {}) };
+  const parent = state.view === "task" && state.task ? state.task.id : null;
+  const body = { task, ...(cwd ? { cwd } : parent ? {} : { ephemeral: true }), ...(browser ? { needs_browser: true } : {}), ...(parent ? { parent_id: parent } : {}) };
   if (pin.includes("/")) body.pin = { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) };
   $("#c-send").disabled = true;
   try { const t = await api("POST", "/tasks", body); $("#c-task").value = ""; await loadTasks(); openTask(t.id); }

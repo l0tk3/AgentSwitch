@@ -136,3 +136,22 @@ describe("Engine", () => {
     expect(store.usageSince(0)).toEqual({ codex: 105 });
   });
 });
+
+describe("follow-ups", () => {
+  it("a child task carries the parent's text and result to the router and, via the brief, to the executor", async () => {
+    const { engine, store, router, executors } = build((input) => decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, brief: input.task.split("User now says:\n")[1] ?? input.task }));
+    const parent = engine.submit({ task: '找一下 Obsidian 库 @echo {"result":"有 3 个库：A、B、C。需要看哪个？"}', cwd: "/tmp" });
+    await engine.idle();
+    const child = engine.submit({ task: "看 A 里有哪些笔记", cwd: "/tmp", parentId: parent.id });
+    await engine.idle();
+    expect(store.getTask(child.id)).toMatchObject({ status: "done", parentId: parent.id });
+    const routerSaw = router.calls[1]!.task;
+    expect(routerSaw).toContain("Earlier turns");
+    expect(routerSaw).toContain("有 3 个库：A、B、C");
+    expect(routerSaw).toContain("User now says:\n看 A 里有哪些笔记");
+    expect(executors.find((e) => e.harness === "codex")!.runs.at(-1)!.brief).toBe("看 A 里有哪些笔记");
+    const grandchild = engine.submit({ task: "第二条", cwd: "/tmp", parentId: child.id });
+    await engine.idle();
+    expect(router.calls[2]!.task.split("User:").length - 1).toBe(2);   // both earlier turns
+  });
+});

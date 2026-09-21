@@ -1,7 +1,7 @@
 /** agentswitch CLI. Daemon-backed commands talk to http://127.0.0.1:4711; `route`/`reroute`/`context init` run locally.
  *
  *   serve                       start the daemon (AGENTSWITCH_ROUTER=echo, AGENTSWITCH_PORT=...)
- *   task "<text>" [--cwd d | --ephemeral] [--pin h/m] [--browser] [--no-watch]   (--ephemeral: temp work dir, wiped after)
+ *   task "<text>" [--cwd d | --ephemeral] [--pin h/m] [--browser] [--no-watch] [--reply <taskId>]   (--reply: follow-up with context)
  *   tasks | show <id> | watch <id> | approve <task> <approval> --allow|--deny | cancel <id>
  *   approvals | quota [--refresh] | preview "<text>" [--cwd d] | log
  *   route "<text>" ... (local, no daemon) | reroute ... | context init
@@ -32,6 +32,7 @@ const { values, positionals } = parseArgs({
   options: {
     cwd: { type: "string" },
     ephemeral: { type: "boolean", default: false },
+    reply: { type: "string" },
     router: { type: "string", default: cfg.router },
     pin: { type: "string" },
     browser: { type: "boolean", default: false },
@@ -105,8 +106,8 @@ async function main(): Promise<number> {
     }
     case "task": {
       if (!a1) throw new Error('task "<text>"');
-      const cwd = values.ephemeral ? undefined : resolve(values.cwd ?? process.cwd());
-      const task = await client.submit(a1, cwd, { ...(values.pin ? { pin: splitPin(values.pin) } : {}), needsBrowser: values.browser, ephemeral: values.ephemeral });
+      const cwd = values.ephemeral || (values.reply && !values.cwd) ? undefined : resolve(values.cwd ?? process.cwd());
+      const task = await client.submit(a1, cwd, { ...(values.pin ? { pin: splitPin(values.pin) } : {}), needsBrowser: values.browser, ephemeral: values.ephemeral, ...(values.reply ? { parentId: values.reply } : {}) });
       if (values.json && !values.watch) return (out(task), 0);
       console.log(`task ${task.id} queued`);
       if (values.watch) await watchInteractive(task.id);

@@ -13,6 +13,8 @@ export type NewTask = {
   readonly needsBrowser?: boolean;
   /** Not a persistent project: delete the work dir and every harness record of it when the task ends. */
   readonly ephemeral?: boolean;
+  /** Follow-up: the router and executor see the parent task's text and result as context. */
+  readonly parentId?: string;
 };
 
 export type Task = {
@@ -25,6 +27,7 @@ export type Task = {
   readonly pin: TargetRef | null;
   readonly needsBrowser: boolean;
   readonly ephemeral: boolean;
+  readonly parentId: string | null;
   readonly harness: string | null;
   readonly model: string | null;
   readonly effort: string | null;

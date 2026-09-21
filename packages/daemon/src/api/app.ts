@@ -43,6 +43,7 @@ const NewTaskBody = z.object({
   pin: TargetRef.optional(),
   needs_browser: z.boolean().optional(),
   ephemeral: z.boolean().optional(),
+  parent_id: z.string().min(1).optional(),
 });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
 const ContextBody = z.object({ text: z.string() });
@@ -59,9 +60,13 @@ export function createApp(deps: ApiDeps): Hono {
   app.post("/tasks", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
-    const { pin, needs_browser, ephemeral, cwd, ...rest } = body.data;
-    const workDir = cwd ?? newWorkDir(deps.workRoot);
-    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: ephemeral ?? cwd === undefined, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
+    const { pin, needs_browser, ephemeral, cwd, parent_id, ...rest } = body.data;
+    const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
+    if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
+    const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
+    const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
+    const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
+    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, ...(parent ? { parentId: parent.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
     return c.json(task, 201);
   });
 
@@ -114,7 +119,7 @@ export function createApp(deps: ApiDeps): Hono {
   app.post("/route/preview", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "task and cwd required" }, 400);
-    const { pin, needs_browser, ephemeral: _e, cwd, ...rest } = body.data;
+    const { pin, needs_browser, ephemeral: _e, parent_id: _p, cwd, ...rest } = body.data;
     if (!cwd) return c.json({ error: "cwd required for preview" }, 400);
     const result = await route({ ...rest, cwd, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) }, deps.routeDeps());
     deps.routingLog.record(rest.task, cwd, result);
