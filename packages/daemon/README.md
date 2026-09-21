@@ -201,8 +201,10 @@ Codex 5 × effort, OpenCode deepseek-flash). The router is an OpenCode `router` 
 Flash, read-only tools, injected via `OPENCODE_CONFIG`) that returns a Decision (harness, model,
 effort, brief, fallbacks, confidence). `validateDecision` is the floor: catalog, browser, quota,
 concurrency (queue, never switch), effort, low confidence → default policy. `CONTEXT.md` (sites,
-accounts as secret-gate tokens, environment, preferences) goes into the router prompt; list entries
-with plaintext credentials are stripped at load. Edit it in the UI's 上下文 tab (shows the linted
+accounts as secret-gate tokens, environment, preferences) is re-read on every dispatch and goes into
+the router prompt **and** the executor's prompt (after the brief and any handoff), so a site's URL,
+account and tokens reach the model that does the work even when the router's brief leaves them out;
+list entries with plaintext credentials are stripped at load. Edit it in the UI's 上下文 tab (shows the linted
 text and the stripped lines), with `agentswitch context init`, or by hand. After a failure, `classifyFailure` + `nextStep`
 decide: transport → retry once then ask the router; quota → fallback chain; refusal / task_failed →
 ask the router with the history; gate_denied or an approved action → stop. The router may

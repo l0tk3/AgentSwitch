@@ -13,6 +13,8 @@ export type ExecutionInput = {
   readonly model: string;
   readonly effort: string | null;
   readonly handoffNote: string | null;
+  /** The user's CONTEXT.md (linted: ciphertext only), so sites/accounts reach the executor even when the router's brief omits them. */
+  readonly context: string | null;
   /** The thread's private home (threads-v0 §1): harness state lives under <home>/<harness>, never in the user's own dirs. */
   readonly threadHome: string | null;
   /** This harness's last session in the thread (from a `session` thread event); the executor resumes it natively. */

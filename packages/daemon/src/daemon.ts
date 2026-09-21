@@ -102,7 +102,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(opencodeRouter({ model: targets.router.model, agentName: "summarizer", tools: "none", runIn: join(cfg.home, "summarizer") }), targets.router.timeout_ms);
   mkdirSync(join(cfg.home, "summarizer"), { recursive: true });
   const extensionsSummary = () => summarizeExtensions(extensions);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, ...(summarizer ? { summarizer } : {}) });
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, ...(summarizer ? { summarizer } : {}) });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };

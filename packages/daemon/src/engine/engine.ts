@@ -18,7 +18,7 @@ import { RECORD_WINDOW_MS } from "../threads/record.js";
 import type { Summarizer } from "../threads/summary.js";
 import { kindOf } from "../router/route.js";
 import type { ExtensionsSummary } from "../router/prompt.js";
-import type { LoadedContext } from "../router/context.js";
+import { loadContext, type LoadedContext } from "../router/context.js";
 import type { HandoffReason, ThreadState } from "../threads/types.js";
 import type { Bus } from "./bus.js";
 import { cleanupEphemeral, defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
@@ -47,6 +47,8 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   readonly protected?: ProtectedPaths;
   /** $AGENTSWITCH_HOME/MEMORY.md: read into the router prompt, appended with the summarizer's facts. */
   readonly memoryPath?: string;
+  /** $AGENTSWITCH_HOME/CONTEXT.md: re-read on every dispatch (edits on the page take effect at once), given to router and executor. */
+  readonly contextPath?: string;
   /** MCP servers and skills, names only, for the router prompt. */
   readonly extensionsSummary?: () => ExtensionsSummary;
   readonly now?: () => number;
@@ -153,9 +155,15 @@ export class Engine {
   }
 
   private routeDeps(): RouteDeps {
-    const { store, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, routingLog: _l, artifactsDir: _d, summarizer: _m, protected: _p, memoryPath, extensionsSummary, now: _n, ...rest } = this.deps;
+    const { store, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, routingLog: _l, artifactsDir: _d, summarizer: _m, protected: _p, memoryPath, contextPath, extensionsSummary, now: _n, maxConcurrentTasks: _x, ...rest } = this.deps;
     const memory: LoadedContext | undefined = memoryPath ? loadMemory(memoryPath) : undefined;
-    return { ...rest, quota: quota(), running: { ...this.running }, records: store.recordsSince(this.now() - RECORD_WINDOW_MS), threads: this.threadBriefs(), ...(memory ? { memory } : {}), ...(extensionsSummary ? { extensions: extensionsSummary() } : {}) };
+    const context = this.context();
+    return { ...rest, quota: quota(), running: { ...this.running }, records: store.recordsSince(this.now() - RECORD_WINDOW_MS), threads: this.threadBriefs(), ...(context ? { context } : {}), ...(memory ? { memory } : {}), ...(extensionsSummary ? { extensions: extensionsSummary() } : {}) };
+  }
+
+  /** CONTEXT.md as of now: the file when a path is configured, else whatever static context the deps carry (tests). */
+  private context(): LoadedContext | undefined {
+    return this.deps.contextPath ? loadContext(this.deps.contextPath) : this.deps.context;
   }
 
   private now(): number {
@@ -394,7 +402,7 @@ export class Engine {
     try {
       const outcome = await executor.run({
         taskId: task.id, task: task.task, brief: briefFor(task), cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments,
-        handoffNote: handoff, threadHome, resume, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal,
+        handoffNote: handoff, context: this.context()?.text ?? null, threadHome, resume, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal,
         emit: (type, payload) => this.emit(task.id, type, payload),
         approve: (action, evidence) => this.requestApproval(task.id, action, evidence),
       });

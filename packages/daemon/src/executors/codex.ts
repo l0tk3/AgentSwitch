@@ -14,7 +14,7 @@ import { NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome } f
 import { AppServerClient, type Json } from "./appserver.js";
 import { codexMcpToml } from "./extensions.js";
 import { codexGateToml, mcpServerEnv, stripProxy, type GateOptions } from "./gate.js";
-import { executorInstructions } from "./instructions.js";
+import { composePrompt, executorInstructions } from "./instructions.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
 export type CodexExecutorOptions = {
@@ -168,7 +168,7 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
           await client.request("initialize", { clientInfo: { name: "agentswitch", version: "0.1.0" } });
           client.notify("initialized");
           const threadId = await openThread(client, input, persistent);
-          const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
+          const prompt = composePrompt(input);
           await client.request("turn/start", { threadId, input: codexInput(prompt, input.attachments, input.cwd) });
           await completed;
           return { ...outcomeFromTurn(state, input.signal.aborted ? "cancelled" : (child.exitCode !== null && !state.completed ? `app-server exited ${child.exitCode}: ${stderr.slice(0, 300)}` : null)), sessionId: threadId };

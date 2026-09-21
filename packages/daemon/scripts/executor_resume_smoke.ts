@@ -21,7 +21,7 @@ const word = `zebra-${Math.floor(1000 + Math.random() * 9000)}`;
 writeFileSync(join(cwd, "note.txt"), `${word}\n`);
 
 const base = (taskId: string, brief: string, resume: string | null): ExecutionInput => ({
-  taskId, task: brief, brief, cwd, model, effort: harness === "codex" ? "low" : null, handoffNote: null, threadHome, resume, attachments: [], browser: false,
+  taskId, task: brief, brief, cwd, model, effort: harness === "codex" ? "low" : null, handoffNote: null, context: null, threadHome, resume, attachments: [], browser: false,
   signal: new AbortController().signal,
   emit: (type, payload) => console.log(`  ${type}: ${JSON.stringify(payload).slice(0, 160)}`),
   approve: async (action) => { console.log(`  APPROVAL -> allow: ${action}`); return "allow"; },

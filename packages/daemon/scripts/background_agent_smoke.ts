@@ -16,7 +16,7 @@ for (const n of ["alpha", "beta", "gamma"]) writeFileSync(join(cwd, `${n}.txt`),
 const log: { t: number; type: string; payload: Record<string, unknown> }[] = [];
 const t0 = Date.now();
 const outcome = await executor.run({
-  taskId: "bg", task: "bg", cwd, model: "claude-haiku-4-5-20251001", effort: null, handoffNote: null, threadHome: null, resume: null, attachments: [], browser: false,
+  taskId: "bg", task: "bg", cwd, model: "claude-haiku-4-5-20251001", effort: null, handoffNote: null, context: null, threadHome: null, resume: null, attachments: [], browser: false,
   brief: "Use the Agent tool to launch a subagent IN THE BACKGROUND (run_in_background) whose job is to list the .txt files in the working directory and report their names. Do not read the files yourself. Wait for the background subagent's notification, then reply with exactly the names it reported, comma-separated, and nothing else.",
   signal: new AbortController().signal,
   emit: (type, payload) => { log.push({ t: Date.now() - t0, type, payload }); if (type === "agent") console.log(`  ${Date.now() - t0} ms agent ${payload.status}: ${payload.description}${payload.summary ? ` — ${String(payload.summary).slice(0, 80)}` : ""}`); },

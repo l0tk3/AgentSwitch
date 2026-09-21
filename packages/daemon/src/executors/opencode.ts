@@ -13,7 +13,7 @@ import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import { opencodeMcpFromRegistry } from "./extensions.js";
 import { gateEnv, mcpServerEnv, opencodeGateConfig, stripProxy, type GateOptions } from "./gate.js";
-import { executorInstructions } from "./instructions.js";
+import { composePrompt, executorInstructions } from "./instructions.js";
 import { NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
@@ -104,7 +104,7 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
       };
       writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath, extras)));
       const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
-      const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
+      const prompt = composePrompt(input);
       // Native continuation (verified: `--session <id>` in a later `run --standalone` process picks the conversation up;
       // sessions live in OpenCode's shared db, keyed by directory, so the engine only offers a resume for the same cwd).
       const once = (resume: string | null) => new Promise<{ summary: RunSummary; exitCode: number | null; stderr: string; timedOut: boolean }>((done) => {

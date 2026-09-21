@@ -11,7 +11,7 @@ import { NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome } f
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } from "./extensions.js";
 import { claudeMcpServers, gateEnv, mcpServerEnv, type GateOptions } from "./gate.js";
-import { executorInstructions } from "./instructions.js";
+import { composePrompt, executorInstructions } from "./instructions.js";
 import { commandTouchesProtected, isProtected, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
 
@@ -171,7 +171,7 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
         ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),
         ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
       };
-      const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
+      const prompt = composePrompt(input);
       let state: Folded = EMPTY_FOLD;
       try {
         for await (const msg of query({ prompt, options })) {
