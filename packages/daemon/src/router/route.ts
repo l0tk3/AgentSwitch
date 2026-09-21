@@ -155,7 +155,7 @@ async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Pr
       ms += reply.elapsedMs;
       const parsed = parseDecision(reply.text);
       if (parsed.ok) return { decision: parsed.decision, routerError: null, routerMs: ms, attempts: attempt };
-      error = parsed.error;
+      error = `${parsed.error}; reply began: ${JSON.stringify(reply.text.trim().slice(0, 200))}`;
     } catch (err) {
       error = (err as Error).message;
       if (/timed out/.test(error)) return { decision: null, routerError: error, routerMs: ms, attempts: attempt };

@@ -22,7 +22,7 @@ describe("route()", () => {
     const r = echoRouter(["nonsense", "{\"harness\": 1}"]);
     const out = await route(req, deps(r));
     expect(out.attempts).toBe(2);
-    expect(r.calls[1]!.previousError).toBe("no JSON object in reply");
+    expect(r.calls[1]!.previousError).toMatch(/^no JSON object in reply; reply began: /);
     expect(r.calls[1]!.task).toContain("previous reply was rejected");
     expect(out.source).toBe("default");
     expect(out.verdict).toMatchObject({ ok: true, harness: "claude-code", model: "claude-sonnet-5", chosen: "pin" });

@@ -25,6 +25,19 @@ function build(routerReplies: string[] | ((input: { task: string }, n: number) =
 const types = (events: TaskEvent[], id: string) => events.filter((e) => e.taskId === id).map((e) => e.type);
 
 describe("Engine", () => {
+  it("an approval left unanswered when the task ends is expired, and neither that nor a late answer revives the task", async () => {
+    const { engine, store, events } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
+    const executor = { harness: "codex", async run(input: { approve: (a: string, e: string) => Promise<string> }) { void input.approve("cp x y", "outside cwd"); return { ok: true, exitCode: 0, lastText: "moved on without waiting" }; } };
+    const eng = new Engine({ store, bus: engine["deps"].bus, executors: [executor as never], targets, router: echoRouter([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]), quota: () => ({}), approvalTimeoutMs: 10_000, retryBackoffMs: 1 });
+    const t = eng.submit({ task: "x", cwd: "/tmp" });
+    await eng.idle();
+    expect(store.getTask(t.id)!.status).toBe("done");
+    expect(store.pendingApprovals(t.id)).toEqual([]);
+    const resolved = events.find((e) => e.taskId === t.id && e.type === "approval_resolved");
+    expect(resolved?.payload).toMatchObject({ status: "expired" });
+    expect(store.getTask(t.id)!.status).toBe("done");
+  });
+
   it("queued → routed → dispatched → done, with the brief from the router", async () => {
     const { engine, store, events, executors } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: "low", brief: "rewritten brief" })]);
     const t = engine.submit({ task: "do the thing", cwd: "/tmp" });

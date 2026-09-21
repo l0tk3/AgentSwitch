@@ -44,7 +44,7 @@ describe("reroute()", () => {
     const r = echoRouter(["garbage", "garbage"]);
     const out = await reroute(base, { targets, router: r, quota: {}, running: {} });
     expect(out.step).toMatchObject({ kind: "redispatch", source: "default", verdict: { ok: true, harness: "codex" } });
-    expect(out.routerError).toBe("no JSON object in reply");
+    expect(out.routerError).toMatch(/^no JSON object in reply; reply began: /);
   });
 
   it("quota, first transport failure and gate denial never reach the router", async () => {

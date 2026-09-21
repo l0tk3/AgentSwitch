@@ -146,7 +146,9 @@ export class Engine {
     clearTimeout(waiter.timer);
     this.waiters.delete(approvalId);
     this.emit(approval.taskId, "approval_resolved", { approvalId, decision, status });
-    this.deps.store.updateTask(approval.taskId, { status: "running" });
+    // A late answer (or expiry) must not revive a task that already ended.
+    const current = this.deps.store.getTask(approval.taskId);
+    if (current && !TERMINAL_STATUS.has(current.status)) this.deps.store.updateTask(approval.taskId, { status: "running" });
     waiter.resolve(decision);
     return true;
   }
@@ -198,6 +200,7 @@ export class Engine {
       if (this.deps.store.getTask(id)?.status !== "cancelled") this.fail(id, (err as Error).message);
     } finally {
       this.controllers.delete(id);
+      for (const a of this.deps.store.pendingApprovals(id)) this.resolveApproval(a.id, "deny", "expired");   // the executor moved on without an answer
       for (const release of held.reverse()) release();
       await this.finishThread(id);          // before cleanup: the diff needs the work dir
       const final = this.deps.store.getTask(id) ?? task;   // joining a thread may have moved the task out of its temp dir

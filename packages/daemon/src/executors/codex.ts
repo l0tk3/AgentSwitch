@@ -72,6 +72,9 @@ function foldAgentItem(state: TurnState, method: string, item: Json): TurnState 
     if (method === "item/completed" && status === "failed") {
       return { ...state, tools: state.tools + 1, agents: { ...state.agents, failed: state.agents.failed + 1 }, agentEvents: [...state.agentEvents, { agentId: ids[0] ?? "", status: "failed", description: `${tool}: ${String(item.prompt ?? "").slice(0, 120)}` }] };
     }
+    if (method === "item/completed" && (tool === "wait" || tool === "closeAgent") && status === "completed") {
+      return { ...state, tools: state.tools + 1, agents: { ...state.agents, completed: state.agents.completed + Math.max(1, ids.length) }, agentEvents: [...state.agentEvents, ...(ids.length ? ids : [""]).map((id) => ({ agentId: id, status: "completed" as const, description: tool }))] };
+    }
     if (method === "item/completed") return { ...state, tools: state.tools + 1, agentEvents: [...state.agentEvents, { agentId: ids[0] ?? "", status: "progress", description: `${tool} ${status}`, ...(item.prompt ? { summary: String(item.prompt).slice(0, 200) } : {}) }] };
     return state;
   }

@@ -115,11 +115,13 @@ describe("sub-agent events (background-v0 §2)", () => {
     s = applyNotification(s, "item/completed", { item: { type: "collabAgentToolCall", tool: "spawnAgent", status: "completed", receiverThreadIds: ["sub1"], prompt: "run the tests", senderThreadId: "main" } });
     s = applyNotification(s, "item/completed", { item: { type: "subAgentActivity", kind: "completed", agentThreadId: "sub1", agentPath: "tester" } });
     s = applyNotification(s, "item/completed", { item: { type: "collabAgentToolCall", tool: "spawnAgent", status: "failed", receiverThreadIds: ["sub2"], prompt: "x" } });
+    s = applyNotification(s, "item/started", { item: { type: "subAgentActivity", kind: "started", agentThreadId: "sub3", agentPath: "x" } });
+    s = applyNotification(s, "item/completed", { item: { type: "collabAgentToolCall", tool: "wait", status: "completed", receiverThreadIds: ["sub3"] } });   // Codex reports the end through wait, not always through subAgentActivity
     s = applyNotification(s, "turn/completed", {});
-    expect(s.agents).toEqual({ spawned: 1, completed: 1, failed: 1 });
-    expect(s.agentEvents.map((a) => a.status)).toEqual(["started", "progress", "completed", "failed"]);
-    expect(s.tools).toBe(2);
-    expect(outcomeFromTurn(s, null).agents).toEqual({ spawned: 1, completed: 1, failed: 1 });
+    expect(s.agents).toEqual({ spawned: 2, completed: 2, failed: 1 });
+    expect(s.agentEvents.map((a) => a.status)).toEqual(["started", "progress", "completed", "failed", "started", "completed"]);
+    expect(s.tools).toBe(3);
+    expect(outcomeFromTurn(s, null).agents).toEqual({ spawned: 2, completed: 2, failed: 1 });
   });
 
   it("OpenCode: the task tool counts as a completed sub-agent", () => {
