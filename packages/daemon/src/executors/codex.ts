@@ -7,9 +7,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import { AppServerClient, type Json } from "./appserver.js";
-import { codexGateToml, stripProxy, type GateOptions } from "./gate.js";
+import { codexMcpToml } from "./extensions.js";
+import { codexGateToml, mcpServerEnv, stripProxy, type GateOptions } from "./gate.js";
 import { executorInstructions } from "./instructions.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
@@ -19,13 +21,14 @@ export type CodexExecutorOptions = {
   readonly gate?: GateOptions | null;
   readonly browser?: boolean;
   readonly maxMs?: number;
+  readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
 };
 
 const APPROVAL_METHODS = new Set(["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "execCommandApproval", "applyPatchApproval"]);
 
-export function codexConfigToml(gate: GateOptions | null | undefined, profile: string, browser: boolean, effort: string | null): string {
+export function codexConfigToml(gate: GateOptions | null | undefined, profile: string, browser: boolean, effort: string | null, mcpToml = ""): string {
   const head = `approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n${effort ? `model_reasoning_effort = ${JSON.stringify(effort)}\n` : ""}`;
-  return head + (gate ? "\n" + codexGateToml(gate, profile, browser) : "\n[sandbox_workspace_write]\nnetwork_access = true\n");
+  return head + (gate ? "\n" + codexGateToml(gate, profile, browser) : "\n[sandbox_workspace_write]\nnetwork_access = true\n") + mcpToml;
 }
 
 /** Approval answer shape differs per method; decline wording mirrors the e2e script's accept wording. */
@@ -81,8 +84,11 @@ function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser:
   copyFileSync(auth, join(home, "auth.json"));
   chmodSync(join(home, "auth.json"), 0o600);
   const profile = join(home, "chromium-profile");
-  writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, browser, effort));
+  const ext = opts.extensions ?? NO_EXTENSIONS;
+  const mcpToml = codexMcpToml(ext.mcpFor("codex"), mcpServerEnv(opts.gate));
+  writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, browser, effort, mcpToml));
   writeFileSync(join(home, "AGENTS.md"), executorInstructions());   // Codex's global instructions live in $CODEX_HOME/AGENTS.md
+  ext.skillsInto("codex", join(home, "skills"));                     // Codex discovers $CODEX_HOME/skills/*/SKILL.md
   return { home, profile };
 }
 

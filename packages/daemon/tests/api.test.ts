@@ -130,3 +130,37 @@ describe("HTTP API", () => {
     d.close();
   });
 });
+
+describe("extensions API", () => {
+  it("mcp servers: put validates, list, delete", async () => {
+    const { d } = daemon();
+    const put = await d.app.request("/mcp/github", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "stdio", command: "npx", args: ["gh-mcp"] }) });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toMatchObject({ name: "github", enabled: true, approval: "ask" });
+    const bad = await d.app.request("/mcp/playwright", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "stdio", command: "x" }) });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/reserved/);
+    expect((await (await d.app.request("/mcp")).json()).map((s: { name: string }) => s.name)).toEqual(["github"]);
+    expect((await d.app.request("/mcp/github", { method: "DELETE" })).status).toBe(200);
+    expect((await d.app.request("/mcp/github", { method: "DELETE" })).status).toBe(404);
+    d.close();
+  });
+  it("skills: create, read with content, toggle, delete, import errors", async () => {
+    const { d } = daemon();
+    const json = (body: unknown) => ({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await d.app.request("/skills/deploy", json({}))).status).toBe(400);
+    expect((await d.app.request("/skills/deploy", json({ content: "# Deploy\n\ndo it" }))).status).toBe(200);
+    expect((await d.app.request("/skills/Bad%20Name", json({ content: "x" }))).status).toBe(400);
+    const one = await (await d.app.request("/skills/deploy")).json();
+    expect(one).toMatchObject({ name: "deploy", description: "Deploy", enabled: true });
+    expect(one.content).toContain("do it");
+    await d.app.request("/skills/deploy", json({ enabled: false, harnesses: ["codex"] }));
+    expect((await (await d.app.request("/skills")).json())[0]).toMatchObject({ enabled: false, harnesses: ["codex"] });
+    expect(Array.isArray(await (await d.app.request("/skills/discover")).json())).toBe(true);
+    const imp = await d.app.request("/skills/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/nonexistent/skill" }) });
+    expect(imp.status).toBe(400);
+    expect((await d.app.request("/skills/deploy", { method: "DELETE" })).status).toBe(200);
+    expect((await d.app.request("/skills/deploy")).status).toBe(404);
+    d.close();
+  });
+});

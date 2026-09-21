@@ -135,6 +135,8 @@ async function main(): Promise<number> {
     }
     case "preview": { if (!a1) throw new Error('preview "<text>"'); out(await client.preview(a1, resolve(values.cwd ?? process.cwd()))); return 0; }
     case "log": { out(await client.routingLog()); return 0; }
+    case "mcp": { out(await client.mcp()); return 0; }
+    case "skills": { out(await client.skills()); return 0; }
     case "health": { out(await client.health()); return 0; }
     case "context": {
       if (a1 !== "init") { out(await client.context()); return 0; }
@@ -146,7 +148,7 @@ async function main(): Promise<number> {
     case "reroute":
       return localRoute(cmd, a1);
     default:
-      console.error("usage: serve | task | tasks | show | watch | approve | cancel | approvals | quota | preview | log | health | context init | route | reroute");
+      console.error("usage: serve | task | tasks | show | watch | approve | cancel | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute");
       return 2;
   }
 }

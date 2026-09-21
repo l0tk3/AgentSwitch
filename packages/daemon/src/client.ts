@@ -26,6 +26,8 @@ export class Client {
   preview(task: string, cwd: string) { return this.call<unknown>("POST", "/route/preview", { task, cwd }); }
   routingLog(limit = 20) { return this.call<unknown[]>("GET", `/routing/log?limit=${limit}`); }
   context() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/context"); }
+  mcp() { return this.call<unknown[]>("GET", "/mcp"); }
+  skills() { return this.call<unknown[]>("GET", "/skills"); }
 
   /** Follow a task's SSE stream; calls onEvent for each event, resolves when the task ends. */
   async watch(id: string, onEvent: (ev: TaskEvent) => void | Promise<void>, after = 0): Promise<void> {

@@ -37,6 +37,25 @@ export function gateEnv(gate: GateOptions): Record<string, string> {
   };
 }
 
+/** Env vars a spawned MCP server needs to run at all; the MCP stdio transport does not inherit
+ *  the parent environment when an explicit env is given. */
+const INHERITED = ["PATH", "HOME", "SHELL", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "TERM"] as const;
+
+export function inheritedEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of INHERITED) if (env[k] !== undefined) out[k] = env[k]!;
+  return out;
+}
+
+/** Env for a user MCP server behind the gate: enough to start, the proxy, and the gate CA so an
+ *  intercepted TLS connection verifies. Without the CA the server would fail every HTTPS call. */
+export function mcpServerEnv(gate: GateOptions | null | undefined, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (!gate) return inheritedEnv(env);
+  const ca = join(gate.home, "ca.pem");
+  const trust = existsSync(ca) ? { NODE_EXTRA_CA_CERTS: ca, SSL_CERT_FILE: ca, REQUESTS_CA_BUNDLE: ca } : {};
+  return { ...inheritedEnv(env), ...gateEnv(gate), ...trust };
+}
+
 export function stripProxy(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) if (v !== undefined && !/^(https?|all)_proxy$/i.test(k)) out[k] = v;

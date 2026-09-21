@@ -6,9 +6,11 @@ import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
-import { claudeMcpServers, gateEnv, type GateOptions } from "./gate.js";
+import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } from "./extensions.js";
+import { claudeMcpServers, gateEnv, mcpServerEnv, type GateOptions } from "./gate.js";
 import { executorInstructions } from "./instructions.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
 
@@ -18,6 +20,7 @@ export type ClaudeExecutorOptions = {
   readonly maxTurns?: number;
   readonly executable?: string;
   readonly rateLimits?: RateLimitCache;
+  readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
 };
 
 const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "WebSearch", "NotebookRead"]);
@@ -41,9 +44,11 @@ export function canonical(p: string): string {
   return tail.length ? join(head, ...tail) : head;
 }
 
-/** Policy: what needs a human. `cwd` should already be canonical. */
-export function decideTool(toolName: string, input: Record<string, unknown>, cwd: string): ToolDecision {
-  if (READ_ONLY.has(toolName) || toolName.startsWith("mcp__secret-gate__") || toolName.startsWith("mcp__playwright__")) return { kind: "allow" };
+/** Policy: what needs a human. `cwd` should already be canonical; `allowedMcp` = registry servers marked approval=allow. */
+export function decideTool(toolName: string, input: Record<string, unknown>, cwd: string, allowedMcp: ReadonlySet<string> = new Set()): ToolDecision {
+  if (READ_ONLY.has(toolName) || toolName === "Skill") return { kind: "allow" };
+  const server = mcpServerOf(toolName);
+  if (server && (server === "secret-gate" || server === "playwright" || allowedMcp.has(server))) return { kind: "allow" };
   if (EDIT_TOOLS.has(toolName)) {
     const raw = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : null;
     const p = raw === null ? null : canonical(resolve(cwd, raw));
@@ -87,25 +92,36 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
     harness: "claude-code",
     async run(input: ExecutionInput): Promise<ExecutionOutcome> {
       const cwd = canonical(resolve(input.cwd));
+      const ext = opts.extensions ?? NO_EXTENSIONS;
+      const servers = ext.mcpFor("claude-code");
+      const allowedMcp = autoAllowedMcp(servers);
       let approvals = 0;
       const canUseTool: CanUseTool = async (toolName, toolInput) => {
-        const d = decideTool(toolName, toolInput, cwd);
+        const d = decideTool(toolName, toolInput, cwd, allowedMcp);
         if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
         const decision: ApprovalDecision = await input.approve(d.action, d.evidence);
         if (decision === "allow") { approvals++; return { behavior: "allow", updatedInput: toolInput }; }
         return { behavior: "deny", message: "denied by the user via AgentSwitch" };
       };
-      const profile = mkdtempSync(join(tmpdir(), "agentswitch-claude-profile-"));
+      const runDir = mkdtempSync(join(tmpdir(), "agentswitch-claude-"));
+      const profile = join(runDir, "profile");
+      const pluginRoot = join(runDir, "plugin");
+      ext.skillsInto("claude-code", join(pluginRoot, "skills"));
+      const plugin = claudePluginDir(pluginRoot, join(pluginRoot, "skills"));
       const abort = new AbortController();
       const onAbort = () => abort.abort();
       input.signal.addEventListener("abort", onAbort, { once: true });
       const browser = (opts.browser ?? true) && input.browser;
+      const baseEnv = opts.gate ? gateEnv(opts.gate) : {};
+      const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
       const options: Options = {
         cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
         systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },
         maxTurns: opts.maxTurns ?? 200, abortController: abort, includePartialMessages: false,
         ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
-        ...(opts.gate ? { env: { ...process.env, ...gateEnv(opts.gate) } as Record<string, string>, mcpServers: claudeMcpServers(opts.gate, profile, browser) } : {}),
+        ...(opts.gate ? { env: { ...process.env, ...baseEnv } as Record<string, string> } : {}),
+        ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
+        ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),
         ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
       };
       const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
@@ -122,7 +138,7 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
         if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: approvals } };
       } finally {
         input.signal.removeEventListener("abort", onAbort);
-        rmSync(profile, { recursive: true, force: true });
+        rmSync(runDir, { recursive: true, force: true });
       }
       return outcomeFromFold(state, approvals, input.signal.aborted);
     },

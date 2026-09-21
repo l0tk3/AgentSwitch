@@ -66,6 +66,17 @@
   .result { margin-top:8px; white-space:pre-wrap; }
   .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:13px; }
   .kv b { color:var(--dim); font-weight:500; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--dim); cursor:pointer; user-select:none; }
+  .chip.on { border-color:var(--acc); color:var(--acc); background:rgba(91,140,255,.12); }
+  .card.off { opacity:.55; }
+  .form { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+  .form .full { grid-column:1/-1; }
+  .form textarea { min-height:120px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .actions { display:flex; gap:8px; margin-top:10px; }
+  .actions button { padding:8px 12px; font-size:13px; }
+  .mono { font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; }
+  details.card > summary { cursor:pointer; color:var(--dim); font-size:13px; }
 </style>
 </head>
 <body>
@@ -90,10 +101,12 @@
   <button data-view="home" class="active">首页<span id="apCount"></span></button>
   <button data-view="quota">额度</button>
   <button data-view="log">路由日志</button>
+  <button data-view="ext">扩展</button>
 </nav>
 <script>
 const $ = (s, r = document) => r.querySelector(s);
-const state = { view: "home", tasks: [], task: null, events: [], approvals: [], quota: [], log: [], es: null, health: false };
+const state = { view: "home", tasks: [], task: null, events: [], approvals: [], quota: [], log: [], es: null, health: false, mcp: [], skills: [], discovered: [], edit: { mcp: null, skill: null }, extHint: "" };
+const HARNESSES = ["claude-code", "codex", "opencode"];
 const api = async (method, path, body) => {
   const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   const t = await r.text();
@@ -181,6 +194,9 @@ function render() {
   } else if (state.view === "log") {
     $("#title").textContent = "路由日志";
     m.innerHTML = state.log.length ? state.log.map((r) => `<div class="card"><div class="row"><span class="badge">${esc(r.source)}</span><span class="grow ellipsis">${r.harness ? esc(r.harness + "/" + r.model) : "无目标"}</span><span class="dim">${ago(r.ts)}</span></div>${r.notes ? `<div class="dim" style="margin-top:4px">${esc(r.notes)}</div>` : ""}${r.routerError ? `<div class="dim" style="color:var(--bad)">${esc(r.routerError)}</div>` : ""}${r.decision ? `<details><summary class="dim">决策</summary><div class="dim" style="white-space:pre-wrap">${esc(JSON.stringify(JSON.parse(r.decision), null, 1))}</div></details>` : ""}</div>`).join("") : `<div class="empty">还没有路由记录</div>`;
+  } else if (state.view === "ext") {
+    $("#title").textContent = "扩展";
+    m.innerHTML = renderExt();
   } else if (state.view === "task" && state.task) {
     const t = state.task;
     $("#title").textContent = "任务 " + t.id;
@@ -197,6 +213,76 @@ function render() {
     const ev = $("#events"); if (ev) ev.scrollTop = ev.scrollHeight;
   }
 }
+
+const chips = (sel, attr) => HARNESSES.map((h) => `<span class="chip ${sel.includes(h) ? "on" : ""}" data-${attr}="${h}">${h}</span>`).join("");
+const lines = (obj, sep) => Object.entries(obj || {}).map(([k, v]) => `${k}${sep}${v}`).join("\n");
+const parseLines = (text, sep) => Object.fromEntries(text.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf(sep); return i < 0 ? [l, ""] : [l.slice(0, i).trim(), l.slice(i + sep.length).trim()]; }));
+
+function mcpCard(s) {
+  const target = s.kind === "stdio" ? [s.command, ...(s.args || [])].join(" ") : s.url;
+  return `<div class="card ${s.enabled ? "" : "off"}"><div class="row"><b class="grow ellipsis">${esc(s.name)}</b><span class="badge">${s.kind}</span><span class="badge">${s.approval === "allow" ? "免审批" : "需审批"}</span></div>
+    <div class="mono dim" style="margin-top:4px">${esc(target)}</div>${s.note ? `<div class="dim">${esc(s.note)}</div>` : ""}
+    <div class="chips" style="margin-top:6px">${chips(s.harnesses, "x")}</div>
+    <div class="actions"><button data-mcp-toggle="${esc(s.name)}">${s.enabled ? "停用" : "启用"}</button><button data-mcp-edit="${esc(s.name)}">编辑</button><button class="bad" data-mcp-del="${esc(s.name)}">删除</button></div></div>`;
+}
+function mcpForm(s) {
+  const e = s || { name: "", kind: "stdio", command: "", args: [], env: {}, url: "", headers: {}, harnesses: HARNESSES, approval: "ask", note: "" };
+  return `<div class="card" id="mcp-form"><div class="form">
+    <div><label>名字</label><input id="m-name" value="${esc(e.name)}" ${s ? "readonly" : ""} placeholder="github"></div>
+    <div><label>类型</label><select id="m-kind"><option value="stdio" ${e.kind === "stdio" ? "selected" : ""}>stdio（本地进程）</option><option value="http" ${e.kind === "http" ? "selected" : ""}>http（远程）</option></select></div>
+    <div class="full"><label>命令（stdio）</label><input id="m-command" value="${esc(e.command || "")}" placeholder="npx"></div>
+    <div class="full"><label>参数，每行一个（stdio）</label><textarea id="m-args" style="min-height:60px">${esc((e.args || []).join("\n"))}</textarea></div>
+    <div class="full"><label>环境变量 KEY=VALUE 每行一个（stdio）</label><textarea id="m-env" style="min-height:60px">${esc(lines(e.env, "="))}</textarea></div>
+    <div class="full"><label>URL（http）</label><input id="m-url" value="${esc(e.url || "")}" placeholder="https://…"></div>
+    <div class="full"><label>请求头 Key: Value 每行一个（http）</label><textarea id="m-headers" style="min-height:60px">${esc(lines(e.headers, ": "))}</textarea></div>
+    <div><label>Claude Code 调用时</label><select id="m-approval"><option value="ask" ${e.approval === "ask" ? "selected" : ""}>需要审批</option><option value="allow" ${e.approval === "allow" ? "selected" : ""}>免审批</option></select></div>
+    <div><label>备注</label><input id="m-note" value="${esc(e.note || "")}"></div>
+    <div class="full"><label>给哪些 harness</label><div class="chips" id="m-harness">${chips(e.harnesses, "h")}</div></div>
+  </div><div class="hint dim" style="margin-top:6px">密钥只放 enc:v1 密文：stdio 服务会继承网关代理环境，出网时密文在网络层替换。</div>
+  <div class="actions"><button class="primary" id="m-save">保存</button><button id="m-cancel">取消</button></div></div>`;
+}
+function skillCard(s) {
+  return `<div class="card ${s.enabled ? "" : "off"}"><div class="row"><b class="grow ellipsis">${esc(s.name)}</b>${s.files ? `<span class="badge">+${s.files} 文件</span>` : ""}</div>
+    <div class="dim" style="margin-top:4px">${esc(s.description || "（无描述）")}</div>
+    <div class="chips" style="margin-top:6px">${chips(s.harnesses, "x")}</div>
+    <div class="actions"><button data-skill-toggle="${esc(s.name)}">${s.enabled ? "停用" : "启用"}</button><button data-skill-edit="${esc(s.name)}">编辑</button><button class="bad" data-skill-del="${esc(s.name)}">删除</button></div></div>`;
+}
+function skillForm(s) {
+  const e = s || { name: "", content: "", harnesses: HARNESSES };
+  return `<div class="card" id="skill-form"><div class="form">
+    <div class="full"><label>名字（目录名）</label><input id="s-name" value="${esc(e.name)}" ${s ? "readonly" : ""} placeholder="deploy-checklist"></div>
+    <div class="full"><label>SKILL.md（没写 frontmatter 会自动补 name/description）</label><textarea id="s-content">${esc(e.content || "")}</textarea></div>
+    <div class="full"><label>给哪些 harness</label><div class="chips" id="s-harness">${chips(e.harnesses, "h")}</div></div>
+  </div><div class="actions"><button class="primary" id="s-save">保存</button><button id="s-cancel">取消</button></div></div>`;
+}
+function renderExt() {
+  const found = state.discovered.filter((d) => !d.installed);
+  return [
+    state.extHint ? `<div class="card" style="color:var(--bad)">${esc(state.extHint)}</div>` : "",
+    `<h2>MCP 服务 ${state.mcp.length}</h2>`,
+    state.edit.mcp !== null ? mcpForm(state.edit.mcp) : `<div class="row"><button class="grow" id="mcp-new">＋ 添加 MCP 服务</button></div>`,
+    state.mcp.map(mcpCard).join("") || `<div class="empty">还没有 MCP 服务；网关自带的 secret-gate / playwright 不在这里管理</div>`,
+    `<h2>Skills ${state.skills.length}</h2>`,
+    state.edit.skill !== null ? skillForm(state.edit.skill) : `<div class="row"><button class="grow" id="skill-new">＋ 新建 skill</button></div>`,
+    state.skills.map(skillCard).join("") || `<div class="empty">还没有 skill</div>`,
+    `<details class="card"><summary>从本机导入（~/.claude/skills、~/.codex/skills…）${found.length ? " · " + found.length : ""}</summary>${found.map((d) => `<div class="row" style="margin-top:8px"><div class="grow"><b>${esc(d.name)}</b> <span class="dim">${esc(d.source)}</span><div class="dim ellipsis">${esc(d.description)}</div></div><button data-skill-import="${esc(d.path)}">导入</button></div>`).join("") || `<div class="dim" style="margin-top:6px">没有可导入的（已导入的不再列出）</div>`}</details>`,
+    `<div class="dim">MCP 和 skill 每次任务运行时注入到执行器的私有配置里，不改你自己的 ~/.claude、~/.codex、OpenCode 配置。</div>`,
+  ].join("");
+}
+async function loadExt() { [state.mcp, state.skills, state.discovered] = await Promise.all([api("GET", "/mcp"), api("GET", "/skills"), api("GET", "/skills/discover")]); }
+const pickedHarnesses = (id) => [...document.querySelectorAll(`#${id} .chip.on`)].map((c) => c.dataset.h);
+async function saveMcp() {
+  const name = $("#m-name").value.trim();
+  const body = { kind: $("#m-kind").value, command: $("#m-command").value.trim() || undefined, args: $("#m-args").value.split("\n").map((l) => l.trim()).filter(Boolean), env: parseLines($("#m-env").value, "="), url: $("#m-url").value.trim() || undefined, headers: parseLines($("#m-headers").value, ":"), approval: $("#m-approval").value, note: $("#m-note").value.trim(), harnesses: pickedHarnesses("m-harness"), enabled: state.edit.mcp ? state.edit.mcp.enabled : true };
+  await api("PUT", "/mcp/" + encodeURIComponent(name), body);
+  state.edit.mcp = null;
+}
+async function saveSkill() {
+  const name = $("#s-name").value.trim();
+  await api("PUT", "/skills/" + encodeURIComponent(name), { content: $("#s-content").value, harnesses: pickedHarnesses("s-harness") });
+  state.edit.skill = null;
+}
+async function extAction(fn) { state.extHint = ""; try { await fn(); } catch (err) { state.extHint = err.message; } await loadExt(); render(); }
 
 async function loadTasks() { state.tasks = await api("GET", "/tasks?limit=50"); }
 async function loadApprovals() { state.approvals = await api("GET", "/approvals"); }
@@ -232,13 +318,27 @@ async function send() {
 }
 
 document.addEventListener("click", async (e) => {
-  const nav = e.target.closest("nav button"); if (nav) { state.view = nav.dataset.view; if (state.es) { state.es.close(); state.es = null; } $("#c-task").style.height = ""; if (state.view === "quota") loadQuota().then(render); if (state.view === "log") loadLog().then(render); if (state.view === "home") loadTasks().then(render); render(); return; }
+  const nav = e.target.closest("nav button"); if (nav) { state.view = nav.dataset.view; if (state.es) { state.es.close(); state.es = null; } $("#c-task").style.height = ""; if (state.view === "quota") loadQuota().then(render); if (state.view === "log") loadLog().then(render); if (state.view === "home") loadTasks().then(render); if (state.view === "ext") loadExt().then(render); render(); return; }
+  const chip = e.target.closest(".chip[data-h]"); if (chip) { chip.classList.toggle("on"); return; }
+  if (e.target.id === "mcp-new") { state.edit.mcp = undefined; render(); return; }
+  if (e.target.id === "m-cancel") { state.edit.mcp = null; render(); return; }
+  if (e.target.id === "m-save") return extAction(saveMcp);
+  if (e.target.id === "skill-new") { state.edit.skill = undefined; render(); return; }
+  if (e.target.id === "s-cancel") { state.edit.skill = null; render(); return; }
+  if (e.target.id === "s-save") return extAction(saveSkill);
+  const mt = e.target.closest("[data-mcp-toggle]"); if (mt) { const s = state.mcp.find((x) => x.name === mt.dataset.mcpToggle); return extAction(() => api("PUT", "/mcp/" + encodeURIComponent(s.name), { ...s, enabled: !s.enabled })); }
+  const me = e.target.closest("[data-mcp-edit]"); if (me) { state.edit.mcp = state.mcp.find((x) => x.name === me.dataset.mcpEdit); render(); return; }
+  const md = e.target.closest("[data-mcp-del]"); if (md) { if (!confirm(`删除 MCP 服务 ${md.dataset.mcpDel}？`)) return; return extAction(() => api("DELETE", "/mcp/" + encodeURIComponent(md.dataset.mcpDel))); }
+  const st = e.target.closest("[data-skill-toggle]"); if (st) { const s = state.skills.find((x) => x.name === st.dataset.skillToggle); return extAction(() => api("PUT", "/skills/" + encodeURIComponent(s.name), { enabled: !s.enabled })); }
+  const se = e.target.closest("[data-skill-edit]"); if (se) { const s = await api("GET", "/skills/" + encodeURIComponent(se.dataset.skillEdit)); state.edit.skill = s; render(); return; }
+  const sd = e.target.closest("[data-skill-del]"); if (sd) { if (!confirm(`删除 skill ${sd.dataset.skillDel}？`)) return; return extAction(() => api("DELETE", "/skills/" + encodeURIComponent(sd.dataset.skillDel))); }
+  const si = e.target.closest("[data-skill-import]"); if (si) return extAction(() => api("POST", "/skills/import", { path: si.dataset.skillImport }));
   const open = e.target.closest("[data-open]"); if (open) return openTask(open.dataset.open);
   const ap = e.target.closest("[data-approve]"); if (ap) { ap.disabled = true; try { await api("POST", `/tasks/${ap.dataset.task}/approve`, { approval_id: ap.dataset.approve, decision: ap.dataset.decision }); } catch (err) { alert(err.message); } await Promise.all([loadApprovals(), loadTasks()]); render(); return; }
   if (e.target.id === "c-send") return send();
   if (e.target.id === "t-cancel") { await api("POST", `/tasks/${state.task.id}/cancel`); return; }
   if (e.target.id === "q-refresh") { e.target.disabled = true; await loadQuota(true); render(); return; }
-  if (e.target.id === "refresh") { await Promise.all([health(), loadTasks(), loadApprovals()]); if (state.view === "quota") await loadQuota(); if (state.view === "log") await loadLog(); render(); return; }
+  if (e.target.id === "refresh") { await Promise.all([health(), loadTasks(), loadApprovals()]); if (state.view === "quota") await loadQuota(); if (state.view === "log") await loadLog(); if (state.view === "ext") await loadExt(); render(); return; }
 });
 $("#c-task").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); });
 function fitMain() {

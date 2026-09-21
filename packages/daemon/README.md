@@ -79,6 +79,28 @@ trivial file task in a temp dir.
 | codex | `codex app-server` JSON-RPC (bundled ChatGPT.app binary); private `CODEX_HOME` with 0600 auth copy + our config.toml, removed after the run; `model_reasoning_effort` from the verdict | `item/*/requestApproval`, `execCommandApproval`, `applyPatchApproval` → engine; MCP elicitations accepted | `turn/completed` error, `error` notifications, process exit |
 | opencode | `opencode run --standalone --format json -m <model>`; config via `OPENCODE_CONFIG` | none: `run` cannot surface prompts (design A.3). Edits and shell allowed, webfetch denied, gate home unreadable | `error` events, exit code, stderr |
 
+## MCP servers and skills
+
+Managed in the UI's 扩展 tab (or `GET /mcp`, `GET /skills`), stored under `$AGENTSWITCH_HOME`:
+`mcp.json` (0600) and `skills/<name>/SKILL.md` + `skills.json`. Nothing touches the user's own
+`~/.claude`, `~/.codex` or OpenCode config — each run gets a private copy.
+
+Per entry you choose which harnesses see it. Injection per harness:
+
+| | MCP | skills |
+|---|---|---|
+| claude-code | `mcpServers` option | local plugin dir (`plugins` + `skills: "all"`) |
+| codex | `[mcp_servers.*]` in the private `config.toml` | copied into `$CODEX_HOME/skills` |
+| opencode | `mcp` (local/remote) in the run config | `skills.paths` to a copied dir |
+
+Names `secret-gate` and `playwright` are reserved for the gate. A stdio server is spawned with
+`PATH`/`HOME`, the gate proxy and (when `secret-gate install-ca` has run) the gate CA in
+`NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE`, so its HTTPS calls survive interception and `enc:v1:`
+ciphertext in its env or headers is substituted on the wire. Claude Code asks for approval before
+every registry MCP tool call unless the entry is marked `approval: allow`; the gate's own servers
+are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.codex/skills`,
+`~/.agents/skills` and the OpenCode skill folders (`GET /skills/discover`).
+
 ## API
 
 | method | path | what |
@@ -94,6 +116,12 @@ trivial file task in a temp dir.
 | GET | `/targets` | catalog + current quota map |
 | GET | `/routing/log` | recent decisions (every engine dispatch and re-dispatch, plus previews) |
 | GET/PUT | `/context` | CONTEXT.md (PUT lints) |
+| GET | `/mcp` | registered MCP servers |
+| PUT/DELETE | `/mcp/:name` | upsert (body = the entry without `name`) / remove |
+| GET | `/skills`, `/skills/:name` | list / one with its SKILL.md in `content` |
+| PUT/DELETE | `/skills/:name` | `{content?, enabled?, harnesses?}` / remove |
+| GET | `/skills/discover` | skills found in the user's own folders, with `installed` |
+| POST | `/skills/import` | `{path}` copies a skill directory into the registry |
 | GET | `/healthz` | |
 
 Later for the phone: bind to the Tailscale address, add bearer auth and pairing. Routes stay.
@@ -121,6 +149,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `config/EXECUTOR.md` | AgentSwitch's part of the guidance every executor gets |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
 | `src/quota/{codex,deepseek,claude,windows,index}.ts` | providers, 5h/7d windows (Codex app-server windows; Claude `rate_limit_event` from runs or a one-turn probe), cached service |
+| `src/extensions/*`, `src/executors/extensions.ts` | MCP + skill registries and their per-harness shapes |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
 | `tests/` | 84 tests; API tests run in-process via Hono `request()` |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
