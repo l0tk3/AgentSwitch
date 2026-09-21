@@ -59,6 +59,19 @@ deleted when it is under the OS temp dir or `~/.agentswitch/work`; a persistent 
 Executors also remove their own temp files (Claude browser profile, OpenCode config dir, router
 config dir).
 
+## Background tasks (background-v0)
+
+Tasks run concurrently. Four gates, in this order: a global cap (`AGENTSWITCH_MAX_TASKS`, default
+4, FIFO beyond it), the parent (a follow-up waits for its parent to end), one task per thread and
+one per cwd (`KeyedLock`), and one slot per harness `max_concurrent` taken at dispatch (full →
+wait, never switch target). A task that has to wait emits a `waiting` event saying for what
+(`global`, `parent`, `thread`, `cwd`, `harness:<name>`); cancelling a waiting task takes effect
+at once. Sub-agents the harnesses spawn (Claude `task_*` system messages, Codex
+`subAgentActivity` / `collabAgentToolCall` items, OpenCode's `task` tool) surface as `agent`
+events and are counted in the `done` event; the executors do not return before the harness
+reports them finished (Claude holds the one-shot result back, Codex sends `turn/completed`
+last, OpenCode runs them synchronously). Verified with `scripts/background_agent_smoke.ts`.
+
 ## Threads (threads-v0)
 
 Every task runs in a thread: one piece of work from first message to done. A follow-up (`parent_id`)
@@ -157,7 +170,7 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 | POST | `/threads/:id/archive`, `/threads/:id/reopen` | archive = delete after 7 days (refused while a task runs) / reopen |
 | DELETE | `/threads/:id` | delete now, private home included |
 | GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
-| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, thread, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
+| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, thread, waiting, dispatched, agent, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
 | POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |
 | POST | `/tasks/:id/cancel` | abort; pending approvals denied |
 | GET | `/approvals` | pending across tasks |
@@ -199,7 +212,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 
 | path | what |
 |---|---|
-| `src/engine/{types,store,bus,engine,cleanup}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop, ephemeral cleanup |
+| `src/engine/{types,store,bus,engine,cleanup,locks}.ts` | task model, SQLite + JSONL persistence, event fan-out, the concurrent engine, ephemeral cleanup, semaphore/keyed locks |
 | `ui/` | desktop console at `/ui`: `index.html` shell, `app.css`, `app.js` (render loop, click routing, polling), `lib/{api,state,actions}.js`, `views/{home,task,log,ext,ctx,quota}.js` |
 | `src/executors/{types,echo,gate,instructions,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, global guidance, the three real executors |
 | `src/executors/protected.ts` | protected paths: deny decision for Claude, deny patterns for OpenCode, snapshot/restore backstop for all |
@@ -211,7 +224,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `src/files/*` | names (limits, MIME), uploads (staging → `<cwd>/in/`), artifacts (tree, safe download path, `out/` → `artifacts/<id>` before an ephemeral cwd is deleted, sweeps), notes (attachment paragraph for router + executor) |
 | `src/extensions/*`, `src/executors/extensions.ts` | MCP + skill registries and their per-harness shapes |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
-| `tests/` | 182 tests; API tests run in-process via Hono `request()` |
+| `tests/` | 192 tests; API tests run in-process via Hono `request()` |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
 | `scripts/resume_experiment.ts`, `scripts/executor_resume_smoke.ts` | real-model checks that Claude / Codex resume from a thread's private home (costs cents) |
 

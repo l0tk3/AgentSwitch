@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { isImage } from "../files/names.js";
 import type { Attachment } from "../files/uploads.js";
-import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
+import { NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome } from "../router/failure.js";
 import { AppServerClient, type Json } from "./appserver.js";
 import { codexMcpToml } from "./extensions.js";
 import { codexGateToml, mcpServerEnv, stripProxy, type GateOptions } from "./gate.js";
@@ -49,9 +49,40 @@ export function describeApproval(method: string, params: Json): { action: string
   return { action: method, evidence: JSON.stringify(params).slice(0, 2000) };
 }
 
-export type TurnState = { text: string[]; tools: number; edits: number; approvals: number; completed: Json | null; errors: string[] };
+export type CodexAgentEvent = { readonly agentId: string; readonly status: "started" | "progress" | "completed" | "failed" | "stopped"; readonly description: string; readonly summary?: string };
+
+export type TurnState = { text: string[]; tools: number; edits: number; approvals: number; completed: Json | null; errors: string[]; agents: AgentCounts; agentEvents: CodexAgentEvent[] };
+
+export const EMPTY_TURN: TurnState = { text: [], tools: 0, edits: 0, approvals: 0, completed: null, errors: [], agents: NO_AGENTS, agentEvents: [] };
+
+/** Sub-agents (background-v0 §2): `collabAgentToolCall` spawn/close items and `subAgentActivity` bookends, on item/started and item/completed. */
+function foldAgentItem(state: TurnState, method: string, item: Json): TurnState | null {
+  const type = String(item.type ?? "");
+  if (type === "subAgentActivity") {
+    const kind = String(item.kind ?? "");
+    const ev: CodexAgentEvent = { agentId: String(item.agentThreadId ?? ""), description: String(item.agentPath ?? "sub-agent"), status: kind === "started" ? "started" : kind === "completed" ? "completed" : kind === "interrupted" ? "stopped" : "progress" };
+    if ((kind === "started") !== (method === "item/started")) return state;   // started on item/started, the rest on item/completed: one event per activity
+    const agents = kind === "started" ? { ...state.agents, spawned: state.agents.spawned + 1 } : kind === "completed" ? { ...state.agents, completed: state.agents.completed + 1 } : kind === "interrupted" ? { ...state.agents, failed: state.agents.failed + 1 } : state.agents;
+    return { ...state, agents, agentEvents: [...state.agentEvents, ev] };
+  }
+  if (type === "collabAgentToolCall") {
+    const tool = String(item.tool ?? "");
+    const status = String(item.status ?? "");
+    const ids = Array.isArray(item.receiverThreadIds) ? (item.receiverThreadIds as unknown[]).map(String) : [];
+    if (method === "item/completed" && status === "failed") {
+      return { ...state, tools: state.tools + 1, agents: { ...state.agents, failed: state.agents.failed + 1 }, agentEvents: [...state.agentEvents, { agentId: ids[0] ?? "", status: "failed", description: `${tool}: ${String(item.prompt ?? "").slice(0, 120)}` }] };
+    }
+    if (method === "item/completed") return { ...state, tools: state.tools + 1, agentEvents: [...state.agentEvents, { agentId: ids[0] ?? "", status: "progress", description: `${tool} ${status}`, ...(item.prompt ? { summary: String(item.prompt).slice(0, 200) } : {}) }] };
+    return state;
+  }
+  return null;
+}
 
 export function applyNotification(state: TurnState, method: string, params: Json): TurnState {
+  if (method === "item/started" || method === "item/completed") {
+    const agent = foldAgentItem(state, method, (params.item as Json) ?? {});
+    if (agent) return agent;
+  }
   if (method === "item/completed") {
     const item = (params.item as Json) ?? {};
     const type = String(item.type ?? "");
@@ -75,6 +106,7 @@ export function outcomeFromTurn(state: TurnState, extraError: string | null): Ex
   return {
     ok, exitCode: ok ? 0 : 1, stderr: errors.join("\n"), lastText: text || (ok ? "(no message)" : ""),
     sideEffects: { ...NO_SIDE_EFFECTS, filesChanged: state.edits, commandsRun: state.tools - state.edits, approvalsGranted: state.approvals },
+    agents: state.agents,
   };
 }
 
@@ -106,7 +138,7 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
       const { home, persistent } = prepareHome(opts, input.effort, (opts.browser ?? true) && input.browser, input.threadHome);
       const env = { ...stripProxy(process.env), CODEX_HOME: home, GIT_EDITOR: "true" };
       let child: ChildProcess | null = null;
-      let state: TurnState = { text: [], tools: 0, edits: 0, approvals: 0, completed: null, errors: [] };
+      let state: TurnState = EMPTY_TURN;
       let notifyDone: (() => void) | null = null;
       const completed = new Promise<void>((r) => (notifyDone = r));
       try {
@@ -125,6 +157,7 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
           state = applyNotification(state, method, params);
           if (state.text.length > before.text.length) input.emit("text", { text: state.text.at(-1) });
           if (state.tools > before.tools) { const item = (params.item as Json) ?? {}; input.emit("tool_call", { tool: String(item.type ?? method), command: item.command ?? null }); }
+          for (const a of state.agentEvents.slice(before.agentEvents.length)) input.emit("agent", { harness: "codex", ...a });
           if (state.completed) notifyDone?.();
         });
         child.on("exit", () => { client.fail(new Error("app-server exited")); notifyDone?.(); });

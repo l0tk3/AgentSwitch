@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { createApp } from "./api/app.js";
 import { Bus } from "./engine/bus.js";
 import { defaultCleanupPaths } from "./engine/cleanup.js";
-import { Engine } from "./engine/engine.js";
+import { DEFAULT_MAX_TASKS, Engine } from "./engine/engine.js";
 import { Store } from "./engine/store.js";
 import { claudeExecutor, probeRateLimits } from "./executors/claude.js";
 import { codexExecutor } from "./executors/codex.js";
@@ -47,6 +47,8 @@ export type DaemonConfig = {
   readonly executors: "echo" | "real";   // real = claude-code (Agent SDK), codex (app-server), opencode (run)
   readonly browser: boolean;             // give real executors the gated Playwright browser
   readonly quotaTtlMs: number;
+  /** Tasks in flight at once (AGENTSWITCH_MAX_TASKS, default 4); see docs/background-v0.md. */
+  readonly maxTasks: number;
 };
 
 export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
@@ -59,6 +61,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     executors: env.AGENTSWITCH_EXECUTORS === "real" ? "real" : "echo",
     browser: env.AGENTSWITCH_BROWSER !== "0",   // gated Playwright MCP attached to browser tasks when the gate exists
     quotaTtlMs: 60_000,
+    maxTasks: Math.max(1, Number(env.AGENTSWITCH_MAX_TASKS ?? DEFAULT_MAX_TASKS) || DEFAULT_MAX_TASKS),
   };
 }
 
@@ -99,8 +102,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(opencodeRouter({ model: targets.router.model, agentName: "summarizer", tools: "none", runIn: join(cfg.home, "summarizer") }), targets.router.timeout_ms);
   mkdirSync(join(cfg.home, "summarizer"), { recursive: true });
   const extensionsSummary = () => summarizeExtensions(extensions);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, ...(summarizer ? { summarizer } : {}) });
-  const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, ...(summarizer ? { summarizer } : {}) });
+  const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
@@ -139,7 +142,7 @@ function defaultEchoRouter(targets: Targets): Router {
 export function serve(cfg: DaemonConfig): { daemon: Daemon; close: () => void } {
   const daemon = buildDaemon(cfg);
   const server = listen({ fetch: daemon.app.fetch, hostname: "127.0.0.1", port: cfg.port }, (info) => {
-    console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router} executors=${cfg.executors} home=${cfg.home}`);
+    console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   });
   void daemon.quota.refresh();
   const sweeper = setInterval(() => sweepThreads(daemon.store), 3600_000);

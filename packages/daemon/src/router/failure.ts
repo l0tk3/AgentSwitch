@@ -10,6 +10,10 @@ export type SideEffects = {
 
 export const NO_SIDE_EFFECTS: SideEffects = { filesChanged: 0, commandsRun: 0, approvalsGranted: 0 };
 
+/** Sub-agents the harness spawned during the run (background-v0 §2). */
+export type AgentCounts = { readonly spawned: number; readonly completed: number; readonly failed: number };
+export const NO_AGENTS: AgentCounts = { spawned: 0, completed: 0, failed: 0 };
+
 export type ExecutionOutcome = {
   readonly ok: boolean;
   readonly exitCode?: number | null;
@@ -23,6 +27,7 @@ export type ExecutionOutcome = {
   readonly tokens?: number;
   /** The harness's own conversation handle (Claude session_id, Codex thread id), for native resume later. */
   readonly sessionId?: string;
+  readonly agents?: AgentCounts;
 };
 
 const REFUSAL = /(I can(?:'|’)?t help|I cannot help|I can(?:'|’)?t assist|unable to assist|won(?:'|’)?t be able to help|against (?:my|our|the) (?:policy|guidelines)|safety (?:policy|guidelines|reasons)|无法协助|不能帮助|不能帮你|无法帮助|违反.{0,6}(政策|准则|规范)|安全(政策|准则)|refus(?:e|al)|stop_reason["']?\s*[:=]\s*["']?refusal)/i;

@@ -71,7 +71,7 @@ iPhone (SwiftUI)                                   Mac (launchd 守护)
 - 任务状态机：`queued → routing → running → (awaiting_approval ⇄ running) → done | failed | cancelled`。
 - 持久化：SQLite。两张核心表：`tasks`（当前状态）、`events`（append-only，SSE 回放用）。
 - 手机断线无所谓：状态在 SQLite，重连时按 `since=<event_id>` 回放。
-- 并发：第一版单任务串行，避免多个 agent 抢同一工作目录。
+- 并发：~~第一版单任务串行~~ 2026-09-21 改为默认并发，三把锁（线程/父任务、cwd、harness `max_concurrent`）加全局上限，见 `background-v0.md`。
 
 ### 3.3 路由器（两阶段，分类器不决定目的地）
 > 2026-09-20：路由改为 OpenCode 里的 DeepSeek V4.1 Flash 分诊台 + 代码校验，**取消敏感度分类和本地可信模型**：凭据和 PII 由用户先做成 secret-gate 密文，任务文本视为可出门。"可信模型"合并进路由器：以后要不出门就把 router agent 的 model 换成本地模型。细节见 `router-v0.md`；本节其余内容为原始思路，冲突处以 `router-v0.md` 为准。
@@ -372,4 +372,4 @@ deny: ["~", "/", "~/.ssh", "~/.claude", "~/Library"]  # 永不作为 cwd
 
 ### B.6 并发
 - 每个已解析的 cwd 一把锁，同一目录同时只跑一个任务；worktree 模式下锁的是 worktree，不同任务可并行。
-- 第一版仍全局串行，锁只是为 M3 之后放开并发做准备。
+- ~~第一版仍全局串行~~ 2026-09-21 起并发（`background-v0.md`）：cwd 锁、线程锁、harness 槽位、全局上限。

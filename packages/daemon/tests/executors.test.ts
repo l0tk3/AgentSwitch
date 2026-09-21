@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { AppServerClient, type Json } from "../src/executors/appserver.js";
-import { canonical, decideTool, foldMessage, outcomeFromFold, type Folded } from "../src/executors/claude.js";
-import { applyNotification, approvalAnswer, codexConfigToml, describeApproval, outcomeFromTurn, type TurnState } from "../src/executors/codex.js";
+import { canonical, decideTool, foldMessage, outcomeFromFold, type Folded, EMPTY_FOLD } from "../src/executors/claude.js";
+import { applyNotification, approvalAnswer, codexConfigToml, describeApproval, outcomeFromTurn, type TurnState, EMPTY_TURN } from "../src/executors/codex.js";
 import { claudeMcpServers, codexGateToml, gateEnv, opencodeGateConfig, type GateOptions } from "../src/executors/gate.js";
 import { opencodeExecConfig, outcomeFromRun, resumeRefused, summarizeRun } from "../src/executors/opencode.js";
 import { classifyFailure } from "../src/router/failure.js";
@@ -86,7 +86,7 @@ describe("codex executor helpers", () => {
     expect(describeApproval("weird", { x: 1 }).evidence).toBe('{"x":1}');
   });
   it("notifications fold into a turn state and an outcome", () => {
-    let s: TurnState = { text: [], tools: 0, edits: 0, approvals: 0, completed: null, errors: [] };
+    let s: TurnState = EMPTY_TURN;
     s = applyNotification(s, "item/completed", { item: { type: "agentMessage", text: "hi" } });
     s = applyNotification(s, "item/completed", { item: { type: "commandExecution", command: "ls" } });
     s = applyNotification(s, "item/completed", { item: { type: "fileChange" } });
@@ -152,7 +152,7 @@ describe("claude executor helpers", () => {
     expect(decideTool("Write", { file_path: join(dir, "..", "escape.txt") }, cwd)).toMatchObject({ kind: "ask" });
   });
   it("messages fold into an outcome: success, error, refusal, rate limit, cancelled", () => {
-    const empty: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: false, rateLimited: false };
+    const empty: Folded = EMPTY_FOLD;
     const assistant = { type: "assistant", message: { content: [{ type: "text", text: "working" }, { type: "tool_use", name: "Edit" }, { type: "tool_use", name: "Bash" }] } } as never;
     const success = { type: "result", subtype: "success", is_error: false, result: "all done", usage: { input_tokens: 10, output_tokens: 5 } } as never;
     let s = foldMessage(foldMessage(empty, assistant), success);

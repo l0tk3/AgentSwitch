@@ -73,10 +73,12 @@ export function summarizeRun(stdout: string): RunSummary {
 export function outcomeFromRun(summary: RunSummary, exitCode: number | null, stderr: string, timedOut: boolean): ExecutionOutcome {
   const edits = summary.tools.filter((t) => /^(edit|write|patch|multiedit)$/i.test(t.tool)).length;
   const shells = summary.tools.filter((t) => /^bash$/i.test(t.tool)).length;
+  const subagents = summary.tools.filter((t) => /^task$/i.test(t.tool)).length;   // OpenCode's sub-agent tool, synchronous
   const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: edits, commandsRun: shells };
+  const agents = { spawned: subagents, completed: subagents, failed: 0 };
   const errText = [...summary.errors, stderr.trim()].filter(Boolean).join("\n");
   const ok = !timedOut && exitCode === 0 && summary.errors.length === 0 && summary.text.trim().length > 0;
-  return { ok, exitCode, stderr: errText, lastText: summary.text.trim(), timedOut, sideEffects, ...(summary.sessionId ? { sessionId: summary.sessionId } : {}) };
+  return { ok, exitCode, stderr: errText, lastText: summary.text.trim(), timedOut, sideEffects, agents, ...(summary.sessionId ? { sessionId: summary.sessionId } : {}) };
 }
 
 /** A resume that OpenCode refused (session gone from its db, or a different directory): retry without it. */
@@ -123,7 +125,10 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
             const line = buffered.slice(0, i); buffered = buffered.slice(i + 1);
             const one = summarizeRun(line);
             if (one.text) input.emit("text", { text: one.text });
-            for (const t of one.tools) input.emit("tool_call", { tool: t.tool, input: t.input });
+            for (const t of one.tools) {
+              input.emit("tool_call", { tool: t.tool, input: t.input });
+              if (/^task$/i.test(t.tool)) input.emit("agent", { harness: "opencode", agentId: "", status: "completed", description: String((t.input as { description?: string } | null)?.description ?? "sub-agent") });
+            }
           }
         });
         child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));

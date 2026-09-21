@@ -22,6 +22,8 @@ import type { LoadedContext } from "../router/context.js";
 import type { HandoffReason, ThreadState } from "../threads/types.js";
 import type { Bus } from "./bus.js";
 import { cleanupEphemeral, defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
+import { KeyedLock, Semaphore, type Release } from "./locks.js";
+import { NO_AGENTS } from "../router/failure.js";
 import { existsSync, rmSync } from "node:fs";
 import type { Decision } from "../router/decision.js";
 import type { ThreadBrief } from "../threads/types.js";
@@ -48,7 +50,11 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   /** MCP servers and skills, names only, for the router prompt. */
   readonly extensionsSummary?: () => ExtensionsSummary;
   readonly now?: () => number;
+  /** Tasks in flight at once (routing or running); the rest queue FIFO (background-v0 §1). */
+  readonly maxConcurrentTasks?: number;
 };
+
+export const DEFAULT_MAX_TASKS = 4;
 
 export type HandoffRequest = { readonly to?: TargetRef; readonly cwd?: string; readonly ephemeral?: boolean };
 
@@ -59,10 +65,15 @@ export class Engine {
   private readonly waiters = new Map<string, Waiter>();
   private readonly controllers = new Map<string, AbortController>();
   private readonly running: Record<string, number> = {};
-  private chain: Promise<void> = Promise.resolve();
+  private readonly inFlight = new Map<string, Promise<void>>();
+  private readonly global: Semaphore;
+  private readonly threadLock = new KeyedLock();
+  private readonly cwdLock = new KeyedLock();
+  private readonly slots = new Map<string, Semaphore>();
 
   constructor(deps: EngineDeps) {
     this.deps = deps;
+    this.global = new Semaphore(deps.maxConcurrentTasks ?? DEFAULT_MAX_TASKS);
   }
 
   /** Persist and enqueue; resolves with the queued task immediately. Every task ends up in a thread: the one
@@ -73,7 +84,8 @@ export class Engine {
     const threadId = input.threadId ?? parent?.threadId ?? null;
     const task = this.deps.store.createTask({ ...input, ...(threadId ? { threadId } : {}) });
     this.emit(task.id, "queued", { task: task.task, cwd: task.cwd, threadId });
-    this.chain = this.chain.then(() => this.process(task.id)).catch(() => undefined);
+    const run = this.process(task.id).catch(() => undefined).finally(() => this.inFlight.delete(task.id));
+    this.inFlight.set(task.id, run);
     return task;
   }
 
@@ -103,9 +115,14 @@ export class Engine {
     return foldThread(this.deps.store.threadEvents(threadId));
   }
 
-  /** Wait until the queue has drained (tests, graceful shutdown). */
-  idle(): Promise<void> {
-    return this.chain;
+  /** Wait until every submitted task has ended (tests, graceful shutdown). */
+  async idle(): Promise<void> {
+    while (this.inFlight.size) await Promise.all([...this.inFlight.values()]);
+  }
+
+  /** Tasks in flight per harness (what the router's concurrency check sees). */
+  runningByHarness(): Record<string, number> {
+    return { ...this.running };
   }
 
   cancel(id: string): Task | undefined {
@@ -150,16 +167,48 @@ export class Engine {
     if (!task || task.status !== "queued") return;
     const controller = new AbortController();
     this.controllers.set(id, controller);
+    const held: Release[] = [];
     try {
-      await this.runTask(task, controller.signal);
+      held.push(await this.gate("global", () => this.global.acquire(controller.signal), task, this.global.full));
+      if (task.parentId) await this.awaitParent(task, controller.signal);
+      if (controller.signal.aborted) return;
+      await this.runTask(task, controller.signal, held);
     } catch (err) {
       if (this.deps.store.getTask(id)?.status !== "cancelled") this.fail(id, (err as Error).message);
     } finally {
       this.controllers.delete(id);
+      for (const release of held.reverse()) release();
       await this.finishThread(id);          // before cleanup: the diff needs the work dir
       const final = this.deps.store.getTask(id) ?? task;   // joining a thread may have moved the task out of its temp dir
       if (final.ephemeral) this.cleanup(final);
     }
+  }
+
+  /** Take a lock, announcing the wait (a `waiting` event) only when it is not immediately free. */
+  private async gate(what: string, take: () => Promise<Release>, task: Task, busy: boolean): Promise<Release> {
+    if (busy) this.emit(task.id, "waiting", { for: what });
+    return take();
+  }
+
+  /** A follow-up must see its parent's result: wait until the parent has ended. */
+  private awaitParent(task: Task, signal: AbortSignal): Promise<void> {
+    const parent = this.deps.store.getTask(task.parentId!);
+    if (!parent || TERMINAL_STATUS.has(parent.status)) return Promise.resolve();
+    this.emit(task.id, "waiting", { for: "parent", taskId: parent.id });
+    return new Promise((resolve, reject) => {
+      const stop = this.deps.bus.subscribe(parent.id, (ev) => {
+        if (ev.type === "done" || ev.type === "failed" || ev.type === "cancelled") { stop(); resolve(); }
+      });
+      signal.addEventListener("abort", () => { stop(); reject(signal.reason ?? new Error("cancelled")); }, { once: true });
+      if (TERMINAL_STATUS.has(this.deps.store.getTask(parent.id)?.status ?? "")) { stop(); resolve(); }   // ended between the check and the subscription
+    });
+  }
+
+  private slot(harness: string): Semaphore {
+    const max = this.deps.targets.harnesses[harness]?.max_concurrent ?? 1;
+    const s = this.slots.get(harness) ?? new Semaphore(max);
+    this.slots.set(harness, s);
+    return s;
   }
 
   /** Open threads as the router sees them: newest 20, title + one line of summary + last target. */
@@ -252,7 +301,7 @@ export class Engine {
     return `This is a follow-up in an ongoing conversation. Earlier turns:\n\n${history}\n\nUser now says:\n${task.task}${attachmentsNote(task.attachments)}`;
   }
 
-  private async runTask(initial: Task, signal: AbortSignal): Promise<void> {
+  private async runTask(initial: Task, signal: AbortSignal, held: Release[]): Promise<void> {
     let task = initial;
     this.deps.store.updateTask(task.id, { status: "routing" });
     const composed = this.composeTask(task);
@@ -261,6 +310,10 @@ export class Engine {
     this.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
     if (!routed.verdict.ok) return this.fail(task.id, `no target: ${routed.verdict.notes.join("; ")}`);
     task = await this.assignThread(task, routed.decision);
+    if (signal.aborted) return;
+    // Locks in a fixed order (background-v0 §1): thread, then cwd; the harness slot is taken per dispatch.
+    held.push(await this.gate("thread", () => this.threadLock.acquire(task.threadId!, signal), task, this.threadLock.isHeld(task.threadId!)));
+    held.push(await this.gate("cwd", () => this.cwdLock.acquire(task.cwd, signal), task, this.cwdLock.isHeld(task.cwd)));
     if (signal.aborted) return;
     let current = this.deps.store.updateTask(task.id, { decision: routed.decision, brief: routed.decision?.brief ?? composed });
     let verdict: Verdict = routed.verdict;
@@ -327,6 +380,11 @@ export class Engine {
     if (!executor) {
       return { kind: "failed", attempt: { ...target, kind: "transport", excerpt: `no executor for harness ${verdict.harness}`, sideEffects: NO_SIDE_EFFECTS } };
     }
+    const slot = this.slot(verdict.harness);
+    let release: Release;
+    try {
+      release = await this.gate(`harness:${verdict.harness}`, () => slot.acquire(signal), task, slot.full);
+    } catch { return { kind: "cancelled" }; }
     this.deps.store.updateTask(task.id, { status: "running", harness: verdict.harness, model: verdict.model, effort: verdict.effort });
     this.emit(task.id, "dispatched", { harness: verdict.harness, model: verdict.model, effort: verdict.effort, chosen: verdict.chosen, brief: task.brief });
     this.running[verdict.harness] = (this.running[verdict.harness] ?? 0) + 1;
@@ -346,7 +404,7 @@ export class Engine {
       if (signal.aborted) return { kind: "cancelled" };
       if (outcome.ok) {
         this.deps.store.updateTask(task.id, { status: "done", result: outcome.lastText ?? "" });
-        this.emit(task.id, "done", { result: outcome.lastText ?? "", tokens: outcome.tokens ?? 0, sideEffects: outcome.sideEffects ?? NO_SIDE_EFFECTS });
+        this.emit(task.id, "done", { result: outcome.lastText ?? "", tokens: outcome.tokens ?? 0, sideEffects: outcome.sideEffects ?? NO_SIDE_EFFECTS, agents: outcome.agents ?? NO_AGENTS });
         return { kind: "done" };
       }
       const kind = classifyFailure(outcome) ?? "unknown";
@@ -360,6 +418,7 @@ export class Engine {
       return { kind: "failed", attempt };
     } finally {
       this.running[verdict.harness] = Math.max(0, (this.running[verdict.harness] ?? 1) - 1);
+      release();
     }
   }
 

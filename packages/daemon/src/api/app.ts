@@ -11,7 +11,7 @@ import { contentType, isImage, MAX_FILE_BYTES, MAX_FILES_PER_UPLOAD } from "../f
 import type { Attachment, Uploads } from "../files/uploads.js";
 import type { Engine } from "../engine/engine.js";
 import type { Store } from "../engine/store.js";
-import { TERMINAL } from "../engine/types.js";
+import { TERMINAL, type TaskEvent } from "../engine/types.js";
 import type { QuotaService } from "../quota/index.js";
 import { exampleContext, lintContext, loadContext } from "../router/context.js";
 import type { RoutingLog } from "../router/log.js";
@@ -186,18 +186,26 @@ export function createApp(deps: ApiDeps): Hono {
     const after = Number(c.req.query("after") ?? 0);
     return streamSSE(c, async (stream) => {
       let last = after;
+      const ends = (type: string) => type === "done" || type === "failed" || type === "cancelled";
       const send = async (ev: { seq: number; type: string; payload: unknown; ts: number }) => {
         if (ev.seq <= last) return;
         last = ev.seq;
         await stream.writeSSE({ id: String(ev.seq), event: ev.type, data: JSON.stringify({ ...ev, taskId: id }) });
       };
-      for (const ev of deps.store.eventsSince(id, after)) await send(ev);
-      if (TERMINAL.has(deps.store.getTask(id)!.status)) return;
       let done!: () => void;
       const finished = new Promise<void>((r) => (done = r));
+      // Subscribe before replaying so nothing emitted during the replay's awaits is lost; the seq check dedups.
+      const queue: TaskEvent[] = [];
+      let replaying = true;
       const unsubscribe = deps.bus.subscribe(id, (ev) => {
-        void send(ev).then(() => { if (ev.type === "done" || ev.type === "failed" || ev.type === "cancelled") done(); });
+        if (replaying) { queue.push(ev); return; }
+        void send(ev).then(() => { if (ends(ev.type)) done(); });
       });
+      let ended = false;
+      for (const ev of deps.store.eventsSince(id, after)) { await send(ev); ended ||= ends(ev.type); }
+      while (queue.length) { const ev = queue.shift()!; await send(ev); ended ||= ends(ev.type); }
+      replaying = false;
+      if (ended || TERMINAL.has(deps.store.getTask(id)!.status)) { unsubscribe(); return; }
       stream.onAbort(() => { unsubscribe(); done(); });
       await finished;
       unsubscribe();

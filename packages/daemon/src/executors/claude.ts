@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
-import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
+import { NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome } from "../router/failure.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } from "./extensions.js";
 import { claudeMcpServers, gateEnv, mcpServerEnv, type GateOptions } from "./gate.js";
@@ -70,9 +70,31 @@ export function decideTool(toolName: string, input: Record<string, unknown>, cwd
   return { kind: "ask", action: `${toolName}`, evidence: JSON.stringify(input).slice(0, 1000) };
 }
 
-export type Folded = { text: string[]; tools: number; edits: number; result: Extract<SDKMessage, { type: "result" }> | null; refusal: boolean; rateLimited: boolean };
+export type AgentEvent = { readonly agentId: string; readonly status: "started" | "progress" | "completed" | "failed" | "stopped"; readonly description: string; readonly summary?: string; readonly tokens?: number; readonly background?: boolean };
+
+export type Folded = { text: string[]; tools: number; edits: number; result: Extract<SDKMessage, { type: "result" }> | null; refusal: boolean; rateLimited: boolean; agents: AgentCounts; agentEvents: AgentEvent[] };
+
+export const EMPTY_FOLD: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: false, rateLimited: false, agents: NO_AGENTS, agentEvents: [] };
+
+/** Sub-agent bookends (background-v0 §2): task_started / task_progress / task_notification, ambient tasks ignored. */
+function foldTask(state: Folded, msg: SDKMessage): Folded | null {
+  if (msg.type !== "system") return null;
+  const m = msg as { subtype?: string; task_id?: string; description?: string; summary?: string; status?: string; is_backgrounded?: boolean; ambient?: boolean; usage?: { total_tokens?: number } };
+  if (m.ambient) return state;
+  const base = { agentId: String(m.task_id ?? ""), description: String(m.description ?? "") };
+  if (m.subtype === "task_started") return { ...state, agents: { ...state.agents, spawned: state.agents.spawned + 1 }, agentEvents: [...state.agentEvents, { ...base, status: "started", background: m.is_backgrounded ?? false }] };
+  if (m.subtype === "task_progress") return { ...state, agentEvents: [...state.agentEvents, { ...base, status: "progress", ...(m.summary ? { summary: m.summary } : {}), ...(m.usage?.total_tokens !== undefined ? { tokens: m.usage.total_tokens } : {}) }] };
+  if (m.subtype === "task_notification") {
+    const status = m.status === "completed" ? "completed" : m.status === "failed" ? "failed" : "stopped";
+    const agents = { ...state.agents, completed: state.agents.completed + (status === "completed" ? 1 : 0), failed: state.agents.failed + (status === "completed" ? 0 : 1) };
+    return { ...state, agents, agentEvents: [...state.agentEvents, { ...base, status, ...(m.summary ? { summary: m.summary } : {}), ...(m.usage?.total_tokens !== undefined ? { tokens: m.usage.total_tokens } : {}) }] };
+  }
+  return null;
+}
 
 export function foldMessage(state: Folded, msg: SDKMessage): Folded {
+  const task = foldTask(state, msg);
+  if (task) return task;
   if (msg.type === "assistant") {
     const blocks = (msg.message as { content?: { type: string; text?: string; name?: string }[] }).content ?? [];
     const text = blocks.filter((b) => b.type === "text" && b.text).map((b) => b.text!);
@@ -91,12 +113,13 @@ export function outcomeFromFold(state: Folded, approvals: number, cancelled: boo
   const usage = r ? (r.usage as { input_tokens?: number; output_tokens?: number }) : undefined;
   const tokens = (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
   const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: state.edits, commandsRun: state.tools - state.edits, approvalsGranted: approvals };
-  if (state.refusal) return { ok: false, exitCode: 0, lastText: `refusal: ${state.text.at(-1) ?? "model refused"}`, sideEffects, tokens };
-  if (!r) return { ok: false, exitCode: cancelled ? null : 1, stderr: cancelled ? "cancelled" : "no result message", lastText: state.text.join("\n"), timedOut: !cancelled, sideEffects, tokens };
+  const agents = state.agents;
+  if (state.refusal) return { ok: false, exitCode: 0, lastText: `refusal: ${state.text.at(-1) ?? "model refused"}`, sideEffects, tokens, agents };
+  if (!r) return { ok: false, exitCode: cancelled ? null : 1, stderr: cancelled ? "cancelled" : "no result message", lastText: state.text.join("\n"), timedOut: !cancelled, sideEffects, tokens, agents };
   const sessionId = r.session_id ? { sessionId: r.session_id } : {};
-  if (r.subtype === "success" && !r.is_error) return { ok: true, exitCode: 0, lastText: r.result, sideEffects, tokens, ...sessionId };
+  if (r.subtype === "success" && !r.is_error) return { ok: true, exitCode: 0, lastText: r.result, sideEffects, tokens, agents, ...sessionId };
   const errText = r.subtype === "success" ? r.result : `${r.subtype}${state.rateLimited ? " (rate limited)" : ""}`;
-  return { ok: false, exitCode: 1, stderr: state.rateLimited ? `rate limit: ${errText}` : errText, lastText: state.text.join("\n"), sideEffects, tokens };
+  return { ok: false, exitCode: 1, stderr: state.rateLimited ? `rate limit: ${errText}` : errText, lastText: state.text.join("\n"), sideEffects, tokens, agents };
 }
 
 /** Private config dir per thread. CLAUDE_CONFIG_DIR alone makes the CLI look for a per-dir keychain entry
@@ -149,7 +172,7 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
         ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
       };
       const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
-      let state: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: false, rateLimited: false };
+      let state: Folded = EMPTY_FOLD;
       try {
         for await (const msg of query({ prompt, options })) {
           const before = state;
@@ -157,9 +180,10 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
           if (msg.type === "rate_limit_event") opts.rateLimits?.record(msg.rate_limit_info);
           for (const t of state.text.slice(before.text.length)) input.emit("text", { text: t });
           if (state.tools > before.tools) input.emit("tool_call", { tool: "claude", count: state.tools - before.tools });
+          for (const a of state.agentEvents.slice(before.agentEvents.length)) input.emit("agent", { harness: "claude-code", ...a });
         }
       } catch (err) {
-        if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: approvals } };
+        if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: approvals }, agents: state.agents };
       } finally {
         input.signal.removeEventListener("abort", onAbort);
         rmSync(runDir, { recursive: true, force: true });

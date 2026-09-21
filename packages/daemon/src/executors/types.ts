@@ -22,8 +22,8 @@ export type ExecutionInput = {
   /** Task or router asked for a browser: attach the gated Playwright MCP. */
   readonly browser: boolean;
   readonly signal: AbortSignal;
-  /** Stream progress; the engine persists and fans out. */
-  readonly emit: (type: "text" | "tool_call", payload: Record<string, unknown>) => void;
+  /** Stream progress; the engine persists and fans out. `agent` = a sub-agent the harness spawned (background-v0 §2). */
+  readonly emit: (type: "text" | "tool_call" | "agent", payload: Record<string, unknown>) => void;
   /** Ask the user; resolves when they answer or the request expires (deny). */
   readonly approve: (action: string, evidence: string) => Promise<ApprovalDecision>;
 };

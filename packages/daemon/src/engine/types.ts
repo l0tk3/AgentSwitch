@@ -70,7 +70,9 @@ export type TaskEventType =
   | "cleaned"
   | "summary"
   | "handoff"
-  | "thread";
+  | "thread"
+  | "waiting"
+  | "agent";
 
 export type TaskEvent = {
   readonly taskId: string;

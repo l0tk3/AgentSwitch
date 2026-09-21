@@ -20,10 +20,12 @@ export function eventLine(ev) {
     case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"} (${p.status})`;
     case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;
     case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
+    case "waiting": return `等待 ${p.for === "parent" ? "父任务 " + p.taskId + " 结束" : p.for === "thread" ? "同线程的另一个任务" : p.for === "cwd" ? "同目录的另一个任务" : p.for === "global" ? "并发槽位（已达上限）" : String(p.for).startsWith("harness:") ? String(p.for).slice(8) + " 的空闲槽位" : p.for}`;
+    case "agent": return `子 agent ${p.status === "started" ? "启动" : p.status === "progress" ? "进展" : p.status === "completed" ? "完成" : p.status === "failed" ? "失败" : "停止"}${p.background ? "（后台）" : ""}：${p.description || p.agentId || ""}${p.summary ? "\n  " + p.summary : ""}${p.tokens ? " · " + p.tokens + " tok" : ""}`;
     case "thread": return `归入线程 ${p.threadId}（${p.source === "router" ? "路由器判断" + (p.confidence !== null ? "，置信度 " + p.confidence : "") : p.source === "user" ? "你确认的" : p.source === "parent" ? "追问自父任务" : "新开"}）${p.cwd ? "，目录 " + p.cwd : ""}`;
     case "handoff": return `交接 ${p.from ? p.from.harness + "/" + p.from.model + " → " : ""}${p.to && p.to.harness ? p.to.harness + "/" + (p.to.model || "?") : "由路由器选"} (${p.reason})${p.taskId && p.taskId !== ev.taskId ? "，新任务 " + p.taskId : ""}`;
     case "summary": return p.ok ? `线程摘要已更新：「${p.title}」(${((p.ms || 0) / 1000).toFixed(1)}s)` : `线程摘要失败：${p.error}`;
-    case "done": return (p.result || "").length > 200 ? "✓ 完成（结果见上方）" : `✓ 完成：${p.result}`;
+    case "done": return ((p.result || "").length > 200 ? "✓ 完成（结果见上方）" : `✓ 完成：${p.result}`) + (p.agents && p.agents.spawned ? `  · 子 agent ${p.agents.completed}/${p.agents.spawned} 完成${p.agents.failed ? "，" + p.agents.failed + " 失败" : ""}` : "");
     case "failed": return `✗ 失败：${p.error}${p.security ? "  [安全事件]" : ""}`;
     case "cancelled": return "已取消";
     case "cleaned": return `已清理临时目录与 harness 记录 (workdir=${p.workDirRemoved}, claude=${(p.claudeProjectsRemoved || []).length}, opencode=${p.opencodeSessionsRemoved}${p.artifacts ? ", 产物 " + p.artifacts + " 个已保留" : ""})`;

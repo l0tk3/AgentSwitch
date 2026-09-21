@@ -10,7 +10,7 @@ import { decisionJson, TARGETS_PATH } from "./helpers.js";
 
 function daemon(replies: string[]) {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-thapi-"));
-  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000 };
+  const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4 };
   const quota = new QuotaService([]);
   const d = buildDaemon(cfg, { router: echoRouter(replies), quota });
   const fetchImpl: typeof fetch = (input, init) => Promise.resolve(d.app.request(input instanceof Request ? input : String(input).replace("http://test", ""), init));
