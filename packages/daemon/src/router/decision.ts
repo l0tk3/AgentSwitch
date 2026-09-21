@@ -9,6 +9,8 @@ export const Decision = z.object({
   effort: z.string().min(1).nullable().default(null),
   brief: z.string().min(1),
   needs_browser: z.boolean().default(false),
+  /** A category from targets.yaml whose allow list restricts the executor (null = unrestricted). */
+  category: z.string().min(1).nullable().default(null),
   expected_size: z.enum(["small", "medium", "large"]).default("medium"),
   risk: z.string().nullable().default(null),
   fallbacks: z.array(TargetRef).default([]),

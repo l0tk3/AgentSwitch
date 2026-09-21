@@ -133,6 +133,17 @@ router:
 - `cost` / `strengths` 是给路由器看的自然语言标签，不参与代码校验；`quota`、`max_concurrent`、`browser`、`models` 键集合参与校验。
 - 用户在手机上也能**手动指定**模型：任务带 `pin: {harness, model}` 时跳过分诊，只做校验。
 
+## 3b. 受限类别 `categories`（2026-09-21）
+
+有些任务只有少数模型肯做（安全类：CTF、pwn、逆向、exploit、漏洞研究，其余模型直接拒绝）。`targets.yaml` 的 `categories` 段给每类一个 `allow` 名单：
+
+- 路由器提示词里列出类别、描述和名单，Decision 多一个 `category` 字段，要求主选和所有 fallback 只从名单里挑。
+- 代码底线：`categoryOf()` 用 `keywords` 做关键词检测（ASCII 整词、中文子串），`validateDecision` 对不在名单里的候选一律拒绝，包括 fallback 和失败后的重派；路由器自报的 `category` 与关键词检测取并集。
+- 默认策略：命中类别时按 `allow` 顺序取第一个额度够的目标，不走正则分类。
+- `--pin` 是用户的决定，不拦，只在 notes 里警告。
+
+首个类别 `security`：Opus 4.8 / 4.7 / 4.6（含 [1m]）加 deepseek-flash。
+
 ## 4. Decision schema 与校验
 
 路由器输出：

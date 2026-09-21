@@ -1,7 +1,7 @@
 /** The floor: pure checks that decide whether a router decision may be executed as-is. */
 
 import type { Decision } from "./decision.js";
-import { modelSpec, type TargetRef, type Targets } from "./targets.js";
+import { allowedFor, modelSpec, type TargetRef, type Targets } from "./targets.js";
 
 /** Fraction of quota left per harness, 0..1. Missing harness = unknown = treated as available. */
 export type Quota = Readonly<Record<string, number>>;
@@ -14,6 +14,8 @@ export type Context = {
   readonly running: Running;
   /** Where a low-confidence decision goes instead of the router's pick (default policy). */
   readonly lowConfidenceTarget: TargetRef;
+  /** Category detected from the task text (keyword floor); the router's own `category` is merged in. */
+  readonly category?: string | null;
 };
 
 export type Chosen = "router" | "fallback" | "default" | "pin";
@@ -43,6 +45,8 @@ export function rejectReason(ref: TargetRef, ctx: Context, needsBrowser: boolean
   const left = ctx.quota[ref.harness];
   if (left !== undefined && left < ctx.targets.router.quota_threshold) return `${ref.harness} quota exhausted (${left})`;
   if (effort !== null && spec.efforts && !spec.efforts.includes(effort)) return `${ref.model} has no effort ${effort}`;
+  const category = ctx.category ?? null;
+  if (!allowedFor(ctx.targets, category, ref)) return `${ref.harness}/${ref.model} is not allowed for category ${category} (would refuse)`;
   return undefined;
 }
 
@@ -52,12 +56,15 @@ function resolveModel(targets: Targets, harness: string, model: string | null): 
 
 /** A pinned target skips the router entirely; still subject to catalog, browser, quota and concurrency. */
 export function validatePin(pin: TargetRef, ctx: Context, needsBrowser = false): Verdict {
-  const reason = rejectReason(pin, ctx, needsBrowser, null);
+  const reason = rejectReason(pin, { ...ctx, category: null }, needsBrowser, null);
   if (reason) return { ok: false, notes: [`pin rejected: ${reason}`] };
-  return accept(pin, null, "pin", ctx, []);
+  const warn = allowedFor(ctx.targets, ctx.category ?? null, pin) ? [] : [`pinned ${pin.harness}/${pin.model} is outside the ${ctx.category} allow list; it may refuse`];
+  return accept(pin, null, "pin", ctx, warn);
 }
 
-export function validateDecision(decision: Decision, ctx: Context): Verdict {
+export function validateDecision(decision: Decision, base: Context): Verdict {
+  const category = decision.category && base.targets.categories[decision.category] ? decision.category : (base.category ?? null);
+  const ctx: Context = { ...base, category };
   const { targets } = ctx;
   const notes: string[] = [];
   const candidates: Candidate[] = [];

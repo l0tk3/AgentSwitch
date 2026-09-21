@@ -1,6 +1,6 @@
 /** Where a task goes when the router is unavailable or not trusted. Coarse, deterministic. */
 
-import type { TargetRef, Targets } from "./targets.js";
+import { categoryOf, type TargetRef, type Targets } from "./targets.js";
 import type { Quota } from "./validate.js";
 
 export type Capability = "browser" | "code" | "chat";
@@ -23,7 +23,15 @@ function bestCodeHarness(targets: Targets, quota: Quota): string {
   return ranked[0] ?? targets.router.default.harness;
 }
 
+/** Inside a restricted category the allow list is a preference order: the first entry whose harness still has quota. */
+function categoryTarget(category: string, targets: Targets, quota: Quota): TargetRef {
+  const allow = targets.categories[category]!.allow;
+  return allow.find((r) => (quota[r.harness] ?? 1) >= targets.router.quota_threshold) ?? allow[0]!;
+}
+
 export function defaultTarget(task: string, targets: Targets, quota: Quota): TargetRef {
+  const category = categoryOf(task, targets);
+  if (category) return categoryTarget(category, targets, quota);
   const cap = classify(task);
   if (cap === "browser") {
     const capable = Object.entries(targets.harnesses).filter(([, spec]) => spec.browser);

@@ -43,10 +43,57 @@ harnesses:
     models:                          # models.dev: deepseek-flash = "DeepSeek V4.1 Flash", 1M ctx
       deepseek/deepseek-flash: {cost: low, strengths: [chat, summarize, long-context, cheap-code]}
 
+# Task categories with a restricted target list. The router is told about them and must set
+# `category`; the code floor also detects them from `keywords` (case-insensitive substrings) and
+# rejects any model outside `allow`, including fallbacks and re-dispatch after a refusal. `allow` is a
+# preference order for the default policy: first entry whose harness still has quota. ASCII keywords
+# match whole words only ("rop" does not match "drop"); CJK keywords match as substrings.
+categories:
+  security:
+    description: >-
+      offensive/defensive security work on the user's own targets: CTF challenges, pwn and reverse
+      engineering, exploit development, vulnerability research, pentest lab work, malware analysis
+    keywords:
+      - "ctf"
+      - "pwn"
+      - "exploit"
+      - "shellcode"
+      - "rop"
+      - "漏洞"
+      - "逆向"
+      - "渗透"
+      - "提权"
+      - "payload"
+      - "webshell"
+      - "木马"
+      - "反编译"
+      - "reverse engineer"
+      - "vuln"
+      - "vulnerability"
+      - "cve-"
+      - "malware"
+      - "fuzz"
+      - "fuzzing"
+      - "sqli"
+      - "xss"
+      - "免杀"
+      - "注入"
+      - "爆破"
+      - "题目附件"
+    note: every other model refuses these tasks outright; never pick one, and never re-dispatch to one after a refusal
+    allow:
+      - {harness: claude-code, model: "claude-opus-4-8"}
+      - {harness: claude-code, model: "claude-opus-4-8[1m]"}
+      - {harness: claude-code, model: "claude-opus-4-7"}
+      - {harness: claude-code, model: "claude-opus-4-7[1m]"}
+      - {harness: claude-code, model: "claude-opus-4-6"}
+      - {harness: claude-code, model: "claude-opus-4-6[1m]"}
+      - {harness: opencode, model: "deepseek/deepseek-flash"}
+
 router:
   harness: opencode
   model: deepseek/deepseek-flash
   timeout_ms: 45000                # the agent reads the repo first; a real run took 19 s
   min_confidence: 0.5
   quota_threshold: 0.05
-  default: {harness: opencode, model: deepseek/deepseek-flash}
+  default: {harness: opencode, model: "deepseek/deepseek-flash"}

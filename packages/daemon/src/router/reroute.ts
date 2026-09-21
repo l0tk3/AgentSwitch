@@ -26,6 +26,8 @@ export type RerouteInput = {
   readonly running: Running;
   readonly lowConfidenceTarget: TargetRef;
   readonly limits?: Limits;
+  /** Keyword-floor category of the task; restricts every candidate (see validate.ts). */
+  readonly category?: string | null;
 };
 
 export type NextStep =
@@ -80,10 +82,10 @@ function switchAlongChain(input: RerouteInput, failed: TargetRef): NextStep {
   const excluded = excludedTargets(input.attempts);
   const targets = markUnavailable(input.targets, excluded);
   const quota = quotaAfter(input.attempts, input.quota);
-  const ctx = { targets, quota, running: input.running, lowConfidenceTarget: input.lowConfidenceTarget };
+  const ctx = { targets, quota, running: input.running, lowConfidenceTarget: input.lowConfidenceTarget, category: input.category ?? null };
   const decision = input.decision ?? {
     harness: failed.harness, model: failed.model, effort: null, brief: "", needs_browser: false, expected_size: "medium" as const,
-    risk: null, fallbacks: [], reason: "", confidence: 1, action: "redispatch" as const, repair: null, handoff_note: null,
+    risk: null, category: null, fallbacks: [], reason: "", confidence: 1, action: "redispatch" as const, repair: null, handoff_note: null,
   };
   const verdict = validateDecision({ ...decision, confidence: Math.max(decision.confidence, targets.router.min_confidence) }, ctx);
   if (verdict.ok) return { kind: "switch", target: { harness: verdict.harness, model: verdict.model }, notes: verdict.notes };

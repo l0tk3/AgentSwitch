@@ -27,9 +27,19 @@ export type HarnessSpec = z.infer<typeof HarnessSpec>;
 export const TargetRef = z.object({ harness: z.string().min(1), model: z.string().min(1) });
 export type TargetRef = z.infer<typeof TargetRef>;
 
+/** A task category whose executors are restricted to `allow` (e.g. security work most models refuse). */
+export const Category = z.object({
+  description: z.string().min(1),
+  keywords: z.array(z.string().min(1)).default([]),
+  allow: z.array(TargetRef).min(1),
+  note: z.string().default(""),
+});
+export type Category = z.infer<typeof Category>;
+
 export const Targets = z
   .object({
     harnesses: z.record(z.string().min(1), HarnessSpec),
+    categories: z.record(z.string().min(1), Category).default({}),
     router: z.object({
       harness: z.string().min(1),
       model: z.string().min(1),
@@ -48,6 +58,12 @@ export const Targets = z
     const d = t.harnesses[t.router.default.harness];
     if (!d || !modelKey(d, t.router.default.model)) {
       ctx.addIssue({ code: "custom", message: "router.default must name a listed harness/model" });
+    }
+    for (const [name, cat] of Object.entries(t.categories)) {
+      for (const ref of cat.allow) {
+        const h = t.harnesses[ref.harness];
+        if (!h || !modelKey(h, ref.model)) ctx.addIssue({ code: "custom", message: `categories.${name}: ${ref.harness}/${ref.model} not in catalog` });
+      }
     }
   });
 export type Targets = z.infer<typeof Targets>;
@@ -101,5 +117,34 @@ export function catalogText(targets: Targets): string {
       lines.push(`  - ${m}: cost ${spec.cost}; ${spec.strengths.join(", ")}${efforts}`);
     }
   }
+  for (const [name, cat] of Object.entries(targets.categories)) {
+    lines.push(`\ncategory "${name}": ${cat.description}`);
+    lines.push(`  only these targets accept it${cat.note ? ` (${cat.note})` : ""}: ${cat.allow.map((r) => `${r.harness}/${r.model}`).join(", ")}`);
+  }
   return lines.join("\n");
+}
+
+/** ASCII keywords match whole words ("rop" must not match "drop"); anything else matches as a substring. */
+export function keywordMatches(keyword: string, text: string): boolean {
+  const k = keyword.toLowerCase();
+  if (!/^[\x20-\x7e]+$/.test(k)) return text.includes(k);
+  const escaped = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tail = /[a-z0-9]$/.test(k) ? "(?![a-z0-9])" : "";
+  return new RegExp(`(?<![a-z0-9])${escaped}${tail}`).test(text);
+}
+
+/** Keyword floor: the first category whose keywords appear in the task text (case-insensitive). */
+export function categoryOf(task: string, targets: Targets): string | null {
+  const text = task.toLowerCase();
+  for (const [name, cat] of Object.entries(targets.categories)) {
+    if (cat.keywords.some((k) => keywordMatches(k, text))) return name;
+  }
+  return null;
+}
+
+/** Whether `ref` may run a task of `category`; unknown or null categories restrict nothing. */
+export function allowedFor(targets: Targets, category: string | null, ref: TargetRef): boolean {
+  const cat = category === null ? undefined : targets.categories[category];
+  if (!cat) return true;
+  return cat.allow.some((a) => a.harness === ref.harness && a.model === ref.model);
 }

@@ -10,6 +10,7 @@ export const DECISION_SHAPE = `{
   "effort": "<one of the model's efforts, or null>",
   "brief": "<the task rewritten for the executor: goal, acceptance criteria, paths not to touch, expected size>",
   "needs_browser": <true|false>,
+  "category": "<a category name listed under the catalog, or null>",
   "expected_size": "small" | "medium" | "large",
   "risk": "<what could go wrong, or null>",
   "fallbacks": [{"harness": "...", "model": "..."}],
@@ -33,6 +34,8 @@ Rules:
   Pick a "[1m]" variant only when the whole repository must fit in context. Prefer the cheapest model that is clearly enough.
 - Browser tasks (open a site, log in, fill a form): needs_browser=true and a harness with browser support.
   Credentials arrive as enc:v1: tokens; pass them through unchanged and never ask the executor to find a password.
+- If the task belongs to a category listed under the catalog, set "category" to its name and choose harness,
+  model and every fallback only from that category's targets; the others refuse such tasks outright.
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
 - You may read files under the working directory to judge size and language. Do not modify anything.
 - If unsure, lower confidence instead of guessing.

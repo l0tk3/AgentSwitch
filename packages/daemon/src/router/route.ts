@@ -6,7 +6,7 @@ import { defaultTarget } from "./defaultPolicy.js";
 import { redispatchMessage, systemPrompt, taskMessage, type RepairTool } from "./prompt.js";
 import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
 import type { Router } from "./routers/types.js";
-import { markUnavailable, type TargetRef, type Targets } from "./targets.js";
+import { categoryOf, markUnavailable, type TargetRef, type Targets } from "./targets.js";
 import { validateDecision, validatePin, type Quota, type Running, type Verdict } from "./validate.js";
 
 export type RouteRequest = {
@@ -40,7 +40,7 @@ export type RouteResult = {
 export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteResult> {
   const { targets } = deps;
   const fallback = defaultTarget(req.task, targets, deps.quota);
-  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback };
+  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) };
 
   if (req.pin) {
     const verdict = validatePin(req.pin, ctx, req.needsBrowser ?? false);
@@ -79,7 +79,7 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
   const tried = req.attempts.map((a) => ({ harness: a.harness, model: a.model }));
   const fallback = defaultTargetExcluding(req, deps, tried);
   const step = nextStep({ decision: req.decision, attempts: req.attempts, routerAsks: req.routerAsks, targets: deps.targets,
-    quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, ...(req.limits ? { limits: req.limits } : {}) });
+    quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, deps.targets), ...(req.limits ? { limits: req.limits } : {}) });
   if (step.kind !== "ask-router") return { step, decision: req.decision, routerError: null, routerMs: 0 };
 
   const targets = markUnavailable(deps.targets, step.exclude);
@@ -89,7 +89,7 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
   const extra = redispatchMessage(summaries, step.exclude, req.diffSummary ?? "", repairs);
   const asked = await askRouter(req, { ...deps, targets }, extra);
   const excludedFallback = defaultTargetExcluding(req, deps, step.exclude);
-  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: excludedFallback };
+  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: excludedFallback, category: categoryOf(req.task, targets) };
   if (asked.decision?.action === "give_up") {
     return { step: { kind: "give_up", reason: asked.decision.reason || "router gave up" }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
   }
