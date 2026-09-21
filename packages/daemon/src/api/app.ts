@@ -6,6 +6,9 @@ import { z } from "zod";
 import type { Bus } from "../engine/bus.js";
 import type { Extensions } from "../extensions/index.js";
 import { HARNESSES, McpServer, SkillName } from "../extensions/types.js";
+import { listTree, resolveInside } from "../files/artifacts.js";
+import { contentType, isImage, MAX_FILE_BYTES, MAX_FILES_PER_UPLOAD } from "../files/names.js";
+import type { Attachment, Uploads } from "../files/uploads.js";
 import type { Engine } from "../engine/engine.js";
 import type { Store } from "../engine/store.js";
 import { TERMINAL } from "../engine/types.js";
@@ -48,6 +51,8 @@ export type ApiDeps = {
   readonly routeDeps: () => RouteDeps;
   readonly contextPath: string;
   readonly workRoot: string;
+  readonly uploads: Uploads;
+  readonly artifactsDir: string;
   readonly extensions: Extensions;
   readonly version: string;
 };
@@ -59,6 +64,8 @@ const NewTaskBody = z.object({
   needs_browser: z.boolean().optional(),
   ephemeral: z.boolean().optional(),
   parent_id: z.string().min(1).optional(),
+  /** Ids from POST /uploads; moved into <cwd>/in/ when the task is created. */
+  attachments: z.array(z.string().min(1)).max(MAX_FILES_PER_UPLOAD).optional(),
 });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
 const ContextBody = z.object({ text: z.string() });
@@ -83,13 +90,16 @@ export function createApp(deps: ApiDeps): Hono {
   app.post("/tasks", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
-    const { pin, needs_browser, ephemeral, cwd, parent_id, ...rest } = body.data;
+    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, ...rest } = body.data;
     const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
     const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
     const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
     const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
-    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, ...(parent ? { parentId: parent.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
+    let attachments: Attachment[] = [];
+    try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
+    catch (err) { return c.json({ error: (err as Error).message }, 400); }
+    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
     return c.json(task, 201);
   });
 
@@ -98,6 +108,48 @@ export function createApp(deps: ApiDeps): Hono {
   app.get("/tasks/:id", (c) => {
     const task = deps.store.getTask(c.req.param("id"));
     return task ? c.json({ ...task, approvals: deps.store.pendingApprovals(task.id) }) : c.json({ error: "not found" }, 404);
+  });
+
+  // Files: uploads are staged, then moved into <cwd>/in/ by POST /tasks; downloads come from the
+  // artifacts store once an ephemeral cwd is gone, otherwise from the cwd itself.
+  app.post("/uploads", async (c) => {
+    const form = await c.req.formData().catch(() => null);
+    if (!form) return c.json({ error: "multipart form expected" }, 400);
+    const entries = [...form.values()].filter((v): v is File => v instanceof File);
+    if (!entries.length) return c.json({ error: "no files" }, 400);
+    if (entries.length > MAX_FILES_PER_UPLOAD) return c.json({ error: `at most ${MAX_FILES_PER_UPLOAD} files per upload` }, 400);
+    const big = entries.find((f) => f.size > MAX_FILE_BYTES);
+    if (big) return c.json({ error: `${big.name} exceeds ${MAX_FILE_BYTES / 1024 / 1024} MB` }, 413);
+    const files = [];
+    for (const f of entries) files.push(deps.uploads.stage(f.name, Buffer.from(await f.arrayBuffer()), f.type));
+    return c.json({ files });
+  });
+
+  const fileRoot = (id: string): { root: "artifacts" | "cwd"; dir: string } | null => {
+    const task = deps.store.getTask(id);
+    if (!task) return null;
+    const art = join(deps.artifactsDir, task.id);
+    if (existsSync(art)) return { root: "artifacts", dir: art };
+    return existsSync(task.cwd) ? { root: "cwd", dir: task.cwd } : null;
+  };
+
+  app.get("/tasks/:id/files", (c) => {
+    const task = deps.store.getTask(c.req.param("id"));
+    if (!task) return c.json({ error: "not found" }, 404);
+    const r = fileRoot(task.id);
+    return c.json({ root: r?.root ?? null, files: r ? listTree(r.dir) : [] });
+  });
+
+  app.get("/tasks/:id/files/*", (c) => {
+    const r = fileRoot(c.req.param("id"));
+    if (!r) return c.notFound();
+    let rel: string;
+    try { rel = decodeURIComponent(c.req.path.split("/files/")[1] ?? ""); } catch { return c.notFound(); }
+    const file = resolveInside(r.dir, rel);
+    if (!file) return c.notFound();
+    const name = rel.split("/").pop() ?? "file";
+    const disposition = `${isImage(name) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`;
+    return c.body(readFileSync(file), 200, { "content-type": contentType(name), "content-disposition": disposition, "cache-control": "private, no-cache" });
   });
 
   app.get("/tasks/:id/events", (c) => {

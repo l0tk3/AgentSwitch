@@ -2,6 +2,7 @@
 
 import type { Decision } from "../router/decision.js";
 import type { Attempt } from "../router/reroute.js";
+import type { Attachment } from "../files/uploads.js";
 import type { TargetRef } from "../router/targets.js";
 
 export type TaskStatus = "queued" | "routing" | "running" | "waiting_approval" | "done" | "failed" | "cancelled";
@@ -15,6 +16,8 @@ export type NewTask = {
   readonly ephemeral?: boolean;
   /** Follow-up: the router and executor see the parent task's text and result as context. */
   readonly parentId?: string;
+  /** Uploaded files already moved into <cwd>/in/. */
+  readonly attachments?: readonly Attachment[];
 };
 
 export type Task = {
@@ -28,6 +31,7 @@ export type Task = {
   readonly needsBrowser: boolean;
   readonly ephemeral: boolean;
   readonly parentId: string | null;
+  readonly attachments: readonly Attachment[];
   readonly harness: string | null;
   readonly model: string | null;
   readonly effort: string | null;

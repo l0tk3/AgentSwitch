@@ -26,6 +26,7 @@ export class Client {
   preview(task: string, cwd: string) { return this.call<unknown>("POST", "/route/preview", { task, cwd }); }
   routingLog(limit = 20) { return this.call<unknown[]>("GET", `/routing/log?limit=${limit}`); }
   context() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/context"); }
+  files(taskId: string) { return this.call<{ root: "artifacts" | "cwd" | null; files: { path: string; size: number; mtime: number }[] }>("GET", `/tasks/${taskId}/files`); }
   contextExample() { return this.call<{ text: string }>("GET", "/context/example"); }
   mcp() { return this.call<unknown[]>("GET", "/mcp"); }
   skills() { return this.call<unknown[]>("GET", "/skills"); }

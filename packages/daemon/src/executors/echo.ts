@@ -2,6 +2,9 @@
  *    @echo {"delayMs":50,"fail":"refusal","approval":"rm -rf /tmp/x","result":"hello","tokens":123}
  *  `fail` is a FailureKind; `failTimes` limits how many attempts fail (default: every attempt). */
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { OUT_DIR } from "../files/names.js";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome, type FailureKind } from "../router/failure.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
@@ -14,6 +17,8 @@ export type EchoDirective = {
   readonly result?: string;
   readonly tokens?: number;
   readonly sideEffects?: { filesChanged?: number; commandsRun?: number };
+  /** Files to write under <cwd>/out/ (path → content), to exercise artifact collection. */
+  readonly out?: Record<string, string>;
 };
 
 const DIRECTIVE = /@echo\s+(\{[^\n]*\})/;
@@ -58,6 +63,7 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
         const decision = await input.approve(`bash: ${d.approval}`, "requested by @echo directive");
         if (decision === "deny") return { ok: false, exitCode: 0, lastText: "user denied the action", sideEffects: NO_SIDE_EFFECTS };
       }
+      for (const [rel, content] of Object.entries(d.out ?? {})) { const p = join(input.cwd, OUT_DIR, rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, content); }
       const sideEffects = { ...NO_SIDE_EFFECTS, ...(d.sideEffects ?? {}) };
       const failed = failures.get(input.taskId) ?? 0;
       if (d.fail && (d.failTimes === undefined || failed < d.failTimes)) {

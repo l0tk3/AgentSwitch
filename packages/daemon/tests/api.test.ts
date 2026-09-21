@@ -101,6 +101,49 @@ describe("HTTP API", () => {
     d.close();
   });
 
+  it("uploads attachments into <cwd>/in, lists and downloads task files, collects out/ after an ephemeral task", async () => {
+    const { d, home } = daemon();
+    const form = new FormData();
+    form.append("files", new File([Buffer.from("PNG")], "shot.png", { type: "image/png" }));
+    form.append("files", new File([Buffer.from("spec")], "../spec.md", { type: "text/markdown" }));
+    const up = await d.app.request("/uploads", { method: "POST", body: form });
+    expect(up.status).toBe(200);
+    const { files } = (await up.json()) as { files: { id: string; name: string; size: number; type: string }[] };
+    expect(files.map((f) => f.name)).toEqual(["shot.png", "spec.md"]);
+    expect((await d.app.request("/uploads", { method: "POST", body: new FormData() })).status).toBe(400);
+
+    const bad = await d.app.request("/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: "x", attachments: ["nope"] }) });
+    expect(bad.status).toBe(400);
+
+    const created = await d.app.request("/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: 'read the files @echo {"delayMs":300,"out":{"report.md":"# done","img/p.png":"P"}}', attachments: files.map((f) => f.id) }) });
+    const t = (await created.json()) as { id: string; cwd: string; ephemeral: boolean; attachments: { path: string }[] };
+    expect(t.ephemeral).toBe(true);
+    expect(t.attachments.map((a) => a.path)).toEqual(["in/shot.png", "in/spec.md"]);
+    expect(readFileSync(join(t.cwd, "in", "spec.md"), "utf8")).toBe("spec");
+    const listed = (await (await d.app.request(`/tasks/${t.id}/files`)).json()) as { root: string; files: { path: string }[] };
+    expect(listed.root).toBe("cwd");
+    expect(listed.files.map((f) => f.path)).toEqual(["in/shot.png", "in/spec.md"]);
+    const dl = await d.app.request(`/tasks/${t.id}/files/in/shot.png`);
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-type")).toBe("image/png");
+    expect(await dl.text()).toBe("PNG");
+    expect((await d.app.request(`/tasks/${t.id}/files/in/../../x`)).status).toBe(404);
+    expect((await d.app.request(`/tasks/${t.id}/files/in/%2e%2e/x`)).status).toBe(404);
+
+    await d.engine.idle();
+    const done = (await (await d.app.request(`/tasks/${t.id}`)).json()) as { status: string; brief: string };
+    expect(done.status).toBe("done");
+    expect(d.engine.composeTask(d.store.getTask(t.id)!)).toContain("in/shot.png (3 B, image/png)");
+    expect(existsSync(t.cwd)).toBe(false);
+    const after = (await (await d.app.request(`/tasks/${t.id}/files`)).json()) as { root: string; files: { path: string; size: number }[] };
+    expect(after.root).toBe("artifacts");
+    expect(after.files.map((f) => f.path)).toEqual(["img/p.png", "report.md"]);
+    expect(await (await d.app.request(`/tasks/${t.id}/files/report.md`)).text()).toBe("# done");
+    expect(existsSync(join(home, "artifacts", t.id, "report.md"))).toBe(true);
+    expect((await d.app.request(`/tasks/nope/files`)).status).toBe(404);
+    d.close();
+  });
+
   it("serves the phone-draft UI, which only talks to the API", async () => {
     const { d } = daemon();
     const res = await d.app.request("/ui");

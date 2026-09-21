@@ -20,6 +20,9 @@ import { deepseekQuota, findDeepSeekKey } from "./quota/deepseek.js";
 import { QuotaService } from "./quota/index.js";
 import { RateLimitCache } from "./quota/windows.js";
 import { loadContext } from "./router/context.js";
+import { sweepDir } from "./files/artifacts.js";
+import { ARTIFACT_TTL_MS, UPLOAD_TTL_MS } from "./files/names.js";
+import { Uploads } from "./files/uploads.js";
 import { RoutingLog } from "./router/log.js";
 import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
@@ -78,9 +81,13 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
     claudeQuota(store, { cache: rateLimits, ...(cfg.executors === "real" ? { probe: () => probeRateLimits() } : {}) }),
   ], cfg.quotaTtlMs);
   const workRoot = join(cfg.home, "work");
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog });
+  const uploads = new Uploads(join(cfg.home, "uploads"));
+  const artifactsDir = join(cfg.home, "artifacts");
+  sweepDir(uploads.dir, UPLOAD_TTL_MS);
+  sweepDir(artifactsDir, ARTIFACT_TTL_MS);
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath) });
-  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, workRoot, extensions, version: VERSION });
+  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 

@@ -9,4 +9,8 @@ answer, finish with a clear question instead of guessing.
 - Do not modify files outside the working directory unless the brief says so.
 - The brief may contain "Handoff from a previous attempt": another agent tried first. Continue,
   do not redo finished work.
+- Files the user attached are under `in/` in the working directory; the brief lists them. Read them.
+- Anything the user should get back as a file (images, documents, exports) goes in `out/` in the
+  working directory. The user downloads from there; files anywhere else in a temporary working
+  directory are deleted when the task ends.
 - The user's own accounts and credentials appear as `enc:v1:` values. Read the next section.

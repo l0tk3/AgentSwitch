@@ -4,6 +4,9 @@ import { classifyFailure, excerpt, hasSideEffects, NO_SIDE_EFFECTS } from "../ro
 import type { Attempt } from "../router/reroute.js";
 import { reroute, route, type RouteDeps } from "../router/route.js";
 import type { RoutingLog } from "../router/log.js";
+import { collectOut } from "../files/artifacts.js";
+import { attachmentsNote } from "../files/notes.js";
+import { join } from "node:path";
 import type { TargetRef } from "../router/targets.js";
 import type { Verdict } from "../router/validate.js";
 import type { ApprovalDecision, Executor } from "../executors/types.js";
@@ -21,6 +24,8 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   readonly retryBackoffMs?: number;
   readonly cleanupPaths?: CleanupPaths;
   readonly routingLog?: RoutingLog;
+  /** Where <cwd>/out is copied before an ephemeral working directory is deleted. */
+  readonly artifactsDir?: string;
 };
 
 type Waiter = { resolve: (d: ApprovalDecision) => void; timer: NodeJS.Timeout };
@@ -97,8 +102,9 @@ export class Engine {
   }
 
   private cleanup(task: Task): void {
+    const artifacts = this.deps.artifactsDir ? collectOut(task.cwd, join(this.deps.artifactsDir, task.id)) : 0;
     const report = cleanupEphemeral(task.cwd, this.deps.cleanupPaths ?? defaultCleanupPaths());
-    this.emit(task.id, "cleaned", { ...report });
+    this.emit(task.id, "cleaned", { ...report, artifacts });
   }
 
   /** Follow-ups carry the conversation: parent chain (oldest first) as context, then the new message. */
@@ -106,9 +112,9 @@ export class Engine {
     const chain: Task[] = [];
     let cur = task.parentId ? this.deps.store.getTask(task.parentId) : undefined;
     while (cur && chain.length < 5) { chain.unshift(cur); cur = cur.parentId ? this.deps.store.getTask(cur.parentId) : undefined; }
-    if (!chain.length) return task.task;
+    if (!chain.length) return task.task + attachmentsNote(task.attachments);
     const history = chain.map((t) => `User: ${t.task}\nAssistant (${t.harness ?? "?"}/${t.model ?? "?"}, ${t.status}): ${(t.result ?? t.error ?? "(no result)").slice(0, 2000)}`).join("\n\n");
-    return `This is a follow-up in an ongoing conversation. Earlier turns:\n\n${history}\n\nUser now says:\n${task.task}`;
+    return `This is a follow-up in an ongoing conversation. Earlier turns:\n\n${history}\n\nUser now says:\n${task.task}${attachmentsNote(task.attachments)}`;
   }
 
   private async runTask(task: Task, signal: AbortSignal): Promise<void> {
@@ -170,7 +176,7 @@ export class Engine {
     this.running[verdict.harness] = (this.running[verdict.harness] ?? 0) + 1;
     try {
       const outcome = await executor.run({
-        taskId: task.id, task: task.task, brief: task.brief ?? task.task, cwd: task.cwd, model: verdict.model, effort: verdict.effort,
+        taskId: task.id, task: task.task, brief: briefFor(task), cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments,
         handoffNote: task.decision?.handoff_note ?? null, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal,
         emit: (type, payload) => this.emit(task.id, type, payload),
         approve: (action, evidence) => this.requestApproval(task.id, action, evidence),
@@ -209,6 +215,13 @@ export class Engine {
     this.deps.store.updateTask(id, { status: "failed", error });
     this.emit(id, "failed", { error, security });
   }
+}
+
+/** The executor reads the router's brief (or the raw task) plus the attachment list, which the router may have dropped. */
+function briefFor(task: Task): string {
+  const base = task.brief ?? task.task;
+  const note = attachmentsNote(task.attachments);
+  return note && !base.includes(task.attachments[0]!.path) ? base + note : base;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

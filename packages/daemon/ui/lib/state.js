@@ -6,6 +6,8 @@ const initial = {
   health: false, version: "",
   tasks: [], task: null, events: [], es: null, approvals: [], quota: [], log: [],
   hint: "",
+  pending: [],                       // [{file, url}] attached to the visible composer
+  files: { root: null, files: [] },  // files of the open task (in/ + out/, or the artifacts store)
   mcp: [], skills: [], discovered: [], edit: { mcp: null, skill: null }, extHint: "",
   ctx: { path: "", text: "", warnings: [], draft: null, hint: "", saved: false },
 };

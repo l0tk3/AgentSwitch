@@ -2,7 +2,7 @@
  *  bindings, and polls the daemon. Typed-in fields marked data-keep survive re-renders. */
 
 import { get, subscribe } from "./lib/state.js";
-import { goto, health, loadApprovals, loadQuota, loadTasks, refresh } from "./lib/actions.js";
+import { addPending, goto, health, loadApprovals, loadQuota, loadTasks, refresh, removePending } from "./lib/actions.js";
 import * as home from "./views/home.js";
 import * as task from "./views/task.js";
 import * as log from "./views/log.js";
@@ -44,10 +44,18 @@ function render(s) {
   view.afterRender?.();
 }
 
+const picker = document.createElement("input");
+picker.type = "file"; picker.multiple = true; picker.hidden = true;
+document.body.appendChild(picker);
+picker.addEventListener("change", () => { addPending(picker.files); picker.value = ""; });
+
 document.addEventListener("click", async (e) => {
   const nav = e.target.closest("nav a[data-nav]");
   if (nav) return goto(nav.dataset.nav);
   if (e.target.closest("#refresh")) return refresh();
+  if (e.target.closest("[data-attach]")) return picker.click();
+  const rm = e.target.closest("[data-pending-remove]");
+  if (rm) return removePending(Number(rm.dataset.pendingRemove));
   const s = get();
   const view = VIEWS[s.view] || home;
   for (const b of view.bindings) {
@@ -59,6 +67,21 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("input", (e) => ctx.onInput(e.target));
+
+document.addEventListener("dragover", (e) => { if (e.target.closest("[data-dropzone]")) { e.preventDefault(); e.target.closest("[data-dropzone]").classList.add("drop"); } });
+document.addEventListener("dragleave", (e) => e.target.closest?.("[data-dropzone]")?.classList.remove("drop"));
+document.addEventListener("drop", (e) => {
+  const zone = e.target.closest("[data-dropzone]");
+  if (!zone) return;
+  e.preventDefault();
+  zone.classList.remove("drop");
+  addPending(e.dataTransfer.files);
+});
+document.addEventListener("paste", (e) => {
+  if (!e.target.closest?.("[data-dropzone]")) return;
+  const files = [...(e.clipboardData?.files || [])];
+  if (files.length) { e.preventDefault(); addPending(files); }
+});
 
 document.addEventListener("keydown", (e) => {
   if (!(e.metaKey || e.ctrlKey)) return;

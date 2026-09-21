@@ -115,6 +115,8 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 | GET/POST | `/quota`, `/quota/refresh` | readings per harness (`remaining` 0..1, detail, source, error) |
 | GET | `/targets` | catalog + current quota map |
 | GET | `/routing/log` | recent decisions (every engine dispatch and re-dispatch, plus previews) |
+| POST | `/uploads` | multipart `files`; stages them, returns ids (≤ 20 files, ≤ 50 MB each, swept after 24 h) |
+| GET | `/tasks/:id/files`, `/tasks/:id/files/*` | list / download a task's files: from `<cwd>` while it exists, else from `artifacts/<id>` (kept 7 days) |
 | GET/PUT | `/context` | CONTEXT.md (GET returns the linted text the router sees; PUT lints and reports warnings) |
 | GET | `/context/example` | the `config/CONTEXT.example.md` template (UI "载入示例模板") |
 | GET | `/mcp` | registered MCP servers |
@@ -151,6 +153,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `config/EXECUTOR.md` | AgentSwitch's part of the guidance every executor gets |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
 | `src/quota/{codex,deepseek,claude,windows,index}.ts` | providers, 5h/7d windows (Codex app-server windows; Claude `rate_limit_event` from runs or a one-turn probe), cached service |
+| `src/files/*` | names (limits, MIME), uploads (staging → `<cwd>/in/`), artifacts (tree, safe download path, `out/` → `artifacts/<id>` before an ephemeral cwd is deleted, sweeps), notes (attachment paragraph for router + executor) |
 | `src/extensions/*`, `src/executors/extensions.ts` | MCP + skill registries and their per-harness shapes |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
 | `tests/` | 84 tests; API tests run in-process via Hono `request()` |

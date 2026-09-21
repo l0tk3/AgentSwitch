@@ -4,6 +4,7 @@ import { ACTIVE, esc, stamp, target, when } from "../lib/api.js";
 import { approve, cancelTask, goto, openTask, submitTask } from "../lib/actions.js";
 import { set } from "../lib/state.js";
 import { approvalCard } from "./home.js";
+import { fileList, pendingList } from "../lib/files.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -22,7 +23,7 @@ export function eventLine(ev) {
     case "done": return (p.result || "").length > 200 ? "✓ 完成（结果见上方）" : `✓ 完成：${p.result}`;
     case "failed": return `✗ 失败：${p.error}${p.security ? "  [安全事件]" : ""}`;
     case "cancelled": return "已取消";
-    case "cleaned": return `已清理临时目录与 harness 记录 (workdir=${p.workDirRemoved}, claude=${(p.claudeProjectsRemoved || []).length}, opencode=${p.opencodeSessionsRemoved})`;
+    case "cleaned": return `已清理临时目录与 harness 记录 (workdir=${p.workDirRemoved}, claude=${(p.claudeProjectsRemoved || []).length}, opencode=${p.opencodeSessionsRemoved}${p.artifacts ? ", 产物 " + p.artifacts + " 个已保留" : ""})`;
     default: return `${ev.type} ${JSON.stringify(p).slice(0, 160)}`;
   }
 }
@@ -44,10 +45,19 @@ function meta(t) {
     ${t.decision ? `<details class="card"><summary>完整决策 JSON</summary><pre class="mono pre" style="margin:8px 0 0">${esc(JSON.stringify(t.decision, null, 2))}</pre></details>` : ""}`;
 }
 
-function followUp(hint) {
-  return `<div class="card composer" style="margin-top:10px">
+function filesCards(t, files) {
+  const inputs = files.files.filter((f) => f.path.startsWith("in/"));
+  const outputs = files.files.filter((f) => !f.path.startsWith("in/"));
+  const where = files.root === "artifacts" ? "任务目录已清理，产物保留 7 天" : files.root === "cwd" ? "工作目录里的文件" : "目录已清理，没有留下 out/ 产物";
+  return `${outputs.length || files.root ? `<div class="card"><div class="dim">产物 · ${where}</div><div class="stack" style="margin-top:8px">${fileList(t.id, outputs, "还没有产物；模型会把交付文件放到 out/")}</div></div>` : ""}
+    ${(t.attachments || []).length ? `<div class="card"><div class="dim">你上传的附件</div><div class="stack" style="margin-top:8px">${fileList(t.id, inputs.length ? inputs : t.attachments.map((a) => ({ path: a.path, size: a.size })), "")}</div></div>` : ""}`;
+}
+
+function followUp(hint, pending) {
+  return `<div class="card composer" style="margin-top:10px" data-dropzone>
     <textarea id="f-task" data-keep rows="2" placeholder="接着说（带上这条任务的上下文）…  ⌘↵ 发送"></textarea>
-    <div class="row" style="margin-top:8px"><span class="hint error grow">${esc(hint)}</span><button class="primary" id="f-send">追问</button></div>
+    <div class="row" style="margin-top:8px"><span class="hint error grow">${esc(hint)}</span><button data-attach>📎 附件</button><button class="primary" id="f-send">追问</button></div>
+    ${pendingList(pending)}
   </div>`;
 }
 
@@ -67,9 +77,9 @@ export function render(s) {
         ${pending.length ? `<div class="approvals">${pending.map((a) => approvalCard(a, null)).join("")}</div>` : ""}
         <h2>事件 ${s.events.length}</h2>
         <div class="card events" id="events">${events || '<span class="dim">等待事件…</span>'}</div>
-        ${followUp(s.hint)}
+        ${followUp(s.hint, s.pending)}
       </div>
-      <aside class="stack">${meta(t)}</aside>
+      <aside class="stack">${filesCards(t, s.files)}${meta(t)}</aside>
     </div>`;
 }
 

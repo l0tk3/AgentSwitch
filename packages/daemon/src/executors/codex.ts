@@ -8,6 +8,8 @@ import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
+import { isImage } from "../files/names.js";
+import type { Attachment } from "../files/uploads.js";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import { AppServerClient, type Json } from "./appserver.js";
 import { codexMcpToml } from "./extensions.js";
@@ -130,7 +132,7 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
           const thread = await client.request("thread/start", { cwd: input.cwd, sandbox: "workspace-write", approvalPolicy: "on-request", ephemeral: true, model: input.model });
           const threadId = String((thread.thread as Json).id);
           const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
-          await client.request("turn/start", { threadId, input: [{ type: "text", text: prompt }] });
+          await client.request("turn/start", { threadId, input: codexInput(prompt, input.attachments, input.cwd) });
           await completed;
           return outcomeFromTurn(state, input.signal.aborted ? "cancelled" : (child.exitCode !== null && !state.completed ? `app-server exited ${child.exitCode}: ${stderr.slice(0, 300)}` : null));
         } finally {
@@ -143,4 +145,10 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
       }
     },
   };
+}
+
+/** Text plus each image attachment as a local image item, so Codex sees screenshots without a Read tool. */
+export function codexInput(text: string, attachments: readonly Attachment[], cwd: string): Json[] {
+  const images = attachments.filter((a) => isImage(a.name)).map((a) => ({ type: "localImage", path: join(cwd, a.path) }));
+  return [{ type: "text", text }, ...images];
 }

@@ -3,20 +3,23 @@
 import { ACTIVE, ago, esc, target, when } from "../lib/api.js";
 import { approve, loadQuota, openTask, submitTask } from "../lib/actions.js";
 import { set } from "../lib/state.js";
+import { pendingList } from "../lib/files.js";
 import { quotaPanel } from "./quota.js";
 
 const $ = (s) => document.querySelector(s);
 
-function composer(hint) {
-  return `<section class="card composer">
+function composer(hint, pending) {
+  return `<section class="card composer" data-dropzone>
     <textarea id="c-task" data-keep rows="3" placeholder="跟路由器说要做什么…  ⌘↵ 发送"></textarea>
     <div class="row opts">
       <input id="c-cwd" data-keep placeholder="工作目录（留空 = 临时目录，用完即删）">
       <input id="c-pin" data-keep class="pin" placeholder="指定 harness/model，留空由路由器决定">
       <select id="c-browser" data-keep><option value="">浏览器：路由器决定</option><option value="1">需要浏览器</option></select>
+      <button data-attach title="也可以拖进来或直接粘贴截图">📎 附件</button>
       <button class="primary" id="c-send">发送</button>
     </div>
-    ${hint ? `<div class="hint error" style="margin-top:8px">${esc(hint)}</div>` : ""}
+    ${pendingList(pending)}
+    <div class="hint" style="margin-top:8px">${hint ? `<span class="error">${esc(hint)}</span> · ` : ""}附件放进任务目录的 in/，内容原样进模型上下文：截图里别带密码。模型交付的文件从任务页下载。</div>
   </section>`;
 }
 
@@ -51,7 +54,7 @@ export function render(s) {
   const recent = s.tasks.filter((t) => !ACTIVE.has(t.status));
   const byId = new Map(s.tasks.map((t) => [t.id, t]));
   return `<div class="page-title">首页</div>
-    ${composer(s.hint)}
+    ${composer(s.hint, s.pending)}
     <div class="cols" style="margin-top:22px">
       <div>
         ${s.approvals.length ? `<h2>待审批 ${s.approvals.length}</h2><div class="approvals">${s.approvals.map((a) => approvalCard(a, byId.get(a.taskId))).join("")}</div>` : ""}

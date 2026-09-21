@@ -2,6 +2,7 @@
 
 import { api } from "./api.js";
 import { get, set } from "./state.js";
+import { releasePending, toPending, uploadPending } from "./files.js";
 
 export const loadTasks = async () => set({ tasks: await api("GET", "/tasks?limit=50") });
 export const loadApprovals = async () => set({ approvals: await api("GET", "/approvals") });
@@ -23,6 +24,12 @@ export async function health() {
   catch { set({ health: false }); }
 }
 
+export const loadFiles = async (taskId) => set({ files: await api("GET", `/tasks/${taskId}/files`) });
+
+export function addPending(fileList) { if (fileList?.length) set((s) => ({ pending: [...s.pending, ...toPending(fileList)] })); }
+export function removePending(i) { set((s) => { s.pending[i]?.url && URL.revokeObjectURL(s.pending[i].url); return { pending: s.pending.filter((_, k) => k !== i) }; }); }
+export function clearPending() { releasePending(get().pending); set({ pending: [] }); }
+
 export function closeStream() {
   const es = get().es;
   if (es) es.close();
@@ -33,6 +40,7 @@ const LOADERS = { home: [loadTasks, loadQuota], log: [loadLog], ext: [loadExt], 
 
 export async function goto(view) {
   closeStream();
+  clearPending();
   set({ view, hint: "" });
   await Promise.all((LOADERS[view] || []).map((f) => f()));
 }
@@ -43,20 +51,22 @@ export async function refresh() {
 }
 
 const EVENT_TYPES = ["queued", "routed", "dispatched", "text", "tool_call", "approval_request", "approval_resolved", "attempt_failed", "redispatch", "done", "failed", "cancelled", "cleaned"];
-const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "failed", "cancelled", "redispatch", "dispatched", "routed"]);
+const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "failed", "cancelled", "redispatch", "dispatched", "routed", "cleaned"]);
 
 /** Open the task view and follow its event stream (`/tasks/${id}/events`, SSE). */
 export function openTask(id) {
   closeStream();
-  set((s) => ({ view: "task", task: s.tasks.find((t) => t.id === id) || null, events: [], hint: "" }));
+  clearPending();
+  set((s) => ({ view: "task", task: s.tasks.find((t) => t.id === id) || null, events: [], hint: "", files: { root: null, files: [] } }));
   api("GET", "/tasks/" + id).then((task) => set({ task })).catch((err) => set({ hint: err.message }));
+  loadFiles(id).catch(() => undefined);
   const es = new EventSource(`/tasks/${id}/events`);
   for (const type of EVENT_TYPES) {
     es.addEventListener(type, async (m) => {
       const ev = JSON.parse(m.data);
       set((s) => ({ events: [...s.events, ev] }));
       if (RELOAD_ON.has(type)) {
-        const [task] = await Promise.all([api("GET", "/tasks/" + id), loadApprovals()]);
+        const [task] = await Promise.all([api("GET", "/tasks/" + id), loadApprovals(), loadFiles(id).catch(() => undefined)]);
         set({ task });
       }
     });
@@ -65,8 +75,11 @@ export function openTask(id) {
   set({ es });
 }
 
+/** Upload whatever is pending under the composer, then create the task with those attachment ids. */
 export async function submitTask(body) {
-  const t = await api("POST", "/tasks", body);
+  const attachments = await uploadPending(get().pending);
+  const t = await api("POST", "/tasks", attachments.length ? { ...body, attachments } : body);
+  clearPending();
   await loadTasks();
   openTask(t.id);
 }

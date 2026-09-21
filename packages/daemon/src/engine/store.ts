@@ -27,7 +27,7 @@ type Row = Record<string, unknown>;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT"],
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'"],
 };
 
 export function migrate(db: DatabaseSync): string[] {
@@ -65,8 +65,8 @@ export class Store {
     const ts = this.now();
     const id = randomUUID().slice(0, 8);
     this.db.prepare(
-      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral, parent_id) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
-    ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0, input.ephemeral ? 1 : 0, input.parentId ?? null);
+      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral, parent_id, attachments) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0, input.ephemeral ? 1 : 0, input.parentId ?? null, JSON.stringify(input.attachments ?? []));
     return this.getTask(id)!;
   }
 
@@ -167,6 +167,7 @@ function toTask(r: Row): Task {
     needsBrowser: Number(r.needs_browser) === 1,
     ephemeral: Number(r.ephemeral ?? 0) === 1,
     parentId: (r.parent_id as string | null) ?? null,
+    attachments: JSON.parse(String(r.attachments ?? "[]")),
     harness: (r.harness as string | null) ?? null,
     model: (r.model as string | null) ?? null,
     effort: (r.effort as string | null) ?? null,
