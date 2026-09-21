@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { appendFileSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { RecordRow } from "../threads/record.js";
 import type { Thread, ThreadEvent, ThreadEventType, ThreadStatus } from "../threads/types.js";
 import type { Approval, ApprovalStatus, NewTask, Task, TaskEvent, TaskEventType } from "./types.js";
 
@@ -32,7 +33,13 @@ CREATE TABLE IF NOT EXISTS thread_events (
   thread_id TEXT NOT NULL, seq INTEGER NOT NULL, ts INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL,
   PRIMARY KEY (thread_id, seq)
 );
-CREATE INDEX IF NOT EXISTS threads_updated ON threads(updated_at DESC);`;
+CREATE INDEX IF NOT EXISTS threads_updated ON threads(updated_at DESC);
+CREATE TABLE IF NOT EXISTS records (
+  task_id TEXT PRIMARY KEY, ts INTEGER NOT NULL, kind TEXT NOT NULL, harness TEXT NOT NULL, model TEXT NOT NULL,
+  status TEXT NOT NULL, failure_kind TEXT, ms INTEGER NOT NULL, tokens INTEGER NOT NULL, approvals INTEGER NOT NULL,
+  handed_off INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, user_handoff INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS records_ts ON records(ts DESC);`;
 
 /** Archived threads are deleted, home dir included, this long after archiving (decided 2026-09-21). */
 export const THREAD_TTL_MS = 7 * 86400_000;
@@ -173,6 +180,27 @@ export class Store {
     this.db.prepare("INSERT INTO thread_events (thread_id, seq, ts, type, payload) VALUES (?, ?, ?, ?, ?)").run(threadId, seq, ts, type, JSON.stringify(payload));
     this.db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(ts, threadId);
     return { threadId, seq, ts, type, payload };
+  }
+
+  // ---- track record (threads-v0 §7) ----
+
+  saveRecord(r: RecordRow): void {
+    this.db.prepare(`INSERT OR REPLACE INTO records (task_id, ts, kind, harness, model, status, failure_kind, ms, tokens, approvals, handed_off, pinned, user_handoff)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(r.taskId, r.ts, r.kind, r.harness, r.model, r.status, r.failureKind, r.ms, r.tokens, r.approvals, r.handedOff ? 1 : 0, r.pinned ? 1 : 0, r.userHandoff ? 1 : 0);
+  }
+
+  /** The user took the task away from its target: a negative signal on that record. */
+  markUserHandoff(taskId: string): boolean {
+    return Number(this.db.prepare("UPDATE records SET user_handoff = 1 WHERE task_id = ?").run(taskId).changes) > 0;
+  }
+
+  recordsSince(ts: number): RecordRow[] {
+    const rows = this.db.prepare("SELECT * FROM records WHERE ts >= ? ORDER BY ts").all(ts) as Row[];
+    return rows.map((r) => ({
+      taskId: String(r.task_id), ts: Number(r.ts), kind: String(r.kind), harness: String(r.harness), model: String(r.model), status: String(r.status),
+      failureKind: (r.failure_kind as string | null) ?? null, ms: Number(r.ms), tokens: Number(r.tokens), approvals: Number(r.approvals),
+      handedOff: Number(r.handed_off) === 1, pinned: Number(r.pinned) === 1, userHandoff: Number(r.user_handoff) === 1,
+    }));
   }
 
   threadEvents(threadId: string): ThreadEvent[] {

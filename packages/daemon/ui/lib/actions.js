@@ -15,8 +15,8 @@ export async function loadExt() {
 }
 
 export async function loadCtx() {
-  const r = await api("GET", "/context");
-  set((s) => ({ ctx: { ...s.ctx, path: r.path, text: r.text, warnings: r.warnings, draft: null, hint: "" } }));
+  const [r, m] = await Promise.all([api("GET", "/context"), api("GET", "/memory")]);
+  set((s) => ({ ctx: { ...s.ctx, path: r.path, text: r.text, warnings: r.warnings, draft: null, hint: "" }, mem: { ...s.mem, path: m.path, text: m.text, warnings: m.warnings, draft: null, hint: "" } }));
 }
 
 export async function health() {
@@ -121,6 +121,17 @@ export async function saveCtx(text) {
     set((s) => ({ ctx: { ...s.ctx, saved: true } }));
   } catch (err) {
     set((s) => ({ ctx: { ...s.ctx, hint: err.message } }));
+  }
+}
+
+export async function saveMem(text) {
+  set((s) => ({ mem: { ...s.mem, hint: "", saved: false } }));
+  try {
+    await api("PUT", "/memory", { text });
+    await loadCtx();
+    set((s) => ({ mem: { ...s.mem, saved: true } }));
+  } catch (err) {
+    set((s) => ({ mem: { ...s.mem, hint: err.message } }));
   }
 }
 

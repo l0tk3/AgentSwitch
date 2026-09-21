@@ -18,6 +18,8 @@ import type { RoutingLog } from "../router/log.js";
 import { route, type RouteDeps } from "../router/route.js";
 import { TargetRef, type Targets } from "../router/targets.js";
 import { foldThread } from "../threads/fold.js";
+import { loadMemory } from "../threads/memory.js";
+import { aggregateRecords, RECORD_WINDOW_MS } from "../threads/record.js";
 import type { Thread, ThreadStatus } from "../threads/types.js";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -52,6 +54,7 @@ export type ApiDeps = {
   readonly routingLog: RoutingLog;
   readonly routeDeps: () => RouteDeps;
   readonly contextPath: string;
+  readonly memoryPath: string;
   readonly workRoot: string;
   readonly uploads: Uploads;
   readonly artifactsDir: string;
@@ -243,6 +246,20 @@ export function createApp(deps: ApiDeps): Hono {
     writeFileSync(deps.contextPath, lint.text, { mode: 0o600 }); // the stripped lines never reach disk
     return c.json({ path: deps.contextPath, warnings: lint.warnings });
   });
+
+  // MEMORY.md: facts the summarizer appended; same lint as CONTEXT.md, the user edits or clears it here.
+  app.get("/memory", (c) => {
+    const m = loadMemory(deps.memoryPath);
+    return c.json({ path: deps.memoryPath, text: m.text, warnings: m.warnings });
+  });
+  app.put("/memory", async (c) => {
+    const body = ContextBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "text required" }, 400);
+    const lint = lintContext(body.data.text);
+    writeFileSync(deps.memoryPath, lint.text, { mode: 0o600 });
+    return c.json({ path: deps.memoryPath, warnings: lint.warnings });
+  });
+  app.get("/records", (c) => c.json(aggregateRecords(deps.store.recordsSince(Date.now() - RECORD_WINDOW_MS))));
 
   mountExtensions(app, deps.extensions);
   return app;

@@ -25,7 +25,7 @@ function build(replies: string[], opts: { summarizer?: Summarizer; executors?: E
   return { store, engine, events, echo, router };
 }
 
-const fakeSummarizer = (calls: unknown[]): Summarizer => async (input) => { calls.push(input); return { summary: { title: `Sum of ${input.task}`, goal: "g", progress: `after ${input.target} ${input.status}`, files: ["a.ts"], unresolved: [], decisions: [] }, error: null, ms: 1 }; };
+const fakeSummarizer = (calls: unknown[]): Summarizer => async (input) => { calls.push(input); return { summary: { title: `Sum of ${input.task}`, goal: "g", progress: `after ${input.target} ${input.status}`, files: ["a.ts"], unresolved: [], decisions: [], facts: input.status === "done" ? [`fact from ${input.task.slice(0, 12)}`] : [] }, error: null, ms: 1 }; };
 
 describe("Engine: threads", () => {
   it("a task opens a thread; a follow-up joins the parent's; both land in the thread log", async () => {

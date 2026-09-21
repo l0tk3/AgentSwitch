@@ -63,6 +63,8 @@ export type Summary = {
   readonly files: readonly string[];
   readonly unresolved: readonly string[];
   readonly decisions: readonly string[];
+  /** Durable, routing-level facts worth keeping in MEMORY.md (may be empty). */
+  readonly facts: readonly string[];
 };
 
 export type HandoffReason = "user" | `failure:${string}` | "quota";

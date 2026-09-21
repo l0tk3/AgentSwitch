@@ -33,7 +33,7 @@ describe("handoff package", () => {
     const dir = repo();
     writeFileSync(join(dir, "x.ts"), "1");
     const pkg = buildHandoff({ from: { harness: "claude-code", model: "claude-sonnet-5", taskId: "t1" }, reason: "failure:refusal", cwd: dir, note: "It refused the login step",
-      summary: { title: "Login", goal: "log in", progress: "found form", files: ["src/login.tsx"], unresolved: [], decisions: [] } });
+      summary: { title: "Login", goal: "log in", progress: "found form", files: ["src/login.tsx"], unresolved: [], decisions: [], facts: [] } });
     expect(pkg.files).toEqual(["src/login.tsx", "x.ts"]);
     const text = renderHandoff(pkg);
     expect(text).toContain("claude-code/claude-sonnet-5 (task t1); it failed (refusal)");

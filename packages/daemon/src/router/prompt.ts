@@ -4,6 +4,20 @@ import { contextSection, EMPTY_CONTEXT, type LoadedContext } from "./context.js"
 import type { Targets } from "./targets.js";
 import { catalogText } from "./targets.js";
 
+/** What the router is told about the world besides the catalog: user context, learned memory, track record, extensions. */
+export type PromptExtras = {
+  readonly context?: LoadedContext;
+  readonly memory?: LoadedContext;
+  /** Pre-rendered `recordText()` over the last 30 days. */
+  readonly record?: string;
+  readonly extensions?: ExtensionsSummary;
+};
+
+export type ExtensionsSummary = {
+  readonly mcp: readonly { name: string; note: string; harnesses: readonly string[] }[];
+  readonly skills: readonly { name: string; description: string; harnesses: readonly string[] }[];
+};
+
 export const DECISION_SHAPE = `{
   "harness": "<one of the listed harnesses>",
   "model": "<a model listed under that harness, or null for its default>",
@@ -11,6 +25,7 @@ export const DECISION_SHAPE = `{
   "brief": "<the task rewritten for the executor: goal, acceptance criteria, paths not to touch, expected size>",
   "needs_browser": <true|false>,
   "category": "<a category name listed under the catalog, or null>",
+  "kind": "code-multifile" | "code-small" | "browser" | "chat" | "translate" | "other",
   "expected_size": "small" | "medium" | "large",
   "risk": "<what could go wrong, or null>",
   "fallbacks": [{"harness": "...", "model": "..."}],
@@ -21,7 +36,8 @@ export const DECISION_SHAPE = `{
   "handoff_note": "<for the next executor: what was already done, what to avoid>" | null
 }`;
 
-export function systemPrompt(targets: Targets, context: LoadedContext = EMPTY_CONTEXT): string {
+export function systemPrompt(targets: Targets, extras: LoadedContext | PromptExtras = EMPTY_CONTEXT): string {
+  const x: PromptExtras = "text" in extras ? { context: extras } : extras;
   return `You are the dispatcher for AgentSwitch. A task arrives; you decide which coding agent and model
 should execute it and write a brief for that executor. You do not execute anything yourself.
 
@@ -38,9 +54,40 @@ Rules:
   model and every fallback only from that category's targets; the others refuse such tasks outright.
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
 - You may read files under the working directory to judge size and language. Do not modify anything.
+- Label the task's "kind" for the track record: code-multifile, code-small, browser, chat, translate or other.
 - If unsure, lower confidence instead of guessing.
 - Reply with exactly one JSON object and nothing else, of this shape:
-${DECISION_SHAPE}${contextSection(context)}`;
+${DECISION_SHAPE}${contextSection(x.context ?? EMPTY_CONTEXT)}${memorySection(x.memory)}${recordSection(x.record)}${extensionsSection(x.extensions)}`;
+}
+
+export function memorySection(memory: LoadedContext | undefined): string {
+  if (!memory?.text.trim()) return "";
+  return `
+
+Learned facts (appended automatically after earlier tasks; the user may edit them):
+${memory.text.trim()}`;
+}
+
+export function recordSection(record: string | undefined): string {
+  if (!record?.trim()) return "";
+  return `
+
+Track record, last 30 days, by task kind (runs, successes, average time and tokens; "user handed off" means the
+user took that kind of task away from that target):
+${record.trim()}
+Prefer targets that succeed at this kind of task. If you pick a target the user handed this kind of task off from,
+say why in "reason". A target with three consecutive refusals/failures on a kind is moved behind your fallbacks by the daemon.`;
+}
+
+export function extensionsSection(ext: ExtensionsSummary | undefined): string {
+  if (!ext || (!ext.mcp.length && !ext.skills.length)) return "";
+  const mcp = ext.mcp.map((m) => `- mcp ${m.name}${m.note ? `: ${m.note}` : ""} (${m.harnesses.join(", ")})`);
+  const skills = ext.skills.map((s) => `- skill ${s.name}${s.description ? `: ${s.description}` : ""} (${s.harnesses.join(", ")})`);
+  return `
+
+Extensions the executors have (MCP servers and skills, with the harnesses that get them). Mention a relevant one in
+the brief by name; the executor loads its details itself:
+${[...mcp, ...skills].join("\n")}`;
 }
 
 export function taskMessage(task: string, cwd: string, previousError?: string): string {

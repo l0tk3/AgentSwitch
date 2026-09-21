@@ -11,6 +11,7 @@ const initial = {
   thread: null,                      // the open task's thread (GET /threads/:id), with folded state and tasks
   mcp: [], skills: [], discovered: [], edit: { mcp: null, skill: null }, extHint: "",
   ctx: { path: "", text: "", warnings: [], draft: null, hint: "", saved: false },
+  mem: { path: "", text: "", warnings: [], draft: null, hint: "", saved: false },   // MEMORY.md, same shape
 };
 
 let state = initial;

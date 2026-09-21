@@ -81,6 +81,15 @@ the router model after every execution (`summary` task event; failure keeps the 
 "交给别人" (`POST /tasks/:id/handoff {to?}`) cancels a running task, queues a successor in the same
 thread that excludes the current executor (or pins `to`), and records a `handoff` event.
 
+The router also reads three more things (threads-v0 §6–8): `MEMORY.md` (facts the summarizer
+noticed, appended with their source task after the CONTEXT.md lint; editable on the 上下文 tab),
+the track record (`records` table: per finished task its router-labelled `kind`, target, outcome,
+time, tokens, whether the user pinned or later handed it off; summarised per kind for the prompt,
+`GET /records`), and the names of registered MCP servers and skills. Two deterministic guards sit
+in `validateDecision`: a target with three consecutive refusals/failures on a kind goes behind the
+router's fallbacks for 30 days, and a target the user handed that kind off from is noted when the
+router gives no reason.
+
 Archive (`POST /threads/:id/archive`) sets `expires_at` = now + 7 days; the hourly sweep deletes
 expired threads with their private home; `PATCH` changes title / expiry / status, `DELETE` removes
 at once. Protected paths (daemon home minus work/artifacts/uploads, `~/.secret-gate`, this
@@ -151,6 +160,8 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 | GET | `/routing/log` | recent decisions (every engine dispatch and re-dispatch, plus previews) |
 | POST | `/uploads` | multipart `files`; stages them, returns ids (≤ 20 files, ≤ 50 MB each, swept after 24 h) |
 | GET | `/tasks/:id/files`, `/tasks/:id/files/*` | list / download a task's files: from `<cwd>` while it exists, else from `artifacts/<id>` (kept 7 days) |
+| GET/PUT | `/memory` | MEMORY.md, same lint as CONTEXT.md |
+| GET | `/records` | track record aggregated per task kind and target (last 30 days) |
 | GET/PUT | `/context` | CONTEXT.md (GET returns the linted text the router sees; PUT lints and reports warnings) |
 | GET | `/context/example` | the `config/CONTEXT.example.md` template (UI "载入示例模板") |
 | GET | `/mcp` | registered MCP servers |
@@ -185,6 +196,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `ui/` | desktop console at `/ui`: `index.html` shell, `app.css`, `app.js` (render loop, click routing, polling), `lib/{api,state,actions}.js`, `views/{home,task,log,ext,ctx,quota}.js` |
 | `src/executors/{types,echo,gate,instructions,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, global guidance, the three real executors |
 | `src/executors/protected.ts` | protected paths: deny decision for Claude, deny patterns for OpenCode, snapshot/restore backstop for all |
+| `src/threads/{record,memory}.ts` | track record aggregation + guards; MEMORY.md append/lint |
 | `src/threads/{types,fold,summary,handoff}.ts` | thread model + fold policies, `foldThread`, the summarizer (router model, zod, lint), handoff package (`git status`/`diff --stat`) + rendering |
 | `config/EXECUTOR.md` | AgentSwitch's part of the guidance every executor gets |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
@@ -192,7 +204,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `src/files/*` | names (limits, MIME), uploads (staging → `<cwd>/in/`), artifacts (tree, safe download path, `out/` → `artifacts/<id>` before an ephemeral cwd is deleted, sweeps), notes (attachment paragraph for router + executor) |
 | `src/extensions/*`, `src/executors/extensions.ts` | MCP + skill registries and their per-harness shapes |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
-| `tests/` | 170 tests; API tests run in-process via Hono `request()` |
+| `tests/` | 180 tests; API tests run in-process via Hono `request()` |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
 | `scripts/resume_experiment.ts`, `scripts/executor_resume_smoke.ts` | real-model checks that Claude / Codex resume from a thread's private home (costs cents) |
 

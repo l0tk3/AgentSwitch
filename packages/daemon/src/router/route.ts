@@ -1,9 +1,10 @@
 /** The pipeline: pin → validate; otherwise router (with timeout and one retry) → validate → default. */
 
-import type { LoadedContext } from "./context.js";
+import { aggregateRecords, guardsFor, recordText, type RecordRow } from "../threads/record.js";
+import { EMPTY_CONTEXT, type LoadedContext } from "./context.js";
 import { parseDecision, type Decision } from "./decision.js";
-import { defaultTarget } from "./defaultPolicy.js";
-import { redispatchMessage, systemPrompt, taskMessage, type RepairTool } from "./prompt.js";
+import { classify, defaultTarget } from "./defaultPolicy.js";
+import { redispatchMessage, systemPrompt, taskMessage, type ExtensionsSummary, type RepairTool } from "./prompt.js";
 import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
 import type { Router } from "./routers/types.js";
 import { categoryOf, markUnavailable, type TargetRef, type Targets } from "./targets.js";
@@ -27,7 +28,17 @@ export type RouteDeps = {
   readonly repairs?: readonly RepairTool[];
   /** The user's CONTEXT.md, already linted (see context.ts). */
   readonly context?: LoadedContext;
+  /** MEMORY.md, linted the same way. */
+  readonly memory?: LoadedContext;
+  /** Track record rows (last 30 days) for the prompt and the guards. */
+  readonly records?: readonly RecordRow[];
+  readonly extensions?: ExtensionsSummary;
 };
+
+/** The router's label, else the default policy's coarse class. */
+export function kindOf(task: string, decision: Decision | null): string {
+  return decision?.kind ?? classify(task);
+}
 
 export type RouteResult = {
   readonly verdict: Verdict;
@@ -54,7 +65,7 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
   const extra = exclude.length ? `Excluded (do not choose; the user handed this task off from them): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ")}` : undefined;
   const asked = await askRouter(req, { ...deps, targets }, extra);
   if (asked.decision) {
-    const verdict = validateDecision(asked.decision, ctx);
+    const verdict = validateDecision(asked.decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, asked.decision)) });
     if (verdict.ok) return { ...asked, verdict, source: verdict.chosen !== "default" ? "router" : "default" };
     const last = validatePin(fallback, ctx, asked.decision.needs_browser);
     return { ...asked, verdict: last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict, source: "default" };
@@ -106,7 +117,7 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
     // Unknown or unregistered tool: treat the decision as a plain re-dispatch of its harness/model.
   }
   if (asked.decision) {
-    const verdict = validateDecision(asked.decision, ctx);
+    const verdict = validateDecision(asked.decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, asked.decision)) });
     if (verdict.ok) {
       const source = verdict.chosen !== "default" ? "router" : "default";
       return { step: { kind: "redispatch", verdict, source }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
@@ -128,7 +139,7 @@ function defaultTargetExcluding(req: RouteRequest, deps: RouteDeps, exclude: rea
 }
 
 async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Promise<Asked> {
-  const system = systemPrompt(deps.targets, deps.context);
+  const system = systemPrompt(deps.targets, { context: deps.context ?? EMPTY_CONTEXT, memory: deps.memory ?? EMPTY_CONTEXT, record: recordText(aggregateRecords(deps.records ?? [])), extensions: deps.extensions ?? { mcp: [], skills: [] } });
   let error: string | null = null;
   let ms = 0;
   for (let attempt = 1; attempt <= 2; attempt++) {

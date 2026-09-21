@@ -177,6 +177,8 @@ browser:        claude/haiku 5 次 3 成功（2 次 transport）
 
 **实现状态（2026-09-21）**：第 1 步和第 2 步已做（`packages/daemon/src/threads/`、`src/executors/protected.ts`，170 例测试）。差异于设计：`session` 事件由执行器回报的 `sessionId`（Claude `session_id` / Codex thread id）写入；用户交接接口是 `POST /tasks/:id/handoff {to?}`，`to` 即 pin；受保护路径除 Claude 的 `decideTool` 硬拒绝和 OpenCode 静态 deny 外，引擎对三家统一做运行前后快照比对并回滚（Codex 沙箱内 cwd 下的 `config/` 没有别的办法拦）；审批超时策略已在引擎里（10 分钟无人批即 deny）。OpenCode 私有目录与 resume 未做（见 §1 注）。页面暂只在任务页加了线程卡片和「交给别人」，线程列表视图属第 4 步。
 
+第 3 步同日完成：`records` 表 + `src/threads/record.ts`（按 kind × 目标聚合成几行进提示词；`guardsFor` 出两条兜底：同 kind 同目标连续 3 次 refusal/task_failed → 30 天内该目标排到 fallback 之后；用户交接过的组合 → 路由器无 reason 时记 note），Decision 加 `kind`（路由器标，pin/失效时 `classify()` 兜底），摘要器多出 `facts` 字段 → `MEMORY.md`（`src/threads/memory.ts`，lint + 去重 + 64KB 上限，页面「上下文」tab 可编辑），MCP/skill 清单以名字 + 一句话进提示词。审批超时策略原本就在引擎里。
+
 ## 11. 测试
 
 | 层 | 内容 | 调云模型？ |

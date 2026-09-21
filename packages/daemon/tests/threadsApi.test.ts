@@ -97,3 +97,20 @@ describe("threads over HTTP", () => {
     d.close();
   });
 });
+
+describe("memory and records over HTTP", () => {
+  it("GET/PUT /memory lints like CONTEXT.md; GET /records aggregates finished tasks", async () => {
+    const { d, client } = daemon([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, kind: "chat" })]);
+    expect(await client.memory()).toMatchObject({ text: "" });
+    const put = await client.putMemory("# m\n- site x needs secret_fill\n- password: hunter2secret\n");
+    expect(put.warnings).toHaveLength(1);
+    const got = await client.memory();
+    expect(got.text).toContain("secret_fill");
+    expect(got.text).not.toContain("hunter2secret");
+    const a = await client.submit("hello", "/tmp");
+    await client.watch(a.id, () => undefined);
+    const recs = await client.records() as { kind: string; targets: { harness: string; runs: number }[] }[];
+    expect(recs).toEqual([{ kind: "chat", targets: [expect.objectContaining({ harness: "codex", runs: 1, ok: 1 })] }]);
+    d.close();
+  });
+});

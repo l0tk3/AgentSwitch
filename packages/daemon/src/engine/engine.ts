@@ -13,7 +13,12 @@ import type { ApprovalDecision, Executor } from "../executors/types.js";
 import { NO_PROTECTED, restoreProtected, snapshotProtected, type ProtectedPaths } from "../executors/protected.js";
 import { foldThread } from "../threads/fold.js";
 import { buildHandoff, gitDiffSummary, renderHandoff } from "../threads/handoff.js";
+import { appendMemory, loadMemory } from "../threads/memory.js";
+import { RECORD_WINDOW_MS } from "../threads/record.js";
 import type { Summarizer } from "../threads/summary.js";
+import { kindOf } from "../router/route.js";
+import type { ExtensionsSummary } from "../router/prompt.js";
+import type { LoadedContext } from "../router/context.js";
 import type { HandoffReason, ThreadState } from "../threads/types.js";
 import type { Bus } from "./bus.js";
 import { cleanupEphemeral, defaultCleanupPaths, type CleanupPaths } from "./cleanup.js";
@@ -35,6 +40,11 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   readonly summarizer?: Summarizer;
   /** Paths no executor may change; the engine restores them after a run as the last line of defense. */
   readonly protected?: ProtectedPaths;
+  /** $AGENTSWITCH_HOME/MEMORY.md: read into the router prompt, appended with the summarizer's facts. */
+  readonly memoryPath?: string;
+  /** MCP servers and skills, names only, for the router prompt. */
+  readonly extensionsSummary?: () => ExtensionsSummary;
+  readonly now?: () => number;
 };
 
 export type HandoffRequest = { readonly to?: TargetRef; readonly cwd?: string; readonly ephemeral?: boolean };
@@ -76,6 +86,7 @@ export class Engine {
       ...(task.threadId ? { threadId: task.threadId } : {}), ...(req.to ? { pin: req.to } : {}),
       ...(from ? { handoffFrom: from, exclude: req.to ? [] : [{ harness: from.harness, model: from.model }] } : {}),
     });
+    this.deps.store.markUserHandoff(task.id);
     if (task.threadId && from) {
       const state = this.threadState(task.threadId);
       this.deps.store.appendThreadEvent(task.threadId, "handoff", { from: { harness: from.harness, model: from.model, taskId: task.id, ...(state.sessions[from.harness] ? { sessionId: state.sessions[from.harness]!.sessionId } : {}) }, to: { ...(req.to ?? {}), taskId: next.id }, reason: "user", summaryRef: state.summarySeq });
@@ -121,8 +132,13 @@ export class Engine {
   }
 
   private routeDeps(): RouteDeps {
-    const { store: _s, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, routingLog: _l, artifactsDir: _d, summarizer: _m, protected: _p, ...rest } = this.deps;
-    return { ...rest, quota: quota(), running: { ...this.running } };
+    const { store, bus: _b, executors: _e, quota, approvalTimeoutMs: _a, retryBackoffMs: _r, cleanupPaths: _c, routingLog: _l, artifactsDir: _d, summarizer: _m, protected: _p, memoryPath, extensionsSummary, now: _n, ...rest } = this.deps;
+    const memory: LoadedContext | undefined = memoryPath ? loadMemory(memoryPath) : undefined;
+    return { ...rest, quota: quota(), running: { ...this.running }, records: store.recordsSince(this.now() - RECORD_WINDOW_MS), ...(memory ? { memory } : {}), ...(extensionsSummary ? { extensions: extensionsSummary() } : {}) };
+  }
+
+  private now(): number {
+    return this.deps.now ? this.deps.now() : Date.now();
   }
 
   private async process(id: string): Promise<void> {
@@ -146,14 +162,25 @@ export class Engine {
     const task = this.deps.store.getTask(id);
     if (!task?.threadId) return;
     const failed = task.attempts.at(-1);
-    this.deps.store.appendThreadEvent(task.threadId, "task", { taskId: task.id, harness: task.harness, model: task.model, status: task.status, kind: task.status === "failed" ? failed?.kind ?? "unknown" : null, tokens: this.tokensOf(task.id) });
+    const tokens = this.tokensOf(task.id);
+    this.deps.store.appendThreadEvent(task.threadId, "task", { taskId: task.id, harness: task.harness, model: task.model, status: task.status, kind: task.status === "failed" ? failed?.kind ?? "unknown" : null, tokens });
+    if (task.harness && task.model) {
+      const events = this.deps.store.eventsSince(task.id);
+      this.deps.store.saveRecord({
+        taskId: task.id, ts: this.now(), kind: kindOf(task.task, task.decision), harness: task.harness, model: task.model, status: task.status,
+        failureKind: task.status === "failed" ? failed?.kind ?? "unknown" : null, ms: Math.max(0, this.now() - task.createdAt), tokens,
+        approvals: events.filter((e) => e.type === "approval_resolved" && e.payload.decision === "allow").length,
+        handedOff: events.some((e) => e.type === "handoff"), pinned: task.pin !== null, userHandoff: false,
+      });
+    }
     if (!this.deps.summarizer) return;
     const previous = this.threadState(task.threadId).summary;
     const r = await this.deps.summarizer({ previous, task: task.task, brief: task.brief, target: `${task.harness ?? "?"}/${task.model ?? "?"}`, status: task.status, result: task.result ?? task.error ?? "", diff: gitDiffSummary(task.cwd), cwd: task.cwd });
     if (!r.summary) { this.emit(task.id, "summary", { ok: false, error: r.error, ms: r.ms }); return; }
     const ev = this.deps.store.appendThreadEvent(task.threadId, "summary", { ...r.summary });
     if (!previous) this.deps.store.updateThread(task.threadId, { title: r.summary.title });
-    this.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, ms: r.ms });
+    const memory = this.deps.memoryPath && r.summary.facts.length ? appendMemory(this.deps.memoryPath, r.summary.facts, { taskId: task.id, ts: this.now() }) : null;
+    this.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, ms: r.ms, ...(memory ? { remembered: memory.added } : {}) });
   }
 
   private tokensOf(taskId: string): number {

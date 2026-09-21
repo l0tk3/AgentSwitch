@@ -15,6 +15,9 @@ import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
 import { defaultProtected, type ProtectedPaths } from "./executors/protected.js";
 import { routerSummarizer } from "./threads/summary.js";
+import { loadMemory } from "./threads/memory.js";
+import { RECORD_WINDOW_MS } from "./threads/record.js";
+import type { ExtensionsSummary } from "./router/prompt.js";
 import type { Executor } from "./executors/types.js";
 import { claudeQuota } from "./quota/claude.js";
 import { codexQuota } from "./quota/codex.js";
@@ -73,6 +76,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const bus = new Bus();
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
   const contextPath = join(cfg.home, "CONTEXT.md");
+  const memoryPath = join(cfg.home, "MEMORY.md");
   const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : opencodeRouter({ model: targets.router.model }));
   const rateLimits = new RateLimitCache();
   const extensions = extensionsAt(cfg.home);
@@ -91,9 +95,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   sweepThreads(store);
   // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
   const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(router);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(summarizer ? { summarizer } : {}) });
-  const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath) });
-  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
+  const extensionsSummary = () => summarizeExtensions(extensions);
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, ...(summarizer ? { summarizer } : {}) });
+  const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary() });
+  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
@@ -106,6 +111,14 @@ export function realExecutors(targets: Targets, browser: boolean, rateLimits?: R
     codexExecutor({ binary: targets.harnesses.codex?.binary ?? "codex", gate, browser, ...ext }),
     opencodeExecutor({ gate, browser, ...ext, protected: prot }),
   ];
+}
+
+/** Names and one-liners only (progressive disclosure): the router mentions an extension, the executor loads it. */
+export function summarizeExtensions(ext: Extensions): ExtensionsSummary {
+  return {
+    mcp: ext.mcp.list().filter((m) => m.enabled).map((m) => ({ name: m.name, note: m.note, harnesses: m.harnesses })),
+    skills: ext.skills.list().filter((s) => s.enabled).map((s) => ({ name: s.name, description: s.description, harnesses: s.harnesses })),
+  };
 }
 
 /** Archived threads past their expiry lose their row, log and private home. Runs at start and hourly. */

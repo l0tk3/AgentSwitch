@@ -1,6 +1,7 @@
 /** The floor: pure checks that decide whether a router decision may be executed as-is. */
 
 import type { Decision } from "./decision.js";
+import type { Guards } from "../threads/record.js";
 import { allowedFor, modelSpec, type TargetRef, type Targets } from "./targets.js";
 
 /** Fraction of quota left per harness, 0..1. Missing harness = unknown = treated as available. */
@@ -16,6 +17,8 @@ export type Context = {
   readonly lowConfidenceTarget: TargetRef;
   /** Category detected from the task text (keyword floor); the router's own `category` is merged in. */
   readonly category?: string | null;
+  /** Track-record guards for this task's kind (threads-v0 §7): demoted targets go behind the fallbacks. */
+  readonly guards?: Guards;
 };
 
 export type Chosen = "router" | "fallback" | "default" | "pin";
@@ -73,8 +76,14 @@ export function validateDecision(decision: Decision, base: Context): Verdict {
     candidates.push({ ref: ctx.lowConfidenceTarget, chosen: "default" });
   } else {
     const primary = { harness: decision.harness, model: resolveModel(targets, decision.harness, decision.model) };
-    candidates.push({ ref: primary, chosen: "router" });
+    const same = (a: TargetRef, b: TargetRef) => a.harness === b.harness && a.model === b.model;
+    const demoted = ctx.guards?.demoted.some((d) => same(d, primary)) ?? false;
+    if (demoted) notes.push(`${primary.harness}/${primary.model} demoted: ${ctx.guards!.demoted.length ? "three consecutive failures on this kind of task; trying fallbacks first" : ""}`.trimEnd());
+    if (!demoted) candidates.push({ ref: primary, chosen: "router" });
     for (const fb of decision.fallbacks) candidates.push({ ref: fb, chosen: "fallback" });
+    if (demoted) candidates.push({ ref: primary, chosen: "fallback" });
+    const overridden = ctx.guards?.overridden.find((o) => same(o, primary));
+    if (overridden && !decision.reason.trim()) notes.push(`${primary.harness}/${primary.model}: the user handed this kind of task off from it before and the router gave no reason`);
   }
   candidates.push({ ref: targets.router.default, chosen: "default" });
 

@@ -11,6 +11,8 @@ export const Decision = z.object({
   needs_browser: z.boolean().default(false),
   /** A category from targets.yaml whose allow list restricts the executor (null = unrestricted). */
   category: z.string().min(1).nullable().default(null),
+  /** Task kind for the track record (threads-v0 §7): code-multifile | code-small | browser | chat | translate | other. */
+  kind: z.string().min(1).max(40).nullable().default(null),
   expected_size: z.enum(["small", "medium", "large"]).default("medium"),
   risk: z.string().nullable().default(null),
   fallbacks: z.array(TargetRef).default([]),
