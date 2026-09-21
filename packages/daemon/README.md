@@ -59,6 +59,35 @@ deleted when it is under the OS temp dir or `~/.agentswitch/work`; a persistent 
 Executors also remove their own temp files (Claude browser profile, OpenCode config dir, router
 config dir).
 
+## Threads (threads-v0)
+
+Every task runs in a thread: one piece of work from first message to done. A follow-up (`parent_id`)
+joins its parent's thread, `thread_id` picks one explicitly, otherwise a new thread opens for the
+cwd. AgentSwitch stores only handles, an append-only `thread_events` log (`task`, `session`,
+`summary`, `title`, `handoff`, `cost`, `progress`, each with its fold policy; `foldThread` is pure)
+and a last-wins summary. Conversation history stays with each harness, in the thread's private home
+`$AGENTSWITCH_HOME/threads/<id>/`:
+
+- `claude/` is `CLAUDE_CONFIG_DIR` (with `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` so the normal keychain
+  login still applies); the next task in the thread by Claude Code passes `resume: <session_id>`.
+- `codex/` is `CODEX_HOME` (auth.json re-copied, config regenerated per run); threads start
+  non-ephemeral and the next Codex task calls `thread/resume {threadId}`.
+- OpenCode keeps no private home yet (its auth lives in the same XDG data dir as its sessions).
+
+Same harness, same thread, same cwd → native resume, no summary involved. Any change of harness
+carries a handoff package instead: the thread summary + files touched + `git status`/`diff --stat`
++ the router's note, rendered under "Handoff from a previous attempt". The summary is rewritten by
+the router model after every execution (`summary` task event; failure keeps the previous one).
+"交给别人" (`POST /tasks/:id/handoff {to?}`) cancels a running task, queues a successor in the same
+thread that excludes the current executor (or pins `to`), and records a `handoff` event.
+
+Archive (`POST /threads/:id/archive`) sets `expires_at` = now + 7 days; the hourly sweep deletes
+expired threads with their private home; `PATCH` changes title / expiry / status, `DELETE` removes
+at once. Protected paths (daemon home minus work/artifacts/uploads, `~/.secret-gate`, this
+package's `config/`) are denied outright for Claude Code (`decideTool`), denied by static patterns
+for OpenCode, and restored from a snapshot after every run for all harnesses (the task fails as a
+security event). `EXECUTOR.md` says that no agent-written text is an authorization.
+
 ## Executors
 
 `AGENTSWITCH_EXECUTORS=real` (default `echo`). When `packages/secret-gate/.venv` exists, every
@@ -105,9 +134,14 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 
 | method | path | what |
 |---|---|---|
-| POST | `/tasks` | `{task, cwd?, pin?, needs_browser?, ephemeral?, parent_id?}` → task (queued); no `cwd` = ephemeral work dir; `parent_id` = follow-up (router and executor see the parent chain's text and results; cwd inherited unless the parent was ephemeral) |
+| POST | `/tasks` | `{task, cwd?, pin?, needs_browser?, ephemeral?, parent_id?, thread_id?}` → task (queued); no `cwd` = ephemeral work dir; `parent_id` = follow-up (router and executor see the parent chain's text and results; cwd inherited unless the parent was ephemeral); `thread_id` runs in that thread |
+| POST | `/tasks/:id/handoff` | `{to?: {harness, model}}` → successor task in the same thread, excluding the current executor unless `to` pins one; cancels the task if still running |
+| GET | `/threads?status=open\|archived`, `/threads/:id` | list with folded state (title, summary, lastTarget, taskCount) / detail with `state`, `tasks`, `events` |
+| PATCH | `/threads/:id` | `{title?, status?, expires_at?}` |
+| POST | `/threads/:id/archive`, `/threads/:id/reopen` | archive = delete after 7 days (refused while a task runs) / reopen |
+| DELETE | `/threads/:id` | delete now, private home included |
 | GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
-| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, done, failed, cancelled |
+| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, dispatched, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
 | POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |
 | POST | `/tasks/:id/cancel` | abort; pending approvals denied |
 | GET | `/approvals` | pending across tasks |
@@ -150,14 +184,17 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `src/engine/{types,store,bus,engine,cleanup}.ts` | task model, SQLite + JSONL persistence, event fan-out, the engine loop, ephemeral cleanup |
 | `ui/` | desktop console at `/ui`: `index.html` shell, `app.css`, `app.js` (render loop, click routing, polling), `lib/{api,state,actions}.js`, `views/{home,task,log,ext,ctx,quota}.js` |
 | `src/executors/{types,echo,gate,instructions,opencode,appserver,codex,claude}.ts` | executor interface, echo, gate wiring, global guidance, the three real executors |
+| `src/executors/protected.ts` | protected paths: deny decision for Claude, deny patterns for OpenCode, snapshot/restore backstop for all |
+| `src/threads/{types,fold,summary,handoff}.ts` | thread model + fold policies, `foldThread`, the summarizer (router model, zod, lint), handoff package (`git status`/`diff --stat`) + rendering |
 | `config/EXECUTOR.md` | AgentSwitch's part of the guidance every executor gets |
 | `src/router/*` | targets, decision, validate, defaultPolicy, prompt, context, failure, reroute, route, log, routers/{echo,opencode} |
 | `src/quota/{codex,deepseek,claude,windows,index}.ts` | providers, 5h/7d windows (Codex app-server windows; Claude `rate_limit_event` from runs or a one-turn probe), cached service |
 | `src/files/*` | names (limits, MIME), uploads (staging → `<cwd>/in/`), artifacts (tree, safe download path, `out/` → `artifacts/<id>` before an ephemeral cwd is deleted, sweeps), notes (attachment paragraph for router + executor) |
 | `src/extensions/*`, `src/executors/extensions.ts` | MCP + skill registries and their per-harness shapes |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
-| `tests/` | 84 tests; API tests run in-process via Hono `request()` |
+| `tests/` | 170 tests; API tests run in-process via Hono `request()` |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
+| `scripts/resume_experiment.ts`, `scripts/executor_resume_smoke.ts` | real-model checks that Claude / Codex resume from a thread's private home (costs cents) |
 
 ## Facts learned
 
@@ -165,4 +202,6 @@ ask the router with the history; gate_denied or an approved action → stop. The
 - Codex `account/rateLimits/read` returns `rateLimits.primary.usedPercent` per window plus `planType`; the ChatGPT.app bundled codex (0.155) must be used, homebrew 0.142 only knows gpt-5.5.
 - DeepSeek `/user/balance` works with the key OpenCode stores in `~/.local/share/opencode/opencode.db` (`credential` table, JSON `{"type":"key","key":...}`).
 - Node's `parseArgs` needs `allowNegative: true` for `--no-watch`; `node:sqlite` prints an ExperimentalWarning on Node 24, silenced in the wrappers.
+- `CLAUDE_CONFIG_DIR` alone makes claude 2.1.278 look for a keychain item `Claude Code-credentials-<sha256(dir)[:8]>` and report "Not logged in"; `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` restores the unsuffixed name. Transcripts land in `<dir>/projects/<realpath cwd key>/<session_id>.jsonl`; `resume` needs the same cwd.
+- Codex `thread/resume {threadId}` reloads the rollout from `$CODEX_HOME/sessions/…` + `thread_history_1.sqlite`; the thread must have been started with `ephemeral: false`. Every app-server start also dumps `skills/.system/` and several sqlite files into CODEX_HOME.
 - Claude's `rate_limit_event` (subscription accounts) carries the 5h / 7d windows in `unifiedWindows`, not in the declared top-level fields; one Haiku turn is enough to receive it. Codex `rateLimits` on this pro plan reports only the 7d window (`secondary` is null).

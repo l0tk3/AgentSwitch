@@ -27,7 +27,7 @@ threads (
   cwd TEXT NOT NULL,
   home TEXT NOT NULL,      -- $AGENTSWITCH_HOME/threads/<id>/，各家私有配置和会话记录
   status TEXT NOT NULL,    -- open | archived
-  expires_at INTEGER       -- 归档后到期整目录删
+  expires_at INTEGER       -- 归档时写 now + 7 天；到期整目录删。用户可在页面上改到期时间或立即删
 )
 thread_events (
   thread_id, seq, ts, type, payload,   -- append-only，见 §2
@@ -46,6 +46,11 @@ threads/<id>/
 ```
 
 今天每次运行用 `mkdtemp` 建再删的 profile、plugin、`CODEX_HOME`，改为落在这里并跨任务保留。线程归档即删整目录，`expires_at` 到期由 daemon 清理。transcript 里有执行器读过的文件全文和工具输出，这是必须删的理由。
+
+> 2026-09-21 实测（`scripts/resume_experiment.ts`、`scripts/executor_resume_smoke.ts`）：
+> - Claude：`CLAUDE_CONFIG_DIR` 生效，但 claude 2.1.278 会改查钥匙串条目 `Claude Code-credentials-<hash>` 而报 "Not logged in"；再传 `CLAUDE_SECURESTORAGE_CONFIG_DIR=""` 即复用用户登录。transcript 落在 `<dir>/projects/<cwd realpath key>/<session_id>.jsonl`，`resume` 要求同 cwd。`~/.claude` 零新增。
+> - Codex：`thread/start` 必须 `ephemeral:false` 才写 rollout；`thread/resume {threadId}` 从 `$CODEX_HOME/sessions/` + `thread_history_1.sqlite` 重载，`~/.codex/sessions` 零新增。每次启动往 CODEX_HOME 灌 `skills/.system/` 和几个 sqlite，噪音随线程删除。
+> - OpenCode 未做私有目录：它的 auth.json 与会话同在 XDG 数据目录，改 `XDG_DATA_HOME` 会丢凭据；同线程换回 OpenCode 时走交接包而不是 resume。
 
 ## 2. 事件日志与折叠策略
 
@@ -91,7 +96,7 @@ export function foldThread(events: ThreadEvent[]): ThreadState   // 纯函数
 
 触发：失败重派（已有，`router-v0.md` §6.5）、额度 fallback（已有）、**用户主动「交给别人」**（新增）。
 
-用户主动交接：任务卡按钮 → `POST /tasks/:id/handoff {to?: TargetRef}` → 引擎取消当前执行（若在跑）→ 摘要器先更新一次 → 走 `reroute`，排除当前目标，带上用户指定的目标（若有）→ 新任务落在同一线程。
+用户主动交接：任务卡按钮 → `POST /tasks/:id/handoff {to?: TargetRef}` → 引擎取消当前执行（若在跑）→ 摘要器先更新一次 → 走 `reroute`，排除当前目标，带上用户指定的目标（若有）→ 新任务落在同一线程。`to` 给了就是 pin：跳过分诊只做校验（同 `router-v0.md` §4 第 6 条，受限类别仍只警告不拦）；没给则路由器选。
 
 每次交接写一条 `handoff` 事件，结构照 Claude Code 的 `fork-context-ref`：
 
@@ -135,7 +140,7 @@ export function foldThread(events: ThreadEvent[]): ThreadState   // 纯函数
 
 不做学习式权重：单用户样本太少，失败信号混着 transport/quota，反馈回路会锁死。做的是记账，然后把账本给路由器看。
 
-每个任务结束写一条战绩：类别（路由器在 Decision 里标：code-multifile / code-small / browser / chat / translate）、目标、结果分类、耗时、成本、审批次数、是否被交接、用户是否改派（`--pin` 覆盖或主动交接即为负面信号）。
+每个任务结束写一条战绩：类别（路由器在 Decision 里标 `kind`：code-multifile / code-small / browser / chat / translate；路由器失效或 pin 时由默认策略表的粗规则兜底标）、目标、结果分类、耗时、成本、审批次数、是否被交接、用户是否改派（`--pin` 覆盖或主动交接即为负面信号）。
 
 提示词里加近 30 天按类别汇总的几行：
 
@@ -170,6 +175,8 @@ browser:        claude/haiku 5 次 3 成功（2 次 transport）
 
 第 2 步的实验结果决定线程私有目录怎么设计，半小时能做完，可提前到第 1 步之前跑。
 
+**实现状态（2026-09-21）**：第 1 步和第 2 步已做（`packages/daemon/src/threads/`、`src/executors/protected.ts`，170 例测试）。差异于设计：`session` 事件由执行器回报的 `sessionId`（Claude `session_id` / Codex thread id）写入；用户交接接口是 `POST /tasks/:id/handoff {to?}`，`to` 即 pin；受保护路径除 Claude 的 `decideTool` 硬拒绝和 OpenCode 静态 deny 外，引擎对三家统一做运行前后快照比对并回滚（Codex 沙箱内 cwd 下的 `config/` 没有别的办法拦）；审批超时策略已在引擎里（10 分钟无人批即 deny）。OpenCode 私有目录与 resume 未做（见 §1 注）。页面暂只在任务页加了线程卡片和「交给别人」，线程列表视图属第 4 步。
+
 ## 11. 测试
 
 | 层 | 内容 | 调云模型？ |
@@ -183,9 +190,12 @@ browser:        claude/haiku 5 次 3 成功（2 次 transport）
 
 会话镜像（官方 Remote Control）、自己的 transcript 格式、权限 DSL 与 bash 语义分析、文件检查点（worktree + git 已覆盖）、提示词 A/B、学习式权重。
 
-## 13. 待拍板
+## 13. 已拍板与待拍板
 
-1. 线程归档后 `expires_at` 默认多久？（建议 7 天）
+2026-09-21 已定：
+1. 线程归档后 `expires_at` 默认 7 天；页面上可手动改到期或立即删（§1）。
+3. 「交给别人」允许指定目标模型，作为 pin 处理（§4）。
+4. 战绩表类别由路由器标，代码只在路由器失效或 pin 时兜底（§7）。
+
+待拍板：
 2. 摘要器要不要读各家 transcript 原文？v0 只读 brief + 结果 + diff，够用再说。
-3. 「交给别人」是否允许指定目标模型，还是只让路由器选？（建议允许，作为 pin）
-4. 战绩表的类别由路由器标还是代码分类？（建议路由器标，代码只做兜底）

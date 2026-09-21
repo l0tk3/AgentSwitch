@@ -1,7 +1,7 @@
 /** Task detail: text, result, approvals, live event stream, follow-up composer; meta in the side column. */
 
 import { ACTIVE, esc, stamp, target, when } from "../lib/api.js";
-import { approve, cancelTask, goto, openTask, submitTask } from "../lib/actions.js";
+import { approve, archiveThread, cancelTask, goto, handoffTask, openTask, submitTask } from "../lib/actions.js";
 import { set } from "../lib/state.js";
 import { approvalCard } from "./home.js";
 import { fileList, pendingList } from "../lib/files.js";
@@ -20,6 +20,8 @@ export function eventLine(ev) {
     case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"} (${p.status})`;
     case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;
     case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
+    case "handoff": return `交接 ${p.from ? p.from.harness + "/" + p.from.model + " → " : ""}${p.to && p.to.harness ? p.to.harness + "/" + (p.to.model || "?") : "由路由器选"} (${p.reason})${p.taskId && p.taskId !== ev.taskId ? "，新任务 " + p.taskId : ""}`;
+    case "summary": return p.ok ? `线程摘要已更新：「${p.title}」(${((p.ms || 0) / 1000).toFixed(1)}s)` : `线程摘要失败：${p.error}`;
     case "done": return (p.result || "").length > 200 ? "✓ 完成（结果见上方）" : `✓ 完成：${p.result}`;
     case "failed": return `✗ 失败：${p.error}${p.security ? "  [安全事件]" : ""}`;
     case "cancelled": return "已取消";
@@ -53,6 +55,28 @@ function filesCards(t, files) {
     ${(t.attachments || []).length ? `<div class="card"><div class="dim">你上传的附件</div><div class="stack" style="margin-top:8px">${fileList(t.id, inputs.length ? inputs : t.attachments.map((a) => ({ path: a.path, size: a.size })), "")}</div></div>` : ""}`;
 }
 
+/** The thread this task belongs to: title, last summary, every execution in it, and archive. */
+function threadCard(t, th) {
+  if (!th) return t.threadId ? `<div class="card dim">线程 <span class="mono">${esc(t.threadId)}</span> 加载中…</div>` : "";
+  const sm = th.state && th.state.summary;
+  const list = (label, items) => (items && items.length ? `<div class="dim" style="margin-top:6px">${label}</div>${items.map((i) => `<div>· ${esc(i)}</div>`).join("")}` : "");
+  const tasks = (th.tasks || []).map((x) => `<div class="${x.id === t.id ? "" : "dim"}" ${x.id === t.id ? "" : `data-open="${x.id}" style="cursor:pointer"`}><span class="badge ${x.status}">${x.status}</span> ${esc(target(x) || "—")}${x.handoffFrom ? " ↤ " + esc(x.handoffFrom.harness) : ""} <span class="mono">${esc(x.id)}</span></div>`).join("");
+  return `<div class="card">
+      <div class="row"><b class="grow">线程 · ${esc(th.title || "（未命名）")}</b><span class="badge ${th.status}">${th.status}</span></div>
+      <div class="dim mono" style="font-size:12px">${esc(th.id)} · ${(th.tasks || []).length} 次执行 · ${th.handoffs || 0} 次交接${th.expiresAt ? " · " + stamp(th.expiresAt) + " 删除" : ""}</div>
+      ${sm ? `<div style="margin-top:8px"><div class="dim">目标</div><div>${esc(sm.goal)}</div><div class="dim" style="margin-top:6px">进展</div><div>${esc(sm.progress || "—")}</div>${list("文件", sm.files)}${list("未解决", sm.unresolved)}${list("已定", sm.decisions)}</div>` : `<div class="dim" style="margin-top:8px">还没有摘要（每次执行结束后由路由模型生成）</div>`}
+      <div class="stack" style="margin-top:8px;font-size:13px">${tasks}</div>
+      ${th.status === "open" && !(th.tasks || []).some((x) => ACTIVE.has(x.status)) ? `<div class="row" style="margin-top:8px"><span class="grow"></span><button class="small" id="t-archive">归档线程（7 天后删除）</button></div>` : ""}
+    </div>`;
+}
+
+function handoffBar(t) {
+  return `<div class="card composer" style="margin-top:10px">
+    <div class="row"><span class="dim grow">交给别人：在同一线程里换个执行者接着做，当前执行者会被排除；填 harness/model 则直接指定</span></div>
+    <div class="row" style="margin-top:6px"><input id="t-handoff-pin" data-keep class="pin grow" placeholder="留空由路由器选，或 codex/gpt-5.5"><button id="t-handoff">交给别人</button></div>
+  </div>`;
+}
+
 function followUp(hint, pending) {
   return `<div class="card composer" style="margin-top:10px" data-dropzone>
     <textarea id="f-task" data-keep rows="2" placeholder="接着说（带上这条任务的上下文）…  ⌘↵ 发送"></textarea>
@@ -78,8 +102,9 @@ export function render(s) {
         <h2>事件 ${s.events.length}</h2>
         <div class="card events" id="events">${events || '<span class="dim">等待事件…</span>'}</div>
         ${followUp(s.hint, s.pending)}
+        ${t.harness ? handoffBar(t) : ""}
       </div>
-      <aside class="stack">${filesCards(t, s.files)}${meta(t)}</aside>
+      <aside class="stack">${threadCard(t, s.thread)}${filesCards(t, s.files)}${meta(t)}</aside>
     </div>`;
 }
 
@@ -99,6 +124,8 @@ async function send(s) {
 export const bindings = [
   { sel: "#f-send", run: (_el, _e, s) => send(s) },
   { sel: "#t-cancel", run: (_el, _e, s) => cancelTask(s.task.id) },
+  { sel: "#t-handoff", run: (el, _e, s) => { el.disabled = true; return handoffTask(s.task.id, $("#t-handoff-pin").value.trim()).finally(() => { el.disabled = false; }); } },
+  { sel: "#t-archive", run: (_el, _e, s) => archiveThread(s.thread.id) },
   { sel: "[data-nav]", run: (el) => goto(el.dataset.nav) },
   { sel: "[data-open]", run: (el) => openTask(el.dataset.open) },
   { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },

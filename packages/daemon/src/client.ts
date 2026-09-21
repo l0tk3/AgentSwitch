@@ -1,6 +1,9 @@
 /** Thin HTTP client used by the CLI; the phone app will do the same calls. */
 
 import type { Approval, Task, TaskEvent } from "./engine/types.js";
+import type { Thread, ThreadState } from "./threads/types.js";
+
+export type ThreadView = Thread & { summary: ThreadState["summary"]; lastTarget: ThreadState["lastTarget"]; lastActivity: number | null; taskCount: number; handoffs: number };
 
 export class Client {
   constructor(private readonly base: string, private readonly fetchImpl: typeof fetch = fetch) {}
@@ -14,9 +17,16 @@ export class Client {
   }
 
   health() { return this.call<{ ok: boolean; version: string }>("GET", "/healthz"); }
-  submit(task: string, cwd: string | undefined, opts: { pin?: { harness: string; model: string }; needsBrowser?: boolean; ephemeral?: boolean; parentId?: string } = {}) {
-    return this.call<Task>("POST", "/tasks", { task, ...(cwd ? { cwd } : {}), ...(opts.pin ? { pin: opts.pin } : {}), ...(opts.needsBrowser ? { needs_browser: true } : {}), ...(opts.ephemeral ? { ephemeral: true } : {}), ...(opts.parentId ? { parent_id: opts.parentId } : {}) });
+  submit(task: string, cwd: string | undefined, opts: { pin?: { harness: string; model: string }; needsBrowser?: boolean; ephemeral?: boolean; parentId?: string; threadId?: string } = {}) {
+    return this.call<Task>("POST", "/tasks", { task, ...(cwd ? { cwd } : {}), ...(opts.pin ? { pin: opts.pin } : {}), ...(opts.needsBrowser ? { needs_browser: true } : {}), ...(opts.ephemeral ? { ephemeral: true } : {}), ...(opts.parentId ? { parent_id: opts.parentId } : {}), ...(opts.threadId ? { thread_id: opts.threadId } : {}) });
   }
+  handoff(taskId: string, to?: { harness: string; model: string }) { return this.call<Task>("POST", `/tasks/${taskId}/handoff`, to ? { to } : {}); }
+  threads(status?: "open" | "archived") { return this.call<ThreadView[]>("GET", `/threads${status ? `?status=${status}` : ""}`); }
+  thread(id: string) { return this.call<ThreadView & { state: ThreadState; tasks: Task[] }>("GET", `/threads/${id}`); }
+  patchThread(id: string, patch: { title?: string | null; status?: "open" | "archived"; expires_at?: number | null }) { return this.call<ThreadView>("PATCH", `/threads/${id}`, patch); }
+  archiveThread(id: string) { return this.call<ThreadView>("POST", `/threads/${id}/archive`); }
+  reopenThread(id: string) { return this.call<ThreadView>("POST", `/threads/${id}/reopen`); }
+  deleteThread(id: string) { return this.call<{ ok: true }>("DELETE", `/threads/${id}`); }
   tasks(limit = 20) { return this.call<Task[]>("GET", `/tasks?limit=${limit}`); }
   task(id: string) { return this.call<Task & { approvals: Approval[] }>("GET", `/tasks/${id}`); }
   approve(taskId: string, approvalId: string, decision: "allow" | "deny") { return this.call<{ ok: true }>("POST", `/tasks/${taskId}/approve`, { approval_id: approvalId, decision }); }

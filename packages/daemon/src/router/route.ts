@@ -14,6 +14,8 @@ export type RouteRequest = {
   readonly cwd: string;
   readonly pin?: TargetRef;
   readonly needsBrowser?: boolean;
+  /** Targets treated as unavailable for this task (the executor a user handed the task off from). */
+  readonly exclude?: readonly TargetRef[];
 };
 
 export type RouteDeps = {
@@ -38,16 +40,19 @@ export type RouteResult = {
 };
 
 export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteResult> {
-  const { targets } = deps;
-  const fallback = defaultTarget(req.task, targets, deps.quota);
+  const exclude = req.exclude ?? [];
+  const targets = exclude.length ? markUnavailable(deps.targets, exclude) : deps.targets;
+  const fallback = defaultTargetExcluding(req, deps, exclude);
   const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) };
 
   if (req.pin) {
-    const verdict = validatePin(req.pin, ctx, req.needsBrowser ?? false);
+    // A pin is the user's decision: it is validated against the full catalog, exclusions notwithstanding.
+    const verdict = validatePin(req.pin, { ...ctx, targets: deps.targets }, req.needsBrowser ?? false);
     return { verdict, decision: null, source: "pin", routerError: null, routerMs: 0, attempts: 0 };
   }
 
-  const asked = await askRouter(req, deps);
+  const extra = exclude.length ? `Excluded (do not choose; the user handed this task off from them): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ")}` : undefined;
+  const asked = await askRouter(req, { ...deps, targets }, extra);
   if (asked.decision) {
     const verdict = validateDecision(asked.decision, ctx);
     if (verdict.ok) return { ...asked, verdict, source: verdict.chosen !== "default" ? "router" : "default" };

@@ -5,6 +5,9 @@ import type { Attempt } from "../router/reroute.js";
 import type { Attachment } from "../files/uploads.js";
 import type { TargetRef } from "../router/targets.js";
 
+/** Who handed this task over (threads-v0 §4); the engine builds the handoff package from it at dispatch. */
+export type HandoffFrom = TargetRef & { readonly taskId: string; readonly reason: "user" | `failure:${string}` | "quota" };
+
 export type TaskStatus = "queued" | "routing" | "running" | "waiting_approval" | "done" | "failed" | "cancelled";
 
 export type NewTask = {
@@ -18,6 +21,11 @@ export type NewTask = {
   readonly parentId?: string;
   /** Uploaded files already moved into <cwd>/in/. */
   readonly attachments?: readonly Attachment[];
+  /** Thread to run in; default: the parent's thread, else a new one. */
+  readonly threadId?: string;
+  /** Targets the router must not pick (a handoff excludes the executor being handed off from). */
+  readonly exclude?: readonly TargetRef[];
+  readonly handoffFrom?: HandoffFrom;
 };
 
 export type Task = {
@@ -32,6 +40,9 @@ export type Task = {
   readonly ephemeral: boolean;
   readonly parentId: string | null;
   readonly attachments: readonly Attachment[];
+  readonly threadId: string | null;
+  readonly exclude: readonly TargetRef[];
+  readonly handoffFrom: HandoffFrom | null;
   readonly harness: string | null;
   readonly model: string | null;
   readonly effort: string | null;
@@ -56,7 +67,9 @@ export type TaskEventType =
   | "done"
   | "failed"
   | "cancelled"
-  | "cleaned";
+  | "cleaned"
+  | "summary"
+  | "handoff";
 
 export type TaskEvent = {
   readonly taskId: string;

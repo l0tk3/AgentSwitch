@@ -1,9 +1,11 @@
 /** SQLite persistence for tasks, events and approvals, plus a JSONL mirror of events per task. */
 
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { appendFileSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { Thread, ThreadEvent, ThreadEventType, ThreadStatus } from "../threads/types.js";
 import type { Approval, ApprovalStatus, NewTask, Task, TaskEvent, TaskEventType } from "./types.js";
 
 const SCHEMA = `
@@ -21,13 +23,25 @@ CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY, task_id TEXT NOT NULL, created_at INTEGER NOT NULL, action TEXT NOT NULL,
   evidence TEXT NOT NULL, status TEXT NOT NULL, resolved_at INTEGER
 );
-CREATE INDEX IF NOT EXISTS tasks_created ON tasks(created_at DESC);`;
+CREATE INDEX IF NOT EXISTS tasks_created ON tasks(created_at DESC);
+CREATE TABLE IF NOT EXISTS threads (
+  id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, title TEXT,
+  cwd TEXT NOT NULL, home TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', expires_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS thread_events (
+  thread_id TEXT NOT NULL, seq INTEGER NOT NULL, ts INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL,
+  PRIMARY KEY (thread_id, seq)
+);
+CREATE INDEX IF NOT EXISTS threads_updated ON threads(updated_at DESC);`;
+
+/** Archived threads are deleted, home dir included, this long after archiving (decided 2026-09-21). */
+export const THREAD_TTL_MS = 7 * 86400_000;
 
 type Row = Record<string, unknown>;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'"],
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT"],
 };
 
 export function migrate(db: DatabaseSync): string[] {
@@ -44,11 +58,18 @@ export function migrate(db: DatabaseSync): string[] {
   return applied;
 }
 
-export type StoreOptions = { readonly dbPath: string; readonly tasksDir?: string; readonly now?: () => number };
+export type StoreOptions = {
+  readonly dbPath: string;
+  readonly tasksDir?: string;
+  /** Where thread private homes live ($AGENTSWITCH_HOME/threads). Memory stores use a temp dir. */
+  readonly threadsDir?: string;
+  readonly now?: () => number;
+};
 
 export class Store {
   private readonly db: DatabaseSync;
   private readonly tasksDir: string | undefined;
+  private readonly threadsDir: string;
   private readonly now: () => number;
 
   constructor(opts: StoreOptions) {
@@ -58,6 +79,7 @@ export class Store {
     this.db.exec(SCHEMA);
     migrate(this.db);
     this.tasksDir = opts.tasksDir;
+    this.threadsDir = opts.threadsDir ?? join(tmpdir(), `agentswitch-threads-${process.pid}`);
     this.now = opts.now ?? Date.now;
   }
 
@@ -65,8 +87,10 @@ export class Store {
     const ts = this.now();
     const id = randomUUID().slice(0, 8);
     this.db.prepare(
-      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral, parent_id, attachments) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0, input.ephemeral ? 1 : 0, input.parentId ?? null, JSON.stringify(input.attachments ?? []));
+      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral, parent_id, attachments, thread_id, exclude, handoff_from) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0, input.ephemeral ? 1 : 0, input.parentId ?? null, JSON.stringify(input.attachments ?? []),
+      input.threadId ?? null, JSON.stringify(input.exclude ?? []), input.handoffFrom ? JSON.stringify(input.handoffFrom) : null);
+    if (input.threadId) this.db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(ts, input.threadId);
     return this.getTask(id)!;
   }
 
@@ -77,6 +101,83 @@ export class Store {
 
   listTasks(limit = 50): Task[] {
     return (this.db.prepare("SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC LIMIT ?").all(limit) as Row[]).map(toTask);
+  }
+
+  tasksInThread(threadId: string): Task[] {
+    return (this.db.prepare("SELECT * FROM tasks WHERE thread_id = ? ORDER BY created_at, rowid").all(threadId) as Row[]).map(toTask);
+  }
+
+  // ---- threads (threads-v0 §1–2): the row is a handle, the state lives in the append-only log ----
+
+  createThread(cwd: string, title: string | null = null): Thread {
+    const ts = this.now();
+    const id = randomUUID().slice(0, 8);
+    const home = join(this.threadsDir, id);
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    this.db.prepare("INSERT INTO threads (id, created_at, updated_at, title, cwd, home, status, expires_at) VALUES (?, ?, ?, ?, ?, ?, 'open', NULL)").run(id, ts, ts, title, cwd, home);
+    return this.getThread(id)!;
+  }
+
+  getThread(id: string): Thread | undefined {
+    const row = this.db.prepare("SELECT * FROM threads WHERE id = ?").get(id) as Row | undefined;
+    return row ? toThread(row) : undefined;
+  }
+
+  listThreads(opts: { status?: ThreadStatus; limit?: number } = {}): Thread[] {
+    const rows = opts.status
+      ? this.db.prepare("SELECT * FROM threads WHERE status = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(opts.status, opts.limit ?? 50)
+      : this.db.prepare("SELECT * FROM threads ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(opts.limit ?? 50);
+    return (rows as Row[]).map(toThread);
+  }
+
+  updateThread(id: string, patch: { title?: string | null; status?: ThreadStatus; expiresAt?: number | null }): Thread {
+    const sets: string[] = ["updated_at = ?"];
+    const values: (string | number | null)[] = [this.now()];
+    if (patch.title !== undefined) { sets.push("title = ?"); values.push(patch.title); }
+    if (patch.status !== undefined) { sets.push("status = ?"); values.push(patch.status); }
+    if (patch.expiresAt !== undefined) { sets.push("expires_at = ?"); values.push(patch.expiresAt); }
+    values.push(id);
+    this.db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    const t = this.getThread(id);
+    if (!t) throw new Error(`thread ${id} not found`);
+    return t;
+  }
+
+  /** Archive: expiry defaults to now + THREAD_TTL_MS; the user may set another date or delete at once. */
+  archiveThread(id: string, ttlMs = THREAD_TTL_MS): Thread {
+    return this.updateThread(id, { status: "archived", expiresAt: this.now() + ttlMs });
+  }
+
+  reopenThread(id: string): Thread {
+    return this.updateThread(id, { status: "open", expiresAt: null });
+  }
+
+  /** Delete the row, its log and its private home. Tasks keep their thread_id (dangling, by design). */
+  deleteThread(id: string): boolean {
+    const t = this.getThread(id);
+    if (!t) return false;
+    rmSync(t.home, { recursive: true, force: true });
+    this.db.prepare("DELETE FROM thread_events WHERE thread_id = ?").run(id);
+    this.db.prepare("DELETE FROM threads WHERE id = ?").run(id);
+    return true;
+  }
+
+  expiredThreads(now = this.now()): Thread[] {
+    return (this.db.prepare("SELECT * FROM threads WHERE status = 'archived' AND expires_at IS NOT NULL AND expires_at <= ?").all(now) as Row[]).map(toThread);
+  }
+
+  appendThreadEvent(threadId: string, type: ThreadEventType, payload: Record<string, unknown> = {}): ThreadEvent {
+    const last = this.db.prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM thread_events WHERE thread_id = ?").get(threadId) as Row;
+    const seq = Number(last.seq) + 1;
+    const ts = this.now();
+    this.db.prepare("INSERT INTO thread_events (thread_id, seq, ts, type, payload) VALUES (?, ?, ?, ?, ?)").run(threadId, seq, ts, type, JSON.stringify(payload));
+    this.db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(ts, threadId);
+    return { threadId, seq, ts, type, payload };
+  }
+
+  threadEvents(threadId: string): ThreadEvent[] {
+    const rows = this.db.prepare("SELECT * FROM thread_events WHERE thread_id = ? ORDER BY seq").all(threadId) as Row[];
+    return rows.map((r) => ({ threadId: String(r.thread_id), seq: Number(r.seq), ts: Number(r.ts), type: String(r.type) as ThreadEventType, payload: JSON.parse(String(r.payload)) }));
   }
 
   updateTask(id: string, patch: Partial<Omit<Task, "id" | "createdAt">>): Task {
@@ -168,6 +269,9 @@ function toTask(r: Row): Task {
     ephemeral: Number(r.ephemeral ?? 0) === 1,
     parentId: (r.parent_id as string | null) ?? null,
     attachments: JSON.parse(String(r.attachments ?? "[]")),
+    threadId: (r.thread_id as string | null) ?? null,
+    exclude: JSON.parse(String(r.exclude ?? "[]")),
+    handoffFrom: r.handoff_from ? JSON.parse(String(r.handoff_from)) : null,
     harness: (r.harness as string | null) ?? null,
     model: (r.model as string | null) ?? null,
     effort: (r.effort as string | null) ?? null,
@@ -177,6 +281,19 @@ function toTask(r: Row): Task {
     routerAsks: Number(r.router_asks ?? 0),
     result: (r.result as string | null) ?? null,
     error: (r.error as string | null) ?? null,
+  };
+}
+
+function toThread(r: Row): Thread {
+  return {
+    id: String(r.id),
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+    title: (r.title as string | null) ?? null,
+    cwd: String(r.cwd),
+    home: String(r.home),
+    status: String(r.status) as ThreadStatus,
+    expiresAt: r.expires_at === null || r.expires_at === undefined ? null : Number(r.expires_at),
   };
 }
 

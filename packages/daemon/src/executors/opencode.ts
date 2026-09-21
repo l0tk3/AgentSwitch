@@ -14,6 +14,7 @@ import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import { opencodeMcpFromRegistry } from "./extensions.js";
 import { gateEnv, mcpServerEnv, opencodeGateConfig, stripProxy, type GateOptions } from "./gate.js";
 import { executorInstructions } from "./instructions.js";
+import { NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
 export type OpenCodeExecutorOptions = {
@@ -22,12 +23,22 @@ export type OpenCodeExecutorOptions = {
   readonly maxMs?: number;
   readonly browser?: boolean;
   readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
+  readonly protected?: ProtectedPaths;
 };
 
-export type OpenCodeExtras = { readonly mcp?: Record<string, unknown>; readonly skillsDir?: string | null };
+export type OpenCodeExtras = { readonly mcp?: Record<string, unknown>; readonly skillsDir?: string | null; readonly protected?: ProtectedPaths };
+
+/** Static deny patterns for the protected roots: no edit under them, no shell command naming them. */
+export function protectedDeny(prot: ProtectedPaths): { edit: Record<string, string>; bash: Record<string, string> } {
+  const edit: Record<string, string> = {};
+  const bash: Record<string, string> = {};
+  for (const r of prot.roots) { edit[`${r}/*`] = "deny"; bash[`*${r}*`] = "deny"; }
+  return { edit, bash };
+}
 
 export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean, instructionsPath?: string, extras: OpenCodeExtras = {}): object {
   const g = gate ? opencodeGateConfig(gate, profile, browser) : { mcp: {}, readDeny: {} };
+  const deny = protectedDeny(extras.protected ?? NO_PROTECTED);
   return {
     $schema: "https://opencode.ai/config.json",
     ...(instructionsPath ? { instructions: [instructionsPath] } : {}),
@@ -35,8 +46,8 @@ export function opencodeExecConfig(gate: GateOptions | null | undefined, profile
     mcp: { ...g.mcp, ...(extras.mcp ?? {}) },
     permission: {
       read: { "*": "allow", ...g.readDeny, "**/.env": "deny", "**/*.pem": "deny", "**/*.key": "deny" },
-      bash: { "*": "allow", "secret-gate keygen*": "deny", ...(gate ? { [`cat ${gate.home}/*`]: "deny" } : {}) },
-      edit: "allow",
+      bash: { "*": "allow", "secret-gate keygen*": "deny", ...(gate ? { [`cat ${gate.home}/*`]: "deny" } : {}), ...deny.bash },
+      edit: Object.keys(deny.edit).length ? { "*": "allow", ...deny.edit } : "allow",
       webfetch: "deny",
     },
   };
@@ -81,9 +92,10 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
       const extras: OpenCodeExtras = {
         mcp: opencodeMcpFromRegistry(ext.mcpFor("opencode"), mcpServerEnv(opts.gate)),
         skillsDir: ext.skillsInto("opencode", skillsDir).length ? skillsDir : null,
+        ...(opts.protected ? { protected: opts.protected } : {}),
       };
       writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath, extras)));
-      const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath };
+      const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
       const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
       const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
       let stdout = "";

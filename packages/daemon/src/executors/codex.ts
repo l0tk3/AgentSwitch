@@ -4,7 +4,7 @@
  *  our config (never the user's ~/.codex/config.toml), removed when the run ends. */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
@@ -78,8 +78,13 @@ export function outcomeFromTurn(state: TurnState, extraError: string | null): Ex
   };
 }
 
-function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser: boolean): { home: string; profile: string } {
-  const home = mkdtempSync(join(tmpdir(), "agentswitch-codex-"));
+/** CODEX_HOME for this run: the thread's private <home>/codex when there is a thread (kept across runs so
+ *  `thread/resume` finds the rollout + thread_history sqlite), else a temp dir removed afterwards. auth.json is
+ *  re-copied and config/AGENTS.md/skills regenerated on every run. */
+function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser: boolean, threadHome: string | null): { home: string; profile: string; persistent: boolean } {
+  const persistent = threadHome !== null;
+  const home = persistent ? join(threadHome, "codex") : mkdtempSync(join(tmpdir(), "agentswitch-codex-"));
+  mkdirSync(home, { recursive: true });
   chmodSync(home, 0o700);
   const auth = opts.authPath ?? join(process.env.HOME ?? "", ".codex", "auth.json");
   if (!existsSync(auth)) throw new Error(`${auth} not found; run codex login`);
@@ -91,15 +96,15 @@ function prepareHome(opts: CodexExecutorOptions, effort: string | null, browser:
   writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, browser, effort, mcpToml));
   writeFileSync(join(home, "AGENTS.md"), executorInstructions());   // Codex's global instructions live in $CODEX_HOME/AGENTS.md
   ext.skillsInto("codex", join(home, "skills"));                     // Codex discovers $CODEX_HOME/skills/*/SKILL.md
-  return { home, profile };
+  return { home, profile, persistent };
 }
 
 export function codexExecutor(opts: CodexExecutorOptions): Executor {
   return {
     harness: "codex",
     async run(input: ExecutionInput): Promise<ExecutionOutcome> {
-      const { home } = prepareHome(opts, input.effort, (opts.browser ?? true) && input.browser);
-      const env = { ...stripProxy(process.env), CODEX_HOME: home };
+      const { home, persistent } = prepareHome(opts, input.effort, (opts.browser ?? true) && input.browser, input.threadHome);
+      const env = { ...stripProxy(process.env), CODEX_HOME: home, GIT_EDITOR: "true" };
       let child: ChildProcess | null = null;
       let state: TurnState = { text: [], tools: 0, edits: 0, approvals: 0, completed: null, errors: [] };
       let notifyDone: (() => void) | null = null;
@@ -129,22 +134,39 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
         try {
           await client.request("initialize", { clientInfo: { name: "agentswitch", version: "0.1.0" } });
           client.notify("initialized");
-          const thread = await client.request("thread/start", { cwd: input.cwd, sandbox: "workspace-write", approvalPolicy: "on-request", ephemeral: true, model: input.model });
-          const threadId = String((thread.thread as Json).id);
+          const threadId = await openThread(client, input, persistent);
           const prompt = input.handoffNote ? `${input.brief}\n\nHandoff from a previous attempt:\n${input.handoffNote}` : input.brief;
           await client.request("turn/start", { threadId, input: codexInput(prompt, input.attachments, input.cwd) });
           await completed;
-          return outcomeFromTurn(state, input.signal.aborted ? "cancelled" : (child.exitCode !== null && !state.completed ? `app-server exited ${child.exitCode}: ${stderr.slice(0, 300)}` : null));
+          return { ...outcomeFromTurn(state, input.signal.aborted ? "cancelled" : (child.exitCode !== null && !state.completed ? `app-server exited ${child.exitCode}: ${stderr.slice(0, 300)}` : null)), sessionId: threadId };
         } finally {
           clearTimeout(timer);
           input.signal.removeEventListener("abort", onAbort);
         }
       } finally {
         child?.kill("SIGTERM");
-        rmSync(home, { recursive: true, force: true });
+        if (!persistent) rmSync(home, { recursive: true, force: true });
       }
     },
   };
+}
+
+/** Resume the thread's Codex conversation when we have one (verified: `thread/resume {threadId}` reloads the
+ *  rollout from CODEX_HOME); fall back to a fresh thread if the resume is refused. Persistent homes start
+ *  non-ephemeral threads so the rollout is written at all. */
+async function openThread(client: AppServerClient, input: ExecutionInput, persistent: boolean): Promise<string> {
+  const base = { cwd: input.cwd, sandbox: "workspace-write", approvalPolicy: "on-request", model: input.model };
+  if (input.resume) {
+    try {
+      const resumed = await client.request("thread/resume", { threadId: input.resume, ...base });
+      const id = (resumed.thread as Json | undefined)?.id;
+      if (typeof id === "string") { input.emit("text", { text: `(resumed Codex thread ${id})` }); return id; }
+    } catch (err) {
+      input.emit("text", { text: `(could not resume Codex thread ${input.resume}: ${(err as Error).message.slice(0, 120)}; starting a new one)` });
+    }
+  }
+  const started = await client.request("thread/start", { ...base, ephemeral: !persistent });
+  return String((started.thread as Json).id);
 }
 
 /** Text plus each image attachment as a local image item, so Codex sees screenshots without a Read tool. */

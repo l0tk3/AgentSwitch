@@ -3,7 +3,7 @@
  *  User settings are not loaded (settingSources: []); the gate proxy goes into the tool env. */
 
 import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
@@ -12,6 +12,7 @@ import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } from "./extensions.js";
 import { claudeMcpServers, gateEnv, mcpServerEnv, type GateOptions } from "./gate.js";
 import { executorInstructions } from "./instructions.js";
+import { commandTouchesProtected, isProtected, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
 
 export type ClaudeExecutorOptions = {
@@ -21,13 +22,17 @@ export type ClaudeExecutorOptions = {
   readonly executable?: string;
   readonly rateLimits?: RateLimitCache;
   readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
+  /** Paths denied outright, never offered for approval (daemon home, gate home, daemon config). */
+  readonly protected?: ProtectedPaths;
 };
 
 const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "WebSearch", "NotebookRead"]);
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
-export type ToolDecision = { kind: "allow" } | { kind: "ask"; action: string; evidence: string };
+export type ToolDecision = { kind: "allow" } | { kind: "ask"; action: string; evidence: string } | { kind: "deny"; reason: string };
+
+export const PROTECTED_DENIAL = "denied by AgentSwitch: this path holds the daemon's own configuration or credentials; the model cannot change its own constraints";
 
 /** Real path of `p` even when it does not exist yet: realpath of the nearest existing ancestor + the rest.
  *  macOS reports the temp dir as /var/... and /private/var/... interchangeably. */
@@ -45,17 +50,23 @@ export function canonical(p: string): string {
 }
 
 /** Policy: what needs a human. `cwd` should already be canonical; `allowedMcp` = registry servers marked approval=allow. */
-export function decideTool(toolName: string, input: Record<string, unknown>, cwd: string, allowedMcp: ReadonlySet<string> = new Set()): ToolDecision {
+export function decideTool(toolName: string, input: Record<string, unknown>, cwd: string, allowedMcp: ReadonlySet<string> = new Set(), prot: ProtectedPaths = NO_PROTECTED): ToolDecision {
   if (READ_ONLY.has(toolName) || toolName === "Skill") return { kind: "allow" };
   const server = mcpServerOf(toolName);
   if (server && (server === "secret-gate" || server === "playwright" || allowedMcp.has(server))) return { kind: "allow" };
   if (EDIT_TOOLS.has(toolName)) {
     const raw = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : null;
     const p = raw === null ? null : canonical(resolve(cwd, raw));
+    if (p && isProtected(p, cwd, prot)) return { kind: "deny", reason: `${PROTECTED_DENIAL} (${p})` };
     if (p && (p === cwd || p.startsWith(cwd + sep))) return { kind: "allow" };
     return { kind: "ask", action: `${toolName} outside cwd: ${p ?? "?"}`, evidence: JSON.stringify(input).slice(0, 1000) };
   }
-  if (toolName === "Bash") return { kind: "ask", action: `Bash: ${String(input.command ?? "")}`, evidence: String(input.description ?? "") };
+  if (toolName === "Bash") {
+    const command = String(input.command ?? "");
+    const hit = commandTouchesProtected(command, cwd, prot);
+    if (hit) return { kind: "deny", reason: `${PROTECTED_DENIAL} (${hit})` };
+    return { kind: "ask", action: `Bash: ${command}`, evidence: String(input.description ?? "") };
+  }
   return { kind: "ask", action: `${toolName}`, evidence: JSON.stringify(input).slice(0, 1000) };
 }
 
@@ -82,9 +93,20 @@ export function outcomeFromFold(state: Folded, approvals: number, cancelled: boo
   const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: state.edits, commandsRun: state.tools - state.edits, approvalsGranted: approvals };
   if (state.refusal) return { ok: false, exitCode: 0, lastText: `refusal: ${state.text.at(-1) ?? "model refused"}`, sideEffects, tokens };
   if (!r) return { ok: false, exitCode: cancelled ? null : 1, stderr: cancelled ? "cancelled" : "no result message", lastText: state.text.join("\n"), timedOut: !cancelled, sideEffects, tokens };
-  if (r.subtype === "success" && !r.is_error) return { ok: true, exitCode: 0, lastText: r.result, sideEffects, tokens };
+  const sessionId = r.session_id ? { sessionId: r.session_id } : {};
+  if (r.subtype === "success" && !r.is_error) return { ok: true, exitCode: 0, lastText: r.result, sideEffects, tokens, ...sessionId };
   const errText = r.subtype === "success" ? r.result : `${r.subtype}${state.rateLimited ? " (rate limited)" : ""}`;
   return { ok: false, exitCode: 1, stderr: state.rateLimited ? `rate limit: ${errText}` : errText, lastText: state.text.join("\n"), sideEffects, tokens };
+}
+
+/** Private config dir per thread. CLAUDE_CONFIG_DIR alone makes the CLI look for a per-dir keychain entry
+ *  ("Claude Code-credentials-<hash>") and report "Not logged in"; CLAUDE_SECURESTORAGE_CONFIG_DIR="" keeps the
+ *  user's normal keychain login (verified 2026-09-21, scripts/resume_experiment.ts). */
+export function claudeHomeEnv(threadHome: string | null): Record<string, string> {
+  if (!threadHome) return {};
+  const dir = join(threadHome, "claude");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return { CLAUDE_CONFIG_DIR: dir, CLAUDE_SECURESTORAGE_CONFIG_DIR: "" };
 }
 
 export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
@@ -97,8 +119,9 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       const allowedMcp = autoAllowedMcp(servers);
       let approvals = 0;
       const canUseTool: CanUseTool = async (toolName, toolInput) => {
-        const d = decideTool(toolName, toolInput, cwd, allowedMcp);
+        const d = decideTool(toolName, toolInput, cwd, allowedMcp, opts.protected ?? NO_PROTECTED);
         if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
+        if (d.kind === "deny") { input.emit("tool_call", { tool: toolName, denied: d.reason }); return { behavior: "deny", message: d.reason }; }
         const decision: ApprovalDecision = await input.approve(d.action, d.evidence);
         if (decision === "allow") { approvals++; return { behavior: "allow", updatedInput: toolInput }; }
         return { behavior: "deny", message: "denied by the user via AgentSwitch" };
@@ -112,14 +135,15 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       const onAbort = () => abort.abort();
       input.signal.addEventListener("abort", onAbort, { once: true });
       const browser = (opts.browser ?? true) && input.browser;
-      const baseEnv = opts.gate ? gateEnv(opts.gate) : {};
+      const baseEnv = { ...(opts.gate ? gateEnv(opts.gate) : {}), ...claudeHomeEnv(input.threadHome) };
       const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
       const options: Options = {
         cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
         systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },
         maxTurns: opts.maxTurns ?? 200, abortController: abort, includePartialMessages: false,
         ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
-        ...(opts.gate ? { env: { ...process.env, ...baseEnv } as Record<string, string> } : {}),
+        env: { ...process.env, ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
+        ...(input.resume ? { resume: input.resume } : {}),
         ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
         ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),
         ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),

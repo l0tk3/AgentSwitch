@@ -25,6 +25,7 @@ export async function health() {
 }
 
 export const loadFiles = async (taskId) => set({ files: await api("GET", `/tasks/${taskId}/files`) });
+export const loadThread = async (threadId) => set({ thread: threadId ? await api("GET", `/threads/${threadId}`) : null });
 
 export function addPending(fileList) { if (fileList?.length) set((s) => ({ pending: [...s.pending, ...toPending(fileList)] })); }
 export function removePending(i) { set((s) => { s.pending[i]?.url && URL.revokeObjectURL(s.pending[i].url); return { pending: s.pending.filter((_, k) => k !== i) }; }); }
@@ -50,15 +51,15 @@ export async function refresh() {
   await Promise.all([health(), loadTasks(), loadApprovals(), ...(LOADERS[view] || []).map((f) => f())]);
 }
 
-const EVENT_TYPES = ["queued", "routed", "dispatched", "text", "tool_call", "approval_request", "approval_resolved", "attempt_failed", "redispatch", "done", "failed", "cancelled", "cleaned"];
-const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "failed", "cancelled", "redispatch", "dispatched", "routed", "cleaned"]);
+const EVENT_TYPES = ["queued", "routed", "dispatched", "text", "tool_call", "approval_request", "approval_resolved", "attempt_failed", "redispatch", "handoff", "summary", "done", "failed", "cancelled", "cleaned"];
+const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "failed", "cancelled", "redispatch", "dispatched", "routed", "cleaned", "handoff", "summary"]);
 
 /** Open the task view and follow its event stream (`/tasks/${id}/events`, SSE). */
 export function openTask(id) {
   closeStream();
   clearPending();
-  set((s) => ({ view: "task", task: s.tasks.find((t) => t.id === id) || null, events: [], hint: "", files: { root: null, files: [] } }));
-  api("GET", "/tasks/" + id).then((task) => set({ task })).catch((err) => set({ hint: err.message }));
+  set((s) => ({ view: "task", task: s.tasks.find((t) => t.id === id) || null, events: [], hint: "", files: { root: null, files: [] }, thread: null }));
+  api("GET", "/tasks/" + id).then((task) => { set({ task }); return loadThread(task.threadId); }).catch((err) => set({ hint: err.message }));
   loadFiles(id).catch(() => undefined);
   const es = new EventSource(`/tasks/${id}/events`);
   for (const type of EVENT_TYPES) {
@@ -68,6 +69,7 @@ export function openTask(id) {
       if (RELOAD_ON.has(type)) {
         const [task] = await Promise.all([api("GET", "/tasks/" + id), loadApprovals(), loadFiles(id).catch(() => undefined)]);
         set({ task });
+        loadThread(task.threadId).catch(() => undefined);
       }
     });
   }
@@ -90,6 +92,19 @@ export async function approve(taskId, approvalId, decision) {
 }
 
 export const cancelTask = (id) => api("POST", `/tasks/${id}/cancel`);
+
+/** Hand the task to another executor in the same thread; `pin` = "harness/model" or empty for the router. */
+export async function handoffTask(id, pin) {
+  const body = pin && pin.includes("/") ? { to: { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) } } : {};
+  const next = await api("POST", `/tasks/${id}/handoff`, body);
+  await loadTasks();
+  openTask(next.id);
+}
+
+export async function archiveThread(id) {
+  await api("POST", `/threads/${id}/archive`);
+  await loadThread(id);
+}
 
 /** Run an extension mutation, surface its error in the view, then reload the registries. */
 export async function extAction(fn) {

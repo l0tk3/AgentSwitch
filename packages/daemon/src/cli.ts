@@ -3,6 +3,8 @@
  *   serve                       start the daemon (AGENTSWITCH_ROUTER=echo, AGENTSWITCH_PORT=...)
  *   task "<text>" [--cwd d | --ephemeral] [--pin h/m] [--browser] [--no-watch] [--reply <taskId>]   (--reply: follow-up with context)
  *   tasks | show <id> | watch <id> | approve <task> <approval> --allow|--deny | cancel <id>
+ *   handoff <taskId> [--pin h/m]     hand a task to another executor (same thread)
+ *   threads [--archived] | thread <id> | archive <id> | reopen <id> | rmthread <id>
  *   approvals | quota [--refresh] | preview "<text>" [--cwd d] | log
  *   route "<text>" ... (local, no daemon) | reroute ... | context init
  */
@@ -33,6 +35,8 @@ const { values, positionals } = parseArgs({
     cwd: { type: "string" },
     ephemeral: { type: "boolean", default: false },
     reply: { type: "string" },
+    thread: { type: "string" },
+    archived: { type: "boolean", default: false },
     router: { type: "string", default: cfg.router },
     pin: { type: "string" },
     browser: { type: "boolean", default: false },
@@ -72,6 +76,8 @@ function showEvent(ev: TaskEvent): void {
     case "approval_resolved": console.log(`${t} approval ${p.approvalId} -> ${p.decision} (${p.status})`); break;
     case "attempt_failed": console.log(`${t} FAILED   ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (side effects)" : ""}`); break;
     case "redispatch": console.log(`${t} reroute  ${p.kind}${p.target ? ` -> ${(p.target as { harness: string; model: string }).harness}/${(p.target as { model: string }).model}` : ""}${p.source ? ` (${p.source})` : ""}`); break;
+    case "handoff": console.log(`${t} handoff  ${p.from ? `${(p.from as { harness: string }).harness} -> ` : ""}${p.to ? `${(p.to as { harness?: string }).harness ?? "?"}/${(p.to as { model?: string }).model ?? "?"}` : "router"} (${p.reason})${p.taskId ? `  task ${p.taskId}` : ""}`); break;
+    case "summary": console.log(`${t} summary  ${p.ok ? `"${p.title}" (${p.ms} ms)` : `failed: ${p.error}`}`); break;
     case "done": console.log(`${t} DONE     ${p.result}`); break;
     case "failed": console.log(`${t} FAILED   ${p.error}${p.security ? "  [security]" : ""}`); break;
     case "cancelled": console.log(`${t} CANCELLED`); break;
@@ -107,7 +113,7 @@ async function main(): Promise<number> {
     case "task": {
       if (!a1) throw new Error('task "<text>"');
       const cwd = values.ephemeral || (values.reply && !values.cwd) ? undefined : resolve(values.cwd ?? process.cwd());
-      const task = await client.submit(a1, cwd, { ...(values.pin ? { pin: splitPin(values.pin) } : {}), needsBrowser: values.browser, ephemeral: values.ephemeral, ...(values.reply ? { parentId: values.reply } : {}) });
+      const task = await client.submit(a1, cwd, { ...(values.pin ? { pin: splitPin(values.pin) } : {}), needsBrowser: values.browser, ephemeral: values.ephemeral, ...(values.reply ? { parentId: values.reply } : {}), ...(values.thread ? { threadId: values.thread } : {}) });
       if (values.json && !values.watch) return (out(task), 0);
       console.log(`task ${task.id} queued`);
       if (values.watch) await watchInteractive(task.id);
@@ -126,6 +132,23 @@ async function main(): Promise<number> {
       out(await client.approve(a1, a2, values.allow ? "allow" : "deny")); return 0;
     }
     case "cancel": { if (!a1) throw new Error("cancel <id>"); out(await client.cancel(a1)); return 0; }
+    case "handoff": {
+      if (!a1) throw new Error("handoff <taskId> [--pin h/m]");
+      const next = await client.handoff(a1, values.pin ? splitPin(values.pin) : undefined);
+      console.log(`task ${next.id} queued in thread ${next.threadId}`);
+      if (values.watch) await watchInteractive(next.id);
+      return 0;
+    }
+    case "threads": {
+      const list = await client.threads(values.archived ? "archived" : "open");
+      if (values.json) return (out(list), 0);
+      for (const t of list) console.log(`${t.id}  ${t.status.padEnd(8)} ${String(t.taskCount).padStart(2)} tasks  ${t.lastTarget ? `${t.lastTarget.harness}/${t.lastTarget.model}` : "-"}  ${(t.title ?? "(untitled)").slice(0, 50)}  ${t.cwd}`);
+      return 0;
+    }
+    case "thread": { if (!a1) throw new Error("thread <id>"); out(await client.thread(a1)); return 0; }
+    case "archive": { if (!a1) throw new Error("archive <id>"); out(await client.archiveThread(a1)); return 0; }
+    case "reopen": { if (!a1) throw new Error("reopen <id>"); out(await client.reopenThread(a1)); return 0; }
+    case "rmthread": { if (!a1) throw new Error("rmthread <id>"); out(await client.deleteThread(a1)); return 0; }
     case "approvals": { out(await client.approvals()); return 0; }
     case "quota": {
       const q = await client.quota(values.refresh) as { harness: string; remaining: number | null; source: string; error: string | null; detail: Record<string, unknown> }[];
@@ -148,7 +171,7 @@ async function main(): Promise<number> {
     case "reroute":
       return localRoute(cmd, a1);
     default:
-      console.error("usage: serve | task | tasks | show | watch | approve | cancel | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute");
+      console.error("usage: serve | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute");
       return 2;
   }
 }

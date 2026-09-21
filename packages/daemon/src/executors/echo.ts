@@ -16,6 +16,8 @@ export type EchoDirective = {
   readonly approvalTimes?: number;
   readonly result?: string;
   readonly tokens?: number;
+  /** Reported as the harness session handle, so thread resume can be tested without a model. */
+  readonly session?: string;
   readonly sideEffects?: { filesChanged?: number; commandsRun?: number };
   /** Files to write under <cwd>/out/ (path → content), to exercise artifact collection. */
   readonly out?: Record<string, string>;
@@ -70,7 +72,7 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
         failures.set(input.taskId, failed + 1);
         return { ok: false, ...FAILURES[d.fail], sideEffects };
       }
-      return { ok: true, exitCode: 0, lastText: d.result ?? `done: ${input.brief.slice(0, 60)}`, sideEffects, ...(d.tokens !== undefined ? { tokens: d.tokens } : {}) } as ExecutionOutcome;
+      return { ok: true, exitCode: 0, lastText: d.result ?? `done: ${input.brief.slice(0, 60)}`, sideEffects, ...(d.tokens !== undefined ? { tokens: d.tokens } : {}), ...(d.session ? { sessionId: input.resume ? `${input.resume}+` : d.session } : {}) } as ExecutionOutcome;
     },
   };
 }

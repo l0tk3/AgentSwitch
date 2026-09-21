@@ -17,6 +17,8 @@ import { exampleContext, lintContext, loadContext } from "../router/context.js";
 import type { RoutingLog } from "../router/log.js";
 import { route, type RouteDeps } from "../router/route.js";
 import { TargetRef, type Targets } from "../router/targets.js";
+import { foldThread } from "../threads/fold.js";
+import type { Thread, ThreadStatus } from "../threads/types.js";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { extname, join, resolve, sep } from "node:path";
@@ -66,7 +68,11 @@ const NewTaskBody = z.object({
   parent_id: z.string().min(1).optional(),
   /** Ids from POST /uploads; moved into <cwd>/in/ when the task is created. */
   attachments: z.array(z.string().min(1)).max(MAX_FILES_PER_UPLOAD).optional(),
+  /** Run inside an existing thread (defaults to the parent's thread, else a new one). */
+  thread_id: z.string().min(1).optional(),
 });
+const HandoffBody = z.object({ to: TargetRef.optional() });
+const ThreadPatch = z.object({ title: z.string().max(200).nullable().optional(), status: z.enum(["open", "archived"]).optional(), expires_at: z.number().int().nullable().optional() });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
 const ContextBody = z.object({ text: z.string() });
 const SkillBody = z.object({ content: z.string().optional(), enabled: z.boolean().optional(), harnesses: z.array(z.enum(HARNESSES)).optional() });
@@ -90,18 +96,36 @@ export function createApp(deps: ApiDeps): Hono {
   app.post("/tasks", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
-    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, ...rest } = body.data;
+    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, ...rest } = body.data;
     const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
+    const thread = thread_id ? deps.store.getThread(thread_id) : undefined;
+    if (thread_id && !thread) return c.json({ error: "thread not found" }, 404);
+    if (thread?.status === "archived") return c.json({ error: "thread is archived; reopen it first" }, 409);
     const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
     const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
     const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
     let attachments: Attachment[] = [];
     try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
     catch (err) { return c.json({ error: (err as Error).message }, 400); }
-    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
+    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
     return c.json(task, 201);
   });
+
+  // "Hand this to someone else": a follow-up in the same thread, excluding the current executor unless `to` pins one.
+  app.post("/tasks/:id/handoff", async (c) => {
+    const body = HandoffBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: issues(body.error) }, 400);
+    const task = deps.store.getTask(c.req.param("id"));
+    if (!task) return c.json({ error: "not found" }, 404);
+    const thread = task.threadId ? deps.store.getThread(task.threadId) : undefined;
+    if (thread?.status === "archived") return c.json({ error: "thread is archived; reopen it first" }, 409);
+    // An ephemeral work dir is wiped when its task ends, so the successor gets a fresh one (as follow-ups do).
+    const next = deps.engine.handoff(task.id, { ...(body.data.to ? { to: body.data.to } : {}), ...(task.ephemeral ? { cwd: newWorkDir(deps.workRoot), ephemeral: true } : {}) });
+    return next ? c.json(next, 201) : c.json({ error: "not found" }, 404);
+  });
+
+  mountThreads(app, deps);
 
   app.get("/tasks", (c) => c.json(deps.store.listTasks(Number(c.req.query("limit") ?? 50))));
 
@@ -222,6 +246,51 @@ export function createApp(deps: ApiDeps): Hono {
 
   mountExtensions(app, deps.extensions);
   return app;
+}
+
+/** Threads (threads-v0 §1, §9): list with folded state, detail with tasks, rename, archive (7-day expiry), reopen, delete. */
+function mountThreads(app: Hono, deps: ApiDeps): void {
+  const view = (t: Thread) => {
+    const state = foldThread(deps.store.threadEvents(t.id));
+    return { ...t, title: t.title ?? state.title, summary: state.summary, lastTarget: state.lastTarget, lastActivity: state.lastActivity, taskCount: state.tasks.length, handoffs: state.handoffs.length };
+  };
+  app.get("/threads", (c) => {
+    const status = c.req.query("status");
+    const limit = Number(c.req.query("limit") ?? 50);
+    const opts: { limit: number; status?: ThreadStatus } = status === "open" || status === "archived" ? { limit, status } : { limit };
+    return c.json(deps.store.listThreads(opts).map(view));
+  });
+  app.get("/threads/:id", (c) => {
+    const t = deps.store.getThread(c.req.param("id"));
+    if (!t) return c.json({ error: "not found" }, 404);
+    return c.json({ ...view(t), state: foldThread(deps.store.threadEvents(t.id)), tasks: deps.store.tasksInThread(t.id), events: deps.store.threadEvents(t.id) });
+  });
+  app.patch("/threads/:id", async (c) => {
+    const body = ThreadPatch.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: issues(body.error) }, 400);
+    if (!deps.store.getThread(c.req.param("id"))) return c.json({ error: "not found" }, 404);
+    const { title, status, expires_at } = body.data;
+    const t = deps.store.updateThread(c.req.param("id"), { ...(title !== undefined ? { title } : {}), ...(status !== undefined ? { status } : {}), ...(expires_at !== undefined ? { expiresAt: expires_at } : {}) });
+    if (title !== undefined && title) deps.store.appendThreadEvent(t.id, "title", { title });
+    return c.json(view(t));
+  });
+  app.post("/threads/:id/archive", (c) => {
+    const id = c.req.param("id");
+    if (!deps.store.getThread(id)) return c.json({ error: "not found" }, 404);
+    const active = deps.store.tasksInThread(id).find((t) => !TERMINAL.has(t.status));
+    if (active) return c.json({ error: `task ${active.id} is still ${active.status}; cancel it first` }, 409);
+    return c.json(view(deps.store.archiveThread(id)));
+  });
+  app.post("/threads/:id/reopen", (c) => {
+    const id = c.req.param("id");
+    return deps.store.getThread(id) ? c.json(view(deps.store.reopenThread(id))) : c.json({ error: "not found" }, 404);
+  });
+  app.delete("/threads/:id", (c) => {
+    const id = c.req.param("id");
+    const active = deps.store.tasksInThread(id).find((t) => !TERMINAL.has(t.status));
+    if (active) return c.json({ error: `task ${active.id} is still ${active.status}; cancel it first` }, 409);
+    return deps.store.deleteThread(id) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
+  });
 }
 
 /** MCP servers and skills: the registry is the source of truth, executors read it on every run. */

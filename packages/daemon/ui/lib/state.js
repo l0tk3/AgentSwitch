@@ -8,6 +8,7 @@ const initial = {
   hint: "",
   pending: [],                       // [{file, url}] attached to the visible composer
   files: { root: null, files: [] },  // files of the open task (in/ + out/, or the artifacts store)
+  thread: null,                      // the open task's thread (GET /threads/:id), with folded state and tasks
   mcp: [], skills: [], discovered: [], edit: { mcp: null, skill: null }, extHint: "",
   ctx: { path: "", text: "", warnings: [], draft: null, hint: "", saved: false },
 };

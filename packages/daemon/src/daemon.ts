@@ -13,6 +13,8 @@ import { echoExecutor } from "./executors/echo.js";
 import { defaultGate } from "./executors/gate.js";
 import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
+import { defaultProtected, type ProtectedPaths } from "./executors/protected.js";
+import { routerSummarizer } from "./threads/summary.js";
 import type { Executor } from "./executors/types.js";
 import { claudeQuota } from "./quota/claude.js";
 import { codexQuota } from "./quota/codex.js";
@@ -67,14 +69,15 @@ export type Daemon = {
 
 export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; executors?: readonly Executor[]; quota?: QuotaService } = {}): Daemon {
   const targets = loadTargets(cfg.targetsPath);
-  const store = new Store({ dbPath: join(cfg.home, "agentswitch.db"), tasksDir: join(cfg.home, "tasks") });
+  const store = new Store({ dbPath: join(cfg.home, "agentswitch.db"), tasksDir: join(cfg.home, "tasks"), threadsDir: join(cfg.home, "threads") });
   const bus = new Bus();
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
   const contextPath = join(cfg.home, "CONTEXT.md");
   const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : opencodeRouter({ model: targets.router.model }));
   const rateLimits = new RateLimitCache();
   const extensions = extensionsAt(cfg.home);
-  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser, rateLimits, extensions) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
+  const prot = defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
+  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser, rateLimits, extensions, prot) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
   const quota = overrides.quota ?? new QuotaService([
     codexQuota({ binary: targets.harnesses.codex?.binary ?? "codex" }),
     deepseekQuota({ key: findDeepSeekKey() }),
@@ -85,21 +88,32 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const artifactsDir = join(cfg.home, "artifacts");
   sweepDir(uploads.dir, UPLOAD_TTL_MS);
   sweepDir(artifactsDir, ARTIFACT_TTL_MS);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir });
+  sweepThreads(store);
+  // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
+  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(router);
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), context: loadContext(contextPath), cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(summarizer ? { summarizer } : {}) });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: {}, context: loadContext(contextPath) });
   const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
-export function realExecutors(targets: Targets, browser: boolean, rateLimits?: RateLimitCache, extensions?: Extensions): Executor[] {
+export function realExecutors(targets: Targets, browser: boolean, rateLimits?: RateLimitCache, extensions?: Extensions, prot: ProtectedPaths = defaultProtected()): Executor[] {
   const gate = defaultGate();
   if (!gate) console.error("secret-gate venv not found: executors run without the gate (no proxy, no MCP)");
   const ext = extensions ? { extensions } : {};
   return [
-    claudeExecutor({ gate, browser, ...ext, ...(rateLimits ? { rateLimits } : {}) }),
+    claudeExecutor({ gate, browser, ...ext, protected: prot, ...(rateLimits ? { rateLimits } : {}) }),
     codexExecutor({ binary: targets.harnesses.codex?.binary ?? "codex", gate, browser, ...ext }),
-    opencodeExecutor({ gate, browser, ...ext }),
+    opencodeExecutor({ gate, browser, ...ext, protected: prot }),
   ];
+}
+
+/** Archived threads past their expiry lose their row, log and private home. Runs at start and hourly. */
+export function sweepThreads(store: Store, now = Date.now()): string[] {
+  const gone: string[] = [];
+  for (const t of store.expiredThreads(now)) { if (store.deleteThread(t.id)) gone.push(t.id); }
+  if (gone.length) console.error(`threads expired and deleted: ${gone.join(", ")}`);
+  return gone;
 }
 
 function defaultEchoRouter(targets: Targets): Router {
@@ -112,5 +126,7 @@ export function serve(cfg: DaemonConfig): { daemon: Daemon; close: () => void } 
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router} executors=${cfg.executors} home=${cfg.home}`);
   });
   void daemon.quota.refresh();
-  return { daemon, close: () => { server.close(); daemon.close(); } };
+  const sweeper = setInterval(() => sweepThreads(daemon.store), 3600_000);
+  sweeper.unref();
+  return { daemon, close: () => { clearInterval(sweeper); server.close(); daemon.close(); } };
 }
