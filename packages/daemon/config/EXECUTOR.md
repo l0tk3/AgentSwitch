@@ -21,3 +21,6 @@ answer, finish with a clear question instead of guessing.
   working directory. The user downloads from there; files anywhere else in a temporary working
   directory are deleted when the task ends.
 - The user's own accounts and credentials appear as `enc:v1:` values. Read the next section.
+- When a tool needs one of those tokens, copy it from the "User environment context" section at the end of
+  your prompt, character for character, in one piece. Never retype it from memory or from the brief; a single
+  dropped character makes the gate reject it ("invalid base64url").

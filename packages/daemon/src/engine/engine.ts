@@ -19,6 +19,7 @@ import type { Summarizer } from "../threads/summary.js";
 import { kindOf } from "../router/route.js";
 import type { ExtensionsSummary } from "../router/prompt.js";
 import { loadContext, type LoadedContext } from "../router/context.js";
+import { knownTokens, repairTokens, shortToken } from "../executors/tokens.js";
 import type { HandoffReason, ThreadState } from "../threads/types.js";
 import type { Bus } from "./bus.js";
 import { cleanupEphemeral, defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
@@ -159,6 +160,18 @@ export class Engine {
     const memory: LoadedContext | undefined = memoryPath ? loadMemory(memoryPath) : undefined;
     const context = this.context();
     return { ...rest, quota: quota(), running: { ...this.running }, records: store.recordsSince(this.now() - RECORD_WINDOW_MS), threads: this.threadBriefs(), ...(context ? { context } : {}), ...(memory ? { memory } : {}), ...(extensionsSummary ? { extensions: extensionsSummary() } : {}) };
+  }
+
+  /** Genuine enc:v1: tokens this task may legitimately use: context, memory and the user's own words. */
+  private tokensFor(task: Task): ReadonlySet<string> {
+    return knownTokens(this.context()?.text, this.deps.memoryPath ? loadMemory(this.deps.memoryPath).text : null, task.task);
+  }
+
+  /** A model that retypes a 200-character token drops a character now and then; put the genuine one back. */
+  private repairBrief(task: Task, brief: string): string {
+    const r = repairTokens(brief, this.tokensFor(task));
+    if (r.repairs.length) this.emit(task.id, "text", { text: `(repaired ${r.repairs.length} damaged secret-gate token(s) in the brief: ${r.repairs.map((x) => `${shortToken(x.from)} → ${shortToken(x.to)}`).join(", ")})` });
+    return r.text;
   }
 
   /** CONTEXT.md as of now: the file when a path is configured, else whatever static context the deps carry (tests). */
@@ -323,7 +336,7 @@ export class Engine {
     held.push(await this.gate("thread", () => this.threadLock.acquire(task.threadId!, signal), task, this.threadLock.isHeld(task.threadId!)));
     held.push(await this.gate("cwd", () => this.cwdLock.acquire(task.cwd, signal), task, this.cwdLock.isHeld(task.cwd)));
     if (signal.aborted) return;
-    let current = this.deps.store.updateTask(task.id, { decision: routed.decision, brief: routed.decision?.brief ?? composed });
+    let current = this.deps.store.updateTask(task.id, { decision: routed.decision, brief: this.repairBrief(task, routed.decision?.brief ?? composed) });
     let verdict: Verdict = routed.verdict;
     let attempts: Attempt[] = [];
     // A task handed over by the user starts with a handoff package; re-dispatches build a fresh one.
@@ -355,7 +368,7 @@ export class Engine {
         continue;
       }
       if (step.kind === "redispatch") {
-        current = this.deps.store.updateTask(task.id, { routerAsks: current.routerAsks + 1, decision: next.decision ?? current.decision, brief: next.decision?.brief ?? current.brief });
+        current = this.deps.store.updateTask(task.id, { routerAsks: current.routerAsks + 1, decision: next.decision ?? current.decision, brief: next.decision?.brief ? this.repairBrief(task, next.decision.brief) : current.brief });
         this.deps.routingLog?.record(task.task, task.cwd, { verdict: step.verdict, decision: next.decision, source: step.source, routerError: next.routerError, routerMs: next.routerMs, attempts: attempts.length });
         this.emit(task.id, "redispatch", { kind: "router", source: step.source, verdict: step.verdict, decision: next.decision, routerError: next.routerError });
         verdict = step.verdict;
@@ -402,7 +415,7 @@ export class Engine {
     try {
       const outcome = await executor.run({
         taskId: task.id, task: task.task, brief: briefFor(task), cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments,
-        handoffNote: handoff, context: this.context()?.text ?? null, threadHome, resume, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal,
+        handoffNote: handoff, context: this.context()?.text ?? null, knownTokens: this.tokensFor(task), threadHome, resume, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal,
         emit: (type, payload) => this.emit(task.id, type, payload),
         approve: (action, evidence) => this.requestApproval(task.id, action, evidence),
       });

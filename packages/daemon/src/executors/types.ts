@@ -15,6 +15,8 @@ export type ExecutionInput = {
   readonly handoffNote: string | null;
   /** The user's CONTEXT.md (linted: ciphertext only), so sites/accounts reach the executor even when the router's brief omits them. */
   readonly context: string | null;
+  /** Genuine enc:v1: tokens for this task; executors that can rewrite tool inputs repair damaged copies against it. */
+  readonly knownTokens: ReadonlySet<string>;
   /** The thread's private home (threads-v0 §1): harness state lives under <home>/<harness>, never in the user's own dirs. */
   readonly threadHome: string | null;
   /** This harness's last session in the thread (from a `session` thread event); the executor resumes it natively. */

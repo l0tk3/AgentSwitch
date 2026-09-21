@@ -64,7 +64,9 @@ export function contextSection(ctx: LoadedContext): string {
 User environment context (maintained by the user; enc:v1: values are secret-gate tokens, usable only through the gate):
 ${ctx.text.trim()}
 
-When the task refers to a site, account or environment listed here, copy the exact URL, username and enc:v1: tokens
-into the brief. Never invent credentials. If the task needs a credential that is not listed, say so in the brief
-and lower confidence; do not ask the executor to look for it.`;
+When the task refers to a site, account or environment listed here, name that entry in the brief (URL and username
+are fine to copy). Do NOT retype enc:v1: tokens: they are 200+ random characters and a single dropped character
+makes them useless; the executor receives this same context verbatim and reads the token from it.
+Never invent credentials. If the task needs a credential that is not listed, say so in the brief and lower
+confidence; do not ask the executor to look for it.`;
 }

@@ -19,7 +19,7 @@ const executor = realExecutors(targets, false).find((e) => e.harness === harness
 const cwd = mkdtempSync(join(tmpdir(), "agentswitch-smoke-"));
 const started = Date.now();
 const outcome = await executor.run({
-  taskId: "smoke", task: "smoke", cwd, model, effort: harness === "codex" ? "low" : null, handoffNote: null, context: null, threadHome: null, resume: null, attachments: [], browser: false,
+  taskId: "smoke", task: "smoke", cwd, model, effort: harness === "codex" ? "low" : null, handoffNote: null, context: null, knownTokens: new Set<string>(), threadHome: null, resume: null, attachments: [], browser: false,
   brief: "Create a file named hello.txt in the current directory containing exactly the text: hi from agentswitch\nThen reply with the single word DONE.",
   signal: new AbortController().signal,
   emit: (type, payload) => console.log(`  ${type}: ${JSON.stringify(payload).slice(0, 160)}`),

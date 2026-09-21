@@ -13,6 +13,7 @@ import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } f
 import { claudeMcpServers, gateEnv, mcpServerEnv, type GateOptions } from "./gate.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { commandTouchesProtected, isProtected, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
+import { repairInValue, shortToken } from "./tokens.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
 
 export type ClaudeExecutorOptions = {
@@ -141,7 +142,11 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       const servers = ext.mcpFor("claude-code");
       const allowedMcp = autoAllowedMcp(servers);
       let approvals = 0;
-      const canUseTool: CanUseTool = async (toolName, toolInput) => {
+      const canUseTool: CanUseTool = async (toolName, rawInput) => {
+        // Damaged enc:v1: copies in tool arguments are put back verbatim before the gate sees them.
+        const fixed = repairInValue(rawInput, input.knownTokens);
+        const toolInput = fixed.value;
+        if (fixed.repairs.length) input.emit("text", { text: `(repaired ${fixed.repairs.length} damaged secret-gate token(s) in ${toolName} arguments: ${fixed.repairs.map((x) => `${shortToken(x.from)} → ${shortToken(x.to)}`).join(", ")})` });
         const d = decideTool(toolName, toolInput, cwd, allowedMcp, opts.protected ?? NO_PROTECTED);
         if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
         if (d.kind === "deny") { input.emit("tool_call", { tool: toolName, denied: d.reason }); return { behavior: "deny", message: d.reason }; }

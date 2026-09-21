@@ -204,7 +204,11 @@ concurrency (queue, never switch), effort, low confidence → default policy. `C
 accounts as secret-gate tokens, environment, preferences) is re-read on every dispatch and goes into
 the router prompt **and** the executor's prompt (after the brief and any handoff), so a site's URL,
 account and tokens reach the model that does the work even when the router's brief leaves them out;
-list entries with plaintext credentials are stripped at load. Edit it in the UI's 上下文 tab (shows the linted
+list entries with plaintext credentials are stripped at load. Models retyping a 200-character token drop a
+character now and then (seen: 226 → 225 chars, `secret-gate: invalid base64url`), so the router is told to name
+the context entry instead of copying tokens, and `src/executors/tokens.ts` puts the genuine token back
+wherever a damaged copy appears: the brief, and Claude's tool arguments via `canUseTool` (Codex and OpenCode
+tool arguments cannot be rewritten; they only get the prompt-level fix). Edit it in the UI's 上下文 tab (shows the linted
 text and the stripped lines), with `agentswitch context init`, or by hand. After a failure, `classifyFailure` + `nextStep`
 decide: transport → retry once then ask the router; quota → fallback chain; refusal / task_failed →
 ask the router with the history; gate_denied or an approved action → stop. The router may
