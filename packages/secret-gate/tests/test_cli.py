@@ -62,6 +62,15 @@ def test_proxy_requires_key_and_mitmdump(tmp_path, monkeypatch, capsys):
     assert main(["proxy"]) == 1
 
 
+def test_proxy_argv_listens_locally_without_http2(tmp_path):
+    from secret_gate.cli import mitmdump_argv
+    argv = mitmdump_argv("/x/mitmdump", tmp_path / "entry.py", 8080)
+    assert argv[:2] == ["/x/mitmdump", "-q"]
+    assert argv[argv.index("-p") + 1] == "8080"
+    assert argv[argv.index("--listen-host") + 1] == "127.0.0.1"
+    assert "http2=false" in argv and argv[argv.index("http2=false") - 1] == "--set"
+
+
 def test_install_ca_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
     monkeypatch.setattr("secret_gate.cli.MITMPROXY_CA_PATH", tmp_path / "missing.pem")

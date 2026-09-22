@@ -248,6 +248,14 @@ config/          per-agent snippets, exec template example
 scripts/env.sh   proxy + CA environment
 ```
 
+## Sloppy upstream headers (HTTP/2 is off)
+
+The proxy talks HTTP/1.1 to every site. mitmproxy's HTTP/2 stack treats a header value with
+leading or trailing whitespace (`Server: nginx `, which some nginx builds send) as a protocol
+error and answers `502 Bad Gateway: HTTP/2 protocol error: Received header value surrounded by
+whitespace`. HTTP/1.1 parsing tolerates it, nothing the gate does needs h2, so `secret-gate proxy`
+starts mitmdump with `--set http2=false`. Header validation itself stays on.
+
 ## Self-signed internal sites
 
 The proxy verifies upstream certificates like a browser would. A site with a self-signed

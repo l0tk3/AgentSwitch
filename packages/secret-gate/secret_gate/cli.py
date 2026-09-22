@@ -142,9 +142,23 @@ def _cmd_proxy(args: argparse.Namespace) -> int:
     if not mitmdump:
         print("mitmdump not found; pip install mitmproxy", file=sys.stderr)
         return 1
-    argv = [mitmdump, "-q", "-s", str(entry), "-p", str(args.port), "--listen-host", "127.0.0.1"]
-    os.execv(mitmdump, argv)
+    os.execv(mitmdump, mitmdump_argv(mitmdump, entry, args.port))
     return 0  # pragma: no cover
+
+
+# HTTP/2 stays off: mitmproxy's h2 stack rejects sloppy-but-common upstream headers
+# (e.g. `Server: nginx ` with a trailing space) as a protocol error, which surfaces as a
+# 502 the model cannot do anything about. HTTP/1.1 parsing tolerates them, and nothing
+# here needs h2. Header validation itself is left on (it guards against request smuggling).
+PROXY_OPTIONS: tuple[str, ...] = ("http2=false",)
+
+
+def mitmdump_argv(mitmdump: str, entry: Path, port: int) -> list[str]:
+    """The exact mitmdump command line the proxy runs; kept pure so it can be tested."""
+    argv = [mitmdump, "-q", "-s", str(entry), "-p", str(port), "--listen-host", "127.0.0.1"]
+    for opt in PROXY_OPTIONS:
+        argv += ["--set", opt]
+    return argv
 
 
 def _cmd_mcp(_: argparse.Namespace) -> int:
