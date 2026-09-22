@@ -18,6 +18,7 @@ import type { RoutingLog } from "../router/log.js";
 import { route, type RouteDeps } from "../router/route.js";
 import { TargetRef, type Targets } from "../router/targets.js";
 import { foldThread } from "../threads/fold.js";
+import { ApprovalPolicy, CATEGORIES, CATEGORY_TITLES, loadPolicy, savePolicy } from "../engine/approvalPolicy.js";
 import { loadMemory } from "../threads/memory.js";
 import { aggregateRecords, RECORD_WINDOW_MS } from "../threads/record.js";
 import type { Thread, ThreadStatus } from "../threads/types.js";
@@ -55,6 +56,7 @@ export type ApiDeps = {
   readonly routeDeps: () => RouteDeps;
   readonly contextPath: string;
   readonly memoryPath: string;
+  readonly policyPath: string;
   readonly workRoot: string;
   readonly uploads: Uploads;
   readonly artifactsDir: string;
@@ -73,7 +75,10 @@ const NewTaskBody = z.object({
   attachments: z.array(z.string().min(1)).max(MAX_FILES_PER_UPLOAD).optional(),
   /** Run inside an existing thread (defaults to the parent's thread, else a new one). */
   thread_id: z.string().min(1).optional(),
+  /** Per-task approval policy override. */
+  approval: ApprovalPolicy.optional(),
 });
+const AnswerBody = z.object({ approval_id: z.string().min(1), text: z.string().min(1).max(4000) });
 const HandoffBody = z.object({ to: TargetRef.optional() });
 const ThreadPatch = z.object({ title: z.string().max(200).nullable().optional(), status: z.enum(["open", "archived"]).optional(), expires_at: z.number().int().nullable().optional() });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
@@ -99,7 +104,7 @@ export function createApp(deps: ApiDeps): Hono {
   app.post("/tasks", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
-    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, ...rest } = body.data;
+    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
     const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
     const thread = thread_id ? deps.store.getThread(thread_id) : undefined;
@@ -111,7 +116,7 @@ export function createApp(deps: ApiDeps): Hono {
     let attachments: Attachment[] = [];
     try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
     catch (err) { return c.json({ error: (err as Error).message }, 400); }
-    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) });
+    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
     return c.json(task, 201);
   });
 
@@ -217,6 +222,21 @@ export function createApp(deps: ApiDeps): Hono {
     if (!body.success) return c.json({ error: "approval_id and decision (allow|deny) required" }, 400);
     const ok = deps.engine.resolveApproval(body.data.approval_id, body.data.decision);
     return ok ? c.json({ ok: true }) : c.json({ error: "no pending approval with that id" }, 404);
+  });
+
+  app.post("/tasks/:id/answer", async (c) => {
+    const body = AnswerBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "approval_id and text required" }, 400);
+    const ok = deps.engine.answer(body.data.approval_id, body.data.text);
+    return ok ? c.json({ ok: true }) : c.json({ error: "no pending question with that id" }, 404);
+  });
+
+  app.get("/approvals/policy", (c) => c.json({ policy: loadPolicy(deps.policyPath), categories: CATEGORIES.map((c2) => ({ id: c2, title: CATEGORY_TITLES[c2] })) }));
+  app.put("/approvals/policy", async (c) => {
+    const body = ApprovalPolicy.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: issues(body.error) }, 400);
+    savePolicy(deps.policyPath, body.data);
+    return c.json({ policy: body.data });
   });
 
   app.post("/tasks/:id/cancel", (c) => {

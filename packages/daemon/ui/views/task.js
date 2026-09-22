@@ -1,7 +1,7 @@
 /** Task detail: text, result, approvals, live event stream, follow-up composer; meta in the side column. */
 
 import { ACTIVE, esc, stamp, target, when } from "../lib/api.js";
-import { approve, archiveThread, cancelTask, goto, handoffTask, openTask, submitTask } from "../lib/actions.js";
+import { answer, approve, archiveThread, cancelTask, goto, handoffTask, openTask, submitTask } from "../lib/actions.js";
 import { set } from "../lib/state.js";
 import { approvalCard } from "./home.js";
 import { fileList, pendingList } from "../lib/files.js";
@@ -13,11 +13,11 @@ export function eventLine(ev) {
   const p = ev.payload || {};
   switch (ev.type) {
     case "queued": return "已排队";
-    case "routed": { const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + (p.routerMs / 1000).toFixed(1) + "s" : ""})${v.notes && v.notes.length ? "\n  " + v.notes.join("; ") : ""}`; }
+    case "routed": { if (p.clarify) return `路由器先问你：${p.clarify}`; const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + (p.routerMs / 1000).toFixed(1) + "s" : ""})${v.notes && v.notes.length ? "\n  " + v.notes.join("; ") : ""}`; }
     case "dispatched": return `派发 ${p.harness}/${p.model}${p.effort ? " effort=" + p.effort : ""}`;
     case "text": return p.text;
     case "tool_call": return `工具 ${p.tool}: ${p.command || (p.input ? JSON.stringify(p.input).slice(0, 160) : "")}`;
-    case "approval_request": return `⚠ 需要审批：${p.action}\n${p.evidence || ""}`;
+    case "approval_request": return p.kind === "question" ? `❓ 路由器问你：${p.action}` : `⚠ 需要审批：${p.action}\n${p.evidence || ""}`;
     case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"}（${p.by === "router" ? "路由器代批" : p.by === "timeout" ? "超时" : "你"}）`;
     case "supervisor": return p.kind === "approval" ? `监督者对审批的意见：${p.decision === "allow" ? "允许" : p.decision === "deny" ? "拒绝" : "交给你决定"}${p.reason ? "，" + p.reason : ""}`
       : p.kind === "checkin" ? `监督者检查（${Math.round((p.silentMs || 0) / 1000)} 秒无动静）：${p.action === "continue" ? "继续等" : p.action === "cancel" ? "取消这次执行并换人" : "问你"}${p.note ? "，" + p.note : ""}`
@@ -149,6 +149,7 @@ export const bindings = [
   { sel: "[data-nav]", run: (el) => goto(el.dataset.nav) },
   { sel: "[data-open]", run: (el) => openTask(el.dataset.open) },
   { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
+  { sel: "[data-answer]", run: (el) => { const text = ($("#q-" + el.dataset.answer)?.value || "").trim(); if (!text) return; el.disabled = true; return answer(el.dataset.task, el.dataset.answer, text); } },
 ];
 
 export const submitKeys = { "f-task": "f-send" };

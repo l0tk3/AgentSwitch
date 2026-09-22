@@ -30,7 +30,7 @@ export function isDestructive(action: string, evidence = ""): boolean {
   return DESTRUCTIVE.some((re) => re.test(text));
 }
 
-export type ApprovalInput = { readonly brief: string; readonly action: string; readonly evidence: string; readonly recentEvents: readonly string[]; readonly sideEffects: string; readonly cwd: string };
+export type ApprovalInput = { readonly brief: string; readonly action: string; readonly evidence: string; readonly recentEvents: readonly string[]; readonly sideEffects: string; readonly cwd: string; /** false only in the user's explicit "auto" mode: no destructive floor. */ readonly floor?: boolean };
 export type ApprovalVerdict = { readonly decision: "allow" | "deny" | "ask_user"; readonly reason: string; readonly ms: number; readonly source: "router" | "floor" | "error" };
 
 export type CheckInInput = { readonly brief: string; readonly elapsedMs: number; readonly silentMs: number; readonly recentEvents: readonly string[]; readonly agentsRunning: number; readonly continues: number; readonly cwd: string };
@@ -112,7 +112,7 @@ export function routerSupervisor(router: Router, config: SupervisorConfig, timeo
   return {
     config,
     async approve(input, signal) {
-      if (isDestructive(input.action, input.evidence)) return { decision: "ask_user", reason: "irreversible or out-of-scope action: only the user may approve it", ms: 0, source: "floor" };
+      if ((input.floor ?? true) && isDestructive(input.action, input.evidence)) return { decision: "ask_user", reason: "irreversible or out-of-scope action: only the user may approve it", ms: 0, source: "floor" };
       const r = await ask(APPROVAL_SYSTEM, approvalMessage(input), input.cwd, ApprovalReply, signal);
       return r.value ? { ...r.value, ms: r.ms, source: "router" } : { decision: "ask_user", reason: r.error ?? "no reply", ms: r.ms, source: "error" };
     },

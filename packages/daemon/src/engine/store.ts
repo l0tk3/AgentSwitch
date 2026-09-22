@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { RecordRow } from "../threads/record.js";
 import type { Thread, ThreadEvent, ThreadEventType, ThreadStatus } from "../threads/types.js";
-import type { Approval, ApprovalStatus, NewTask, Task, TaskEvent, TaskEventType } from "./types.js";
+import type { Approval, ApprovalKind, ApprovalStatus, NewTask, Task, TaskEvent, TaskEventType } from "./types.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -48,7 +48,8 @@ type Row = Record<string, unknown>;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT"],
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT", "approval_policy TEXT"],
+  approvals: ["kind TEXT NOT NULL DEFAULT 'approval'", "answer TEXT"],
 };
 
 export function migrate(db: DatabaseSync): string[] {
@@ -94,9 +95,9 @@ export class Store {
     const ts = this.now();
     const id = randomUUID().slice(0, 8);
     this.db.prepare(
-      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral, parent_id, attachments, thread_id, exclude, handoff_from) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, created_at, updated_at, status, task, cwd, pin, needs_browser, ephemeral, parent_id, attachments, thread_id, exclude, handoff_from, approval_policy) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, ts, ts, input.task, input.cwd, input.pin ? JSON.stringify(input.pin) : null, input.needsBrowser ? 1 : 0, input.ephemeral ? 1 : 0, input.parentId ?? null, JSON.stringify(input.attachments ?? []),
-      input.threadId ?? null, JSON.stringify(input.exclude ?? []), input.handoffFrom ? JSON.stringify(input.handoffFrom) : null);
+      input.threadId ?? null, JSON.stringify(input.exclude ?? []), input.handoffFrom ? JSON.stringify(input.handoffFrom) : null, input.approval ? JSON.stringify(input.approval) : null);
     if (input.threadId) this.db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(ts, input.threadId);
     return this.getTask(id)!;
   }
@@ -245,10 +246,16 @@ export class Store {
     return rows.map((r) => ({ taskId: String(r.task_id), seq: Number(r.seq), ts: Number(r.ts), type: String(r.type) as TaskEventType, payload: JSON.parse(String(r.payload)) }));
   }
 
-  createApproval(taskId: string, action: string, evidence: string): Approval {
+  createApproval(taskId: string, action: string, evidence: string, kind: ApprovalKind = "approval"): Approval {
     const id = randomUUID().slice(0, 8);
-    this.db.prepare("INSERT INTO approvals (id, task_id, created_at, action, evidence, status) VALUES (?, ?, ?, ?, ?, 'pending')").run(id, taskId, this.now(), action, evidence);
+    this.db.prepare("INSERT INTO approvals (id, task_id, created_at, action, evidence, status, kind) VALUES (?, ?, ?, ?, ?, 'pending', ?)").run(id, taskId, this.now(), action, evidence, kind);
     return this.getApproval(id)!;
+  }
+
+  /** A question answered with text counts as allowed, with the answer stored. */
+  answerApproval(id: string, text: string): Approval | undefined {
+    this.db.prepare("UPDATE approvals SET status = 'allowed', resolved_at = ?, answer = ? WHERE id = ? AND status = 'pending' AND kind = 'question'").run(this.now(), text, id);
+    return this.getApproval(id);
   }
 
   getApproval(id: string): Approval | undefined {
@@ -301,6 +308,7 @@ function toTask(r: Row): Task {
     threadId: (r.thread_id as string | null) ?? null,
     exclude: JSON.parse(String(r.exclude ?? "[]")),
     handoffFrom: r.handoff_from ? JSON.parse(String(r.handoff_from)) : null,
+    approvalPolicy: r.approval_policy ? JSON.parse(String(r.approval_policy)) : null,
     harness: (r.harness as string | null) ?? null,
     model: (r.model as string | null) ?? null,
     effort: (r.effort as string | null) ?? null,
@@ -332,9 +340,11 @@ function toApproval(r: Row): Approval {
     id: String(r.id),
     taskId: String(r.task_id),
     createdAt: Number(r.created_at),
+    kind: (String(r.kind ?? "approval") as ApprovalKind),
     action: String(r.action),
     evidence: String(r.evidence),
     status: String(r.status) as ApprovalStatus,
     resolvedAt: r.resolved_at === null || r.resolved_at === undefined ? null : Number(r.resolved_at),
+    answer: (r.answer as string | null) ?? null,
   };
 }

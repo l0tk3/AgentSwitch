@@ -2,7 +2,7 @@
  *  summarizer); both show the linted text the router actually sees. */
 
 import { esc } from "../lib/api.js";
-import { loadCtxExample, saveCtx, saveMem } from "../lib/actions.js";
+import { loadCtxExample, saveCtx, saveMem, savePolicy } from "../lib/actions.js";
 import { patch } from "../lib/state.js";
 
 const $ = (s) => document.querySelector(s);
@@ -34,6 +34,7 @@ export function render(s) {
         </div>
       </div>
       <aside class="stack">
+        ${policyCard(s.policy)}
         ${warnings}
         <div class="card">
           <div class="dim">文件</div><div class="mono" style="margin-top:4px">${esc(c.path)}</div>
@@ -51,6 +52,23 @@ export function render(s) {
     </div>`;
 }
 
+/** Who answers approvals (docs/supervisor-v0.md §1b): manual / auto / scoped with reserved categories. */
+function policyCard(p) {
+  if (!p) return "";
+  const mode = p.policy.mode;
+  const opt = (v, label, desc) => `<label class="row" style="gap:8px;align-items:flex-start"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}><span><b>${label}</b><div class="dim">${desc}</div></span></label>`;
+  const cats = p.categories.map((c) => `<label class="row" style="gap:8px"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
+  return `<div class="card"><div class="dim">审批策略</div>
+    <div class="stack" style="margin-top:8px">
+      ${opt("manual", "全部我来批", "路由器不介入任何审批")}
+      ${opt("auto", "全权交给路由器", "包括删除、推送、支付这类不可逆动作；它拿不准仍会问你")}
+      ${opt("scoped", "划定范围", "下面勾选的类别留给我，其余路由器批")}
+    </div>
+    <div class="stack" style="margin:8px 0 0 24px;font-size:13px">${cats}</div>
+    <div class="row" style="margin-top:8px"><span class="grow dim">daemon 自己的文件永远不可改，不在此列。路由器分诊时缺信息会直接问你。</span><button class="small" id="pol-save">保存策略</button></div>
+  </div>`;
+}
+
 export function onInput(el) {
   const key = el.id === "ctx-text" ? "ctx" : el.id === "mem-text" ? "mem" : null;
   if (!key) return;
@@ -65,4 +83,6 @@ export const bindings = [
   { sel: "#ctx-save", run: () => save() },
   { sel: "#mem-save", run: () => saveMem($("#mem-text").value) },
   { sel: "#ctx-example", run: () => loadCtxExample() },
+  { sel: "#pol-save", run: () => savePolicy({ mode: document.querySelector("input[name=pol-mode]:checked")?.value || "scoped", human: [...document.querySelectorAll(".pol-cat:checked")].map((el) => el.value) }) },
+  { sel: "input[name=pol-mode]", run: (el, e, s) => { if (s.policy) { const next = { ...s.policy, policy: { ...s.policy.policy, mode: el.value } }; import("../lib/state.js").then((m) => m.set({ policy: next })); } } },
 ];

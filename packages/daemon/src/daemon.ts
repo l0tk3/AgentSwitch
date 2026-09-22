@@ -82,6 +82,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
   const contextPath = join(cfg.home, "CONTEXT.md");
   const memoryPath = join(cfg.home, "MEMORY.md");
+  const policyPath = join(cfg.home, "approvals.json");
   const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : opencodeRouter({ model: targets.router.model }));
   const rateLimits = new RateLimitCache();
   const extensions = extensionsAt(cfg.home);
@@ -105,9 +106,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
   const supervisor = summarizer ? routerSupervisor(opencodeRouter({ model: targets.router.model, agentName: "supervisor", tools: "none", runIn: join(cfg.home, "summarizer") }), targets.router.supervisor, targets.router.timeout_ms) : undefined;
   const extensionsSummary = () => summarizeExtensions(extensions);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}) });
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}) });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
+  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, policyPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 

@@ -12,6 +12,20 @@
 
 审批卡片仍然发给用户：人和路由器谁先答算谁的。事件 `approval_resolved` 多一个 `by: user | router | timeout`。
 
+## 1b. 审批策略与追问（2026-09-22）
+
+用户决定谁批什么，三种模式，存在 `$AGENTSWITCH_HOME/approvals.json`，任务可单独覆盖（`POST /tasks {approval: …}`）：
+
+| 模式 | 含义 |
+|---|---|
+| `manual` | 全部由用户批，路由器不介入 |
+| `auto` | 全权交给路由器，没有底线（用户明示的授权）；路由器仍可回 `ask_user` |
+| `scoped` | 用户勾选保留给自己的类别，其余路由器批 |
+
+类别（`scoped` 的 `human` 列表，按关键词/动作形态匹配）：`delete`（删文件、rm、git clean、DROP/DELETE）、`outside_cwd`（工作目录外的写入）、`shell`（任何 shell 命令）、`git_push`（push/force）、`irreversible`（支付、发送、删账号）、`browser`（浏览器提交类）。默认 `scoped`，保留 `delete`、`git_push`、`irreversible`。daemon 自身文件永远硬拒绝，不属于审批。
+
+**追问**：路由器在分诊时若发现只有用户能补的缺口（凭据、URL、二选一的歧义），回 `{"action":"clarify","question":"…"}`；daemon 发一张「问题」卡片（审批的一种，`kind: question`，带文本框），用户作答后把答复追加进任务文本重新分诊；每个任务最多问两次；10 分钟无人答则任务失败并说明在等什么。看门狗的 `ask_user` 仍是允许/拒绝二选一。
+
 ## 2. 提示词原则
 
 - 审批：只看动作是否在简报范围内、是否可逆、是否碰了简报里的禁区。不确定就 `ask_user`。

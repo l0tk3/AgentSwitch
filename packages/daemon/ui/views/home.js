@@ -1,8 +1,8 @@
 /** Home: composer, pending approvals, task table, quota panel. */
 
 import { ACTIVE, ago, esc, target, when } from "../lib/api.js";
-import { approve, loadQuota, openTask, submitTask } from "../lib/actions.js";
-import { set } from "../lib/state.js";
+import { answer, approve, loadQuota, openTask, submitTask } from "../lib/actions.js";
+import { get, set } from "../lib/state.js";
 import { pendingList } from "../lib/files.js";
 import { quotaPanel } from "./quota.js";
 import { firstLine } from "../lib/feedback.js";
@@ -16,6 +16,7 @@ function composer(hint, pending) {
       <input id="c-cwd" data-keep placeholder="工作目录（留空 = 临时目录，用完即删）">
       <input id="c-pin" data-keep class="pin" placeholder="指定 harness/model，留空由路由器决定">
       <select id="c-browser" data-keep><option value="">浏览器：路由器决定</option><option value="1">需要浏览器</option></select>
+      <select id="c-approval" data-keep title="这次任务的审批由谁来批；默认按「上下文」页的审批策略"><option value="">审批：按默认策略</option><option value="manual">审批：全部我来批</option><option value="auto">审批：全权交给路由器</option><option value="scoped">审批：按划定范围</option></select>
       <button data-attach title="也可以拖进来或直接粘贴截图">📎 附件</button>
       <button class="primary" id="c-send">发送</button>
     </div>
@@ -25,6 +26,14 @@ function composer(hint, pending) {
 }
 
 export function approvalCard(a, task) {
+  if (a.kind === "question") {
+    return `<div class="card warn">
+      <div class="dim">${task ? esc(task.task.slice(0, 80)) + " · " : ""}${when(a.createdAt)} · 路由器在问你</div>
+      <div style="margin-top:4px"><b>${esc(a.action)}</b></div>
+      <textarea id="q-${a.id}" data-keep rows="2" placeholder="回答后任务会带着你的答复重新分诊" style="margin-top:8px"></textarea>
+      <div class="row" style="margin-top:8px"><button class="primary grow" data-answer="${a.id}" data-task="${a.taskId}">回答</button><button class="bad" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">不答，取消任务</button></div>
+    </div>`;
+  }
   return `<div class="card warn">
     <div class="dim">${task ? esc(task.task.slice(0, 80)) + " · " : ""}${when(a.createdAt)}</div>
     <div style="margin-top:4px"><b>${esc(a.action)}</b></div>
@@ -92,6 +101,8 @@ async function send() {
   const pin = $("#c-pin").value.trim();
   const body = { task, ...(cwd ? { cwd } : { ephemeral: true }), ...($("#c-browser").value === "1" ? { needs_browser: true } : {}) };
   if (pin.includes("/")) body.pin = { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) };
+  const mode = $("#c-approval").value;
+  if (mode) body.approval = mode === "scoped" ? { mode, human: (get().policy?.policy?.human) || undefined } : { mode };
   $("#c-send").disabled = true;
   try { await submitTask(body); }
   catch (err) { set({ hint: err.message }); }
@@ -102,6 +113,7 @@ export const bindings = [
   { sel: "#q-refresh", run: (el) => { el.disabled = true; return loadQuota(true); } },
   { sel: "tr[data-open]", run: (el) => openTask(el.dataset.open) },
   { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
+  { sel: "[data-answer]", run: (el) => { const text = ($("#q-" + el.dataset.answer)?.value || "").trim(); if (!text) return; el.disabled = true; return answer(el.dataset.task, el.dataset.answer, text); } },
 ];
 
 export const submitKeys = { "c-task": "c-send" };

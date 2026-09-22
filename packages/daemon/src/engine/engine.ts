@@ -21,6 +21,7 @@ import type { ExtensionsSummary } from "../router/prompt.js";
 import { loadContext, type LoadedContext } from "../router/context.js";
 import { knownTokens, repairTokens, shortToken } from "../executors/tokens.js";
 import type { Supervisor } from "../router/supervisor.js";
+import { DEFAULT_POLICY, loadPolicy, whoAnswers, type ApprovalPolicy } from "./approvalPolicy.js";
 import { listTree } from "../files/artifacts.js";
 import { OUT_DIR } from "../files/names.js";
 import type { HandoffReason, ThreadState } from "../threads/types.js";
@@ -60,7 +61,11 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   readonly maxConcurrentTasks?: number;
   /** docs/supervisor-v0.md: approvals on the user's behalf, watchdog during execution, acceptance on done. */
   readonly supervisor?: Supervisor;
+  /** $AGENTSWITCH_HOME/approvals.json: who answers which approvals (manual / auto / scoped). */
+  readonly policyPath?: string;
 };
+
+export const MAX_CLARIFICATIONS = 2;
 
 export const DEFAULT_MAX_TASKS = 4;
 
@@ -79,6 +84,7 @@ export class Engine {
   private readonly cwdLock = new KeyedLock();
   private readonly slots = new Map<string, Semaphore>();
   private readonly rejections = new Map<string, number>();   // acceptance rejections per task (at most one)
+  private readonly questions = new Map<string, (text: string | null) => void>();   // question approvals awaiting text
 
   constructor(deps: EngineDeps) {
     this.deps = deps;
@@ -120,6 +126,26 @@ export class Engine {
     return next;
   }
 
+  /** Answer a router question with text; the task is re-routed with the answer appended. */
+  answer(approvalId: string, text: string): boolean {
+    const approval = this.deps.store.getApproval(approvalId);
+    if (!approval || approval.kind !== "question" || approval.status !== "pending") return false;
+    this.deps.store.answerApproval(approvalId, text);
+    const waiter = this.waiters.get(approvalId);
+    if (waiter) { clearTimeout(waiter.timer); this.waiters.delete(approvalId); }
+    this.emit(approval.taskId, "approval_resolved", { approvalId, decision: "answer", status: "allowed", by: "user", kind: "question", text });
+    const q = this.questions.get(approvalId);
+    if (q) { this.questions.delete(approvalId); q(text); }
+    if (waiter) waiter.resolve("allow");
+    const current = this.deps.store.getTask(approval.taskId);
+    if (current && !TERMINAL_STATUS.has(current.status)) this.deps.store.updateTask(approval.taskId, { status: "routing" });
+    return true;
+  }
+
+  policyFor(task: Task): ApprovalPolicy {
+    return task.approvalPolicy ?? (this.deps.policyPath ? loadPolicy(this.deps.policyPath) : DEFAULT_POLICY);
+  }
+
   threadState(threadId: string): ThreadState {
     return foldThread(this.deps.store.threadEvents(threadId));
   }
@@ -151,7 +177,9 @@ export class Engine {
     if (!approval || !waiter) return false;
     clearTimeout(waiter.timer);
     this.waiters.delete(approvalId);
-    this.emit(approval.taskId, "approval_resolved", { approvalId, decision, status, by });
+    this.emit(approval.taskId, "approval_resolved", { approvalId, decision, status, by, kind: approval.kind });
+    const q = this.questions.get(approvalId);
+    if (q) { this.questions.delete(approvalId); q(null); }
     // A late answer (or expiry) must not revive a task that already ended.
     const current = this.deps.store.getTask(approval.taskId);
     if (current && !TERMINAL_STATUS.has(current.status)) this.deps.store.updateTask(approval.taskId, { status: "running" });
@@ -337,8 +365,19 @@ export class Engine {
   private async runTask(initial: Task, signal: AbortSignal, held: Release[]): Promise<void> {
     let task = initial;
     this.deps.store.updateTask(task.id, { status: "routing" });
-    const composed = this.composeTask(task);
-    const routed = await route({ task: composed, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser, exclude: task.exclude }, this.routeDeps());
+    let composed = this.composeTask(task);
+    let routed = await route({ task: composed, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser, exclude: task.exclude }, this.routeDeps());
+    // The router may ask the user first (docs/supervisor-v0.md §1b): at most MAX_CLARIFICATIONS rounds.
+    for (let round = 0; routed.clarify && round < MAX_CLARIFICATIONS; round++) {
+      this.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError, clarify: routed.clarify });
+      const text = await this.requestQuestion(task.id, routed.clarify);
+      if (signal.aborted) return;
+      if (text === null) return this.fail(task.id, `waiting for your answer: ${routed.clarify}`);
+      composed = `${composed}\n\nUser clarification (in reply to "${routed.clarify}"):\n${text}`;
+      this.deps.store.updateTask(task.id, { status: "routing" });
+      routed = await route({ task: composed, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser, exclude: task.exclude }, this.routeDeps());
+    }
+    if (routed.clarify) return this.fail(task.id, `the router kept asking questions: ${routed.clarify}`);
     this.deps.routingLog?.record(task.task, task.cwd, routed);
     this.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
     if (!routed.verdict.ok) return this.fail(task.id, `no target: ${routed.verdict.notes.join("; ")}`);
@@ -507,7 +546,10 @@ export class Engine {
     const sup = this.deps.supervisor;
     const task = this.deps.store.getTask(taskId);
     if (!sup || !sup.config.approvals || !task) return;
-    void sup.approve({ brief: task.brief ?? task.task, action, evidence, recentEvents: this.recentEventLines(taskId), sideEffects: this.sideEffectsLine(taskId), cwd: task.cwd }).then((v) => {
+    const policy = this.policyFor(task);
+    const who = whoAnswers(policy, action, evidence);
+    if (who.who === "user") { this.emit(taskId, "supervisor", { kind: "approval", approvalId, decision: "ask_user", reason: who.because, source: "policy", ms: 0 }); return; }
+    void sup.approve({ brief: task.brief ?? task.task, action, evidence, recentEvents: this.recentEventLines(taskId), sideEffects: this.sideEffectsLine(taskId), cwd: task.cwd, floor: policy.mode !== "auto" }).then((v) => {
       if (!this.waiters.has(approvalId)) return;   // the user got there first
       this.emit(taskId, "supervisor", { kind: "approval", approvalId, decision: v.decision, reason: v.reason, source: v.source, ms: v.ms });
       if (v.decision === "allow") this.resolveApproval(approvalId, "allow", "allowed", "router");
@@ -568,6 +610,18 @@ export class Engine {
     if (!thread) return { threadHome: null, resume: null };
     const session = this.threadState(thread.id).sessions[harness];
     return { threadHome: thread.home, resume: session && thread.cwd === task.cwd ? session.sessionId : null };
+  }
+
+  /** A question card for the user; resolves with their text, or null when denied or expired. */
+  private requestQuestion(taskId: string, question: string): Promise<string | null> {
+    const approval = this.deps.store.createApproval(taskId, question, "路由器需要你补充信息才能派发", "question");
+    this.deps.store.updateTask(taskId, { status: "waiting_approval" });
+    this.emit(taskId, "approval_request", { approvalId: approval.id, kind: "question", action: question, evidence: "路由器需要你补充信息才能派发", humanOnly: true });
+    return new Promise((resolve) => {
+      this.questions.set(approval.id, resolve);
+      const timer = setTimeout(() => this.resolveApproval(approval.id, "deny", "expired"), this.deps.approvalTimeoutMs ?? 10 * 60_000);
+      this.waiters.set(approval.id, { resolve: () => undefined, timer });
+    });
   }
 
   private requestApproval(taskId: string, action: string, evidence: string, opts: { humanOnly?: boolean } = {}): Promise<ApprovalDecision> {

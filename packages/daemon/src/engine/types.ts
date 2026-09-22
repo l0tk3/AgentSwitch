@@ -4,6 +4,7 @@ import type { Decision } from "../router/decision.js";
 import type { Attempt } from "../router/reroute.js";
 import type { Attachment } from "../files/uploads.js";
 import type { TargetRef } from "../router/targets.js";
+import type { ApprovalPolicy } from "./approvalPolicy.js";
 
 /** Who handed this task over (threads-v0 §4); the engine builds the handoff package from it at dispatch. */
 export type HandoffFrom = TargetRef & { readonly taskId: string; readonly reason: "user" | `failure:${string}` | "quota" };
@@ -26,6 +27,8 @@ export type NewTask = {
   /** Targets the router must not pick (a handoff excludes the executor being handed off from). */
   readonly exclude?: readonly TargetRef[];
   readonly handoffFrom?: HandoffFrom;
+  /** Per-task approval policy; default: $AGENTSWITCH_HOME/approvals.json. */
+  readonly approval?: ApprovalPolicy;
 };
 
 export type Task = {
@@ -43,6 +46,7 @@ export type Task = {
   readonly threadId: string | null;
   readonly exclude: readonly TargetRef[];
   readonly handoffFrom: HandoffFrom | null;
+  readonly approvalPolicy: ApprovalPolicy | null;
   readonly harness: string | null;
   readonly model: string | null;
   readonly effort: string | null;
@@ -87,14 +91,19 @@ export type TaskEvent = {
 
 export type ApprovalStatus = "pending" | "allowed" | "denied" | "expired";
 
+/** approval = allow/deny; question = the router needs text from the user (docs/supervisor-v0.md §1b). */
+export type ApprovalKind = "approval" | "question";
+
 export type Approval = {
   readonly id: string;
   readonly taskId: string;
   readonly createdAt: number;
+  readonly kind: ApprovalKind;
   readonly action: string;
   readonly evidence: string;
   readonly status: ApprovalStatus;
   readonly resolvedAt: number | null;
+  readonly answer: string | null;
 };
 
 export const TERMINAL: ReadonlySet<TaskStatus> = new Set(["done", "failed", "cancelled"]);

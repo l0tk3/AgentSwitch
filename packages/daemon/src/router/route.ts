@@ -44,6 +44,8 @@ export function kindOf(task: string, decision: Decision | null): string {
 }
 
 export type RouteResult = {
+  /** The router asked for the user's input instead of dispatching (Decision.action=clarify). */
+  readonly clarify?: string;
   readonly verdict: Verdict;
   readonly decision: Decision | null;
   /** How the executable target was obtained. */
@@ -67,6 +69,9 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
 
   const extra = exclude.length ? `Excluded (do not choose; the user handed this task off from them): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ")}` : undefined;
   const asked = await askRouter(req, { ...deps, targets }, extra);
+  if (asked.decision?.action === "clarify" && asked.decision.question?.trim()) {
+    return { ...asked, clarify: asked.decision.question.trim(), verdict: { ok: false, notes: ["router asks the user a question first"] }, source: "router" };
+  }
   if (asked.decision) {
     const verdict = validateDecision(asked.decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, asked.decision)) });
     if (verdict.ok) return { ...asked, verdict, source: verdict.chosen !== "default" ? "router" : "default" };

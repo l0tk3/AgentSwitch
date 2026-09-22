@@ -22,7 +22,9 @@ export const Decision = z.object({
   reason: z.string().default(""),
   confidence: z.number().min(0).max(1),
   /** Re-dispatch only: keep going with a new target, run a repair tool first, or tell the user why not. */
-  action: z.enum(["redispatch", "repair", "give_up"]).default("redispatch"),
+  action: z.enum(["redispatch", "repair", "give_up", "clarify"]).default("redispatch"),
+  /** action=clarify: the one thing only the user can supply (credential, URL, which of two readings). */
+  question: z.string().nullable().default(null),
   /** action=repair only: which registered repair tool to run, with its arguments. */
   repair: z.object({ tool: z.string().min(1), args: z.record(z.string(), z.unknown()).default({}) }).nullable().default(null),
   /** Re-dispatch only: what the next executor must know about the previous attempt. */

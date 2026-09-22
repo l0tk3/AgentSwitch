@@ -72,7 +72,7 @@ function showEvent(ev: TaskEvent): void {
     case "dispatched": console.log(`${t} dispatch ${p.harness}/${p.model}${p.effort ? ` effort=${p.effort}` : ""} [${p.chosen}]`); break;
     case "text": console.log(`${t}   ${String(p.text).replace(/\n/g, "\n           ")}`); break;
     case "tool_call": console.log(`${t}   tool ${p.tool}: ${p.command ?? JSON.stringify(p)}`); break;
-    case "approval_request": console.log(`${t} APPROVAL ${p.approvalId}: ${p.action}\n           ${p.evidence}`); break;
+    case "approval_request": console.log(`${t} ${p.kind === "question" ? "QUESTION" : "APPROVAL"} ${p.approvalId}: ${p.action}\n           ${p.evidence}`); break;
     case "approval_resolved": console.log(`${t} approval ${p.approvalId} -> ${p.decision} (${p.status}, by ${p.by ?? "user"})`); break;
     case "supervisor": console.log(`${t} supervisor ${p.kind}: ${p.decision ?? p.action ?? (p.accepted ? "accepted" : `rejected: ${(p.missing as string[] | undefined)?.join("; ") ?? ""}`)}${p.reason || p.note ? ` — ${p.reason ?? p.note}` : ""} [${p.source}]`); break;
     case "attempt_failed": console.log(`${t} FAILED   ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (side effects)" : ""}`); break;
@@ -97,6 +97,12 @@ async function watchInteractive(id: string): Promise<void> {
       if (values.json) return out(ev);
       showEvent(ev);
       if (ev.type === "approval_request" && process.stdin.isTTY) {
+        if (ev.payload.kind === "question") {
+          const text = await new Promise<string>((r) => rl.question("           answer: ", r));
+          if (text.trim()) await client.answer(id, String(ev.payload.approvalId), text.trim());
+          else await client.approve(id, String(ev.payload.approvalId), "deny");
+          return;
+        }
         const answer = await new Promise<string>((r) => rl.question("           allow? [y/N] ", r));
         await client.approve(id, String(ev.payload.approvalId), /^y/i.test(answer) ? "allow" : "deny");
       }
@@ -136,6 +142,12 @@ async function main(): Promise<number> {
       out(await client.approve(a1, a2, values.allow ? "allow" : "deny")); return 0;
     }
     case "cancel": { if (!a1) throw new Error("cancel <id>"); out(await client.cancel(a1)); return 0; }
+    case "answer": { if (!a1 || !a2 || !positionals[3]) throw new Error('answer <task> <approval> "<text>"'); out(await client.answer(a1, a2, positionals[3])); return 0; }
+    case "policy": {
+      if (!a1) { out(await client.policy()); return 0; }
+      if (a1 !== "manual" && a1 !== "auto" && a1 !== "scoped") throw new Error("policy [manual|auto|scoped] [cat,cat,…]");
+      out(await client.setPolicy({ mode: a1, ...(a2 ? { human: a2.split(",") } : {}) })); return 0;
+    }
     case "handoff": {
       if (!a1) throw new Error("handoff <taskId> [--pin h/m]");
       const next = await client.handoff(a1, values.pin ? splitPin(values.pin) : undefined);

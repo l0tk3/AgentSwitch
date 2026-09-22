@@ -38,7 +38,7 @@ export function closeStream() {
   set({ es: null });
 }
 
-const LOADERS = { home: [loadTasks, loadThreads, loadQuota], log: [loadLog], ext: [loadExt], ctx: [loadCtx] };
+const LOADERS = { home: [loadTasks, loadThreads, loadQuota, loadPolicy], log: [loadLog], ext: [loadExt], ctx: [loadCtx, loadPolicy] };
 
 export async function goto(view) {
   closeStream();
@@ -85,6 +85,17 @@ export async function submitTask(body) {
   clearPending();
   await Promise.all([loadTasks(), loadThreads().catch(() => undefined)]);
   openTask(t.id);
+}
+
+export async function answer(taskId, approvalId, text) {
+  await api("POST", `/tasks/${taskId}/answer`, { approval_id: approvalId, text });
+  await Promise.all([loadApprovals(), loadTasks()]);
+}
+
+export const loadPolicy = async () => set({ policy: await api("GET", "/approvals/policy") });
+export async function savePolicy(policy) {
+  const r = await api("PUT", "/approvals/policy", policy);
+  set((s) => ({ policy: { ...s.policy, policy: r.policy } }));
 }
 
 export async function approve(taskId, approvalId, decision) {

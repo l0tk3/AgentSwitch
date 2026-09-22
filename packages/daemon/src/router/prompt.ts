@@ -36,7 +36,8 @@ export const DECISION_SHAPE = `{
   "fallbacks": [{"harness": "...", "model": "..."}],
   "reason": "<one sentence>",
   "confidence": <0..1>,
-  "action": "redispatch" | "repair" | "give_up",   // only when asked to decide again after a failure
+  "action": "redispatch" | "repair" | "give_up" | "clarify",   // redispatch by default; clarify = ask the user first
+  "question": "<with action=clarify: the one question the user must answer>" | null,
   "repair": {"tool": "<a listed repair tool>", "args": {}} | null,   // only with action=repair
   "handoff_note": "<for the next executor: what was already done, what to avoid>" | null
 }`;
@@ -60,7 +61,10 @@ Rules:
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
 - You may read files under the working directory to judge size and language. Do not modify anything.
 - Label the task's "kind" for the track record: code-multifile, code-small, browser, chat, translate or other.
-- If unsure, lower confidence instead of guessing.
+- If the task cannot be done without something only the user can supply (a credential or site missing from the
+  context, a URL, which of two readings they mean), reply with action "clarify" and one precise question instead of
+  dispatching. Do not clarify for things an executor can find out by itself.
+- If unsure about the target, lower confidence instead of guessing.
 - Reply with exactly one JSON object and nothing else, of this shape:
 ${DECISION_SHAPE}${contextSection(x.context ?? EMPTY_CONTEXT)}${memorySection(x.memory)}${recordSection(x.record)}${extensionsSection(x.extensions)}${threadsSection(x.threads)}`;
 }
