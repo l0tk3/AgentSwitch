@@ -1,5 +1,7 @@
 /** Tasks: create, list, show, follow the event stream, approve / answer / cancel, hand off. */
 
+import { looksSensitive } from "../secrets/detect.js";
+import type { SealedEntry } from "../secrets/sealer.js";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -18,6 +20,8 @@ const NewTaskBody = z.object({
   needs_browser: z.boolean().optional(),
   ephemeral: z.boolean().optional(),
   parent_id: z.string().min(1).optional(),
+  /** Run the sealer even when the text does not look sensitive (router-v0 §9). */
+  seal: z.boolean().optional(),
   /** Ids from POST /uploads; moved into <cwd>/in/ when the task is created. */
   attachments: z.array(z.string().min(1)).max(MAX_FILES_PER_UPLOAD).optional(),
   /** Run inside an existing thread (defaults to the parent's thread, else a new one). */
@@ -26,6 +30,18 @@ const NewTaskBody = z.object({
   approval: ApprovalPolicy.optional(),
 });
 export { NewTaskBody };
+
+type Sealed = { ok: true; text: string; sealed: readonly SealedEntry[] } | { ok: false; code: "unroutable" | "unavailable"; error: string };
+
+/** Plaintext credentials never reach the store: when asked, or when the text looks like it carries them, the sealer
+ *  runs first and its failure refuses the submission rather than storing the text as is. */
+async function sealSubmission(deps: ApiDeps, text: string, requested: boolean): Promise<Sealed> {
+  if (!requested && !looksSensitive(text)) return { ok: true, text, sealed: [] };
+  if (!deps.sealer) return requested ? { ok: false, code: "unavailable", error: "no sealer: the daemon runs without secret-gate, so plaintext credentials cannot be turned into tokens" } : { ok: true, text, sealed: [] };
+  const r = await deps.sealer(text);
+  if (!r.ok) return { ok: false, code: r.code, error: r.error };
+  return { ok: true, text: r.text, sealed: r.sealed };
+}
 const AnswerBody = z.object({ approval_id: z.string().min(1), text: z.string().max(4000).optional(), answers: z.record(z.string(), z.array(z.string())).optional() })
   .refine((b) => b.text !== undefined || b.answers !== undefined, { message: "text or answers required" });
 const HandoffBody = z.object({ to: TargetRef.optional() });
@@ -36,7 +52,9 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
   app.post("/tasks", async (c) => {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
-    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
+    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, seal, ...rest } = body.data;
+    const sealed = await sealSubmission(deps, rest.task, seal ?? false);
+    if (!sealed.ok) return c.json({ error: sealed.error }, sealed.code === "unroutable" ? 400 : 503);
     const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
     if (cwdProblem) return c.json({ error: cwdProblem }, 400);
     const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
@@ -50,7 +68,7 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     let attachments: Attachment[] = [];
     try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
     catch (err) { return c.json({ error: (err as Error).message }, 400); }
-    const task = deps.engine.submit({ ...rest, cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
+    const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
     return c.json(task, 201);
   });
 

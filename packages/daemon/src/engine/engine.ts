@@ -89,8 +89,10 @@ export class Engine {
   submit(input: NewTask): Task {
     const parent = input.parentId ? this.ctx.store.getTask(input.parentId) : undefined;
     const threadId = input.threadId ?? parent?.threadId ?? null;
-    const task = this.ctx.store.createTask({ ...input, ...(threadId ? { threadId } : {}) });
+    const { sealed, ...rest } = input;
+    const task = this.ctx.store.createTask({ ...rest, ...(threadId ? { threadId } : {}) });
     this.ctx.emit(task.id, "queued", { task: task.task, cwd: task.cwd, threadId });
+    if (sealed?.length) this.ctx.emit(task.id, "sealed", { entries: sealed });
     const run = this.process(task.id).catch((err: unknown) => {
       console.error(`task ${task.id}: unhandled error after execution: ${(err as Error).message}`);
     }).finally(() => this.inFlight.delete(task.id));

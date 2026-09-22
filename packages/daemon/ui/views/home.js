@@ -16,12 +16,13 @@ function composer(hint, pending) {
       <input id="c-cwd" data-keep placeholder="工作目录（留空 = 临时目录，用完即删）">
       <input id="c-pin" data-keep class="pin" placeholder="指定 harness/model，留空由路由器决定">
       <select id="c-browser" data-keep><option value="">浏览器：路由器决定</option><option value="1">需要浏览器</option></select>
+      <label class="dim" title="任务里可以直接写账号密码或贴一张账号表：先由路由器模型标出来，daemon 用图形界面同一把密钥做成 enc:v1: 密文，执行者和记录只见密文"><input type="checkbox" id="c-seal" data-keep> 含明文凭据，先做密文</label>
       <select id="c-approval" data-keep title="这次任务的审批由谁来批；默认按「上下文」页的审批策略"><option value="">审批：按默认策略</option><option value="manual">审批：全部我来批</option><option value="auto">审批：全权交给路由器</option><option value="scoped">审批：按划定范围</option></select>
       <button data-attach title="也可以拖进来或直接粘贴截图">📎 附件</button>
       <button class="primary" id="c-send">发送</button>
     </div>
     ${pendingList(pending)}
-    <div class="hint" style="margin-top:8px">${hint ? `<span class="error">${esc(hint)}</span> · ` : ""}附件放进任务目录的 in/，内容原样进模型上下文：截图里别带密码。模型交付的文件从任务页下载。</div>
+    <div class="hint" style="margin-top:8px">${hint ? `<span class="error">${esc(hint)}</span> · ` : ""}附件放进任务目录的 in/，内容原样进模型上下文：截图里别带密码。任务文本里的密码会先做成密文（看起来像凭据时自动做，勾选则一定做）。模型交付的文件从任务页下载。</div>
   </section>`;
 }
 
@@ -114,7 +115,7 @@ async function send() {
   if (!task) return;
   const cwd = $("#c-cwd").value.trim();
   const pin = $("#c-pin").value.trim();
-  const body = { task, ...(cwd ? { cwd } : { ephemeral: true }), ...($("#c-browser").value === "1" ? { needs_browser: true } : {}) };
+  const body = { task, ...(cwd ? { cwd } : { ephemeral: true }), ...($("#c-browser").value === "1" ? { needs_browser: true } : {}), ...($("#c-seal").checked ? { seal: true } : {}) };
   if (pin.includes("/")) body.pin = { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) };
   const mode = $("#c-approval").value;
   if (mode) body.approval = mode === "scoped" ? { mode, human: (get().policy?.policy?.human) || undefined } : { mode };

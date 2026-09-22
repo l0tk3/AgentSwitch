@@ -3,7 +3,7 @@
  *  decides when to ask and what is off limits; the model returns one JSON object. */
 
 import { z } from "zod";
-import { extractJsonObject } from "./decision.js";
+import { extractJsonObject } from "../util/json.js";
 import type { Router } from "./routers/types.js";
 
 export const SupervisorConfig = z.object({

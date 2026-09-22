@@ -11,4 +11,4 @@
 ## 约定
 - 每个 package 自包含：自己的依赖、测试、README；跨 package 只通过进程/网络接口
 - 测试不打真模型；打真模型的脚本放 `scripts/` 且不进 pytest
-- 密码、token、PII 只能以 secret-gate 密文形式出现在任何模型上下文里
+- 密码、token、PII 只能以 secret-gate 密文形式出现在执行器上下文、库和日志里。唯一例外是路由器模型的 sealer 调用（`docs/router-v0.md` §9）：它看任务原文、标出凭据，由 daemon 做成密文后才入库

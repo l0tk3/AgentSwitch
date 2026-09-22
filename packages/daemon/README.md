@@ -34,6 +34,15 @@ Environment: `AGENTSWITCH_HOME` (default `~/.agentswitch`: `agentswitch.db`, `ro
 Development executor: put an `@echo {...}` directive in the task text to script the run:
 `{"delayMs":50,"approval":"rm -rf /tmp/x","fail":"quota","failTimes":1,"result":"ok","tokens":123}`.
 
+## Plaintext credentials in a task (router-v0 §9)
+
+A task may carry accounts and passwords, or a pasted table of them. When the text looks like it does (or the
+request says `seal: true`), the router's text-only agent marks the values and their hosts, the daemon mints
+tokens with `secret-gate enc --batch` (the desktop UI's command and current keypair) and stores the task
+with the tokens in place of the values. A `sealed` event lists labels and hosts. An http credential whose
+site the text does not name is refused (400: add the URL); a sealer failure refuses the submission (503)
+instead of storing plaintext. Echo mode has no sealer.
+
 ## Phone draft UI
 
 `http://127.0.0.1:4711/ui` (`/` redirects there): a desktop console served from `ui/` (plain ES modules, no build step; `/ui/*` serves only files inside that directory),

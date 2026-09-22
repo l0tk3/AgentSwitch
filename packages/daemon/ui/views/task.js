@@ -13,6 +13,7 @@ export function eventLine(ev) {
   const p = ev.payload || {};
   switch (ev.type) {
     case "queued": return "已排队";
+    case "sealed": return `已做密文：${(p.entries || []).map((e) => `${e.label}${e.hosts && e.hosts.length ? " → " + e.hosts.join(", ") : ""}`).join("；")}`;
     case "routed": { if (p.clarify) return `路由器先问你：${p.clarify}`; const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + (p.routerMs / 1000).toFixed(1) + "s" : ""})${v.notes && v.notes.length ? "\n  " + v.notes.join("; ") : ""}`; }
     case "dispatched": return `派发 ${p.harness}/${p.model}${p.effort ? " effort=" + p.effort : ""}`;
     case "text": return p.text;

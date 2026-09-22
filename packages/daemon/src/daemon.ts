@@ -13,6 +13,8 @@ import { claudeExecutor, probeRateLimits } from "./executors/claude.js";
 import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
 import { defaultGate } from "./executors/gate.js";
+import { gateMinter } from "./secrets/minter.js";
+import { routerSealer, sitesFromContext, type Sealer } from "./secrets/sealer.js";
 import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
 import { defaultProtected, type ProtectedPaths } from "./executors/protected.js";
@@ -91,6 +93,8 @@ export type BuildOverrides = {
   readonly targets?: Targets;
   /** The resident OpenCode server; when absent, router-type calls fall back to `opencode run --standalone`. */
   readonly opencode?: OpenCodeServer;
+  /** Tests: a sealer without a model or the gate. */
+  readonly sealer?: Sealer;
 };
 
 export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): Daemon {
@@ -126,9 +130,12 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
   const supervisor = summarizer ? routerSupervisor(oracle("supervisor"), targets.router.supervisor, targets.router.timeout_ms) : undefined;
   const extensionsSummary = () => summarizeExtensions(extensions);
+  // The sealer (router-v0 §9) is the same text-only agent plus `secret-gate enc --batch`; only with real executors, which require the gate.
+  const gate = cfg.executors === "real" ? defaultGate() : null;
+  const sealer = overrides.sealer ?? (summarizer && gate ? routerSealer(oracle("sealer"), gateMinter(gate), () => sitesFromContext(loadContext(contextPath).text), targets.router.timeout_ms) : undefined);
   const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}) });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION });
+  const app = createApp({ ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 

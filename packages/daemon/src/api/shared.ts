@@ -1,5 +1,6 @@
 /** Shared by every route module: dependencies, body parsing, error text. */
 
+import type { Sealer } from "../secrets/sealer.js";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -17,6 +18,8 @@ import type { Targets } from "../router/targets.js";
 import type { CwdRules } from "./cwdPolicy.js";
 
 export type ApiDeps = {
+  /** Turns plaintext credentials in a submission into tokens before anything is stored (router-v0 §9); absent in echo mode. */
+  readonly sealer?: Sealer;
   readonly store: Store;
   readonly bus: Bus;
   readonly engine: Engine;

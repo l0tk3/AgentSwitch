@@ -4,7 +4,7 @@
  *  Failure leaves the previous summary in place and never blocks the task. */
 
 import { z } from "zod";
-import { extractJsonObject } from "../router/decision.js";
+import { extractJsonObject } from "../util/json.js";
 import { lintContext } from "../router/context.js";
 import type { Router } from "../router/routers/types.js";
 import type { Summary } from "./types.js";
