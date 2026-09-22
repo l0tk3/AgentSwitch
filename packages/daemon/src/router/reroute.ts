@@ -4,7 +4,7 @@
 import type { Decision } from "./decision.js";
 import { hasSideEffects, type FailureKind, type SideEffects } from "./failure.js";
 import { markUnavailable, type TargetRef, type Targets } from "./targets.js";
-import { validateDecision, validatePin, type Quota, type Running } from "./validate.js";
+import { validateDecision, validateTarget, type Quota, type Running } from "./validate.js";
 
 export type Attempt = {
   readonly harness: string;
@@ -90,7 +90,7 @@ function switchAlongChain(input: RerouteInput, failed: TargetRef): NextStep {
   };
   const verdict = validateDecision({ ...decision, confidence: Math.max(decision.confidence, targets.router.min_confidence) }, ctx);
   if (verdict.ok) return { kind: "switch", target: { harness: verdict.harness, model: verdict.model }, notes: verdict.notes };
-  const lastResort = validatePin(input.lowConfidenceTarget, ctx, decision.needs_browser);
+  const lastResort = validateTarget(input.lowConfidenceTarget, ctx, decision.needs_browser, "default");
   if (lastResort.ok) return { kind: "switch", target: input.lowConfidenceTarget, notes: [...verdict.notes, "default policy target"] };
   return { kind: "stop", reason: `no remaining target: ${[...new Set([...verdict.notes, ...lastResort.notes])].join("; ")}`, security: false };
 }

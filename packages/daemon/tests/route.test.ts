@@ -25,7 +25,7 @@ describe("route()", () => {
     expect(r.calls[1]!.previousError).toMatch(/^no JSON object in reply; reply began: /);
     expect(r.calls[1]!.task).toContain("previous reply was rejected");
     expect(out.source).toBe("default");
-    expect(out.verdict).toMatchObject({ ok: true, harness: "claude-code", model: "claude-sonnet-5", chosen: "pin" });
+    expect(out.verdict).toMatchObject({ ok: true, harness: "claude-code", model: "claude-sonnet-5", chosen: "default" });
     expect(out.routerError).toContain("brief");
   });
 

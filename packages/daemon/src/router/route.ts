@@ -9,7 +9,7 @@ import { redispatchMessage, systemPrompt, taskMessage, type ExtensionsSummary, t
 import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
 import type { Router } from "./routers/types.js";
 import { categoryOf, markUnavailable, type TargetRef, type Targets } from "./targets.js";
-import { validateDecision, validatePin, type Quota, type Running, type Verdict } from "./validate.js";
+import { validateDecision, validatePin, validateTarget, type Quota, type Running, type Verdict } from "./validate.js";
 
 export type RouteRequest = {
   readonly task: string;
@@ -75,10 +75,10 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
   if (asked.decision) {
     const verdict = validateDecision(asked.decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, asked.decision)) });
     if (verdict.ok) return { ...asked, verdict, source: verdict.chosen !== "default" ? "router" : "default" };
-    const last = validatePin(fallback, ctx, asked.decision.needs_browser);
+    const last = validateTarget(fallback, ctx, asked.decision.needs_browser, "default");
     return { ...asked, verdict: last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict, source: "default" };
   }
-  const verdict = validatePin(fallback, ctx, req.needsBrowser ?? false);
+  const verdict = validateTarget(fallback, ctx, req.needsBrowser ?? false, "default");
   return { ...asked, verdict, source: "default" };
 }
 
@@ -130,11 +130,11 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
       const source = verdict.chosen !== "default" ? "router" : "default";
       return { step: { kind: "redispatch", verdict, source }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
     }
-    const last = validatePin(excludedFallback, ctx, asked.decision.needs_browser);
+    const last = validateTarget(excludedFallback, ctx, asked.decision.needs_browser, "default");
     const merged = last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict;
     return { step: { kind: "redispatch", verdict: merged, source: "default" }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
   }
-  const verdict = validatePin(excludedFallback, ctx, req.needsBrowser ?? false);
+  const verdict = validateTarget(excludedFallback, ctx, req.needsBrowser ?? false, "default");
   return { step: { kind: "redispatch", verdict, source: "default" }, decision: null, routerError: asked.routerError, routerMs: asked.routerMs };
 }
 

@@ -57,12 +57,19 @@ function resolveModel(targets: Targets, harness: string, model: string | null): 
   return model ?? targets.harnesses[harness]?.default_model ?? "";
 }
 
-/** A pinned target skips the router entirely; still subject to catalog, browser, quota and concurrency. */
+/** A single target checked on its own (no fallback chain): the user's pin, or the default-policy target when the
+ *  router is unusable. `chosen` says which, so logs and the UI do not call a default a pin. A pin ignores the
+ *  category allow list (the user's decision, with a warning); a default target is rejected outside it. */
+export function validateTarget(ref: TargetRef, ctx: Context, needsBrowser: boolean, chosen: "pin" | "default"): Verdict {
+  const reason = rejectReason(ref, chosen === "pin" ? { ...ctx, category: null } : ctx, needsBrowser, null);
+  if (reason) return { ok: false, notes: [`${chosen} rejected: ${reason}`] };
+  const warn = chosen === "pin" && !allowedFor(ctx.targets, ctx.category ?? null, ref) ? [`pinned ${ref.harness}/${ref.model} is outside the ${ctx.category} allow list; it may refuse`] : [];
+  return accept(ref, null, chosen, ctx, warn);
+}
+
+/** The user's pinned target: skips the router entirely; still subject to catalog, browser, quota and concurrency. */
 export function validatePin(pin: TargetRef, ctx: Context, needsBrowser = false): Verdict {
-  const reason = rejectReason(pin, { ...ctx, category: null }, needsBrowser, null);
-  if (reason) return { ok: false, notes: [`pin rejected: ${reason}`] };
-  const warn = allowedFor(ctx.targets, ctx.category ?? null, pin) ? [] : [`pinned ${pin.harness}/${pin.model} is outside the ${ctx.category} allow list; it may refuse`];
-  return accept(pin, null, "pin", ctx, warn);
+  return validateTarget(pin, ctx, needsBrowser, "pin");
 }
 
 export function validateDecision(decision: Decision, base: Context): Verdict {

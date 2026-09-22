@@ -29,7 +29,7 @@ describe("reroute()", () => {
     expect(out.step.kind).toBe("redispatch");
     if (out.step.kind === "redispatch") {
       expect(out.step.source).toBe("default");
-      expect(out.step.verdict).toMatchObject({ ok: true, harness: "codex", model: "gpt-5.6-luna", chosen: "pin" });   // browser default with Claude excluded: cheapest browser-capable model
+      expect(out.step.verdict).toMatchObject({ ok: true, harness: "codex", model: "gpt-5.6-luna", chosen: "default" });   // browser default with Claude excluded: cheapest browser-capable model
       expect(out.step.verdict.notes[0]).toContain("unavailable");
     }
   });
