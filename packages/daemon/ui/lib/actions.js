@@ -6,6 +6,7 @@ import { releasePending, toPending, uploadPending } from "./files.js";
 
 export const loadTasks = async () => set({ tasks: await api("GET", "/tasks?limit=50") });
 export const loadThreads = async () => set({ threads: await api("GET", "/threads?status=open&limit=30") });
+export const loadPolicy = async () => set({ policy: await api("GET", "/approvals/policy") });
 export const loadApprovals = async () => set({ approvals: await api("GET", "/approvals") });
 export const loadQuota = async (refresh = false) => set({ quota: await api("GET", "/quota" + (refresh ? "?refresh=1" : "")) });
 export const loadLog = async () => set({ log: await api("GET", "/routing/log?limit=50") });
@@ -92,7 +93,6 @@ export async function answer(taskId, approvalId, text) {
   await Promise.all([loadApprovals(), loadTasks()]);
 }
 
-export const loadPolicy = async () => set({ policy: await api("GET", "/approvals/policy") });
 export async function savePolicy(policy) {
   const r = await api("PUT", "/approvals/policy", policy);
   set((s) => ({ policy: { ...s.policy, policy: r.policy } }));
