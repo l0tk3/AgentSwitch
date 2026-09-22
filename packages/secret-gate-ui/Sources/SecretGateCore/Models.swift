@@ -77,6 +77,26 @@ public struct TokenEntry: Identifiable, Hashable, Sendable {
     /// Label of the companion token that carries the account name.
     public var accountLabel: String { label + "/user" }
 
+    /// Everything but the secret value, for the rows file: the table survives a restart, plaintext never touches disk.
+    public struct Saved: Codable, Sendable {
+        public let id: UUID
+        public let label: String
+        public let hosts: String
+        public let kind: SecretKind
+        public let uses: [SecretUse]
+        public let note: String
+        public let account: String
+        public let encryptAccount: Bool
+    }
+
+    public var saved: Saved {
+        Saved(id: id, label: label, hosts: hosts, kind: kind, uses: uses.map(\.rawValue).sorted().compactMap(SecretUse.init(rawValue:)), note: note, account: account, encryptAccount: encryptAccount)
+    }
+
+    public init(saved s: Saved) {
+        self.init(id: s.id, label: s.label, hosts: s.hosts, kind: s.kind, uses: Set(s.uses), value: "", note: s.note, account: s.account, encryptAccount: s.encryptAccount)
+    }
+
     /// The extra row sent to the CLI when the account is to be encrypted (nil when there is nothing to encrypt).
     public var accountEntry: TokenEntry? {
         guard encryptAccount, !account.isEmpty, !hostList.isEmpty else { return nil }

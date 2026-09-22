@@ -145,3 +145,25 @@ final class EncryptedAccountTests: XCTestCase {
         XCTAssertEqual(rows[0].contextEntry, "- fin/pass：a.example\n  账号 lotke\n  密码 enc:v1:PPP")   // falls back to plaintext, visibly
     }
 }
+
+final class RowStoreTests: XCTestCase {
+    func testRoundTripKeepsEverythingButTheValue() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sgui-\(UUID().uuidString)")
+        let store = RowStore(url: dir.appendingPathComponent("rows.json"))
+        let a = TokenEntry(label: "fin/pass", hosts: "a.example:8600", kind: .secret, uses: [.http, .exec], value: "SECRET", note: "财务", account: "lotke", encryptAccount: false)
+        let b = TokenEntry(label: "mail/totp", hosts: "", kind: .totp, uses: [.otp], value: "S", note: "邮件")
+        XCTAssertNil(store.save([a, b]))
+        let text = try String(contentsOf: store.url, encoding: .utf8)
+        XCTAssertFalse(text.contains("SECRET"))
+        let back = store.load()
+        XCTAssertEqual(back.map(\.id), [a.id, b.id])
+        XCTAssertEqual(back[0].label, "fin/pass")
+        XCTAssertEqual(back[0].uses, [.http, .exec])
+        XCTAssertEqual(back[0].note, "财务")
+        XCTAssertEqual(back[0].account, "lotke")
+        XCTAssertFalse(back[0].encryptAccount)
+        XCTAssertEqual(back[0].value, "")
+        XCTAssertEqual(back[1].kind, .totp)
+        XCTAssertTrue(RowStore(url: dir.appendingPathComponent("missing.json")).load().isEmpty)
+    }
+}

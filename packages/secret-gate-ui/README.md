@@ -43,6 +43,9 @@ gate home are editable in Settings (⌘,); defaults are the repo venv and `~/.se
   (`- 备注（label）：hosts` / `账号 …` / `密码 enc:v1:…`, or `2FA …` for TOTP) ready to paste into
   AgentSwitch's router context; "复制全部条目" copies them all; "只复制密文" copies the bare token.
   The JSON export carries label, hosts, kind, note, account and token, never plaintext.
+- The table (labels, hosts, kind, uses, note, account, the encrypt-account flag) is saved to
+  `~/Library/Application Support/SecretGateUI/rows.json` (0600) on every change and restored at
+  launch; secret values are never written to disk.
 - Plaintext stays in the table after a run (mint again for another host, fix a typo) until
   "清空明文" is pressed. It lives only in the app's memory.
 

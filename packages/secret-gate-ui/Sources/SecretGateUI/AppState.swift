@@ -9,7 +9,15 @@ final class AppState: ObservableObject {
     @AppStorage("gateHome") var gateHome: String = GateCLI.defaultHome().path
 
     @Published private(set) var keys: [Keypair] = []
-    @Published var entries: [TokenEntry] = [TokenEntry()]
+    @Published var entries: [TokenEntry] = [TokenEntry()] {
+        didSet { if let err = rows.save(entries) { errorMessage = "行没能保存：\(err.localizedDescription)" } }
+    }
+    private let rows = RowStore(url: RowStore.defaultURL())
+
+    init() {
+        let loaded = rows.load()
+        if !loaded.isEmpty { entries = loaded }
+    }
     @Published private(set) var results: [MintedRow] = []
     @Published private(set) var busy = false
     @Published var errorMessage: String?
