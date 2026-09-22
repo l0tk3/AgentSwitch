@@ -36,12 +36,12 @@ Development executor: put an `@echo {...}` directive in the task text to script 
 
 ## Plaintext credentials in a task (router-v0 §9)
 
-A task may carry accounts and passwords, or a pasted table of them. When the text looks like it does (or the
-request says `seal: true`), the router's text-only agent marks the values and their hosts, the daemon mints
-tokens with `secret-gate enc --batch` (the desktop UI's command and current keypair) and stores the task
-with the tokens in place of the values. A `sealed` event lists labels and hosts. An http credential whose
-site the text does not name is refused (400: add the URL); a sealer failure refuses the submission (503)
-instead of storing plaintext. Echo mode has no sealer.
+Write tasks as you like, accounts and passwords included. Every submission passes the sealer before
+it is stored: the router's text-only agent decides what is sensitive and which host each value is for
+(from the text, CONTEXT.md and the earlier turn), the daemon mints tokens with `secret-gate enc --batch`
+(the desktop UI's command and current keypair) and stores the task with tokens in place of the values.
+A `sealed` event lists labels and hosts. An http credential whose site nothing names is refused (400);
+a sealer failure refuses the submission (503) instead of storing plaintext. Echo mode has no sealer.
 
 ## Phone draft UI
 

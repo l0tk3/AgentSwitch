@@ -14,8 +14,9 @@ const gate = defaultGate();
 if (!gate) throw new Error("secret-gate not found");
 const targets = loadTargets(join(import.meta.dirname, "..", "config", "targets.yaml"));
 const router = opencodeRouter({ model: targets.router.model, agentName: "sealer", tools: "none", runIn: mkdtempSync(join(tmpdir(), "sealer-smoke-")) });
-const seal = routerSealer(router, gateMinter(gate), () => ["core.internal.cworkspace.tech:8600"]);
-const text = "登录财务系统 http://core.internal.cworkspace.tech:8600/ 账号 smoke-user 密码 Sm0ke-Pass-42! 然后导出九月报表";
+// No URL in the task: the model must find the finance system's host in the environment context.
+const seal = routerSealer(router, gateMinter(gate), () => "- 财务系统（finance）：http://core.internal.cworkspace.tech:8600/ 账号 enc:v1:AAAAAAAAAAAAAAAAAAAAAAAA\n- grafana：http://core.internal.cworkspace.tech:3000/");
+const text = "登录财务系统，账号 smoke-user 密码 Sm0ke-Pass-42!，然后导出九月报表";
 const started = Date.now();
 const r = await seal(text);
 console.log(`sealer: ${Date.now() - started} ms`);
