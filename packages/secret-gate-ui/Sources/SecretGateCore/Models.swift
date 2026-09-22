@@ -103,10 +103,27 @@ public struct TokenEntry: Identifiable, Hashable, Sendable {
         return TokenEntry(label: accountLabel, hosts: hosts, kind: .secret, uses: [.http], value: account)
     }
 
-    public var hostList: [String] {
+    /// The hosts field as typed, one entry per site: a bare `host[:port]` or a full URL (`https://host:port/path`).
+    public var siteList: [String] {
         hosts.split(whereSeparator: { $0 == "," || $0 == " " || $0 == "|" || $0 == ";" })
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    /// What the gate binds to: `host[:port]` only. The scheme and path of a URL are for the CONTEXT.md entry, so the
+    /// model knows whether a site is http or https; the gate sees both through the proxy and does not care.
+    public var hostList: [String] {
+        var seen = Set<String>()
+        return siteList.map(TokenEntry.hostOf).filter { seen.insert($0).inserted }
+    }
+
+    /// `https://user@core.example:8600/login?x` → `core.example:8600`; a bare host passes through untouched.
+    public static func hostOf(_ site: String) -> String {
+        var s = site
+        if let r = s.range(of: "://") { s = String(s[r.upperBound...]) }
+        if let slash = s.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) { s = String(s[..<slash]) }
+        if let at = s.lastIndex(of: "@") { s = String(s[s.index(after: at)...]) }
+        return s
     }
 
     /// What `secret-gate enc --batch` expects on stdin, one object per entry.
@@ -137,6 +154,8 @@ public struct MintedRow: Identifiable, Hashable, Sendable {
     public let id: UUID
     public let label: String
     public let hosts: [String]
+    /// The sites as typed (URLs keep their scheme and path); what the CONTEXT.md entry prints.
+    public let sites: [String]
     public let kind: SecretKind
     public let note: String
     public let account: String
@@ -151,6 +170,7 @@ public struct MintedRow: Identifiable, Hashable, Sendable {
         id = entry.id
         label = entry.label
         hosts = entry.hostList
+        sites = entry.siteList
         kind = entry.kind
         note = entry.note
         account = entry.account
@@ -179,7 +199,7 @@ public struct MintedRow: Identifiable, Hashable, Sendable {
     public var contextEntry: String? {
         guard let token else { return nil }
         let title = note.isEmpty ? label : "\(note)（\(label)）"
-        var lines = ["- \(title)：\(hosts.joined(separator: ", "))"]
+        var lines = ["- \(title)：\(sites.joined(separator: ", "))"]
         if let accountToken { lines.append("  账号 \(accountToken)（密文，用 secret_fill 填）") }
         else if !account.isEmpty { lines.append("  账号 \(account)") }
         lines.append(kind == .totp ? "  2FA \(token)（用 secret_otp 取码）" : "  密码 \(token)")
@@ -188,7 +208,7 @@ public struct MintedRow: Identifiable, Hashable, Sendable {
 
     /// JSON export row (no plaintext ever).
     public var exportObject: [String: Any] {
-        ["label": label, "hosts": hosts, "kind": kind.rawValue, "note": note, "account": accountToken ?? account, "account_encrypted": accountToken != nil, "token": token ?? "", "error": error ?? ""]
+        ["label": label, "hosts": hosts, "sites": sites, "kind": kind.rawValue, "note": note, "account": accountToken ?? account, "account_encrypted": accountToken != nil, "token": token ?? "", "error": error ?? ""]
     }
 }
 

@@ -109,7 +109,7 @@ private struct EntryRow: View {
             HStack(spacing: 8) {
                 TextField("label，例如 portal-a/pass", text: Binding(get: { entry.label }, set: { onChange(entry.with(label: $0)) }))
                     .frame(width: 180)
-                TextField("host，逗号分隔；可带端口 10.0.0.5:8001；支持 *.example.com",
+                TextField("站点：可写完整 URL（https://core.example:8600/login），密文只绑 host:port，条目里保留协议；逗号分隔多个",
                           text: Binding(get: { entry.hosts }, set: { onChange(entry.with(hosts: $0)) }))
                 Picker("", selection: Binding(get: { entry.kind }, set: { onChange(entry.with(kind: $0, uses: defaultUses(for: $0))) })) {
                     ForEach(SecretKind.allCases, id: \.self) { Text($0.title).tag($0) }

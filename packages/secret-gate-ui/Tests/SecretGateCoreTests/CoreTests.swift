@@ -195,3 +195,24 @@ final class RowsExchangeTests: XCTestCase {
         XCTAssertTrue(RowsExchange.parse("").isEmpty)
     }
 }
+
+final class SiteURLTests: XCTestCase {
+    func testHostOfStripsSchemePathAndCredentials() {
+        XCTAssertEqual(TokenEntry.hostOf("https://core.internal.example:8600/login?next=1#x"), "core.internal.example:8600")
+        XCTAssertEqual(TokenEntry.hostOf("http://alice@mail.example/"), "mail.example")
+        XCTAssertEqual(TokenEntry.hostOf("10.0.0.5:8001"), "10.0.0.5:8001")
+        XCTAssertEqual(TokenEntry.hostOf("*.example.com"), "*.example.com")
+    }
+
+    func testTokenBindsHostsButEntryKeepsURLs() {
+        let e = TokenEntry(label: "fin/pass", hosts: "https://core.example:8600/login, http://core.example:8600", value: "v", note: "财务", encryptAccount: false)
+        XCTAssertEqual(e.hostList, ["core.example:8600"])                       // one binding, scheme-agnostic, deduplicated
+        XCTAssertEqual(e.siteList, ["https://core.example:8600/login", "http://core.example:8600"])
+        XCTAssertNil(e.problem)
+        let row = MintedRow(entry: e, result: TokenResult(label: "fin/pass", token: "enc:v1:AAA", error: nil))
+        XCTAssertEqual(row.contextEntry, "- 财务（fin/pass）：https://core.example:8600/login, http://core.example:8600\n  密码 enc:v1:AAA")
+        XCTAssertEqual(row.exportObject["hosts"] as? [String], ["core.example:8600"])
+        XCTAssertEqual(row.exportObject["sites"] as? [String], e.siteList)
+        XCTAssertEqual(e.batchObject["hosts"] as? [String], ["core.example:8600"])   // the CLI never sees a scheme
+    }
+}

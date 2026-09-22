@@ -31,7 +31,9 @@ gate home are editable in Settings (⌘,); defaults are the repo venv and `~/.se
 - **Keypairs**: list, generate with a name, switch the current one, copy a public key.
   Creating a keypair never switches silently unless it is the first; tokens minted earlier
   keep working because the gate decrypts with every keypair it holds.
-- **Tokens**: label, hosts (comma separated, `*.example.com` and IPs allowed), kind
+- **Tokens**: label, sites (comma separated; a bare `host[:port]`, `*.example.com`, an IP, or a full URL
+  such as `https://core.example:8600/login` — the token binds to `host:port` only, the URL with its
+  scheme goes into the CONTEXT.md entry so the model knows http from https), kind
   (password/token or TOTP), uses (http / otp / exec), value in a secure field, plus a note
   (what the platform is for) and an optional account. The note never reaches the CLI; the account
   is minted as a companion token `<label>/user` (same hosts, http use) when "账号也加密" is on

@@ -33,7 +33,7 @@ struct ResultsView: View {
                             if r.accountToken != nil { Text("账号已加密").font(.caption).foregroundStyle(.secondary) }
                             else if !r.account.isEmpty { Text("账号 \(r.account)").font(.caption).foregroundStyle(.secondary) }
                         }
-                        Text(r.hosts.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                        Text(r.sites.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
                         Text(r.token ?? r.error ?? "").font(.caption.monospaced())
                             .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
                             .foregroundStyle(r.ok ? Color.secondary : Color.red)
