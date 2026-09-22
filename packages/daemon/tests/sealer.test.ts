@@ -6,10 +6,11 @@ import { describe, expect, it } from "vitest";
 import { buildDaemon, type DaemonConfig } from "../src/daemon.js";
 import { echoRouter } from "../src/router/routers/echo.js";
 import { fakeMinter, parseMintOutput, type MintEntry } from "../src/secrets/minter.js";
-import { applyTokens, hostOf, parseSealReply, planSeal, routerSealer, type Sealer } from "../src/secrets/sealer.js";
+import { applyTokens, hostOf, isWholeRecord, LEGEND_HEADER, parseSealReply, planSeal, recordDelimiter, routerSealer, splitRecord, type Sealer } from "../src/secrets/sealer.js";
+import { composePrompt } from "../src/executors/instructions.js";
 import { decisionJson, TARGETS_PATH } from "./helpers.js";
 
-const reply = (secrets: unknown[]) => JSON.stringify({ secrets });
+const reply = (secrets: unknown[], layout: string | null = null) => JSON.stringify({ secrets, layout });
 
 describe("seal helpers", () => {
   it("hostOf strips scheme, credentials and path", () => {
@@ -26,12 +27,12 @@ describe("seal helpers", () => {
   it("planSeal: short, absent or duplicate values are skipped; http without a host is unroutable; labels are cleaned", () => {
     const text = "账号 lotke 密码 Hunter2! 再来一次 Hunter2!";
     const plan = planSeal(text, [
-      { value: "Hunter2!", label: "财务 pass", kind: "secret", hosts: ["http://core:8600/"], uses: ["http"] },
-      { value: "Hunter2!", label: "dup", kind: "secret", hosts: ["core"], uses: ["http"] },
-      { value: "abc", label: "short", kind: "secret", hosts: ["core"], uses: ["http"] },
-      { value: "notthere", label: "absent", kind: "secret", hosts: ["core"], uses: ["http"] },
-      { value: "lotke", label: "finance/account", kind: "secret", hosts: [], uses: ["http"] },
-      { value: "lotke", label: "x", kind: "secret", hosts: [], uses: ["exec"] },
+      { value: "Hunter2!", label: "财务 pass", field: "", kind: "secret", hosts: ["http://core:8600/"], uses: ["http"] },
+      { value: "Hunter2!", label: "dup", field: "", kind: "secret", hosts: ["core"], uses: ["http"] },
+      { value: "abc", label: "short", field: "", kind: "secret", hosts: ["core"], uses: ["http"] },
+      { value: "notthere", label: "absent", field: "", kind: "secret", hosts: ["core"], uses: ["http"] },
+      { value: "lotke", label: "finance/account", field: "", kind: "secret", hosts: [], uses: ["http"] },
+      { value: "lotke", label: "x", field: "", kind: "secret", hosts: [], uses: ["exec"] },
     ]);
     expect(plan.entries.map((e) => [e.label, e.hosts])).toEqual([["pass", ["core:8600"]]]);
     expect(plan.skipped).toEqual(["dup", "short", "absent", "x"]);
@@ -49,7 +50,7 @@ describe("seal helpers", () => {
 });
 
 describe("routerSealer", () => {
-  const found = [{ value: "Hunter2!", label: "finance/pass", hosts: ["http://core.internal:8600/"] }, { value: "lotke@x.io", label: "finance/account", hosts: ["core.internal:8600"] }];
+  const found = [{ value: "Hunter2!", label: "finance/pass", field: "account password", hosts: ["http://core.internal:8600/"] }, { value: "lotke@x.io", label: "finance/account", field: "login email", hosts: ["core.internal:8600"] }];
 
   it("replaces the values the model found with minted tokens and reports labels and hosts only", async () => {
     const router = echoRouter([reply(found)]);
@@ -61,9 +62,12 @@ describe("routerSealer", () => {
     if (!r.ok) return;
     expect(r.text).not.toContain("Hunter2!");
     expect(r.text).not.toContain("lotke@x.io");
-    expect(r.text.match(/enc:v1:[A-Za-z0-9_=-]+/g)).toHaveLength(2);
     expect(r.text).toContain("导出九月报表");
-    expect(r.sealed).toEqual([{ label: "finance/pass", kind: "secret", hosts: ["core.internal:8600"], uses: ["http"] }, { label: "finance/account", kind: "secret", hosts: ["core.internal:8600"], uses: ["http"] }]);
+    expect(r.sealed.map(({ token: _t, ...rest }) => rest)).toEqual([{ label: "finance/pass", field: "account password", kind: "secret", hosts: ["core.internal:8600"], uses: ["http"] }, { label: "finance/account", field: "login email", kind: "secret", hosts: ["core.internal:8600"], uses: ["http"] }]);
+    const [body, legendPart] = r.text.split(LEGEND_HEADER);
+    expect(body!.match(/enc:v1:[A-Za-z0-9_=-]+/g)).toHaveLength(2);
+    expect(legendPart).toContain(`- account password (for core.internal:8600): ${r.sealed[0]!.token}`);
+    expect(legendPart).toContain(`- login email (for core.internal:8600): ${r.sealed[1]!.token}`);
     expect(minted[0]!.map((e) => e.value)).toEqual(["Hunter2!", "lotke@x.io"]);
     expect(router.calls[0]!.task).toContain("User's environment context");
     expect(router.calls[0]!.task).toContain("core.internal:8600");
@@ -112,7 +116,8 @@ describe("POST /tasks with plaintext credentials", () => {
     expect(d.store.getTask(task.id)!.task).not.toContain("Hunter2!");
     const events = d.store.eventsSince(task.id, 0);
     expect(JSON.stringify(events)).not.toContain("Hunter2!");
-    expect(events.find((e) => e.type === "sealed")?.payload).toEqual({ entries: [{ label: "finance/pass", kind: "secret", hosts: ["core.internal:8600"], uses: ["http"] }] });
+    const sealedEv = events.find((e) => e.type === "sealed")?.payload as { entries: { label: string; field: string; token: string }[] };
+    expect(sealedEv.entries).toMatchObject([{ label: "finance/pass", field: "finance/pass", hosts: ["core.internal:8600"], token: expect.stringMatching(/^enc:v1:/) }]);
     expect(JSON.stringify(d.store.getTask(task.id))).not.toContain("Hunter2!");
   });
 
@@ -133,5 +138,66 @@ describe("POST /tasks with plaintext credentials", () => {
     const r = await daemon(unroutable).post({ task: "密码 Hunter2!", cwd: "/tmp" });
     expect(r.status).toBe(400);
     expect(((await r.json()) as { error: string }).error).toContain("x/pass");
+  });
+});
+
+describe("records: pasted account lines (email|password|year|country|app password|session key)", () => {
+  const line = "xx@aa.com|Pw-2024-secret|2024|United States|ggff elhf lchd cpkx|sessionkey-01-abcdef";
+  const text = `把这个账号录进 http://panel.example:9000/ 的账号管理\n${line}`;
+  const fields = [
+    { value: "xx@aa.com", field: "login email", label: "acct1/email", hosts: ["panel.example:9000"] },
+    { value: "Pw-2024-secret", field: "account password", label: "acct1/pass", hosts: ["panel.example:9000"] },
+    { value: "ggff elhf lchd cpkx", field: "Google app password", label: "acct1/app-pass", hosts: ["panel.example:9000"] },
+    { value: "sessionkey-01-abcdef", field: "session key", label: "acct1/session", hosts: ["panel.example:9000"] },
+  ];
+  const layout = "email | password | year | country | Google app password | session key";
+
+  it("recordDelimiter / isWholeRecord / splitRecord", () => {
+    expect(recordDelimiter(line)).toBe("|");
+    expect(recordDelimiter("a,b")).toBeNull();
+    expect(isWholeRecord(text, line)).toBe(true);
+    expect(isWholeRecord(text, "Pw-2024-secret")).toBe(false);
+    expect(isWholeRecord("a\nb", "a\nb")).toBe(true);
+    const split = splitRecord({ value: line, field: "", label: "x", kind: "secret", hosts: ["h"], uses: ["http"] }, 1);
+    expect(split.map((f) => f.value)).toEqual(["xx@aa.com", "Pw-2024-secret", "2024", "United States", "ggff elhf lchd cpkx", "sessionkey-01-abcdef"]);
+    expect(split[4]).toMatchObject({ label: "record1/field5", field: "field 5 of record 1", hosts: ["h"] });
+  });
+
+  it("fields are sealed one by one, year and country stay in the clear, the legend names each token and the layout", async () => {
+    const r = await routerSealer(echoRouter([reply(fields, layout)]), fakeMinter(), () => "")(text);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const recordLine = r.text.split("\n")[1]!;
+    expect(recordLine).toMatch(/^enc:v1:\S+\|enc:v1:\S+\|2024\|United States\|enc:v1:\S+\|enc:v1:\S+$/);
+    expect(r.text).toContain(`Record layout: ${layout}`);
+    expect(r.text).toContain(`- Google app password (for panel.example:9000): ${r.sealed[2]!.token}`);
+    for (const f of fields) expect(r.text).not.toContain(f.value);
+  });
+
+  it("a whole record marked as one value: asked again with feedback; still whole → every field sealed on its own", async () => {
+    const whole = [{ value: line, field: "account", label: "acct/all", hosts: ["panel.example:9000"] }];
+    const fixed = echoRouter([reply(whole), reply(fields, layout)]);
+    const r1 = await routerSealer(fixed, fakeMinter(), () => "")(text);
+    expect(fixed.calls).toHaveLength(2);
+    expect(fixed.calls[1]!.task).toContain("marked whole records as single values (acct/all)");
+    expect(r1.ok && r1.text).toContain("|2024|United States|");
+    const stubborn = echoRouter([reply(whole)]);
+    const r2 = await routerSealer(stubborn, fakeMinter(), () => "")(text);
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) return;
+    expect(r2.sealed).toHaveLength(6);
+    expect(r2.text).not.toContain("xx@aa.com");
+    expect(r2.text).not.toContain(line);
+  });
+});
+
+describe("composePrompt: the user's own message reaches the executor when it carries tokens", () => {
+  it("added after the brief only when it holds a token and differs from the brief", () => {
+    const task = `录入账号 enc:v1:AAAAAAAAAAAAAAAAAAAAAAAA\n\n${LEGEND_HEADER}\n- login email: enc:v1:AAAAAAAAAAAAAAAAAAAAAAAA`;
+    const p = composePrompt({ brief: "enter the account", task, handoffNote: null, context: null });
+    expect(p.startsWith("enter the account\n\nThe user's own message")).toBe(true);
+    expect(p).toContain("- login email: enc:v1:");
+    expect(composePrompt({ brief: "b", task: "no tokens here", handoffNote: null, context: null })).toBe("b");
+    expect(composePrompt({ brief: task, task, handoffNote: null, context: null })).toBe(task);
   });
 });

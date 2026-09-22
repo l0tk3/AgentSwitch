@@ -25,6 +25,9 @@ what you need. Without such a tool, finish with a clear question instead of gues
   working directory. The user downloads from there; files anywhere else in a temporary working
   directory are deleted when the task ends.
 - The user's own accounts and credentials appear as `enc:v1:` values. Read the next section.
-- When a tool needs one of those tokens, copy it from the "User environment context" section at the end of
-  your prompt, character for character, in one piece. Never retype it from memory or from the brief; a single
+- When a tool needs one of those tokens, copy it from "The user's own message" or the "User environment
+  context" section of your prompt, character for character, in one piece. A message the user pasted accounts into
+  ends with a list naming what each token is ("login email", "Google app password"); open the target form, match
+  its fields to that list, and put each token where its field goes. Values left in the clear (years, countries)
+  are meant to be typed as they are. Never retype it from memory or from the brief; a single
   dropped character makes the gate reject it ("invalid base64url").

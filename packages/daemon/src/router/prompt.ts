@@ -55,7 +55,9 @@ Rules:
   Small edits: a mid/low model. One-line questions, summaries, translation, very long material: opencode / deepseek-flash.
   Pick a "[1m]" variant only when the whole repository must fit in context. Prefer the cheapest model that is clearly enough.
 - Browser tasks (open a site, log in, fill a form): needs_browser=true and a harness with browser support.
-  Credentials arrive as enc:v1: tokens; pass them through unchanged and never ask the executor to find a password.
+  Credentials arrive as enc:v1: tokens and never as plaintext; never ask the executor to find a password. Tokens in
+  the user's message reach the executor verbatim with a list saying what each one is: in the brief, refer to them by
+  that description ("the Google app password from the user's message") instead of copying them.
 - If the task belongs to a category listed under the catalog, set "category" to its name and choose harness,
   model and every fallback only from that category's targets; the others refuse such tasks outright.
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
