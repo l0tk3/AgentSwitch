@@ -7,7 +7,7 @@ import Foundation
 ///     label, , totp, BASE32SECRET          (no host: use = otp)
 ///
 /// Lines starting with `#` and blank lines are ignored. Fields are comma separated;
-/// hosts inside a field are separated by `|` or spaces.
+/// hosts inside a field are separated by `|` or spaces. Note and account are filled in on the row afterwards.
 public enum CSVImport {
     public static func parse(_ text: String) -> [TokenEntry] {
         text.split(whereSeparator: \.isNewline)

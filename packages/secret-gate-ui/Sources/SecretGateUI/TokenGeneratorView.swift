@@ -53,6 +53,9 @@ struct TokenGeneratorView: View {
             let ready = state.readyEntries.count
             Text("\(ready) / \(state.entries.count) 行可生成").foregroundStyle(.secondary)
             Spacer()
+            Button("清空明文") { state.clearValues() }
+                .disabled(!state.entries.contains { !$0.value.isEmpty })
+                .help("生成后明文会留在表格里，方便再生成或改错；这个按钮一次清掉")
             Button("全部生成") { state.encryptAll() }
                 .keyboardShortcut(.return, modifiers: [.command])
                 .disabled(ready == 0 || state.current == nil || state.busy)
@@ -103,6 +106,11 @@ private struct EntryRow: View {
                 .labelsHidden().frame(width: 150)
                 Button(role: .destructive, action: onRemove) { Image(systemName: "minus.circle") }
                     .buttonStyle(.plain).help("删除这一行")
+            }
+            HStack(spacing: 8) {
+                TextField("备注：这个平台是做什么的，例如 财务系统", text: Binding(get: { entry.note }, set: { onChange(entry.with(note: $0)) }))
+                TextField("账号（可选）", text: Binding(get: { entry.account }, set: { onChange(entry.with(account: $0)) }))
+                    .frame(width: 200)
             }
             HStack(spacing: 8) {
                 SecureField(entry.kind == .totp ? "2FA 的 base32 密钥" : "密码 / token 的值",

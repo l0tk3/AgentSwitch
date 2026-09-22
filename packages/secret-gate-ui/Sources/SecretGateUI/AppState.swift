@@ -10,7 +10,7 @@ final class AppState: ObservableObject {
 
     @Published private(set) var keys: [Keypair] = []
     @Published var entries: [TokenEntry] = [TokenEntry()]
-    @Published private(set) var results: [TokenResult] = []
+    @Published private(set) var results: [MintedRow] = []
     @Published private(set) var busy = false
     @Published var errorMessage: String?
 
@@ -58,15 +58,16 @@ final class AppState: ObservableObject {
         let batch = readyEntries
         guard !batch.isEmpty else { errorMessage = "没有可生成的行"; return }
         let cli = cli
+        // Rows keep their plaintext after a run: the user may want to mint again for another host or fix a
+        // typo without retyping everything. "清空明文" wipes them explicitly.
         perform { try cli.encrypt(batch) } assign: { results in
-            self.results = results
-            // Drop the plaintext of everything that succeeded; keep failed rows for correction.
-            let okLabels = Set(results.filter(\.ok).compactMap(\.label))
-            self.entries = self.entries.map { okLabels.contains($0.label) ? $0.with(value: "") : $0 }
+            self.results = MintedRow.join(entries: batch, results: results)
         }
     }
 
     func clearResults() { results = [] }
+
+    func clearValues() { entries = entries.map { $0.with(value: "") } }
 
     // MARK: plumbing
 

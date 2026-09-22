@@ -32,11 +32,17 @@ gate home are editable in Settings (⌘,); defaults are the repo venv and `~/.se
   Creating a keypair never switches silently unless it is the first; tokens minted earlier
   keep working because the gate decrypts with every keypair it holds.
 - **Tokens**: label, hosts (comma separated, `*.example.com` and IPs allowed), kind
-  (password/token or TOTP), uses (http / otp / exec), value in a secure field. Rows show
-  their validation problem inline; only valid rows are sent.
+  (password/token or TOTP), uses (http / otp / exec), value in a secure field, plus a note
+  (what the platform is for) and an optional account; the last two never reach the CLI. Rows
+  show their validation problem inline; only valid rows are sent.
 - **Batch**: paste lines `label, host1|host2, [secret|totp,] value`, or add rows by hand.
   Results list per-row success/error with copy buttons, copy-all, and JSON export.
-- After a successful run the plaintext of every succeeded row is cleared from the table.
+- Results pair each token with its row. "复制条目" copies one row as a CONTEXT.md list item
+  (`- 备注（label）：hosts` / `账号 …` / `密码 enc:v1:…`, or `2FA …` for TOTP) ready to paste into
+  AgentSwitch's router context; "复制全部条目" copies them all; "只复制密文" copies the bare token.
+  The JSON export carries label, hosts, kind, note, account and token, never plaintext.
+- Plaintext stays in the table after a run (mint again for another host, fix a typo) until
+  "清空明文" is pressed. It lives only in the app's memory.
 
 ## Layout
 

@@ -72,3 +72,38 @@ final class ResultDecodingTests: XCTestCase {
         XCTAssertEqual(results[1].error, "invalid host")
     }
 }
+
+final class MintedRowTests: XCTestCase {
+    func testJoinPairsByLabelInOrderAndKeepsNoteAndAccount() {
+        let a = TokenEntry(label: "finance/pass", hosts: "core.internal.example:8600", value: "v", note: "财务系统", account: "lotke")
+        let b = TokenEntry(label: "mail/totp", hosts: "core.internal.example:8400", kind: .totp, uses: [.otp, .http], value: "S", note: "邮件")
+        let rows = MintedRow.join(entries: [a, b], results: [
+            TokenResult(label: "mail/totp", token: "enc:v1:TTT", error: nil),
+            TokenResult(label: "finance/pass", token: nil, error: "invalid host"),
+        ])
+        XCTAssertEqual(rows.map(\.label), ["finance/pass", "mail/totp"])
+        XCTAssertEqual(rows[0].error, "invalid host")
+        XCTAssertNil(rows[0].contextEntry)
+        XCTAssertEqual(rows[1].token, "enc:v1:TTT")
+        XCTAssertEqual(rows[1].note, "邮件")
+        XCTAssertEqual(rows[0].account, "lotke")
+    }
+
+    func testContextEntryShape() {
+        let pw = MintedRow(entry: TokenEntry(label: "finance/pass", hosts: "a.example:8600, b.example", value: "v", note: "财务系统", account: "lotke"),
+                           result: TokenResult(label: "finance/pass", token: "enc:v1:AAA", error: nil))
+        XCTAssertEqual(pw.contextEntry, "- 财务系统（finance/pass）：a.example:8600, b.example\n  账号 lotke\n  密码 enc:v1:AAA")
+        let totp = MintedRow(entry: TokenEntry(label: "mail/totp", hosts: "m.example", kind: .totp, uses: [.otp], value: "S"),
+                             result: TokenResult(label: "mail/totp", token: "enc:v1:TTT", error: nil))
+        XCTAssertEqual(totp.contextEntry, "- mail/totp：m.example\n  2FA enc:v1:TTT（用 secret_otp 取码）")
+        XCTAssertEqual(pw.exportObject["account"] as? String, "lotke")
+        XCTAssertNil(pw.exportObject["value"])
+    }
+
+    func testWithKeepsNoteAndAccount() {
+        let e = TokenEntry(label: "a", note: "n", account: "u")
+        XCTAssertEqual(e.with(value: "x").note, "n")
+        XCTAssertEqual(e.with(value: "x").account, "u")
+        XCTAssertEqual(e.with(note: "m").account, "u")
+    }
+}
