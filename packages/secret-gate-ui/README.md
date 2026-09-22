@@ -33,8 +33,10 @@ gate home are editable in Settings (⌘,); defaults are the repo venv and `~/.se
   keep working because the gate decrypts with every keypair it holds.
 - **Tokens**: label, hosts (comma separated, `*.example.com` and IPs allowed), kind
   (password/token or TOTP), uses (http / otp / exec), value in a secure field, plus a note
-  (what the platform is for) and an optional account; the last two never reach the CLI. Rows
-  show their validation problem inline; only valid rows are sent.
+  (what the platform is for) and an optional account. The note never reaches the CLI; the account
+  is minted as a companion token `<label>/user` (same hosts, http use) when "账号也加密" is on
+  (the default), so the login name is ciphertext to the model too and is filled with `secret_fill`.
+  Rows show their validation problem inline; only valid rows are sent.
 - **Batch**: paste lines `label, host1|host2, [secret|totp,] value`, or add rows by hand.
   Results list per-row success/error with copy buttons, copy-all, and JSON export.
 - Results pair each token with its row. "复制条目" copies one row as a CONTEXT.md list item

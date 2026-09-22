@@ -30,7 +30,8 @@ struct ResultsView: View {
                         HStack(spacing: 6) {
                             Text(r.label).font(.body.weight(.medium))
                             if !r.note.isEmpty { Text(r.note).foregroundStyle(.secondary) }
-                            if !r.account.isEmpty { Text("账号 \(r.account)").font(.caption).foregroundStyle(.secondary) }
+                            if r.accountToken != nil { Text("账号已加密").font(.caption).foregroundStyle(.secondary) }
+                            else if !r.account.isEmpty { Text("账号 \(r.account)").font(.caption).foregroundStyle(.secondary) }
                         }
                         Text(r.hosts.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
                         Text(r.token ?? r.error ?? "").font(.caption.monospaced())

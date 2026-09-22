@@ -111,6 +111,10 @@ private struct EntryRow: View {
                 TextField("备注：这个平台是做什么的，例如 财务系统", text: Binding(get: { entry.note }, set: { onChange(entry.with(note: $0)) }))
                 TextField("账号（可选）", text: Binding(get: { entry.account }, set: { onChange(entry.with(account: $0)) }))
                     .frame(width: 200)
+                Toggle("账号也加密", isOn: Binding(get: { entry.encryptAccount }, set: { onChange(entry.with(encryptAccount: $0)) }))
+                    .toggleStyle(.checkbox).font(.caption)
+                    .disabled(entry.account.isEmpty)
+                    .help("多铸一个 <label>/user 密文，条目里的账号行也是 enc:v1:，模型看不到账号名")
             }
             HStack(spacing: 8) {
                 SecureField(entry.kind == .totp ? "2FA 的 base32 密钥" : "密码 / token 的值",

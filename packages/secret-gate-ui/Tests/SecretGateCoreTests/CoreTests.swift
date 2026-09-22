@@ -75,7 +75,7 @@ final class ResultDecodingTests: XCTestCase {
 
 final class MintedRowTests: XCTestCase {
     func testJoinPairsByLabelInOrderAndKeepsNoteAndAccount() {
-        let a = TokenEntry(label: "finance/pass", hosts: "core.internal.example:8600", value: "v", note: "财务系统", account: "lotke")
+        let a = TokenEntry(label: "finance/pass", hosts: "core.internal.example:8600", value: "v", note: "财务系统", account: "lotke", encryptAccount: false)
         let b = TokenEntry(label: "mail/totp", hosts: "core.internal.example:8400", kind: .totp, uses: [.otp, .http], value: "S", note: "邮件")
         let rows = MintedRow.join(entries: [a, b], results: [
             TokenResult(label: "mail/totp", token: "enc:v1:TTT", error: nil),
@@ -90,7 +90,7 @@ final class MintedRowTests: XCTestCase {
     }
 
     func testContextEntryShape() {
-        let pw = MintedRow(entry: TokenEntry(label: "finance/pass", hosts: "a.example:8600, b.example", value: "v", note: "财务系统", account: "lotke"),
+        let pw = MintedRow(entry: TokenEntry(label: "finance/pass", hosts: "a.example:8600, b.example", value: "v", note: "财务系统", account: "lotke", encryptAccount: false),
                            result: TokenResult(label: "finance/pass", token: "enc:v1:AAA", error: nil))
         XCTAssertEqual(pw.contextEntry, "- 财务系统（finance/pass）：a.example:8600, b.example\n  账号 lotke\n  密码 enc:v1:AAA")
         let totp = MintedRow(entry: TokenEntry(label: "mail/totp", hosts: "m.example", kind: .totp, uses: [.otp], value: "S"),
@@ -105,5 +105,43 @@ final class MintedRowTests: XCTestCase {
         XCTAssertEqual(e.with(value: "x").note, "n")
         XCTAssertEqual(e.with(value: "x").account, "u")
         XCTAssertEqual(e.with(note: "m").account, "u")
+    }
+}
+
+final class EncryptedAccountTests: XCTestCase {
+    func testAccountEntryOnlyWhenRequestedAndPresent() {
+        let e = TokenEntry(label: "fin/pass", hosts: "a.example", value: "v", account: "lotke")
+        XCTAssertEqual(e.accountEntry?.label, "fin/pass/user")
+        XCTAssertEqual(e.accountEntry?.value, "lotke")
+        XCTAssertEqual(e.accountEntry?.hostList, ["a.example"])
+        XCTAssertEqual(e.accountEntry?.uses, [.http])
+        XCTAssertNil(e.with(encryptAccount: false).accountEntry)
+        XCTAssertNil(e.with(account: "").accountEntry)
+        XCTAssertNil(TokenEntry(label: "t", kind: .totp, uses: [.otp], value: "S", account: "x").accountEntry)   // no host: nothing to bind to
+    }
+
+    func testJoinFoldsTheCompanionIntoItsRowAndPrintsCiphertext() {
+        let e = TokenEntry(label: "fin/pass", hosts: "a.example", value: "v", note: "财务", account: "lotke")
+        let rows = MintedRow.join(entries: [e], results: [
+            TokenResult(label: "fin/pass/user", token: "enc:v1:UUU", error: nil),
+            TokenResult(label: "fin/pass", token: "enc:v1:PPP", error: nil),
+        ])
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].accountToken, "enc:v1:UUU")
+        XCTAssertEqual(rows[0].contextEntry, "- 财务（fin/pass）：a.example\n  账号 enc:v1:UUU（密文，用 secret_fill 填）\n  密码 enc:v1:PPP")
+        XCTAssertFalse(rows[0].contextEntry!.contains("lotke"))
+        XCTAssertEqual(rows[0].exportObject["account"] as? String, "enc:v1:UUU")
+        XCTAssertEqual(rows[0].exportObject["account_encrypted"] as? Bool, true)
+    }
+
+    func testCompanionFailureIsReportedOnTheRow() {
+        let e = TokenEntry(label: "fin/pass", hosts: "a.example", value: "v", account: "lotke")
+        let rows = MintedRow.join(entries: [e], results: [
+            TokenResult(label: "fin/pass", token: "enc:v1:PPP", error: nil),
+            TokenResult(label: "fin/pass/user", token: nil, error: "boom"),
+        ])
+        XCTAssertTrue(rows[0].ok)
+        XCTAssertEqual(rows[0].error, "账号密文失败：boom")
+        XCTAssertEqual(rows[0].contextEntry, "- fin/pass：a.example\n  账号 lotke\n  密码 enc:v1:PPP")   // falls back to plaintext, visibly
     }
 }

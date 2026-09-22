@@ -58,9 +58,10 @@ final class AppState: ObservableObject {
         let batch = readyEntries
         guard !batch.isEmpty else { errorMessage = "没有可生成的行"; return }
         let cli = cli
+        let sent = batch.flatMap { [$0] + ($0.accountEntry.map { [$0] } ?? []) }   // account companions ride along
         // Rows keep their plaintext after a run: the user may want to mint again for another host or fix a
         // typo without retyping everything. "清空明文" wipes them explicitly.
-        perform { try cli.encrypt(batch) } assign: { results in
+        perform { try cli.encrypt(sent) } assign: { results in
             self.results = MintedRow.join(entries: batch, results: results)
         }
     }
