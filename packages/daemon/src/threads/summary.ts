@@ -52,7 +52,10 @@ Reply with exactly one JSON object and nothing else:
   "spoken": "<one plain sentence, at most 40 characters, in the user's language, saying what this run produced or why it failed, as it would be read aloud to the user>"
 }
 Keep the whole object under 500 tokens. Merge the previous summary with the new run; drop nothing that is still true.
-"facts" are for the dispatcher's long-term memory, not a recap of this run: only what would change how a future task is routed or briefed.`;
+"facts" are for the dispatcher's long-term memory, not a recap of this run: only what would change how a future task is
+routed or briefed, and only about the user's environment (a site's login quirks, a project's layout or test duration, a
+tool that must be used). Never state observations about this task itself, the working directory, or how simple the job
+was; for a one-off question with nothing to remember, "facts" is [].`;
 
 export function summaryMessage(input: SummaryInput): string {
   const prev = input.previous ? JSON.stringify(input.previous) : "(none)";
