@@ -1,5 +1,6 @@
 /** What every harness adapter implements. The engine owns approvals, events and re-dispatch. */
 
+import type { UserAnswers, UserQuestion } from "../engine/questions.js";
 import type { Attachment } from "../files/uploads.js";
 import type { ExecutionOutcome } from "../router/failure.js";
 
@@ -30,6 +31,9 @@ export type ExecutionInput = {
   readonly emit: (type: "text" | "tool_call" | "agent", payload: Record<string, unknown>) => void;
   /** Ask the user; resolves when they answer or the request expires (deny). */
   readonly approve: (action: string, evidence: string) => Promise<ApprovalDecision>;
+  /** The harness's own "ask the user" tool, passed straight to the user's card (supervisor-v0 §1c).
+   *  Resolves with the answers, or null when the user declined or nobody answered in time. */
+  readonly ask: (questions: readonly UserQuestion[]) => Promise<UserAnswers | null>;
 };
 
 export interface Executor {

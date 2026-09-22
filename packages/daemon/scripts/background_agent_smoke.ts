@@ -20,7 +20,7 @@ const outcome = await executor.run({
   brief: "Use the Agent tool to launch a subagent IN THE BACKGROUND (run_in_background) whose job is to list the .txt files in the working directory and report their names. Do not read the files yourself. Wait for the background subagent's notification, then reply with exactly the names it reported, comma-separated, and nothing else.",
   signal: new AbortController().signal,
   emit: (type, payload) => { log.push({ t: Date.now() - t0, type, payload }); if (type === "agent") console.log(`  ${Date.now() - t0} ms agent ${payload.status}: ${payload.description}${payload.summary ? ` — ${String(payload.summary).slice(0, 80)}` : ""}`); },
-  approve: async (action) => { console.log(`  APPROVAL -> allow: ${action.slice(0, 80)}`); return "allow"; },
+  approve: async (action) => { console.log(`  APPROVAL -> allow: ${action.slice(0, 80)}`); return "allow"; }, ask: async (qs) => { console.log("question:", JSON.stringify(qs)); return Object.fromEntries(qs.map((q) => [q.id, [q.options[0]?.label ?? "yes"]])); }
 });
 const agentEvents = log.filter((e) => e.type === "agent");
 const lastAgent = agentEvents.at(-1)?.t ?? -1;

@@ -1,5 +1,5 @@
 /** Test executor. Reads a directive from the task text so a single task can script its own run:
- *    @echo {"delayMs":50,"fail":"refusal","approval":"rm -rf /tmp/x","result":"hello","tokens":123}
+ *    @echo {"delayMs":50,"fail":"refusal","approval":"rm -rf /tmp/x","question":{"text":"which?","options":["a","b"]},"result":"hello","tokens":123}
  *  `fail` is a FailureKind; `failTimes` limits how many attempts fail (default: every attempt). */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -15,6 +15,9 @@ export type EchoDirective = {
   readonly failTimes?: number;
   readonly approval?: string;
   readonly approvalTimes?: number;
+  /** Ask the user through the card; the answer (or "none") becomes the result unless `result` is set. */
+  readonly question?: { readonly id?: string; readonly text: string; readonly options?: readonly string[] };
+  readonly questionTimes?: number;
   readonly result?: string;
   readonly tokens?: number;
   /** Reported as the harness session handle, so thread resume can be tested without a model. */
@@ -49,6 +52,16 @@ const FAILURES: Record<FailureKind, Partial<ExecutionOutcome>> = {
 /** Per-task counters shared by every echo executor, so "fail once" means once per task, not once per harness. */
 const failures = new Map<string, number>();
 const approvalsAsked = new Map<string, number>();
+const questionsAsked = new Map<string, number>();
+
+async function askOnce(input: ExecutionInput, d: EchoDirective): Promise<string | null> {
+  const asked = questionsAsked.get(input.taskId) ?? 0;
+  if (!d.question || (d.questionTimes !== undefined && asked >= d.questionTimes)) return null;
+  questionsAsked.set(input.taskId, asked + 1);
+  const q = { id: d.question.id ?? "q1", header: "echo", text: d.question.text, options: (d.question.options ?? []).map((label) => ({ label, description: "" })), multi: false, secret: false };
+  const answers = await input.ask([q]);
+  return answers ? `answer: ${(answers[q.id] ?? []).join(", ")}` : "answer: none";
+}
 
 export function echoExecutor(harness: string): Executor & { readonly runs: ExecutionInput[] } {
   const runs: ExecutionInput[] = [];
@@ -67,6 +80,8 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
         const decision = await input.approve(`bash: ${d.approval}`, "requested by @echo directive");
         if (decision === "deny") return { ok: false, exitCode: 0, lastText: "user denied the action", sideEffects: NO_SIDE_EFFECTS };
       }
+      const answered = await askOnce(input, d);
+      if (answered) input.emit("text", { text: answered });
       for (const [rel, content] of Object.entries(d.out ?? {})) { const p = join(input.cwd, OUT_DIR, rel); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, content); }
       const sideEffects = { ...NO_SIDE_EFFECTS, ...(d.sideEffects ?? {}) };
       const failed = failures.get(input.taskId) ?? 0;
@@ -74,7 +89,7 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
         failures.set(input.taskId, failed + 1);
         return { ok: false, ...FAILURES[d.fail], sideEffects };
       }
-      return { ok: true, exitCode: 0, lastText: d.result ?? `done: ${input.brief.slice(0, 60)}`, sideEffects, ...(d.tokens !== undefined ? { tokens: d.tokens } : {}), ...(d.session ? { sessionId: input.resume ? `${input.resume}+` : d.session } : {}) } as ExecutionOutcome;
+      return { ok: true, exitCode: 0, lastText: d.result ?? answered ?? `done: ${input.brief.slice(0, 60)}`, sideEffects, ...(d.tokens !== undefined ? { tokens: d.tokens } : {}), ...(d.session ? { sessionId: input.resume ? `${input.resume}+` : d.session } : {}) } as ExecutionOutcome;
     },
   };
 }

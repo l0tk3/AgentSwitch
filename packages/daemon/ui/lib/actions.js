@@ -88,8 +88,9 @@ export async function submitTask(body) {
   openTask(t.id);
 }
 
-export async function answer(taskId, approvalId, text) {
-  await api("POST", `/tasks/${taskId}/answer`, { approval_id: approvalId, text });
+/** `given` = {text} for one question, {answers: {id: [..]}} for several (docs/supervisor-v0.md §1c). */
+export async function answer(taskId, approvalId, given) {
+  await api("POST", `/tasks/${taskId}/answer`, { approval_id: approvalId, ...given });
   await Promise.all([loadApprovals(), loadTasks()]);
 }
 

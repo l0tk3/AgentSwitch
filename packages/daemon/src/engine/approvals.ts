@@ -4,13 +4,17 @@
 
 import type { ApprovalDecision } from "../executors/types.js";
 import type { EngineContext } from "./context.js";
+import { answersFromText, describeAnswers, encodeEvidence, parseEvidence, validateAnswers, type QuestionSource, type UserAnswers, type UserQuestion } from "./questions.js";
 import { TERMINAL, type ApprovalStatus } from "./types.js";
 
 export type ResolvedBy = "user" | "router" | "timeout";
 export type RequestOptions = { readonly humanOnly?: boolean };
+/** What the user sent back: plain text answers the first question; `answers` covers several. */
+export type GivenAnswer = { readonly text?: string; readonly answers?: unknown };
+export type AnswerResult = { readonly ok: true } | { readonly ok: false; readonly code: "not_found" | "bad_answer"; readonly error: string };
 
 type Pending = { readonly kind: "approval"; readonly resolve: (d: ApprovalDecision) => void; readonly timer: NodeJS.Timeout }
-  | { readonly kind: "question"; readonly resolve: (text: string | null) => void; readonly timer: NodeJS.Timeout };
+  | { readonly kind: "question"; readonly resolve: (answers: UserAnswers | null) => void; readonly timer: NodeJS.Timeout };
 
 export const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
@@ -38,11 +42,14 @@ export class ApprovalDesk {
     return promise;
   }
 
-  /** Free text from the user. Resolves with the text, or null when denied or expired. */
-  ask(taskId: string, question: string, evidence: string): Promise<string | null> {
-    const approval = this.ctx.store.createApproval(taskId, question, evidence, "question");
+  /** Questions for the user, from the router or passed straight through from an executor (supervisor-v0 §1c).
+   *  Resolves with the answers, or null when denied or expired. Never goes to the supervisor. */
+  ask(taskId: string, questions: readonly UserQuestion[], source: QuestionSource): Promise<UserAnswers | null> {
+    if (!questions.length) throw new Error("ask: no questions");
+    const evidence = encodeEvidence({ source, questions });
+    const approval = this.ctx.store.createApproval(taskId, questions[0]!.text, evidence, "question");
     this.ctx.store.updateTask(taskId, { status: "waiting_approval" });
-    this.ctx.emit(taskId, "approval_request", { approvalId: approval.id, kind: "question", action: question, evidence, humanOnly: true });
+    this.ctx.emit(taskId, "approval_request", { approvalId: approval.id, kind: "question", action: questions[0]!.text, evidence, humanOnly: true, source, questions });
     return new Promise((resolve) => {
       this.pending.set(approval.id, { kind: "question", resolve, timer: this.expiry(approval.id) });
     });
@@ -59,17 +66,23 @@ export class ApprovalDesk {
     return true;
   }
 
-  /** Text answer to a question; the caller re-routes the task. */
-  answer(approvalId: string, text: string): boolean {
+  /** The user's answers. A router question sends the task back to routing; an executor question resumes the run. */
+  answer(approvalId: string, given: GivenAnswer): AnswerResult {
     const current = this.ctx.store.getApproval(approvalId);
-    const p = current?.kind === "question" && current.status === "pending" ? this.take(approvalId) : undefined;
-    if (!p || p.kind !== "question") return false;
-    const approval = this.ctx.store.answerApproval(approvalId, text);
-    if (!approval) return false;
-    this.ctx.emit(approval.taskId, "approval_resolved", { approvalId, decision: "answer", status: "allowed", by: "user", kind: "question", text });
-    this.resume(approval.taskId, "routing");
-    p.resolve(text);
-    return true;
+    const ev = current?.kind === "question" && current.status === "pending" && this.pending.has(approvalId) ? parseEvidence(current.evidence) : null;
+    if (!current || !ev) return { ok: false, code: "not_found", error: "no pending question with that id" };
+    const checked = given.answers !== undefined ? validateAnswers(ev.questions, given.answers)
+      : given.text?.trim() ? { ok: true as const, answers: answersFromText(ev.questions, given.text.trim()) }
+      : { ok: false as const, error: "text or answers required" };
+    if (!checked.ok) return { ok: false, code: "bad_answer", error: checked.error };
+    const p = this.take(approvalId);
+    const approval = this.ctx.store.answerApproval(approvalId, JSON.stringify(checked.answers));
+    if (!p || p.kind !== "question" || !approval) return { ok: false, code: "not_found", error: "no pending question with that id" };
+    const text = describeAnswers(ev.questions, checked.answers);
+    this.ctx.emit(approval.taskId, "approval_resolved", { approvalId, decision: "answer", status: "allowed", by: "user", kind: "question", source: ev.source, text, answers: checked.answers });
+    this.resume(approval.taskId, ev.source === "router" ? "routing" : "running");
+    p.resolve(checked.answers);
+    return { ok: true };
   }
 
   /** When a task ends or is cancelled, nothing may stay pending for it. */

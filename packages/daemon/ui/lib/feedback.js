@@ -14,7 +14,8 @@ export function feedback(t, events) {
   if (t.status === "cancelled") return { stage: 3, tone: "", label: "已取消", detail: who };
   if (t.status === "waiting_approval") {
     const a = last("approval_request");
-    return { stage: 2, tone: "warn", label: "等你审批", detail: a ? String(a.payload.action || "").slice(0, 80) : "" };
+    const question = a && a.payload.kind === "question";
+    return { stage: 2, tone: "warn", label: question ? (a.payload.source === "executor" ? "执行者在问你" : "路由器在问你") : "等你审批", detail: a ? String(a.payload.action || "").slice(0, 80) : "" };
   }
   if (t.status === "running") {
     const agent = last("agent");

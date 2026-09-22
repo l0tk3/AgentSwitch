@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { isImage } from "../files/names.js";
+import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../engine/questions.js";
 import type { Attachment } from "../files/uploads.js";
 import { NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome } from "../router/failure.js";
 import { AppServerClient, type Json } from "./appserver.js";
@@ -26,11 +27,27 @@ export type CodexExecutorOptions = {
   readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
 };
 
+const USER_INPUT_METHOD = "item/tool/requestUserInput";
 const APPROVAL_METHODS = new Set(["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "execCommandApproval", "applyPatchApproval"]);
 
 export function codexConfigToml(gate: GateOptions | null | undefined, profile: string, browser: boolean, effort: string | null, mcpToml = ""): string {
   const head = `approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n${effort ? `model_reasoning_effort = ${JSON.stringify(effort)}\n` : ""}`;
   return head + (gate ? "\n" + codexGateToml(gate, profile, browser) : "\n[sandbox_workspace_write]\nnetwork_access = true\n") + mcpToml;
+}
+
+/** Codex's request_user_input questions (app-server protocol, experimental) in the shared shape. */
+export function codexQuestions(params: Json): UserQuestion[] {
+  const raw = Array.isArray(params.questions) ? (params.questions as Json[]) : [];
+  return raw.map((q, i) => ({
+    id: String(q.id ?? `q${i + 1}`), header: String(q.header ?? ""), text: String(q.question ?? ""),
+    options: (Array.isArray(q.options) ? (q.options as Json[]) : []).map((o) => ({ label: String(o.label ?? ""), description: String(o.description ?? "") })).filter((o) => o.label),
+    multi: false, secret: Boolean(q.isSecret),
+  })).filter((q) => q.text);
+}
+
+/** The response Codex expects: every question id → its answers; an unanswered card tells the model so. */
+export function codexAnswers(questions: readonly UserQuestion[], answers: UserAnswers | null): Json {
+  return { answers: Object.fromEntries(questions.map((q) => [q.id, { answers: answers ? [...(answers[q.id] ?? [])] : [NO_ANSWER_MESSAGE] }])) };
 }
 
 /** Approval answer shape differs per method; decline wording mirrors the e2e script's accept wording. */
@@ -150,6 +167,7 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
         child.stderr!.on("data", (d: Buffer) => (stderr += d.toString()));
         const client = new AppServerClient(child.stdin!, child.stdout!, async (method, params) => {
           if (method === "mcpServer/elicitation/request") return approvalAnswer(method, true);
+          if (method === USER_INPUT_METHOD) { const qs = codexQuestions(params); return codexAnswers(qs, qs.length ? await input.ask(qs) : null); }
           if (!APPROVAL_METHODS.has(method)) return { decision: "decline" };
           const { action, evidence } = describeApproval(method, params);
           const decision = await input.approve(action, evidence);

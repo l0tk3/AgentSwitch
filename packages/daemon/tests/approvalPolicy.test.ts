@@ -94,12 +94,12 @@ describe("Engine: the router asks the user (clarify)", () => {
     const approvalId = await new Promise<string>((resolve) => bus.subscribe(t.id, (e) => { if (e.type === "approval_request") resolve(String(e.payload.approvalId)); }));
     expect(store.getApproval(approvalId)).toMatchObject({ kind: "question", action: "哪个财务系统？" });
     expect(store.getTask(t.id)!.status).toBe("waiting_approval");
-    expect(engine.answer(approvalId, "core 那个，8600 端口")).toBe(true);
+    expect(engine.answer(approvalId, { text: "core 那个，8600 端口" }).ok).toBe(true);
     await engine.idle();
     expect(store.getTask(t.id)).toMatchObject({ status: "done", harness: "codex" });
-    expect(store.getApproval(approvalId)).toMatchObject({ status: "allowed", answer: "core 那个，8600 端口" });
+    expect(store.getApproval(approvalId)).toMatchObject({ status: "allowed", answer: JSON.stringify({ clarify: ["core 那个，8600 端口"] }) });
     expect(resolved(events, t.id)[0]).toMatchObject({ decision: "answer", kind: "question", by: "user" });
-    expect(engine.answer(approvalId, "again")).toBe(false);
+    expect(engine.answer(approvalId, { text: "again" }).ok).toBe(false);
     const { engine: e2, store: s2 } = build([clarify("要哪个？")]);
     const u = e2.submit({ task: "x", cwd: "/tmp/q2" });
     await e2.idle();
@@ -109,7 +109,7 @@ describe("Engine: the router asks the user (clarify)", () => {
   it("stops after two clarification rounds", async () => {
     const { engine, store, bus } = build(() => clarify("再问一次？"));
     const t = engine.submit({ task: "x", cwd: "/tmp/q3" });
-    bus.subscribe(t.id, (e) => { if (e.type === "approval_request") setTimeout(() => engine.answer(String(e.payload.approvalId), "答"), 5); });
+    bus.subscribe(t.id, (e) => { if (e.type === "approval_request") setTimeout(() => engine.answer(String(e.payload.approvalId), { text: "答" }), 5); });
     await engine.idle();
     expect(store.getTask(t.id)!.status).toBe("failed");
     expect(store.getTask(t.id)!.error).toContain("kept asking");

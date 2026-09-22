@@ -23,7 +23,7 @@ const outcome = await executor.run({
   brief: "Create a file named hello.txt in the current directory containing exactly the text: hi from agentswitch\nThen reply with the single word DONE.",
   signal: new AbortController().signal,
   emit: (type, payload) => console.log(`  ${type}: ${JSON.stringify(payload).slice(0, 160)}`),
-  approve: async (action, evidence) => { console.log(`  APPROVAL -> allow: ${action} | ${evidence.slice(0, 120)}`); return "allow"; },
+  approve: async (action, evidence) => { console.log(`  APPROVAL -> allow: ${action} | ${evidence.slice(0, 120)}`); return "allow"; }, ask: async (qs) => { console.log("question:", JSON.stringify(qs)); return Object.fromEntries(qs.map((q) => [q.id, [q.options[0]?.label ?? "yes"]])); }
 });
 const files = readdirSync(cwd);
 console.log(JSON.stringify({ harness, model, ms: Date.now() - started, ok: outcome.ok, kind: classifyFailure(outcome), lastText: outcome.lastText?.slice(0, 200), stderr: outcome.stderr?.slice(0, 300), sideEffects: outcome.sideEffects, tokens: outcome.tokens, files, hello: files.includes("hello.txt") ? readFileSync(join(cwd, "hello.txt"), "utf8") : null }, null, 2));

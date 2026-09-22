@@ -25,13 +25,28 @@ function composer(hint, pending) {
   </section>`;
 }
 
+/** A question card's questions: from the evidence JSON (supervisor-v0 §1c); older rows carried plain text. */
+export function questionsOf(a) {
+  try { const ev = JSON.parse(a.evidence); if (ev && Array.isArray(ev.questions) && ev.questions.length) return { source: ev.source || "router", questions: ev.questions }; } catch { /* plain evidence */ }
+  return { source: "router", questions: [{ id: "clarify", text: a.action, options: [], multi: false, secret: false }] };
+}
+
+function questionBlock(a, q, i) {
+  const box = `q-${a.id}-${i}`;
+  const options = (q.options || []).length ? `<div class="chips" style="margin-top:6px">${q.options.map((o) => `<span class="chip" data-opt="${esc(o.label)}" data-for="${box}" title="${esc(o.description || "")}">${esc(o.label)}</span>`).join("")}</div>` : "";
+  return `<div style="margin-top:8px">${q.header ? `<span class="badge">${esc(q.header)}</span> ` : ""}<b>${esc(q.text)}</b>
+    ${q.secret ? '<div class="dim error">敏感信息：填 secret-gate 密文（enc:v1:…），不要填明文</div>' : ""}${options}
+    <textarea id="${box}" data-keep rows="2" placeholder="${(q.options || []).length ? "点上面的选项，或自己写" : "写答复"}${q.multi ? "，多个用逗号分开" : ""}" style="margin-top:6px"></textarea></div>`;
+}
+
 export function approvalCard(a, task) {
   if (a.kind === "question") {
+    const { source, questions } = questionsOf(a);
+    const fromExecutor = source === "executor";
     return `<div class="card warn">
-      <div class="dim">${task ? esc(task.task.slice(0, 80)) + " · " : ""}${when(a.createdAt)} · 路由器在问你</div>
-      <div style="margin-top:4px"><b>${esc(a.action)}</b></div>
-      <textarea id="q-${a.id}" data-keep rows="2" placeholder="回答后任务会带着你的答复重新分诊" style="margin-top:8px"></textarea>
-      <div class="row" style="margin-top:8px"><button class="primary grow" data-answer="${a.id}" data-task="${a.taskId}">回答</button><button class="bad" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">不答，取消任务</button></div>
+      <div class="dim">${task ? esc(task.task.slice(0, 80)) + " · " : ""}${when(a.createdAt)} · ${fromExecutor ? "执行者在问你（答复直接回到它手里）" : "路由器在问你"}</div>
+      ${questions.map((q, i) => questionBlock(a, q, i)).join("")}
+      <div class="row" style="margin-top:8px"><button class="primary grow" data-answer="${a.id}" data-task="${a.taskId}">回答</button><button class="bad" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">${fromExecutor ? "不答，让它自己看着办" : "不答，取消任务"}</button></div>
     </div>`;
   }
   return `<div class="card warn">
@@ -113,7 +128,22 @@ export const bindings = [
   { sel: "#q-refresh", run: (el) => { el.disabled = true; return loadQuota(true); } },
   { sel: "tr[data-open]", run: (el) => openTask(el.dataset.open) },
   { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
-  { sel: "[data-answer]", run: (el) => { const text = ($("#q-" + el.dataset.answer)?.value || "").trim(); if (!text) return; el.disabled = true; return answer(el.dataset.task, el.dataset.answer, text); } },
+  { sel: "[data-opt]", run: (el) => { const box = $("#" + el.dataset.for); if (!box) return; box.value = box.value.trim() ? `${box.value.trim()}, ${el.dataset.opt}` : el.dataset.opt; } },
+  { sel: "[data-answer]", run: (el) => { const given = collectAnswers(el.dataset.answer); if (!given) return; el.disabled = true; return answer(el.dataset.task, el.dataset.answer, given); } },
 ];
+
+/** null until every question on the card has text; one question posts `text`, several post `answers`. */
+export function collectAnswers(approvalId) {
+  const a = get().approvals.find((x) => x.id === approvalId);
+  if (!a) return null;
+  const { questions } = questionsOf(a);
+  const answers = {};
+  for (const [i, q] of questions.entries()) {
+    const v = ($("#q-" + approvalId + "-" + i)?.value || "").trim();
+    if (!v) return null;
+    answers[q.id] = q.multi ? v.split(/[,，]\s*/).filter(Boolean) : [v];
+  }
+  return questions.length === 1 ? { text: answers[questions[0].id][0] } : { answers };
+}
 
 export const submitKeys = { "c-task": "c-send" };

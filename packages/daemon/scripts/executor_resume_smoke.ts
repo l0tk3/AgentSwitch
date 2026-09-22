@@ -24,7 +24,7 @@ const base = (taskId: string, brief: string, resume: string | null): ExecutionIn
   taskId, task: brief, brief, cwd, model, effort: harness === "codex" ? "low" : null, handoffNote: null, context: null, knownTokens: new Set<string>(), threadHome, resume, attachments: [], browser: false,
   signal: new AbortController().signal,
   emit: (type, payload) => console.log(`  ${type}: ${JSON.stringify(payload).slice(0, 160)}`),
-  approve: async (action) => { console.log(`  APPROVAL -> allow: ${action}`); return "allow"; },
+  approve: async (action) => { console.log(`  APPROVAL -> allow: ${action}`); return "allow"; }, ask: async (qs) => { console.log("question:", JSON.stringify(qs)); return Object.fromEntries(qs.map((q) => [q.id, [q.options[0]?.label ?? "yes"]])); }
 });
 const t0 = Date.now();
 const first = await executor.run(base("r1", "Read note.txt in the working directory and reply with its exact content.", null));

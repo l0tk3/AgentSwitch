@@ -19,7 +19,8 @@ import { collectOut } from "../files/artifacts.js";
 import { join } from "node:path";
 import { sleep } from "../util/sleep.js";
 import { DEFAULT_POLICY, loadPolicy, type ApprovalPolicy } from "./approvalPolicy.js";
-import { ApprovalDesk, type ResolvedBy } from "./approvals.js";
+import { CLARIFY_ID, clarifyQuestion } from "./questions.js";
+import { ApprovalDesk, type AnswerResult, type GivenAnswer, type ResolvedBy } from "./approvals.js";
 import type { Bus } from "./bus.js";
 import { cleanupEphemeral, defaultCleanupPaths, type CleanupPaths } from "./cleanup.js";
 import { Composer, type ComposeDeps } from "./compose.js";
@@ -129,7 +130,7 @@ export class Engine {
     return this.desk.resolve(approvalId, decision, status, by);
   }
 
-  answer(approvalId: string, text: string): boolean { return this.desk.answer(approvalId, text); }
+  answer(approvalId: string, given: GivenAnswer): AnswerResult { return this.desk.answer(approvalId, given); }
 
   /** 👍 / 👎 on a task: track record + routing_log (router-v0 §7). */
   rate(taskId: string, rating: 1 | -1 | null): boolean {
@@ -185,7 +186,8 @@ export class Engine {
     let routed = await route(request(text), this.routeDeps());
     for (let round = 0; routed.clarify && round < MAX_CLARIFICATIONS; round++) {
       this.ctx.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError, clarify: routed.clarify });
-      const answer = await this.desk.ask(task.id, routed.clarify, "路由器需要你补充信息才能派发");
+      const answers = await this.desk.ask(task.id, [clarifyQuestion(routed.clarify)], "router");
+      const answer = answers?.[CLARIFY_ID]?.[0] ?? null;
       if (signal.aborted) return null;
       if (answer === null) { this.fail(task.id, `waiting for your answer: ${routed.clarify}`); return null; }
       text = `${text}\n\nUser clarification (in reply to "${routed.clarify}"):\n${answer}`;
@@ -279,6 +281,7 @@ export class Engine {
         browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal: attemptCtl.signal,
         emit: (type, payload) => { this.ctx.emit(task.id, type, payload); dog.touch(); },
         approve: async (action, evidence) => { dog.pause(); try { return await this.desk.request(task.id, action, evidence); } finally { dog.touch(); } },
+        ask: async (questions) => { dog.pause(); try { return await this.desk.ask(task.id, questions, "executor"); } finally { dog.touch(); } },
       });
       dog.stop();
       const touched = restoreProtected(task.cwd, prot, snapshot);

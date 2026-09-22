@@ -14,6 +14,7 @@ import { claudeMcpServers, gateEnv, mcpServerEnv, type GateOptions } from "./gat
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { commandTouchesProtected, isProtected, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import { repairInValue, shortToken } from "./tokens.js";
+import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../engine/questions.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
 
 export type ClaudeExecutorOptions = {
@@ -135,6 +136,31 @@ export function claudeHomeEnv(threadHome: string | null): Record<string, string>
   return { CLAUDE_CONFIG_DIR: dir, CLAUDE_SECURESTORAGE_CONFIG_DIR: "" };
 }
 
+const ASK_TOOL = "AskUserQuestion";
+
+/** Claude's AskUserQuestion input, in the shared shape. Its answers are keyed by question text, so that is the id. */
+export function claudeQuestions(input: Record<string, unknown>): UserQuestion[] {
+  const raw = Array.isArray(input.questions) ? (input.questions as Record<string, unknown>[]) : [];
+  return raw.map((q) => ({
+    id: String(q.question ?? ""), header: String(q.header ?? ""), text: String(q.question ?? ""),
+    options: (Array.isArray(q.options) ? (q.options as Record<string, unknown>[]) : []).map((o) => ({ label: String(o.label ?? ""), description: String(o.description ?? "") })).filter((o) => o.label),
+    multi: Boolean(q.multiSelect), secret: false,
+  })).filter((q) => q.text);
+}
+
+/** The tool input Claude expects back: `answers` = question text → chosen label(s), joined for multi-select. */
+export function claudeAnswers(input: Record<string, unknown>, answers: UserAnswers): Record<string, unknown> {
+  return { ...input, answers: Object.fromEntries(Object.entries(answers).map(([id, a]) => [id, a.join(", ")])) };
+}
+
+async function askThroughCard(input: ExecutionInput, toolInput: Record<string, unknown>): Promise<Awaited<ReturnType<CanUseTool>>> {
+  const questions = claudeQuestions(toolInput);
+  if (!questions.length) return { behavior: "deny", message: `${ASK_TOOL} needs at least one question` };
+  const answers = await input.ask(questions);
+  if (!answers) return { behavior: "deny", message: NO_ANSWER_MESSAGE };
+  return { behavior: "allow", updatedInput: claudeAnswers(toolInput, answers) };
+}
+
 /** The approval hook: repair damaged tokens, apply the policy floor, ask the engine for the rest. */
 function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: ReadonlySet<string>, prot: ProtectedPaths, granted: { count: number }): CanUseTool {
   return async (toolName, rawInput) => {
@@ -142,6 +168,7 @@ function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: Readonly
     const fixed = repairInValue(rawInput, input.knownTokens);
     const toolInput = fixed.value;
     if (fixed.repairs.length) input.emit("text", { text: `(repaired ${fixed.repairs.length} damaged secret-gate token(s) in ${toolName} arguments: ${fixed.repairs.map((x) => `${shortToken(x.from)} → ${shortToken(x.to)}`).join(", ")})` });
+    if (toolName === ASK_TOOL) return askThroughCard(input, toolInput);
     const d = decideTool(toolName, toolInput, cwd, allowedMcp, prot);
     if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
     if (d.kind === "deny") { input.emit("tool_call", { tool: toolName, denied: d.reason }); return { behavior: "deny", message: d.reason }; }

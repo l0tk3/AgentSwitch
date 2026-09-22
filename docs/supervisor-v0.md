@@ -26,6 +26,20 @@
 
 **追问**：路由器在分诊时若发现只有用户能补的缺口（凭据、URL、二选一的歧义），回 `{"action":"clarify","question":"…"}`；daemon 发一张「问题」卡片（审批的一种，`kind: question`，带文本框），用户作答后把答复追加进任务文本重新分诊；每个任务最多问两次；10 分钟无人答则任务失败并说明在等什么。看门狗的 `ask_user` 仍是允许/拒绝二选一。
 
+## 1c. 执行器提问透传（2026-09-22）
+
+执行器中途要问用户的东西不经过路由器转述：harness 自己的「问用户」工具直接变成一张问题卡片，答复原样回到那个工具调用手里，任务状态 `waiting_approval` → 答后回 `running`，看门狗在等答期间暂停。路由器不参与，也不能代答（凭据、二选一这类东西本来就只有用户知道）。
+
+| harness | 入口 | 回去的形状 |
+|---|---|---|
+| Claude Code | `canUseTool("AskUserQuestion", {questions})` | `updatedInput.answers = {问题原文: 选项标签}`，多选逗号连接 |
+| Codex | app-server 请求 `item/tool/requestUserInput` | `{answers: {问题id: {answers: [..]}}}` |
+| OpenCode | 2.0.8 没有提问工具 | 只能在最终回复里把问题说清楚（EXECUTOR.md 已写） |
+
+三家问题统一成 `UserQuestion {id, header, text, options[], multi, secret}`（`src/engine/questions.ts`），答复 `UserAnswers = {id: string[]}`。卡片存在 `approvals` 表 `kind: question`，`evidence` 是 `{source: router|executor, questions}` 的 JSON，路由器的追问也走同一形状（`source: router`，单题 id `clarify`），答复存 `answer` 列（JSON）。API `POST /tasks/:id/answer` 接 `text`（答第一题）或 `answers`（多题按 id），少答、多答、空答都 400。
+
+没人答（10 分钟超时，或用户点「不答」）：执行器拿到 null，把「用户没有回答」的原话交给模型（`NO_ANSWER_MESSAGE`），让它只在猜错无害时继续，否则停下报告；任务不因此失败。Codex 标了 `isSecret` 的题卡片上提示填 `enc:v1:` 密文。
+
 ## 2. 提示词原则
 
 - 审批：只看动作是否在简报范围内、是否可逆、是否碰了简报里的禁区。不确定就 `ask_user`。
@@ -34,6 +48,7 @@
 
 ## 3. 不做的
 
+- 不让路由器替用户答执行器的问题；问题直接透传（§1c）。
 - 不让路由器往执行中的会话里插话（Claude 一次性运行做不到，Codex 能但三家不一致）。要改方向就 cancel 后重派带交接。
 - 不做多轮讨论：每个介入点一次调用、一个 JSON。
 - 不给路由器 shell 或文件写权限；它仍只读。
