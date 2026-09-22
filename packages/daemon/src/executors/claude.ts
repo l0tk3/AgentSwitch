@@ -133,67 +133,85 @@ export function claudeHomeEnv(threadHome: string | null): Record<string, string>
   return { CLAUDE_CONFIG_DIR: dir, CLAUDE_SECURESTORAGE_CONFIG_DIR: "" };
 }
 
+/** The approval hook: repair damaged tokens, apply the policy floor, ask the engine for the rest. */
+function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: ReadonlySet<string>, prot: ProtectedPaths, granted: { count: number }): CanUseTool {
+  return async (toolName, rawInput) => {
+    // Damaged enc:v1: copies in tool arguments are put back verbatim before the gate sees them.
+    const fixed = repairInValue(rawInput, input.knownTokens);
+    const toolInput = fixed.value;
+    if (fixed.repairs.length) input.emit("text", { text: `(repaired ${fixed.repairs.length} damaged secret-gate token(s) in ${toolName} arguments: ${fixed.repairs.map((x) => `${shortToken(x.from)} → ${shortToken(x.to)}`).join(", ")})` });
+    const d = decideTool(toolName, toolInput, cwd, allowedMcp, prot);
+    if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
+    if (d.kind === "deny") { input.emit("tool_call", { tool: toolName, denied: d.reason }); return { behavior: "deny", message: d.reason }; }
+    const decision: ApprovalDecision = await input.approve(d.action, d.evidence);
+    if (decision === "allow") { granted.count++; return { behavior: "allow", updatedInput: toolInput }; }
+    return { behavior: "deny", message: "denied by the user via AgentSwitch" };
+  };
+}
+
+type RunSetup = { readonly options: Options; readonly runDir: string };
+
+/** SDK options for one run: private config dir, gate proxy + MCP, registry MCP + skills plugin, resume handle. */
+function setupRun(input: ExecutionInput, opts: ClaudeExecutorOptions, cwd: string, canUseTool: CanUseTool, abort: AbortController): RunSetup {
+  const ext = opts.extensions ?? NO_EXTENSIONS;
+  const servers = ext.mcpFor("claude-code");
+  const runDir = mkdtempSync(join(tmpdir(), "agentswitch-claude-"));
+  const profile = join(runDir, "profile");
+  const pluginRoot = join(runDir, "plugin");
+  ext.skillsInto("claude-code", join(pluginRoot, "skills"));
+  const plugin = claudePluginDir(pluginRoot, join(pluginRoot, "skills"));
+  const browser = (opts.browser ?? true) && input.browser;
+  const baseEnv = { ...(opts.gate ? gateEnv(opts.gate) : {}), ...claudeHomeEnv(input.threadHome) };
+  const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
+  const options: Options = {
+    cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
+    systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },
+    maxTurns: opts.maxTurns ?? DEFAULT_MAX_TURNS, abortController: abort, includePartialMessages: false,
+    ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
+    env: { ...process.env, ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
+    ...(input.resume ? { resume: input.resume } : {}),
+    ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
+    ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),
+    ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
+  };
+  return { options, runDir };
+}
+
+/** Stream what changed between two folds to the engine. */
+function emitDelta(input: ExecutionInput, before: Folded, after: Folded): void {
+  for (const t of after.text.slice(before.text.length)) input.emit("text", { text: t });
+  if (after.tools > before.tools) input.emit("tool_call", { tool: "claude", count: after.tools - before.tools });
+  for (const a of after.agentEvents.slice(before.agentEvents.length)) input.emit("agent", { harness: "claude-code", ...a });
+}
+
+export const DEFAULT_MAX_TURNS = 200;
+
 export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
   return {
     harness: "claude-code",
     async run(input: ExecutionInput): Promise<ExecutionOutcome> {
       const cwd = canonical(resolve(input.cwd));
-      const ext = opts.extensions ?? NO_EXTENSIONS;
-      const servers = ext.mcpFor("claude-code");
-      const allowedMcp = autoAllowedMcp(servers);
-      let approvals = 0;
-      const canUseTool: CanUseTool = async (toolName, rawInput) => {
-        // Damaged enc:v1: copies in tool arguments are put back verbatim before the gate sees them.
-        const fixed = repairInValue(rawInput, input.knownTokens);
-        const toolInput = fixed.value;
-        if (fixed.repairs.length) input.emit("text", { text: `(repaired ${fixed.repairs.length} damaged secret-gate token(s) in ${toolName} arguments: ${fixed.repairs.map((x) => `${shortToken(x.from)} → ${shortToken(x.to)}`).join(", ")})` });
-        const d = decideTool(toolName, toolInput, cwd, allowedMcp, opts.protected ?? NO_PROTECTED);
-        if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
-        if (d.kind === "deny") { input.emit("tool_call", { tool: toolName, denied: d.reason }); return { behavior: "deny", message: d.reason }; }
-        const decision: ApprovalDecision = await input.approve(d.action, d.evidence);
-        if (decision === "allow") { approvals++; return { behavior: "allow", updatedInput: toolInput }; }
-        return { behavior: "deny", message: "denied by the user via AgentSwitch" };
-      };
-      const runDir = mkdtempSync(join(tmpdir(), "agentswitch-claude-"));
-      const profile = join(runDir, "profile");
-      const pluginRoot = join(runDir, "plugin");
-      ext.skillsInto("claude-code", join(pluginRoot, "skills"));
-      const plugin = claudePluginDir(pluginRoot, join(pluginRoot, "skills"));
+      const granted = { count: 0 };
+      const allowedMcp = autoAllowedMcp((opts.extensions ?? NO_EXTENSIONS).mcpFor("claude-code"));
       const abort = new AbortController();
       const onAbort = () => abort.abort();
       input.signal.addEventListener("abort", onAbort, { once: true });
-      const browser = (opts.browser ?? true) && input.browser;
-      const baseEnv = { ...(opts.gate ? gateEnv(opts.gate) : {}), ...claudeHomeEnv(input.threadHome) };
-      const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
-      const options: Options = {
-        cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
-        systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },
-        maxTurns: opts.maxTurns ?? 200, abortController: abort, includePartialMessages: false,
-        ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
-        env: { ...process.env, ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
-        ...(input.resume ? { resume: input.resume } : {}),
-        ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
-        ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),
-        ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
-      };
-      const prompt = composePrompt(input);
+      const { options, runDir } = setupRun(input, opts, cwd, permissionHook(input, cwd, allowedMcp, opts.protected ?? NO_PROTECTED, granted), abort);
       let state: Folded = EMPTY_FOLD;
       try {
-        for await (const msg of query({ prompt, options })) {
+        for await (const msg of query({ prompt: composePrompt(input), options })) {
           const before = state;
           state = foldMessage(state, msg);
           if (msg.type === "rate_limit_event") opts.rateLimits?.record(msg.rate_limit_info);
-          for (const t of state.text.slice(before.text.length)) input.emit("text", { text: t });
-          if (state.tools > before.tools) input.emit("tool_call", { tool: "claude", count: state.tools - before.tools });
-          for (const a of state.agentEvents.slice(before.agentEvents.length)) input.emit("agent", { harness: "claude-code", ...a });
+          emitDelta(input, before, state);
         }
       } catch (err) {
-        if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: approvals }, agents: state.agents };
+        if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: granted.count }, agents: state.agents };
       } finally {
         input.signal.removeEventListener("abort", onAbort);
         rmSync(runDir, { recursive: true, force: true });
       }
-      return outcomeFromFold(state, approvals, input.signal.aborted);
+      return outcomeFromFold(state, granted.count, input.signal.aborted);
     },
   };
 }

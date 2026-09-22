@@ -24,7 +24,6 @@ import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
 import { loadTargets } from "./router/targets.js";
 
-const HERE = new URL(".", import.meta.url).pathname;
 const cfg = defaultConfig();
 
 const { values, positionals } = parseArgs({

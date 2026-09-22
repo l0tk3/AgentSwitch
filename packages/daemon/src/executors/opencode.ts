@@ -86,6 +86,46 @@ export function resumeRefused(summary: RunSummary, exitCode: number | null, stde
   return exitCode !== 0 && !summary.text.trim() && /session/i.test(`${summary.errors.join(" ")} ${stderr}`);
 }
 
+type RunResult = { readonly summary: RunSummary; readonly exitCode: number | null; readonly stderr: string; readonly timedOut: boolean };
+
+/** One `opencode run` process: streams text/tool/agent events to the engine, honours the abort signal and the timeout. */
+function runOnce(binary: string, prompt: string, resume: string | null, input: ExecutionInput, env: Record<string, string>, maxMs: number): Promise<RunResult> {
+  return new Promise((done) => {
+    if (resume) input.emit("text", { text: `(resuming OpenCode session ${resume})` });
+    const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, ...(resume ? ["--session", resume] : []), prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let buffered = "";
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, maxMs);
+    const onAbort = () => child.kill("SIGTERM");
+    input.signal.addEventListener("abort", onAbort, { once: true });
+    child.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString();
+      buffered += d.toString();
+      let i;
+      while ((i = buffered.indexOf("\n")) >= 0) {
+        const line = buffered.slice(0, i); buffered = buffered.slice(i + 1);
+        const one = summarizeRun(line);
+        if (one.text) input.emit("text", { text: one.text });
+        for (const t of one.tools) {
+          input.emit("tool_call", { tool: t.tool, input: t.input });
+          if (/^task$/i.test(t.tool)) input.emit("agent", { harness: "opencode", agentId: "", status: "completed", description: String((t.input as { description?: string } | null)?.description ?? "sub-agent") });
+        }
+      }
+    });
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.on("error", (e) => { stderr += e.message; });
+    child.on("close", (exitCode) => {
+      clearTimeout(timer);
+      input.signal.removeEventListener("abort", onAbort);
+      done({ summary: summarizeRun(stdout), exitCode, stderr, timedOut });
+    });
+  });
+}
+
+export const DEFAULT_MAX_MS = 30 * 60_000;
+
 export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
   const binary = opts.binary ?? join(process.env.HOME ?? "", ".opencode", "bin", "opencode");
   return {
@@ -105,45 +145,14 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
       writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath, extras)));
       const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
       const prompt = composePrompt(input);
-      // Native continuation (verified: `--session <id>` in a later `run --standalone` process picks the conversation up;
-      // sessions live in OpenCode's shared db, keyed by directory, so the engine only offers a resume for the same cwd).
-      const once = (resume: string | null) => new Promise<{ summary: RunSummary; exitCode: number | null; stderr: string; timedOut: boolean }>((done) => {
-        if (resume) input.emit("text", { text: `(resuming OpenCode session ${resume})` });
-        const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, ...(resume ? ["--session", resume] : []), prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-        let stdout = "";
-        let stderr = "";
-        let timedOut = false;
-        const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, opts.maxMs ?? 30 * 60_000);
-        const onAbort = () => child.kill("SIGTERM");
-        input.signal.addEventListener("abort", onAbort, { once: true });
-        let buffered = "";
-        child.stdout.on("data", (d: Buffer) => {
-          stdout += d.toString();
-          buffered += d.toString();
-          let i;
-          while ((i = buffered.indexOf("\n")) >= 0) {
-            const line = buffered.slice(0, i); buffered = buffered.slice(i + 1);
-            const one = summarizeRun(line);
-            if (one.text) input.emit("text", { text: one.text });
-            for (const t of one.tools) {
-              input.emit("tool_call", { tool: t.tool, input: t.input });
-              if (/^task$/i.test(t.tool)) input.emit("agent", { harness: "opencode", agentId: "", status: "completed", description: String((t.input as { description?: string } | null)?.description ?? "sub-agent") });
-            }
-          }
-        });
-        child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-        child.on("error", (e) => { stderr += e.message; });
-        child.on("close", (exitCode) => {
-          clearTimeout(timer);
-          input.signal.removeEventListener("abort", onAbort);
-          done({ summary: summarizeRun(stdout), exitCode, stderr, timedOut });
-        });
-      });
+      const maxMs = opts.maxMs ?? DEFAULT_MAX_MS;
       try {
-        let r = await once(input.resume);
+        // Native continuation: `--session <id>` picks the conversation up (sessions live in OpenCode's shared db, keyed by
+        // directory, so the engine only offers a resume for the same cwd); a refused resume falls back to a fresh session.
+        let r = await runOnce(binary, prompt, input.resume, input, env, maxMs);
         if (input.resume && !input.signal.aborted && resumeRefused(r.summary, r.exitCode, r.stderr)) {
           input.emit("text", { text: `(OpenCode refused to resume ${input.resume}: ${r.stderr.trim().slice(0, 120)}; starting a new session)` });
-          r = await once(null);
+          r = await runOnce(binary, prompt, null, input, env, maxMs);
         }
         return outcomeFromRun(r.summary, r.exitCode, r.stderr, r.timedOut);
       } finally {

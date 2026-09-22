@@ -26,7 +26,7 @@ const types = (events: TaskEvent[], id: string) => events.filter((e) => e.taskId
 
 describe("Engine", () => {
   it("an approval left unanswered when the task ends is expired, and neither that nor a late answer revives the task", async () => {
-    const { engine, store, events, bus } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
+    const { store, events, bus } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
     const executor = { harness: "codex", async run(input: { approve: (a: string, e: string) => Promise<string> }) { void input.approve("cp x y", "outside cwd"); return { ok: true, exitCode: 0, lastText: "moved on without waiting" }; } };
     const eng = new Engine({ store, bus, executors: [executor as never], targets, router: echoRouter([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]), quota: () => ({}), approvalTimeoutMs: 10_000, retryBackoffMs: 1 });
     const t = eng.submit({ task: "x", cwd: "/tmp" });
@@ -178,7 +178,7 @@ describe("follow-ups", () => {
     expect(routerSaw).toContain("有 3 个库：A、B、C");
     expect(routerSaw).toContain("User now says:\n看 A 里有哪些笔记");
     expect(executors.find((e) => e.harness === "codex")!.runs.at(-1)!.brief).toBe("看 A 里有哪些笔记");
-    const grandchild = engine.submit({ task: "第二条", cwd: "/tmp", parentId: child.id });
+    engine.submit({ task: "第二条", cwd: "/tmp", parentId: child.id });
     await engine.idle();
     expect(router.calls[2]!.task.split("User:").length - 1).toBe(2);   // both earlier turns
   });
