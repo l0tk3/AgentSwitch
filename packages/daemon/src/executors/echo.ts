@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { OUT_DIR } from "../files/names.js";
 import { NO_SIDE_EFFECTS, type ExecutionOutcome, type FailureKind } from "../router/failure.js";
+import { sleep } from "../util/sleep.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
 export type EchoDirective = {
@@ -78,10 +79,3 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
   };
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(new Error("cancelled"));
-    const t = setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => { clearTimeout(t); reject(new Error("cancelled")); }, { once: true });
-  });
-}

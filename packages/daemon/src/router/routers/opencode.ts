@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stripProxy } from "../../util/env.js";
 import type { Router, RouterInput, RouterReply } from "./types.js";
 
 export type OpenCodeRouterOptions = {
@@ -78,13 +79,6 @@ export function opencodeRouter(opts: OpenCodeRouterOptions): Router {
   };
 }
 
-function stripProxy(env: NodeJS.ProcessEnv): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (v !== undefined && !/^(https?|all)_proxy$/i.test(k)) out[k] = v;
-  }
-  return out;
-}
 
 function run(cmd: string, args: string[], cwd: string, env: Record<string, string>, signal: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {

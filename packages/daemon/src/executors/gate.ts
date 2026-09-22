@@ -56,11 +56,7 @@ export function mcpServerEnv(gate: GateOptions | null | undefined, env: NodeJS.P
   return { ...inheritedEnv(env), ...gateEnv(gate), ...trust };
 }
 
-export function stripProxy(env: NodeJS.ProcessEnv): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) if (v !== undefined && !/^(https?|all)_proxy$/i.test(k)) out[k] = v;
-  return out;
-}
+export { stripProxy } from "../util/env.js";
 
 function playwrightArgs(gate: GateOptions, profile: string): string[] {
   return ["browser", "--", "npx", "-y", "--prefer-offline", `@playwright/mcp@${gate.playwrightVersion}`,

@@ -26,9 +26,9 @@ const types = (events: TaskEvent[], id: string) => events.filter((e) => e.taskId
 
 describe("Engine", () => {
   it("an approval left unanswered when the task ends is expired, and neither that nor a late answer revives the task", async () => {
-    const { engine, store, events } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
+    const { engine, store, events, bus } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
     const executor = { harness: "codex", async run(input: { approve: (a: string, e: string) => Promise<string> }) { void input.approve("cp x y", "outside cwd"); return { ok: true, exitCode: 0, lastText: "moved on without waiting" }; } };
-    const eng = new Engine({ store, bus: engine["deps"].bus, executors: [executor as never], targets, router: echoRouter([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]), quota: () => ({}), approvalTimeoutMs: 10_000, retryBackoffMs: 1 });
+    const eng = new Engine({ store, bus, executors: [executor as never], targets, router: echoRouter([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]), quota: () => ({}), approvalTimeoutMs: 10_000, retryBackoffMs: 1 });
     const t = eng.submit({ task: "x", cwd: "/tmp" });
     await eng.idle();
     expect(store.getTask(t.id)!.status).toBe("done");

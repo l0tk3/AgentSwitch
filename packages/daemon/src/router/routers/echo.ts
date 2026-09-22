@@ -1,5 +1,6 @@
 /** Test router: canned replies, optional delay and failure. Never calls a model. */
 
+import { sleep } from "../../util/sleep.js";
 import type { Router, RouterInput, RouterReply } from "./types.js";
 
 export type EchoScript = readonly string[] | ((input: RouterInput, call: number) => string);
@@ -20,13 +21,3 @@ export function echoRouter(script: EchoScript, opts: { delayMs?: number } = {}):
   };
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(signal.reason);
-    const t = setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => {
-      clearTimeout(t);
-      reject(signal.reason);
-    }, { once: true });
-  });
-}
