@@ -242,7 +242,7 @@ ask the router with the history; gate_denied or an approved action → stop. The
 | `src/files/*` | names (limits, MIME), uploads (staging → `<cwd>/in/`), artifacts (tree, safe download path, `out/` → `artifacts/<id>` before an ephemeral cwd is deleted, sweeps), notes (attachment paragraph for router + executor) |
 | `src/extensions/*`, `src/executors/extensions.ts` | MCP + skill registries and their per-harness shapes |
 | `src/api/app.ts`, `src/daemon.ts`, `src/client.ts`, `src/cli.ts`, `bin/agentswitch` | HTTP, composition root, client, CLI |
-| `tests/` | 192 tests; API tests run in-process via Hono `request()` |
+| `tests/` | 213 tests; API tests run in-process via Hono `request()` |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
 | `scripts/resume_experiment.ts`, `scripts/executor_resume_smoke.ts` | real-model checks that Claude / Codex resume from a thread's private home (costs cents) |
 

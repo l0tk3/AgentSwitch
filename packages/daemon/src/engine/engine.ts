@@ -90,7 +90,9 @@ export class Engine {
     const threadId = input.threadId ?? parent?.threadId ?? null;
     const task = this.ctx.store.createTask({ ...input, ...(threadId ? { threadId } : {}) });
     this.ctx.emit(task.id, "queued", { task: task.task, cwd: task.cwd, threadId });
-    const run = this.process(task.id).catch(() => undefined).finally(() => this.inFlight.delete(task.id));
+    const run = this.process(task.id).catch((err: unknown) => {
+      console.error(`task ${task.id}: unhandled error after execution: ${(err as Error).message}`);
+    }).finally(() => this.inFlight.delete(task.id));
     this.inFlight.set(task.id, run);
     return task;
   }
@@ -151,8 +153,8 @@ export class Engine {
     this.controllers.set(id, controller);
     const held: Release[] = [];
     try {
+      if (task.parentId) await this.scheduler.awaitParent(task, controller.signal);   // before taking a slot: waiting on a parent costs nothing
       held.push(await this.scheduler.acquireGlobal(task, controller.signal));
-      if (task.parentId) await this.scheduler.awaitParent(task, controller.signal);
       if (controller.signal.aborted) return;
       await this.runTask(task, controller.signal, held);
     } catch (err) {

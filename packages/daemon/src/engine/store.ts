@@ -247,7 +247,7 @@ export class Store {
   }
 
   createApproval(taskId: string, action: string, evidence: string, kind: ApprovalKind = "approval"): Approval {
-    const id = randomUUID().slice(0, 8);
+    const id = randomUUID();   // unguessable: an approval id is the capability to answer it
     this.db.prepare("INSERT INTO approvals (id, task_id, created_at, action, evidence, status, kind) VALUES (?, ?, ?, ?, ?, 'pending', ?)").run(id, taskId, this.now(), action, evidence, kind);
     return this.getApproval(id)!;
   }

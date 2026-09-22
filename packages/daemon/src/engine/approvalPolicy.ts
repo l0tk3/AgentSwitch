@@ -49,7 +49,12 @@ export function whoAnswers(policy: ApprovalPolicy, action: string, evidence = ""
 
 export function loadPolicy(path: string | undefined): ApprovalPolicy {
   if (!path || !existsSync(path)) return DEFAULT_POLICY;
-  try { return ApprovalPolicy.parse(JSON.parse(readFileSync(path, "utf8"))); } catch { return DEFAULT_POLICY; }
+  try { return ApprovalPolicy.parse(JSON.parse(readFileSync(path, "utf8"))); }
+  catch (err) {
+    // A broken policy file must not quietly widen what the router may approve: fall back to the user answering everything.
+    console.error(`approval policy ${path} unreadable (${(err as Error).message}); using manual mode until it is fixed`);
+    return { mode: "manual", human: [] };
+  }
 }
 
 export function savePolicy(path: string, policy: ApprovalPolicy): void {

@@ -27,7 +27,7 @@ export type ClaudeExecutorOptions = {
   readonly protected?: ProtectedPaths;
 };
 
-const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "WebSearch", "NotebookRead"]);
+const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "NotebookRead"]);   // web (WebSearch/WebFetch) asks: design §3.4
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 

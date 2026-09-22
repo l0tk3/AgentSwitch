@@ -8,7 +8,8 @@ import { TERMINAL, type TaskEvent } from "../engine/types.js";
 import { MAX_FILES_PER_UPLOAD } from "../files/names.js";
 import type { Attachment } from "../files/uploads.js";
 import { TargetRef } from "../router/targets.js";
-import { issues, newWorkDir, type ApiDeps } from "./shared.js";
+import { checkCwd } from "./cwdPolicy.js";
+import { issues, newWorkDir, limitParam, type ApiDeps } from "./shared.js";
 
 const NewTaskBody = z.object({
   task: z.string().min(1),
@@ -34,6 +35,8 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
     const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
+    const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
+    if (cwdProblem) return c.json({ error: cwdProblem }, 400);
     const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
     const thread = thread_id ? deps.store.getThread(thread_id) : undefined;
@@ -62,7 +65,7 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     return next ? c.json(next, 201) : c.json({ error: "not found" }, 404);
   });
 
-  app.get("/tasks", (c) => c.json(deps.store.listTasks(Number(c.req.query("limit") ?? 50))));
+  app.get("/tasks", (c) => c.json(deps.store.listTasks(limitParam(c, 50))));
 
   app.get("/tasks/:id", (c) => {
     const task = deps.store.getTask(c.req.param("id"));
@@ -104,17 +107,20 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     });
   });
 
+  /** The approval must belong to the task in the path: a leaked id from another task answers nothing. */
+  const owned = (c: { req: { param: (k: string) => string } }, approvalId: string): boolean => deps.store.getApproval(approvalId)?.taskId === c.req.param("id");
+
   app.post("/tasks/:id/approve", async (c) => {
     const body = ApproveBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "approval_id and decision (allow|deny) required" }, 400);
-    const ok = deps.engine.resolveApproval(body.data.approval_id, body.data.decision);
+    const ok = owned(c, body.data.approval_id) && deps.engine.resolveApproval(body.data.approval_id, body.data.decision);
     return ok ? c.json({ ok: true }) : c.json({ error: "no pending approval with that id" }, 404);
   });
 
   app.post("/tasks/:id/answer", async (c) => {
     const body = AnswerBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "approval_id and text required" }, 400);
-    const ok = deps.engine.answer(body.data.approval_id, body.data.text);
+    const ok = owned(c, body.data.approval_id) && deps.engine.answer(body.data.approval_id, body.data.text);
     return ok ? c.json({ ok: true }) : c.json({ error: "no pending question with that id" }, 404);
   });
 

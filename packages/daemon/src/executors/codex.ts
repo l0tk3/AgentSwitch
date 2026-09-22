@@ -164,6 +164,7 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
           if (state.completed) notifyDone?.();
         });
         child.on("exit", () => { client.fail(new Error("app-server exited")); notifyDone?.(); });
+        child.on("error", (e) => { stderr += e.message; client.fail(e); notifyDone?.(); });   // e.g. the binary is missing: a transport failure, not a crash
         const onAbort = () => child?.kill("SIGTERM");
         input.signal.addEventListener("abort", onAbort, { once: true });
         const timer = setTimeout(() => { state = { ...state, errors: [...state.errors, "timed out"] }; child?.kill("SIGTERM"); }, opts.maxMs ?? 30 * 60_000);
@@ -202,7 +203,9 @@ async function openThread(client: AppServerClient, input: ExecutionInput, persis
     }
   }
   const started = await client.request("thread/start", { ...base, ephemeral: !persistent });
-  return String((started.thread as Json).id);
+  const id = (started.thread as Json | undefined)?.id;
+  if (typeof id !== "string" || !id) throw new Error(`thread/start returned no thread id: ${JSON.stringify(started).slice(0, 200)}`);
+  return id;
 }
 
 /** Text plus each image attachment as a local image item, so Codex sees screenshots without a Read tool. */

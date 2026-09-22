@@ -19,7 +19,7 @@
 | 模式 | 含义 |
 |---|---|
 | `manual` | 全部由用户批，路由器不介入 |
-| `auto` | 全权交给路由器，没有底线（用户明示的授权）；路由器仍可回 `ask_user` |
+| `auto` | 全权交给路由器（用户明示的授权），破坏性动作也由它批；路由器仍可回 `ask_user`。唯一例外：碰 daemon 自身状态或 gate 家目录的动作在任何模式下都直接 `deny`（`isSelfHarm`），不是审批问题 |
 | `scoped` | 用户勾选保留给自己的类别，其余路由器批 |
 
 类别（`scoped` 的 `human` 列表，按关键词/动作形态匹配）：`delete`（删文件、rm、git clean、DROP/DELETE）、`outside_cwd`（工作目录外的写入）、`shell`（任何 shell 命令）、`git_push`（push/force）、`irreversible`（支付、发送、删账号）、`browser`（浏览器提交类）。默认 `scoped`，保留 `delete`、`git_push`、`irreversible`。daemon 自身文件永远硬拒绝，不属于审批。

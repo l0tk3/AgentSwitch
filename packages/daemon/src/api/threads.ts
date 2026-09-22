@@ -5,9 +5,10 @@ import { z } from "zod";
 import { TERMINAL } from "../engine/types.js";
 import { foldThread } from "../threads/fold.js";
 import type { Thread, ThreadStatus } from "../threads/types.js";
-import { issues, type ApiDeps } from "./shared.js";
+import { issues, limitParam, type ApiDeps } from "./shared.js";
 
-const ThreadPatch = z.object({ title: z.string().max(200).nullable().optional(), status: z.enum(["open", "archived"]).optional(), expires_at: z.number().int().nullable().optional() });
+/** Status changes go through /archive and /reopen (they check for running tasks and set the expiry). */
+const ThreadPatch = z.object({ title: z.string().max(200).nullable().optional(), expires_at: z.number().int().nullable().optional() });
 
 export function mountThreads(app: Hono, deps: ApiDeps): void {
   const view = (t: Thread) => {
@@ -16,7 +17,7 @@ export function mountThreads(app: Hono, deps: ApiDeps): void {
   };
   app.get("/threads", (c) => {
     const status = c.req.query("status");
-    const limit = Number(c.req.query("limit") ?? 50);
+    const limit = limitParam(c, 50);
     const opts: { limit: number; status?: ThreadStatus } = status === "open" || status === "archived" ? { limit, status } : { limit };
     return c.json(deps.store.listThreads(opts).map(view));
   });
@@ -29,8 +30,8 @@ export function mountThreads(app: Hono, deps: ApiDeps): void {
     const body = ThreadPatch.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: issues(body.error) }, 400);
     if (!deps.store.getThread(c.req.param("id"))) return c.json({ error: "not found" }, 404);
-    const { title, status, expires_at } = body.data;
-    const t = deps.store.updateThread(c.req.param("id"), { ...(title !== undefined ? { title } : {}), ...(status !== undefined ? { status } : {}), ...(expires_at !== undefined ? { expiresAt: expires_at } : {}) });
+    const { title, expires_at } = body.data;
+    const t = deps.store.updateThread(c.req.param("id"), { ...(title !== undefined ? { title } : {}), ...(expires_at !== undefined ? { expiresAt: expires_at } : {}) });
     if (title !== undefined && title) deps.store.appendThreadEvent(t.id, "title", { title });
     return c.json(view(t));
   });

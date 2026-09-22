@@ -9,7 +9,8 @@ import { exampleContext, lintContext, loadContext } from "../router/context.js";
 import { route } from "../router/route.js";
 import { loadMemory } from "../threads/memory.js";
 import { aggregateRecords, RECORD_WINDOW_MS } from "../threads/record.js";
-import { issues, type ApiDeps } from "./shared.js";
+import { checkCwd } from "./cwdPolicy.js";
+import { issues, limitParam, type ApiDeps } from "./shared.js";
 import { NewTaskBody } from "./tasks.js";
 
 const ContextBody = z.object({ text: z.string() });
@@ -29,6 +30,8 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
     if (!body.success) return c.json({ error: "task and cwd required" }, 400);
     const { pin, needs_browser, ephemeral: _e, parent_id: _p, cwd, ...rest } = body.data;
     if (!cwd) return c.json({ error: "cwd required for preview" }, 400);
+    const cwdProblem = checkCwd(cwd, deps.cwdRules);
+    if (cwdProblem) return c.json({ error: cwdProblem }, 400);
     const result = await route({ ...rest, cwd, ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}) }, deps.routeDeps());
     deps.routingLog.record(rest.task, cwd, result);
     return c.json(result);
@@ -38,7 +41,7 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
   app.post("/quota/refresh", async (c) => c.json(await deps.quota.refresh(true)));
 
   app.get("/targets", (c) => c.json({ ...deps.targets, quota: deps.quota.map() }));
-  app.get("/routing/log", (c) => c.json(deps.routingLog.recent(Number(c.req.query("limit") ?? 50))));
+  app.get("/routing/log", (c) => c.json(deps.routingLog.recent(limitParam(c, 50))));
 
   app.get("/context/example", (c) => c.json({ text: exampleContext() }));
   app.get("/context", (c) => {

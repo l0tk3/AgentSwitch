@@ -113,7 +113,8 @@ export class ThreadBook {
         taskId: task.id, ts: this.ctx.now(), kind: kindOf(task.task, task.decision), harness: task.harness, model: task.model, status: task.status, failureKind,
         ms: Math.max(0, this.ctx.now() - task.createdAt), tokens,
         approvals: events.filter((e) => e.type === "approval_resolved" && e.payload.decision === "allow").length,
-        handedOff: events.some((e) => e.type === "handoff"), pinned: task.pin !== null, userHandoff: false,
+        handedOff: events.some((e) => e.type === "handoff"), pinned: task.pin !== null,
+        userHandoff: events.some((e) => e.type === "handoff" && e.payload.reason === "user"),
       });
     }
     await this.summarize(task);

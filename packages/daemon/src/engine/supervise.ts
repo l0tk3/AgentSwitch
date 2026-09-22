@@ -50,7 +50,7 @@ export function superviseApproval(ctx: EngineContext, sup: Supervisor, desk: App
     ctx.emit(task.id, "supervisor", { kind: "approval", approvalId, decision: v.decision, reason: v.reason, source: v.source, ms: v.ms });
     if (v.decision === "allow") desk.resolve(approvalId, "allow", "allowed", "router");
     else if (v.decision === "deny") desk.resolve(approvalId, "deny", "denied", "router");
-  });
+  }).catch((err: unknown) => ctx.emit(task.id, "supervisor", { kind: "approval", approvalId, decision: "ask_user", reason: (err as Error).message, source: "error", ms: 0 }));
 }
 
 export type Watchdog = { touch(): void; pause(): void; stop(): void; readonly cancelledWith: string | null };
@@ -63,7 +63,7 @@ export function watchdog(ctx: EngineContext, sup: Supervisor | undefined, desk: 
   const arm = () => {
     if (state.timer) clearTimeout(state.timer);
     if (ms <= 0 || !sup || state.stopped) return;
-    state.timer = setTimeout(() => void fire(), ms);
+    state.timer = setTimeout(() => { fire().catch((err: unknown) => ctx.emit(task.id, "supervisor", { kind: "checkin", action: "continue", note: (err as Error).message, source: "error", silentMs: 0, ms: 0 })); }, ms);
     state.timer.unref?.();
   };
   const fire = async () => {

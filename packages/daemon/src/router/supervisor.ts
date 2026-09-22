@@ -21,13 +21,21 @@ const DESTRUCTIVE = [
   /\b(drop|truncate)\s+(table|database|schema)\b/i, /\bDELETE\s+FROM\b/i, /\bmkfs\b|\bdd\s+if=/i, /\b(shutdown|reboot|halt)\b/i, /\bkill\s+-9\s+-1\b|\bpkill\b/i,
   /\bchmod\s+-R\s+777\b/i, /\bcurl\b.*\|\s*(ba)?sh\b/i, /\bsudo\b/i,
   /(支付|付款|转账|下单|purchase|checkout|pay(ment)?\b|transfer\s+funds)/i, /(发送邮件|群发|send\s+(mail|email|message)|发短信|post\s+to\s+(twitter|x\.com|weibo))/i,
-  /(删除账号|注销|delete\s+(my\s+)?account|deactivate)/i, /\.agentswitch\b|\.secret-gate\b|packages\/daemon\/config\b/i,
+  /(删除账号|注销|delete\s+(my\s+)?account|deactivate)/i,
 ];
+
+/** The daemon's own state and the gate: never approvable by anyone but the user, in any mode, and even then the
+ *  executors' protected-path guard refuses the write. */
+const SELF_HARM = /\.agentswitch\b|\.secret-gate\b|packages\/daemon\/config\b/i;
+
+export function isSelfHarm(action: string, evidence = ""): boolean {
+  return SELF_HARM.test(`${action}\n${evidence}`);
+}
 
 /** True when the action must reach a human whatever the router thinks. */
 export function isDestructive(action: string, evidence = ""): boolean {
   const text = `${action}\n${evidence}`;
-  return DESTRUCTIVE.some((re) => re.test(text));
+  return isSelfHarm(action, evidence) || DESTRUCTIVE.some((re) => re.test(text));
 }
 
 export type ApprovalInput = { readonly brief: string; readonly action: string; readonly evidence: string; readonly recentEvents: readonly string[]; readonly sideEffects: string; readonly cwd: string; /** false only in the user's explicit "auto" mode: no destructive floor. */ readonly floor?: boolean };
@@ -112,6 +120,7 @@ export function routerSupervisor(router: Router, config: SupervisorConfig, timeo
   return {
     config,
     async approve(input, signal) {
+      if (isSelfHarm(input.action, input.evidence)) return { decision: "deny", reason: "touches AgentSwitch's own state or the gate: never approved on the user's behalf", ms: 0, source: "floor" };
       if ((input.floor ?? true) && isDestructive(input.action, input.evidence)) return { decision: "ask_user", reason: "irreversible or out-of-scope action: only the user may approve it", ms: 0, source: "floor" };
       const r = await ask(APPROVAL_SYSTEM, approvalMessage(input), input.cwd, ApprovalReply, signal);
       return r.value ? { ...r.value, ms: r.ms, source: "router" } : { decision: "ask_user", reason: r.error ?? "no reply", ms: r.ms, source: "error" };

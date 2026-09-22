@@ -68,7 +68,7 @@ iPhone (SwiftUI)                                   Mac (launchd 守护)
 - 备选（Tailscale 不可用时）：Cloudflare Tunnel + Access。不做端口转发。
 
 ### 3.2 任务引擎
-- 任务状态机：`queued → routing → running → (awaiting_approval ⇄ running) → done | failed | cancelled`。
+- 任务状态机：`queued → routing → running → (waiting_approval ⇄ running) → done | failed | cancelled`（实现用 `waiting_approval`，2026-09-22 统一）。
 - 持久化：SQLite。两张核心表：`tasks`（当前状态）、`events`（append-only，SSE 回放用）。
 - 手机断线无所谓：状态在 SQLite，重连时按 `since=<event_id>` 回放。
 - 并发：~~第一版单任务串行~~ 2026-09-21 改为默认并发，三把锁（线程/父任务、cwd、harness `max_concurrent`）加全局上限，见 `background-v0.md`。

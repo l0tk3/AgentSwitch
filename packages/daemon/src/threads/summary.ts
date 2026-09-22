@@ -90,7 +90,7 @@ export function parseSummary(text: string): ParsedSummary {
   if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
   const s = parsed.data;
   const clean = (v: string) => lintContext(`- ${v}`).text.replace(/^- /, "");
-  return { ok: true, summary: { title: s.title, goal: clean(s.goal), progress: clean(s.progress), files: s.files, unresolved: s.unresolved.map(clean), decisions: s.decisions.map(clean), facts: s.facts.map(clean), spoken: clean(s.spoken).slice(0, 200) } };
+  return { ok: true, summary: { title: clean(s.title), goal: clean(s.goal), progress: clean(s.progress), files: s.files, unresolved: s.unresolved.map(clean), decisions: s.decisions.map(clean), facts: s.facts.map(clean), spoken: clean(s.spoken).slice(0, 200) } };
 }
 
 export type Summarizer = (input: SummaryInput, signal?: AbortSignal) => Promise<{ summary: Summary | null; error: string | null; ms: number }>;

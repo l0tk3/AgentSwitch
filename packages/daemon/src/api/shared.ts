@@ -14,6 +14,7 @@ import type { QuotaService } from "../quota/index.js";
 import type { RoutingLog } from "../router/log.js";
 import type { RouteDeps } from "../router/route.js";
 import type { Targets } from "../router/targets.js";
+import type { CwdRules } from "./cwdPolicy.js";
 
 export type ApiDeps = {
   readonly store: Store;
@@ -31,6 +32,7 @@ export type ApiDeps = {
   readonly artifactsDir: string;
   readonly extensions: Extensions;
   readonly version: string;
+  readonly cwdRules: CwdRules;
 };
 
 export const issues = (err: z.ZodError): string => err.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; ");
@@ -40,6 +42,12 @@ export async function parseBody<T>(c: Context, schema: z.ZodType<T>): Promise<{ 
   const raw = await c.req.json().catch(() => ({}));
   const r = schema.safeParse(raw);
   return r.success ? { ok: true, data: r.data } : { ok: false, error: issues(r.error) };
+}
+
+/** `?limit=` clamped to a sane range; garbage → the default. */
+export function limitParam(c: Context, fallback: number, max = 500): number {
+  const n = Number(c.req.query("limit") ?? fallback);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : fallback;
 }
 
 export function newWorkDir(root: string): string {

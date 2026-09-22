@@ -4,6 +4,7 @@ import { serve as listen } from "@hono/node-server";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createApp } from "./api/app.js";
+import { defaultCwdRules } from "./api/cwdPolicy.js";
 import { Bus } from "./engine/bus.js";
 import { defaultCleanupPaths } from "./engine/cleanup.js";
 import { DEFAULT_MAX_TASKS, Engine } from "./engine/engine.js";
@@ -101,14 +102,14 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   sweepThreads(store);
   // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
   // The summarizer is a text-only agent on the router's model, run in a scratch dir so it never explores the repo.
-  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(opencodeRouter({ model: targets.router.model, agentName: "summarizer", tools: "none", runIn: join(cfg.home, "summarizer") }), targets.router.timeout_ms);
-  mkdirSync(join(cfg.home, "summarizer"), { recursive: true });
+  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(opencodeRouter({ model: targets.router.model, agentName: "summarizer", tools: "none", runIn: join(cfg.home, "router-scratch") }), targets.router.timeout_ms);
+  mkdirSync(join(cfg.home, "router-scratch"), { recursive: true });
   // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
-  const supervisor = summarizer ? routerSupervisor(opencodeRouter({ model: targets.router.model, agentName: "supervisor", tools: "none", runIn: join(cfg.home, "summarizer") }), targets.router.supervisor, targets.router.timeout_ms) : undefined;
+  const supervisor = summarizer ? routerSupervisor(opencodeRouter({ model: targets.router.model, agentName: "supervisor", tools: "none", runIn: join(cfg.home, "router-scratch") }), targets.router.supervisor, targets.router.timeout_ms) : undefined;
   const extensionsSummary = () => summarizeExtensions(extensions);
   const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}) });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, policyPath, workRoot, uploads, artifactsDir, extensions, version: VERSION });
+  const app = createApp({ store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
