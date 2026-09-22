@@ -48,6 +48,7 @@
 ## 2. 分诊台怎么跑
 
 - **在哪跑**：OpenCode `serve`（常驻，v2 HTTP API），daemon 用 `session.create` + `session.prompt` 调；每次分诊一个新 session，不复用上下文。standalone `run` 每次起服务要 2–3 s，只做后备。
+  > 2026-09-22 实现：daemon 启动时拉起 `opencode serve --port 4712`（`OPENCODE_SERVER_PASSWORD` 随机，Basic 认证用户名固定 `opencode`），配置经 `OPENCODE_CONFIG` 注入两个 agent：`dispatcher`（read/glob/grep/list）和 `oracle`（无工具，摘要器与监督者用）。v2 API 不能按调用传 system prompt，所以指令放在消息开头、任务在结尾；完成信号是消息列表里 `type: idle` 的条目；每次问答一个 session，问完删除。实测一次 DeepSeek 调用约 1.2 s（原来 5–10 s）。serve 起不来时退回 `run --standalone`。执行器仍用 `run --standalone`（权限与 `--session` 续接已验证），待迁。
 - **用什么 agent**：`opencode.json` 里定义 `router` agent，`mode: primary`，model `deepseek/deepseek-flash`，工具只留 `read` / `glob` / `grep` / `list`，`bash` / `edit` / `write` / `webfetch` / `websearch` 全部 deny，无 MCP。它能看仓库，不能改、不能出网、不能拿凭据。
 - **看仓库的范围**：只允许读 cwd 之内；`~/.secret-gate`、`.env`、`*.pem`、`*.key` 在 OpenCode permission 里 deny（防误操作，不是隐私边界）。
 - **为什么放在 OpenCode 而不是直接调 DeepSeek API**：三点。它需要看仓库，OpenCode 已有受控的只读工具；DeepSeek 作为执行者本来就在 OpenCode 里，provider、限流、账单一处管理；将来换路由模型（比如以后想换成别家或本地模型）只改 agent 的 `model` 字段。
@@ -132,7 +133,7 @@ router:
 
 - `models` 里的 key 是执行器实际接受的模型 ID：Claude Code 走 `--model` / SDK 的 `model` 字段，Codex 走 app-server `newConversation.model`，OpenCode 走 `provider/model`。
 - Codex 每个模型还有 `efforts`（推理强度，`ultra` 会自动委派子任务）。Decision 里可选 `effort` 字段，缺省 `medium`；校验只检查它在该模型的 `efforts` 里。Claude Code 的对应物是 `--effort`/settings 的 effortLevel，v1 不路由这一维。
-- **发现与刷新**：daemon 启动时用 Codex app-server 的 `model/list` 拉真实列表，和 yaml 求交集；yaml 里有、后端没有的模型标为 `unavailable` 并在路由面板显示，不会派过去。OpenCode 2.0.8 的 `opencode models` 和 `/api/model` 在本机都返回空，所以 OpenCode 这边用 `opencode auth list`（哪些 provider 有凭据）× models.dev 目录（`https://models.dev/api.json`，OpenCode 自己也用它）求可用集。Claude Code 没有列表接口，以 yaml 为准，派发失败（未知模型）时标 unavailable。
+- **发现与刷新**（2026-09-22 决定并实现，`src/router/discovery.ts`）：启动时 Codex 走 app-server `model/list`，Claude Code 走 Agent SDK 的 `supportedModels()`（不发消息，2.4 s，返回 `resolvedModel` 规范 id）；结果与 yaml **求并集**：老模型保留（按 id 仍可派发），新 id 加进目录，cost 按名字猜（fable/gpt-6→top、opus→high、haiku/mini/flash→low、其余 mid），strengths 标 `discovered`。不做 `unavailable` 标记。OpenCode 侧不发现（只用 deepseek-flash）。
 - `cost` / `strengths` 是给路由器看的自然语言标签，不参与代码校验；`quota`、`max_concurrent`、`browser`、`models` 键集合参与校验。
 - 用户在手机上也能**手动指定**模型：任务带 `pin: {harness, model}` 时跳过分诊，只做校验。
 

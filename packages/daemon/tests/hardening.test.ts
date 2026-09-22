@@ -34,7 +34,7 @@ describe("hardening (audit 2026-09-22)", () => {
 
   it("an approval can only be answered through its own task; ids are full UUIDs", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-h2-"));
-    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4 };
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
     const d = buildDaemon(cfg, { router: echoRouter(() => decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })), quota: new QuotaService([]) });
     const fetchImpl: typeof fetch = (input, init) => Promise.resolve(d.app.request(input instanceof Request ? input : String(input).replace("http://test", ""), init));
     const client = new Client("http://test", fetchImpl);

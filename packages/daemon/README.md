@@ -206,6 +206,14 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 
 Later for the phone: bind to the Tailscale address, add bearer auth and pairing. Routes stay.
 
+## Start-up (serve)
+
+`serve` discovers models (Codex `model/list`, Claude `supportedModels()`; new ids join the catalog, old
+ones stay), brings up a resident `opencode serve` on `AGENTSWITCH_OPENCODE_PORT` (4712) with a
+read-only `dispatcher` agent and a tool-less `oracle` agent, and only then listens. Router, summarizer
+and supervisor calls are one short-lived session each on that server (~1 s); if it fails to start
+they fall back to `opencode run --standalone`. Real executors refuse to start without secret-gate.
+
 ## Router (router-v0)
 
 `config/targets.yaml` lists every selectable model per harness (Claude Code 15 incl. `[1m]`,

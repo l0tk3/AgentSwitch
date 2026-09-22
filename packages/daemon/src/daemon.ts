@@ -36,6 +36,8 @@ import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
 import type { Router } from "./router/routers/types.js";
 import { loadTargets, type Targets } from "./router/targets.js";
+import { discoverTargets } from "./router/discovery.js";
+import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
 
 export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
@@ -51,6 +53,9 @@ export type DaemonConfig = {
   readonly quotaTtlMs: number;
   /** Tasks in flight at once (AGENTSWITCH_MAX_TASKS, default 4); see docs/background-v0.md. */
   readonly maxTasks: number;
+  /** Port of the resident `opencode serve` (AGENTSWITCH_OPENCODE_PORT); router-type calls go there. */
+  readonly opencodePort: number;
+  readonly opencodeBinary: string;
 };
 
 export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
@@ -64,6 +69,8 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     browser: env.AGENTSWITCH_BROWSER !== "0",   // gated Playwright MCP attached to browser tasks when the gate exists
     quotaTtlMs: 60_000,
     maxTasks: Math.max(1, Number(env.AGENTSWITCH_MAX_TASKS ?? DEFAULT_MAX_TASKS) || DEFAULT_MAX_TASKS),
+    opencodePort: Number(env.AGENTSWITCH_OPENCODE_PORT ?? DEFAULT_OPENCODE_PORT) || DEFAULT_OPENCODE_PORT,
+    opencodeBinary: env.OPENCODE_BIN ?? join(env.HOME ?? "", ".opencode", "bin", "opencode"),
   };
 }
 
@@ -76,15 +83,26 @@ export type Daemon = {
   close(): void;
 };
 
-export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; executors?: readonly Executor[]; quota?: QuotaService } = {}): Daemon {
-  const targets = loadTargets(cfg.targetsPath);
+export type BuildOverrides = {
+  readonly router?: Router;
+  readonly executors?: readonly Executor[];
+  readonly quota?: QuotaService;
+  /** Catalog after discovery (serve() passes it); default: the yaml as is. */
+  readonly targets?: Targets;
+  /** The resident OpenCode server; when absent, router-type calls fall back to `opencode run --standalone`. */
+  readonly opencode?: OpenCodeServer;
+};
+
+export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): Daemon {
+  const targets = overrides.targets ?? loadTargets(cfg.targetsPath);
   const store = new Store({ dbPath: join(cfg.home, "agentswitch.db"), tasksDir: join(cfg.home, "tasks"), threadsDir: join(cfg.home, "threads") });
   const bus = new Bus();
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
   const contextPath = join(cfg.home, "CONTEXT.md");
   const memoryPath = join(cfg.home, "MEMORY.md");
   const policyPath = join(cfg.home, "approvals.json");
-  const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : opencodeRouter({ model: targets.router.model }));
+  const resident = overrides.opencode;
+  const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : resident ? serveRouter(resident, "dispatcher", targets.router.model) : opencodeRouter({ model: targets.router.model }));
   const rateLimits = new RateLimitCache();
   const extensions = extensionsAt(cfg.home);
   const prot = defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
@@ -102,10 +120,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   sweepThreads(store);
   // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
   // The summarizer is a text-only agent on the router's model, run in a scratch dir so it never explores the repo.
-  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(opencodeRouter({ model: targets.router.model, agentName: "summarizer", tools: "none", runIn: join(cfg.home, "router-scratch") }), targets.router.timeout_ms);
   mkdirSync(join(cfg.home, "router-scratch"), { recursive: true });
+  const oracle = (agentName: string): Router => resident ? serveRouter(resident, "oracle", targets.router.model) : opencodeRouter({ model: targets.router.model, agentName, tools: "none", runIn: join(cfg.home, "router-scratch") });
+  const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(oracle("summarizer"), targets.router.timeout_ms);
   // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
-  const supervisor = summarizer ? routerSupervisor(opencodeRouter({ model: targets.router.model, agentName: "supervisor", tools: "none", runIn: join(cfg.home, "router-scratch") }), targets.router.supervisor, targets.router.timeout_ms) : undefined;
+  const supervisor = summarizer ? routerSupervisor(oracle("supervisor"), targets.router.supervisor, targets.router.timeout_ms) : undefined;
   const extensionsSummary = () => summarizeExtensions(extensions);
   const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}) });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
@@ -146,13 +165,23 @@ function defaultEchoRouter(targets: Targets): Router {
   return echoRouter((input) => JSON.stringify({ harness: targets.router.default.harness, model: null, brief: input.task.split("\n\nTask:\n")[1] ?? input.task, confidence: 0.9 }));
 }
 
-export function serve(cfg: DaemonConfig): { daemon: Daemon; close: () => void } {
-  const daemon = buildDaemon(cfg);
+/** Start-up: discover models (real executors only), bring up the resident OpenCode server (real router only), then listen. */
+export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close: () => void }> {
+  const yaml = loadTargets(cfg.targetsPath);
+  const targets = cfg.executors === "real" ? await discoverTargets(yaml, { codexBinary: yaml.harnesses.codex?.binary ?? "codex" }) : yaml;
+  let opencode: OpenCodeServer | undefined;
+  if (cfg.router === "opencode") {
+    const gate = defaultGate();
+    const server = new OpenCodeServer({ binary: cfg.opencodeBinary, port: cfg.opencodePort, home: join(cfg.home, "opencode"), gateHome: gate?.home ?? join(process.env.HOME ?? "", ".secret-gate") });
+    try { await server.start(); opencode = server; }
+    catch (err) { console.error(`${(err as Error).message}; router-type calls fall back to opencode run --standalone`); }
+  }
+  const daemon = buildDaemon(cfg, { targets, ...(opencode ? { opencode } : {}) });
   const server = listen({ fetch: daemon.app.fetch, hostname: "127.0.0.1", port: cfg.port }, (info) => {
-    console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
+    console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   });
   void daemon.quota.refresh();
   const sweeper = setInterval(() => sweepThreads(daemon.store), 3600_000);
   sweeper.unref();
-  return { daemon, close: () => { clearInterval(sweeper); server.close(); daemon.close(); } };
+  return { daemon, close: () => { clearInterval(sweeper); server.close(); daemon.close(); opencode?.stop(); } };
 }

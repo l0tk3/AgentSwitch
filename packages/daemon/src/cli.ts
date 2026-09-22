@@ -114,7 +114,7 @@ async function watchInteractive(id: string): Promise<void> {
 async function main(): Promise<number> {
   switch (cmd) {
     case "serve": {
-      const handle = serve(cfg);
+      const handle = await serve(cfg);
       process.on("SIGINT", () => { handle.close(); process.exit(0); });
       await new Promise(() => undefined);
       return 0;

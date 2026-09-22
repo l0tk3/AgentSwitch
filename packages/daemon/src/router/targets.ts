@@ -14,6 +14,7 @@ export const ModelSpec = z.object({
   unavailable: z.boolean().optional(),
 });
 export type ModelSpec = z.infer<typeof ModelSpec>;
+export type CostTier = z.infer<typeof Cost>;
 
 export const HarnessSpec = z.object({
   quota: z.enum(["local-count", "rate-limits", "balance"]),
