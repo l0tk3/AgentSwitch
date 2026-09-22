@@ -22,6 +22,10 @@ substitutes the real value on the way out, for the allowed host only. You never 
 and the user does not expect you to.
 
 - There is nothing to decode, print, base64-decode or "test"; treat the value as opaque text.
+- If a request is answered with `502 Bad Gateway` and `certificate verify failed`, the site uses a
+  certificate the gate cannot verify. Stop and report the host and the error verbatim: the user must
+  list it in `~/.secret-gate/upstream-insecure.txt` and restart the proxy. Do not try other hosts,
+  ports or `-k`/`--insecure` flags.
 - If a request carrying a value is answered with `HTTP 403` and the header `X-Secret-Gate: denied`,
   the value is not allowed for that host or action. Tell the user; do not try other hosts.
 - If the site rejects the login (for example it hashes the password in the browser before sending,

@@ -248,6 +248,17 @@ config/          per-agent snippets, exec template example
 scripts/env.sh   proxy + CA environment
 ```
 
+## Self-signed internal sites
+
+The proxy verifies upstream certificates like a browser would. A site with a self-signed
+certificate answers with `502 Bad Gateway: certificate verify failed: self-signed certificate in
+certificate chain`, and nothing the model does can fix that. List such hosts, one per line, in
+`~/.secret-gate/upstream-insecure.txt` (`host`, `host:port`, or `*.suffix`; `#` comments) and
+restart the proxy: for those hosts alone the upstream certificate is accepted unverified (a warning
+is logged once per host); every other host stays strictly verified. Only do this for hosts you
+reach over a network you trust (LAN, Tailscale): an attacker on the path to an unverified host
+could impersonate it and receive the substituted secret.
+
 ## Limits
 
 - Sites that hash the password in browser JS or validate the field format: the proxy cannot
