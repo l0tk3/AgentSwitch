@@ -33,8 +33,7 @@ function applyOne(state: ThreadState, ev: ThreadEvent): ThreadState {
     }
     case "summary": {
       const summary = summaryFromPayload(p);
-      // A summary is a boundary: transient progress lines are cleared whether or not it parsed.
-      return summary ? { ...state, summary, summarySeq: ev.seq, title: state.title ?? summary.title, progress: [], lastActivity } : { ...state, progress: [], lastActivity };
+      return summary ? { ...state, summary, summarySeq: ev.seq, title: state.title ?? summary.title, lastActivity } : { ...state, lastActivity };
     }
     case "title": {
       const title = str(p.title);
@@ -45,14 +44,6 @@ function applyOne(state: ThreadState, ev: ThreadEvent): ThreadState {
       if (!from || typeof from.harness !== "string") return { ...state, lastActivity };
       const rec: HandoffRecord = { from, to: (p.to as HandoffRecord["to"]) ?? null, reason: String(p.reason ?? "user") as HandoffRecord["reason"], summaryRef: typeof p.summaryRef === "number" ? p.summaryRef : null, ts: ev.ts };
       return { ...state, handoffs: [...state.handoffs, rec], lastActivity };
-    }
-    case "cost": {
-      const cost = p.tokens && typeof p.tokens === "object" ? Object.fromEntries(Object.entries(p.tokens as Record<string, unknown>).map(([k, v]) => [k, Number(v ?? 0)])) : state.cost;
-      return { ...state, cost, lastActivity };
-    }
-    case "progress": {
-      const text = str(p.text);
-      return text ? { ...state, progress: [...state.progress, text], lastActivity } : { ...state, lastActivity };
     }
     default:
       return state;

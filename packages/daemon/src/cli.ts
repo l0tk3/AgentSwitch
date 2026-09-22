@@ -141,6 +141,7 @@ async function main(): Promise<number> {
       out(await client.approve(a1, a2, values.allow ? "allow" : "deny")); return 0;
     }
     case "cancel": { if (!a1) throw new Error("cancel <id>"); out(await client.cancel(a1)); return 0; }
+    case "rate": { if (!a1 || !["up", "down", "clear"].includes(a2 ?? "")) throw new Error("rate <task> up|down|clear"); out(await client.rate(a1, a2 === "up" ? 1 : a2 === "down" ? -1 : null)); return 0; }
     case "answer": { if (!a1 || !a2 || !positionals[3]) throw new Error('answer <task> <approval> "<text>"'); out(await client.answer(a1, a2, positionals[3])); return 0; }
     case "policy": {
       if (!a1) { out(await client.policy()); return 0; }

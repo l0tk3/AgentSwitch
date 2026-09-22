@@ -11,12 +11,14 @@ import { appendMemory } from "../threads/memory.js";
 import type { Summarizer } from "../threads/summary.js";
 import type { HandoffReason, ThreadBrief, ThreadState } from "../threads/types.js";
 import type { Attempt } from "../router/reroute.js";
+import type { RoutingLog } from "../router/log.js";
 import { defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
 import type { EngineContext } from "./context.js";
 import type { HandoffFrom, Task } from "./types.js";
 
 export type ThreadBookDeps = {
   readonly targets: Targets;
+  readonly routingLog?: RoutingLog;
   readonly summarizer?: Summarizer;
   readonly memoryPath?: string;
   readonly cleanupPaths?: CleanupPaths;
@@ -105,6 +107,7 @@ export class ThreadBook {
     if (!task?.threadId) return;
     const failed = task.attempts.at(-1);
     const failureKind = task.status === "failed" ? failed?.kind ?? "unknown" : null;
+    if (task.routeLogId !== null) this.deps.routingLog?.setOutcome(task.routeLogId, failureKind ? `${task.status}:${failureKind}` : task.status);
     const events = this.ctx.store.eventsSince(task.id);
     const tokens = events.filter((e) => e.type === "done").reduce((n, e) => n + Number(e.payload.tokens ?? 0), 0);
     this.ctx.store.appendThreadEvent(task.threadId, "task", { taskId: task.id, harness: task.harness, model: task.model, status: task.status, kind: failureKind, tokens });
@@ -114,7 +117,7 @@ export class ThreadBook {
         ms: Math.max(0, this.ctx.now() - task.createdAt), tokens,
         approvals: events.filter((e) => e.type === "approval_resolved" && e.payload.decision === "allow").length,
         handedOff: events.some((e) => e.type === "handoff"), pinned: task.pin !== null,
-        userHandoff: events.some((e) => e.type === "handoff" && e.payload.reason === "user"),
+        userHandoff: events.some((e) => e.type === "handoff" && e.payload.reason === "user"), rating: task.rating,
       });
     }
     await this.summarize(task);

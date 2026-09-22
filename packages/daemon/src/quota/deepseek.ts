@@ -25,18 +25,19 @@ export function findDeepSeekKey(env: NodeJS.ProcessEnv = process.env, opencodeDb
   }
 }
 
-/** `{is_available, balance_infos:[{currency,total_balance,granted_balance,topped_up_balance}]}` */
-export function parseBalance(body: Json, fullScaleCny = 50): { remaining: number | null; detail: Json } {
+/** `{is_available, balance_infos:[{currency,total_balance,granted_balance,topped_up_balance}]}`.
+ *  Pay-as-you-go has no "full scale": the account is usable (1) or not (0); the balance itself is shown as detail. */
+export function parseBalance(body: Json): { remaining: number | null; detail: Json } {
   const infos = (body.balance_infos as Json[] | undefined) ?? [];
   const total = infos.reduce((sum, i) => sum + Number(i.total_balance ?? 0), 0);
   const available = body.is_available !== false;
   return {
-    remaining: infos.length === 0 ? null : available ? Math.max(0, Math.min(1, total / fullScaleCny)) : 0,
+    remaining: infos.length === 0 ? null : available && total > 0 ? 1 : 0,
     detail: { is_available: available, balances: infos.map((i) => ({ currency: i.currency, total: i.total_balance, granted: i.granted_balance, topped_up: i.topped_up_balance })) },
   };
 }
 
-export function deepseekQuota(opts: { key: string | null; fetchImpl?: typeof fetch; fullScaleCny?: number; baseUrl?: string }): QuotaProvider {
+export function deepseekQuota(opts: { key: string | null; fetchImpl?: typeof fetch; baseUrl?: string }): QuotaProvider {
   return {
     harness: "opencode",
     async read() {
@@ -44,7 +45,7 @@ export function deepseekQuota(opts: { key: string | null; fetchImpl?: typeof fet
       try {
         const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl ?? "https://api.deepseek.com"}/user/balance`, { headers: { Authorization: `Bearer ${opts.key}` } });
         if (!res.ok) return { remaining: null, detail: {}, source: "deepseek /user/balance", error: `HTTP ${res.status}` };
-        return { ...parseBalance((await res.json()) as Json, opts.fullScaleCny), source: "deepseek /user/balance", error: null };
+        return { ...parseBalance((await res.json()) as Json), source: "deepseek /user/balance", error: null };
       } catch (err) {
         return { remaining: null, detail: {}, source: "deepseek /user/balance", error: (err as Error).message };
       }

@@ -78,7 +78,7 @@ export class Engine {
       if (task && deps.supervisor) superviseApproval(this.ctx, deps.supervisor, this.desk, task, this.policyFor(task), approvalId, action, evidence);
     });
     this.scheduler = new Scheduler(this.ctx, deps.targets, deps.maxConcurrentTasks ?? DEFAULT_MAX_TASKS);
-    this.threads = new ThreadBook(this.ctx, deps);
+    this.threads = new ThreadBook(this.ctx, { ...deps, ...(deps.routingLog ? { routingLog: deps.routingLog } : {}) });
     this.composer = new Composer(this.ctx, deps);
   }
 
@@ -130,6 +130,15 @@ export class Engine {
   }
 
   answer(approvalId: string, text: string): boolean { return this.desk.answer(approvalId, text); }
+
+  /** 👍 / 👎 on a task: track record + routing_log (router-v0 §7). */
+  rate(taskId: string, rating: 1 | -1 | null): boolean {
+    const task = this.ctx.store.getTask(taskId);
+    if (!task || !this.ctx.store.rateTask(taskId, rating)) return false;
+    if (task.routeLogId !== null) this.deps.routingLog?.setRating(task.routeLogId, rating);
+    this.ctx.emit(taskId, "rated", { rating });
+    return true;
+  }
 
   /** Wait until every submitted task has ended (tests, graceful shutdown). */
   async idle(): Promise<void> {
@@ -192,7 +201,8 @@ export class Engine {
     const first = await this.routeWithQuestions(initial, this.composer.task(initial), signal);
     if (!first) return;
     const { routed, composed } = first;
-    this.deps.routingLog?.record(initial.task, initial.cwd, routed);
+    const routeLogId = this.deps.routingLog?.record(initial.task, initial.cwd, routed) ?? null;
+    if (routeLogId !== null) this.ctx.store.updateTask(initial.id, { routeLogId });
     this.ctx.emit(initial.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
     if (!routed.verdict.ok) return this.fail(initial.id, `no target: ${routed.verdict.notes.join("; ")}`);
     const task = await this.threads.assign(initial, routed.decision, (q, e) => this.desk.request(initial.id, q, e, { humanOnly: true }));
@@ -230,7 +240,8 @@ export class Engine {
         handoff = this.threads.recordHandoff(current, failed, reason, step.target, null);
       } else if (step.kind === "redispatch") {
         current = this.ctx.store.updateTask(task.id, { routerAsks: current.routerAsks + 1, decision: next.decision ?? current.decision, brief: next.decision?.brief ? this.composer.repairBrief(task, next.decision.brief) : current.brief });
-        this.deps.routingLog?.record(task.task, task.cwd, { verdict: step.verdict, decision: next.decision, source: step.source, routerError: next.routerError, routerMs: next.routerMs, attempts: attempts.length });
+        const logId = this.deps.routingLog?.record(task.task, task.cwd, { verdict: step.verdict, decision: next.decision, source: step.source, routerError: next.routerError, routerMs: next.routerMs, attempts: attempts.length }) ?? null;
+        if (logId !== null) this.ctx.store.updateTask(task.id, { routeLogId: logId });
         this.ctx.emit(task.id, "redispatch", { kind: "router", source: step.source, verdict: step.verdict, decision: next.decision, routerError: next.routerError });
         verdict = step.verdict;
         handoff = verdict.ok ? this.threads.recordHandoff(current, failed, reason, { harness: verdict.harness, model: verdict.model }, next.decision?.handoff_note ?? null) : null;

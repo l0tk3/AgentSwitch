@@ -22,6 +22,7 @@ export type RecordRow = {
   readonly handedOff: boolean;          // the engine moved it to another target mid-task
   readonly pinned: boolean;             // the user chose the target (--pin)
   readonly userHandoff: boolean;        // the user took it away from this target afterwards
+  readonly rating: number | null;       // the user's 👍 (1) / 👎 (-1)
 };
 
 export const RECORD_WINDOW_MS = 30 * 86400_000;
@@ -38,6 +39,8 @@ export type TargetStats = {
   readonly avgMs: number;
   readonly avgTokens: number;
   readonly userHandoffs: number;
+  readonly thumbsUp: number;
+  readonly thumbsDown: number;
 };
 
 export type KindStats = { readonly kind: string; readonly targets: readonly TargetStats[] };
@@ -67,6 +70,8 @@ export function aggregateRecords(rows: readonly RecordRow[], now = Date.now(), w
         avgMs: Math.round(rs.reduce((s, r) => s + r.ms, 0) / n),
         avgTokens: Math.round(rs.reduce((s, r) => s + r.tokens, 0) / n),
         userHandoffs: rs.filter((r) => r.userHandoff).length,
+        thumbsUp: rs.filter((r) => r.rating === 1).length,
+        thumbsDown: rs.filter((r) => r.rating === -1).length,
       };
     }).sort((a, b) => b.runs - a.runs),
   })).sort((a, b) => a.kind.localeCompare(b.kind));
@@ -77,7 +82,7 @@ export function recordText(stats: readonly KindStats[]): string {
   const lines: string[] = [];
   for (const k of stats) {
     const parts = k.targets.map((t) => {
-      const extras = [t.refusals ? `${t.refusals} refused` : "", t.transports ? `${t.transports} transport/quota` : "", t.userHandoffs ? `user handed off ${t.userHandoffs}×` : ""].filter(Boolean);
+      const extras = [t.refusals ? `${t.refusals} refused` : "", t.transports ? `${t.transports} transport/quota` : "", t.userHandoffs ? `user handed off ${t.userHandoffs}×` : "", t.thumbsUp || t.thumbsDown ? `user rated 👍${t.thumbsUp} 👎${t.thumbsDown}` : ""].filter(Boolean);
       return `${t.harness}/${t.model} ${t.runs} runs ${t.ok} ok, avg ${Math.round(t.avgMs / 1000)} s${t.avgTokens ? `, ${t.avgTokens} tok` : ""}${extras.length ? ` (${extras.join(", ")})` : ""}`;
     });
     lines.push(`${k.kind}: ${parts.join("; ")}`);

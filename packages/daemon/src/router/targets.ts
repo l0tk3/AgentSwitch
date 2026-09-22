@@ -20,6 +20,8 @@ export const HarnessSpec = z.object({
   max_concurrent: z.number().int().positive(),
   browser: z.boolean(),
   default_model: z.string().min(1),
+  /** Wall-clock limit for one execution; the executor is killed past it (transport failure → retry/reroute). */
+  timeout_ms: z.number().int().positive().default(30 * 60_000),
   binary: z.string().optional(),
   models: z.record(z.string().min(1), ModelSpec),
 });

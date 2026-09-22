@@ -43,9 +43,7 @@ describe("Store", () => {
     expect(store.pendingApprovals(t.id)).toEqual([]);
     now = 2_000;
     store.appendEvent(t.id, "done", { tokens: 150 });
-    store.appendEvent(t.id, "done", { tokens: 50 });
-    expect(store.usageSince(1_500)).toEqual({ "claude-code": 200 });
-    expect(store.usageSince(3_000)).toEqual({});
+    expect(store.eventsSince(t.id).at(-1)!.ts).toBe(2_000);
     store.close();
   });
 });

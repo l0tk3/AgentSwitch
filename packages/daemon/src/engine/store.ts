@@ -48,8 +48,9 @@ type Row = Record<string, unknown>;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT", "approval_policy TEXT"],
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT", "approval_policy TEXT", "route_log_id INTEGER", "rating INTEGER"],
   approvals: ["kind TEXT NOT NULL DEFAULT 'approval'", "answer TEXT"],
+  records: ["rating INTEGER"],
 };
 
 export function migrate(db: DatabaseSync): string[] {
@@ -188,6 +189,16 @@ export class Store {
   saveRecord(r: RecordRow): void {
     this.db.prepare(`INSERT OR REPLACE INTO records (task_id, ts, kind, harness, model, status, failure_kind, ms, tokens, approvals, handed_off, pinned, user_handoff)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(r.taskId, r.ts, r.kind, r.harness, r.model, r.status, r.failureKind, r.ms, r.tokens, r.approvals, r.handedOff ? 1 : 0, r.pinned ? 1 : 0, r.userHandoff ? 1 : 0);
+    if (r.rating !== null) this.db.prepare("UPDATE records SET rating = ? WHERE task_id = ?").run(r.rating, r.taskId);
+  }
+
+  /** 👍 / 👎 on a finished task: kept on the task row and on its track record. */
+  rateTask(taskId: string, rating: 1 | -1 | null): boolean {
+    const task = this.getTask(taskId);
+    if (!task) return false;
+    this.updateTask(taskId, { rating });
+    this.db.prepare("UPDATE records SET rating = ? WHERE task_id = ?").run(rating, taskId);
+    return true;
   }
 
   /** The user took the task away from its target: a negative signal on that record. */
@@ -201,6 +212,7 @@ export class Store {
       taskId: String(r.task_id), ts: Number(r.ts), kind: String(r.kind), harness: String(r.harness), model: String(r.model), status: String(r.status),
       failureKind: (r.failure_kind as string | null) ?? null, ms: Number(r.ms), tokens: Number(r.tokens), approvals: Number(r.approvals),
       handedOff: Number(r.handed_off) === 1, pinned: Number(r.pinned) === 1, userHandoff: Number(r.user_handoff) === 1,
+      rating: r.rating === null || r.rating === undefined ? null : Number(r.rating),
     }));
   }
 
@@ -215,9 +227,9 @@ export class Store {
     const map: Record<string, (v: unknown) => unknown> = {
       status: (v) => v, harness: (v) => v, model: (v) => v, effort: (v) => v, brief: (v) => v, result: (v) => v, error: (v) => v,
       decision: (v) => (v === null ? null : JSON.stringify(v)), attempts: (v) => JSON.stringify(v), routerAsks: (v) => v,
-      threadId: (v) => v, cwd: (v) => v, ephemeral: (v) => (v ? 1 : 0), spoken: (v) => v,
+      threadId: (v) => v, cwd: (v) => v, ephemeral: (v) => (v ? 1 : 0), spoken: (v) => v, routeLogId: (v) => v, rating: (v) => v,
     };
-    const columns: Record<string, string> = { routerAsks: "router_asks", threadId: "thread_id" };
+    const columns: Record<string, string> = { routerAsks: "router_asks", threadId: "thread_id", routeLogId: "route_log_id" };
     for (const [key, value] of Object.entries(patch)) {
       const conv = map[key];
       if (!conv) continue;
@@ -275,17 +287,6 @@ export class Store {
     return this.getApproval(id);
   }
 
-  /** Token usage per harness recorded in done events; the Claude quota provider reads this. */
-  usageSince(ts: number): Record<string, number> {
-    const rows = this.db.prepare("SELECT t.harness AS harness, e.payload AS payload FROM events e JOIN tasks t ON t.id = e.task_id WHERE e.type = 'done' AND e.ts >= ?").all(ts) as Row[];
-    const out: Record<string, number> = {};
-    for (const r of rows) {
-      const h = r.harness ? String(r.harness) : "unknown";
-      const tokens = Number((JSON.parse(String(r.payload)) as { tokens?: number }).tokens ?? 0);
-      out[h] = (out[h] ?? 0) + tokens;
-    }
-    return out;
-  }
 
   close(): void {
     this.db.close();
@@ -319,6 +320,8 @@ function toTask(r: Row): Task {
     result: (r.result as string | null) ?? null,
     error: (r.error as string | null) ?? null,
     spoken: (r.spoken as string | null) ?? null,
+    routeLogId: r.route_log_id === null || r.route_log_id === undefined ? null : Number(r.route_log_id),
+    rating: r.rating === null || r.rating === undefined ? null : Number(r.rating),
   };
 }
 

@@ -19,7 +19,7 @@ const targets = realTargets();
 const base: Context = { targets, quota: {}, running: {}, lowConfidenceTarget: { harness: "claude-code", model: "claude-sonnet-5" } };
 const d = (over: Record<string, unknown> = {}) => Decision.parse({ harness: "codex", model: "gpt-6-astra", effort: "high", brief: "x", confidence: 0.9, ...over });
 const opus = { harness: "claude-code", model: "claude-opus-5" };
-const strike = (i: number, over: Partial<RecordRow> = {}): RecordRow => ({ taskId: `s${i}`, ts: Date.now() - 1000 + i, kind: "code-multifile", harness: "codex", model: "gpt-6-astra", status: "failed", failureKind: "refusal", ms: 1, tokens: 0, approvals: 0, handedOff: false, pinned: false, userHandoff: false, ...over });
+const strike = (i: number, over: Partial<RecordRow> = {}): RecordRow => ({ taskId: `s${i}`, ts: Date.now() - 1000 + i, kind: "code-multifile", harness: "codex", model: "gpt-6-astra", status: "failed", failureKind: "refusal", ms: 1, tokens: 0, approvals: 0, handedOff: false, pinned: false, userHandoff: false, rating: null, ...over });
 
 describe("track-record guards in validateDecision", () => {
   it("a demoted primary is tried after the fallbacks (and before router.default); effort is dropped with it", () => {

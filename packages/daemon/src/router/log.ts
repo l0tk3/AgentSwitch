@@ -20,6 +20,7 @@ export type LogEntry = {
   readonly routerError: string | null;
   readonly routerMs: number;
   readonly outcome: string | null;
+  readonly rating: number | null;
 };
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS routing_log (
@@ -35,7 +36,8 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS routing_log (
   notes TEXT NOT NULL,
   router_error TEXT,
   router_ms INTEGER NOT NULL,
-  outcome TEXT
+  outcome TEXT,
+  rating INTEGER
 )`;
 
 export function taskHash(task: string): string {
@@ -49,6 +51,8 @@ export class RoutingLog {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(SCHEMA);
+    const cols = new Set((this.db.prepare("PRAGMA table_info(routing_log)").all() as { name: string }[]).map((c) => c.name));
+    if (!cols.has("rating")) this.db.exec("ALTER TABLE routing_log ADD COLUMN rating INTEGER");
   }
 
   record(task: string, cwd: string, result: RouteResult, ts = Date.now()): number {
@@ -73,8 +77,13 @@ export class RoutingLog {
     return Number(info.lastInsertRowid);
   }
 
+  /** How the dispatch this row decided actually ended (router-v0 §7): "done", "failed:refusal", "cancelled"… */
   setOutcome(id: number, outcome: string): void {
     this.db.prepare("UPDATE routing_log SET outcome = ? WHERE id = ?").run(outcome, id);
+  }
+
+  setRating(id: number, rating: number | null): void {
+    this.db.prepare("UPDATE routing_log SET rating = ? WHERE id = ?").run(rating, id);
   }
 
   recent(limit = 50): LogEntry[] {
@@ -93,6 +102,7 @@ export class RoutingLog {
       routerError: (r.router_error as string | null) ?? null,
       routerMs: Number(r.router_ms),
       outcome: (r.outcome as string | null) ?? null,
+      rating: r.rating === null || r.rating === undefined ? null : Number(r.rating),
     }));
   }
 

@@ -32,17 +32,14 @@ describe("foldThread", () => {
     expect(s.sessions.codex!.sessionId).toBe("x1");
   });
 
-  it("summary is last-wins, clears progress, seeds the title once; title events override", () => {
+  it("summary is last-wins, seeds the title once; title events override", () => {
     const s = foldThread([
-      ev(1, "progress", { text: "reading files" }),
       ev(2, "summary", { title: "Fix login", goal: "make login work", progress: "half", files: ["a.ts"], unresolved: [], decisions: ["use React form"] }),
-      ev(3, "progress", { text: "running tests" }),
       ev(4, "summary", { title: "Fix login v2", goal: "make login work", progress: "done", files: ["a.ts", "b.ts"], unresolved: [], decisions: [] }),
       ev(5, "title", { title: "用户改的标题" }),
     ]);
     expect(s.summary!.progress).toBe("done");
     expect(s.summarySeq).toBe(4);
-    expect(s.progress).toEqual([]);
     expect(s.title).toBe("用户改的标题");
     expect(foldThread([ev(1, "summary", { title: "T", goal: "g" })]).title).toBe("T");
   });
@@ -53,7 +50,7 @@ describe("foldThread", () => {
       ev(1, "handoff", { from: { harness: "claude-code", model: "claude-sonnet-5", taskId: "a" }, to: null, reason: "failure:refusal" }),
       ev(2, "handoff", { nothing: true }),
       ev(4, "session", { harness: "codex" }),
-      ev(5, "cost", { tokens: { "codex/gpt-5.5": "12" } }),
+      ev(5, "task", { taskId: "z", harness: "codex", model: "gpt-5.5", status: "done", tokens: 12 }),
     ]);
     expect(s.handoffs.map((h) => h.reason)).toEqual(["failure:refusal", "user"]);
     expect(s.handoffs[1]!.summaryRef).toBe(2);
@@ -62,6 +59,6 @@ describe("foldThread", () => {
   });
 
   it("every event type declares a fold policy", () => {
-    expect(Object.keys(FOLD).sort()).toEqual(["cost", "handoff", "progress", "session", "summary", "task", "title"]);
+    expect(Object.keys(FOLD).sort()).toEqual(["handoff", "session", "summary", "task", "title"]);
   });
 });

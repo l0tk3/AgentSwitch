@@ -19,19 +19,19 @@ export type Thread = {
   readonly expiresAt: number | null;
 };
 
-export type ThreadEventType = "task" | "session" | "summary" | "title" | "handoff" | "cost" | "progress";
+export type ThreadEventType = "task" | "session" | "summary" | "title" | "handoff";
 
-export type Fold = "accumulate" | "last-wins" | "boundary-cleared";
+export type Fold = "accumulate" | "last-wins";
 
-/** Every event type declares how it folds into the current state (borrowed from Claude Code's log design). */
+/** Every event type declares how it folds into the current state (borrowed from Claude Code's log design).
+ *  Cost is accumulated from task events and transient progress lives in the task's own event stream, so neither
+ *  needs an event type of its own (decided 2026-09-22). */
 export const FOLD: Readonly<Record<ThreadEventType, Fold>> = {
   task: "accumulate",
   session: "last-wins",        // grouped by harness: one live handle per harness
   summary: "last-wins",
   title: "last-wins",
   handoff: "accumulate",
-  cost: "last-wins",
-  progress: "boundary-cleared", // transient; a summary clears it
 };
 
 export type ThreadEvent = {
@@ -86,8 +86,7 @@ export type ThreadState = {
   readonly summarySeq: number | null;
   readonly title: string | null;
   readonly handoffs: readonly HandoffRecord[];
-  readonly cost: Readonly<Record<string, number>>;   // tokens by "harness/model"
-  readonly progress: readonly string[];
+  readonly cost: Readonly<Record<string, number>>;   // tokens by "harness/model", accumulated from task events
   readonly lastTarget: TargetRef | null;
   readonly lastActivity: number | null;
 };
@@ -104,5 +103,5 @@ export type ThreadBrief = {
 };
 
 export const EMPTY_THREAD_STATE: ThreadState = {
-  tasks: [], sessions: {}, summary: null, summarySeq: null, title: null, handoffs: [], cost: {}, progress: [], lastTarget: null, lastActivity: null,
+  tasks: [], sessions: {}, summary: null, summarySeq: null, title: null, handoffs: [], cost: {}, lastTarget: null, lastActivity: null,
 };

@@ -54,12 +54,12 @@ describe("hardening (audit 2026-09-22)", () => {
     d.close();
   });
 
-  it("self-harm actions are denied by the supervisor in every mode, WebSearch needs approval, a broken policy file means manual", async () => {
+  it("self-harm actions are denied by the supervisor in every mode, WebSearch is read-only, a broken policy file means manual", async () => {
     expect(isSelfHarm("Bash: cat ~/.secret-gate/keys.json")).toBe(true);
     expect(isSelfHarm("Edit outside cwd: /Users/x/.agentswitch/mcp.json")).toBe(true);
     const sup = routerSupervisor({ name: "never-called", route: async () => { throw new Error("must not be asked"); } }, SupervisorConfig.parse({}));
     expect(await sup.approve({ brief: "b", action: "Write: /Users/x/.agentswitch/CONTEXT.md", evidence: "", recentEvents: [], sideEffects: "", cwd: "/w", floor: false })).toMatchObject({ decision: "deny", source: "floor" });
-    expect(decideTool("WebSearch", { query: "x" }, "/tmp")).toMatchObject({ kind: "ask" });
+    expect(decideTool("WebSearch", { query: "x" }, "/tmp")).toEqual({ kind: "allow" });   // decided 2026-09-22: search has no side effects
     const p = join(mkdtempSync(join(tmpdir(), "agentswitch-h3-")), "approvals.json");
     writeFileSync(p, "{not json");
     expect(loadPolicy(p)).toEqual({ mode: "manual", human: [] });

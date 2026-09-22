@@ -20,6 +20,8 @@ export type ClaudeExecutorOptions = {
   readonly gate?: GateOptions | null;
   readonly browser?: boolean;
   readonly maxTurns?: number;
+  /** Wall-clock limit; the run is aborted past it and reported as timed out (transport). */
+  readonly maxMs?: number;
   readonly executable?: string;
   readonly rateLimits?: RateLimitCache;
   readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
@@ -27,7 +29,7 @@ export type ClaudeExecutorOptions = {
   readonly protected?: ProtectedPaths;
 };
 
-const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "NotebookRead"]);   // web (WebSearch/WebFetch) asks: design §3.4
+const READ_ONLY = new Set(["Read", "Glob", "Grep", "LS", "TodoWrite", "TodoRead", "Task", "NotebookRead", "WebSearch"]);   // search has no side effects (decided 2026-09-22); WebFetch still asks
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
@@ -196,6 +198,8 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       const abort = new AbortController();
       const onAbort = () => abort.abort();
       input.signal.addEventListener("abort", onAbort, { once: true });
+      let timedOut = false;
+      const timer = opts.maxMs ? setTimeout(() => { timedOut = true; abort.abort(); }, opts.maxMs) : null;
       const { options, runDir } = setupRun(input, opts, cwd, permissionHook(input, cwd, allowedMcp, opts.protected ?? NO_PROTECTED, granted), abort);
       let state: Folded = EMPTY_FOLD;
       try {
@@ -206,11 +210,14 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
           emitDelta(input, before, state);
         }
       } catch (err) {
+        if (timedOut) return { ok: false, exitCode: null, stderr: `timed out after ${opts.maxMs} ms`, lastText: state.text.join("\n"), timedOut: true, sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: granted.count }, agents: state.agents };
         if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: granted.count }, agents: state.agents };
       } finally {
+        if (timer) clearTimeout(timer);
         input.signal.removeEventListener("abort", onAbort);
         rmSync(runDir, { recursive: true, force: true });
       }
+      if (timedOut) return { ok: false, exitCode: null, stderr: `timed out after ${opts.maxMs} ms`, lastText: state.text.join("\n"), timedOut: true, sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: granted.count }, agents: state.agents };
       return outcomeFromFold(state, granted.count, input.signal.aborted);
     },
   };

@@ -34,6 +34,7 @@ export class Client {
   setPolicy(policy: { mode: "manual" | "auto" | "scoped"; human?: string[] }) { return this.call<{ policy: unknown }>("PUT", "/approvals/policy", policy); }
   approve(taskId: string, approvalId: string, decision: "allow" | "deny") { return this.call<{ ok: true }>("POST", `/tasks/${taskId}/approve`, { approval_id: approvalId, decision }); }
   cancel(id: string) { return this.call<Task>("POST", `/tasks/${id}/cancel`); }
+  rate(id: string, rating: 1 | -1 | null) { return this.call<{ ok: true }>("POST", `/tasks/${id}/rate`, { rating }); }
   approvals() { return this.call<Approval[]>("GET", "/approvals"); }
   quota(refresh = false) { return this.call<unknown[]>("GET", `/quota${refresh ? "?refresh=1" : ""}`); }
   preview(task: string, cwd: string) { return this.call<unknown>("POST", "/route/preview", { task, cwd }); }

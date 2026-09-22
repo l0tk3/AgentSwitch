@@ -153,7 +153,7 @@ describe("Engine", () => {
   });
 
   it("tasks run one after another and done events carry tokens", async () => {
-    const { engine, store, events } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
+    const { engine, events } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
     const a = engine.submit({ task: 'a @echo {"delayMs":20,"tokens":100}', cwd: "/tmp" });
     const b = engine.submit({ task: 'b @echo {"tokens":5}', cwd: "/tmp" });
     await engine.idle();
@@ -161,7 +161,7 @@ describe("Engine", () => {
     const doneB = events.find((e) => e.taskId === b.id && e.type === "done")!;
     expect(doneA.ts).toBeLessThanOrEqual(doneB.ts);
     expect(doneA.payload.tokens).toBe(100);
-    expect(store.usageSince(0)).toEqual({ codex: 105 });
+    expect(doneB.payload.tokens).toBe(5);
   });
 });
 

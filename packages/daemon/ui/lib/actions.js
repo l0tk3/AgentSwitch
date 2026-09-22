@@ -105,6 +105,13 @@ export async function approve(taskId, approvalId, decision) {
 
 export const cancelTask = (id) => api("POST", `/tasks/${id}/cancel`);
 
+/** 👍 / 👎 on a finished task; clicking the same one again clears it. */
+export async function rateTask(id, rating) {
+  await api("POST", `/tasks/${id}/rate`, { rating });
+  const task = await api("GET", "/tasks/" + id);
+  set({ task });
+}
+
 /** Hand the task to another executor in the same thread; `pin` = "harness/model" or empty for the router. */
 export async function handoffTask(id, pin) {
   const body = pin && pin.includes("/") ? { to: { harness: pin.slice(0, pin.indexOf("/")), model: pin.slice(pin.indexOf("/") + 1) } } : {};

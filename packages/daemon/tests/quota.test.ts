@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { Store } from "../src/engine/store.js";
 import { claudeQuota } from "../src/quota/claude.js";
 import { labelForMinutes, RateLimitCache, remainingFromWindows } from "../src/quota/windows.js";
 import { parseRateLimits } from "../src/quota/codex.js";
@@ -16,9 +15,10 @@ describe("quota parsing", () => {
     expect(parseRateLimits({ primary: { usedPercent: 50 } }).remaining).toBe(0.5);
   });
 
-  it("deepseek balance → fraction of a full scale; unavailable = 0; empty = unknown", () => {
+  it("deepseek balance → usable (1) or not (0); empty = unknown", () => {
     const body = { is_available: true, balance_infos: [{ currency: "CNY", total_balance: "25.00", granted_balance: "0", topped_up_balance: "25.00" }] };
-    expect(parseBalance(body, 50)).toMatchObject({ remaining: 0.5, detail: { is_available: true } });
+    expect(parseBalance(body)).toMatchObject({ remaining: 1, detail: { is_available: true } });
+    expect(parseBalance({ is_available: true, balance_infos: [{ total_balance: "0" }] }).remaining).toBe(0);
     expect(parseBalance({ ...body, is_available: false }).remaining).toBe(0);
     expect(parseBalance({ balance_infos: [{ total_balance: "999" }] }).remaining).toBe(1);
     expect(parseBalance({}).remaining).toBeNull();
@@ -49,17 +49,13 @@ describe("quota parsing", () => {
   });
 
   it("claude: windows from rate_limit events win over the token count; probe fills an empty cache", async () => {
-    const store = new Store({ dbPath: ":memory:" });
-    const t = store.createTask({ task: "x", cwd: "/" });
-    store.updateTask(t.id, { harness: "claude-code" });
-    store.appendEvent(t.id, "done", { tokens: 250 });
     const cache = new RateLimitCache(() => 1000);
-    const noProbe = await claudeQuota(store, { cache, dailyTokenBudget: 1000 }).read();
-    expect(noProbe.remaining).toBe(0.75);
-    expect(noProbe.source).toContain("local token count");
+    const noProbe = await claudeQuota({ cache }).read();
+    expect(noProbe.remaining).toBeNull();          // nothing seen yet: unknown, which the floor treats as available
+    expect(noProbe.source).toContain("no windows seen yet");
     let probes = 0;
     const probe = async () => { probes++; return [{ rateLimitType: "five_hour", utilization: 0.4, resetsAt: 99 }, { rateLimitType: "seven_day", utilization: 12, resetsAt: 100 }, { rateLimitType: "overage" }]; };
-    const q = claudeQuota(store, { cache, probe, dailyTokenBudget: 1000 });
+    const q = claudeQuota({ cache, probe });
     const r = await q.read();
     expect(probes).toBe(1);
     expect(r.detail.windows).toEqual([{ label: "5h", usedPercent: 40, resetsAt: 99 }, { label: "7d", usedPercent: 12, resetsAt: 100 }]);
@@ -77,9 +73,8 @@ describe("quota parsing", () => {
     expect(remainingFromWindows(real.list())).toBe(0.87);
     real.record({ status: "allowed" });   // nothing usable: no change
     expect(real.list()).toHaveLength(2);
-    const failing = claudeQuota(store, { cache: new RateLimitCache(), probe: async () => { throw new Error("offline"); } });
+    const failing = claudeQuota({ cache: new RateLimitCache(), probe: async () => { throw new Error("offline"); } });
     expect((await failing.read()).error).toBe("probe: offline");
-    store.close();
   });
 
   it("QuotaService caches within the TTL, force-refreshes, and maps only known readings", async () => {

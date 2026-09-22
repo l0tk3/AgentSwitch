@@ -92,7 +92,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   const quota = overrides.quota ?? new QuotaService([
     codexQuota({ binary: targets.harnesses.codex?.binary ?? "codex" }),
     deepseekQuota({ key: findDeepSeekKey() }),
-    claudeQuota(store, { cache: rateLimits, ...(cfg.executors === "real" ? { probe: () => probeRateLimits() } : {}) }),
+    claudeQuota({ cache: rateLimits, ...(cfg.executors === "real" ? { probe: () => probeRateLimits() } : {}) }),
   ], cfg.quotaTtlMs);
   const workRoot = join(cfg.home, "work");
   const uploads = new Uploads(join(cfg.home, "uploads"));
@@ -113,14 +113,16 @@ export function buildDaemon(cfg: DaemonConfig, overrides: { router?: Router; exe
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
+/** Real executors need the gate (design §3.9: no harness starts without it; decided again 2026-09-22). */
 export function realExecutors(targets: Targets, browser: boolean, rateLimits?: RateLimitCache, extensions?: Extensions, prot: ProtectedPaths = defaultProtected()): Executor[] {
   const gate = defaultGate();
-  if (!gate) console.error("secret-gate venv not found: executors run without the gate (no proxy, no MCP)");
+  if (!gate) throw new Error("secret-gate not found (packages/secret-gate/.venv/bin/secret-gate or $SECRET_GATE_BIN): refusing to start real executors without the gate");
   const ext = extensions ? { extensions } : {};
+  const timeout = (h: string) => targets.harnesses[h]?.timeout_ms ?? 30 * 60_000;
   return [
-    claudeExecutor({ gate, browser, ...ext, protected: prot, ...(rateLimits ? { rateLimits } : {}) }),
-    codexExecutor({ binary: targets.harnesses.codex?.binary ?? "codex", gate, browser, ...ext }),
-    opencodeExecutor({ gate, browser, ...ext, protected: prot }),
+    claudeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("claude-code"), ...(rateLimits ? { rateLimits } : {}) }),
+    codexExecutor({ binary: targets.harnesses.codex?.binary ?? "codex", gate, browser, ...ext, maxMs: timeout("codex") }),
+    opencodeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("opencode") }),
   ];
 }
 

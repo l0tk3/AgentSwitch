@@ -1,7 +1,7 @@
 /** Task detail: text, result, approvals, live event stream, follow-up composer; meta in the side column. */
 
 import { ACTIVE, esc, stamp, target, when } from "../lib/api.js";
-import { answer, approve, archiveThread, cancelTask, goto, handoffTask, openTask, submitTask } from "../lib/actions.js";
+import { answer, approve, archiveThread, cancelTask, goto, handoffTask, openTask, rateTask, submitTask } from "../lib/actions.js";
 import { set } from "../lib/state.js";
 import { approvalCard } from "./home.js";
 import { fileList, pendingList } from "../lib/files.js";
@@ -110,7 +110,7 @@ export function render(s) {
   const pending = s.approvals.filter((a) => a.taskId === t.id);
   const parent = t.parentId ? s.tasks.find((x) => x.id === t.parentId) : null;
   const events = s.events.map((e) => `<div class="ev ${e.type}"><span class="ts">${when(e.ts)}</span>${esc(eventLine(e))}</div>`).join("");
-  return `<div class="page-title"><a data-nav="home">← 首页</a><span class="badge ${t.status}">${t.status}</span><span class="dim grow ellipsis">${esc(target(t))}</span>${ACTIVE.has(t.status) ? `<button class="bad small" id="t-cancel">取消任务</button>` : ""}</div>
+  return `<div class="page-title"><a data-nav="home">← 首页</a><span class="badge ${t.status}">${t.status}</span><span class="dim grow ellipsis">${esc(target(t))}</span>${ACTIVE.has(t.status) ? `<button class="bad small" id="t-cancel">取消任务</button>` : `<button class="small ${t.rating === 1 ? "ok" : ""}" data-rate="1" title="这次结果好，路由器下次会参考">👍</button><button class="small ${t.rating === -1 ? "bad" : ""}" data-rate="-1" title="这次结果不好">👎</button>`}</div>
     <div class="cols">
       <div class="stack">
         ${parent ? `<div class="card dim" data-open="${parent.id}" style="cursor:pointer">↩ 追问自：${esc(parent.task.slice(0, 120))}</div>` : ""}
@@ -146,6 +146,7 @@ export const bindings = [
   { sel: "#t-cancel", run: (_el, _e, s) => cancelTask(s.task.id) },
   { sel: "#t-handoff", run: (el, _e, s) => { el.disabled = true; return handoffTask(s.task.id, $("#t-handoff-pin").value.trim()).finally(() => { el.disabled = false; }); } },
   { sel: "#t-archive", run: (_el, _e, s) => archiveThread(s.thread.id) },
+  { sel: "[data-rate]", run: (el, _e, s) => rateTask(s.task.id, Number(el.dataset.rate) === s.task.rating ? null : Number(el.dataset.rate)) },
   { sel: "[data-nav]", run: (el) => goto(el.dataset.nav) },
   { sel: "[data-open]", run: (el) => openTask(el.dataset.open) },
   { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },

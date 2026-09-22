@@ -56,6 +56,10 @@ export type Task = {
   readonly routerAsks: number;
   readonly result: string | null;
   readonly error: string | null;
+  /** routing_log row of the latest (re)dispatch decision, for the outcome write-back and the rating. */
+  readonly routeLogId: number | null;
+  /** The user's verdict on the outcome: 1 (👍), -1 (👎) or null. */
+  readonly rating: number | null;
   /** The summarizer's one-sentence account of the outcome (feedback line on the page, push text later). */
   readonly spoken: string | null;
 };
@@ -79,7 +83,8 @@ export type TaskEventType =
   | "thread"
   | "waiting"
   | "agent"
-  | "supervisor";
+  | "supervisor"
+  | "rated";
 
 export type TaskEvent = {
   readonly taskId: string;

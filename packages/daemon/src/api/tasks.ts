@@ -29,6 +29,7 @@ export { NewTaskBody };
 const AnswerBody = z.object({ approval_id: z.string().min(1), text: z.string().min(1).max(4000) });
 const HandoffBody = z.object({ to: TargetRef.optional() });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
+const RateBody = z.object({ rating: z.union([z.literal(1), z.literal(-1), z.null()]) });
 
 export function mountTasks(app: Hono, deps: ApiDeps): void {
   app.post("/tasks", async (c) => {
@@ -122,6 +123,12 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     if (!body.success) return c.json({ error: "approval_id and text required" }, 400);
     const ok = owned(c, body.data.approval_id) && deps.engine.answer(body.data.approval_id, body.data.text);
     return ok ? c.json({ ok: true }) : c.json({ error: "no pending question with that id" }, 404);
+  });
+
+  app.post("/tasks/:id/rate", async (c) => {
+    const body = RateBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) return c.json({ error: "rating must be 1, -1 or null" }, 400);
+    return deps.engine.rate(c.req.param("id"), body.data.rating) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
   });
 
   app.post("/tasks/:id/cancel", (c) => {
