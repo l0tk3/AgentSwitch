@@ -1,6 +1,6 @@
 /** Classify how an execution ended. Pattern table, no model involved (router-v0 §6.2). */
 
-export type FailureKind = "refusal" | "quota" | "transport" | "gate_denied" | "task_failed" | "unknown";
+export type FailureKind = "refusal" | "quota" | "transport" | "gate_denied" | "task_failed" | "rejected" | "unknown";
 
 export type SideEffects = {
   readonly filesChanged: number;

@@ -20,6 +20,9 @@ import { kindOf } from "../router/route.js";
 import type { ExtensionsSummary } from "../router/prompt.js";
 import { loadContext, type LoadedContext } from "../router/context.js";
 import { knownTokens, repairTokens, shortToken } from "../executors/tokens.js";
+import type { Supervisor } from "../router/supervisor.js";
+import { listTree } from "../files/artifacts.js";
+import { OUT_DIR } from "../files/names.js";
 import type { HandoffReason, ThreadState } from "../threads/types.js";
 import type { Bus } from "./bus.js";
 import { cleanupEphemeral, defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
@@ -55,6 +58,8 @@ export type EngineDeps = Omit<RouteDeps, "quota" | "running"> & {
   readonly now?: () => number;
   /** Tasks in flight at once (routing or running); the rest queue FIFO (background-v0 §1). */
   readonly maxConcurrentTasks?: number;
+  /** docs/supervisor-v0.md: approvals on the user's behalf, watchdog during execution, acceptance on done. */
+  readonly supervisor?: Supervisor;
 };
 
 export const DEFAULT_MAX_TASKS = 4;
@@ -73,6 +78,7 @@ export class Engine {
   private readonly threadLock = new KeyedLock();
   private readonly cwdLock = new KeyedLock();
   private readonly slots = new Map<string, Semaphore>();
+  private readonly rejections = new Map<string, number>();   // acceptance rejections per task (at most one)
 
   constructor(deps: EngineDeps) {
     this.deps = deps;
@@ -139,13 +145,13 @@ export class Engine {
     return updated;
   }
 
-  resolveApproval(approvalId: string, decision: ApprovalDecision, status: "allowed" | "denied" | "expired" = decision === "allow" ? "allowed" : "denied"): boolean {
+  resolveApproval(approvalId: string, decision: ApprovalDecision, status: "allowed" | "denied" | "expired" = decision === "allow" ? "allowed" : "denied", by: "user" | "router" | "timeout" = status === "expired" ? "timeout" : "user"): boolean {
     const approval = this.deps.store.resolveApproval(approvalId, status);
     const waiter = this.waiters.get(approvalId);
     if (!approval || !waiter) return false;
     clearTimeout(waiter.timer);
     this.waiters.delete(approvalId);
-    this.emit(approval.taskId, "approval_resolved", { approvalId, decision, status });
+    this.emit(approval.taskId, "approval_resolved", { approvalId, decision, status, by });
     // A late answer (or expiry) must not revive a task that already ended.
     const current = this.deps.store.getTask(approval.taskId);
     if (current && !TERMINAL_STATUS.has(current.status)) this.deps.store.updateTask(approval.taskId, { status: "running" });
@@ -259,7 +265,7 @@ export class Engine {
     let thread = wanted && wanted.status === "open" ? wanted : undefined;
     if (thread && confidence >= this.deps.targets.router.thread_confidence) source = "router";
     else if (thread) {
-      const answer = await this.requestApproval(task.id, `归到线程「${thread.title ?? thread.id}」？允许 = 归入并接着做，拒绝 = 新开线程`, `路由器置信度 ${confidence}；线程目录 ${thread.cwd}`);
+      const answer = await this.requestApproval(task.id, `归到线程「${thread.title ?? thread.id}」？允许 = 归入并接着做，拒绝 = 新开线程`, `路由器置信度 ${confidence}；线程目录 ${thread.cwd}`, { humanOnly: true });
       if (answer === "allow") source = "user"; else thread = undefined;
     }
     const target = thread ?? this.deps.store.createThread(task.cwd);
@@ -418,18 +424,35 @@ export class Engine {
     const prot = this.deps.protected ?? NO_PROTECTED;
     const snapshot = snapshotProtected(task.cwd, prot);
     const { threadHome, resume } = this.continuation(task, verdict.harness);
+    // One attempt = one abort scope: the supervisor's watchdog can end this attempt without cancelling the task.
+    const attemptCtl = new AbortController();
+    const onTaskAbort = () => attemptCtl.abort(signal.reason);
+    signal.addEventListener("abort", onTaskAbort, { once: true });
+    const watchdog = this.watchdog(task, attemptCtl);
     try {
       const outcome = await executor.run({
         taskId: task.id, task: task.task, brief: briefFor(task), cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments,
-        handoffNote: handoff, context: this.context()?.text ?? null, knownTokens: this.tokensFor(task), threadHome, resume, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal,
-        emit: (type, payload) => this.emit(task.id, type, payload),
-        approve: (action, evidence) => this.requestApproval(task.id, action, evidence),
+        handoffNote: handoff, context: this.context()?.text ?? null, knownTokens: this.tokensFor(task), threadHome, resume, browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal: attemptCtl.signal,
+        emit: (type, payload) => { this.emit(task.id, type, payload); watchdog.touch(); },
+        approve: async (action, evidence) => { watchdog.pause(); try { return await this.requestApproval(task.id, action, evidence); } finally { watchdog.touch(); } },
       });
+      watchdog.stop();
       const touched = restoreProtected(task.cwd, prot, snapshot);
       if (touched.length) { this.emit(task.id, "attempt_failed", { ...target, kind: "protected", excerpt: touched.join(", "), sideEffects: outcome.sideEffects ?? NO_SIDE_EFFECTS, hadSideEffects: true, security: true }); return { kind: "protected", paths: touched }; }
       if (outcome.sessionId && task.threadId) this.deps.store.appendThreadEvent(task.threadId, "session", { harness: verdict.harness, sessionId: outcome.sessionId, taskId: task.id });
       if (signal.aborted) return { kind: "cancelled" };
+      if (watchdog.cancelledWith !== null) {
+        const attempt: Attempt = { ...target, kind: "rejected", excerpt: `supervisor cancelled a silent run: ${watchdog.cancelledWith}`.slice(0, 240), sideEffects: outcome.sideEffects ?? NO_SIDE_EFFECTS };
+        this.emit(task.id, "attempt_failed", { ...attempt, hadSideEffects: hasSideEffects(attempt.sideEffects) });
+        return { kind: "failed", attempt };
+      }
       if (outcome.ok) {
+        const verdictOnResult = await this.acceptance(task, outcome.lastText ?? "", signal);
+        if (verdictOnResult) {
+          const attempt: Attempt = { ...target, kind: "rejected", excerpt: verdictOnResult.slice(0, 240), sideEffects: outcome.sideEffects ?? NO_SIDE_EFFECTS };
+          this.emit(task.id, "attempt_failed", { ...attempt, hadSideEffects: hasSideEffects(attempt.sideEffects) });
+          return { kind: "failed", attempt };
+        }
         this.deps.store.updateTask(task.id, { status: "done", result: outcome.lastText ?? "" });
         this.emit(task.id, "done", { result: outcome.lastText ?? "", tokens: outcome.tokens ?? 0, sideEffects: outcome.sideEffects ?? NO_SIDE_EFFECTS, agents: outcome.agents ?? NO_AGENTS });
         return { kind: "done" };
@@ -439,14 +462,104 @@ export class Engine {
       this.emit(task.id, "attempt_failed", { ...attempt, hadSideEffects: hasSideEffects(attempt.sideEffects) });
       return { kind: "failed", attempt };
     } catch (err) {
+      watchdog.stop();
       if (signal.aborted) return { kind: "cancelled" };
+      if (watchdog.cancelledWith !== null) {
+        const attempt: Attempt = { ...target, kind: "rejected", excerpt: `supervisor cancelled a silent run: ${watchdog.cancelledWith}`.slice(0, 240), sideEffects: NO_SIDE_EFFECTS };
+        this.emit(task.id, "attempt_failed", { ...attempt, hadSideEffects: false });
+        return { kind: "failed", attempt };
+      }
       const attempt: Attempt = { ...target, kind: "transport", excerpt: (err as Error).message.slice(0, 240), sideEffects: NO_SIDE_EFFECTS };
       this.emit(task.id, "attempt_failed", { ...attempt, hadSideEffects: false });
       return { kind: "failed", attempt };
     } finally {
+      signal.removeEventListener("abort", onTaskAbort);
       this.running[verdict.harness] = Math.max(0, (this.running[verdict.harness] ?? 1) - 1);
       release();
     }
+  }
+
+  // ---- supervisor (docs/supervisor-v0.md) ----
+
+  /** Short lines of the task's latest events for the supervisor's prompts. */
+  private recentEventLines(taskId: string, n = 20): string[] {
+    return this.deps.store.eventsSince(taskId).slice(-n).map((e) => {
+      const p = e.payload;
+      const t = new Date(e.ts).toISOString().slice(11, 19);
+      switch (e.type) {
+        case "text": return `${t} text: ${String(p.text ?? "").replace(/\s+/g, " ").slice(0, 160)}`;
+        case "tool_call": return `${t} tool ${p.tool ?? "?"}${p.command ? `: ${String(p.command).slice(0, 120)}` : p.denied ? ` denied: ${String(p.denied).slice(0, 80)}` : ""}`;
+        case "agent": return `${t} sub-agent ${p.status}: ${String(p.description ?? "").slice(0, 80)}`;
+        case "approval_request": return `${t} approval requested: ${String(p.action ?? "").slice(0, 120)}`;
+        case "approval_resolved": return `${t} approval ${p.decision} (${p.by ?? p.status})`;
+        default: return `${t} ${e.type}`;
+      }
+    });
+  }
+
+  private sideEffectsLine(taskId: string): string {
+    const ev = this.deps.store.eventsSince(taskId);
+    return `${ev.filter((e) => e.type === "tool_call").length} tool calls, ${ev.filter((e) => e.type === "approval_resolved" && e.payload.decision === "allow").length} approvals granted`;
+  }
+
+  /** Ask the supervisor to answer an approval on the user's behalf; the user can still answer first. */
+  private superviseApproval(taskId: string, approvalId: string, action: string, evidence: string): void {
+    const sup = this.deps.supervisor;
+    const task = this.deps.store.getTask(taskId);
+    if (!sup || !sup.config.approvals || !task) return;
+    void sup.approve({ brief: task.brief ?? task.task, action, evidence, recentEvents: this.recentEventLines(taskId), sideEffects: this.sideEffectsLine(taskId), cwd: task.cwd }).then((v) => {
+      if (!this.waiters.has(approvalId)) return;   // the user got there first
+      this.emit(taskId, "supervisor", { kind: "approval", approvalId, decision: v.decision, reason: v.reason, source: v.source, ms: v.ms });
+      if (v.decision === "allow") this.resolveApproval(approvalId, "allow", "allowed", "router");
+      else if (v.decision === "deny") this.resolveApproval(approvalId, "deny", "denied", "router");
+    });
+  }
+
+  /** No events for `watchdog_ms` → the supervisor looks: continue (reset), cancel (abort this attempt), or ask the user. */
+  private watchdog(task: Task, attempt: AbortController): { touch: () => void; pause: () => void; stop: () => void; readonly cancelledWith: string | null } {
+    const sup = this.deps.supervisor;
+    const ms = sup?.config.watchdog_ms ?? 0;
+    const state = { timer: null as NodeJS.Timeout | null, last: this.now(), continues: 0, stopped: false, cancelledWith: null as string | null, started: this.now() };
+    const fire = async () => {
+      if (state.stopped || !sup) return;
+      const silentMs = this.now() - state.last;
+      const events = this.deps.store.eventsSince(task.id);
+      const agentsRunning = events.filter((e) => e.type === "agent" && e.payload.status === "started").length - events.filter((e) => e.type === "agent" && ["completed", "failed", "stopped"].includes(String(e.payload.status))).length;
+      const v = await sup.checkIn({ brief: this.deps.store.getTask(task.id)?.brief ?? task.task, elapsedMs: this.now() - state.started, silentMs, recentEvents: this.recentEventLines(task.id), agentsRunning: Math.max(0, agentsRunning), continues: state.continues, cwd: task.cwd }, attempt.signal);
+      if (state.stopped) return;
+      this.emit(task.id, "supervisor", { kind: "checkin", action: v.action, note: v.note, source: v.source, silentMs, ms: v.ms });
+      if (v.action === "continue") { state.continues++; arm(); return; }
+      if (v.action === "cancel") { state.cancelledWith = v.note || "no progress"; attempt.abort(new Error("cancelled by the supervisor")); return; }
+      const answer = await this.requestApproval(task.id, `执行已 ${Math.round(silentMs / 1000)} 秒没有动静，继续等吗？允许 = 继续，拒绝 = 取消这次执行并换人`, v.note, { humanOnly: true });
+      if (state.stopped) return;
+      if (answer === "allow") { state.continues = 0; arm(); return; }
+      state.cancelledWith = `the user stopped waiting (${v.note || "no progress"})`;
+      attempt.abort(new Error("cancelled by the user via the supervisor"));
+    };
+    const arm = () => { if (state.timer) clearTimeout(state.timer); if (ms > 0 && sup && !state.stopped) { state.timer = setTimeout(() => void fire(), ms); state.timer.unref?.(); } };
+    arm();
+    return {
+      touch: () => { state.last = this.now(); arm(); },
+      pause: () => { if (state.timer) clearTimeout(state.timer); state.timer = null; },
+      stop: () => { state.stopped = true; if (state.timer) clearTimeout(state.timer); },
+      get cancelledWith() { return state.cancelledWith; },
+    };
+  }
+
+  /** On done: the supervisor checks the result against the brief. One rejection sends the task back; a second one is
+   *  recorded but overruled, so a task cannot loop on acceptance. Returns the rejection text or null. */
+  private async acceptance(task: Task, result: string, signal: AbortSignal): Promise<string | null> {
+    const sup = this.deps.supervisor;
+    if (!sup || !sup.config.acceptance) return null;
+    const current = this.deps.store.getTask(task.id) ?? task;
+    let outFiles: string[] = [];
+    try { outFiles = listTree(join(task.cwd, OUT_DIR)).map((f) => f.path); } catch { /* no out dir */ }
+    const v = await sup.accept({ brief: current.brief ?? task.task, result, diff: gitDiffSummary(task.cwd), outFiles, cwd: task.cwd }, signal);
+    const overruled = !v.accepted && (this.rejections.get(task.id) ?? 0) >= 1;
+    this.emit(task.id, "supervisor", { kind: "acceptance", accepted: v.accepted, missing: v.missing, note: v.note, source: v.source, ms: v.ms, ...(overruled ? { overruled: true } : {}) });
+    if (v.accepted || overruled) return null;
+    this.rejections.set(task.id, (this.rejections.get(task.id) ?? 0) + 1);
+    return `not accepted: ${v.missing.join("; ") || v.note}`;
   }
 
   /** Same harness in the same thread and the same cwd → resume its last session (threads-v0 §4: no handoff needed). */
@@ -457,14 +570,16 @@ export class Engine {
     return { threadHome: thread.home, resume: session && thread.cwd === task.cwd ? session.sessionId : null };
   }
 
-  private requestApproval(taskId: string, action: string, evidence: string): Promise<ApprovalDecision> {
+  private requestApproval(taskId: string, action: string, evidence: string, opts: { humanOnly?: boolean } = {}): Promise<ApprovalDecision> {
     const approval = this.deps.store.createApproval(taskId, action, evidence);
     this.deps.store.updateTask(taskId, { status: "waiting_approval" });
-    this.emit(taskId, "approval_request", { approvalId: approval.id, action, evidence });
-    return new Promise((resolve) => {
+    this.emit(taskId, "approval_request", { approvalId: approval.id, action, evidence, humanOnly: opts.humanOnly ?? false });
+    const pending = new Promise<ApprovalDecision>((resolve) => {
       const timer = setTimeout(() => this.resolveApproval(approval.id, "deny", "expired"), this.deps.approvalTimeoutMs ?? 10 * 60_000);
       this.waiters.set(approval.id, { resolve, timer });
     });
+    if (!opts.humanOnly) this.superviseApproval(taskId, approval.id, action, evidence);
+    return pending;
   }
 
   private fail(id: string, error: string, security = false): void {

@@ -73,7 +73,8 @@ function showEvent(ev: TaskEvent): void {
     case "text": console.log(`${t}   ${String(p.text).replace(/\n/g, "\n           ")}`); break;
     case "tool_call": console.log(`${t}   tool ${p.tool}: ${p.command ?? JSON.stringify(p)}`); break;
     case "approval_request": console.log(`${t} APPROVAL ${p.approvalId}: ${p.action}\n           ${p.evidence}`); break;
-    case "approval_resolved": console.log(`${t} approval ${p.approvalId} -> ${p.decision} (${p.status})`); break;
+    case "approval_resolved": console.log(`${t} approval ${p.approvalId} -> ${p.decision} (${p.status}, by ${p.by ?? "user"})`); break;
+    case "supervisor": console.log(`${t} supervisor ${p.kind}: ${p.decision ?? p.action ?? (p.accepted ? "accepted" : `rejected: ${(p.missing as string[] | undefined)?.join("; ") ?? ""}`)}${p.reason || p.note ? ` — ${p.reason ?? p.note}` : ""} [${p.source}]`); break;
     case "attempt_failed": console.log(`${t} FAILED   ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (side effects)" : ""}`); break;
     case "redispatch": console.log(`${t} reroute  ${p.kind}${p.target ? ` -> ${(p.target as { harness: string; model: string }).harness}/${(p.target as { model: string }).model}` : ""}${p.source ? ` (${p.source})` : ""}`); break;
     case "waiting": console.log(`${t} waiting  ${p.for}${p.taskId ? ` (${p.taskId})` : ""}`); break;

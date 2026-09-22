@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import { SupervisorConfig } from "./supervisor.js";
 
 export const Cost = z.enum(["free", "low", "mid", "high", "top"]);
 
@@ -48,6 +49,8 @@ export const Targets = z
       quota_threshold: z.number().min(0).max(1).default(0.05),
       /** Below this the router's thread assignment is not trusted: the user is asked (threads-v0 §6). */
       thread_confidence: z.number().min(0).max(1).default(0.6),
+      /** docs/supervisor-v0.md: approvals on the user's behalf, watchdog, acceptance. */
+      supervisor: SupervisorConfig.prefault({}),
       default: TargetRef,
     }),
   })

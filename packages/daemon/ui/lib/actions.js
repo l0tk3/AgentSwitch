@@ -52,7 +52,7 @@ export async function refresh() {
   await Promise.all([health(), loadTasks(), loadApprovals(), ...(LOADERS[view] || []).map((f) => f())]);
 }
 
-const EVENT_TYPES = ["queued", "routed", "thread", "waiting", "dispatched", "text", "tool_call", "agent", "approval_request", "approval_resolved", "attempt_failed", "redispatch", "handoff", "summary", "done", "failed", "cancelled", "cleaned"];
+const EVENT_TYPES = ["queued", "routed", "thread", "waiting", "dispatched", "text", "tool_call", "agent", "supervisor", "approval_request", "approval_resolved", "attempt_failed", "redispatch", "handoff", "summary", "done", "failed", "cancelled", "cleaned"];
 const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "failed", "cancelled", "redispatch", "dispatched", "routed", "cleaned", "handoff", "summary", "thread"]);
 
 /** Open the task view and follow its event stream (`/tasks/${id}/events`, SSE). */

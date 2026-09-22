@@ -74,7 +74,8 @@ export type TaskEventType =
   | "handoff"
   | "thread"
   | "waiting"
-  | "agent";
+  | "agent"
+  | "supervisor";
 
 export type TaskEvent = {
   readonly taskId: string;

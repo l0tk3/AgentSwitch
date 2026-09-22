@@ -72,6 +72,18 @@ events and are counted in the `done` event; the executors do not return before t
 reports them finished (Claude holds the one-shot result back, Codex sends `turn/completed`
 last, OpenCode runs them synchronously). Verified with `scripts/background_agent_smoke.ts`.
 
+## Supervisor (supervisor-v0)
+
+The router model also supervises (`router.supervisor` in targets.yaml). Approvals an executor
+raises are shown to the user as before and, in parallel, put to the supervisor with the brief and
+the recent events; it answers allow / deny / ask_user and whoever answers first wins
+(`approval_resolved.by` = user | router | timeout). Destructive actions (`rm -rf`, force push,
+DROP, sudo, payments, sending, account deletion, the daemon's own files) never reach it. A run
+with no event for `watchdog_ms` (8 min) gets a check-in: continue (at most 3 times), cancel (the
+attempt fails as `rejected` with the note and the router re-dispatches with a handoff), or ask the
+user. On done the result is checked against the brief: one rejection sends the task back as a
+`rejected` attempt; a second is recorded but overruled. Every verdict is a `supervisor` event.
+
 ## Threads (threads-v0)
 
 Every task runs in a thread: one piece of work from first message to done. A follow-up (`parent_id`)
@@ -170,7 +182,7 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 | POST | `/threads/:id/archive`, `/threads/:id/reopen` | archive = delete after 7 days (refused while a task runs) / reopen |
 | DELETE | `/threads/:id` | delete now, private home included |
 | GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
-| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, thread, waiting, dispatched, agent, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
+| GET | `/tasks/:id/events?after=N` | SSE: queued, routed, thread, waiting, dispatched, agent, supervisor, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
 | POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |
 | POST | `/tasks/:id/cancel` | abort; pending approvals denied |
 | GET | `/approvals` | pending across tasks |

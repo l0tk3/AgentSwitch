@@ -68,7 +68,8 @@ export function nextStep(input: RerouteInput): NextStep {
 
   // transport (after the retry): the environment may be broken for every harness; let the router
   // judge and, once repair tools exist, fix it. refusal / task_failed / unknown: the router judges.
-  if (last.kind !== "refusal" && last.kind !== "transport" && hasSideEffects(last.sideEffects)) {
+  // "rejected" = the supervisor cancelled a silent run or refused the result: side effects or not, the router decides next.
+  if (last.kind !== "refusal" && last.kind !== "transport" && last.kind !== "rejected" && hasSideEffects(last.sideEffects)) {
     return { kind: "stop", reason: `${last.kind} after side effects; hand over to the user`, security: false };
   }
   if (input.routerAsks >= limits.maxRouterAsks) {

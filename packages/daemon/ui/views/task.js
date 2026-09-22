@@ -18,7 +18,10 @@ export function eventLine(ev) {
     case "text": return p.text;
     case "tool_call": return `工具 ${p.tool}: ${p.command || (p.input ? JSON.stringify(p.input).slice(0, 160) : "")}`;
     case "approval_request": return `⚠ 需要审批：${p.action}\n${p.evidence || ""}`;
-    case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"} (${p.status})`;
+    case "approval_resolved": return `审批 → ${p.decision === "allow" ? "允许" : "拒绝"}（${p.by === "router" ? "路由器代批" : p.by === "timeout" ? "超时" : "你"}）`;
+    case "supervisor": return p.kind === "approval" ? `监督者对审批的意见：${p.decision === "allow" ? "允许" : p.decision === "deny" ? "拒绝" : "交给你决定"}${p.reason ? "，" + p.reason : ""}`
+      : p.kind === "checkin" ? `监督者检查（${Math.round((p.silentMs || 0) / 1000)} 秒无动静）：${p.action === "continue" ? "继续等" : p.action === "cancel" ? "取消这次执行并换人" : "问你"}${p.note ? "，" + p.note : ""}`
+      : `监督者验收：${p.accepted ? "通过" : p.overruled ? "仍未通过，但已重做过一次，按完成处理" : "未通过，退回重做"}${(p.missing || []).length ? "，缺：" + p.missing.join("；") : ""}${p.note ? "，" + p.note : ""}`;
     case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;
     case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
     case "waiting": return `等待 ${p.for === "parent" ? "父任务 " + p.taskId + " 结束" : p.for === "thread" ? "同线程的另一个任务" : p.for === "cwd" ? "同目录的另一个任务" : p.for === "global" ? "并发槽位（已达上限）" : String(p.for).startsWith("harness:") ? String(p.for).slice(8) + " 的空闲槽位" : p.for}`;

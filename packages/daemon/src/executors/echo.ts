@@ -41,6 +41,7 @@ const FAILURES: Record<FailureKind, Partial<ExecutionOutcome>> = {
   transport: { stderr: "connect ECONNREFUSED 127.0.0.1:8080" },
   gate_denied: { gateDenied: true, httpStatus: 403, lastText: "X-Secret-Gate: denied" },
   task_failed: { exitCode: 1, lastText: "tests failed" },
+  rejected: { exitCode: 1, lastText: "rejected" },
   unknown: {},
 };
 
