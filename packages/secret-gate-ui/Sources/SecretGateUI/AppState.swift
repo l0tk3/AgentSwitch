@@ -53,10 +53,13 @@ final class AppState: ObservableObject {
     }
 
     func importCSV(_ text: String) {
-        let imported = CSVImport.parse(text)
-        guard !imported.isEmpty else { errorMessage = "没有解析到任何行。格式：label, host1|host2, [kind,] value"; return }
+        let imported = RowsExchange.parse(text)
+        guard !imported.isEmpty else { errorMessage = "没有解析到任何行。格式：label, host1|host2, [kind,] value，或「导出当前行」得到的 JSON"; return }
         entries = entries.filter { $0.problem == nil } + imported
     }
+
+    /// Whole table as JSON, values included: the counterpart of the paste sheet.
+    var exportText: String { RowsExchange.export(entries.filter { !$0.label.isEmpty }) }
 
     // MARK: encryption
 

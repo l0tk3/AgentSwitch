@@ -167,3 +167,31 @@ final class RowStoreTests: XCTestCase {
         XCTAssertTrue(RowStore(url: dir.appendingPathComponent("missing.json")).load().isEmpty)
     }
 }
+
+final class RowsExchangeTests: XCTestCase {
+    func testExportThenParseRoundTripsEveryField() {
+        let a = TokenEntry(label: "fin/pass", hosts: "a.example:8600, b.example", kind: .secret, uses: [.http, .exec], value: "p,w", note: "财务", account: "lotke", encryptAccount: false)
+        let b = TokenEntry(label: "mail/totp", hosts: "", kind: .totp, uses: [.otp], value: "S", note: "邮件")
+        let text = RowsExchange.export([a, b])
+        XCTAssertTrue(text.hasPrefix("["))
+        XCTAssertTrue(text.contains("\"value\" : \"p,w\""))
+        let back = RowsExchange.parse(text)
+        XCTAssertEqual(back.count, 2)
+        XCTAssertEqual(back[0].label, "fin/pass")
+        XCTAssertEqual(back[0].hostList, ["a.example:8600", "b.example"])
+        XCTAssertEqual(back[0].uses, [.http, .exec])
+        XCTAssertEqual(back[0].value, "p,w")
+        XCTAssertEqual(back[0].note, "财务")
+        XCTAssertEqual(back[0].account, "lotke")
+        XCTAssertFalse(back[0].encryptAccount)
+        XCTAssertEqual(back[1].kind, .totp)
+        XCTAssertTrue(back[1].encryptAccount)
+        XCTAssertNil(back[0].problem)
+    }
+
+    func testParseStillAcceptsCSVAndRejectsJunk() {
+        XCTAssertEqual(RowsExchange.parse("x/pass, x.example, v").first?.label, "x/pass")
+        XCTAssertTrue(RowsExchange.parse("[not json").isEmpty)
+        XCTAssertTrue(RowsExchange.parse("").isEmpty)
+    }
+}

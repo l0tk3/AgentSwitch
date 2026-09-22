@@ -6,6 +6,14 @@ struct TokenGeneratorView: View {
     @EnvironmentObject private var state: AppState
     @State private var showingImport = false
     @State private var importText = ""
+    @State private var exported = false
+
+    private func exportRows() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(state.exportText, forType: .string)
+        exported = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exported = false }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +51,9 @@ struct TokenGeneratorView: View {
             }
             Spacer()
             Button { showingImport = true } label: { Label("粘贴批量导入", systemImage: "text.badge.plus") }
+            Button { exportRows() } label: { Label(exported ? "已复制" : "导出当前行", systemImage: "square.and.arrow.up") }
+                .disabled(!state.entries.contains { !$0.label.isEmpty })
+                .help("把表格所有行（含明文值）作为 JSON 复制到剪贴板，可用「粘贴批量导入」原样导回。含明文，别贴给模型")
             Button { state.addEntry() } label: { Label("加一行", systemImage: "plus") }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
@@ -67,7 +78,7 @@ struct TokenGeneratorView: View {
     private var importSheet: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("批量导入").font(.headline)
-            Text("每行一条：label, host1|host2, [secret|totp,] 值。TOTP 行可以不写 host。以 # 开头的行忽略。")
+            Text("每行一条：label, host1|host2, [secret|totp,] 值。TOTP 行可以不写 host。以 # 开头的行忽略。也可以粘贴「导出当前行」得到的 JSON（带备注、账号和值）。")
                 .font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $importText)
                 .font(.body.monospaced())

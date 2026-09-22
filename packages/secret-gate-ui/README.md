@@ -37,7 +37,9 @@ gate home are editable in Settings (⌘,); defaults are the repo venv and `~/.se
   is minted as a companion token `<label>/user` (same hosts, http use) when "账号也加密" is on
   (the default), so the login name is ciphertext to the model too and is filled with `secret_fill`.
   Rows show their validation problem inline; only valid rows are sent.
-- **Batch**: paste lines `label, host1|host2, [secret|totp,] value`, or add rows by hand.
+- **Batch**: paste lines `label, host1|host2, [secret|totp,] value`, or the JSON that "导出当前行"
+  puts on the clipboard (every field, value included: it is plaintext, keep it out of any model
+  context), or add rows by hand.
   Results list per-row success/error with copy buttons, copy-all, and JSON export.
 - Results pair each token with its row. "复制条目" copies one row as a CONTEXT.md list item
   (`- 备注（label）：hosts` / `账号 …` / `密码 enc:v1:…`, or `2FA …` for TOTP) ready to paste into
