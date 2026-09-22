@@ -20,7 +20,7 @@ export function uiFile(urlPath: string): { body: string; type: string } | null {
 
 export function mountUi(app: Hono): void {
   app.get("/", (c) => c.redirect("/ui"));
-  app.get("/ui", (c) => c.html(uiFile("/index.html")!.body));
+  app.get("/ui", (c) => c.body(uiFile("/index.html")!.body, 200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" }));
   app.get("/ui/*", (c) => {
     const f = uiFile(c.req.path.slice("/ui".length));
     return f ? c.body(f.body, 200, { "content-type": f.type, "cache-control": "no-cache" }) : c.notFound();
