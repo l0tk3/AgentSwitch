@@ -4,11 +4,13 @@
 import { join } from "node:path";
 import { listTree } from "../files/artifacts.js";
 import { OUT_DIR } from "../files/names.js";
+import { repairTokens, TOKEN_RE } from "../executors/tokens.js";
 import type { Supervisor } from "../router/supervisor.js";
 import { gitDiffSummary } from "../threads/handoff.js";
 import { whoAnswers, type ApprovalPolicy } from "./approvalPolicy.js";
 import type { ApprovalDesk } from "./approvals.js";
 import type { EngineContext } from "./context.js";
+import { describeAnswers, type UserAnswers, type UserQuestion } from "./questions.js";
 import type { Task } from "./types.js";
 
 const RECENT_EVENTS = 20;
@@ -100,4 +102,32 @@ export async function acceptance(ctx: EngineContext, sup: Supervisor | undefined
   ctx.emit(task.id, "supervisor", { kind: "acceptance", accepted: v.accepted, missing: v.missing, note: v.note, source: v.source, ms: v.ms, ...(overruled ? { overruled: true } : {}) });
   if (v.accepted || overruled) return { rejected: null, rejections: rejectionsSoFar };
   return { rejected: `not accepted: ${v.missing.join("; ") || v.note}`, rejections: rejectionsSoFar + 1 };
+}
+
+export type QuestionMaterial = { readonly userMessage: string; readonly context: string; readonly steps: readonly string[]; readonly knownTokens: ReadonlySet<string> };
+
+/** Every enc:v1: token in the answers must be one the task legitimately holds (a damaged copy is repaired first);
+ *  anything else could be an invention and goes to the user instead. */
+export function answersUseKnownTokens(answers: UserAnswers, known: ReadonlySet<string>): UserAnswers | null {
+  const out: Record<string, string[]> = {};
+  for (const [id, list] of Object.entries(answers)) {
+    const fixed = list.map((a) => repairTokens(a, known).text);
+    if (fixed.some((a) => (a.match(TOKEN_RE) ?? []).some((t) => !known.has(t)))) return null;
+    out[id] = fixed;
+  }
+  return out;
+}
+
+/** loop-v0 §6: an executor's question goes to the supervisor first (never in manual mode); what it cannot answer
+ *  from the task's own material, or answers with a token the task does not hold, reaches the user's card. */
+export async function answerQuestions(ctx: EngineContext, sup: Supervisor | undefined, desk: ApprovalDesk, task: Task, policy: ApprovalPolicy, questions: readonly UserQuestion[], material: QuestionMaterial, signal?: AbortSignal): Promise<UserAnswers | null> {
+  if (sup?.answer && policy.mode !== "manual") {
+    const current = ctx.store.getTask(task.id) ?? task;
+    const v = await sup.answer({ brief: current.brief ?? task.task, userMessage: material.userMessage, context: material.context, steps: material.steps, cwd: task.cwd,
+      questions: questions.map((q) => ({ id: q.id, text: q.text, options: q.options.map((o) => o.label), secret: q.secret })) }, signal);
+    const answers = v.answers ? answersUseKnownTokens(v.answers, material.knownTokens) : null;
+    ctx.emit(task.id, "supervisor", { kind: "question", answered: answers !== null, reason: v.reason, source: v.source, ms: v.ms, questions: questions.map((q) => q.text), text: answers ? describeAnswers(questions, answers) : null });
+    if (answers) return answers;
+  }
+  return desk.ask(task.id, questions, "executor");
 }

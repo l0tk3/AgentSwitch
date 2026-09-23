@@ -47,11 +47,17 @@ export type CheckInVerdict = { readonly action: "continue" | "cancel" | "ask_use
 export type AcceptInput = { readonly brief: string; readonly result: string; readonly diff: string; readonly outFiles: readonly string[]; readonly cwd: string };
 export type AcceptVerdict = { readonly accepted: boolean; readonly missing: readonly string[]; readonly note: string; readonly ms: number; readonly source: "router" | "error" };
 
+export type AnswerInput = { readonly brief: string; readonly userMessage: string; readonly context: string; readonly steps: readonly string[]; readonly questions: readonly { id: string; text: string; options: readonly string[]; secret: boolean }[]; readonly cwd: string };
+/** answers = every question answered from the material; forward = at least one is only the user's to answer. */
+export type AnswerVerdict = { readonly answers: Readonly<Record<string, readonly string[]>> | null; readonly forward: boolean; readonly reason: string; readonly ms: number; readonly source: "router" | "error" };
+
 export interface Supervisor {
   readonly config: SupervisorConfig;
   approve(input: ApprovalInput, signal?: AbortSignal): Promise<ApprovalVerdict>;
   checkIn(input: CheckInInput, signal?: AbortSignal): Promise<CheckInVerdict>;
   accept(input: AcceptInput, signal?: AbortSignal): Promise<AcceptVerdict>;
+  /** loop-v0 §6: an executor's question, answered from the task's own material or forwarded to the user. */
+  answer?(input: AnswerInput, signal?: AbortSignal): Promise<AnswerVerdict>;
 }
 
 export const APPROVAL_SYSTEM = `You supervise coding agents that AgentSwitch dispatched for its user. An agent is asking permission for one
@@ -73,6 +79,21 @@ acceptance criteria one by one. Something the brief asked for as a file that onl
 delivered. Do not invent requirements the brief does not state; partial work the agent explained honestly is still
 not accepted if a criterion is unmet. Reply with exactly one JSON object:
 {"accepted": true | false, "missing": ["<unmet criterion>"], "note": "<one sentence for the next agent or the user>"}`;
+
+export const ANSWER_SYSTEM = `A coding agent AgentSwitch dispatched for its user has stopped to ask a question. Answer it on the user's behalf
+only when the answer is plainly in the material below: the brief, the user's own message, the user's environment
+context, or earlier steps of this task. Quote values from there exactly; an enc:v1: token must be copied whole from the
+material, never invented. If any question needs something the material does not contain, or a choice only the user can
+make, forward instead of guessing. Reply with exactly one JSON object:
+{"forward": true | false, "answers": {"<question id>": ["<answer>"]}, "reason": "<one sentence>"}
+With forward=false every question id must be answered.`;
+
+const AnswerReply = z.object({ forward: z.boolean().default(false), answers: z.record(z.string(), z.array(z.string())).default({}), reason: z.string().default("") });
+
+export function answerMessage(i: AnswerInput): string {
+  const qs = i.questions.map((q) => `- id ${JSON.stringify(q.id)}: ${q.text}${q.options.length ? ` (options: ${q.options.join(" / ")})` : ""}${q.secret ? " [the agent marked this as sensitive]" : ""}`).join("\n");
+  return `Working directory: ${i.cwd}\n\nBrief:\n${i.brief.slice(0, 4000)}\n\nThe user's own message:\n${i.userMessage.slice(0, 6000)}\n\nUser environment context:\n${i.context.slice(0, 6000) || "(none)"}\n\nEarlier steps:\n${events(i.steps)}\n\nQuestions:\n${qs}`;
+}
 
 const ApprovalReply = z.object({ decision: z.enum(["allow", "deny", "ask_user"]), reason: z.string().default("") });
 const CheckInReply = z.object({ action: z.enum(["continue", "cancel", "ask_user"]), note: z.string().default("") });
@@ -133,6 +154,12 @@ export function routerSupervisor(router: Router, config: SupervisorConfig, timeo
     async accept(input, signal) {
       const r = await ask(ACCEPT_SYSTEM, acceptMessage(input), input.cwd, AcceptReply, signal);
       return r.value ? { ...r.value, ms: r.ms, source: "router" } : { accepted: true, missing: [], note: r.error ?? "no reply", ms: r.ms, source: "error" };
+    },
+    async answer(input, signal) {
+      const r = await ask(ANSWER_SYSTEM, answerMessage(input), input.cwd, AnswerReply, signal);
+      if (!r.value) return { answers: null, forward: true, reason: r.error ?? "no reply", ms: r.ms, source: "error" };
+      const complete = !r.value.forward && input.questions.every((q) => (r.value!.answers[q.id] ?? []).some((a) => a.trim()));
+      return { answers: complete ? r.value.answers : null, forward: !complete, reason: r.value.reason, ms: r.ms, source: "router" };
     },
   };
 }

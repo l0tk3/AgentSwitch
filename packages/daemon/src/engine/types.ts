@@ -88,7 +88,8 @@ export type TaskEventType =
   | "agent"
   | "supervisor"
   | "rated"
-  | "sealed";
+  | "sealed"
+  | "step";
 
 export type TaskEvent = {
   readonly taskId: string;

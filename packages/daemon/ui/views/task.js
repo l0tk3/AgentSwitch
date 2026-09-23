@@ -13,6 +13,10 @@ export function eventLine(ev) {
   const p = ev.payload || {};
   switch (ev.type) {
     case "queued": return "已排队";
+    case "step": return p.action === "plan" ? (p.source === "error" ? `规划模型不可用（${p.routerError || ""}），按路由器的决定执行` : `多步任务，交给规划模型 ${p.model || ""}${p.reason ? "：" + p.reason : ""}`)
+      : p.action === "dispatch" ? `第 ${p.n} 步：派发${p.purpose === "research" ? "调研（只读）" : p.purpose === "verify" ? "复查（只读）" : ""} → ${p.target ? p.target.harness + "/" + p.target.model : "无目标"}${p.reason ? "，" + p.reason : ""}`
+      : p.action === "ask_user" ? `第 ${p.n} 步：问你：${p.question}`
+      : p.action === "finish" ? `第 ${p.n} 步：完成${p.source === "error" ? "（" + (p.note || "") + "）" : p.reason ? "，" + p.reason : ""}` : `第 ${p.n} 步：${p.action}`;
     case "sealed": return `已做密文：${(p.entries || []).map((e) => `${e.field || e.label}${e.hosts && e.hosts.length ? " → " + e.hosts.join(", ") : ""}`).join("；")}`;
     case "routed": { if (p.clarify) return `路由器先问你：${p.clarify}`; const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + (p.routerMs / 1000).toFixed(1) + "s" : ""})${v.notes && v.notes.length ? "\n  " + v.notes.join("; ") : ""}`; }
     case "dispatched": return `派发 ${p.harness}/${p.model}${p.effort ? " effort=" + p.effort : ""}`;
@@ -20,7 +24,8 @@ export function eventLine(ev) {
     case "tool_call": return `工具 ${p.tool}: ${p.command || (p.input ? JSON.stringify(p.input).slice(0, 160) : "")}`;
     case "approval_request": return p.kind === "question" ? `❓ ${p.source === "executor" ? "执行者" : "路由器"}问你：${(p.questions || [{ text: p.action }]).map((q) => q.text).join("；")}` : `⚠ 需要审批：${p.action}\n${p.evidence || ""}`;
     case "approval_resolved": return p.decision === "answer" ? `你答了：${p.text || ""}` : `${p.kind === "question" ? "问题" : "审批"} → ${p.decision === "allow" ? "允许" : p.kind === "question" ? "没答" : "拒绝"}（${p.by === "router" ? "路由器代批" : p.by === "timeout" ? "超时" : "你"}）`;
-    case "supervisor": return p.kind === "approval" ? `监督者对审批的意见：${p.decision === "allow" ? "允许" : p.decision === "deny" ? "拒绝" : "交给你决定"}${p.reason ? "，" + p.reason : ""}`
+    case "supervisor": return p.kind === "question" ? (p.answered ? `执行者提问，监督者替你答了：${p.text}` : `执行者提问，监督者转给你${p.reason ? "（" + p.reason + "）" : ""}`)
+      : p.kind === "approval" ? `监督者对审批的意见：${p.decision === "allow" ? "允许" : p.decision === "deny" ? "拒绝" : "交给你决定"}${p.reason ? "，" + p.reason : ""}`
       : p.kind === "checkin" ? `监督者检查（${Math.round((p.silentMs || 0) / 1000)} 秒无动静）：${p.action === "continue" ? "继续等" : p.action === "cancel" ? "取消这次执行并换人" : "问你"}${p.note ? "，" + p.note : ""}`
       : `监督者验收：${p.accepted ? "通过" : p.overruled ? "仍未通过，但已重做过一次，按完成处理" : "未通过，退回重做"}${(p.missing || []).length ? "，缺：" + p.missing.join("；") : ""}${p.note ? "，" + p.note : ""}`;
     case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;

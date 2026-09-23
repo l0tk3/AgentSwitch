@@ -32,6 +32,8 @@ export const DECISION_SHAPE = `{
   "thread": "<id of the open thread this continues, or \"new\">",
   "thread_confidence": <0..1>,
   "expected_size": "small" | "medium" | "large",
+  "plan": "single" | "multi",   // multi = something must be found out first, or several dependent steps
+  "purpose": "research" | "do" | "verify",   // research/verify = look only, change nothing, submit nothing
   "risk": "<what could go wrong, or null>",
   "fallbacks": [{"harness": "...", "model": "..."}],
   "reason": "<one sentence>",
@@ -66,6 +68,9 @@ Rules:
 - If the task cannot be done without something only the user can supply (a credential or site missing from the
   context, a URL, which of two readings they mean), reply with action "clarify" and one precise question instead of
   dispatching. Do not clarify for things an executor can find out by itself.
+- "plan": "multi" when the task cannot be done well in one go: something must be looked up first (what a form
+  requires, what a site offers), or later steps depend on earlier results. The daemon then runs it step by step with
+  a planner. "single" for anything one executor can finish by itself.
 - If unsure about the target, lower confidence instead of guessing.
 - Reply with exactly one JSON object and nothing else, of this shape:
 ${DECISION_SHAPE}${contextSection(x.context ?? EMPTY_CONTEXT)}${memorySection(x.memory)}${recordSection(x.record)}${extensionsSection(x.extensions)}${threadsSection(x.threads)}`;
@@ -145,4 +150,54 @@ ${tools}
 Decide again from the history above: a different harness or model, a repair tool, or give_up with the reason.
 For transport failures (proxy, TLS, network, crash, silent timeout) the environment may be broken for every harness;
 prefer a path that does not share the broken piece. Put what the next executor must know in handoff_note.`;
+}
+
+/** loop-v0: one step of a running task: what happened, and what the model may reply. */
+export type StepRecord =
+  | { readonly kind: "dispatch"; readonly purpose: "research" | "do" | "verify"; readonly harness: string; readonly model: string; readonly brief: string; readonly ok: boolean;
+      readonly failureKind: string | null; readonly reply: string; readonly sideEffects: string; readonly outFiles: readonly string[]; readonly diff: string }
+  | { readonly kind: "ask_user"; readonly question: string; readonly answer: string | null }
+  | { readonly kind: "note"; readonly text: string };
+
+const REPLY_EXCERPT = 3000;
+const BRIEF_EXCERPT = 300;
+
+function stepLine(s: StepRecord, i: number): string {
+  if (s.kind === "note") return `${i + 1}. ${s.text}`;
+  if (s.kind === "ask_user") return `${i + 1}. ask_user: "${s.question}" → ${s.answer === null ? "no answer" : JSON.stringify(s.answer)}`;
+  const head = `${i + 1}. dispatch [${s.purpose}] ${s.harness}/${s.model} — brief: ${JSON.stringify(s.brief.slice(0, BRIEF_EXCERPT))}`;
+  const outcome = s.ok ? `   → done. Reply: ${s.reply.slice(0, REPLY_EXCERPT) || "(empty)"}` : `   → failed (${s.failureKind ?? "unknown"}): ${JSON.stringify(s.reply.slice(0, 500))}`;
+  return `${head}\n${outcome}\n   side effects: ${s.sideEffects}; out/: ${s.outFiles.length ? s.outFiles.join(", ") : "(none)"}; worktree: ${s.diff || "(clean)"}`;
+}
+
+export function stepLines(steps: readonly StepRecord[]): string[] { return steps.map(stepLine); }
+
+/** The message for a next-step call: the task, every step so far, the budget. */
+export function stepsMessage(task: string, cwd: string, steps: readonly StepRecord[], used: number, budget: number, previousError?: string): string {
+  const retry = previousError ? `\n\nYour previous reply was rejected: ${previousError}. Reply with one valid JSON object only.` : "";
+  const lines = steps.length ? steps.map(stepLine).join("\n") : "(none yet)";
+  return `Working directory: ${cwd}\n\nTask:\n${task}\n\nSteps so far:\n${lines}\nDispatches used: ${used} of ${budget}.\n\nDecide the next action.${retry}`;
+}
+
+/** Appended to the dispatcher's system prompt for next-step calls. */
+export function loopSection(exclude: readonly { harness: string; model: string }[], repairs: readonly RepairTool[] = []): string {
+  const tools = repairs.length ? repairs.map((r) => `- ${r.name}: ${r.description}`).join("\n") : "(none registered; action=repair is not available)";
+  return `
+
+You are running this task step by step: after each step you see its outcome and choose the next action. Reply with one
+JSON object, one of:
+- a dispatch: the decision shape above with "action": "dispatch" and "purpose": "research" (look only: change nothing,
+  submit nothing), "do", or "verify" (check earlier work: change nothing). The executor sees earlier steps only through
+  your brief and a short handoff, so put in the brief everything it needs from them (what a previous step found, what
+  to do with it). Refer to the user's enc:v1: tokens by their field names, never copy them.
+- {"action": "ask_user", "question": "<one precise question only the user can answer>"}
+- {"action": "finish", "result": "<for the user: what was done and what was found; quote the executor where useful>"}
+- {"action": "give_up", "reason": "<why this cannot be done>"}
+- {"action": "repair", "repair": {"tool": "<a listed repair tool>", "args": {}}} — only with a listed tool.
+Excluded (failed already; do not choose): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ") || "none"}
+For transport failures (proxy, TLS, network, crash, silent timeout) the environment may be broken for every harness;
+prefer a path that does not share the broken piece. A step that failed after side effects: say in the brief what is
+already done so it is not redone.
+Repair tools you may request with action="repair" (the daemon runs them, then asks you again):
+${tools}`;
 }

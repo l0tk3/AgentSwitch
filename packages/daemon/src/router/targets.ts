@@ -55,6 +55,8 @@ export const Targets = z
       /** docs/supervisor-v0.md: approvals on the user's behalf, watchdog, acceptance. */
       supervisor: SupervisorConfig.prefault({}),
       default: TargetRef,
+      /** loop-v0 §6: the model that runs multi-step tasks; absent = the router itself. */
+      planner: TargetRef.nullable().default(null),
     }),
   })
   .superRefine((t, ctx) => {
@@ -66,6 +68,10 @@ export const Targets = z
     const d = t.harnesses[t.router.default.harness];
     if (!d || !modelKey(d, t.router.default.model)) {
       ctx.addIssue({ code: "custom", message: "router.default must name a listed harness/model" });
+    }
+    const p = t.router.planner ? t.harnesses[t.router.planner.harness] : undefined;
+    if (t.router.planner && (!p || !modelKey(p, t.router.planner.model))) {
+      ctx.addIssue({ code: "custom", message: "router.planner must name a listed harness/model" });
     }
     for (const [name, cat] of Object.entries(t.categories)) {
       for (const ref of cat.allow) {

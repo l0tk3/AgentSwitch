@@ -6,6 +6,7 @@ import { EMPTY_CONTEXT, type LoadedContext } from "./context.js";
 import { parseDecision, type Decision } from "./decision.js";
 import { classify, defaultTarget } from "./defaultPolicy.js";
 import { redispatchMessage, systemPrompt, taskMessage, type ExtensionsSummary, type RepairTool } from "./prompt.js";
+import { askJson } from "./ask.js";
 import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
 import type { Router } from "./routers/types.js";
 import { categoryOf, markUnavailable, type TargetRef, type Targets } from "./targets.js";
@@ -72,17 +73,24 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
   if (asked.decision?.action === "clarify" && asked.decision.question?.trim()) {
     return { ...asked, clarify: asked.decision.question.trim(), verdict: { ok: false, notes: ["router asks the user a question first"] }, source: "router" };
   }
-  if (asked.decision) {
-    const verdict = validateDecision(asked.decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, asked.decision)) });
-    if (verdict.ok) return { ...asked, verdict, source: verdict.chosen !== "default" ? "router" : "default" };
-    const last = validateTarget(fallback, ctx, asked.decision.needs_browser, "default");
-    return { ...asked, verdict: last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict, source: "default" };
-  }
+  if (asked.decision) return { ...asked, ...verdictFor(asked.decision, req, deps, exclude) };
   const verdict = validateTarget(fallback, ctx, req.needsBrowser ?? false, "default");
   return { ...asked, verdict, source: "default" };
 }
 
 type Asked = { decision: Decision | null; routerError: string | null; routerMs: number; attempts: number };
+
+/** A router decision → an executable target, with every floor applied (catalog, quota, category, track-record guards);
+ *  a decision that fails validation falls back to the default policy's target, `exclude` taken out of both. */
+export function verdictFor(decision: Decision, req: RouteRequest, deps: RouteDeps, exclude: readonly TargetRef[]): { verdict: Verdict; source: "router" | "default" } {
+  const targets = exclude.length ? markUnavailable(deps.targets, exclude) : deps.targets;
+  const fallback = defaultTargetExcluding(req, deps, exclude);
+  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) };
+  const verdict = validateDecision(decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, decision)) });
+  if (verdict.ok) return { verdict, source: verdict.chosen !== "default" ? "router" : "default" };
+  const last = validateTarget(fallback, ctx, decision.needs_browser, "default");
+  return { verdict: last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict, source: "default" };
+}
 
 export type RerouteRequest = RouteRequest & {
   readonly decision: Decision | null;
@@ -125,48 +133,35 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
     // Unknown or unregistered tool: treat the decision as a plain re-dispatch of its harness/model.
   }
   if (asked.decision) {
-    const verdict = validateDecision(asked.decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, asked.decision)) });
-    if (verdict.ok) {
-      const source = verdict.chosen !== "default" ? "router" : "default";
-      return { step: { kind: "redispatch", verdict, source }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
-    }
-    const last = validateTarget(excludedFallback, ctx, asked.decision.needs_browser, "default");
-    const merged = last.ok ? { ...last, notes: [...verdict.notes, ...last.notes] } : verdict;
-    return { step: { kind: "redispatch", verdict: merged, source: "default" }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
+    const { verdict, source } = verdictFor(asked.decision, req, deps, step.exclude);
+    return { step: { kind: "redispatch", verdict, source }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
   }
   const verdict = validateTarget(excludedFallback, ctx, req.needsBrowser ?? false, "default");
   return { step: { kind: "redispatch", verdict, source: "default" }, decision: null, routerError: asked.routerError, routerMs: asked.routerMs };
 }
 
+/** The default policy's target as a verdict, `exclude` avoided: what a task gets when the router is unusable. */
+export function defaultVerdict(req: RouteRequest, deps: RouteDeps, exclude: readonly TargetRef[], needsBrowser: boolean): Verdict {
+  const targets = exclude.length ? markUnavailable(deps.targets, exclude) : deps.targets;
+  const fallback = defaultTargetExcluding(req, deps, exclude);
+  return validateTarget(fallback, { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) }, needsBrowser, "default");
+}
+
 /** Default-policy target that avoids harnesses already tried. */
-function defaultTargetExcluding(req: RouteRequest, deps: RouteDeps, exclude: readonly TargetRef[]): TargetRef {
+export function defaultTargetExcluding(req: RouteRequest, deps: RouteDeps, exclude: readonly TargetRef[]): TargetRef {
   const tried = new Set(exclude.map((e) => e.harness));
   const quota: Record<string, number> = { ...deps.quota };
   for (const h of tried) quota[h] = 0;
   return defaultTarget(req.task, deps.targets, quota);
 }
 
+export function routerSystem(deps: RouteDeps): string {
+  return systemPrompt(deps.targets, { context: deps.context ?? EMPTY_CONTEXT, memory: deps.memory ?? EMPTY_CONTEXT, record: recordText(aggregateRecords(deps.records ?? [])), extensions: deps.extensions ?? { mcp: [], skills: [] }, threads: deps.threads ?? [] });
+}
+
 async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Promise<Asked> {
-  const system = systemPrompt(deps.targets, { context: deps.context ?? EMPTY_CONTEXT, memory: deps.memory ?? EMPTY_CONTEXT, record: recordText(aggregateRecords(deps.records ?? [])), extensions: deps.extensions ?? { mcp: [], skills: [] }, threads: deps.threads ?? [] });
-  let error: string | null = null;
-  let ms = 0;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error("router timed out")), deps.targets.router.timeout_ms);
-    try {
-      const body = taskMessage(req.task, req.cwd, error ?? undefined) + (extra ? `\n\n${extra}` : "");
-      const input = { task: body, cwd: req.cwd, system, ...(error ? { previousError: error } : {}) };
-      const reply = await deps.router.route(input, controller.signal);
-      ms += reply.elapsedMs;
-      const parsed = parseDecision(reply.text);
-      if (parsed.ok) return { decision: parsed.decision, routerError: null, routerMs: ms, attempts: attempt };
-      error = `${parsed.error}; reply began: ${JSON.stringify(reply.text.trim().slice(0, 200))}`;
-    } catch (err) {
-      error = (err as Error).message;
-      if (/timed out/.test(error)) return { decision: null, routerError: error, routerMs: ms, attempts: attempt };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  return { decision: null, routerError: error, routerMs: ms, attempts: 2 };
+  const body = (error?: string) => taskMessage(req.task, req.cwd, error) + (extra ? `\n\n${extra}` : "");
+  const parse = (text: string) => { const r = parseDecision(text); return r.ok ? { ok: true as const, value: r.decision } : r; };
+  const r = await askJson(deps.router, { system: routerSystem(deps), cwd: req.cwd, body }, parse, deps.targets.router.timeout_ms);
+  return { decision: r.value, routerError: r.error, routerMs: r.ms, attempts: r.tries };
 }

@@ -40,6 +40,7 @@ import type { Router } from "./router/routers/types.js";
 import { loadTargets, type Targets } from "./router/targets.js";
 import { discoverTargets } from "./router/discovery.js";
 import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
+import { claudeTextRouter } from "./router/routers/claude.js";
 
 export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
@@ -95,6 +96,8 @@ export type BuildOverrides = {
   readonly opencode?: OpenCodeServer;
   /** Tests: a sealer without a model or the gate. */
   readonly sealer?: Sealer;
+  /** Tests: the planner for multi-step tasks (loop-v0 §6). */
+  readonly planner?: () => Router | null;
 };
 
 export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): Daemon {
@@ -130,13 +133,28 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
   const supervisor = summarizer ? routerSupervisor(oracle("supervisor"), targets.router.supervisor, targets.router.timeout_ms) : undefined;
   const extensionsSummary = () => summarizeExtensions(extensions);
+  // loop-v0 §6: the planner runs multi-step tasks; only with a real router, and only while its harness has quota.
+  const planner = overrides.planner ?? (cfg.router === "echo" || overrides.router ? undefined : plannerFor(targets, resident, () => quota.map()));
   // The sealer (router-v0 §9) is the same text-only agent plus `secret-gate enc --batch`; only with real executors, which require the gate.
   const gate = cfg.executors === "real" ? defaultGate() : null;
   const sealer = overrides.sealer ?? (summarizer && gate ? routerSealer(oracle("sealer"), gateMinter(gate), () => loadContext(contextPath).text, targets.router.timeout_ms) : undefined);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}) });
+  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
   const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const app = createApp({ ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
+}
+
+/** targets.yaml `router.planner` as a text-only Router: claude-code through the Agent SDK, opencode through the resident
+ *  server. Null while the planner's harness is out of quota (the router then runs multi-step tasks itself). */
+export function plannerFor(targets: Targets, resident: OpenCodeServer | undefined, quota: () => Record<string, number>): () => Router | null {
+  const p = targets.router.planner;
+  if (!p) return () => null;
+  return () => {
+    if ((quota()[p.harness] ?? 1) < targets.router.quota_threshold) return null;
+    if (p.harness === "claude-code") return claudeTextRouter({ model: p.model });
+    if (p.harness === "opencode" && resident) return serveRouter(resident, "oracle", p.model);
+    return null;
+  };
 }
 
 /** Real executors need the gate (design §3.9: no harness starts without it; decided again 2026-09-22). */

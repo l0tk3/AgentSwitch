@@ -20,6 +20,10 @@ export const Decision = z.object({
   thread: z.string().min(1).nullable().default(null),
   thread_confidence: z.number().min(0).max(1).nullable().default(null),
   expected_size: z.enum(["small", "medium", "large"]).default("medium"),
+  /** loop-v0 §6: "multi" hands the task to the planner, which runs it step by step. */
+  plan: z.enum(["single", "multi"]).default("single"),
+  /** loop-v0: research/verify steps are read-only (approvals refused, brief says so). */
+  purpose: z.enum(["research", "do", "verify"]).default("do"),
   risk: z.string().nullable().default(null),
   fallbacks: z.array(TargetRef).default([]),
   reason: z.string().default(""),

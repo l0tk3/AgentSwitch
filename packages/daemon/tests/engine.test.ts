@@ -86,7 +86,9 @@ describe("Engine", () => {
     expect(done.attempts.map((a) => [a.harness, a.kind])).toEqual([["claude-code", "task_failed"]]);
     expect(done.routerAsks).toBe(1);
     expect(done.harness).toBe("codex");
-    expect(router.calls[1]!.task).toContain("Previous attempts");
+    expect(router.calls[1]!.task).toContain("Steps so far:");
+    expect(router.calls[1]!.task).toContain("→ failed (task_failed)");
+    expect(router.calls[1]!.system).toContain("Excluded (failed already; do not choose): claude-code/claude-sonnet-5");
     expect(store.pendingApprovals()).toEqual([]);
   });
 

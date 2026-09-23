@@ -1,6 +1,6 @@
 # AgentSwitch
 
-手机遥控 Mac 上多个 AI agent（Claude Code / Codex / OpenCode）的任务编排层。设计稿在 `docs/design-v0.md`（总体）、`docs/router-v0.md`（路由器）和 `docs/threads-v0.md`（线程、交接、记忆），改架构先改它们。
+手机遥控 Mac 上多个 AI agent（Claude Code / Codex / OpenCode）的任务编排层。设计稿在 `docs/design-v0.md`（总体）、`docs/router-v0.md`（路由器）、`docs/loop-v0.md`（调度循环）和 `docs/threads-v0.md`（线程、交接、记忆），改架构先改它们。
 
 ## 布局
 - `docs/` 设计与决策记录

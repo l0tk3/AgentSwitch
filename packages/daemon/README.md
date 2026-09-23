@@ -81,6 +81,19 @@ events and are counted in the `done` event; the executors do not return before t
 reports them finished (Claude holds the one-shot result back, Codex sends `turn/completed`
 last, OpenCode runs them synchronously). Verified with `scripts/background_agent_smoke.ts`.
 
+## Task loop (loop-v0)
+
+A task is run step by step (`src/engine/taskLoop.ts`). The router's first decision carries `plan` and
+`purpose`; `plan: multi` hands the task to the planner (`router.planner` in targets.yaml, a text-only
+Claude or opencode model), which replies one action per step: a dispatch (`purpose` research / do /
+verify; research and verify are read-only, their approval requests are refused), `ask_user`, `finish`
+or `give_up`. After a research/verify step, or in a multi-step task, every successful dispatch goes
+back to the loop model; a single-step task ends after the supervisor's acceptance as before. Failures
+keep the code rules (transport retry, quota switch, stop after side effects) and otherwise go to the
+loop model with the failed target excluded. Budgets: 5 dispatches and 12 loop calls, each extendable
+once the user says so. Executor questions go to the supervisor first (loop-v0 §6). Timeline events:
+`step` (plan / dispatch / ask_user / finish), `redispatch`, `supervisor {kind: question}`.
+
 ## Supervisor (supervisor-v0)
 
 The router model also supervises (`router.supervisor` in targets.yaml). Approvals an executor

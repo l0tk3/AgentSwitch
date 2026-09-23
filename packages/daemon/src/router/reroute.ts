@@ -87,6 +87,7 @@ function switchAlongChain(input: RerouteInput, failed: TargetRef): NextStep {
   const decision = input.decision ?? {
     harness: failed.harness, model: failed.model, effort: null, brief: "", needs_browser: false, expected_size: "medium" as const,
     risk: null, category: null, kind: null, thread: null, thread_confidence: null, question: null, fallbacks: [], reason: "", confidence: 1, action: "redispatch" as const, repair: null, handoff_note: null,
+    plan: "single" as const, purpose: "do" as const,
   };
   const verdict = validateDecision({ ...decision, confidence: Math.max(decision.confidence, targets.router.min_confidence) }, ctx);
   if (verdict.ok) return { kind: "switch", target: { harness: verdict.harness, model: verdict.model }, notes: verdict.notes };
