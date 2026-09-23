@@ -5,6 +5,8 @@ import type { Attachment } from "../files/uploads.js";
 import type { ExecutionOutcome } from "../router/failure.js";
 
 export type ApprovalDecision = "allow" | "deny";
+/** Per-execution loopback capability. Only the gate MCP process receives this credential. */
+export type CredentialRepair = { readonly url: string; readonly key: string };
 
 export type ExecutionInput = {
   readonly taskId: string;
@@ -16,8 +18,13 @@ export type ExecutionInput = {
   readonly handoffNote: string | null;
   /** The user's CONTEXT.md (linted: ciphertext only), so sites/accounts reach the executor even when the router's brief omits them. */
   readonly context: string | null;
+  /** Related, scoped observations only; this is deliberately separate from user-maintained context. */
+  readonly platformMemory?: string | null;
+  /** Source-attributed question/answer history; corrections survive a change of executor. */
+  readonly feedback?: string | null;
   /** Genuine enc:v1: tokens for this task; executors that can rewrite tool inputs repair damaged copies against it. */
   readonly knownTokens: ReadonlySet<string>;
+  readonly credentialRepair?: CredentialRepair;
   /** The thread's private home (threads-v0 §1): harness state lives under <home>/<harness>, never in the user's own dirs. */
   readonly threadHome: string | null;
   /** This harness's last session in the thread (from a `session` thread event); the executor resumes it natively. */
@@ -28,10 +35,10 @@ export type ExecutionInput = {
   readonly browser: boolean;
   readonly signal: AbortSignal;
   /** Stream progress; the engine persists and fans out. `agent` = a sub-agent the harness spawned (background-v0 §2). */
-  readonly emit: (type: "text" | "tool_call" | "agent", payload: Record<string, unknown>) => void;
+  readonly emit: (type: "text" | "tool_call" | "agent" | "credential_repair", payload: Record<string, unknown>) => void;
   /** Ask the user; resolves when they answer or the request expires (deny). */
   readonly approve: (action: string, evidence: string) => Promise<ApprovalDecision>;
-  /** The harness's own "ask the user" tool, passed straight to the user's card (supervisor-v0 §1c).
+  /** The harness's question/feedback tool: the router answers from evidence or forwards to the user.
    *  Resolves with the answers, or null when the user declined or nobody answered in time. */
   readonly ask: (questions: readonly UserQuestion[]) => Promise<UserAnswers | null>;
 };

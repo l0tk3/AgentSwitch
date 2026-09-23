@@ -86,12 +86,12 @@ describe("routerSealer", () => {
 
   it("nothing found leaves the text as is; a missing host, a bad reply, a minter failure or a timeout refuse the submission", async () => {
     expect(await routerSealer(echoRouter([reply([])]), fakeMinter(), () => "")("plain")).toMatchObject({ ok: true, text: "plain", sealed: [] });
-    expect(await routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: [] }])]), fakeMinter(), () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unroutable", error: expect.stringContaining("x/pass") });
+    expect(await routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: [] }])]), fakeMinter(), () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unroutable", error: expect.stringContaining("不知道这些凭据要用在哪个站点") });
     expect(await routerSealer(echoRouter(["no json"]), fakeMinter(), () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unavailable" });
     const refusing = async (entries: readonly MintEntry[]) => entries.map((e) => ({ label: e.label, error: "invalid label" }));
-    expect(await routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: ["a"] }])]), refusing, () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unavailable", error: expect.stringContaining("secret-gate refused") });
+    expect(await routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: ["a"] }])]), refusing, () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unavailable", error: "凭据加密暂时不可用，请稍后重试。" });
     const slow = echoRouter([reply([])], { delayMs: 200 });
-    expect(await routerSealer(slow, fakeMinter(), () => "", 20)("pw Hunter2!")).toMatchObject({ ok: false, code: "unavailable", error: expect.stringContaining("timed out") });
+    expect(await routerSealer(slow, fakeMinter(), () => "", 20)("pw Hunter2!")).toMatchObject({ ok: false, code: "unavailable", error: "敏感信息检查超时，请稍后重试。" });
   });
 });
 
@@ -137,7 +137,7 @@ describe("POST /tasks with plaintext credentials", () => {
     const unroutable = routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: [] }])]), fakeMinter(), () => "");
     const r = await daemon(unroutable).post({ task: "密码 Hunter2!", cwd: "/tmp" });
     expect(r.status).toBe(400);
-    expect(((await r.json()) as { error: string }).error).toContain("x/pass");
+    expect(((await r.json()) as { error: string }).error).toContain("不知道这些凭据要用在哪个站点");
   });
 });
 
@@ -169,7 +169,7 @@ describe("records: pasted account lines (email|password|year|country|app passwor
     if (!r.ok) return;
     const recordLine = r.text.split("\n")[1]!;
     expect(recordLine).toMatch(/^enc:v1:\S+\|enc:v1:\S+\|2024\|United States\|enc:v1:\S+\|enc:v1:\S+$/);
-    expect(r.text).toContain(`Record layout: ${layout}`);
+    expect(r.text).toContain(`Candidate record layout: ${layout}`);
     expect(r.text).toContain(`- Google app password (for panel.example:9000): ${r.sealed[2]!.token}`);
     for (const f of fields) expect(r.text).not.toContain(f.value);
   });

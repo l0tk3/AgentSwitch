@@ -22,6 +22,21 @@ export function factLines(text: string): string[] {
 
 export type AppendResult = { readonly added: string[]; readonly skipped: string[] };
 
+/** Remove only generated facts attributed to deleted tasks; keep unrelated and hand-written memory. */
+export function removeTaskMemories(path: string | undefined, taskIds: readonly string[]): number {
+  if (!path || !taskIds.length || !existsSync(path)) return 0;
+  const ids = new Set(taskIds);
+  const current = readFileSync(path, "utf8");
+  let removed = 0;
+  const kept = current.split("\n").filter((line) => {
+    const source = /^- .+ \(task ([^,\s)]+), \d{4}-\d{2}-\d{2}\)\s*$/.exec(line);
+    if (source?.[1] && ids.has(source[1])) { removed++; return false; }
+    return true;
+  });
+  if (removed) writeFileSync(path, kept.join("\n"), { mode: 0o600 });
+  return removed;
+}
+
 /** Append facts (linted, deduplicated, capped) to MEMORY.md. Never throws on a bad fact; the file stays ≤ 64 KB. */
 export function appendMemory(path: string, facts: readonly string[], source: { taskId: string; ts?: number }): AppendResult {
   const current = existsSync(path) ? readFileSync(path, "utf8") : "";

@@ -3,14 +3,29 @@
 export const HARNESSES = ["claude-code", "codex", "opencode"];
 export const HARNESS_NAMES = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode · DeepSeek" };
 export const ACTIVE = new Set(["queued", "routing", "running", "waiting_approval"]);
+export const STATUS_LABELS = { queued: "排队中", routing: "分诊中", running: "执行中", waiting_approval: "等待答复", done: "已完成", partial: "部分完成", blocked: "执行受阻", failed: "失败", cancelled: "已取消" };
+export const statusLabel = (status) => STATUS_LABELS[status] || status;
+export function taskStatusLabel(task) {
+  if (task.status !== "blocked") return statusLabel(task.status);
+  const error = String(task.error || "");
+  if (/等待.*(?:答复|回答)|waiting for your answer/i.test(error)) return "待补充条件";
+  if (/规划/.test(error)) return /超时|timed?\s*out|timeout|deadline/i.test(error) ? "规划超时" : "规划失败";
+  return "执行受阻";
+}
 
-export async function api(method, path, body) {
-  const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  const t = await r.text();
-  let d = {};
-  try { d = t ? JSON.parse(t) : {}; } catch { throw new Error(`HTTP ${r.status}: ${t.slice(0, 120)}（服务端异常，看 daemon 日志）`); }
-  if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
-  return d;
+export async function api(method, path, body, { timeoutMs = 15_000 } = {}) {
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined, ...(controller ? { signal: controller.signal } : {}) });
+    const t = await r.text();
+    let d = {};
+    try { d = t ? JSON.parse(t) : {}; } catch { throw new Error(`HTTP ${r.status}: ${t.slice(0, 120)}（服务端异常，看 daemon 日志）`); }
+    if (!r.ok) throw Object.assign(new Error(d.error || ("HTTP " + r.status)), { status: r.status });
+    return d;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

@@ -54,6 +54,23 @@ export function parseDecision(text: string): ParseResult {
     return { ok: false, error: `invalid JSON: ${(err as Error).message}` };
   }
   const parsed = Decision.safeParse(value);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
-  return { ok: true, decision: parsed.data };
+  if (parsed.success) return { ok: true, decision: parsed.data };
+  // Non-dispatch actions do not need a target. In particular, a minimal give_up
+  // must never become a schema error followed by the default policy dispatching.
+  // Keep the existing Decision type for persisted records and callers; these
+  // compatibility fields are not an executable target and route() stops first.
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const control = value as Record<string, unknown>;
+    if (control.action === "give_up" || control.action === "clarify" || control.action === "repair") {
+      const reason = typeof control.reason === "string" ? control.reason : "";
+      const repair = Decision.shape.repair.safeParse(control.repair);
+      return { ok: true, decision: Decision.parse({
+        harness: "router", brief: typeof control.brief === "string" && control.brief.trim() ? control.brief : reason || "Router control decision",
+        confidence: 1, action: control.action, reason,
+        question: typeof control.question === "string" ? control.question : null,
+        repair: repair.success ? repair.data : null,
+      }) };
+    }
+  }
+  return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
 }

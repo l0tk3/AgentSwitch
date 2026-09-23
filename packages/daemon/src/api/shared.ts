@@ -29,6 +29,7 @@ export type ApiDeps = {
   readonly routeDeps: () => RouteDeps;
   readonly contextPath: string;
   readonly memoryPath: string;
+  readonly platformMemoryPath?: string;
   readonly policyPath: string;
   readonly workRoot: string;
   readonly uploads: Uploads;

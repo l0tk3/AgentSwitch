@@ -21,6 +21,8 @@ export class AppServerClient {
     private readonly onNotification: NotificationHandler,
   ) {
     createInterface({ input: output }).on("line", (line) => this.handle(line));
+    input.on("error", (err) => this.fail(err));
+    output.on("error", (err) => this.fail(err));
     output.on("close", () => this.fail(new Error("app-server closed")));
   }
 
@@ -49,6 +51,7 @@ export class AppServerClient {
   }
 
   request(method: string, params: Json = {}, timeoutMs = 60_000): Promise<Json> {
+    if (this.closed) return Promise.reject(new Error("app-server closed"));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`${method}: no response in ${timeoutMs} ms`)); }, timeoutMs);

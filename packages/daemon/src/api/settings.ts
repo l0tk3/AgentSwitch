@@ -8,6 +8,7 @@ import { ApprovalPolicy, CATEGORIES, CATEGORY_TITLES, loadPolicy, savePolicy } f
 import { exampleContext, lintContext, loadContext } from "../router/context.js";
 import { route } from "../router/route.js";
 import { loadMemory } from "../threads/memory.js";
+import { deletePlatformMemory, loadPlatformMemory } from "../threads/platformMemory.js";
 import { aggregateRecords, RECORD_WINDOW_MS } from "../threads/record.js";
 import { checkCwd } from "./cwdPolicy.js";
 import { issues, limitParam, type ApiDeps } from "./shared.js";
@@ -69,4 +70,9 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
     return c.json({ path: deps.memoryPath, warnings: lint.warnings });
   });
   app.get("/records", (c) => c.json(aggregateRecords(deps.store.recordsSince(Date.now() - RECORD_WINDOW_MS))));
+  app.get("/platform-memory", (c) => c.json({ records: deps.platformMemoryPath ? loadPlatformMemory(deps.platformMemoryPath, Date.now(), true) : [] }));
+  app.delete("/platform-memory/:id", (c) => {
+    if (!deps.platformMemoryPath || !deletePlatformMemory(deps.platformMemoryPath, c.req.param("id"))) return c.json({ error: "这条平台经验不存在" }, 404);
+    return c.json({ ok: true });
+  });
 }

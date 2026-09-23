@@ -7,18 +7,25 @@ import { decisionJson, realTargets } from "./helpers.js";
 
 const targets = realTargets();
 const first = Decision.parse({ harness: "claude-code", model: "claude-sonnet-5", brief: "log in", confidence: 0.9, needs_browser: true });
-const refused = { harness: "claude-code", model: "claude-sonnet-5", kind: "refusal" as const, excerpt: "I can't help with automating logins", sideEffects: NO_SIDE_EFFECTS };
-const base = { task: "打开站点登录，密码 enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", cwd: "/tmp/x", decision: first, attempts: [refused], routerAsks: 0 };
+const failed = { harness: "claude-code", model: "claude-sonnet-5", kind: "task_failed" as const, excerpt: "could not find the login form", sideEffects: NO_SIDE_EFFECTS };
+const base = { task: "打开站点登录，密码 enc:v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", cwd: "/tmp/x", decision: first, attempts: [failed], routerAsks: 0 };
 
 describe("reroute()", () => {
-  it("refusal: router gets the history, picks another harness, floor validates with the refused one excluded", async () => {
-    const r = echoRouter([decisionJson({ harness: "codex", model: "gpt-6-astra", effort: "high", needs_browser: true, handoff_note: "user's own account" })]);
+  it("refusal stops without consulting the ordinary router or selecting a default target", async () => {
+    const r = echoRouter([decisionJson()]);
+    const out = await reroute({ ...base, attempts: [{ ...failed, kind: "refusal" }] }, { targets, router: r, quota: {}, running: {} });
+    expect(out.step).toMatchObject({ kind: "stop", reason: expect.stringContaining("grounded clarification") });
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it("task failure: router receives history and chooses an available target", async () => {
+    const r = echoRouter([decisionJson({ harness: "codex", model: "gpt-6-astra", effort: "high", needs_browser: true, handoff_note: "the login form was not found" })]);
     const out = await reroute(base, { targets, router: r, quota: {}, running: {} });
     expect(out.step).toMatchObject({ kind: "redispatch", source: "router", verdict: { ok: true, harness: "codex", model: "gpt-6-astra" } });
-    expect(out.decision?.handoff_note).toBe("user's own account");
+    expect(out.decision?.handoff_note).toBe("the login form was not found");
     const msg = r.calls[0]!.task;
     expect(msg).toContain("Previous attempts:");
-    expect(msg).toContain("claude-code/claude-sonnet-5 -> refusal");
+    expect(msg).toContain("claude-code/claude-sonnet-5 -> task_failed");
     expect(msg).toContain("Excluded (do not choose): claude-code/claude-sonnet-5");
     expect(r.calls[0]!.system).not.toContain("claude-sonnet-5:");   // excluded model hidden from the catalog
   });
@@ -35,9 +42,9 @@ describe("reroute()", () => {
   });
 
   it("router gives up: surfaced with its reason", async () => {
-    const r = echoRouter([decisionJson({ harness: "codex", action: "give_up", reason: "no listed model may automate this site" })]);
+    const r = echoRouter([decisionJson({ harness: "codex", action: "give_up", reason: "the form could not be located" })]);
     const out = await reroute(base, { targets, router: r, quota: {}, running: {} });
-    expect(out.step).toEqual({ kind: "give_up", reason: "no listed model may automate this site" });
+    expect(out.step).toEqual({ kind: "give_up", reason: "the form could not be located" });
   });
 
   it("router unusable: default policy excluding the tried harness", async () => {
@@ -49,19 +56,19 @@ describe("reroute()", () => {
 
   it("quota, first transport failure and gate denial never reach the router", async () => {
     const r = echoRouter([decisionJson()]);
-    const quota = await reroute({ ...base, attempts: [{ ...refused, kind: "quota" }] }, { targets, router: r, quota: {}, running: {} });
+    const quota = await reroute({ ...base, attempts: [{ ...failed, kind: "quota" }] }, { targets, router: r, quota: {}, running: {} });
     expect(quota.step).toMatchObject({ kind: "switch", target: { harness: "codex", model: "gpt-5.6-luna" } });  // browser task: opencode cannot; cheapest codex model, not the top one
-    const chat = await reroute({ ...base, task: "总结一下", decision: { ...first, needs_browser: false }, attempts: [{ ...refused, kind: "quota" }] }, { targets, router: r, quota: {}, running: {} });
+    const chat = await reroute({ ...base, task: "总结一下", decision: { ...first, needs_browser: false }, attempts: [{ ...failed, kind: "quota" }] }, { targets, router: r, quota: {}, running: {} });
     expect(chat.step).toMatchObject({ kind: "switch", target: { harness: "opencode" } });
-    const transport = await reroute({ ...base, attempts: [{ ...refused, kind: "transport" }] }, { targets, router: r, quota: {}, running: {} });
+    const transport = await reroute({ ...base, attempts: [{ ...failed, kind: "transport" }] }, { targets, router: r, quota: {}, running: {} });
     expect(transport.step).toMatchObject({ kind: "retry" });
-    const denied = await reroute({ ...base, attempts: [{ ...refused, kind: "gate_denied" }] }, { targets, router: r, quota: {}, running: {} });
+    const denied = await reroute({ ...base, attempts: [{ ...failed, kind: "gate_denied" }] }, { targets, router: r, quota: {}, running: {} });
     expect(denied.step).toMatchObject({ kind: "stop", security: true });
     expect(r.calls).toHaveLength(0);
   });
 
   it("repeated transport failure: router is asked, sees the repair tools, and may request one", async () => {
-    const proxyDown = { ...refused, kind: "transport" as const, excerpt: "connect ECONNREFUSED 127.0.0.1:8080" };
+    const proxyDown = { ...failed, kind: "transport" as const, excerpt: "connect ECONNREFUSED 127.0.0.1:8080" };
     const repairs = [{ name: "restart_gate_proxy", description: "restart the secret-gate proxy on :8080" }];
     const r = echoRouter([decisionJson({ action: "repair", repair: { tool: "restart_gate_proxy", args: { port: 8080 } }, reason: "proxy is down" })]);
     const out = await reroute({ ...base, attempts: [proxyDown, proxyDown] }, { targets, router: r, quota: {}, running: {}, repairs });
@@ -71,7 +78,7 @@ describe("reroute()", () => {
   });
 
   it("repair requested for an unregistered tool degrades to a plain re-dispatch", async () => {
-    const proxyDown = { ...refused, kind: "transport" as const, excerpt: "ETIMEDOUT" };
+    const proxyDown = { ...failed, kind: "transport" as const, excerpt: "ETIMEDOUT" };
     const r = echoRouter([decisionJson({ harness: "codex", model: "gpt-6-astra", effort: "high", needs_browser: true, action: "repair", repair: { tool: "reboot_mac", args: {} } })]);
     const out = await reroute({ ...base, attempts: [proxyDown, proxyDown] }, { targets, router: r, quota: {}, running: {} });
     expect(out.step).toMatchObject({ kind: "redispatch", source: "router", verdict: { ok: true, harness: "codex" } });

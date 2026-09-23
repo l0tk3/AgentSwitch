@@ -24,4 +24,20 @@ describe("parseDecision", () => {
     expect(parseDecision(decisionJson({ confidence: 1.5 }))).toMatchObject({ ok: false, error: expect.stringContaining("confidence") });
     expect(parseDecision("nothing")).toMatchObject({ ok: false, error: "no JSON object in reply" });
   });
+
+  it.each([
+    { action: "give_up", reason: "The requested operation needs clarification." },
+    { action: "give_up", reason: "The requested operation needs clarification.", harness: 17, brief: null, confidence: 4 },
+  ])("accepts a stop independently of dispatch fields: %j", (value) => {
+    expect(parseDecision(JSON.stringify(value))).toMatchObject({ ok: true, decision: { action: "give_up", reason: value.reason } });
+  });
+
+  it("retains other non-dispatch actions without inventing an executable target", () => {
+    expect(parseDecision(JSON.stringify({ action: "clarify", question: "Which local file should be inspected?" })))
+      .toMatchObject({ ok: true, decision: { action: "clarify", question: "Which local file should be inspected?" } });
+    expect(parseDecision(JSON.stringify({ action: "clarify", question: 42 })))
+      .toMatchObject({ ok: true, decision: { action: "clarify", question: null } });
+    expect(parseDecision(JSON.stringify({ action: "repair", repair: { tool: "restart_proxy", args: {} } })))
+      .toMatchObject({ ok: true, decision: { action: "repair", repair: { tool: "restart_proxy", args: {} } } });
+  });
 });

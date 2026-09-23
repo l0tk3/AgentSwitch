@@ -3,6 +3,7 @@
  *  log with per-type fold policies, and a last-wins summary that carries across harnesses. */
 
 import type { TargetRef } from "../router/targets.js";
+import type { PlatformFactCandidate } from "./platformMemory.js";
 
 export type ThreadStatus = "open" | "archived";
 
@@ -65,6 +66,8 @@ export type Summary = {
   readonly decisions: readonly string[];
   /** Durable, routing-level facts worth keeping in MEMORY.md (may be empty). */
   readonly facts: readonly string[];
+  /** Candidates only; checkpoint evidence and platform scope are validated before long-term storage. */
+  readonly platformFacts?: readonly PlatformFactCandidate[];
   /** One sentence for a phone notification or a voice reply: what came out of this run. */
   readonly spoken: string;
 };

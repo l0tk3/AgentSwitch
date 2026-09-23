@@ -48,6 +48,8 @@ export const Targets = z
       harness: z.string().min(1),
       model: z.string().min(1),
       timeout_ms: z.number().int().positive().default(20_000),
+      /** Independent planner invocation, including process startup and one JSON correction. */
+      planner_timeout_ms: z.number().int().positive().default(120_000),
       min_confidence: z.number().min(0).max(1).default(0.5),
       quota_threshold: z.number().min(0).max(1).default(0.05),
       /** Below this the router's thread assignment is not trusted: the user is asked (threads-v0 §6). */

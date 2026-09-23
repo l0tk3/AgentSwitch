@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
+from .credential_repair import REPAIR_PURPOSE, request_repair
 from .errors import GateError
 from .exec_templates import load_templates
 from .gate_ops import op_describe, op_exec, op_http, op_otp
@@ -21,6 +22,15 @@ def build_server() -> FastMCP:
     def secret_describe(token: str) -> dict:
         """Show a token's label, kind, allowed hosts and uses. Never reveals the value."""
         return _guard(lambda: op_describe(resolver, token))
+
+    @mcp.tool()
+    async def secret_repair(token: str, host: str, purpose: str = REPAIR_PURPOSE) -> dict:
+        """Ask the task dispatcher to authorize TOTP seed import at an already granted host.
+        Returns secret/http ciphertext only. Does not generate a code, fill a field, or add hosts."""
+        try:
+            return await request_repair(token, host, purpose)
+        except GateError as exc:
+            raise RuntimeError(f"secret-gate: {exc}") from None
 
     @mcp.tool()
     def secret_otp(token: str) -> str:

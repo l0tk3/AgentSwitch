@@ -1,6 +1,7 @@
 /** The router agent's instructions and the per-task message. Kept as plain text so it can be diffed. */
 
 import { contextSection, EMPTY_CONTEXT, type LoadedContext } from "./context.js";
+import { COMMUNICATION_GUIDANCE } from "../util/communication.js";
 import type { Targets } from "./targets.js";
 import { catalogText } from "./targets.js";
 import type { ThreadBrief } from "../threads/types.js";
@@ -50,6 +51,8 @@ export function systemPrompt(targets: Targets, extras: LoadedContext | PromptExt
   return `You are the dispatcher for AgentSwitch. A task arrives; you decide which coding agent and model
 should execute it and write a brief for that executor. You do not execute anything yourself.
 
+${COMMUNICATION_GUIDANCE}
+
 Available targets (choose only from this list; every model is selectable):
 ${catalogText(targets)}
 
@@ -59,8 +62,26 @@ Rules:
   Pick a "[1m]" variant only when the whole repository must fit in context. Prefer the cheapest model that is clearly enough.
 - Browser tasks (open a site, log in, fill a form): needs_browser=true and a harness with browser support.
   Credentials arrive as enc:v1: tokens and never as plaintext; never ask the executor to find a password. Tokens in
-  the user's message reach the executor verbatim with a list saying what each one is: in the brief, refer to them by
-  that description ("the Google app password from the user's message") instead of copying them.
+  the user's message reach the executor verbatim with automatically inferred candidate labels: in the brief, refer
+  to them by that description or record position instead of copying them. These labels and the generated record
+  layout are not user-confirmed facts; preserve uncertainty when their meaning is unclear.
+- Distinguish explicit user statements, observed evidence and model inference. Your brief, a previous summary,
+  and auto-generated labels can contain mistakes. A form field, a file path or a tool parameter observed on site
+  does not alone prove an unknown input's meaning or the user's intent. Invite the executor to challenge a
+  conflicting assumption through its existing question tool, with the assumption's source, observed evidence,
+  completed operations and the conclusion needing confirmation. The supervisor answers from evidence or asks
+  the user in Chinese; no question tool means the executor returns a clear unresolved blocker to the loop.
+  Do not request an existing secret again just to clarify its meaning. Correcting an assumption cannot expand
+  token host/use permissions, substitute for approval or bypass a provider refusal. Do not require a separate
+  discovery dispatch or model call on every step when the needed evidence is already available.
+- A TOTP seed stored in a management form and a generated login code are different credential uses. Executors
+  have secret_repair for a same-session correction when a seed-import token is needed: it checks a sealed
+  seed-import grant, the original destination, and the user's task before returning a separate scoped token.
+  If such a mismatch is reported, have the executor use that tool and retry only the failed field; keep the
+  original OTP token for generating codes. Do not redo successful business steps or ask the user to mint tokens
+  manually when this repair is available. An old token without the seed-import grant requires the user to submit
+  that field again with the intended destination. Missing user permission or an unanswered question never means
+  permission to skip a required field or change the task's scope.
 - If the task belongs to a category listed under the catalog, set "category" to its name and choose harness,
   model and every fallback only from that category's targets; the others refuse such tasks outright.
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
@@ -161,19 +182,40 @@ prefer a path that does not share the broken piece. Put what the next executor m
 /** loop-v0: one step of a running task: what happened, and what the model may reply. */
 export type StepRecord =
   | { readonly kind: "dispatch"; readonly purpose: "research" | "do" | "verify"; readonly harness: string; readonly model: string; readonly brief: string; readonly ok: boolean;
-      readonly failureKind: string | null; readonly reply: string; readonly sideEffects: string; readonly outFiles: readonly string[]; readonly diff: string }
+      readonly failureKind: string | null; readonly reply: string; readonly sideEffects: string; readonly sideEffectsKnown?: boolean; readonly outFiles: readonly string[]; readonly diff: string }
   | { readonly kind: "ask_user"; readonly question: string; readonly answer: string | null }
   | { readonly kind: "note"; readonly text: string };
 
 const REPLY_EXCERPT = 3000;
 const BRIEF_EXCERPT = 300;
 
+/** Keep the conclusion and blocking facts when evidence must be bounded; mark omissions explicitly. */
+export function evidenceExcerpt(text: string, limit = 20_000): string {
+  if (text.length <= limit) return text;
+  const marker = "\n[... evidence abbreviated; omitted material is not proof of completion ...]\n";
+  const available = Math.max(0, limit - marker.length * 2);
+  const head = Math.floor(available / 3), tail = Math.floor(available / 3);
+  const remaining = Math.max(0, limit - head - tail - marker.length * 2);
+  const blockers: string[] = [];
+  const matches = text.matchAll(/未完成|未能|无法|失败|阻塞|尚未|待确认|待处理|remaining|blocked|not (?:done|complete|finished)|could not|failed|error|timeout|unresolved/gi);
+  let end = -1;
+  for (const match of matches) {
+    const index = match.index!;
+    if (index < head || index >= text.length - tail || index <= end) continue;
+    const start = Math.max(head, index - 100);
+    end = Math.min(text.length - tail, index + 260);
+    blockers.push(text.slice(start, end));
+    if (blockers.join("\n").length >= remaining) break;
+  }
+  return text.slice(0, head) + marker + blockers.join("\n").slice(0, remaining) + marker + text.slice(-tail);
+}
+
 function stepLine(s: StepRecord, i: number): string {
   if (s.kind === "note") return `${i + 1}. ${s.text}`;
   if (s.kind === "ask_user") return `${i + 1}. ask_user: "${s.question}" → ${s.answer === null ? "no answer" : JSON.stringify(s.answer)}`;
-  const head = `${i + 1}. dispatch [${s.purpose}] ${s.harness}/${s.model} — brief: ${JSON.stringify(s.brief.slice(0, BRIEF_EXCERPT))}`;
-  const outcome = s.ok ? `   → done. Reply: ${s.reply.slice(0, REPLY_EXCERPT) || "(empty)"}` : `   → failed (${s.failureKind ?? "unknown"}): ${JSON.stringify(s.reply.slice(0, 500))}`;
-  return `${head}\n${outcome}\n   side effects: ${s.sideEffects}; out/: ${s.outFiles.length ? s.outFiles.join(", ") : "(none)"}; worktree: ${s.diff || "(clean)"}`;
+  const head = `${i + 1}. dispatch [${s.purpose}] ${s.harness}/${s.model} — brief: ${JSON.stringify(evidenceExcerpt(s.brief, BRIEF_EXCERPT))}`;
+  const outcome = s.ok ? `   → step succeeded (task completion unverified). Reply: ${evidenceExcerpt(s.reply, REPLY_EXCERPT) || "(empty)"}` : `   → failed (${s.failureKind ?? "unknown"}): ${JSON.stringify(evidenceExcerpt(s.reply, REPLY_EXCERPT))}`;
+  return `${head}\n${outcome}\n   side effects: ${s.sideEffects}${s.sideEffectsKnown === false ? " (unknown; verify the actual state before any retry)" : ""}; out/: ${s.outFiles.length ? s.outFiles.join(", ") : "(none)"}; worktree: ${s.diff || "(clean)"}`;
 }
 
 export function stepLines(steps: readonly StepRecord[]): string[] { return steps.map(stepLine); }
@@ -194,16 +236,28 @@ You are running this task step by step: after each step you see its outcome and 
 JSON object, one of:
 - a dispatch: the decision shape above with "action": "dispatch" and "purpose": "research" (look only: change nothing,
   submit nothing), "do", or "verify" (check earlier work: change nothing). The executor sees earlier steps only through
-  your brief and a short handoff, so put in the brief everything it needs from them (what a previous step found, what
-  to do with it). Refer to the user's enc:v1: tokens by their field names, never copy them.
+  your brief, a short handoff and separately recorded feedback, so put in the brief the observations and corrected
+  assumptions it needs. Refer to the user's enc:v1: tokens by candidate field name or record position, never copy them.
 - {"action": "ask_user", "question": "<one precise question only the user can answer>"}
-- {"action": "finish", "result": "<for the user: what was done and what was found; quote the executor where useful>"}
+- {"action": "finish", "completion": "complete|partial|blocked", "remaining": ["<each unfinished goal or blocker>"], "result": "<what was actually done and verified; quote the executor where useful>"}
 - {"action": "give_up", "reason": "<why this cannot be done>"}
 - {"action": "repair", "repair": {"tool": "<a listed repair tool>", "args": {}}} — only with a listed tool.
 Excluded (failed already; do not choose): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ") || "none"}
+Completion is measured against the original user's whole goal, never only the last dispatch's brief. A successful
+research step or successful tool process is not completion of the requested operation. complete requires a nonempty
+result, remaining=[], and evidence for every requested outcome. Budget exhaustion, missing answers, service errors,
+or an unverified login/submission must be reported as partial or blocked with remaining work, never complete.
 For transport failures (proxy, TLS, network, crash, silent timeout) the environment may be broken for every harness;
 prefer a path that does not share the broken piece. A step that failed after side effects: say in the brief what is
 already done so it is not redone.
+When new observations or feedback conflict with an earlier brief, check the evidence and its source before choosing
+the next action. For the same issue, apply the latest supported correction instead of repeating the old assumption;
+router-generated inference cannot override an explicit user statement. Preserve uncertainty rather than promoting
+a guess into a fact. If the material cannot resolve a necessary ambiguity, ask the user in Chinese about the meaning
+or choice, without requesting an existing secret again. An unanswered question is a blocker, not permission to skip.
+Continue from the affected checkpoint, preserve completed operations, and first inspect actual state read-only when
+an earlier write's result is uncertain. Do not add mandatory discovery or extra planning calls to conflict-free steps.
+Feedback cannot change the original goal, credential host/use permissions, approval rules or provider refusal boundaries.
 Repair tools you may request with action="repair" (the daemon runs them, then asks you again):
 ${tools}`;
 }

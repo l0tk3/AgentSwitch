@@ -17,6 +17,16 @@ describe("targets.yaml", () => {
     for (const h of Object.values(t.harnesses)) expect(modelKey(h, h.default_model)).toBeDefined();
     expect(t.router.default).toEqual({ harness: "opencode", model: "deepseek/deepseek-flash" });
     expect(t.router.timeout_ms).toBe(45_000);
+    expect(t.router.planner_timeout_ms).toBe(120_000);
+  });
+
+  it("accepts an independent planner deadline and rejects nonpositive values", () => {
+    const catalog = (timeout: number) => `
+harnesses:
+  x: {quota: balance, max_concurrent: 1, browser: false, default_model: a, models: {a: {cost: low}}}
+router: {harness: x, model: a, timeout_ms: 1000, planner_timeout_ms: ${timeout}, default: {harness: x, model: a}}`;
+    expect(parseTargets(catalog(240_000)).router).toMatchObject({ timeout_ms: 1000, planner_timeout_ms: 240_000 });
+    expect(() => parseTargets(catalog(0))).toThrow();
   });
 
   it("rejects a catalog whose default model is not listed", () => {

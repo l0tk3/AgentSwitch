@@ -103,7 +103,7 @@ describe("Engine: the router asks the user (clarify)", () => {
     const { engine: e2, store: s2 } = build([clarify("要哪个？")]);
     const u = e2.submit({ task: "x", cwd: "/tmp/q2" });
     await e2.idle();
-    expect(s2.getTask(u.id)).toMatchObject({ status: "failed", error: expect.stringContaining("waiting for your answer: 要哪个？") });
+    expect(s2.getTask(u.id)).toMatchObject({ status: "blocked", error: expect.stringContaining("waiting for your answer: 要哪个？") });
   });
 
   it("stops after two clarification rounds", async () => {

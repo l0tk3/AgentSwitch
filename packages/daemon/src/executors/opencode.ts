@@ -10,12 +10,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
-import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
+import { detectRefusal, NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
 import { opencodeMcpFromRegistry } from "./extensions.js";
-import { gateEnv, mcpServerEnv, opencodeGateConfig, stripProxy, type GateOptions } from "./gate.js";
+import { gateEnv, mcpServerEnv, opencodeGateConfig, stripProxy, withoutCredentialRepair, type GateOptions } from "./gate.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
+import { terminateProcess } from "./processes.js";
 import { NO_PROTECTED, type ProtectedPaths } from "./protected.js";
-import type { ExecutionInput, Executor } from "./types.js";
+import type { CredentialRepair, ExecutionInput, Executor } from "./types.js";
 
 export type OpenCodeExecutorOptions = {
   readonly binary?: string;
@@ -36,8 +37,8 @@ export function protectedDeny(prot: ProtectedPaths): { edit: Record<string, stri
   return { edit, bash };
 }
 
-export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean, instructionsPath?: string, extras: OpenCodeExtras = {}): object {
-  const g = gate ? opencodeGateConfig(gate, profile, browser) : { mcp: {}, readDeny: {} };
+export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean, instructionsPath?: string, extras: OpenCodeExtras = {}, repair?: CredentialRepair): object {
+  const g = gate ? opencodeGateConfig(gate, profile, browser, repair) : { mcp: {}, readDeny: {} };
   const deny = protectedDeny(extras.protected ?? NO_PROTECTED);
   return {
     $schema: "https://opencode.ai/config.json",
@@ -53,37 +54,42 @@ export function opencodeExecConfig(gate: GateOptions | null | undefined, profile
   };
 }
 
-export type RunSummary = { text: string; tools: { tool: string; input: unknown }[]; errors: string[]; sessionId: string | null };
+export type RunSummary = { text: string; tools: { tool: string; input: unknown }[]; errors: string[]; sessionId: string | null; telemetryComplete: boolean };
 
 /** Fold the `--format json` event stream into text, tool calls, errors and the session id (every event carries `sessionID`). */
 export function summarizeRun(stdout: string): RunSummary {
-  const out: RunSummary = { text: "", tools: [], errors: [], sessionId: null };
+  const out: RunSummary = { text: "", tools: [], errors: [], sessionId: null, telemetryComplete: true };
   for (const line of stdout.split("\n")) {
     if (!line.trim().startsWith("{")) continue;
     let ev: { type?: string; sessionID?: string; part?: Record<string, unknown>; error?: unknown; message?: string };
-    try { ev = JSON.parse(line); } catch { continue; }
+    try { ev = JSON.parse(line); } catch { out.telemetryComplete = false; continue; }
     if (typeof ev.sessionID === "string" && !out.sessionId) out.sessionId = ev.sessionID;
     if (ev.type === "text" && typeof ev.part?.text === "string") out.text += ev.part.text;
     else if (ev.type === "tool_use" && ev.part) out.tools.push({ tool: String(ev.part.tool ?? "?"), input: ev.part.input ?? ev.part.state ?? null });
     else if (ev.type === "error") out.errors.push(typeof ev.error === "string" ? ev.error : ev.message ?? JSON.stringify(ev.error ?? ev));
+    else if (!["step_start", "step_finish", "reasoning", "text"].includes(ev.type ?? "")) out.telemetryComplete = false;
   }
   return out;
 }
 
 export function outcomeFromRun(summary: RunSummary, exitCode: number | null, stderr: string, timedOut: boolean): ExecutionOutcome {
   const edits = summary.tools.filter((t) => /^(edit|write|patch|multiedit)$/i.test(t.tool)).length;
-  const shells = summary.tools.filter((t) => /^bash$/i.test(t.tool)).length;
+  // MCP/browser tools and sub-agents can mutate remote state without any file or shell event.
+  const operations = summary.tools.length - edits;
   const subagents = summary.tools.filter((t) => /^task$/i.test(t.tool)).length;   // OpenCode's sub-agent tool, synchronous
-  const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: edits, commandsRun: shells };
+  const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: edits, commandsRun: operations };
   const agents = { spawned: subagents, completed: subagents, failed: 0 };
   const errText = [...summary.errors, stderr.trim()].filter(Boolean).join("\n");
-  const ok = !timedOut && exitCode === 0 && summary.errors.length === 0 && summary.text.trim().length > 0;
-  return { ok, exitCode, stderr: errText, lastText: summary.text.trim(), timedOut, sideEffects, agents, ...(summary.sessionId ? { sessionId: summary.sessionId } : {}) };
+  const lastText = summary.text.trimEnd();
+  const refusal = detectRefusal({ ok: true, lastText });
+  const ok = !refusal && !timedOut && exitCode === 0 && summary.errors.length === 0 && lastText.trim().length > 0;
+  return { ok, exitCode, stderr: errText, lastText, timedOut, sideEffects, sideEffectsKnown: !timedOut && exitCode === 0 && summary.telemetryComplete, agents, ...(refusal ? { refusal } : {}), ...(summary.sessionId ? { sessionId: summary.sessionId } : {}) };
 }
 
 /** A resume that OpenCode refused (session gone from its db, or a different directory): retry without it. */
-export function resumeRefused(summary: RunSummary, exitCode: number | null, stderr: string): boolean {
-  return exitCode !== 0 && !summary.text.trim() && /session/i.test(`${summary.errors.join(" ")} ${stderr}`);
+export function resumeRefused(summary: RunSummary, exitCode: number | null, stderr: string, timedOut = false): boolean {
+  return !timedOut && exitCode !== null && exitCode !== 0 && summary.telemetryComplete && !summary.text.trim() && summary.tools.length === 0
+    && /session[^\n]*(?:not found|does not exist|unknown|invalid|expired)/i.test(`${summary.errors.join(" ")} ${stderr}`);
 }
 
 type RunResult = { readonly summary: RunSummary; readonly exitCode: number | null; readonly stderr: string; readonly timedOut: boolean };
@@ -92,14 +98,15 @@ type RunResult = { readonly summary: RunSummary; readonly exitCode: number | nul
 function runOnce(binary: string, prompt: string, resume: string | null, input: ExecutionInput, env: Record<string, string>, maxMs: number): Promise<RunResult> {
   return new Promise((done) => {
     if (resume) input.emit("text", { text: `(resuming OpenCode session ${resume})` });
-    const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, ...(resume ? ["--session", resume] : []), prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, ...(resume ? ["--session", resume] : []), prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let buffered = "";
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, maxMs);
-    const onAbort = () => child.kill("SIGTERM");
+    const timer = setTimeout(() => { timedOut = true; terminateProcess(child); }, maxMs);
+    const onAbort = () => terminateProcess(child);
     input.signal.addEventListener("abort", onAbort, { once: true });
+    if (input.signal.aborted) onAbort();
     child.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
       buffered += d.toString();
@@ -116,9 +123,10 @@ function runOnce(binary: string, prompt: string, resume: string | null, input: E
     });
     child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
     child.on("error", (e) => { stderr += e.message; });
-    child.on("close", (exitCode) => {
+    child.on("close", async (exitCode) => {
       clearTimeout(timer);
       input.signal.removeEventListener("abort", onAbort);
+      if (timedOut || input.signal.aborted) await terminateProcess(child);
       done({ summary: summarizeRun(stdout), exitCode, stderr, timedOut });
     });
   });
@@ -142,19 +150,20 @@ export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
         skillsDir: ext.skillsInto("opencode", skillsDir).length ? skillsDir : null,
         ...(opts.protected ? { protected: opts.protected } : {}),
       };
-      writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath, extras)));
-      const env = { ...stripProxy(process.env), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
+      writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath, extras, input.credentialRepair)));
+      const env = { ...stripProxy(withoutCredentialRepair(process.env)), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
       const prompt = composePrompt(input);
       const maxMs = opts.maxMs ?? DEFAULT_MAX_MS;
       try {
         // Native continuation: `--session <id>` picks the conversation up (sessions live in OpenCode's shared db, keyed by
         // directory, so the engine only offers a resume for the same cwd); a refused resume falls back to a fresh session.
         let r = await runOnce(binary, prompt, input.resume, input, env, maxMs);
-        if (input.resume && !input.signal.aborted && resumeRefused(r.summary, r.exitCode, r.stderr)) {
+        if (input.resume && !input.signal.aborted && resumeRefused(r.summary, r.exitCode, r.stderr, r.timedOut)) {
           input.emit("text", { text: `(OpenCode refused to resume ${input.resume}: ${r.stderr.trim().slice(0, 120)}; starting a new session)` });
           r = await runOnce(binary, prompt, null, input, env, maxMs);
         }
-        return outcomeFromRun(r.summary, r.exitCode, r.stderr, r.timedOut);
+        const outcome = outcomeFromRun(r.summary, r.exitCode, r.stderr, r.timedOut);
+        return input.signal.aborted ? { ...outcome, ok: false, sideEffectsKnown: false } : outcome;
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

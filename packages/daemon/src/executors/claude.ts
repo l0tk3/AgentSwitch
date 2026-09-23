@@ -7,10 +7,10 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
-import { NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome } from "../router/failure.js";
+import { detectRefusal, NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome, type RefusalSignal } from "../router/failure.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } from "./extensions.js";
-import { claudeMcpServers, gateEnv, mcpServerEnv, type GateOptions } from "./gate.js";
+import { claudeMcpServers, gateEnv, mcpServerEnv, withoutCredentialRepair, type GateOptions } from "./gate.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { commandTouchesProtected, isProtected, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import { repairInValue, shortToken } from "./tokens.js";
@@ -76,9 +76,9 @@ export function decideTool(toolName: string, input: Record<string, unknown>, cwd
 
 export type AgentEvent = { readonly agentId: string; readonly status: "started" | "progress" | "completed" | "failed" | "stopped"; readonly description: string; readonly summary?: string; readonly tokens?: number; readonly background?: boolean };
 
-export type Folded = { text: string[]; tools: number; edits: number; result: Extract<SDKMessage, { type: "result" }> | null; refusal: boolean; rateLimited: boolean; agents: AgentCounts; agentEvents: AgentEvent[] };
+export type Folded = { text: string[]; tools: number; edits: number; result: Extract<SDKMessage, { type: "result" }> | null; refusal: RefusalSignal | null; sessionId?: string; rateLimited: boolean; agents: AgentCounts; agentEvents: AgentEvent[] };
 
-export const EMPTY_FOLD: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: false, rateLimited: false, agents: NO_AGENTS, agentEvents: [] };
+export const EMPTY_FOLD: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: null, rateLimited: false, agents: NO_AGENTS, agentEvents: [] };
 
 /** Sub-agent bookends (background-v0 §2): task_started / task_progress / task_notification, ambient tasks ignored. */
 function foldTask(state: Folded, msg: SDKMessage): Folded | null {
@@ -97,6 +97,7 @@ function foldTask(state: Folded, msg: SDKMessage): Folded | null {
 }
 
 export function foldMessage(state: Folded, msg: SDKMessage): Folded {
+  if ("session_id" in msg && msg.session_id) state = { ...state, sessionId: msg.session_id };
   const task = foldTask(state, msg);
   if (task) return task;
   if (msg.type === "assistant") {
@@ -104,10 +105,14 @@ export function foldMessage(state: Folded, msg: SDKMessage): Folded {
     const text = blocks.filter((b) => b.type === "text" && b.text).map((b) => b.text!);
     const tools = blocks.filter((b) => b.type === "tool_use");
     const edits = tools.filter((b) => b.name && EDIT_TOOLS.has(b.name)).length;
-    return { ...state, text: [...state.text, ...text], tools: state.tools + tools.length, edits: state.edits + edits };
+    const refusal: RefusalSignal | null = !msg.parent_tool_use_id && msg.message.stop_reason === "refusal"
+      ? { source: "provider", reason: "Claude assistant stop_reason: refusal" } : state.refusal;
+    return { ...state, text: [...state.text, ...text], tools: state.tools + tools.length, edits: state.edits + edits, refusal };
   }
   if (msg.type === "result") return { ...state, result: msg };
-  if (msg.type === "system" && (msg as { subtype?: string }).subtype === "model_refusal_no_fallback") return { ...state, refusal: true };
+  if (msg.type === "system" && msg.subtype === "model_refusal_no_fallback") return {
+    ...state, refusal: { source: "provider", reason: `Claude model_refusal_no_fallback${msg.api_refusal_category ? ` (${msg.api_refusal_category})` : ""}: ${msg.api_refusal_explanation ?? msg.content ?? "model refused"}` },
+  };
   if (msg.type === "rate_limit_event") return { ...state, rateLimited: true };
   return state;
 }
@@ -116,14 +121,17 @@ export function outcomeFromFold(state: Folded, approvals: number, cancelled: boo
   const r = state.result;
   const usage = r ? (r.usage as { input_tokens?: number; output_tokens?: number }) : undefined;
   const tokens = (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0);
-  const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: state.edits, commandsRun: state.tools - state.edits, approvalsGranted: approvals };
+  const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: state.edits, commandsRun: Math.max(state.tools - state.edits, state.agents.spawned), approvalsGranted: approvals };
   const agents = state.agents;
-  if (state.refusal) return { ok: false, exitCode: 0, lastText: `refusal: ${state.text.at(-1) ?? "model refused"}`, sideEffects, tokens, agents };
-  if (!r) return { ok: false, exitCode: cancelled ? null : 1, stderr: cancelled ? "cancelled" : "no result message", lastText: state.text.join("\n"), timedOut: !cancelled, sideEffects, tokens, agents };
-  const sessionId = r.session_id ? { sessionId: r.session_id } : {};
-  if (r.subtype === "success" && !r.is_error) return { ok: true, exitCode: 0, lastText: r.result, sideEffects, tokens, agents, ...sessionId };
+  const sessionId = r?.session_id || state.sessionId;
+  const common = { sideEffects, sideEffectsKnown: r !== null && !cancelled, tokens, agents, ...(sessionId ? { sessionId } : {}) };
+  const lastText = r?.subtype === "success" ? r.result : state.text.at(-1) ?? "";
+  const refusal = state.refusal ?? detectRefusal({ ok: true, lastText });
+  if (refusal) return { ok: false, exitCode: 0, lastText, refusal, ...common };
+  if (!r) return { ok: false, exitCode: cancelled ? null : 1, stderr: cancelled ? "cancelled" : "no result message", lastText, timedOut: !cancelled, ...common };
+  if (r.subtype === "success" && !r.is_error) return { ok: true, exitCode: 0, lastText, ...common };
   const errText = r.subtype === "success" ? r.result : `${r.subtype}${state.rateLimited ? " (rate limited)" : ""}`;
-  return { ok: false, exitCode: 1, stderr: state.rateLimited ? `rate limit: ${errText}` : errText, lastText: state.text.join("\n"), sideEffects, tokens, agents };
+  return { ok: false, exitCode: 1, stderr: state.rateLimited ? `rate limit: ${errText}` : errText, lastText, ...common };
 }
 
 /** Private config dir per thread. CLAUDE_CONFIG_DIR alone makes the CLI look for a per-dir keychain entry
@@ -164,6 +172,7 @@ async function askThroughCard(input: ExecutionInput, toolInput: Record<string, u
 /** The approval hook: repair damaged tokens, apply the policy floor, ask the engine for the rest. */
 function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: ReadonlySet<string>, prot: ProtectedPaths, granted: { count: number }): CanUseTool {
   return async (toolName, rawInput) => {
+    if (input.signal.aborted) return { behavior: "deny", message: "execution stopped" };
     // Damaged enc:v1: copies in tool arguments are put back verbatim before the gate sees them.
     const fixed = repairInValue(rawInput, input.knownTokens);
     const toolInput = fixed.value;
@@ -173,7 +182,7 @@ function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: Readonly
     if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
     if (d.kind === "deny") { input.emit("tool_call", { tool: toolName, denied: d.reason }); return { behavior: "deny", message: d.reason }; }
     const decision: ApprovalDecision = await input.approve(d.action, d.evidence);
-    if (decision === "allow") { granted.count++; return { behavior: "allow", updatedInput: toolInput }; }
+    if (decision === "allow" && !input.signal.aborted) { granted.count++; return { behavior: "allow", updatedInput: toolInput }; }
     return { behavior: "deny", message: "denied by the user via AgentSwitch" };
   };
 }
@@ -191,13 +200,13 @@ function setupRun(input: ExecutionInput, opts: ClaudeExecutorOptions, cwd: strin
   const plugin = claudePluginDir(pluginRoot, join(pluginRoot, "skills"));
   const browser = (opts.browser ?? true) && input.browser;
   const baseEnv = { ...(opts.gate ? gateEnv(opts.gate) : {}), ...claudeHomeEnv(input.threadHome) };
-  const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
+  const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser, input.credentialRepair) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
   const options: Options = {
     cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
     systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },
     maxTurns: opts.maxTurns ?? DEFAULT_MAX_TURNS, abortController: abort, includePartialMessages: false,
     ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
-    env: { ...process.env, ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
+    env: { ...withoutCredentialRepair(process.env), ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
     ...(input.resume ? { resume: input.resume } : {}),
     ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
     ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),
@@ -225,6 +234,7 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       const abort = new AbortController();
       const onAbort = () => abort.abort();
       input.signal.addEventListener("abort", onAbort, { once: true });
+      if (input.signal.aborted) onAbort();
       let timedOut = false;
       const timer = opts.maxMs ? setTimeout(() => { timedOut = true; abort.abort(); }, opts.maxMs) : null;
       const { options, runDir } = setupRun(input, opts, cwd, permissionHook(input, cwd, allowedMcp, opts.protected ?? NO_PROTECTED, granted), abort);
@@ -237,25 +247,38 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
           emitDelta(input, before, state);
         }
       } catch (err) {
-        if (timedOut) return { ok: false, exitCode: null, stderr: `timed out after ${opts.maxMs} ms`, lastText: state.text.join("\n"), timedOut: true, sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: granted.count }, agents: state.agents };
-        if (!input.signal.aborted) return { ok: false, exitCode: 1, stderr: (err as Error).message, lastText: state.text.join("\n"), sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: granted.count }, agents: state.agents };
+        return { ...outcomeFromFold(state, granted.count, input.signal.aborted), ok: false,
+          exitCode: timedOut || input.signal.aborted ? null : 1, stderr: timedOut ? `timed out after ${opts.maxMs} ms` : (err as Error).message,
+          lastText: state.text.join("\n"), timedOut, sideEffectsKnown: false };
       } finally {
         if (timer) clearTimeout(timer);
         input.signal.removeEventListener("abort", onAbort);
         rmSync(runDir, { recursive: true, force: true });
       }
-      if (timedOut) return { ok: false, exitCode: null, stderr: `timed out after ${opts.maxMs} ms`, lastText: state.text.join("\n"), timedOut: true, sideEffects: { ...NO_SIDE_EFFECTS, approvalsGranted: granted.count }, agents: state.agents };
+      if (timedOut) return { ...outcomeFromFold(state, granted.count, false), ok: false, exitCode: null, stderr: `timed out after ${opts.maxMs} ms`, lastText: state.text.join("\n"), timedOut: true, sideEffectsKnown: false };
       return outcomeFromFold(state, granted.count, input.signal.aborted);
     },
   };
 }
 
 /** One-turn query whose only purpose is the rate_limit_event it emits (subscription windows). */
-export async function probeRateLimits(model = "claude-haiku-4-5-20251001", executable?: string): Promise<RateLimitInfo[]> {
+export async function probeRateLimits(model = "claude-haiku-4-5-20251001", executable?: string, signal?: AbortSignal): Promise<RateLimitInfo[]> {
+  signal?.throwIfAborted();
   const infos: RateLimitInfo[] = [];
-  const options: Options = { model, maxTurns: 1, permissionMode: "default", settingSources: [], canUseTool: async () => ({ behavior: "deny", message: "probe" }), ...(executable ? { pathToClaudeCodeExecutable: executable } : {}) };
-  for await (const msg of query({ prompt: "Reply with the single word: ok", options })) {
-    if (msg.type === "rate_limit_event") infos.push(msg.rate_limit_info);
+  const abortController = new AbortController();
+  let probe: ReturnType<typeof query> | undefined;
+  const onAbort = () => { abortController.abort(signal?.reason); probe?.close(); };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const options: Options = { model, maxTurns: 1, permissionMode: "default", settingSources: [], abortController, canUseTool: async () => ({ behavior: "deny", message: "probe" }), ...(executable ? { pathToClaudeCodeExecutable: executable } : {}) };
+  try {
+    probe = query({ prompt: "Reply with the single word: ok", options });
+    for await (const msg of probe) {
+      if (msg.type === "rate_limit_event") infos.push(msg.rate_limit_info);
+    }
+    signal?.throwIfAborted();
+    return infos;
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    probe?.close();
   }
-  return infos;
 }

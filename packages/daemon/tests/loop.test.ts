@@ -19,7 +19,7 @@ import { decisionJson, realTargets } from "./helpers.js";
 
 const targets = realTargets();
 const codex = (over: Record<string, unknown> = {}) => decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, ...over });
-const finish = (result: string | null = null, reason = "all done") => JSON.stringify({ action: "finish", result, reason });
+const finish = (result: string | null = "done", reason = "all done") => JSON.stringify({ action: "finish", result, reason, completion: "complete", remaining: [] });
 const askUser = (question: string) => JSON.stringify({ action: "ask_user", question });
 
 type Build = { router?: string[] | ((i: { task: string }, n: number) => string); planner?: string[] | ((i: { task: string }, n: number) => string) | null; supervisor?: Supervisor; executors?: Executor[]; timeout?: number };
@@ -34,7 +34,13 @@ function build(o: Build = {}) {
   const planner = o.planner === null ? null : echoRouter(o.planner ?? [finish("planned")]);
   const picks: Pick[] = [];
   const factory = (pick: Pick) => { picks.push(pick); return planner ? { router: planner, target: pick ?? { harness: "claude-code", model: "claude-sonnet-5" } } : null; };
-  const engine = new Engine({ store, bus, executors: o.executors ?? echo, targets, router, quota: () => ({}), approvalTimeoutMs: o.timeout ?? 200, retryBackoffMs: 1, planner: factory, ...(o.supervisor ? { supervisor: o.supervisor } : {}) });
+  const supervisor: Supervisor = o.supervisor ?? {
+    config: { approvals: false, watchdog_ms: 0, acceptance: false, max_continues: 0 },
+    approve: async () => ({ decision: "ask_user", reason: "", ms: 0, source: "router" }),
+    checkIn: async () => ({ action: "continue", note: "", ms: 0, source: "router" }),
+    accept: async () => ({ accepted: true, missing: [], note: "fixture verified original task", ms: 0, source: "router" }),
+  };
+  const engine = new Engine({ store, bus, executors: o.executors ?? echo, targets, router, quota: () => ({}), approvalTimeoutMs: o.timeout ?? 200, retryBackoffMs: 1, planner: factory, supervisor });
   const firstApproval = (taskId: string) => new Promise<string>((resolve) => bus.subscribe(taskId, (e) => { if (e.type === "approval_request") resolve(String(e.payload.approvalId)); }));
   return { store, bus, engine, events, echo, router, planner, picks, firstApproval };
 }
@@ -45,8 +51,8 @@ describe("parseLoopReply", () => {
   it("decision-shaped replies are dispatches; finish, ask_user, give_up and repair have their own shapes", () => {
     expect(parseLoopReply(codex())).toMatchObject({ ok: true, value: { kind: "dispatch", decision: { harness: "codex", action: "redispatch", purpose: "do" } } });
     expect(parseLoopReply(codex({ action: "dispatch", purpose: "research" }))).toMatchObject({ ok: true, value: { kind: "dispatch", decision: { purpose: "research" } } });
-    expect(parseLoopReply(`Sure:\n${finish("ok", "why")}`)).toEqual({ ok: true, value: { kind: "finish", result: "ok", reason: "why" } });
-    expect(parseLoopReply(finish("  "))).toMatchObject({ ok: true, value: { kind: "finish", result: null } });
+    expect(parseLoopReply(`Sure:\n${finish("ok", "why")}`)).toEqual({ ok: true, value: { kind: "finish", result: "ok", reason: "why", completion: "complete", remaining: [] } });
+    expect(parseLoopReply(finish("  "))).toMatchObject({ ok: false });
     expect(parseLoopReply(askUser("which?"))).toEqual({ ok: true, value: { kind: "ask_user", question: "which?" } });
     expect(parseLoopReply(JSON.stringify({ action: "clarify", question: "which?" }))).toMatchObject({ ok: true, value: { kind: "ask_user" } });
     expect(parseLoopReply(JSON.stringify({ action: "ask_user" }))).toMatchObject({ ok: false });
@@ -67,12 +73,12 @@ describe("nextAction", () => {
     expect(out.action).toMatchObject({ kind: "dispatch", source: "default", verdict: { ok: true } });   // the excluded target fell to the default policy
     expect((out.action as { verdict: { harness: string } }).verdict.harness).not.toBe("claude-code");
     expect(r.calls[0]!.task).toContain("1. dispatch [research] codex/gpt-5.5");
-    expect(r.calls[0]!.task).toContain("→ done. Reply: found 3 fields");
+    expect(r.calls[0]!.task).toContain("step succeeded (task completion unverified). Reply: found 3 fields");
     expect(r.calls[0]!.task).toContain("Dispatches used: 1 of 5.");
     expect(r.calls[0]!.system).toContain("step by step");
     expect(r.calls[0]!.system).not.toContain("claude-sonnet-5:");
     const bad = echoRouter(["garbage", "garbage"]);
-    expect(await nextAction(bad, deps(bad), { req, steps: [], used: 0, budget: 5, exclude: [] })).toMatchObject({ action: null, routerError: expect.stringContaining("no JSON object") });
+    expect(await nextAction(bad, deps(bad), { req, steps: [], used: 0, budget: 5, exclude: [] })).toMatchObject({ action: null, routerError: expect.stringContaining("JSON"), failure: { kind: "invalid_response", tries: 2 } });
     const repair = echoRouter([codex({ action: "repair", repair: { tool: "restart_gate", args: {} } })]);
     expect((await nextAction(repair, { ...deps(repair), repairs: [{ name: "restart_gate", description: "d" }] }, { req, steps: [], used: 0, budget: 5, exclude: [] })).action).toEqual({ kind: "repair", tool: "restart_gate", args: {} });
     const unlisted = echoRouter([codex({ action: "repair", repair: { tool: "nope", args: {} } })]);
@@ -113,29 +119,29 @@ describe("multi-step tasks: the planner takes over", () => {
   });
 
   it("the planner asks the user mid-way; the answer is a step it sees on the next call", async () => {
-    const { engine, store, events, planner, firstApproval } = build({ planner: [askUser("which region?"), codex(), finish()] });
+    const { engine, store, events, planner, firstApproval } = build({ planner: [askUser("使用哪个区域？"), codex(), finish()] });
     const t = engine.submit({ task: "x", cwd: "/tmp/loop3" });
     const id = await firstApproval(t.id);
-    expect(store.getApproval(id)).toMatchObject({ kind: "question", action: "which region?" });
+    expect(store.getApproval(id)).toMatchObject({ kind: "question", action: "使用哪个区域？" });
     expect(engine.answer(id, { text: "EU" }).ok).toBe(true);
     await engine.idle();
     expect(store.getTask(t.id)!.status).toBe("done");
-    expect(planner!.calls[1]!.task).toContain('ask_user: "which region?" → "EU"');
+    expect(planner!.calls[1]!.task).toContain('ask_user: "使用哪个区域？" → "EU"');
     expect(stepsOf(events, t.id)).toEqual(["0:plan", "1:ask_user", "2:dispatch/do", "3:finish"]);
   });
 
-  it("an unusable planner leaves the router's decision in force; an unusable loop model after a research step finishes with what there is", async () => {
+  it("an unusable planner blocks; after successful research an unusable loop preserves partial progress", async () => {
     const a = build({ router: [codex({ plan: "multi", reason: "look first" }), finish()], planner: ["garbage", "garbage"] });
     const t = a.engine.submit({ task: 'x @echo {"result":"r1"}', cwd: "/tmp/loop4" });
     await a.engine.idle();
-    expect(a.store.getTask(t.id)).toMatchObject({ status: "done", result: "r1" });
-    expect(a.events.filter((e) => e.taskId === t.id && e.type === "step").map((e) => e.payload)).toContainEqual(expect.objectContaining({ action: "plan", source: "error" }));
-    expect(stepsOf(a.events, t.id)).toEqual(["0:plan", "0:plan", "2:finish"]);   // handed to the planner, planner unusable, the router ran the loop itself
+    expect(a.store.getTask(t.id)).toMatchObject({ status: "blocked", result: "" });
+    expect(codexRuns(a.echo)).toHaveLength(0);
+    expect(stepsOf(a.events, t.id)).toEqual(["0:plan", "0:plan"]);
     const b = build({ router: [codex({ purpose: "research" }), "garbage", "garbage"], planner: null });
     const u = b.engine.submit({ task: 'y @echo {"result":"r2"}', cwd: "/tmp/loop5" });
     await b.engine.idle();
-    expect(b.store.getTask(u.id)).toMatchObject({ status: "done", result: "r2" });
-    expect(stepsOf(b.events, u.id)).toEqual(["2:finish"]);
+    expect(b.store.getTask(u.id)).toMatchObject({ status: "partial", result: "r2" });
+    expect(stepsOf(b.events, u.id)).toEqual(["2:plan"]);
   });
 
   it("no planner configured: the router itself continues after a research step", async () => {
@@ -154,7 +160,7 @@ describe("multi-step tasks: the planner takes over", () => {
     expect(a.store.getApproval(id)!.action).toContain(`已派发 ${MAX_DISPATCHES} 次`);
     expect(a.engine.resolveApproval(id, "deny")).toBe(true);
     await a.engine.idle();
-    expect(a.store.getTask(t.id)).toMatchObject({ status: "failed", error: `stopped after ${MAX_DISPATCHES} dispatches` });
+    expect(a.store.getTask(t.id)).toMatchObject({ status: "partial", error: `stopped after ${MAX_DISPATCHES} dispatches` });
     expect(codexRuns(a.echo)).toHaveLength(MAX_DISPATCHES);
     const b = build({ planner: (_i, n) => (n < MAX_DISPATCHES + 1 ? codex() : finish("enough")) });
     const u = b.engine.submit({ task: "y", cwd: "/tmp/loop8" });

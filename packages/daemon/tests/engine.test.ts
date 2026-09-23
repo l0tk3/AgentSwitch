@@ -44,7 +44,7 @@ describe("Engine", () => {
     expect(t.status).toBe("queued");
     await engine.idle();
     expect(store.getTask(t.id)).toMatchObject({ status: "done", harness: "codex", model: "gpt-5.5", effort: "low", brief: "rewritten brief" });
-    expect(types(events, t.id)).toEqual(["queued", "routed", "thread", "dispatched", "text", "done"]);
+    expect(types(events, t.id)).toEqual(["queued", "routed", "thread", "dispatched", "text", "checkpoint", "done"]);
     expect(executors.find((e) => e.harness === "codex")!.runs[0]).toMatchObject({ brief: "rewritten brief", model: "gpt-5.5", effort: "low", browser: false });
   });
 
@@ -53,7 +53,7 @@ describe("Engine", () => {
       decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null, needs_browser: true }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, needs_browser: true }),
     ]);
-    engine.submit({ task: 'open the site @echo {"fail":"refusal","failTimes":1}', cwd: "/tmp" });
+    engine.submit({ task: 'open the site @echo {"fail":"task_failed","failTimes":1}', cwd: "/tmp" });
     await engine.idle();
     expect(router.calls).toHaveLength(2);
     expect(routingLog.recent().map((r) => [r.source, r.harness])).toEqual([["router", "codex"], ["router", "claude-code"]]);
@@ -61,7 +61,7 @@ describe("Engine", () => {
     expect(executors.find((e) => e.harness === "codex")!.runs[0]!.browser).toBe(true);
   });
 
-  it("approval: task waits, allow continues to done; deny ends in task_failed → router → done", async () => {
+  it("approval: task waits and an actual allowance continues to done", async () => {
     const { engine, store, events, bus } = build([decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null })]);
     const t = engine.submit({ task: 'delete stuff @echo {"approval":"rm -rf /tmp/x"}', cwd: "/tmp" });
     const approvalId = await new Promise<string>((resolve) => bus.subscribe(t.id, (e) => { if (e.type === "approval_request") resolve(String(e.payload.approvalId)); }));
@@ -74,7 +74,7 @@ describe("Engine", () => {
     expect(engine.resolveApproval(approvalId, "allow")).toBe(false);  // already resolved
   });
 
-  it("approval times out → denied → executor reports failure → router asked → second executor finishes", async () => {
+  it("an approval timeout with conflicting tool observations stops before another model can replay", async () => {
     const { engine, store, router } = build([
       decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, handoff_note: "user did not approve rm" }),
@@ -82,13 +82,12 @@ describe("Engine", () => {
     const t = engine.submit({ task: 'x @echo {"approval":"rm -rf /","approvalTimes":1}', cwd: "/tmp" });
     await engine.idle();
     const done = store.getTask(t.id)!;
-    expect(done.status).toBe("done");
+    expect(done.status).toBe("blocked");
     expect(done.attempts.map((a) => [a.harness, a.kind])).toEqual([["claude-code", "task_failed"]]);
-    expect(done.routerAsks).toBe(1);
-    expect(done.harness).toBe("codex");
-    expect(router.calls[1]!.task).toContain("Steps so far:");
-    expect(router.calls[1]!.task).toContain("→ failed (task_failed)");
-    expect(router.calls[1]!.system).toContain("Excluded (failed already; do not choose): claude-code/claude-sonnet-5");
+    expect(done.routerAsks).toBe(0);
+    expect(done.harness).toBe("claude-code");
+    expect(done.attempts[0]).toMatchObject({ sideEffects: { commandsRun: 1 }, sideEffectsKnown: false });
+    expect(router.calls).toHaveLength(1);
     expect(store.pendingApprovals()).toEqual([]);
   });
 
@@ -119,14 +118,14 @@ describe("Engine", () => {
     expect(events.find((e) => e.taskId === t.id && e.type === "failed")?.payload).toMatchObject({ security: true });
   });
 
-  it("refusal: router gives up → failed with its reason", async () => {
+  it("refusal: a policy diagnosis stops before ordinary rerouting or acceptance", async () => {
     const { engine, store } = build([
       decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
-      decisionJson({ harness: "codex", action: "give_up", reason: "nothing listed can do this" }),
+      JSON.stringify({ action: "stop", reason: "policy", note: "policy restriction", question: null, facts: [] }),
     ]);
     const t = engine.submit({ task: 'x @echo {"fail":"refusal"}', cwd: "/tmp" });
     await engine.idle();
-    expect(store.getTask(t.id)).toMatchObject({ status: "failed", error: "router gave up: nothing listed can do this" });
+    expect(store.getTask(t.id)).toMatchObject({ status: "failed", harness: "claude-code", error: expect.stringContaining("policy restriction") });
   });
 
   it("no verdict at all fails the task; pin skips the router", async () => {

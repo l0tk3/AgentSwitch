@@ -47,10 +47,8 @@ export function mountThreads(app: Hono, deps: ApiDeps): void {
     return deps.store.getThread(id) ? c.json(view(deps.store.reopenThread(id))) : c.json({ error: "not found" }, 404);
   });
   app.delete("/threads/:id", (c) => {
-    const id = c.req.param("id");
-    const active = deps.store.tasksInThread(id).find((t) => !TERMINAL.has(t.status));
-    if (active) return c.json({ error: `task ${active.id} is still ${active.status}; cancel it first` }, 409);
-    return deps.store.deleteThread(id) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
+    const result = deps.engine.deleteThread(c.req.param("id"));
+    return result.ok ? c.json({ ok: true }) : c.json({ error: result.error }, result.code === "not_found" ? 404 : 409);
   });
 }
 

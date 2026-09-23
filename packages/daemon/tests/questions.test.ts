@@ -34,6 +34,18 @@ describe("question helpers", () => {
     expect(parseEvidence(JSON.stringify({ source: "nobody", questions: [] }))).toBeNull();
   });
 
+  it("retains the original router question through evidence storage after translation", () => {
+    const translated = "要检查哪个管理页面？";
+    const original = "Which management page should be inspected?";
+    const question = clarifyQuestion(translated, original);
+    expect(question).toMatchObject({ header: "路由器", text: translated, originalText: original });
+    const evidence = { source: "router" as const, questions: [question] };
+    expect(parseEvidence(encodeEvidence(evidence))).toEqual(evidence);
+    expect(clarifyQuestion(translated, translated)).not.toHaveProperty("originalText");
+    expect(clarifyQuestion(translated)).not.toHaveProperty("originalText");
+    expect(describeAnswers([question], { clarify: ["本地测试页面。"] })).toBe(`${translated} → 本地测试页面。`);
+  });
+
   it("validateAnswers wants every question answered, nothing extra, non-empty strings", () => {
     expect(validateAnswers([q(), q({ id: "b", text: "B?" })], { which: ["finance"], b: ["x"] })).toEqual({ ok: true, answers: { which: ["finance"], b: ["x"] } });
     expect(validateAnswers([q(), q({ id: "b", text: "B?" })], { which: ["finance"] })).toMatchObject({ ok: false, error: "unanswered: b" });
@@ -113,17 +125,17 @@ describe("Engine: an executor's question goes straight to the user", () => {
     expect(engine.answer(id, { text: "again" })).toMatchObject({ ok: false, code: "not_found" });
   });
 
-  it("deny or timeout hands the executor null: it carries on without an answer, the task is not failed", async () => {
+  it("deny or timeout aborts the executor and preserves the unanswered question as blocked", async () => {
     const { engine, store, firstQuestion } = build(10_000);
     const t = engine.submit({ task: 'x @echo {"question":{"text":"Port?"}}', cwd: "/tmp" });
     const id = await firstQuestion(t.id);
     expect(engine.resolveApproval(id, "deny")).toBe(true);
     await engine.idle();
-    expect(store.getTask(t.id)).toMatchObject({ status: "done", result: "answer: none" });
+    expect(store.getTask(t.id)).toMatchObject({ status: "blocked", error: expect.stringContaining("等待你的答复") });
     const { engine: e2, store: s2 } = build(30);
     const u = e2.submit({ task: 'x @echo {"question":{"text":"Port?"}}', cwd: "/tmp" });
     await e2.idle();
-    expect(s2.getTask(u.id)).toMatchObject({ status: "done", result: "answer: none" });
+    expect(s2.getTask(u.id)).toMatchObject({ status: "blocked", error: expect.stringContaining("Port?") });
     expect(s2.pendingApprovals()).toEqual([]);
   });
 });

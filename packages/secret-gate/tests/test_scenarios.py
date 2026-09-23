@@ -154,5 +154,5 @@ def test_scenario_token_reuse_across_requests(resolver, api_bearer):
 def test_scenario_describe_is_metadata_only(resolver, portal_pass, portal_totp):
     for tok in (portal_pass, portal_totp):
         info = resolver.describe(tok)
-        assert set(info) == {"label", "kind", "hosts", "uses"}
+        assert set(info) == {"label", "kind", "hosts", "uses", "seed_import_hosts"}
         assert_no_plaintext(str(info))

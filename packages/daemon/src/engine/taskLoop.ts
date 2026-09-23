@@ -6,14 +6,17 @@
 import { join } from "node:path";
 import type { Executor } from "../executors/types.js";
 import { NO_PROTECTED, restoreProtected, snapshotProtected } from "../executors/protected.js";
+import { knownTokens as tokensIn } from "../executors/tokens.js";
 import { listTree } from "../files/artifacts.js";
 import { OUT_DIR } from "../files/names.js";
-import { classifyFailure, excerpt, hasSideEffects, NO_AGENTS, NO_SIDE_EFFECTS, type ExecutionOutcome, type SideEffects } from "../router/failure.js";
-import { MAX_DISPATCHES, MAX_LOOP_STEPS, nextAction, type NextResult } from "../router/loop.js";
-import { stepLines, type StepRecord } from "../router/prompt.js";
+import { classifyFailure, detectRefusal, excerpt, hasSideEffects, NO_AGENTS, NO_SIDE_EFFECTS, type ExecutionOutcome, type SideEffects } from "../router/failure.js";
+import { LOOP_FAILURE_MESSAGE, MAX_DISPATCHES, MAX_LOOP_STEPS, nextAction, type NextResult } from "../router/loop.js";
+import { evidenceExcerpt, stepLines, type StepRecord } from "../router/prompt.js";
+import { localizeQuestion } from "../router/questionLanguage.js";
 import { excludedTargets, nextStep, type Attempt } from "../router/reroute.js";
-import { defaultTargetExcluding, defaultVerdict, route, type RouteDeps, type RouteRequest, type RouteResult } from "../router/route.js";
+import { defaultTargetExcluding, route, type RouteDeps, type RouteRequest, type RouteResult } from "../router/route.js";
 import type { Router } from "../router/routers/types.js";
+import { routerSupervisor } from "../router/supervisor.js";
 import { categoryOf, type TargetRef } from "../router/targets.js";
 import type { Verdict } from "../router/validate.js";
 import { gitDiffSummary } from "../threads/handoff.js";
@@ -26,10 +29,11 @@ import type { EngineContext } from "./context.js";
 import type { EngineDeps } from "./engine.js";
 import type { Release } from "./locks.js";
 import { CLARIFY_ID, clarifyQuestion } from "./questions.js";
+import { recoverRefusal } from "./refusal.js";
 import type { Scheduler } from "./scheduler.js";
-import { acceptance, answerQuestions, watchdog } from "./supervise.js";
+import { acceptance, answerQuestions, recentEventLines, watchdog } from "./supervise.js";
 import type { ThreadBook } from "./threadBook.js";
-import type { Task } from "./types.js";
+import { TERMINAL, type Task } from "./types.js";
 
 export const MAX_CLARIFICATIONS = 2;
 
@@ -56,7 +60,8 @@ type Purpose = "research" | "do" | "verify";
 type DispatchOutcome =
   | { readonly kind: "succeeded"; readonly outcome: ExecutionOutcome }
   | { readonly kind: "cancelled" }
-  | { readonly kind: "failed"; readonly attempt: Attempt }
+  | { readonly kind: "blocked"; readonly reason: string }
+  | { readonly kind: "failed"; readonly attempt: Attempt; readonly result: string }
   | { readonly kind: "protected"; readonly paths: readonly string[] };
 
 /** The loop's state between steps; replaced, never mutated. */
@@ -78,6 +83,9 @@ type State = {
   readonly lastSuccess: ExecutionOutcome | null;
   readonly tokens: number;
   readonly sideEffects: SideEffects;
+  readonly refusalRetried: boolean;
+  /** Only the immediate clarification attempt; its failure must never fall through to target switching. */
+  readonly clarificationPending: boolean;
 };
 
 type FailureContext = { readonly failed: Attempt; readonly reason: HandoffReason; readonly exclude: readonly TargetRef[] };
@@ -89,15 +97,26 @@ export class TaskLoop {
 
   private get ctx(): EngineContext { return this.d.ctx; }
 
+  private active(id: string, signal?: AbortSignal): boolean {
+    const current = this.ctx.store.getTask(id);
+    return !signal?.aborted && !!current && !TERMINAL.has(current.status);
+  }
+
+  private loopTimeout(planner: Router | null): number {
+    return planner ? this.d.engine.targets.router.planner_timeout_ms : this.d.engine.targets.router.timeout_ms;
+  }
+
   async run(initial: Task, signal: AbortSignal, held: Release[]): Promise<void> {
     this.ctx.store.updateTask(initial.id, { status: "routing" });
     const first = await this.routeWithQuestions(initial, this.d.composer.task(initial), signal);
-    if (!first) return;
+    if (!first || !this.active(initial.id, signal)) return;
     const { routed, composed } = first;
-    const routeLogId = this.d.engine.routingLog?.record(initial.task, initial.cwd, routed) ?? null;
+    const routeLogId = this.d.engine.routingLog?.record(initial.task, initial.cwd, routed, this.ctx.now(), initial.id) ?? null;
     if (routeLogId !== null) this.ctx.store.updateTask(initial.id, { routeLogId });
     this.ctx.emit(initial.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
-    if (!routed.verdict.ok) return this.fail(initial.id, `no target: ${routed.verdict.notes.join("; ")}`);
+    if (!routed.verdict.ok) return this.fail(initial.id, routed.decision?.action === "give_up"
+      ? `路由器已停止：${routed.decision.reason || "未提供原因"}`
+      : `no target: ${routed.verdict.notes.join("; ")}`);
     const task = await this.d.threads.assign(initial, routed.decision, (q, e) => this.d.desk.request(initial.id, q, e, { humanOnly: true }));
     if (signal.aborted) return;
     // Locks in a fixed order (background-v0 §1): thread, then cwd; the harness slot is taken per dispatch.
@@ -106,9 +125,9 @@ export class TaskLoop {
     if (signal.aborted) return;
     const current = this.ctx.store.updateTask(task.id, { decision: routed.decision, brief: this.d.composer.repairBrief(task, routed.decision?.brief ?? composed) });
     let st: State | null = {
-      current, verdict: routed.verdict, steps: [], attempts: [], dispatches: 0, budget: MAX_DISPATCHES, loopCalls: 0, loopBudget: MAX_LOOP_STEPS, rejections: 0, planner: null, lastSuccess: null, tokens: 0, sideEffects: NO_SIDE_EFFECTS,
+      current, verdict: routed.verdict, steps: [], attempts: [], dispatches: 0, budget: MAX_DISPATCHES, loopCalls: 0, loopBudget: MAX_LOOP_STEPS, rejections: 0, planner: null, lastSuccess: null, tokens: 0, sideEffects: NO_SIDE_EFFECTS, refusalRetried: false, clarificationPending: false,
       looping: current.decision?.plan === "multi" && !task.pin,
-      handoff: task.handoffFrom ? this.d.threads.handoffText(task, task.handoffFrom, task.decision?.handoff_note ?? null) : null,
+      handoff: [task.handoffFrom ? this.d.threads.handoffText(task, task.handoffFrom, task.decision?.handoff_note ?? null) : null, this.d.composer.checkpointContext(current)].filter(Boolean).join("\n\n") || null,
     };
     if (current.decision?.plan === "multi" && !task.pin) st = await this.escalate(task, composed, st, signal);
     while (st) st = await this.step(task, composed, st, signal);
@@ -118,29 +137,34 @@ export class TaskLoop {
   private async routeWithQuestions(task: Task, composed: string, signal: AbortSignal): Promise<{ routed: RouteResult; composed: string } | null> {
     let text = composed;
     let routed = await route(this.request(task, text), this.d.routeDeps());
+    if (!this.active(task.id, signal)) return null;
     for (let round = 0; routed.clarify && round < MAX_CLARIFICATIONS; round++) {
       this.ctx.emit(task.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError, clarify: routed.clarify });
-      const answer = await this.askUser(task, routed.clarify);
+      const answer = await this.askUser(task, routed.clarify, signal);
       if (signal.aborted) return null;
-      if (answer === null) { this.fail(task.id, `waiting for your answer: ${routed.clarify}`); return null; }
+      if (answer === null) { this.incomplete(task, null, `waiting for your answer: ${routed.clarify}`, "blocked"); return null; }
       text = `${text}\n\nUser clarification (in reply to "${routed.clarify}"):\n${answer}`;
       this.ctx.store.updateTask(task.id, { status: "routing" });
       routed = await route(this.request(task, text), this.d.routeDeps());
+      if (!this.active(task.id, signal)) return null;
     }
     if (routed.clarify) { this.fail(task.id, `the router kept asking questions: ${routed.clarify}`); return null; }
     return { routed, composed: text };
   }
 
   private request(task: Task, text: string): RouteRequest {
-    return { task: text, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser, exclude: task.exclude };
+    const feedback = this.d.composer.feedbackContext(this.ctx.store.getTask(task.id) ?? task);
+    return { task: feedback ? `${text}\n\n${feedback}` : text, cwd: task.cwd, ...(task.pin ? { pin: task.pin } : {}), needsBrowser: task.needsBrowser, exclude: task.exclude };
   }
 
-  private async askUser(task: Task, question: string): Promise<string | null> {
-    const answers = await this.d.desk.ask(task.id, [clarifyQuestion(question)], "router");
+  private async askUser(task: Task, question: string, signal: AbortSignal): Promise<string | null> {
+    const text = await localizeQuestion(this.d.engine.questionRouter ?? this.d.engine.router, question, task.cwd, this.d.engine.targets.router.timeout_ms, signal);
+    if (signal.aborted) return null;
+    const answers = await this.d.desk.ask(task.id, [clarifyQuestion(text, question)], "router");
     return answers?.[CLARIFY_ID]?.[0] ?? null;
   }
 
-  /** The router said "multi": the planner takes over from the first step; if it is unusable, the router's decision stands. */
+  /** The planner owns a multi-step task; an unusable plan leaves it blocked before any dispatch. */
   private async escalate(task: Task, composed: string, st: State, signal: AbortSignal): Promise<State | null> {
     const pick = st.current.decision?.planner ?? null;
     const chosen = this.d.engine.planner?.(pick) ?? null;
@@ -148,48 +172,77 @@ export class TaskLoop {
     const planner = chosen.router;
     this.ctx.emit(task.id, "step", { n: 0, action: "plan", model: `${chosen.target.harness}/${chosen.target.model}`, pick, reason: st.current.decision?.reason ?? "" });
     const note: StepRecord = { kind: "note", text: `The dispatcher triaged this as a multi-step task: ${st.current.decision?.reason || "(no reason given)"}. Plan it from the start.` };
-    const r = await nextAction(planner, this.d.routeDeps(), { req: this.request(task, composed), steps: [note], used: 0, budget: st.budget, exclude: [] }, signal);
-    if (!r.action) { this.ctx.emit(task.id, "step", { n: 0, action: "plan", source: "error", routerError: r.routerError, note: "the planner was unusable; the router's decision stands" }); return st; }
+    const r = await nextAction(planner, this.d.routeDeps(), { req: this.request(task, composed), steps: [note], used: 0, budget: st.budget, exclude: [], timeoutMs: this.loopTimeout(planner) }, signal);
+    if (!this.active(task.id, signal)) return null;
+    if (!r.action) return this.planningFailure(task, st, r, "initial_plan", `${chosen.target.harness}/${chosen.target.model}`);
     return this.applyAction(task, composed, { ...st, planner, loopCalls: 1 }, r, null, signal);
   }
 
   /** One dispatch and whatever follows it. Null ends the loop (the task is done, failed or cancelled). */
   private async step(task: Task, composed: string, st: State, signal: AbortSignal): Promise<State | null> {
-    if (signal.aborted) return null;
+    if (!this.active(task.id, signal)) return null;
     if (!st.verdict.ok) { this.fail(task.id, `no target: ${st.verdict.notes.join("; ")}`); return null; }
     if (st.dispatches >= st.budget) {
+      if (st.clarificationPending) { this.fail(task.id, "refusal: dispatch budget exhausted before the clarification retry"); return null; }
       const more = await this.askForMore(task, `已派发 ${st.dispatches} 次还没完成，还要继续吗？允许 = 再给 ${MAX_DISPATCHES} 次，拒绝 = 停止`, st);
-      if (!more) { this.fail(task.id, `stopped after ${st.dispatches} dispatches`); return null; }
+      if (!this.active(task.id, signal)) return null;
+      if (!more) { this.incomplete(task, st, `stopped after ${st.dispatches} dispatches`); return null; }
       return { ...st, budget: st.budget + MAX_DISPATCHES };
     }
     const purpose: Purpose = st.current.decision?.purpose ?? "do";
     const outcome = await this.dispatch(st.current, st.verdict, signal, st.handoff, purpose, st);
+    if (!this.active(task.id, signal)) return null;
     if (outcome.kind === "cancelled") return null;
+    if (outcome.kind === "blocked") { this.incomplete(task, st, outcome.reason, "blocked"); return null; }
     if (outcome.kind === "protected") { this.fail(task.id, `executor changed protected files (restored): ${outcome.paths.join(", ")}`, true); return null; }
     const after: State = { ...st, dispatches: st.dispatches + 1, steps: [...st.steps, this.record(st.current, st.verdict, purpose, outcome)], looping: st.looping || purpose !== "do" };
     if (outcome.kind === "failed") return this.afterFailure(task, composed, after, outcome.attempt, signal);
-    const done: State = { ...after, lastSuccess: outcome.outcome, tokens: after.tokens + (outcome.outcome.tokens ?? 0), sideEffects: addEffects(after.sideEffects, outcome.outcome.sideEffects ?? NO_SIDE_EFFECTS) };
+    const done: State = { ...after, clarificationPending: false, lastSuccess: outcome.outcome, tokens: after.tokens + (outcome.outcome.tokens ?? 0), sideEffects: addEffects(after.sideEffects, outcome.outcome.sideEffects ?? NO_SIDE_EFFECTS) };
     if (done.planner !== null || done.looping) return this.decideNext(task, composed, done, signal);
     // A single-step task: the supervisor's acceptance (when configured) is the only check before done.
-    const check = await acceptance(this.ctx, this.d.engine.supervisor, done.current, outcome.outcome.lastText ?? "", done.rejections, signal);
+    const check = await acceptance(this.ctx, this.d.engine.supervisor, done.current, outcome.outcome.lastText ?? "", done.rejections, signal, { goal: composed, feedback: this.d.composer.feedbackContext(done.current) ?? "", timeoutMs: this.d.engine.targets.router.timeout_ms });
+    if (!this.active(task.id, signal)) return null;
     if (!check.rejected) { this.finish(task, done, null); return null; }
-    const attempt: Attempt = { harness: st.verdict.harness, model: st.verdict.model, kind: "rejected", excerpt: check.rejected.slice(0, 240), sideEffects: outcome.outcome.sideEffects ?? NO_SIDE_EFFECTS };
+    if (check.unavailable || done.rejections >= 1) { this.incomplete(task, done, check.rejected); return null; }
+    const attempt: Attempt = { harness: st.verdict.harness, model: st.verdict.model, kind: "rejected", excerpt: evidenceExcerpt(check.rejected, 500), sideEffects: outcome.outcome.sideEffects ?? NO_SIDE_EFFECTS, sideEffectsKnown: outcome.outcome.sideEffectsKnown ?? outcome.outcome.sideEffects !== undefined };
     this.ctx.emit(task.id, "attempt_failed", { ...attempt, hadSideEffects: hasSideEffects(attempt.sideEffects) });
-    return this.afterFailure(task, composed, { ...done, rejections: check.rejections }, attempt, signal);
+    return this.afterFailure(task, composed, { ...done, clarificationPending: st.clarificationPending, rejections: check.rejections }, attempt, signal);
   }
 
   /** Code rules first (retry / switch / stop); everything else is the loop model's call, the failed target excluded. */
   private async afterFailure(task: Task, composed: string, st: State, attempt: Attempt, signal: AbortSignal): Promise<State | null> {
+    if (!this.active(task.id, signal)) return null;
     const attempts = [...st.attempts, attempt];
     const current = this.ctx.store.updateTask(task.id, { attempts, status: "routing" });
+    // Resolve refusals before the normal loop, including its model-switch and finish fallbacks.
+    if (attempt.kind === "refusal") {
+      const recovery = await recoverRefusal(this.d, current, attempt, st.refusalRetried, signal);
+      if (recovery.kind === "cancelled") return null;
+      if (recovery.kind === "stop") { this.fail(task.id, recovery.error); return null; }
+      const brief = this.d.composer.repairBrief(current, recovery.brief);
+      const updated = this.ctx.store.updateTask(task.id, { brief, ...(current.decision ? { decision: { ...current.decision, brief } } : {}) });
+      this.ctx.emit(task.id, "redispatch", { kind: "clarification", target: { harness: attempt.harness, model: attempt.model } });
+      return { ...st, current: updated, attempts, refusalRetried: true, clarificationPending: true };
+    }
+    if (st.clarificationPending) {
+      const note = `the clarification retry ended with ${attempt.kind}; no automatic fallback`;
+      this.ctx.emit(task.id, "refusal", { action: "stop", reason: "unknown", note });
+      this.fail(task.id, note, attempt.kind === "gate_denied");
+      return null;
+    }
     const deps = this.d.routeDeps();
     const req = this.request(task, composed);
     const tried = attempts.map((a) => ({ harness: a.harness, model: a.model }));
     const step = nextStep({ decision: current.decision, attempts, routerAsks: current.routerAsks, targets: deps.targets, quota: deps.quota, running: deps.running,
       lowConfidenceTarget: defaultTargetExcluding(req, deps, tried), category: categoryOf(composed, deps.targets) });
     const reason: HandoffReason = attempt.kind === "quota" ? "quota" : `failure:${attempt.kind}`;
-    const base: State = { ...st, current, attempts };
-    if (step.kind === "stop") { this.fail(task.id, step.reason, step.security); return null; }
+    let base: State = { ...st, current, attempts };
+    if (step.kind === "stop") {
+      if (!step.security && (attempt.sideEffectsKnown === false || hasSideEffects(attempt.sideEffects) || attempt.kind === "rejected")) this.incomplete(task, base, step.reason, "blocked");
+      else if (!step.security && st.lastSuccess) this.incomplete(task, base, step.reason);
+      else this.fail(task.id, step.reason, step.security);
+      return null;
+    }
     if (step.kind === "retry") {
       this.ctx.emit(task.id, "redispatch", { kind: "retry", target: step.target, backoffMs: step.backoffMs });
       try { await sleep(this.d.engine.retryBackoffMs ?? step.backoffMs, signal); } catch { return null; }
@@ -200,41 +253,62 @@ export class TaskLoop {
       const verdict: Verdict = { ok: true, harness: step.target.harness, model: step.target.model, effort: null, chosen: "fallback", queue: false, notes: step.notes };
       return { ...base, verdict, handoff: this.d.threads.recordHandoff(current, attempt, reason, step.target, null) };
     }
-    const r = await nextAction(st.planner ?? deps.router, deps, { req, steps: st.steps, used: st.dispatches, budget: st.budget, exclude: step.exclude }, signal);
+    if (base.loopCalls >= base.loopBudget) {
+      const more = await this.askForMore(task, `调度已走了 ${base.loopCalls} 步，要增加 ${MAX_LOOP_STEPS} 步以分析这次失败吗？`, base);
+      if (!this.active(task.id, signal)) return null;
+      if (!more) { this.incomplete(task, base, "调度预算已用尽，失败原因和剩余工作尚未处理"); return null; }
+      base = { ...base, loopBudget: base.loopBudget + MAX_LOOP_STEPS };
+    }
+    const r = await nextAction(st.planner ?? deps.router, deps, { req, steps: st.steps, used: st.dispatches, budget: st.budget, exclude: step.exclude, timeoutMs: this.loopTimeout(st.planner) }, signal);
+    if (!this.active(task.id, signal)) return null;
     const asked = this.ctx.store.updateTask(task.id, { routerAsks: current.routerAsks + 1 });
     return this.applyAction(task, composed, { ...base, current: asked, loopCalls: st.loopCalls + 1 }, r, { failed: attempt, reason, exclude: step.exclude }, signal);
   }
 
   /** After a successful research/verify/multi-step dispatch: the loop model says what comes next. */
   private async decideNext(task: Task, composed: string, st: State, signal: AbortSignal): Promise<State | null> {
+    if (!this.active(task.id, signal)) return null;
     if (st.loopCalls >= st.loopBudget) {
-      const more = await this.askForMore(task, `调度已走了 ${st.loopCalls} 步还没结束，还要继续吗？允许 = 再给 ${MAX_LOOP_STEPS} 步，拒绝 = 以目前的结果完成`, st);
-      if (!more) { this.finish(task, st, null); return null; }
-      return { ...st, loopBudget: st.loopBudget + MAX_LOOP_STEPS };
+      const more = await this.askForMore(task, `调度已走了 ${st.loopCalls} 步还没结束，还要继续吗？允许 = 再给 ${MAX_LOOP_STEPS} 步，拒绝 = 保留进度并停止`, st);
+      if (!this.active(task.id, signal)) return null;
+      if (!more) { this.incomplete(task, st, "调度预算已用尽，尚未确认原任务完成"); return null; }
+      return this.decideNext(task, composed, { ...st, loopBudget: st.loopBudget + MAX_LOOP_STEPS }, signal);
     }
     this.ctx.store.updateTask(task.id, { status: "routing" });
     const deps = this.d.routeDeps();
-    const r = await nextAction(st.planner ?? deps.router, deps, { req: this.request(task, composed), steps: st.steps, used: st.dispatches, budget: st.budget, exclude: excludedTargets(st.attempts) }, signal);
+    const r = await nextAction(st.planner ?? deps.router, deps, { req: this.request(task, composed), steps: st.steps, used: st.dispatches, budget: st.budget, exclude: excludedTargets(st.attempts), timeoutMs: this.loopTimeout(st.planner) }, signal);
     return this.applyAction(task, composed, { ...st, loopCalls: st.loopCalls + 1 }, r, null, signal);
   }
 
   /** Turn the loop model's reply into the next state: a validated dispatch, a question card, or the end. */
   private async applyAction(task: Task, composed: string, st: State, r: NextResult, failure: FailureContext | null, signal: AbortSignal): Promise<State | null> {
+    if (!this.active(task.id, signal)) return null;
     const n = st.steps.length + 1;
     const a = r.action;
-    if (!a) return this.withoutRouter(task, composed, st, r, failure);
+    if (!a) return this.planningFailure(task, st, r, "next_action", (st.planner ?? this.d.engine.router).name);
     if (a.kind === "give_up") { this.fail(task.id, `router gave up: ${a.reason}`); return null; }
     if (a.kind === "repair") { this.fail(task.id, `router requested repair tool ${a.tool}; repair tools are not wired yet`); return null; }
-    if (a.kind === "finish") { this.ctx.emit(task.id, "step", { n, action: "finish", reason: a.reason, model: (st.planner ?? this.d.engine.router).name, routerMs: r.routerMs }); this.finish(task, st, a.result); return null; }
+    if (a.kind === "finish") {
+      this.ctx.emit(task.id, "step", { n, action: "finish", completion: a.completion, remaining: a.remaining, reason: a.reason, model: (st.planner ?? this.d.engine.router).name, routerMs: r.routerMs });
+      if (a.completion !== "complete") { this.incomplete(task, st, a.remaining.join("\n"), a.completion, a.result); return null; }
+      const verifier = this.d.engine.supervisor ?? routerSupervisor(st.planner ?? this.d.engine.router, { approvals: false, acceptance: true, watchdog_ms: 0, max_continues: 0 }, this.d.engine.targets.router.timeout_ms);
+      const evidence = `Candidate final result:\n${a.result ?? ""}\n\nExecution evidence (each step success is not proof of overall completion):\n${stepLines(st.steps).join("\n") || "No executor steps were performed."}`;
+      const checked = await acceptance(this.ctx, verifier, st.current, evidence, st.rejections, signal, { goal: composed, feedback: this.d.composer.feedbackContext(st.current) ?? "", required: true, timeoutMs: this.d.engine.targets.router.timeout_ms });
+      if (!this.active(task.id, signal)) return null;
+      if (checked.rejected) { this.incomplete(task, st, checked.rejected, undefined, a.result); return null; }
+      this.finish(task, st, a.result);
+      return null;
+    }
     if (a.kind === "ask_user") {
       this.ctx.emit(task.id, "step", { n, action: "ask_user", question: a.question, model: (st.planner ?? this.d.engine.router).name, routerMs: r.routerMs });
-      const answer = await this.askUser(task, a.question);
+      const answer = await this.askUser(task, a.question, signal);
       if (signal.aborted) return null;
+      if (answer === null) { this.incomplete(task, st, `waiting for your answer: ${a.question}`, "blocked"); return null; }
       return this.decideNext(task, composed, { ...st, steps: [...st.steps, { kind: "ask_user", question: a.question, answer }] }, signal);
     }
     const decision = a.decision;
     const current = this.ctx.store.updateTask(task.id, { decision, brief: this.d.composer.repairBrief(task, decision.brief), status: "routing" });
-    const logId = this.d.engine.routingLog?.record(task.task, task.cwd, { verdict: a.verdict, decision, source: a.source, routerError: null, routerMs: r.routerMs, attempts: st.attempts.length }) ?? null;
+    const logId = this.d.engine.routingLog?.record(task.task, task.cwd, { verdict: a.verdict, decision, source: a.source, routerError: null, routerMs: r.routerMs, attempts: st.attempts.length }, this.ctx.now(), task.id) ?? null;
     if (logId !== null) this.ctx.store.updateTask(task.id, { routeLogId: logId });
     const target: TargetRef | null = a.verdict.ok ? { harness: a.verdict.harness, model: a.verdict.model } : null;
     if (failure) this.ctx.emit(task.id, "redispatch", { kind: "router", source: a.source, verdict: a.verdict, decision, routerError: null });
@@ -243,32 +317,34 @@ export class TaskLoop {
     return { ...st, current, verdict: a.verdict, handoff: [stepsNote(st.steps), failureNote].filter(Boolean).join("\n\n") || null };
   }
 
-  /** The loop model was unusable: after a failure the default policy picks a target; after success the task ends with what it has. */
-  private withoutRouter(task: Task, composed: string, st: State, r: NextResult, failure: FailureContext | null): State | null {
-    if (!failure) {
-      this.ctx.emit(task.id, "step", { n: st.steps.length + 1, action: "finish", source: "error", routerError: r.routerError, note: "the loop model was unusable; finishing with the last result" });
-      this.finish(task, st, null);
-      return null;
-    }
-    const deps = this.d.routeDeps();
-    const verdict = defaultVerdict(this.request(task, composed), deps, failure.exclude, st.current.needsBrowser || (st.current.decision?.needs_browser ?? false));
-    this.ctx.emit(task.id, "redispatch", { kind: "router", source: "default", verdict, decision: null, routerError: r.routerError });
-    const handoff = verdict.ok ? this.d.threads.recordHandoff(st.current, failure.failed, failure.reason, { harness: verdict.harness, model: verdict.model }, null) : null;
-    return { ...st, verdict, handoff: [stepsNote(st.steps), handoff].filter(Boolean).join("\n\n") || null };
+  /** A missing next action cannot establish completion or authorize replay of a previous operation. */
+  private planningFailure(task: Task, st: State, result: NextResult, stage: "initial_plan" | "next_action", model: string): null {
+    const kind = result.failure?.kind ?? "service_error";
+    const diagnostic = LOOP_FAILURE_MESSAGE[kind];
+    this.ctx.emit(task.id, "step", {
+      n: stage === "initial_plan" ? 0 : st.steps.length + 1, action: "plan", source: "error", stage, model,
+      routerError: diagnostic, routerMs: result.routerMs, tries: result.failure?.tries ?? 0, failureKind: kind,
+      ...(result.failure ? { timeoutMs: result.failure.timeoutMs } : {}), dispatches: st.dispatches,
+    });
+    const progress = st.dispatches === 0 ? "本次任务尚未派发执行，未执行新的业务操作。"
+      : `已保存此前 ${st.dispatches} 次派发的进展；已停止，未自动重放业务步骤。`;
+    this.incomplete(task, st, `${stage === "initial_plan" ? "首次规划" : "后续规划"}失败：${diagnostic}。${progress}`);
+    return null;
   }
 
   private async askForMore(task: Task, question: string, st: State): Promise<boolean> {
-    const evidence = stepLines(st.steps.slice(-3)).join("\n").slice(0, 2000);
+    const evidence = evidenceExcerpt(stepLines(st.steps.slice(-3)).join("\n"), 2000);
     return (await this.d.desk.request(task.id, question, evidence, { humanOnly: true })) === "allow";
   }
 
-  private record(task: Task, verdict: OkVerdict, purpose: Purpose, outcome: Exclude<DispatchOutcome, { kind: "cancelled" | "protected" }>): StepRecord {
+  private record(task: Task, verdict: OkVerdict, purpose: Purpose, outcome: Exclude<DispatchOutcome, { kind: "cancelled" | "protected" | "blocked" }>): StepRecord {
     let outFiles: string[] = [];
     try { outFiles = listTree(join(task.cwd, OUT_DIR)).map((f) => f.path); } catch { outFiles = []; }
     const effects = outcome.kind === "succeeded" ? outcome.outcome.sideEffects ?? NO_SIDE_EFFECTS : outcome.attempt.sideEffects;
     return {
       kind: "dispatch", purpose, harness: verdict.harness, model: verdict.model, brief: task.brief ?? task.task, ok: outcome.kind === "succeeded",
-      failureKind: outcome.kind === "failed" ? outcome.attempt.kind : null, reply: outcome.kind === "succeeded" ? outcome.outcome.lastText ?? "" : outcome.attempt.excerpt,
+      failureKind: outcome.kind === "failed" ? outcome.attempt.kind : null, reply: outcome.kind === "succeeded" ? evidenceExcerpt(outcome.outcome.lastText ?? "") : outcome.result,
+      sideEffectsKnown: outcome.kind === "succeeded" ? outcome.outcome.sideEffectsKnown ?? outcome.outcome.sideEffects !== undefined : outcome.attempt.sideEffectsKnown ?? false,
       sideEffects: `files changed ${effects.filesChanged}, commands ${effects.commandsRun}, approvals ${effects.approvalsGranted}`, outFiles, diff: gitDiffSummary(task.cwd),
     };
   }
@@ -279,6 +355,7 @@ export class TaskLoop {
     if (!executor) return this.failedAttempt(task, { ...target, kind: "transport", excerpt: `no executor for harness ${verdict.harness}`, sideEffects: NO_SIDE_EFFECTS });
     let release: Release;
     try { release = await this.d.scheduler.acquireHarness(task, verdict.harness, signal); } catch { return { kind: "cancelled" }; }
+    if (!this.active(task.id, signal)) { release(); return { kind: "cancelled" }; }
     this.ctx.store.updateTask(task.id, { status: "running", harness: verdict.harness, model: verdict.model, effort: verdict.effort });
     this.ctx.emit(task.id, "dispatched", { harness: verdict.harness, model: verdict.model, effort: verdict.effort, chosen: verdict.chosen, brief: task.brief, purpose });
     const prot = this.d.engine.protected ?? NO_PROTECTED;
@@ -289,59 +366,159 @@ export class TaskLoop {
     const onTaskAbort = () => attemptCtl.abort(signal.reason);
     signal.addEventListener("abort", onTaskAbort, { once: true });
     const dog = watchdog(this.ctx, this.d.engine.supervisor, this.d.desk, task, attemptCtl);
+    let blockedQuestion: string | null = null;
+    let observedTools = 0, observedApprovals = 0;
+    let observedText = "";
+    let checkpointPayload: Record<string, unknown> | null = null;
+    let execution: Promise<ExecutionOutcome> | null = null;
+    let executionSettled = false;
+    const observedEffects = (): SideEffects => ({ filesChanged: 0, commandsRun: observedTools, approvalsGranted: observedApprovals });
+    const checkpoint = (ok: boolean, result: string, sideEffects: SideEffects, sideEffectsKnown: boolean) => {
+      if (checkpointPayload) return;
+      checkpointPayload = { purpose, ok, result: evidenceExcerpt(result), sideEffects, sideEffectsKnown, harness: verdict.harness, model: verdict.model, brief: evidenceExcerpt(brief, 8_000) };
+    };
     const readOnly = purpose !== "do";
     const brief = readOnly ? `${READ_ONLY_BRIEF[purpose]}\n\n${this.d.composer.brief(task)}` : this.d.composer.brief(task);
-    const material = { userMessage: task.task, context: this.d.composer.context()?.text ?? "", steps: stepLines(st.steps), knownTokens: this.d.composer.tokens(task) };
+    const priorCheckpoints = this.d.composer.checkpointContext(task);
+    const handoffNote = priorCheckpoints && !handoff?.includes(priorCheckpoints) ? [priorCheckpoints, handoff].filter(Boolean).join("\n\n") : handoff;
+    const material = { userMessage: this.d.composer.task(task), context: this.d.composer.context()?.text ?? "", steps: stepLines(st.steps), knownTokens: new Set(this.d.composer.tokens(task)) };
+    let onAttemptAbort!: () => void;
     try {
-      const outcome = await executor.run({
-        taskId: task.id, task: task.task, brief, cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments,
-        handoffNote: handoff, context: material.context || null, knownTokens: material.knownTokens, threadHome, resume,
-        browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal: attemptCtl.signal,
-        emit: (type, payload) => { this.ctx.emit(task.id, type, payload); dog.touch(); },
-        approve: async (action, evidence) => {
-          if (readOnly) { this.ctx.emit(task.id, "supervisor", { kind: "approval", decision: "deny", reason: `${purpose} step is read-only`, source: "floor", action }); return "deny"; }
-          dog.pause(); try { return await this.d.desk.request(task.id, action, evidence); } finally { dog.touch(); }
-        },
-        ask: async (questions) => { dog.pause(); try { return await answerQuestions(this.ctx, this.d.engine.supervisor, this.d.desk, task, this.d.policyFor(task), questions, material, attemptCtl.signal); } finally { dog.touch(); } },
+      const interrupted = new Promise<never>((_resolve, reject) => {
+        onAttemptAbort = () => reject(attemptCtl.signal.reason instanceof Error ? attemptCtl.signal.reason : new Error("execution interrupted"));
+        attemptCtl.signal.addEventListener("abort", onAttemptAbort, { once: true });
       });
+      attemptCtl.signal.throwIfAborted();
+      execution = executor.run({
+        taskId: task.id, task: task.task, brief, cwd: task.cwd, model: verdict.model, effort: verdict.effort, attachments: task.attachments,
+        handoffNote, context: material.context || null, platformMemory: this.d.composer.platformExperience(task), feedback: this.d.composer.feedbackContext(task), knownTokens: material.knownTokens, threadHome, resume,
+        browser: task.needsBrowser || (task.decision?.needs_browser ?? false), signal: attemptCtl.signal,
+        emit: (type, payload) => {
+          if (attemptCtl.signal.aborted || !this.active(task.id, signal)) return;
+          if (type === "tool_call" && !payload.denied) observedTools += typeof payload.count === "number" && Number.isFinite(payload.count) ? Math.max(1, payload.count) : 1;
+          if (type === "text" && typeof payload.text === "string") observedText = evidenceExcerpt([observedText, payload.text].filter(Boolean).join("\n"));
+          this.ctx.emit(task.id, type, payload); dog.touch();
+        },
+        approve: async (action, evidence) => {
+          if (attemptCtl.signal.aborted || !this.active(task.id, signal)) return "deny";
+          if (readOnly) { this.ctx.emit(task.id, "supervisor", { kind: "approval", decision: "deny", reason: `${purpose} step is read-only`, source: "floor", action }); return "deny"; }
+          dog.pause();
+          try {
+            const decision = await this.d.desk.request(task.id, action, evidence);
+            if (attemptCtl.signal.aborted || !this.active(task.id, signal)) return "deny";
+            if (decision === "allow") observedApprovals++;
+            return decision;
+          } finally { dog.touch(); }
+        },
+        ask: async (questions) => {
+          if (attemptCtl.signal.aborted || !this.active(task.id, signal)) return null;
+          dog.pause();
+          try {
+            const answers = await answerQuestions(this.ctx, this.d.engine.supervisor, this.d.desk, task, this.d.policyFor(task), questions, {
+              ...material, feedback: this.d.composer.feedbackContext(task) ?? "",
+              observations: [...recentEventLines(this.ctx, task.id, 12), ...(observedText ? [evidenceExcerpt(observedText, 4_000)] : [])],
+            }, attemptCtl.signal, this.d.engine.targets.router.timeout_ms);
+            if (signal.aborted || attemptCtl.signal.aborted || !this.active(task.id, signal)) return null;
+            if (answers === null && !signal.aborted && !attemptCtl.signal.aborted) {
+              blockedQuestion = `等待你的答复：${questions.map((q) => q.text).join("；")}`;
+              attemptCtl.abort(new Error(blockedQuestion));
+              this.incomplete(task, st, blockedQuestion, "blocked");
+            }
+            // A user can supply a newly sealed credential while an executor is waiting. Its
+            // existing input set must then recognize that token for the remaining tool calls.
+            for (const token of tokensIn(...Object.values(answers ?? {}).flat())) material.knownTokens.add(token);
+            return answers;
+          } finally { dog.touch(); }
+        },
+      });
+      void execution.then(() => { executionSettled = true; }, () => { executionSettled = true; });
+      const outcome = await Promise.race([execution, interrupted]);
       dog.stop();
+      const reported = outcome.sideEffects ?? NO_SIDE_EFFECTS;
+      // Emitted observations are a lower bound; a zero reported afterward cannot erase them.
+      const sideEffects: SideEffects = {
+        filesChanged: reported.filesChanged,
+        commandsRun: Math.max(reported.commandsRun, observedTools - reported.filesChanged),
+        approvalsGranted: Math.max(reported.approvalsGranted, observedApprovals),
+      };
+      const contradictsObservations = reported.commandsRun + reported.filesChanged < observedTools || reported.approvalsGranted < observedApprovals;
+      const sideEffectsKnown = (outcome.sideEffectsKnown ?? outcome.sideEffects !== undefined) && !contradictsObservations;
+      const result = outcome.lastText || outcome.stderr || "";
       const touched = restoreProtected(task.cwd, prot, snapshot);
       if (touched.length) {
-        this.ctx.emit(task.id, "attempt_failed", { ...target, kind: "protected", excerpt: touched.join(", "), sideEffects: outcome.sideEffects ?? NO_SIDE_EFFECTS, hadSideEffects: true, security: true });
+        checkpoint(false, `${result}\n受保护文件被修改并已恢复：${touched.join(", ")}`, sideEffects, sideEffectsKnown);
+        this.ctx.emit(task.id, "attempt_failed", { ...target, kind: "protected", excerpt: touched.join(", "), sideEffects, sideEffectsKnown, hadSideEffects: true, security: true });
         return { kind: "protected", paths: touched };
       }
       if (outcome.sessionId && task.threadId) this.ctx.store.appendThreadEvent(task.threadId, "session", { harness: verdict.harness, sessionId: outcome.sessionId, taskId: task.id });
-      if (signal.aborted) return { kind: "cancelled" };
-      const sideEffects = outcome.sideEffects ?? NO_SIDE_EFFECTS;
-      if (dog.cancelledWith !== null) return this.failedAttempt(task, { ...target, kind: "rejected", excerpt: `supervisor cancelled a silent run: ${dog.cancelledWith}`.slice(0, 240), sideEffects });
-      if (!outcome.ok) return this.failedAttempt(task, { ...target, kind: classifyFailure(outcome) ?? "unknown", excerpt: excerpt(outcome), sideEffects });
-      return { kind: "succeeded", outcome };
+      if (signal.aborted) { checkpoint(false, `${result}\n执行已取消；继续前需核对现场`, sideEffects, false); return { kind: "cancelled" }; }
+      if (blockedQuestion) { checkpoint(false, `${result}\n${blockedQuestion}`, sideEffects, false); return { kind: "blocked", reason: blockedQuestion }; }
+      const kind = classifyFailure(outcome);
+      checkpoint(!kind && dog.cancelledWith === null, result, sideEffects, sideEffectsKnown);
+      if (kind === "refusal" || kind === "gate_denied") {
+        const refusal = kind === "refusal" ? detectRefusal(outcome) : null;
+        return this.failedAttempt(task, { ...target, kind, excerpt: excerpt(outcome), sideEffects, sideEffectsKnown, ...(refusal ? { refusal } : {}) }, result);
+      }
+      if (dog.cancelledWith !== null) return this.failedAttempt(task, { ...target, kind: "rejected", excerpt: `supervisor cancelled a silent run: ${dog.cancelledWith}`.slice(0, 240), sideEffects, sideEffectsKnown: false }, result);
+      if (kind) return this.failedAttempt(task, { ...target, kind, excerpt: excerpt(outcome), sideEffects, sideEffectsKnown }, result);
+      return { kind: "succeeded", outcome: { ...outcome, sideEffects, sideEffectsKnown } };
     } catch (err) {
       dog.stop();
+      const sideEffects = observedEffects();
+      const message = blockedQuestion ?? (err instanceof Error ? err.message : "executor failed");
+      restoreProtected(task.cwd, prot, snapshot);
+      const observations = observedText ? `Observed executor messages (unverified):\n${observedText}\n\nExecution interrupted:\n${message}` : message;
+      checkpoint(false, observations, sideEffects, false);
       if (signal.aborted) return { kind: "cancelled" };
-      if (dog.cancelledWith !== null) return this.failedAttempt(task, { ...target, kind: "rejected", excerpt: `supervisor cancelled a silent run: ${dog.cancelledWith}`.slice(0, 240), sideEffects: NO_SIDE_EFFECTS });
-      return this.failedAttempt(task, { ...target, kind: "transport", excerpt: (err as Error).message.slice(0, 240), sideEffects: NO_SIDE_EFFECTS });
+      if (blockedQuestion) return { kind: "blocked", reason: blockedQuestion };
+      if (dog.cancelledWith !== null) return this.failedAttempt(task, { ...target, kind: "rejected", excerpt: `supervisor cancelled a silent run: ${dog.cancelledWith}`.slice(0, 240), sideEffects, sideEffectsKnown: false }, observations);
+      return this.failedAttempt(task, { ...target, kind: "transport", excerpt: evidenceExcerpt(message, 500), sideEffects, sideEffectsKnown: false }, observations);
     } finally {
+      if (onAttemptAbort) attemptCtl.signal.removeEventListener("abort", onAttemptAbort);
       signal.removeEventListener("abort", onTaskAbort);
-      release();
+      try {
+        if (attemptCtl.signal.aborted && execution && !executionSettled) {
+          let timer: NodeJS.Timeout | undefined;
+          try { await Promise.race([execution.catch(() => undefined), new Promise<void>((resolve) => { timer = setTimeout(resolve, 2_000); })]); }
+          finally { if (timer) clearTimeout(timer); }
+          if (!executionSettled) {
+            this.d.scheduler.quarantineExecution(task, execution);
+            const payload = (checkpointPayload ?? { purpose, result: "", sideEffects: observedEffects(), harness: verdict.harness, model: verdict.model, brief: evidenceExcerpt(brief, 8_000) }) as Record<string, unknown>;
+            checkpointPayload = { ...payload, ok: false, sideEffectsKnown: false, result: evidenceExcerpt(`${payload.result}\n执行器未在退场时限内结束；续跑前必须核对现场。`) };
+          }
+        }
+        // Keep locks until the adapter has had a bounded chance to reap its child processes.
+        restoreProtected(task.cwd, prot, snapshot);
+        if (checkpointPayload) this.ctx.emit(task.id, "checkpoint", checkpointPayload);
+      } finally { release(); }
     }
   }
 
-  private failedAttempt(task: Task, attempt: Attempt): DispatchOutcome {
+  private failedAttempt(task: Task, attempt: Attempt, result = attempt.excerpt): DispatchOutcome {
     this.ctx.emit(task.id, "attempt_failed", { ...attempt, hadSideEffects: hasSideEffects(attempt.sideEffects) });
-    return { kind: "failed", attempt };
+    return { kind: "failed", attempt, result: evidenceExcerpt(result) };
   }
 
   /** Done: the loop model's result when it wrote one, else the last successful executor reply. */
   private finish(task: Task, st: State, result: string | null): void {
+    if (!this.active(task.id)) return;
     const text = result ?? st.lastSuccess?.lastText ?? "";
     this.ctx.store.updateTask(task.id, { status: "done", result: text });
     this.ctx.emit(task.id, "done", { result: text, tokens: st.tokens, sideEffects: st.sideEffects, agents: st.lastSuccess?.agents ?? NO_AGENTS, dispatches: st.dispatches });
   }
 
   private fail(id: string, error: string, security = false): void {
+    if (!this.active(id)) return;
     this.ctx.store.updateTask(id, { status: "failed", error });
     this.ctx.emit(id, "failed", { error, security });
+  }
+
+  private incomplete(task: Task, st: State | null, reason: string, status?: "partial" | "blocked", result?: string | null): void {
+    if (!this.active(task.id)) return;
+    const terminal = status ?? (st?.lastSuccess ? "partial" : "blocked");
+    const text = result ?? st?.lastSuccess?.lastText ?? "";
+    this.ctx.store.updateTask(task.id, { status: terminal, result: text, error: reason });
+    this.ctx.emit(task.id, terminal, { result: text, error: reason, remaining: [reason], dispatches: st?.dispatches ?? 0 });
   }
 }
 

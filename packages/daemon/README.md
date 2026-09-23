@@ -95,6 +95,29 @@ loop model with the failed target excluded. Budgets: 5 dispatches and 12 loop ca
 once the user says so. Executor questions go to the supervisor first (loop-v0 §6). Timeline events:
 `step` (plan / dispatch / ask_user / finish), `redispatch`, `supervisor {kind: question}`.
 
+## Refusal clarification
+
+All model roles share the privacy and Simplified Chinese communication guidance in
+`src/util/communication.ts`. It limits discussion to facts needed for the current operation;
+it does not establish ownership or authorization for a target. Router questions are requested
+in Chinese. An English question gets one bounded translation attempt before display, with
+its original wording retained in the question evidence; a translation failure shows a Chinese
+notice with the original question. A router `give_up` stops before any executor is selected.
+
+Question cards show submission progress immediately and retain drafts across live updates.
+An accepted answer stays accepted even if refreshing the view fails. An uncertain network result
+requires checking the question status before another submission.
+
+An executor's direct refusal is recorded even when its process completed successfully. Provider safety
+signals stop automatic recovery. Other refusals can be diagnosed by the router, which may ask one factual
+question or select exact quotations from the user's task, parent messages, environment context or answers.
+The daemon checks each quotation against its source and records the source ID and SHA-256 hash in a
+`refusal` event. It appends those statements to the original brief without changing the target or permissions.
+At most one clarification retry is allowed per task, on the same model and existing session. Side effects,
+missing execution telemetry, invalid diagnosis, policy restrictions, a repeated refusal or a failed retry
+stop recovery; none triggers automatic model switching. Refusals bypass ordinary success acceptance.
+Answers submitted through the API pass the configured sealer before being stored, just like new tasks.
+
 ## Supervisor (supervisor-v0)
 
 The router model also supervises (`router.supervisor` in targets.yaml). Approvals an executor
@@ -203,8 +226,9 @@ are always allowed. Skills can be imported by copy from `~/.claude/skills`, `~/.
 | GET | `/threads?status=open\|archived`, `/threads/:id` | list with folded state (title, summary, lastTarget, taskCount) / detail with `state`, `tasks`, `events` |
 | PATCH | `/threads/:id` | `{title?, status?, expires_at?}` |
 | POST | `/threads/:id/archive`, `/threads/:id/reopen` | archive = delete after 7 days (refused while a task runs) / reopen |
-| DELETE | `/threads/:id` | delete now, private home included |
+| DELETE | `/threads/:id` | permanently delete the thread, all its tasks and associated records, and its private home; 409 while any task is active or finishing |
 | GET | `/tasks`, `/tasks/:id` | list / detail with pending approvals |
+| DELETE | `/tasks/:id` | permanently delete one task and its stored records/artifacts; remove an empty thread, retain other tasks and the user's working directory; 409 while the thread is active or finishing |
 | GET | `/tasks/:id/events?after=N` | SSE: queued, routed, thread, waiting, dispatched, agent, supervisor, text, tool_call, approval_request, approval_resolved, attempt_failed, redispatch, handoff, summary, done, failed, cancelled, cleaned |
 | POST | `/tasks/:id/approve` | `{approval_id, decision: allow\|deny}` |
 | POST | `/tasks/:id/cancel` | abort; pending approvals denied |

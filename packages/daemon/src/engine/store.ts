@@ -2,12 +2,12 @@
 
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { appendFileSync, mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { RecordRow } from "../threads/record.js";
 import type { Thread, ThreadEvent, ThreadEventType, ThreadStatus } from "../threads/types.js";
-import type { Approval, ApprovalKind, ApprovalStatus, NewTask, Task, TaskEvent, TaskEventType } from "./types.js";
+import { TERMINAL, type Approval, type ApprovalKind, type ApprovalStatus, type NewTask, type Task, type TaskEvent, type TaskEventType } from "./types.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -72,6 +72,8 @@ export type StoreOptions = {
   readonly tasksDir?: string;
   /** Where thread private homes live ($AGENTSWITCH_HOME/threads). Memory stores use a temp dir. */
   readonly threadsDir?: string;
+  /** Only daemon-owned artifact copies are removed; a task's cwd is never deleted here. */
+  readonly artifactsDir?: string;
   readonly now?: () => number;
 };
 
@@ -79,6 +81,7 @@ export class Store {
   private readonly db: DatabaseSync;
   private readonly tasksDir: string | undefined;
   private readonly threadsDir: string;
+  private readonly artifactsDir: string | undefined;
   private readonly now: () => number;
 
   constructor(opts: StoreOptions) {
@@ -87,8 +90,10 @@ export class Store {
     this.db = new DatabaseSync(opts.dbPath);
     this.db.exec(SCHEMA);
     migrate(this.db);
-    this.tasksDir = opts.tasksDir;
-    this.threadsDir = opts.threadsDir ?? join(tmpdir(), `agentswitch-threads-${process.pid}`);
+    const root = (path: string): string => { mkdirSync(path, { recursive: true }); return realpathSync(path); };
+    this.tasksDir = opts.tasksDir ? root(opts.tasksDir) : undefined;
+    this.threadsDir = root(opts.threadsDir ?? join(tmpdir(), `agentswitch-threads-${process.pid}`));
+    this.artifactsDir = opts.artifactsDir ? root(opts.artifactsDir) : undefined;
     this.now = opts.now ?? Date.now;
   }
 
@@ -161,14 +166,91 @@ export class Store {
     return this.updateThread(id, { status: "open", expiresAt: null });
   }
 
-  /** Delete the row, its log and its private home. Tasks keep their thread_id (dangling, by design). */
+  /** Delete a task and its owned data. Remaining thread tasks keep their records but start with fresh context. */
+  deleteTask(id: string): boolean {
+    const task = this.getTask(id);
+    if (!task) return false;
+    const thread = task.threadId ? this.getThread(task.threadId) : undefined;
+    const siblings = task.threadId ? this.tasksInThread(task.threadId) : [task];
+    this.assertIdle(siblings);
+    if (thread && siblings.length === 1) return this.deleteThread(thread.id);
+    const files = this.deletionFiles([task], thread);
+    this.removeOwnedFiles(files);
+    this.transaction(() => {
+      this.deleteTaskRows([task]);
+      if (thread) this.resetThreadContext(thread.id);
+    });
+    if (thread) mkdirSync(join(this.threadsDir, thread.id), { recursive: true, mode: 0o700 });
+    return true;
+  }
+
+  /** Delete the thread, every task, its logs and daemon-owned files together; never remove the work directory. */
   deleteThread(id: string): boolean {
     const t = this.getThread(id);
     if (!t) return false;
-    rmSync(t.home, { recursive: true, force: true });
-    this.db.prepare("DELETE FROM thread_events WHERE thread_id = ?").run(id);
-    this.db.prepare("DELETE FROM threads WHERE id = ?").run(id);
+    const tasks = this.tasksInThread(id);
+    this.assertIdle(tasks);
+    this.removeOwnedFiles(this.deletionFiles(tasks, t));
+    this.transaction(() => {
+      this.deleteTaskRows(tasks);
+      this.db.prepare("DELETE FROM thread_events WHERE thread_id = ?").run(id);
+      this.db.prepare("DELETE FROM threads WHERE id = ?").run(id);
+    });
     return true;
+  }
+
+  private assertIdle(tasks: readonly Task[]): void {
+    const active = tasks.find((task) => !TERMINAL.has(task.status));
+    if (active) throw new Error(`task ${active.id} is still ${active.status}; cancel it first`);
+  }
+
+  private transaction(run: () => void): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try { run(); this.db.exec("COMMIT"); }
+    catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  private deleteTaskRows(tasks: readonly Task[]): void {
+    for (const task of tasks) {
+      this.db.prepare("UPDATE tasks SET parent_id = NULL WHERE parent_id = ?").run(task.id);
+      this.db.prepare("UPDATE tasks SET handoff_from = NULL WHERE json_extract(handoff_from, '$.taskId') = ?").run(task.id);
+      // Handoff metadata can live in another thread; remove only explicit references, never another task.
+      this.db.prepare("DELETE FROM thread_events WHERE json_extract(payload, '$.taskId') = ? OR json_extract(payload, '$.from.taskId') = ? OR json_extract(payload, '$.to.taskId') = ?").run(task.id, task.id, task.id);
+      for (const table of ["events", "approvals", "records"]) this.db.prepare(`DELETE FROM ${table} WHERE task_id = ?`).run(task.id);
+      this.db.prepare("DELETE FROM tasks WHERE id = ?").run(task.id);
+    }
+  }
+
+  private resetThreadContext(id: string): void {
+    // Summaries and native sessions blend all prior tasks. They cannot be redacted reliably, so discard them.
+    this.db.prepare("DELETE FROM thread_events WHERE thread_id = ? AND type IN ('summary', 'session', 'title', 'handoff')").run(id);
+    this.db.prepare("UPDATE threads SET title = NULL, home = ?, updated_at = ? WHERE id = ?").run(join(this.threadsDir, id), this.now(), id);
+  }
+
+  private deletionFiles(tasks: readonly Task[], thread?: Thread): string[] {
+    const files: string[] = [];
+    const child = (root: string, id: string, suffix = ""): string => {
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("unsafe managed file id");
+      // Roots are resolved at startup; a replaced root must not redirect deletion into a user's directory.
+      if (!existsSync(root) || realpathSync(root) !== root) throw new Error("managed file root changed; refusing deletion");
+      return join(root, id + suffix);
+    };
+    for (const task of tasks) {
+      if (this.tasksDir) files.push(child(this.tasksDir, task.id, ".jsonl"));
+      if (this.artifactsDir) files.push(child(this.artifactsDir, task.id));
+    }
+    if (thread) files.push(child(this.threadsDir, thread.id));  // never trust a persisted home path for deletion
+    const cwds = (this.db.prepare("SELECT DISTINCT cwd FROM tasks").all() as { cwd: string }[]).map(({ cwd }) => existsSync(cwd) ? realpathSync(cwd) : resolve(cwd));
+    return files.filter((file) => {
+      // rm removes a final-component symlink itself, without following its target.
+      if (existsSync(file) && lstatSync(file).isSymbolicLink()) return true;
+      if (cwds.some((cwd) => cwd === file || cwd.startsWith(file + sep))) throw new Error("managed files overlap a task working directory; refusing deletion");
+      return true;
+    });
+  }
+
+  private removeOwnedFiles(files: readonly string[]): void {
+    for (const file of files) rmSync(file, { recursive: true, force: true });
   }
 
   expiredThreads(now = this.now()): Thread[] {
@@ -222,6 +304,10 @@ export class Store {
   }
 
   updateTask(id: string, patch: Partial<Omit<Task, "id" | "createdAt">>): Task {
+    const existing = this.getTask(id);
+    if (!existing) throw new Error(`task ${id} not found`);
+    // A late async callback cannot revive a task or overwrite its terminal result.
+    if (patch.status && TERMINAL.has(existing.status)) return existing;
     const sets: string[] = ["updated_at = ?"];
     const values: unknown[] = [this.now()];
     const map: Record<string, (v: unknown) => unknown> = {

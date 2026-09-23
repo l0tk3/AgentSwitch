@@ -15,12 +15,16 @@ import type { RoutingLog } from "../router/log.js";
 import { defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
 import type { EngineContext } from "./context.js";
 import type { HandoffFrom, Task } from "./types.js";
+import { loadContext } from "../router/context.js";
+import { platformCheckpoint, platformOrigins, rememberPlatformFacts, safePlatformText } from "../threads/platformMemory.js";
 
 export type ThreadBookDeps = {
   readonly targets: Targets;
   readonly routingLog?: RoutingLog;
   readonly summarizer?: Summarizer;
   readonly memoryPath?: string;
+  readonly platformMemoryPath?: string;
+  readonly contextPath?: string;
   readonly cleanupPaths?: CleanupPaths;
 };
 
@@ -102,7 +106,8 @@ export class ThreadBook {
   }
 
   /** End of every execution: the thread's task event, the track record, then the summary (never blocking on failure). */
-  async finish(taskId: string): Promise<void> {
+  async finish(taskId: string, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
     const task = this.ctx.store.getTask(taskId);
     if (!task?.threadId) return;
     const failed = task.attempts.at(-1);
@@ -120,21 +125,32 @@ export class ThreadBook {
         userHandoff: events.some((e) => e.type === "handoff" && e.payload.reason === "user"), rating: task.rating,
       });
     }
-    await this.summarize(task);
+    // A queued cancellation may reach finish before acquiring the thread/cwd locks. It has no
+    // execution to summarize, and must not overwrite the preceding task's still-pending summary.
+    // Routing/planner-only failures remain in the task record and events above for follow-up.
+    if (events.some((event) => event.type === "dispatched")) await this.summarize(task, signal);
   }
 
-  private async summarize(task: Task): Promise<void> {
+  private async summarize(task: Task, signal?: AbortSignal): Promise<void> {
     const summarizer = this.deps.summarizer;
     if (!summarizer || !task.threadId) return;
+    if (signal?.aborted) return;
     const previous = this.state(task.threadId).summary;
-    const r = await summarizer({ previous, task: task.task, brief: task.brief, target: `${task.harness ?? "?"}/${task.model ?? "?"}`, status: task.status, result: task.result ?? task.error ?? "", diff: gitDiffSummary(task.cwd), cwd: task.cwd });
+    const evidence = this.ctx.store.eventsSince(task.id).map(platformCheckpoint).filter((point) => point !== null);
+    const context = loadContext(this.deps.contextPath).text;
+    const knownPlatformOrigins = platformOrigins(task.task, context);
+    const r = await summarizer({ previous, task: task.task, brief: task.brief, target: `${task.harness ?? "?"}/${task.model ?? "?"}`, status: task.status, result: task.result ?? "", error: task.error, diff: gitDiffSummary(task.cwd), cwd: task.cwd, evidence, knownPlatformOrigins }, signal);
+    if (signal?.aborted || !this.ctx.store.getTask(task.id) || !this.ctx.store.getThread(task.threadId)) return;
     if (!r.summary) { this.ctx.emit(task.id, "summary", { ok: false, error: r.error, ms: r.ms }); return; }
     const ev = this.ctx.store.appendThreadEvent(task.threadId, "summary", { ...r.summary });
     if (!previous) this.ctx.store.updateThread(task.threadId, { title: r.summary.title });
     if (r.summary.spoken) this.ctx.store.updateTask(task.id, { spoken: r.summary.spoken });
-    // Memory is about the user's environment: a throwaway chat in a temp dir has nothing worth keeping.
-    const worthRemembering = !task.ephemeral || kindOf(task.task, task.decision) === "browser";
-    const memory = this.deps.memoryPath && worthRemembering && r.summary.facts.length ? appendMemory(this.deps.memoryPath, r.summary.facts, { taskId: task.id, ts: this.ctx.now() }) : null;
-    this.ctx.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, spoken: r.summary.spoken, ms: r.ms, ...(memory ? { remembered: memory.added } : {}) });
+    // Browser experience requires checkpoint evidence; it never goes into the unscoped legacy facts file.
+    const browser = task.needsBrowser || task.decision?.needs_browser || kindOf(task.task, task.decision) === "browser";
+    const facts = r.summary.facts.filter(safePlatformText);
+    const memory = this.deps.memoryPath && !browser && !task.ephemeral && facts.length ? appendMemory(this.deps.memoryPath, facts, { taskId: task.id, ts: this.ctx.now() }) : null;
+    const platform = this.deps.platformMemoryPath && r.summary.platformFacts?.length
+      ? rememberPlatformFacts(this.deps.platformMemoryPath, r.summary.platformFacts, { taskId: task.id, task: task.task, context, checkpoints: evidence, now: this.ctx.now() }) : null;
+    this.ctx.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, spoken: r.summary.spoken, ms: r.ms, ...(memory ? { remembered: memory.added } : {}), ...(platform ? { platformRemembered: platform.added.map((entry) => entry.id), platformSkipped: platform.skipped.length } : {}) });
   }
 }

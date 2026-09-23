@@ -12,6 +12,8 @@ import type { RoutingLog } from "../router/log.js";
 import type { Supervisor } from "../router/supervisor.js";
 import type { TargetRef } from "../router/targets.js";
 import type { Summarizer } from "../threads/summary.js";
+import { removeTaskMemories } from "../threads/memory.js";
+import { removeTaskPlatformMemories } from "../threads/platformMemory.js";
 import { collectOut } from "../files/artifacts.js";
 import { join } from "node:path";
 import { DEFAULT_POLICY, loadPolicy, type ApprovalPolicy } from "./approvalPolicy.js";
@@ -21,7 +23,7 @@ import { cleanupEphemeral, defaultCleanupPaths, type CleanupPaths } from "./clea
 import { Composer, type ComposeDeps } from "./compose.js";
 import { engineContext, type EngineContext } from "./context.js";
 import type { Release } from "./locks.js";
-import { DEFAULT_MAX_TASKS, Scheduler } from "./scheduler.js";
+import { DEFAULT_MAX_TASKS, ExecutionStillRunningError, Scheduler } from "./scheduler.js";
 import type { Store } from "./store.js";
 import { superviseApproval } from "./supervise.js";
 import { TaskLoop } from "./taskLoop.js";
@@ -42,6 +44,8 @@ export type EngineDeps = ComposeDeps & {
   readonly artifactsDir?: string;
   /** Rewrites the thread summary after every execution (threads-v0 §3); absent in tests. */
   readonly summarizer?: Summarizer;
+  /** Bound all summary work, including a custom summarizer that ignores cancellation. */
+  readonly summaryTimeoutMs?: number;
   /** Paths no executor may change; restored after every run as the last line of defense. */
   readonly protected?: ProtectedPaths;
   readonly now?: () => number;
@@ -49,6 +53,8 @@ export type EngineDeps = ComposeDeps & {
   readonly maxConcurrentTasks?: number;
   /** docs/supervisor-v0.md: approvals on the user's behalf, watchdog during execution, acceptance on done. */
   readonly supervisor?: Supervisor;
+  /** Text-only router for translating a question, with no task execution or workspace tools. */
+  readonly questionRouter?: Router;
   /** $AGENTSWITCH_HOME/approvals.json: who answers which approvals (manual / auto / scoped). */
   readonly policyPath?: string;
   /** loop-v0 §6: the planner for a multi-step task, given the router's pick (validated by the factory); null = the router runs it. */
@@ -60,6 +66,7 @@ export { MAX_CLARIFICATIONS } from "./taskLoop.js";
 export type PlannerFactory = (pick: TargetRef | null) => { readonly router: Router; readonly target: TargetRef } | null;
 
 export type HandoffRequest = { readonly to?: TargetRef; readonly cwd?: string; readonly ephemeral?: boolean };
+export type DeleteResult = { readonly ok: true } | { readonly ok: false; readonly code: "not_found" | "busy"; readonly error: string };
 
 export class Engine {
   private readonly ctx: EngineContext;
@@ -128,6 +135,43 @@ export class Engine {
     return updated;
   }
 
+  /** Terminal status is published before summaries and cleanup finish; deletion also waits for that work. */
+  deleteTask(id: string): DeleteResult {
+    const task = this.ctx.store.getTask(id);
+    if (!task) return { ok: false, code: "not_found", error: "not found" };
+    const related = task.threadId ? this.ctx.store.tasksInThread(task.threadId) : [task];
+    const blocked = this.deletionBlocker(related);
+    if (blocked) return blocked;
+    this.ctx.store.deleteTask(id);
+    this.forgetTasks([task]);
+    return { ok: true };
+  }
+
+  deleteThread(id: string): DeleteResult {
+    if (!this.ctx.store.getThread(id)) return { ok: false, code: "not_found", error: "not found" };
+    const tasks = this.ctx.store.tasksInThread(id);
+    const blocked = this.deletionBlocker(tasks);
+    if (blocked) return blocked;
+    this.ctx.store.deleteThread(id);
+    this.forgetTasks(tasks);
+    return { ok: true };
+  }
+
+  private deletionBlocker(tasks: readonly Task[]): DeleteResult | null {
+    const pending = tasks.map((task) => this.scheduler.pendingExecution(task)).find(Boolean);
+    if (pending) return { ok: false, code: "busy", error: `任务 ${pending.id} 的执行器尚未退出，请稍后再删除` };
+    const busy = tasks.find((task) => !TERMINAL.has(task.status) || this.inFlight.has(task.id));
+    return busy ? { ok: false, code: "busy", error: this.inFlight.has(busy.id) && TERMINAL.has(busy.status)
+      ? `task ${busy.id} is still finishing; retry shortly`
+      : `task ${busy.id} is still ${busy.status}; cancel it first` } : null;
+  }
+
+  private forgetTasks(tasks: readonly Task[]): void {
+    for (const task of tasks) this.deps.routingLog?.deleteTask(task.id, task.routeLogId);
+    removeTaskMemories(this.deps.memoryPath, tasks.map((task) => task.id));
+    if (this.deps.platformMemoryPath) removeTaskPlatformMemories(this.deps.platformMemoryPath, tasks.map((task) => task.id));
+  }
+
   resolveApproval(approvalId: string, decision: "allow" | "deny", status?: Exclude<ApprovalStatus, "pending">, by?: ResolvedBy): boolean {
     return this.desk.resolve(approvalId, decision, status, by);
   }
@@ -164,20 +208,45 @@ export class Engine {
     const controller = new AbortController();
     this.controllers.set(id, controller);
     const held: Release[] = [];
+    // Snapshot only older submissions, before our first await; this cannot form a wait cycle.
+    const preceding = [...this.inFlight].filter(([otherId]) => {
+      const other = this.ctx.store.getTask(otherId);
+      return otherId !== id && (otherId === task.parentId || !!task.threadId && other?.threadId === task.threadId);
+    }).map(([, promise]) => promise);
     try {
+      if (preceding.length) {
+        this.ctx.emit(id, "waiting", { for: task.parentId && this.inFlight.has(task.parentId) ? "parent" : "thread", ...(task.parentId ? { taskId: task.parentId } : {}) });
+        await waitUnlessCancelled(Promise.all(preceding), controller.signal);
+      }
       if (task.parentId) await this.scheduler.awaitParent(task, controller.signal);   // before taking a slot: waiting on a parent costs nothing
       held.push(await this.scheduler.acquireGlobal(task, controller.signal));
       if (controller.signal.aborted) return;
       await this.loop.run(task, controller.signal, held);
     } catch (err) {
-      if (this.ctx.store.getTask(id)?.status !== "cancelled") this.fail(id, (err as Error).message);
+      if (!TERMINAL.has(this.ctx.store.getTask(id)?.status ?? "failed")) {
+        if (err instanceof ExecutionStillRunningError) {
+          this.ctx.store.updateTask(id, { status: "blocked", error: err.message });
+          this.ctx.emit(id, "blocked", { error: err.message, remaining: [err.message], dispatches: 0 });
+        } else this.fail(id, (err as Error).message);
+      }
     } finally {
       this.controllers.delete(id);
       this.desk.expireAll(id);                       // the executor moved on without an answer
-      for (const release of held.reverse()) release();
-      await this.threads.finish(id);                 // before cleanup: the diff needs the work dir
-      const final = this.ctx.store.getTask(id) ?? task;   // joining a thread may have moved the task out of its temp dir
-      if (final.ephemeral) this.cleanup(final);
+      const finishCtl = new AbortController();
+      const timer = setTimeout(() => finishCtl.abort(new Error("摘要生成超时")), this.deps.summaryTimeoutMs ?? 45_000);
+      try {
+        // Keep thread/cwd locked until its summary is committed, and bound an unresponsive model.
+        await waitUnlessCancelled(this.threads.finish(id, finishCtl.signal), finishCtl.signal);
+      } catch {
+        this.ctx.emit(id, "summary", { ok: false, error: "摘要未能及时保存；已保留步骤检查点，下次继续前需核对现场" });
+      } finally {
+        clearTimeout(timer);
+        finishCtl.abort();
+        try {
+          const final = this.ctx.store.getTask(id) ?? task;
+          if (final.ephemeral && !this.scheduler.pendingExecution(final)) this.cleanup(final);
+        } finally { for (const release of held.reverse()) release(); }
+      }
     }
   }
 
@@ -188,7 +257,20 @@ export class Engine {
   }
 
   private fail(id: string, error: string): void {
+    const task = this.ctx.store.getTask(id);
+    if (!task || TERMINAL.has(task.status)) return;
     this.ctx.store.updateTask(id, { status: "failed", error });
     this.ctx.emit(id, "failed", { error, security: false });
   }
+}
+
+async function waitUnlessCancelled<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  let abort!: () => void;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason ?? new Error("cancelled"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try { return await Promise.race([work, stopped]); }
+  finally { signal.removeEventListener("abort", abort); }
 }

@@ -9,6 +9,8 @@ export type UserQuestion = {
   readonly id: string;
   readonly header: string;
   readonly text: string;
+  /** Kept for answer attribution when a router question was translated for display. */
+  readonly originalText?: string | undefined;
   readonly options: readonly { readonly label: string; readonly description: string }[];
   readonly multi: boolean;
   /** The harness flagged the answer as sensitive: the card tells the user to answer with secret-gate ciphertext. */
@@ -21,9 +23,13 @@ export type UserAnswers = Readonly<Record<string, readonly string[]>>;
 const Option = z.object({ label: z.string().min(1), description: z.string().default("") });
 export const UserQuestionSchema = z.object({
   id: z.string().min(1), header: z.string().default(""), text: z.string().min(1),
+  originalText: z.string().min(1).optional(),
   options: z.array(Option).default([]), multi: z.boolean().default(false), secret: z.boolean().default(false),
 });
-export const UserAnswersSchema = z.record(z.string().min(1), z.array(z.string().min(1).max(4000)).min(1));
+export const MAX_ANSWER_LENGTH = 4000;
+export const MAX_SEALED_ANSWER_LENGTH = 65_536;
+const answersSchema = (maxLength: number) => z.record(z.string().min(1), z.array(z.string().min(1).max(maxLength).refine((s) => !!s.trim())).min(1));
+export const UserAnswersSchema = answersSchema(MAX_ANSWER_LENGTH);
 
 export type QuestionEvidence = { readonly source: QuestionSource; readonly questions: readonly UserQuestion[] };
 const EvidenceSchema = z.object({ source: z.enum(["router", "executor"]), questions: z.array(UserQuestionSchema).min(1) });
@@ -31,11 +37,11 @@ const EvidenceSchema = z.object({ source: z.enum(["router", "executor"]), questi
 export const CLARIFY_ID = "clarify";
 
 /** What the harness's tool gets back when nobody answered: the model must not invent an answer. */
-export const NO_ANSWER_MESSAGE = "The user did not answer within the time limit. Proceed only where a wrong guess is harmless; otherwise stop and report exactly what you need.";
+export const NO_ANSWER_MESSAGE = "The required question was not answered. Stop this execution; do not guess, perform further operations, or report completion. The task is blocked until the user supplies the missing answer.";
 
 /** The router's one free-text question, in the shared shape. */
-export function clarifyQuestion(text: string): UserQuestion {
-  return { id: CLARIFY_ID, header: "路由器", text, options: [], multi: false, secret: false };
+export function clarifyQuestion(text: string, originalText?: string): UserQuestion {
+  return { id: CLARIFY_ID, header: "路由器", text, ...(originalText && originalText !== text ? { originalText } : {}), options: [], multi: false, secret: false };
 }
 
 export function encodeEvidence(ev: QuestionEvidence): string { return JSON.stringify(ev); }
@@ -51,8 +57,9 @@ export function answersFromText(questions: readonly UserQuestion[], text: string
 }
 
 /** Every question must be answered with at least one non-empty entry; nothing else may be present. */
-export function validateAnswers(questions: readonly UserQuestion[], answers: unknown): { ok: true; answers: UserAnswers } | { ok: false; error: string } {
-  const parsed = UserAnswersSchema.safeParse(answers);
+export function validateAnswers(questions: readonly UserQuestion[], answers: unknown, sealed = false): { ok: true; answers: UserAnswers } | { ok: false; error: string } {
+  if (!questions.length || new Set(questions.map((q) => q.id)).size !== questions.length) return { ok: false, error: "questions must have distinct nonempty ids" };
+  const parsed = (sealed ? answersSchema(MAX_SEALED_ANSWER_LENGTH) : UserAnswersSchema).safeParse(answers);
   if (!parsed.success) return { ok: false, error: "answers must map every question id to a non-empty list of strings" };
   const ids = new Set(questions.map((q) => q.id));
   const missing = questions.filter((q) => !parsed.data[q.id]).map((q) => q.id);

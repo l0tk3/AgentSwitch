@@ -10,7 +10,7 @@ import type { SealedEntry } from "../secrets/sealer.js";
 /** Who handed this task over (threads-v0 §4); the engine builds the handoff package from it at dispatch. */
 export type HandoffFrom = TargetRef & { readonly taskId: string; readonly reason: "user" | `failure:${string}` | "quota" };
 
-export type TaskStatus = "queued" | "routing" | "running" | "waiting_approval" | "done" | "failed" | "cancelled";
+export type TaskStatus = "queued" | "routing" | "running" | "waiting_approval" | "done" | "partial" | "blocked" | "failed" | "cancelled";
 
 export type NewTask = {
   readonly task: string;
@@ -76,8 +76,13 @@ export type TaskEventType =
   | "approval_request"
   | "approval_resolved"
   | "attempt_failed"
+  | "refusal"
+  | "credential_repair"
+  | "checkpoint"
   | "redispatch"
   | "done"
+  | "partial"
+  | "blocked"
   | "failed"
   | "cancelled"
   | "cleaned"
@@ -87,6 +92,7 @@ export type TaskEventType =
   | "waiting"
   | "agent"
   | "supervisor"
+  | "feedback"
   | "rated"
   | "sealed"
   | "step";
@@ -116,4 +122,4 @@ export type Approval = {
   readonly answer: string | null;
 };
 
-export const TERMINAL: ReadonlySet<TaskStatus> = new Set(["done", "failed", "cancelled"]);
+export const TERMINAL: ReadonlySet<TaskStatus> = new Set(["done", "partial", "blocked", "failed", "cancelled"]);

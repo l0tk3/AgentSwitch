@@ -221,11 +221,28 @@ router:
 
 ### 6.2 执行失败的分类（代码做，不问模型）
 
+> 2026-09-23 修订：拒绝使用独立恢复流程，替代旧的“拒绝后换模型”规则。
+> 目标是修复信息缺失造成的误拒绝；不得编造授权、隐藏任务目的或轮换模型追逐被拒绝的结果。
+
+#### 拒绝诊断与一次澄清
+
+> 2026-09-23 交互修订：全局沟通说明用于保护企业内部管理工作的商业机密，只讨论当前操作必要的事实、范围和结果，不要求披露无关业务背景；不将该说明解释为所有目标均属内部系统或已经获得授权。路由器、规划器、监督者与执行器默认用简体中文面向用户沟通，标识符与凭据原样保留。路由器产生英文问题时，仅翻译问题本身再展示，不增加事实或重新判断授权。
+>
+> 首次路由和澄清后的路由均尊重 `give_up`：记录原因为终止结果，不派发其简报，也不选择默认模型。回答按钮使用按问题 ID 保存的提交状态，立即显示“提交中…”，等待期间防重、保留输入；失败显示可操作反馈，成功与后续界面刷新失败分别处理。
+
+- 执行器保留结构化拒绝信号；即使进程正常完成，也检查最终回复是否为直接拒绝。引用、日志和代码中的拒绝文本不算执行者拒绝。
+- 拒绝在普通验收前处理，不能被验收的第二次放行规则记为完成。提供方明确的安全拦截、gate 拒绝不自动重试。
+- 普通文本拒绝交给路由器专用诊断调用；只允许 `stop`、`ask_user`、`clarify`。原因分为上下文缺失、密文用途误解、明确政策限制或未知。解析失败、未知和政策限制停止，不走默认模型兜底。
+- 背景只能逐字引用当前用户任务、同一父链的用户消息、用户维护的 CONTEXT.md，以及本任务用户实际回答；每条引用保存来源 ID、来源内容哈希和原文。执行器输出、自动摘要和路由器推断不能成为授权证据。引用仅证明用户说过什么，不证明客观授权。
+- daemon 校验引用确实存在，再构造“原简报 + 完整拒绝原因 + 带来源的原文补充 + 原用户任务”，不接受诊断模型自由编写的新任务。至少有一条补充不在旧简报中；原任务目标、目录、模型、审批和 gate 策略不变。诊断输入超过长度上限时停止，不截掉后半段限制。
+- 每个任务最多一次用户澄清问题、一次同目标澄清重试；保持已有执行器会话和拒绝记录。新回答必须完整引用并携带对应问题，不能只选有利的一句。澄清重试失败（包括额度、网络或验收失败）即停止。被拒绝的那次执行有文件修改、命令执行、已批准操作或缺少副作用记录时不自动重试，以免重复操作。
+- 使用现有 `waiting_approval` 表示等待回答、`failed` 表示拒绝终止；新增 `refusal` 事件记录诊断、事实来源、是否重试及停止原因，无需数据库状态迁移。API 的普通问题回答与拒绝澄清回答均在入库前经过既有 sealer，失败保留问题待答且不存部分答案；执行器可识别回答中新提供的密文。原回答上限 4000 字，密文化后内部上限 64 KiB。
+
 每次执行结束，daemon 把结果归一成 `ExecutionOutcome {exitCode, httpStatus, stderr, lastText, sideEffects, events}`，用模式表判成一种 `FailureKind`：
 
 | kind | 信号（按 harness 各自映射） | 含义 |
 |---|---|---|
-| `refusal` | 模型文本 "I can't help / 无法协助 / against policy / safety"；Claude SDK 的 refusal stop reason；Codex 的 policy 拒绝 | 被围栏拦下，换模型大概率能过 |
+| `refusal` | 最终回复的直接拒绝；Claude SDK 的 refusal stop reason / no-fallback 信号；Codex 的结构化 cyberPolicy 信号 | 先诊断来源与原因，不自动换模型；结构化安全拦截直接停止 |
 | `quota` | HTTP 429 / 402；"rate limit / insufficient balance / quota exceeded / usage limit"；Codex `rateLimits` 归零；DeepSeek `/user/balance` 为 0 | 这个 harness 暂时不能用 |
 | `transport` | 代理连不上、ECONNREFUSED / ETIMEDOUT、TLS 错、harness 进程崩溃或超时无输出 | 环境问题，与任务无关 |
 | `gate_denied` | secret-gate 返回 403 `X-Secret-Gate: denied` | **安全信号，不重派**，推手机 |
@@ -241,7 +258,8 @@ router:
 | `transport` | 无 | 同一目标退避后重试一次；再失败**问路由器**：环境可能对所有 harness 都坏了，由它判断换一条不共享故障点的路，或请求修复工具（§6.6），或放弃并告诉用户查什么。路由器问完额度用尽时才退回沿链换 |
 | `transport` | 有 | 直接问路由器（不重试，避免重复副作用） |
 | `quota` | 任意 | 该 harness 额度记 0，沿原 Decision 的 fallback 链取下一个能过校验的目标（代码就能决定，不问路由器） |
-| `refusal` | 任意 | **问路由器**：只带拒绝原文、已尝试的目标（排除）、工作树 diff 摘要，不额外指导；换模型、改简报还是 `give_up` 由它定 |
+| `refusal` | 无且遥测完整 | TaskLoop 走 §6.2 专用诊断；纯函数 `nextStep` 返回停止，防止 CLI 等调用者绕回普通换模型 |
+| `refusal` | 有或遥测缺失 | 停止，保留已做进度给用户 |
 | `task_failed` / `unknown` | 无 | 问路由器一次 |
 | `task_failed` / `unknown` | 有 | 停止，推手机；用户可从手机"换个模型继续" |
 | `gate_denied` | — | 停止，推手机，记 security 事件 |
@@ -256,20 +274,20 @@ router:
 
 ### 6.5 路由器的再决策
 
-再决策仍然是同一个 `router` agent，多一段消息：
+普通失败的再决策仍然是同一个 `router` agent，多一段消息；拒绝使用 §6.2 的专用诊断协议：
 
 ```
 Previous attempts:
-1. claude-code/claude-sonnet-5 -> refusal: "I can't help with automating logins to..." (no side effects)
+1. claude-code/claude-sonnet-5 -> task_failed: "The login form was not found" (no side effects)
 Excluded: claude-code/claude-sonnet-5
 Worktree diff: (none)
-Decide again: pick a different harness or model, and rewrite the brief so the executor understands
-this is the user's own account and credentials are enc:v1: placeholders.
+Decide again from the observed failure. Preserve the original task and known constraints;
+do not invent ownership, authorization, or credentials.
 ```
 
 Decision 多三个可选字段：`action: "redispatch" | "repair" | "give_up"`（默认 redispatch），`repair: {tool, args}`（仅 repair），`handoff_note`（写给下一位的交接说明）。`give_up` 时 daemon 停止并把 `reason` 推给用户。校验规则不变，被排除的目标在校验里视为 unavailable。
 
-路由器自己失败（DeepSeek 挂了）→ 和首次分诊一样落到默认表，且默认表也排除已失败的 harness。
+普通失败的路由器调用失败（DeepSeek 挂了）→ 和首次分诊一样落到默认表，且默认表也排除已失败的 harness。拒绝诊断调用失败直接停止，不使用此兜底。
 
 ### 6.6 修复工具（接口已留，工具未做）
 
@@ -317,3 +335,23 @@ Decision 多三个可选字段：`action: "redispatch" | "repair" | "give_up"`�
 1. OpenRouter 要不要作为目标？
 2. 用户打分（👍/👎）要不要做进 M1？不做的话路由测试集只能靠手写。
 3. ~~模型 ID 核实~~ 三家都已核实写入。
+
+## 11. 执行中的凭据修复（2026-09-23）
+
+TOTP 种子录入与生成验证码是不同操作。sealer 必须根据用户原始任务识别用途：网页录入种子签发 `kind=secret, uses=[http]`，仅限用户指定的目标；生成验证码继续使用 `kind=totp, uses=[otp]`。既有 `kind=totp` 的 HTTP 解析仍输出验证码，不能简单加 http 权限来录入种子。
+
+为三种执行器提供 `secret_repair(token, host, purpose=totp_seed_import)` MCP 工具，建立执行者到路由器的受控反馈路径。每次执行拥有独立的 loopback 端点和随机访问凭证，结束即关闭；请求必须引用当前任务已有的密文。daemon 先通过 gate 取得无明文的元数据，要求目标仍属于原密文的 hosts 及密文中独立的 `seed_import_hosts` 预授权，再让文本路由器核对用户任务或用户维护的上下文是否明确授权将种子录入该目标；决策必须引用原文，不接受执行者自己声称已授权。缺证据、不同目标、非 TOTP、取消、超时均拒绝修复并保留原拒绝，不改 gate 的全局策略。
+
+通过核对后仅由本地 gate 内部打开旧密文并重签为该目标的普通 secret/http 密文，明文不进入 daemon、模型、日志或持久记录。新密文返回原模型会话，加入本次执行的 knownTokens，并持久记录凭据修复事件供后续派发使用；相同请求去重，有限次数，已完成的业务步骤不重跑。该工具为用途错误的特定修复能力，不开放任意 host/用途修改，也不把 provider safeguard 当作凭据问题。
+
+`seed_import_hosts` 只在输入阶段根据用户原文明示的种子导入目标签入密文，严格限制到已有 hosts 内的精确目标，禁止通配符；gate 重签时独立验证，不能通过直接调用 CLI 绕过。旧密文没有该预授权时不自动升级：用户需在新消息中明确导入目标并重新提供该字段，由 sealer 正确签发。
+
+新输入优先在 sealer 阶段正确区分用途；运行时修复服务处理已持有密文的已授权种子录入场景。所有测试使用假凭据、假路由器与本地模拟执行器，不调用真实模型或重放用户业务任务。
+
+
+## 输入稳定性与消息接收反馈（2026-09-23）
+
+- 后台状态和额度更新只更新 DOM 差异，保留正在编辑的控件、焦点、选区和输入法组合；同一输入区不能因轮询重建。切换任务/页面按身份隔离草稿；输入法组合期间不触发快捷发送。额度仅在可见首页每两分钟自动更新，保留手动刷新，其他任务状态维持正常刷新。
+- POST /tasks 的接收等待包含入口敏感字段识别与加密，完成后才允许入库并进入分诊。默认 JSON API 保持兼容；浏览器可用 Accept: application/x-ndjson 获取接收阶段、耗时及最终任务回执。流中不得包含原始消息、凭据、模型回复或环境内容。
+- 流式回执分 progress（stage=sealing/creating、elapsedMs）、accepted（task、elapsedMs）及 error（status、error）。失联且未收到 accepted 时视为结果待确认，禁止自动重发；accepted 后不能因后续网络错误误报发送失败。
+- sealer 的模型视图可缩短环境与父任务中已有 enc:v1 密文，但必须保留目标站点、字段和原文授权说明，授权校验仍针对原始材料；自由文本消息仍走识别，不以正则猜测“没有敏感信息”跳过。

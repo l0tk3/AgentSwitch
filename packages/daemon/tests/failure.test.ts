@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyFailure, excerpt, hasSideEffects, NO_SIDE_EFFECTS } from "../src/router/failure.js";
+import { classifyFailure, detectRefusal, excerpt, hasSideEffects, NO_SIDE_EFFECTS } from "../src/router/failure.js";
 
 describe("classifyFailure", () => {
   it("success is not a failure", () => {
@@ -8,6 +8,7 @@ describe("classifyFailure", () => {
 
   it("gate denial wins over everything", () => {
     expect(classifyFailure({ ok: false, gateDenied: true, httpStatus: 429 })).toBe("gate_denied");
+    expect(classifyFailure({ ok: true, gateDenied: true, refusal: { source: "provider", reason: "blocked" } })).toBe("gate_denied");
   });
 
   it("quota: status codes and wording", () => {
@@ -31,6 +32,18 @@ describe("classifyFailure", () => {
     expect(classifyFailure({ ok: false, exitCode: 0, lastText: "I can't help with automating logins to third-party sites." })).toBe("refusal");
     expect(classifyFailure({ ok: false, exitCode: 0, lastText: "抱歉，我无法协助完成这个操作。" })).toBe("refusal");
     expect(classifyFailure({ ok: false, exitCode: 0, lastText: "This request goes against our safety guidelines" })).toBe("refusal");
+  });
+
+  it("a successful process can still refuse the task", () => {
+    const outcome = { ok: true, exitCode: 0, lastText: "I cannot help with that request." };
+    expect(classifyFailure(outcome)).toBe("refusal");
+    expect(detectRefusal(outcome)).toEqual({ source: "text", reason: outcome.lastText });
+  });
+
+  it("explicit provider refusal takes precedence over ordinary failure classification", () => {
+    const refusal = { source: "provider" as const, reason: "provider policy" };
+    expect(detectRefusal({ ok: true, refusal, lastText: "anything" })).toEqual(refusal);
+    expect(classifyFailure({ ok: false, refusal, httpStatus: 429 })).toBe("refusal");
   });
 
   it("task_failed: executor finished and reported a problem; unknown otherwise", () => {

@@ -33,9 +33,9 @@ export function parseRateLimits(result: Json): { remaining: number | null; detai
 export function codexQuota(opts: { binary: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }): QuotaProvider {
   return {
     harness: "codex",
-    async read() {
+    async read(_force, signal) {
       try {
-        const result = await appServerRequest(opts.binary, "account/rateLimits/read", {}, opts.timeoutMs ?? 20_000, opts.env);
+        const result = await appServerRequest(opts.binary, "account/rateLimits/read", {}, opts.timeoutMs ?? 20_000, opts.env, signal);
         return { ...parseRateLimits(result), source: "codex app-server account/rateLimits/read", error: null };
       } catch (err) {
         return { remaining: null, detail: {}, source: "codex app-server", error: (err as Error).message };
@@ -45,17 +45,29 @@ export function codexQuota(opts: { binary: string; timeoutMs?: number; env?: Nod
 }
 
 /** Minimal JSON-RPC over stdio: initialize, one request, exit. Server→client requests are answered with accept. */
-export function appServerRequest(binary: string, method: string, params: Json, timeoutMs: number, env: NodeJS.ProcessEnv = process.env): Promise<Json> {
+export function appServerRequest(binary: string, method: string, params: Json, timeoutMs: number, env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal): Promise<Json> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason ?? new Error("cancelled")); return; }
     const clean = Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && !/^(https?|all)_proxy$/i.test(k))) as Record<string, string>;
     const child = spawn(binary, ["app-server"], { env: clean, stdio: ["pipe", "pipe", "pipe"] });
-    const timer = setTimeout(() => { child.kill(); reject(new Error(`${method}: timed out after ${timeoutMs} ms`)); }, timeoutMs);
-    const send = (msg: Json) => child.stdin.write(JSON.stringify(msg) + "\n");
-    const finish = (fn: () => void) => { clearTimeout(timer); child.kill(); fn(); };
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      child.kill("SIGKILL");  // disposable read-only process: a hung child must not outlive the refresh
+      fn();
+    };
+    const onAbort = () => finish(() => reject(signal?.reason ?? new Error("cancelled")));
+    const timer = setTimeout(() => finish(() => reject(new Error(`${method}: timed out after ${timeoutMs} ms`))), timeoutMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const send = (msg: Json) => { if (!settled) child.stdin.write(JSON.stringify(msg) + "\n"); };
     let stderr = "";
-    child.stderr.on("data", (d) => (stderr += d));
+    child.stderr.on("data", (d) => (stderr = (stderr + String(d)).slice(-2000)));
+    child.stdin.on("error", (e) => finish(() => reject(e)));
     child.on("error", (e) => finish(() => reject(e)));
-    child.on("exit", (code) => { if (code !== null && code !== 0) finish(() => reject(new Error(`app-server exited ${code}: ${stderr.slice(0, 200)}`))); });
+    child.on("close", (code) => finish(() => reject(new Error(`app-server exited ${code}: ${stderr.slice(0, 200)}`))));
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
       let msg: Json;

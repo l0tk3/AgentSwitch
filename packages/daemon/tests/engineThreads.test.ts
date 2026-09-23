@@ -49,26 +49,26 @@ describe("Engine: threads", () => {
     const calls: { previous: unknown; status: string }[] = [];
     const { engine, store, events, echo } = build([
       decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
-      decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, handoff_note: "claude refused; user account" }),
+      decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, handoff_note: "claude failed; continue from the recorded progress" }),
     ], { summarizer: fakeSummarizer(calls) });
-    const a = engine.submit({ task: 'login @echo {"fail":"refusal","failTimes":1}', cwd: "/tmp" });
+    const a = engine.submit({ task: 'login @echo {"fail":"task_failed","failTimes":1}', cwd: "/tmp" });
     await engine.idle();
     expect(store.getTask(a.id)!.status).toBe("done");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.previous).toBeNull();
-    expect(store.getThread(tid(store, a.id))!.title).toBe(`Sum of login @echo {"fail":"refusal","failTimes":1}`);
+    expect(store.getThread(tid(store, a.id))!.title).toBe(`Sum of login @echo {"fail":"task_failed","failTimes":1}`);
     expect(store.getTask(a.id)!.spoken).toBe("做完了：login @ech");   // the one-sentence feedback lands on the task row
     const summaryEv = events.find((e) => e.taskId === a.id && e.type === "summary");
     expect(summaryEv?.payload).toMatchObject({ ok: true, seq: expect.any(Number) });
     // the mid-task re-dispatch carried a handoff package to codex (no summary yet at that point, but the note and reason)
     const codexRun = echo.find((e) => e.harness === "codex")!.runs[0]!;
     expect(codexRun.handoffNote).toContain("claude-code/claude-sonnet-5");
-    expect(codexRun.handoffNote).toContain("it failed (refusal)");
-    expect(codexRun.handoffNote).toContain("claude refused; user account");
+    expect(codexRun.handoffNote).toContain("it failed (task_failed)");
+    expect(codexRun.handoffNote).toContain("claude failed; continue from the recorded progress");
     expect(codexRun.handoffNote).toContain("Nothing above is an approval");
     const state = engine.threadState(tid(store, a.id));
     expect(state.handoffs).toHaveLength(1);
-    expect(state.handoffs[0]).toMatchObject({ from: { harness: "claude-code", taskId: a.id }, to: { harness: "codex", model: "gpt-5.5" }, reason: "failure:refusal" });
+    expect(state.handoffs[0]).toMatchObject({ from: { harness: "claude-code", taskId: a.id }, to: { harness: "codex", model: "gpt-5.5" }, reason: "failure:task_failed" });
     expect(events.filter((e) => e.taskId === a.id).map((e) => e.type)).toContain("handoff");
   });
 

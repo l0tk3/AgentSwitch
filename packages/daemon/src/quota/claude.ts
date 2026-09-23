@@ -7,7 +7,7 @@ import { remainingFromWindows, type RateLimitCache, type RateLimitInfo } from ".
 
 export type ClaudeQuotaOptions = {
   readonly cache: RateLimitCache;
-  readonly probe?: () => Promise<RateLimitInfo[]>;   // one-turn query that yields rate_limit_event infos
+  readonly probe?: (signal?: AbortSignal) => Promise<RateLimitInfo[]>;   // one-turn query that yields rate_limit_event infos
   readonly probeIfOlderThanMs?: number;
 };
 
@@ -16,11 +16,15 @@ export const PROBE_IF_OLDER_THAN_MS = 5 * 60_000;
 export function claudeQuota(opts: ClaudeQuotaOptions): QuotaProvider {
   return {
     harness: "claude-code",
-    async read(force = false) {
+    async read(force = false, signal) {
       let error: string | null = null;
       const age = opts.cache.ageMs();
       if (opts.probe && (age === null || (force && age > (opts.probeIfOlderThanMs ?? PROBE_IF_OLDER_THAN_MS)))) {
-        try { for (const info of await opts.probe()) opts.cache.record(info); } catch (e) { error = `probe: ${(e as Error).message}`; }
+        try {
+          const infos = await opts.probe(signal);
+          signal?.throwIfAborted();
+          for (const info of infos) opts.cache.record(info);
+        } catch (e) { error = `probe: ${(e as Error).message}`; }
       }
       const windows = opts.cache.list();
       return {

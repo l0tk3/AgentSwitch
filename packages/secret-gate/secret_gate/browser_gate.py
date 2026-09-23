@@ -7,6 +7,7 @@ tests). All policy decisions are in browser_policy.py; this module only sequence
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Protocol
@@ -33,6 +34,7 @@ from .browser_policy import (
     strip_file_output,
 )
 from .errors import GateError, PolicyViolation
+from .credential_repair import REPAIR_DESCRIPTION, REPAIR_SCHEMA, REPAIR_TOOL, request_repair
 from .redact import contains_any, redact
 from .resolver import Resolver
 
@@ -73,6 +75,7 @@ class BrowserGate:
             if t.name not in DENIED_TOOLS
         ]
         tools.append(types.Tool(name=SECRET_FILL_TOOL, description=SECRET_FILL_DESCRIPTION, inputSchema=SECRET_FILL_SCHEMA))
+        tools.append(types.Tool(name=REPAIR_TOOL, description=REPAIR_DESCRIPTION, inputSchema=REPAIR_SCHEMA))
         return tools
 
     async def call_tool(self, name: str, args: dict[str, Any]) -> list[types.ContentBlock]:
@@ -80,13 +83,24 @@ class BrowserGate:
             try:
                 return await self._call(name, args)
             except GateError as exc:
-                raise RuntimeError(f"secret-gate: {exc}") from None
+                hint = ""
+                if isinstance(exc, PolicyViolation) and "does not allow use 'http'" in str(exc):
+                    hint = (" If the original task explicitly authorizes importing this TOTP seed into this same host, "
+                            "request secret_repair(token, host, purpose='totp_seed_import'). The original token must "
+                            "already grant seed import; otherwise ask for the field and destination in a new message. "
+                            "Do not change hosts, keep retrying the fill, or substitute a code for the seed.")
+                raise RuntimeError(f"secret-gate: {exc}{hint}") from None
             except Exception as exc:  # noqa: BLE001 - never let a downstream message carry a value back
                 raise RuntimeError(redact(str(exc), self._state.filled) or "browser error") from None
             finally:
                 sweep_output_dir(self._output_dir)
 
     async def _call(self, name: str, args: dict[str, Any]) -> list[types.ContentBlock]:
+        if name == REPAIR_TOOL:
+            if set(args) - {"token", "host", "purpose"}:
+                raise PolicyViolation("credential repair request has unexpected fields")
+            result = await request_repair(args.get("token"), args.get("host"), args.get("purpose", "totp_seed_import"))
+            return [types.TextContent(type="text", text=json.dumps(result))]
         if name == SECRET_FILL_TOOL:
             name, args = "browser_type", secret_fill_to_type(args)
         check_call_allowed(name, args, self._state)

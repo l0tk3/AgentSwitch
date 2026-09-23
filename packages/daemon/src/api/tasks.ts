@@ -5,7 +5,8 @@ import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { ApprovalPolicy } from "../engine/approvalPolicy.js";
-import { TERMINAL, type TaskEvent } from "../engine/types.js";
+import { answersFromText, parseEvidence, validateAnswers } from "../engine/questions.js";
+import { TERMINAL, type Task, type TaskEvent } from "../engine/types.js";
 import { MAX_FILES_PER_UPLOAD } from "../files/names.js";
 import type { Attachment } from "../files/uploads.js";
 import { TargetRef } from "../router/targets.js";
@@ -44,28 +45,90 @@ const HandoffBody = z.object({ to: TargetRef.optional() });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
 const RateBody = z.object({ rating: z.union([z.literal(1), z.literal(-1), z.null()]) });
 
+type IntakeStage = "sealing" | "creating";
+type IntakeResult = { ok: true; task: Task; elapsedMs: number; sealingMs: number }
+  | { ok: false; status: 400 | 404 | 409 | 500 | 503; error: string; streamError: string; elapsedMs: number; sealingMs: number };
+
+/** A bounded receipt, not an execution stream. Slow readers and disconnects never repeat or hold up creation. */
+function intakeStream(receive: (progress: (stage: IntakeStage) => void) => Promise<IntakeResult>, elapsed: () => number): ReadableStream<Uint8Array> {
+  let connected = true;
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      const send = (frame: object) => { if (connected) controller.enqueue(encoder.encode(JSON.stringify(frame) + "\n")); };
+      void (async () => {
+        try {
+          const result = await receive((stage) => send({ type: "progress", stage, elapsedMs: elapsed() }));
+          if (result.ok) send({ type: "accepted", task: result.task, elapsedMs: result.elapsedMs, sealingMs: result.sealingMs });
+          else send({ type: "error", status: result.status, error: result.streamError });
+        } catch {
+          // Provider errors can contain the original input; never echo them into the receipt.
+          send({ type: "error", status: 500, error: "任务接收结果暂时无法确认，请检查任务列表，勿自动重发。" });
+        } finally {
+          if (connected) controller.close();
+        }
+      })();
+    },
+    cancel() { connected = false; },
+  });
+}
+
 export function mountTasks(app: Hono, deps: ApiDeps): void {
   app.post("/tasks", async (c) => {
+    const started = Date.now();
+    const elapsed = () => Date.now() - started;
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
     const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
     const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
     if (cwdProblem) return c.json({ error: cwdProblem }, 400);
-    const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
+    let parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
-    const thread = thread_id ? deps.store.getThread(thread_id) : undefined;
-    if (thread_id && !thread) return c.json({ error: "thread not found" }, 404);
+    const initialThreadId = thread_id ?? parent?.threadId;
+    let thread = initialThreadId ? deps.store.getThread(initialThreadId) : undefined;
+    if (initialThreadId && !thread) return c.json({ error: "thread not found" }, 404);
     if (thread?.status === "archived") return c.json({ error: "thread is archived; reopen it first" }, 409);
-    const sealed = await sealSubmission(deps, rest.task, { ...(parent ? { parentTask: parent.task } : {}), ...(thread?.title ? { threadTitle: thread.title } : {}) });
-    if (!sealed.ok) return c.json({ error: sealed.error }, sealed.code === "unroutable" ? 400 : 503);
-    const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
-    const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
-    const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
-    let attachments: Attachment[] = [];
-    try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
-    catch (err) { return c.json({ error: (err as Error).message }, 400); }
-    const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
-    return c.json(task, 201);
+    const receive = async (progress: (stage: IntakeStage) => void = () => undefined): Promise<IntakeResult> => {
+      let sealingMs = 0;
+      const failure = (status: Extract<IntakeResult, { ok: false }>["status"], error: string, streamError = error): IntakeResult => ({ ok: false, status, error, streamError, elapsedMs: elapsed(), sealingMs });
+      if (deps.sealer) progress("sealing");
+      const sealStarted = Date.now();
+      let sealed: Sealed;
+      try { sealed = await sealSubmission(deps, rest.task, { ...(parent ? { parentTask: parent.task } : {}), ...(thread?.title ? { threadTitle: thread.title } : {}) }); }
+      catch { sealed = { ok: false, code: "unavailable", error: "凭据保护服务暂时不可用，消息未创建任务，请稍后重试。" }; }
+      finally { sealingMs = deps.sealer ? Date.now() - sealStarted : 0; }
+      if (!sealed.ok) return failure(sealed.code === "unroutable" ? 400 : 503, sealed.error, sealed.code === "unroutable"
+        ? "凭据缺少目标站点或原文用途授权，请补充后重试。" : "凭据保护服务暂时不可用，消息未创建任务，请稍后重试。");
+      progress("creating");
+      // Sealing can take seconds. The referenced task/thread may have been deleted or archived meanwhile.
+      parent = parent_id ? deps.store.getTask(parent_id) : undefined;
+      if (parent_id && !parent) return failure(404, "parent task not found");
+      const effectiveThreadId = thread_id ?? parent?.threadId;
+      thread = effectiveThreadId ? deps.store.getThread(effectiveThreadId) : undefined;
+      if (effectiveThreadId && !thread) return failure(404, "thread not found");
+      if (thread?.status === "archived") return failure(409, "thread is archived; reopen it first");
+      const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
+      const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
+      const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
+      let attachments: Attachment[] = [];
+      try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
+      catch (err) { return failure(400, (err as Error).message, "附件无法移入任务目录，请重新检查附件后提交。"); }
+      const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
+      const elapsedMs = elapsed();
+      // A diagnostic failure after submit must not turn an accepted task into a retryable rejection.
+      try { deps.bus.publish(deps.store.appendEvent(task.id, "step", { action: "intake", durationMs: elapsedMs, sealingMs })); } catch { /* The task receipt still takes precedence. */ }
+      return { ok: true, task, elapsedMs, sealingMs };
+    };
+    const wantsStream = (c.req.header("accept") ?? "").split(",").some((part) => part.split(";")[0]?.trim().toLowerCase() === "application/x-ndjson" && !/;\s*q=0(?:\.0*)?(?:\s*;|\s*$)/i.test(part));
+    if (wantsStream) {
+      c.header("Content-Type", "application/x-ndjson; charset=utf-8");
+      c.header("Cache-Control", "no-store");
+      c.header("X-Accel-Buffering", "no");
+      return c.newResponse(intakeStream(receive, elapsed));
+    }
+    const result = await receive();
+    c.header("Server-Timing", `sealing;dur=${result.sealingMs}, intake;dur=${result.elapsedMs}`);
+    return result.ok ? c.json(result.task, 201) : c.json({ error: result.error }, result.status);
   });
 
   // "Hand this to someone else": a follow-up in the same thread, excluding the current executor unless `to` pins one.
@@ -88,6 +151,11 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     return task ? c.json({ ...task, approvals: deps.store.pendingApprovals(task.id) }) : c.json({ error: "not found" }, 404);
   });
 
+  app.delete("/tasks/:id", (c) => {
+    const result = deps.engine.deleteTask(c.req.param("id"));
+    return result.ok ? c.json({ ok: true }) : c.json({ error: result.error }, result.code === "not_found" ? 404 : 409);
+  });
+
   // Files: uploads are staged, then moved into <cwd>/in/ by POST /tasks; downloads come from the
   // artifacts store once an ephemeral cwd is gone, otherwise from the cwd itself.
   app.get("/tasks/:id/events", (c) => {
@@ -97,7 +165,7 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     const after = Number(c.req.query("after") ?? 0);
     return streamSSE(c, async (stream) => {
       let last = after;
-      const ends = (type: string) => type === "done" || type === "failed" || type === "cancelled";
+      const ends = (type: string) => TERMINAL.has(type as import("../engine/types.js").TaskStatus);
       const send = async (ev: { seq: number; type: string; payload: unknown; ts: number }) => {
         if (ev.seq <= last) return;
         last = ev.seq;
@@ -116,7 +184,8 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
       for (const ev of deps.store.eventsSince(id, after)) { await send(ev); ended ||= ends(ev.type); }
       while (queue.length) { const ev = queue.shift()!; await send(ev); ended ||= ends(ev.type); }
       replaying = false;
-      if (ended || TERMINAL.has(deps.store.getTask(id)!.status)) { unsubscribe(); return; }
+      const current = deps.store.getTask(id);
+      if (ended || !current || TERMINAL.has(current.status)) { unsubscribe(); return; }
       stream.onAbort(() => { unsubscribe(); done(); });
       await finished;
       unsubscribe();
@@ -137,7 +206,29 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     const body = AnswerBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "approval_id plus text or answers (question id → strings) required" }, 400);
     if (!owned(c, body.data.approval_id)) return c.json({ error: "no pending question with that id" }, 404);
-    const r = deps.engine.answer(body.data.approval_id, { ...(body.data.text !== undefined ? { text: body.data.text } : {}), ...(body.data.answers !== undefined ? { answers: body.data.answers } : {}) });
+    const approval = deps.store.getApproval(body.data.approval_id)!;
+    const evidence = approval.kind === "question" && approval.status === "pending" ? parseEvidence(approval.evidence) : null;
+    const task = deps.store.getTask(approval.taskId);
+    if (!evidence || !task || TERMINAL.has(task.status)) return c.json({ error: "no pending question with that id" }, 404);
+    const checked = validateAnswers(evidence.questions, body.data.answers ?? answersFromText(evidence.questions, body.data.text?.trim() ?? ""));
+    if (!checked.ok) return c.json({ error: checked.error }, 400);
+    // Answers are another plaintext entrance. Seal before ApprovalDesk stores the answer or emits it.
+    const answers: Record<string, string[]> = {};
+    const entries: SealedEntry[] = [];
+    // Only the sealer sees this plaintext bundle. A host named in another answer can supply
+    // the destination for a credential without ever copying that plaintext into stored evidence.
+    const answerContext = `${task.task}\n\nQuestions and user answers:\n${JSON.stringify({ questions: evidence.questions, answers: checked.answers })}`;
+    for (const [id, values] of Object.entries(checked.answers)) {
+      answers[id] = [];
+      for (const value of values) {
+        const sealed = await sealSubmission(deps, value, { parentTask: answerContext });
+        if (!sealed.ok) return c.json({ error: "could not seal the answer; it was not stored" }, sealed.code === "unroutable" ? 400 : 503);
+        answers[id].push(sealed.text);
+        entries.push(...sealed.sealed);
+      }
+    }
+    const r = deps.engine.answer(body.data.approval_id, { answers, sealed: !!deps.sealer });
+    if (r.ok && entries.length) deps.bus.publish(deps.store.appendEvent(task.id, "sealed", { entries, source: "answer", approvalId: approval.id }));
     return r.ok ? c.json({ ok: true }) : c.json({ error: r.error }, r.code === "not_found" ? 404 : 400);
   });
 

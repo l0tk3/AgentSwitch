@@ -3,6 +3,7 @@
 
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { CredentialRepair } from "./types.js";
 
 export type GateOptions = {
   readonly bin: string;            // .../packages/secret-gate/.venv/bin/secret-gate
@@ -37,6 +38,16 @@ export function gateEnv(gate: GateOptions): Record<string, string> {
   };
 }
 
+/** Keep the repair capability out of harness processes, ordinary shell tools and user extensions. */
+export function withoutCredentialRepair(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { SECRET_GATE_REPAIR_URL: _url, SECRET_GATE_REPAIR_KEY: _key, ...rest } = env;
+  return rest;
+}
+
+function gateMcpEnv(gate: GateOptions, repair?: CredentialRepair): Record<string, string> {
+  return { SECRET_GATE_HOME: gate.home, ...(repair ? { SECRET_GATE_REPAIR_URL: repair.url, SECRET_GATE_REPAIR_KEY: repair.key } : {}) };
+}
+
 /** Env vars a spawned MCP server needs to run at all; the MCP stdio transport does not inherit
  *  the parent environment when an explicit env is given. */
 const INHERITED = ["PATH", "HOME", "SHELL", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "TERM"] as const;
@@ -65,31 +76,32 @@ function playwrightArgs(gate: GateOptions, profile: string): string[] {
 }
 
 /** MCP servers in Claude Code / Agent SDK shape. */
-export function claudeMcpServers(gate: GateOptions, profile: string, browser: boolean): Record<string, { type: "stdio"; command: string; args: string[]; env: Record<string, string> }> {
-  const env = { SECRET_GATE_HOME: gate.home };
+export function claudeMcpServers(gate: GateOptions, profile: string, browser: boolean, repair?: CredentialRepair): Record<string, { type: "stdio"; command: string; args: string[]; env: Record<string, string> }> {
+  const env = gateMcpEnv(gate, repair);
   return {
     "secret-gate": { type: "stdio", command: gate.bin, args: ["mcp"], env },
-    ...(browser ? { playwright: { type: "stdio", command: gate.bin, args: playwrightArgs(gate, profile), env } } : {}),
+    ...(browser ? { playwright: { type: "stdio", command: gate.bin, args: playwrightArgs(gate, profile), env: gateMcpEnv(gate) } } : {}),
   };
 }
 
 /** OpenCode `mcp` + `permission` sections. */
-export function opencodeGateConfig(gate: GateOptions, profile: string, browser: boolean): { mcp: Record<string, unknown>; readDeny: Record<string, string> } {
-  const environment = { SECRET_GATE_HOME: gate.home };
+export function opencodeGateConfig(gate: GateOptions, profile: string, browser: boolean, repair?: CredentialRepair): { mcp: Record<string, unknown>; readDeny: Record<string, string> } {
+  const environment = gateMcpEnv(gate, repair);
   return {
     mcp: {
       "secret-gate": { type: "local", command: [gate.bin, "mcp"], enabled: true, environment },
-      ...(browser ? { playwright: { type: "local", command: [gate.bin, ...playwrightArgs(gate, profile)], enabled: true, environment } } : {}),
+      ...(browser ? { playwright: { type: "local", command: [gate.bin, ...playwrightArgs(gate, profile)], enabled: true, environment: gateMcpEnv(gate) } } : {}),
     },
     readDeny: { [`${gate.home}/*`]: "deny" },
   };
 }
 
 /** Codex config.toml sections (proxy only for the shell tool; never in the codex process env). */
-export function codexGateToml(gate: GateOptions, profile: string, browser: boolean): string {
+export function codexGateToml(gate: GateOptions, profile: string, browser: boolean, repair?: CredentialRepair): string {
   const set = Object.entries(gateEnv(gate)).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join(", ");
   const pw = browser
     ? `\n[mcp_servers.playwright]\ncommand = ${JSON.stringify(gate.bin)}\nargs = ${JSON.stringify(playwrightArgs(gate, profile))}\n\n[mcp_servers.playwright.env]\nSECRET_GATE_HOME = ${JSON.stringify(gate.home)}\n`
     : "";
-  return `[sandbox_workspace_write]\nnetwork_access = true\n\n[shell_environment_policy]\ninherit = "all"\nset = { ${set} }\n\n[mcp_servers.secret-gate]\ncommand = ${JSON.stringify(gate.bin)}\nargs = ["mcp"]\n\n[mcp_servers.secret-gate.env]\nSECRET_GATE_HOME = ${JSON.stringify(gate.home)}\n${pw}`;
+  const mcpEnv = Object.entries(gateMcpEnv(gate, repair)).map(([k, v]) => `${k} = ${JSON.stringify(v)}`).join("\n");
+  return `[sandbox_workspace_write]\nnetwork_access = true\n\n[shell_environment_policy]\ninherit = "all"\nset = { ${set} }\n\n[mcp_servers.secret-gate]\ncommand = ${JSON.stringify(gate.bin)}\nargs = ["mcp"]\n\n[mcp_servers.secret-gate.env]\n${mcpEnv}\n${pw}`;
 }

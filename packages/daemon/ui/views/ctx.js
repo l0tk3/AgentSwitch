@@ -1,8 +1,8 @@
 /** Router context: edit $AGENTSWITCH_HOME/CONTEXT.md (hand-written) and MEMORY.md (appended by the
  *  summarizer); both show the linted text the router actually sees. */
 
-import { esc } from "../lib/api.js";
-import { loadCtxExample, saveCtx, saveMem, savePolicy } from "../lib/actions.js";
+import { esc, stamp } from "../lib/api.js";
+import { deletePlatformMemory, loadCtxExample, loadPlatformMemory, openTask, saveCtx, saveMem, savePolicy } from "../lib/actions.js";
 import { patch } from "../lib/state.js";
 
 const $ = (s) => document.querySelector(s);
@@ -32,6 +32,7 @@ export function render(s) {
           <button class="primary" id="mem-save" ${m.draft === null ? "disabled" : ""}>${m.saved ? "已保存" : "保存"}</button>
           ${m.warnings.length ? `<span class="hint error">${m.warnings.length} 行疑似明文凭据已被删掉</span>` : ""}
         </div>
+        ${platformMemory(s.platformMem)}
       </div>
       <aside class="stack">
         ${policyCard(s.policy)}
@@ -50,6 +51,28 @@ export function render(s) {
         </div>
       </aside>
     </div>`;
+}
+
+function platformMemory(mem = { records: [], loading: false, loaded: false, deletions: {} }) {
+  const records = mem.records.map((record) => {
+    const removal = mem.deletions[record.id] || {};
+    const busy = removal.status === "deleting";
+    const expired = record.expiresAt <= Date.now();
+    return `<article class="card platform-memory ${expired ? "expired" : ""}" aria-busy="${busy}">
+      <div class="row"><b class="grow mono">${esc(record.origin)}</b><button class="small bad" data-delete-memory="${esc(record.id)}" ${busy ? "disabled" : ""}>${busy ? "删除中…" : removal.status === "error" ? "重试删除" : "删除"}</button></div>
+      <div class="chips" style="margin-top:8px"><span class="badge">${record.kind === "incident" ? "临时事件" : "操作经验"}</span><span class="badge">${record.status === "verified" ? "已验证" : "待验证"}</span>${expired ? '<span class="badge blocked">已过期</span>' : ""}</div>
+      <div class="pre" style="margin-top:8px">${esc(record.text)}</div>
+      <div class="dim" style="margin-top:8px">更新 ${stamp(record.updatedAt)} · ${expired ? "已于" : "有效至"} ${stamp(record.expiresAt)}${expired ? " 过期" : ""}</div>
+      <details id="memory-source-${esc(record.id)}" data-keep-open style="margin-top:8px"><summary>来源：任务 ${esc(record.source.taskId)} · 事件 #${record.source.eventSeq}</summary>
+        <blockquote class="pre dim">${esc(record.source.quote)}</blockquote><button class="small" data-memory-task="${esc(record.source.taskId)}">查看来源任务</button>
+      </details>
+      ${removal.message ? `<div class="hint ${removal.status === "error" ? "error" : ""}" role="${removal.status === "error" ? "alert" : "status"}" aria-live="polite" style="margin-top:8px">${esc(removal.message)}</div>` : ""}
+    </article>`;
+  }).join("");
+  return `<section><h2>平台经验 <span class="spacer"></span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></h2>
+    <p class="dim">按具体平台保存的观察记录，带来源和有效期。过期记录不会用于后续任务；这些记录不代表操作授权。</p>
+    ${mem.hint ? `<div class="card bad error" role="alert">${esc(mem.hint)}</div>` : ""}
+    <div class="stack">${records || `<div class="empty">${mem.loading ? "正在加载平台经验…" : mem.loaded ? "暂无平台经验" : "平台经验尚未加载"}</div>`}</div></section>`;
 }
 
 /** Who answers approvals (docs/supervisor-v0.md §1b): manual / auto / scoped with reserved categories. */
@@ -80,6 +103,9 @@ export function onInput(el) {
 export const save = () => saveCtx($("#ctx-text").value);
 
 export const bindings = [
+  { sel: "[data-delete-memory]", run: (el) => deletePlatformMemory(el.dataset.deleteMemory) },
+  { sel: "[data-memory-task]", run: (el) => openTask(el.dataset.memoryTask) },
+  { sel: "#platform-memory-refresh", run: () => loadPlatformMemory() },
   { sel: "#ctx-save", run: () => save() },
   { sel: "#mem-save", run: () => saveMem($("#mem-text").value) },
   { sel: "#ctx-example", run: () => loadCtxExample() },

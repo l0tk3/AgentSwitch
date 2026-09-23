@@ -10,7 +10,7 @@ import { TERMINAL, type ApprovalStatus } from "./types.js";
 export type ResolvedBy = "user" | "router" | "timeout";
 export type RequestOptions = { readonly humanOnly?: boolean };
 /** What the user sent back: plain text answers the first question; `answers` covers several. */
-export type GivenAnswer = { readonly text?: string; readonly answers?: unknown };
+export type GivenAnswer = { readonly text?: string; readonly answers?: unknown; /** Internal API flag after raw length validation and sealing; never accepted from an HTTP body. */ readonly sealed?: boolean };
 export type AnswerResult = { readonly ok: true } | { readonly ok: false; readonly code: "not_found" | "bad_answer"; readonly error: string };
 
 type Pending = { readonly kind: "approval"; readonly resolve: (d: ApprovalDecision) => void; readonly timer: NodeJS.Timeout }
@@ -61,6 +61,12 @@ export class ApprovalDesk {
     const approval = this.ctx.store.resolveApproval(approvalId, status);
     if (!p || !approval) return false;
     this.ctx.emit(approval.taskId, "approval_resolved", { approvalId, decision, status, by, kind: approval.kind });
+    const evidence = p.kind === "question" ? parseEvidence(approval.evidence) : null;
+    const task = this.ctx.store.getTask(approval.taskId);
+    if (evidence && task && !TERMINAL.has(task.status)) this.ctx.emit(approval.taskId, "feedback", {
+      version: 1, approvalId, source: "user", status: "unanswered", questions: evidence.questions, answers: null,
+      reason: status === "expired" ? "问题已超时，尚未得到答复" : "问题未得到答复",
+    });
     this.resume(approval.taskId, "running");
     if (p.kind === "question") p.resolve(null); else p.resolve(decision);
     return true;
@@ -69,10 +75,12 @@ export class ApprovalDesk {
   /** The user's answers. A router question sends the task back to routing; an executor question resumes the run. */
   answer(approvalId: string, given: GivenAnswer): AnswerResult {
     const current = this.ctx.store.getApproval(approvalId);
+    const task = current ? this.ctx.store.getTask(current.taskId) : undefined;
+    if (!task || TERMINAL.has(task.status)) return { ok: false, code: "not_found", error: "no active task with that question" };
     const ev = current?.kind === "question" && current.status === "pending" && this.pending.has(approvalId) ? parseEvidence(current.evidence) : null;
     if (!current || !ev) return { ok: false, code: "not_found", error: "no pending question with that id" };
-    const checked = given.answers !== undefined ? validateAnswers(ev.questions, given.answers)
-      : given.text?.trim() ? { ok: true as const, answers: answersFromText(ev.questions, given.text.trim()) }
+    const checked = given.answers !== undefined ? validateAnswers(ev.questions, given.answers, given.sealed)
+      : given.text?.trim() ? validateAnswers(ev.questions, answersFromText(ev.questions, given.text.trim()), given.sealed)
       : { ok: false as const, error: "text or answers required" };
     if (!checked.ok) return { ok: false, code: "bad_answer", error: checked.error };
     const p = this.take(approvalId);
@@ -80,6 +88,7 @@ export class ApprovalDesk {
     if (!p || p.kind !== "question" || !approval) return { ok: false, code: "not_found", error: "no pending question with that id" };
     const text = describeAnswers(ev.questions, checked.answers);
     this.ctx.emit(approval.taskId, "approval_resolved", { approvalId, decision: "answer", status: "allowed", by: "user", kind: "question", source: ev.source, text, answers: checked.answers });
+    this.ctx.emit(approval.taskId, "feedback", { version: 1, approvalId, source: "user", status: "answered", questions: ev.questions, answers: checked.answers });
     this.resume(approval.taskId, ev.source === "router" ? "routing" : "running");
     p.resolve(checked.answers);
     return { ok: true };

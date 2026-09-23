@@ -75,6 +75,7 @@ function showEvent(ev: TaskEvent): void {
     case "approval_resolved": console.log(`${t} approval ${p.approvalId} -> ${p.decision} (${p.status}, by ${p.by ?? "user"})`); break;
     case "supervisor": console.log(`${t} supervisor ${p.kind}: ${p.decision ?? p.action ?? (p.accepted ? "accepted" : `rejected: ${(p.missing as string[] | undefined)?.join("; ") ?? ""}`)}${p.reason || p.note ? ` — ${p.reason ?? p.note}` : ""} [${p.source}]`); break;
     case "attempt_failed": console.log(`${t} FAILED   ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (side effects)" : ""}`); break;
+    case "refusal": console.log(`${t} refusal  ${p.action}: ${p.note ?? p.reason ?? ""}`); break;
     case "redispatch": console.log(`${t} reroute  ${p.kind}${p.target ? ` -> ${(p.target as { harness: string; model: string }).harness}/${(p.target as { model: string }).model}` : ""}${p.source ? ` (${p.source})` : ""}`); break;
     case "waiting": console.log(`${t} waiting  ${p.for}${p.taskId ? ` (${p.taskId})` : ""}`); break;
     case "agent": console.log(`${t}   agent ${p.status} ${p.description ?? p.agentId ?? ""}${p.summary ? `: ${String(p.summary).slice(0, 120)}` : ""}`); break;
@@ -82,6 +83,8 @@ function showEvent(ev: TaskEvent): void {
     case "handoff": console.log(`${t} handoff  ${p.from ? `${(p.from as { harness: string }).harness} -> ` : ""}${p.to ? `${(p.to as { harness?: string }).harness ?? "?"}/${(p.to as { model?: string }).model ?? "?"}` : "router"} (${p.reason})${p.taskId ? `  task ${p.taskId}` : ""}`); break;
     case "summary": console.log(`${t} summary  ${p.ok ? `"${p.title}"${p.spoken ? ` — ${p.spoken}` : ""} (${p.ms} ms)` : `failed: ${p.error}`}`); break;
     case "done": console.log(`${t} DONE     ${p.result}`); break;
+    case "partial": console.log(`${t} PARTIAL  ${p.result || p.error || "部分完成"}`); break;
+    case "blocked": console.log(`${t} BLOCKED  ${p.error || p.result || "等待补充条件"}`); break;
     case "failed": console.log(`${t} FAILED   ${p.error}${p.security ? "  [security]" : ""}`); break;
     case "cancelled": console.log(`${t} CANCELLED`); break;
     case "cleaned": console.log(`${t} cleaned  workdir=${p.workDirRemoved} claude=${(p.claudeProjectsRemoved as string[]).length} opencode=${p.opencodeSessionsRemoved}${(p.errors as string[]).length ? `  ${(p.errors as string[]).join("; ")}` : ""}`); break;

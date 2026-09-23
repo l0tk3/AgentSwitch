@@ -20,9 +20,18 @@ describe("nextStep", () => {
     expect(twice).toEqual({ kind: "ask-router", exclude: [{ harness: "codex", model: "gpt-6-astra" }] });
   });
 
-  it("transport with side effects skips the retry and asks the router", () => {
+  it("transport with side effects stops before any retry or router fallback", () => {
     const s = nextStep(input([attempt({ sideEffects: { ...NO_SIDE_EFFECTS, filesChanged: 2 } })]));
-    expect(s).toMatchObject({ kind: "ask-router" });
+    expect(s).toMatchObject({ kind: "stop", reason: expect.stringContaining("核对现场") });
+  });
+
+  it("incomplete telemetry never permits replay, even for quota or supervisor rejection", () => {
+    for (const kind of ["transport", "quota", "task_failed", "unknown", "rejected"] as const) {
+      expect(nextStep(input([attempt({ kind, sideEffectsKnown: false })]))).toMatchObject({ kind: "stop", reason: expect.stringContaining("核对现场") });
+      expect(nextStep(input([attempt({ kind, sideEffects: { ...NO_SIDE_EFFECTS, commandsRun: 1 } })]))).toMatchObject({ kind: "stop" });
+    }
+    const missing = { ...attempt(), sideEffects: undefined } as unknown as Attempt;
+    expect(nextStep(input([missing]))).toMatchObject({ kind: "stop" });
   });
 
   it("transport when the router asks are used up still moves along the chain", () => {
@@ -45,9 +54,10 @@ describe("nextStep", () => {
     expect((s as { reason: string }).reason).toContain("no remaining target");
   });
 
-  it("refusal asks the router with the tried targets excluded, even after side effects", () => {
+  it("refusal cannot enter the generic router fallback, even after side effects", () => {
     const s = nextStep(input([attempt({ kind: "refusal", sideEffects: { ...NO_SIDE_EFFECTS, commandsRun: 3 } })]));
-    expect(s).toEqual({ kind: "ask-router", exclude: [{ harness: "codex", model: "gpt-6-astra" }] });
+    expect(s).toMatchObject({ kind: "stop", reason: expect.stringContaining("grounded clarification") });
+    expect(nextStep(input([attempt({ kind: "refusal" })]))).toMatchObject({ kind: "stop" });
   });
 
   it("task_failed: ask the router only when nothing was done yet", () => {
@@ -62,7 +72,7 @@ describe("nextStep", () => {
 
   it("limits: attempts and router asks", () => {
     expect(nextStep(input([attempt({ kind: "quota" }), attempt({ kind: "quota" }), attempt({ kind: "quota" })]))).toMatchObject({ kind: "stop", reason: expect.stringContaining("max attempts") });
-    expect(nextStep(input([attempt({ kind: "refusal" })], { routerAsks: 2 }))).toMatchObject({ kind: "stop", reason: expect.stringContaining("router already asked") });
+    expect(nextStep(input([attempt({ kind: "task_failed" })], { routerAsks: 2 }))).toMatchObject({ kind: "stop", reason: expect.stringContaining("router already asked") });
     expect(nextStep(input([]))).toMatchObject({ kind: "stop" });
   });
 

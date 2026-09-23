@@ -2,7 +2,7 @@
  *  Pure (router-v0 §6.3, §6.4). The orchestration that actually asks the router is in route.ts. */
 
 import type { Decision } from "./decision.js";
-import { hasSideEffects, type FailureKind, type SideEffects } from "./failure.js";
+import { hasSideEffects, type FailureKind, type RefusalSignal, type SideEffects } from "./failure.js";
 import { markUnavailable, type TargetRef, type Targets } from "./targets.js";
 import { validateDecision, validateTarget, type Quota, type Running } from "./validate.js";
 
@@ -12,6 +12,9 @@ export type Attempt = {
   readonly kind: FailureKind;
   readonly excerpt: string;
   readonly sideEffects: SideEffects;
+  readonly refusal?: RefusalSignal;
+  /** False means the counts are incomplete. Legacy explicit counts remain known unless marked false. */
+  readonly sideEffectsKnown?: boolean;
 };
 
 export type Limits = { readonly maxAttempts: number; readonly maxRouterAsks: number };
@@ -56,22 +59,24 @@ export function nextStep(input: RerouteInput): NextStep {
   const last = input.attempts.at(-1);
   if (!last) return { kind: "stop", reason: "no attempt to recover from", security: false };
   if (last.kind === "gate_denied") return { kind: "stop", reason: "secret-gate denied a request; not re-dispatching", security: true };
-  if (last.sideEffects.approvalsGranted > 0) return { kind: "stop", reason: "an approved action was taken before the failure; hand over to the user", security: false };
+  // TaskLoop owns the bounded, evidence-based clarification path. Other callers must not
+  // silently treat a refusal as a reason to rotate targets (including the standalone CLI).
+  if (last.kind === "refusal") return { kind: "stop", reason: "refusal requires grounded clarification; automatic target switching is disabled", security: false };
+  if (!last.sideEffects || last.sideEffectsKnown === false || hasSideEffects(last.sideEffects)) {
+    return { kind: "stop", reason: "执行可能已产生副作用，或记录不完整；已停止自动重试，请先核对现场再继续。", security: false };
+  }
   if (input.attempts.length >= limits.maxAttempts) return { kind: "stop", reason: `max attempts (${limits.maxAttempts}) reached`, security: false };
 
   const target = { harness: last.harness, model: last.model };
   const sameTargetTransportFailures = input.attempts.filter((a) => a.kind === "transport" && a.harness === last.harness && a.model === last.model).length;
-  if (last.kind === "transport" && sameTargetTransportFailures === 1 && !hasSideEffects(last.sideEffects)) {
+  if (last.kind === "transport" && sameTargetTransportFailures === 1) {
     return { kind: "retry", target, backoffMs: TRANSPORT_BACKOFF_MS };
   }
   if (last.kind === "quota") return switchAlongChain(input, target);
 
   // transport (after the retry): the environment may be broken for every harness; let the router
-  // judge and, once repair tools exist, fix it. refusal / task_failed / unknown: the router judges.
-  // "rejected" = the supervisor cancelled a silent run or refused the result: side effects or not, the router decides next.
-  if (last.kind !== "refusal" && last.kind !== "transport" && last.kind !== "rejected" && hasSideEffects(last.sideEffects)) {
-    return { kind: "stop", reason: `${last.kind} after side effects; hand over to the user`, security: false };
-  }
+  // judge and, once repair tools exist, fix it. task_failed / unknown: the router judges.
+  // Only reliable zero-effect failures reach this point, including supervisor rejection.
   if (input.routerAsks >= limits.maxRouterAsks) {
     // Out of router asks: transport can still move along the chain by itself; the rest stops.
     return last.kind === "transport" ? switchAlongChain(input, target) : { kind: "stop", reason: `router already asked ${input.routerAsks} times`, security: false };

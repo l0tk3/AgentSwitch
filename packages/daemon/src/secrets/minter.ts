@@ -10,6 +10,8 @@ export type MintEntry = {
   readonly kind: "secret" | "totp";
   readonly hosts: readonly string[];
   readonly uses: readonly ("http" | "otp" | "exec")[];
+  /** Original-user authorization to import a TOTP seed into these exact hosts; absent means no grant. */
+  readonly seed_import_hosts?: readonly string[];
 };
 
 export type MintResult = { readonly label: string; readonly token: string } | { readonly label: string; readonly error: string };
@@ -42,7 +44,7 @@ export function gateMinter(gate: { readonly bin: string; readonly home: string }
       if (code !== 0 && code !== 1) { reject(new Error(`secret-gate enc exited ${code}: ${err.trim().slice(0, 200)}`)); return; }
       try { resolve(parseMintOutput(out)); } catch (e) { reject(e); }
     });
-    child.stdin.end(JSON.stringify(entries.map((e) => ({ label: e.label, value: e.value, kind: e.kind, hosts: [...e.hosts], uses: [...e.uses] }))));
+    child.stdin.end(JSON.stringify(entries.map((e) => ({ label: e.label, value: e.value, kind: e.kind, hosts: [...e.hosts], uses: [...e.uses], ...(e.seed_import_hosts?.length ? { seed_import_hosts: [...e.seed_import_hosts] } : {}) }))));
   });
 }
 

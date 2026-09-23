@@ -32,6 +32,8 @@ export type RouteDeps = {
   readonly context?: LoadedContext;
   /** MEMORY.md, linted the same way. */
   readonly memory?: LoadedContext;
+  /** Select only observations about platforms mentioned in this request. Never user authorization. */
+  readonly platformMemory?: (task: string) => string | null;
   /** Track record rows (last 30 days) for the prompt and the guards. */
   readonly records?: readonly RecordRow[];
   readonly extensions?: ExtensionsSummary;
@@ -70,8 +72,15 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
 
   const extra = exclude.length ? `Excluded (do not choose; the user handed this task off from them): ${exclude.map((e) => `${e.harness}/${e.model}`).join(", ")}` : undefined;
   const asked = await askRouter(req, { ...deps, targets }, extra);
-  if (asked.decision?.action === "clarify" && asked.decision.question?.trim()) {
-    return { ...asked, clarify: asked.decision.question.trim(), verdict: { ok: false, notes: ["router asks the user a question first"] }, source: "router" };
+  if (asked.decision?.action === "give_up") {
+    return { ...asked, verdict: { ok: false, notes: [asked.decision.reason || "router gave up"] }, source: "router" };
+  }
+  if (asked.decision?.action === "clarify") {
+    const clarify = asked.decision.question?.trim();
+    return { ...asked, ...(clarify ? { clarify } : {}), verdict: { ok: false, notes: [clarify ? "router asks the user a question first" : "router requested clarification without a question"] }, source: "router" };
+  }
+  if (asked.decision?.action === "repair") {
+    return { ...asked, verdict: { ok: false, notes: ["router requested a repair before dispatch; initial-route repair is not supported", ...(asked.decision.reason ? [asked.decision.reason] : [])] }, source: "router" };
   }
   if (asked.decision) return { ...asked, ...verdictFor(asked.decision, req, deps, exclude) };
   const verdict = validateTarget(fallback, ctx, req.needsBrowser ?? false, "default");
@@ -155,13 +164,13 @@ export function defaultTargetExcluding(req: RouteRequest, deps: RouteDeps, exclu
   return defaultTarget(req.task, deps.targets, quota);
 }
 
-export function routerSystem(deps: RouteDeps): string {
-  return systemPrompt(deps.targets, { context: deps.context ?? EMPTY_CONTEXT, memory: deps.memory ?? EMPTY_CONTEXT, record: recordText(aggregateRecords(deps.records ?? [])), extensions: deps.extensions ?? { mcp: [], skills: [] }, threads: deps.threads ?? [] });
+export function routerSystem(deps: RouteDeps, task?: string): string {
+  return [systemPrompt(deps.targets, { context: deps.context ?? EMPTY_CONTEXT, memory: deps.memory ?? EMPTY_CONTEXT, record: recordText(aggregateRecords(deps.records ?? [])), extensions: deps.extensions ?? { mcp: [], skills: [] }, threads: deps.threads ?? [] }), task ? deps.platformMemory?.(task) : null].filter(Boolean).join("\n\n");
 }
 
 async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Promise<Asked> {
   const body = (error?: string) => taskMessage(req.task, req.cwd, error) + (extra ? `\n\n${extra}` : "");
   const parse = (text: string) => { const r = parseDecision(text); return r.ok ? { ok: true as const, value: r.decision } : r; };
-  const r = await askJson(deps.router, { system: routerSystem(deps), cwd: req.cwd, body }, parse, deps.targets.router.timeout_ms);
+  const r = await askJson(deps.router, { system: routerSystem(deps, req.task), cwd: req.cwd, body }, parse, deps.targets.router.timeout_ms);
   return { decision: r.value, routerError: r.error, routerMs: r.ms, attempts: r.tries };
 }

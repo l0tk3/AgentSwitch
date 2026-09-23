@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { probeRateLimits } from "../src/executors/claude.js";
+import { buildDaemon, defaultConfig } from "../src/daemon.js";
 import { claudeQuota } from "../src/quota/claude.js";
 import { labelForMinutes, RateLimitCache, remainingFromWindows } from "../src/quota/windows.js";
-import { parseRateLimits } from "../src/quota/codex.js";
+import { codexQuota, parseRateLimits } from "../src/quota/codex.js";
 import { deepseekQuota, findDeepSeekKey, parseBalance } from "../src/quota/deepseek.js";
 import { QuotaService } from "../src/quota/index.js";
+import type { QuotaProvider } from "../src/quota/types.js";
 
 describe("quota parsing", () => {
   it("codex rateLimits → remaining from the worst window", () => {
@@ -95,4 +101,111 @@ describe("quota parsing", () => {
     expect(reads).toBe(3);
     expect(svc.map()).toEqual({ codex: 0.3 });
   });
+});
+
+describe("quota refresh deadlines", () => {
+  it("the quota HTTP route returns even when a provider never finishes", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-quota-api-"));
+    const quota = new QuotaService([{ harness: "stuck", read: async () => new Promise(() => undefined) }], 1000, Date.now, 25);
+    const daemon = buildDaemon(defaultConfig({ AGENTSWITCH_HOME: home, AGENTSWITCH_ROUTER: "echo", AGENTSWITCH_EXECUTORS: "echo" }), { quota });
+    vi.useFakeTimers();
+    try {
+      const pending = daemon.app.request("/quota");
+      await vi.advanceTimersByTimeAsync(25);
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual([expect.objectContaining({ harness: "stuck", remaining: null, error: "quota timed out after 25 ms" })]);
+      expect((await daemon.app.request("/healthz")).status).toBe(200);
+    } finally { vi.useRealTimers(); daemon.close(); rmSync(home, { recursive: true, force: true }); }
+  });
+
+  it("bounds a provider that ignores abort, isolates errors, and releases the shared refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const signals: AbortSignal[] = [];
+      const never: QuotaProvider = { harness: "stuck", read: async (_force, signal) => { signals.push(signal!); return new Promise(() => undefined); } };
+      const svc = new QuotaService([never,
+        { harness: "bad", read: async () => { throw new Error("unavailable"); } },
+        { harness: "good", read: async () => ({ remaining: 0.7, detail: {}, source: "test", error: null }) },
+      ], 1000, Date.now, 25);
+      const one = svc.refresh(), joined = svc.refresh();
+      await vi.advanceTimersByTimeAsync(25);
+      const result = await one;
+      expect(await joined).toEqual(result);
+      expect(signals).toHaveLength(1);
+      expect(signals[0]!.aborted).toBe(true);
+      expect(result).toEqual([
+        expect.objectContaining({ harness: "stuck", remaining: null, error: "quota timed out after 25 ms" }),
+        expect.objectContaining({ harness: "bad", remaining: null, error: "unavailable" }),
+        expect.objectContaining({ harness: "good", remaining: 0.7, error: null }),
+      ]);
+      const next = svc.refresh(true);
+      await vi.advanceTimersByTimeAsync(25);
+      await next;
+      expect(signals).toHaveLength(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps previous readings on timeout and ignores a late result after a newer refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      let finishLate!: (value: Awaited<ReturnType<QuotaProvider["read"]>>) => void;
+      const value = (remaining: number) => ({ remaining, detail: { fixture: true }, source: "test", error: null });
+      const provider: QuotaProvider = { harness: "test", read: async () => {
+        calls++;
+        if (calls === 2) return new Promise((resolve) => { finishLate = resolve; });
+        return value(calls === 1 ? 0.4 : 0.8);
+      } };
+      const svc = new QuotaService([provider], 1000, Date.now, 10);
+      await svc.refresh();
+      const stuck = svc.refresh(true);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await stuck).toEqual([expect.objectContaining({ remaining: 0.4, source: "test", error: "quota timed out after 10 ms" })]);
+      await svc.refresh(true);
+      finishLate(value(0.1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(svc.map()).toEqual({ test: 0.8 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("aborts DeepSeek fetch and forwards cancellation to the Claude probe", async () => {
+    vi.useFakeTimers();
+    try {
+      const signals: AbortSignal[] = [];
+      const pending = <T>(signal: AbortSignal) => new Promise<T>((_resolve, reject) => {
+        signals.push(signal);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      const svc = new QuotaService([
+        deepseekQuota({ key: "fixture", fetchImpl: async (_url, init) => pending<Response>(init!.signal as AbortSignal) }),
+        claudeQuota({ cache: new RateLimitCache(), probe: async (signal) => pending(signal!) }),
+      ], 1000, Date.now, 10);
+      const refresh = svc.refresh();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await refresh).toHaveLength(2);
+      expect(signals).toHaveLength(2);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["codex", "claude"] as const)("stops a hung %s quota child without calling a model", async (harness) => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-quota-child-"));
+    const executable = join(dir, "fake-agent.cjs"), pidFile = join(dir, "pid");
+    // A real local process that never emits a protocol response. It cannot reach a model or the network.
+    writeFileSync(executable, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`, { mode: 0o700 });
+    const provider = harness === "codex" ? codexQuota({ binary: executable })
+      : claudeQuota({ cache: new RateLimitCache(), probe: (signal) => probeRateLimits(undefined, executable, signal) });
+    const svc = new QuotaService([provider], 1000, Date.now, 2000);
+    try {
+      const refresh = svc.refresh();
+      await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 1500, interval: 10 }).catch(async (error) => { throw new Error(`${String(error)}; reading=${JSON.stringify(await refresh)}`); });
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      expect(await refresh).toEqual([expect.objectContaining({ error: "quota timed out after 2000 ms" })]);
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 3500, interval: 20 });
+    } finally {
+      if (existsSync(pidFile)) { try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch { /* already gone */ } }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 8000);
 });

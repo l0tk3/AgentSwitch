@@ -16,20 +16,25 @@ export const toPending = (files) => [...files].map((file) => ({ file, url: isIma
 export const releasePending = (list) => list.forEach((p) => p.url && URL.revokeObjectURL(p.url));
 
 /** POST /uploads with every pending file; resolves to the staged ids in order. */
-export async function uploadPending(list) {
+export async function uploadPending(list, { timeoutMs = 120_000 } = {}) {
   if (!list.length) return [];
   const form = new FormData();
   for (const p of list) form.append("files", p.file, p.file.name);
-  const r = await fetch("/uploads", { method: "POST", body: form });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || "上传失败 HTTP " + r.status);
-  return d.files.map((f) => f.id);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch("/uploads", { method: "POST", body: form, signal: controller.signal });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(d.error || "上传失败 HTTP " + r.status), { status: r.status });
+    if (!Array.isArray(d.files) || d.files.some((f) => typeof f.id !== "string")) throw new Error("上传结果无效");
+    return d.files.map((f) => f.id);
+  } finally { clearTimeout(timeout); }
 }
 
 /** Pending list under a composer: thumbnails for images, name + size for the rest, a remove button each. */
-export function pendingList(list) {
+export function pendingList(list, disabled = false) {
   if (!list.length) return "";
-  const items = list.map((p, i) => `<div class="attach">${p.url ? `<img src="${p.url}" alt="">` : `<span class="attach-ico">📄</span>`}<span class="ellipsis">${esc(p.file.name)}</span><span class="dim">${fmtSize(p.file.size)}</span><button class="small" data-pending-remove="${i}" title="移除">×</button></div>`).join("");
+  const items = list.map((p, i) => `<div class="attach">${p.url ? `<img src="${p.url}" alt="">` : `<span class="attach-ico">📄</span>`}<span class="ellipsis">${esc(p.file.name)}</span><span class="dim">${fmtSize(p.file.size)}</span><button class="small" data-pending-remove="${i}" title="移除" ${disabled ? "disabled" : ""}>×</button></div>`).join("");
   return `<div class="attach-list">${items}</div>`;
 }
 

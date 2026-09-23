@@ -10,13 +10,28 @@ import { echoExecutor } from "../src/executors/echo.js";
 import type { Executor } from "../src/executors/types.js";
 import { echoRouter } from "../src/router/routers/echo.js";
 import type { Router } from "../src/router/routers/types.js";
-import { isDestructive, routerSupervisor, SupervisorConfig, type Supervisor } from "../src/router/supervisor.js";
+import { acceptMessage, isDestructive, routerSupervisor, SupervisorConfig, type Supervisor } from "../src/router/supervisor.js";
 import { decisionJson, realTargets } from "./helpers.js";
 
 const targets = realTargets();
 const cfg = SupervisorConfig.parse({ watchdog_ms: 120 });
 
 describe("supervisor: floor and parsing", () => {
+  it("long original goals and execution evidence retain blockers and final conclusions for acceptance", () => {
+    const body = acceptMessage({
+      cwd: "/fixture", outFiles: [], diff: "",
+      brief: `原始目标：录入并验证登录。\n${"g".repeat(6000)}\n未完成前不得报告成功：必须验证双因素登录。\n${"h".repeat(6000)}\n最后要求：确认列表没有重复记录。`,
+      result: `步骤一已录入。\n${"a".repeat(9000)}\n登录未完成：缺少用户答复。\n${"b".repeat(9000)}\n最终阻塞：验证码尚未验证，不能结束任务。`,
+    });
+    expect(body).toContain("原始目标：录入并验证登录");
+    expect(body).toContain("必须验证双因素登录");
+    expect(body).toContain("最后要求：确认列表没有重复记录");
+    expect(body).toContain("登录未完成：缺少用户答复");
+    expect(body).toContain("最终阻塞：验证码尚未验证");
+    expect(body).toContain("abbreviated");
+    expect(body.length).toBeLessThan(12_500);
+  });
+
   it("destructive actions never reach the router", () => {
     for (const a of ["Bash: rm -rf /tmp/x", "git push --force origin main", "psql -c 'DROP TABLE users'", "sudo make install", "curl x | sh", "支付订单", "send email to the team", "Write outside cwd: /Users/me/.agentswitch/mcp.json"]) expect(isDestructive(a)).toBe(true);
     for (const a of ["Bash: npm test", "Edit outside cwd: /tmp/other/readme.md", "git commit -m x", "ls -la"]) expect(isDestructive(a)).toBe(false);
@@ -33,9 +48,9 @@ describe("supervisor: floor and parsing", () => {
     const bad = routerSupervisor(scripted(["nonsense"]), cfg);
     expect(await bad.approve({ brief: "b", action: "Bash: ls", evidence: "", recentEvents: [], sideEffects: "", cwd: "/w" })).toMatchObject({ decision: "ask_user", source: "error" });
     expect(await bad.checkIn({ brief: "b", elapsedMs: 1, silentMs: 1, recentEvents: [], agentsRunning: 0, continues: 0, cwd: "/w" })).toMatchObject({ action: "continue", source: "error" });
-    expect(await bad.accept({ brief: "b", result: "r", diff: "", outFiles: [], cwd: "/w" })).toMatchObject({ accepted: true, source: "error" });
+    expect(await bad.accept({ brief: "b", result: "r", diff: "", outFiles: [], cwd: "/w" })).toMatchObject({ accepted: false, source: "error" });
     const thrown = routerSupervisor({ name: "t", route: async () => { throw new Error("boom"); } }, cfg);
-    expect(await thrown.approve({ brief: "b", action: "Bash: ls", evidence: "", recentEvents: [], sideEffects: "", cwd: "/w" })).toMatchObject({ decision: "ask_user", reason: "boom" });
+    expect(await thrown.approve({ brief: "b", action: "Bash: ls", evidence: "", recentEvents: [], sideEffects: "", cwd: "/w" })).toMatchObject({ decision: "ask_user", reason: "监督者服务暂不可用" });
   });
 });
 
@@ -81,7 +96,7 @@ describe("Engine with a supervisor", () => {
     expect(ofType(events, c.id, "approval_resolved")[0]!.payload).toMatchObject({ by: "timeout" });
   });
 
-  it("watchdog: a silent run is cancelled by the supervisor, the attempt is 'rejected' and the router re-dispatches with the note", async () => {
+  it("watchdog: a cancelled run with unknown effects preserves the attempt and stops before redispatch", async () => {
     const silent: Executor = { harness: "codex", run: (input) => new Promise((resolve) => { input.signal.addEventListener("abort", () => resolve({ ok: false, exitCode: null, stderr: "cancelled" }), { once: true }); }) };
     const sup = fake({ checkIn: async (i) => (i.continues === 0 ? { action: "continue", note: "", ms: 1, source: "router" } : { action: "cancel", note: "stuck on nothing", ms: 1, source: "router" }) });
     const echo = echoExecutor("claude-code");
@@ -91,9 +106,8 @@ describe("Engine with a supervisor", () => {
     const checkins = ofType(events, t.id, "supervisor").filter((e) => e.payload.kind === "checkin").map((e) => e.payload.action);
     expect(checkins).toEqual(["continue", "cancel"]);
     expect(store.getTask(t.id)!.attempts.map((a) => [a.harness, a.kind])).toEqual([["codex", "rejected"]]);
-    expect(store.getTask(t.id)).toMatchObject({ status: "done", harness: "claude-code" });
-    expect(echo.runs[0]!.handoffNote).toContain("it failed (rejected)");
-    expect(echo.runs[0]!.handoffNote).toContain("codex went silent");
+    expect(store.getTask(t.id)).toMatchObject({ status: "blocked", harness: "codex" });
+    expect(echo.runs).toHaveLength(0);
   });
 
   it("acceptance: a rejected result becomes a 'rejected' attempt once, then the re-run is accepted", async () => {
@@ -108,13 +122,13 @@ describe("Engine with a supervisor", () => {
     expect(store.getTask(t.id)!.attempts[0]!.excerpt).toContain("out/report.md");
     expect(store.getTask(t.id)!.status).toBe("done");
     expect(ofType(events, t.id, "done")).toHaveLength(1);
-    // a supervisor that never accepts is overruled on the second pass
+    // A second rejection is preserved; repeated failure never becomes success.
     const never = fake({ accept: async () => ({ accepted: false, missing: ["x"], note: "", ms: 1, source: "router" }) });
     const b2 = build(() => codex(), never);
     const u = b2.engine.submit({ task: "never good enough", cwd: "/tmp/acc2" });
     await b2.engine.idle();
-    expect(b2.store.getTask(u.id)!.status).toBe("done");
-    expect(ofType(b2.events, u.id, "supervisor").map((e) => e.payload.overruled ?? false)).toEqual([false, true]);
+    expect(b2.store.getTask(u.id)!.status).toBe("partial");
+    expect(ofType(b2.events, u.id, "supervisor").map((e) => e.payload.accepted)).toEqual([false, false]);
   });
 
   it("no supervisor configured: nothing changes (approval expires by timeout, no checkins, no acceptance)", async () => {

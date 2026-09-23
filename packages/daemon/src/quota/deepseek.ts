@@ -40,10 +40,10 @@ export function parseBalance(body: Json): { remaining: number | null; detail: Js
 export function deepseekQuota(opts: { key: string | null; fetchImpl?: typeof fetch; baseUrl?: string }): QuotaProvider {
   return {
     harness: "opencode",
-    async read() {
+    async read(_force, signal) {
       if (!opts.key) return { remaining: null, detail: {}, source: "deepseek /user/balance", error: "no DeepSeek API key (set DEEPSEEK_API_KEY or `opencode auth login`)" };
       try {
-        const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl ?? "https://api.deepseek.com"}/user/balance`, { headers: { Authorization: `Bearer ${opts.key}` } });
+        const res = await (opts.fetchImpl ?? fetch)(`${opts.baseUrl ?? "https://api.deepseek.com"}/user/balance`, { headers: { Authorization: `Bearer ${opts.key}` }, ...(signal ? { signal } : {}) });
         if (!res.ok) return { remaining: null, detail: {}, source: "deepseek /user/balance", error: `HTTP ${res.status}` };
         return { ...parseBalance((await res.json()) as Json), source: "deepseek /user/balance", error: null };
       } catch (err) {

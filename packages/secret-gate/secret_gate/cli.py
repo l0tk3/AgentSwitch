@@ -23,7 +23,8 @@ from .constants import (
     VALID_USES,
 )
 from .crypto import generate_keypair
-from .errors import GateError
+from .credential_repair import checked_token, credential_info, reissue_totp_seed
+from .errors import GateError, ValidationError
 from .keyring import create_keypair, list_keypairs, set_current
 from .keystore import gate_home, load_private_key, load_public_key, parse_public_key, save_keypair
 from .policy import SecretPayload
@@ -74,7 +75,8 @@ def _cmd_enc(args: argparse.Namespace) -> int:
         return _enc_batch(public)
     value = args.value if args.value is not None else _read_value(args.stdin)
     payload = SecretPayload.create(
-        value=value, hosts=tuple(args.host), uses=set(args.use), label=args.label, kind=args.kind
+        value=value, hosts=tuple(args.host), uses=set(args.use), label=args.label, kind=args.kind,
+        seed_import_hosts=args.seed_import_host,
     )
     print(make_token(public, payload))
     return 0
@@ -105,6 +107,7 @@ def _enc_batch(public: bytes) -> int:
                 uses=set(entry.get("uses") or [USE_HTTP]),
                 label=label or "",
                 kind=entry.get("kind", KIND_SECRET),
+                seed_import_hosts=entry.get("seed_import_hosts", []),
             )
             results.append({"label": label, "token": make_token(public, payload)})
         except GateError as exc:
@@ -124,6 +127,27 @@ def _cmd_check(args: argparse.Namespace) -> int:
     info = resolver.describe(args.token)
     for key in ("label", "kind", "hosts", "uses"):
         print(f"{key}: {info[key]}")
+    return 0
+
+
+def _cmd_credential(args: argparse.Namespace) -> int:
+    """Trusted daemon commands: ciphertext on stdin, policy/ciphertext on stdout, never a secret value."""
+    raw = sys.stdin.read(196609)
+    if len(raw) > 196608:
+        raise ValidationError("credential request too large")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise ValidationError("credential request must be a JSON object") from None
+    keys = {"token"} if args.cmd == "credential-info" else {"token", "host", "purpose"}
+    if not isinstance(data, dict) or set(data) != keys:
+        raise ValidationError("credential request has unexpected fields")
+    token = checked_token(data["token"])
+    home = gate_home()
+    resolver = Resolver.from_home(home)
+    result = credential_info(resolver, token) if args.cmd == "credential-info" else reissue_totp_seed(
+        resolver, load_public_key(home), token, data["host"], data["purpose"])
+    print(json.dumps(result))
     return 0
 
 
@@ -218,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--host", action="append", default=[], help="allowed host, repeatable; *.x.com ok; add :port to bind one port (host:8001)")
     e.add_argument("--use", action="append", default=[], choices=sorted(VALID_USES))
     e.add_argument("--kind", default=KIND_SECRET, choices=sorted(VALID_KINDS))
+    e.add_argument("--seed-import-host", action="append", default=[], help="explicitly authorize TOTP seed import to an existing exact host[:port]")
     e.add_argument("--pubkey", help="public key text (default: read from gate home)")
     e.add_argument("--value", help="secret value (prefer prompt or --stdin: avoids shell history)")
     e.add_argument("--stdin", action="store_true", help="read value from stdin")
@@ -227,6 +252,9 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("check", help="show a token's policy (never its value)")
     c.add_argument("token")
     c.set_defaults(fn=_cmd_check)
+
+    sub.add_parser("credential-info", help="daemon: read token JSON on stdin, return policy metadata").set_defaults(fn=_cmd_credential)
+    sub.add_parser("credential-reissue", help="daemon: re-sign an authorized TOTP seed import request from stdin").set_defaults(fn=_cmd_credential)
 
     pr = sub.add_parser("proxy", help="run the substituting HTTPS proxy")
     pr.add_argument("-p", "--port", type=int, default=DEFAULT_PROXY_PORT)

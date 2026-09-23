@@ -94,6 +94,7 @@ router:
   harness: opencode
   model: deepseek/deepseek-flash
   timeout_ms: 45000                # the agent reads the repo first; a real run took 19 s
+  planner_timeout_ms: 120000       # separate budget for planner startup and one JSON correction
   min_confidence: 0.5
   quota_threshold: 0.05
   default: {harness: opencode, model: "deepseek/deepseek-flash"}

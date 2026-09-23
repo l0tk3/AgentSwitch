@@ -6,12 +6,13 @@ import { listTree } from "../files/artifacts.js";
 import { OUT_DIR } from "../files/names.js";
 import { repairTokens, TOKEN_RE } from "../executors/tokens.js";
 import type { Supervisor } from "../router/supervisor.js";
+import { evidenceExcerpt } from "../router/prompt.js";
 import { gitDiffSummary } from "../threads/handoff.js";
 import { whoAnswers, type ApprovalPolicy } from "./approvalPolicy.js";
 import type { ApprovalDesk } from "./approvals.js";
 import type { EngineContext } from "./context.js";
-import { describeAnswers, type UserAnswers, type UserQuestion } from "./questions.js";
-import type { Task } from "./types.js";
+import { describeAnswers, validateAnswers, type UserAnswers, type UserQuestion } from "./questions.js";
+import { TERMINAL, type Task } from "./types.js";
 
 const RECENT_EVENTS = 20;
 const AGENT_ENDED = new Set(["completed", "failed", "stopped"]);
@@ -91,20 +92,41 @@ export function watchdog(ctx: EngineContext, sup: Supervisor | undefined, desk: 
   };
 }
 
-/** On done: check the result against the brief. One rejection sends the task back; a second is recorded but overruled. */
-export async function acceptance(ctx: EngineContext, sup: Supervisor | undefined, task: Task, result: string, rejectionsSoFar: number, signal: AbortSignal): Promise<{ rejected: string | null; rejections: number }> {
-  if (!sup?.config.acceptance) return { rejected: null, rejections: rejectionsSoFar };
-  const current = ctx.store.getTask(task.id) ?? task;
+/** Completion checks never overrule a rejection or turn an unavailable verifier into success. */
+export async function acceptance(ctx: EngineContext, sup: Supervisor | undefined, task: Task, result: string, rejectionsSoFar: number, signal: AbortSignal,
+  options: { goal?: string; feedback?: string; required?: boolean; timeoutMs?: number } = {}): Promise<{ rejected: string | null; rejections: number; unavailable?: boolean }> {
+  if (!options.required && !sup?.config.acceptance) return { rejected: null, rejections: rejectionsSoFar };
+  if (!sup) return { rejected: "无法验证原任务是否完成：验收服务不可用", rejections: rejectionsSoFar + 1, unavailable: true };
+  if (signal.aborted || TERMINAL.has(ctx.store.getTask(task.id)?.status ?? "cancelled")) return { rejected: "cancelled", rejections: rejectionsSoFar };
   let outFiles: string[] = [];
   try { outFiles = listTree(join(task.cwd, OUT_DIR)).map((f) => f.path); } catch { outFiles = []; }
-  const v = await sup.accept({ brief: current.brief ?? task.task, result, diff: gitDiffSummary(task.cwd), outFiles, cwd: task.cwd }, signal);
-  const overruled = !v.accepted && rejectionsSoFar >= 1;
-  ctx.emit(task.id, "supervisor", { kind: "acceptance", accepted: v.accepted, missing: v.missing, note: v.note, source: v.source, ms: v.ms, ...(overruled ? { overruled: true } : {}) });
-  if (v.accepted || overruled) return { rejected: null, rejections: rejectionsSoFar };
-  return { rejected: `not accepted: ${v.missing.join("; ") || v.note}`, rejections: rejectionsSoFar + 1 };
+  const controller = new AbortController();
+  const combined = AbortSignal.any([signal, controller.signal]);
+  const timer = setTimeout(() => controller.abort(new Error("completion verification timed out")), options.timeoutMs ?? 45_000);
+  let onAbort!: () => void;
+  try {
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(new Error("completion verification cancelled or timed out"));
+      combined.addEventListener("abort", onAbort, { once: true });
+    });
+    combined.throwIfAborted();
+    const v = await Promise.race([sup.accept({ brief: evidenceExcerpt(options.goal ?? task.task, 3800), result: evidenceExcerpt(result, 7800), diff: gitDiffSummary(task.cwd), outFiles, cwd: task.cwd, ...(options.feedback ? { feedback: options.feedback } : {}) }, combined), aborted]);
+    combined.throwIfAborted();
+    if (TERMINAL.has(ctx.store.getTask(task.id)?.status ?? "cancelled")) return { rejected: "cancelled", rejections: rejectionsSoFar };
+    const accepted = v.accepted && v.source !== "error";
+    ctx.emit(task.id, "supervisor", { kind: "acceptance", accepted, missing: v.missing, note: v.note, source: v.source, ms: v.ms });
+    if (accepted) return { rejected: null, rejections: rejectionsSoFar };
+    return { rejected: `not accepted: ${v.missing.join("; ") || v.note}`, rejections: rejectionsSoFar + 1, ...(v.source === "error" ? { unavailable: true } : {}) };
+  } catch {
+    return { rejected: signal.aborted ? "cancelled" : "无法验证原任务是否完成：验收服务不可用或超时", rejections: rejectionsSoFar + 1, unavailable: true };
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) combined.removeEventListener("abort", onAbort);
+    controller.abort();
+  }
 }
 
-export type QuestionMaterial = { readonly userMessage: string; readonly context: string; readonly steps: readonly string[]; readonly knownTokens: ReadonlySet<string> };
+export type QuestionMaterial = { readonly userMessage: string; readonly context: string; readonly steps: readonly string[]; readonly knownTokens: ReadonlySet<string>; readonly feedback?: string; readonly observations?: readonly string[] };
 
 /** Every enc:v1: token in the answers must be one the task legitimately holds (a damaged copy is repaired first);
  *  anything else could be an invention and goes to the user instead. */
@@ -120,14 +142,44 @@ export function answersUseKnownTokens(answers: UserAnswers, known: ReadonlySet<s
 
 /** loop-v0 §6: an executor's question goes to the supervisor first (never in manual mode); what it cannot answer
  *  from the task's own material, or answers with a token the task does not hold, reaches the user's card. */
-export async function answerQuestions(ctx: EngineContext, sup: Supervisor | undefined, desk: ApprovalDesk, task: Task, policy: ApprovalPolicy, questions: readonly UserQuestion[], material: QuestionMaterial, signal?: AbortSignal): Promise<UserAnswers | null> {
+export async function answerQuestions(ctx: EngineContext, sup: Supervisor | undefined, desk: ApprovalDesk, task: Task, policy: ApprovalPolicy, questions: readonly UserQuestion[], material: QuestionMaterial, signal?: AbortSignal, timeoutMs = 45_000): Promise<UserAnswers | null> {
+  const stopped = () => signal?.aborted || TERMINAL.has(ctx.store.getTask(task.id)?.status ?? "cancelled");
+  if (stopped()) return null;
   if (sup?.answer && policy.mode !== "manual") {
     const current = ctx.store.getTask(task.id) ?? task;
-    const v = await sup.answer({ brief: current.brief ?? task.task, userMessage: material.userMessage, context: material.context, steps: material.steps, cwd: task.cwd,
-      questions: questions.map((q) => ({ id: q.id, text: q.text, options: q.options.map((o) => o.label), secret: q.secret })) }, signal);
-    const answers = v.answers ? answersUseKnownTokens(v.answers, material.knownTokens) : null;
-    ctx.emit(task.id, "supervisor", { kind: "question", answered: answers !== null, reason: v.reason, source: v.source, ms: v.ms, questions: questions.map((q) => q.text), text: answers ? describeAnswers(questions, answers) : null });
-    if (answers) return answers;
+    const controller = new AbortController();
+    const combined = AbortSignal.any([controller.signal, ...(signal ? [signal] : [])]);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const started = Date.now();
+    let onAbort!: () => void;
+    try {
+      const aborted = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(new Error("question resolution cancelled or timed out"));
+        combined.addEventListener("abort", onAbort, { once: true });
+      });
+      combined.throwIfAborted();
+      const v = await Promise.race([sup.answer({ brief: current.brief ?? task.task, userMessage: material.userMessage, context: material.context, steps: material.steps, cwd: task.cwd,
+        ...(material.feedback ? { feedback: material.feedback } : {}), ...(material.observations ? { observations: material.observations } : {}),
+        questions: questions.map((q) => ({ id: q.id, text: q.originalText ?? q.text, options: q.options.map((o) => o.label), secret: q.secret })) }, combined), aborted]);
+      combined.throwIfAborted();
+      if (stopped()) return null;
+      const checked = v.source === "router" && !v.forward ? validateAnswers(questions, v.answers, true) : null;
+      const answers = checked?.ok ? answersUseKnownTokens(checked.answers, material.knownTokens) : null;
+      const reason = v.source === "error" ? "监督者未能核实答复，转交用户确认" : !answers && !v.forward ? "监督者答复不完整或包含未知凭据，转交用户确认" : v.reason;
+      ctx.emit(task.id, "supervisor", { kind: "question", answered: answers !== null, reason, source: v.source, ms: v.ms, questions: questions.map((q) => q.text), text: answers ? describeAnswers(questions, answers) : null });
+      if (answers) {
+        ctx.emit(task.id, "feedback", { version: 1, source: "router", status: "answered", questions, answers, reason });
+        return answers;
+      }
+    } catch {
+      if (stopped()) return null;
+      ctx.emit(task.id, "supervisor", { kind: "question", answered: false, reason: controller.signal.aborted ? "监督者答复超时，转交用户确认" : "监督者服务暂不可用，转交用户确认", source: "error", ms: Date.now() - started, questions: questions.map((q) => q.text), text: null });
+    } finally {
+      clearTimeout(timer);
+      if (onAbort) combined.removeEventListener("abort", onAbort);
+      controller.abort();
+    }
   }
+  if (stopped()) return null;
   return desk.ask(task.id, questions, "executor");
 }

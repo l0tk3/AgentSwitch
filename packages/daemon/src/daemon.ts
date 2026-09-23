@@ -14,6 +14,9 @@ import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
 import { defaultGate } from "./executors/gate.js";
 import { gateMinter } from "./secrets/minter.js";
+import { credentialGate } from "./secrets/credentialRepair.js";
+import { platformExperience } from "./engine/platformContext.js";
+import { credentialRepairExecutor } from "./executors/credentialRepair.js";
 import { routerSealer, type Sealer } from "./secrets/sealer.js";
 import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
@@ -104,11 +107,12 @@ export type BuildOverrides = {
 
 export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): Daemon {
   const targets = overrides.targets ?? loadTargets(cfg.targetsPath);
-  const store = new Store({ dbPath: join(cfg.home, "agentswitch.db"), tasksDir: join(cfg.home, "tasks"), threadsDir: join(cfg.home, "threads") });
+  const store = new Store({ dbPath: join(cfg.home, "agentswitch.db"), tasksDir: join(cfg.home, "tasks"), threadsDir: join(cfg.home, "threads"), artifactsDir: join(cfg.home, "artifacts") });
   const bus = new Bus();
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
   const contextPath = join(cfg.home, "CONTEXT.md");
   const memoryPath = join(cfg.home, "MEMORY.md");
+  const platformMemoryPath = join(cfg.home, "platform-memory.json");
   const policyPath = join(cfg.home, "approvals.json");
   const resident = overrides.opencode;
   const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : resident ? serveRouter(resident, "dispatcher", targets.router.model) : opencodeRouter({ model: targets.router.model }));
@@ -119,14 +123,13 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const quota = overrides.quota ?? new QuotaService([
     codexQuota({ binary: targets.harnesses.codex?.binary ?? "codex" }),
     deepseekQuota({ key: findDeepSeekKey() }),
-    claudeQuota({ cache: rateLimits, ...(cfg.executors === "real" ? { probe: () => probeRateLimits() } : {}) }),
+    claudeQuota({ cache: rateLimits, ...(cfg.executors === "real" ? { probe: (signal?: AbortSignal) => probeRateLimits(undefined, undefined, signal) } : {}) }),
   ], cfg.quotaTtlMs);
   const workRoot = join(cfg.home, "work");
   const uploads = new Uploads(join(cfg.home, "uploads"));
   const artifactsDir = join(cfg.home, "artifacts");
   sweepDir(uploads.dir, UPLOAD_TTL_MS);
   sweepDir(artifactsDir, ARTIFACT_TTL_MS);
-  sweepThreads(store);
   // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
   // The summarizer is a text-only agent on the router's model, run in a scratch dir so it never explores the repo.
   mkdirSync(join(cfg.home, "router-scratch"), { recursive: true });
@@ -134,15 +137,18 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(oracle("summarizer"), targets.router.timeout_ms);
   // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
   const supervisor = summarizer ? routerSupervisor(oracle("supervisor"), targets.router.supervisor, targets.router.timeout_ms) : undefined;
+  const questionRouter = summarizer ? oracle("question-translator") : router;
   const extensionsSummary = () => summarizeExtensions(extensions);
   // loop-v0 §6: the planner runs multi-step tasks; only with a real router, and only while its harness has quota.
   const planner = overrides.planner ?? (cfg.router === "echo" || overrides.router ? undefined : plannerFor(targets, resident, () => quota.map()));
   // The sealer (router-v0 §9) is the same text-only agent plus `secret-gate enc --batch`; only with real executors, which require the gate.
   const gate = cfg.executors === "real" ? defaultGate() : null;
   const sealer = overrides.sealer ?? (summarizer && gate ? routerSealer(oracle("sealer"), gateMinter(gate), () => loadContext(contextPath).text, targets.router.timeout_ms) : undefined);
-  const engine = new Engine({ store, bus, executors, targets, router, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
-  const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const app = createApp({ ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION });
+  const wiredExecutors = gate && summarizer ? executors.map((executor) => credentialRepairExecutor(executor, { gate: credentialGate(gate), router: oracle("credential-repair"), store })) : executors;
+  const engine = new Engine({ store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
+  sweepThreads(store, Date.now(), engine);
+  const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
+  const app = createApp({ ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION });
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
@@ -189,9 +195,15 @@ export function summarizeExtensions(ext: Extensions): ExtensionsSummary {
 }
 
 /** Archived threads past their expiry lose their row, log and private home. Runs at start and hourly. */
-export function sweepThreads(store: Store, now = Date.now()): string[] {
+export function sweepThreads(store: Store, now = Date.now(), engine?: Pick<Engine, "deleteThread">): string[] {
   const gone: string[] = [];
-  for (const t of store.expiredThreads(now)) { if (store.deleteThread(t.id)) gone.push(t.id); }
+  for (const t of store.expiredThreads(now)) {
+    try {
+      if (engine ? engine.deleteThread(t.id).ok : store.deleteThread(t.id)) gone.push(t.id);
+    } catch (err) {
+      console.error(`thread ${t.id} could not be deleted: ${(err as Error).message}`);
+    }
+  }
   if (gone.length) console.error(`threads expired and deleted: ${gone.join(", ")}`);
   return gone;
 }
@@ -216,7 +228,7 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   });
   void daemon.quota.refresh();
-  const sweeper = setInterval(() => sweepThreads(daemon.store), 3600_000);
+  const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), 3600_000);
   sweeper.unref();
   return { daemon, close: () => { clearInterval(sweeper); server.close(); daemon.close(); opencode?.stop(); } };
 }

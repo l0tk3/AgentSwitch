@@ -1,8 +1,8 @@
-/** Entry: renders the current view into #main on every state change, routes clicks to the view's
- *  bindings, and polls the daemon. Typed-in fields marked data-keep survive re-renders. */
+/** Entry: patch changed view content without disconnecting live editors, route events and poll. */
 
 import { get, subscribe } from "./lib/state.js";
-import { addPending, goto, health, loadApprovals, loadQuota, loadTasks, loadThreads, refresh, removePending } from "./lib/actions.js";
+import { createRenderer } from "./lib/rendering.js";
+import { addPending, goto, health, loadApprovals, loadArchivedThreads, loadQuota, loadTasks, loadThreads, refresh, removePending } from "./lib/actions.js";
 import * as home from "./views/home.js";
 import * as task from "./views/task.js";
 import * as log from "./views/log.js";
@@ -12,24 +12,8 @@ import * as ctx from "./views/ctx.js";
 const VIEWS = { home, task, log, ext, ctx };
 const $ = (s) => document.querySelector(s);
 const main = $("#main");
-
-/** Snapshot of data-keep fields so a re-render does not eat what the user is typing. */
-function keep() {
-  const active = document.activeElement;
-  return [...main.querySelectorAll("[data-keep]")].map((el) => ({
-    id: el.id, value: el.value, focused: el === active,
-    start: el.selectionStart, end: el.selectionEnd,
-  }));
-}
-
-function restore(saved) {
-  for (const k of saved) {
-    const el = document.getElementById(k.id);
-    if (!el) continue;
-    el.value = k.value;
-    if (k.focused) { el.focus(); try { el.setSelectionRange(k.start, k.end); } catch { /* selects and inputs without selection */ } }
-  }
-}
+const renderer = createRenderer(main);
+let renderedScope, renderedEvents;
 
 function render(s) {
   $("#dot").classList.toggle("on", s.health);
@@ -38,10 +22,11 @@ function render(s) {
   const navView = s.view === "task" ? "home" : s.view;
   document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("active", a.dataset.nav === navView));
   const view = VIEWS[s.view] || home;
-  const saved = keep();
-  main.innerHTML = view.render(s);
-  restore(saved);
-  view.afterRender?.();
+  const scope = `${s.view}:${s.view === "task" ? s.task?.id || "loading" : ""}:${s.navigationId}`;
+  const events = $("#events");
+  const following = events && events.scrollHeight - events.scrollTop - events.clientHeight <= 4;
+  if (renderer.render(view.render(s), scope) && (scope !== renderedScope || (s.events !== renderedEvents && following))) view.afterRender?.();
+  renderedScope = scope; renderedEvents = s.events;
 }
 
 const picker = document.createElement("input");
@@ -75,15 +60,18 @@ document.addEventListener("drop", (e) => {
   if (!zone) return;
   e.preventDefault();
   zone.classList.remove("drop");
+  if (zone.getAttribute("aria-busy") === "true") return;
   addPending(e.dataTransfer.files);
 });
 document.addEventListener("paste", (e) => {
-  if (!e.target.closest?.("[data-dropzone]")) return;
+  const zone = e.target.closest?.("[data-dropzone]");
+  if (!zone || zone.getAttribute("aria-busy") === "true") return;
   const files = [...(e.clipboardData?.files || [])];
   if (files.length) { e.preventDefault(); addPending(files); }
 });
 
 document.addEventListener("keydown", (e) => {
+  if (renderer.isComposing(e)) return;
   if (!(e.metaKey || e.ctrlKey)) return;
   const view = VIEWS[get().view] || home;
   if (e.key === "Enter" && view.submitKeys?.[e.target.id]) { e.preventDefault(); $("#" + view.submitKeys[e.target.id])?.click(); }
@@ -92,19 +80,22 @@ document.addEventListener("keydown", (e) => {
 
 subscribe(render);
 
+let tickRunning = false;
 async function tick(n) {
+  if (tickRunning) return;
+  tickRunning = true;
   const s = get();
-  await Promise.all([
+  // Quota probes can be slow. One bounded request is shared, and never delays task polling.
+  if (s.view === "home" && !document.hidden && n % 24 === 0) void loadQuota().catch(() => undefined);
+  try { await Promise.allSettled([
     health(), loadApprovals(),
     s.view === "home" ? loadTasks() : null,
     s.view === "home" && n % 3 === 0 ? loadThreads().catch(() => undefined) : null,
-    s.view === "home" && n % 6 === 0 ? loadQuota() : null,
-  ]);
+    s.view === "home" && n % 3 === 0 ? loadArchivedThreads().catch(() => undefined) : null,
+  ]); } finally { tickRunning = false; }
 }
 
-(async () => {
-  await Promise.all([health(), loadTasks(), loadApprovals(), loadQuota()]);
-  render(get());
-  let n = 0;
-  setInterval(() => tick(++n), 5000);
-})();
+render(get());
+void tick(0);
+let pollNumber = 0;
+setInterval(() => { void tick(++pollNumber); }, 5000);

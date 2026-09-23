@@ -33,6 +33,18 @@ and the user does not expect you to.
   2FA code) or `secret_exec` instead of raw shell commands.
 - `secret_describe(value)` shows a value's label, allowed hosts and uses, so you can check you
   have the right one.
+- TOTP **seed import** and a current **verification code** are different operations. A token of
+  kind `totp` produces a short-lived code, including when used over HTTP; never put that code
+  into a seed-storage field. A seed-storage field needs a `secret` / `http` token.
+- If a seed-storage fill fails because the TOTP token allows only `otp`, call
+  `secret_repair(token, host, purpose="totp_seed_import")` only when the original user task
+  explicitly requested importing that seed into that same destination. This asks the task
+  dispatcher to check the request and returns a replacement ciphertext, never plaintext.
+  The old ciphertext must already carry `seed_import_hosts` permission for this exact host;
+  the tool cannot add permission or targets. If the grant is absent, ask the user to submit
+  the field and its destination in a new message. Do not decode the token, change hosts,
+  call `credential-reissue` yourself, repeatedly retry the rejected fill, or skip the field
+  without the user's answer. A repair does not fill or submit anything automatically.
 - In the browser (Playwright tools): put the value into a field with `secret_fill(target, token)`,
   or pass it as the `text` of `browser_type` / a field `value` of `browser_fill_form`. The gate
   types the real value into the page for you; the page's own validation sees the real value.

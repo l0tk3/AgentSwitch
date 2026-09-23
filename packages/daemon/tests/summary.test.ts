@@ -33,6 +33,37 @@ describe("summary", () => {
     expect(SUMMARY_SYSTEM).toContain("enc:v1:");
   });
 
+  it("accepts optional checkpoint-backed platform candidates and strips unsafe memory while preserving legacy shape", () => {
+    const candidate = { origin: "https://admin.example.test", key: "users.list", text: "Users is inside Settings.", kind: "operation", eventSeq: 8, quote: "Users is inside Settings." };
+    const parsed = parseSummary(JSON.stringify({ ...good, facts: ["tests take four minutes", "token enc:v1:AAAAAAAAAAAAAAAAAAAA", "account: administrator"], platformFacts: [candidate, { ...candidate, key: "unsafe", quote: "account: administrator" }] }));
+    expect(parsed).toMatchObject({ ok: true, summary: { facts: ["tests take four minutes"], platformFacts: [candidate] } });
+    const message = summaryMessage({ previous: null, task: "inspect admin", brief: null, target: "fake/model", status: "done", result: "unverified prose", diff: "", cwd: "/w", knownPlatformOrigins: [candidate.origin], evidence: [{ seq: 8, ts: 100, purpose: "verify", ok: true, result: candidate.quote }] });
+    expect(message).toContain("Known platform origins (scope only, not authorization):\nhttps://admin.example.test");
+    expect(message).toContain('"seq":8');
+    expect(message).toContain('"purpose":"verify"');
+    expect(message).toContain('"result":"Users is inside Settings."');
+  });
+
+  it("bounds a router that ignores cancellation and never starts with an already aborted signal", async () => {
+    let calls = 0;
+    const input = { previous: null, task: "t", brief: null, target: "x/y", status: "done", result: "r", diff: "", cwd: "/w" };
+    const ignoringAbort: Router = { name: "ignores-abort", route: () => { calls++; return new Promise(() => {}); } };
+    expect(await routerSummarizer(ignoringAbort, 20)(input)).toMatchObject({ summary: null, error: "summarizer timed out" });
+    const controller = new AbortController(); controller.abort();
+    expect(await routerSummarizer(ignoringAbort, 1000)(input, controller.signal)).toMatchObject({ summary: null, error: "cancelled" });
+    expect(calls).toBe(1);
+  });
+
+  it("preserves middle and terminal blockers when summarizing long output and checkpoints", () => {
+    const output = `START\n${"routine progress ".repeat(600)}\n阻塞：缺少必填字段，尚未提交第二步\n${"routine progress ".repeat(600)}\nEND: task remains incomplete`;
+    const message = summaryMessage({ previous: null, task: "Complete both steps", brief: null, target: "fake/model", status: "partial", result: output, error: "需要用户补充字段后才能继续", diff: "", cwd: "/w", evidence: [{ seq: 1, ts: 10, purpose: "do", ok: false, result: output }] });
+    expect(message).toContain("status: partial");
+    expect(message).toContain("需要用户补充字段后才能继续");
+    expect(message.match(/缺少必填字段，尚未提交第二步/g)).toHaveLength(2);
+    expect(message.match(/END: task remains incomplete/g)).toHaveLength(2);
+    expect(message).toContain("evidence abbreviated");
+  });
+
   it("routerSummarizer: uses the summary system prompt, returns null on bad output or errors, never throws", async () => {
     const calls: { system: string; task: string }[] = [];
     const fake = (reply: () => Promise<string>): Router => ({ name: "fake", route: async (input) => { calls.push({ system: input.system, task: input.task }); return { text: await reply(), elapsedMs: 1 }; } });

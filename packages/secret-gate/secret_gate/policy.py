@@ -77,6 +77,8 @@ class SecretPayload:
     uses: frozenset[str]
     label: str
     kind: str = KIND_SECRET
+    # Optional capability, sealed at creation: import this seed into these exact destinations.
+    seed_import_hosts: tuple[str, ...] = ()
 
     @classmethod
     def create(
@@ -87,6 +89,7 @@ class SecretPayload:
         uses: frozenset[str] | set[str] | list[str],
         label: str,
         kind: str = KIND_SECRET,
+        seed_import_hosts: tuple[str, ...] | list[str] = (),
     ) -> SecretPayload:
         if not isinstance(value, str) or not value:
             raise ValidationError("value must be a non-empty string")
@@ -100,7 +103,14 @@ class SecretPayload:
         host_tuple = tuple(normalize_host(h) for h in hosts)
         if kind == KIND_TOTP:
             _validate_base32(value)
-        return cls(value=value, hosts=host_tuple, uses=use_set, label=label, kind=kind)
+        if not isinstance(seed_import_hosts, (list, tuple)):
+            raise ValidationError("seed_import_hosts must be a list of exact destinations")
+        grants = tuple(dict.fromkeys(normalize_host(h) for h in seed_import_hosts))
+        if grants and kind != KIND_TOTP:
+            raise ValidationError("seed import grants apply only to TOTP tokens")
+        if any("*" in h or not any(host_matches(p, h) for p in host_tuple) for h in grants):
+            raise ValidationError("seed import grants must be exact destinations already allowed by hosts")
+        return cls(value=value, hosts=host_tuple, uses=use_set, label=label, kind=kind, seed_import_hosts=grants)
 
     def to_json(self) -> str:
         return json.dumps(
@@ -110,6 +120,7 @@ class SecretPayload:
                 "use": sorted(self.uses),
                 "label": self.label,
                 "kind": self.kind,
+                "seed_import_hosts": list(self.seed_import_hosts),
             },
             separators=(",", ":"),
         )
@@ -129,6 +140,7 @@ class SecretPayload:
                 uses=data["use"],
                 label=data["label"],
                 kind=data.get("kind", KIND_SECRET),
+                seed_import_hosts=data.get("seed_import_hosts", []),
             )
         except KeyError as exc:
             raise ValidationError(f"payload missing field {exc.args[0]!r}") from exc
@@ -149,4 +161,5 @@ class SecretPayload:
             "kind": self.kind,
             "hosts": list(self.hosts),
             "uses": sorted(self.uses),
+            "seed_import_hosts": list(self.seed_import_hosts),
         }

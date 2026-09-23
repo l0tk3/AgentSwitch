@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -32,7 +32,7 @@ describe("threads over HTTP", () => {
     const list = await client.threads();
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ id: (await tid(client, a.id)), cwd: "/tmp", status: "open", taskCount: 1, lastTarget: { harness: "codex", model: "gpt-5.5" } });
-    expect(list[0]!.home.startsWith(join(home, "threads"))).toBe(true);
+    expect(list[0]!.home.startsWith(realpathSync(join(home, "threads")))).toBe(true);
     const b = await client.handoff(a.id);
     expect(b).toMatchObject({ threadId: (await tid(client, a.id)), parentId: a.id, exclude: [{ harness: "codex", model: "gpt-5.5" }] });
     await client.watch(b.id, () => undefined);
@@ -88,8 +88,10 @@ describe("threads over HTTP", () => {
     const b = await client.submit("again", "/tmp");
     await client.watch(b.id, () => undefined);
     expect((await client.reopenThread((await tid(client, b.id)))).status).toBe("open");
-    expect(await client.deleteThread((await tid(client, b.id)))).toEqual({ ok: true });
-    await expect(client.deleteThread((await tid(client, b.id)))).rejects.toThrow(/not found/);
+    const deletedThread = await tid(client, b.id);
+    expect(await client.deleteThread(deletedThread)).toEqual({ ok: true });
+    await expect(client.task(b.id)).rejects.toThrow(/not found/);
+    await expect(client.deleteThread(deletedThread)).rejects.toThrow(/not found/);
     await expect(client.patchThread("nope", { title: "x" })).rejects.toThrow(/not found/);
     d.close();
   });

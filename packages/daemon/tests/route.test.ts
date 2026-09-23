@@ -36,6 +36,43 @@ describe("route()", () => {
     expect(out.verdict).toMatchObject({ ok: true, model: "claude-opus-5" });
   });
 
+  it.each([
+    decisionJson({ action: "give_up", brief: "No dispatch. The requested operation needs clarification.", reason: "The requested operation needs clarification." }),
+    JSON.stringify({ action: "give_up", reason: "The requested operation needs clarification." }),
+    JSON.stringify({ action: "give_up", reason: "The requested operation needs clarification.", harness: 7, brief: null, confidence: 9 }),
+  ])("never converts a router stop into an executable default: %s", async (reply) => {
+    const r = echoRouter([reply, decisionJson()]);
+    const out = await route(req, deps(r));
+    expect(out).toMatchObject({ source: "router", attempts: 1, decision: { action: "give_up" }, verdict: { ok: false, notes: ["The requested operation needs clarification."] } });
+    expect(out.verdict).not.toHaveProperty("harness");
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it.each([
+    decisionJson({ action: "clarify", question: "   " }),
+    JSON.stringify({ action: "clarify" }),
+    JSON.stringify({ action: "clarify", question: 42 }),
+  ])("stops an empty or invalid clarification without dispatching: %s", async (reply) => {
+    const r = echoRouter([reply, decisionJson()]);
+    const out = await route(req, deps(r));
+    expect(out).toMatchObject({ source: "router", verdict: { ok: false, notes: ["router requested clarification without a question"] } });
+    expect(out.clarify).toBeUndefined();
+    expect(r.calls).toHaveLength(1);
+  });
+
+  it("retains a minimal clarification as a question without an executable verdict", async () => {
+    const out = await route(req, deps(echoRouter([JSON.stringify({ action: "clarify", question: "Which file?" })])));
+    expect(out).toMatchObject({ source: "router", clarify: "Which file?", verdict: { ok: false } });
+  });
+
+  it.each([
+    decisionJson({ action: "repair", reason: "proxy is unavailable", repair: { tool: "restart_proxy", args: {} } }),
+    JSON.stringify({ action: "repair", reason: "proxy is unavailable", repair: { tool: "restart_proxy", args: {} } }),
+  ])("does not run a first-route repair as an ordinary dispatch: %s", async (reply) => {
+    const out = await route(req, deps(echoRouter([reply])));
+    expect(out).toMatchObject({ source: "router", verdict: { ok: false, notes: [expect.stringContaining("initial-route repair is not supported"), "proxy is unavailable"] } });
+  });
+
   it("timeout does not retry and uses the default policy", async () => {
     const slow = echoRouter([decisionJson()], { delayMs: 5_000 });
     const fast = { ...targets, router: { ...targets.router, timeout_ms: 30 } };

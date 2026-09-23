@@ -26,13 +26,13 @@ describe("HTTP API", () => {
     expect(t.status).toBe("queued");
     const seen: string[] = [];
     await client.watch(t.id, (ev) => { seen.push(ev.type); });
-    expect(seen).toEqual(["queued", "routed", "thread", "dispatched", "text", "done"]);
+    expect(seen).toEqual(["queued", "step", "routed", "thread", "dispatched", "text", "checkpoint", "done"]);
     expect((await client.tasks())[0]!.id).toBe(t.id);
     expect((await client.task(t.id)).status).toBe("done");
     // replay after completion also works, and `after` skips old events
     const replay: number[] = [];
     await client.watch(t.id, (ev) => { replay.push(ev.seq); }, 3);
-    expect(replay).toEqual([4, 5, 6]);
+    expect(replay).toEqual([4, 5, 6, 7, 8]);
     d.close();
   });
 

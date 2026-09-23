@@ -37,7 +37,7 @@ OUTPUT_SUBDIR = "browser-out"
 
 def downstream_env(env: dict[str, str] | None = None) -> dict[str, str]:
     base = dict(os.environ if env is None else env)
-    return {k: v for k, v in base.items() if k not in PROXY_VARS}
+    return {k: v for k, v in base.items() if k not in (*PROXY_VARS, "SECRET_GATE_REPAIR_URL", "SECRET_GATE_REPAIR_KEY")}
 
 
 def parse_command(argv: Sequence[str]) -> list[str]:
