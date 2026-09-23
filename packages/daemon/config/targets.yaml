@@ -97,4 +97,4 @@ router:
   min_confidence: 0.5
   quota_threshold: 0.05
   default: {harness: opencode, model: "deepseek/deepseek-flash"}
-  planner: {harness: claude-code, model: claude-sonnet-5}   # loop-v0: runs tasks the router marks plan=multi, step by step
+  planner: {harness: claude-code, model: claude-sonnet-5}   # loop-v0: fallback planner; the router names one per multi-step task

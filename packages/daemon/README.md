@@ -84,8 +84,9 @@ last, OpenCode runs them synchronously). Verified with `scripts/background_agent
 ## Task loop (loop-v0)
 
 A task is run step by step (`src/engine/taskLoop.ts`). The router's first decision carries `plan` and
-`purpose`; `plan: multi` hands the task to the planner (`router.planner` in targets.yaml, a text-only
-Claude or opencode model), which replies one action per step: a dispatch (`purpose` research / do /
+`purpose`; `plan: multi` hands the task to the planner the router names in the decision (`planner`, any listed
+model with quota; `router.planner` in targets.yaml is the fallback), run as a text-only Claude, Codex or
+opencode call. It replies one action per step: a dispatch (`purpose` research / do /
 verify; research and verify are read-only, their approval requests are refused), `ask_user`, `finish`
 or `give_up`. After a research/verify step, or in a multi-step task, every successful dispatch goes
 back to the loop model; a single-step task ends after the supervisor's acceptance as before. Failures

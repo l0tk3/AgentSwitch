@@ -58,7 +58,7 @@
 
 **分诊字段。** 路由决策加两个字段：`plan: single | multi`、`purpose: research | do | verify`（默认 single / do）。Flash 判断 `multi`（要先看一眼再做、或有几步前后依赖）→ 规划模型从第一步起接手，Flash 的派发作废；规划模型出错或额度用完 → 退回 Flash 的决定。
 
-**规划模型。** `targets.yaml` 的 `router.planner: {harness, model}`。`claude-code` 走 Agent SDK 纯文本调用（`tools: []`、`maxTurns: 1`、不落会话），`opencode` 走常驻 serve。该 harness 额度低于阈值时用 Flash。默认 `claude-code/claude-sonnet-5`。
+**规划模型由路由器动态选（2026-09-23 用户决定）。** Flash 判 `multi` 时同时在决策里写 `planner: {harness, model}`：从目录里挑一个**做规划**的模型（不需要工具，只看每步结果决定下一步），步骤相互依赖、动作有风险、材料长就挑 top/high，简单的先看后做挑 mid，顺带看额度。代码校验这个选择（在目录里、额度够），不合格就退到 `targets.yaml` 的 `router.planner`（默认 `claude-sonnet-5`，只是兜底），再不行 Flash 自己跑循环。三家都能当规划模型：`claude-code` 走 Agent SDK 纯文本调用（`tools: []`、`maxTurns: 1`、不落会话），`codex` 走 app-server 的只读临时线程（用用户自己的 CODEX_HOME），`opencode` 走常驻 serve。实测 Flash 对「录入账号、表单未知」的任务判 multi 并选了 claude-sonnet-5 做规划；codex/gpt-5.5 当规划模型时同样先只读调研再填表，每步约 20 秒。
 
 **每步之后谁来决定。**
 

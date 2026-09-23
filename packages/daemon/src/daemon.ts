@@ -37,10 +37,12 @@ import { RoutingLog } from "./router/log.js";
 import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
 import type { Router } from "./router/routers/types.js";
-import { loadTargets, type Targets } from "./router/targets.js";
+import { loadTargets, type Targets, modelKey, type TargetRef } from "./router/targets.js";
 import { discoverTargets } from "./router/discovery.js";
 import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
+import type { PlannerFactory } from "./engine/engine.js";
 import { claudeTextRouter } from "./router/routers/claude.js";
+import { codexTextRouter } from "./router/routers/codex.js";
 
 export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
@@ -97,7 +99,7 @@ export type BuildOverrides = {
   /** Tests: a sealer without a model or the gate. */
   readonly sealer?: Sealer;
   /** Tests: the planner for multi-step tasks (loop-v0 §6). */
-  readonly planner?: () => Router | null;
+  readonly planner?: PlannerFactory;
 };
 
 export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): Daemon {
@@ -144,15 +146,23 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
-/** targets.yaml `router.planner` as a text-only Router: claude-code through the Agent SDK, opencode through the resident
- *  server. Null while the planner's harness is out of quota (the router then runs multi-step tasks itself). */
-export function plannerFor(targets: Targets, resident: OpenCodeServer | undefined, quota: () => Record<string, number>): () => Router | null {
-  const p = targets.router.planner;
-  if (!p) return () => null;
-  return () => {
-    if ((quota()[p.harness] ?? 1) < targets.router.quota_threshold) return null;
-    if (p.harness === "claude-code") return claudeTextRouter({ model: p.model });
-    if (p.harness === "opencode" && resident) return serveRouter(resident, "oracle", p.model);
+/** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml
+ *  `router.planner`, else none (the router runs the loop itself). claude-code goes through the Agent SDK, codex through
+ *  app-server, opencode through the resident server; a harness out of quota is not used. */
+export function plannerFor(targets: Targets, resident: OpenCodeServer | undefined, quota: () => Record<string, number>): PlannerFactory {
+  const usable = (t: TargetRef | null): boolean => !!t && !!targets.harnesses[t.harness] && !!modelKey(targets.harnesses[t.harness]!, t.model) && (quota()[t.harness] ?? 1) >= targets.router.quota_threshold;
+  const build = (t: TargetRef): Router | null => {
+    if (t.harness === "claude-code") return claudeTextRouter({ model: t.model });
+    if (t.harness === "codex") return codexTextRouter({ model: t.model, binary: targets.harnesses.codex?.binary ?? "codex" });
+    if (t.harness === "opencode" && resident) return serveRouter(resident, "oracle", t.model);
+    return null;
+  };
+  return (pick) => {
+    for (const t of [pick, targets.router.planner]) {
+      if (!usable(t)) continue;
+      const router = build(t!);
+      if (router) return { router, target: t! };
+    }
     return null;
   };
 }

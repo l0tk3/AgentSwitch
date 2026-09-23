@@ -142,9 +142,11 @@ export class TaskLoop {
 
   /** The router said "multi": the planner takes over from the first step; if it is unusable, the router's decision stands. */
   private async escalate(task: Task, composed: string, st: State, signal: AbortSignal): Promise<State | null> {
-    const planner = this.d.engine.planner?.() ?? null;
-    if (!planner) return st;
-    this.ctx.emit(task.id, "step", { n: 0, action: "plan", model: planner.name, reason: st.current.decision?.reason ?? "" });
+    const pick = st.current.decision?.planner ?? null;
+    const chosen = this.d.engine.planner?.(pick) ?? null;
+    if (!chosen) { this.ctx.emit(task.id, "step", { n: 0, action: "plan", source: "none", pick, note: "no usable planner; the router runs the loop" }); return st; }
+    const planner = chosen.router;
+    this.ctx.emit(task.id, "step", { n: 0, action: "plan", model: `${chosen.target.harness}/${chosen.target.model}`, pick, reason: st.current.decision?.reason ?? "" });
     const note: StepRecord = { kind: "note", text: `The dispatcher triaged this as a multi-step task: ${st.current.decision?.reason || "(no reason given)"}. Plan it from the start.` };
     const r = await nextAction(planner, this.d.routeDeps(), { req: this.request(task, composed), steps: [note], used: 0, budget: st.budget, exclude: [] }, signal);
     if (!r.action) { this.ctx.emit(task.id, "step", { n: 0, action: "plan", source: "error", routerError: r.routerError, note: "the planner was unusable; the router's decision stands" }); return st; }

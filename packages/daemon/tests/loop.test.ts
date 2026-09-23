@@ -23,6 +23,7 @@ const finish = (result: string | null = null, reason = "all done") => JSON.strin
 const askUser = (question: string) => JSON.stringify({ action: "ask_user", question });
 
 type Build = { router?: string[] | ((i: { task: string }, n: number) => string); planner?: string[] | ((i: { task: string }, n: number) => string) | null; supervisor?: Supervisor; executors?: Executor[]; timeout?: number };
+type Pick = { harness: string; model: string } | null;
 function build(o: Build = {}) {
   const store = new Store({ dbPath: ":memory:", threadsDir: join(mkdtempSync(join(tmpdir(), "agentswitch-loop-")), "threads") });
   const bus = new Bus();
@@ -31,9 +32,11 @@ function build(o: Build = {}) {
   const echo = Object.keys(targets.harnesses).map((h) => echoExecutor(h));
   const router = echoRouter(o.router ?? [codex({ plan: "multi", reason: "look first" })]);
   const planner = o.planner === null ? null : echoRouter(o.planner ?? [finish("planned")]);
-  const engine = new Engine({ store, bus, executors: o.executors ?? echo, targets, router, quota: () => ({}), approvalTimeoutMs: o.timeout ?? 200, retryBackoffMs: 1, planner: () => planner, ...(o.supervisor ? { supervisor: o.supervisor } : {}) });
+  const picks: Pick[] = [];
+  const factory = (pick: Pick) => { picks.push(pick); return planner ? { router: planner, target: pick ?? { harness: "claude-code", model: "claude-sonnet-5" } } : null; };
+  const engine = new Engine({ store, bus, executors: o.executors ?? echo, targets, router, quota: () => ({}), approvalTimeoutMs: o.timeout ?? 200, retryBackoffMs: 1, planner: factory, ...(o.supervisor ? { supervisor: o.supervisor } : {}) });
   const firstApproval = (taskId: string) => new Promise<string>((resolve) => bus.subscribe(taskId, (e) => { if (e.type === "approval_request") resolve(String(e.payload.approvalId)); }));
-  return { store, bus, engine, events, echo, router, planner, firstApproval };
+  return { store, bus, engine, events, echo, router, planner, picks, firstApproval };
 }
 const codexRuns = (echo: ReturnType<typeof echoExecutor>[]) => echo.find((e) => e.harness === "codex")!.runs;
 const stepsOf = (events: TaskEvent[], id: string) => events.filter((e) => e.taskId === id && e.type === "step").map((e) => `${e.payload.n}:${e.payload.action}${e.payload.purpose ? "/" + e.payload.purpose : ""}`);
@@ -160,6 +163,22 @@ describe("multi-step tasks: the planner takes over", () => {
     await b.engine.idle();
     expect(b.store.getTask(u.id)).toMatchObject({ status: "done", result: "enough" });
     expect(codexRuns(b.echo)).toHaveLength(MAX_DISPATCHES + 1);
+  });
+
+  it("the router's planner pick reaches the factory and the plan event; no pick = null", async () => {
+    const a = build({ router: [codex({ plan: "multi", planner: { harness: "claude-code", model: "claude-opus-5" } })], planner: [finish("p")] });
+    const t = a.engine.submit({ task: "x", cwd: "/tmp/loop11" });
+    await a.engine.idle();
+    expect(a.picks).toEqual([{ harness: "claude-code", model: "claude-opus-5" }]);
+    expect(a.events.find((e) => e.taskId === t.id && e.type === "step")?.payload).toMatchObject({ action: "plan", model: "claude-code/claude-opus-5", pick: { harness: "claude-code", model: "claude-opus-5" } });
+    const b = build({ planner: [finish("p")] });
+    b.engine.submit({ task: "y", cwd: "/tmp/loop12" });
+    await b.engine.idle();
+    expect(b.picks).toEqual([null]);
+    const c = build({ planner: null });
+    const u = c.engine.submit({ task: "z", cwd: "/tmp/loop13" });
+    await c.engine.idle();
+    expect(c.events.find((e) => e.taskId === u.id && e.type === "step")?.payload).toMatchObject({ action: "plan", source: "none" });
   });
 
   it("give_up fails the task with the reason; a pinned task never goes to the planner", async () => {

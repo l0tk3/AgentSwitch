@@ -1,14 +1,21 @@
 /** Real-model smoke for loop-v0: the planner (targets.yaml router.planner) decides the first step of a multi-step
  *  task and then the step after a research result. Made-up task, sealed-looking tokens, no real site.
  *  Run from packages/daemon: npx tsx scripts/planner_smoke.ts */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { plannerFor } from "../src/daemon.js";
 import { nextAction } from "../src/router/loop.js";
 import { loadTargets } from "../src/router/targets.js";
 
 const targets = loadTargets(join(import.meta.dirname, "..", "config", "targets.yaml"));
-const planner = plannerFor(targets, undefined, () => ({}))();
-if (!planner) throw new Error("no planner configured or usable");
+// The router's pick comes from argv (harness/model), else targets.yaml's default.
+const pickArg = process.argv[2];
+const pick = pickArg ? { harness: pickArg.slice(0, pickArg.indexOf("/")), model: pickArg.slice(pickArg.indexOf("/") + 1) } : null;
+const chosen = plannerFor(targets, undefined, () => ({}))(pick);
+if (!chosen) throw new Error("no planner usable");
+console.log(`planner: ${chosen.target.harness}/${chosen.target.model}`);
+const planner = chosen.router;
 const T = "enc:v1:" + "A".repeat(200);
 const task = `把下面这个账号录进自建邮箱平台 http://mail.internal.example:8095/
 ${T}|${T}|2024|United States|${T}|${T}
@@ -20,7 +27,7 @@ Record layout: login email | password | birth year | country | app password | se
 - app password (for mail.internal.example:8095): ${T}
 - session key (for mail.internal.example:8095): ${T}`;
 const deps = { targets, router: planner, quota: {}, running: {} };
-const req = { task, cwd: "/tmp/planner-smoke", needsBrowser: true };
+const req = { task, cwd: mkdtempSync(join(tmpdir(), "planner-smoke-")), needsBrowser: true };   // spawn reports ENOENT for a missing cwd
 const show = (label: string, r: Awaited<ReturnType<typeof nextAction>>) => {
   const a = r.action;
   console.log(`${label}: ${r.routerMs} ms, error=${r.routerError ?? "none"}`);

@@ -51,11 +51,13 @@ export type EngineDeps = ComposeDeps & {
   readonly supervisor?: Supervisor;
   /** $AGENTSWITCH_HOME/approvals.json: who answers which approvals (manual / auto / scoped). */
   readonly policyPath?: string;
-  /** loop-v0 §6: the planner for multi-step tasks, when one is configured and has quota; null = the router runs them. */
-  readonly planner?: () => Router | null;
+  /** loop-v0 §6: the planner for a multi-step task, given the router's pick (validated by the factory); null = the router runs it. */
+  readonly planner?: PlannerFactory;
 };
 
 export { MAX_CLARIFICATIONS } from "./taskLoop.js";
+
+export type PlannerFactory = (pick: TargetRef | null) => { readonly router: Router; readonly target: TargetRef } | null;
 
 export type HandoffRequest = { readonly to?: TargetRef; readonly cwd?: string; readonly ephemeral?: boolean };
 

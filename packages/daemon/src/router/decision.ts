@@ -22,6 +22,8 @@ export const Decision = z.object({
   expected_size: z.enum(["small", "medium", "large"]).default("medium"),
   /** loop-v0 §6: "multi" hands the task to the planner, which runs it step by step. */
   plan: z.enum(["single", "multi"]).default("single"),
+  /** loop-v0 §6: with plan=multi, the catalog model the router wants to run the loop; null = the daemon's default. */
+  planner: TargetRef.nullable().default(null),
   /** loop-v0: research/verify steps are read-only (approvals refused, brief says so). */
   purpose: z.enum(["research", "do", "verify"]).default("do"),
   risk: z.string().nullable().default(null),

@@ -33,6 +33,7 @@ export const DECISION_SHAPE = `{
   "thread_confidence": <0..1>,
   "expected_size": "small" | "medium" | "large",
   "plan": "single" | "multi",   // multi = something must be found out first, or several dependent steps
+  "planner": {"harness": "...", "model": "..."} | null,   // with plan=multi: the listed model that will run the steps
   "purpose": "research" | "do" | "verify",   // research/verify = look only, change nothing, submit nothing
   "risk": "<what could go wrong, or null>",
   "fallbacks": [{"harness": "...", "model": "..."}],
@@ -68,9 +69,14 @@ Rules:
 - If the task cannot be done without something only the user can supply (a credential or site missing from the
   context, a URL, which of two readings they mean), reply with action "clarify" and one precise question instead of
   dispatching. Do not clarify for things an executor can find out by itself.
-- "plan": "multi" when the task cannot be done well in one go: something must be looked up first (what a form
-  requires, what a site offers), or later steps depend on earlier results. The daemon then runs it step by step with
-  a planner. "single" for anything one executor can finish by itself.
+- "plan": "multi" when the task cannot be done well in one go: something must be looked up first, or later steps
+  depend on earlier results. Typical: entering data into a site whose form you have not seen (first a read-only look at
+  the form's fields, then the entry), a change that must be verified on another system, anything where the second
+  step's brief cannot be written before the first step's result is known. The daemon then runs it step by step with
+  a planner, which you name in "planner": a listed model, chosen for the planning, not the execution (it gets no tools,
+  only sees each step's outcome and decides the next). A top/high model when steps depend on each other, actions are
+  risky, or the material is long; a mid model for a plain look-then-do. Mind quota. "single" for anything one
+  executor can finish by itself.
 - If unsure about the target, lower confidence instead of guessing.
 - Reply with exactly one JSON object and nothing else, of this shape:
 ${DECISION_SHAPE}${contextSection(x.context ?? EMPTY_CONTEXT)}${memorySection(x.memory)}${recordSection(x.record)}${extensionsSection(x.extensions)}${threadsSection(x.threads)}`;
