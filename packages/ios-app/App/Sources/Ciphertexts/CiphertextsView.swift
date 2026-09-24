@@ -1,0 +1,120 @@
+import AgentSwitchKit
+import SwiftUI
+
+/// Mint `enc:v1:` tokens on the phone with the Mac's gate public key (app-v0 §3). The plaintext value is held only in
+/// this view's state and cleared as soon as the token exists; the saved list keeps ciphertext and note only.
+/// Shown pushed from Settings or in a sheet from the input box; the caller provides the navigation stack.
+struct CiphertextsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var draft = SecretDraft()
+    @State private var minted: SavedCiphertext?
+    @State private var error: String?
+
+    var body: some View {
+        Form {
+            keySection
+            if model.canMint { mintSection }
+            if let minted { resultSection(minted) }
+            savedSection
+        }
+        .navigationTitle("密文")
+        .task { if !model.canMint { await model.refreshGateKey() } }
+        .onDisappear { draft.value = "" }
+    }
+
+    @ViewBuilder
+    private var keySection: some View {
+        Section {
+            if let gate = model.profile?.gate, model.canMint {
+                LabeledContent("gate 密钥对", value: gate.keypair)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(unavailableText).font(.footnote)
+                    Button("重新获取公钥") { Task { await model.refreshGateKey() } }.disabled(model.api == nil)
+                }
+            }
+        } footer: {
+            Text("密文在手机上用 Mac 的 gate 公钥加密，只有这台 Mac 的 gate 能解开，并且只能用于你填的站点。")
+        }
+    }
+
+    private var unavailableText: String {
+        if case .unavailable(let message) = model.gateKeyStatus { return "Mac 暂时读不到 gate 公钥（\(message)），暂不能生成密文。" }
+        return "还没有 gate 公钥，暂不能生成密文。"
+    }
+
+    private var mintSection: some View {
+        Section("生成") {
+            TextField("label，例如 corp-vpn/pass", text: $draft.label)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            TextField("站点：host[:port]、*.example.com 或网址，逗号分隔", text: $draft.sites, axis: .vertical)
+                .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+            Picker("类型", selection: $draft.kind) {
+                ForEach(SecretKind.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            ForEach(SecretUse.allCases, id: \.self) { use in
+                Toggle(use.title, isOn: Binding(get: { draft.uses.contains(use) },
+                                                set: { on in if on { draft.uses.insert(use) } else { draft.uses.remove(use) } }))
+            }
+            SecureField(draft.kind == .totp ? "TOTP 密钥（base32）" : "密码 / token", text: $draft.value)
+                .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+            TextField("备注（可选，只存在手机上）", text: $draft.note)
+            if let problem = draft.problem, !draft.value.isEmpty || !draft.label.isEmpty {
+                Text(problem).font(.footnote).foregroundStyle(.orange)
+            }
+            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            Button("生成密文") { mint() }.disabled(draft.problem != nil)
+        }
+    }
+
+    private func resultSection(_ item: SavedCiphertext) -> some View {
+        Section("刚生成") {
+            Text(item.token).font(.caption.monospaced()).lineLimit(3).textSelection(.enabled)
+            HStack {
+                Button("复制") { Clipboard.copyToken(item.token) }
+                Spacer()
+                Button("插入任务") { model.insertIntoCompose(item.token) }
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private var savedSection: some View {
+        Section("已保存") {
+            if model.ciphertexts.isEmpty {
+                Text("还没有保存的密文").foregroundStyle(.secondary)
+            }
+            ForEach(model.ciphertexts) { item in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.note)
+                    Text(item.shortToken).font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
+                .swipeActions(edge: .leading) {
+                    Button("插入任务") { model.insertIntoCompose(item.token) }.tint(.blue)
+                }
+                .contextMenu {
+                    Button("复制密文", systemImage: "doc.on.doc") { Clipboard.copyToken(item.token) }
+                    Button("插入任务", systemImage: "square.and.pencil") { model.insertIntoCompose(item.token) }
+                }
+            }
+            .onDelete { offsets in model.deleteCiphertexts(Set(offsets.map { model.ciphertexts[$0].id })) }
+        }
+    }
+
+    private func mint() {
+        do {
+            minted = try model.mint(draft)
+            error = nil
+            // Plaintext is gone the moment the token exists; label, sites and kind stay for the next one.
+            draft.value = ""
+            draft.note = ""
+        } catch {
+            draft.value = ""
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+#Preview {
+    NavigationStack { CiphertextsView() }.environment(AppModel.preview())
+}
