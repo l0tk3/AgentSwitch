@@ -5,13 +5,16 @@ import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { ApprovalPolicy } from "../engine/approvalPolicy.js";
-import { answersFromText, parseEvidence, validateAnswers } from "../engine/questions.js";
+import { answersFromText, MAX_ANSWER_LENGTH, parseEvidence, validateAnswers } from "../core/questions.js";
 import { TERMINAL, type Task, type TaskEvent } from "../engine/types.js";
 import { MAX_FILES_PER_UPLOAD } from "../files/names.js";
 import type { Attachment } from "../files/uploads.js";
-import { TargetRef } from "../router/targets.js";
-import { checkCwd } from "./cwdPolicy.js";
+import { remoteCaller } from "../core/caller.js";
+import { TargetRef } from "../core/target.js";
+import { zodIssues } from "../util/zod.js";
+import { checkCwd, checkStoredCwd } from "./cwdPolicy.js";
 import { issues, newWorkDir, limitParam, type ApiDeps } from "./shared.js";
+import { DEFAULT_LIST_LIMIT, SSE_HEARTBEAT_MS } from "../core/limits.js";
 
 const NewTaskBody = z.object({
   task: z.string().min(1),
@@ -29,6 +32,16 @@ const NewTaskBody = z.object({
 });
 export { NewTaskBody };
 
+/** What a paired phone may not decide (app-v0 §2): the approval policy is the Mac's, and so is where a task runs on the
+ *  Mac. A phone's task gets a fresh work dir, or its parent's cwd as a follow-up; it may not mark that ephemeral either,
+ *  which deletes a work dir under the temp dir or the daemon's work root when the task ends. */
+function remoteRefusal(body: z.infer<typeof NewTaskBody>): string | null {
+  if (body.approval !== undefined) return "approval cannot be set from a paired device; the Mac's approval policy applies";
+  if (body.cwd !== undefined) return "cwd cannot be set from a paired device; the task gets its own work directory (a follow-up continues in its parent's)";
+  if (body.ephemeral !== undefined) return "ephemeral cannot be set from a paired device";
+  return null;
+}
+
 type Sealed = { ok: true; text: string; sealed: readonly SealedEntry[] } | { ok: false; code: "unroutable" | "unavailable"; error: string };
 
 /** Every submission passes the sealer (router-v0 §9) before anything is stored; a sealer failure refuses the
@@ -39,7 +52,7 @@ async function sealSubmission(deps: ApiDeps, text: string, ctx: SealContext): Pr
   if (!r.ok) return { ok: false, code: r.code, error: r.error };
   return { ok: true, text: r.text, sealed: r.sealed };
 }
-const AnswerBody = z.object({ approval_id: z.string().min(1), text: z.string().max(4000).optional(), answers: z.record(z.string(), z.array(z.string())).optional() })
+const AnswerBody = z.object({ approval_id: z.string().min(1), text: z.string().max(MAX_ANSWER_LENGTH).optional(), answers: z.record(z.string(), z.array(z.string())).optional() })
   .refine((b) => b.text !== undefined || b.answers !== undefined, { message: "text or answers required" });
 const HandoffBody = z.object({ to: TargetRef.optional() });
 const ApproveBody = z.object({ approval_id: z.string().min(1), decision: z.enum(["allow", "deny"]) });
@@ -73,12 +86,38 @@ function intakeStream(receive: (progress: (stage: IntakeStage) => void) => Promi
   });
 }
 
+export type TaskBody = z.infer<typeof NewTaskBody>;
+export type Admitted = { ok: true; task: Task } | { ok: false; status: 400 | 404 | 409; error: string; streamError?: string };
+
+/** The second half of taking a task, after sealing (shared by POST /tasks and the assistant, assistant-v0 §1.1): the
+ *  referenced parent and thread are looked up again (sealing takes seconds; they may be gone or archived meanwhile), the
+ *  work dir chosen, attachments moved in, the task submitted. */
+export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly text: string; readonly sealed: readonly SealedEntry[] }): Admitted {
+  const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, task: _raw, ...rest } = body;
+  const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
+  if (parent_id && !parent) return { ok: false, status: 404, error: "parent task not found" };
+  const effectiveThreadId = thread_id ?? parent?.threadId;
+  const thread = effectiveThreadId ? deps.store.getThread(effectiveThreadId) : undefined;
+  if (effectiveThreadId && !thread) return { ok: false, status: 404, error: "thread not found" };
+  if (thread?.status === "archived") return { ok: false, status: 409, error: "thread is archived; reopen it first" };
+  const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
+  const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
+  const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
+  let attachments: Attachment[] = [];
+  try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
+  catch (err) { return { ok: false, status: 400, error: (err as Error).message, streamError: "附件无法移入任务目录，请重新检查附件后提交。" }; }
+  const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
+  return { ok: true, task };
+}
+
 export function mountTasks(app: Hono, deps: ApiDeps): void {
   app.post("/tasks", async (c) => {
     const started = Date.now();
     const elapsed = () => Date.now() - started;
     const body = NewTaskBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!body.success) return c.json({ error: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, 400);
+    if (!body.success) return c.json({ error: zodIssues(body.error) }, 400);
+    const refused = remoteCaller(c.env) ? remoteRefusal(body.data) : null;
+    if (refused) return c.json({ error: refused }, 400);
     const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
     const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
     if (cwdProblem) return c.json({ error: cwdProblem }, 400);
@@ -88,6 +127,9 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     let thread = initialThreadId ? deps.store.getThread(initialThreadId) : undefined;
     if (initialThreadId && !thread) return c.json({ error: "thread not found" }, 404);
     if (thread?.status === "archived") return c.json({ error: "thread is archived; reopen it first" }, 409);
+    // A follow-up takes over its parent's cwd, which may predate the current rules.
+    const inheritedProblem = cwd === undefined && parent && !parent.ephemeral ? checkStoredCwd(parent.cwd, deps.cwdRules, deps.workRoot) : null;
+    if (inheritedProblem) return c.json({ error: `the parent task's ${inheritedProblem}` }, 400);
     const receive = async (progress: (stage: IntakeStage) => void = () => undefined): Promise<IntakeResult> => {
       let sealingMs = 0;
       const failure = (status: Extract<IntakeResult, { ok: false }>["status"], error: string, streamError = error): IntakeResult => ({ ok: false, status, error, streamError, elapsedMs: elapsed(), sealingMs });
@@ -100,20 +142,9 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
       if (!sealed.ok) return failure(sealed.code === "unroutable" ? 400 : 503, sealed.error, sealed.code === "unroutable"
         ? "凭据缺少目标站点或原文用途授权，请补充后重试。" : "凭据保护服务暂时不可用，消息未创建任务，请稍后重试。");
       progress("creating");
-      // Sealing can take seconds. The referenced task/thread may have been deleted or archived meanwhile.
-      parent = parent_id ? deps.store.getTask(parent_id) : undefined;
-      if (parent_id && !parent) return failure(404, "parent task not found");
-      const effectiveThreadId = thread_id ?? parent?.threadId;
-      thread = effectiveThreadId ? deps.store.getThread(effectiveThreadId) : undefined;
-      if (effectiveThreadId && !thread) return failure(404, "thread not found");
-      if (thread?.status === "archived") return failure(409, "thread is archived; reopen it first");
-      const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
-      const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
-      const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
-      let attachments: Attachment[] = [];
-      try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
-      catch (err) { return failure(400, (err as Error).message, "附件无法移入任务目录，请重新检查附件后提交。"); }
-      const task = deps.engine.submit({ ...rest, task: sealed.text, ...(sealed.sealed.length ? { sealed: sealed.sealed } : {}), cwd: workDir, ephemeral: isEphemeral, attachments, ...(parent ? { parentId: parent.id } : {}), ...(thread ? { threadId: thread.id } : {}), ...(pin ? { pin } : {}), ...(needs_browser !== undefined ? { needsBrowser: needs_browser } : {}), ...(approval ? { approval } : {}) });
+      const admitted = admitSealed(deps, body.data, sealed);
+      if (!admitted.ok) return failure(admitted.status, admitted.error, admitted.streamError ?? admitted.error);
+      const task = admitted.task;
       const elapsedMs = elapsed();
       // A diagnostic failure after submit must not turn an accepted task into a retryable rejection.
       try { deps.bus.publish(deps.store.appendEvent(task.id, "step", { action: "intake", durationMs: elapsedMs, sealingMs })); } catch { /* The task receipt still takes precedence. */ }
@@ -139,12 +170,14 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     if (!task) return c.json({ error: "not found" }, 404);
     const thread = task.threadId ? deps.store.getThread(task.threadId) : undefined;
     if (thread?.status === "archived") return c.json({ error: "thread is archived; reopen it first" }, 409);
+    const cwdProblem = task.ephemeral ? null : checkStoredCwd(task.cwd, deps.cwdRules, deps.workRoot);
+    if (cwdProblem) return c.json({ error: `the task's ${cwdProblem}` }, 400);
     // An ephemeral work dir is wiped when its task ends, so the successor gets a fresh one (as follow-ups do).
     const next = deps.engine.handoff(task.id, { ...(body.data.to ? { to: body.data.to } : {}), ...(task.ephemeral ? { cwd: newWorkDir(deps.workRoot), ephemeral: true } : {}) });
     return next ? c.json(next, 201) : c.json({ error: "not found" }, 404);
   });
 
-  app.get("/tasks", (c) => c.json(deps.store.listTasks(limitParam(c, 50))));
+  app.get("/tasks", (c) => c.json(deps.store.listTasks(limitParam(c, DEFAULT_LIST_LIMIT))));
 
   app.get("/tasks/:id", (c) => {
     const task = deps.store.getTask(c.req.param("id"));
@@ -187,8 +220,13 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
       const current = deps.store.getTask(id);
       if (ended || !current || TERMINAL.has(current.status)) { unsubscribe(); return; }
       stream.onAbort(() => { unsubscribe(); done(); });
-      await finished;
-      unsubscribe();
+      const heartbeat = setInterval(() => { void stream.write(": ping\n\n").catch(() => undefined); }, deps.sseHeartbeatMs ?? SSE_HEARTBEAT_MS);
+      try {
+        await finished;
+      } finally {
+        clearInterval(heartbeat);
+        unsubscribe();
+      }
     });
   });
 

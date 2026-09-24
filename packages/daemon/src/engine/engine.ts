@@ -3,14 +3,16 @@
  *  Scheduler (gates), ApprovalDesk (questions to humans), ThreadBook (threads, handoffs, records, summary),
  *  Composer (prompts and route deps), supervise (the router as supervisor). */
 
+import type { BrowserSlots } from "../executors/browserSlots.js";
 import type { Executor } from "../executors/types.js";
 import type { ProtectedPaths } from "../executors/protected.js";
 import type { RouteDeps } from "../router/route.js";
-import type { Router } from "../router/routers/types.js";
-import type { ThreadBrief, ThreadState } from "../threads/types.js";
+import type { Router } from "../core/modelCall.js";
+import type { ThreadState } from "../threads/types.js";
+import type { ThreadBrief } from "../router/prompt.js";
 import type { RoutingLog } from "../router/log.js";
 import type { Supervisor } from "../router/supervisor.js";
-import type { TargetRef } from "../router/targets.js";
+import type { TargetRef } from "../core/target.js";
 import type { Summarizer } from "../threads/summary.js";
 import { removeTaskMemories } from "../threads/memory.js";
 import { removeTaskPlatformMemories } from "../threads/platformMemory.js";
@@ -48,6 +50,8 @@ export type EngineDeps = ComposeDeps & {
   readonly summaryTimeoutMs?: number;
   /** Paths no executor may change; restored after every run as the last line of defense. */
   readonly protected?: ProtectedPaths;
+  /** Kept browser profiles so a login carries over (threads-v0 §4b); absent = a throw-away profile per run. */
+  readonly browserSlots?: BrowserSlots;
   readonly now?: () => number;
   /** Tasks in flight at once (routing or running); the rest queue FIFO (background-v0 §1). */
   readonly maxConcurrentTasks?: number;
@@ -62,6 +66,7 @@ export type EngineDeps = ComposeDeps & {
 };
 
 export { MAX_CLARIFICATIONS } from "./taskLoop.js";
+import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
 
 export type PlannerFactory = (pick: TargetRef | null) => { readonly router: Router; readonly target: TargetRef } | null;
 
@@ -154,6 +159,7 @@ export class Engine {
     if (blocked) return blocked;
     this.ctx.store.deleteThread(id);
     this.forgetTasks(tasks);
+    this.deps.browserSlots?.forgetThread(id);   // the thread's logins go with it
     return { ok: true };
   }
 
@@ -192,7 +198,6 @@ export class Engine {
     while (this.inFlight.size) await Promise.all([...this.inFlight.values()]);
   }
 
-  runningByHarness(): Record<string, number> { return this.scheduler.runningByHarness(); }
   threadState(threadId: string): ThreadState { return this.threads.state(threadId); }
   threadBriefs(limit?: number): ThreadBrief[] { return this.threads.briefs(limit); }
   composeTask(task: Task): string { return this.composer.task(task); }
@@ -200,7 +205,7 @@ export class Engine {
 
   // ---- lifecycle ----
 
-  private routeDeps(): RouteDeps { return this.composer.routeDeps(this.scheduler.runningByHarness(), this.threads.briefs()); }
+  private routeDeps(): RouteDeps { return this.composer.routeDeps(this.threads.briefs()); }
 
   private async process(id: string): Promise<void> {
     const task = this.ctx.store.getTask(id);
@@ -233,7 +238,7 @@ export class Engine {
       this.controllers.delete(id);
       this.desk.expireAll(id);                       // the executor moved on without an answer
       const finishCtl = new AbortController();
-      const timer = setTimeout(() => finishCtl.abort(new Error("摘要生成超时")), this.deps.summaryTimeoutMs ?? 45_000);
+      const timer = setTimeout(() => finishCtl.abort(new Error("摘要生成超时")), this.deps.summaryTimeoutMs ?? SUPPORT_CALL_TIMEOUT_MS);
       try {
         // Keep thread/cwd locked until its summary is committed, and bound an unresponsive model.
         await waitUnlessCancelled(this.threads.finish(id, finishCtl.signal), finishCtl.signal);

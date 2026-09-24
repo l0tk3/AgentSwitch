@@ -1,16 +1,16 @@
 /** The pipeline: pin → validate; otherwise router (with timeout and one retry) → validate → default. */
 
-import { aggregateRecords, guardsFor, recordText, type RecordRow } from "../threads/record.js";
-import type { ThreadBrief } from "../threads/types.js";
-import { EMPTY_CONTEXT, type LoadedContext } from "./context.js";
+import { aggregateRecords, guardsFor, recordText, type RecordRow } from "./record.js";
+import { type ThreadBrief, redispatchMessage, systemPrompt, taskMessage, type ExtensionsSummary, type RepairTool } from "./prompt.js";
+import { EMPTY_CONTEXT, type LoadedContext } from "../core/contextDoc.js";
 import { parseDecision, type Decision } from "./decision.js";
 import { classify, defaultTarget } from "./defaultPolicy.js";
-import { redispatchMessage, systemPrompt, taskMessage, type ExtensionsSummary, type RepairTool } from "./prompt.js";
 import { askJson } from "./ask.js";
 import { nextStep, type Attempt, type Limits, type NextStep } from "./reroute.js";
-import type { Router } from "./routers/types.js";
-import { categoryOf, markUnavailable, type TargetRef, type Targets } from "./targets.js";
-import { validateDecision, validatePin, validateTarget, type Quota, type Running, type Verdict } from "./validate.js";
+import type { Router } from "../core/modelCall.js";
+import { categoryOf, markUnavailable, type Targets } from "./targets.js";
+import type { TargetRef } from "../core/target.js";
+import { validateDecision, validatePin, validateTarget, type Quota, type Verdict } from "./validate.js";
 
 export type RouteRequest = {
   readonly task: string;
@@ -25,10 +25,9 @@ export type RouteDeps = {
   readonly targets: Targets;
   readonly router: Router;
   readonly quota: Quota;
-  readonly running: Running;
   /** Repair tools the router may request during a re-dispatch (none registered yet). */
   readonly repairs?: readonly RepairTool[];
-  /** The user's CONTEXT.md, already linted (see context.ts). */
+  /** The user's CONTEXT.md, already linted (see core/contextDoc.ts). */
   readonly context?: LoadedContext;
   /** MEMORY.md, linted the same way. */
   readonly memory?: LoadedContext;
@@ -62,7 +61,7 @@ export async function route(req: RouteRequest, deps: RouteDeps): Promise<RouteRe
   const exclude = req.exclude ?? [];
   const targets = exclude.length ? markUnavailable(deps.targets, exclude) : deps.targets;
   const fallback = defaultTargetExcluding(req, deps, exclude);
-  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) };
+  const ctx = { targets, quota: deps.quota, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) };
 
   if (req.pin) {
     // A pin is the user's decision: it is validated against the full catalog, exclusions notwithstanding.
@@ -94,7 +93,7 @@ type Asked = { decision: Decision | null; routerError: string | null; routerMs: 
 export function verdictFor(decision: Decision, req: RouteRequest, deps: RouteDeps, exclude: readonly TargetRef[]): { verdict: Verdict; source: "router" | "default" } {
   const targets = exclude.length ? markUnavailable(deps.targets, exclude) : deps.targets;
   const fallback = defaultTargetExcluding(req, deps, exclude);
-  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) };
+  const ctx = { targets, quota: deps.quota, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) };
   const verdict = validateDecision(decision, { ...ctx, guards: guardsFor(deps.records ?? [], kindOf(req.task, decision)) });
   if (verdict.ok) return { verdict, source: verdict.chosen !== "default" ? "router" : "default" };
   const last = validateTarget(fallback, ctx, decision.needs_browser, "default");
@@ -120,7 +119,7 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
   const tried = req.attempts.map((a) => ({ harness: a.harness, model: a.model }));
   const fallback = defaultTargetExcluding(req, deps, tried);
   const step = nextStep({ decision: req.decision, attempts: req.attempts, routerAsks: req.routerAsks, targets: deps.targets,
-    quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, deps.targets), ...(req.limits ? { limits: req.limits } : {}) });
+    quota: deps.quota, lowConfidenceTarget: fallback, category: categoryOf(req.task, deps.targets), ...(req.limits ? { limits: req.limits } : {}) });
   if (step.kind !== "ask-router") return { step, decision: req.decision, routerError: null, routerMs: 0 };
 
   const targets = markUnavailable(deps.targets, step.exclude);
@@ -130,7 +129,7 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
   const extra = redispatchMessage(summaries, step.exclude, req.diffSummary ?? "", repairs);
   const asked = await askRouter(req, { ...deps, targets }, extra);
   const excludedFallback = defaultTargetExcluding(req, deps, step.exclude);
-  const ctx = { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: excludedFallback, category: categoryOf(req.task, targets) };
+  const ctx = { targets, quota: deps.quota, lowConfidenceTarget: excludedFallback, category: categoryOf(req.task, targets) };
   if (asked.decision?.action === "give_up") {
     return { step: { kind: "give_up", reason: asked.decision.reason || "router gave up" }, decision: asked.decision, routerError: null, routerMs: asked.routerMs };
   }
@@ -153,7 +152,7 @@ export async function reroute(req: RerouteRequest, deps: RouteDeps): Promise<Rer
 export function defaultVerdict(req: RouteRequest, deps: RouteDeps, exclude: readonly TargetRef[], needsBrowser: boolean): Verdict {
   const targets = exclude.length ? markUnavailable(deps.targets, exclude) : deps.targets;
   const fallback = defaultTargetExcluding(req, deps, exclude);
-  return validateTarget(fallback, { targets, quota: deps.quota, running: deps.running, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) }, needsBrowser, "default");
+  return validateTarget(fallback, { targets, quota: deps.quota, lowConfidenceTarget: fallback, category: categoryOf(req.task, targets) }, needsBrowser, "default");
 }
 
 /** Default-policy target that avoids harnesses already tried. */

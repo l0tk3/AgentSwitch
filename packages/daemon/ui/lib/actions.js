@@ -123,7 +123,7 @@ export async function refresh() {
   if (results.some((r) => r.status === "rejected") && get().view === view) set({ hint: "部分状态暂未刷新，请稍后重试。" });
 }
 
-const EVENT_TYPES = ["queued", "routed", "thread", "waiting", "dispatched", "text", "tool_call", "agent", "supervisor", "feedback", "sealed", "credential_repair", "step", "checkpoint", "approval_request", "approval_resolved", "attempt_failed", "refusal", "redispatch", "handoff", "summary", "done", "partial", "blocked", "failed", "cancelled", "cleaned"];
+const EVENT_TYPES = ["queued", "routed", "thread", "waiting", "dispatched", "text", "tool_call", "agent", "supervisor", "feedback", "sealed", "credential_repair", "transfer_grant", "step", "checkpoint", "approval_request", "approval_resolved", "attempt_failed", "refusal", "redispatch", "handoff", "summary", "done", "partial", "blocked", "failed", "cancelled", "cleaned"];
 const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "partial", "blocked", "checkpoint", "failed", "cancelled", "redispatch", "dispatched", "routed", "cleaned", "handoff", "summary", "thread"]);
 
 /** Open the task view and follow its event stream (`/tasks/${id}/events`, SSE). */

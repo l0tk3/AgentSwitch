@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { AppServerClient } from "../src/executors/appserver.js";
-import { terminateProcess } from "../src/executors/processes.js";
+import { AppServerClient } from "../src/harness/appserver.js";
+import { terminateProcess } from "../src/harness/processes.js";
 
 describe("executor process stop", () => {
   it.skipIf(process.platform === "win32")("forces an isolated fixture process that ignores graceful termination to exit", async () => {

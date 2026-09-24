@@ -1,11 +1,9 @@
 /** Codex quota via `codex app-server` JSON-RPC `account/rateLimits/read` (verified 2026-09-20). */
 
-import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
+import { appServerRequest, type Json } from "../harness/appserver.js";
 import type { QuotaProvider } from "./types.js";
 import { labelForMinutes, type Window } from "./windows.js";
-
-type Json = Record<string, unknown>;
+import { APP_SERVER_REQUEST_TIMEOUT_MS } from "../core/limits.js";
 
 /** `{rateLimits:{primary:{usedPercent,windowDurationMins,resetsAt},planType,...}}` → remaining fraction. */
 export function parseRateLimits(result: Json): { remaining: number | null; detail: Json } {
@@ -35,50 +33,11 @@ export function codexQuota(opts: { binary: string; timeoutMs?: number; env?: Nod
     harness: "codex",
     async read(_force, signal) {
       try {
-        const result = await appServerRequest(opts.binary, "account/rateLimits/read", {}, opts.timeoutMs ?? 20_000, opts.env, signal);
+        const result = await appServerRequest(opts.binary, "account/rateLimits/read", {}, opts.timeoutMs ?? APP_SERVER_REQUEST_TIMEOUT_MS, opts.env, signal);
         return { ...parseRateLimits(result), source: "codex app-server account/rateLimits/read", error: null };
       } catch (err) {
         return { remaining: null, detail: {}, source: "codex app-server", error: (err as Error).message };
       }
     },
   };
-}
-
-/** Minimal JSON-RPC over stdio: initialize, one request, exit. Server→client requests are answered with accept. */
-export function appServerRequest(binary: string, method: string, params: Json, timeoutMs: number, env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal): Promise<Json> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(signal.reason ?? new Error("cancelled")); return; }
-    const clean = Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== undefined && !/^(https?|all)_proxy$/i.test(k))) as Record<string, string>;
-    const child = spawn(binary, ["app-server"], { env: clean, stdio: ["pipe", "pipe", "pipe"] });
-    let settled = false;
-    const finish = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      child.kill("SIGKILL");  // disposable read-only process: a hung child must not outlive the refresh
-      fn();
-    };
-    const onAbort = () => finish(() => reject(signal?.reason ?? new Error("cancelled")));
-    const timer = setTimeout(() => finish(() => reject(new Error(`${method}: timed out after ${timeoutMs} ms`))), timeoutMs);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    const send = (msg: Json) => { if (!settled) child.stdin.write(JSON.stringify(msg) + "\n"); };
-    let stderr = "";
-    child.stderr.on("data", (d) => (stderr = (stderr + String(d)).slice(-2000)));
-    child.stdin.on("error", (e) => finish(() => reject(e)));
-    child.on("error", (e) => finish(() => reject(e)));
-    child.on("close", (code) => finish(() => reject(new Error(`app-server exited ${code}: ${stderr.slice(0, 200)}`))));
-    const rl = createInterface({ input: child.stdout });
-    rl.on("line", (line) => {
-      let msg: Json;
-      try { msg = JSON.parse(line) as Json; } catch { return; }
-      if (msg.method && msg.id !== undefined) { send({ jsonrpc: "2.0", id: msg.id, result: { decision: "accept" } }); return; }
-      if (msg.id === 1 && msg.result !== undefined) { send({ jsonrpc: "2.0", method: "initialized", params: {} }); send({ jsonrpc: "2.0", id: 2, method, params }); return; }
-      if (msg.id === 2) {
-        if (msg.error) finish(() => reject(new Error(`${method} failed: ${JSON.stringify(msg.error)}`)));
-        else finish(() => resolve(msg.result as Json));
-      }
-    });
-    send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { clientInfo: { name: "agentswitch", version: "0.1.0" } } });
-  });
 }

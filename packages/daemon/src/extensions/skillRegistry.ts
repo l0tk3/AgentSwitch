@@ -5,10 +5,13 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
+import { zodIssues } from "../util/zod.js";
 import { type DiscoveredSkill, type Harness, NAME_RE, parseFrontmatter, type Skill, SkillMeta } from "./types.js";
 
 const MetaFile = z.record(z.string(), SkillMeta);
 export const SKILL_FILE = "SKILL.md";
+/** A skill without frontmatter is described by its first line, this long at most. */
+const MAX_DESCRIPTION_CHARS = 120;
 
 export function defaultDiscoverRoots(home = process.env.HOME ?? ""): { source: string; dir: string }[] {
   return [
@@ -127,7 +130,7 @@ export class SkillRegistry {
   private readMeta(): Record<string, SkillMeta> {
     if (!existsSync(this.metaPath)) return {};
     const parsed = MetaFile.safeParse(JSON.parse(readFileSync(this.metaPath, "utf8")));
-    if (!parsed.success) throw new Error(`${this.metaPath}: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+    if (!parsed.success) throw new Error(`${this.metaPath}: ${zodIssues(parsed.error, { paths: false })}`);
     return parsed.data;
   }
 
@@ -149,5 +152,5 @@ export function ensureFrontmatter(name: string, content: string): string {
 
 function firstLine(text: string): string {
   const line = text.split("\n").map((l) => l.replace(/^#+\s*/, "").trim()).find(Boolean) ?? "";
-  return line.slice(0, 120);
+  return line.slice(0, MAX_DESCRIPTION_CHARS);
 }

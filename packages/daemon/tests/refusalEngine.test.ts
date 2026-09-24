@@ -7,7 +7,7 @@ import { Engine } from "../src/engine/engine.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import type { ExecutionInput, Executor } from "../src/executors/types.js";
-import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../src/router/failure.js";
+import { NO_SIDE_EFFECTS, type ExecutionOutcome } from "../src/core/outcome.js";
 import { echoRouter } from "../src/router/routers/echo.js";
 import { SupervisorConfig, type Supervisor } from "../src/router/supervisor.js";
 import { decisionJson, realTargets } from "./helpers.js";
@@ -126,9 +126,55 @@ describe("Engine: bounded, sourced refusal clarification", () => {
     }));
   });
 
-  it("a structured provider refusal stops without asking another model or accepting its text", async () => {
-    const outcome = { ...refused, lastText: "Request blocked.", refusal: { source: "provider" as const, reason: "content_filter" } };
-    const f = build([outcome]);
+  // A provider's safety classifier (e.g. `[cyber]`) is not the model refusing: the same request usually passes when
+  // sent again (router-v0 §6.2). One identical retry, same model, a new session; never another model or a rewrite.
+  const blocked: ExecutionOutcome = { ok: false, lastText: "API Error: safeguards flagged this message.", sideEffects: NO_SIDE_EFFECTS, sessionId: "flagged-session", refusal: { source: "provider", reason: "Claude assistant stop_reason: refusal" } };
+  const decideAlways = () => decisionJson({ harness: "codex", model: "gpt-6-astra", effort: "high", brief });
+
+  it("a provider safety block is retried once, unchanged, on the same model in a new session, without asking a model", async () => {
+    const f = build([blocked, { ...succeeded, sessionId: "fresh-session" }], decideAlways);
+    const task = f.engine.submit({ task: taskText, cwd: f.home });
+    await f.engine.idle();
+
+    expect(f.store.getTask(task.id)).toMatchObject({ status: "done", result: succeeded.lastText });
+    expect(f.runs.map((run) => [run.harness, run.input.model, run.input.effort])).toEqual([["codex", "gpt-6-astra", "high"], ["codex", "gpt-6-astra", "high"]]);
+    expect(f.runs[1]!.input.brief).toBe(f.runs[0]!.input.brief);
+    expect(f.runs[1]!.input.resume).toBeNull();
+    expect(f.router.calls).toHaveLength(1);   // routing only: no diagnosis, no other model
+    expect(refusalEvents(f.events).map((event) => event.payload)).toEqual([expect.objectContaining({ action: "retry", reason: "provider_safety" })]);
+
+    // The flagged session is never resumed; the thread continues from the retry's session.
+    const next = f.engine.submit({ task: "Continue with the same sample.", cwd: f.home, parentId: task.id });
+    await f.engine.idle();
+    expect(f.store.getTask(next.id)?.status).toBe("done");
+    expect(f.runs[2]!.input.resume).toBe("fresh-session");
+  });
+
+  it("a flagged session already in the thread is dropped, so the retry and later tasks start fresh", async () => {
+    const f = build([{ ...succeeded, sessionId: "good-session" }, blocked, succeeded, succeeded], decideAlways);
+    const first = f.engine.submit({ task: taskText, cwd: f.home });
+    await f.engine.idle();
+    const second = f.engine.submit({ task: "Continue with the same sample.", cwd: f.home, parentId: first.id });
+    await f.engine.idle();
+    const third = f.engine.submit({ task: "And summarize it.", cwd: f.home, parentId: second.id });
+    await f.engine.idle();
+
+    expect([first, second, third].map((t) => f.store.getTask(t.id)?.status)).toEqual(["done", "done", "done"]);
+    expect(f.runs.map((run) => run.input.resume)).toEqual([null, "good-session", null, null]);
+  });
+
+  it("a second block on the identical retry stops: two dispatches, both the same model", async () => {
+    const f = build([blocked, blocked], decideAlways);
+    const task = f.engine.submit({ task: taskText, cwd: f.home });
+    await f.engine.idle();
+
+    expectStopped(f, task.id, 2);
+    expect(refusalEvents(f.events).at(-1)?.payload).toMatchObject({ action: "stop", reason: "provider_safety" });
+    expect(f.router.calls).toHaveLength(1);
+  });
+
+  it("a provider block after the run already did something is not replayed", async () => {
+    const f = build([{ ...blocked, sideEffects: { filesChanged: 0, commandsRun: 1, approvalsGranted: 0 } }], decideAlways);
     const task = f.engine.submit({ task: taskText, cwd: f.home });
     await f.engine.idle();
 

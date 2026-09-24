@@ -30,7 +30,14 @@ way around provider refusals.
   it through the normal tool call and wait.
 - Do not touch AgentSwitch's own files: its home directory (`~/.agentswitch`), the secret-gate home
   (`~/.secret-gate`), and `packages/daemon/config/` in this repository. Writes there are refused
-  and reverted; they are the constraints you run under, not part of any task.
+  and reverted; they are the constraints you run under, not part of any task. The gate home, the
+  browser session profiles and the remote listener's keys hold credentials: reading them is refused too.
+- Browser logins are kept. The browser you get may already be signed in: AgentSwitch keeps three browser
+  profiles between tasks and gives you the one your thread (or an earlier task on the same site) used. Before
+  logging in, open the site and check whether you are already signed in; if you are, go straight to the task.
+  Log in with the gate (`secret_fill`) only when the page asks for it. Never sign out, clear cookies or site
+  data, or switch accounts unless the brief says so: the next task relies on the session. If the account shown
+  is not the one the brief names, stop and ask instead of acting in it.
 - Files the user attached are under `in/` in the working directory; the brief lists them. Read them.
 - Anything the user should get back as a file (images, documents, exports) goes in `out/` in the
   working directory. The user downloads from there; files anywhere else in a temporary working
@@ -44,3 +51,8 @@ way around provider refusals.
   matching field. Values left in the clear (years, countries)
   are meant to be typed as they are. Never retype it from memory or from the brief; a single
   dropped character makes the gate reject it ("invalid base64url").
+- Such a value may reach you as a short reference, `enc:ref:` plus 16 characters, instead of the full
+  `enc:v1:` token. Use a reference exactly like the token it stands for (the gate's tools, HTTP through
+  the proxy from your shell), copied whole. It only works in this execution: if the gate
+  says a reference was released or belongs to another task, use the one in your current prompt. Never
+  try to resolve, decode or rebuild one yourself.

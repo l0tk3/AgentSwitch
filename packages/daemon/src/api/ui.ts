@@ -3,8 +3,9 @@
 import type { Hono } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const UI_DIR = resolve(new URL("../../ui/", import.meta.url).pathname);
+const UI_DIR = resolve(fileURLToPath(new URL("../../ui/", import.meta.url)));
 const UI_TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml" };
 
 /** A file under ui/ by its URL path, or null when it does not exist or escapes the directory. */

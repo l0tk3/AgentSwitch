@@ -2,7 +2,7 @@
  *  (loop-v0 §6) when targets.yaml names a claude-code model for it. */
 
 import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
-import type { Router, RouterInput, RouterReply } from "./types.js";
+import type { Router, RouterInput, RouterReply } from "../../core/modelCall.js";
 
 export type ClaudeRouterOptions = { readonly model: string; readonly executable?: string; readonly cwd?: string };
 

@@ -7,7 +7,7 @@ import { Engine } from "../src/engine/engine.js";
 import { Store } from "../src/engine/store.js";
 import { echoExecutor } from "../src/executors/echo.js";
 import { echoRouter } from "../src/router/routers/echo.js";
-import type { Router } from "../src/router/routers/types.js";
+import type { Router } from "../src/core/modelCall.js";
 import type { Summarizer, SummaryInput } from "../src/threads/summary.js";
 import { decisionJson, realTargets } from "./helpers.js";
 

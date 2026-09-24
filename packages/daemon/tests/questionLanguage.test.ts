@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localizeQuestion } from "../src/router/questionLanguage.js";
-import type { Router, RouterInput } from "../src/router/routers/types.js";
+import type { Router, RouterInput } from "../src/core/modelCall.js";
 
 const question = "Which service is in scope for this task?";
 const original = (text = question): string => `请补充以下信息（原问题）：\n${text}`;

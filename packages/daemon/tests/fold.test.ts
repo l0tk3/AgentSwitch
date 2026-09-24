@@ -11,12 +11,12 @@ describe("foldThread", () => {
 
   it("task accumulates, cost adds up per harness/model, lastTarget follows the latest task", () => {
     const s = foldThread([
-      ev(1, "task", { taskId: "a", harness: "claude-code", model: "claude-sonnet-5", status: "failed", kind: "refusal", tokens: 100 }),
+      ev(1, "task", { taskId: "a", harness: "claude-code", model: "claude-sonnet-4-6", status: "failed", kind: "refusal", tokens: 100 }),
       ev(2, "task", { taskId: "b", harness: "codex", model: "gpt-5.5", status: "done", tokens: 50 }),
       ev(3, "task", { taskId: "c", harness: "codex", model: "gpt-5.5", status: "done", tokens: 25 }),
     ]);
     expect(s.tasks.map((t) => t.taskId)).toEqual(["a", "b", "c"]);
-    expect(s.cost).toEqual({ "claude-code/claude-sonnet-5": 100, "codex/gpt-5.5": 75 });
+    expect(s.cost).toEqual({ "claude-code/claude-sonnet-4-6": 100, "codex/gpt-5.5": 75 });
     expect(s.lastTarget).toEqual({ harness: "codex", model: "gpt-5.5" });
     expect(s.lastActivity).toBe(3000);
   });
@@ -47,7 +47,7 @@ describe("foldThread", () => {
   it("handoff accumulates with summaryRef; malformed payloads are ignored, order follows seq", () => {
     const s = foldThread([
       ev(3, "handoff", { from: { harness: "codex", model: "gpt-5.5", taskId: "b" }, to: { harness: "claude-code", taskId: "c" }, reason: "user", summaryRef: 2 }),
-      ev(1, "handoff", { from: { harness: "claude-code", model: "claude-sonnet-5", taskId: "a" }, to: null, reason: "failure:refusal" }),
+      ev(1, "handoff", { from: { harness: "claude-code", model: "claude-sonnet-4-6", taskId: "a" }, to: null, reason: "failure:refusal" }),
       ev(2, "handoff", { nothing: true }),
       ev(4, "session", { harness: "codex" }),
       ev(5, "task", { taskId: "z", harness: "codex", model: "gpt-5.5", status: "done", tokens: 12 }),

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import type { Router } from "./routers/types.js";
+import type { Router } from "../core/modelCall.js";
 
 const MAX_QUESTION_LENGTH = 8192;
 const MAX_TRANSLATION_MS = 5000;

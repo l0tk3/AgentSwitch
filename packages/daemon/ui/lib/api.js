@@ -5,12 +5,12 @@ export const HARNESS_NAMES = { "claude-code": "Claude Code", codex: "Codex", ope
 export const ACTIVE = new Set(["queued", "routing", "running", "waiting_approval"]);
 export const STATUS_LABELS = { queued: "排队中", routing: "分诊中", running: "执行中", waiting_approval: "等待答复", done: "已完成", partial: "部分完成", blocked: "执行受阻", failed: "失败", cancelled: "已取消" };
 export const statusLabel = (status) => STATUS_LABELS[status] || status;
+const BLOCK_LABELS = { question: "待补充条件", planner_timeout: "规划超时", planner_error: "规划失败" };
+
+/** A blocked task's label comes from the engine's structured `blockCause`, never from parsing the error text. */
 export function taskStatusLabel(task) {
   if (task.status !== "blocked") return statusLabel(task.status);
-  const error = String(task.error || "");
-  if (/等待.*(?:答复|回答)|waiting for your answer/i.test(error)) return "待补充条件";
-  if (/规划/.test(error)) return /超时|timed?\s*out|timeout|deadline/i.test(error) ? "规划超时" : "规划失败";
-  return "执行受阻";
+  return BLOCK_LABELS[task.blockCause] ?? "执行受阻";
 }
 
 export async function api(method, path, body, { timeoutMs = 15_000 } = {}) {

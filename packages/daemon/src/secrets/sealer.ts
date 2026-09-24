@@ -5,11 +5,14 @@
 
 import { z } from "zod";
 import { extractJsonObject } from "../util/json.js";
-import type { Router } from "../router/routers/types.js";
+import type { Router } from "../core/modelCall.js";
 import type { MintEntry, Minter } from "./minter.js";
 
 export const SEAL_TIMEOUT_MS = 30_000;
 const MIN_VALUE_LENGTH = 4;
+/** The model's quoted grant for a seed import, and a token label. */
+const MAX_SEED_EVIDENCE_CHARS = 4000;
+const MAX_LABEL_CHARS = 64;
 const EXISTING_TOKEN = /\benc:v1:[A-Za-z0-9_=-]{16,}/g;
 const SEAL_ERROR = {
   unavailable: "敏感信息检查暂时不可用，请稍后重试。",
@@ -36,7 +39,7 @@ const Found = z.object({
   kind: z.enum(["secret", "totp"]).default("secret"),
   purpose: z.enum(["secret", "totp_code", "totp_seed_import"]).optional(),
   seed_import_hosts: z.array(z.string()).optional(),
-  seed_import_evidence: z.string().max(4000).optional(),
+  seed_import_evidence: z.string().max(MAX_SEED_EVIDENCE_CHARS).optional(),
   hosts: z.array(z.string()).default([]),
   uses: z.array(z.enum(["http", "otp", "exec"])).min(1).default(["http"]),
 });
@@ -96,7 +99,7 @@ export function hostOf(site: string): string {
 
 const LABEL_OK = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/;
 function cleanLabel(label: string): string {
-  const cleaned = label.replace(/[^A-Za-z0-9._/-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, 64);
+  const cleaned = label.replace(/[^A-Za-z0-9._/-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "").slice(0, MAX_LABEL_CHARS);
   return LABEL_OK.test(cleaned) ? cleaned : "task/secret";
 }
 
@@ -104,10 +107,11 @@ export type PlannedEntry = MintEntry & { readonly field: string; readonly purpos
 export type Plan = { readonly entries: readonly PlannedEntry[]; readonly unroutable: readonly string[]; readonly missingImportAuthorization: readonly string[]; readonly skipped: readonly string[]; readonly records: readonly string[] };
 
 const DELIMITERS = ["|", "\t", "----", ",", ";"] as const;
+const MIN_RECORD_FIELDS = 3;
 
 /** The delimiter that splits `line` into 3+ fields, if any. */
 export function recordDelimiter(line: string): string | null {
-  return DELIMITERS.find((d) => line.split(d).length >= 3) ?? null;
+  return DELIMITERS.find((d) => line.split(d).length >= MIN_RECORD_FIELDS) ?? null;
 }
 
 /** A marked value that is really a whole record (or several lines): it spans fields instead of being one. */
@@ -161,6 +165,8 @@ function evidencedExactHost(host: string, evidence: string): boolean {
   return new RegExp(`(?<![a-z0-9._:\\[\\]-])${literal}(?![a-z0-9._:\\[\\]-])`, "i").test(evidence);
 }
 
+/** The iPhone app cuts a task's text at "\n\n[AgentSwitch sealed the credentials" to show it (ios-app MessageDisplay);
+ *  keep that prefix when rewording, and CONTEXT.md saves cut it off the same way (api/settings.ts). */
 export const LEGEND_HEADER = "[AgentSwitch sealed the credentials in this message. The following field names and record layout are model-inferred candidates, not user-confirmed facts. Copy each enc:v1: token whole only after checking its mapping. If evidence conflicts, ask through the existing question flow; do not infer an input's type merely from a field on the page. Correcting a label does not change token host/use permissions.]";
 
 /** Keep inferred labels separate from the user's text; downstream models may challenge these candidates. */

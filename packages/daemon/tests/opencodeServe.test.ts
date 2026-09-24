@@ -1,8 +1,8 @@
 import { createServer, type Server } from "node:http";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeServer, serveConfig, serveRouter } from "../src/router/routers/opencodeServe.js";
 
 /** A fake `opencode serve`: sessions, async prompts that complete after a tick, message lists with an idle marker. */
@@ -59,12 +59,12 @@ describe("OpenCodeServer client", () => {
 
   it("ask(): creates a session, prompts, waits for the idle marker, returns the assistant text, deletes the session", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-ocs-"));
-    const s = new OpenCodeServer({ binary: "/nonexistent", port: fake.port(), home, gateHome: "/h/.secret-gate", log: () => undefined });
-    // no start(): the fake is already listening; ask() only needs the URL and the password header
+    const s = new OpenCodeServer({ binary: "/nonexistent", home, gateHome: "/h/.secret-gate", endpoint: { url: `http://127.0.0.1:${fake.port()}`, password: "pw" }, log: () => undefined });
+    await s.start();   // the fake is already listening: start() only takes the endpoint, nothing is spawned
+    expect(s.running).toBe(true);
     const text = await s.ask("oracle", "deepseek/deepseek-flash", "hello world!", "/tmp", new AbortController().signal);
     expect(text).toBe("echo:hello world!");
-    await new Promise((r) => setTimeout(r, 20));
-    expect(fake.deleted).toEqual(["ses_1"]);
+    await vi.waitFor(() => expect(fake.deleted).toEqual(["ses_1"]), { timeout: 4_000, interval: 5 });   // the DELETE is fire-and-forget
     const router = serveRouter(s, "dispatcher", "deepseek/deepseek-flash");
     const reply = await router.route({ task: "TASK", cwd: "/tmp", system: "SYSTEM" }, new AbortController().signal);
     expect(reply.text).toBe("echo:\n=====\n\nTASK");   // system rides at the head of the message, the task at its tail
@@ -76,7 +76,37 @@ describe("OpenCodeServer client", () => {
   it("start() fails fast when the binary is missing", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-ocs2-"));
     const s = new OpenCodeServer({ binary: join(home, "no-such-binary"), port: 0, home, gateHome: "/h", log: () => undefined });
-    await expect(s.start()).rejects.toThrow(/exited before it was ready|did not answer/);
+    await expect(s.start()).rejects.toThrow(/opencode serve --stdio (failed to start|exited .* before it was ready)/);
     expect(s.running).toBe(false);
+    await expect(s.ask("oracle", "deepseek/deepseek-flash", "x", "/tmp", new AbortController().signal)).rejects.toThrow("not running");
+  });
+
+  it("the process: `serve --stdio` on the configured port, password only as OPENCODE_PASSWORD, proxy-free env, both agents; answers, then exits when stopped", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-ocs3-"));
+    const out = join(home, "spawned.json");
+    const bin = join(home, "fake-serve");
+    // Records argv and env, reports the fake API's address as `serve --stdio` does, exits on stdin EOF.
+    writeFileSync(bin, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(out)},JSON.stringify({argv:process.argv.slice(2),env:process.env}));console.log(JSON.stringify({url:'http://127.0.0.1:${fake.port()}'}));process.stdin.resume();process.stdin.on('end',()=>process.exit(0));`, { mode: 0o700 });
+    const saved = { ...process.env };
+    Object.assign(process.env, { HTTPS_PROXY: "http://proxy:1", OPENCODE_SERVER_PASSWORD: "leak", OPENCODE_PASSWORD: "inherited" });
+    const logs: string[] = [];
+    const s = new OpenCodeServer({ binary: bin, port: 4799, home: join(home, "router"), gateHome: "/h/.secret-gate", log: (l) => logs.push(l) });
+    try { await s.start(); } finally { for (const k of ["HTTPS_PROXY", "OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD"]) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
+    expect(s.running).toBe(true);
+    const seen = JSON.parse(readFileSync(out, "utf8")) as { argv: string[]; env: Record<string, string> };
+    expect(seen.argv).toEqual(["serve", "--stdio", "--port", "4799", "--hostname", "127.0.0.1"]);
+    expect(seen.env.OPENCODE_SERVER_PASSWORD).toBeUndefined();
+    expect(seen.env.OPENCODE_PASSWORD).toMatch(/^[\w-]{20,}$/);
+    expect(seen.env.OPENCODE_PASSWORD).not.toBe("inherited");
+    expect(seen.env.HTTPS_PROXY).toBeUndefined();
+    expect(seen.env.NO_PROXY).toBe("127.0.0.1,localhost");
+    expect(seen.env.PWD).toBe(join(home, "router"));
+    const config = JSON.parse(readFileSync(seen.env.OPENCODE_CONFIG!, "utf8")) as { agent: Record<string, unknown> };
+    expect(Object.keys(config.agent).sort()).toEqual(["dispatcher", "oracle"]);
+    const reply = await serveRouter(s, "oracle", "deepseek/deepseek-flash").route({ task: "PING", cwd: "/tmp", system: "S" }, new AbortController().signal);
+    expect(reply.text).toBe("echo:\n=====\n\nPING");   // the fake echoes the last 12 characters
+    await s.stop();
+    expect(s.running).toBe(false);
+    expect(logs.some((l) => l.includes(`ready on http://127.0.0.1:${fake.port()}`))).toBe(true);
   });
 });

@@ -1,7 +1,8 @@
-/** Entry: patch changed view content without disconnecting live editors, route events and poll. */
+/** Entry: patch the sidebar and changed view content without disconnecting live editors, route events and poll. */
 
 import { get, subscribe } from "./lib/state.js";
 import { createRenderer } from "./lib/rendering.js";
+import { sidebar } from "./lib/sidebar.js";
 import { addPending, goto, health, loadApprovals, loadArchivedThreads, loadQuota, loadTasks, loadThreads, refresh, removePending } from "./lib/actions.js";
 import * as home from "./views/home.js";
 import * as task from "./views/task.js";
@@ -13,14 +14,11 @@ const VIEWS = { home, task, log, ext, ctx };
 const $ = (s) => document.querySelector(s);
 const main = $("#main");
 const renderer = createRenderer(main);
+const sideRenderer = createRenderer($("aside.side"));
 let renderedScope, renderedEvents;
 
 function render(s) {
-  $("#dot").classList.toggle("on", s.health);
-  $("#version").textContent = s.version ? "v" + s.version : "";
-  $("#apCount").textContent = s.approvals.length ? String(s.approvals.length) : "";
-  const navView = s.view === "task" ? "home" : s.view;
-  document.querySelectorAll("nav a").forEach((a) => a.classList.toggle("active", a.dataset.nav === navView));
+  sideRenderer.render(sidebar(s), "side");
   const view = VIEWS[s.view] || home;
   const scope = `${s.view}:${s.view === "task" ? s.task?.id || "loading" : ""}:${s.navigationId}`;
   const events = $("#events");
@@ -53,18 +51,24 @@ document.addEventListener("click", async (e) => {
 
 document.addEventListener("input", (e) => ctx.onInput(e.target));
 
-document.addEventListener("dragover", (e) => { if (e.target.closest("[data-dropzone]")) { e.preventDefault(); e.target.closest("[data-dropzone]").classList.add("drop"); } });
-document.addEventListener("dragleave", (e) => e.target.closest?.("[data-dropzone]")?.classList.remove("drop"));
+// Drag-over highlighting is the one view detail kept out of state: it follows the pointer, not data, and
+// dragleave/dragover alternate every time the pointer crosses one of the composer's children, so a state
+// entry would re-render the whole view on each crossing. It is only the `drop` class on the zone; a
+// background render may clear it, and the next dragover (they repeat while hovering) sets it again.
+const dropZone = (e) => e.target.closest?.("[data-dropzone]");
+const highlight = (zone, on) => zone?.classList.toggle("drop", on);
+document.addEventListener("dragover", (e) => { const zone = dropZone(e); if (zone) { e.preventDefault(); highlight(zone, true); } });
+document.addEventListener("dragleave", (e) => highlight(dropZone(e), false));
 document.addEventListener("drop", (e) => {
-  const zone = e.target.closest("[data-dropzone]");
+  const zone = dropZone(e);
   if (!zone) return;
   e.preventDefault();
-  zone.classList.remove("drop");
+  highlight(zone, false);
   if (zone.getAttribute("aria-busy") === "true") return;
   addPending(e.dataTransfer.files);
 });
 document.addEventListener("paste", (e) => {
-  const zone = e.target.closest?.("[data-dropzone]");
+  const zone = dropZone(e);
   if (!zone || zone.getAttribute("aria-busy") === "true") return;
   const files = [...(e.clipboardData?.files || [])];
   if (files.length) { e.preventDefault(); addPending(files); }

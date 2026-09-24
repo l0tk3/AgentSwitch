@@ -1,5 +1,6 @@
 /** Shared by every route module: dependencies, body parsing, error text. */
 
+import type { Assistant } from "../assistant/assistant.js";
 import type { Sealer } from "../secrets/sealer.js";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -15,7 +16,11 @@ import type { QuotaService } from "../quota/index.js";
 import type { RoutingLog } from "../router/log.js";
 import type { RouteDeps } from "../router/route.js";
 import type { Targets } from "../router/targets.js";
+import { zodIssues } from "../util/zod.js";
 import type { CwdRules } from "./cwdPolicy.js";
+
+/** The most rows a `?limit=` may ask for. */
+const MAX_LIST_LIMIT = 500;
 
 export type ApiDeps = {
   /** Turns plaintext credentials in a submission into tokens before anything is stored (router-v0 §9); absent in echo mode. */
@@ -37,9 +42,16 @@ export type ApiDeps = {
   readonly extensions: Extensions;
   readonly version: string;
   readonly cwdRules: CwdRules;
+  /** Model settings (app-v0 §2): the overlay file and the catalog it applies to (targets.yaml after discovery). */
+  readonly models?: { readonly path: string; readonly base: Targets };
+  /** Tests: the SSE heartbeat period (default SSE_HEARTBEAT_MS). */
+  readonly sseHeartbeatMs?: number;
+  /** The router as the user's assistant (assistant-v0 §1.1). */
+  readonly assistant?: Assistant;
 };
 
-export const issues = (err: z.ZodError): string => err.issues.map((i) => `${i.path.join(".") || "body"}: ${i.message}`).join("; ");
+/** A request body's issues; an issue on the body itself reads "body: ...". */
+export const issues = (err: z.ZodError): string => zodIssues(err, { root: "body" });
 
 /** Parse a JSON body against a schema; a missing or malformed body validates as `{}`. */
 export async function parseBody<T>(c: Context, schema: z.ZodType<T>): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
@@ -49,7 +61,7 @@ export async function parseBody<T>(c: Context, schema: z.ZodType<T>): Promise<{ 
 }
 
 /** `?limit=` clamped to a sane range; garbage → the default. */
-export function limitParam(c: Context, fallback: number, max = 500): number {
+export function limitParam(c: Context, fallback: number, max = MAX_LIST_LIMIT): number {
   const n = Number(c.req.query("limit") ?? fallback);
   return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : fallback;
 }

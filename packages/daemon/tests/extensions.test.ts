@@ -9,7 +9,7 @@ import { opencodeExecConfig } from "../src/executors/opencode.js";
 import { extensionsAt } from "../src/extensions/index.js";
 import { McpRegistry, removeServer, serversFor, upsertServer } from "../src/extensions/mcpRegistry.js";
 import { ensureFrontmatter, SkillRegistry } from "../src/extensions/skillRegistry.js";
-import { inheritedEnv, mcpServerEnv } from "../src/executors/gate.js";
+import { codexGateToml, gateEnv, inheritedEnv, mcpServerEnv } from "../src/executors/gate.js";
 import { McpServer, parseFrontmatter } from "../src/extensions/types.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "agentswitch-ext-"));
@@ -72,6 +72,18 @@ describe("spawned MCP server env", () => {
     expect(withCa.SSL_CERT_FILE).toBe(join(home, "ca.pem"));
     expect(mcpServerEnv(null, parent)).toEqual(parent);
   });
+
+  it("every executor's own env carries the gate CA too, so its shell tools verify intercepted TLS (design-v0 §3)", () => {
+    // 2026-09-24: from the Mac app (a clean env, no scripts/env.sh) Python and curl in an executor failed every HTTPS
+    // call through the gate with "unable to get local issuer certificate".
+    const home = tmp();
+    const g = { bin: "/g/secret-gate", home, proxy: "http://127.0.0.1:8080", playwrightVersion: "0.0.82", allowedOrigins: [] };
+    expect(gateEnv(g)).not.toHaveProperty("SSL_CERT_FILE");
+    writeFileSync(join(home, "ca.pem"), "-----BEGIN CERTIFICATE-----");
+    const ca = join(home, "ca.pem");
+    expect(gateEnv(g, "SCOPE")).toMatchObject({ SSL_CERT_FILE: ca, REQUESTS_CA_BUNDLE: ca, NODE_EXTRA_CA_CERTS: ca, HTTPS_PROXY: "http://scope:SCOPE@127.0.0.1:8080" });
+    expect(codexGateToml(g, join(home, "profile"), false)).toContain(`SSL_CERT_FILE = ${JSON.stringify(ca)}`);
+  });
 });
 
 describe("harness shapes", () => {
@@ -86,7 +98,7 @@ describe("harness shapes", () => {
     const o = opencodeMcpFromRegistry([stdio, http], base);
     expect(o.github).toEqual({ type: "local", command: ["npx", "-y", "gh-mcp"], environment: { HTTPS_PROXY: "http://127.0.0.1:8080", GH_TOKEN: "enc:v1:abc" }, enabled: true });
     expect(o.docs).toMatchObject({ type: "remote", url: "https://mcp.example.com/sse" });
-    const cfg = opencodeExecConfig(null, "/p", false, undefined, { mcp: o, skillsDir: "/s" }) as { mcp: Record<string, unknown>; skills: { paths: string[] } };
+    const cfg = opencodeExecConfig(null, "/p", false, { mcp: o, skillsDir: "/s" }) as { mcp: Record<string, unknown>; skills: { paths: string[] } };
     expect(Object.keys(cfg.mcp)).toEqual(["github", "docs"]);
     expect(cfg.skills.paths).toEqual(["/s"]);
     expect((opencodeExecConfig(null, "/p", false) as { skills?: unknown }).skills).toBeUndefined();

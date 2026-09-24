@@ -14,12 +14,19 @@ describe("model discovery", () => {
   it("merges new ids under their harness, keeps every yaml entry, ignores unknown harnesses", () => {
     const t = realTargets();
     const before = Object.keys(t.harnesses["claude-code"]!.models).length;
-    const { targets, added } = mergeDiscovered(t, { "claude-code": ["claude-sonnet-5", "claude-sonnet-6"], codex: ["gpt-5.5", "gpt-7"] });
+    const { targets, added } = mergeDiscovered(t, { "claude-code": ["claude-sonnet-4-6", "claude-sonnet-6"], codex: ["gpt-5.5", "gpt-7"] });
     expect(added).toEqual(["claude-code/claude-sonnet-6", "codex/gpt-7"]);
     expect(Object.keys(targets.harnesses["claude-code"]!.models)).toHaveLength(before + 1);
     expect(targets.harnesses["claude-code"]!.models["claude-sonnet-6"]).toEqual({ cost: "mid", strengths: ["discovered"] });
     expect(targets.harnesses.codex!.models["gpt-7"]).toMatchObject({ cost: "mid", efforts: ["low", "medium", "high", "xhigh", "max"] });
     expect(targets.harnesses.codex!.models["gpt-5.5"]).toEqual(t.harnesses.codex!.models["gpt-5.5"]);   // untouched
     expect(t.harnesses.codex!.models["gpt-7"]).toBeUndefined();                                          // input not mutated
+  });
+
+  it("never adds a model the catalog excludes, however the CLI lists it", () => {
+    const { targets, added } = mergeDiscovered(realTargets(), { "claude-code": ["claude-sonnet-5", "claude-sonnet-5[1m]", "claude-sonnet-6"], codex: [] });
+    expect(added).toEqual(["claude-code/claude-sonnet-6"]);
+    expect(targets.harnesses["claude-code"]!.models).not.toHaveProperty(["claude-sonnet-5"]);
+    expect(targets.harnesses["claude-code"]!.models).not.toHaveProperty(["claude-sonnet-5[1m]"]);
   });
 });

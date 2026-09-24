@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { RouteResult } from "./route.js";
+import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
 
 export type LogEntry = {
   readonly id: number;
@@ -95,7 +96,7 @@ export class RoutingLog {
     this.db.prepare("DELETE FROM routing_log WHERE task_id = ? OR (id = ? AND task_id IS NULL)").run(taskId, legacyLogId);
   }
 
-  recent(limit = 50): LogEntry[] {
+  recent(limit = DEFAULT_LIST_LIMIT): LogEntry[] {
     const rows = this.db.prepare("SELECT * FROM routing_log ORDER BY id DESC LIMIT ?").all(limit) as Record<string, unknown>[];
     return rows.map((r) => ({
       id: Number(r.id),

@@ -10,7 +10,7 @@ export function summaryFromPayload(p: Readonly<Record<string, unknown>>): Summar
   const title = str(p.title);
   const goal = str(p.goal);
   if (title === null || goal === null) return null;
-  return { title, goal, progress: str(p.progress) ?? "", files: strs(p.files), unresolved: strs(p.unresolved), decisions: strs(p.decisions), facts: strs(p.facts), spoken: str(p.spoken) ?? "" };
+  return { title, goal, progress: str(p.progress) ?? "", files: strs(p.files), unresolved: strs(p.unresolved), decisions: strs(p.decisions), facts: strs(p.facts), spoken: str(p.spoken) ?? "", speech: str(p.speech) ?? "" };
 }
 
 function applyOne(state: ThreadState, ev: ThreadEvent): ThreadState {
@@ -27,6 +27,11 @@ function applyOne(state: ThreadState, ev: ThreadEvent): ThreadState {
     case "session": {
       const harness = str(p.harness);
       const sessionId = str(p.sessionId);
+      if (harness && p.dropped === true) {
+        // A provider's safety classifier flagged this harness's session: nothing resumes it again (router-v0 §6.2).
+        const { [harness]: _flagged, ...sessions } = state.sessions;
+        return { ...state, sessions, lastActivity };
+      }
       if (!harness || !sessionId) return { ...state, lastActivity };
       const handle: SessionHandle = { harness, sessionId, taskId: String(p.taskId ?? ""), ts: ev.ts };
       return { ...state, sessions: { ...state.sessions, [harness]: handle }, lastActivity };

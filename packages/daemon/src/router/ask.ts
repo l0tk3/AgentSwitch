@@ -1,7 +1,11 @@
 /** One router-model call that must come back as JSON of a known shape: timeout per try, one retry that tells the
- *  model what was wrong with its first reply, a timeout ends it at once. Never throws. */
+ *  model what was wrong with its first reply (or after a service error); a timeout or a cancellation ends it at once.
+ *  Never throws. */
 
-import type { Router } from "./routers/types.js";
+import type { Router } from "../core/modelCall.js";
+
+/** How much of a rejected reply the retry message and the error quote. */
+const REPLY_QUOTE_CHARS = 200;
 
 export type AskFailureKind = "timeout" | "cancelled" | "invalid_response" | "service_error";
 export type Asked<T> = { readonly value: T | null; readonly error: string | null; readonly ms: number; readonly tries: number; readonly failureKind?: AskFailureKind };
@@ -24,11 +28,13 @@ export async function askJson<T>(router: Router, req: { readonly system: string;
       const parsed = parse(reply.text);
       if (parsed.ok) return { value: parsed.value, error: null, ms, tries };
       failureKind = "invalid_response";
-      error = `${parsed.error}; reply began: ${JSON.stringify(reply.text.trim().slice(0, 200))}`;
+      error = `${parsed.error}; reply began: ${JSON.stringify(reply.text.trim().slice(0, REPLY_QUOTE_CHARS))}`;
     } catch (err) {
       error = (err as Error).message;
+      // The kind comes from who stopped the try (this try's own controller is aborted only by its deadline or by the
+      // caller), never from the error text: a router failure that merely mentions a timeout is a service error.
       failureKind = outer?.aborted ? "cancelled" : controller.signal.aborted ? "timeout" : "service_error";
-      if (failureKind === "timeout" || failureKind === "cancelled" || /timed out|cancelled/.test(error)) return { value: null, error, ms, tries, failureKind };
+      if (failureKind !== "service_error") return { value: null, error, ms, tries, failureKind };
     } finally {
       clearTimeout(timer);
       outer?.removeEventListener("abort", onAbort);

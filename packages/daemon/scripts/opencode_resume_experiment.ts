@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stripProxy } from "../src/executors/gate.js";
+import { stripProxy } from "../src/util/env.js";
 import { opencodeExecConfig } from "../src/executors/opencode.js";
 
 const binary = join(process.env.HOME ?? "", ".opencode", "bin", "opencode");

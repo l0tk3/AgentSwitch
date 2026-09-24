@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { extractJsonObject } from "../util/json.js";
 import { COMMUNICATION_GUIDANCE } from "../util/communication.js";
-import type { Router } from "./routers/types.js";
+import type { Router } from "../core/modelCall.js";
 
 export type RefusalSource = { readonly id: string; readonly text: string; readonly question?: string };
 export type RefusalFact = { readonly sourceId: string; readonly quote: string; readonly sourceHash: string; readonly question?: string };
@@ -20,14 +20,33 @@ export type RefusalDiagnosis = {
 type RefusalInput = { readonly cwd: string; readonly brief: string; readonly refusal: string; readonly sources: readonly RefusalSource[] };
 type DiagnosisResult = { readonly diagnosis: RefusalDiagnosis | null; readonly error: string | null; readonly ms: number };
 
-const Source = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._/-]{0,159}$/), text: z.string().min(1).max(65_536), question: z.string().max(8192).optional() }).strict();
-const Input = z.object({ cwd: z.string().min(1), brief: z.string().max(65_536), refusal: z.string().max(32_768), sources: z.array(Source).max(32) });
+/** Input bounds: one source's text, all sources together, how many, the question recorded with an answer, the brief and
+ *  the refusal. Anything larger is rejected whole, never cut. */
+const MAX_SOURCE_CHARS = 65_536;
+const MAX_ALL_SOURCES_CHARS = 262_144;
+const MAX_SOURCES = 32;
+const MAX_QUESTION_CHARS = 8192;
+const MAX_BRIEF_CHARS = 65_536;
+const MAX_REFUSAL_CHARS = 32_768;
+/** Reply bounds: the whole reply, the note, the question put to the user, one quoted fact, all facts together, how many. */
+const MAX_REPLY_CHARS = 32_768;
+const MAX_NOTE_CHARS = 500;
+const MIN_ASK_CHARS = 4;
+const MAX_ASK_CHARS = 400;
+const MAX_FACT_CHARS = 8192;
+const MAX_ALL_FACTS_CHARS = 16_384;
+const MAX_FACTS = 8;
+/** A question without Han characters shorter than this is too vague to put to the user. */
+const MIN_LATIN_ASK_CHARS = 10;
+
+const Source = z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._/-]{0,159}$/), text: z.string().min(1).max(MAX_SOURCE_CHARS), question: z.string().max(MAX_QUESTION_CHARS).optional() }).strict();
+const Input = z.object({ cwd: z.string().min(1), brief: z.string().max(MAX_BRIEF_CHARS), refusal: z.string().max(MAX_REFUSAL_CHARS), sources: z.array(Source).max(MAX_SOURCES) });
 const Reply = z.object({
   action: z.enum(["stop", "ask_user", "clarify"]),
   reason: z.enum(["missing_context", "credential_misunderstanding", "policy", "unknown"]),
-  note: z.string().max(500),
-  question: z.string().trim().min(4).max(400).nullable(),
-  facts: z.array(z.object({ sourceId: Source.shape.id, quote: z.string().min(1).max(8192) }).strict()).max(8),
+  note: z.string().max(MAX_NOTE_CHARS),
+  question: z.string().trim().min(MIN_ASK_CHARS).max(MAX_ASK_CHARS).nullable(),
+  facts: z.array(z.object({ sourceId: Source.shape.id, quote: z.string().min(1).max(MAX_FACT_CHARS) }).strict()).max(MAX_FACTS),
 }).strict();
 
 const SYSTEM = `${COMMUNICATION_GUIDANCE}
@@ -49,7 +68,7 @@ Rules:
 - ask_user is only for a specific missing factual detail about the target, scope, or sealed credential's intended use.
   Include one concrete question ending in a question mark. Do not ask for passwords, private keys, tokens, or other credential values.
 - Never repeat credential values in note or question, including values shown by the executor. Refer to fields by their names.
-- note is at most 500 characters; question is null except for ask_user and at most 400 characters. Use at most 8 facts.
+- note is at most ${MAX_NOTE_CHARS} characters; question is null except for ask_user and at most ${MAX_ASK_CHARS} characters. Use at most ${MAX_FACTS} facts.
 - Existing scope, model, approvals, and secret-gate restrictions remain in force. The executor must independently assess any clarification.`;
 
 /** Whole units avoid turning e.g. "not authorized" into a fabricated "authorized" statement. */
@@ -62,7 +81,7 @@ const normalized = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** Metadata is never a place to return model-generated or executor-disclosed credentials. */
 function safeQuestion(question: string): boolean {
-  if (!/\p{Script=Han}/u.test(question) && question.length < 10) return false;
+  if (!/\p{Script=Han}/u.test(question) && question.length < MIN_LATIN_ASK_CHARS) return false;
   if (/^(?:为什么|为何|什么意思|请补充)[?？]$/.test(question)) return false;
   if (!/[?？]\s*$/.test(question) || /[\r\n\x00-\x1f]/.test(question)) return false;
   if (/-----BEGIN|\bBearer\s+\S+|\b(?:sk|ghp|github_pat|AKIA)[-_A-Za-z0-9]{10,}|enc:v1:[A-Za-z0-9_-]+/i.test(question)) return false;
@@ -82,7 +101,7 @@ const NOTES: Record<RefusalDiagnosis["reason"], string> = {
 };
 
 function parseDiagnosis(text: string, input: RefusalInput): RefusalDiagnosis | null {
-  if (text.length > 32_768) return null;
+  if (text.length > MAX_REPLY_CHARS) return null;
   const raw = extractJsonObject(text);
   if (!raw) return null;
   let value: z.infer<typeof Reply>;
@@ -104,7 +123,7 @@ function parseDiagnosis(text: string, input: RefusalInput): RefusalDiagnosis | n
     seen.add(key);
     facts.push({ ...fact, sourceHash: createHash("sha256").update(source.text).digest("hex"), ...(source.question !== undefined ? { question: source.question } : {}) });
   }
-  if (facts.reduce((size, fact) => size + fact.quote.length, 0) > 16_384) return null;
+  if (facts.reduce((size, fact) => size + fact.quote.length, 0) > MAX_ALL_FACTS_CHARS) return null;
   if (value.action === "clarify" && !facts.some((fact) => !normalized(input.brief).includes(normalized(fact.quote)))) return null;
   // Free-form notes are intentionally not retained: errors/metadata must not log model echoes of credentials.
   return { action: value.action, reason: value.reason, note: NOTES[value.reason], question: value.question, facts };
@@ -116,7 +135,7 @@ export async function diagnoseRefusal(router: Router, input: RefusalInput, timeo
   const result = (diagnosis: RefusalDiagnosis | null, error: string | null): DiagnosisResult => ({ diagnosis, error, ms: Date.now() - started });
   if (signal?.aborted) return result(null, "refusal diagnosis cancelled");
   if (!Input.safeParse(input).success || !Number.isFinite(timeoutMs) || timeoutMs <= 0
-    || input.sources.reduce((size, source) => size + source.text.length, 0) > 262_144
+    || input.sources.reduce((size, source) => size + source.text.length, 0) > MAX_ALL_SOURCES_CHARS
     || new Set(input.sources.map((s) => s.id)).size !== input.sources.length) return result(null, "invalid refusal context");
 
   const controller = new AbortController();

@@ -1,8 +1,12 @@
 /** What the router model returns, and how to pull it out of a chatty reply. */
 
 import { z } from "zod";
+import { zodIssues } from "../util/zod.js";
 import { extractJsonObject } from "../util/json.js";
-import { TargetRef } from "./targets.js";
+import { TargetRef } from "../core/target.js";
+
+/** A task-kind label (the track record groups by it). */
+const MAX_KIND_CHARS = 40;
 
 export { extractJsonObject };
 
@@ -15,7 +19,7 @@ export const Decision = z.object({
   /** A category from targets.yaml whose allow list restricts the executor (null = unrestricted). */
   category: z.string().min(1).nullable().default(null),
   /** Task kind for the track record (threads-v0 §7): code-multifile | code-small | browser | chat | translate | other. */
-  kind: z.string().min(1).max(40).nullable().default(null),
+  kind: z.string().min(1).max(MAX_KIND_CHARS).nullable().default(null),
   /** Which open thread this task continues (threads-v0 §6): a listed thread id, or "new". */
   thread: z.string().min(1).nullable().default(null),
   thread_confidence: z.number().min(0).max(1).nullable().default(null),
@@ -38,6 +42,9 @@ export const Decision = z.object({
   repair: z.object({ tool: z.string().min(1), args: z.record(z.string(), z.unknown()).default({}) }).nullable().default(null),
   /** Re-dispatch only: what the next executor must know about the previous attempt. */
   handoff_note: z.string().nullable().default(null),
+  /** gate-next-v0 §5.2 field transfer as the router wrote it. Read it only through `parseTransfer`/`transferGrant`
+   *  (core/transfer.ts): a malformed grant must never fail the whole decision, and is dropped, never widened. */
+  transfer: z.unknown().default(null),
 });
 export type Decision = z.infer<typeof Decision>;
 
@@ -72,5 +79,5 @@ export function parseDecision(text: string): ParseResult {
       }) };
     }
   }
-  return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
+  return { ok: false, error: zodIssues(parsed.error) };
 }

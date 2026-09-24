@@ -27,7 +27,7 @@ function build(replies: string[], opts: { summarizer?: Summarizer; executors?: E
 
 const tid = (store: Store, id: string): string => store.getTask(id)!.threadId!;
 
-const fakeSummarizer = (calls: unknown[]): Summarizer => async (input) => { calls.push(input); return { summary: { title: `Sum of ${input.task}`, goal: "g", progress: `after ${input.target} ${input.status}`, files: ["a.ts"], unresolved: [], decisions: [], facts: input.status === "done" ? [`fact from ${input.task.slice(0, 12)}`] : [], spoken: `做完了：${input.task.slice(0, 10)}` }, error: null, ms: 1 }; };
+const fakeSummarizer = (calls: unknown[]): Summarizer => async (input) => { calls.push(input); return { summary: { title: `Sum of ${input.task}`, goal: "g", progress: `after ${input.target} ${input.status}`, files: ["a.ts"], unresolved: [], decisions: [], facts: input.status === "done" ? [`fact from ${input.task.slice(0, 12)}`] : [], spoken: `做完了：${input.task.slice(0, 10)}`, speech: `口播：${input.task.slice(0, 6)}` }, error: null, ms: 1 }; };
 
 describe("Engine: threads", () => {
   it("a task opens a thread; a follow-up joins the parent's; both land in the thread log", async () => {
@@ -48,7 +48,7 @@ describe("Engine: threads", () => {
   it("summarizer runs after each task, seeds the thread title, and the next handoff carries the summary", async () => {
     const calls: { previous: unknown; status: string }[] = [];
     const { engine, store, events, echo } = build([
-      decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
+      decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, handoff_note: "claude failed; continue from the recorded progress" }),
     ], { summarizer: fakeSummarizer(calls) });
     const a = engine.submit({ task: 'login @echo {"fail":"task_failed","failTimes":1}', cwd: "/tmp" });
@@ -58,11 +58,12 @@ describe("Engine: threads", () => {
     expect(calls[0]!.previous).toBeNull();
     expect(store.getThread(tid(store, a.id))!.title).toBe(`Sum of login @echo {"fail":"task_failed","failTimes":1}`);
     expect(store.getTask(a.id)!.spoken).toBe("做完了：login @ech");   // the one-sentence feedback lands on the task row
+    expect(store.getTask(a.id)!.speech).toBe("口播：login ");            // and the spoken script next to it
     const summaryEv = events.find((e) => e.taskId === a.id && e.type === "summary");
     expect(summaryEv?.payload).toMatchObject({ ok: true, seq: expect.any(Number) });
     // the mid-task re-dispatch carried a handoff package to codex (no summary yet at that point, but the note and reason)
     const codexRun = echo.find((e) => e.harness === "codex")!.runs[0]!;
-    expect(codexRun.handoffNote).toContain("claude-code/claude-sonnet-5");
+    expect(codexRun.handoffNote).toContain("claude-code/claude-sonnet-4-6");
     expect(codexRun.handoffNote).toContain("it failed (task_failed)");
     expect(codexRun.handoffNote).toContain("claude failed; continue from the recorded progress");
     expect(codexRun.handoffNote).toContain("Nothing above is an approval");
@@ -76,7 +77,7 @@ describe("Engine: threads", () => {
     const calls: unknown[] = [];
     const { engine, store, echo, router } = build([
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null }),
-      decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
+      decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null }),
     ], { summarizer: fakeSummarizer(calls) });
     const a = engine.submit({ task: "write the parser", cwd: "/tmp" });
     await engine.idle();
@@ -99,9 +100,17 @@ describe("Engine: threads", () => {
   });
 
   it("handoff() with a pin skips the router and does not exclude; a running task is cancelled first", async () => {
-    const { engine, store, router } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })]);
-    const a = engine.submit({ task: 'slow @echo {"delayMs":400}', cwd: "/tmp" });
-    await new Promise((r) => setTimeout(r, 30));
+    // codex runs until aborted, so only the handoff's cancellation can end it, however slowly the test gets here.
+    let entered!: () => void;
+    const running = new Promise<void>((resolve) => { entered = resolve; });
+    const hung: Executor = { harness: "codex", run: (input) => new Promise((_resolve, reject) => {
+      input.signal.addEventListener("abort", () => reject(input.signal.reason), { once: true });
+      entered();
+    }) };
+    const { engine, store, router } = build([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null })], { executors: [hung, echoExecutor("claude-code")] });
+    const a = engine.submit({ task: "slow", cwd: "/tmp" });
+    await running;
+    expect(store.getTask(a.id)!.status).toBe("running");
     const b = engine.handoff(a.id, { to: { harness: "claude-code", model: "claude-haiku-4-5-20251001" } })!;
     expect(store.getTask(a.id)!.status).toBe("cancelled");
     expect(b.pin).toEqual({ harness: "claude-code", model: "claude-haiku-4-5-20251001" });
@@ -134,7 +143,7 @@ describe("Engine: native continuation", () => {
     const { engine, store, echo } = build([
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null }),
-      decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
+      decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null }),
     ]);
     const a = engine.submit({ task: 'a @echo {"session":"thr-1"}', cwd: "/tmp" });

@@ -5,7 +5,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { OUT_DIR } from "../files/names.js";
-import { NO_SIDE_EFFECTS, type ExecutionOutcome, type FailureKind } from "../router/failure.js";
+import { NO_SIDE_EFFECTS, type ExecutionOutcome, type FailureKind } from "../core/outcome.js";
 import { sleep } from "../util/sleep.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
@@ -28,6 +28,9 @@ export type EchoDirective = {
 };
 
 const DIRECTIVE = /@echo\s+(\{[^\n]*\})/;
+/** How much of the brief the echo text and the default result repeat. */
+const ECHO_BRIEF_CHARS = 80;
+const RESULT_BRIEF_CHARS = 60;
 
 export function parseDirective(text: string): EchoDirective {
   const m = DIRECTIVE.exec(text);
@@ -44,6 +47,7 @@ const FAILURES: Record<FailureKind, Partial<ExecutionOutcome>> = {
   quota: { httpStatus: 429, stderr: "rate limit exceeded" },
   transport: { stderr: "connect ECONNREFUSED 127.0.0.1:8080" },
   gate_denied: { gateDenied: true, httpStatus: 403, lastText: "X-Secret-Gate: denied" },
+  gate_unavailable: { gateUnavailable: true, exitCode: null, stderr: "secret-gate 代理未运行" },
   task_failed: { exitCode: 1, lastText: "tests failed" },
   rejected: { exitCode: 1, lastText: "rejected" },
   unknown: {},
@@ -72,7 +76,7 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
       runs.push(input);
       const d = parseDirective(input.task);
       if (d.delayMs) await sleep(d.delayMs, input.signal);
-      input.emit("text", { text: `echo[${harness}/${input.model}] ${input.brief.slice(0, 80)}` });
+      input.emit("text", { text: `echo[${harness}/${input.model}] ${input.brief.slice(0, ECHO_BRIEF_CHARS)}` });
       const asked = approvalsAsked.get(input.taskId) ?? 0;
       if (d.approval && (d.approvalTimes === undefined || asked < d.approvalTimes)) {
         approvalsAsked.set(input.taskId, asked + 1);
@@ -89,7 +93,7 @@ export function echoExecutor(harness: string): Executor & { readonly runs: Execu
         failures.set(input.taskId, failed + 1);
         return { ok: false, ...FAILURES[d.fail], sideEffects };
       }
-      return { ok: true, exitCode: 0, lastText: d.result ?? answered ?? `done: ${input.brief.slice(0, 60)}`, sideEffects, ...(d.tokens !== undefined ? { tokens: d.tokens } : {}), ...(d.session ? { sessionId: input.resume ? `${input.resume}+` : d.session } : {}) } as ExecutionOutcome;
+      return { ok: true, exitCode: 0, lastText: d.result ?? answered ?? `done: ${input.brief.slice(0, RESULT_BRIEF_CHARS)}`, sideEffects, ...(d.tokens !== undefined ? { tokens: d.tokens } : {}), ...(d.session ? { sessionId: input.resume ? `${input.resume}+` : d.session } : {}) } as ExecutionOutcome;
     },
   };
 }

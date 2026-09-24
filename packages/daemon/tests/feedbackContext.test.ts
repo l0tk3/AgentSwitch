@@ -6,7 +6,7 @@ import { Bus } from "../src/engine/bus.js";
 import { Composer } from "../src/engine/compose.js";
 import { engineContext } from "../src/engine/context.js";
 import { FEEDBACK_CONTEXT_LIMIT, feedbackExcerpt, feedbackRecords, formatFeedbackContext, parseFeedback, type FeedbackPayload, type FeedbackRecord } from "../src/engine/feedback.js";
-import { describeAnswers, encodeEvidence, type UserQuestion } from "../src/engine/questions.js";
+import { describeAnswers, encodeEvidence, type UserQuestion } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { Task, TaskEvent } from "../src/engine/types.js";
 import { echoRouter } from "../src/router/routers/echo.js";

@@ -1,7 +1,7 @@
 /** Task file access: list a directory tree, resolve a download path safely inside it, copy out/ into
  *  the artifacts store before an ephemeral working directory is deleted, sweep old entries. */
 
-import { cpSync, existsSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { OUT_DIR } from "./names.js";
 
@@ -40,12 +40,20 @@ export function resolveInside(root: string, rel: string): string | null {
   return target;
 }
 
+/** Only directories and regular files with a single link are kept: the artifacts store is served to the user, and a
+ *  symlink or hard link in out/ would put a file from anywhere into it. */
+const keepable = (p: string): boolean => {
+  const st = lstatSync(p);
+  return st.isDirectory() || (st.isFile() && st.nlink === 1);
+};
+
 /** Copy <cwd>/out into `dest`; returns how many files were copied (0 = nothing to keep, dest untouched). */
 export function collectOut(cwd: string, dest: string): number {
   const src = join(cwd, OUT_DIR);
-  const files = listTree(src);
+  if (!existsSync(src) || !lstatSync(src).isDirectory()) return 0;
+  const files = listTree(src).filter((f) => keepable(join(src, f.path)));
   if (!files.length) return 0;
-  cpSync(src, dest, { recursive: true, dereference: true });
+  cpSync(src, dest, { recursive: true, filter: keepable });
   return files.length;
 }
 

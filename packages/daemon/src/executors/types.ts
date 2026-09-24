@@ -1,8 +1,9 @@
 /** What every harness adapter implements. The engine owns approvals, events and re-dispatch. */
 
-import type { UserAnswers, UserQuestion } from "../engine/questions.js";
+import type { UserAnswers, UserQuestion } from "../core/questions.js";
 import type { Attachment } from "../files/uploads.js";
-import type { ExecutionOutcome } from "../router/failure.js";
+import type { ExecutionOutcome } from "../core/outcome.js";
+import type { TransferGrant } from "../core/transfer.js";
 
 export type ApprovalDecision = "allow" | "deny";
 /** Per-execution loopback capability. Only the gate MCP process receives this credential. */
@@ -25,6 +26,11 @@ export type ExecutionInput = {
   /** Genuine enc:v1: tokens for this task; executors that can rewrite tool inputs repair damaged copies against it. */
   readonly knownTokens: ReadonlySet<string>;
   readonly credentialRepair?: CredentialRepair;
+  /** This execution's enc:ref: scope (gate-next-v0 §1), set by the refs wrapper. A capability: only the gate processes
+   *  (SECRET_GATE_SCOPE) and the shell tools' proxy URL carry it; never argv, prompts, events or logs. */
+  readonly gateScope?: string | null;
+  /** §5.2 authorized field transfer, validated from the router's decision; the engine sets it only with the browser attached. */
+  readonly transfer?: TransferGrant | null;
   /** The thread's private home (threads-v0 §1): harness state lives under <home>/<harness>, never in the user's own dirs. */
   readonly threadHome: string | null;
   /** This harness's last session in the thread (from a `session` thread event); the executor resumes it natively. */
@@ -33,9 +39,11 @@ export type ExecutionInput = {
   readonly attachments: readonly Attachment[];
   /** Task or router asked for a browser: attach the gated Playwright MCP. */
   readonly browser: boolean;
+  /** A kept browser session slot's profile (browserSlots.ts); absent = a throw-away profile for this run only. */
+  readonly browserProfile?: string;
   readonly signal: AbortSignal;
   /** Stream progress; the engine persists and fans out. `agent` = a sub-agent the harness spawned (background-v0 §2). */
-  readonly emit: (type: "text" | "tool_call" | "agent" | "credential_repair", payload: Record<string, unknown>) => void;
+  readonly emit: (type: "text" | "tool_call" | "agent" | "credential_repair" | "transfer_grant", payload: Record<string, unknown>) => void;
   /** Ask the user; resolves when they answer or the request expires (deny). */
   readonly approve: (action: string, evidence: string) => Promise<ApprovalDecision>;
   /** The harness's question/feedback tool: the router answers from evidence or forwards to the user.

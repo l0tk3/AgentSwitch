@@ -2,15 +2,22 @@
 import { randomBytes, createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { Executor } from "./types.js";
-import type { Store } from "../engine/store.js";
-import { CredentialIssue, CredentialRepairError, exactHost, repairCredential, type CredentialGate, type ReissuedCredential } from "../secrets/credentialRepair.js";
-import type { Router } from "../router/routers/types.js";
+import { CredentialIssue, CredentialRepairError, repairCredential, type CredentialGate, type ReissuedCredential } from "../secrets/credentialRepair.js";
+import { exactHost } from "../util/host.js";
+import type { Router } from "../core/modelCall.js";
+import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
+
+/** A repair request body, and how many distinct repairs one execution may ask for. */
+const MAX_REQUEST_BYTES = 40_000;
+const MAX_REPAIRS_PER_RUN = 3;
 
 type Reply = ({ ok: true } & ReissuedCredential) | { ok: false; error: string };
 type RepairEvent = { status: "repaired"; originalToken: string; token: string; host: string; purpose: "totp_seed_import"; label: string; kind: "secret"; hosts: string[]; uses: string[] };
+/** The task's stored events (the engine's Store satisfies it): earlier repairs are replayed from them. */
+export type TaskEventLog = { eventsSince(taskId: string): readonly { readonly type: string; readonly payload: Readonly<Record<string, unknown>> }[] };
 const fingerprint = (token: string) => createHash("sha256").update(token).digest("hex").slice(0, 16);
 
-export function credentialRepairExecutor(executor: Executor, deps: { gate: CredentialGate; router: Router; store: Store; timeoutMs?: number }): Executor {
+export function credentialRepairExecutor(executor: Executor, deps: { gate: CredentialGate; router: Router; store: TaskEventLog; timeoutMs?: number }): Executor {
   return {
     harness: executor.harness,
     async run(input) {
@@ -38,7 +45,7 @@ export function credentialRepairExecutor(executor: Executor, deps: { gate: Crede
         if (!request.headers["content-type"]?.startsWith("application/json")) { send(400, { ok: false, error: "需要 JSON 请求" }); return; }
         try {
           let body = "";
-          for await (const chunk of request) { body += String(chunk); if (Buffer.byteLength(body) > 40_000) { send(413, { ok: false, error: "请求过长" }); return; } }
+          for await (const chunk of request) { body += String(chunk); if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) { send(413, { ok: false, error: "请求过长" }); return; } }
           const parsed = CredentialIssue.safeParse(JSON.parse(body));
           if (!parsed.success) { send(400, { ok: false, error: "无效的凭据修复请求" }); return; }
           const host = exactHost(parsed.data.host);
@@ -50,10 +57,10 @@ export function credentialRepairExecutor(executor: Executor, deps: { gate: Crede
           if (cached) { send(200, cached); return; }
           let work = inflight.get(key);
           if (!work) {
-            if (++attempts > 3) { send(429, { ok: false, error: "本次执行的凭据修复次数已用尽，请停止重试" }); return; }
+            if (++attempts > MAX_REPAIRS_PER_RUN) { send(429, { ok: false, error: "本次执行的凭据修复次数已用尽，请停止重试" }); return; }
             const controller = new AbortController();
             pending.add(controller);
-            const deadline = setTimeout(() => controller.abort(), deps.timeoutMs ?? 45_000);
+            const deadline = setTimeout(() => controller.abort(), deps.timeoutMs ?? SUPPORT_CALL_TIMEOUT_MS);
             const repairSignal = AbortSignal.any([signal, controller.signal]);
             input.emit("credential_repair", { status: "requested", credential: fingerprint(issue.token), host: issue.host, purpose: issue.purpose });
             work = (async (): Promise<Reply> => {

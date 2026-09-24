@@ -3,11 +3,14 @@
 import { EventEmitter } from "node:events";
 import type { TaskEvent } from "./types.js";
 
+/** SSE subscribers plus internal listeners; far above normal use, so a leak still warns. */
+const MAX_LISTENERS = 1000;
+
 export class Bus {
   private readonly emitter = new EventEmitter();
 
   constructor() {
-    this.emitter.setMaxListeners(1000);
+    this.emitter.setMaxListeners(MAX_LISTENERS);
   }
 
   publish(event: TaskEvent): void {

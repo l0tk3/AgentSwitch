@@ -1,8 +1,10 @@
 /** HTTP API. The phone is just another client of these routes; the CLI uses the same ones. */
 
 import { Hono } from "hono";
+import { mountAssistant } from "./assistant.js";
 import { mountExtensions } from "./extensions.js";
 import { mountFiles } from "./files.js";
+import { mountModelSettings } from "./models.js";
 import { mountSettings } from "./settings.js";
 import { type ApiDeps } from "./shared.js";
 import { mountTasks } from "./tasks.js";
@@ -16,7 +18,9 @@ export function createApp(deps: ApiDeps): Hono {
   const app = new Hono();
   mountUi(app);
   mountSettings(app, deps);
+  mountModelSettings(app, deps);
   mountTasks(app, deps);
+  mountAssistant(app, deps);
   mountFiles(app, deps);
   mountThreads(app, deps);
   mountExtensions(app, deps.extensions);

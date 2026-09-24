@@ -3,6 +3,12 @@
 
 import { spawn } from "node:child_process";
 import { z } from "zod";
+import { GATE_CLI_TIMEOUT_MS } from "../core/limits.js";
+
+/** Stderr quoted in an error. */
+const STDERR_QUOTE_CHARS = 200;
+/** fakeMinter pads its token body to this length so the token regexes (16+ characters) accept it. */
+const FAKE_TOKEN_CHARS = 24;
 
 export type MintEntry = {
   readonly label: string;
@@ -30,7 +36,7 @@ export function parseMintOutput(stdout: string): readonly MintResult[] {
   return parsed.data.map((r) => ("token" in r ? { label: r.label ?? "", token: r.token } : { label: r.label ?? "", error: r.error }));
 }
 
-export function gateMinter(gate: { readonly bin: string; readonly home: string }, timeoutMs = 15_000): Minter {
+export function gateMinter(gate: { readonly bin: string; readonly home: string }, timeoutMs = GATE_CLI_TIMEOUT_MS): Minter {
   return (entries) => new Promise((resolve, reject) => {
     if (!entries.length) { resolve([]); return; }
     const child = spawn(gate.bin, ["enc", "--batch"], { env: { ...process.env, SECRET_GATE_HOME: gate.home }, stdio: ["pipe", "pipe", "pipe"] });
@@ -41,7 +47,7 @@ export function gateMinter(gate: { readonly bin: string; readonly home: string }
     child.on("error", (e) => { clearTimeout(timer); reject(new Error(`secret-gate enc: ${e.message}`)); });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0 && code !== 1) { reject(new Error(`secret-gate enc exited ${code}: ${err.trim().slice(0, 200)}`)); return; }
+      if (code !== 0 && code !== 1) { reject(new Error(`secret-gate enc exited ${code}: ${err.trim().slice(0, STDERR_QUOTE_CHARS)}`)); return; }
       try { resolve(parseMintOutput(out)); } catch (e) { reject(e); }
     });
     child.stdin.end(JSON.stringify(entries.map((e) => ({ label: e.label, value: e.value, kind: e.kind, hosts: [...e.hosts], uses: [...e.uses], ...(e.seed_import_hosts?.length ? { seed_import_hosts: [...e.seed_import_hosts] } : {}) }))));
@@ -50,5 +56,5 @@ export function gateMinter(gate: { readonly bin: string; readonly home: string }
 
 /** Test double: a token that looks real enough for the token regexes; the value is not recoverable from it. */
 export function fakeMinter(): Minter {
-  return async (entries) => entries.map((e, i) => ({ label: e.label, token: `enc:v1:${Buffer.from(`${e.label}#${i}#${e.value.length}`).toString("base64url").padEnd(24, "A")}` }));
+  return async (entries) => entries.map((e, i) => ({ label: e.label, token: `enc:v1:${Buffer.from(`${e.label}#${i}#${e.value.length}`).toString("base64url").padEnd(FAKE_TOKEN_CHARS, "A")}` }));
 }

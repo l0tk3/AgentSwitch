@@ -15,15 +15,11 @@ export class Scheduler {
   private readonly threadLock = new KeyedLock();
   private readonly cwdLock = new KeyedLock();
   private readonly slots = new Map<string, Semaphore>();
-  private readonly running: Record<string, number> = {};
   private readonly unsettled = new Map<string, Task>();
 
   constructor(private readonly ctx: EngineContext, private readonly targets: Targets, maxTasks: number = DEFAULT_MAX_TASKS) {
     this.global = new Semaphore(maxTasks);
   }
-
-  /** Tasks currently executing per harness (what the router's concurrency check sees). */
-  runningByHarness(): Record<string, number> { return { ...this.running }; }
 
   acquireGlobal(task: Task, signal: AbortSignal): Promise<Release> {
     return this.gate("global", () => this.global.acquire(signal), task, this.global.full);
@@ -58,12 +54,13 @@ export class Scheduler {
     throw new ExecutionStillRunningError(`任务 ${pending.id} 的执行器尚未退出，已停止本次执行以避免重复操作；退出后请核对现场再继续。`);
   }
 
-  /** A harness slot; counts the harness as running until released. */
+  /** A harness slot (`max_concurrent`), held until released. */
   async acquireHarness(task: Task, harness: string, signal: AbortSignal): Promise<Release> {
     const slot = this.slot(harness);
+    // Awaited here, not returned as is: the extra ticks keep a finished task's `done` event ahead of the dispatch of
+    // the task that takes its slot.
     const release = await this.gate(`harness:${harness}`, () => slot.acquire(signal), task, slot.full);
-    this.running[harness] = (this.running[harness] ?? 0) + 1;
-    return () => { this.running[harness] = Math.max(0, (this.running[harness] ?? 1) - 1); release(); };
+    return release;
   }
 
   /** A follow-up must see its parent's result: wait until the parent has ended. */

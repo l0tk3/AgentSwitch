@@ -1,7 +1,7 @@
 /** Test router: canned replies, optional delay and failure. Never calls a model. */
 
 import { sleep } from "../../util/sleep.js";
-import type { Router, RouterInput, RouterReply } from "./types.js";
+import type { Router, RouterInput, RouterReply } from "../../core/modelCall.js";
 
 export type EchoScript = readonly string[] | ((input: RouterInput, call: number) => string);
 

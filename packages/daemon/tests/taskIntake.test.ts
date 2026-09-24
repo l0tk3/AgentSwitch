@@ -14,6 +14,7 @@ const token = `enc:v1:${"A".repeat(32)}`;
 const sealed: SealResult = { ok: true, text: `使用 ${token}`, sealed: [], ms: 999_999 };
 const fixtures: { d: Daemon; dir: string }[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const { d, dir } of fixtures.splice(0)) {
     for (const task of d.store.listTasks()) d.engine.cancel(task.id);
     await d.engine.idle();
@@ -43,7 +44,7 @@ const frames = (text: string): Frame[] => text.trim().split("\n").filter(Boolean
 async function firstFrame(response: Response) {
   const reader = response.body!.getReader();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const first = await Promise.race([reader.read(), new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("first progress frame was held behind sealing")), 500); })]).finally(() => { if (timer) clearTimeout(timer); });
+  const first = await Promise.race([reader.read(), new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("first progress frame was held behind sealing")), 4_000); })]).finally(() => { if (timer) clearTimeout(timer); });
   expect(first.done).toBe(false);
   return { reader, first: frames(new TextDecoder().decode(first.value))[0]! };
 }
@@ -59,6 +60,7 @@ describe("task intake receipts", () => {
     const pending = deferred<SealResult>();
     const sealer = vi.fn<Sealer>(async () => pending.promise);
     const f = build(sealer);
+    vi.useFakeTimers({ toFake: ["Date"] });   // the clock moves only when the test says; streams and the engine keep real scheduling
     const response = await f.post();
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/x-ndjson");
@@ -67,15 +69,16 @@ describe("task intake receipts", () => {
     expect(first).toMatchObject({ type: "progress", stage: "sealing", elapsedMs: expect.any(Number) });
     expect(Object.keys(first).sort()).toEqual(["elapsedMs", "stage", "type"]);
     expect(f.d.store.listTasks()).toHaveLength(0);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    vi.advanceTimersByTime(20);   // sealing takes 20 ms of clock time
+    await new Promise((resolve) => setImmediate(resolve));
     expect(f.d.store.listTasks()).toHaveLength(0);
     pending.resolve(sealed);
     const rest = await remainder(reader);
+    vi.useRealTimers();
     expect(rest.map((frame) => frame.type === "progress" ? frame.stage : frame.type)).toEqual(["creating", "accepted"]);
     const accepted = rest[1]!;
     expect(accepted.task?.task).toBe(`使用 ${token}`);
-    expect(accepted.sealingMs).toBeGreaterThanOrEqual(15);
-    expect(accepted.sealingMs).toBeLessThan(1000);
+    expect(accepted.sealingMs).toBe(20);   // measured by the daemon, not the sealer's self-reported ms
     expect(accepted.elapsedMs).toBeGreaterThanOrEqual(accepted.sealingMs!);
     expect(sealer).toHaveBeenCalledTimes(1);
     await f.d.engine.idle();

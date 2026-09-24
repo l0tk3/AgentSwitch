@@ -1,6 +1,7 @@
 /** agentswitch CLI. Daemon-backed commands talk to http://127.0.0.1:4711; `route`/`reroute`/`context init` run locally.
  *
- *   serve                       start the daemon (AGENTSWITCH_ROUTER=echo, AGENTSWITCH_PORT=...)
+ *   serve                       start the daemon (AGENTSWITCH_ROUTER=echo, AGENTSWITCH_PORT=...; AGENTSWITCH_REMOTE=1 adds
+ *                               the HTTPS listener for paired phones on AGENTSWITCH_REMOTE_PORT, default 4713)
  *   task "<text>" [--cwd d | --ephemeral] [--pin h/m] [--browser] [--no-watch] [--reply <taskId>]   (--reply: follow-up with context)
  *   tasks | show <id> | watch <id> | approve <task> <approval> --allow|--deny | cancel <id>
  *   handoff <taskId> [--pin h/m]     hand a task to another executor (same thread)
@@ -16,15 +17,21 @@ import { parseArgs } from "node:util";
 import { Client } from "./client.js";
 import { defaultConfig, serve } from "./daemon.js";
 import type { TaskEvent } from "./engine/types.js";
-import { CONTEXT_EXAMPLE, loadContext } from "./router/context.js";
-import { NO_SIDE_EFFECTS, type FailureKind } from "./router/failure.js";
+import { CONTEXT_EXAMPLE } from "./router/context.js";
+import { loadContext } from "./core/contextDoc.js";
+import { NO_SIDE_EFFECTS, type FailureKind } from "./core/outcome.js";
 import { RoutingLog } from "./router/log.js";
 import { reroute, route } from "./router/route.js";
 import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
 import { loadTargets } from "./router/targets.js";
+import { withModelOverlay } from "./router/modelOverlay.js";
 
 const cfg = defaultConfig();
+/** How much of an agent summary, a task and a thread title one output line shows. */
+const SUMMARY_CHARS = 120;
+const TASK_CHARS = 60;
+const TITLE_CHARS = 50;
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -51,6 +58,7 @@ const { values, positionals } = parseArgs({
     refresh: { type: "boolean", default: false },
     allow: { type: "boolean", default: false },
     deny: { type: "boolean", default: false },
+    help: { type: "boolean", short: "h", default: false },
   },
 });
 const [cmd, a1, a2] = positionals;
@@ -78,7 +86,7 @@ function showEvent(ev: TaskEvent): void {
     case "refusal": console.log(`${t} refusal  ${p.action}: ${p.note ?? p.reason ?? ""}`); break;
     case "redispatch": console.log(`${t} reroute  ${p.kind}${p.target ? ` -> ${(p.target as { harness: string; model: string }).harness}/${(p.target as { model: string }).model}` : ""}${p.source ? ` (${p.source})` : ""}`); break;
     case "waiting": console.log(`${t} waiting  ${p.for}${p.taskId ? ` (${p.taskId})` : ""}`); break;
-    case "agent": console.log(`${t}   agent ${p.status} ${p.description ?? p.agentId ?? ""}${p.summary ? `: ${String(p.summary).slice(0, 120)}` : ""}`); break;
+    case "agent": console.log(`${t}   agent ${p.status} ${p.description ?? p.agentId ?? ""}${p.summary ? `: ${String(p.summary).slice(0, SUMMARY_CHARS)}` : ""}`); break;
     case "thread": console.log(`${t} thread   ${p.threadId} (${p.source}${p.confidence !== null && p.confidence !== undefined ? `, confidence ${p.confidence}` : ""})`); break;
     case "handoff": console.log(`${t} handoff  ${p.from ? `${(p.from as { harness: string }).harness} -> ` : ""}${p.to ? `${(p.to as { harness?: string }).harness ?? "?"}/${(p.to as { model?: string }).model ?? "?"}` : "router"} (${p.reason})${p.taskId ? `  task ${p.taskId}` : ""}`); break;
     case "summary": console.log(`${t} summary  ${p.ok ? `"${p.title}"${p.spoken ? ` — ${p.spoken}` : ""} (${p.ms} ms)` : `failed: ${p.error}`}`); break;
@@ -114,11 +122,16 @@ async function watchInteractive(id: string): Promise<void> {
   }
 }
 
+const USAGE = "usage: serve | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute";
+
 async function main(): Promise<number> {
+  if (values.help) { console.log(USAGE); return 0; }
   switch (cmd) {
     case "serve": {
       const handle = await serve(cfg);
-      process.on("SIGINT", () => { handle.close(); process.exit(0); });
+      const stop = () => { handle.close(); process.exit(0); };
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
       await new Promise(() => undefined);
       return 0;
     }
@@ -134,7 +147,7 @@ async function main(): Promise<number> {
     case "tasks": {
       const tasks = await client.tasks();
       if (values.json) return (out(tasks), 0);
-      for (const t of tasks) console.log(`${t.id}  ${t.status.padEnd(16)} ${t.harness ? `${t.harness}/${t.model}` : "-"}  ${t.task.slice(0, 60)}`);
+      for (const t of tasks) console.log(`${t.id}  ${t.status.padEnd(16)} ${t.harness ? `${t.harness}/${t.model}` : "-"}  ${t.task.slice(0, TASK_CHARS)}`);
       return 0;
     }
     case "show": { if (!a1) throw new Error("show <id>"); out(await client.task(a1)); return 0; }
@@ -161,7 +174,7 @@ async function main(): Promise<number> {
     case "threads": {
       const list = await client.threads(values.archived ? "archived" : "open");
       if (values.json) return (out(list), 0);
-      for (const t of list) console.log(`${t.id}  ${t.status.padEnd(8)} ${String(t.taskCount).padStart(2)} tasks  ${t.lastTarget ? `${t.lastTarget.harness}/${t.lastTarget.model}` : "-"}  ${(t.title ?? "(untitled)").slice(0, 50)}  ${t.cwd}`);
+      for (const t of list) console.log(`${t.id}  ${t.status.padEnd(8)} ${String(t.taskCount).padStart(2)} tasks  ${t.lastTarget ? `${t.lastTarget.harness}/${t.lastTarget.model}` : "-"}  ${(t.title ?? "(untitled)").slice(0, TITLE_CHARS)}  ${t.cwd}`);
       return 0;
     }
     case "thread": { if (!a1) throw new Error("thread <id>"); out(await client.thread(a1)); return 0; }
@@ -190,20 +203,20 @@ async function main(): Promise<number> {
     case "reroute":
       return localRoute(cmd, a1);
     default:
-      console.error("usage: serve | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute");
+      console.error(USAGE);
       return 2;
   }
 }
 
 async function localRoute(kind: "route" | "reroute", task: string | undefined): Promise<number> {
   if (!task) throw new Error(`${kind} "<text>"`);
-  const targets = loadTargets(values.targets);
+  const targets = withModelOverlay(loadTargets(values.targets), join(cfg.home, "models.json"));
   const context = loadContext(values.context);
   for (const w of context.warnings) console.error(`context warning: ${w}`);
   const router = values.router === "echo"
     ? echoRouter([JSON.stringify({ harness: targets.router.default.harness, model: null, brief: task, confidence: 0.9 })])
     : opencodeRouter({ model: targets.router.model });
-  const deps = { targets, router, quota: {}, running: {}, context };
+  const deps = { targets, router, quota: {}, context };
   if (kind === "reroute") {
     if (!values.failed) throw new Error("reroute needs --failed harness/model");
     const attempt = { ...splitPin(values.failed), kind: values.kind as FailureKind, excerpt: values.excerpt, sideEffects: NO_SIDE_EFFECTS };

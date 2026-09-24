@@ -2,13 +2,21 @@
 
 import type { Hono } from "hono";
 import { z } from "zod";
+import { remoteCaller } from "../core/caller.js";
 import { TERMINAL } from "../engine/types.js";
 import { foldThread } from "../threads/fold.js";
 import type { Thread, ThreadStatus } from "../threads/types.js";
 import { issues, limitParam, type ApiDeps } from "./shared.js";
+import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
+
+/** A thread title set by the user. */
+const MAX_TITLE_CHARS = 200;
 
 /** Status changes go through /archive and /reopen (they check for running tasks and set the expiry). */
-const ThreadPatch = z.object({ title: z.string().max(200).nullable().optional(), expires_at: z.number().int().nullable().optional() });
+const ThreadPatch = z.object({ title: z.string().max(MAX_TITLE_CHARS).nullable().optional(), expires_at: z.number().int().nullable().optional() });
+/** A paired phone may rename a thread, nothing more: an expiry in the past has the hourly sweep delete the thread, and
+ *  deleting is local only (app-v0 §2). Archive (7 days to reopen) and reopen are the phone's way to change it. */
+const REMOTE_EXPIRY_REFUSED = "expires_at cannot be set from a paired device; archive the thread instead (it is deleted 7 days later unless reopened)";
 
 export function mountThreads(app: Hono, deps: ApiDeps): void {
   const view = (t: Thread) => {
@@ -17,7 +25,7 @@ export function mountThreads(app: Hono, deps: ApiDeps): void {
   };
   app.get("/threads", (c) => {
     const status = c.req.query("status");
-    const limit = limitParam(c, 50);
+    const limit = limitParam(c, DEFAULT_LIST_LIMIT);
     const opts: { limit: number; status?: ThreadStatus } = status === "open" || status === "archived" ? { limit, status } : { limit };
     return c.json(deps.store.listThreads(opts).map(view));
   });
@@ -29,6 +37,7 @@ export function mountThreads(app: Hono, deps: ApiDeps): void {
   app.patch("/threads/:id", async (c) => {
     const body = ThreadPatch.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: issues(body.error) }, 400);
+    if (remoteCaller(c.env) && body.data.expires_at !== undefined) return c.json({ error: REMOTE_EXPIRY_REFUSED }, 400);
     if (!deps.store.getThread(c.req.param("id"))) return c.json({ error: "not found" }, 404);
     const { title, expires_at } = body.data;
     const t = deps.store.updateThread(c.req.param("id"), { ...(title !== undefined ? { title } : {}), ...(expires_at !== undefined ? { expiresAt: expires_at } : {}) });

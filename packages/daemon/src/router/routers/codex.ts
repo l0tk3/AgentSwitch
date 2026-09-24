@@ -1,11 +1,10 @@
 /** A text-only Router on `codex app-server`: an ephemeral read-only thread, one turn, the agent's messages joined.
  *  Used when the router names a Codex model as the planner (loop-v0 §6). Runs in the user's own CODEX_HOME. */
 
-import { spawn } from "node:child_process";
-import { AppServerClient, type Json } from "../../executors/appserver.js";
-import { stripProxy } from "../../executors/gate.js";
-import { terminateProcess } from "../../executors/processes.js";
-import type { Router, RouterInput, RouterReply } from "./types.js";
+import { AppServerClient, type Json } from "../../harness/appserver.js";
+import { stripProxy } from "../../util/env.js";
+import { spawnOwned, terminateProcess } from "../../harness/processes.js";
+import type { Router, RouterInput, RouterReply } from "../../core/modelCall.js";
 
 export type CodexRouterOptions = { readonly binary?: string; readonly model: string };
 
@@ -16,7 +15,7 @@ export function codexTextRouter(opts: CodexRouterOptions): Router {
       if (signal.aborted) return Promise.reject(signal.reason ?? new Error("cancelled"));
       const started = Date.now();
       return new Promise<RouterReply>((resolve, reject) => {
-        const child = spawn(opts.binary ?? "codex", ["app-server"], { cwd: input.cwd, detached: process.platform !== "win32", env: { ...stripProxy(process.env), GIT_EDITOR: "true" }, stdio: ["pipe", "pipe", "pipe"] });
+        const child = spawnOwned(opts.binary ?? "codex", ["app-server"], { cwd: input.cwd, env: { ...stripProxy(process.env), GIT_EDITOR: "true" }, stdio: ["pipe", "pipe", "pipe"] });
         child.stderr?.resume(); // Drain diagnostics without persisting provider output or request content.
         const text: string[] = [];
         let settled = false;

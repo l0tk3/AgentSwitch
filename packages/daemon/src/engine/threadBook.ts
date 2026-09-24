@@ -4,18 +4,20 @@
 import { existsSync, rmSync } from "node:fs";
 import type { Decision } from "../router/decision.js";
 import { kindOf } from "../router/route.js";
-import type { TargetRef, Targets } from "../router/targets.js";
+import type { Targets } from "../router/targets.js";
+import type { TargetRef } from "../core/target.js";
 import { foldThread } from "../threads/fold.js";
 import { buildHandoff, gitDiffSummary, renderHandoff } from "../threads/handoff.js";
 import { appendMemory } from "../threads/memory.js";
 import type { Summarizer } from "../threads/summary.js";
-import type { HandoffReason, ThreadBrief, ThreadState } from "../threads/types.js";
+import type { HandoffReason, ThreadState } from "../threads/types.js";
+import type { ThreadBrief } from "../router/prompt.js";
 import type { Attempt } from "../router/reroute.js";
 import type { RoutingLog } from "../router/log.js";
 import { defaultCleanupPaths, isDeletableWorkDir, type CleanupPaths } from "./cleanup.js";
 import type { EngineContext } from "./context.js";
 import type { HandoffFrom, Task } from "./types.js";
-import { loadContext } from "../router/context.js";
+import { loadContext } from "../core/contextDoc.js";
 import { platformCheckpoint, platformOrigins, rememberPlatformFacts, safePlatformText } from "../threads/platformMemory.js";
 
 export type ThreadBookDeps = {
@@ -51,6 +53,12 @@ export class ThreadBook {
     if (!thread) return { threadHome: null, resume: null };
     const session = this.state(thread.id).sessions[harness];
     return { threadHome: thread.home, resume: session && thread.cwd === task.cwd ? session.sessionId : null };
+  }
+
+  /** A provider's safety classifier flagged a run of this harness: its session (and the one it resumed) holds the
+   *  flagged turn, so the thread forgets it and the next run of that harness starts a new session (router-v0 §6.2). */
+  dropSession(threadId: string, harness: string, taskId: string): void {
+    this.ctx.store.appendThreadEvent(threadId, "session", { harness, dropped: true, reason: "provider_safety", taskId });
   }
 
   /** threads-v0 §6: the parent's thread; else the router's pick above the threshold, the user's say below it, else a new
@@ -144,13 +152,14 @@ export class ThreadBook {
     if (!r.summary) { this.ctx.emit(task.id, "summary", { ok: false, error: r.error, ms: r.ms }); return; }
     const ev = this.ctx.store.appendThreadEvent(task.threadId, "summary", { ...r.summary });
     if (!previous) this.ctx.store.updateThread(task.threadId, { title: r.summary.title });
-    if (r.summary.spoken) this.ctx.store.updateTask(task.id, { spoken: r.summary.spoken });
+    // A newer summary of the task replaces its script, an empty one included (a stale script is never read).
+    this.ctx.store.updateTask(task.id, { ...(r.summary.spoken ? { spoken: r.summary.spoken } : {}), speech: r.summary.speech || null });
     // Browser experience requires checkpoint evidence; it never goes into the unscoped legacy facts file.
     const browser = task.needsBrowser || task.decision?.needs_browser || kindOf(task.task, task.decision) === "browser";
     const facts = r.summary.facts.filter(safePlatformText);
     const memory = this.deps.memoryPath && !browser && !task.ephemeral && facts.length ? appendMemory(this.deps.memoryPath, facts, { taskId: task.id, ts: this.ctx.now() }) : null;
     const platform = this.deps.platformMemoryPath && r.summary.platformFacts?.length
       ? rememberPlatformFacts(this.deps.platformMemoryPath, r.summary.platformFacts, { taskId: task.id, task: task.task, context, checkpoints: evidence, now: this.ctx.now() }) : null;
-    this.ctx.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, spoken: r.summary.spoken, ms: r.ms, ...(memory ? { remembered: memory.added } : {}), ...(platform ? { platformRemembered: platform.added.map((entry) => entry.id), platformSkipped: platform.skipped.length } : {}) });
+    this.ctx.emit(task.id, "summary", { ok: true, seq: ev.seq, title: r.summary.title, spoken: r.summary.spoken, ...(r.summary.speech ? { speech: r.summary.speech } : {}), ms: r.ms, ...(memory ? { remembered: memory.added } : {}), ...(platform ? { platformRemembered: platform.added.map((entry) => entry.id), platformSkipped: platform.skipped.length } : {}) });
   }
 }

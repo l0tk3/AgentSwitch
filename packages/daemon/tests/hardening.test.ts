@@ -29,7 +29,8 @@ describe("hardening (audit 2026-09-22)", () => {
     expect(checkCwd(join(home, ".ssh"), rules)).toMatch(/credentials/);
     expect(checkCwd(join(home, ".agentswitch", "work", "x"), rules)).toMatch(/daemon/);
     expect(checkCwd(join(home, "nope"), rules)).toMatch(/not an existing directory/);
-    expect(checkCwd(tmpdir(), rules)).toBeNull();
+    expect(checkCwd(tmpdir(), rules)).toMatch(/contains .*\.ssh/);   // it holds this home, so its credential dirs too
+    expect(checkCwd(mkdtempSync(join(tmpdir(), "agentswitch-h-project-")), rules)).toBeNull();
   });
 
   it("an approval can only be answered through its own task; ids are full UUIDs", async () => {

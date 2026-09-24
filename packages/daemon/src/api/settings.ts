@@ -5,16 +5,35 @@ import type { Hono } from "hono";
 import { writeFileSync } from "node:fs";
 import { z } from "zod";
 import { ApprovalPolicy, CATEGORIES, CATEGORY_TITLES, loadPolicy, savePolicy } from "../engine/approvalPolicy.js";
-import { exampleContext, lintContext, loadContext } from "../router/context.js";
+import { exampleContext } from "../router/context.js";
+import { lintContext, loadContext } from "../core/contextDoc.js";
+import { keepPrevious } from "../core/contextHistory.js";
+import { remoteCaller } from "../core/caller.js";
+import { LEGEND_HEADER, type SealedEntry } from "../secrets/sealer.js";
 import { route } from "../router/route.js";
 import { loadMemory } from "../threads/memory.js";
 import { deletePlatformMemory, loadPlatformMemory } from "../threads/platformMemory.js";
-import { aggregateRecords, RECORD_WINDOW_MS } from "../threads/record.js";
+import { aggregateRecords, RECORD_WINDOW_MS } from "../router/record.js";
 import { checkCwd } from "./cwdPolicy.js";
 import { issues, limitParam, type ApiDeps } from "./shared.js";
 import { NewTaskBody } from "./tasks.js";
+import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
 
 const ContextBody = z.object({ text: z.string() });
+const CONTEXT_UNROUTABLE = "有凭据看不出用在哪个站点：在同一条目里写上网址（例如 https://fin.example.com）再保存。";
+
+type SealedContext = { ok: true; text: string; sealed: readonly SealedEntry[] } | { ok: false; status: 400 | 503; error: string };
+
+/** CONTEXT.md is saved the way a task is submitted (router-v0 §9): the sealer marks the credentials in it and the
+ *  daemon mints tokens, so passwords can be written in the clear here too. The legend the sealer appends is for
+ *  executors and is not kept. A refusal saves nothing. Echo mode (no sealer, no gate): the text as is. */
+async function sealContext(deps: ApiDeps, text: string): Promise<SealedContext> {
+  if (!deps.sealer || !text.trim()) return { ok: true, text, sealed: [] };
+  const r = await deps.sealer(text);
+  if (!r.ok) return r.code === "unroutable" ? { ok: false, status: 400, error: CONTEXT_UNROUTABLE } : { ok: false, status: 503, error: r.error };
+  const legendAt = r.text.indexOf(`\n\n${LEGEND_HEADER}`);
+  return { ok: true, text: legendAt >= 0 ? r.text.slice(0, legendAt) : r.text, sealed: r.sealed };
+}
 
 export function mountSettings(app: Hono, deps: ApiDeps): void {
   app.get("/healthz", (c) => c.json({ ok: true, version: deps.version, pendingApprovals: deps.store.pendingApprovals().length }));
@@ -42,7 +61,7 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
   app.post("/quota/refresh", async (c) => c.json(await deps.quota.refresh(true)));
 
   app.get("/targets", (c) => c.json({ ...deps.targets, quota: deps.quota.map() }));
-  app.get("/routing/log", (c) => c.json(deps.routingLog.recent(limitParam(c, 50))));
+  app.get("/routing/log", (c) => c.json(deps.routingLog.recent(limitParam(c, DEFAULT_LIST_LIMIT))));
 
   app.get("/context/example", (c) => c.json({ text: exampleContext() }));
   app.get("/context", (c) => {
@@ -52,9 +71,16 @@ export function mountSettings(app: Hono, deps: ApiDeps): void {
   app.put("/context", async (c) => {
     const body = ContextBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) return c.json({ error: "text required" }, 400);
-    const lint = lintContext(body.data.text);
+    const current = loadContext(deps.contextPath);
+    if (current.source && body.data.text === current.text) return c.json({ path: deps.contextPath, warnings: current.warnings, sealed: [] });
+    const sealed = await sealContext(deps, body.data.text);
+    if (!sealed.ok) return c.json({ error: sealed.error }, sealed.status);
+    const lint = lintContext(sealed.text);
+    const caller = remoteCaller(c.env);
+    keepPrevious(deps.contextPath, lint.text, caller ? `device-${caller.deviceId}` : "local");
     writeFileSync(deps.contextPath, lint.text, { mode: 0o600 }); // the stripped lines never reach disk
-    return c.json({ path: deps.contextPath, warnings: lint.warnings });
+    const entries = sealed.sealed.map(({ label, field, hosts, uses }) => ({ label, field, hosts, uses }));
+    return c.json({ path: deps.contextPath, warnings: lint.warnings, sealed: entries });
   });
 
   // MEMORY.md: facts the summarizer appended; same lint as CONTEXT.md, the user edits or clears it here.

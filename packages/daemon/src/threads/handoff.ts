@@ -3,7 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import type { TargetRef } from "../router/targets.js";
+import type { TargetRef } from "../core/target.js";
 import { renderSummary } from "./summary.js";
 import type { HandoffReason, Summary } from "./types.js";
 
@@ -17,12 +17,14 @@ export type HandoffPackage = {
 };
 
 export const MAX_DIFF_CHARS = 6000;
+/** Each git call; a hung repository (network filesystem, lock) must not hold the handoff. */
+const GIT_TIMEOUT_MS = 5000;
 
 /** `git status --short` + `git diff --stat` for cwd; empty when not a repo or git is missing. Never throws. */
 export function gitDiffSummary(cwd: string, max = MAX_DIFF_CHARS): string {
   if (!existsSync(cwd)) return "";
   const run = (args: string[]): string => {
-    const r = spawnSync("git", args, { cwd, encoding: "utf8", timeout: 5000, env: { ...process.env, GIT_EDITOR: "true", GIT_TERMINAL_PROMPT: "0" } });
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", timeout: GIT_TIMEOUT_MS, env: { ...process.env, GIT_EDITOR: "true", GIT_TERMINAL_PROMPT: "0" } });
     return r.status === 0 ? r.stdout.trimEnd() : "";
   };
   if (run(["rev-parse", "--is-inside-work-tree"]).trim() !== "true") return "";

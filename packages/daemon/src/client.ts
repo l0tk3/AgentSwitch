@@ -3,6 +3,10 @@
 import type { Approval, Task, TaskEvent } from "./engine/types.js";
 import type { Thread, ThreadState } from "./threads/types.js";
 
+/** Rows the CLI lists by default. */
+const CLIENT_LIST_LIMIT = 20;
+const SSE_DATA = "data:";
+
 export type ThreadView = Thread & { summary: ThreadState["summary"]; lastTarget: ThreadState["lastTarget"]; lastActivity: number | null; taskCount: number; handoffs: number };
 
 export class Client {
@@ -27,7 +31,7 @@ export class Client {
   archiveThread(id: string) { return this.call<ThreadView>("POST", `/threads/${id}/archive`); }
   reopenThread(id: string) { return this.call<ThreadView>("POST", `/threads/${id}/reopen`); }
   deleteThread(id: string) { return this.call<{ ok: true }>("DELETE", `/threads/${id}`); }
-  tasks(limit = 20) { return this.call<Task[]>("GET", `/tasks?limit=${limit}`); }
+  tasks(limit = CLIENT_LIST_LIMIT) { return this.call<Task[]>("GET", `/tasks?limit=${limit}`); }
   task(id: string) { return this.call<Task & { approvals: Approval[] }>("GET", `/tasks/${id}`); }
   answer(taskId: string, approvalId: string, text: string) { return this.call<{ ok: true }>("POST", `/tasks/${taskId}/answer`, { approval_id: approvalId, text }); }
   policy() { return this.call<{ policy: { mode: string; human: string[] }; categories: { id: string; title: string }[] }>("GET", "/approvals/policy"); }
@@ -39,7 +43,7 @@ export class Client {
   approvals() { return this.call<Approval[]>("GET", "/approvals"); }
   quota(refresh = false) { return this.call<unknown[]>("GET", `/quota${refresh ? "?refresh=1" : ""}`); }
   preview(task: string, cwd: string) { return this.call<unknown>("POST", "/route/preview", { task, cwd }); }
-  routingLog(limit = 20) { return this.call<unknown[]>("GET", `/routing/log?limit=${limit}`); }
+  routingLog(limit = CLIENT_LIST_LIMIT) { return this.call<unknown[]>("GET", `/routing/log?limit=${limit}`); }
   context() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/context"); }
   memory() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/memory"); }
   putMemory(text: string) { return this.call<{ path: string; warnings: string[] }>("PUT", "/memory", { text }); }
@@ -64,8 +68,8 @@ export class Client {
       while ((idx = buf.indexOf("\n\n")) >= 0) {
         const frame = buf.slice(0, idx);
         buf = buf.slice(idx + 2);
-        const data = frame.split("\n").find((l) => l.startsWith("data:"));
-        if (data) await onEvent(JSON.parse(data.slice(5).trim()) as TaskEvent);
+        const data = frame.split("\n").find((l) => l.startsWith(SSE_DATA));
+        if (data) await onEvent(JSON.parse(data.slice(SSE_DATA.length).trim()) as TaskEvent);
       }
     }
   }

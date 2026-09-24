@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import { Bus } from "../src/engine/bus.js";
 import { Engine } from "../src/engine/engine.js";
 import { Store } from "../src/engine/store.js";
-import type { ExecutionOutcome } from "../src/router/failure.js";
+import type { ExecutionOutcome } from "../src/core/outcome.js";
 import { echoRouter } from "../src/router/routers/echo.js";
 import { realTargets } from "./helpers.js";
 

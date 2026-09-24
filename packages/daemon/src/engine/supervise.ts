@@ -6,15 +6,23 @@ import { listTree } from "../files/artifacts.js";
 import { OUT_DIR } from "../files/names.js";
 import { repairTokens, TOKEN_RE } from "../executors/tokens.js";
 import type { Supervisor } from "../router/supervisor.js";
-import { evidenceExcerpt } from "../router/prompt.js";
+import { evidenceExcerpt } from "../core/evidence.js";
 import { gitDiffSummary } from "../threads/handoff.js";
 import { whoAnswers, type ApprovalPolicy } from "./approvalPolicy.js";
 import type { ApprovalDesk } from "./approvals.js";
 import type { EngineContext } from "./context.js";
-import { describeAnswers, validateAnswers, type UserAnswers, type UserQuestion } from "./questions.js";
+import { describeAnswers, validateAnswers, type UserAnswers, type UserQuestion } from "../core/questions.js";
 import { TERMINAL, type Task } from "./types.js";
+import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
 
 const RECENT_EVENTS = 20;
+/** One event line: text, a command or an approval's action, and a shorter note (a denial, a sub-agent). */
+const EVENT_TEXT_CHARS = 160;
+const EVENT_DETAIL_CHARS = 120;
+const EVENT_NOTE_CHARS = 80;
+/** The brief and the final reply in the acceptance check (inside the supervisor's own budgets). */
+const ACCEPT_BRIEF_CHARS = 3800;
+const ACCEPT_RESULT_CHARS = 7800;
 const AGENT_ENDED = new Set(["completed", "failed", "stopped"]);
 
 /** Short lines of the task's latest events for the supervisor's prompts. */
@@ -23,10 +31,10 @@ export function recentEventLines(ctx: EngineContext, taskId: string, n = RECENT_
     const p = e.payload;
     const t = new Date(e.ts).toISOString().slice(11, 19);
     switch (e.type) {
-      case "text": return `${t} text: ${String(p.text ?? "").replace(/\s+/g, " ").slice(0, 160)}`;
-      case "tool_call": return `${t} tool ${p.tool ?? "?"}${p.command ? `: ${String(p.command).slice(0, 120)}` : p.denied ? ` denied: ${String(p.denied).slice(0, 80)}` : ""}`;
-      case "agent": return `${t} sub-agent ${p.status}: ${String(p.description ?? "").slice(0, 80)}`;
-      case "approval_request": return `${t} approval requested: ${String(p.action ?? "").slice(0, 120)}`;
+      case "text": return `${t} text: ${String(p.text ?? "").replace(/\s+/g, " ").slice(0, EVENT_TEXT_CHARS)}`;
+      case "tool_call": return `${t} tool ${p.tool ?? "?"}${p.command ? `: ${String(p.command).slice(0, EVENT_DETAIL_CHARS)}` : p.denied ? ` denied: ${String(p.denied).slice(0, EVENT_NOTE_CHARS)}` : ""}`;
+      case "agent": return `${t} sub-agent ${p.status}: ${String(p.description ?? "").slice(0, EVENT_NOTE_CHARS)}`;
+      case "approval_request": return `${t} approval requested: ${String(p.action ?? "").slice(0, EVENT_DETAIL_CHARS)}`;
       case "approval_resolved": return `${t} approval ${p.decision} (${p.by ?? p.status})`;
       default: return `${t} ${e.type}`;
     }
@@ -102,7 +110,7 @@ export async function acceptance(ctx: EngineContext, sup: Supervisor | undefined
   try { outFiles = listTree(join(task.cwd, OUT_DIR)).map((f) => f.path); } catch { outFiles = []; }
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal]);
-  const timer = setTimeout(() => controller.abort(new Error("completion verification timed out")), options.timeoutMs ?? 45_000);
+  const timer = setTimeout(() => controller.abort(new Error("completion verification timed out")), options.timeoutMs ?? SUPPORT_CALL_TIMEOUT_MS);
   let onAbort!: () => void;
   try {
     const aborted = new Promise<never>((_resolve, reject) => {
@@ -110,7 +118,7 @@ export async function acceptance(ctx: EngineContext, sup: Supervisor | undefined
       combined.addEventListener("abort", onAbort, { once: true });
     });
     combined.throwIfAborted();
-    const v = await Promise.race([sup.accept({ brief: evidenceExcerpt(options.goal ?? task.task, 3800), result: evidenceExcerpt(result, 7800), diff: gitDiffSummary(task.cwd), outFiles, cwd: task.cwd, ...(options.feedback ? { feedback: options.feedback } : {}) }, combined), aborted]);
+    const v = await Promise.race([sup.accept({ brief: evidenceExcerpt(options.goal ?? task.task, ACCEPT_BRIEF_CHARS), result: evidenceExcerpt(result, ACCEPT_RESULT_CHARS), diff: gitDiffSummary(task.cwd), outFiles, cwd: task.cwd, ...(options.feedback ? { feedback: options.feedback } : {}) }, combined), aborted]);
     combined.throwIfAborted();
     if (TERMINAL.has(ctx.store.getTask(task.id)?.status ?? "cancelled")) return { rejected: "cancelled", rejections: rejectionsSoFar };
     const accepted = v.accepted && v.source !== "error";
@@ -142,7 +150,7 @@ export function answersUseKnownTokens(answers: UserAnswers, known: ReadonlySet<s
 
 /** loop-v0 §6: an executor's question goes to the supervisor first (never in manual mode); what it cannot answer
  *  from the task's own material, or answers with a token the task does not hold, reaches the user's card. */
-export async function answerQuestions(ctx: EngineContext, sup: Supervisor | undefined, desk: ApprovalDesk, task: Task, policy: ApprovalPolicy, questions: readonly UserQuestion[], material: QuestionMaterial, signal?: AbortSignal, timeoutMs = 45_000): Promise<UserAnswers | null> {
+export async function answerQuestions(ctx: EngineContext, sup: Supervisor | undefined, desk: ApprovalDesk, task: Task, policy: ApprovalPolicy, questions: readonly UserQuestion[], material: QuestionMaterial, signal?: AbortSignal, timeoutMs = SUPPORT_CALL_TIMEOUT_MS): Promise<UserAnswers | null> {
   const stopped = () => signal?.aborted || TERMINAL.has(ctx.store.getTask(task.id)?.status ?? "cancelled");
   if (stopped()) return null;
   if (sup?.answer && policy.mode !== "manual") {

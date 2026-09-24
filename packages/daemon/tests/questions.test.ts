@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { Bus } from "../src/engine/bus.js";
 import { Engine } from "../src/engine/engine.js";
-import { answersFromText, clarifyQuestion, describeAnswers, encodeEvidence, NO_ANSWER_MESSAGE, parseEvidence, validateAnswers, type UserQuestion } from "../src/engine/questions.js";
+import { answersFromText, clarifyQuestion, describeAnswers, encodeEvidence, NO_ANSWER_MESSAGE, parseEvidence, validateAnswers, type UserQuestion } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import { claudeAnswers, claudeQuestions } from "../src/executors/claude.js";

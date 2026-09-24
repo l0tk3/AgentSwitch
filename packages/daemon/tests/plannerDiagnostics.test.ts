@@ -2,13 +2,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Bus } from "../src/engine/bus.js";
 import { Engine } from "../src/engine/engine.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import { nextAction } from "../src/router/loop.js";
-import type { Router, RouterInput } from "../src/router/routers/types.js";
+import type { Router, RouterInput } from "../src/core/modelCall.js";
 import type { Supervisor } from "../src/router/supervisor.js";
 import { decisionJson, realTargets } from "./helpers.js";
 
@@ -26,12 +26,13 @@ function fake(script: (call: number, input: RouterInput, signal: AbortSignal) =>
   return { ...router, calls };
 }
 function direct(router: Router, timeoutMs = 200, signal?: AbortSignal) {
-  return nextAction(router, { router, targets: realTargets(), running: {}, quota: {} }, {
+  return nextAction(router, { router, targets: realTargets(), quota: {} }, {
     req: { task: "核对配置", cwd: "/tmp" }, steps: [], used: 0, budget: 5, exclude: [], timeoutMs,
   }, signal);
 }
 const fixtures: { engine: Engine; store: Store; dir: string }[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const f of fixtures.splice(0)) {
     for (const task of f.store.listTasks()) f.engine.cancel(task.id);
     await f.engine.idle();
@@ -71,28 +72,36 @@ const failures = (events: TaskEvent[]) => events.filter((e) => e.type === "step"
 
 describe("safe loop failure diagnostics", () => {
   it.each(["invalid_response", "service_error"] as const)("classifies %s with actual attempts and wall time, without persisting raw model/provider text", async (kind) => {
+    vi.useFakeTimers();
     const router = fake(async () => {
       await delay(10);
       if (kind === "service_error") throw new Error(sentinel);
       return sentinel;
     });
-    const result = await direct(router);
+    const running = direct(router);
+    await vi.advanceTimersByTimeAsync(20);
+    const result = await running;
     expect(result).toMatchObject({ action: null, failure: { kind, tries: 2, timeoutMs: 200 } });
-    expect(result.routerMs).toBeGreaterThanOrEqual(15);
-    expect(result.routerMs).toBeLessThan(1000);
+    expect(result.routerMs).toBe(20);   // both attempts on the clock, not the router's self-reported elapsedMs
     expect(JSON.stringify(result)).not.toContain(sentinel);
     expect(router.calls).toHaveLength(2);
   });
 
   it("a deadline is total across JSON correction and blocks a late action from a router ignoring abort", async () => {
+    vi.useFakeTimers();
     let resolveLate!: (text: string) => void;
-    const router = fake(async (n) => n === 0 ? sentinel : new Promise((resolve) => { resolveLate = resolve; }));
-    const result = await direct(router, 30);
+    const router = fake(async (n) => {
+      if (n === 0) { await delay(20); return sentinel; }
+      return new Promise((resolve) => { resolveLate = resolve; });
+    });
+    const running = direct(router, 30);
+    await vi.advanceTimersByTimeAsync(30);   // a per-attempt deadline would still leave the correction 20 ms
+    const result = await running;
     expect(result).toMatchObject({ action: null, failure: { kind: "timeout", tries: 2, timeoutMs: 30 } });
-    expect(result.routerMs).toBeGreaterThanOrEqual(20);
+    expect(result.routerMs).toBe(30);
     expect(JSON.stringify(result)).not.toContain(sentinel);
     resolveLate(finish);
-    await delay(0);
+    await vi.advanceTimersByTimeAsync(0);
     expect(router.calls).toHaveLength(2);
     expect(result.action).toBeNull();
   });
@@ -131,7 +140,8 @@ describe("planner failure events and independent deadlines", () => {
     const f = build(planner, { plannerMs: 30 });
     const task = f.submit();
     await f.engine.idle();
-    expect(f.store.getTask(task.id)).toMatchObject({ status: "blocked", error: expect.stringContaining("未执行新的业务操作") });
+    expect(f.store.getTask(task.id)).toMatchObject({ status: "blocked", error: expect.stringContaining("未执行新的业务操作"),
+      blockCause: kind === "timeout" ? "planner_timeout" : "planner_error" });
     expect(f.runs).toBe(0);
     expect(failures(f.events)).toHaveLength(1);
     expect(failures(f.events)[0]!.payload).toMatchObject({ stage: "initial_plan", model: "codex/gpt-5.5", failureKind: kind, tries: kind === "timeout" ? 1 : 2, timeoutMs: 30, dispatches: 0 });
@@ -143,7 +153,8 @@ describe("planner failure events and independent deadlines", () => {
     const f = build(planner, { failExecutor });
     const task = f.submit();
     await f.engine.idle();
-    expect(f.store.getTask(task.id)).toMatchObject({ status: failExecutor ? "blocked" : "partial", error: expect.stringContaining("已保存此前 1 次派发的进展") });
+    expect(f.store.getTask(task.id)).toMatchObject({ status: failExecutor ? "blocked" : "partial", error: expect.stringContaining("已保存此前 1 次派发的进展"),
+      blockCause: failExecutor ? "planner_error" : null });
     if (!failExecutor) expect(f.store.getTask(task.id)?.result).toBe("已保存步骤进展");
     expect(f.runs).toBe(1);
     expect(f.events.filter((e) => e.type === "checkpoint")).toHaveLength(1);

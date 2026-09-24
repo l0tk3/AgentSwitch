@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     Array.from({ length: conc }, async () => {
       while (next < chosen.length) {
         const sample = chosen[next++]!;
-        const result = await route({ task: sample.input, cwd: values.cwd }, { targets, router, quota: {}, running: {} });
+        const result = await route({ task: sample.input, cwd: values.cwd }, { targets, router, quota: {} });
         const { hit, why } = judge(sample, result, targets);
         results.push({ sample, result, hit, why });
         const v = result.verdict;

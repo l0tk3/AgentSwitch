@@ -7,6 +7,10 @@ export const TOKEN_RE = /enc:v1:[A-Za-z0-9_=-]{16,}/g;
 const MIN_PREFIX = 10;
 const MIN_SUFFIX = 6;
 const MAX_LENGTH_DIFF = 4;
+/** A logged token: the prefix plus 12 characters, and the last 6. */
+const SHORT_HEAD_CHARS = 19;
+const SHORT_TAIL_CHARS = 6;
+const TOKEN_PREFIX = "enc:v1:";
 
 export function knownTokens(...texts: (string | null | undefined)[]): ReadonlySet<string> {
   const out = new Set<string>();
@@ -68,4 +72,4 @@ export function repairInValue<T>(value: T, known: ReadonlySet<string>, repairs: 
 }
 
 /** Short form for logs: never the whole token. */
-export const shortToken = (t: string): string => `${t.slice(0, 19)}…${t.slice(-6)} (${t.length - 7} chars)`;
+export const shortToken = (t: string): string => `${t.slice(0, SHORT_HEAD_CHARS)}…${t.slice(-SHORT_TAIL_CHARS)} (${t.length - TOKEN_PREFIX.length} chars)`;

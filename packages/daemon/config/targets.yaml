@@ -6,21 +6,25 @@ harnesses:
     quota: local-count
     max_concurrent: 1
     browser: true
-    default_model: claude-sonnet-5
+    default_model: claude-sonnet-4-6
+    # Never used, even when model discovery lists them (2026-09-24, user's call: Sonnet 5's safety classifier
+    # flagged plain logins; everything that was Sonnet 5 is Sonnet 4.6).
+    exclude: [claude-sonnet-5, "claude-sonnet-5[1m]"]
     models:                          # "[1m]" = Claude Code's 1M-context variant of the same model
       claude-fable-5-1:          {cost: top,  strengths: [hardest, longest-agentic, architecture]}
       claude-fable-5-1[1m]:      {cost: top,  strengths: [hardest, whole-repo-context]}
-      claude-opus-5:             {cost: high, strengths: [complex-code, refactor, review]}
-      claude-opus-5[1m]:         {cost: high, strengths: [complex-code, whole-repo-context]}
-      claude-opus-4-8:           {cost: high, strengths: [complex-code, refactor]}
+      # preferred: the user's most trusted models (2026-09-24); the router gives them real work (router-v0 §5)
+      claude-opus-5-5:           {cost: high, strengths: [complex-code, refactor, review], preferred: true}
+      claude-opus-5-5[1m]:       {cost: high, strengths: [complex-code, whole-repo-context], preferred: true}
+      claude-opus-5:             {cost: high, strengths: [complex-code, refactor], preferred: true}
+      claude-opus-5[1m]:         {cost: high, strengths: [complex-code, whole-repo-context], preferred: true}
+      claude-opus-4-8:           {cost: high, strengths: [complex-code]}
       claude-opus-4-8[1m]:       {cost: high, strengths: [complex-code, whole-repo-context]}
       claude-opus-4-7:           {cost: high, strengths: [complex-code]}
       claude-opus-4-7[1m]:       {cost: high, strengths: [complex-code, whole-repo-context]}
       claude-opus-4-6:           {cost: high, strengths: [complex-code]}
       claude-opus-4-6[1m]:       {cost: high, strengths: [complex-code, whole-repo-context]}
-      claude-sonnet-5:           {cost: mid,  strengths: [code, browser, general]}
-      claude-sonnet-5[1m]:       {cost: mid,  strengths: [code, whole-repo-context]}
-      claude-sonnet-4-6:         {cost: mid,  strengths: [code, general]}
+      claude-sonnet-4-6:         {cost: mid,  strengths: [code, browser, general]}
       claude-sonnet-4-6[1m]:     {cost: mid,  strengths: [code, whole-repo-context]}
       claude-haiku-4-5-20251001: {cost: low,  strengths: [small-edit, quick-answer]}
   codex:
@@ -30,7 +34,9 @@ harnesses:
     default_model: gpt-6-astra
     binary: /Applications/ChatGPT.app/Contents/Resources/codex   # 0.155; homebrew 0.142 only knows gpt-5.5
     models:                          # app-server model/list, 2026-09-20
-      gpt-6-astra:   {cost: top,  strengths: [complex-code, large-repo, test-heavy], efforts: [low, medium, high, xhigh, max, ultra]}
+      gpt-6-astra:   {cost: top,  strengths: [complex-code, large-repo, test-heavy], efforts: [low, medium, high, xhigh, max, ultra], preferred: true}
+      gpt-6-sol:     {cost: high, strengths: [complex-code, code, general],          efforts: [low, medium, high, xhigh, max, ultra], preferred: true}
+      gpt-6-luna:    {cost: mid,  strengths: [code, general],                        efforts: [low, medium, high, xhigh, max], preferred: true}
       gpt-5.6-sol:   {cost: high, strengths: [code, general],                        efforts: [low, medium, high, xhigh, max, ultra]}
       gpt-5.6-terra: {cost: high, strengths: [code, general],                        efforts: [low, medium, high, xhigh, max, ultra]}
       gpt-5.6-luna:  {cost: mid,  strengths: [code, general],                        efforts: [low, medium, high, xhigh, max]}
@@ -98,4 +104,4 @@ router:
   min_confidence: 0.5
   quota_threshold: 0.05
   default: {harness: opencode, model: "deepseek/deepseek-flash"}
-  planner: {harness: claude-code, model: claude-sonnet-5}   # loop-v0: fallback planner; the router names one per multi-step task
+  planner: {harness: claude-code, model: claude-opus-5-5}   # loop-v0: fallback planner; the router names one per multi-step task

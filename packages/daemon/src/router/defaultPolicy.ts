@@ -1,6 +1,7 @@
 /** Where a task goes when the router is unavailable or not trusted. Coarse, deterministic. */
 
-import { categoryOf, modelKey, type TargetRef, type Targets } from "./targets.js";
+import { categoryOf, modelKey, type Targets } from "./targets.js";
+import type { TargetRef } from "../core/target.js";
 import type { Quota } from "./validate.js";
 
 export type Capability = "browser" | "code" | "chat";
@@ -29,9 +30,9 @@ function categoryTarget(category: string, targets: Targets, quota: Quota): Targe
   return allow.find((r) => (quota[r.harness] ?? 1) >= targets.router.quota_threshold) ?? allow[0]!;
 }
 
-/** router-v0 §4 default table: browser → claude-code / claude-sonnet-5. Only when that has no quota does the
+/** router-v0 §4 default table: browser → claude-code / claude-sonnet-4-6 (Sonnet 5 is excluded, 2026-09-24). Only when that has no quota does the
  *  cheapest other browser-capable harness step in; the low-confidence fallback must never land on a top-cost model. */
-export const BROWSER_DEFAULT: TargetRef = { harness: "claude-code", model: "claude-sonnet-5" };
+export const BROWSER_DEFAULT: TargetRef = { harness: "claude-code", model: "claude-sonnet-4-6" };
 
 function browserTarget(targets: Targets, quota: Quota): TargetRef | undefined {
   const preferred = targets.harnesses[BROWSER_DEFAULT.harness];

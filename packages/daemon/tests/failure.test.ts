@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classifyFailure, detectRefusal, excerpt, hasSideEffects, NO_SIDE_EFFECTS } from "../src/router/failure.js";
+import { classifyFailure, excerpt } from "../src/router/failure.js";
+import { detectRefusal, hasSideEffects, NO_SIDE_EFFECTS } from "../src/core/outcome.js";
 
 describe("classifyFailure", () => {
   it("success is not a failure", () => {

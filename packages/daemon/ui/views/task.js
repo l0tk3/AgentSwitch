@@ -15,7 +15,8 @@ const $ = (s) => document.querySelector(s);
 function planningFailure(p) {
   const stage = ["initial", "initial_plan"].includes(p.stage) ? "初次规划" : ["next", "next_action"].includes(p.stage) ? "下一步规划" : "规划";
   const kind = { timeout: "调用超时", invalid_response: "回复格式无效", service_error: "服务调用失败", cancelled: "已取消" }[p.failureKind] || "未返回有效动作";
-  const detail = String(p.routerError || p.note || "").replace(/^loop model timed out$/i, "规划调用超时").replace(/^cancelled$/i, "规划调用已取消");
+  // The kind above is the event's structured field; routerError is the daemon's fixed diagnostic, shown as is.
+  const detail = String(p.routerError || p.note || "");
   const timing = Number.isFinite(p.routerMs) && p.routerMs >= 0 ? ` · 耗时 ${(p.routerMs / 1000).toFixed(1)} 秒` : "";
   const tries = Number.isFinite(p.tries) && p.tries >= 0 ? ` · 尝试 ${p.tries} 次` : "";
   return `${stage}已停止 · ${p.model || "未指定模型"} · ${kind}${timing}${tries}${detail ? "\n原因：" + detail : ""}`;
@@ -36,6 +37,15 @@ export function eventLine(ev) {
       return `已保存步骤进展 · ${{ research: "调研", do: "执行", verify: "复查" }[p.purpose] || p.purpose} · ${p.ok ? "本步结束" : "本步未完成"}\n${counts}${p.sideEffectsKnown === true ? "" : " · 副作用记录不完整，继续前请核对现场"}${p.result ? "\n" + p.result : ""}`;
     }
     case "sealed": return `已做密文：${(p.entries || []).map((e) => `${e.field || e.label}${e.hosts && e.hosts.length ? " → " + e.hosts.join(", ") : ""}`).join("；")}`;
+    case "transfer_grant": {
+      const what = `${(p.fields || []).join("、")} · ${(p.source || []).join(", ")} → ${(p.destination || []).join(", ")}${p.purpose ? "（" + p.purpose + "）" : ""}`;
+      if (p.status === "pinned") return `授权字段传递（来自首次路由，后续步骤只能缩小）：${what}`;
+      if (p.status === "offered") return `授权字段传递 → ${p.harness}/${p.model}：${what}${p.attached ? "" : " · 本次未挂浏览器，未交给执行器"}`;
+      if (p.status === "applied") return `授权字段传递已接入 ${p.harness} 的浏览器 gate`;
+      if (p.status === "inactive") return `授权字段传递本次未生效（${p.harness}）：${p.reason || ""}`;
+      if (p.status === "dropped") return `授权字段传递已丢弃${p.stage === "step" ? "（第 " + p.n + " 步）" : ""}：${p.reason || ""}`;
+      return `授权字段传递：${what}`;
+    }
     case "credential_repair": return p.status === "requested" ? `凭据修复：正在核对种子录入授权 → ${p.host}` : p.status === "repaired" ? `凭据修复：已签发限于 ${p.host} 的种子录入密文，执行者可继续原操作` : `凭据修复未通过：${p.error || "需要补充明确授权"}`;
     case "routed": { if (p.clarify) return `路由器先问你：${p.clarify}`; const v = p.verdict || {}; return `路由 → ${v.ok ? v.harness + "/" + v.model : "无目标"} (${p.source}${p.routerMs ? ", " + (p.routerMs / 1000).toFixed(1) + "s" : ""})${v.notes && v.notes.length ? "\n  " + v.notes.join("; ") : ""}`; }
     case "dispatched": return `派发 ${p.harness}/${p.model}${p.effort ? " effort=" + p.effort : ""}`;
@@ -54,8 +64,10 @@ export function eventLine(ev) {
       : p.kind === "checkin" ? `监督者检查（${Math.round((p.silentMs || 0) / 1000)} 秒无动静）：${p.action === "continue" ? "继续等" : p.action === "cancel" ? "取消这次执行并换人" : "问你"}${p.note ? "，" + p.note : ""}`
       : `监督者验收：${p.accepted ? "通过" : "未通过"}${(p.missing || []).length ? "，缺：" + p.missing.join("；") : ""}${p.note ? "，" + p.note : ""}`;
     case "attempt_failed": return `失败 ${p.harness}/${p.model}: ${p.kind} "${p.excerpt}"${p.hadSideEffects ? " (已有副作用)" : ""}`;
-    case "refusal": return `模型拒绝：${p.action === "clarify" ? "补充任务事实后重试一次" : p.action === "ask_user" ? "等待你补充操作范围" : "停止自动重试"}${p.note ? " · " + p.note : ""}${p.facts?.length ? "\n" + p.facts.map((f) => `[${f.sourceId}] ${f.quote}`).join("\n") : ""}`;
-    case "redispatch": return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
+    case "refusal": if (p.reason === "provider_safety") return p.action === "retry" ? "服务商安全拦截：原样重发一次（新会话、同一模型）" : `服务商安全拦截：已停止${p.note ? " · " + p.note : ""}`;
+      return `模型拒绝：${p.action === "clarify" ? "补充任务事实后重试一次" : p.action === "ask_user" ? "等待你补充操作范围" : "停止自动重试"}${p.note ? " · " + p.note : ""}${p.facts?.length ? "\n" + p.facts.map((f) => `[${f.sourceId}] ${f.quote}`).join("\n") : ""}`;
+    case "redispatch": if (p.kind === "provider_safety") return `原样重发${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}`;
+      return `重派 ${p.kind}${p.target ? " → " + p.target.harness + "/" + p.target.model : ""}${p.source ? " (" + p.source + ")" : ""}`;
     case "waiting": return `等待 ${p.for === "parent" ? "父任务 " + p.taskId + " 结束" : p.for === "thread" ? "同线程的另一个任务" : p.for === "cwd" ? "同目录的另一个任务" : p.for === "global" ? "并发槽位（已达上限）" : String(p.for).startsWith("harness:") ? String(p.for).slice(8) + " 的空闲槽位" : p.for}`;
     case "agent": return `子 agent ${p.status === "started" ? "启动" : p.status === "progress" ? "进展" : p.status === "completed" ? "完成" : p.status === "failed" ? "失败" : "停止"}${p.background ? "（后台）" : ""}：${p.description || p.agentId || ""}${p.summary ? "\n  " + p.summary : ""}${p.tokens ? " · " + p.tokens + " tok" : ""}`;
     case "thread": return `归入线程 ${p.threadId}（${p.source === "router" ? "路由器判断" + (p.confidence !== null ? "，置信度 " + p.confidence : "") : p.source === "user" ? "你确认的" : p.source === "parent" ? "追问自父任务" : "新开"}）${p.cwd ? "，目录 " + p.cwd : ""}`;

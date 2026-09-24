@@ -14,7 +14,8 @@ const initial = {
   files: { root: null, files: [] },  // files of the open task (in/ + out/, or the artifacts store)
   thread: null,
   policy: null,                      // {policy:{mode,human}, categories:[{id,title}]} from /approvals/policy                      // the open task's thread (GET /threads/:id), with folded state and tasks
-  mcp: [], skills: [], discovered: [], edit: { mcp: null, skill: null }, extHint: "",
+  mcp: [], skills: [], discovered: [], extHint: "",
+  edit: { mcp: null, skill: null, harnesses: { mcp: null, skill: null } },   // open forms; harnesses = chips toggled, null = the entry's own
   ctx: { path: "", text: "", warnings: [], draft: null, hint: "", saved: false },
   mem: { path: "", text: "", warnings: [], draft: null, hint: "", saved: false },   // MEMORY.md, same shape
   platformMem: { records: [], loaded: false, loading: false, hint: "", deletions: {} },

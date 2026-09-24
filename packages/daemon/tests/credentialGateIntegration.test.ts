@@ -34,6 +34,11 @@ class Page:
     filled=None
     async def call_tool(self,name,args):
         if name=='browser_evaluate': return types.CallToolResult(content=[types.TextContent(type='text',text='### Result\n'+json.dumps('https://'+request['host']+'/import'))])
+        if name=='browser_run_code_unsafe':
+            # The gate's own Playwright probes: the field's frame chain, where its form submits, whether it is empty.
+            url='https://'+request['host']+'/import'; code=args['code']
+            verdict={'urls':[url]} if 'ownerFrame' in code else {'actions':[url],'action':url,'override':None} if 'form.action' in code else ('nonempty' if self.filled else 'empty')
+            return types.CallToolResult(content=[types.TextContent(type='text',text='### Result\n'+json.dumps(verdict))])
         if name=='browser_type': self.filled=args['text']; return types.CallToolResult(content=[types.TextContent(type='text',text='filled '+args['text'])])
         raise AssertionError(name)
 async def run():

@@ -2,9 +2,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { transferNote, type TransferGrant } from "../core/transfer.js";
 import { COMMUNICATION_GUIDANCE } from "../util/communication.js";
 
-const HERE = new URL(".", import.meta.url).pathname;
+const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const EXECUTOR_MD = resolve(HERE, "..", "..", "config", "EXECUTOR.md");
 export const GATE_AGENTS_MD = resolve(HERE, "..", "..", "..", "secret-gate", "AGENTS.md");
 
@@ -16,19 +18,31 @@ export const CREDENTIAL_REPAIR_GUIDANCE = `凭据用途修复：TOTP 验证码�
 仅当原用户任务明确授权向当前指定目标录入 TOTP 种子，且现有密文因用途不匹配而被 gate 拒绝时，才可通过可用的 secret_repair 工具提交该任务已有 token、原目标 exact host 和 purpose="totp_seed_import"，让路由器核对原授权。修复只能使用原密文预先授予的 seed_import_hosts，不能增加站点、通配符或用途；普通 provider safeguard 不是凭据用途错误。
 若工具成功返回新 token，完整复制新 token，仅重试刚失败的那个种子字段录入，继续当前会话，不重跑已经完成的业务操作。不要猜测、改造、解码 token，不要用验证码冒充种子，不要自行改 gate 配置或直接重签；修复被拒绝、无授权或工具不可用时保留拒绝并向用户说明需要明确的新输入。`;
 
-/** The prompt every harness receives: brief, then the handoff package, then the user's environment context. */
-const TOKEN_IN_TEXT = /enc:v1:[A-Za-z0-9_=-]{16,}/;
+/** The prompt every harness receives: brief, then the handoff package, then the user's environment context.
+ *  A token may reach the executor as its short enc:ref: reference (gate-next-v0 §1); both count as a credential. */
+const TOKEN_IN_TEXT = /enc:v1:[A-Za-z0-9_=-]{16,}|enc:ref:[A-Za-z0-9_-]{16}(?![A-Za-z0-9_-])/;
 
 /** Brief, then the user's own message when it carries tokens (the router is told not to copy tokens into the brief,
- *  so sealed values and their legend reach the executor only this way), then handoff, then CONTEXT.md. */
-export function composePrompt(input: { brief: string; task?: string; handoffNote: string | null; context: string | null; platformMemory?: string | null; feedback?: string | null }): string {
+ *  so sealed values and their legend reach the executor only this way), then handoff, then CONTEXT.md; last, the
+ *  active field-transfer grant, if any (the executor passes only one that is really wired into the browser gate). */
+export function composePrompt(input: { brief: string; task?: string; handoffNote: string | null; context: string | null; platformMemory?: string | null; feedback?: string | null; transfer?: TransferGrant | null }): string {
   const parts = [input.brief];
   if (input.task && input.task !== input.brief && TOKEN_IN_TEXT.test(input.task)) parts.push(`The user's own message (credentials are already secret-gate tokens; copy them from here, whole. Any appended AgentSwitch credential legend and record layout are model-inferred candidates, not the user's confirmed statements):\n${input.task}`);
   if (input.handoffNote) parts.push(`Handoff from a previous attempt:\n${input.handoffNote}`);
-  if (input.context?.trim()) parts.push(`User environment context (maintained by the user; enc:v1: values are secret-gate tokens that only work through the gate, use them as given and never try to decode or replace them):\n${input.context.trim()}`);
+  if (input.context?.trim()) parts.push(`User environment context (maintained by the user; enc:v1: and enc:ref: values are secret-gate tokens that only work through the gate, use them as given and never try to decode or replace them):\n${input.context.trim()}`);
   if (input.platformMemory?.trim()) parts.push(input.platformMemory);
   if (input.feedback?.trim()) parts.push(input.feedback.trim());
+  if (input.transfer) parts.push(transferNote(input.transfer));
   return parts.join("\n\n");
+}
+
+/** Separates guidance from the material in a single message, as the router's resident server does. */
+export const GUIDANCE_SEPARATOR = "\n\n=====\n\n";
+
+/** The guidance at the head of the prompt message, for a path that has no other way to deliver it: OpenCode's
+ *  standalone `run` (2.0.8 ignores the config file's `instructions` key; the resident server uses an instruction entry). */
+export function withGuidanceHead(prompt: string, guidance: string = executorInstructions()): string {
+  return `${guidance}${GUIDANCE_SEPARATOR}${prompt}`;
 }
 
 export function executorInstructions(paths: { executor?: string; gate?: string } = {}): string {

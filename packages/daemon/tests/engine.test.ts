@@ -50,7 +50,7 @@ describe("Engine", () => {
 
   it("every routing decision lands in the routing log; browser flag reaches the executor", async () => {
     const { engine, routingLog, executors, router } = build([
-      decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null, needs_browser: true }),
+      decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null, needs_browser: true }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, needs_browser: true }),
     ]);
     engine.submit({ task: 'open the site @echo {"fail":"task_failed","failTimes":1}', cwd: "/tmp" });
@@ -62,7 +62,7 @@ describe("Engine", () => {
   });
 
   it("approval: task waits and an actual allowance continues to done", async () => {
-    const { engine, store, events, bus } = build([decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null })]);
+    const { engine, store, events, bus } = build([decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null })]);
     const t = engine.submit({ task: 'delete stuff @echo {"approval":"rm -rf /tmp/x"}', cwd: "/tmp" });
     const approvalId = await new Promise<string>((resolve) => bus.subscribe(t.id, (e) => { if (e.type === "approval_request") resolve(String(e.payload.approvalId)); }));
     expect(store.getTask(t.id)!.status).toBe("waiting_approval");
@@ -76,7 +76,7 @@ describe("Engine", () => {
 
   it("an approval timeout with conflicting tool observations stops before another model can replay", async () => {
     const { engine, store, router } = build([
-      decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
+      decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null }),
       decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, handoff_note: "user did not approve rm" }),
     ]);
     const t = engine.submit({ task: 'x @echo {"approval":"rm -rf /","approvalTimes":1}', cwd: "/tmp" });
@@ -120,7 +120,7 @@ describe("Engine", () => {
 
   it("refusal: a policy diagnosis stops before ordinary rerouting or acceptance", async () => {
     const { engine, store } = build([
-      decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null }),
+      decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null }),
       JSON.stringify({ action: "stop", reason: "policy", note: "policy restriction", question: null, facts: [] }),
     ]);
     const t = engine.submit({ task: 'x @echo {"fail":"refusal"}', cwd: "/tmp" });

@@ -11,6 +11,8 @@ export type Harness = (typeof HARNESSES)[number];
 export const RESERVED_NAMES: ReadonlySet<string> = new Set(["secret-gate", "playwright"]);
 
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** The one-line note shown to the router next to an MCP server's name. */
+const MAX_NOTE_CHARS = 500;
 
 const Name = z.string().regex(NAME_RE, "name: lowercase letters, digits, - and _ only").refine((n) => !RESERVED_NAMES.has(n), "name is reserved by the gate");
 const StringMap = z.record(z.string().min(1), z.string());
@@ -29,7 +31,7 @@ export const McpServer = z
     harnesses: z.array(z.enum(HARNESSES)).default([...HARNESSES]),
     /** Claude Code only: whether calls to this server's tools need a human (ask) or not (allow). */
     approval: z.enum(["ask", "allow"]).default("ask"),
-    note: z.string().max(500).default(""),
+    note: z.string().max(MAX_NOTE_CHARS).default(""),
   })
   .refine((s) => (s.kind === "stdio" ? Boolean(s.command) : Boolean(s.url)), { message: "stdio servers need command; http servers need url" })
   .refine((s) => (s.kind === "http" ? /^https?:\/\//.test(s.url ?? "") : true), { message: "url must be http(s)" });

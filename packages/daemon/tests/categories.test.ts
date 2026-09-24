@@ -11,7 +11,7 @@ import { decisionJson, realTargets } from "./helpers.js";
 const targets = realTargets();
 const OPUS48 = { harness: "claude-code", model: "claude-opus-4-8" };
 const FLASH = { harness: "opencode", model: "deepseek/deepseek-flash" };
-const ctxOf = (category: string | null, quota: Record<string, number> = {}) => ({ targets, quota, running: {}, lowConfidenceTarget: FLASH, category });
+const ctxOf = (category: string | null, quota: Record<string, number> = {}) => ({ targets, quota, lowConfidenceTarget: FLASH, category });
 
 describe("security category", () => {
   it("is declared in targets.yaml with an allow list of catalog models", () => {
@@ -52,12 +52,12 @@ categories:
   });
 
   it("rejects disallowed models for a security task and takes the first allowed fallback", () => {
-    const d = parseDecision(decisionJson({ harness: "codex", model: "gpt-6-astra", fallbacks: [{ harness: "claude-code", model: "claude-sonnet-5" }, OPUS48] }));
+    const d = parseDecision(decisionJson({ harness: "codex", model: "gpt-6-astra", fallbacks: [{ harness: "claude-code", model: "claude-sonnet-4-6" }, OPUS48] }));
     if (!d.ok) throw new Error(d.error);
     const v = validateDecision(d.decision, ctxOf("security"));
     expect(v).toMatchObject({ ok: true, harness: "claude-code", model: "claude-opus-4-8", chosen: "fallback" });
     expect(v.notes.join("\n")).toMatch(/gpt-6-astra.*security.*refuse/);
-    expect(v.notes.join("\n")).toMatch(/claude-sonnet-5.*security/);
+    expect(v.notes.join("\n")).toMatch(/claude-sonnet-4-6.*security/);
     // the router may declare the category itself even when the keyword floor missed it
     const declared = parseDecision(decisionJson({ harness: "codex", model: "gpt-6-astra", category: "security", fallbacks: [OPUS48] }));
     if (!declared.ok) throw new Error(declared.error);
@@ -76,7 +76,7 @@ categories:
 
   it("end to end: the router picks Codex for a CTF task, the floor redirects to Opus", async () => {
     const router = echoRouter([decisionJson({ harness: "codex", model: "gpt-6-astra", fallbacks: [OPUS48] })]);
-    const r = await route({ task: "CTF pwn: 分析 ./chall 并写 exploit", cwd: "/tmp" }, { targets, router, quota: {}, running: {} });
+    const r = await route({ task: "CTF pwn: 分析 ./chall 并写 exploit", cwd: "/tmp" }, { targets, router, quota: {} });
     expect(r.verdict).toMatchObject({ ok: true, harness: "claude-code", model: "claude-opus-4-8" });
     expect(r.source).toBe("router");
   });

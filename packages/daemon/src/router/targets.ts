@@ -3,7 +3,13 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { z } from "zod";
+import { TargetRef } from "../core/target.js";
 import { SupervisorConfig } from "./supervisor.js";
+import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";
+
+/** targets.yaml defaults: one router-model call, and one planner call (process start and a JSON correction included). */
+const ROUTER_TIMEOUT_MS = 20_000;
+const PLANNER_TIMEOUT_MS = 120_000;
 
 export const Cost = z.enum(["free", "low", "mid", "high", "top"]);
 
@@ -12,6 +18,8 @@ export const ModelSpec = z.object({
   strengths: z.array(z.string()).default([]),
   efforts: z.array(z.string()).optional(),
   unavailable: z.boolean().optional(),
+  /** The user's most trusted models (2026-09-24: Opus, GPT-6): the router gives them real work (router-v0 §5). */
+  preferred: z.boolean().optional(),
 });
 export type ModelSpec = z.infer<typeof ModelSpec>;
 export type CostTier = z.infer<typeof Cost>;
@@ -22,14 +30,13 @@ export const HarnessSpec = z.object({
   browser: z.boolean(),
   default_model: z.string().min(1),
   /** Wall-clock limit for one execution; the executor is killed past it (transport failure → retry/reroute). */
-  timeout_ms: z.number().int().positive().default(30 * 60_000),
+  timeout_ms: z.number().int().positive().default(DEFAULT_EXECUTOR_TIMEOUT_MS),
   binary: z.string().optional(),
   models: z.record(z.string().min(1), ModelSpec),
+  /** Ids never used, even when model discovery lists them or a wildcard would admit them (the user's call). */
+  exclude: z.array(z.string().min(1)).optional(),
 });
 export type HarnessSpec = z.infer<typeof HarnessSpec>;
-
-export const TargetRef = z.object({ harness: z.string().min(1), model: z.string().min(1) });
-export type TargetRef = z.infer<typeof TargetRef>;
 
 /** A task category whose executors are restricted to `allow` (e.g. security work most models refuse). */
 export const Category = z.object({
@@ -47,9 +54,9 @@ export const Targets = z
     router: z.object({
       harness: z.string().min(1),
       model: z.string().min(1),
-      timeout_ms: z.number().int().positive().default(20_000),
+      timeout_ms: z.number().int().positive().default(ROUTER_TIMEOUT_MS),
       /** Independent planner invocation, including process startup and one JSON correction. */
-      planner_timeout_ms: z.number().int().positive().default(120_000),
+      planner_timeout_ms: z.number().int().positive().default(PLANNER_TIMEOUT_MS),
       min_confidence: z.number().min(0).max(1).default(0.5),
       quota_threshold: z.number().min(0).max(1).default(0.05),
       /** Below this the router's thread assignment is not trusted: the user is asked (threads-v0 §6). */
@@ -63,6 +70,9 @@ export const Targets = z
   })
   .superRefine((t, ctx) => {
     for (const [name, h] of Object.entries(t.harnesses)) {
+      for (const id of h.exclude ?? []) {
+        if (id in h.models) ctx.addIssue({ code: "custom", message: `harness ${name}: ${id} is both listed and excluded` });
+      }
       if (!modelKey(h, h.default_model)) {
         ctx.addIssue({ code: "custom", message: `harness ${name}: default_model ${h.default_model} not in models` });
       }
@@ -92,8 +102,10 @@ export function loadTargets(path: string): Targets {
   return parseTargets(readFileSync(path, "utf8"));
 }
 
-/** The catalog key that admits `model`: exact, or a `prefix/*` wildcard. */
+/** The catalog key that admits `model`: exact, or a `prefix/*` wildcard; never an excluded id. Every floor check
+ *  (pins, router and planner picks, defaults, categories) goes through here. */
 export function modelKey(harness: HarnessSpec, model: string): string | undefined {
+  if (harness.exclude?.includes(model)) return undefined;
   if (model in harness.models) return model;
   for (const key of Object.keys(harness.models)) {
     if (key.endsWith("/*") && model.startsWith(key.slice(0, -1)) && model.length > key.length - 1) return key;
@@ -130,7 +142,7 @@ export function catalogText(targets: Targets): string {
     for (const [m, spec] of Object.entries(h.models)) {
       if (spec.unavailable) continue;
       const efforts = spec.efforts ? `; efforts: ${spec.efforts.join("/")}` : "";
-      lines.push(`  - ${m}: cost ${spec.cost}; ${spec.strengths.join(", ")}${efforts}`);
+      lines.push(`  - ${m}: cost ${spec.cost}; ${spec.strengths.join(", ")}${spec.preferred ? "; preferred" : ""}${efforts}`);
     }
   }
   for (const [name, cat] of Object.entries(targets.categories)) {

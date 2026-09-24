@@ -1,8 +1,18 @@
-/** Only for children started in their own process group by our adapters. */
-import type { ChildProcess } from "node:child_process";
+/** Harness processes our adapters own: started in their own process group, stopped as a group. */
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+
+/** Start a harness as the leader of its own process group (not on Windows), so terminateProcess reaches its tools too. */
+export function spawnOwned(command: string, args: readonly string[], options: Omit<SpawnOptions, "detached">): ChildProcess {
+  return spawn(command, args, { ...options, detached: process.platform !== "win32" });
+}
+
+/** SIGTERM to SIGKILL for a process group. */
+const TERMINATE_GRACE_MS = 500;
 
 const stopping = new WeakMap<ChildProcess, Promise<void>>();
-export function terminateProcess(child: ChildProcess, graceMs = 500): Promise<void> {
+
+/** Only for children started in their own process group by our adapters (spawnOwned). */
+export function terminateProcess(child: ChildProcess, graceMs = TERMINATE_GRACE_MS): Promise<void> {
   const pending = stopping.get(child);
   if (pending) return pending;
   if (!child.pid) return Promise.resolve();

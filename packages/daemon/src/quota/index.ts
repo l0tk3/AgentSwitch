@@ -3,13 +3,21 @@
 import type { QuotaProvider, QuotaReading } from "./types.js";
 
 export type { QuotaProvider, QuotaReading } from "./types.js";
+import { QUOTA_TTL_MS } from "../core/limits.js";
 export const QUOTA_TIMEOUT_MS = 10_000;
+
+/** Arms one provider's deadline and returns its disarm. Tests may expire it on an event instead of elapsed time. */
+export type ArmDeadline = (ms: number, expire: () => void) => () => void;
+const armTimer: ArmDeadline = (ms, expire) => {
+  const timer = setTimeout(expire, ms);
+  return () => clearTimeout(timer);
+};
 
 export class QuotaService {
   private readings = new Map<string, QuotaReading>();
   private inflight: Promise<QuotaReading[]> | null = null;
 
-  constructor(private readonly providers: readonly QuotaProvider[], private readonly ttlMs = 60_000, private readonly now: () => number = Date.now, private readonly timeoutMs = QUOTA_TIMEOUT_MS) {}
+  constructor(private readonly providers: readonly QuotaProvider[], private readonly ttlMs = QUOTA_TTL_MS, private readonly now: () => number = Date.now, private readonly timeoutMs = QUOTA_TIMEOUT_MS, private readonly armDeadline: ArmDeadline = armTimer) {}
 
   async refresh(force = false): Promise<QuotaReading[]> {
     const fresh = [...this.readings.values()].every((r) => this.now() - r.fetchedAt < this.ttlMs) && this.readings.size === this.providers.length;
@@ -21,13 +29,13 @@ export class QuotaService {
 
   private async readProvider(provider: QuotaProvider, force: boolean): Promise<QuotaReading> {
     const controller = new AbortController();
-    let timer!: ReturnType<typeof setTimeout>;
+    let disarm!: () => void;
     const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
+      disarm = this.armDeadline(this.timeoutMs, () => {
         const error = new Error(`quota timed out after ${this.timeoutMs} ms`);
         controller.abort(error);  // providers stop their fetch/process, not just the HTTP response
         reject(error);
-      }, this.timeoutMs);
+      });
     });
     let reading: QuotaReading;
     try {
@@ -38,7 +46,7 @@ export class QuotaService {
       const previous = this.readings.get(provider.harness);
       reading = { harness: provider.harness, remaining: previous?.remaining ?? null, detail: previous?.detail ?? {}, source: previous?.source ?? `${provider.harness} quota`, fetchedAt: this.now(), error: error instanceof Error ? error.message : String(error) };
     } finally {
-      clearTimeout(timer);
+      disarm();
     }
     this.readings.set(provider.harness, reading);
     return reading;

@@ -8,9 +8,9 @@ import { Engine } from "../src/engine/engine.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import type { ExecutionInput } from "../src/executors/types.js";
-import type { ExecutionOutcome } from "../src/router/failure.js";
+import type { ExecutionOutcome } from "../src/core/outcome.js";
 import { MAX_LOOP_STEPS, nextAction, parseLoopReply } from "../src/router/loop.js";
-import { evidenceExcerpt } from "../src/router/prompt.js";
+import { evidenceExcerpt } from "../src/core/evidence.js";
 import { echoRouter, type EchoScript } from "../src/router/routers/echo.js";
 import type { AcceptInput, Supervisor } from "../src/router/supervisor.js";
 import { decisionJson, realTargets } from "./helpers.js";
@@ -274,7 +274,7 @@ describe("checkpoints and bounded observations", () => {
   it("the loop model has a deadline even if its implementation ignores abort", async () => {
     const f = build({ timeoutMs: 20 });
     const router = { name: "hung fake", route: async () => new Promise<never>(() => {}) };
-    const out = await nextAction(router, { router, targets: f.targets, running: {}, quota: {} }, { req: { task: goal, cwd: f.dir }, steps: [], used: 0, budget: 5, exclude: [] });
+    const out = await nextAction(router, { router, targets: f.targets, quota: {} }, { req: { task: goal, cwd: f.dir }, steps: [], used: 0, budget: 5, exclude: [] });
     expect(out).toMatchObject({ action: null, routerError: expect.stringContaining("超时"), failure: { kind: "timeout", tries: 1 } });
   });
 });

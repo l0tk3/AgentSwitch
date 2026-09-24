@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { echoRouter } from "../src/router/routers/echo.js";
-import type { Router, RouterReply } from "../src/router/routers/types.js";
+import type { Router, RouterReply } from "../src/core/modelCall.js";
 import { fakeMinter, type Minter, type MintResult } from "../src/secrets/minter.js";
 import { parseSealReply, planSeal, routerSealer, sealMessage, type FoundSecret } from "../src/secrets/sealer.js";
 

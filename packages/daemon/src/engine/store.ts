@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { RecordRow } from "../threads/record.js";
+import type { RecordRow } from "../router/record.js";
 import type { Thread, ThreadEvent, ThreadEventType, ThreadStatus } from "../threads/types.js";
-import { TERMINAL, type Approval, type ApprovalKind, type ApprovalStatus, type NewTask, type Task, type TaskEvent, type TaskEventType } from "./types.js";
+import { TERMINAL, type Approval, type ApprovalKind, type ApprovalStatus, type BlockCause, type Device, type NewTask, type Task, type TaskEvent, type TaskEventType } from "./types.js";
+import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -39,7 +40,11 @@ CREATE TABLE IF NOT EXISTS records (
   status TEXT NOT NULL, failure_kind TEXT, ms INTEGER NOT NULL, tokens INTEGER NOT NULL, approvals INTEGER NOT NULL,
   handed_off INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0, user_handoff INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS records_ts ON records(ts DESC);`;
+CREATE INDEX IF NOT EXISTS records_ts ON records(ts DESC);
+CREATE TABLE IF NOT EXISTS devices (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER
+);`;
 
 /** Archived threads are deleted, home dir included, this long after archiving (decided 2026-09-21). */
 export const THREAD_TTL_MS = 7 * 86400_000;
@@ -48,7 +53,7 @@ type Row = Record<string, unknown>;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT", "approval_policy TEXT", "route_log_id INTEGER", "rating INTEGER"],
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT", "approval_policy TEXT", "route_log_id INTEGER", "rating INTEGER", "block_cause TEXT", "speech TEXT"],
   approvals: ["kind TEXT NOT NULL DEFAULT 'approval'", "answer TEXT"],
   records: ["rating INTEGER"],
 };
@@ -113,7 +118,7 @@ export class Store {
     return row ? toTask(row) : undefined;
   }
 
-  listTasks(limit = 50): Task[] {
+  listTasks(limit = DEFAULT_LIST_LIMIT): Task[] {
     return (this.db.prepare("SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC LIMIT ?").all(limit) as Row[]).map(toTask);
   }
 
@@ -139,8 +144,8 @@ export class Store {
 
   listThreads(opts: { status?: ThreadStatus; limit?: number } = {}): Thread[] {
     const rows = opts.status
-      ? this.db.prepare("SELECT * FROM threads WHERE status = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(opts.status, opts.limit ?? 50)
-      : this.db.prepare("SELECT * FROM threads ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(opts.limit ?? 50);
+      ? this.db.prepare("SELECT * FROM threads WHERE status = ? ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(opts.status, opts.limit ?? DEFAULT_LIST_LIMIT)
+      : this.db.prepare("SELECT * FROM threads ORDER BY updated_at DESC, rowid DESC LIMIT ?").all(opts.limit ?? DEFAULT_LIST_LIMIT);
     return (rows as Row[]).map(toThread);
   }
 
@@ -313,9 +318,9 @@ export class Store {
     const map: Record<string, (v: unknown) => unknown> = {
       status: (v) => v, harness: (v) => v, model: (v) => v, effort: (v) => v, brief: (v) => v, result: (v) => v, error: (v) => v,
       decision: (v) => (v === null ? null : JSON.stringify(v)), attempts: (v) => JSON.stringify(v), routerAsks: (v) => v,
-      threadId: (v) => v, cwd: (v) => v, ephemeral: (v) => (v ? 1 : 0), spoken: (v) => v, routeLogId: (v) => v, rating: (v) => v,
+      threadId: (v) => v, cwd: (v) => v, ephemeral: (v) => (v ? 1 : 0), spoken: (v) => v, speech: (v) => v, routeLogId: (v) => v, rating: (v) => v, blockCause: (v) => v,
     };
-    const columns: Record<string, string> = { routerAsks: "router_asks", threadId: "thread_id", routeLogId: "route_log_id" };
+    const columns: Record<string, string> = { routerAsks: "router_asks", threadId: "thread_id", routeLogId: "route_log_id", blockCause: "block_cause" };
     for (const [key, value] of Object.entries(patch)) {
       const conv = map[key];
       if (!conv) continue;
@@ -373,10 +378,52 @@ export class Store {
     return this.getApproval(id);
   }
 
+  // ---- paired devices (app-v0 §2) ----
+
+  createDevice(input: { readonly name: string; readonly platform: string; readonly tokenHash: string }): Device {
+    const id = randomUUID().slice(0, 8);
+    this.db.prepare("INSERT INTO devices (id, name, platform, token_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(id, input.name, input.platform, input.tokenHash, this.now());
+    return this.getDevice(id)!;
+  }
+
+  getDevice(id: string): Device | undefined {
+    const r = this.db.prepare("SELECT * FROM devices WHERE id = ?").get(id) as Row | undefined;
+    return r ? toDevice(r) : undefined;
+  }
+
+  listDevices(): Device[] {
+    return (this.db.prepare("SELECT * FROM devices ORDER BY created_at DESC, id").all() as Row[]).map(toDevice);
+  }
+
+  /** Every device's token hash, revoked ones included, for the caller's constant-time comparison. */
+  deviceTokenHashes(): { readonly id: string; readonly tokenHash: string }[] {
+    return (this.db.prepare("SELECT id, token_hash FROM devices").all() as Row[]).map((r) => ({ id: String(r.id), tokenHash: String(r.token_hash) }));
+  }
+
+  /** Revocation is permanent; revoking twice keeps the first time. Undefined when there is no such device. */
+  revokeDevice(id: string): Device | undefined {
+    this.db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(this.now(), id);
+    return this.getDevice(id);
+  }
+
+  touchDevice(id: string, ts: number = this.now()): void {
+    this.db.prepare("UPDATE devices SET last_seen_at = ? WHERE id = ?").run(ts, id);
+  }
 
   close(): void {
     this.db.close();
   }
+}
+
+function toDevice(r: Row): Device {
+  return {
+    id: String(r.id),
+    name: String(r.name),
+    platform: String(r.platform),
+    createdAt: Number(r.created_at),
+    lastSeenAt: r.last_seen_at === null || r.last_seen_at === undefined ? null : Number(r.last_seen_at),
+    revokedAt: r.revoked_at === null || r.revoked_at === undefined ? null : Number(r.revoked_at),
+  };
 }
 
 function toTask(r: Row): Task {
@@ -406,8 +453,10 @@ function toTask(r: Row): Task {
     result: (r.result as string | null) ?? null,
     error: (r.error as string | null) ?? null,
     spoken: (r.spoken as string | null) ?? null,
+    speech: (r.speech as string | null) ?? null,
     routeLogId: r.route_log_id === null || r.route_log_id === undefined ? null : Number(r.route_log_id),
     rating: r.rating === null || r.rating === undefined ? null : Number(r.rating),
+    blockCause: (r.block_cause as BlockCause | null) ?? null,
   };
 }
 

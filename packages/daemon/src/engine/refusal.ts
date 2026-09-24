@@ -1,15 +1,18 @@
-/** Refusals have one bounded clarification path, separate from quality acceptance and target fallback. */
+/** Refusals have one bounded clarification path, separate from quality acceptance and target fallback. A provider's
+ *  safety classifier block is not the model refusing: it gets one identical resend instead (router-v0 §6.2). */
 
-import { hasSideEffects } from "../router/failure.js";
+import { hasSideEffects } from "../core/outcome.js";
 import { localizeQuestion } from "../router/questionLanguage.js";
 import { clarificationBrief, diagnoseRefusal, type RefusalSource } from "../router/refusal.js";
 import type { Attempt } from "../router/reroute.js";
 import type { LoopDeps } from "./taskLoop.js";
-import { CLARIFY_ID, clarifyQuestion } from "./questions.js";
+import { CLARIFY_ID, clarifyQuestion } from "../core/questions.js";
 import type { Task } from "./types.js";
 
 export type RefusalRecovery =
   | { readonly kind: "retry"; readonly brief: string }
+  /** The same brief to the same target in a new session: nothing rewritten, no other model. */
+  | { readonly kind: "resend" }
   | { readonly kind: "stop"; readonly error: string }
   | { readonly kind: "cancelled" };
 
@@ -20,8 +23,8 @@ export async function recoverRefusal(d: LoopDeps, task: Task, attempt: Attempt, 
     return { kind: "stop", error: `refusal: ${note}` };
   };
   if (signal.aborted) return { kind: "cancelled" };
+  if (attempt.refusal?.source === "provider") return providerBlock(d, task, attempt, alreadyRetried, stop);
   if (alreadyRetried) return stop("the single clarification retry has been used");
-  if (attempt.refusal?.source === "provider") return stop("the provider reported a safety refusal; automatic retry is disabled", "policy");
   if (attempt.sideEffectsKnown === false || hasSideEffects(attempt.sideEffects)) return stop("execution had side effects or incomplete telemetry; review its progress before continuing");
 
   const brief = task.brief ?? task.task;
@@ -61,4 +64,14 @@ export async function recoverRefusal(d: LoopDeps, task: Task, attempt: Attempt, 
     sources = [...initial, newAnswer];
   }
   return stop("no grounded clarification was available");
+}
+
+/** A provider's safety classifier flagged the request (e.g. `[cyber]` on a plain login). Such flags are false positives
+ *  often enough that the identical request passes when sent again (2026-09-24: 11 of 11 resends passed), so it is sent
+ *  once more unchanged — unless it was already resent, or the flagged run had already done something. */
+function providerBlock(d: LoopDeps, task: Task, attempt: Attempt, alreadyRetried: boolean, stop: (note: string, reason?: string) => RefusalRecovery): RefusalRecovery {
+  if (alreadyRetried) return stop("the provider's safety classifier blocked the identical resend as well", "provider_safety");
+  if (hasSideEffects(attempt.sideEffects)) return stop("the provider's safety classifier blocked a run that had already done something; review its progress before continuing", "provider_safety");
+  d.ctx.emit(task.id, "refusal", { action: "retry", reason: "provider_safety", note: "the provider's safety classifier blocked the request; resending it unchanged once, in a new session", target: { harness: attempt.harness, model: attempt.model }, refusal: attempt.refusal ?? null });
+  return { kind: "resend" };
 }

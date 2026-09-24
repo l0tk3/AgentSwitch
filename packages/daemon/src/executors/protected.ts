@@ -6,13 +6,18 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export type ProtectedPaths = {
   readonly roots: readonly string[];    // canonical absolute paths
   readonly exempt: readonly string[];   // subtrees inside a root that executors may use (work dirs, uploads, artifacts)
+  /** Credentials at rest that no executor may even read (2026-09-24): the gate home (its private keys), the browser
+   *  session profiles (cookies) and the remote listener's TLS key. Claude checks its read tools, OpenCode gets read
+   *  denies; Codex has no per-path read rule (a known gap, BOUNDARY.md). */
+  readonly readDenied?: readonly string[];
 };
 
-const HERE = new URL(".", import.meta.url).pathname;
+const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const DAEMON_CONFIG_DIR = resolve(HERE, "..", "..", "config");
 const EXEMPT_UNDER_HOME = ["work", "artifacts", "uploads"] as const;
 
@@ -30,7 +35,23 @@ export function defaultProtected(env: NodeJS.ProcessEnv = process.env): Protecte
   return {
     roots: [home, gate, DAEMON_CONFIG_DIR].map(canonicalPath),
     exempt: EXEMPT_UNDER_HOME.map((d) => canonicalPath(join(home, d))),
+    readDenied: [gate, join(home, BROWSER_PROFILES_DIR), join(home, "remote")].map(canonicalPath),
   };
+}
+
+/** Under `$AGENTSWITCH_HOME`: the browser session slots (browserSlots.ts). */
+export const BROWSER_PROFILES_DIR = "browser-profiles";
+
+/** True when `path` (absolute or relative to cwd) lands inside a read-denied root. */
+export function isReadDenied(path: string, cwd: string, prot: ProtectedPaths): boolean {
+  const p = canonicalPath(resolve(cwd, path));
+  return (prot.readDenied ?? []).some((r) => under(p, r));
+}
+
+/** True when a search rooted at `path` would reach into a read-denied root (`Grep` over `~` finds the gate's keys). */
+export function containsReadDenied(path: string, cwd: string, prot: ProtectedPaths): boolean {
+  const p = canonicalPath(resolve(cwd, path));
+  return (prot.readDenied ?? []).some((r) => under(r, p));
 }
 
 const under = (p: string, root: string): boolean => p === root || p.startsWith(root + sep);
@@ -42,17 +63,72 @@ export function isProtected(path: string, cwd: string, prot: ProtectedPaths): bo
   return prot.roots.some((r) => under(p, r));
 }
 
-/** Path-looking tokens of a shell command, so `rm -rf ~/.agentswitch/skills` or `> config/targets.yaml` are caught. */
-export function pathTokens(command: string, env: NodeJS.ProcessEnv = process.env): string[] {
-  const home = env.HOME ?? "";
-  return (command.match(/[^\s"'`;&|<>()]+/g) ?? [])
-    .filter((t) => t.includes("/") || t.startsWith("~") || t.startsWith("."))
-    .map((t) => (t.startsWith("~") ? home + t.slice(1) : t));
+/** A shell command's words as the shell would read them: quotes and backslash escapes resolved, so
+ *  `Application\ Support/AgentSwitch` and "…/Application Support/AgentSwitch" are one path each (the Mac app's home has
+ *  a space; a whitespace split missed both, 2026-09-24). Operators and redirections end a word. */
+export function shellWords(command: string): string[] {
+  const words: string[] = [];
+  let word = "";
+  let started = false;
+  let quote: "'" | "\"" | null = null;
+  const end = () => { if (started) words.push(word); word = ""; started = false; };
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    // A backslash-newline outside single quotes is a line continuation: gone, not part of the word.
+    if (ch === "\\" && command[i + 1] === "\n" && quote !== "'") { i++; continue; }
+    if (quote) {
+      if (ch === quote) quote = null;
+      else if (quote === "\"" && ch === "\\" && i + 1 < command.length && "\"\\$`".includes(command[i + 1]!)) word += command[++i];
+      else word += ch;
+      continue;
+    }
+    if (ch === "'" || ch === "\"") { quote = ch; started = true; continue; }
+    if (ch === "\\" && i + 1 < command.length) { word += command[++i]; started = true; continue; }
+    if (/\s/.test(ch) || ";&|<>()`".includes(ch)) { end(); continue; }
+    word += ch;
+    started = true;
+  }
+  end();
+  return words;
 }
 
-/** The first protected path a shell command names, or null. Heuristic: a deny here is a floor, the snapshot backstop is the wall. */
+/** Path-looking words of a shell command, `~` and `$HOME` expanded, so `rm -rf ~/.agentswitch/skills`,
+ *  `> config/targets.yaml` and `cat "$HOME/Library/Application Support/AgentSwitch/x"` are caught. */
+export function pathTokens(command: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  const home = env.HOME ?? "";
+  const expand = (t: string) => t.replace(/^~(?=\/|$)/, home).replace(/\$\{HOME\}|\$HOME(?![A-Za-z0-9_])/g, home);
+  return shellWords(command).map(expand).filter((t) => t.includes("/") || t.startsWith("."));
+}
+
+/** The command as one string with quotes, escapes and line continuations gone and `~`, `$HOME`, `${HOME}` expanded:
+ *  a root spelled anywhere in it — inside `sh -c "…"`, a `python3 -c` string, `--cacert=…`, `$(…)` — shows up whole. */
+export function flattenShell(command: string, home: string): string {
+  const text = command.replace(/\\\r?\n/g, "").replace(/\\(.)/g, "$1").replace(/["']/g, "");
+  if (!home) return text;
+  return text.replace(/\$\{HOME\}|\$HOME(?![A-Za-z0-9_])/g, home).replace(/(^|[\s=:(|;&<>`])~(?=\/|$|[\s;|&)<>`])/g, `$1${home}`);
+}
+
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** macOS names the temp dirs with and without `/private`. */
+const spellings = (root: string): string[] => (/^\/private\/(var|tmp)\//.test(root) ? [root, root.slice("/private".length)] : [root]);
+
+/** Every protected or read-denied root the flattened command spells out, with the path that follows it
+ *  (`<root>/work/t1` is still judged as the exempt work dir). Case-insensitive: the Mac's disk is. */
+function namedRoots(command: string, prot: ProtectedPaths, env: NodeJS.ProcessEnv): string[] {
+  const text = flattenShell(command, env.HOME ?? "");
+  const out: string[] = [];
+  for (const root of new Set([...prot.roots, ...(prot.readDenied ?? [])])) {
+    for (const spelling of spellings(root)) {
+      for (const m of text.matchAll(new RegExp(`${escapeRegExp(spelling)}([^\\s;&|<>()\`]*)`, "gi"))) out.push(root + m[1]);
+    }
+  }
+  return out;
+}
+
+/** The first protected path a shell command names, or null. String matching, so a floor: a path reached relative to a
+ *  `cd`, through a glob, a variable or `find` is not seen (BOUNDARY.md); the snapshot backstop covers roots inside cwd. */
 export function commandTouchesProtected(command: string, cwd: string, prot: ProtectedPaths, env: NodeJS.ProcessEnv = process.env): string | null {
-  for (const t of pathTokens(command, env)) if (isProtected(t, cwd, prot)) return t;
+  for (const t of [...pathTokens(command, env), ...namedRoots(command, prot, env)]) if (isProtected(t, cwd, prot) || isReadDenied(t, cwd, prot)) return t;
   return null;
 }
 

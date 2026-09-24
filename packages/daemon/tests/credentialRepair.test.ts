@@ -4,7 +4,8 @@ import { Store } from "../src/engine/store.js";
 import { credentialRepairExecutor } from "../src/executors/credentialRepair.js";
 import type { ExecutionInput, Executor } from "../src/executors/types.js";
 import { echoRouter } from "../src/router/routers/echo.js";
-import { CredentialRepairError, exactHost, repairCredential, type CredentialGate, type CredentialIssue, type ReissuedCredential } from "../src/secrets/credentialRepair.js";
+import { CredentialRepairError, repairCredential, type CredentialGate, type CredentialIssue, type ReissuedCredential } from "../src/secrets/credentialRepair.js";
+import { exactHost } from "../src/util/host.js";
 
 const old = "enc:v1:OldFixtureToken000000000000000000";
 const fresh = "enc:v1:NewFixtureToken000000000000000000";

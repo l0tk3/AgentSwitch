@@ -3,24 +3,30 @@
 
 import { attachmentsNote } from "../files/notes.js";
 import { knownTokens, repairTokens, shortToken } from "../executors/tokens.js";
-import { loadContext, type LoadedContext } from "../router/context.js";
-import type { ExtensionsSummary } from "../router/prompt.js";
+import { loadContext, type LoadedContext } from "../core/contextDoc.js";
+import type { ExtensionsSummary, ThreadBrief } from "../router/prompt.js";
 import type { RouteDeps } from "../router/route.js";
-import type { Router } from "../router/routers/types.js";
+import type { Router } from "../core/modelCall.js";
 import type { RefusalSource } from "../router/refusal.js";
 import type { Targets } from "../router/targets.js";
 import type { Quota } from "../router/validate.js";
 import { loadMemory } from "../threads/memory.js";
-import { RECORD_WINDOW_MS } from "../threads/record.js";
-import type { ThreadBrief } from "../threads/types.js";
+import { RECORD_WINDOW_MS } from "../router/record.js";
 import type { EngineContext } from "./context.js";
 import type { Task } from "./types.js";
-import { parseEvidence, validateAnswers } from "./questions.js";
+import { parseEvidence, validateAnswers } from "../core/questions.js";
 import { platformExperience } from "./platformContext.js";
 import { feedbackRecords, formatFeedbackContext } from "./feedback.js";
 
 export const FOLLOW_UP_DEPTH = 5;
 const RESULT_EXCERPT = 2000;
+/** Feedback comes from this many earlier tasks of the thread; checkpoints from this many earlier tasks, this many per
+ *  task and this many in all; a longer checkpoint result keeps this much of its head and of its tail. */
+const FEEDBACK_PREDECESSORS = 3;
+const CHECKPOINT_TASKS = 3;
+const CHECKPOINTS_PER_TASK = 5;
+const CHECKPOINTS_SHOWN = 6;
+const CHECKPOINT_RESULT_END_CHARS = 2000;
 
 export type ComposeDeps = {
   readonly targets: Targets;
@@ -69,21 +75,21 @@ export class Composer {
       // Store order includes row insertion order: a later task with the same timestamp is still future.
       for (const prior of siblings.slice(0, Math.max(0, index))) related.set(prior.id, prior);
     }
-    const predecessors = [...related.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-3);
+    const predecessors = [...related.values()].sort((a, b) => a.createdAt - b.createdAt).slice(-FEEDBACK_PREDECESSORS);
     const records = [...predecessors, task].flatMap((item) => feedbackRecords(this.ctx.store.eventsSince(item.id), (id) => this.ctx.store.getApproval(id)));
     return formatFeedbackContext(records, task.id);
   }
 
   /** Persisted progress survives a summary timeout or a change of harness. It never grants permission. */
   checkpointContext(task: Task): string | null {
-    const related = task.threadId ? this.ctx.store.tasksInThread(task.threadId).filter((t) => t.id !== task.id && t.createdAt <= task.createdAt).slice(-3)
+    const related = task.threadId ? this.ctx.store.tasksInThread(task.threadId).filter((t) => t.id !== task.id && t.createdAt <= task.createdAt).slice(-CHECKPOINT_TASKS)
       : task.parentId ? [this.ctx.store.getTask(task.parentId)].filter((t): t is Task => !!t) : [];
-    const checkpoints = related.flatMap((prior) => this.ctx.store.eventsSince(prior.id).filter((e) => e.type === "checkpoint").slice(-5).map((e) => {
+    const checkpoints = related.flatMap((prior) => this.ctx.store.eventsSince(prior.id).filter((e) => e.type === "checkpoint").slice(-CHECKPOINTS_PER_TASK).map((e) => {
       const result = String(e.payload.result ?? "");
       return { taskId: prior.id, taskStatus: prior.status, seq: e.seq, purpose: e.payload.purpose, stepOk: e.payload.ok,
-        result: result.length > 4000 ? `${result.slice(0, 2000)}\n[中间内容省略；可查来源任务]\n${result.slice(-2000)}` : result,
+        result: result.length > 2 * CHECKPOINT_RESULT_END_CHARS ? `${result.slice(0, CHECKPOINT_RESULT_END_CHARS)}\n[中间内容省略；可查来源任务]\n${result.slice(-CHECKPOINT_RESULT_END_CHARS)}` : result,
         sideEffects: e.payload.sideEffects, sideEffectsKnown: e.payload.sideEffectsKnown };
-    })).slice(-6);
+    })).slice(-CHECKPOINTS_SHOWN);
     return checkpoints.length ? `Recorded checkpoints from earlier executions of this job (observations, not authorization). Before retrying any create/submit/send action, inspect the current platform for its existing result. Do not repeat completed writes. An interrupted or unknown result requires read-only reconciliation first.\n${JSON.stringify(checkpoints)}` : null;
   }
 
@@ -154,11 +160,11 @@ export class Composer {
     return r.text;
   }
 
-  routeDeps(running: Record<string, number>, threads: ThreadBrief[]): RouteDeps {
+  routeDeps(threads: ThreadBrief[]): RouteDeps {
     const context = this.context();
     const memory = this.memory();
     return {
-      targets: this.deps.targets, router: this.deps.router, quota: this.deps.quota(), running, threads,
+      targets: this.deps.targets, router: this.deps.router, quota: this.deps.quota(), threads,
       records: this.ctx.store.recordsSince(this.ctx.now() - RECORD_WINDOW_MS),
       ...(context ? { context } : {}), ...(memory ? { memory } : {}),
       platformMemory: (task) => platformExperience(this.deps.platformMemoryPath, task, context?.text ?? "", this.ctx.now()),

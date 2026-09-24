@@ -4,7 +4,7 @@ import { echoRouter } from "../src/router/routers/echo.js";
 import { decisionJson, realTargets } from "./helpers.js";
 
 const targets = realTargets();
-const deps = (router: ReturnType<typeof echoRouter>, over: Partial<Parameters<typeof route>[1]> = {}) => ({ targets, router, quota: {}, running: {}, ...over });
+const deps = (router: ReturnType<typeof echoRouter>, over: Partial<Parameters<typeof route>[1]> = {}) => ({ targets, router, quota: {}, ...over });
 const req = { task: "在 packages/daemon 里加一个 router 模块并写测试", cwd: "/tmp/x" };
 
 describe("route()", () => {
@@ -25,7 +25,7 @@ describe("route()", () => {
     expect(r.calls[1]!.previousError).toMatch(/^no JSON object in reply; reply began: /);
     expect(r.calls[1]!.task).toContain("previous reply was rejected");
     expect(out.source).toBe("default");
-    expect(out.verdict).toMatchObject({ ok: true, harness: "claude-code", model: "claude-sonnet-5", chosen: "default" });
+    expect(out.verdict).toMatchObject({ ok: true, harness: "claude-code", model: "claude-sonnet-4-6", chosen: "default" });
     expect(out.routerError).toContain("brief");
   });
 

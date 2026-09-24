@@ -2,7 +2,7 @@
  *  Conversation history stays with each harness; a thread only holds handles, an append-only event
  *  log with per-type fold policies, and a last-wins summary that carries across harnesses. */
 
-import type { TargetRef } from "../router/targets.js";
+import type { TargetRef } from "../core/target.js";
 import type { PlatformFactCandidate } from "./platformMemory.js";
 
 export type ThreadStatus = "open" | "archived";
@@ -29,7 +29,7 @@ export type Fold = "accumulate" | "last-wins";
  *  needs an event type of its own (decided 2026-09-22). */
 export const FOLD: Readonly<Record<ThreadEventType, Fold>> = {
   task: "accumulate",
-  session: "last-wins",        // grouped by harness: one live handle per harness
+  session: "last-wins",        // grouped by harness: one live handle per harness; `dropped: true` clears it
   summary: "last-wins",
   title: "last-wins",
   handoff: "accumulate",
@@ -70,6 +70,8 @@ export type Summary = {
   readonly platformFacts?: readonly PlatformFactCandidate[];
   /** One sentence for a phone notification or a voice reply: what came out of this run. */
   readonly spoken: string;
+  /** The result retold for listening (threads-v0 §3); absent in summaries written before 2026-09-24. */
+  readonly speech?: string;
 };
 
 export type HandoffReason = "user" | `failure:${string}` | "quota";
@@ -90,17 +92,6 @@ export type ThreadState = {
   readonly title: string | null;
   readonly handoffs: readonly HandoffRecord[];
   readonly cost: Readonly<Record<string, number>>;   // tokens by "harness/model", accumulated from task events
-  readonly lastTarget: TargetRef | null;
-  readonly lastActivity: number | null;
-};
-
-/** What the router sees of an open thread (threads-v0 §6): a title, a line of summary, who did it last. */
-export type ThreadBrief = {
-  readonly id: string;
-  readonly title: string | null;
-  readonly cwd: string;
-  readonly goal: string;
-  readonly progress: string;
   readonly lastTarget: TargetRef | null;
   readonly lastActivity: number | null;
 };

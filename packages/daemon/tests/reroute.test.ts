@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Decision } from "../src/router/decision.js";
-import { NO_SIDE_EFFECTS } from "../src/router/failure.js";
+import { NO_SIDE_EFFECTS } from "../src/core/outcome.js";
 import { excludedTargets, nextStep, quotaAfter, type Attempt, type RerouteInput } from "../src/router/reroute.js";
 import { realTargets } from "./helpers.js";
 
@@ -11,7 +11,7 @@ const decision = Decision.parse({
 });
 const attempt = (over: Partial<Attempt> = {}): Attempt => ({ harness: "codex", model: "gpt-6-astra", kind: "transport", excerpt: "x", sideEffects: NO_SIDE_EFFECTS, ...over });
 const input = (attempts: Attempt[], over: Partial<RerouteInput> = {}): RerouteInput =>
-  ({ decision, attempts, routerAsks: 0, targets, quota: {}, running: {}, lowConfidenceTarget: { harness: "claude-code", model: "claude-sonnet-5" }, ...over });
+  ({ decision, attempts, routerAsks: 0, targets, quota: {}, lowConfidenceTarget: { harness: "claude-code", model: "claude-sonnet-4-6" }, ...over });
 
 describe("nextStep", () => {
   it("transport without side effects: retry the same target once, then ask the router", () => {

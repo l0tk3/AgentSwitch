@@ -61,7 +61,7 @@ function build(mode: Mode, timeoutMs = 1000) {
 }
 
 function expectStopped(f: ReturnType<typeof build>, mode: Mode) {
-  expect(f.store.getTask(f.task.id)).toMatchObject({ status: "blocked", error: `waiting for your answer: ${question}` });
+  expect(f.store.getTask(f.task.id)).toMatchObject({ status: "blocked", error: `waiting for your answer: ${question}`, blockCause: "question" });
   expect(f.executor.runs).toHaveLength(mode === "router" ? 1 : 0);
   expect(f.router.calls).toHaveLength(mode === "router" ? 2 : 1);
   if (f.planner) expect(f.planner.calls).toHaveLength(1);

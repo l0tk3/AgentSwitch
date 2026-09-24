@@ -1,10 +1,22 @@
-/** Composition root: config → store, bus, engine, executors, quota, API. `serve()` listens on 127.0.0.1. */
+/** Composition root: config → store, bus, engine, executors, quota, API. `serve()` listens on 127.0.0.1 and, with
+ *  AGENTSWITCH_REMOTE=1, on the remote HTTPS port for paired phones (app-v0 §2). */
 
-import { serve as listen } from "@hono/node-server";
+import { Assistant } from "./assistant/assistant.js";
+import { AssistantLog } from "./assistant/log.js";
+import { admitSealed, type TaskBody } from "./api/tasks.js";
+import type { ApiDeps } from "./api/shared.js";
+import { BrowserSlots } from "./executors/browserSlots.js";
+import { BROWSER_PROFILES_DIR } from "./executors/protected.js";
+import { serve as listen, type ServerType } from "@hono/node-server";
+import { Hono } from "hono";
 import { mkdirSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import { defaultCwdRules } from "./api/cwdPolicy.js";
+import { guardLocal } from "./api/localGuard.js";
 import { Bus } from "./engine/bus.js";
 import { defaultCleanupPaths } from "./engine/cleanup.js";
 import { DEFAULT_MAX_TASKS, Engine } from "./engine/engine.js";
@@ -12,7 +24,9 @@ import { Store } from "./engine/store.js";
 import { claudeExecutor, probeRateLimits } from "./executors/claude.js";
 import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
-import { defaultGate } from "./executors/gate.js";
+import { defaultGate, gateHealth, gateNotFound, type GateOptions } from "./executors/gate.js";
+import { gateRefsExecutor } from "./executors/gateRefs.js";
+import { gateRefs } from "./secrets/refs.js";
 import { gateMinter } from "./secrets/minter.js";
 import { credentialGate } from "./secrets/credentialRepair.js";
 import { platformExperience } from "./engine/platformContext.js";
@@ -20,11 +34,12 @@ import { credentialRepairExecutor } from "./executors/credentialRepair.js";
 import { routerSealer, type Sealer } from "./secrets/sealer.js";
 import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
+import { OpenCodeExecServer, opencodeServeConfig } from "./executors/opencodeServer.js";
 import { defaultProtected, type ProtectedPaths } from "./executors/protected.js";
 import { routerSummarizer } from "./threads/summary.js";
 import { routerSupervisor } from "./router/supervisor.js";
 import { loadMemory } from "./threads/memory.js";
-import { RECORD_WINDOW_MS } from "./threads/record.js";
+import { RECORD_WINDOW_MS } from "./router/record.js";
 import type { ExtensionsSummary } from "./router/prompt.js";
 import type { Executor } from "./executors/types.js";
 import { claudeQuota } from "./quota/claude.js";
@@ -32,24 +47,35 @@ import { codexQuota } from "./quota/codex.js";
 import { deepseekQuota, findDeepSeekKey } from "./quota/deepseek.js";
 import { QuotaService } from "./quota/index.js";
 import { RateLimitCache } from "./quota/windows.js";
-import { loadContext } from "./router/context.js";
+import { loadContext } from "./core/contextDoc.js";
 import { sweepDir } from "./files/artifacts.js";
+import { resolveCommand } from "./util/which.js";
 import { ARTIFACT_TTL_MS, UPLOAD_TTL_MS } from "./files/names.js";
 import { Uploads } from "./files/uploads.js";
 import { RoutingLog } from "./router/log.js";
 import { echoRouter } from "./router/routers/echo.js";
 import { opencodeRouter } from "./router/routers/opencode.js";
-import type { Router } from "./router/routers/types.js";
-import { loadTargets, type Targets, modelKey, type TargetRef } from "./router/targets.js";
+import type { Router } from "./core/modelCall.js";
+import { loadTargets, type Targets, modelKey } from "./router/targets.js";
+import { withModelOverlay } from "./router/modelOverlay.js";
+import { mountRemoteAdmin } from "./remote/admin.js";
+import { createRemoteApp } from "./remote/app.js";
+import { DEFAULT_REMOTE_PORT, remoteRuntime, type RemoteRuntime } from "./remote/runtime.js";
+import { listenRemote, type RemoteListener } from "./remote/server.js";
+import type { TargetRef } from "./core/target.js";
 import { discoverTargets } from "./router/discovery.js";
 import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
 import type { PlannerFactory } from "./engine/engine.js";
-import { claudeTextRouter } from "./router/routers/claude.js";
+import { claudeTextRouter, type ClaudeRouterOptions } from "./router/routers/claude.js";
 import { codexTextRouter } from "./router/routers/codex.js";
+import { DEFAULT_EXECUTOR_TIMEOUT_MS, QUOTA_TTL_MS } from "./core/limits.js";
 
 export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
-const HERE = new URL(".", import.meta.url).pathname;
+/** Expired archived threads are deleted at start-up and then this often. */
+const THREAD_SWEEP_INTERVAL_MS = 3600_000;
+const HERE = fileURLToPath(new URL(".", import.meta.url));
+const MAX_PORT = 65_535;
 
 export type DaemonConfig = {
   readonly home: string;                 // ~/.agentswitch
@@ -64,7 +90,19 @@ export type DaemonConfig = {
   /** Port of the resident `opencode serve` (AGENTSWITCH_OPENCODE_PORT); router-type calls go there. */
   readonly opencodePort: number;
   readonly opencodeBinary: string;
+  /** OpenCode executors (AGENTSWITCH_OPENCODE_EXECUTOR): `serve` (default) = sessions on a resident executor server of
+   *  their own, `run` = `opencode run --standalone` per step (also the automatic fallback). */
+  readonly opencodeExecutor?: "serve" | "run";
+  /** app-v0 §2: HTTPS for paired phones on all interfaces (AGENTSWITCH_REMOTE=1, AGENTSWITCH_REMOTE_PORT, default 4713;
+   *  AGENTSWITCH_REMOTE_NAME overrides the Mac name in the pairing payload). Absent = off. */
+  readonly remote?: { readonly port: number; readonly name?: string };
 };
+
+/** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
+export function remotePort(value: string | undefined): number {
+  const n = value?.trim() ? Number(value) : NaN;
+  return Number.isInteger(n) && n >= 0 && n <= MAX_PORT ? n : DEFAULT_REMOTE_PORT;
+}
 
 export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
   const home = env.AGENTSWITCH_HOME ?? join(env.HOME ?? ".", ".agentswitch");
@@ -75,15 +113,24 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     router: env.AGENTSWITCH_ROUTER === "echo" ? "echo" : "opencode",
     executors: env.AGENTSWITCH_EXECUTORS === "real" ? "real" : "echo",
     browser: env.AGENTSWITCH_BROWSER !== "0",   // gated Playwright MCP attached to browser tasks when the gate exists
-    quotaTtlMs: 60_000,
+    quotaTtlMs: QUOTA_TTL_MS,
     maxTasks: Math.max(1, Number(env.AGENTSWITCH_MAX_TASKS ?? DEFAULT_MAX_TASKS) || DEFAULT_MAX_TASKS),
     opencodePort: Number(env.AGENTSWITCH_OPENCODE_PORT ?? DEFAULT_OPENCODE_PORT) || DEFAULT_OPENCODE_PORT,
     opencodeBinary: env.OPENCODE_BIN ?? join(env.HOME ?? "", ".opencode", "bin", "opencode"),
+    opencodeExecutor: env.AGENTSWITCH_OPENCODE_EXECUTOR === "run" ? "run" : "serve",
+    ...(env.AGENTSWITCH_REMOTE === "1" || env.AGENTSWITCH_REMOTE === "true"
+      ? { remote: { port: remotePort(env.AGENTSWITCH_REMOTE_PORT), ...(env.AGENTSWITCH_REMOTE_NAME?.trim() ? { name: env.AGENTSWITCH_REMOTE_NAME.trim() } : {}) } }
+      : {}),
   };
 }
 
 export type Daemon = {
+  /** What the 127.0.0.1 listener serves: the API plus the local-only remote management routes. */
   readonly app: ReturnType<typeof createApp>;
+  /** The API alone; the remote listener forwards its allowlisted routes here. */
+  readonly api: ReturnType<typeof createApp>;
+  /** Remote access state when AGENTSWITCH_REMOTE is on (certificate generated on first build), else null. */
+  readonly remote: RemoteRuntime | null;
   readonly engine: Engine;
   readonly store: Store;
   readonly quota: QuotaService;
@@ -99,14 +146,40 @@ export type BuildOverrides = {
   readonly targets?: Targets;
   /** The resident OpenCode server; when absent, router-type calls fall back to `opencode run --standalone`. */
   readonly opencode?: OpenCodeServer;
+  /** The OpenCode executors' own resident server (real executors only); when absent they run `opencode run --standalone`. */
+  readonly opencodeExec?: OpenCodeExecServer;
   /** Tests: a sealer without a model or the gate. */
   readonly sealer?: Sealer;
   /** Tests: the planner for multi-step tasks (loop-v0 §6). */
   readonly planner?: PlannerFactory;
+  /** Tests: remote state without openssl or the network (null = off whatever cfg.remote says). */
+  readonly remote?: RemoteRuntime | null;
+  /** Tests: a short SSE heartbeat period. */
+  readonly sseHeartbeatMs?: number;
+  /** Tests: the assistant's model (assistant-v0 §1.1) without OpenCode. */
+  readonly assistant?: Router;
 };
 
+/** The user's own Claude Code CLI (`CLAUDE_BIN`, set by the Mac app) instead of the copy bundled with the Agent SDK:
+ *  it already has the user's Keychain grant for its login, where the bundled copy (another code signature) would make
+ *  macOS ask again and stall model discovery. Unset → the SDK's bundled CLI, as before. */
+export function claudeBinary(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.CLAUDE_BIN ? resolveCommand(env.CLAUDE_BIN, "claude", env.PATH) : undefined;
+}
+
+const withClaude = (bin: string | undefined): { claudeExecutable?: string } => (bin ? { claudeExecutable: bin } : {});
+const executableOf = (bin: string | undefined): { executable?: string } => (bin ? { executable: bin } : {});
+
+/** The codex CLI of this Mac: the catalog's path when it exists, else `codex` on PATH (see resolveCommand). */
+export function codexBinary(targets: Pick<Targets, "harnesses">, env: NodeJS.ProcessEnv = process.env): string {
+  return resolveCommand(targets.harnesses.codex?.binary, "codex", env.PATH);
+}
+
 export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): Daemon {
-  const targets = overrides.targets ?? loadTargets(cfg.targetsPath);
+  // app-v0 §2: $AGENTSWITCH_HOME/models.json (the Mac app's model settings) over targets.yaml; bad parts are ignored.
+  const baseTargets = overrides.targets ?? loadTargets(cfg.targetsPath);
+  const modelsPath = join(cfg.home, "models.json");
+  const targets = withModelOverlay(baseTargets, modelsPath);
   const store = new Store({ dbPath: join(cfg.home, "agentswitch.db"), tasksDir: join(cfg.home, "tasks"), threadsDir: join(cfg.home, "threads"), artifactsDir: join(cfg.home, "artifacts") });
   const bus = new Bus();
   const routingLog = new RoutingLog(join(cfg.home, "routing.db"));
@@ -119,11 +192,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const rateLimits = new RateLimitCache();
   const extensions = extensionsAt(cfg.home);
   const prot = defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
-  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser, rateLimits, extensions, prot) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
+  const executors = overrides.executors ?? (cfg.executors === "real" ? realExecutors(targets, cfg.browser, rateLimits, extensions, prot, overrides.opencodeExec) : Object.keys(targets.harnesses).map((h) => echoExecutor(h)));
   const quota = overrides.quota ?? new QuotaService([
-    codexQuota({ binary: targets.harnesses.codex?.binary ?? "codex" }),
+    codexQuota({ binary: codexBinary(targets) }),
     deepseekQuota({ key: findDeepSeekKey() }),
-    claudeQuota({ cache: rateLimits, ...(cfg.executors === "real" ? { probe: (signal?: AbortSignal) => probeRateLimits(undefined, undefined, signal) } : {}) }),
+    claudeQuota({ cache: rateLimits, ...(cfg.executors === "real" ? { probe: (signal?: AbortSignal) => probeRateLimits(undefined, claudeBinary(), signal) } : {}) }),
   ], cfg.quotaTtlMs);
   const workRoot = join(cfg.home, "work");
   const uploads = new Uploads(join(cfg.home, "uploads"));
@@ -144,12 +217,25 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // The sealer (router-v0 §9) is the same text-only agent plus `secret-gate enc --batch`; only with real executors, which require the gate.
   const gate = cfg.executors === "real" ? defaultGate() : null;
   const sealer = overrides.sealer ?? (summarizer && gate ? routerSealer(oracle("sealer"), gateMinter(gate), () => loadContext(contextPath).text, targets.router.timeout_ms) : undefined);
-  const wiredExecutors = gate && summarizer ? executors.map((executor) => credentialRepairExecutor(executor, { gate: credentialGate(gate), router: oracle("credential-repair"), store })) : executors;
-  const engine = new Engine({ store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
+  // gate-next-v0 §1/§3: per-execution enc:ref: scope and proxy health, inside the repair bridge so its handoff notes
+  // and repaired tokens are registered too.
+  const scoped = gate ? executors.map((executor) => gateRefsExecutor(executor, { refs: gateRefs(gate), health: () => gateHealth(gate) })) : executors;
+  const wiredExecutors = gate && summarizer ? scoped.map((executor) => credentialRepairExecutor(executor, { gate: credentialGate(gate), router: oracle("credential-repair"), store })) : scoped;
+  // Kept browser logins (threads-v0 §4b): real executors only; the directory is read-denied to them (prot.readDenied).
+  const browserSlots = cfg.executors === "real" ? new BrowserSlots(join(cfg.home, BROWSER_PROFILES_DIR)) : undefined;
+  const engine = new Engine({ store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
   sweepThreads(store, Date.now(), engine);
-  const routeDeps = () => ({ targets, router, quota: quota.map(), running: engine.runningByHarness(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const app = createApp({ ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION });
-  return { app, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
+  const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
+  const apiDeps: ApiDeps = { ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
+  // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
+  const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
+  const assistant = new Assistant({ log: new AssistantLog(join(cfg.home, "assistant.db")), store, engine, ...(assistantRouter ? { router: assistantRouter } : {}), ...(sealer ? { sealer } : {}),
+    admit: (body, sealed) => admitSealed(apiDeps, body as TaskBody, sealed), timeoutMs: targets.router.timeout_ms });
+  const api = createApp({ ...apiDeps, assistant });
+  const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
+  const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
+  return { app, api, remote, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml
@@ -158,8 +244,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
 export function plannerFor(targets: Targets, resident: OpenCodeServer | undefined, quota: () => Record<string, number>): PlannerFactory {
   const usable = (t: TargetRef | null): boolean => !!t && !!targets.harnesses[t.harness] && !!modelKey(targets.harnesses[t.harness]!, t.model) && (quota()[t.harness] ?? 1) >= targets.router.quota_threshold;
   const build = (t: TargetRef): Router | null => {
-    if (t.harness === "claude-code") return claudeTextRouter({ model: t.model });
-    if (t.harness === "codex") return codexTextRouter({ model: t.model, binary: targets.harnesses.codex?.binary ?? "codex" });
+    if (t.harness === "claude-code") return claudeTextRouter(claudePlannerOptions(t.model));
+    if (t.harness === "codex") return codexTextRouter({ model: t.model, binary: codexBinary(targets) });
     if (t.harness === "opencode" && resident) return serveRouter(resident, "oracle", t.model);
     return null;
   };
@@ -173,16 +259,22 @@ export function plannerFor(targets: Targets, resident: OpenCodeServer | undefine
   };
 }
 
+/** A claude-code planner: the user's own CLI like the executor and the model discovery (the SDK's bundled copy has no
+ *  Keychain grant when started from the Mac app, so every planner call failed), from tmpdir like the discovery. */
+export function claudePlannerOptions(model: string, env: NodeJS.ProcessEnv = process.env): ClaudeRouterOptions {
+  return { model, cwd: tmpdir(), ...executableOf(claudeBinary(env)) };
+}
+
 /** Real executors need the gate (design §3.9: no harness starts without it; decided again 2026-09-22). */
-export function realExecutors(targets: Targets, browser: boolean, rateLimits?: RateLimitCache, extensions?: Extensions, prot: ProtectedPaths = defaultProtected()): Executor[] {
+export function realExecutors(targets: Targets, browser: boolean, rateLimits?: RateLimitCache, extensions?: Extensions, prot: ProtectedPaths = defaultProtected(), opencodeServer?: OpenCodeExecServer): Executor[] {
   const gate = defaultGate();
-  if (!gate) throw new Error("secret-gate not found (packages/secret-gate/.venv/bin/secret-gate or $SECRET_GATE_BIN): refusing to start real executors without the gate");
+  if (!gate) throw new Error(`${gateNotFound()}: refusing to start real executors without the gate`);
   const ext = extensions ? { extensions } : {};
-  const timeout = (h: string) => targets.harnesses[h]?.timeout_ms ?? 30 * 60_000;
+  const timeout = (h: string) => targets.harnesses[h]?.timeout_ms ?? DEFAULT_EXECUTOR_TIMEOUT_MS;
   return [
-    claudeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("claude-code"), ...(rateLimits ? { rateLimits } : {}) }),
-    codexExecutor({ binary: targets.harnesses.codex?.binary ?? "codex", gate, browser, ...ext, maxMs: timeout("codex") }),
-    opencodeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("opencode") }),
+    claudeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("claude-code"), ...(rateLimits ? { rateLimits } : {}), ...executableOf(claudeBinary()) }),
+    codexExecutor({ binary: codexBinary(targets), gate, browser, ...ext, maxMs: timeout("codex") }),
+    opencodeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("opencode"), ...(opencodeServer ? { server: opencodeServer } : {}) }),
   ];
 }
 
@@ -212,10 +304,31 @@ function defaultEchoRouter(targets: Targets): Router {
   return echoRouter((input) => JSON.stringify({ harness: targets.router.default.harness, model: null, brief: input.task.split("\n\nTask:\n")[1] ?? input.task, confidence: 0.9 }));
 }
 
-/** Start-up: discover models (real executors only), bring up the resident OpenCode server (real router only), then listen. */
+/** §3 start-up check: real executors refuse every run while the gate proxy is down, so say so loudly now. */
+export async function checkGateProxy(gate: GateOptions | null, log: (message: string) => void = console.error): Promise<boolean> {
+  if (!gate) return false;
+  const health = await gateHealth(gate);
+  if (!health.ok) log(`ERROR secret-gate proxy ${gate.proxy} is not reachable (${health.error}): every task will stop before its executor starts. Start it with \`secret-gate service install\` (launchd) or \`secret-gate proxy\`.`);
+  return health.ok;
+}
+
+/** The OpenCode executors' resident server (`opencode serve --stdio`, own config and password, proxy-free env). Kept
+ *  even when the first start fails: executors retry it after a cooldown and run standalone meanwhile. */
+export async function startOpenCodeExecServer(cfg: DaemonConfig): Promise<OpenCodeExecServer> {
+  const home = join(cfg.home, "opencode-exec");
+  const prot = defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
+  const server = new OpenCodeExecServer({ binary: cfg.opencodeBinary, home, config: opencodeServeConfig(defaultGate(), prot, join(home, "skills")) });
+  try { await server.start(); }
+  catch (err) { console.error(`${(err as Error).message}; OpenCode executors run opencode run --standalone until it starts`); }
+  return server;
+}
+
+/** Start-up: discover models (real executors only), bring up the resident OpenCode servers (router: real router only;
+ *  executors: real executors in serve mode), then listen. */
 export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close: () => void }> {
+  if (cfg.executors === "real") await checkGateProxy(defaultGate());
   const yaml = loadTargets(cfg.targetsPath);
-  const targets = cfg.executors === "real" ? await discoverTargets(yaml, { codexBinary: yaml.harnesses.codex?.binary ?? "codex" }) : yaml;
+  const targets = cfg.executors === "real" ? await discoverTargets(yaml, { codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()) }) : yaml;
   let opencode: OpenCodeServer | undefined;
   if (cfg.router === "opencode") {
     const gate = defaultGate();
@@ -223,12 +336,34 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
     try { await server.start(); opencode = server; }
     catch (err) { console.error(`${(err as Error).message}; router-type calls fall back to opencode run --standalone`); }
   }
-  const daemon = buildDaemon(cfg, { targets, ...(opencode ? { opencode } : {}) });
-  const server = listen({ fetch: daemon.app.fetch, hostname: "127.0.0.1", port: cfg.port }, (info) => {
+  const opencodeExec = cfg.executors === "real" && (cfg.opencodeExecutor ?? "serve") === "serve" ? await startOpenCodeExecServer(cfg) : undefined;
+  const daemon = buildDaemon(cfg, { targets, ...(opencode ? { opencode } : {}), ...(opencodeExec ? { opencodeExec } : {}) });
+  const remote: RemoteListener | undefined = daemon.remote
+    ? await startRemote(daemon, daemon.remote).catch((err: Error) => { daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); throw err; })
+    : undefined;
+  const server = listenLocal(daemon, cfg.port, (info) => {
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   });
   void daemon.quota.refresh();
-  const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), 3600_000);
+  const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), THREAD_SWEEP_INTERVAL_MS);
   sweeper.unref();
-  return { daemon, close: () => { clearInterval(sweeper); server.close(); daemon.close(); opencode?.stop(); } };
+  return { daemon, close: () => { clearInterval(sweeper); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); } };
+}
+
+/** The 127.0.0.1 listener (web UI, CLI, Mac app): the local app behind the browser guard (api/localGuard.ts: Host,
+ *  Origin, JSON bodies). The remote listener forwards into `daemon.api` in process and never passes this guard. */
+export function listenLocal(daemon: Pick<Daemon, "app">, port: number, onListening?: (info: AddressInfo) => void): ServerType {
+  return listen({ fetch: guardLocal((request, env) => daemon.app.fetch(request, env)), hostname: "127.0.0.1", port }, onListening);
+}
+
+/** app-v0 §2: the HTTPS listener for paired phones, before the local one, so a taken port fails start-up cleanly. */
+export async function startRemote(daemon: Pick<Daemon, "api" | "store">, remote: RemoteRuntime, host?: string): Promise<RemoteListener> {
+  const app = createRemoteApp({ store: daemon.store, pairing: remote.pairing, presence: remote.presence, gateKey: remote.gateKey, local: daemon.api });
+  try {
+    const listener = await listenRemote({ fetch: app.fetch, tls: remote.tls, port: remote.port, ...(host ? { host } : {}) });
+    console.error(`agentswitchd remote listening on https://*:${listener.port}  fingerprint=${remote.tls.fingerprint} name="${remote.name}"`);
+    return listener;
+  } catch (err) {
+    throw new Error(`remote listener on port ${remote.port}: ${(err as Error).message}`);
+  }
 }

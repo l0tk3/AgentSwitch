@@ -3,7 +3,7 @@
  *  too noisy, so the router reads the ledger and decides; code only demotes a target that keeps failing
  *  and flags one the user walked away from. */
 
-import type { TargetRef } from "../router/targets.js";
+import type { TargetRef } from "../core/target.js";
 
 /** Router-labelled task kind (Decision.kind); code falls back to the coarse default-policy classes. */
 export const KINDS = ["code-multifile", "code-small", "browser", "chat", "translate", "code", "other"] as const;
@@ -47,6 +47,9 @@ export type KindStats = { readonly kind: string; readonly targets: readonly Targ
 
 const key = (r: { harness: string; model: string }): string => `${r.harness}/${r.model}`;
 
+/** Transport, quota and a down gate proxy say nothing about the model. */
+const environmental = (r: RecordRow): boolean => r.failureKind === "transport" || r.failureKind === "quota" || r.failureKind === "gate_unavailable";
+
 /** Per kind, per target: counts and averages over the window. Pure. */
 export function aggregateRecords(rows: readonly RecordRow[], now = Date.now(), windowMs = RECORD_WINDOW_MS): KindStats[] {
   const recent = rows.filter((r) => r.ts >= now - windowMs);
@@ -65,8 +68,8 @@ export function aggregateRecords(rows: readonly RecordRow[], now = Date.now(), w
         harness: first.harness, model: first.model, runs: n,
         ok: rs.filter((r) => r.status === "done").length,
         refusals: rs.filter((r) => r.failureKind === "refusal").length,
-        failures: rs.filter((r) => r.status === "failed" && r.failureKind !== "refusal" && r.failureKind !== "transport" && r.failureKind !== "quota").length,
-        transports: rs.filter((r) => r.failureKind === "transport" || r.failureKind === "quota").length,
+        failures: rs.filter((r) => r.status === "failed" && r.failureKind !== "refusal" && !environmental(r)).length,
+        transports: rs.filter(environmental).length,
         avgMs: Math.round(rs.reduce((s, r) => s + r.ms, 0) / n),
         avgTokens: Math.round(rs.reduce((s, r) => s + r.tokens, 0) / n),
         userHandoffs: rs.filter((r) => r.userHandoff).length,
@@ -110,7 +113,7 @@ export function guardsFor(rows: readonly RecordRow[], kind: string | null, now =
   for (const r of recent) {
     const k = key(r);
     if (r.userHandoff) overridden.set(k, { harness: r.harness, model: r.model });
-    if (r.status === "cancelled" || r.failureKind === "transport" || r.failureKind === "quota") continue;   // not a verdict on the model
+    if (r.status === "cancelled" || environmental(r)) continue;   // not a verdict on the model
     const n = isStrike(r) ? (streak.get(k) ?? 0) + 1 : 0;
     streak.set(k, n);
     if (n >= DEMOTE_AFTER) demoted.set(k, { harness: r.harness, model: r.model });

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Bus } from "../src/engine/bus.js";
 import { Engine } from "../src/engine/engine.js";
-import { parseEvidence } from "../src/engine/questions.js";
+import { parseEvidence } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import type { Executor } from "../src/executors/types.js";

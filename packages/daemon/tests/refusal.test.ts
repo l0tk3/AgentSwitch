@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { clarificationBrief, diagnoseRefusal, type RefusalSource } from "../src/router/refusal.js";
-import type { Router, RouterInput } from "../src/router/routers/types.js";
+import type { Router, RouterInput } from "../src/core/modelCall.js";
 
 const source: RefusalSource = { id: "task:current", text: "Read the local test fixture.\nThe synthetic accounts belong to the local demo service.\nDo not contact any other service." };
 const quote = "The synthetic accounts belong to the local demo service.";

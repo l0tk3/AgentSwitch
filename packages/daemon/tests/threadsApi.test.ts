@@ -26,7 +26,7 @@ async function waitThread(client: Client, id: string): Promise<string> {
 
 describe("threads over HTTP", () => {
   it("tasks open threads; handoff makes a follow-up in the same thread excluding the executor; thread detail lists both", async () => {
-    const { d, client, home } = daemon([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null }), decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null })]);
+    const { d, client, home } = daemon([decisionJson({ harness: "codex", model: "gpt-5.5", effort: null }), decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null })]);
     const a = await client.submit("do x", "/tmp");
     await client.watch(a.id, () => undefined);
     const list = await client.threads();

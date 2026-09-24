@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { EMPTY_FOLD, foldMessage, outcomeFromFold } from "../src/executors/claude.js";
 import { applyNotification, EMPTY_TURN, outcomeFromTurn } from "../src/executors/codex.js";
 import { outcomeFromRun, summarizeRun } from "../src/executors/opencode.js";
-import { classifyFailure, detectRefusal, excerpt } from "../src/router/failure.js";
+import { classifyFailure, excerpt } from "../src/router/failure.js";
+import { detectRefusal } from "../src/core/outcome.js";
 
 describe("conservative final-text refusal detection", () => {
   it.each([

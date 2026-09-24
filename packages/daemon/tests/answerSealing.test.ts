@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/api/app.js";
 import { Bus } from "../src/engine/bus.js";
 import { Engine } from "../src/engine/engine.js";
-import type { UserAnswers, UserQuestion } from "../src/engine/questions.js";
+import type { UserAnswers, UserQuestion } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { Executor } from "../src/executors/types.js";
 import { echoRouter } from "../src/router/routers/echo.js";

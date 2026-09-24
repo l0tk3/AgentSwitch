@@ -3,7 +3,7 @@
 
 import { esc, stamp } from "../lib/api.js";
 import { deletePlatformMemory, loadCtxExample, loadPlatformMemory, openTask, saveCtx, saveMem, savePolicy } from "../lib/actions.js";
-import { patch } from "../lib/state.js";
+import { get, patch, set } from "../lib/state.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -92,12 +92,16 @@ function policyCard(p) {
   </div>`;
 }
 
+/** What a draft shows outside its own textarea: the save button (enabled, 已保存) and the example button. */
+const shown = (d) => `${d.draft === null}:${d.saved}:${!(d.draft ?? d.text).trim()}`;
+
+/** Keystrokes update the draft silently (`patch`); one that changes `shown` goes through `set` and re-renders. */
 export function onInput(el) {
   const key = el.id === "ctx-text" ? "ctx" : el.id === "mem-text" ? "mem" : null;
   if (!key) return;
-  patch((s) => ({ [key]: { ...s[key], draft: el.value, saved: false } }));
-  const btn = $(key === "ctx" ? "#ctx-save" : "#mem-save");
-  if (btn) { btn.disabled = false; btn.textContent = "保存"; }
+  const before = get()[key];
+  const next = { ...before, draft: el.value, saved: false };
+  (shown(before) === shown(next) ? patch : set)({ [key]: next });
 }
 
 export const save = () => saveCtx($("#ctx-text").value);
@@ -110,5 +114,5 @@ export const bindings = [
   { sel: "#mem-save", run: () => saveMem($("#mem-text").value) },
   { sel: "#ctx-example", run: () => loadCtxExample() },
   { sel: "#pol-save", run: () => savePolicy({ mode: document.querySelector("input[name=pol-mode]:checked")?.value || "scoped", human: [...document.querySelectorAll(".pol-cat:checked")].map((el) => el.value) }) },
-  { sel: "input[name=pol-mode]", run: (el, e, s) => { if (s.policy) { const next = { ...s.policy, policy: { ...s.policy.policy, mode: el.value } }; import("../lib/state.js").then((m) => m.set({ policy: next })); } } },
+  { sel: "input[name=pol-mode]", run: (el, e, s) => { if (s.policy) set({ policy: { ...s.policy, policy: { ...s.policy.policy, mode: el.value } } }); } },
 ];

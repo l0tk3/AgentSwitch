@@ -2,8 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
-import { AppServerClient, type Json } from "../src/executors/appserver.js";
+import { describe, expect, it, vi } from "vitest";
+import { AppServerClient, type Json } from "../src/harness/appserver.js";
 import { canonical, decideTool, foldMessage, outcomeFromFold, type Folded, EMPTY_FOLD } from "../src/executors/claude.js";
 import { applyNotification, approvalAnswer, codexConfigToml, describeApproval, outcomeFromTurn, type TurnState, EMPTY_TURN } from "../src/executors/codex.js";
 import { claudeMcpServers, codexGateToml, gateEnv, opencodeGateConfig, type GateOptions } from "../src/executors/gate.js";
@@ -111,16 +111,14 @@ describe("AppServerClient", () => {
     const serverSeen: Json[] = [];
     toServer.on("data", (d: Buffer) => { for (const line of d.toString().split("\n").filter(Boolean)) serverSeen.push(JSON.parse(line) as Json); });
     const p = client.request("initialize", { a: 1 });
-    await new Promise((r) => setTimeout(r, 5));
-    expect(serverSeen[0]).toMatchObject({ id: 1, method: "initialize", params: { a: 1 } });
+    await vi.waitFor(() => expect(serverSeen[0]).toMatchObject({ id: 1, method: "initialize", params: { a: 1 } }), { timeout: 4_000, interval: 1 });
     fromServer.write(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { hello: true } }) + "\n");
     expect(await p).toEqual({ hello: true });
     fromServer.write(JSON.stringify({ jsonrpc: "2.0", method: "item/completed", params: {} }) + "\n");
     fromServer.write(JSON.stringify({ jsonrpc: "2.0", id: 77, method: "execCommandApproval", params: { x: 5 } }) + "\n");
     fromServer.write("not json\n");
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(serverSeen.at(-1)).toEqual({ jsonrpc: "2.0", id: 77, result: { echoed: "execCommandApproval", ok: 5 } }), { timeout: 4_000, interval: 1 });
     expect(notes).toEqual(["item/completed"]);
-    expect(serverSeen.at(-1)).toEqual({ jsonrpc: "2.0", id: 77, result: { echoed: "execCommandApproval", ok: 5 } });
     const failing = client.request("x", {}, 20);
     await expect(failing).rejects.toThrow(/no response/);
     const p2 = client.request("y");
@@ -177,10 +175,10 @@ describe("executor instructions", () => {
     const text = executorInstructions();
     expect(text).toContain("You are being run by AgentSwitch");
     expect(text).toContain("enc:v1:");
-    expect(text).toContain("secret_fill");
-    expect(executorInstructions({ executor: EXECUTOR_MD, gate: "/nonexistent" })).not.toContain("secret_fill");
+    expect(text).toContain("secret_field_state");   // only secret-gate's AGENTS.md names it (EXECUTOR.md mentions secret_fill)
+    expect(executorInstructions({ executor: EXECUTOR_MD, gate: "/nonexistent" })).not.toContain("secret_field_state");
     expect(executorInstructions({ executor: "/nonexistent", gate: GATE_AGENTS_MD })).toContain("secret-gate");
-    const cfg = opencodeExecConfig(null, "/p", false, "/x/AGENTS.md") as { instructions: string[] };
-    expect(cfg.instructions).toEqual(["/x/AGENTS.md"]);
+    // OpenCode 2.0.8 ignores a config `instructions` key; the guidance goes into the prompt or a session entry instead.
+    expect(opencodeExecConfig(null, "/p", false)).not.toHaveProperty("instructions");
   });
 });

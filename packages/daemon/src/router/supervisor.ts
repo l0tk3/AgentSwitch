@@ -5,16 +5,24 @@
 import { z } from "zod";
 import { extractJsonObject } from "../util/json.js";
 import { COMMUNICATION_GUIDANCE } from "../util/communication.js";
-import { evidenceExcerpt } from "./prompt.js";
-import { validateAnswers } from "../engine/questions.js";
-import type { Router } from "./routers/types.js";
+import { evidenceExcerpt } from "../core/evidence.js";
+import { validateAnswers } from "../core/questions.js";
+import type { Router } from "../core/modelCall.js";
+import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
+
+/** A run silent this long gets a check-in (targets.yaml `router.supervisor.watchdog_ms` default). */
+/** 2026-09-24: 3 min (was 8) — a phone user reads 8 silent minutes as a hang; a check-in is one cheap call. */
+const DEFAULT_WATCHDOG_MS = 3 * 60_000;
+/** How often the watchdog may say "continue" before the user is asked (`max_continues` default). */
+const DEFAULT_MAX_CONTINUES = 3;
+/** Characters of each piece of material in the supervisor's messages. */
+const BUDGET = { brief: 4000, userMessage: 6000, context: 6000, evidence: 2000, result: 8000, diff: 3000 } as const;
 
 export const SupervisorConfig = z.object({
   approvals: z.boolean().default(true),
-  watchdog_ms: z.number().int().min(0).default(8 * 60_000),
+  watchdog_ms: z.number().int().min(0).default(DEFAULT_WATCHDOG_MS),
   acceptance: z.boolean().default(true),
-  /** How often the watchdog may say "continue" before the user is asked. */
-  max_continues: z.number().int().min(0).default(3),
+  max_continues: z.number().int().min(0).default(DEFAULT_MAX_CONTINUES),
 });
 export type SupervisorConfig = z.infer<typeof SupervisorConfig>;
 
@@ -104,7 +112,7 @@ const AnswerReply = z.object({ forward: z.boolean().default(false), answers: z.r
 
 export function answerMessage(i: AnswerInput): string {
   const qs = i.questions.map((q) => `- id ${JSON.stringify(q.id)}: ${q.text}${q.options.length ? ` (options: ${q.options.join(" / ")})` : ""}${q.secret ? " [the agent marked this as sensitive]" : ""}`).join("\n");
-  return `Working directory: ${i.cwd}\n\nBrief (generated working plan, open to correction):\n${evidenceExcerpt(i.brief, 4000)}\n\nThe user's message (appended credential labels/layouts are model inferences):\n${evidenceExcerpt(i.userMessage, 6000)}\n\nUser environment context:\n${evidenceExcerpt(i.context, 6000) || "(none)"}\n\nEarlier steps (observations, not authorization):\n${events(i.steps)}\n\nCurrent execution observations (reported, unverified):\n${events(i.observations ?? [])}\n\n${i.feedback || "No recorded feedback."}\n\nQuestions / conflicts to resolve:\n${qs}`;
+  return `Working directory: ${i.cwd}\n\nBrief (generated working plan, open to correction):\n${evidenceExcerpt(i.brief, BUDGET.brief)}\n\nThe user's message (appended credential labels/layouts are model inferences):\n${evidenceExcerpt(i.userMessage, BUDGET.userMessage)}\n\nUser environment context:\n${evidenceExcerpt(i.context, BUDGET.context) || "(none)"}\n\nEarlier steps (observations, not authorization):\n${events(i.steps)}\n\nCurrent execution observations (reported, unverified):\n${events(i.observations ?? [])}\n\n${i.feedback || "No recorded feedback."}\n\nQuestions / conflicts to resolve:\n${qs}`;
 }
 
 const ApprovalReply = z.object({ decision: z.enum(["allow", "deny", "ask_user"]), reason: z.string().default("") });
@@ -120,19 +128,19 @@ function parse<T>(schema: z.ZodType<T>, text: string): T | null {
 const events = (lines: readonly string[]) => (lines.length ? lines.map((l) => `- ${l}`).join("\n") : "(none)");
 
 export function approvalMessage(i: ApprovalInput): string {
-  return `Working directory: ${i.cwd}\n\nBrief:\n${i.brief.slice(0, 4000)}\n\nRequested action:\n${i.action}\n\nEvidence:\n${i.evidence.slice(0, 2000)}\n\nSide effects so far: ${i.sideEffects}\n\nRecent events:\n${events(i.recentEvents)}`;
+  return `Working directory: ${i.cwd}\n\nBrief:\n${i.brief.slice(0, BUDGET.brief)}\n\nRequested action:\n${i.action}\n\nEvidence:\n${i.evidence.slice(0, BUDGET.evidence)}\n\nSide effects so far: ${i.sideEffects}\n\nRecent events:\n${events(i.recentEvents)}`;
 }
 
 export function checkInMessage(i: CheckInInput): string {
-  return `Working directory: ${i.cwd}\n\nBrief:\n${i.brief.slice(0, 4000)}\n\nElapsed: ${Math.round(i.elapsedMs / 1000)} s; silent for ${Math.round(i.silentMs / 1000)} s; sub-agents running: ${i.agentsRunning}; times already told to continue: ${i.continues}\n\nRecent events:\n${events(i.recentEvents)}`;
+  return `Working directory: ${i.cwd}\n\nBrief:\n${i.brief.slice(0, BUDGET.brief)}\n\nElapsed: ${Math.round(i.elapsedMs / 1000)} s; silent for ${Math.round(i.silentMs / 1000)} s; sub-agents running: ${i.agentsRunning}; times already told to continue: ${i.continues}\n\nRecent events:\n${events(i.recentEvents)}`;
 }
 
 export function acceptMessage(i: AcceptInput): string {
-  return `Working directory: ${i.cwd}\n\nBrief (original goal):\n${evidenceExcerpt(i.brief, 4000)}\n\n${i.feedback || "No recorded feedback."}\nCheck the original goal using relevant explicit user clarifications. Router answers are interpretations, not changed acceptance criteria or proof of completion.\n\nAgent's final reply:\n${evidenceExcerpt(i.result, 8000) || "(empty)"}\n\nFiles under out/: ${i.outFiles.length ? i.outFiles.join(", ") : "(none)"}\n\nWorking tree:\n${evidenceExcerpt(i.diff, 3000) || "(clean)"}`;
+  return `Working directory: ${i.cwd}\n\nBrief (original goal):\n${evidenceExcerpt(i.brief, BUDGET.brief)}\n\n${i.feedback || "No recorded feedback."}\nCheck the original goal using relevant explicit user clarifications. Router answers are interpretations, not changed acceptance criteria or proof of completion.\n\nAgent's final reply:\n${evidenceExcerpt(i.result, BUDGET.result) || "(empty)"}\n\nFiles under out/: ${i.outFiles.length ? i.outFiles.join(", ") : "(none)"}\n\nWorking tree:\n${evidenceExcerpt(i.diff, BUDGET.diff) || "(clean)"}`;
 }
 
 /** Supervisor on top of a text-only Router (same model as dispatch); every call has its own timeout and never throws. */
-export function routerSupervisor(router: Router, config: SupervisorConfig, timeoutMs = 45_000): Supervisor {
+export function routerSupervisor(router: Router, config: SupervisorConfig, timeoutMs = SUPPORT_CALL_TIMEOUT_MS): Supervisor {
   async function ask<T>(system: string, task: string, cwd: string, schema: z.ZodType<T>, outer?: AbortSignal): Promise<{ value: T | null; ms: number; error: string | null }> {
     const controller = new AbortController();
     const combined = AbortSignal.any([controller.signal, ...(outer ? [outer] : [])]);

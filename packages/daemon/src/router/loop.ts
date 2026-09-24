@@ -6,9 +6,15 @@ import { askJson, type AskFailureKind } from "./ask.js";
 import { Decision, extractJsonObject, type Decision as DecisionT } from "./decision.js";
 import { loopSection, stepsMessage, type StepRecord } from "./prompt.js";
 import { routerSystem, verdictFor, type RouteDeps, type RouteRequest } from "./route.js";
-import type { Router } from "./routers/types.js";
-import { markUnavailable, type TargetRef } from "./targets.js";
+import type { Router } from "../core/modelCall.js";
+import type { TransferGrant } from "../core/transfer.js";
+import { markUnavailable } from "./targets.js";
+import type { TargetRef } from "../core/target.js";
 import type { Verdict } from "./validate.js";
+import { zodIssues } from "../util/zod.js";
+
+/** Open items a `finish` reply may list. */
+const MAX_REMAINING_ITEMS = 30;
 
 export const MAX_DISPATCHES = 5;
 export const MAX_LOOP_STEPS = 12;
@@ -37,7 +43,7 @@ const Head = z.object({
 
 const Finish = z.object({
   completion: z.enum(["complete", "partial", "blocked"]),
-  remaining: z.array(z.string().trim().min(1)).max(30),
+  remaining: z.array(z.string().trim().min(1)).max(MAX_REMAINING_ITEMS),
 });
 
 /** A reply in the decision shape is a dispatch; finish / ask_user / give_up need only their own fields. */
@@ -47,7 +53,7 @@ export function parseLoopReply(text: string): { ok: true; value: LoopReply } | {
   let obj: unknown;
   try { obj = JSON.parse(raw); } catch (err) { return { ok: false, error: `invalid JSON: ${(err as Error).message}` }; }
   const head = Head.safeParse(obj);
-  if (!head.success) return { ok: false, error: head.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
+  if (!head.success) return { ok: false, error: zodIssues(head.error) };
   const h = head.data;
   if (h.action === "finish") {
     const completion = Finish.safeParse(obj);
@@ -63,7 +69,7 @@ export function parseLoopReply(text: string): { ok: true; value: LoopReply } | {
     return h.question?.trim() ? { ok: true, value: { kind: "ask_user", question: h.question.trim() } } : { ok: false, error: "ask_user needs a question" };
   }
   const decision = Decision.safeParse({ ...(obj as Record<string, unknown>), action: h.action === "repair" ? "repair" : "redispatch" });
-  if (!decision.success) return { ok: false, error: decision.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
+  if (!decision.success) return { ok: false, error: zodIssues(decision.error) };
   const d = decision.data;
   if (h.action === "repair" && d.repair) return { ok: true, value: { kind: "repair", decision: d, tool: d.repair.tool, args: d.repair.args } };
   return { ok: true, value: { kind: "dispatch", decision: d } };
@@ -78,6 +84,8 @@ export type NextInput = {
   readonly exclude: readonly TargetRef[];
   /** A true planner has its own deadline; otherwise use the router's configured timeout. */
   readonly timeoutMs?: number;
+  /** §5.2 grant pinned from the first routing decision, shown so a dispatch can restate it (or a subset). */
+  readonly transfer?: TransferGrant | null;
 };
 
 export type NextResult = {
@@ -104,7 +112,7 @@ export async function nextAction(router: Router, deps: RouteDeps, input: NextInp
   const failed = (kind: AskFailureKind): NextResult => ({ action: null, routerError: LOOP_FAILURE_MESSAGE[kind], routerMs: Date.now() - started, failure: { kind, tries, timeoutMs } });
   if (signal?.aborted) return failed("cancelled");
   const system = routerSystem({ ...deps, targets: input.exclude.length ? markUnavailable(deps.targets, input.exclude) : deps.targets }, input.req.task) + loopSection(input.exclude, deps.repairs ?? []);
-  const body = (error?: string) => stepsMessage(input.req.task, input.req.cwd, input.steps, input.used, input.budget, error);
+  const body = (error?: string) => stepsMessage(input.req.task, input.req.cwd, input.steps, input.used, input.budget, error, input.transfer ?? null);
   const deadline = new AbortController();
   const combined = AbortSignal.any([deadline.signal, ...(signal ? [signal] : [])]);
   const timer = setTimeout(() => deadline.abort(new Error("loop model timed out")), timeoutMs);

@@ -1,22 +1,34 @@
-/** OpenCode executor: `opencode run --standalone --format json -m <model>` in the task cwd.
+/** OpenCode executor. Default (tech debt #8): a session on the daemon's resident executor server
+ *  (`opencode serve --stdio`, opencodeServer.ts), wired per execution by opencodeServeRun.ts; rules that say "ask"
+ *  become engine approvals and the question tool becomes engine questions. Fallback, and the only path with
+ *  AGENTSWITCH_OPENCODE_EXECUTOR=run: `opencode run --standalone --format json -m <model>` in the task cwd.
  *
- *  Permissions are static (no interactive approvals): `opencode run` cannot surface permission
- *  prompts (design A.3), so edits inside cwd and shell are allowed, the gate home is unreadable
- *  and webfetch is denied. Dangerous-command review therefore relies on the router not sending
- *  such tasks here; Codex and Claude carry the approval protocol. */
+ *  The standalone path has static permissions only (design A.3: `run` cannot surface permission prompts), so edits
+ *  inside cwd and shell are allowed, the gate home is unreadable and webfetch is denied; both paths share those rules
+ *  (opencodeShared.ts). */
 
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
-import { detectRefusal, NO_SIDE_EFFECTS, type ExecutionOutcome } from "../router/failure.js";
+import type { ExecutionOutcome } from "../core/outcome.js";
 import { opencodeMcpFromRegistry } from "./extensions.js";
-import { gateEnv, mcpServerEnv, opencodeGateConfig, stripProxy, withoutCredentialRepair, type GateOptions } from "./gate.js";
-import { composePrompt, executorInstructions } from "./instructions.js";
-import { terminateProcess } from "./processes.js";
-import { NO_PROTECTED, type ProtectedPaths } from "./protected.js";
-import type { CredentialRepair, ExecutionInput, Executor } from "./types.js";
+import { gateEnv, gateRun, mcpServerEnv, reportTransfer, withoutCredentialRepair, type GateOptions } from "./gate.js";
+import { stripProxy } from "../util/env.js";
+import { composePrompt, withGuidanceHead } from "./instructions.js";
+import { interruptedOutcome, watchRunStop } from "./lifecycle.js";
+import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";
+import type { OpenCodeExecServer } from "./opencodeServer.js";
+import { runOnServer } from "./opencodeServeRun.js";
+import { opencodeExecConfig, outcomeFromRun, SUBAGENT_TOOL, type OpenCodeExtras, type RunSummary } from "./opencodeShared.js";
+import { spawnOwned, terminateProcess } from "../harness/processes.js";
+import type { ProtectedPaths } from "./protected.js";
+import type { ExecutionInput, Executor } from "./types.js";
+
+export { opencodeExecConfig, outcomeFromRun, protectedDeny, type OpenCodeExtras, type RunSummary } from "./opencodeShared.js";
+
+/** How much of OpenCode's stderr the "refused to resume" note quotes. */
+const RESUME_ERROR_CHARS = 120;
 
 export type OpenCodeExecutorOptions = {
   readonly binary?: string;
@@ -25,36 +37,11 @@ export type OpenCodeExecutorOptions = {
   readonly browser?: boolean;
   readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
   readonly protected?: ProtectedPaths;
+  /** The resident executor server; without it, or when it cannot take a run, `opencode run --standalone`. */
+  readonly server?: OpenCodeExecServer | null;
+  /** Operator log (stderr by default). Never receives a scope, repair key or grant. */
+  readonly log?: (line: string) => void;
 };
-
-export type OpenCodeExtras = { readonly mcp?: Record<string, unknown>; readonly skillsDir?: string | null; readonly protected?: ProtectedPaths };
-
-/** Static deny patterns for the protected roots: no edit under them, no shell command naming them. */
-export function protectedDeny(prot: ProtectedPaths): { edit: Record<string, string>; bash: Record<string, string> } {
-  const edit: Record<string, string> = {};
-  const bash: Record<string, string> = {};
-  for (const r of prot.roots) { edit[`${r}/*`] = "deny"; bash[`*${r}*`] = "deny"; }
-  return { edit, bash };
-}
-
-export function opencodeExecConfig(gate: GateOptions | null | undefined, profile: string, browser: boolean, instructionsPath?: string, extras: OpenCodeExtras = {}, repair?: CredentialRepair): object {
-  const g = gate ? opencodeGateConfig(gate, profile, browser, repair) : { mcp: {}, readDeny: {} };
-  const deny = protectedDeny(extras.protected ?? NO_PROTECTED);
-  return {
-    $schema: "https://opencode.ai/config.json",
-    ...(instructionsPath ? { instructions: [instructionsPath] } : {}),
-    ...(extras.skillsDir ? { skills: { paths: [extras.skillsDir] } } : {}),
-    mcp: { ...g.mcp, ...(extras.mcp ?? {}) },
-    permission: {
-      read: { "*": "allow", ...g.readDeny, "**/.env": "deny", "**/*.pem": "deny", "**/*.key": "deny" },
-      bash: { "*": "allow", "secret-gate keygen*": "deny", ...(gate ? { [`cat ${gate.home}/*`]: "deny" } : {}), ...deny.bash },
-      edit: Object.keys(deny.edit).length ? { "*": "allow", ...deny.edit } : "allow",
-      webfetch: "deny",
-    },
-  };
-}
-
-export type RunSummary = { text: string; tools: { tool: string; input: unknown }[]; errors: string[]; sessionId: string | null; telemetryComplete: boolean };
 
 /** Fold the `--format json` event stream into text, tool calls, errors and the session id (every event carries `sessionID`). */
 export function summarizeRun(stdout: string): RunSummary {
@@ -72,20 +59,6 @@ export function summarizeRun(stdout: string): RunSummary {
   return out;
 }
 
-export function outcomeFromRun(summary: RunSummary, exitCode: number | null, stderr: string, timedOut: boolean): ExecutionOutcome {
-  const edits = summary.tools.filter((t) => /^(edit|write|patch|multiedit)$/i.test(t.tool)).length;
-  // MCP/browser tools and sub-agents can mutate remote state without any file or shell event.
-  const operations = summary.tools.length - edits;
-  const subagents = summary.tools.filter((t) => /^task$/i.test(t.tool)).length;   // OpenCode's sub-agent tool, synchronous
-  const sideEffects = { ...NO_SIDE_EFFECTS, filesChanged: edits, commandsRun: operations };
-  const agents = { spawned: subagents, completed: subagents, failed: 0 };
-  const errText = [...summary.errors, stderr.trim()].filter(Boolean).join("\n");
-  const lastText = summary.text.trimEnd();
-  const refusal = detectRefusal({ ok: true, lastText });
-  const ok = !refusal && !timedOut && exitCode === 0 && summary.errors.length === 0 && lastText.trim().length > 0;
-  return { ok, exitCode, stderr: errText, lastText, timedOut, sideEffects, sideEffectsKnown: !timedOut && exitCode === 0 && summary.telemetryComplete, agents, ...(refusal ? { refusal } : {}), ...(summary.sessionId ? { sessionId: summary.sessionId } : {}) };
-}
-
 /** A resume that OpenCode refused (session gone from its db, or a different directory): retry without it. */
 export function resumeRefused(summary: RunSummary, exitCode: number | null, stderr: string, timedOut = false): boolean {
   return !timedOut && exitCode !== null && exitCode !== 0 && summary.telemetryComplete && !summary.text.trim() && summary.tools.length === 0
@@ -98,16 +71,12 @@ type RunResult = { readonly summary: RunSummary; readonly exitCode: number | nul
 function runOnce(binary: string, prompt: string, resume: string | null, input: ExecutionInput, env: Record<string, string>, maxMs: number): Promise<RunResult> {
   return new Promise((done) => {
     if (resume) input.emit("text", { text: `(resuming OpenCode session ${resume})` });
-    const child = spawn(binary, ["run", "--standalone", "--format", "json", "-m", input.model, ...(resume ? ["--session", resume] : []), prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const child = spawnOwned(binary, ["run", "--standalone", "--format", "json", "-m", input.model, ...(resume ? ["--session", resume] : []), prompt], { cwd: input.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
-    let timedOut = false;
     let buffered = "";
-    const timer = setTimeout(() => { timedOut = true; terminateProcess(child); }, maxMs);
-    const onAbort = () => terminateProcess(child);
-    input.signal.addEventListener("abort", onAbort, { once: true });
-    if (input.signal.aborted) onAbort();
-    child.stdout.on("data", (d: Buffer) => {
+    const stop = watchRunStop(input.signal, maxMs, () => void terminateProcess(child));
+    child.stdout!.on("data", (d: Buffer) => {
       stdout += d.toString();
       buffered += d.toString();
       let i;
@@ -117,56 +86,73 @@ function runOnce(binary: string, prompt: string, resume: string | null, input: E
         if (one.text) input.emit("text", { text: one.text });
         for (const t of one.tools) {
           input.emit("tool_call", { tool: t.tool, input: t.input });
-          if (/^task$/i.test(t.tool)) input.emit("agent", { harness: "opencode", agentId: "", status: "completed", description: String((t.input as { description?: string } | null)?.description ?? "sub-agent") });
+          if (SUBAGENT_TOOL.test(t.tool)) input.emit("agent", { harness: "opencode", agentId: "", status: "completed", description: String((t.input as { description?: string } | null)?.description ?? "sub-agent") });
         }
       }
     });
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.stderr!.on("data", (d: Buffer) => (stderr += d.toString()));
     child.on("error", (e) => { stderr += e.message; });
     child.on("close", async (exitCode) => {
-      clearTimeout(timer);
-      input.signal.removeEventListener("abort", onAbort);
-      if (timedOut || input.signal.aborted) await terminateProcess(child);
-      done({ summary: summarizeRun(stdout), exitCode, stderr, timedOut });
+      stop.dispose();
+      if (stop.timedOut || input.signal.aborted) await terminateProcess(child);
+      done({ summary: summarizeRun(stdout), exitCode, stderr, timedOut: stop.timedOut });
     });
   });
 }
 
-export const DEFAULT_MAX_MS = 30 * 60_000;
+/** The run's private dir: skills and the 0600 config, plus the env and prompt that go with them. The guidance
+ *  (EXECUTOR.md, the gate's AGENTS.md) rides at the head of the prompt: OpenCode 2.0.8 ignores the config file's
+ *  `instructions` key, so a config entry never reached the model. */
+function prepareRun(dir: string, input: ExecutionInput, opts: OpenCodeExecutorOptions): { env: Record<string, string>; prompt: string } {
+  const configPath = join(dir, "opencode.json");
+  const ext = opts.extensions ?? NO_EXTENSIONS;
+  const skillsDir = join(dir, "skills");
+  const extras: OpenCodeExtras = {
+    mcp: opencodeMcpFromRegistry(ext.mcpFor("opencode"), mcpServerEnv(opts.gate)),
+    skillsDir: ext.skillsInto("opencode", skillsDir).length ? skillsDir : null,
+    ...(opts.protected ? { protected: opts.protected } : {}),
+  };
+  const browser = (opts.browser ?? true) && input.browser;
+  const run = gateRun(input, browser);
+  writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, input.browserProfile ?? join(dir, "profile"), browser, extras, input.credentialRepair, run)), { mode: 0o600 });
+  reportTransfer(input, run, "opencode", !!opts.gate, browser);
+  // The shell tool inherits this env: its proxy URL carries the execution scope.
+  const env = { ...stripProxy(withoutCredentialRepair(process.env)), ...(opts.gate ? gateEnv(opts.gate, run.scope) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
+  return { env, prompt: withGuidanceHead(composePrompt({ ...input, transfer: opts.gate ? run.transfer ?? null : null })) };
+}
 
 export function opencodeExecutor(opts: OpenCodeExecutorOptions = {}): Executor {
   const binary = opts.binary ?? join(process.env.HOME ?? "", ".opencode", "bin", "opencode");
+  const log = opts.log ?? ((line: string) => console.error(line));
   return {
     harness: "opencode",
     async run(input: ExecutionInput): Promise<ExecutionOutcome> {
-      const dir = mkdtempSync(join(tmpdir(), "agentswitch-oc-"));
-      const configPath = join(dir, "opencode.json");
-      const instructionsPath = join(dir, "AGENTS.md");
-      writeFileSync(instructionsPath, executorInstructions());
-      const ext = opts.extensions ?? NO_EXTENSIONS;
-      const skillsDir = join(dir, "skills");
-      const extras: OpenCodeExtras = {
-        mcp: opencodeMcpFromRegistry(ext.mcpFor("opencode"), mcpServerEnv(opts.gate)),
-        skillsDir: ext.skillsInto("opencode", skillsDir).length ? skillsDir : null,
-        ...(opts.protected ? { protected: opts.protected } : {}),
-      };
-      writeFileSync(configPath, JSON.stringify(opencodeExecConfig(opts.gate, join(dir, "profile"), (opts.browser ?? true) && input.browser, instructionsPath, extras, input.credentialRepair)));
-      const env = { ...stripProxy(withoutCredentialRepair(process.env)), ...(opts.gate ? gateEnv(opts.gate) : {}), PWD: input.cwd, OPENCODE_CONFIG: configPath, GIT_EDITOR: "true" };
-      const prompt = composePrompt(input);
-      const maxMs = opts.maxMs ?? DEFAULT_MAX_MS;
-      try {
-        // Native continuation: `--session <id>` picks the conversation up (sessions live in OpenCode's shared db, keyed by
-        // directory, so the engine only offers a resume for the same cwd); a refused resume falls back to a fresh session.
-        let r = await runOnce(binary, prompt, input.resume, input, env, maxMs);
-        if (input.resume && !input.signal.aborted && resumeRefused(r.summary, r.exitCode, r.stderr, r.timedOut)) {
-          input.emit("text", { text: `(OpenCode refused to resume ${input.resume}: ${r.stderr.trim().slice(0, 120)}; starting a new session)` });
-          r = await runOnce(binary, prompt, null, input, env, maxMs);
-        }
-        const outcome = outcomeFromRun(r.summary, r.exitCode, r.stderr, r.timedOut);
-        return input.signal.aborted ? { ...outcome, ok: false, sideEffectsKnown: false } : outcome;
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
+      if (opts.server) {
+        const attempt = await runOnServer(opts.server, input, { ...opts, log });
+        if (attempt.kind === "done") return attempt.outcome;
+        log(`OpenCode executor for ${input.taskId}: ${attempt.reason}; running opencode run --standalone`);
+        input.emit("text", { text: `(OpenCode resident server not used: ${attempt.reason}; running opencode run --standalone)` });
       }
+      return runStandalone(binary, input, opts);
     },
   };
+}
+
+async function runStandalone(binary: string, input: ExecutionInput, opts: OpenCodeExecutorOptions): Promise<ExecutionOutcome> {
+  const dir = mkdtempSync(join(tmpdir(), "agentswitch-oc-"));
+  try {
+    const { env, prompt } = prepareRun(dir, input, opts);
+    const maxMs = opts.maxMs ?? DEFAULT_EXECUTOR_TIMEOUT_MS;
+    // Native continuation: `--session <id>` picks the conversation up (sessions live in OpenCode's shared db, keyed by
+    // directory, so the engine only offers a resume for the same cwd); a refused resume falls back to a fresh session.
+    let r = await runOnce(binary, prompt, input.resume, input, env, maxMs);
+    if (input.resume && !input.signal.aborted && resumeRefused(r.summary, r.exitCode, r.stderr, r.timedOut)) {
+      input.emit("text", { text: `(OpenCode refused to resume ${input.resume}: ${r.stderr.trim().slice(0, RESUME_ERROR_CHARS)}; starting a new session)` });
+      r = await runOnce(binary, prompt, null, input, env, maxMs);
+    }
+    const outcome = outcomeFromRun(r.summary, r.exitCode, r.stderr, r.timedOut);
+    return input.signal.aborted ? interruptedOutcome(outcome) : outcome;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

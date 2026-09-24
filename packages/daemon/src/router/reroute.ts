@@ -2,9 +2,10 @@
  *  Pure (router-v0 §6.3, §6.4). The orchestration that actually asks the router is in route.ts. */
 
 import type { Decision } from "./decision.js";
-import { hasSideEffects, type FailureKind, type RefusalSignal, type SideEffects } from "./failure.js";
-import { markUnavailable, type TargetRef, type Targets } from "./targets.js";
-import { validateDecision, validateTarget, type Quota, type Running } from "./validate.js";
+import { hasSideEffects, type FailureKind, type RefusalSignal, type SideEffects } from "../core/outcome.js";
+import { markUnavailable, type Targets } from "./targets.js";
+import type { TargetRef } from "../core/target.js";
+import { validateDecision, validateTarget, type Quota } from "./validate.js";
 
 export type Attempt = {
   readonly harness: string;
@@ -15,6 +16,8 @@ export type Attempt = {
   readonly refusal?: RefusalSignal;
   /** False means the counts are incomplete. Legacy explicit counts remain known unless marked false. */
   readonly sideEffectsKnown?: boolean;
+  /** A completed run whose result the acceptance check rejected (not a run the watchdog cut short). */
+  readonly acceptance?: boolean;
 };
 
 export type Limits = { readonly maxAttempts: number; readonly maxRouterAsks: number };
@@ -26,7 +29,6 @@ export type RerouteInput = {
   readonly routerAsks: number;
   readonly targets: Targets;
   readonly quota: Quota;
-  readonly running: Running;
   readonly lowConfidenceTarget: TargetRef;
   readonly limits?: Limits;
   /** Keyword-floor category of the task; restricts every candidate (see validate.ts). */
@@ -59,6 +61,8 @@ export function nextStep(input: RerouteInput): NextStep {
   const last = input.attempts.at(-1);
   if (!last) return { kind: "stop", reason: "no attempt to recover from", security: false };
   if (last.kind === "gate_denied") return { kind: "stop", reason: "secret-gate denied a request; not re-dispatching", security: true };
+  // The proxy is shared by every harness: another target would meet the same dead gate. Not a security event.
+  if (last.kind === "gate_unavailable") return { kind: "stop", reason: last.excerpt || "secret-gate 代理未运行，已停止，未派发其他执行器", security: false };
   // TaskLoop owns the bounded, evidence-based clarification path. Other callers must not
   // silently treat a refusal as a reason to rotate targets (including the standalone CLI).
   if (last.kind === "refusal") return { kind: "stop", reason: "refusal requires grounded clarification; automatic target switching is disabled", security: false };
@@ -88,11 +92,11 @@ function switchAlongChain(input: RerouteInput, failed: TargetRef): NextStep {
   const excluded = excludedTargets(input.attempts);
   const targets = markUnavailable(input.targets, excluded);
   const quota = quotaAfter(input.attempts, input.quota);
-  const ctx = { targets, quota, running: input.running, lowConfidenceTarget: input.lowConfidenceTarget, category: input.category ?? null };
+  const ctx = { targets, quota, lowConfidenceTarget: input.lowConfidenceTarget, category: input.category ?? null };
   const decision = input.decision ?? {
     harness: failed.harness, model: failed.model, effort: null, brief: "", needs_browser: false, expected_size: "medium" as const,
     risk: null, category: null, kind: null, thread: null, thread_confidence: null, question: null, fallbacks: [], reason: "", confidence: 1, action: "redispatch" as const, repair: null, handoff_note: null,
-    plan: "single" as const, purpose: "do" as const, planner: null,
+    plan: "single" as const, purpose: "do" as const, planner: null, transfer: null,
   };
   const verdict = validateDecision({ ...decision, confidence: Math.max(decision.confidence, targets.router.min_confidence) }, ctx);
   if (verdict.ok) return { kind: "switch", target: { harness: verdict.harness, model: verdict.model }, notes: verdict.notes };

@@ -5,14 +5,20 @@ import { z } from "zod";
 
 export const PLATFORM_MEMORY_TTL = { incident: 86400_000, observed: 7 * 86400_000, verified: 30 * 86400_000 } as const;
 export const MAX_PLATFORM_MEMORIES = 500;
+/** Candidates one summary may propose (the rest are dropped unread). */
+export const MAX_PLATFORM_CANDIDATES = 10;
+/** Field bounds: an origin, a fact's text, and the checkpoint quote that backs it. */
+const MAX_ORIGIN_CHARS = 2048;
+const MAX_FACT_TEXT_CHARS = 600;
+const MAX_QUOTE_CHARS = 1200;
 
 export const PlatformFactSchema = z.object({
-  origin: z.string().min(1).max(2048),
+  origin: z.string().min(1).max(MAX_ORIGIN_CHARS),
   key: z.string().regex(/^[a-z0-9][a-z0-9._/-]{0,79}$/),
-  text: z.string().min(1).max(600),
+  text: z.string().min(1).max(MAX_FACT_TEXT_CHARS),
   kind: z.enum(["operation", "incident"]).default("operation"),
   eventSeq: z.number().int().positive(),
-  quote: z.string().min(1).max(1200),
+  quote: z.string().min(1).max(MAX_QUOTE_CHARS),
 });
 export type PlatformFactCandidate = z.infer<typeof PlatformFactSchema>;
 
@@ -75,8 +81,8 @@ export function platformCheckpoint(event: { readonly seq: number; readonly ts: n
 
 const Stored = z.object({
   id: z.string().regex(/^[a-f0-9]{24}$/), origin: z.string(), key: PlatformFactSchema.shape.key,
-  text: z.string().min(1).max(600), kind: z.enum(["operation", "incident"]), status: z.enum(["observed", "verified"]),
-  source: z.object({ taskId: z.string().min(1), eventSeq: z.number().int().positive(), quote: z.string().min(1).max(1200) }),
+  text: z.string().min(1).max(MAX_FACT_TEXT_CHARS), kind: z.enum(["operation", "incident"]), status: z.enum(["observed", "verified"]),
+  source: z.object({ taskId: z.string().min(1), eventSeq: z.number().int().positive(), quote: z.string().min(1).max(MAX_QUOTE_CHARS) }),
   createdAt: z.number().finite(), updatedAt: z.number().finite(), expiresAt: z.number().finite(),
 });
 const FileSchema = z.object({ version: z.literal(1), entries: z.array(Stored).max(MAX_PLATFORM_MEMORIES) });
@@ -109,7 +115,7 @@ export function rememberPlatformFacts(path: string, candidates: readonly Platfor
   const checkpoints = new Map(source.checkpoints.map((point) => [point.seq, point]));
   const entries = new Map(current.filter((entry) => entry.expiresAt > now).map((entry) => [entry.id, entry]));
   const added: PlatformMemory[] = [], skipped: string[] = [];
-  for (const raw of candidates.slice(0, 10)) {
+  for (const raw of candidates.slice(0, MAX_PLATFORM_CANDIDATES)) {
     const parsed = PlatformFactSchema.safeParse(raw);
     if (!parsed.success) { skipped.push("invalid candidate"); continue; }
     const fact = parsed.data;

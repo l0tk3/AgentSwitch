@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -80,6 +80,24 @@ describe("artifacts", () => {
     writeFileSync(join(cwd, "out", "img", "p.png"), "p");
     expect(collectOut(cwd, dest)).toBe(2);
     expect(readFileSync(join(dest, "img", "p.png"), "utf8")).toBe("p");
+  });
+  it("keeps only the task's own files: no symlink, hard link or symlinked out/ reaches the artifacts store", () => {
+    const outside = tmp();
+    writeFileSync(join(outside, "id_ed25519"), "KEY");
+    const cwd = tmp();
+    mkdirSync(join(cwd, "out"));
+    writeFileSync(join(cwd, "out", "report.md"), "r");
+    symlinkSync(join(outside, "id_ed25519"), join(cwd, "out", "key"));
+    symlinkSync(outside, join(cwd, "out", "dir"));
+    linkSync(join(outside, "id_ed25519"), join(cwd, "out", "hard"));
+    const dest = join(tmp(), "artifacts", "t2");
+    expect(collectOut(cwd, dest)).toBe(1);
+    expect(listTree(dest).map((f) => f.path)).toEqual(["report.md"]);
+    expect(existsSync(join(dest, "key")) || existsSync(join(dest, "dir")) || existsSync(join(dest, "hard"))).toBe(false);
+
+    const linked = tmp();
+    symlinkSync(outside, join(linked, "out"));
+    expect(collectOut(linked, join(tmp(), "artifacts", "t3"))).toBe(0);
   });
 });
 

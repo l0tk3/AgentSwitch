@@ -3,7 +3,7 @@
  *  that guards CONTEXT.md. The user edits or deletes lines on the page; the router reads it with CONTEXT.md. */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lintContext, MAX_CONTEXT_BYTES, type LoadedContext } from "../router/context.js";
+import { lintContext, MAX_CONTEXT_BYTES, type LoadedContext } from "../core/contextDoc.js";
 
 export const MEMORY_HEADER = "# AgentSwitch 记忆\n\n摘要器在任务结束时追加的持久事实，一行一条，带来源任务。可随意删改；只放路由层知识，不放凭据。\n";
 export const MAX_FACT_CHARS = 300;

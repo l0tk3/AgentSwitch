@@ -9,6 +9,8 @@ export const OUT_DIR = "out";
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const MAX_FILES_PER_UPLOAD = 20;
 export const MAX_NAME_LENGTH = 120;
+/** A shortened name keeps its extension, up to this long. */
+const MAX_EXT_LENGTH = 16;
 export const UPLOAD_TTL_MS = 24 * 3600_000;
 export const ARTIFACT_TTL_MS = 7 * 86400_000;
 
@@ -29,7 +31,7 @@ export function safeName(raw: string): string {
   const noDot = base.startsWith(".") ? "_" + base.slice(1) : base;
   if (!noDot) return "file";
   if (noDot.length <= MAX_NAME_LENGTH) return noDot;
-  const ext = extname(noDot).slice(0, 16);
+  const ext = extname(noDot).slice(0, MAX_EXT_LENGTH);
   return noDot.slice(0, MAX_NAME_LENGTH - ext.length) + ext;
 }
 

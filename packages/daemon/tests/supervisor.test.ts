@@ -9,7 +9,7 @@ import type { TaskEvent } from "../src/engine/types.js";
 import { echoExecutor } from "../src/executors/echo.js";
 import type { Executor } from "../src/executors/types.js";
 import { echoRouter } from "../src/router/routers/echo.js";
-import type { Router } from "../src/router/routers/types.js";
+import type { Router } from "../src/core/modelCall.js";
 import { acceptMessage, isDestructive, routerSupervisor, SupervisorConfig, type Supervisor } from "../src/router/supervisor.js";
 import { decisionJson, realTargets } from "./helpers.js";
 
@@ -100,7 +100,7 @@ describe("Engine with a supervisor", () => {
     const silent: Executor = { harness: "codex", run: (input) => new Promise((resolve) => { input.signal.addEventListener("abort", () => resolve({ ok: false, exitCode: null, stderr: "cancelled" }), { once: true }); }) };
     const sup = fake({ checkIn: async (i) => (i.continues === 0 ? { action: "continue", note: "", ms: 1, source: "router" } : { action: "cancel", note: "stuck on nothing", ms: 1, source: "router" }) });
     const echo = echoExecutor("claude-code");
-    const { engine, store, events } = build([codex(), decisionJson({ harness: "claude-code", model: "claude-sonnet-5", effort: null, handoff_note: "codex went silent" })], sup, [silent, echo]);
+    const { engine, store, events } = build([codex(), decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null, handoff_note: "codex went silent" })], sup, [silent, echo]);
     const t = engine.submit({ task: "quiet", cwd: "/tmp/w1" });
     await engine.idle();
     const checkins = ofType(events, t.id, "supervisor").filter((e) => e.payload.kind === "checkin").map((e) => e.payload.action);

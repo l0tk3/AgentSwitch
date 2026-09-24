@@ -26,7 +26,7 @@ Record layout: login email | password | birth year | country | app password | se
 - account password (for mail.internal.example:8095): ${T}
 - app password (for mail.internal.example:8095): ${T}
 - session key (for mail.internal.example:8095): ${T}`;
-const deps = { targets, router: planner, quota: {}, running: {} };
+const deps = { targets, router: planner, quota: {} };
 const req = { task, cwd: mkdtempSync(join(tmpdir(), "planner-smoke-")), needsBrowser: true };   // spawn reports ENOENT for a missing cwd
 const show = (label: string, r: Awaited<ReturnType<typeof nextAction>>) => {
   const a = r.action;

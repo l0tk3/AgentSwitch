@@ -1,19 +1,23 @@
 /** The resident OpenCode server (router-v0 §2, decided 2026-09-22): one `opencode serve` process for the whole
  *  daemon; every router-type call (dispatch, summary, supervision) is a fresh session on it, ~1 s instead of a
  *  2-3 s cold start per `run --standalone`. The v2 API takes no per-call system prompt, so the instructions ride
- *  at the head of the user message and the configured agents carry only the tool policy. */
+ *  at the head of the user message and the configured agents carry only the tool policy.
+ *
+ *  The process is `opencode serve --stdio --port <AGENTSWITCH_OPENCODE_PORT>` (harness/opencodeStdio.ts, shared with
+ *  the executors' server): its password never reaches the processes it spawns, and it exits with the daemon. */
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import type { ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { basicAuth, startStdioServe, stopStdioServe } from "../../harness/opencodeStdio.js";
 import { stripProxy } from "../../util/env.js";
 import { sleep } from "../../util/sleep.js";
-import type { Router, RouterInput, RouterReply } from "./types.js";
+import type { Router, RouterInput, RouterReply } from "../../core/modelCall.js";
 
 export const DEFAULT_OPENCODE_PORT = 4712;
-const START_TIMEOUT_MS = 30_000;
 const POLL_MS = 250;
+/** Response text quoted in an API error. */
+const ERROR_BODY_CHARS = 200;
 const AGENT_PROMPT = "You are an AgentSwitch service agent. Your full instructions come at the head of each message, followed by the material to act on. Follow the instructions exactly and reply only as they say.";
 
 export type ServeAgent = "dispatcher" | "oracle";
@@ -36,64 +40,63 @@ type Json = Record<string, unknown>;
 
 export type OpenCodeServerOptions = {
   readonly binary: string;
+  /** Loopback port (AGENTSWITCH_OPENCODE_PORT); 0 lets the server pick one. */
   readonly port?: number;
-  readonly home: string;          // where the config file and logs go
+  readonly home: string;          // where the config file goes
   readonly gateHome: string;
+  /** Tests and tools: an already running server instead of spawning one. */
+  readonly endpoint?: { readonly url: string; readonly password: string };
+  readonly startTimeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
   readonly log?: (line: string) => void;
 };
 
 export class OpenCodeServer {
   private child: ChildProcess | null = null;
-  private readonly password = randomBytes(24).toString("base64url");
-  private readonly port: number;
+  private url: string | null = null;
+  private password = "";
   private readonly fetchImpl: typeof fetch;
   private readonly log: (line: string) => void;
 
   constructor(private readonly opts: OpenCodeServerOptions) {
-    this.port = opts.port ?? DEFAULT_OPENCODE_PORT;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.log = opts.log ?? ((l) => console.error(l));
   }
 
-  get baseUrl(): string { return `http://127.0.0.1:${this.port}`; }
-
-  /** Spawn and wait until /api/config answers. Throws when it does not come up in time. */
+  /** Spawn and wait until the server reports its address. Throws when it does not come up in time. */
   async start(): Promise<void> {
+    if (this.opts.endpoint) { this.url = this.opts.endpoint.url; this.password = this.opts.endpoint.password; return; }
     mkdirSync(this.opts.home, { recursive: true });
     const configPath = join(this.opts.home, "opencode.serve.json");
     writeFileSync(configPath, JSON.stringify(serveConfig(this.opts.gateHome)));
-    const env = { ...stripProxy(process.env), OPENCODE_CONFIG: configPath, OPENCODE_SERVER_PASSWORD: this.password, PWD: this.opts.home, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
-    this.child = spawn(this.opts.binary, ["serve", "--port", String(this.port), "--hostname", "127.0.0.1"], { cwd: this.opts.home, env, stdio: ["ignore", "ignore", "pipe"] });
-    let stderr = "";
-    this.child.stderr?.on("data", (d: Buffer) => { stderr = (stderr + d.toString()).slice(-2000); });
-    this.child.on("exit", (code) => { this.log(`opencode serve exited (${code}) ${stderr.trim().slice(-300)}`); this.child = null; });
-    this.child.on("error", (e) => { stderr += e.message; this.child = null; });   // e.g. binary missing
-    const deadline = Date.now() + START_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (!this.child) throw new Error(`opencode serve exited before it was ready: ${stderr.trim().slice(-300)}`);
-      try { if ((await this.fetchImpl(`${this.baseUrl}/api/config`, { headers: this.headers() })).ok) { this.log(`opencode serve ready on ${this.baseUrl}`); return; } } catch { /* not yet */ }
-      await sleep(POLL_MS);
-    }
-    this.stop();
-    throw new Error(`opencode serve did not answer within ${START_TIMEOUT_MS} ms: ${stderr.trim().slice(-300)}`);
+    const env = { ...stripProxy(process.env), OPENCODE_CONFIG: configPath, PWD: this.opts.home, NO_PROXY: "127.0.0.1,localhost", no_proxy: "127.0.0.1,localhost" };
+    const { child, url, password, stderrTail } = await startStdioServe({ binary: this.opts.binary, cwd: this.opts.home, env, port: this.opts.port ?? DEFAULT_OPENCODE_PORT, startTimeoutMs: this.opts.startTimeoutMs });
+    child.on("exit", (code) => {
+      if (this.child !== child) return;
+      this.log(`opencode serve exited (${code}) ${stderrTail()}`);
+      this.child = null; this.url = null;
+    });
+    this.child = child; this.url = url; this.password = password;
+    this.log(`opencode serve ready on ${url}`);
   }
 
-  get running(): boolean { return this.child !== null; }
+  get running(): boolean { return this.url !== null && (this.opts.endpoint !== undefined || this.child !== null); }
 
-  stop(): void {
-    this.child?.kill("SIGTERM");
-    this.child = null;
+  async stop(): Promise<void> {
+    const child = this.child;
+    this.child = null; this.url = null;
+    if (child) await stopStdioServe(child);
   }
 
   private headers(): Record<string, string> {
-    return { authorization: `Basic ${Buffer.from(`opencode:${this.password}`).toString("base64")}`, "content-type": "application/json" };
+    return { authorization: basicAuth(this.password), "content-type": "application/json" };
   }
 
   private async call(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<Json> {
-    const res = await this.fetchImpl(`${this.baseUrl}${path}`, { method, headers: this.headers(), ...(body !== undefined ? { body: JSON.stringify(body) } : {}), ...(signal ? { signal } : {}) });
+    if (!this.url) throw new Error(`opencode serve ${method} ${path}: the server is not running`);
+    const res = await this.fetchImpl(`${this.url}${path}`, { method, headers: this.headers(), ...(body !== undefined ? { body: JSON.stringify(body) } : {}), ...(signal ? { signal } : {}) });
     const text = await res.text();
-    if (!res.ok) throw new Error(`opencode serve ${method} ${path}: HTTP ${res.status} ${text.slice(0, 200)}`);
+    if (!res.ok) throw new Error(`opencode serve ${method} ${path}: HTTP ${res.status} ${text.slice(0, ERROR_BODY_CHARS)}`);
     return text ? (JSON.parse(text) as Json) : {};
   }
 

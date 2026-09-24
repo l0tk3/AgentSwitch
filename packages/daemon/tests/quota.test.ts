@@ -193,19 +193,27 @@ describe("quota refresh deadlines", () => {
     const dir = mkdtempSync(join(tmpdir(), "agentswitch-quota-child-"));
     const executable = join(dir, "fake-agent.cjs"), pidFile = join(dir, "pid");
     // A real local process that never emits a protocol response. It cannot reach a model or the network.
-    writeFileSync(executable, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`, { mode: 0o700 });
+    // The pid is renamed into place so a reader never sees a half-written file (an empty pid would mean process group 0).
+    writeFileSync(executable, `#!${process.execPath}\nconst fs = require('node:fs');\nfs.writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, String(process.pid));\nfs.renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`, { mode: 0o700 });
+    const readPid = () => existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8")) || 0 : 0;
     const provider = harness === "codex" ? codexQuota({ binary: executable })
       : claudeQuota({ cache: new RateLimitCache(), probe: (signal) => probeRateLimits(undefined, executable, signal) });
-    const svc = new QuotaService([provider], 1000, Date.now, 2000);
+    // The deadline expires once the child is known to be running, never on a race with its start-up.
+    let expire: (() => void) | undefined;
+    const svc = new QuotaService([provider], 1000, Date.now, 2000, (_ms, fire) => { expire = fire; return () => undefined; });
     try {
       const refresh = svc.refresh();
-      await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 1500, interval: 10 }).catch(async (error) => { throw new Error(`${String(error)}; reading=${JSON.stringify(await refresh)}`); });
-      const pid = Number(readFileSync(pidFile, "utf8"));
+      const pid = await vi.waitFor(() => { const pid = readPid(); expect(pid).toBeGreaterThan(0); return pid; }, { timeout: 15_000, interval: 10 })
+        .catch(async (error) => { expire?.(); throw new Error(`${String(error)}; reading=${JSON.stringify(await refresh)}`); });
+      expect(expire).toBeDefined();
+      expire!();
       expect(await refresh).toEqual([expect.objectContaining({ error: "quota timed out after 2000 ms" })]);
-      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 3500, interval: 20 });
+      // Codex kills at once; the Claude SDK sends SIGTERM after its own close grace. The bound only limits a failure.
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 20_000, interval: 20 });
     } finally {
-      if (existsSync(pidFile)) { try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch { /* already gone */ } }
+      const pid = readPid();
+      if (pid > 0) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 8000);
+  }, 45_000);
 });

@@ -2,7 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { contextSection, EMPTY_CONTEXT, lintContext, loadContext, MAX_CONTEXT_BYTES } from "../src/router/context.js";
+import { contextSection } from "../src/router/context.js";
+import { EMPTY_CONTEXT, lintContext, loadContext, MAX_CONTEXT_BYTES } from "../src/core/contextDoc.js";
 import { systemPrompt } from "../src/router/prompt.js";
 import { route } from "../src/router/route.js";
 import { echoRouter } from "../src/router/routers/echo.js";
@@ -29,6 +30,18 @@ describe("context lint", () => {
     const { text, warnings } = lintContext(raw);
     expect(warnings).toEqual([]);
     expect(text).toBe(raw);
+  });
+
+  it("a key or a one-time code is a credential too", () => {
+    const { text, warnings } = lintContext(["- 站点 A", "  密钥: abcd1234efgh", "  验证码: 482913"].join("\n"));
+    expect(warnings).toHaveLength(2);
+    expect(text).not.toMatch(/abcd1234efgh|482913/);
+  });
+
+  it("is stable: linting its own output warns about nothing again", () => {
+    const once = lintContext(["- 站点 A", "  密码 Hunter2-Real"].join("\n"));
+    expect(once.warnings).toHaveLength(1);
+    expect(lintContext(once.text)).toEqual({ text: once.text, warnings: [] });
   });
 
   it("truncates oversized files", () => {
@@ -58,7 +71,7 @@ describe("context in the pipeline", () => {
     writeFileSync(file, `## 站点\n- core：http://core.internal.example:8400/\n  密码 ${TOKEN}\n  密码 leaked-plain\n`);
     const ctx = loadContext(file);
     const r = echoRouter([decisionJson()]);
-    await route({ task: "登录 core 看首页标题", cwd: dir }, { targets: realTargets(), router: r, quota: {}, running: {}, context: ctx });
+    await route({ task: "登录 core 看首页标题", cwd: dir }, { targets: realTargets(), router: r, quota: {}, context: ctx });
     const system = r.calls[0]!.system;
     expect(system).toContain("User environment context");
     expect(system).toContain(TOKEN);

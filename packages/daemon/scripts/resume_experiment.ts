@@ -10,8 +10,8 @@ import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, readFile
 import { homedir, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { AppServerClient, type Json } from "../src/executors/appserver.js";
-import { stripProxy } from "../src/executors/gate.js";
+import { AppServerClient, type Json } from "../src/harness/appserver.js";
+import { stripProxy } from "../src/util/env.js";
 
 const HERE = new URL(".", import.meta.url).pathname;
 const CLAUDE_MODEL = "claude-haiku-4-5-20251001";

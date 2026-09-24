@@ -7,13 +7,13 @@ const targets = realTargets();
 
 describe("plannerFor", () => {
   it("a listed pick with quota wins; an unlisted or exhausted pick falls back to the yaml planner; nothing usable → null", () => {
-    const withDefault = { ...targets, router: { ...targets.router, planner: { harness: "claude-code", model: "claude-sonnet-5" } } };
+    const withDefault = { ...targets, router: { ...targets.router, planner: { harness: "claude-code", model: "claude-sonnet-4-6" } } };
     const f = plannerFor(withDefault, undefined, () => ({}));
     expect(f({ harness: "claude-code", model: "claude-opus-5" })).toMatchObject({ target: { harness: "claude-code", model: "claude-opus-5" }, router: { name: "claude:claude-opus-5" } });
     expect(f({ harness: "codex", model: "gpt-5.5" })).toMatchObject({ target: { harness: "codex", model: "gpt-5.5" }, router: { name: "codex:gpt-5.5" } });
-    expect(f({ harness: "nope", model: "x" })).toMatchObject({ target: { harness: "claude-code", model: "claude-sonnet-5" } });
-    expect(f({ harness: "claude-code", model: "not-listed" })).toMatchObject({ target: { harness: "claude-code", model: "claude-sonnet-5" } });
-    expect(f(null)).toMatchObject({ target: { harness: "claude-code", model: "claude-sonnet-5" } });
+    expect(f({ harness: "nope", model: "x" })).toMatchObject({ target: { harness: "claude-code", model: "claude-sonnet-4-6" } });
+    expect(f({ harness: "claude-code", model: "not-listed" })).toMatchObject({ target: { harness: "claude-code", model: "claude-sonnet-4-6" } });
+    expect(f(null)).toMatchObject({ target: { harness: "claude-code", model: "claude-sonnet-4-6" } });
     const dry = plannerFor(withDefault, undefined, () => ({ "claude-code": 0 }));
     expect(dry({ harness: "claude-code", model: "claude-opus-5" })).toBeNull();
     expect(dry({ harness: "codex", model: "gpt-5.5" })).toMatchObject({ target: { harness: "codex" } });

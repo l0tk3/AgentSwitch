@@ -20,10 +20,10 @@ describe("credential-repair capability wiring", () => {
     const cfg = opencodeGateConfig(gate, "/profile", true, repair);
     expect(cfg.mcp["secret-gate"]).toMatchObject({ environment: expected });
     expect(cfg.mcp.playwright).toMatchObject({ environment: { SECRET_GATE_HOME: gate.home } });
-    const executor = opencodeExecConfig(gate, "/profile", true, undefined, { mcp: { extra: { environment: { PATH: "/bin" } } } }, repair) as { mcp: Record<string, { environment: Record<string, string> }> };
+    const executor = opencodeExecConfig(gate, "/profile", true, { mcp: { extra: { environment: { PATH: "/bin" } } } }, repair) as { mcp: Record<string, { environment: Record<string, string> }> };
     expect(executor.mcp["secret-gate"]!.environment).toEqual(expected);
     expect(executor.mcp.extra!.environment).not.toHaveProperty("SECRET_GATE_REPAIR_KEY");
-    expect(JSON.stringify(opencodeExecConfig(null, "/profile", false, undefined, {}, repair))).not.toContain(repair.key);
+    expect(JSON.stringify(opencodeExecConfig(null, "/profile", false, {}, repair))).not.toContain(repair.key);
   });
 
   it("Codex stores the capability in gate MCP env, never shell policy or the browser", () => {

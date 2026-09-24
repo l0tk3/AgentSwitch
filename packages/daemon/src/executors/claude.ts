@@ -3,19 +3,22 @@
  *  User settings are not loaded (settingSources: []); the gate proxy goes into the tool env. */
 
 import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
-import { detectRefusal, NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome, type RefusalSignal } from "../router/failure.js";
+import { detectRefusal, NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome, type RefusalSignal } from "../core/outcome.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
 import { autoAllowedMcp, claudeMcpFromRegistry, claudePluginDir, mcpServerOf } from "./extensions.js";
-import { claudeMcpServers, gateEnv, mcpServerEnv, withoutCredentialRepair, type GateOptions } from "./gate.js";
+import { claudeMcpServers, gateEnv, gateRun, mcpServerEnv, reportTransfer, withoutCredentialRepair, type GateOptions } from "./gate.js";
+import type { TransferGrant } from "../core/transfer.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
-import { commandTouchesProtected, isProtected, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
+import { interruptedOutcome, watchRunStop } from "./lifecycle.js";
+import { commandTouchesProtected, containsReadDenied, isProtected, isReadDenied, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import { repairInValue, shortToken } from "./tokens.js";
-import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../engine/questions.js";
+import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../core/questions.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
+import { APPROVAL_EVIDENCE_CHARS } from "../core/limits.js";
 
 export type ClaudeExecutorOptions = {
   readonly gate?: GateOptions | null;
@@ -37,6 +40,22 @@ const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 export type ToolDecision = { kind: "allow" } | { kind: "ask"; action: string; evidence: string } | { kind: "deny"; reason: string };
 
 export const PROTECTED_DENIAL = "denied by AgentSwitch: this path holds the daemon's own configuration or credentials; the model cannot change its own constraints";
+export const READ_DENIAL = "denied by AgentSwitch: this path holds credentials (gate keys, browser sessions, TLS keys) that executors may not read";
+export const SEARCH_DENIAL = "denied by AgentSwitch: this directory contains credentials (gate keys, browser sessions, TLS keys) that executors may not read; search a narrower directory";
+const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS", "NotebookRead"]);
+
+/** The paths a read tool would look at: its file or directory, and for Glob an absolute pattern's fixed prefix. */
+function readTargets(toolName: string, input: Record<string, unknown>): string[] {
+  const home = process.env.HOME ?? "";
+  const expand = (p: string) => (p.startsWith("~") ? home + p.slice(1) : p);
+  const out = [input.file_path, input.path, input.notebook_path].filter((v): v is string => typeof v === "string").map(expand);
+  if (toolName === "Glob" && typeof input.pattern === "string") {
+    const pattern = expand(input.pattern);
+    const fixed = pattern.slice(0, pattern.search(/[*?[{]/) === -1 ? pattern.length : pattern.search(/[*?[{]/));
+    if (fixed.startsWith("/") || fixed.startsWith(".")) out.push(fixed);
+  }
+  return out;
+}
 
 /** Real path of `p` even when it does not exist yet: realpath of the nearest existing ancestor + the rest.
  *  macOS reports the temp dir as /var/... and /private/var/... interchangeably. */
@@ -55,6 +74,14 @@ export function canonical(p: string): string {
 
 /** Policy: what needs a human. `cwd` should already be canonical; `allowedMcp` = registry servers marked approval=allow. */
 export function decideTool(toolName: string, input: Record<string, unknown>, cwd: string, allowedMcp: ReadonlySet<string> = new Set(), prot: ProtectedPaths = NO_PROTECTED): ToolDecision {
+  if (READ_TOOLS.has(toolName)) {
+    const targets = readTargets(toolName, input);
+    const hit = targets.find((p) => isReadDenied(p, cwd, prot));
+    if (hit) return { kind: "deny", reason: `${READ_DENIAL} (${hit})` };
+    // A content search above a credential store would read it too; a Glob only lists names.
+    const wide = toolName === "Grep" ? targets.find((p) => containsReadDenied(p, cwd, prot)) : undefined;
+    if (wide) return { kind: "deny", reason: `${SEARCH_DENIAL} (${wide})` };
+  }
   if (READ_ONLY.has(toolName) || toolName === "Skill") return { kind: "allow" };
   const server = mcpServerOf(toolName);
   if (server && (server === "secret-gate" || server === "playwright" || allowedMcp.has(server))) return { kind: "allow" };
@@ -63,7 +90,7 @@ export function decideTool(toolName: string, input: Record<string, unknown>, cwd
     const p = raw === null ? null : canonical(resolve(cwd, raw));
     if (p && isProtected(p, cwd, prot)) return { kind: "deny", reason: `${PROTECTED_DENIAL} (${p})` };
     if (p && (p === cwd || p.startsWith(cwd + sep))) return { kind: "allow" };
-    return { kind: "ask", action: `${toolName} outside cwd: ${p ?? "?"}`, evidence: JSON.stringify(input).slice(0, 1000) };
+    return { kind: "ask", action: `${toolName} outside cwd: ${p ?? "?"}`, evidence: JSON.stringify(input).slice(0, APPROVAL_EVIDENCE_CHARS) };
   }
   if (toolName === "Bash") {
     const command = String(input.command ?? "");
@@ -71,7 +98,7 @@ export function decideTool(toolName: string, input: Record<string, unknown>, cwd
     if (hit) return { kind: "deny", reason: `${PROTECTED_DENIAL} (${hit})` };
     return { kind: "ask", action: `Bash: ${command}`, evidence: String(input.description ?? "") };
   }
-  return { kind: "ask", action: `${toolName}`, evidence: JSON.stringify(input).slice(0, 1000) };
+  return { kind: "ask", action: `${toolName}`, evidence: JSON.stringify(input).slice(0, APPROVAL_EVIDENCE_CHARS) };
 }
 
 export type AgentEvent = { readonly agentId: string; readonly status: "started" | "progress" | "completed" | "failed" | "stopped"; readonly description: string; readonly summary?: string; readonly tokens?: number; readonly background?: boolean };
@@ -187,20 +214,43 @@ function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: Readonly
   };
 }
 
-type RunSetup = { readonly options: Options; readonly runDir: string };
+type RunSetup = { readonly options: Options; readonly runDir: string; readonly transfer: TransferGrant | null };
+
+/** MCP config as a 0600 file in the run's private (0700) dir. The SDK would put `mcpServers`, env included, into the
+ *  CLI's argv as `--mcp-config '<json>'`, readable by any local user through `ps`: that env holds the execution scope,
+ *  the repair key and the transfer grant. `--mcp-config <file>` is read by the CLI at start (verified against the
+ *  bundled 2.1.278 CLI: argv carries only the path, the servers get their env). Removed with the run dir. */
+export function mcpConfigFile(runDir: string, mcpServers: Record<string, unknown>): string {
+  const path = join(runDir, "mcp.json");
+  writeFileSync(path, JSON.stringify({ mcpServers }), { mode: 0o600 });
+  return path;
+}
+
+/** The run's private dir and SDK options; a failed setup removes the dir. The caller removes it after the run. */
+function setupRun(input: ExecutionInput, opts: ClaudeExecutorOptions, cwd: string, canUseTool: CanUseTool, abort: AbortController): RunSetup {
+  const runDir = mkdtempSync(join(tmpdir(), "agentswitch-claude-"));
+  try {
+    return { runDir, ...runOptions(runDir, input, opts, cwd, canUseTool, abort) };
+  } catch (err) {
+    rmSync(runDir, { recursive: true, force: true });
+    throw err;
+  }
+}
 
 /** SDK options for one run: private config dir, gate proxy + MCP, registry MCP + skills plugin, resume handle. */
-function setupRun(input: ExecutionInput, opts: ClaudeExecutorOptions, cwd: string, canUseTool: CanUseTool, abort: AbortController): RunSetup {
+function runOptions(runDir: string, input: ExecutionInput, opts: ClaudeExecutorOptions, cwd: string, canUseTool: CanUseTool, abort: AbortController): Omit<RunSetup, "runDir"> {
   const ext = opts.extensions ?? NO_EXTENSIONS;
   const servers = ext.mcpFor("claude-code");
-  const runDir = mkdtempSync(join(tmpdir(), "agentswitch-claude-"));
-  const profile = join(runDir, "profile");
+  const profile = input.browserProfile ?? join(runDir, "profile");
   const pluginRoot = join(runDir, "plugin");
   ext.skillsInto("claude-code", join(pluginRoot, "skills"));
   const plugin = claudePluginDir(pluginRoot, join(pluginRoot, "skills"));
   const browser = (opts.browser ?? true) && input.browser;
-  const baseEnv = { ...(opts.gate ? gateEnv(opts.gate) : {}), ...claudeHomeEnv(input.threadHome) };
-  const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser, input.credentialRepair) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
+  const run = gateRun(input, browser);
+  // The Bash tool inherits this env: its proxy URL carries the execution scope; registry MCP servers do not.
+  const baseEnv = { ...(opts.gate ? gateEnv(opts.gate, run.scope) : {}), ...claudeHomeEnv(input.threadHome) };
+  const mcpServers = { ...(opts.gate ? claudeMcpServers(opts.gate, profile, browser, input.credentialRepair, run) : {}), ...claudeMcpFromRegistry(servers, mcpServerEnv(opts.gate)) };
+  reportTransfer(input, run, "claude-code", !!opts.gate, browser);
   const options: Options = {
     cwd, model: input.model, canUseTool, permissionMode: "default", settingSources: [],
     systemPrompt: { type: "preset", preset: "claude_code", append: executorInstructions() },
@@ -208,11 +258,11 @@ function setupRun(input: ExecutionInput, opts: ClaudeExecutorOptions, cwd: strin
     ...(input.effort && EFFORTS.has(input.effort) ? { effort: input.effort as EffortLevel } : {}),
     env: { ...withoutCredentialRepair(process.env), ...baseEnv, GIT_EDITOR: "true" } as Record<string, string>,
     ...(input.resume ? { resume: input.resume } : {}),
-    ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
+    ...(Object.keys(mcpServers).length ? { extraArgs: { "mcp-config": mcpConfigFile(runDir, mcpServers) } } : {}),
     ...(plugin ? { plugins: [{ type: "local" as const, path: plugin }], skills: "all" as const } : {}),
     ...(opts.executable ? { pathToClaudeCodeExecutable: opts.executable } : {}),
   };
-  return { options, runDir };
+  return { options, transfer: opts.gate ? run.transfer ?? null : null };
 }
 
 /** Stream what changed between two folds to the engine. */
@@ -232,31 +282,28 @@ export function claudeExecutor(opts: ClaudeExecutorOptions = {}): Executor {
       const granted = { count: 0 };
       const allowedMcp = autoAllowedMcp((opts.extensions ?? NO_EXTENSIONS).mcpFor("claude-code"));
       const abort = new AbortController();
-      const onAbort = () => abort.abort();
-      input.signal.addEventListener("abort", onAbort, { once: true });
-      if (input.signal.aborted) onAbort();
-      let timedOut = false;
-      const timer = opts.maxMs ? setTimeout(() => { timedOut = true; abort.abort(); }, opts.maxMs) : null;
-      const { options, runDir } = setupRun(input, opts, cwd, permissionHook(input, cwd, allowedMcp, opts.protected ?? NO_PROTECTED, granted), abort);
+      const { options, runDir, transfer } = setupRun(input, opts, cwd, permissionHook(input, cwd, allowedMcp, opts.protected ?? NO_PROTECTED, granted), abort);
+      // The SDK stops its CLI through our AbortController; no maxMs means no deadline here (the daemon always sets one).
+      const stop = watchRunStop(input.signal, opts.maxMs || null, () => abort.abort());
       let state: Folded = EMPTY_FOLD;
+      const timedOutOutcome = () => interruptedOutcome(outcomeFromFold(state, granted.count, false),
+        { exitCode: null, stderr: `timed out after ${opts.maxMs} ms`, lastText: state.text.join("\n"), timedOut: true });
       try {
-        for await (const msg of query({ prompt: composePrompt(input), options })) {
+        for await (const msg of query({ prompt: composePrompt({ ...input, transfer }), options })) {
           const before = state;
           state = foldMessage(state, msg);
           if (msg.type === "rate_limit_event") opts.rateLimits?.record(msg.rate_limit_info);
           emitDelta(input, before, state);
         }
       } catch (err) {
-        return { ...outcomeFromFold(state, granted.count, input.signal.aborted), ok: false,
-          exitCode: timedOut || input.signal.aborted ? null : 1, stderr: timedOut ? `timed out after ${opts.maxMs} ms` : (err as Error).message,
-          lastText: state.text.join("\n"), timedOut, sideEffectsKnown: false };
+        if (stop.timedOut) return timedOutOutcome();
+        return interruptedOutcome(outcomeFromFold(state, granted.count, input.signal.aborted),
+          { exitCode: input.signal.aborted ? null : 1, stderr: (err as Error).message, lastText: state.text.join("\n"), timedOut: false });
       } finally {
-        if (timer) clearTimeout(timer);
-        input.signal.removeEventListener("abort", onAbort);
+        stop.dispose();
         rmSync(runDir, { recursive: true, force: true });
       }
-      if (timedOut) return { ...outcomeFromFold(state, granted.count, false), ok: false, exitCode: null, stderr: `timed out after ${opts.maxMs} ms`, lastText: state.text.join("\n"), timedOut: true, sideEffectsKnown: false };
-      return outcomeFromFold(state, granted.count, input.signal.aborted);
+      return stop.timedOut ? timedOutOutcome() : outcomeFromFold(state, granted.count, input.signal.aborted);
     },
   };
 }
@@ -269,7 +316,8 @@ export async function probeRateLimits(model = "claude-haiku-4-5-20251001", execu
   let probe: ReturnType<typeof query> | undefined;
   const onAbort = () => { abortController.abort(signal?.reason); probe?.close(); };
   signal?.addEventListener("abort", onAbort, { once: true });
-  const options: Options = { model, maxTurns: 1, permissionMode: "default", settingSources: [], abortController, canUseTool: async () => ({ behavior: "deny", message: "probe" }), ...(executable ? { pathToClaudeCodeExecutable: executable } : {}) };
+  // Neutral cwd, like model discovery: no CLAUDE.md search through privacy-protected parents.
+  const options: Options = { model, maxTurns: 1, permissionMode: "default", settingSources: [], abortController, cwd: tmpdir(), canUseTool: async () => ({ behavior: "deny", message: "probe" }), ...(executable ? { pathToClaudeCodeExecutable: executable } : {}) };
   try {
     probe = query({ prompt: "Reply with the single word: ok", options });
     for await (const msg of probe) {

@@ -13,7 +13,7 @@ import { echoExecutor } from "../src/executors/echo.js";
 import type { Executor } from "../src/executors/types.js";
 import { MAX_DISPATCHES, nextAction, parseLoopReply } from "../src/router/loop.js";
 import { echoRouter } from "../src/router/routers/echo.js";
-import type { Router } from "../src/router/routers/types.js";
+import type { Router } from "../src/core/modelCall.js";
 import type { Supervisor } from "../src/router/supervisor.js";
 import { decisionJson, realTargets } from "./helpers.js";
 
@@ -33,7 +33,7 @@ function build(o: Build = {}) {
   const router = echoRouter(o.router ?? [codex({ plan: "multi", reason: "look first" })]);
   const planner = o.planner === null ? null : echoRouter(o.planner ?? [finish("planned")]);
   const picks: Pick[] = [];
-  const factory = (pick: Pick) => { picks.push(pick); return planner ? { router: planner, target: pick ?? { harness: "claude-code", model: "claude-sonnet-5" } } : null; };
+  const factory = (pick: Pick) => { picks.push(pick); return planner ? { router: planner, target: pick ?? { harness: "claude-code", model: "claude-sonnet-4-6" } } : null; };
   const supervisor: Supervisor = o.supervisor ?? {
     config: { approvals: false, watchdog_ms: 0, acceptance: false, max_continues: 0 },
     approve: async () => ({ decision: "ask_user", reason: "", ms: 0, source: "router" }),
@@ -65,18 +65,18 @@ describe("parseLoopReply", () => {
 
 describe("nextAction", () => {
   const req = { task: "do it", cwd: "/tmp" };
-  const deps = (router: Router) => ({ targets, router, quota: {}, running: {} });
+  const deps = (router: Router) => ({ targets, router, quota: {} });
   it("shows the steps and the excluded targets, validates a dispatch against the floor, and reports an unusable model", async () => {
-    const r = echoRouter([codex({ harness: "claude-code", model: "claude-sonnet-5" })]);
+    const r = echoRouter([codex({ harness: "claude-code", model: "claude-sonnet-4-6" })]);
     const steps = [{ kind: "dispatch" as const, purpose: "research" as const, harness: "codex", model: "gpt-5.5", brief: "look", ok: true, failureKind: null, reply: "found 3 fields", sideEffects: "files changed 0, commands 1, approvals 0", outFiles: [], diff: "" }];
-    const out = await nextAction(r, deps(r), { req, steps, used: 1, budget: 5, exclude: [{ harness: "claude-code", model: "claude-sonnet-5" }] });
+    const out = await nextAction(r, deps(r), { req, steps, used: 1, budget: 5, exclude: [{ harness: "claude-code", model: "claude-sonnet-4-6" }] });
     expect(out.action).toMatchObject({ kind: "dispatch", source: "default", verdict: { ok: true } });   // the excluded target fell to the default policy
     expect((out.action as { verdict: { harness: string } }).verdict.harness).not.toBe("claude-code");
     expect(r.calls[0]!.task).toContain("1. dispatch [research] codex/gpt-5.5");
     expect(r.calls[0]!.task).toContain("step succeeded (task completion unverified). Reply: found 3 fields");
     expect(r.calls[0]!.task).toContain("Dispatches used: 1 of 5.");
     expect(r.calls[0]!.system).toContain("step by step");
-    expect(r.calls[0]!.system).not.toContain("claude-sonnet-5:");
+    expect(r.calls[0]!.system).not.toContain("claude-sonnet-4-6:");
     const bad = echoRouter(["garbage", "garbage"]);
     expect(await nextAction(bad, deps(bad), { req, steps: [], used: 0, budget: 5, exclude: [] })).toMatchObject({ action: null, routerError: expect.stringContaining("JSON"), failure: { kind: "invalid_response", tries: 2 } });
     const repair = echoRouter([codex({ action: "repair", repair: { tool: "restart_gate", args: {} } })]);

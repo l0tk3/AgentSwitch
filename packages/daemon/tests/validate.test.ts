@@ -5,13 +5,13 @@ import { markUnavailable } from "../src/router/targets.js";
 import { realTargets } from "./helpers.js";
 
 const targets = realTargets();
-const base: Context = { targets, quota: {}, running: {}, lowConfidenceTarget: { harness: "claude-code", model: "claude-sonnet-5" } };
+const base: Context = { targets, quota: {}, lowConfidenceTarget: { harness: "claude-code", model: "claude-sonnet-4-6" } };
 const d = (over: Record<string, unknown> = {}) =>
   Decision.parse({ harness: "codex", model: "gpt-6-astra", effort: "high", brief: "x", confidence: 0.9, ...over });
 
 describe("validateDecision", () => {
   it("passes a listed harness/model/effort straight through", () => {
-    expect(validateDecision(d(), base)).toMatchObject({ ok: true, harness: "codex", model: "gpt-6-astra", effort: "high", chosen: "router", queue: false });
+    expect(validateDecision(d(), base)).toMatchObject({ ok: true, harness: "codex", model: "gpt-6-astra", effort: "high", chosen: "router" });
   });
 
   it("null model resolves to the harness default", () => {
@@ -33,7 +33,7 @@ describe("validateDecision", () => {
   });
 
   it("browser tasks need a browser-capable harness", () => {
-    const v = validateDecision(d({ harness: "opencode", model: null, effort: null, needs_browser: true, fallbacks: [{ harness: "claude-code", model: "claude-sonnet-5" }] }), base);
+    const v = validateDecision(d({ harness: "opencode", model: null, effort: null, needs_browser: true, fallbacks: [{ harness: "claude-code", model: "claude-sonnet-4-6" }] }), base);
     expect(v).toMatchObject({ ok: true, harness: "claude-code", chosen: "fallback" });
     const none = validateDecision(d({ harness: "opencode", model: null, effort: null, needs_browser: true }), base);
     expect(none).toMatchObject({ ok: false });
@@ -48,14 +48,15 @@ describe("validateDecision", () => {
     expect(validateDecision(d(), gone).notes[0]).toContain("unavailable");
   });
 
-  it("full harness queues instead of switching", () => {
-    expect(validateDecision(d(), { ...base, running: { codex: 1 } })).toMatchObject({ ok: true, harness: "codex", queue: true });
-    expect(validateDecision(d(), { ...base, running: { codex: 0 } })).toMatchObject({ queue: false });
+  it("concurrency is not the floor's business: no queue flag or note; the scheduler waits for a max_concurrent slot", () => {
+    const busy = validateDecision(d(), base);
+    expect(busy).toMatchObject({ ok: true, harness: "codex", chosen: "router", notes: [] });
+    expect(busy).not.toHaveProperty("queue");
   });
 
   it("low confidence keeps only the brief: target comes from the default policy", () => {
     const v = validateDecision(d({ confidence: 0.2 }), base);
-    expect(v).toMatchObject({ ok: true, harness: "claude-code", model: "claude-sonnet-5", chosen: "default", effort: null });
+    expect(v).toMatchObject({ ok: true, harness: "claude-code", model: "claude-sonnet-4-6", chosen: "default", effort: null });
     expect(v.notes[0]).toContain("below 0.5");
   });
 });

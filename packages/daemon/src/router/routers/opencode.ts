@@ -10,7 +10,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripProxy } from "../../util/env.js";
-import type { Router, RouterInput, RouterReply } from "./types.js";
+import type { Router, RouterInput, RouterReply } from "../../core/modelCall.js";
+
+/** Stderr quoted when `opencode run` fails. */
+const STDERR_QUOTE_CHARS = 400;
 
 export type OpenCodeRouterOptions = {
   readonly binary?: string;
@@ -88,6 +91,6 @@ function run(cmd: string, args: string[], cwd: string, env: Record<string, strin
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
     child.on("error", (e) => reject(signal.aborted ? new Error("router timed out") : e));
-    child.on("close", (code) => (code === 0 || out.length > 0 ? resolve(out) : reject(new Error(`opencode exited ${code}: ${err.slice(0, 400)}`))));
+    child.on("close", (code) => (code === 0 || out.length > 0 ? resolve(out) : reject(new Error(`opencode exited ${code}: ${err.slice(0, STDERR_QUOTE_CHARS)}`))));
   });
 }

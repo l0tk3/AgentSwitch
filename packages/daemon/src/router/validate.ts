@@ -1,18 +1,16 @@
 /** The floor: pure checks that decide whether a router decision may be executed as-is. */
 
 import type { Decision } from "./decision.js";
-import type { Guards } from "../threads/record.js";
-import { allowedFor, modelSpec, type TargetRef, type Targets } from "./targets.js";
+import type { Guards } from "./record.js";
+import { allowedFor, modelSpec, type Targets } from "./targets.js";
+import type { TargetRef } from "../core/target.js";
 
 /** Fraction of quota left per harness, 0..1. Missing harness = unknown = treated as available. */
 export type Quota = Readonly<Record<string, number>>;
-/** Tasks currently running per harness. */
-export type Running = Readonly<Record<string, number>>;
 
 export type Context = {
   readonly targets: Targets;
   readonly quota: Quota;
-  readonly running: Running;
   /** Where a low-confidence decision goes instead of the router's pick (default policy). */
   readonly lowConfidenceTarget: TargetRef;
   /** Category detected from the task text (keyword floor); the router's own `category` is merged in. */
@@ -30,7 +28,6 @@ export type Verdict =
       readonly model: string;
       readonly effort: string | null;
       readonly chosen: Chosen;
-      readonly queue: boolean;
       readonly notes: readonly string[];
     }
   | { readonly ok: false; readonly notes: readonly string[] };
@@ -64,10 +61,11 @@ export function validateTarget(ref: TargetRef, ctx: Context, needsBrowser: boole
   const reason = rejectReason(ref, chosen === "pin" ? { ...ctx, category: null } : ctx, needsBrowser, null);
   if (reason) return { ok: false, notes: [`${chosen} rejected: ${reason}`] };
   const warn = chosen === "pin" && !allowedFor(ctx.targets, ctx.category ?? null, ref) ? [`pinned ${ref.harness}/${ref.model} is outside the ${ctx.category} allow list; it may refuse`] : [];
-  return accept(ref, null, chosen, ctx, warn);
+  return accept(ref, null, chosen, warn);
 }
 
-/** The user's pinned target: skips the router entirely; still subject to catalog, browser, quota and concurrency. */
+/** The user's pinned target: skips the router entirely; still subject to catalog, browser and quota (a busy harness is
+ *  the scheduler's wait, not a rejection). */
 export function validatePin(pin: TargetRef, ctx: Context, needsBrowser = false): Verdict {
   return validateTarget(pin, ctx, needsBrowser, "pin");
 }
@@ -101,21 +99,13 @@ export function validateDecision(decision: Decision, base: Context): Verdict {
       notes.push(`${cand.ref.harness}/${cand.ref.model}: ${reason}`);
       continue;
     }
-    return accept(cand.ref, effort, cand.chosen, ctx, notes);
+    return accept(cand.ref, effort, cand.chosen, notes);
   }
   return { ok: false, notes: [...notes, "no candidate can run"] };
 }
 
-function accept(ref: TargetRef, effort: string | null, chosen: Chosen, ctx: Context, notes: readonly string[]): Verdict {
-  const max = ctx.targets.harnesses[ref.harness]?.max_concurrent ?? 1;
-  const queue = (ctx.running[ref.harness] ?? 0) >= max;
-  return {
-    ok: true,
-    harness: ref.harness,
-    model: ref.model,
-    effort,
-    chosen,
-    queue,
-    notes: queue ? [...notes, `${ref.harness} at max_concurrent; queued`] : notes,
-  };
+/** An executable verdict. Concurrency is not the floor's business: the engine's scheduler holds a dispatch until the
+ *  harness has a `max_concurrent` slot free (and announces the wait with a `waiting` event). */
+function accept(ref: TargetRef, effort: string | null, chosen: Chosen, notes: readonly string[]): Verdict {
+  return { ok: true, harness: ref.harness, model: ref.model, effort, chosen, notes };
 }

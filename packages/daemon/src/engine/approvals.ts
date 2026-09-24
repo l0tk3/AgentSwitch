@@ -4,7 +4,7 @@
 
 import type { ApprovalDecision } from "../executors/types.js";
 import type { EngineContext } from "./context.js";
-import { answersFromText, describeAnswers, encodeEvidence, parseEvidence, validateAnswers, type QuestionSource, type UserAnswers, type UserQuestion } from "./questions.js";
+import { answersFromText, describeAnswers, encodeEvidence, parseEvidence, validateAnswers, type QuestionSource, type UserAnswers, type UserQuestion } from "../core/questions.js";
 import { TERMINAL, type ApprovalStatus } from "./types.js";
 
 export type ResolvedBy = "user" | "router" | "timeout";

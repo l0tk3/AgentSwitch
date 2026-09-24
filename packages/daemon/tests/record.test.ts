@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregateRecords, guardsFor, recordText, type RecordRow } from "../src/threads/record.js";
+import { aggregateRecords, guardsFor, recordText, type RecordRow } from "../src/router/record.js";
 
 const NOW = 100 * 86400_000;
 const row = (over: Partial<RecordRow>): RecordRow => ({ taskId: "t", ts: NOW - 1000, kind: "code-multifile", harness: "claude-code", model: "claude-opus-5", status: "done", failureKind: null, ms: 60_000, tokens: 1000, approvals: 0, handedOff: false, pinned: false, userHandoff: false, rating: null, ...over });

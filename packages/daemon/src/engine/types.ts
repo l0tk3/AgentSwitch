@@ -3,12 +3,15 @@
 import type { Decision } from "../router/decision.js";
 import type { Attempt } from "../router/reroute.js";
 import type { Attachment } from "../files/uploads.js";
-import type { TargetRef } from "../router/targets.js";
+import type { TargetRef } from "../core/target.js";
 import type { ApprovalPolicy } from "./approvalPolicy.js";
 import type { SealedEntry } from "../secrets/sealer.js";
 
 /** Who handed this task over (threads-v0 §4); the engine builds the handoff package from it at dispatch. */
 export type HandoffFrom = TargetRef & { readonly taskId: string; readonly reason: "user" | `failure:${string}` | "quota" };
+
+/** question: waiting for the user's answer; planner_timeout / planner_error: the loop model gave no usable next action. */
+export type BlockCause = "question" | "planner_timeout" | "planner_error";
 
 export type TaskStatus = "queued" | "routing" | "running" | "waiting_approval" | "done" | "partial" | "blocked" | "failed" | "cancelled";
 
@@ -65,11 +68,16 @@ export type Task = {
   readonly rating: number | null;
   /** The summarizer's one-sentence account of the outcome (feedback line on the page, push text later). */
   readonly spoken: string | null;
+  /** The summarizer's spoken script for this run (threads-v0 §3), read aloud by the phone. */
+  readonly speech: string | null;
+  /** Why a blocked task stopped, for display without parsing `error` (null: not blocked, or no specific cause). */
+  readonly blockCause: BlockCause | null;
 };
 
 export type TaskEventType =
   | "queued"
   | "routed"
+  | "browser_session"   // threads-v0 §4b: which kept browser profile a run got {slot, reused, reason}, or none when all are busy
   | "dispatched"
   | "text"
   | "tool_call"
@@ -95,6 +103,7 @@ export type TaskEventType =
   | "feedback"
   | "rated"
   | "sealed"
+  | "transfer_grant"
   | "step";
 
 export type TaskEvent = {
@@ -120,6 +129,16 @@ export type Approval = {
   readonly status: ApprovalStatus;
   readonly resolvedAt: number | null;
   readonly answer: string | null;
+};
+
+/** A paired phone (app-v0 §2 设备令牌). The store keeps only the SHA-256 of its token, and never hands it out here. */
+export type Device = {
+  readonly id: string;
+  readonly name: string;
+  readonly platform: string;
+  readonly createdAt: number;
+  readonly lastSeenAt: number | null;
+  readonly revokedAt: number | null;
 };
 
 export const TERMINAL: ReadonlySet<TaskStatus> = new Set(["done", "partial", "blocked", "failed", "cancelled"]);

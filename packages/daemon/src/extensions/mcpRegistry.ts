@@ -4,6 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { zodIssues } from "../util/zod.js";
 import { type Harness, McpServer } from "./types.js";
 
 const File = z.object({ servers: z.array(McpServer).default([]) });
@@ -11,7 +12,7 @@ const File = z.object({ servers: z.array(McpServer).default([]) });
 export function readServers(path: string): McpServer[] {
   if (!existsSync(path)) return [];
   const parsed = File.safeParse(JSON.parse(readFileSync(path, "utf8")));
-  if (!parsed.success) throw new Error(`${path}: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  if (!parsed.success) throw new Error(`${path}: ${zodIssues(parsed.error)}`);
   return parsed.data.servers;
 }
 
