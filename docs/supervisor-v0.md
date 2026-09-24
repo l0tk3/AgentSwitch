@@ -63,7 +63,7 @@
 router:
   supervisor:
     approvals: true        # 替用户批（底线之外）
-    watchdog_ms: 480000    # 无事件多久后看一眼；0 关闭
+    watchdog_ms: 180000    # 无事件多久后看一眼；0 关闭（2026-09-24 由 8 分钟改为 3 分钟：手机上 8 分钟没动静就像卡死了）
     acceptance: true       # done 后验收
 ```
 

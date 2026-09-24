@@ -63,6 +63,7 @@ iPhone (SwiftUI)                                   Mac (launchd 守护)
 
 ### 3.1 网络与鉴权
 - Tailscale 个人版。daemon 只监听 `100.x.y.z:PORT`，绝不监听 0.0.0.0。
+  > 2026-09-24 改：局域网和 Tailscale 都支持，远程端口走自签 TLS（配对时钉指纹）+ 设备令牌，只收私有网段与 Tailscale 来源；见 `app-v0.md` §2。
 - 配对：Mac 端 `agentswitch pair` 生成一次性配对码 + QR，手机扫后换取长期 token。token 存 Keychain。
 - 所有请求 `Authorization: Bearer`。token 可吊销、可轮换。
 - 备选（Tailscale 不可用时）：Cloudflare Tunnel + Access。不做端口转发。
@@ -228,7 +229,7 @@ secret-gate 自身待办（不属于 AgentSwitch）：路径前缀绑定（同�
 - 发现并修复：curl 对 `http://` 目标忽略大写 `HTTP_PROXY`，原配置片段全部只写了大写，等于没接代理。现已两种大小写都设，并有回归测试。
 - 发现（不修，记入威胁模型）：haiku 会不假思索执行页面里的注入指令，也无视 AGENTS.md 里"不要换 host 重试"。真正拦住的是 gate 的 403。**AGENTS.md 是给模型的提示，不是安全控制。**
 - **OpenCode + DeepSeek V4.1 Flash 同样四场景全过**（`scripts/opencode_e2e.py`）。DeepSeek 每次都直接拒绝了注入指令，与 haiku 形成对比。
-- OpenCode 的坑（详见 secret-gate README）：会话目录取自 `$PWD` 而非 cwd；`run` 必须 `--standalone` 否则走后台服务拿不到代理环境；`NO_PROXY` 必须含 127.0.0.1；MCP 工具经 Code Mode 的 execute 暴露。这些直接决定 daemon 里 opencode 执行器怎么 spawn。
+- OpenCode 的坑（详见 secret-gate README）：会话目录取自 `$PWD` 而非 cwd；`run` 必须 `--standalone` 否则走后台服务拿不到代理环境；`NO_PROXY` 必须含 127.0.0.1；MCP 工具经 Code Mode 的 execute 暴露。这些直接决定 daemon 里 opencode 执行器怎么 spawn。2026-09-24 起执行器默认跑在执行器专用的常驻 serve 上（见 `router-v0.md` §2 的更新），`run --standalone` 只作回退；另发现 OpenCode 2.0.8 忽略配置里的 `instructions`，执行者指南改为放在消息开头或会话指令条目里送达。
 - 在 shell 不受限时，DeepSeek 自己写了个 MCP 客户端调 gate，并 ls 了 gate 的 home 目录。它没读私钥，但没有任何东西拦它。**gate 跑在独立 macOS 用户下从"建议"升为"前置条件"。**
 - **Codex：S1/S2 通过，S3/S4 上游阻塞**（`scripts/codex_e2e.py`）。`codex exec` 会取消所有 MCP 调用（openai/codex#24135），任何配置都无效。这不影响代理路径；AgentSwitch 的 Codex 执行器走 app-server 协议，由 daemon 回答审批，MCP 路径在那里再验。
 - **Codex app-server 路径已验证**（`scripts/codex_appserver_e2e.py`，3/3）：MCP 审批以 `mcpServer/elicitation/request` 到达，`_meta.codex_approval_kind = mcp_tool_call`，带工具参数（只有密文）和可读的提示语，回 `{action: "accept"}` 即放行；`account/rateLimits/read` 直接给 usedPercent / resetsAt。这两条就是 daemon 里 Codex 执行器的审批回路和额度来源，脚本可以直接当骨架。
@@ -345,6 +346,7 @@ projects:                   # 显式覆盖 / 别名
     isolation: worktree     # 见 B.4
 scratch: ~/Desktop/WorkSpace/Scratch/agentswitch   # 无项目任务的落脚点
 deny: ["~", "/", "~/.ssh", "~/.claude", "~/Library"]  # 永不作为 cwd
+# 2026-09-24：按真实路径（及设备号+inode）比较，禁区本身、其内部以及任何包含禁区的上级目录都拒绝（见 app-v0 §6）
 ```
 
 ### B.2 解析顺序（每个任务跑一遍，结果写进 task 记录）

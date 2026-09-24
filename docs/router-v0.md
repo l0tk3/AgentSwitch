@@ -35,7 +35,7 @@
    Decision × targets.yaml × 额度 × 并发 ──▶ 通过 / 改写为降级链的下一项 / 拒绝
    │
    ▼
-④ 派发（§3.4 执行器）      claude-code ─┬─ fable-5-1 / opus-5 / opus-4-8 / 4-7 / 4-6 / sonnet-5 / sonnet-4-6 / haiku-4-5（含 [1m] 档）
+④ 派发（§3.4 执行器）      claude-code ─┬─ fable-5-1 / opus-5-5 / opus-5 / opus-4-8 / 4-7 / 4-6 / sonnet-4-6 / haiku-4-5（含 [1m] 档；sonnet-5 已排除）
                            codex ───────┼─ gpt-6-astra / gpt-5.6-sol / terra / luna / gpt-5.5（× effort 档）
                            opencode ────┴─ deepseek-flash（DeepSeek V4.1 Flash，自己）
    │
@@ -49,6 +49,7 @@
 
 - **在哪跑**：OpenCode `serve`（常驻，v2 HTTP API），daemon 用 `session.create` + `session.prompt` 调；每次分诊一个新 session，不复用上下文。standalone `run` 每次起服务要 2–3 s，只做后备。
   > 2026-09-22 实现：daemon 启动时拉起 `opencode serve --port 4712`（`OPENCODE_SERVER_PASSWORD` 随机，Basic 认证用户名固定 `opencode`），配置经 `OPENCODE_CONFIG` 注入两个 agent：`dispatcher`（read/glob/grep/list）和 `oracle`（无工具，摘要器与监督者用）。v2 API 不能按调用传 system prompt，所以指令放在消息开头、任务在结尾；完成信号是消息列表里 `type: idle` 的条目；每次问答一个 session，问完删除。实测一次 DeepSeek 调用约 1.2 s（原来 5–10 s）。serve 起不来时退回 `run --standalone`。执行器仍用 `run --standalone`（权限与 `--session` 续接已验证），待迁。
+  > 2026-09-24 更新：路由器服务改为 `opencode serve --stdio --port <AGENTSWITCH_OPENCODE_PORT>`，启动前把密码从服务自身环境里删掉，它派生的 shell 和 MCP 拿不到密码；stdin 关闭即退出，随 daemon 启停（`harness/opencodeStdio.ts`）。执行器已迁到另一个**执行器专用**的常驻服务（`executors/opencodeServer.ts`，不与路由器共用：运行时 MCP 按目录生效，共用会让路由器会话看到某次执行的范围）；每次执行按会话设置 shell 环境、权限、指令，按 cwd 添加并在结束时删除 MCP；服务不可用或发 prompt 前任一调用失败时退回 `run --standalone`，`AGENTSWITCH_OPENCODE_EXECUTOR=run` 可强制旧路径。
 - **用什么 agent**：`opencode.json` 里定义 `router` agent，`mode: primary`，model `deepseek/deepseek-flash`，工具只留 `read` / `glob` / `grep` / `list`，`bash` / `edit` / `write` / `webfetch` / `websearch` 全部 deny，无 MCP。它能看仓库，不能改、不能出网、不能拿凭据。
 - **看仓库的范围**：只允许读 cwd 之内；`~/.secret-gate`、`.env`、`*.pem`、`*.key` 在 OpenCode permission 里 deny（防误操作，不是隐私边界）。
 - **为什么放在 OpenCode 而不是直接调 DeepSeek API**：三点。它需要看仓库，OpenCode 已有受控的只读工具；DeepSeek 作为执行者本来就在 OpenCode 里，provider、限流、账单一处管理；将来换路由模型（比如以后想换成别家或本地模型）只改 agent 的 `model` 字段。
@@ -59,7 +60,7 @@
 
 路由器的"CLAUDE.md"：用户手写的 markdown，每次分诊原样进路由器的 system prompt。内容三类：
 
-- **站点与账号**：URL、账号、密码/2FA/Token 的 **secret-gate 密文**、备注（表单类型、登录后标题）。
+- **站点与账号**：URL、账号、密码/2FA/Token 的 **secret-gate 密文**（可以写明文，保存时由 sealer 换成密文，§9 末尾）、备注（表单类型、登录后标题）。
 - **环境**：代理地址、内网可达条件、该用哪个二进制。
 - **偏好**：某目录优先哪个 harness、某类任务别用贵模型。
 
@@ -79,7 +80,9 @@
 
 加密后的文本末尾追加一段说明（`LEGEND_HEADER` + layout + 每个密文对应的字段和 host）。执行者的 prompt 里除了路由器写的简报，还会收到**用户原话**（只要原话里有密文）：路由器被要求不抄密文，所以之前任务里的密文根本到不了执行者手里，这是「执行者一头雾水」的另一半原因。路由器提示词改为用字段名指代（「用户消息里的应用专用密码」），执行者按说明把密文对到表单字段上。
 
-代价：每个任务多一次路由器调用（常驻 serve 上约 1–4 秒）。不做的：附件不过 sealer（截图、文件原样进 in/，界面已提示）；不写 CONTEXT.md（任务里的密文只活在这个任务和它的线程里）。
+代价：每个任务多一次路由器调用（常驻 serve 上约 1–4 秒）。不做的：附件不过 sealer（截图、文件原样进 in/，界面已提示）；不把任务里的密文写进 CONTEXT.md（任务里的密文只活在这个任务和它的线程里）。
+
+**CONTEXT.md 的保存也过 sealer（2026-09-24）**：`PUT /context`（网页和手机同一条路）先过 sealer 再过 lint，所以 CONTEXT.md 里也可以直接写账号密码；sealer 追加的执行者说明不写进文件（路由器直接读 CONTEXT.md）；sealer 不可用或看不出站点时拒绝保存、文件不动；内容没变不调用模型；保存前的旧版本留在 `context-history/`。
 
 > 2026-09-21：实测路由器把 226 字符的密文抄成 225 字符，gate 报 `invalid base64url`。对策：提示词改为「指条目名，不抄密文」；daemon 的 `tokens.ts` 用 CONTEXT.md/MEMORY.md/任务原文里的真密文做确定性修复（前缀 ≥10、后缀 ≥6、长度差 ≤4、唯一匹配才替换），作用于简报和 Claude 工具参数（canUseTool 的 updatedInput）；Codex/OpenCode 的工具参数无法改写，只能靠提示词。根治要靠 secret-gate 支持短别名（模型写 `enc:ref:<name>`，gate 查表），待做。
 > 2026-09-21：只靠路由器抄不可靠（实测它写了「未提供 URL 和凭据」）。现在整份 lint 后的 CONTEXT.md 也附在执行者提示词末尾（简报 → 交接包 → 环境上下文），文件里只有密文，给执行者是安全的；引擎每次分诊重新读文件，页面上保存即生效（原来引擎只在启动时读一次，这是个 bug）。
@@ -102,21 +105,22 @@ harnesses:
     quota: local-count              # design §3.7
     max_concurrent: 1
     browser: true                   # 可经 secret-gate browser 用浏览器
-    default_model: claude-sonnet-5
+    default_model: claude-sonnet-4-6
+    exclude: [claude-sonnet-5, "claude-sonnet-5[1m]"]   # 永不使用：模型发现列出也不加进目录，指定/路由/规划一律拒绝（2026-09-24 用户决定）
     models:                         # `[1m]` 后缀 = Claude Code 的 1M 上下文变体，同一模型另一档
       claude-fable-5-1:       {cost: top,  strengths: [hardest, longest-agentic, architecture]}
       claude-fable-5-1[1m]:   {cost: top,  strengths: [hardest, whole-repo-context]}
-      claude-opus-5:          {cost: high, strengths: [complex-code, refactor, review]}
+      claude-opus-5-5:        {cost: high, strengths: [complex-code, refactor, review]}
+      claude-opus-5-5[1m]:    {cost: high, strengths: [complex-code, whole-repo-context]}
+      claude-opus-5:          {cost: high, strengths: [complex-code, refactor]}
       claude-opus-5[1m]:      {cost: high, strengths: [complex-code, whole-repo-context]}
-      claude-opus-4-8:        {cost: high, strengths: [complex-code, refactor]}
+      claude-opus-4-8:        {cost: high, strengths: [complex-code]}
       claude-opus-4-8[1m]:    {cost: high, strengths: [complex-code, whole-repo-context]}
       claude-opus-4-7:        {cost: high, strengths: [complex-code]}
       claude-opus-4-7[1m]:    {cost: high, strengths: [complex-code, whole-repo-context]}
       claude-opus-4-6:        {cost: high, strengths: [complex-code]}
       claude-opus-4-6[1m]:    {cost: high, strengths: [complex-code, whole-repo-context]}
-      claude-sonnet-5:        {cost: mid,  strengths: [code, browser, general]}
-      claude-sonnet-5[1m]:    {cost: mid,  strengths: [code, whole-repo-context]}
-      claude-sonnet-4-6:      {cost: mid,  strengths: [code, general]}
+      claude-sonnet-4-6:      {cost: mid,  strengths: [code, browser, general]}
       claude-sonnet-4-6[1m]:  {cost: mid,  strengths: [code, whole-repo-context]}
       claude-haiku-4-5-20251001: {cost: low, strengths: [small-edit, quick-answer]}
   codex:                            # 执行器：codex app-server
@@ -200,11 +204,12 @@ router:
 |---|---|
 | code | 额度剩余最多的 harness 的 `default_model`（claude-code / codex 二选一） |
 | chat / summarize | opencode / deepseek-flash |
-| browser | claude-code / claude-sonnet-5；Claude 无额度时取其他带浏览器 harness 里**最便宜**的模型（2026-09-21：原实现按额度最多的 harness 取默认模型，一次低置信兜底落到了 gpt-6-astra，已改） |
+| browser | claude-code / claude-sonnet-4-6（2026-09-24 起；原为 sonnet-5，已排除）；Claude 无额度时取其他带浏览器 harness 里**最便宜**的模型（2026-09-21：原实现按额度最多的 harness 取默认模型，一次低置信兜底落到了 gpt-6-astra，已改） |
 
 ## 5. 路由提示词的原则（写进 `router` agent 的 prompt）
 
-- 改代码且跨多文件、要跑测试 → Claude Opus/Fable 或 Codex Astra，按额度；整仓库级上下文才选 `[1m]` 档；小改动 → Sonnet / Haiku / gpt-5.5 低 effort；一句话问答、总结、翻译、超长材料 → 自己（deepseek-flash）。每个 harness 的全部模型都可选，按 `cost` 和 `strengths` 权衡，不要总挑最贵的。
+- 改代码且跨多文件、要跑测试 → Claude Opus/Fable 或 Codex Astra，按额度；整仓库级上下文才选 `[1m]` 档；小改动 → Sonnet / Haiku / gpt-5.5 低 effort；一句话问答、总结、翻译、超长材料 → 自己（deepseek-flash）。每个 harness 的全部模型都可选，按 `cost` 和 `strengths` 权衡。
+- **优先模型（2026-09-24 用户决定）**：目录里标 `preferred: true` 的是用户最信得过的（Opus 5.5 / 5 与 GPT-6 astra / sol / luna，含 `[1m]` 档），目录文本里带 “preferred”。正经活——改代码、多步任务、会改东西的浏览器任务、用户要据此决定的调研——交给它们，规划模型也从它们里挑；便宜模型只做简短问答、摘要、翻译、小改动。取代原来的“选够用的最便宜的”。兜底规划模型改为 claude-opus-5-5。浏览器默认目标仍是 claude-sonnet-4-6（Claude 无额度时同档里按目录顺序，GPT-6 luna 排在前面）。
 - 浏览器任务 → 标 `needs_browser`，交给 claude-sonnet；凭据一律以 `enc:v1:` 密文形式转交，简报里禁止要求执行者"找密码"。
 - 简报必须包含：目标、验收条件、禁止触碰的路径、预计规模。不复述用户没说的需求。
 - 不确定时降低 `confidence`，不要编造能力。
@@ -231,7 +236,10 @@ router:
 > 首次路由和澄清后的路由均尊重 `give_up`：记录原因为终止结果，不派发其简报，也不选择默认模型。回答按钮使用按问题 ID 保存的提交状态，立即显示“提交中…”，等待期间防重、保留输入；失败显示可操作反馈，成功与后续界面刷新失败分别处理。
 
 - 执行器保留结构化拒绝信号；即使进程正常完成，也检查最终回复是否为直接拒绝。引用、日志和代码中的拒绝文本不算执行者拒绝。
-- 拒绝在普通验收前处理，不能被验收的第二次放行规则记为完成。提供方明确的安全拦截、gate 拒绝不自动重试。
+- 拒绝在普通验收前处理，不能被验收的第二次放行规则记为完成。gate 拒绝不自动重试。
+- **服务商安全分类器拦截（2026-09-24 用户拍板修订）**：`refusal.source = provider`（如 Claude 的 `[cyber]` 实时防护）不是模型在拒绝，而是分类器对请求的判断，误拦时同一请求重发多半能过（实测：把被拦的那次执行请求原样发给 7 个 Claude 模型、Sonnet 5 共 4 次，11 次无一被拦，`packages/daemon/scripts/guardrail_probe.ts`）。所以代码（不是模型）原样重发**一次**：同一模型、同一 effort、同一简报，不改写、不换模型、不经诊断调用；被拦的会话作废（线程 `session` 事件带 `dropped`，它续接过的旧会话也一起作废，因为被拦的那一轮已经写进去了），重发和之后同 harness 的任务都开新会话。已有副作用（工具、文件、审批计数非零）不重发；重发再被拦即停止，事件 `refusal {reason: "provider_safety"}` 记录重发与停止。这一次重发与澄清重试共用每任务一次的额度。
+- **验收不通过交还原执行器改正（2026-09-24）**：监督者验收判定结果不合格（`rejected` 且标 `acceptance`，不含看门狗掐断的执行）时，不再按“有副作用就停、请用户核对现场”处理，而是交还同一执行器、续接它自己的会话，交接说明写明验收意见，要求先只读核对实际情况再改正、已生效的操作不重复。只改一次；第二次不合格照旧以 `partial` 结束并写明原因。用户的例子：列目录的任务“正文说 17 个、表格 15 个”，跑过 `ls` 被算作副作用而停下——核对本来就该执行器自己做。
+- 之前任务被服务商拦过或被拒绝，不决定新任务：路由器和规划模型的提示词写明，新任务是用户自己的请求，线程里的拦截记录不是停止、拒绝或换执行者的理由，只按合适程度选目标；没发生在本任务上的拦截不得说成发生了（2026-09-24：用户重发后，规划模型看到同线程的旧拦截记录，没派发就收尾，还声称“本次调度也被拦截”）。
 - 普通文本拒绝交给路由器专用诊断调用；只允许 `stop`、`ask_user`、`clarify`。原因分为上下文缺失、密文用途误解、明确政策限制或未知。解析失败、未知和政策限制停止，不走默认模型兜底。
 - 背景只能逐字引用当前用户任务、同一父链的用户消息、用户维护的 CONTEXT.md，以及本任务用户实际回答；每条引用保存来源 ID、来源内容哈希和原文。执行器输出、自动摘要和路由器推断不能成为授权证据。引用仅证明用户说过什么，不证明客观授权。
 - daemon 校验引用确实存在，再构造“原简报 + 完整拒绝原因 + 带来源的原文补充 + 原用户任务”，不接受诊断模型自由编写的新任务。至少有一条补充不在旧简报中；原任务目标、目录、模型、审批和 gate 策略不变。诊断输入超过长度上限时停止，不截掉后半段限制。

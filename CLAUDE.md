@@ -1,12 +1,14 @@
 # AgentSwitch
 
-手机遥控 Mac 上多个 AI agent（Claude Code / Codex / OpenCode）的任务编排层。设计稿在 `docs/design-v0.md`（总体）、`docs/router-v0.md`（路由器）、`docs/loop-v0.md`（调度循环）、`docs/threads-v0.md`（线程、交接、记忆）和 `docs/gate-next-v0.md`（凭据层下一步），改架构先改它们。
+手机遥控 Mac 上多个 AI agent（Claude Code / Codex / OpenCode）的任务编排层。设计稿在 `docs/design-v0.md`（总体）、`docs/router-v0.md`（路由器）、`docs/loop-v0.md`（调度循环）、`docs/threads-v0.md`（线程、交接、记忆）、`docs/gate-next-v0.md`（凭据层下一步）、`docs/app-v0.md`（Mac 应用与 iPhone 应用）和 `docs/assistant-v0.md`（助理、线程视图、声音、实时活动、自修复；草案），改架构先改它们。
 
 ## 布局
 - `docs/` 设计与决策记录
-- `packages/secret-gate/` 凭据层（Python）：模型只拿密文，网络层解密。自带 venv、pytest、AGENTS.md
+- `packages/secret-gate/` 凭据层（Python）：模型只拿密文或任务范围内的短引用 `enc:ref:`，网络层与浏览器 gate 解密。自带 venv、pytest、AGENTS.md；`BOUNDARY.md` 是各入口的安全边界清单，改浏览器或凭据入口时同步更新
 - `packages/secret-gate-ui/` macOS 原生界面（SwiftUI + SwiftPM）：管理命名密钥对、单条/批量生成密文，全部通过 secret-gate CLI，不自己做密码学
-- `packages/daemon/` TypeScript 守护进程：任务引擎（SQLite + SSE + 审批）、路由器（`docs/router-v0.md`）、HTTP API、额度、CLI `bin/agentswitch`。执行器：echo（开发）+ claude-code（Agent SDK）/ codex（app-server）/ opencode（run），`AGENTSWITCH_EXECUTORS=real` 启用
+- `packages/mac-app/` macOS 菜单栏应用（SwiftUI + SwiftPM + xcodegen）：内置 Node/Python 运行时，看护 gate 与 daemon，配对二维码、设备、模型、密钥、环境检测；`scripts/build-app.sh` 打出自包含的 `AgentSwitch.app`（`docs/app-v0.md` §4）
+- `packages/ios-app/` iPhone 应用（SwiftUI，iOS 17+，xcodegen）：`AgentSwitchKit` 纯逻辑包（配对、钉证书指纹、本地造密文、事件流）+ 界面；`scripts/e2e-live.sh` 用它连打包后的运行时做端到端（`docs/app-v0.md` §5）
+- `packages/daemon/` TypeScript 守护进程：任务引擎（SQLite + SSE + 审批）、路由器（`docs/router-v0.md`）、HTTP API、额度、CLI `bin/agentswitch`。执行器：echo（开发）+ claude-code（Agent SDK）/ codex（app-server）/ opencode（执行器专用的常驻 serve，不可用时退回 `run --standalone`；`AGENTSWITCH_OPENCODE_EXECUTOR=run` 强制旧路径），`AGENTSWITCH_EXECUTORS=real` 启用
 
 ## 约定
 - 每个 package 自包含：自己的依赖、测试、README；跨 package 只通过进程/网络接口

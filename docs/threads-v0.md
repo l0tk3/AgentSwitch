@@ -66,7 +66,7 @@ threads/<id>/
 | 类型 | 折叠 | 内容 |
 |---|---|---|
 | `task` | accumulate | 一次执行：task id、harness/model、结果分类、成本 |
-| `session` | last-wins（按 harness 分组） | `{harness, sessionId}`，各家最后一个会话句柄 |
+| `session` | last-wins（按 harness 分组） | `{harness, sessionId}`，各家最后一个会话句柄；`{harness, dropped: true}` 作废该 harness 的会话（服务商安全分类器拦过它，router-v0 §6.2） |
 | `summary` | last-wins | 摘要器写的线程摘要（§3） |
 | `title` | last-wins | 标题 |
 | `handoff` | accumulate | 交接记录（§4） |
@@ -87,7 +87,7 @@ export function foldThread(events: ThreadEvent[]): ThreadState   // 纯函数
 - 触发：每次任务结束（done / failed / cancelled）。
 - 模型：`opencode / deepseek-flash`，同路由器，一次调用，≤ 20 s，失败不阻塞任务，只留上一版摘要。
 - 输入：上一版摘要 + 本次执行的 brief、结果文本、diff 摘要、动过的文件列表。不读各家 transcript 原文（v0 不做；以后可从私有目录里按 `runtime/session-schema.md` 的格式读 user/assistant 记录）。
-- 输出（≤ 500 token，固定结构）：目标、做到哪、动过的文件、未解决、定过的决定、标题。
+- 输出（≤ 700 token，固定结构）：目标、做到哪、动过的文件、未解决、定过的决定、标题。另有两句给人的话，存到任务上：`spoken`（一句，≤ 40 字，做成了什么或为什么失败，用于通知）和 `speech`（2026-09-24，口播稿：把结果本身讲给耳朵听，2–5 个短句、≤ 250 字，结论先行；不含链接、@账号、编号、代码、Markdown、密文，数字日期写成念得出的样子；`spoken` 已说全时为空）。两句解析后在代码里再过一遍，不靠模型自觉：逐行过凭据校验（`lintContext`，标签含密码、密钥、验证码等，任何一行都查），再去密文、链接、Markdown 符号、@（邮箱里的不动）、像随机串的长字符串，最后在上限内的最后一个句末截断，不截在半句。新一次摘要的 `speech` 为空时清掉旧的，不念过期的稿子。
 - 落盘：一条 `summary` 事件加一条 `title` 事件。写入前过 `lintContext`。
 
 摘要是路由器和交接包的唯一信息源，所以它先于「智能归类」做。
@@ -115,6 +115,20 @@ export function foldThread(events: ThreadEvent[]): ThreadState   // 纯函数
 ```
 
 `handoff_note` 从自由文本改为结构化：`{summary, files, diff}`；执行器把它渲染进 prompt 的方式不变。
+
+## 4a. 归入线程的判断（2026-09-24 修订）
+
+实测：四条前后相接的消息（长期项目目录在哪 → Projects 下有哪些项目 → Claudebox 项目总结 → 总结 AgentSwitch）被分进四个新线程，后面的执行器没有前面查到的目录，只好去翻 AgentSwitch 自己的数据。路由提示词改为：追问、下一步、引用前面任务查到的东西（点名那个目录、项目、站点、结果，或离开它就说不通）都算延续，线程带着那些发现和执行器会话；同一话题几分钟内的下一条几乎都是延续；手机任务各有自己的工作目录，目录不同不是新开的理由；只有无关的新工作才新开。助理（assistant-v0 §1.1）看得到对话，能直接把延续标成父任务，线程由父任务决定，不再靠猜。
+
+## 4b. 浏览器会话槽位（2026-09-24 用户要求）
+
+**用途：登录一次，后面的任务接着用。** 原来 Claude 与 OpenCode 每次执行后删掉浏览器 profile，每个任务都重新登录；Codex 的 profile 放在线程私有目录里、不设上限也不设防。现在三家统一用 `$AGENTSWITCH_HOME/browser-profiles/slot-1..3`（`src/executors/browserSlots.ts`）：
+
+- **分配**（引擎在派发浏览器执行时取，执行结束、执行器子进程收尾后归还）：在空闲的槽里依次取——本线程上次用的；记录过的站点与这次任务文本/简报里点名的站点有交集的（最近用的优先）；从没用过的；否则最久没用的那个，**先清空**再给。三个都被正在跑的执行占着时，这次用一次性 profile（旧行为）。事件 `browser_session {slot, reused, reason}` 或 `{slot: null, reason: "all_busy"}`。
+- **记录**：`slots.json`（0600）存每槽的线程、站点（从 URL、邮箱域名、`x.com` 这样的裸域名里取，文件名后缀不算）、最后使用时间。索引丢了或坏了就清空全部槽位，不猜登录归谁。
+- **清理**：删除线程时清掉它绑定的槽（正在用则归还时清）；归还时停掉仍占着该 profile 的浏览器进程（只匹配本槽路径），并删掉 Chromium 的单例锁。Codex 线程目录里的旧 `chromium-profile` 在下次执行时删除。
+- **防护**：槽位目录进 `readDenied`（执行器不能读，含 cookie 数据库；Claude 的读工具与 OpenCode 的读权限都拒绝，Codex 没有按路径的读限制——已知缺口，见 secret-gate BOUNDARY.md）。每次取用前在 profile 的 `Preferences` 里关掉 Chromium 的密码保存与自动填充，gate 填过的密码不会被浏览器存下、下次原样出现在页面上。
+- **指导**：`config/EXECUTOR.md` 写明登录会保留——先看是否已登录，只在页面要求时用 `secret_fill`；不登出、不清 cookie、不换账号；显示的账号与简报不符就停下来问。路由器提示词写明：同一站点的后续任务归入那个线程，简报里写“先确认是否已登录”。
 
 ## 5. 执行器策略补两条
 
