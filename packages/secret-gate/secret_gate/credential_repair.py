@@ -18,7 +18,7 @@ from .constants import KIND_SECRET, KIND_TOTP, LABEL_PATTERN, USE_HTTP
 from .errors import GateError, PolicyViolation, ValidationError
 from .policy import SecretPayload, normalize_host
 from .resolver import Resolver
-from .tokens import is_token, make_token
+from .tokens import is_ref, is_token, make_token
 
 REPAIR_PURPOSE = "totp_seed_import"
 REPAIR_TIMEOUT_SECONDS = 65
@@ -139,3 +139,14 @@ async def request_repair(token: str, host: str, purpose: str = REPAIR_PURPOSE, *
     except (ValueError, UnicodeDecodeError):
         raise ValidationError("invalid credential repair response") from None
     return _bridge_result(data, request["host"])
+
+
+async def repair_scoped(resolver: Resolver, token: Any, host: Any, purpose: Any = REPAIR_PURPOSE, **kwargs: Any) -> dict:
+    """A reference leaves the gate only as its ciphertext; the repaired ciphertext comes back as a
+    reference in the same execution scope, so the model keeps working with short references."""
+    as_ref = isinstance(token, str) and is_ref(token)
+    result = await request_repair(resolver.ciphertext(token) if as_ref else token, host, purpose, **kwargs)
+    if not as_ref:
+        return result
+    ref = resolver.register(result["token"])
+    return {"ref": ref, **{k: v for k, v in result.items() if k != "token"}}

@@ -44,3 +44,16 @@ def test_addon_only_takes_over_listed_hosts():
         again.ssl_conn = listed.ssl_conn
         addon.tls_start_server(again)                                      # never replaces a connection someone else set
         assert again.ssl_conn is listed.ssl_conn
+
+
+def test_replace_patterns_swaps_the_whole_set():
+    addon = UpstreamTlsAddon({"core.internal.example:8600"})
+    assert addon.patterns == frozenset({"core.internal.example:8600"})
+    with taddons.context(tlsconfig.TlsConfig(), addon):
+        addon.replace_patterns(frozenset({"other.internal.example"}))
+        dropped = _tls_start("core.internal.example", 8600)
+        addon.tls_start_server(dropped)
+        assert dropped.ssl_conn is None                                    # no longer listed: strict again
+        added = _tls_start("other.internal.example", 443)
+        addon.tls_start_server(added)
+        assert added.ssl_conn is not None

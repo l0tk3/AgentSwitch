@@ -188,8 +188,7 @@ def test_both_mcp_surfaces_forward_repair_only(gate_home, keypair, resolver, mon
     from secret_gate.mcp_server import build_server
     tok = token(keypair); result = repaired(keypair, resolver, tok); calls = []
     async def bridge(token, host, purpose=REPAIR_PURPOSE): calls.append((token, host, purpose)); return result
-    monkeypatch.setattr("secret_gate.browser_gate.request_repair", bridge)
-    monkeypatch.setattr("secret_gate.mcp_server.request_repair", bridge)
+    monkeypatch.setattr("secret_gate.credential_repair.request_repair", bridge)
     async def scenario():
         browser = BrowserGate(resolver, FakePlaywright())
         assert "secret_repair" in {tool.name for tool in await browser.list_tools()}
@@ -201,3 +200,20 @@ def test_both_mcp_surfaces_forward_repair_only(gate_home, keypair, resolver, mon
         assert fs.TOTP_SECRET_B32 not in str(response)
     asyncio.run(scenario())
     assert calls == [(tok, HOST, REPAIR_PURPOSE)] * 2
+
+
+def test_repair_of_a_reference_sends_ciphertext_and_returns_a_reference(keypair, resolver, tmp_path, monkeypatch):
+    from secret_gate.credential_repair import repair_scoped
+    from secret_gate.refs import RefRegistry
+    from secret_gate.resolver import Resolver
+
+    scope = "repair-scope-0123456789abcd"
+    scoped = Resolver(keypair.private, refs=RefRegistry(tmp_path / "refs.sqlite3"), scope=scope)
+    tok = token(keypair); result = repaired(keypair, resolver, tok); sent = []
+    async def bridge(token, host, purpose=REPAIR_PURPOSE): sent.append(token); return result
+    monkeypatch.setattr("secret_gate.credential_repair.request_repair", bridge)
+    ref = scoped.register(tok)
+    got = asyncio.run(repair_scoped(scoped, ref, HOST))
+    assert sent == [tok] and "token" not in got and got["ref"].startswith("enc:ref:") and got["ref"] != ref
+    assert scoped.ciphertext(got["ref"]) == result["token"] and got["hosts"] == [HOST]
+    assert asyncio.run(repair_scoped(scoped, tok, HOST)) == result  # a token in, a token out

@@ -8,7 +8,7 @@ own TlsConfig, so providing `tls_start.ssl_conn` here is the supported way to ta
 
 from __future__ import annotations
 
-import logging
+import sys
 from pathlib import Path
 
 from OpenSSL import SSL
@@ -17,7 +17,6 @@ from mitmproxy.addons.tlsconfig import _default_ciphers  # mirror mitmproxy's ow
 from mitmproxy.net import tls as net_tls
 
 UPSTREAM_INSECURE_FILE = "upstream-insecure.txt"
-_log = logging.getLogger(__name__)
 
 
 def parse_insecure_hosts(text: str) -> frozenset[str]:
@@ -47,8 +46,16 @@ class UpstreamTlsAddon:
     """Takes over the proxy→server TLS handshake for listed hosts with verification off."""
 
     def __init__(self, patterns: frozenset[str]) -> None:
-        self._patterns = patterns
+        self._patterns = frozenset(patterns)
         self._warned: set[str] = set()
+
+    @property
+    def patterns(self) -> frozenset[str]:
+        return self._patterns
+
+    def replace_patterns(self, patterns: frozenset[str]) -> None:
+        """Swap the whole set in one assignment (SIGHUP reload, see reload.py); a handshake reads it once."""
+        self._patterns = frozenset(patterns)
 
     def tls_start_server(self, tls_start: tls.TlsData) -> None:
         if tls_start.ssl_conn is not None or not tls_start.conn.address:
@@ -85,4 +92,6 @@ class UpstreamTlsAddon:
         key = f"{host}:{port}"
         if key not in self._warned:
             self._warned.add(key)
-            _log.warning("secret-gate: upstream certificate of %s is NOT verified (listed in %s)", key, UPSTREAM_INSECURE_FILE)
+            # stderr, not the logger: `secret-gate proxy` runs mitmdump with -q, which drops warnings.
+            print(f"secret-gate: upstream certificate of {key} is NOT verified (listed in {UPSTREAM_INSECURE_FILE})",
+                  file=sys.stderr, flush=True)

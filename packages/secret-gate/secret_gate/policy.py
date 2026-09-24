@@ -27,7 +27,7 @@ def split_host_port(text: str) -> tuple[str, int | None]:
     name, sep, port_text = text.rpartition(":")
     if not sep:
         return text, None
-    if not name or not port_text.isdigit() or not 1 <= int(port_text) <= 65535 or ":" in name:
+    if not name or not (port_text.isascii() and port_text.isdecimal()) or not 1 <= int(port_text) <= 65535 or ":" in name:
         raise ValidationError(f"invalid host:port {text!r}")
     return name, int(port_text)
 
@@ -41,7 +41,7 @@ def normalize_host(host: str) -> str:
         raise ValidationError("host must be a string")
     name, port = split_host_port(host.strip().lower())
     name = name.rstrip(".")
-    if not HOST_PATTERN.match(name):
+    if not HOST_PATTERN.fullmatch(name):
         raise ValidationError(f"invalid host pattern: {host!r}")
     return name if port is None else f"{name}:{port}"
 
@@ -93,7 +93,7 @@ class SecretPayload:
     ) -> SecretPayload:
         if not isinstance(value, str) or not value:
             raise ValidationError("value must be a non-empty string")
-        if not isinstance(label, str) or not LABEL_PATTERN.match(label):
+        if not isinstance(label, str) or not LABEL_PATTERN.fullmatch(label):
             raise ValidationError(f"invalid label: {label!r}")
         if kind not in VALID_KINDS:
             raise ValidationError(f"invalid kind: {kind!r}")

@@ -35,7 +35,7 @@ class KeypairInfo:
 
 
 def validate_name(name: str) -> str:
-    if not isinstance(name, str) or not NAME_PATTERN.match(name) or name in RESERVED_NAMES:
+    if not isinstance(name, str) or not NAME_PATTERN.fullmatch(name) or name in RESERVED_NAMES:
         raise KeyStoreError(f"invalid keypair name {name!r}: letters, digits, . _ - only, max 32")
     return name
 

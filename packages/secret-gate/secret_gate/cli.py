@@ -1,4 +1,4 @@
-"""`secret-gate` command line: keygen | keys | pubkey | enc | check | proxy | mcp | install-ca."""
+"""`secret-gate` command line: keygen | keys | pubkey | enc | check | refs | proxy | mcp | browser | install-ca | service | bootstrap."""
 
 from __future__ import annotations
 
@@ -22,13 +22,16 @@ from .constants import (
     VALID_KINDS,
     VALID_USES,
 )
+from .bootstrap import add_bootstrap_parser
 from .crypto import generate_keypair
 from .credential_repair import checked_token, credential_info, reissue_totp_seed
 from .errors import GateError, ValidationError
 from .keyring import create_keypair, list_keypairs, set_current
 from .keystore import gate_home, load_private_key, load_public_key, parse_public_key, save_keypair
 from .policy import SecretPayload
+from .refs_cli import add_refs_parser
 from .resolver import Resolver
+from .service import add_service_parser
 from .tokens import make_token
 
 
@@ -255,6 +258,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("credential-info", help="daemon: read token JSON on stdin, return policy metadata").set_defaults(fn=_cmd_credential)
     sub.add_parser("credential-reissue", help="daemon: re-sign an authorized TOTP seed import request from stdin").set_defaults(fn=_cmd_credential)
+    add_refs_parser(sub)
 
     pr = sub.add_parser("proxy", help="run the substituting HTTPS proxy")
     pr.add_argument("-p", "--port", type=int, default=DEFAULT_PROXY_PORT)
@@ -265,6 +269,8 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("command", nargs=argparse.REMAINDER, help="-- <downstream MCP command...>")
     b.set_defaults(fn=_cmd_browser)
     sub.add_parser("install-ca", help="copy mitmproxy CA and trust it").set_defaults(fn=_cmd_install_ca)
+    add_service_parser(sub)
+    add_bootstrap_parser(sub)
     return p
 
 

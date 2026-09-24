@@ -13,6 +13,10 @@ class PolicyViolation(GateError):
     """Token is valid but the requested host/use is not allowed by its policy."""
 
 
+class RefError(PolicyViolation):
+    """A short reference is unknown, released, used outside its scope, or used without a scope."""
+
+
 class KeyStoreError(GateError):
     """Key material is missing, unreadable, or has unsafe permissions."""
 

@@ -24,6 +24,8 @@ def encodings(value: str) -> frozenset[str]:
         quote(value, safe=""),
         quote_plus(value),
         quote(value, safe="*-._"),
+        quote(value, safe="!'()*~"),  # JS encodeURIComponent
+        quote_plus(value, safe="*").replace("~", "%7E"),  # WHATWG application/x-www-form-urlencoded (browsers)
         json_escaped,
         json.dumps(value)[1:-1],  # non-ASCII as \uXXXX
         json_escaped.replace("/", "\\/"),

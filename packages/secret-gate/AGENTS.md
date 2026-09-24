@@ -14,6 +14,14 @@ hidden from them.
 - Only the gate process on this machine, which holds the private key, can turn it back into the
   real value, and it will only do so for the website the user allowed when they created it.
 
+## What an `enc:ref:` value is
+
+A short reference (24 characters) the task dispatcher gives you instead of a long `enc:v1:` value.
+Use it exactly like the `enc:v1:` value it stands for, in the same places and with the same tools;
+the same website restrictions apply. It only works inside the task that received it. If the gate
+answers that a reference "was released" or "belongs to a different task", take the reference from
+the current task context instead of an older message; do not try to rebuild or guess one.
+
 ## What to do with it
 
 Use it exactly where the real value would go: the password field of the login form, the `-d`
@@ -24,7 +32,7 @@ and the user does not expect you to.
 - There is nothing to decode, print, base64-decode or "test"; treat the value as opaque text.
 - If a request is answered with `502 Bad Gateway` and `certificate verify failed`, the site uses a
   certificate the gate cannot verify. Stop and report the host and the error verbatim: the user must
-  list it in `~/.secret-gate/upstream-insecure.txt` and restart the proxy. Do not try other hosts,
+  list it in `~/.secret-gate/upstream-insecure.txt` and reload the gate (`secret-gate service reload`). Do not try other hosts,
   ports or `-k`/`--insecure` flags.
 - If a request carrying a value is answered with `HTTP 403` and the header `X-Secret-Gate: denied`,
   the value is not allowed for that host or action. Tell the user; do not try other hosts.
@@ -48,8 +56,18 @@ and the user does not expect you to.
 - In the browser (Playwright tools): put the value into a field with `secret_fill(target, token)`,
   or pass it as the `text` of `browser_type` / a field `value` of `browser_fill_form`. The gate
   types the real value into the page for you; the page's own validation sees the real value.
-  Snapshots then show `[REDACTED:label]` where the value is, which is expected. Screenshots,
-  copy shortcuts, `data:` pages, file uploads and searching for parts of a value are refused
-  after a fill; use `browser_snapshot` to read the page instead.
+  Snapshots then show `[REDACTED:label]` where the value is, which is expected. Copy shortcuts,
+  `data:` pages, file uploads and searching for parts of a value are refused after a fill.
+- `secret_fill` reports the field's current state (`empty` / `nonempty` / `unknown`) and whether
+  the gate filled it; `secret_field_state(target)` checks again later without showing the value.
+  A filled field is not a saved record: submit the form and confirm on the page.
+- Screenshots come back with filled values, password fields and personal data covered by solid
+  magenta boxes. That is the gate, not a page bug. If a screenshot is refused because the masking
+  could not be verified, read the page with `browser_snapshot` instead of retrying.
+- When the task authorizes moving specific personal data from one system to another, the gate
+  shows those values on the source page as `enc:ref:` references with labels such as
+  `page/email-1`, plus a short legend. Place each one with `secret_fill` on the destination named in
+  the legend; the gate refuses other sites and forms that submit elsewhere. Do not try to read the
+  values some other way; the references are how this task is meant to be done.
 - The gate's key directory (`~/.secret-gate/`, or `$SECRET_GATE_HOME`) belongs to the gate
   process; there is no reason for you to read it or to run `secret-gate keygen`.

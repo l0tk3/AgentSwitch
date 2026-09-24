@@ -57,6 +57,10 @@ def op_http(
         raise ValidationError("url must include a host")
     port = parts.port or (443 if parts.scheme == "https" else 80)
     host = f"{parts.hostname}:{port}"  # port-aware policy
+    for name, value in (headers or {}).items():
+        # A Host header naming another site would let a CDN route the value there (domain fronting).
+        if name.lower() == "host" and str(value).rsplit(":", 1)[0].strip().lower().rstrip(".") != parts.hostname.lower():
+            raise ValidationError("the Host header must name the URL's own host")
 
     collected: list[Resolution] = []
     new_url, res = resolver.substitute(url, use=USE_HTTP, host=host)

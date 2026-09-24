@@ -32,7 +32,8 @@ def test_enc_with_explicit_pubkey_and_value(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("SECRET_GATE_HOME", str(tmp_path))
     main(["keygen"]); capsys.readouterr()
     main(["pubkey"]); pub = capsys.readouterr().out.strip()
-    assert main(["enc", "--label", "x/y", "--pubkey", pub, "--value", "v", "--use", "exec"]) == 0
+    # The "=" form: a base64url key may start with "-", which argparse would take for an option.
+    assert main(["enc", "--label", "x/y", f"--pubkey={pub}", "--value", "v", "--use", "exec"]) == 0
     tok = capsys.readouterr().out.strip()
     main(["check", tok])
     assert "uses: ['exec']" in capsys.readouterr().out

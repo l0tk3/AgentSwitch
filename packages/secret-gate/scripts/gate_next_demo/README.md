@@ -66,4 +66,4 @@ node packages/secret-gate/scripts/gate_next_demo/run.mjs --out /absolute/path/to
 packages/secret-gate/.venv/bin/python packages/secret-gate/scripts/gate_next_demo/gate_demo.py --self-test
 ```
 
-本目录是可丢弃的实验入口，不对外提供可部署服务，未注册 MCP 工具，也没有更改当前服务的截图或凭据策略。
+本目录是可丢弃的实验入口，不对外提供可部署服务，未注册 MCP 工具。生产接入（2026-09-24）在 `secret_gate/refs.py`、`browser_gate.py`、`browser_mask.py`、`transfer.py` 等模块里重新实现，行为以 `docs/gate-next-v0.md` 和 `BOUNDARY.md` 为准；本 demo 保持原样，作为当时的对照实验。

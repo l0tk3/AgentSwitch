@@ -5,20 +5,28 @@ echoed JS-escaped in the code section, `- [Snapshot](../x.yml)` link lines, and 
 page-*.yml written to the cwd (which the gate must have pointed at its private dir).
 State: current URL and typed values; snapshots echo typed values like the real a11y tree.
 Fills are appended to $FAKE_PW_LOG so the test can check what reached the "browser".
+`browser_run_code_unsafe` understands the gate's own snippets (field state, form target, masked
+screenshot); $FAKE_PW_PAGE_TEXT adds a line to every snapshot (a page that shows personal data).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import sys
 import time
 from pathlib import Path
 
 from mcp import types
 from mcp.server.fastmcp import FastMCP
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tests.fixtures.png import make_png  # noqa: E402
+
 mcp = FastMCP("fake-playwright")
 _state: dict = {"url": "about:blank", "typed": {}, "tabs": ["about:blank"]}
+_BOXES = {"e1": (10, 10, 80, 20), "e2": (10, 40, 80, 20), "e9": (10, 70, 200, 20), "input[type=password]": (100, 10, 60, 20)}
 _log = Path(os.environ["FAKE_PW_LOG"]) if os.environ.get("FAKE_PW_LOG") else None
 
 
@@ -43,6 +51,8 @@ def _snapshot_body() -> str:
     lines = [f"- Page URL: {_state['url']}", "- Page Snapshot:"]
     for target, value in _state["typed"].items():
         lines.append(f'  - textbox "{target}" [ref={target}]: {value}')
+    if os.environ.get("FAKE_PW_PAGE_TEXT"):
+        lines.append(f'  - paragraph [ref=e9]: {os.environ["FAKE_PW_PAGE_TEXT"]}')
     return "\n".join(lines)
 
 
@@ -90,7 +100,22 @@ def browser_take_screenshot(filename: str | None = None) -> list[types.ImageCont
 
 @mcp.tool()
 def browser_run_code_unsafe(code: str) -> str:
-    return "should never be reachable"
+    """Only the gate calls this (the model never sees the tool)."""
+    if "inputValue" in code:
+        target = json.loads(re.search(r'locate\(("(?:[^"\\]|\\.)*")\)', code).group(1))
+        value = _state["typed"].get(target)
+        result = "unknown" if value is None else ("nonempty" if value else "empty")
+    elif "form.action" in code:
+        result = {"actions": [_state["url"], os.environ.get("FAKE_PW_FORM_ACTION") or _state["url"]]}
+    elif "ownerFrame" in code:
+        result = {"urls": [_state["url"]]}
+    else:
+        start = code.index("const spec = ") + len("const spec = ")
+        spec = json.JSONDecoder().raw_decode(code, start)[0]
+        boxes = [_BOXES[k] for k in (*spec["refs"], *spec["selectors"]) if k in _BOXES]
+        Path(spec["path"]).write_bytes(make_png(300, 200, [(*b, (255, 0, 255)) for b in boxes]))
+        result = {"boxes": [{"x": x, "y": y, "width": w, "height": h} for x, y, w, h in boxes]}
+    return f"### Result\n{json.dumps(result)}\n### Ran Playwright code\n..."
 
 
 @mcp.tool()

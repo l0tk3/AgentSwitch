@@ -50,7 +50,7 @@ class ExecTemplate:
 
 
 def _parse_one(name: str, spec: object) -> ExecTemplate:
-    if not TEMPLATE_NAME_PATTERN.match(name):
+    if not TEMPLATE_NAME_PATTERN.fullmatch(name):
         raise ExecTemplateError(f"bad template name {name!r}")
     if not isinstance(spec, dict) or not isinstance(spec.get("argv"), list) or not spec["argv"]:
         raise ExecTemplateError(f"template {name!r} needs a non-empty argv list")

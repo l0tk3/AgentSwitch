@@ -43,9 +43,9 @@ def test_parse_command():
         parse_command(["--"])
 
 
-def _params(gate_home: Path, log: Path) -> StdioServerParameters:
+def _params(gate_home: Path, log: Path, **extra: str) -> StdioServerParameters:
     env = {**os.environ, "SECRET_GATE_HOME": str(gate_home), "FAKE_PW_LOG": str(log),
-           "HTTP_PROXY": "http://127.0.0.1:1"}  # would break the child if it leaked through
+           "HTTP_PROXY": "http://127.0.0.1:1", **extra}  # the proxy would break the child if it leaked through
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "secret_gate.cli", "browser", "--", sys.executable, str(FAKE)],
@@ -65,9 +65,9 @@ def test_fill_through_real_mcp_processes(gate_home, tmp_path, portal_pass, porta
             await asyncio.wait_for(s.initialize(), 30)
             names = {t.name for t in (await s.list_tools()).tools}
             await s.call_tool("browser_navigate", {"url": PAGE})
-            fill = await s.call_tool("secret_fill", {"target": "pw", "token": portal_pass, "submit": True})
+            fill = await s.call_tool("secret_fill", {"target": "e1", "token": portal_pass, "submit": True})
             form = await s.call_tool("browser_fill_form", {"fields": [
-                {"target": "user", "name": "u", "type": "textbox", "value": portal_user}]})
+                {"target": "e2", "name": "u", "type": "textbox", "value": portal_user}]})
             snap = await s.call_tool("browser_snapshot", {})
             shot = await s.call_tool("browser_take_screenshot", {})
             unsafe = await s.call_tool("browser_run_code_unsafe", {"code": "1"})
@@ -96,7 +96,10 @@ def test_fill_through_real_mcp_processes(gate_home, tmp_path, portal_pass, porta
     snap_text = _text(r["snap"])
     assert fs.PORTAL.password not in snap_text and fs.PORTAL.username not in snap_text
     assert f"[REDACTED:{fs.PORTAL.label}]" in snap_text and "[REDACTED:portal-a/user]" in snap_text
-    assert r["shot"].isError and "screenshot refused" in _text(r["shot"])
+    # The page shows both values: the capture is masked (e1, e2, password inputs) and verified.
+    assert not r["shot"].isError and "masked 3 region" in _text(r["shot"])
+    assert any(isinstance(c, types.ImageContent) for c in r["shot"].content)
+    assert '"current": "nonempty"' in _text(r["fill"])
     assert r["unsafe"].isError and "disabled" in _text(r["unsafe"])
     for key, needle in (("data_tab", "http(s)"), ("copy", "copy/cut"), ("upload", "uploading"), ("find", "matches part")):
         assert r[key].isError and needle in _text(r[key]), key
@@ -117,3 +120,48 @@ def test_wrong_host_never_reaches_fake_browser(gate_home, tmp_path, bank_pass):
     assert "host" in _text(r).lower()
     assert fs.BANK.password not in _text(r)
     assert not log.exists()
+
+
+def test_transfer_grant_seals_page_data_into_references_end_to_end(gate_home, tmp_path):
+    log = tmp_path / "fills.jsonl"
+    email = "alice.demo@example.com"
+    grant = {"source": ["login.portal-a.example.com"], "destination": ["erp.example.test"], "fields": ["email"],
+             "purpose": "register the customer's contact e-mail in the ERP"}
+    params = _params(gate_home, log, SECRET_GATE_SCOPE="e2e-scope-0123456789abcdefgh", SECRET_GATE_TRANSFER=json.dumps(grant),
+                     FAKE_PW_PAGE_TEXT=f"Contact {email}")
+
+    async def scenario() -> dict:
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as s:
+            await asyncio.wait_for(s.initialize(), 30)
+            await s.call_tool("browser_navigate", {"url": PAGE})
+            source = _text(await s.call_tool("browser_snapshot", {}))
+            ref = next(w for w in source.split() if w.startswith("enc:ref:"))
+            wrong = await s.call_tool("secret_fill", {"target": "e1", "token": ref})  # still on the source host
+            await s.call_tool("browser_navigate", {"url": "https://erp.example.test/customers/new"})
+            fill = await s.call_tool("secret_fill", {"target": "e1", "token": ref})
+            dest = _text(await s.call_tool("browser_snapshot", {}))
+            return {"source": source, "ref": ref, "wrong": wrong, "fill": fill, "dest": dest}
+
+    r = asyncio.run(asyncio.wait_for(scenario(), 90))
+    assert email not in r["source"] and "page/email-1" in r["source"] and "erp.example.test" in r["source"]
+    assert r["wrong"].isError and "not allowed on host" in _text(r["wrong"])
+    assert not r["fill"].isError and email not in _text(r["fill"])
+    assert email not in r["dest"] and r["ref"] in r["dest"]
+    typed = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [e["text"] for e in typed] == [email]  # the destination page received the real value
+    audit = (gate_home / "logs" / "browser-audit.jsonl").read_text()
+    assert email not in audit and '"event": "seal"' in audit and '"event": "fill"' in audit and "e2e-scope" not in audit
+
+
+def test_transfer_grant_without_scope_is_not_applied(gate_home, tmp_path):
+    from secret_gate.browser_mcp import execution_config
+
+    grant = json.dumps({"source": ["a.example.com"], "destination": ["b.example.com"], "fields": ["phone"], "purpose": "x"})
+    assert execution_config({"SECRET_GATE_TRANSFER": grant}, gate_home) == (None, None, None)
+    scope, parsed, key = execution_config({"SECRET_GATE_TRANSFER": grant, "SECRET_GATE_SCOPE": "s" * 32}, gate_home)
+    assert scope == "s" * 32 and parsed.destination == ("b.example.com",) and len(key) == 32
+    assert execution_config({}, gate_home) == (None, None, None)
+    bad = json.dumps({"source": ["-a.example.com"], "destination": ["b.example.com"], "fields": ["phone"], "purpose": "x"})
+    assert execution_config({"SECRET_GATE_TRANSFER": bad, "SECRET_GATE_SCOPE": "s" * 32}, gate_home) == ("s" * 32, None, None)
+    env = downstream_env({"SECRET_GATE_SCOPE": "x", "SECRET_GATE_TRANSFER": "y", "PATH": "/bin"})
+    assert env == {"PATH": "/bin"}

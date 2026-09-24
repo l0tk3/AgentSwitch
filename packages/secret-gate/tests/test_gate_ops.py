@@ -51,6 +51,16 @@ def test_op_http_body_and_url(resolver, portal_pass, portal_user):
     assert result.status == 302 and result.headers["location"] == "/home"
 
 
+@respx.mock
+def test_op_http_refuses_a_host_header_for_another_site(resolver, api_bearer):
+    respx.get("https://api.c.example.org/me").mock(return_value=httpx.Response(200))
+    with pytest.raises(ValidationError, match="Host header"):
+        op_http(resolver, method="GET", url="https://api.c.example.org/me",
+                headers={"Host": fs.EVIL_HOST, "Authorization": f"Bearer {api_bearer}"})
+    assert not respx.calls
+    op_http(resolver, method="GET", url="https://api.c.example.org/me", headers={"host": "API.c.example.org:443"})
+
+
 def test_op_http_validation(resolver):
     with pytest.raises(ValidationError):
         op_http(resolver, method="BREW", url="https://a.com")

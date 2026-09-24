@@ -23,3 +23,14 @@ def test_redact_none_and_contains():
     assert contains_any("has secretvalue", res)
     assert not contains_any("clean", res)
     assert not contains_any(None, res)
+
+
+def test_browser_and_js_url_encodings_are_redacted():
+    from secret_gate.redact import redact
+    from secret_gate.resolver import Resolution
+
+    value = "a b~c!d'e(f)g*h"
+    r = Resolution(token="enc:v1:x", label="t", value=value)
+    for form in ("a+b%7Ec%21d%27e%28f%29g*h",  # a browser form post
+                 "a%20b~c!d'e(f)g*h"):  # encodeURIComponent
+        assert redact(f"q={form}&x=1", [r]) == "q=[REDACTED:t]&x=1"

@@ -63,3 +63,21 @@ def test_allows():
     p = SecretPayload.create(value="v", hosts=["*.a.com"], uses=["http"], label="l")
     assert p.allows_host("X.a.com") and not p.allows_host("a.com")
     assert p.allows_use("http") and not p.allows_use("exec")
+
+
+@pytest.mark.parametrize("label", ["portal/pass\n", "portal/pass\r", "ok\n"])
+def test_label_with_trailing_newline_is_rejected(label):
+    from secret_gate.errors import ValidationError
+    from secret_gate.policy import SecretPayload
+
+    with pytest.raises(ValidationError):
+        SecretPayload.create(value="v", hosts=["a.example.com"], uses=["http"], label=label)
+
+
+@pytest.mark.parametrize("host", ["a.example.com:٨٠", "a.example.com:²", "a.example.com:８０"])
+def test_hosts_reject_non_ascii_ports(host):  # surrounding whitespace is trimmed on purpose (CLI input)
+    from secret_gate.errors import ValidationError
+    from secret_gate.policy import normalize_host
+
+    with pytest.raises(ValidationError):
+        normalize_host(host)

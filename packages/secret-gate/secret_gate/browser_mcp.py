@@ -8,11 +8,16 @@ Playwright MCP writes every page snapshot and console log, unredacted, to its ou
 (default `.playwright-mcp/` under its cwd, i.e. the agent's work dir). The gate therefore runs the
 downstream with cwd and --output-dir inside the gate home, which the harness deny rules already
 cover and which a separate gate user makes unreadable.
+
+The dispatcher configures one execution through the environment of this process only:
+SECRET_GATE_SCOPE (its enc:ref: scope) and SECRET_GATE_TRANSFER (an authorized field transfer,
+transfer.py). Neither reaches the downstream: it gets no scope, no grant, no repair bridge.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Sequence
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -24,10 +29,14 @@ from mcp.client.stdio import stdio_client
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
+from .audit import Audit
 from .browser_gate import BrowserGate
+from .browser_mask import MaskConfig
+from .constants import SCOPE_ENV_VAR
 from .errors import ValidationError
-from .keystore import gate_home
+from .keystore import gate_home, load_public_key
 from .resolver import Resolver
+from .transfer import TRANSFER_ENV_VAR, TransferGrant
 
 PROXY_VARS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy")
 SERVER_NAME = "secret-gate-browser"
@@ -35,9 +44,30 @@ OUTPUT_DIR_FLAG = "--output-dir"
 OUTPUT_SUBDIR = "browser-out"
 
 
+GATE_ONLY_VARS = ("SECRET_GATE_REPAIR_URL", "SECRET_GATE_REPAIR_KEY", SCOPE_ENV_VAR, TRANSFER_ENV_VAR)
+
+
 def downstream_env(env: dict[str, str] | None = None) -> dict[str, str]:
     base = dict(os.environ if env is None else env)
-    return {k: v for k, v in base.items() if k not in (*PROXY_VARS, "SECRET_GATE_REPAIR_URL", "SECRET_GATE_REPAIR_KEY")}
+    return {k: v for k, v in base.items() if k not in (*PROXY_VARS, *GATE_ONLY_VARS)}
+
+
+def execution_config(env: dict[str, str], home: Path) -> tuple[str | None, TransferGrant | None, bytes | None]:
+    """(scope, transfer grant, public key) for this execution. A grant without a scope, or one this gate cannot
+    parse, is not applied: exactly what the dispatcher does with an invalid grant (nothing sealed, nothing widened)."""
+    scope = env.get(SCOPE_ENV_VAR) or None
+    raw = env.get(TRANSFER_ENV_VAR)
+    if not raw:
+        return scope, None, None
+    try:
+        grant = TransferGrant.parse(raw)
+    except ValidationError as exc:
+        print(f"secret-gate: SECRET_GATE_TRANSFER ignored: {exc}", file=sys.stderr)
+        return scope, None, None
+    if scope is None:
+        print("secret-gate: SECRET_GATE_TRANSFER ignored: it needs SECRET_GATE_SCOPE from the dispatcher", file=sys.stderr)
+        return None, None, None
+    return scope, grant, load_public_key(home)
 
 
 def parse_command(argv: Sequence[str]) -> list[str]:
@@ -113,10 +143,14 @@ def build_server(gate: BrowserGate) -> Server:
 
 async def serve(command: Sequence[str]) -> None:
     home = gate_home()
-    resolver = Resolver.from_home(home)
+    scope, grant, public_key = execution_config(dict(os.environ), home)
+    resolver = Resolver.from_home(home, scope=scope)
+    mask = MaskConfig.load(home)
     out_dir = private_output_dir(home)
     async with StdioDownstream(command, out_dir) as downstream:
-        server = build_server(BrowserGate(resolver, downstream, output_dir=out_dir))
+        gate = BrowserGate(resolver, downstream, output_dir=out_dir, transfer=grant, public_key=public_key,
+                           mask=mask, audit=Audit.at_home(home, scope))
+        server = build_server(gate)
         async with stdio_server() as (read, write):
             await server.run(read, write, server.create_initialization_options())
 

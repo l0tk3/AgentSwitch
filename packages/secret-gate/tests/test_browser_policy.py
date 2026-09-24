@@ -181,3 +181,58 @@ def test_gate_state_is_immutable_and_accumulates():
     assert s0.filled == () and s0.tainted_urls == frozenset()
     assert s1.tainted_urls == {"http://x/"} and s1.filled == (r1,)
     assert s2.filled == (r1,) and s2.tainted_urls == {"http://x/", "http://y/"}
+
+
+def test_references_are_fillable_and_refused_outside_the_typed_text():
+    from secret_gate.refs import new_ref
+
+    ref = new_ref()
+    assert secret_fill_to_type({"target": "e1", "token": ref})["text"] == ref
+    assert has_tokens("browser_type", {"target": "e1", "text": f"x{ref}"})
+    assert has_tokens("browser_fill_form", {"fields": [{"target": "e1", "value": ref}]})
+    with pytest.raises(PolicyViolation, match="only appear in the typed text"):
+        has_tokens("browser_type", {"target": ref, "text": "x"})
+
+
+def test_gate_state_tracks_sealed_values_and_fill_history():
+    from secret_gate.browser_policy import FILL_ATTEMPTED, FILL_DONE, GateState
+    from secret_gate.resolver import Resolution
+
+    sealed = Resolution(token="enc:ref:AAAAAAAAAAAAAAAA", label="page/email-1", value="alice@example.com")
+    state = GateState().with_sealed("https://a.example.com/", (sealed,))
+    assert state.protected == (sealed,) and state.tainted_urls == {"https://a.example.com/"}
+    assert state.with_sealed("https://a.example.com/", (sealed,)).sealed == (sealed,)  # no duplicates
+    state = state.with_fill_status("https://b.example.com/", ("e1", "e2"), FILL_ATTEMPTED)
+    state = state.with_fill_status("https://b.example.com/", ("e1",), FILL_DONE)
+    assert state.fill_history("https://b.example.com/", "e1") == (True, True)
+    assert state.fill_history("https://b.example.com/", "e2") == (True, False)
+    assert state.fill_history("https://a.example.com/", "e1") == (False, False)
+    assert state.filled_targets("https://b.example.com/") == ("e2", "e1")
+
+
+def test_oracle_checks_cover_drag_form_targets_case_and_text_selectors():
+    from secret_gate.browser_policy import GateState
+
+    state = GateState(filled=(Resolution(token="enc:v1:x", label="t", value="Zq9-Vx7-Pw4k"),))
+    for name, args, needle in (
+        ("browser_drag", {"startTarget": "e1", "endTarget": "zq9-v"}, "matches part"),
+        ("browser_fill_form", {"fields": [{"target": "input[value^=VX7-]", "value": "x"}]}, "matches part"),
+        ("browser_click", {"target": "text=Welcome back"}, "text or path selectors"),
+        ("browser_click", {"target": "button:has(span)"}, "text or path selectors"),
+        ("browser_click", {"target": "internal:role=button"}, "text or path selectors"),
+        ("browser_network_requests", {"filter": "/api/.*"}, "filter search"),
+    ):
+        with pytest.raises(PolicyViolation, match=needle):
+            check_call_allowed(name, args, state)
+    check_call_allowed("browser_click", {"target": "f1e7"}, state)
+    check_call_allowed("browser_click", {"target": "#submit"}, state)
+    check_call_allowed("browser_click", {"target": "text=Welcome back"}, GateState())  # nothing protected yet
+
+
+def test_page_host_errors_never_echo_the_url():
+    with pytest.raises(PolicyViolation) as exc:
+        page_host("data:text/html,alice@example.com")
+    assert "alice" not in str(exc.value) and "data:" in str(exc.value)
+    with pytest.raises(PolicyViolation) as exc:
+        page_host("https://a.example.com:99999/?pw=Hunter2")
+    assert "Hunter2" not in str(exc.value)
