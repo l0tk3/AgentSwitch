@@ -1,0 +1,60 @@
+# xcodegen spec for AgentSwitch.app. `xcodegen generate` writes AgentSwitch.xcodeproj (git-ignored);
+# scripts/build-app.sh does that, builds Release and assembles the runtime.
+name: AgentSwitch
+options:
+  bundleIdPrefix: com.agentswitch
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ARCHS: arm64
+packages:
+  AgentSwitchMacCore:
+    path: .
+targets:
+  AgentSwitch:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/AgentSwitchMac
+      - path: Resources/AppIcon.icns
+        buildPhase: resources
+    dependencies:
+      - package: AgentSwitchMacCore
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: AgentSwitch
+        CFBundleName: AgentSwitch
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        CFBundleIconFile: AppIcon
+        # Menu-bar app: no Dock icon by default. It appears while the settings window is open, or always when
+        # 通用 › 始终在程序坞显示 is on (DockPresence).
+        LSUIElement: true
+        NSHumanReadableCopyright: AgentSwitch
+        # macOS 15+ local network privacy: Bonjour registration and LAN traffic of the children.
+        NSLocalNetworkUsageDescription: AgentSwitch 在局域网里广播自己，让配对过的 iPhone 找到这台 Mac。
+        NSBonjourServices:
+          - _agentswitch._tcp
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agentswitch.mac
+        PRODUCT_NAME: AgentSwitch
+        GENERATE_INFOPLIST_FILE: NO
+        # Ad-hoc signing, no team; build-app.sh re-signs the whole bundle after adding the runtime.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        # No App Sandbox: the app spawns user-installed CLIs (claude, codex, opencode) through the daemon,
+        # reads ~/.secret-gate and ~/.mitmproxy, and binds ports. No hardened runtime for ad-hoc builds.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        COMBINE_HIDPI_IMAGES: YES
