@@ -39,6 +39,9 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/context/example"],
   ["POST", "/assistant"],
   ["GET", "/assistant"],
+  ["GET", "/projects"],
+  ["GET", "/update"],
+  ["POST", "/update/install"],
 ];
 
 /** Routes the remote app answers itself; every other allowed route goes on to the local API unchanged. */

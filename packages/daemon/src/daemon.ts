@@ -3,6 +3,9 @@
 
 import { Assistant } from "./assistant/assistant.js";
 import { AssistantLog } from "./assistant/log.js";
+import { announceUpdate, Reporter, type ReporterOptions } from "./assistant/reports.js";
+import { loadProjects, PROJECTS_FILE } from "./files/projects.js";
+import { updateState } from "./files/appUpdate.js";
 import { admitSealed, type TaskBody } from "./api/tasks.js";
 import type { ApiDeps } from "./api/shared.js";
 import { BrowserSlots } from "./executors/browserSlots.js";
@@ -97,6 +100,8 @@ export type DaemonConfig = {
   /** app-v0 §2: HTTPS for paired phones on all interfaces (AGENTSWITCH_REMOTE=1, AGENTSWITCH_REMOTE_PORT, default 4713;
    *  AGENTSWITCH_REMOTE_NAME overrides the Mac name in the pairing payload). Absent = off. */
   readonly remote?: { readonly port: number; readonly name?: string };
+  /** The AgentSwitch.app this daemon runs from (AGENTSWITCH_APP_BUNDLE, set by the Mac app): staged updates sit next to it. */
+  readonly appBundle?: string;
 };
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
@@ -122,6 +127,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     ...(env.AGENTSWITCH_REMOTE === "1" || env.AGENTSWITCH_REMOTE === "true"
       ? { remote: { port: remotePort(env.AGENTSWITCH_REMOTE_PORT), ...(env.AGENTSWITCH_REMOTE_NAME?.trim() ? { name: env.AGENTSWITCH_REMOTE_NAME.trim() } : {}) } }
       : {}),
+    ...(env.AGENTSWITCH_APP_BUNDLE?.trim() ? { appBundle: env.AGENTSWITCH_APP_BUNDLE.trim() } : {}),
   };
 }
 
@@ -157,6 +163,8 @@ export type BuildOverrides = {
   readonly remote?: RemoteRuntime | null;
   /** Tests: a short SSE heartbeat period. */
   readonly sseHeartbeatMs?: number;
+  /** Tests: the reporter's waits (summary, needs-you grace, watch tick) and clock. */
+  readonly reports?: Omit<ReporterOptions, "log" | "store" | "bus">;
   /** Tests: the assistant's model (assistant-v0 §1.1) without OpenCode. */
   readonly assistant?: Router;
 };
@@ -230,16 +238,21 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const engine = new Engine({ store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
   sweepThreads(store, Date.now(), engine);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const apiDeps: ApiDeps = { ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), projectsPath: join(cfg.home, PROJECTS_FILE), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
-  const assistant = new Assistant({ log: new AssistantLog(join(cfg.home, "assistant.db")), store, engine, ...(assistantRouter ? { router: assistantRouter } : {}), ...(sealer ? { sealer } : {}),
-    admit: (body, sealed) => admitSealed(apiDeps, body as TaskBody, sealed), timeoutMs: targets.router.timeout_ms });
+  const conversation = new AssistantLog(join(cfg.home, "assistant.db"));
+  // Ends, questions for the user and watched tasks' progress, told in the conversation (assistant-v0 step 3).
+  const reporter = new Reporter({ log: conversation, store, bus, home: cfg.home, ...overrides.reports });
+  reporter.start();
+  announceUpdate(cfg.home, conversation);
+  const assistant = new Assistant({ log: conversation, store, engine, ...(assistantRouter ? { router: assistantRouter } : {}), ...(sealer ? { sealer } : {}),
+    admit: (body, sealed) => admitSealed(apiDeps, body as TaskBody, sealed), projects: () => loadProjects(apiDeps.projectsPath), stagedUpdate: () => updateState(cfg.appBundle)?.staged?.built ?? null, timeoutMs: targets.router.timeout_ms });
   const api = createApp({ ...apiDeps, assistant });
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
-  return { app, api, remote, engine, store, quota, targets, close: () => { store.close(); routingLog.close(); } };
+  return { app, api, remote, engine, store, quota, targets, close: () => { reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml

@@ -13,6 +13,7 @@ import { remoteCaller } from "../core/caller.js";
 import { TargetRef } from "../core/target.js";
 import { zodIssues } from "../util/zod.js";
 import { checkCwd, checkStoredCwd } from "./cwdPolicy.js";
+import { resolveProject } from "./projects.js";
 import { issues, newWorkDir, limitParam, type ApiDeps } from "./shared.js";
 import { DEFAULT_LIST_LIMIT, SSE_HEARTBEAT_MS } from "../core/limits.js";
 
@@ -29,6 +30,8 @@ const NewTaskBody = z.object({
   thread_id: z.string().min(1).optional(),
   /** Per-task approval policy override. */
   approval: ApprovalPolicy.optional(),
+  /** Run in a registered project directory (GET /projects), by name; the phone's way to reach a folder on the Mac. */
+  project: z.string().trim().min(1).max(40).optional(),
 });
 export { NewTaskBody };
 
@@ -93,7 +96,12 @@ export type Admitted = { ok: true; task: Task } | { ok: false; status: 400 | 404
  *  referenced parent and thread are looked up again (sealing takes seconds; they may be gone or archived meanwhile), the
  *  work dir chosen, attachments moved in, the task submitted. */
 export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly text: string; readonly sealed: readonly SealedEntry[] }): Admitted {
-  const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, task: _raw, ...rest } = body;
+  const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, project, task: _raw, ...rest } = body;
+  if (project && cwd) return { ok: false, status: 400, error: "a task names a project or a cwd, not both" };
+  // Checked here, after sealing, so a project removed or moved meanwhile is refused rather than run somewhere else.
+  const chosen = project ? resolveProject(deps, project) : null;
+  if (chosen && !chosen.ok) return { ok: false, status: 400, error: chosen.error };
+  const projectDir = chosen?.ok ? chosen.path : undefined;
   const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
   if (parent_id && !parent) return { ok: false, status: 404, error: "parent task not found" };
   const effectiveThreadId = thread_id ?? parent?.threadId;
@@ -101,8 +109,9 @@ export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly te
   if (effectiveThreadId && !thread) return { ok: false, status: 404, error: "thread not found" };
   if (thread?.status === "archived") return { ok: false, status: 409, error: "thread is archived; reopen it first" };
   const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
-  const workDir = cwd ?? inherited ?? newWorkDir(deps.workRoot);
-  const isEphemeral = ephemeral ?? (cwd === undefined && inherited === undefined);
+  // A named project wins over the parent's directory: "now do it in the repo" continues the thread, somewhere else.
+  const workDir = projectDir ?? cwd ?? inherited ?? newWorkDir(deps.workRoot);
+  const isEphemeral = projectDir === undefined && (ephemeral ?? (cwd === undefined && inherited === undefined));
   let attachments: Attachment[] = [];
   try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
   catch (err) { return { ok: false, status: 400, error: (err as Error).message, streamError: "附件无法移入任务目录，请重新检查附件后提交。" }; }
@@ -118,9 +127,12 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     if (!body.success) return c.json({ error: zodIssues(body.error) }, 400);
     const refused = remoteCaller(c.env) ? remoteRefusal(body.data) : null;
     if (refused) return c.json({ error: refused }, 400);
-    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
+    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, project, ...rest } = body.data;
+    if (project && cwd) return c.json({ error: "a task names a project or a cwd, not both" }, 400);
     const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
     if (cwdProblem) return c.json({ error: cwdProblem }, 400);
+    const chosen = project ? resolveProject(deps, project) : null;
+    if (chosen && !chosen.ok) return c.json({ error: chosen.error }, 400);
     let parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
     const initialThreadId = thread_id ?? parent?.threadId;

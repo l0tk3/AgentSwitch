@@ -42,6 +42,12 @@ export type ApiDeps = {
   readonly extensions: Extensions;
   readonly version: string;
   readonly cwdRules: CwdRules;
+  /** `$AGENTSWITCH_HOME/projects.json`: the project directories a phone task may name (absent = none). */
+  readonly projectsPath?: string;
+  /** `$AGENTSWITCH_HOME`: where the update request and result files are (assistant-v0 §5). */
+  readonly home?: string;
+  /** The AgentSwitch.app this daemon runs from (the Mac app passes it); absent outside the app: no updates. */
+  readonly appBundle?: string;
   /** Model settings (app-v0 §2): the overlay file and the catalog it applies to (targets.yaml after discovery). */
   readonly models?: { readonly path: string; readonly base: Targets };
   /** Tests: the SSE heartbeat period (default SSE_HEARTBEAT_MS). */

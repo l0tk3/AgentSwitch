@@ -2,6 +2,8 @@
 
 import { Hono } from "hono";
 import { mountAssistant } from "./assistant.js";
+import { mountProjects } from "./projects.js";
+import { mountUpdate } from "./update.js";
 import { mountExtensions } from "./extensions.js";
 import { mountFiles } from "./files.js";
 import { mountModelSettings } from "./models.js";
@@ -18,6 +20,8 @@ export function createApp(deps: ApiDeps): Hono {
   const app = new Hono();
   mountUi(app);
   mountSettings(app, deps);
+  mountProjects(app, deps);
+  mountUpdate(app, deps);
   mountModelSettings(app, deps);
   mountTasks(app, deps);
   mountAssistant(app, deps);

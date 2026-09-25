@@ -46,10 +46,11 @@ function lastStep(events: readonly TaskEvent[]): string | null {
   return null;
 }
 
-function line(store: Store, task: Task, now: number): string {
+function line(store: Store, task: Task, now: number, watchMs: number | undefined): string {
   const thread = task.threadId ? store.getThread(task.threadId) : undefined;
   const parts = [`id ${task.id}`, thread?.title ? `thread "${thread.title}"` : null, STATUS[task.status] ?? task.status,
-    task.harness ? `${task.harness}/${task.model}` : null, `${TERMINAL.has(task.status) ? "ended" : "started"} ${ago(now - (TERMINAL.has(task.status) ? task.updatedAt : task.createdAt))}`];
+    task.harness ? `${task.harness}/${task.model}` : null, `${TERMINAL.has(task.status) ? "ended" : "started"} ${ago(now - (TERMINAL.has(task.status) ? task.updatedAt : task.createdAt))}`,
+    watchMs ? `watched every ${Math.round(watchMs / 60_000)} min` : null];
   const out = [`- ${parts.filter(Boolean).join(" · ")}`, `  asked: ${clip(withoutLegend(task.task), 160)}`];
   if (!TERMINAL.has(task.status)) {
     const step = lastStep(store.eventsSince(task.id));
@@ -63,13 +64,14 @@ function line(store: Store, task: Task, now: number): string {
   return out.join("\n");
 }
 
-export function buildRegister(store: Store, now: number): Register {
+/** `watches`: task id → interval of the watches set (shown so the assistant can change or stop them). */
+export function buildRegister(store: Store, now: number, watches: ReadonlyMap<string, number> = new Map()): Register {
   const tasks = store.listTasks(REGISTER_ACTIVE * 4);
   const active = tasks.filter((t) => !TERMINAL.has(t.status)).slice(0, REGISTER_ACTIVE);
   const recent = tasks.filter((t) => TERMINAL.has(t.status)).slice(0, REGISTER_RECENT);
   const text = [
-    "Running or waiting:", ...(active.length ? active.map((t) => line(store, t, now)) : ["(none)"]),
-    "", "Recently ended:", ...(recent.length ? recent.map((t) => line(store, t, now)) : ["(none)"]),
+    "Running or waiting:", ...(active.length ? active.map((t) => line(store, t, now, watches.get(t.id))) : ["(none)"]),
+    "", "Recently ended:", ...(recent.length ? recent.map((t) => line(store, t, now, undefined)) : ["(none)"]),
   ].join("\n");
   return { text, activeIds: new Set(active.map((t) => t.id)), allIds: new Set([...active, ...recent].map((t) => t.id)) };
 }

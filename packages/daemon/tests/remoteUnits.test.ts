@@ -301,6 +301,7 @@ describe("remote route allowlist", () => {
       "GET /tasks/:id/files", "GET /tasks/:id/files/*", "GET /approvals", "GET /threads", "GET /threads/:id", "PATCH /threads/:id",
       "POST /threads/:id/archive", "POST /threads/:id/reopen", "DELETE /tasks/:id", "DELETE /threads/:id", "GET /quota", "POST /quota/refresh",
       "GET /targets", "POST /uploads", "GET /context", "PUT /context", "GET /context/example", "POST /assistant", "GET /assistant",
+      "GET /projects", "GET /update", "POST /update/install",
     ]);
   });
 
@@ -311,7 +312,7 @@ describe("remote route allowlist", () => {
       ["POST", "/context"], ["DELETE", "/context"], ["GET", "/mcp"], ["GET", "/skills"], ["GET", "/memory"], ["GET", "/records"],
       ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["GET", "/approvals/policy"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
       ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/tasks/"], ["GET", "/tasks/a/b"], ["GET", "/tasks/a/files/"], ["POST", "/route/preview"],
-      ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
+      ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"], ["PUT", "/projects"], ["POST", "/update"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
   });
 });
 

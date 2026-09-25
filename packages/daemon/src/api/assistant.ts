@@ -1,5 +1,5 @@
 /** The assistant conversation over HTTP (assistant-v0 §1.1): POST a message (the phone's input box), GET the messages
- *  after a sequence number. The phone may use both. */
+ *  after a sequence number (`?after=`) or the newest ones (`?last=`, for a first load). The phone may use both. */
 
 import type { Hono } from "hono";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { MAX_FILES_PER_UPLOAD } from "../files/names.js";
 import { issues, limitParam, type ApiDeps } from "./shared.js";
 
 export const MAX_MESSAGE_CHARS = 8000;
+const MAX_LAST = 500;
 
 const MessageBody = z.object({
   text: z.string().trim().min(1).max(MAX_MESSAGE_CHARS),
@@ -29,6 +30,8 @@ export function mountAssistant(app: Hono, deps: ApiDeps): void {
 
   app.get("/assistant", (c) => {
     if (!deps.assistant) return c.json({ messages: [] });
+    const last = Number(c.req.query("last"));
+    if (Number.isInteger(last) && last > 0) return c.json({ messages: deps.assistant.latest(Math.min(last, MAX_LAST)) });
     const after = Math.max(0, Number(c.req.query("after") ?? 0) || 0);
     return c.json({ messages: deps.assistant.messages(after, limitParam(c, 100, 500)) });
   });

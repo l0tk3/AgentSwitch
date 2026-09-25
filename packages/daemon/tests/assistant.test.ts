@@ -104,6 +104,27 @@ describe("assistant", () => {
     expect(f.d.store.getTask(task.id)?.status).toBe("cancelled");
   });
 
+  it("watch: sets an interval on a running task, the register shows it, 0 stops it; an ended or unknown task is refused", async () => {
+    const assistant = scripted([
+      JSON.stringify({ action: "create_task", text: "好的。" }),
+      (message) => JSON.stringify({ action: "watch", text: "每 5 分钟告诉你。", task_ids: [/id (\w+)/.exec(message)?.[1] ?? "?"], every_minutes: 5 }),
+      (message) => JSON.stringify({ action: "watch", text: "不盯了。", task_ids: [/id (\w+)/.exec(message)?.[1] ?? "?"], every_minutes: 0 }),
+      JSON.stringify({ action: "watch", text: "好。", task_ids: ["made-up"] }),
+    ]);
+    const f = daemon(assistant);
+    const task = (await f.say('慢慢来 @echo {"delayMs":3000,"result":"ok"}')).body.task;
+    const set = await f.say("每 5 分钟告诉我一下进展");
+    expect(set.body.assistant).toMatchObject({ kind: "watch", taskIds: [task.id] });
+    const stop = await f.say("别盯了");
+    expect(assistant.calls[2]).toMatch(/watched every 5 min/);
+    expect(stop.body.assistant).toMatchObject({ kind: "watch", taskIds: [task.id] });
+    const none = await f.say("盯着那个不存在的");
+    expect(none.body.assistant).toMatchObject({ kind: "reply", text: "没有找到正在进行的这个任务。" });
+    expect(assistant.calls[3]).not.toMatch(/watched every/);   // stopped
+    f.d.engine.cancel(task.id);
+    await f.d.engine.idle();
+  });
+
   it("when the assistant fails, the message still becomes a task", async () => {
     const f = daemon(scripted(["no json", "still no json"]));
     const r = await f.say("整理下载目录");
@@ -142,6 +163,15 @@ describe("assistant", () => {
     expect(r.body.task).toBeDefined();
     expect(r.body.task.attachments).toHaveLength(1);
     await f.d.engine.idle();
+  });
+
+  it("a first load gets the newest messages (?last=), later polls the ones after a sequence number", async () => {
+    const f = daemon(scripted([JSON.stringify({ action: "reply", text: "一" }), JSON.stringify({ action: "reply", text: "二" })]));
+    await f.say("第一句");
+    await f.say("第二句");
+    const last = (await (await f.d.app.request("/assistant?last=2")).json() as { messages: Record<string, any>[] }).messages;
+    expect(last.map((m) => m.text)).toEqual(["第二句", "二"]);
+    expect((await f.messages(last[0]!.seq)).map((m) => m.text)).toEqual(["二"]);
   });
 
   it("refuses an empty message and a sealer failure stores nothing", async () => {
