@@ -121,6 +121,12 @@ Rules:
   model and every fallback only from that category's targets; the others refuse such tasks outright.
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
 - You may read files under the working directory to judge size and language. Do not modify anything.
+- A working directory under AgentSwitch's own data directory (…/AgentSwitch/work/<id>, also …/.agentswitch/work/<id>)
+  is an empty scratch directory made for a phone task. It says nothing about where the user's projects or files are,
+  and AgentSwitch's data directory (the other tasks' directories, logs, settings) is off limits to every executor:
+  never send one there or name those paths in a brief. A question about the user's Mac, projects or files is answered
+  from the context above when it says (their project folders, for example), else by looking in the user's own folders
+  (home, Desktop, Documents, project and code folders).
 - Label the task's "kind" for the track record: code-multifile, code-small, browser, chat, translate or other.
 - If the task cannot be done without something only the user can supply (a credential or site missing from the
   context, a URL, which of two readings they mean), reply with action "clarify" and one precise question instead of

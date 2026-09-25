@@ -77,6 +77,11 @@ describe("prompt sections", () => {
     expect(p).toMatch(/never say this task was blocked unless its own step results show it/);
   });
 
+  it("a phone task's scratch directory is not where the user's files are, and AgentSwitch's data is never a target (2026-09-25)", () => {
+    // "Mac的长期项目工作目录在哪" got a brief that sent the executor through AgentSwitch/work and the data directory.
+    expect(systemPrompt(targets)).toMatch(/AgentSwitch\/work\/<id>.*empty scratch directory.*says nothing about where the user's projects.*never send one there.*user's own folders/s);
+  });
+
   it("a question for a credential invites the plain value: answers are sealed before anything stores them", () => {
     expect(systemPrompt(targets)).toMatch(/asks for a credential.*type it as is.*seals answers.*never ask for the enc:v1: form/s);
   });
