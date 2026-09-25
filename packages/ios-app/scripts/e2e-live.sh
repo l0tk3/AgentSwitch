@@ -38,8 +38,10 @@ pids+=($!)
 
 for _ in $(seq 1 120); do curl -sf "http://127.0.0.1:$LOCAL/healthz" >/dev/null && break; sleep 0.5; done
 curl -sf "http://127.0.0.1:$LOCAL/healthz" >/dev/null || { echo "daemon did not come up:" >&2; tail -20 "$WORK/logs/daemon.log" >&2; exit 1; }
-LINK="$(curl -sf -X POST "http://127.0.0.1:$LOCAL/pairing" | "$RUNTIME/node/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).link))')"
+# The local API wants the token the daemon wrote on start-up (daemon api/localAuth.ts).
+AUTH="Authorization: Bearer $(cat "$WORK/as-home/local-token")"
+LINK="$(curl -sf -X POST -H "$AUTH" "http://127.0.0.1:$LOCAL/pairing" | "$RUNTIME/node/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).link))')"
 [ -n "$LINK" ] || { echo "no pairing link" >&2; exit 1; }
 
 AGENTSWITCH_E2E_THROWAWAY=1 AGENTSWITCH_E2E_LINK="$LINK" swift test --filter LiveDaemonTests 2>&1 | tail -5
-echo "devices after the test:"; curl -sf "http://127.0.0.1:$LOCAL/devices" | "$RUNTIME/node/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const d of JSON.parse(s))console.log(`  ${d.name} (${d.platform}) revoked=${d.revokedAt!==null}`)})'
+echo "devices after the test:"; curl -sf -H "$AUTH" "http://127.0.0.1:$LOCAL/devices" | "$RUNTIME/node/bin/node" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{for(const d of JSON.parse(s))console.log(`  ${d.name} (${d.platform}) revoked=${d.revokedAt!==null}`)})'

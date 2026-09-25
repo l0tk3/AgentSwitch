@@ -106,6 +106,25 @@ final class StubTransport: HTTPTransport, @unchecked Sendable {
 }
 
 final class DaemonClientTests: XCTestCase {
+    func testTheLocalTokenGoesWithEveryCallAndTheConsoleOpensThroughAOneTimeLink() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-token-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let tokenFile = home.appendingPathComponent(DaemonClient.tokenFileName)
+        let stub = StubTransport { req in
+            req.url?.path == "/local/console-link" ? (200, #"{"path":"/ui/login?code=abc"}"#) : (200, "[]")
+        }
+        let client = DaemonClient(port: 4811, transport: stub, tokenFile: tokenFile)
+        _ = try await client.devices()
+        XCTAssertNil(stub.requests[0].value(forHTTPHeaderField: "Authorization"), "no token yet: the daemon writes it on its first start")
+        try "tok-123\n".write(to: tokenFile, atomically: true, encoding: .utf8)
+        _ = try await client.devices()
+        XCTAssertEqual(stub.requests[1].value(forHTTPHeaderField: "Authorization"), "Bearer tok-123")
+        let link = try await client.consoleLink()
+        XCTAssertEqual(link.absoluteString, "http://127.0.0.1:4811/ui/login?code=abc")
+        XCTAssertEqual(stub.requests[2].httpMethod, "POST")
+    }
+
     func testRoutesMethodsAndBodies() async throws {
         let stub = StubTransport { req in
             switch (req.httpMethod ?? "", req.url?.path ?? "") {

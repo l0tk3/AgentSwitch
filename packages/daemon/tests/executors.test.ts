@@ -131,12 +131,12 @@ describe("AppServerClient", () => {
 });
 
 describe("claude executor helpers", () => {
-  it("tool policy: read-only and gate tools pass, edits inside cwd pass, the rest asks", () => {
+  it("tool policy: read-only and gate tools pass, edits anywhere but a protected folder pass (2026-09-25), the rest asks", () => {
     expect(decideTool("Read", { file_path: "/etc/passwd" }, "/w")).toEqual({ kind: "allow" });
     expect(decideTool("mcp__secret-gate__secret_fill", {}, "/w")).toEqual({ kind: "allow" });
     expect(decideTool("Edit", { file_path: "src/a.ts" }, "/w")).toEqual({ kind: "allow" });
-    expect(decideTool("Write", { file_path: "/etc/hosts" }, "/w")).toMatchObject({ kind: "ask", action: expect.stringContaining("outside cwd") });
-    expect(decideTool("Write", { file_path: "/wrong/x" }, "/w")).toMatchObject({ kind: "ask" });
+    expect(decideTool("Write", { file_path: "/etc/hosts" }, "/w")).toEqual({ kind: "allow" });
+    expect(decideTool("Write", {}, "/w")).toMatchObject({ kind: "ask" });
     expect(decideTool("Bash", { command: "rm -rf /", description: "clean" }, "/w")).toEqual({ kind: "ask", action: "Bash: rm -rf /", evidence: "clean" });
     expect(decideTool("WebFetch", { url: "http://x" }, "/w")).toMatchObject({ kind: "ask", action: "WebFetch" });
   });
@@ -147,7 +147,7 @@ describe("claude executor helpers", () => {
     expect(decideTool("Write", { file_path: join(dir, "hello.txt") }, cwd)).toEqual({ kind: "allow" });
     expect(decideTool("Write", { file_path: join(cwd, "sub", "x.txt") }, cwd)).toEqual({ kind: "allow" });
     expect(canonical("/definitely/not/here/x")).toBe("/definitely/not/here/x");
-    expect(decideTool("Write", { file_path: join(dir, "..", "escape.txt") }, cwd)).toMatchObject({ kind: "ask" });
+    expect(decideTool("Write", { file_path: join(dir, "..", "escape.txt") }, cwd)).toEqual({ kind: "allow" });   // other folders are open too
   });
   it("messages fold into an outcome: success, error, refusal, rate limit, cancelled", () => {
     const empty: Folded = EMPTY_FOLD;

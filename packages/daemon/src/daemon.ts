@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import { defaultCwdRules } from "./api/cwdPolicy.js";
 import { guardLocal } from "./api/localGuard.js";
+import { ensureLocalToken, LocalAuth } from "./api/localAuth.js";
 import { Bus } from "./engine/bus.js";
 import { defaultCleanupPaths } from "./engine/cleanup.js";
 import { DEFAULT_MAX_TASKS, Engine } from "./engine/engine.js";
@@ -358,9 +359,11 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   const remote: RemoteListener | undefined = daemon.remote
     ? await startRemote(daemon, daemon.remote).catch((err: Error) => { daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); throw err; })
     : undefined;
+  // Every local caller shows the token (api/localAuth.ts); made on first start, read by the Mac app and the CLI.
+  const auth = new LocalAuth(ensureLocalToken(cfg.home));
   const server = listenLocal(daemon, cfg.port, (info) => {
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
-  });
+  }, auth);
   void daemon.quota.refresh();
   const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), THREAD_SWEEP_INTERVAL_MS);
   sweeper.unref();
@@ -368,9 +371,10 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
 }
 
 /** The 127.0.0.1 listener (web UI, CLI, Mac app): the local app behind the browser guard (api/localGuard.ts: Host,
- *  Origin, JSON bodies). The remote listener forwards into `daemon.api` in process and never passes this guard. */
-export function listenLocal(daemon: Pick<Daemon, "app">, port: number, onListening?: (info: AddressInfo) => void): ServerType {
-  return listen({ fetch: guardLocal((request, env) => daemon.app.fetch(request, env)), hostname: "127.0.0.1", port }, onListening);
+ *  Origin, JSON bodies) and, when given, the local token (api/localAuth.ts). The remote listener forwards into
+ *  `daemon.api` in process and never passes either. */
+export function listenLocal(daemon: Pick<Daemon, "app">, port: number, onListening?: (info: AddressInfo) => void, auth?: LocalAuth): ServerType {
+  return listen({ fetch: guardLocal((request, env) => auth?.check(request) ?? daemon.app.fetch(request, env)), hostname: "127.0.0.1", port }, onListening);
 }
 
 /** app-v0 §2: the HTTPS listener for paired phones, before the local one, so a taken port fails start-up cleanly. */

@@ -16,7 +16,7 @@ describe("OpenCode serve mapping", () => {
       r("read", "*", "allow"), r("read", "/h/.secret-gate/*", "deny"), r("read", "**/.env", "deny"), r("read", "**/*.pem", "deny"), r("read", "**/*.key", "deny"),
       r("shell", "*", "allow"), r("shell", "secret-gate keygen*", "deny"), r("shell", "cat /h/.secret-gate/*", "deny"), r("shell", "*/h/.agentswitch*", "deny"), r("shell", "*/h/.secret-gate*", "deny"),
       r("edit", "*", "allow"), r("edit", "/h/.agentswitch/*", "deny"), r("edit", "/h/.secret-gate/*", "deny"),
-      r("external_directory", "/h/.agentswitch", "deny"), r("external_directory", "/h/.agentswitch/*", "deny"), r("external_directory", "/h/.secret-gate", "deny"), r("external_directory", "/h/.secret-gate/*", "deny"),
+      r("external_directory", "*", "allow"), r("external_directory", "/h/.agentswitch", "deny"), r("external_directory", "/h/.agentswitch/*", "deny"), r("external_directory", "/h/.secret-gate", "deny"), r("external_directory", "/h/.secret-gate/*", "deny"),
       r("webfetch", "*", "deny"),
     ]);
     expect(toRuleset({ edit: "allow", bash: { x: "bogus" } })).toEqual([r("edit", "*", "allow")]);

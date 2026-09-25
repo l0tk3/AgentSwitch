@@ -116,7 +116,11 @@ struct MenuContentView: View {
         .buttonStyle(.borderless)
     }
 
+    /// Signed in through a one-time link (the local API wants its token; the browser gets a session instead).
     private func openConsole() {
-        if let url = URL(string: "http://127.0.0.1:\(model.ports.local)/ui") { NSWorkspace.shared.open(url) }
+        Task {
+            do { NSWorkspace.shared.open(try await model.client.consoleLink()) }
+            catch { model.errorMessage = "网页控制台没打开：\(error.localizedDescription)" }
+        }
     }
 }

@@ -35,7 +35,9 @@ action for this message:
   the name of a registered project (listed below) when the work is on it — the user names it or plainly means it ("修一下
   AgentSwitch 的 bug", "在那个仓库里跑测试"); the task then runs in that folder. Otherwise leave it out: the task gets an
   empty scratch folder. Never guess a project for a task that does not need one. "text": one short sentence confirming
-  you took it on — no promises about the result.
+  you took it on — no promises about the result. "cwd": a folder on the Mac the user names for the work, when it is not
+  a registered project ("在 ~/Desktop/报表 里整理一下", "/Users/x/code/site 的测试"): an absolute path or one starting with ~/.
+  Leave it out otherwise.
 - "status": the user asks how a task went or is going. "task_ids": the register tasks meant (find them by thread
   title, site, time or order — "刚才那个", "x.com 那个"). "text": answer from the register only — state, last step, what
   it waits for, the outcome — in one or two sentences. Never invent progress.
@@ -50,7 +52,7 @@ When the body says a new AgentSwitch version is waiting and the user wants it in
 设置 › 新版本 on the phone or in the Mac's menu bar (you cannot install it); after the switch you report how it went.
 Answer in the user's language, briefly: it may be read aloud. Never repeat enc:v1: tokens in "text".
 Reply with one JSON object only:
-{"action":"create_task|status|cancel|watch|reply","text":"...","task":"...","parent_id":"...","project":"...","task_ids":["..."],"every_minutes":10}`;
+{"action":"create_task|status|cancel|watch|reply","text":"...","task":"...","parent_id":"...","project":"...","cwd":"...","task_ids":["..."],"every_minutes":10}`;
 
 export const DEFAULT_WATCH_MINUTES = 10;
 export const MAX_WATCH_MINUTES = 240;
@@ -58,14 +60,14 @@ const MS_PER_MINUTE = 60_000;
 
 const Decision = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reply"), text: z.string().min(1) }),
-  z.object({ action: z.literal("create_task"), text: z.string().default(""), task: z.string().optional(), parent_id: z.string().optional(), project: z.string().optional() }),
+  z.object({ action: z.literal("create_task"), text: z.string().default(""), task: z.string().optional(), parent_id: z.string().optional(), project: z.string().optional(), cwd: z.string().max(1024).optional() }),
   z.object({ action: z.literal("status"), text: z.string().min(1), task_ids: z.array(z.string()).default([]) }),
   z.object({ action: z.literal("cancel"), text: z.string().min(1), task_ids: z.array(z.string()).default([]) }),
   z.object({ action: z.literal("watch"), text: z.string().min(1), task_ids: z.array(z.string()).default([]), every_minutes: z.number().int().min(0).max(MAX_WATCH_MINUTES).default(DEFAULT_WATCH_MINUTES) }),
 ]);
 type Decision = z.infer<typeof Decision>;
 
-export type TaskRequest = { readonly task: string; readonly parent_id?: string; readonly project?: string; readonly attachments?: string[]; readonly pin?: TargetRef };
+export type TaskRequest = { readonly task: string; readonly parent_id?: string; readonly project?: string; readonly cwd?: string; readonly attachments?: string[]; readonly pin?: TargetRef };
 export type Admit = (body: TaskRequest, sealed: { readonly text: string; readonly sealed: readonly SealedEntry[] }) =>
   { ok: true; task: Task } | { ok: false; status: number; error: string };
 
@@ -166,7 +168,9 @@ export class Assistant {
         const task = decision.task && keepsTokens(sealed.text, decision.task) ? decision.task : sealed.text;
         const parent = decision.parent_id && register.allIds.has(decision.parent_id) ? decision.parent_id : undefined;
         const project = decision.project ? findProject(this.projects(), decision.project)?.name : undefined;
-        return create("task", decision.text || "收到，正在安排。", { task, ...(parent ? { parent_id: parent } : {}), ...(project ? { project } : {}) });
+        // A named folder (checked against the cwd rules when the task is admitted); a registered project wins.
+        const cwd = !project && decision.cwd ? expandHome(decision.cwd.trim()) : undefined;
+        return create("task", decision.text || "收到，正在安排。", { task, ...(parent ? { parent_id: parent } : {}), ...(project ? { project } : {}), ...(cwd ? { cwd } : {}) });
       }
     }
   }
@@ -198,4 +202,11 @@ function parseDecision(text: string): { ok: true; value: Decision } | { ok: fals
 /** A rewrite may only be used when every credential token of the user's message survived it, character for character. */
 export function keepsTokens(original: string, rewrite: string): boolean {
   return [...original.matchAll(TOKEN)].every((m) => rewrite.includes(m[0]));
+}
+
+/** `~/x` → `$HOME/x`; anything not absolute after that is dropped (a relative folder means nothing on the phone). */
+function expandHome(path: string): string | undefined {
+  const home = process.env.HOME ?? "";
+  const full = path === "~" ? home : path.startsWith("~/") ? home + path.slice(1) : path;
+  return full.startsWith("/") ? full : undefined;
 }

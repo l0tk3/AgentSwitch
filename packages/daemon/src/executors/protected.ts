@@ -35,9 +35,13 @@ export function defaultProtected(env: NodeJS.ProcessEnv = process.env): Protecte
   return {
     roots: [home, gate, DAEMON_CONFIG_DIR].map(canonicalPath),
     exempt: EXEMPT_UNDER_HOME.map((d) => canonicalPath(join(home, d))),
-    readDenied: [gate, join(home, BROWSER_PROFILES_DIR), join(home, "remote")].map(canonicalPath),
+    // The local API's token too: an executor that read it could call the API to loosen its own approval policy.
+    readDenied: [gate, join(home, BROWSER_PROFILES_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME)].map(canonicalPath),
   };
 }
+
+/** Under `$AGENTSWITCH_HOME`: the local API token (api/localAuth.ts keeps the same name; executors never read it). */
+export const LOCAL_TOKEN_NAME = "local-token";
 
 /** Under `$AGENTSWITCH_HOME`: the browser session slots (browserSlots.ts). */
 export const BROWSER_PROFILES_DIR = "browser-profiles";

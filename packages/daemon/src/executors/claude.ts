@@ -5,7 +5,7 @@
 import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { detectRefusal, NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome, type RefusalSignal } from "../core/outcome.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
@@ -89,8 +89,9 @@ export function decideTool(toolName: string, input: Record<string, unknown>, cwd
     const raw = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : null;
     const p = raw === null ? null : canonical(resolve(cwd, raw));
     if (p && isProtected(p, cwd, prot)) return { kind: "deny", reason: `${PROTECTED_DENIAL} (${p})` };
-    if (p && (p === cwd || p.startsWith(cwd + sep))) return { kind: "allow" };
-    return { kind: "ask", action: `${toolName} outside cwd: ${p ?? "?"}`, evidence: JSON.stringify(input).slice(0, APPROVAL_EVIDENCE_CHARS) };
+    // Any other folder of the Mac, like Claude Code on it (2026-09-25, user decision); only the protected ones are out.
+    if (p) return { kind: "allow" };
+    return { kind: "ask", action: `${toolName} without a path`, evidence: JSON.stringify(input).slice(0, APPROVAL_EVIDENCE_CHARS) };
   }
   if (toolName === "Bash") {
     const command = String(input.command ?? "");

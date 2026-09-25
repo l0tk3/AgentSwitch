@@ -10,10 +10,15 @@ const SSE_DATA = "data:";
 export type ThreadView = Thread & { summary: ThreadState["summary"]; lastTarget: ThreadState["lastTarget"]; lastActivity: number | null; taskCount: number; handoffs: number };
 
 export class Client {
-  constructor(private readonly base: string, private readonly fetchImpl: typeof fetch = fetch) {}
+  /** `token`: the local API's (`$AGENTSWITCH_HOME/local-token`, api/localAuth.ts). */
+  constructor(private readonly base: string, private readonly fetchImpl: typeof fetch = fetch, private readonly token: string | null = null) {}
+
+  private auth(): Record<string, string> {
+    return this.token ? { authorization: `Bearer ${this.token}` } : {};
+  }
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await this.fetchImpl(`${this.base}${path}`, { method, headers: { "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+    const res = await this.fetchImpl(`${this.base}${path}`, { method, headers: { "content-type": "application/json", ...this.auth() }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
     const text = await res.text();
     const data = text ? (JSON.parse(text) as T & { error?: string }) : ({} as T & { error?: string });
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -55,7 +60,7 @@ export class Client {
 
   /** Follow a task's SSE stream; calls onEvent for each event, resolves when the task ends. */
   async watch(id: string, onEvent: (ev: TaskEvent) => void | Promise<void>, after = 0): Promise<void> {
-    const res = await this.fetchImpl(`${this.base}/tasks/${id}/events?after=${after}`);
+    const res = await this.fetchImpl(`${this.base}/tasks/${id}/events?after=${after}`, { headers: this.auth() });
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();

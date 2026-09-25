@@ -33,8 +33,9 @@ function packagesImported(dist: string): Set<string> {
   return new Set(names.filter((n) => !n.startsWith("node:") && !builtinModules.includes(n)).map((n) => (n.startsWith("@") ? n.split("/").slice(0, 2).join("/") : n.split("/")[0]!)));
 }
 
-function httpJson(url: string): Promise<unknown> {
-  return new Promise((ok, fail) => get(url, (res) => { let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => ok(JSON.parse(b))); }).on("error", fail));
+function httpJson(url: string, token?: string): Promise<unknown> {
+  const headers = token ? { authorization: `Bearer ${token}` } : {};
+  return new Promise((ok, fail) => get(url, { headers }, (res) => { let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => ok(JSON.parse(b))); }).on("error", fail));
 }
 
 function httpsJson(port: number, path: string): Promise<unknown> {
@@ -79,7 +80,10 @@ describe("production build", () => {
         child.on("exit", (code) => { clearTimeout(timer); fail(new Error(`daemon exited ${code}:\n${log}`)); });
       });
       expect(await httpJson(`http://127.0.0.1:${ports.local}/healthz`)).toMatchObject({ ok: true, version: "0.1.0" });
-      expect(await httpJson(`http://127.0.0.1:${ports.local}/remote/info`)).toMatchObject({ enabled: true, name: "Build Test", bonjour: "AgentSwitch on Build Test" });
+      // The local API wants the token the daemon wrote on start-up (api/localAuth.ts); without it, 401.
+      expect(await httpJson(`http://127.0.0.1:${ports.local}/remote/info`)).toMatchObject({ error: expect.stringContaining("token") });
+      const token = readFileSync(join(home, "local-token"), "utf8").trim();
+      expect(await httpJson(`http://127.0.0.1:${ports.local}/remote/info`, token)).toMatchObject({ enabled: true, name: "Build Test", bonjour: "AgentSwitch on Build Test" });
       expect(await httpsJson(ports.remote, "/healthz")).toEqual({ ok: true });
       expect(statSync(join(home, "remote", "key.pem")).mode & 0o777).toBe(0o600);
     } finally {

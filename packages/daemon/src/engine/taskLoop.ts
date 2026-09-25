@@ -4,6 +4,7 @@
  *  after transport and quota failures. The loop model only ever answers "what next" with one JSON object. */
 
 import { namedHosts } from "../executors/browserSlots.js";
+import { isReadOnlyCommand, shellCommandOf } from "../executors/readOnly.js";
 import { join } from "node:path";
 import type { Executor } from "../executors/types.js";
 import { NO_PROTECTED, restoreProtected, snapshotProtected } from "../executors/protected.js";
@@ -55,8 +56,8 @@ const OBSERVED_EVENTS = 12;
 
 /** Prefixed to the brief of a read-only step; its approval requests are refused outright (loop-v0 §6). */
 export const READ_ONLY_BRIEF: Record<"research" | "verify", string> = {
-  research: "This is a read-only research step: look and report; change nothing, create nothing, submit no form, send nothing. Any action that needs approval will be refused.",
-  verify: "This is a read-only verification step: check the earlier work and report; change nothing, submit nothing. Any action that needs approval will be refused.",
+  research: "This is a read-only research step: look and report; change nothing, create nothing, submit no form, send nothing. Commands that only read inside the working directory (git log/status/diff/show, ls, cat, head, grep, find, wc) run without asking; any other action that needs approval will be refused.",
+  verify: "This is a read-only verification step: check the earlier work and report; change nothing, submit nothing. Commands that only read inside the working directory (git log/status/diff/show, ls, cat, head, grep, find, wc) run without asking; any other action that needs approval will be refused.",
 };
 
 export type LoopDeps = {
@@ -458,7 +459,16 @@ export class TaskLoop {
         },
         approve: async (action, evidence) => {
           if (attemptCtl.signal.aborted || !this.active(task.id, signal)) return "deny";
-          if (readOnly) { this.ctx.emit(task.id, "supervisor", { kind: "approval", decision: "deny", reason: `${purpose} step is read-only`, source: "floor", action }); return "deny"; }
+          if (readOnly) {
+            // A command that only reads, inside the task's folder, is what a look needs (readOnly.ts); the rest is refused.
+            const command = shellCommandOf(action);
+            if (command !== null && isReadOnlyCommand(command, task.cwd, this.d.engine.protected ?? NO_PROTECTED)) {
+              this.ctx.emit(task.id, "supervisor", { kind: "approval", decision: "allow", reason: "a command that only reads, in a read-only step", source: "floor", action });
+              return "allow";
+            }
+            this.ctx.emit(task.id, "supervisor", { kind: "approval", decision: "deny", reason: `${purpose} step is read-only`, source: "floor", action });
+            return "deny";
+          }
           dog.pause();
           try {
             const decision = await this.d.desk.request(task.id, action, evidence);

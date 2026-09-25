@@ -101,7 +101,9 @@ final class AppModel {
         bonjour.onStatus = { [weak self] line in self?.bonjourStatus = line }
     }
 
-    var client: DaemonClient { DaemonClient(port: ports.local) }
+    var client: DaemonClient {
+        DaemonClient(port: ports.local, tokenFile: paths.agentswitchHome.appendingPathComponent(DaemonClient.tokenFileName))
+    }
     var gateCLI: GateCLI { config.get().gateCLI }
 
     // MARK: status lines

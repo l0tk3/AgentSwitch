@@ -11,17 +11,18 @@ export type OpenCodeExtras = { readonly mcp?: Record<string, unknown>; readonly 
 
 export type ProtectedDeny = { edit: Record<string, string>; bash: Record<string, string>; read: Record<string, string>; external: Record<string, string> };
 
-/** Static deny patterns for the protected roots: no edit under them, no shell command naming them, no working in them
+/** Static rules for the folders outside the project: any folder of the Mac is open, like Claude Code on it (2026-09-25,
+ *  user decision), except the protected roots: no edit under them, no shell command naming them, no working in them
  *  (`cd`, the shell tool's `workdir`, a file outside the project: OpenCode asks `external_directory` for those and
  *  never matches them against the bash patterns), and no read at all of the read-denied ones (credentials at rest).
- *  Exempt subtrees and `askUnder` (the skills dir) keep OpenCode's default for outside directories: ask. OpenCode
- *  takes the last matching rule, so they come after the denies. */
+ *  Exempt subtrees and `askUnder` (the skills dir) inside a root are open again. OpenCode takes the last matching rule,
+ *  so the order is: everything, then the roots, then what is exempt inside them. */
 export function protectedDeny(prot: ProtectedPaths, env: NodeJS.ProcessEnv = process.env, askUnder: readonly string[] = []): ProtectedDeny {
   const home = env.HOME ?? "";
   const edit: Record<string, string> = {};
   const bash: Record<string, string> = {};
   const read: Record<string, string> = {};
-  const external: Record<string, string> = {};
+  const external: Record<string, string> = { "*": "allow" };
   for (const r of prot.roots) {
     edit[`${r}/*`] = "deny";
     for (const form of [...shellForms(r, home), ...appDataTails(r, home)]) bash[`*${form}*`] = "deny";
@@ -29,7 +30,7 @@ export function protectedDeny(prot: ProtectedPaths, env: NodeJS.ProcessEnv = pro
     external[`${r}/*`] = "deny";
   }
   for (const r of prot.readDenied ?? []) { read[r] = "deny"; read[`${r}/*`] = "deny"; }
-  for (const d of [...prot.exempt, ...askUnder]) { external[d] = "ask"; external[`${d}/*`] = "ask"; }
+  for (const d of [...prot.exempt, ...askUnder]) { external[d] = "allow"; external[`${d}/*`] = "allow"; }
   return { edit, bash, read, external };
 }
 
@@ -74,8 +75,7 @@ export function opencodeExecConfig(gate: GateOptions | null | undefined, profile
       read: { "*": "allow", ...g.readDeny, ...deny.read, "**/.env": "deny", "**/*.pem": "deny", "**/*.key": "deny" },
       bash: { "*": "allow", "secret-gate keygen*": "deny", ...(gate ? { [`cat ${gate.home}/*`]: "deny" } : {}), ...deny.bash },
       edit: Object.keys(deny.edit).length ? { "*": "allow", ...deny.edit } : "allow",
-      // No "*" key: every other outside directory keeps OpenCode's default, ask.
-      ...(Object.keys(deny.external).length ? { external_directory: deny.external } : {}),
+      external_directory: deny.external,
       webfetch: "deny",
     },
   };

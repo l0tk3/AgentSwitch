@@ -64,6 +64,19 @@ describe("project folders for phone tasks", () => {
     expect((await f.call("GET", "/projects")).body.projects[0].problem).toMatch(/not an existing directory/);
   });
 
+  it("the assistant sends a task into a folder the user names (2026-09-25); one the cwd rules refuse is said, not run", async () => {
+    const replies: string[] = [];
+    const f = daemon({ name: "assistant-test", async route() { return { text: replies.shift() ?? "", elapsedMs: 1 }; } });
+    replies.push(JSON.stringify({ action: "create_task", text: "好的。", cwd: f.repo }), JSON.stringify({ action: "create_task", text: "好的。", cwd: "~" }));
+    const say = (text: string) => f.call("POST", "/assistant", { text, client_id: `c-${Math.random().toString(36).slice(2, 12)}` }, true);
+    const named = await say(`在 ${f.repo} 里跑一下测试`);
+    expect(named.body.task).toMatchObject({ cwd: f.repo, ephemeral: false });
+    const home = await say("在我的主目录里整理一下");
+    expect(home.body.task).toBeUndefined();
+    expect(home.body.assistant.text).toMatch(/没能建成任务.*too broad/);
+    await f.d.engine.idle();
+  });
+
   it("the assistant sees the projects and sends a task into the one the user means; an unknown name gets a scratch folder", async () => {
     const calls: string[] = [];
     const replies = [

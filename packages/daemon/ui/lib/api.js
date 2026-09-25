@@ -21,6 +21,8 @@ export async function api(method, path, body, { timeoutMs = 15_000 } = {}) {
     const t = await r.text();
     let d = {};
     try { d = t ? JSON.parse(t) : {}; } catch { throw new Error(`HTTP ${r.status}: ${t.slice(0, 120)}（服务端异常，看 daemon 日志）`); }
+    // The console's session ends when the daemon restarts (api/localAuth.ts): open it again from the Mac menu bar.
+    if (r.status === 401) throw Object.assign(new Error("网页控制台的登录已失效：请从 Mac 菜单栏的 AgentSwitch 重新打开网页控制台。"), { status: 401 });
     if (!r.ok) throw Object.assign(new Error(d.error || ("HTTP " + r.status)), { status: r.status });
     return d;
   } finally {

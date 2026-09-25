@@ -35,12 +35,11 @@ const NewTaskBody = z.object({
 });
 export { NewTaskBody };
 
-/** What a paired phone may not decide (app-v0 §2): the approval policy is the Mac's, and so is where a task runs on the
- *  Mac. A phone's task gets a fresh work dir, or its parent's cwd as a follow-up; it may not mark that ephemeral either,
- *  which deletes a work dir under the temp dir or the daemon's work root when the task ends. */
+/** What a paired phone may not decide (app-v0 §2): the approval policy is the Mac's. Where a task runs it may choose
+ *  since 2026-09-25 (user decision: the Mac's folders are open to tasks, like Claude Code): any folder the cwd rules
+ *  allow. It may not mark a folder ephemeral, which deletes it when the task ends. */
 function remoteRefusal(body: z.infer<typeof NewTaskBody>): string | null {
   if (body.approval !== undefined) return "approval cannot be set from a paired device; the Mac's approval policy applies";
-  if (body.cwd !== undefined) return "cwd cannot be set from a paired device; the task gets its own work directory (a follow-up continues in its parent's)";
   if (body.ephemeral !== undefined) return "ephemeral cannot be set from a paired device";
   return null;
 }
@@ -98,6 +97,9 @@ export type Admitted = { ok: true; task: Task } | { ok: false; status: 400 | 404
 export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly text: string; readonly sealed: readonly SealedEntry[] }): Admitted {
   const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, project, task: _raw, ...rest } = body;
   if (project && cwd) return { ok: false, status: 400, error: "a task names a project or a cwd, not both" };
+  // The assistant's folder comes here unchecked (POST /tasks checked its own before sealing): check it now.
+  const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
+  if (cwdProblem) return { ok: false, status: 400, error: cwdProblem };
   // Checked here, after sealing, so a project removed or moved meanwhile is refused rather than run somewhere else.
   const chosen = project ? resolveProject(deps, project) : null;
   if (chosen && !chosen.ok) return { ok: false, status: 400, error: chosen.error };

@@ -47,13 +47,13 @@ describe("protected paths", () => {
     expect(commandTouchesProtected("rm -rf ~/.agentswitch/skills", repo, withHome, { HOME: "/tmp/fakehome" })).toBe("/tmp/fakehome/.agentswitch/skills");
   });
 
-  it("decideTool denies edits and Bash on protected paths outright, still asks for other outside-cwd writes", () => {
+  it("decideTool denies edits and Bash on protected paths outright; other folders of the Mac are open (2026-09-25)", () => {
     const { home, repo, prot } = setup();
     expect(decideTool("Edit", { file_path: "config/targets.yaml" }, repo, new Set(), prot)).toMatchObject({ kind: "deny" });
     expect(decideTool("Write", { file_path: join(home, "mcp.json") }, repo, new Set(), prot)).toMatchObject({ kind: "deny" });
     expect(decideTool("Bash", { command: `echo hi >> ${home}/CONTEXT.md` }, repo, new Set(), prot)).toMatchObject({ kind: "deny" });
     expect(decideTool("Edit", { file_path: "README.md" }, repo, new Set(), prot)).toEqual({ kind: "allow" });
-    expect(decideTool("Edit", { file_path: "/etc/hosts" }, repo, new Set(), prot)).toMatchObject({ kind: "ask" });
+    expect(decideTool("Edit", { file_path: "/etc/hosts" }, repo, new Set(), prot)).toEqual({ kind: "allow" });
     expect(decideTool("Bash", { command: "ls" }, repo, new Set(), prot)).toMatchObject({ kind: "ask" });
     expect(decideTool("Read", { file_path: join(home, "mcp.json") }, repo, new Set(), prot)).toEqual({ kind: "allow" });
   });
@@ -80,7 +80,7 @@ describe("read-denied paths (2026-09-24)", () => {
   // read them. Before this, Claude's Read/Glob/Grep/LS were allowed everywhere.
   it("defaultProtected read-denies the gate home, the browser profiles and the remote listener's key", () => {
     const p = defaultProtected({ HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg" });
-    expect(p.readDenied).toEqual(["/h/.sg", "/h/.as/browser-profiles", "/h/.as/remote"]);
+    expect(p.readDenied).toEqual(["/h/.sg", "/h/.as/browser-profiles", "/h/.as/remote", "/h/.as/local-token"]);
   });
 
   it("Claude's read tools are refused there, whatever form the path takes; elsewhere they stay allowed", () => {
@@ -203,18 +203,18 @@ describe("shell commands that name a root inside a quoted string, an option or a
     for (const command of ["ls ~/Desktop", "cat packages/secret-gate/README.md", "cat config/targets.yaml"]) expect(lastMatch(bash, command), command).toBeUndefined();
   });
 
-  it("OpenCode may not work in a root (cd, workdir): external_directory denies it, exempt subtrees and skills still ask", async () => {
+  it("OpenCode may not work in a root (cd, workdir): external_directory denies it; every other folder, exempt subtrees and skills are open", async () => {
     const { opencodeExecConfig } = await import("../src/executors/opencodeShared.js");
     const skills = `${home}/opencode/skills`;
     const config = opencodeExecConfig(null, "/p", false, { protected: prot, skillsDir: skills }) as { permission: { external_directory: Record<string, string> } };
     const rules = config.permission.external_directory;
-    expect(rules["*"]).toBeUndefined();
+    expect(rules["*"]).toBe("allow");
     expect(lastMatch(rules, home)).toBe("deny");
     expect(lastMatch(rules, `${home}/*`)).toBe("deny");
     expect(lastMatch(rules, `${gate}/keys/*`)).toBe("deny");
-    expect(lastMatch(rules, `${home}/work/t1/*`)).toBe("ask");
-    expect(lastMatch(rules, `${skills}/demo/*`)).toBe("ask");
-    expect(lastMatch(rules, "/Users/u/Desktop/*")).toBeUndefined();
+    expect(lastMatch(rules, `${home}/work/t1/*`)).toBe("allow");
+    expect(lastMatch(rules, `${skills}/demo/*`)).toBe("allow");
+    expect(lastMatch(rules, "/Users/u/Desktop/*")).toBe("allow");
   });
 });
 

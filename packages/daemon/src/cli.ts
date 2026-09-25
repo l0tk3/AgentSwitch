@@ -10,6 +10,7 @@
  *   route "<text>" ... (local, no daemon) | reroute ... | context init
  */
 
+import { readLocalToken } from "./api/localAuth.js";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -62,7 +63,7 @@ const { values, positionals } = parseArgs({
   },
 });
 const [cmd, a1, a2] = positionals;
-const client = new Client(values.server);
+const client = new Client(values.server, fetch, readLocalToken(cfg.home));
 const out = (v: unknown) => console.log(JSON.stringify(v, null, 2));
 
 function splitPin(text: string): { harness: string; model: string } {

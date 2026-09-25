@@ -84,7 +84,7 @@ describe("OpenCode executor on the resident server: per-execution wiring", () =>
     const { permission } = opencodeExecConfig(gate, "", false, { protected: prot, skillsDir: server.skillsDir }) as { permission: Record<string, unknown> };
     expect(s.permissions).toEqual(toRuleset(permission));
     expect(s.permissions).toContainEqual({ action: "external_directory", resource: "/h/.agentswitch/*", effect: "deny" });
-    expect(s.permissions).toContainEqual({ action: "external_directory", resource: `${server.skillsDir}/*`, effect: "ask" });
+    expect(s.permissions).toContainEqual({ action: "external_directory", resource: `${server.skillsDir}/*`, effect: "allow" });
     expect(s.permissions).toContainEqual({ action: "webfetch", resource: "*", effect: "deny" });
     expect(s.permissions).toContainEqual({ action: "read", resource: "/h/.secret-gate/*", effect: "deny" });
     expect(s.permissions).toContainEqual({ action: "shell", resource: "*/h/.agentswitch*", effect: "deny" });

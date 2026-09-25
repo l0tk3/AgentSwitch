@@ -278,7 +278,7 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
     expect((await call(s.port, "DELETE", `/threads/${threadId}`)).status).toBe(401);
   });
 
-  it("a phone cannot weaken the Mac's decisions: no approval override, cwd or ephemeral; PATCH /threads only renames", async () => {
+  it("a phone cannot weaken the Mac's decisions: no approval override or ephemeral; a cwd only where the rules allow; PATCH /threads only renames", async () => {
     const s = await remoteDaemon();
     const { token } = await pair(s);
     const project = mkdtempSync(join(tmpdir(), "agentswitch-remote-proj-"));
@@ -286,11 +286,14 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
     expect(refused.status).toBe(400);
     expect(String(refused.body.error)).toMatch(/approval cannot be set from a paired device/);
     expect((await call(s.port, "POST", "/tasks", { token, json: { task: "x", approval: {} } })).status).toBe(400);
-    const cwd = await call(s.port, "POST", "/tasks", { token, json: { task: "x", cwd: project } });
-    expect(cwd.status).toBe(400);
-    expect(String(cwd.body.error)).toMatch(/cwd cannot be set from a paired device/);
+    // A folder the cwd rules allow may be named (2026-09-25, user decision); one they refuse may not.
+    const inProject = await call(s.port, "POST", "/tasks", { token, json: { task: 'x @echo {"result":"ok"}', cwd: project } });
+    expect(inProject.status).toBe(201);
+    expect(inProject.body).toMatchObject({ cwd: project, ephemeral: false });
+    expect((await call(s.port, "POST", "/tasks", { token, json: { task: "x", cwd: process.env.HOME } })).status).toBe(400);
     expect((await call(s.port, "POST", "/tasks", { token, json: { task: "x", ephemeral: true } })).status).toBe(400);
-    expect(s.d.store.listTasks(10)).toEqual([]);
+    expect(s.d.store.listTasks(10)).toHaveLength(1);
+    await s.d.engine.idle();
 
     const created = await call(s.port, "POST", "/tasks", { token, json: { task: 'hi @echo {"result":"hi"}' } });
     expect(created.status).toBe(201);

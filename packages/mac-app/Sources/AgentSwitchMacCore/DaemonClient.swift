@@ -42,10 +42,24 @@ public enum DaemonError: LocalizedError, Equatable, Sendable {
 public struct DaemonClient: Sendable {
     public let baseURL: URL
     private let transport: HTTPTransport
+    /// The local API's token (daemon api/localAuth.ts): `$AGENTSWITCH_HOME/local-token`, written by the daemon on
+    /// start-up. Read on every call, so a client made before the daemon's first start still gets it.
+    private let tokenFile: URL?
 
-    public init(port: Int, transport: HTTPTransport = URLSessionTransport()) {
+    public init(port: Int, transport: HTTPTransport = URLSessionTransport(), tokenFile: URL? = nil) {
         baseURL = URL(string: "http://127.0.0.1:\(port)")!
         self.transport = transport
+        self.tokenFile = tokenFile
+    }
+
+    public static let tokenFileName = "local-token"
+
+    /// A one-time link that opens the web console signed in (valid for a minute, used once; never the token itself).
+    public func consoleLink() async throws -> URL {
+        struct Link: Decodable { let path: String }
+        let link = try decode(Link.self, try await call("POST", "/local/console-link", body: Data("{}".utf8)))
+        guard let url = URL(string: baseURL.absoluteString + link.path) else { throw DaemonError.decoding("console link \(link.path)") }
+        return url
     }
 
     public func health() async throws -> Health {
@@ -98,6 +112,9 @@ public struct DaemonClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let tokenFile, let token = try? String(contentsOf: tokenFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

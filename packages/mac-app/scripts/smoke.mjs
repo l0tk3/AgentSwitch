@@ -12,7 +12,7 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, openSync, existsSync } from "node:fs";
+import { mkdirSync, openSync, existsSync, readFileSync } from "node:fs";
 import { connect as tcpConnect } from "node:net";
 import { Agent, request as httpsRequest } from "node:https";
 import { join, resolve } from "node:path";
@@ -62,9 +62,14 @@ function gateProbe(port) {
 }
 
 // ---- local HTTP (loopback, plain)
+// The local API wants the token the daemon writes on start-up (daemon api/localAuth.ts); /healthz does not.
+function localAuth() {
+  try { return { authorization: `Bearer ${readFileSync(join(HOME_AS, "local-token"), "utf8").trim()}` }; } catch { return {}; }
+}
+
 async function local(method, path, body) {
   const res = await fetch(`http://127.0.0.1:${PORTS.local}${path}`, {
-    method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined,
+    method, headers: { ...localAuth(), ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
   let json = null;

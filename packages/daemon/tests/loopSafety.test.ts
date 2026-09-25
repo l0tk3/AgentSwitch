@@ -184,6 +184,23 @@ describe("completion requires evidence for the original goal", () => {
     expect(f.runs).toHaveLength(1);
   });
 
+  it("a read-only step runs commands that only read in its folder and still refuses everything else (2026-09-25)", async () => {
+    const decisions: [string, string][] = [];
+    const f = build({ planner: [decision({ purpose: "research", brief: "总结仓库最近的改动" }), finish()], run: async (input) => {
+      for (const action of ["Bash: git log --oneline -n 30 2>&1", "Bash: git status --short --branch", "Bash: git commit -am x", "Bash: git log > out.txt", "Edit outside cwd: /x"]) {
+        decisions.push([action, await input.approve(action, "")]);
+      }
+      return { ok: true, lastText: "最近的改动：……", sideEffects: noEffects };
+    } });
+    f.submit();
+    await f.engine.idle();
+    expect(decisions).toEqual([
+      ["Bash: git log --oneline -n 30 2>&1", "allow"], ["Bash: git status --short --branch", "allow"],
+      ["Bash: git commit -am x", "deny"], ["Bash: git log > out.txt", "deny"], ["Edit outside cwd: /x", "deny"],
+    ]);
+    expect(f.events.filter((e) => e.type === "supervisor" && e.payload.decision === "allow").map((e) => e.payload.reason)).toEqual(["a command that only reads, in a read-only step", "a command that only reads, in a read-only step"]);
+  });
+
   it("uses a bounded text verifier when no supervisor is configured", async () => {
     const f = build({ noSupervisor: true, planner: [decision(), finish(), JSON.stringify({ accepted: false, missing: ["登录未完成"], note: "need verification" })] });
     const task = f.submit();
