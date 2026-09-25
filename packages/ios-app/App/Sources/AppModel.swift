@@ -30,6 +30,14 @@ final class AppModel {
     private(set) var gateKeyStatus: GateKeyStatus = .unknown
     private(set) var targets: Targets?
     private(set) var sending = false
+    /// The conversation with the assistant (the home screen); loaded newest first, then polled for what follows.
+    private(set) var conversation = ConversationLog()
+    private var conversationLoaded = false
+    /// The Mac has the assistant (a Mac without it answers 404). Then the assistant reports ends and questions in the
+    /// conversation, and voice mode reads those instead of reading tasks and approvals on its own (not twice).
+    private(set) var hasAssistant = false
+    /// The message on its way, until the Mac answers; one at a time.
+    private(set) var outgoing: OutgoingMessage?
 
     var composeText = ""
     /// Files waiting to go with the next task, already prepared (images shrunk, metadata dropped).
@@ -107,6 +115,10 @@ final class AppModel {
         tasks = []
         approvals = []
         threads = []
+        conversation = ConversationLog()
+        conversationLoaded = false
+        hasAssistant = false
+        outgoing = nil
         cues = CueTracker()
         targets = nil
         pin = nil
@@ -184,6 +196,41 @@ final class AppModel {
         await refreshTasks()
         await refreshApprovals()
         await refreshThreads()
+        await refreshConversation()
+    }
+
+    /// First the newest messages, then what came after the last one held. An answer the phone missed (the connection
+    /// broke after the Mac got the message) confirms the waiting bubble; one that arrives this way is sounded and, in
+    /// voice mode, read.
+    func refreshConversation() async {
+        guard let api else { return }
+        do {
+            if !conversationLoaded {
+                conversation = ConversationLog(try await api.assistantMessages(last: Conversation.defaultLimit))
+                conversationLoaded = true
+                hasAssistant = true
+            } else {
+                let fresh = try await api.assistantMessages(after: conversation.lastSeq)
+                let arrived = conversation.newAssistantMessages(in: fresh)
+                conversation = conversation.merging(fresh)
+                for message in arrived { announceMessage(message) }
+            }
+            if let waiting = outgoing, conversation.contains(clientId: waiting.clientId) { outgoing = nil }
+        } catch APIError.http(status: 404, message: _) {
+            conversationLoaded = true   // a Mac without the assistant: the log shows tasks only
+            hasAssistant = false
+        } catch { handle(error) }
+    }
+
+    /// An assistant message: a sound, and in voice mode its text read aloud. A report of an end or a question has its
+    /// sound already (the task's own cue); a progress line gets a light one.
+    private func announceMessage(_ message: AssistantMessage) {
+        switch message.kind {
+        case .notice: break
+        case .progress: feedback.play(.sent, speaking: speaker.isSpeaking)
+        default: feedback.play(.accepted, speaking: speaker.isSpeaking)
+        }
+        if feedback.settings.voiceMode { speaker.say(MessageDisplay.readable(message.text), key: "m\(message.seq)") }
     }
 
     func refreshThreads() async {
@@ -208,10 +255,11 @@ final class AppModel {
         } catch { handle(error) }
     }
 
-    /// Endings get a sound; in voice mode a finished task's spoken script is read once it has arrived.
+    /// Endings get a sound; in voice mode a finished task's spoken script is read once it has arrived (the assistant's
+    /// report reads it instead when the Mac has one).
     private func announce() {
         for cue in cues.taskCues(tasks) { feedback.play(cue.cue, speaking: speaker.isSpeaking) }
-        guard feedback.settings.voiceMode else { _ = cues.newScripts(tasks); return }
+        guard feedback.settings.voiceMode, !hasAssistant else { _ = cues.newScripts(tasks); return }
         for task in cues.newScripts(tasks) { speaker.toggle(task) }
     }
 
@@ -221,7 +269,7 @@ final class AppModel {
             let fresh = try await api.approvals()
             for approval in cues.newApprovals(fresh) {
                 feedback.play(.needsYou, speaking: speaker.isSpeaking)
-                if feedback.settings.voiceMode { speaker.say(Self.spokenQuestion(approval), key: approval.id) }
+                if feedback.settings.voiceMode && !hasAssistant { speaker.say(Self.spokenQuestion(approval), key: approval.id) }
                 await notifications.needsAttention(taskId: approval.taskId, approval: approval)
             }
             approvals = fresh
@@ -264,47 +312,87 @@ final class AppModel {
         tasks.insert(task, at: 0)
     }
 
-    /// The input box's send: no thread and no parent, the router files it (threads-v0). Text and pin are cleared only
-    /// once the Mac accepted the task, and the text only if it was not edited meanwhile. A failure keeps them for
-    /// another try and returns the message for the input box (not the banner, so it shows once).
+    /// The input box's send (assistant-v0 §1.1): the message goes to the assistant, which answers, looks up a task or
+    /// hands the work to the router. The box empties at once and the message waits in its bubble until the Mac answers;
+    /// a failure stays there with a resend, which the Mac recognizes by the client id and answers only once.
     func send() async -> String? {
         let typed = composeText
         let written = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         // Attachments alone are a task too.
         let text = written.isEmpty && !attachments.isEmpty ? Self.attachmentsOnlyTask : written
-        guard let api, !text.isEmpty, !sending, preparingAttachments == 0 else { return nil }
+        guard api != nil, !text.isEmpty, !sending, outgoing == nil, preparingAttachments == 0 else { return nil }
+        outgoing = OutgoingMessage(text: text, attachments: attachments, pin: pin)
+        if composeText == typed { composeText = "" }
+        attachments = []
+        pin = nil
+        await deliver()
+        return nil
+    }
+
+    /// The waiting message again, same client id: the Mac answers a message it already has with its first answer.
+    func resend() async {
+        guard let waiting = outgoing, waiting.failure != nil, !sending else { return }
+        outgoing = waiting.failing(nil)
+        await deliver()
+    }
+
+    /// Back into the input box to change it; the Mac never got it, or answers the old one only if it is resent.
+    func editOutgoing() {
+        guard let waiting = outgoing, waiting.failure != nil else { return }
+        if composeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { composeText = waiting.text == Self.attachmentsOnlyTask ? "" : waiting.text }
+        attachments = waiting.attachments + attachments
+        pin = pin ?? waiting.pin
+        outgoing = nil
+    }
+
+    private func deliver() async {
+        guard let api, var message = outgoing else { return }
         feedback.play(.sent, speaking: speaker.isSpeaking)
         sending = true
         defer { sending = false }
-        let outgoing = attachments
-        let staged: [StagedUpload]
-        do {
-            staged = outgoing.isEmpty ? [] : try await api.upload(outgoing.map(\.file))
-        } catch {
-            feedback.play(.failed, speaking: speaker.isSpeaking)
-            if case APIError.unauthorized = error { handle(error) }
-            // Nothing was created yet: the task is only sent after its files are staged.
-            return "附件没传上去（\(error.localizedDescription)），再发一次试试。"
+        if message.staged == nil {
+            do {
+                message = message.staging(message.attachments.isEmpty ? [] : try await api.upload(message.attachments.map(\.file)).map(\.id))
+                outgoing = message
+            } catch {
+                return fail("附件没传上去（\(error.localizedDescription)）。", error)
+            }
         }
         do {
-            let task = try await api.createTask(NewTaskRequest(task: text, pin: pin, attachments: staged.map(\.id)))
-            if composeText == typed { composeText = "" }
-            pin = nil
-            attachments.removeAll { item in outgoing.contains { $0.id == item.id } }
-            taskCreated(task)
-            feedback.play(.accepted, speaking: speaker.isSpeaking)
-            if feedback.settings.voiceMode { speaker.say("收到，正在安排。", key: task.id) }
-            return nil
+            received(try await api.sendMessage(NewMessage(text: message.text, clientId: message.clientId, attachments: message.staged, pin: message.pin)))
+        } catch APIError.http(status: 404, message: _) {
+            await sendAsTask(message, api)
         } catch let error as APIError where error.isNetworkFailure {
-            // The Mac may have created it before the connection broke: look before sending again.
-            feedback.play(.failed, speaking: speaker.isSpeaking)
-            await refreshTasks()
-            return Self.unconfirmedSend
+            fail(Self.unconfirmedSend, error)
+            await refreshConversation()   // it may have arrived: the stored message confirms it
         } catch {
-            feedback.play(.failed, speaking: speaker.isSpeaking)
-            if case APIError.unauthorized = error { handle(error) }
-            return error.localizedDescription
+            fail(error.localizedDescription, error)
         }
+    }
+
+    private func received(_ reply: AssistantReply) {
+        conversation = conversation.merging([reply.user, reply.assistant])
+        if let task = reply.task { taskCreated(task) }
+        outgoing = nil
+        announceMessage(reply.assistant)
+    }
+
+    /// A Mac without the assistant (an older daemon): the message becomes a task as before.
+    private func sendAsTask(_ message: OutgoingMessage, _ api: AgentSwitchAPI) async {
+        do {
+            let task = try await api.createTask(NewTaskRequest(task: message.text, pin: message.pin, attachments: message.staged ?? []))
+            taskCreated(task)
+            outgoing = nil
+            feedback.play(.accepted, speaking: speaker.isSpeaking)
+        } catch {
+            fail(error.localizedDescription, error)
+        }
+    }
+
+    private func fail(_ reason: String, _ error: Error) {
+        feedback.play(.failed, speaking: speaker.isSpeaking)
+        if case APIError.unauthorized = error { handle(error) }
+        outgoing = outgoing?.failing(reason)
     }
 
     static let attachmentsOnlyTask = "请查看附件。"
@@ -316,7 +404,7 @@ final class AppModel {
         }
         return "需要你批准：" + approval.action
     }
-    static let unconfirmedSend = "没收到 Mac 的确认，任务可能已经建好了：先看日志里有没有这条，再决定要不要重发。"
+    static let unconfirmedSend = "没收到 Mac 的回应。可以放心重发：同一条消息 Mac 只处理一次。"
 
     /// Answering in the log: the result shows up in the task's state and the approvals list right after.
     func decide(_ approval: Approval, _ decision: ApprovalDecision) async {

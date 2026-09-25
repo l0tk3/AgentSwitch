@@ -33,7 +33,7 @@ struct InputBar: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 extras
-                TextField("让 Mac 上的 agent 做什么…", text: $model.composeText, axis: .vertical)
+                TextField("跟助理说：做什么，或问问进展…", text: $model.composeText, axis: .vertical)
                     .lineLimit(1...6)
                     // Passwords may be typed here: keep the keyboard from learning or suggesting them.
                     .autocorrectionDisabled()
@@ -126,7 +126,7 @@ struct InputBar: View {
 
     private var canSend: Bool {
         let hasContent = !model.composeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty
-        return model.api != nil && !model.sending && model.preparingAttachments == 0 && hasContent
+        return model.api != nil && !model.sending && model.outgoing == nil && model.preparingAttachments == 0 && hasContent
     }
 
     private var extras: some View {

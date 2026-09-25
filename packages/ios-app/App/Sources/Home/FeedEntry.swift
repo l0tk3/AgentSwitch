@@ -3,8 +3,10 @@ import SwiftUI
 
 /// One task in the log: what you said, then what happened (state, executor, live lines, result or error), then this
 /// task's pending approvals and questions to answer in place. Tapping the middle part opens the full event stream.
+/// Under the assistant's reply that created it, what you said is already above: `showsRequest` false leaves it out.
 struct FeedEntry: View {
     let task: AgentTask
+    var showsRequest = true
     let tail: [TaskEvent]
     let pending: [Approval]
     /// Files the executor handed back, once known (FeedModel looks once per finished task).
@@ -26,17 +28,8 @@ struct FeedEntry: View {
             if let threadId = task.threadId, let openThread {
                 ThreadTag(threadId: threadId, title: model.thread(threadId)?.title) { openThread(threadId) }
             }
-            HStack {
-                Spacer(minLength: 48)
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(MessageDisplay.readable(task.task))
-                        .padding(10)
-                        .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
-                        .textSelection(.enabled)
-                    if let sent = task.attachments, !sent.isEmpty {
-                        Label("\(sent.count) 个附件", systemImage: "paperclip").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
+            if showsRequest {
+                UserBubble(text: task.task, attachments: task.attachments?.count ?? 0)
             }
             Button(action: open) { outcome }
                 .buttonStyle(.plain)

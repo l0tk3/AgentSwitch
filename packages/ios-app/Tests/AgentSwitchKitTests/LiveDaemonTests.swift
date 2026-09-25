@@ -70,6 +70,23 @@ final class LiveDaemonTests: XCTestCase {
         XCTAssertEqual(back, bytes)
         for try await _ in api.events(taskId: withFile.id) {}
 
+        // The assistant (assistant-v0 §1.1): a message is answered and, with no router model (echo mode), becomes a task;
+        // the same client id sent again gets the same answer; the conversation reads back newest-first and incrementally.
+        let clientId = Conversation.newClientId()
+        let said = NewMessage(text: "整理一下 e2e 目录 @echo {\"result\":\"ok\"}", clientId: clientId)
+        let reply = try await api.sendMessage(said)
+        XCTAssertEqual(reply.user.clientId, clientId)
+        XCTAssertEqual(reply.assistant.kind, .fallback)
+        let created = try XCTUnwrap(reply.task)
+        XCTAssertEqual(reply.assistant.taskIds, [created.id])
+        let again = try await api.sendMessage(said)
+        XCTAssertEqual(again.assistant.seq, reply.assistant.seq, "a resend is answered once")
+        let recent = try await api.assistantMessages(last: 2)
+        XCTAssertEqual(recent.map(\.seq), [reply.user.seq, reply.assistant.seq])
+        let after = try await api.assistantMessages(after: reply.user.seq)
+        XCTAssertEqual(after.map(\.seq), [reply.assistant.seq])
+        for try await _ in api.events(taskId: created.id) {}
+
         // The advanced delete: a finished task goes, and is gone.
         try await api.deleteTask(task.id)
         do { _ = try await api.task(task.id); XCTFail("a deleted task must be gone") } catch APIError.http(status: 404, message: _) {}

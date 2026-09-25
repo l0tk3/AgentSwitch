@@ -79,6 +79,11 @@ public struct AgentSwitchAPI: Sendable {
         (try await get(["assistant"], query: [URLQueryItem(name: "after", value: String(seq))]) as AssistantMessages).messages
     }
 
+    /// The newest `count` messages, oldest first: the first load of the conversation.
+    public func assistantMessages(last count: Int) async throws -> [AssistantMessage] {
+        (try await get(["assistant"], query: [URLQueryItem(name: "last", value: String(count))]) as AssistantMessages).messages
+    }
+
     /// Stages files for a task (multipart, sent once); pass the ids as `NewTaskRequest.attachments`.
     public func upload(_ files: [UploadFile]) async throws -> [StagedUpload] {
         let boundary = "agentswitch-\(UUID().uuidString)"
@@ -113,6 +118,19 @@ public struct AgentSwitchAPI: Sendable {
 
     public func deleteThread(_ id: String) async throws {
         let _: OKReply = try await perform("DELETE", ["threads", id], query: [], body: nil)
+    }
+
+    /// A newer AgentSwitch.app staged on the Mac, if any, and the last switch's outcome.
+    public func appUpdate() async throws -> AppUpdateInfo { try await get(["update"]) }
+
+    /// The user's go-ahead: the Mac app quits, swaps in the new version and restarts (the previous one comes back if
+    /// the new one does not start). The connection drops meanwhile; the assistant reports the outcome.
+    public func installUpdate() async throws {
+        let _: InstallRequested = try await send("POST", ["update", "install"], body: [String: String]())
+    }
+
+    public func projects() async throws -> [ProjectFolder] {
+        (try await get(["projects"]) as ProjectFolders).projects
     }
 
     // MARK: - plumbing

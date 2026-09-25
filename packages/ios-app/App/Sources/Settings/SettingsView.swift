@@ -32,6 +32,7 @@ struct SettingsView: View {
                     Text("会话由路由器自动管理：相关的任务归到同一个会话里续接。这里只用来删掉不想要的会话或单条日志，删除不可恢复。")
                 }
                 .disabled(model.api == nil)
+                if model.api != nil { MacAppSection() }
                 if let profile = model.profile { serverSection(profile) }
                 connectionSection
                 Section {
@@ -189,7 +190,7 @@ private struct FeedbackSection: View {
         } header: {
             Text("提示与朗读")
         } footer: {
-            Text("发出、已接收、需要你、完成、失败各有提示音和振动。语音模式会念出需要你回答的问题，任务完成时自动朗读口播稿，也会在静音时出声。应用没打开时暂时不会响（要等推送）。")
+            Text("发出、已接收、需要你、完成、失败各有提示音和振动。语音模式会念出助理的回复和它主动的汇报（任务结束、需要你回答、你让它盯着的进展），也会在静音时出声。应用没打开时暂时不会响（要等推送），打开后补上。")
         }
     }
 }

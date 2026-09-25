@@ -4,7 +4,9 @@ import Foundation
 public struct AssistantMessage: Decodable, Sendable, Hashable, Identifiable {
     public enum Role: String, Decodable, Sendable { case user, assistant }
     public enum Kind: String, Decodable, Sendable {
-        case message, reply, task, status, cancel, fallback, notice, other
+        /// `notice`: a task ended or waits for you (the assistant speaks up on its own); `progress`: a watched task's
+        /// line; `watch`: the answer that set or stopped a watch.
+        case message, reply, task, status, cancel, fallback, notice, watch, progress, other
         public init(from decoder: Decoder) throws {
             self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
         }
@@ -16,11 +18,49 @@ public struct AssistantMessage: Decodable, Sendable, Hashable, Identifiable {
     public let text: String
     public let kind: Kind
     public let taskIds: [String]
+    /// The phone's id for a message it sent (user messages only): how a send the phone never heard back from is found.
+    public let clientId: String?
 
     public var id: Int { seq }
     public var date: Date { Date(milliseconds: ts) }
     /// A reply that created its tasks (as opposed to one that only talks about them).
     public var createdTasks: Bool { kind == .task || kind == .fallback }
+    /// Said by the assistant on its own, not in answer to a message.
+    public var unprompted: Bool { kind == .notice || kind == .progress }
+}
+
+/// The conversation as the phone holds it: each message once, by sequence number, the newest `keep`. Values, not
+/// shared state: merging returns a new log.
+public struct ConversationLog: Sendable, Equatable {
+    public static let keep = 200
+
+    public let messages: [AssistantMessage]
+    private let keep: Int
+
+    public init(_ messages: [AssistantMessage] = [], keep: Int = ConversationLog.keep) {
+        let unique = Dictionary(messages.map { ($0.seq, $0) }, uniquingKeysWith: { _, newer in newer })
+        self.messages = Array(unique.values.sorted { $0.seq < $1.seq }.suffix(keep))
+        self.keep = keep
+    }
+
+    /// The highest sequence number held: the next poll asks for what came after it.
+    public var lastSeq: Int { messages.last?.seq ?? 0 }
+    public var isEmpty: Bool { messages.isEmpty }
+
+    public func merging(_ incoming: [AssistantMessage]) -> ConversationLog {
+        incoming.isEmpty ? self : ConversationLog(messages + incoming, keep: keep)
+    }
+
+    /// Whether the Mac stored the message sent with this client id (a send whose answer was lost on the way).
+    public func contains(clientId: String) -> Bool {
+        messages.contains { $0.role == .user && $0.clientId == clientId }
+    }
+
+    /// Assistant messages in `incoming` this log does not hold yet, oldest first (what to sound or read aloud).
+    public func newAssistantMessages(in incoming: [AssistantMessage]) -> [AssistantMessage] {
+        let known = Set(messages.map(\.seq))
+        return incoming.filter { $0.role == .assistant && !known.contains($0.seq) }.sorted { $0.seq < $1.seq }
+    }
 }
 
 /// `POST /assistant`: the stored message, the answer, and the task when one was created.

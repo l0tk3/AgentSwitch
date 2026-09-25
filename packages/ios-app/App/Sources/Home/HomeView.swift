@@ -1,8 +1,10 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// The one screen (app-v0 §5): the log of recent tasks, oldest first, and the input box. Threads are never chosen here;
-/// the router files every task. Settings, ciphertexts and the loose approvals open as sheets.
+/// The one screen (app-v0 §5, assistant-v0 §1.1): the conversation with the assistant, oldest first — your messages,
+/// its answers, each task under the answer that created it, tasks made elsewhere on their own — and the input box.
+/// Threads are never chosen here; the router files every task. Settings, ciphertexts and the loose approvals open as
+/// sheets.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @State private var feed = FeedModel()
@@ -14,27 +16,30 @@ struct HomeView: View {
     var body: some View {
         @Bindable var model = model
         NavigationStack(path: $path) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    ConnectionBanner()
-                    if let banner = model.banner {
-                        ErrorText(message: $model.banner).id(banner)
+            ScrollViewReader { scroller in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        ConnectionBanner()
+                        if let banner = model.banner {
+                            ErrorText(message: $model.banner).id(banner)
+                        }
+                        if timeline.isEmpty && model.outgoing == nil {
+                            EmptyLog()
+                        }
+                        ForEach(timeline) { item in row(item) }
+                        if let outgoing = model.outgoing {
+                            OutgoingBubble(message: outgoing)
+                        }
+                        Color.clear.frame(height: 1).id(Self.bottom)
                     }
-                    if timeline.isEmpty {
-                        EmptyLog()
-                    }
-                    ForEach(timeline) { task in
-                        FeedEntry(task: task, tail: feed.tails[task.id] ?? [],
-                                  pending: ActivityFeed.pending(model.approvals, for: task.id), deliverables: feed.deliverables[task.id] ?? 0,
-                                  open: { open(task.id) },
-                                  delete: { deleting = $0 },
-                                  openThread: { openThread($0) })
-                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+                .defaultScrollAnchor(.bottom)
+                // A new message, answer or task: follow it down.
+                .onChange(of: timeline.last?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
+                .onChange(of: model.outgoing?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
             }
-            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .top) {
                 VStack(spacing: 0) {
@@ -75,7 +80,42 @@ struct HomeView: View {
         }
     }
 
-    private var timeline: [AgentTask] { ActivityFeed.timeline(model.tasks) }
+    private static let bottom = "bottom"
+
+    private var timeline: [Conversation.Item] {
+        Conversation.timeline(messages: model.conversation.messages, tasks: ActivityFeed.timeline(model.tasks))
+    }
+
+    @ViewBuilder
+    private func row(_ item: Conversation.Item) -> some View {
+        switch item {
+        case .user(let message):
+            UserBubble(text: message.text)
+        case .assistant(let message, let created):
+            AssistantBubble(message: message, created: created, entry: { entry($0, showsRequest: false) }, open: open)
+        case .task(let task):
+            entry(task, showsRequest: true)
+        }
+    }
+
+    private func entry(_ task: AgentTask, showsRequest: Bool) -> FeedEntry {
+        FeedEntry(task: task, showsRequest: showsRequest, tail: feed.tails[task.id] ?? [],
+                  pending: ActivityFeed.pending(model.approvals, for: task.id), deliverables: feed.deliverables[task.id] ?? 0,
+                  open: { open(task.id) },
+                  delete: { deleting = $0 },
+                  openThread: { openThread($0) })
+    }
+
+    /// Tasks with a card in the conversation (their approvals are answered there, not behind the top button).
+    private var shownTaskIds: Set<String> {
+        Set(timeline.flatMap { item -> [String] in
+            switch item {
+            case .user: return []
+            case .assistant(_, let created): return created.map(\.id)
+            case .task(let task): return [task.id]
+            }
+        })
+    }
 
     private func open(_ id: String) {
         Keyboard.dismiss()
@@ -88,7 +128,7 @@ struct HomeView: View {
     }
 
     private var looseCount: Int {
-        ActivityFeed.looseApprovals(model.approvals, shown: Set(timeline.map(\.id))).count
+        ActivityFeed.looseApprovals(model.approvals, shown: shownTaskIds).count
     }
 
     @ViewBuilder
@@ -132,9 +172,9 @@ private struct LooseApprovalsButton: View {
 private struct EmptyLog: View {
     var body: some View {
         ContentUnavailableView {
-            Label("想让 Mac 上的 agent 做什么？", systemImage: "text.bubble")
+            Label("跟助理说吧", systemImage: "text.bubble")
         } description: {
-            Text("在下面直接说。账号密码可以直接写，Mac 会先加密再交给 agent；相关的任务会自动归到同一个会话里续接。")
+            Text("让 Mac 上的 agent 做事，或者问之前的任务怎么样了、让它停下。账号密码可以直接写，Mac 会先加密再交给 agent；相关的任务会自动归到同一个会话里续接。")
         }
         .padding(.top, 40)
     }
