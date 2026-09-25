@@ -19,6 +19,7 @@
 | `give_up {reason}` | 任务失败 | — |
 
 - `purpose`：`research`（只看不改：审批一律拒绝写操作和表单提交，适合「去看看平台表单要什么字段」）、`do`、`verify`（只读复查）。
+  > 2026-09-25 改：原来只读步骤里凡是要审批的一律拒绝，而 Claude 执行每条 shell 命令都要审批，「总结仓库最近的改动」连 `git log` 都跑不了（手机实测）。现在只读步骤里**只读的命令**直接放行（`executors/readOnly.ts`）：整行每条命令都在白名单里且只用于读（`git log/status/diff/show/rev-parse/ls-files/blame…`、只列不改的 `git branch/tag/remote/config --get/stash list`、`ls cat head tail wc grep rg find`（不带 `-exec/-delete`）、`ps lsof du stat` 等），没有写文件的重定向（`2>&1`、`>/dev/null` 除外）、没有命令/进程替换、没有后台、命令前不设变量、`git -c` 拒绝，且命令里的路径都在任务自己的目录里（手机任务要进别的目录只能靠登记的项目目录）。其余照旧拒绝；受保护路径的检查在它之前，不受影响。简报里写明哪些命令会放行。Codex 自带的沙箱（例如拦 `ps`）不在此列。
 - 预算：每个任务最多派发 5 次、路由器最多 12 步，超出强制 `ask_user`「还要继续吗」。
 - 现有零散机制合并进循环：重派 = 路由器看到失败后再 `dispatch`；验收 = 路由器看到结果后决定 `finish` 还是再派；追问 = `ask_user`。额度耗尽换备选、传输错误重试一次仍由代码直接做，不打扰路由器。
 - 简单任务不变慢：`dispatch` → `finish` 两次路由器调用，和现在的「分诊 + 验收」一样。
