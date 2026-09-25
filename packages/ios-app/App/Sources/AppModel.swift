@@ -48,6 +48,13 @@ final class AppModel {
     var pin: TargetRef?
     let speaker = Speaker()
     let feedback = Feedback()
+    let live = LiveActivities()
+    /// The home screen's live event tails (FeedModel): the current step of each task in the Live Activity.
+    var liveTails: [String: [TaskEvent]] = [:] { didSet { if liveTails != oldValue { syncLive() } } }
+    /// A task to open, from a Live Activity's link (`agentswitch://task/<id>`); the home screen takes it.
+    var openTaskRequest: String?
+    /// Syncs one after another: two at once could each start an activity.
+    @ObservationIgnored private var liveSync: Task<Void, Never>?
     /// Threads as the router filed the tasks (the home screen labels and strip, the thread page).
     private(set) var threads: [AgentThread] = []
     private var cues = CueTracker()
@@ -236,6 +243,27 @@ final class AppModel {
     func refreshThreads() async {
         guard let api else { return }
         if let fresh = try? await api.threads() { threads = fresh }
+        syncLive()
+    }
+
+    /// The Live Activity follows the tasks, the questions waiting for you and the live tails (assistant-v0 §4).
+    func syncLive() {
+        let titles = Dictionary(threads.compactMap { t in t.title.map { (t.id, $0) } }, uniquingKeysWith: { a, _ in a })
+        let state = LiveSummary.state(tasks: tasks, approvals: approvals, threadTitles: titles, tails: liveTails)
+        let ended = state == nil ? LiveSummary.ended(tasks: tasks, threadTitles: titles) : nil
+        let mac = profile?.name ?? "Mac"
+        let live = live
+        let previous = liveSync
+        liveSync = Task {
+            await previous?.value
+            await live.sync(state, ended: ended, macName: mac)
+        }
+    }
+
+    /// From a Live Activity: the home screen opens the task (sheets close first).
+    func openTask(_ id: String) {
+        sheet = nil
+        openTaskRequest = id
     }
 
     func thread(_ id: String?) -> AgentThread? {
@@ -252,6 +280,7 @@ final class AppModel {
         do {
             tasks = try await api.tasks()
             announce()
+            syncLive()
         } catch { handle(error) }
     }
 
@@ -273,6 +302,7 @@ final class AppModel {
                 await notifications.needsAttention(taskId: approval.taskId, approval: approval)
             }
             approvals = fresh
+            syncLive()
         } catch { handle(error) }
     }
 

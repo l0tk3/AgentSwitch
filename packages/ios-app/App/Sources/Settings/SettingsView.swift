@@ -175,9 +175,11 @@ struct TargetsQuotaView: View {
     }
 }
 
-/// 提示与朗读 (assistant-v0 §3): sounds, haptics, sounding with the silent switch on, voice mode, the reading voice.
+/// 提示与朗读 (assistant-v0 §3, §4): sounds, haptics, sounding with the silent switch on, voice mode, the reading
+/// voice, and the Live Activity on the lock screen and in the Dynamic Island.
 private struct FeedbackSection: View {
     @Environment(AppModel.self) private var model
+    @State private var liveOn = true
 
     var body: some View {
         @Bindable var settings = model.feedback.settings
@@ -187,10 +189,19 @@ private struct FeedbackSection: View {
             Toggle("静音时也响", isOn: $settings.audibleInSilent).disabled(!settings.sound)
             Toggle("语音模式", isOn: $settings.voiceMode)
             NavigationLink { SpeechVoiceView() } label: { Label("朗读声音", systemImage: "speaker.wave.2") }
+            Toggle("实时活动（锁屏与灵动岛）", isOn: Binding(get: { liveOn }, set: { on in
+                liveOn = on
+                model.live.enabled = on
+                if on { model.syncLive() }
+            }))
+            if liveOn && !model.live.allowed {
+                Text("iOS 里关掉了：到「设置 › AgentSwitch › 实时活动」打开。").font(.footnote).foregroundStyle(.orange)
+            }
         } header: {
             Text("提示与朗读")
         } footer: {
-            Text("发出、已接收、需要你、完成、失败各有提示音和振动。语音模式会念出助理的回复和它主动的汇报（任务结束、需要你回答、你让它盯着的进展），也会在静音时出声。应用没打开时暂时不会响（要等推送），打开后补上。")
+            Text("发出、已接收、需要你、完成、失败各有提示音和振动。语音模式会念出助理的回复和它主动的汇报（任务结束、需要你回答、你让它盯着的进展），也会在静音时出声。应用没打开时暂时不会响（要等推送），打开后补上。实时活动在任务进行时出现在锁屏和灵动岛上，等你处理的排在最前；应用被系统挂起后停在最后的状态（计时照走），打开应用就更新。")
         }
+        .onAppear { liveOn = model.live.enabled }
     }
 }

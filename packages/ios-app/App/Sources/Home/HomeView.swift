@@ -69,6 +69,13 @@ struct HomeView: View {
                 }
             }
             .onChange(of: model.tasks) { feed.sync(model) }
+            .onChange(of: feed.tails) { model.liveTails = feed.tails }
+            .onChange(of: model.openTaskRequest) {
+                guard let id = model.openTaskRequest else { return }
+                model.openTaskRequest = nil
+                path = NavigationPath()
+                path.append(id)
+            }
             .onChange(of: path) { if !path.isEmpty { Keyboard.dismiss() } }
             .onAppear { feed.visible = true }
             .onDisappear {

@@ -18,6 +18,9 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+    # The app's bundle id; the widget extension's is derived from it. scripts/install-device.sh overrides this one
+    # setting (not PRODUCT_BUNDLE_IDENTIFIER, which would give the extension the app's id too).
+    APP_BUNDLE_ID: com.agentswitch.ios
 
 targets:
   AgentSwitch:
@@ -31,9 +34,13 @@ targets:
     dependencies:
       - package: AgentSwitchKit
         product: AgentSwitchKit
+      - package: AgentSwitchKit
+        product: AgentSwitchLive
+      # The Live Activity's UI (assistant-v0 §4), embedded in the app.
+      - target: AgentSwitchWidgets
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.agentswitch.ios
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
         PRODUCT_NAME: AgentSwitch
         INFOPLIST_FILE: App/Info.plist
         GENERATE_INFOPLIST_FILE: NO
@@ -43,6 +50,33 @@ targets:
         ENABLE_PREVIEWS: YES
         # No team and no automatic signing: simulator builds are ad-hoc signed ("Sign to Run Locally").
         # For a device, set DEVELOPMENT_TEAM and CODE_SIGN_STYLE=Automatic in Xcode (see README).
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_IDENTITY: "-"
+        "CODE_SIGN_IDENTITY[sdk=iphoneos*]": ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
+
+  AgentSwitchWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Widgets
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: AgentSwitchKit
+        product: AgentSwitchLive
+      - package: AgentSwitchKit
+        product: AgentSwitchLiveUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).widgets
+        PRODUCT_NAME: AgentSwitchWidgets
+        INFOPLIST_FILE: Widgets/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: ""
         CODE_SIGN_IDENTITY: "-"
