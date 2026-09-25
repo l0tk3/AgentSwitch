@@ -82,7 +82,7 @@ export const isFinal = (m: Json): boolean => m.type !== "assistant" || (m.time a
  *  later part exists, a tool once it completed or failed, and a message's items stop at its first unfinished part
  *  (with `final`, everything finished or not-a-tool is an item). Unknown message or part types make the telemetry
  *  incomplete. */
-export function foldTurn(messages: readonly Json[], since: number, sessionId: string, final = false): Turn {
+export function foldTurn(messages: readonly Json[], since: number, sessionId: string, final = false, settled: ReadonlySet<string> = new Set()): Turn {
   const ordered = messages.filter((m) => createdAt(m) >= since).sort((a, b) => createdAt(a) - createdAt(b) || String(a.id).localeCompare(String(b.id)));
   const summary: RunSummary = { text: "", tools: [], errors: [], sessionId, telemetryComplete: true };
   const items: TurnItem[] = [];
@@ -98,7 +98,7 @@ export function foldTurn(messages: readonly Json[], since: number, sessionId: st
     const usage = m.tokens as { input?: number; output?: number } | undefined;
     tokens += (Number(usage?.input) || 0) + (Number(usage?.output) || 0);
     const error = m.error as { type?: string; message?: string; status?: number } | undefined;
-    if (error) { summary.errors.push(`${error.type ?? "error"}: ${error.message ?? ""}`.trim()); if (typeof error.status === "number") httpStatus = error.status; }
+    if (error && !settled.has(String(m.id))) { summary.errors.push(`${error.type ?? "error"}: ${error.message ?? ""}`.trim()); if (typeof error.status === "number") httpStatus = error.status; }
     const parts = Array.isArray(m.content) ? (m.content as Json[]) : [];
     let open = false;   // an earlier part of this message is unfinished: later items wait for it
     parts.forEach((p, i) => {
@@ -125,6 +125,14 @@ export function foldTurn(messages: readonly Json[], since: number, sessionId: st
     });
   }
   return { summary, items, idle, httpStatus, tokens };
+}
+
+/** The prompt that lets a session go on after OpenCode stopped it on declined actions (2.0.8 cannot carry a reason
+ *  with a reject): what was refused, that it stays refused, and to finish with what is allowed. */
+export function declinedPrompt(refused: readonly string[]): string {
+  return `AgentSwitch refused ${refused.length === 1 ? "this action" : "these actions"}, and OpenCode stopped your last step:
+${refused.map((a) => `- ${a}`).join("\n")}
+They are off limits for this task: do not retry them or reach the same data another way. Continue the task with what you are allowed to do. If it cannot be finished without them, give your answer now and say what was refused.`;
 }
 
 export type PermissionRequest = { readonly id: string; readonly sessionID: string; readonly action: string; readonly resources?: readonly string[]; readonly metadata?: Json };

@@ -277,6 +277,43 @@ describe("OpenCode executor on the resident server: events, approvals, questions
     expect(r).toMatchObject({ kind: "done", outcome: { sideEffects: { approvalsGranted: 1 } } });
   });
 
+  it("a declined action stops OpenCode's step without an end marker (2.0.8): the session is told what was refused and finishes", async () => {
+    const cwd = dir("halt");
+    fake.script = async (t) => {
+      if (t.session.prompts.length === 1) {
+        t.assistant([{ type: "text", text: "Looking. " }]);
+        await t.ask("external_directory", ["/h/.agentswitch/*"]);
+        t.halt([{ type: "tool", id: "c1", name: "read", state: { status: "error", input: { path: "/h/.agentswitch" }, error: { message: "The user declined this tool call" } } }]);
+        return;
+      }
+      t.assistant([{ type: "text", text: "Found nothing without that directory." }]);
+    };
+    const events: Events = [];
+    const r = await runOnServer(server, input(cwd, {}, events), opts({ haltMs: 20 }));
+    expect(r).toMatchObject({ kind: "done", outcome: { ok: true, exitCode: 0, lastText: "Looking. Found nothing without that directory." } });
+    const session = [...fake.sessions.values()].find((s) => s.directory === cwd && !s.parentID)!;
+    expect(session.prompts).toHaveLength(2);
+    expect(session.prompts[1]).toMatch(/refused this action[\s\S]*- OpenCode access outside cwd: \/h\/\.agentswitch\/\*[\s\S]*do not retry/);
+    expect(events).toContainEqual({ type: "text", payload: { text: expect.stringMatching(/AgentSwitch refused 1 action/) } });
+    expect(r.kind === "done" && r.outcome.stderr).not.toMatch(/Step interrupted/);
+  });
+
+  it("a stop without an end marker and nothing declined ends the run as failed at once, not at the watchdog", async () => {
+    const cwd = dir("halt-plain");
+    fake.script = async (t) => { t.assistant([{ type: "text", text: "partial" }]); t.halt(); };
+    const r = await runOnServer(server, input(cwd), opts({ haltMs: 20 }));
+    expect(r).toMatchObject({ kind: "done", outcome: { ok: false, exitCode: 1, stderr: expect.stringContaining("no end marker") } });
+    expect([...fake.sessions.values()].find((s) => s.directory === cwd)!.prompts).toHaveLength(1);
+  });
+
+  it("an executor that keeps reaching for refused actions is resumed three times, then the run ends", async () => {
+    const cwd = dir("halt-again");
+    fake.script = async (t) => { await t.ask("shell", ["cat ~/.secret-gate/keys/x"]); t.halt(); };
+    const r = await runOnServer(server, input(cwd), opts({ haltMs: 20 }));
+    expect(r).toMatchObject({ kind: "done", outcome: { ok: false, exitCode: 1 } });
+    expect([...fake.sessions.values()].find((s) => s.directory === cwd)!.prompts).toHaveLength(4);
+  });
+
   it("the question tool goes to the engine's questions; no answer says so; other forms are cancelled", async () => {
     const cwd = dir("ask");
     const answers: unknown[] = [];

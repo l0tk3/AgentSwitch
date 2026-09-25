@@ -23,7 +23,7 @@ import { gateRun, mcpServerEnv, opencodeGateConfig, reportTransfer, type GateOpt
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { interruptedOutcome, watchRunStop, type StopCause } from "./lifecycle.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";
-import { approvalFor, createdAt, foldTurn, formAnswer, formQuestions, isFinal, modelRef, runtimeMcp, shellEnv, toRuleset, type PermissionRequest, type PermissionRule, type TurnItem } from "./opencodeServeMap.js";
+import { approvalFor, createdAt, declinedPrompt, foldTurn, formAnswer, formQuestions, isFinal, modelRef, runtimeMcp, shellEnv, toRuleset, type PermissionRequest, type PermissionRule, type TurnItem } from "./opencodeServeMap.js";
 import { locationQuery, OpenCodeApiError, type CallOptions, type Json, type OpenCodeExecServer } from "./opencodeServer.js";
 import { opencodeExecConfig, outcomeFromRun, SUBAGENT_TOOL } from "./opencodeShared.js";
 import { canonicalPath, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
@@ -38,6 +38,8 @@ export type ServeRunOptions = {
   readonly log?: (line: string) => void;
   /** Tests: poll interval. */
   readonly pollMs?: number;
+  /** Tests: how long a stop without an end marker must last to count (HALT_CONFIRM_MS). */
+  readonly haltMs?: number;
 };
 
 export type ServeAttempt = { readonly kind: "done"; readonly outcome: ExecutionOutcome } | { readonly kind: "fallback"; readonly reason: string };
@@ -57,6 +59,12 @@ const CLEANUP_TIMEOUT_MS = 10_000;
 /** The gate's own servers: always cleared from a location before an execution adds its own. */
 const RESERVED_MCP = ["secret-gate", "playwright"];
 const DENIED = "denied by the user via AgentSwitch";
+/** OpenCode 2.0.8 ends a step when a permission is declined and writes no idle marker (verified 2026-09-25, task
+ *  7698f9b5 waited six minutes for one): the session just stops. Stopped this long with nothing pending = turn over. */
+const HALT_CONFIRM_MS = 2_000;
+/** A stop caused by declined actions: the session is told what was refused and goes on, at most this often. */
+const MAX_DECLINE_RESUMES = 3;
+const HALTED = "OpenCode stopped the turn without finishing it (after a refused action) and wrote no end marker";
 
 /** Raised before the prompt is admitted: the run can still go to `opencode run --standalone`. */
 class SetupFailure extends Error {}
@@ -101,6 +109,10 @@ class ServeExecution {
   /** Text events held back until the prompt is admitted (a fallback run says its own). */
   private readonly notes: string[] = [];
   private approvals = 0;
+  /** Actions declined since the last prompt: a halt they caused is resumed with them named. */
+  private declined: string[] = [];
+  /** Approvals and questions still being decided: the session waits for them, it has not stopped. */
+  private inflight = 0;
   private stopCause: StopCause | null = null;
   private truncated = false;
 
@@ -283,36 +295,69 @@ class ServeExecution {
     let failures = 0;
     let lost: string | null = null;
     let stoppedAt = 0;
+    let haltedAt = 0;
+    let halted = false;
+    let resumes = 0;
+    /** Messages of steps that stopped on a declined action and were resumed: their "Step interrupted" is not a failure. */
+    const settled = new Set<string>();
     const watch = watchRunStop(this.input.signal, this.opts.maxMs ?? DEFAULT_EXECUTOR_TIMEOUT_MS, (cause) => { this.stopCause ??= cause; void this.interrupt(); });
     try {
       for (;;) {
         if (this.stopped && !stoppedAt) stoppedAt = Date.now();
         let polled = false;
+        let active: ReadonlySet<string> = new Set();
         try {
           await this.collect(sid, since, seen);
-          await this.adoptChildren();
+          active = await this.adoptChildren();
           await this.answerPermissions();
           await this.answerForms();
           polled = true; failures = 0;
         } catch (err) {
           if (!this.server.running || ++failures >= MAX_POLL_FAILURES) { lost = (err as Error).message; break; }
         }
-        const turn = foldTurn([...seen.values()], since, sid);
+        const turn = foldTurn([...seen.values()], since, sid, false, settled);
         this.emit(turn.items, emitted);
         if (polled && turn.idle) break;
+        if (polled && !this.stopped && this.stalled(seen, since, active)) {
+          haltedAt ||= Date.now();
+          if (Date.now() - haltedAt >= (this.opts.haltMs ?? HALT_CONFIRM_MS)) {
+            if (!this.declined.length || resumes >= MAX_DECLINE_RESUMES || !(await this.resume(sid, seen, since, settled))) { halted = true; break; }
+            resumes++;
+            haltedAt = 0;
+          }
+        } else haltedAt = 0;
         if (stoppedAt && Date.now() - stoppedAt > INTERRUPT_GRACE_MS) break;
         await sleep(this.opts.pollMs ?? POLL_MS);
       }
     } finally {
       watch.dispose();
     }
-    const turn = foldTurn([...seen.values()], since, sid, true);
+    const turn = foldTurn([...seen.values()], since, sid, true, settled);
     this.emit(turn.items, emitted);
     const summary = { ...turn.summary, telemetryComplete: turn.summary.telemetryComplete && !this.truncated };
-    const exitCode = turn.idle === "succeeded" ? 0 : turn.idle === "failed" ? 1 : null;
-    const stderr = [lost ? `OpenCode executor server connection closed during the run: ${lost}` : "", turn.idle === "failed" && !summary.errors.length ? "OpenCode turn failed" : ""].filter(Boolean).join("\n");
+    const exitCode = turn.idle === "succeeded" ? 0 : turn.idle === "failed" || halted ? 1 : null;
+    const stderr = [lost ? `OpenCode executor server connection closed during the run: ${lost}` : "", turn.idle === "failed" && !summary.errors.length ? "OpenCode turn failed" : "", halted && !turn.idle ? HALTED : ""].filter(Boolean).join("\n");
     const outcome: ExecutionOutcome = { ...outcomeFromRun(summary, exitCode, this.redact(stderr), watch.timedOut, this.approvals), ...(turn.httpStatus ? { httpStatus: turn.httpStatus } : {}), ...(turn.tokens ? { tokens: turn.tokens } : {}) };
-    return this.input.signal.aborted || !turn.idle || lost ? interruptedOutcome(outcome) : outcome;
+    return this.input.signal.aborted || (!turn.idle && !halted) || lost ? interruptedOutcome(outcome) : outcome;
+  }
+
+  /** The session stopped without an idle marker: neither it nor a sub-agent runs, no approval or question is being
+   *  decided, and every message of the turn is final. */
+  private stalled(seen: ReadonlyMap<string, Json>, since: number, active: ReadonlySet<string>): boolean {
+    if (this.inflight > 0 || [...this.tree].some((id) => active.has(id))) return false;
+    const turn = [...seen.values()].filter((m) => createdAt(m) >= since);
+    return turn.some((m) => m.type === "assistant") && turn.every(isFinal);
+  }
+
+  /** A session that stopped on declined actions is told what was refused and asked to go on without them. */
+  private async resume(sid: string, seen: ReadonlyMap<string, Json>, since: number, settled: Set<string>): Promise<boolean> {
+    const refused = [...new Set(this.declined)];
+    this.declined = [];
+    try { await this.call("POST", `/api/session/${enc(sid)}/prompt`, { text: declinedPrompt(refused) }, { signal: this.input.signal }); }
+    catch (err) { this.log(`OpenCode executor for ${this.input.taskId}: could not resume after refused actions: ${(err as Error).message}`); return false; }
+    for (const m of seen.values()) if (m.type === "assistant" && createdAt(m) >= since && (m.error as Json | undefined)?.type === "aborted") settled.add(String(m.id));
+    this.input.emit("text", { text: `(AgentSwitch refused ${refused.length} action(s) and OpenCode stopped; told it to go on without them)` });
+    return true;
   }
 
   /** This turn's root-session messages, newest first, page by page until one older than the turn or one already seen
@@ -347,7 +392,7 @@ class ServeExecution {
   /** Sub-agent sessions inherit the permission rules but not the shell env or the instruction entry (verified), so both
    *  are set as soon as a child shows up among the active sessions. A child's first shell call can come before that
    *  poll; it then runs with the server's env: no proxy, no scope, so gate substitution fails closed. */
-  private async adoptChildren(): Promise<void> {
+  private async adoptChildren(): Promise<ReadonlySet<string>> {
     const active = await this.call<{ data?: Json }>("GET", "/api/session/active");
     for (const id of Object.keys(active.data ?? {})) {
       if (this.tree.has(id) || this.parents.has(id)) continue;
@@ -362,6 +407,7 @@ class ServeExecution {
         this.tree.add(id); grew = true;
       }
     }
+    return new Set(Object.keys(active.data ?? {}));
   }
 
   private async answerPermissions(): Promise<void> {
@@ -378,15 +424,21 @@ class ServeExecution {
   /** A rule that says "ask" goes to the engine's approval flow (allow and deny rules never get here). Only `once`:
    *  `always` would save a rule in OpenCode's shared database for later sessions. */
   private async decide(sid: string, req: PermissionRequest): Promise<void> {
-    let allow = false;
-    if (!this.stopped) {
+    this.inflight++;
+    try {
+      let allow = false;
       const { action, evidence } = approvalFor(req);
-      try { allow = (await this.input.approve(action, evidence)) === "allow"; }
-      catch (err) { this.log(`OpenCode approval for ${this.input.taskId} failed: ${(err as Error).message}`); }
+      if (!this.stopped) {
+        try { allow = (await this.input.approve(action, evidence)) === "allow"; }
+        catch (err) { this.log(`OpenCode approval for ${this.input.taskId} failed: ${(err as Error).message}`); }
+      }
+      allow = allow && !this.stopped;
+      if (allow) this.approvals++;
+      else this.declined.push(action);
+      await this.reply(sid, req.id, allow);
+    } finally {
+      this.inflight--;
     }
-    allow = allow && !this.stopped;
-    if (allow) this.approvals++;
-    await this.reply(sid, req.id, allow);
   }
 
   private async reply(sid: string, id: string, allow: boolean): Promise<void> {
@@ -408,6 +460,11 @@ class ServeExecution {
   /** The question tool goes to the engine's questions (the router answers from evidence or asks the user); an
    *  unanswered question tells the model so. Any other form, or a reply OpenCode refuses, is cancelled. */
   private async answer(sid: string, id: string, form: Json): Promise<void> {
+    this.inflight++;
+    try { await this.answerForm(sid, id, form); } finally { this.inflight--; }
+  }
+
+  private async answerForm(sid: string, id: string, form: Json): Promise<void> {
     const questions = formQuestions(form);
     let reply: Record<string, string | string[]> | null = null;
     if (questions) {

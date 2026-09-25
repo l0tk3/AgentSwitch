@@ -36,6 +36,9 @@ export type Turn = {
   form(fields: Json[], kind?: string): Promise<Json | "cancelled">;
   /** A running sub-agent session under this one. */
   child(): FakeSession;
+  /** What OpenCode 2.0.8 does after a declined permission (verified 2026-09-25): the step's message fails with
+   *  aborted / "Step interrupted" and the session stops without an idle marker. */
+  halt(parts?: Json[]): void;
   interrupted: Promise<void>;
 };
 
@@ -195,6 +198,11 @@ export class FakeOpenCode {
       ask: (action, resources) => new Promise((resolve) => { const id = `per_${++this.n}`; this.permissions.push({ id, sessionID: s.id, resolve, body: { id, sessionID: s.id, action, resources, save: ["x *"] } }); }),
       form: (fields, kind = "question") => new Promise((resolve) => { const id = `frm_${++this.n}`; this.forms.push({ id, sessionID: s.id, resolve, body: { id, sessionID: s.id, title: "Questions", metadata: { kind }, fields } }); }),
       child: () => { const c = this.newSession(s.directory, { parentID: s.id, permissions: s.permissions }); c.active = true; return c; },
+      halt: (parts = []) => {
+        const t = this.now();
+        s.messages.push({ id: `msg_${++this.n}`, type: "assistant", agent: "build", time: { created: t, completed: t }, finish: "error", error: { type: "aborted", message: "Step interrupted" }, content: parts });
+        s.active = false;   // finish() then writes no idle marker
+      },
     };
     void this.script(turn).then(() => this.finish(s, "succeeded"), () => this.finish(s, "failed"));
     return { id: `msg_in_${this.n}`, sessionID: s.id, type: "user", time: { created } };
