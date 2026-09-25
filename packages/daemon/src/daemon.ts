@@ -6,6 +6,7 @@ import { AssistantLog } from "./assistant/log.js";
 import { admitSealed, type TaskBody } from "./api/tasks.js";
 import type { ApiDeps } from "./api/shared.js";
 import { BrowserSlots } from "./executors/browserSlots.js";
+import { cloneRoot, CloneSweeper } from "./executors/chromeClones.js";
 import { BROWSER_PROFILES_DIR } from "./executors/protected.js";
 import { serve as listen, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
@@ -223,7 +224,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const wiredExecutors = gate && summarizer ? scoped.map((executor) => credentialRepairExecutor(executor, { gate: credentialGate(gate), router: oracle("credential-repair"), store })) : scoped;
   // Kept browser logins (threads-v0 §4b): real executors only; the directory is read-denied to them (prot.readDenied).
   const browserSlots = cfg.executors === "real" ? new BrowserSlots(join(cfg.home, BROWSER_PROFILES_DIR)) : undefined;
-  const engine = new Engine({ store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
+  const cloneDir = cfg.executors === "real" ? cloneRoot() : null;
+  const clones = cloneDir ? new CloneSweeper({ root: cloneDir }) : undefined;
+  clones?.schedule();   // what earlier runs left behind
+  const engine = new Engine({ store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
   sweepThreads(store, Date.now(), engine);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const apiDeps: ApiDeps = { ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };

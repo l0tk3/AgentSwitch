@@ -33,8 +33,9 @@ function build() {
   } };
   const slots = new BrowserSlots(join(home, "browser-profiles"), 3, Date.now, () => undefined);
   const router = echoRouter(() => decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null, needs_browser: true }));
-  const engine = new Engine({ store, bus, executors: [executor], targets: realTargets(), router, quota: () => ({}), browserSlots: slots });
-  return { engine, store, events, seen, slots, home };
+  const sweeps: number[] = [];
+  const engine = new Engine({ store, bus, executors: [executor], targets: realTargets(), router, quota: () => ({}), browserSlots: slots, afterBrowserRun: () => sweeps.push(seen.length) });
+  return { engine, store, events, seen, slots, home, sweeps };
 }
 
 describe("Engine: browser session slots", () => {
@@ -49,6 +50,7 @@ describe("Engine: browser session slots", () => {
     const notes = f.events.filter((e) => e.type === "browser_session").map((e) => e.payload);
     expect(notes).toEqual([expect.objectContaining({ slot: 1, reused: false, reason: "free" }), expect.objectContaining({ slot: 1, reused: true, reason: "thread" })]);
     expect(f.slots.list()[0]).toMatchObject({ hosts: ["x.com"] });
+    expect(f.sweeps).toEqual([1, 2]);   // each browser run asks for Chrome's leftover clones to be swept, after it ended
   });
 
   it("a task without the browser takes no slot", async () => {

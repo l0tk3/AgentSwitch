@@ -128,6 +128,7 @@ export function foldThread(events: ThreadEvent[]): ThreadState   // 纯函数
 - **记录**：`slots.json`（0600）存每槽的线程、站点（从 URL、邮箱域名、`x.com` 这样的裸域名里取，文件名后缀不算）、最后使用时间。索引丢了或坏了就清空全部槽位，不猜登录归谁。
 - **清理**：删除线程时清掉它绑定的槽（正在用则归还时清）；归还时停掉仍占着该 profile 的浏览器进程（只匹配本槽路径），并删掉 Chromium 的单例锁。Codex 线程目录里的旧 `chromium-profile` 在下次执行时删除。
 - **防护**：槽位目录进 `readDenied`（执行器不能读，含 cookie 数据库；Claude 的读工具与 OpenCode 的读权限都拒绝，Codex 没有按路径的读限制——已知缺口，见 secret-gate BOUNDARY.md）。每次取用前在 profile 的 `Preferences` 里关掉 Chromium 的密码保存与自动填充，gate 填过的密码不会被浏览器存下、下次原样出现在页面上。
+- **Chrome 的签名副本**（2026-09-25）：Google Chrome 每次启动把自己的应用包复制到 `<用户临时目录>/../X/com.google.Chrome.code_sign_clone/`，正常退出才删；执行器的浏览器是被停掉的，每跑一次留一份（五天 35 份，Chrome 一升级旧副本就各占一整份旧版本）。每次带浏览器的执行结束约 30 秒后，daemon 删掉没有任何 Chrome 进程打开（`lsof`）、且已存在 5 分钟以上的副本；daemon 启动时也扫一次。`lsof` 查不出结果时一份都不删。
 - **指导**：`config/EXECUTOR.md` 写明登录会保留——先看是否已登录，只在页面要求时用 `secret_fill`；不登出、不清 cookie、不换账号；显示的账号与简报不符就停下来问。路由器提示词写明：同一站点的后续任务归入那个线程，简报里写“先确认是否已登录”。
 
 ## 5. 执行器策略补两条

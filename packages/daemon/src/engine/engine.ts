@@ -52,6 +52,8 @@ export type EngineDeps = ComposeDeps & {
   readonly protected?: ProtectedPaths;
   /** Kept browser profiles so a login carries over (threads-v0 §4b); absent = a throw-away profile per run. */
   readonly browserSlots?: BrowserSlots;
+  /** Called after every run that had the browser (the daemon sweeps Chrome's leftover code-sign clones). */
+  readonly afterBrowserRun?: () => void;
   readonly now?: () => number;
   /** Tasks in flight at once (routing or running); the rest queue FIFO (background-v0 §1). */
   readonly maxConcurrentTasks?: number;

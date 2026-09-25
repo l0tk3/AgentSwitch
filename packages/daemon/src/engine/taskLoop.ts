@@ -551,6 +551,7 @@ export class TaskLoop {
       } finally {
         lease?.release();   // after the adapter reaped its children; closes a browser still holding the profile
         release();
+        if (browser) this.d.engine.afterBrowserRun?.();
       }
     }
   }
