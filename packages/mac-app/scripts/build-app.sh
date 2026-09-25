@@ -15,6 +15,9 @@
 #   scripts/build-app.sh                                       full build → build/AgentSwitch.app
 #   APP_OUT=build/next/AgentSwitch.app scripts/build-app.sh    same, assembled elsewhere (build/AgentSwitch.app is running)
 #   SKIP_RUNTIME=1 scripts/build-app.sh                        reuse build/stage/runtime from the previous run (UI-only changes)
+#   SIGN_IDENTITY=- scripts/build-app.sh                       ad-hoc signature (default: an "Apple Development" identity if any)
+# A build staged at build/next/AgentSwitch.app is offered by the running app (menu, or the phone's settings); on the
+# user's go-ahead the app swaps it in itself and puts itself back if the new one does not start (assistant-v0 §5).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -214,8 +217,13 @@ build_app
 log "assembling $APP"
 ditto "$RUNTIME" "$APP/Contents/Resources/runtime"
 check_no_build_paths
-codesign --force --deep --sign - "$APP"
-codesign --verify --deep --strict "$APP" && echo "signature ok (ad-hoc)"
+# A stable identity keeps macOS's privacy grants (Files and Folders, …) across rebuilds: an ad-hoc signature is known
+# by its hash, so to TCC every new build is a new app and the user is asked again (2026-09-25). SIGN_IDENTITY picks
+# one (`-` = ad-hoc); by default the first "Apple Development" identity in the keychain, else ad-hoc.
+SIGN="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -n 1)}"
+SIGN="${SIGN:--}"
+codesign --force --deep --timestamp=none --sign "$SIGN" "$APP"
+codesign --verify --deep --strict "$APP" && if [ "$SIGN" = "-" ]; then echo "signature ok (ad-hoc)"; else echo "signature ok (development identity: stable across builds)"; fi
 
 log "done"
 cat "$RUNTIME/VERSIONS"

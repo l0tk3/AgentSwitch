@@ -80,6 +80,17 @@ public struct DaemonClient: Sendable {
         return try decode(ModelSettingsSaveResult.self, try await call("PUT", "/settings/models", body: body))
     }
 
+    /// Folders a phone task may run in (assistant-v0 §5); each with why it cannot be used now, if so.
+    public func projects() async throws -> [ProjectEntry] {
+        try decode(ProjectList.self, try await call("GET", "/projects")).projects
+    }
+
+    /// Replaces the list; the daemon checks every folder against its cwd rules and refuses the whole list otherwise.
+    public func saveProjects(_ projects: [ProjectEntry]) async throws -> [ProjectEntry] {
+        let body = try JSONEncoder().encode(ProjectList(projects: projects.map { ProjectEntry(name: $0.name, path: $0.path) }))
+        return try decode(ProjectList.self, try await call("PUT", "/projects", body: body)).projects
+    }
+
     // MARK: plumbing
 
     private func call(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {

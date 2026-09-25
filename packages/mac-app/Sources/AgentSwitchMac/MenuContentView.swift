@@ -23,6 +23,7 @@ struct MenuContentView: View {
                 StatusRow(label: "已配对设备", line: model.devicesLine)
             }
             attention
+            update
             Divider()
             actions
         }
@@ -73,6 +74,28 @@ struct MenuContentView: View {
             }
             .font(.caption)
         }
+    }
+
+    /// A newer AgentSwitch.app is staged (assistant-v0 §5): install after a confirmation; the helper puts the current
+    /// version back by itself if the new one does not start.
+    @ViewBuilder
+    private var update: some View {
+        if let built = model.stagedUpdate {
+            HStack {
+                Label("有新版本（构建于 \(built)）", systemImage: "arrow.down.circle").font(.caption)
+                Spacer()
+                Button("安装并重启…") { confirmUpdate(built) }.font(.caption)
+            }
+        }
+    }
+
+    private func confirmUpdate(_ built: String) {
+        let alert = NSAlert()
+        alert.messageText = "安装新版本？"
+        alert.informativeText = "构建于 \(built)。AgentSwitch 会退出、换成新版本再启动；正在运行的任务会被中断。新版本 150 秒内没起来，会自动退回现在这一版。App 若放在桌面、文稿或下载里，macOS 可能先要你允许 AgentSwitch 访问那个文件夹。"
+        alert.addButton(withTitle: "安装并重启")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn { Task { await model.installUpdate() } }
     }
 
     private var actions: some View {

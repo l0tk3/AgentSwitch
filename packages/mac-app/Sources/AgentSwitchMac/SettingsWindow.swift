@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, devices, models, keys, environment, general
+    case pairing, devices, projects, models, keys, environment, general
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "配对"
         case .devices: return "设备"
+        case .projects: return "项目"
         case .models: return "模型"
         case .keys: return "密钥"
         case .environment: return "环境"
@@ -22,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "qrcode"
         case .devices: return "iphone"
+        case .projects: return "folder"
         case .models: return "cpu"
         case .keys: return "key"
         case .environment: return "checklist"
@@ -115,6 +117,7 @@ struct SettingsView: View {
         switch tab {
         case .pairing: PairingView()
         case .devices: DevicesView()
+        case .projects: ProjectsView()
         case .models: ModelsView()
         case .keys: KeysView()
         case .environment: EnvironmentView()

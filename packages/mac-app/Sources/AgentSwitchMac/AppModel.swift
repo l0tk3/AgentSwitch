@@ -38,6 +38,12 @@ final class AppModel {
     private(set) var detecting = false
     /// First-run facts worth telling once (keypair created, CA copied).
     private(set) var notices: [String] = []
+    /// The build time of a newer AgentSwitch.app staged next to this one (assistant-v0 §5), if any.
+    private(set) var stagedUpdate: String?
+    /// Folders a phone task may run in (assistant-v0 §5), as the daemon has them.
+    private(set) var projects: [ProjectEntry] = []
+    /// An install is being checked or started: a second request waits for its outcome.
+    @ObservationIgnored private var installing = false
     var errorMessage: String?
     let pairingSession = PairingSession()
 
@@ -225,6 +231,140 @@ final class AppModel {
     func pollOnce() async {
         await pollGate()
         await pollDaemon()
+        pollUpdate()
+    }
+
+    // MARK: - updates (assistant-v0 §5)
+
+    /// A staged newer bundle, and the phone's go-ahead to install it (the daemon leaves a request file).
+    private func pollUpdate() {
+        guard let app = paths.runtime.appBundle else { return }
+        stagedUpdate = AppUpdate.newerStaged(than: app)
+        let request = paths.agentswitchHome.appendingPathComponent(AppUpdate.requestFile)
+        guard FileManager.default.fileExists(atPath: request.path) else { return }
+        try? FileManager.default.removeItem(at: request)
+        if stagedUpdate != nil { Task { await installUpdate() } }
+    }
+
+    /// The switch, all done by this app (macOS lets it touch its own folder; a helper left behind after it quit was held
+    /// by the privacy checks): stop the children, swap the bundles, start the new copy and wait, hidden, for its daemon.
+    /// It answers: this copy quits. It does not: this copy stops it, puts itself back and starts again. Nothing changes
+    /// when the folder check fails; the reason goes to the menu and, through the daemon, to the conversation.
+    func installUpdate() async {
+        guard let app = paths.runtime.appBundle, let staged = stagedUpdate, !installing else { return }
+        installing = true
+        defer { installing = false }
+        let from = AppUpdate.built(app)
+        if let problem = await AppUpdate.folderAccessProblem(app: app) {
+            errorMessage = problem
+            writeUpdateResult(ok: false, reverted: false, from: from, to: staged, reason: problem)
+            return
+        }
+        await shutdown()
+        releaseInstance()
+        // Off the main thread with a deadline: a move macOS holds must not freeze the app with the services stopped.
+        let giveUp = GiveUp()
+        switch await AppUpdate.offMain(wait: AppUpdate.accessWait * 4, { try AppUpdate.swapIn(app: app, proceed: { giveUp.proceed }) }) {
+        case .done: break
+        case .failed(let error):
+            writeUpdateResult(ok: false, reverted: false, from: from, to: staged, reason: "换版没做成：\(error.localizedDescription)")
+            return await restart(app)
+        case .timedOut:
+            giveUp.now()
+            writeUpdateResult(ok: false, reverted: false, from: from, to: staged, reason: "macOS 挡住了换版（App 管理权限？）")
+            return await restart(app)
+        }
+        updating = true
+        let started = try? await launchCopy(of: app)
+        if started != nil, await newDaemonAnswers() {
+            writeUpdateResult(ok: true, reverted: false, from: from, to: staged, reason: "")
+            return exitApp()
+        }
+        if let started { await stopCopy(started, bundle: app) }
+        let giveUpBack = GiveUp()
+        let back = await AppUpdate.offMain(wait: AppUpdate.accessWait * 4, { try AppUpdate.swapBack(app: app, proceed: { giveUpBack.proceed }) })
+        if case .timedOut = back { giveUpBack.now() }
+        switch back {
+        case .done:
+            writeUpdateResult(ok: false, reverted: true, from: from, to: staged,
+                              reason: "新版本 \(AppUpdate.healthWait) 秒内没有起来（本机端口 \(ports.local)），已留作 failed-AgentSwitch.app")
+        case .failed(let error):
+            writeUpdateResult(ok: false, reverted: false, from: from, to: staged, reason: "新版本没起来，退回也失败了：\(error.localizedDescription)")
+        case .timedOut:
+            writeUpdateResult(ok: false, reverted: false, from: from, to: staged, reason: "新版本没起来，退回被 macOS 挡住了")
+        }
+        await restart(app)
+    }
+
+    /// Set by the app delegate: frees the single-instance lock for the copy about to start, and quits once the
+    /// children are already stopped.
+    @ObservationIgnored var releaseInstance: @MainActor () -> Void = {}
+    @ObservationIgnored var exitApp: @MainActor () -> Void = {}
+    /// Hides the menu bar item while this copy only waits on the new one.
+    private(set) var updating = false
+
+    private func writeUpdateResult(ok: Bool, reverted: Bool, from: String?, to: String?, reason: String) {
+        try? AppUpdate.result(ok: ok, reverted: reverted, from: from, to: to, reason: reason)
+            .write(to: paths.agentswitchHome.appendingPathComponent(AppUpdate.resultFile), options: .atomic)
+    }
+
+    /// A second copy of the app at `bundle`, while this one still runs (same bundle id: a new instance).
+    private func launchCopy(of bundle: URL) async throws -> NSRunningApplication {
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        config.activates = false
+        return try await NSWorkspace.shared.openApplication(at: bundle, configuration: config)
+    }
+
+    private func newDaemonAnswers() async -> Bool {
+        let client = client
+        let deadline = Date().addingTimeInterval(TimeInterval(AppUpdate.healthWait))
+        while Date() < deadline {
+            if (try? await client.health())?.ok == true { return true }
+            try? await Task.sleep(for: .seconds(2))
+        }
+        return false
+    }
+
+    /// The new copy's orderly quit (it stops its children), then force; then anything still running from its bundle.
+    private func stopCopy(_ copy: NSRunningApplication, bundle: URL) async {
+        copy.terminate()
+        for _ in 0..<20 where !copy.isTerminated { try? await Task.sleep(for: .milliseconds(500)) }
+        if !copy.isTerminated { copy.forceTerminate() }
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-9", "-f", bundle.path + "/Contents/"]
+        try? pkill.run()
+        pkill.waitUntilExit()
+    }
+
+    /// Whatever is at `bundle` now starts afresh; this copy leaves.
+    private func restart(_ bundle: URL) async {
+        _ = try? await launchCopy(of: bundle)
+        exitApp()
+    }
+
+    // MARK: - project folders (assistant-v0 §5)
+
+    func refreshProjects() async {
+        do { projects = try await client.projects() } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// Adds folders picked on the Mac; the daemon checks each against its rules and refuses the list otherwise.
+    func addProjects(_ folders: [URL]) async {
+        var next = projects
+        for folder in folders where !next.contains(where: { $0.path == folder.path }) {
+            next.append(ProjectEntry(name: ProjectEntry.name(for: folder, taken: next.map(\.name)), path: folder.path))
+        }
+        await saveProjects(next)
+    }
+
+    func removeProject(_ project: ProjectEntry) async {
+        await saveProjects(projects.filter { $0.name != project.name })
+    }
+
+    private func saveProjects(_ list: [ProjectEntry]) async {
+        do { projects = try await client.saveProjects(list) } catch { errorMessage = error.localizedDescription }
     }
 
     private func pollGate() async {

@@ -45,6 +45,8 @@ public enum ChildEnvironment {
         if let router = options.router { env["AGENTSWITCH_ROUTER"] = router }
         env["SECRET_GATE_HOME"] = paths.gateHome.path
         env["SECRET_GATE_BIN"] = paths.runtime.secretGate.path
+        // Staged updates sit next to the bundle; the daemon offers them to the phone (assistant-v0 §5).
+        if let bundle = paths.runtime.appBundle { env["AGENTSWITCH_APP_BUNDLE"] = bundle.path }
         env["SECRET_GATE_PROXY"] = "http://127.0.0.1:\(ports.gate)"
         if let opencodeBinary { env["OPENCODE_BIN"] = opencodeBinary }
         if let claudeBinary { env["CLAUDE_BIN"] = claudeBinary }

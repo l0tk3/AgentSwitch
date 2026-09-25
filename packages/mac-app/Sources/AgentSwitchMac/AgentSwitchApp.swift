@@ -7,7 +7,8 @@ struct AgentSwitchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        MenuBarExtra {
+        // Hidden while this copy only waits on a newly installed one (AppModel.installUpdate).
+        MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating }, set: { _ in })) {
             MenuContentView()
                 .environment(delegate.model)
                 .environment(\.showSettings, ShowSettingsAction { [delegate] tab in delegate.settings.show(tab) })
@@ -44,6 +45,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source.setEventHandler { [weak self] in self?.quit() }
             source.resume()
             signalSources.append(source)
+        }
+        model.releaseInstance = { [weak self] in
+            self?.instanceLock?.release()
+            self?.instanceLock = nil
+        }
+        model.exitApp = { [weak self] in
+            self?.shutdownDone = true   // the children were stopped before the switch
+            NSApp.terminate(nil)
         }
         model.launch()
         let defaults = UserDefaults.standard

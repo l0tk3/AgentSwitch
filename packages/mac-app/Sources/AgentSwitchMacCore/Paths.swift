@@ -16,6 +16,12 @@ public struct RuntimeLayout: Sendable, Equatable {
     public var secretGate: URL { pythonBin.appendingPathComponent("secret-gate") }
     /// Written by scripts/build-app.sh: one `name=version` line per component.
     public var versionsFile: URL { root.appendingPathComponent("VERSIONS") }
+    /// The AgentSwitch.app this runtime is inside; nil for a development runtime elsewhere (no bundle to update).
+    public var appBundle: URL? {
+        let parts = root.standardizedFileURL.pathComponents
+        guard parts.suffix(3) == ["Contents", "Resources", "runtime"], parts.count > 3, parts[parts.count - 4].hasSuffix(".app") else { return nil }
+        return root.standardizedFileURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    }
 
     /// Pieces that are absent, as display paths; empty means the runtime is complete.
     public func missing(fileManager: FileManager = .default) -> [String] {
