@@ -63,7 +63,7 @@
 - 代理本身：策略 host 取代理实际连接的地址（CONNECT 目标或绝对 URL），不取客户端可随意填写的 Host 头；带值的请求若 Host 头与目的地不一致直接拒绝（防域前置），`secret_http` 同样要求 Host 头就是 URL 的 host。检查过程出任何意外错误都拒绝请求且请求保持原样，响应脱敏出错则扣下整个响应。上游证书例外名单在启动时也按重载的严格规则加载，文件不可信就不加载任何例外。
 - daemon：`serve()` 启动时发现代理不通会打印错误；每次执行前做 TCP 探测，不通就不启动 harness，以失败类型 `gate_unavailable` 停止任务。三个 harness 共用同一个代理，重试或换目标都没用；这种失败不记作模型失败，也不标成安全事件。
 
-**未做。** 本机还没有安装服务（当前代理仍是手动启动，需要用户执行 `secret-gate service install`）；gate 以独立 macOS 用户运行仍是手动步骤。
+**未做。** 本机还没有安装服务（当前代理仍是手动启动，需要用户执行 `secret-gate service install`）；gate 以独立 macOS 用户运行仍是手动步骤。→ 2026-09-27 起按 `gate-service-v0.md` 做成系统服务（独立服务账户、LaunchDaemon、本机 socket），取代这里的 LaunchAgent。
 
 ## 4. 浏览器工具的安全边界清单
 

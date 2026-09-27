@@ -153,7 +153,7 @@ AgentSwitch **不内嵌**它，把它当作一个必须先于所有 harness 启�
 | 事件回流 | gate 的 403 拒绝要作为 `security` 事件写进任务事件表并推手机。这是提示注入被拦下的信号，不能只躺在代理日志里 |
 | 桌面端造密文 | `packages/secret-gate-ui`（SwiftUI）：命名密钥对的生成/切换、单条和批量密文，全部经 CLI，值只走 stdin。gate 用所有密钥对解密，切换不作废旧密文 |
 | 手机端造密文 | 配对时手机拿到 gate 公钥（公钥可随意分发）。手机上输入密码 + 允许的 host → 本地 sealed-box 加密 → 密文作为任务参数发出。密码明文不经过 agentswitchd |
-| 私钥隔离 | gate 以 launchd 服务跑在独立 macOS 用户下，私钥 0600 在那个用户家目录。agentswitchd 和三个 harness 在你的用户下，文件系统层面读不到。这一步做完，三家 deny 规则退为锦上添花 |
+| 私钥隔离 | gate 以 launchd 服务跑在独立 macOS 用户下，私钥 0600 在那个用户家目录。agentswitchd 和三个 harness 在你的用户下，文件系统层面读不到。这一步做完，三家 deny 规则退为锦上添花。具体设计见 `gate-service-v0.md`（2026-09-27：role account `_agentswitchgate`、LaunchDaemon、`gate.sock`；浏览器填表的值仍经过用户侧） |
 | PII 假名化 | secret-gate 的 redact 模块已能把 PII 令牌在回显里脱敏；AgentSwitch 的 `privacy/redact` 直接复用它的令牌格式，映射表放 gate 用户下 |
 
 | 浏览器填值 | `secret-gate browser -- <playwright mcp>`：gate 作为 MCP 中间层包住 Playwright MCP。`secret_fill` / 带密文的 `browser_type` 由 gate 按当前页面 host:port 校验后把明文写进 DOM，前端校验、前端哈希都能过；所有工具返回按本会话填过的值打码；`browser_evaluate`、`run_code_unsafe`、`filename` 输出、`paths` 上传、非 http(s) URL、填值后的复制快捷键和子串搜索、持有过值或正显示值的页面截图一律拒绝；Playwright 自己落盘的快照/日志放在 gate 家目录并逐次清空。不用 CDP 直连，浏览器只有一份 |
@@ -367,7 +367,7 @@ deny: ["~", "/", "~/.ssh", "~/.claude", "~/Library"]  # 永不作为 cwd
 | harness | 传 cwd | 限制越界访问 | 备注 |
 |---|---|---|---|
 | Claude Code | Agent SDK `cwd` 选项 | 权限规则里只 allow 该目录；不给 `--add-dir`；SDK `canUseTool` 里校验路径参数 | Claude Code 默认能读任意路径，必须在 canUseTool 里做二次路径校验 |
-| Codex | app-server `thread/start` 带 `cwd` | sandbox 模式 `workspace-write`，不用 `danger-full-access` | Codex 的 sandbox 是 OS 级（macOS Seatbelt），越界最难 |
+| Codex | app-server `thread/start` 带 `cwd` | sandbox 模式 `workspace-write`，不用 `danger-full-access` | Codex 的 sandbox 是 OS 级（macOS Seatbelt），越界最难。沙箱里跑不了的命令（`ps`、`top` 等 setuid 程序）Codex 申请到沙箱外跑：daemon 拆出 `zsh -lc` 里的命令，碰禁区当场拒，其余按 `Bash: <命令>` 走和 Claude 一样的底线与审批（2026-09-25，用户决定；`codexApproval`） |
 | OpenCode | `serve` 进程启动时绑定目录 | 权限配置按工具 allow/deny | 一个 serve 进程一个目录：要么每个项目一个进程按需拉起，要么验证新版 SDK 的 `directory` 参数能否按 session 指定（待验证，M2 第一件事之一） |
 
 三者里只有 Codex 有真沙箱。Claude Code 和 OpenCode 的"限制"是应用层的，越界访问最终靠审批回路兜底：任何路径不在 cwd 下的文件操作一律转审批。
