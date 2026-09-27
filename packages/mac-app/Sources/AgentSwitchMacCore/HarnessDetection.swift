@@ -18,7 +18,7 @@ public enum Harness: String, CaseIterable, Sendable, Identifiable {
     public func knownLocations(home: String) -> [String] {
         switch self {
         case .claude: return ["\(home)/.local/bin/claude", "\(home)/.claude/local/claude"]
-        case .codex: return ["/Applications/ChatGPT.app/Contents/Resources/codex", "/Applications/Codex.app/Contents/Resources/codex"]
+        case .codex: return ["/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex", "/Applications/Codex.app/Contents/Resources/codex"]
         case .opencode: return ["\(home)/.opencode/bin/opencode"]
         }
     }

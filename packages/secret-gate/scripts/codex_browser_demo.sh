@@ -2,7 +2,7 @@
 # Launch an interactive Codex (TUI) session whose browser (Playwright MCP) goes through the gate.
 #
 #   scripts/codex_browser_demo.sh http://site.example.com:8400 [more-origins...]
-#   CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex scripts/codex_browser_demo.sh ...
+#   CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex scripts/codex_browser_demo.sh ...
 #
 # Prerequisites (see README "Setup"): a current keypair (UI or `secret-gate keys new work --use`),
 # `secret-gate proxy` running on $GATE_PORT (default 8080) with the same SECRET_GATE_HOME, and a

@@ -2,7 +2,7 @@
 
 Run: .venv/bin/python scripts/codex_e2e.py             (all scenarios)
      SG_E2E_ONLY=S2 .venv/bin/python scripts/...       (subset, comma separated)
-     CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex SG_E2E_MODEL=gpt-6-astra ...
+     CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex SG_E2E_MODEL=gpt-6-astra ...
 Needs a logged-in `codex` (ChatGPT auth in ~/.codex/auth.json), curl, and the venv. Not part of
 pytest: it spends real model tokens. With SG_E2E_MODEL unset the CLI's default model is used.
 

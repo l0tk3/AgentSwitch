@@ -16,7 +16,7 @@ import type { ExecutionInput } from "../src/executors/types.js";
 
 const MODEL = process.env.PROBE_MODEL ?? "gpt-6-luna";
 const LIMIT_MS = Number(process.env.PROBE_LIMIT_MS ?? 180_000);
-const binary = process.env.CODEX_BIN ?? "/Applications/ChatGPT.app/Contents/Resources/codex";
+const binary = process.env.CODEX_BIN ?? "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
 const cwd = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-codex-esc-")));
 const prot = defaultProtected();
 const brief = `目标：以只读方式查明这台 Mac 当前占用 CPU 最高的 5 个进程，列出进程名、PID 和 CPU 占用，用简体中文回答。

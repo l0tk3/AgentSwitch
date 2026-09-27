@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from secret_gate.otp import totp  # noqa: E402
 import codex_e2e as base  # noqa: E402  (reuses temp CODEX_HOME, tokens, constants)
 
-BUNDLED = Path("/Applications/ChatGPT.app/Contents/Resources/codex")
+BUNDLED = Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex")
 CODEX = os.environ.get("CODEX_BIN") or (str(BUNDLED) if BUNDLED.exists() else "codex")
 MODEL = os.environ.get("SG_E2E_MODEL", "")
 ONLY = {x.strip() for x in os.environ.get("SG_E2E_ONLY", "").split(",") if x.strip()}

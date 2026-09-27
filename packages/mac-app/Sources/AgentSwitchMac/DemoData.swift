@@ -100,7 +100,7 @@ enum DemoData {
     static func harnesses(home: String) -> [HarnessReport] {
         [HarnessEvaluator.evaluate(HarnessFacts(harness: .claude, binary: "\(home)/.local/bin/claude",
                                                 versionOutput: "2.1.278 (Claude Code)", loginEvidence: "钥匙串条目 Claude Code-credentials")),
-         HarnessEvaluator.evaluate(HarnessFacts(harness: .codex, binary: "/Applications/ChatGPT.app/Contents/Resources/codex",
+         HarnessEvaluator.evaluate(HarnessFacts(harness: .codex, binary: "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
                                                 versionOutput: "codex-cli 0.155.0", loginEvidence: "\(home)/.codex/auth.json")),
          HarnessEvaluator.evaluate(HarnessFacts(harness: .opencode, binary: "\(home)/.opencode/bin/opencode",
                                                 versionOutput: "2.0.8", loginEvidence: nil))]

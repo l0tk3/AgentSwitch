@@ -32,7 +32,7 @@ harnesses:
     max_concurrent: 1
     browser: true
     default_model: gpt-6-astra
-    binary: /Applications/ChatGPT.app/Contents/Resources/codex   # 0.155; homebrew 0.142 only knows gpt-5.5
+    binary: /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex   # ChatGPT.app bundle (0.158); homebrew 0.142 only knows gpt-5.5
     models:                          # app-server model/list, 2026-09-20
       gpt-6-astra:   {cost: top,  strengths: [complex-code, large-repo, test-heavy], efforts: [low, medium, high, xhigh, max, ultra], preferred: true}
       gpt-6-sol:     {cost: high, strengths: [complex-code, code, general],          efforts: [low, medium, high, xhigh, max, ultra], preferred: true}
