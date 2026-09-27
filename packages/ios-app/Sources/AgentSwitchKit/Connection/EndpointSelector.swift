@@ -34,6 +34,21 @@ public protocol EndpointProber: Sendable {
     func probe(_ endpoint: APIEndpoint, token: String?) async -> ProbeOutcome
 }
 
+/// How one address fared in the last selection, for "why can't it connect" (2026-09-26: over Tailscale the phone
+/// reached the Mac in Safari but the app did not connect, and nothing said why).
+public struct ProbeReport: Sendable, Equatable {
+    public let endpoint: APIEndpoint
+    /// nil: not waited for, a better-ranked address answered first.
+    public let outcome: ProbeOutcome?
+    public let seconds: Double
+
+    public init(endpoint: APIEndpoint, outcome: ProbeOutcome?, seconds: Double) {
+        self.endpoint = endpoint
+        self.outcome = outcome
+        self.seconds = seconds
+    }
+}
+
 public enum SelectionResult: Sendable, Equatable {
     case selected(APIEndpoint)
     case unauthorized
@@ -59,22 +74,38 @@ public enum EndpointSelector {
     }
 
     public static func select(from candidates: [APIEndpoint], token: String?, prober: any EndpointProber) async -> SelectionResult {
-        let outcomes = await withTaskGroup(of: (Int, ProbeOutcome).self) { group in
+        await selectReporting(from: candidates, token: token, prober: prober).result
+    }
+
+    /// The selection and how every address fared (the seconds each took to answer or fail).
+    public static func selectReporting(from candidates: [APIEndpoint], token: String?, prober: any EndpointProber) async
+        -> (result: SelectionResult, reports: [ProbeReport]) {
+        let clock = ContinuousClock()
+        let start = clock.now
+        let finished = await withTaskGroup(of: (Int, ProbeOutcome, Double).self) { group in
             for (i, endpoint) in candidates.enumerated() {
-                group.addTask { (i, await prober.probe(endpoint, token: token)) }
+                group.addTask {
+                    let outcome = await prober.probe(endpoint, token: token)
+                    let elapsed = clock.now - start
+                    return (i, outcome, Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18)
+                }
             }
-            var results = [ProbeOutcome?](repeating: nil, count: candidates.count)
-            for await (i, outcome) in group {
-                results[i] = outcome
+            var results = [(ProbeOutcome, Double)?](repeating: nil, count: candidates.count)
+            for await (i, outcome, seconds) in group {
+                results[i] = (outcome, seconds)
                 // Stop early once every better-ranked candidate has failed and this one answered.
-                if let first = results.firstIndex(where: { $0 == nil || $0 == .ok }), results[first] == .ok {
+                if let first = results.firstIndex(where: { $0 == nil || $0?.0 == .ok }), results[first]?.0 == .ok {
                     group.cancelAll()
                     break
                 }
             }
-            return results.map { $0 ?? .unreachable("not needed") }
+            return results
         }
-        return decide(candidates: candidates, outcomes: outcomes)
+        let outcomes = finished.map { $0?.0 ?? .unreachable("not needed") }
+        let reports = candidates.enumerated().map { i, endpoint in
+            ProbeReport(endpoint: endpoint, outcome: finished[i]?.0, seconds: finished[i]?.1 ?? 0)
+        }
+        return (decide(candidates: candidates, outcomes: outcomes), reports)
     }
 
     /// Best reachable endpoint in preference order; otherwise the most telling failure.
@@ -103,7 +134,7 @@ public struct HTTPEndpointProber: EndpointProber {
             health.setValue(nil, forHTTPHeaderField: "Authorization")
             let (data, response) = try await transport.send(health)
             let reply: Health = try AgentSwitchAPI.decode(data, response)
-            guard reply.ok else { return .unreachable("healthz not ok") }
+            guard reply.ok else { return .unreachable("服务状态异常") }
             guard token != nil else { return .ok }
             let (meData, meResponse) = try await transport.send(api.request("GET", endpoint, ["me"], query: [], body: nil, timeout: timeout))
             try AgentSwitchAPI.check(meData, meResponse)

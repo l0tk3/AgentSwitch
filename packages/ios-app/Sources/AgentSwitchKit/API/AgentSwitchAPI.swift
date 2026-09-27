@@ -26,6 +26,7 @@ public struct AgentSwitchAPI: Sendable {
 
     public func health() async throws -> Health { try await get(["healthz"]) }
     public func me() async throws -> Me { try await get(["me"]) }
+    public func addresses() async throws -> MacAddresses { try await get(["addresses"]) }
     public func gatePubkey() async throws -> GatePubkey { try await get(["gate", "pubkey"]) }
 
     public func tasks(limit: Int = 50) async throws -> [AgentTask] {
@@ -127,10 +128,6 @@ public struct AgentSwitchAPI: Sendable {
     /// the new one does not start). The connection drops meanwhile; the assistant reports the outcome.
     public func installUpdate() async throws {
         let _: InstallRequested = try await send("POST", ["update", "install"], body: [String: String]())
-    }
-
-    public func projects() async throws -> [ProjectFolder] {
-        (try await get(["projects"]) as ProjectFolders).projects
     }
 
     // MARK: - plumbing

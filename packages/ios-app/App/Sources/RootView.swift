@@ -45,12 +45,12 @@ struct LockView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "lock.fill").font(.system(size: 48)).foregroundStyle(.secondary)
+            Image(systemName: "lock.fill").font(.system(size: 40)).foregroundStyle(.secondary)
             Text("AgentSwitch 已锁定").font(.title3.bold())
             Button("用 \(lock.biometryName) 解锁") { Task { await lock.unlock() } }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.borderedProminent).tint(Theme.fill)
             if let error = lock.lastError {
-                Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center)
+                Text(error).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.center)
             }
         }
         .padding()

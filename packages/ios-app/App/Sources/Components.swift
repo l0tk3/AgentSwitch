@@ -3,56 +3,50 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// The status of a task where a small mark is enough (lists, links): the dot and word of StatusLabel.
 struct StatusBadge: View {
     let task: AgentTask
 
     var body: some View {
-        Text(task.statusLabel)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
-            .foregroundStyle(color)
-    }
-
-    private var color: Color {
-        switch task.status {
-        case .done: return .green
-        case .failed: return .red
-        case .partial, .blocked: return .orange
-        case .waitingApproval: return .purple
-        case .cancelled: return .gray
-        default: return .blue
-        }
+        StatusLabel(task: task)
     }
 }
 
-/// The connection line shown on top of the lists: where we are connected, or why not.
+/// The connection line shown on top of the lists (control-v0 §5): 连接中 → 重连中 → 无法连接（第 N 次）→ 未找到 Mac →
+/// 配对已失效, so a blip and a Mac that is gone read differently. The phone keeps retrying on its own; 重试 only does
+/// it now.
 struct ConnectionBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        switch model.connection {
+        let phase = model.connectionPhase
+        switch phase {
         case .connected:
             EmptyView()
-        case .idle, .selecting:
-            Label("正在连接 \(model.profile?.name ?? "Mac")…", systemImage: "antenna.radiowaves.left.and.right")
+        case .connecting, .reconnecting:
+            Label(phase.text, systemImage: "antenna.radiowaves.left.and.right")
                 .font(.footnote).foregroundStyle(.secondary)
-        case .unreachable:
+        case .failing, .lost:
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                HStack {
+                    Label(phase.text, systemImage: "wifi.exclamationmark").foregroundStyle(Theme.waiting)
+                    Spacer()
+                    Button("重试") { model.reconnect() }
+                }
+                if phase == .lost {
+                    Text("Mac 可能处于睡眠状态或已离线。查看 设置 › Mac › 排障。").foregroundStyle(.secondary)
+                }
+            }
+            .font(.footnote)
+        case .unpaired:
             HStack {
-                Label("连不上 Mac", systemImage: "wifi.exclamationmark").foregroundStyle(.orange)
-                Spacer()
-                Button("重试") { model.reconnect() }
-            }.font(.footnote)
-        case .unauthorized:
-            HStack {
-                Label("此设备已被吊销或令牌失效", systemImage: "person.crop.circle.badge.xmark").foregroundStyle(.red)
+                Label("配对已失效", systemImage: "person.crop.circle.badge.xmark").foregroundStyle(Theme.failed)
                 Spacer()
                 Button("重新配对") { model.forget() }
             }.font(.footnote)
-        case .pinMismatch:
-            Label("服务器证书与配对时不一致，已拒绝连接", systemImage: "exclamationmark.shield")
-                .font(.footnote).foregroundStyle(.red)
+        case .certificateChanged:
+            Label("Mac 的证书与配对时不一致，已拒绝连接", systemImage: "exclamationmark.shield")
+                .font(.footnote).foregroundStyle(Theme.failed)
         }
     }
 }
@@ -64,7 +58,7 @@ struct ErrorText: View {
     var body: some View {
         if let message {
             HStack(alignment: .top) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.failed)
                 Text(message).font(.footnote)
                 Spacer()
                 Button { self.message = nil } label: { Image(systemName: "xmark.circle.fill") }
@@ -95,9 +89,15 @@ enum Clipboard {
 }
 
 extension Date {
+    /// 刚刚 · 3 分钟前 · 今天 14:20 · 9月24日 (docs/ui-v0.md §4).
     var relative: String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .short
-        return f.localizedString(for: self, relativeTo: Date())
+        let seconds = Date().timeIntervalSince(self)
+        if seconds < 60 { return "刚刚" }
+        if seconds < 3600 { return "\(Int(seconds / 60)) 分钟前" }
+        let calendar = Calendar.current
+        let time = formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        if calendar.isDateInToday(self) { return "今天 \(time)" }
+        if calendar.isDateInYesterday(self) { return "昨天 \(time)" }
+        return formatted(.dateTime.month(.defaultDigits).day())
     }
 }

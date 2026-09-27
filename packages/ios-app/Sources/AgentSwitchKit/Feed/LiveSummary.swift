@@ -18,7 +18,7 @@ public enum LiveSummary {
             let waitingOn = pending[task.id]?.first
             let needsYou = waitingOn != nil || task.status == .waitingApproval
             return LiveState.Row(id: task.id, title: title(task, threadTitles), step: step(task, waitingOn, tails[task.id] ?? []),
-                                 model: task.model.map(shortModel), startedAt: task.created, needsYou: needsYou)
+                                 model: task.model.map(ModelName.display), startedAt: task.created, needsYou: needsYou)
         }
         let ordered = rows.sorted { ($0.needsYou ? 0 : 1, $1.startedAt) < ($1.needsYou ? 0 : 1, $0.startedAt) }
         let waiting = rows.filter(\.needsYou).count
@@ -52,12 +52,20 @@ public enum LiveSummary {
         return plainStatus(task.status)
     }
 
+    /// What a running task is doing now, in plain words, for a card (the same line the Live Activity shows).
+    public static func currentStep(_ task: AgentTask, tail: [TaskEvent]) -> String? {
+        for event in tail.reversed() {
+            if let line = plainLine(event) { return clip(line, stepChars * 2) }
+        }
+        return task.spoken.map { clip($0, stepChars * 2) }
+    }
+
     static func plainStatus(_ status: TaskStatus) -> String {
         switch status {
-        case .queued: return "排队中"
-        case .routing: return "正在安排执行者"
-        case .running: return "执行中"
-        case .waitingApproval: return "等你答复"
+        case .queued: return "排队"
+        case .routing: return "选择模型"
+        case .running: return "进行中"
+        case .waitingApproval: return "等你处理"
         default: return status.label
         }
     }
@@ -70,37 +78,29 @@ public enum LiveSummary {
             let text = MessageDisplay.readable(p["text"]?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : text.split(separator: "\n").first.map(String.init)
         case "tool_call":
-            let tool = p["tool"]?.string ?? "工具"
-            if let command = p["input"]?["command"]?.string ?? p["command"]?.string {
-                return "在运行命令：" + MessageDisplay.readable(command)
-            }
-            return "在用工具 \(tool)"
-        case "dispatched": return "交给 \(shortModel(p["model"]?.string ?? "执行者"))"
+            return p["denied"] == nil ? MessageDisplay.readable(ToolDisplay.line(p)) : nil
+        case "dispatched": return p["model"]?.string.map { "已交给 " + ModelName.display($0) } ?? "开始执行"
         case "routed":
-            if let clarify = p["clarify"]?.string, !clarify.isEmpty { return "先问你：" + clarify }
-            return "已选好执行者"
+            if let clarify = p["clarify"]?.string, !clarify.isEmpty { return "等你回答：" + clarify }
+            return p["verdict"]?["model"]?.string.map { "已选定 " + ModelName.display($0) } ?? "已选定模型"
         case "step":
             switch p["action"]?.string {
-            case "intake": return "已收到"
-            case "plan": return "多步任务，正在规划"
+            case "intake": return "已接收"
+            case "plan": return "多步任务，规划中"
             case "dispatch":
-                let model = p["target"]?["model"]?.string.map(shortModel) ?? "执行者"
-                return "第 \(p["n"]?.int ?? 1) 步：交给 \(model)"
-            case "ask_user": return p["question"]?.string.map { "先问你：" + $0 }
+                let model = p["target"]?["model"]?.string.map(ModelName.display)
+                return "第 \(p["n"]?.int ?? 1) 步" + (model.map { "：交由 \($0) 执行" } ?? "")
+            case "ask_user": return p["question"]?.string.map { "等你回答：" + $0 }
             case "finish": return "收尾检查"
             default: return nil
             }
-        case "redispatch": return "换个方式重试"
-        case "attempt_failed": return "这次没成功，正在处理"
-        case "queued": return "排队中"
+        case "redispatch": return "重试"
+        case "attempt_failed": return "一次尝试失败"
+        case "queued": return "排队"
         default: return nil
         }
     }
 
-    /// `deepseek/deepseek-flash` → `deepseek-flash`; `claude-opus-5-5[1m]` stays as it is.
-    static func shortModel(_ model: String) -> String {
-        model.split(separator: "/").last.map(String.init) ?? model
-    }
 
     static func clip(_ text: String, _ limit: Int) -> String {
         let one = text.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)

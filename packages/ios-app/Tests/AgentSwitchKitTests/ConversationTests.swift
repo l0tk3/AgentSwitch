@@ -110,12 +110,12 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(log.merging([answer]).newAssistantMessages(in: [answer]), [])
     }
 
-    func testUpdateAndProjectCalls() async throws {
+    func testUpdateCalls() async throws {
         let transport = FakeTransport { req, _ in
             switch (req.httpMethod, req.url?.path) {
             case ("GET", "/update"): return (json(["running": "2026-09-25T01:00:00Z", "staged": "2026-09-25T03:00:00Z", "last": ["ok": false, "reverted": true, "from": "A", "to": "B", "at": 1, "reason": "did not answer"]]), httpResponse(req.url))
             case ("POST", "/update/install"): return (json(["requested": true, "staged": "2026-09-25T03:00:00Z"]), httpResponse(req.url, status: 202))
-            default: return (json(["projects": [["name": "AgentSwitch", "path": "/Users/u/Projects/AgentSwitch"], ["name": "Old", "path": "/x", "problem": "not an existing directory"]]]), httpResponse(req.url))
+            default: return (json(["error": "not found"]), httpResponse(req.url, status: 404))
             }
         }
         let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
@@ -124,9 +124,6 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(update.last?.reverted, true)
         try await api.installUpdate()
         XCTAssertEqual(transport.requests.last?.httpMethod, "POST")
-        let projects = try await api.projects()
-        XCTAssertEqual(projects.map(\.name), ["AgentSwitch", "Old"])
-        XCTAssertEqual(projects[1].problem, "not an existing directory")
     }
 
     func testClientIdsAreFreshAndWellFormed() {

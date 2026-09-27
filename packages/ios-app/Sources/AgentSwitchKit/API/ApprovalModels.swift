@@ -9,7 +9,8 @@ public enum ApprovalKind: String, Codable, Sendable {
 }
 
 public enum ApprovalStatus: String, Codable, Sendable {
-    case pending, allowed, denied, expired, other
+    /// `withdrawn`: the executor cancelled its own request (control-v0 §4); only `pending` ones are ever shown.
+    case pending, allowed, denied, expired, withdrawn, other
 
     public init(from decoder: Decoder) throws {
         self = ApprovalStatus(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
@@ -97,12 +98,12 @@ public enum AnswerCheck {
     public static func problem(questions: [UserQuestion], answers: [String: [String]]) -> String? {
         for q in questions {
             let values = (answers[q.id] ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            if values.isEmpty { return "还没回答：\(q.text)" }
-            if !q.multi && values.count > 1 { return "只能选一个：\(q.text)" }
-            if values.contains(where: { $0.count > maxLength }) { return "回答太长（最多 \(maxLength) 字）" }
+            if values.isEmpty { return "未回答：\(q.text)" }
+            if !q.multi && values.count > 1 { return "仅可选择一项：\(q.text)" }
+            if values.contains(where: { $0.count > maxLength }) { return "回答过长（最多 \(maxLength) 字）" }
         }
         let extra = Set(answers.keys).subtracting(questions.map(\.id))
-        return extra.isEmpty ? nil : "多余的回答：\(extra.sorted().joined(separator: ", "))"
+        return extra.isEmpty ? nil : "无对应问题的回答：\(extra.sorted().joined(separator: ", "))"
     }
 
     /// Drops blanks and trims, so what is sent is what was checked.

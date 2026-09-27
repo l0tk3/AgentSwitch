@@ -1,56 +1,56 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// First run: scan the QR code the Mac app shows, or paste its link.
+/// First run: scan the QR code the Mac app shows, or paste its link. One screen, one action (docs/ui-v0.md).
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @State private var scanning = false
-    @State private var pasted = ""
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("在 Mac 上打开 AgentSwitch，点「配对」显示二维码，然后用这台 iPhone 扫码。")
-                        Text("iPhone 与 Mac 需在同一局域网，或两边都登录了同一个 Tailscale。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                }
-                Section {
-                    Button {
-                        scanning = true
-                    } label: {
-                        Label("扫描配对二维码", systemImage: "qrcode.viewfinder")
-                    }
-                }
-                Section("或粘贴配对链接") {
-                    TextField("agentswitch://pair?p=…", text: $pasted, axis: .vertical)
-                        .lineLimit(1...4)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.footnote.monospaced())
-                    HStack {
-                        Button("从剪贴板粘贴") { pasted = Clipboard.pastedText() ?? "" }
-                        Spacer()
-                        Button("继续") { model.receivePairingLink(pasted) }
-                            .disabled(pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    .buttonStyle(.borderless)
-                }
-                if let banner = model.banner {
-                    Section { Text(banner).font(.footnote).foregroundStyle(.red) }
-                }
+        VStack(spacing: Theme.Space.xl) {
+            Spacer()
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 56, weight: .light))
+                .foregroundStyle(Color.accentColor)
+            VStack(spacing: Theme.Space.s) {
+                Text("连接你的 Mac").font(.title2.weight(.semibold))
+                Text("在 Mac 上打开 AgentSwitch，点按「配对」，然后用此 iPhone 扫描二维码。")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
-            .navigationTitle("连接你的 Mac")
-            .sheet(isPresented: $scanning) {
-                ScannerSheet { code in
-                    scanning = false
-                    model.receivePairingLink(code)
+            Spacer()
+            VStack(spacing: Theme.Space.m) {
+                if let banner = model.banner {
+                    Text(banner).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.center)
                 }
+                Button { scanning = true } label: {
+                    Text("扫描二维码").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(Theme.fill)
+                .controlSize(.large)
+                Button("粘贴配对链接") { paste() }
+                    .controlSize(.large)
+                Text("iPhone 与 Mac 需在同一局域网，或登录同一 Tailscale 网络。")
+                    .font(.footnote).foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
             }
         }
+        .padding(.horizontal, Theme.Space.xl)
+        .padding(.bottom, Theme.Space.l)
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
+        .sheet(isPresented: $scanning) {
+            ScannerSheet { code in
+                scanning = false
+                model.receivePairingLink(code)
+            }
+        }
+    }
+
+    private func paste() {
+        let text = Clipboard.pastedText()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if text.isEmpty { model.banner = "剪贴板中无配对链接" } else { model.receivePairingLink(text) }
     }
 }
 
@@ -69,7 +69,7 @@ struct ScannerSheet: View {
                     VStack(spacing: 12) {
                         Image(systemName: "camera.fill").font(.largeTitle).foregroundStyle(.secondary)
                         Text(problem).multilineTextAlignment(.center)
-                        Text("可以改用「粘贴配对链接」。").font(.footnote).foregroundStyle(.secondary)
+                        Text("可改用「粘贴配对链接」。").font(.footnote).foregroundStyle(.secondary)
                     }
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

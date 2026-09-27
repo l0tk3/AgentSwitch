@@ -22,13 +22,23 @@ enum GateKeyStatus: Equatable {
 final class AppModel {
     private(set) var profile: ServerProfile?
     private(set) var connection: ConnectionState = .idle
+    /// How the attempts went since the last connection: the tiers of the connection line (control-v0 §5).
+    private(set) var connectionProgress = ConnectionProgress()
     private(set) var api: AgentSwitchAPI?
     private(set) var me: Me?
+    /// How each address fared in the last route choice (settings › Mac), for "why can't it connect".
+    private(set) var routeReport: (at: Date, reports: [ProbeReport])?
     private(set) var tasks: [AgentTask] = []
+    /// Tasks opened on this phone and when, until the Mac's list says so too (no flicker back to unread in between).
+    private var readLocally: [String: Int64] = [:]
+    /// The Mac records read marks (`POST /tasks/:id/ack`); an older one answers 404 and then no task shows as unread.
+    private(set) var readMarksSupported = true
     private(set) var approvals: [Approval] = []
     private(set) var ciphertexts: [SavedCiphertext] = []
     private(set) var gateKeyStatus: GateKeyStatus = .unknown
     private(set) var targets: Targets?
+    /// `GET /quota` as last read (设置 › 用量); nil until the Mac has answered once. A failed re-read keeps it.
+    private(set) var quota: [QuotaReading]?
     private(set) var sending = false
     /// The conversation with the assistant (the home screen); loaded newest first, then polled for what follows.
     private(set) var conversation = ConversationLog()
@@ -79,7 +89,7 @@ final class AppModel {
     static func live() -> AppModel {
         let store = try? LocalStore.standard()
         let model = AppModel(store: store, vault: KeychainTokenVault())
-        if store == nil { model.banner = "无法打开本地存储，配对信息不会被保存" }
+        if store == nil { model.banner = "无法打开本地存储，配对信息将无法保存。" }
         return model
     }
 
@@ -117,9 +127,12 @@ final class AppModel {
         try? store?.deleteProfile()
         profile = nil
         connection = .idle
+        connectionProgress = ConnectionProgress()
         api = nil
         me = nil
         tasks = []
+        readLocally = [:]
+        readMarksSupported = true
         approvals = []
         threads = []
         conversation = ConversationLog()
@@ -128,6 +141,7 @@ final class AppModel {
         outgoing = nil
         cues = CueTracker()
         targets = nil
+        quota = nil
         pin = nil
         gateKeyStatus = .unknown
     }
@@ -172,23 +186,31 @@ final class AppModel {
     private func connectionChanged(_ state: ConnectionState) {
         let wasConnected = connection.endpoint != nil
         connection = state
+        connectionProgress = connectionProgress.after(state)
+        if state != .selecting, let manager { Task { self.routeReport = await manager.lastReport } }
         if state.endpoint != nil && !wasConnected {
             Task {
                 await refreshAll()
                 await refreshGateKey()
+                await refreshAddresses()
                 me = try? await api?.me()
                 await refreshTargets()
             }
         }
     }
 
-    /// Back in the foreground: look for a better path if we had none, and refresh what the tabs show.
+    /// What the connection line says now (连接中 · 重连中 · 无法连接（第 N 次）· 未找到 Mac · 配对已失效).
+    var connectionPhase: ConnectionPhase { connectionProgress.phase(connection) }
+
+    /// Back in the foreground (control-v0 §5): the address in use is checked at once, since it may have gone while the
+    /// phone slept (another Wi-Fi, Tailscale off), and a new one chosen if it does not answer; then a refresh. A
+    /// connection that comes back refreshes by itself (connectionChanged).
     func resume() {
-        guard let manager else { return }
-        if connection.endpoint == nil, connection != .unauthorized {
-            Task { await manager.reselect() }
-        } else {
-            Task { await refreshAll() }
+        guard let manager, connection != .unauthorized else { return }
+        let before = connection.endpoint
+        Task {
+            let state = await manager.verify()
+            if let endpoint = state.endpoint, endpoint == before { await refreshAll() }
         }
     }
 
@@ -233,7 +255,7 @@ final class AppModel {
     /// sound already (the task's own cue); a progress line gets a light one.
     private func announceMessage(_ message: AssistantMessage) {
         switch message.kind {
-        case .notice: break
+        case .notice, .waiting: break
         case .progress: feedback.play(.sent, speaking: speaker.isSpeaking)
         default: feedback.play(.accepted, speaking: speaker.isSpeaking)
         }
@@ -275,10 +297,21 @@ final class AppModel {
         do { targets = try await api.targets() } catch { handle(error) }
     }
 
+    /// Usage per executor, quietly: an older Mac or a failed read leaves the last numbers (or none) and no banner.
+    /// `force` has the Mac read every executor again instead of answering from its cache (pull to refresh).
+    func refreshQuota(force: Bool = false) async {
+        guard let api else { return }
+        do {
+            quota = try await force ? api.refreshQuota() : api.quota()
+        } catch {
+            if case APIError.unauthorized = error { handle(error) }
+        }
+    }
+
     func refreshTasks() async {
         guard let api else { return }
         do {
-            tasks = try await api.tasks()
+            tasks = withLocalReads(try await api.tasks())
             announce()
             syncLive()
         } catch { handle(error) }
@@ -306,6 +339,15 @@ final class AppModel {
         } catch { handle(error) }
     }
 
+    /// The Mac's current addresses into the saved profile and the address choice, so a phone paired while Tailscale was
+    /// off (or before the Mac's LAN address changed) still finds it elsewhere next time.
+    func refreshAddresses() async {
+        guard let api, let profile, let now = try? await api.addresses(), let updated = profile.updated(with: now) else { return }
+        try? store?.saveProfile(updated)
+        self.profile = updated
+        await manager?.update(book: updated)
+    }
+
     /// The Mac's current gate key. Kept as is when the Mac cannot read it (503), so minting keeps working with the key
     /// from pairing; the gate still opens tokens made for any of its keypairs.
     func refreshGateKey() async {
@@ -320,13 +362,14 @@ final class AppModel {
             }
             gateKeyStatus = .available
         } catch APIError.http(status: 503, message: let message) {
-            if profile.gate == nil { gateKeyStatus = .unavailable(message.isEmpty ? "gate 公钥暂时不可用" : message) }
+            if profile.gate == nil { gateKeyStatus = .unavailable(message.isEmpty ? "公钥暂时不可用" : message) }
         } catch {
             handle(error)
         }
     }
 
-    /// Central error funnel: a 401 anywhere means this phone is no longer paired.
+    /// Central error funnel: a 401 anywhere means this phone is no longer paired. A network failure is left to the
+    /// connection line (无法连接（第 N 次）…), which says it better and goes away by itself once the Mac is back.
     func handle(_ error: Error) {
         if error is CancellationError { return }
         if let api = error as? APIError, api == .unauthorized {
@@ -334,7 +377,45 @@ final class AppModel {
             banner = api.localizedDescription
             return
         }
+        if let api = error as? APIError, api.isNetworkFailure { return }
         banner = error.localizedDescription
+    }
+
+    /// Ended and not opened yet, as far as this Mac keeps read marks.
+    func isUnread(_ task: AgentTask) -> Bool {
+        readMarksSupported && task.isUnread
+    }
+
+    /// Tasks with an open approval or question.
+    var pendingTaskIds: Set<String> {
+        Set(approvals.filter { $0.status == .pending }.map(\.taskId))
+    }
+
+    /// Opening a task reads it (control-v0 §4): marked here at once, then on the Mac. A Mac without read marks (404)
+    /// turns the marks off rather than leaving every ended task unread.
+    func acknowledge(_ task: AgentTask) async {
+        guard readMarksSupported, task.isUnread, (readLocally[task.id] ?? 0) < task.updatedAt else { return }
+        let at = max(Int64(Date().timeIntervalSince1970 * 1000), task.updatedAt)
+        readLocally[task.id] = at
+        tasks = withLocalReads(tasks)
+        guard let api else { return }
+        do {
+            try await api.acknowledge(taskId: task.id)
+        } catch APIError.http(status: 404, message: _) {
+            readMarksSupported = false
+        } catch {
+            if case APIError.unauthorized = error { handle(error) }
+        }
+    }
+
+    /// The Mac's list with this phone's newer read marks laid over it; a mark the Mac has caught up with is dropped.
+    private func withLocalReads(_ fresh: [AgentTask]) -> [AgentTask] {
+        guard !readLocally.isEmpty else { return fresh }
+        readLocally = readLocally.filter { id, at in fresh.first { $0.id == id }.map { ($0.acknowledgedAt ?? 0) < at } ?? true }
+        return fresh.map { task in
+            guard let at = readLocally[task.id], (task.acknowledgedAt ?? 0) < at else { return task }
+            return task.acknowledged(at: at)
+        }
     }
 
     func taskCreated(_ task: AgentTask) {
@@ -385,7 +466,7 @@ final class AppModel {
                 message = message.staging(message.attachments.isEmpty ? [] : try await api.upload(message.attachments.map(\.file)).map(\.id))
                 outgoing = message
             } catch {
-                return fail("附件没传上去（\(error.localizedDescription)）。", error)
+                return fail("附件上传失败（\(error.localizedDescription)）。", error)
             }
         }
         do {
@@ -430,11 +511,11 @@ final class AppModel {
     /// What voice mode reads when something needs you: the questions, else the action to approve.
     static func spokenQuestion(_ approval: Approval) -> String {
         if let evidence = approval.questionEvidence {
-            return "需要你回答：" + evidence.questions.map(\.text).joined(separator: "。")
+            return "等你回答：" + evidence.questions.map(\.text).joined(separator: "。")
         }
-        return "需要你批准：" + approval.action
+        return "等你批准：" + approval.action
     }
-    static let unconfirmedSend = "没收到 Mac 的回应。可以放心重发：同一条消息 Mac 只处理一次。"
+    static let unconfirmedSend = "未收到 Mac 的响应。重发不会导致重复处理。"
 
     /// Answering in the log: the result shows up in the task's state and the approvals list right after.
     func decide(_ approval: Approval, _ decision: ApprovalDecision) async {
@@ -461,7 +542,7 @@ final class AppModel {
         let prepared = await Task.detached(priority: .userInitiated) { files.map { ($0.name, prepare ? ImagePrep.prepare($0) : $0) } }.value
         var problems: [String] = []
         for (name, file) in prepared {
-            guard let file else { problems.append("\(name) 读不出来"); continue }
+            guard let file else { problems.append("\(name) 无法读取"); continue }
             if let problem = PendingAttachment.problem(adding: file, to: attachments) { problems.append(problem); continue }
             attachments.append(PendingAttachment(file: file))
         }
@@ -523,6 +604,31 @@ final class AppModel {
         do { try store?.saveCiphertexts(ciphertexts) } catch { banner = error.localizedDescription }
     }
 }
+
+#if DEBUG
+extension AppModel {
+    /// The sample screens (`-uiDemo YES`): a paired Mac, the demo conversation and tasks, no network. `offline`: the
+    /// Mac has not answered for three tries in a row, the last route choice found nothing.
+    static func demo(offline: Bool = false) -> AppModel {
+        let model = preview()
+        model.tasks = DemoData.tasks
+        model.threads = DemoData.threads
+        model.approvals = DemoData.approvals
+        model.conversation = ConversationLog(DemoData.messages)
+        model.hasAssistant = true
+        model.quota = DemoData.quota
+        model.routeReport = (Date().addingTimeInterval(-40), DemoData.routeReport)
+        model.connectionProgress = ConnectionProgress().after(model.connection)
+        if offline {
+            let start = Date().addingTimeInterval(-150)
+            model.connection = .unreachable
+            model.connectionProgress = (0..<3).reduce(model.connectionProgress) { p, i in p.after(.unreachable, at: start.addingTimeInterval(Double(i) * 30)) }
+            model.routeReport = (Date().addingTimeInterval(-20), DemoData.routeReport.map { ProbeReport(endpoint: $0.endpoint, outcome: .unreachable("请求超时。"), seconds: 4) })
+        }
+        return model
+    }
+}
+#endif
 
 extension AppModel {
     /// Sample state for SwiftUI previews only.

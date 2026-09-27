@@ -86,4 +86,18 @@ final class MarkdownTests: XCTestCase {
         XCTAssertEqual(blocks.count, 5)
         XCTAssertEqual(blocks.filter { if case .listItem = $0 { return true } else { return false } }.count, 3)
     }
+
+    /// Bold next to Chinese punctuation (2026-09-25: "**未解决阻塞。**本次" showed its asterisks).
+    func testBoldBesideChinesePunctuation() {
+        for (source, bold) in [("**未解决阻塞。**本次只读查询", "未解决阻塞。"), ("结论是**「正常」**。", "「正常」")] {
+            let out = Markdown.inline(source)
+            let text = String(out.characters)
+            XCTAssertFalse(text.contains("*"), text)
+            XCTAssertFalse(text.contains("\u{200B}"), text)
+            let strong = out.runs.filter { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }
+                .map { String(out[$0.range].characters) }.joined()
+            XCTAssertEqual(strong, bold)
+        }
+        XCTAssertEqual(String(Markdown.inline("a **b** c").characters), "a b c")
+    }
 }

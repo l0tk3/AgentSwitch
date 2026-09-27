@@ -1,13 +1,11 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// The Mac side, seen from the phone (assistant-v0 §5): a newer AgentSwitch.app waiting to be installed (installed only
-/// on the user's go-ahead; the previous version comes back by itself if the new one does not start), and the project
-/// folders a phone task may run in (managed on the Mac).
+/// The Mac app, seen from the phone (assistant-v0 §5): a newer AgentSwitch.app waiting to be installed (installed only
+/// on the user's go-ahead; the previous version comes back by itself if the new one does not start).
 struct MacAppSection: View {
     @Environment(AppModel.self) private var model
     @State private var update: AppUpdateInfo?
-    @State private var projects: [ProjectFolder] = []
     @State private var confirming = false
     @State private var requested = false
     @State private var error: String?
@@ -16,52 +14,35 @@ struct MacAppSection: View {
         Section {
             if let staged = update?.staged, !requested {
                 Button { confirming = true } label: {
-                    Label("安装新版本（构建于 \(staged)）", systemImage: "arrow.down.circle")
+                    LabeledContent("安装新版本") { Text(staged).monospacedDigit() }
                 }
             } else if requested {
-                Label("已通知 Mac 安装，它会重启一次；结果助理会在对话里告诉你。", systemImage: "hourglass")
+                Text("正在安装。Mac 上的 AgentSwitch 将重启，结果将显示在对话中。")
                     .foregroundStyle(.secondary)
             } else {
                 LabeledContent("版本", value: update?.running ?? "—")
             }
             if let last = update?.last, !last.ok {
-                Text(last.reverted ? "上次换版没成功，已退回上一版：\(last.reason)" : "上次换版没有装上：\(last.reason)")
-                    .font(.footnote).foregroundStyle(.orange)
+                Text(last.reverted ? "上次更新失败，已恢复至上一版本：\(last.reason)" : "上次更新未安装：\(last.reason)")
+                    .font(.footnote).foregroundStyle(Theme.waiting)
             }
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
         } header: {
-            Text("新版本")
+            Text("Mac 应用")
         } footer: {
-            Text("在 Mac 上构建好的新版本会出现在这里。安装时 Mac 上的 AgentSwitch 会退出再启动，正在运行的任务会中断；新版本起不来会自动退回现在这一版。")
+            Text("安装时正在进行的任务将中断；新版本无法启动时将自动恢复至上一版本。")
         }
         .task { await load() }
         .confirmationDialog("安装新版本？", isPresented: $confirming, titleVisibility: .visible) {
             Button("安装并重启 Mac 上的 AgentSwitch") { Task { await install() } }
         } message: {
-            Text("正在运行的任务会被中断。")
-        }
-        Section {
-            if projects.isEmpty {
-                Text("还没有。在 Mac 的「设置 › 项目」里添加。").foregroundStyle(.secondary)
-            }
-            ForEach(projects) { project in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(project.name)
-                    Text(project.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    if let problem = project.problem { Text(problem).font(.caption).foregroundStyle(.red) }
-                }
-            }
-        } header: {
-            Text("项目文件夹")
-        } footer: {
-            Text("说“在 <项目名> 里……”，任务就在 Mac 上那个文件夹里做；其余任务用用完即删的临时文件夹。只能在 Mac 上增删。")
+            Text("正在进行的任务将中断。")
         }
     }
 
     private func load() async {
         guard let api = model.api else { return }
         update = try? await api.appUpdate()
-        projects = (try? await api.projects()) ?? []
     }
 
     private func install() async {

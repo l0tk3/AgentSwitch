@@ -12,9 +12,9 @@ public enum PairingError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .codeRejected: return "配对码无效、已过期或已被使用，请在 Mac 上重新生成二维码"
-        case .rateLimited: return "配对尝试太频繁，请一分钟后再试"
-        case .unreachable: return "连不上这台 Mac。确认 iPhone 与 Mac 在同一局域网，或两边都已登录 Tailscale"
-        case .pinMismatch: return "对方证书指纹与二维码不一致，已中止配对"
+        case .rateLimited: return "配对尝试过于频繁，请一分钟后重试"
+        case .unreachable: return "无法连接此 Mac。请确认 iPhone 与 Mac 在同一局域网，或均已登录 Tailscale。"
+        case .pinMismatch: return "Mac 的证书指纹与二维码不一致，已中止配对"
         case .failed(let message): return "配对失败：\(message)"
         }
     }

@@ -4,9 +4,9 @@ import Foundation
 public struct AssistantMessage: Decodable, Sendable, Hashable, Identifiable {
     public enum Role: String, Decodable, Sendable { case user, assistant }
     public enum Kind: String, Decodable, Sendable {
-        /// `notice`: a task ended or waits for you (the assistant speaks up on its own); `progress`: a watched task's
-        /// line; `watch`: the answer that set or stopped a watch.
-        case message, reply, task, status, cancel, fallback, notice, watch, progress, other
+        /// `notice`: a task ended; `waiting`: a task waits for you (its card shows the question); `progress`: a
+        /// watched task's line; `watch`: the answer that set or stopped a watch.
+        case message, reply, task, status, cancel, fallback, notice, waiting, watch, progress, other
         public init(from decoder: Decoder) throws {
             self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
         }
@@ -26,7 +26,7 @@ public struct AssistantMessage: Decodable, Sendable, Hashable, Identifiable {
     /// A reply that created its tasks (as opposed to one that only talks about them).
     public var createdTasks: Bool { kind == .task || kind == .fallback }
     /// Said by the assistant on its own, not in answer to a message.
-    public var unprompted: Bool { kind == .notice || kind == .progress }
+    public var unprompted: Bool { kind == .notice || kind == .waiting || kind == .progress }
 }
 
 /// The conversation as the phone holds it: each message once, by sequence number, the newest `keep`. Values, not

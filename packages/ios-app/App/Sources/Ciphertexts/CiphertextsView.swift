@@ -26,7 +26,7 @@ struct CiphertextsView: View {
     private var keySection: some View {
         Section {
             if let gate = model.profile?.gate, model.canMint {
-                LabeledContent("gate 密钥对", value: gate.keypair)
+                LabeledContent("密钥对", value: gate.keypair)
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(unavailableText).font(.footnote)
@@ -34,20 +34,20 @@ struct CiphertextsView: View {
                 }
             }
         } footer: {
-            Text("密文在手机上用 Mac 的 gate 公钥加密，只有这台 Mac 的 gate 能解开，并且只能用于你填的站点。")
+            Text("密文在 iPhone 上生成，仅此 Mac 可解密，且仅用于所填站点。")
         }
     }
 
     private var unavailableText: String {
-        if case .unavailable(let message) = model.gateKeyStatus { return "Mac 暂时读不到 gate 公钥（\(message)），暂不能生成密文。" }
-        return "还没有 gate 公钥，暂不能生成密文。"
+        if case .unavailable(let message) = model.gateKeyStatus { return "Mac 暂时无法读取公钥（\(message)），暂不可生成密文。" }
+        return "尚未取得公钥，暂不可生成密文。"
     }
 
     private var mintSection: some View {
         Section("生成") {
-            TextField("label，例如 corp-vpn/pass", text: $draft.label)
+            TextField("名称，例如 corp-vpn/pass", text: $draft.label)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
-            TextField("站点：host[:port]、*.example.com 或网址，逗号分隔", text: $draft.sites, axis: .vertical)
+            TextField("站点，例如 *.example.com；多个用逗号分隔", text: $draft.sites, axis: .vertical)
                 .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
             Picker("类型", selection: $draft.kind) {
                 ForEach(SecretKind.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -58,17 +58,17 @@ struct CiphertextsView: View {
             }
             SecureField(draft.kind == .totp ? "TOTP 密钥（base32）" : "密码 / token", text: $draft.value)
                 .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
-            TextField("备注（可选，只存在手机上）", text: $draft.note)
+            TextField("备注（可选，仅保存在 iPhone 上）", text: $draft.note)
             if let problem = draft.problem, !draft.value.isEmpty || !draft.label.isEmpty {
-                Text(problem).font(.footnote).foregroundStyle(.orange)
+                Text(problem).font(.footnote).foregroundStyle(Theme.waiting)
             }
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
             Button("生成密文") { mint() }.disabled(draft.problem != nil)
         }
     }
 
     private func resultSection(_ item: SavedCiphertext) -> some View {
-        Section("刚生成") {
+        Section("新生成") {
             Text(item.token).font(.caption.monospaced()).lineLimit(3).textSelection(.enabled)
             HStack {
                 Button("复制") { Clipboard.copyToken(item.token) }
@@ -82,7 +82,7 @@ struct CiphertextsView: View {
     private var savedSection: some View {
         Section("已保存") {
             if model.ciphertexts.isEmpty {
-                Text("还没有保存的密文").foregroundStyle(.secondary)
+                Text("无已保存的密文").foregroundStyle(.secondary)
             }
             ForEach(model.ciphertexts) { item in
                 VStack(alignment: .leading, spacing: 4) {
@@ -90,7 +90,7 @@ struct CiphertextsView: View {
                     Text(item.shortToken).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 .swipeActions(edge: .leading) {
-                    Button("插入任务") { model.insertIntoCompose(item.token) }.tint(.blue)
+                    Button("插入任务") { model.insertIntoCompose(item.token) }.tint(.accentColor)
                 }
                 .contextMenu {
                     Button("复制密文", systemImage: "doc.on.doc") { Clipboard.copyToken(item.token) }

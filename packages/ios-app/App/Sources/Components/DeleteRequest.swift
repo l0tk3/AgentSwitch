@@ -16,7 +16,7 @@ enum DeleteRequest: Identifiable {
 
     var question: String {
         switch self {
-        case .task: return "删除这条任务？"
+        case .task: return "删除此任务？"
         case .thread(_, let title): return "删除会话「\(title ?? "未命名会话")」？"
         }
     }
@@ -30,15 +30,15 @@ enum DeleteRequest: Identifiable {
 
     var detail: String {
         switch self {
-        case .task: return "任务的日志、文件和它在会话里留下的续接内容一起删掉，不可恢复。"
-        case .thread: return "会话里的任务、日志、产物和续接状态一起删掉，不可恢复。"
+        case .task: return "任务的记录和文件将一并删除，且无法恢复。"
+        case .thread: return "会话中所有任务的记录和文件将一并删除，且无法恢复。"
         }
     }
 
     /// 409 means something in it still runs; say what to do instead of the raw reply.
     static func message(for error: Error) -> String {
         if case APIError.http(status: 409, let message) = error {
-            return "还有任务在运行或等你答复，先取消或等它结束再删。" + (message.isEmpty ? "" : "（\(message)）")
+            return "有任务正在进行或等你处理，暂无法删除。请取消任务，或等待任务结束后重试。" + (message.isEmpty ? "" : "（\(message)）")
         }
         return error.localizedDescription
     }

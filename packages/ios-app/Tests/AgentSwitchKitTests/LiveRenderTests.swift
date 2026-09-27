@@ -13,17 +13,17 @@ final class LiveRenderTests: XCTestCase {
     private static let now = Date()
 
     static let states: [(String, LiveState)] = [
-        ("routing", LiveState(rows: [.init(id: "a", title: "总结一下 AgentSwitch 最近的改动", step: "正在安排执行者", model: nil,
+        ("routing", LiveState(rows: [.init(id: "a", title: "总结一下 AgentSwitch 最近的改动", step: "选择模型", model: nil,
                                              startedAt: now.addingTimeInterval(-8), needsYou: false)], running: 1, waiting: 0)),
         ("running3", LiveState(rows: [
-            .init(id: "a", title: "修 AgentSwitch 的 bug", step: "第 2 步：在运行命令：npx vitest run tests/projects.test.ts", model: "claude-opus-5-5",
+            .init(id: "a", title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "Opus 5.5",
                   startedAt: now.addingTimeInterval(-640), needsYou: false),
-            .init(id: "b", title: "整理下载目录", step: "交给 deepseek-flash", model: "deepseek-flash", startedAt: now.addingTimeInterval(-40), needsYou: false),
+            .init(id: "b", title: "整理下载目录", step: "交给 DeepSeek Flash", model: "DeepSeek Flash", startedAt: now.addingTimeInterval(-40), needsYou: false),
             .init(id: "c", title: "登录 x.com 看通知", step: "在用工具 browser_navigate", model: "claude-sonnet-4-6", startedAt: now.addingTimeInterval(-15), needsYou: false),
         ], running: 3, waiting: 0)),
         ("needsYou", LiveState(rows: [
             .init(id: "a", title: "登录财务平台", step: "短信验证码是多少？", model: "claude-sonnet-4-6", startedAt: now.addingTimeInterval(-95), needsYou: true),
-            .init(id: "b", title: "修 AgentSwitch 的 bug", step: "第 2 步：交给 claude-opus-5-5", model: "claude-opus-5-5", startedAt: now.addingTimeInterval(-640), needsYou: false),
+            .init(id: "b", title: "修 AgentSwitch 的 bug", step: "第 2 步：交给 Opus 5.5", model: "Opus 5.5", startedAt: now.addingTimeInterval(-640), needsYou: false),
         ], running: 1, waiting: 1)),
         ("endedOK", .finished(.init(taskId: "a", title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。", ok: true))),
         ("endedFail", .finished(.init(taskId: "a", title: "登录财务平台", line: "登录页一直打不开，gate 代理连不上。", ok: false))),

@@ -35,6 +35,18 @@ final class EndpointSelectorTests: XCTestCase {
         XCTAssertEqual(result, .selected(APIEndpoint(host: "mac.tail1234.ts.net", port: 4713, kind: .tailnet)))
     }
 
+    /// Settings › Mac lists every address with what came of it (2026-09-26: the app gave no reason over Tailscale).
+    func testTheSelectionReportsEveryAddress() async {
+        let book = PairingPayload.sample()
+        let prober = FakeProber(["192.168.1.5": .unreachable("请求超时。"), "100.101.102.103": .ok])
+        let candidates = EndpointSelector.candidates(for: book, discovered: [])
+        let (result, reports) = await EndpointSelector.selectReporting(from: candidates, token: "t", prober: prober)
+        XCTAssertEqual(result, .selected(APIEndpoint(host: "100.101.102.103", port: 4713, kind: .tailnet)))
+        XCTAssertEqual(reports.map(\.endpoint), candidates)
+        XCTAssertEqual(reports.first?.outcome, .unreachable("请求超时。"))
+        XCTAssertEqual(reports.first { $0.endpoint.host == "100.101.102.103" }?.outcome, .ok)
+    }
+
     func testFailureReasons() {
         let c = EndpointSelector.candidates(for: book, discovered: [])
         XCTAssertEqual(EndpointSelector.decide(candidates: c, outcomes: [.unreachable("x"), .unauthorized, .pinMismatch(seen: "ff"), .unreachable("y")]), .unauthorized)
@@ -75,6 +87,32 @@ final class ConnectionManagerTests: XCTestCase {
         await manager.reportFailure(first)
         let second = try await manager.endpoint()
         XCTAssertEqual(second.host, "100.101.102.103")
+    }
+
+    /// 2026-09-26: a phone paired while the Mac had no Tailscale address could not connect on mobile data. Once
+    /// connected it takes the Mac's current addresses; the next selection off the LAN finds the Tailscale one.
+    func testAddressesLearnedLaterAreUsedOffTheLan() async throws {
+        let saved = ServerProfile(name: "Mac", port: 4713, fingerprint: String(repeating: "ab", count: 32), lan: ["192.168.1.5"], tailnet: [],
+                                  bonjour: "AgentSwitch on Mac", gate: nil, deviceId: "d", pairedAt: Date())
+        let prober = FakeProber(["192.168.1.5": .ok, "100.101.102.103": .ok])
+        let manager = ConnectionManager(book: saved, token: "t", discovery: nil, prober: prober)
+        let home = try await manager.endpoint()
+        XCTAssertEqual(home.kind, .lan)
+        let learned = try XCTUnwrap(saved.updated(with: MacAddresses(lan: ["192.168.1.5"], tailnet: ["100.101.102.103", "mac.tail1234.ts.net"])))
+        XCTAssertEqual(learned.tailnet, ["100.101.102.103", "mac.tail1234.ts.net"])
+        await manager.update(book: learned)
+        prober.set("192.168.1.5", .unreachable("mobile data"))
+        await manager.reportFailure(home)
+        let away = try await manager.endpoint()
+        XCTAssertEqual(away, APIEndpoint(host: "100.101.102.103", port: 4713, kind: .tailnet))
+    }
+
+    func testAnEmptyKindKeepsTheSavedAddressesAndNothingNewChangesNothing() {
+        let saved = ServerProfile(name: "Mac", port: 4713, fingerprint: String(repeating: "ab", count: 32), lan: ["192.168.1.5"], tailnet: ["100.101.102.103"],
+                                  bonjour: "b", gate: nil, deviceId: "d", pairedAt: Date())
+        XCTAssertNil(saved.updated(with: MacAddresses(lan: ["192.168.1.5"], tailnet: [])), "Tailscale off for a moment keeps the saved address")
+        XCTAssertNil(saved.updated(with: MacAddresses(lan: [], tailnet: ["100.101.102.103"])))
+        XCTAssertEqual(saved.updated(with: MacAddresses(lan: ["192.168.1.20", "bad host!"], tailnet: []))?.lan, ["192.168.1.20"])
     }
 
     func testRevokedTokenSurfacesAsUnauthorized() async {

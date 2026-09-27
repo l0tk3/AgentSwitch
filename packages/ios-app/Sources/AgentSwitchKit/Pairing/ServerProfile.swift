@@ -52,6 +52,18 @@ public struct ServerProfile: Codable, Sendable, Equatable, ServerAddressBook {
                       gate: gate, deviceId: deviceId, pairedAt: pairedAt)
     }
 
+    /// A copy with the Mac's current addresses, or nil when nothing changes. A kind the Mac reports empty (Tailscale
+    /// off for a moment, no network) keeps the saved ones; malformed entries are dropped (2026-09-26: a phone paired
+    /// before the Mac found its Tailscale address never learned it and could not connect off the LAN).
+    public func updated(with now: MacAddresses) -> ServerProfile? {
+        let lan = now.lan.filter(HostAddress.isValid)
+        let tailnet = now.tailnet.filter(HostAddress.isValid)
+        let next = (lan: lan.isEmpty ? self.lan : lan, tailnet: tailnet.isEmpty ? self.tailnet : tailnet)
+        guard next.lan != self.lan || next.tailnet != self.tailnet else { return nil }
+        return ServerProfile(name: name, port: port, fingerprint: fingerprint, lan: next.lan, tailnet: next.tailnet,
+                             bonjour: bonjour, gate: gate, deviceId: deviceId, pairedAt: pairedAt)
+    }
+
     /// Keychain account for this server's device token.
     public var tokenAccount: String { fingerprint }
 

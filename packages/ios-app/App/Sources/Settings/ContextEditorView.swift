@@ -24,18 +24,18 @@ struct ContextEditorView: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
             } footer: {
-                Text("写站点网址、账号、环境和偏好。账号密码可以直接写：保存时 Mac 先让路由器标出凭据、加密成密文再存；也可以插入手机上生成的密文。")
+                Text("记录站点、账号、环境和偏好。密码可直接填写，保存时由 Mac 加密。")
             }
             if !warnings.isEmpty {
-                Section("保存时的提醒") {
-                    ForEach(warnings, id: \.self) { Text($0).font(.footnote).foregroundStyle(.orange) }
+                Section("保存提示") {
+                    ForEach(warnings, id: \.self) { Text($0).font(.footnote).foregroundStyle(Theme.waiting) }
                 }
             }
             if error != nil {
                 Section { ErrorText(message: $error) }
             }
             if let saved, !dirty {
-                Section { Label(Self.savedLine(saved), systemImage: "checkmark.circle").foregroundStyle(.green) }
+                Section { Label(Self.savedLine(saved), systemImage: "checkmark.circle").foregroundStyle(Theme.done) }
             }
         }
         .navigationTitle("环境说明")
@@ -50,7 +50,7 @@ struct ContextEditorView: View {
                     Button("撤销修改", systemImage: "arrow.uturn.backward") { text = stored ?? "" }
                         .disabled(!dirty)
                 } label: { Image(systemName: "ellipsis.circle") }
-                Button(saving ? "保存中…" : "保存") { Task { await save() } }
+                Button(saving ? "保存中" : "保存") { Task { await save() } }
                     .disabled(saving || !dirty || stored == nil)
             }
         }
@@ -66,7 +66,7 @@ struct ContextEditorView: View {
     static func savedLine(_ result: ContextSaveResult) -> String {
         var parts = ["已保存"]
         if !result.sealed.isEmpty { parts.append("\(result.sealed.count) 个凭据已加密（\(result.sealed.map(\.field).joined(separator: "、"))）") }
-        if !result.warnings.isEmpty { parts.append("部分行被去掉") }
+        if !result.warnings.isEmpty { parts.append("部分行已移除") }
         return parts.joined(separator: "，")
     }
 

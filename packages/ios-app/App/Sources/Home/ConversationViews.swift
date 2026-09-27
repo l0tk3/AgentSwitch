@@ -1,7 +1,7 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// What you said, on the right. Ciphertexts show as a lock mark; the Mac's legend is not shown.
+/// What you said, on the right, in the accent colour. Ciphertexts show as a lock mark; the Mac's legend is not shown.
 struct UserBubble: View {
     let text: String
     var attachments: Int = 0
@@ -9,23 +9,26 @@ struct UserBubble: View {
 
     var body: some View {
         HStack {
-            Spacer(minLength: 48)
-            VStack(alignment: .trailing, spacing: 4) {
+            Spacer(minLength: 56)
+            VStack(alignment: .trailing, spacing: Theme.Space.xs) {
                 Text(MessageDisplay.readable(text))
-                    .padding(10)
-                    .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 14))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.Radius.bubble, style: .continuous))
                     .textSelection(.enabled)
-                    .opacity(faded ? 0.6 : 1)
+                    .opacity(faded ? 0.55 : 1)
                 if attachments > 0 {
-                    Label("\(attachments) 个附件", systemImage: "paperclip").font(.caption2).foregroundStyle(.secondary)
+                    Label("\(attachments) 个附件", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
     }
 }
 
-/// The assistant's answer on the left, the tasks it created right under it (their live cards), and small links to the
-/// tasks a progress or cancel answer is about.
+/// AgentSwitch's side of the conversation: plain text on the left, no bubble (docs/ui-v0.md: not a chat robot). A
+/// notice carries a small dot in the state of the task it is about; the tasks an answer created hang under it as
+/// cards, the ones it only talks about as small links.
 struct AssistantBubble: View {
     let message: AssistantMessage
     let created: [AgentTask]
@@ -34,111 +37,115 @@ struct AssistantBubble: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label { Text(MessageDisplay.readable(message.text)) } icon: { Self.icon(message.kind) }
-                    .labelStyle(KindLabelStyle())
-                    .padding(10)
-                    .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 14))
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                if let dot { Circle().fill(dot).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
+                Text(MessageDisplay.readable(message.text))
+                    .foregroundStyle(message.unprompted ? .secondary : .primary)
                     .textSelection(.enabled)
-                    .contextMenu {
-                        let key = "m\(message.seq)"
-                        let speaking = model.speaker.speakingTaskId == key
-                        Button(speaking ? "停止朗读" : "朗读", systemImage: speaking ? "stop.circle" : "speaker.wave.2") {
-                            if speaking { model.speaker.stop() } else { model.speaker.say(MessageDisplay.readable(message.text), key: key) }
-                        }
-                    }
-                Spacer(minLength: 48)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .contextMenu { readAloud }
+            if isAnswer { playButton }
             ForEach(created) { task in entry(task) }
-            if !mentioned.isEmpty {
-                FlowLinks(tasks: mentioned, open: open)
-            }
+            ForEach(mentioned) { task in TaskLink(task: task, waiting: waiting(task)) { open(task.id) } }
         }
     }
 
-    /// Said on its own (a report, a progress line) or setting a watch: a small sign in front, nothing for answers.
-    @ViewBuilder
-    static func icon(_ kind: AssistantMessage.Kind) -> some View {
-        switch kind {
-        case .notice: Image(systemName: "bell.fill").foregroundStyle(.orange)
-        case .progress: Image(systemName: "clock").foregroundStyle(.secondary)
-        case .watch: Image(systemName: "eye").foregroundStyle(.secondary)
-        default: EmptyView()
-        }
+    /// A notice or progress line: the state of its task; nothing for plain answers.
+    private var dot: Color? {
+        guard message.unprompted else { return nil }
+        guard let task = message.taskIds.first.flatMap({ id in model.tasks.first { $0.id == id } }) else { return .secondary }
+        return waiting(task) ? Theme.waiting : Theme.color(task.status)
+    }
+
+    private func waiting(_ task: AgentTask) -> Bool {
+        !ActivityFeed.pending(model.approvals, for: task.id).isEmpty
     }
 
     private var mentioned: [AgentTask] {
-        guard !message.createdTasks else { return [] }
+        guard !message.createdTasks, !message.unprompted else { return [] }
         return message.taskIds.compactMap { id in model.tasks.first { $0.id == id } }
     }
-}
 
-/// Icon and text side by side; with no icon the text alone, not an empty gap.
-private struct KindLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            configuration.icon.font(.footnote)
-            configuration.title
+    /// An answer to what you asked (not a task created, not a notice): it gets a visible 朗读 under it.
+    private var isAnswer: Bool { message.kind == .reply || message.kind == .status }
+
+    private var speakKey: String { "m\(message.seq)" }
+
+    private func toggleSpeech() {
+        if model.speaker.speakingTaskId == speakKey { model.speaker.stop() } else { model.speaker.say(MessageDisplay.readable(message.text), key: speakKey) }
+    }
+
+    private var playButton: some View {
+        let speaking = model.speaker.speakingTaskId == speakKey
+        return Button(action: toggleSpeech) {
+            Label(speaking ? "停止" : "朗读", systemImage: speaking ? "stop.fill" : "speaker.wave.2")
+                .font(.footnote)
+                .foregroundStyle(speaking ? Color.accentColor : .secondary)
         }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var readAloud: some View {
+        let speaking = model.speaker.speakingTaskId == speakKey
+        Button(speaking ? "停止朗读" : "朗读", systemImage: speaking ? "stop.circle" : "speaker.wave.2", action: toggleSpeech)
+        Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
     }
 }
 
-/// Links to the tasks an answer talks about: their words, shortened.
-private struct FlowLinks: View {
-    let tasks: [AgentTask]
-    let open: (String) -> Void
-
-    static let titleChars = 18
+/// A task an answer talks about: its state and its words, one line.
+struct TaskLink: View {
+    let task: AgentTask
+    var waiting = false
+    let open: () -> Void
+    @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(tasks) { task in
-                Button { open(task.id) } label: {
-                    HStack(spacing: 6) {
-                        StatusBadge(task: task)
-                        Text(Self.title(task)).lineLimit(1)
-                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-                    }
-                    .font(.footnote)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
-                }
-                .buttonStyle(.plain)
+        Button(action: open) {
+            HStack(spacing: Theme.Space.s) {
+                StatusLabel(task: task, waiting: waiting)
+                Text(title).font(.subheadline).foregroundStyle(.primary).lineLimit(1)
+                Spacer(minLength: 0)
+                if model.isUnread(task) { UnreadDot() }
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, 10)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
+        .buttonStyle(.plain)
     }
 
-    static func title(_ task: AgentTask) -> String {
-        let words = MessageDisplay.readable(task.task).replacingOccurrences(of: "\n", with: " ")
-        return words.count > titleChars ? String(words.prefix(titleChars)) + "…" : words
+    private var title: String {
+        task.threadId.flatMap { model.thread($0)?.title } ?? MessageDisplay.readable(task.task)
     }
 }
 
-/// The message on its way: faded while the assistant thinks; on failure, why, with a resend (same message to the Mac)
+/// The message on its way: faded while it is being sent; on failure, why, with a resend (the same message to the Mac)
 /// or back into the box to change it.
 struct OutgoingBubble: View {
     let message: OutgoingMessage
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .trailing, spacing: Theme.Space.s) {
             UserBubble(text: message.text, attachments: message.attachments.count, faded: message.failure == nil)
             if let failure = message.failure {
-                Text(failure).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.trailing)
-                HStack(spacing: 12) {
-                    Button("改一改") { model.editOutgoing() }
-                    Button("重发") { Task { await model.resend() } }.buttonStyle(.borderedProminent)
+                Text(failure).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.trailing)
+                HStack(spacing: Theme.Space.m) {
+                    Button("修改") { model.editOutgoing() }.buttonStyle(.bordered)
+                    Button("重发") { Task { await model.resend() } }.buttonStyle(.borderedProminent).tint(Theme.fill)
                 }
-                .font(.footnote)
+                .controlSize(.small)
                 .disabled(model.sending)
             } else {
                 HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text(message.staged == nil && !message.attachments.isEmpty ? "正在上传附件…" : "助理在想…")
+                    ProgressView().controlSize(.mini)
+                    Text(message.staged == nil && !message.attachments.isEmpty ? "上传附件中" : "发送中")
                 }
-                .font(.footnote)
+                .font(.caption)
                 .foregroundStyle(.secondary)
             }
         }

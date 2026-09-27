@@ -15,11 +15,17 @@ struct TaskFilesSection: View {
 
     var body: some View {
         if !files.isEmpty {
-            Section("文件") {
-                ForEach(files) { file in
-                    Button { Task { await open(file) } } label: { row(file) }
-                        .disabled(downloading != nil)
+            Block("文件") {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
+                        if index > 0 { Divider().padding(.leading, 34) }
+                        Button { Task { await open(file) } } label: { row(file) }
+                            .buttonStyle(.plain)
+                            .disabled(downloading != nil)
+                    }
                 }
+                .padding(.horizontal, 14)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                 if error != nil { ErrorText(message: $error) }
             }
         }
@@ -29,13 +35,14 @@ struct TaskFilesSection: View {
         HStack(spacing: 10) {
             Image(systemName: Self.icon(for: file.name)).frame(width: 24).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(file.name).lineLimit(2)
-                Text("\(file.isDeliverable ? "交回的" : "你发的") · \(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
+                Text(file.name).font(.subheadline).lineLimit(2)
+                Text("\(file.isDeliverable ? "返回的文件" : "发送的附件") · \(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if downloading == file.path { ProgressView() } else { Image(systemName: file.opensInPreview ? "eye" : "chevron.left.forwardslash.chevron.right").foregroundStyle(.tint) }
+            if downloading == file.path { ProgressView() } else { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
         }
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
     }
 

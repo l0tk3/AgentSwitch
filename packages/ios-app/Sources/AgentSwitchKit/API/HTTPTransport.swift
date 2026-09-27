@@ -15,7 +15,7 @@ public enum APIError: Error, Equatable, LocalizedError {
         switch self {
         case .unauthorized: return "设备令牌无效或已在 Mac 上吊销，请重新配对"
         case .pinMismatch: return "服务器证书与配对时不一致，已拒绝连接"
-        case .unreachable: return "连不上 Mac（局域网与 Tailscale 地址都无响应）"
+        case .unreachable: return "无法连接 Mac（局域网与 Tailscale 地址均无响应）"
         case .http(let status, let message): return message.isEmpty ? "请求失败（HTTP \(status)）" : message
         case .transport(let message): return "网络错误：\(message)"
         case .decoding(let message): return "无法解析服务器回复：\(message)"

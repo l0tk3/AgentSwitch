@@ -33,7 +33,7 @@ struct PairConfirmView: View {
             Section("Mac") {
                 LabeledContent("名称", value: payload.name)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("证书指纹（与 Mac 上显示的一致才继续）").font(.caption).foregroundStyle(.secondary)
+                    Text("证书指纹（与 Mac 上显示的一致时再继续）").font(.caption).foregroundStyle(.secondary)
                     Text(ServerProfile.grouped(payload.fp)).font(.footnote.monospaced()).textSelection(.enabled)
                 }
                 LabeledContent("配对码", value: payload.code).font(.body.monospaced())
@@ -43,17 +43,17 @@ struct PairConfirmView: View {
                 ForEach(payload.tailnet, id: \.self) { LabeledContent("Tailscale", value: "\($0):\(payload.port)") }
                 if !payload.bonjour.isEmpty { LabeledContent("Bonjour", value: payload.bonjour) }
             }
-            Section("密文公钥") {
+            Section("加密公钥") {
                 if let gate = payload.gate {
                     LabeledContent("密钥对", value: gate.keypair)
                 } else {
-                    Text("二维码未带 gate 公钥，配对后会向 Mac 获取").font(.footnote).foregroundStyle(.secondary)
+                    Text("二维码中无公钥，将在配对后向 Mac 获取").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            Section("这台设备") {
+            Section("此设备") {
                 TextField("设备名称", text: $deviceName)
                 if let current = model.profile, current.fingerprint != payload.fp {
-                    Text("将替换当前配对的「\(current.name)」").font(.footnote).foregroundStyle(.orange)
+                    Text("将替换当前配对的「\(current.name)」").font(.footnote).foregroundStyle(Theme.waiting)
                 }
             }
             Section {
@@ -61,18 +61,18 @@ struct PairConfirmView: View {
                     Task { await pair(payload) }
                 } label: {
                     HStack {
-                        Text(pairing ? "正在配对…" : "配对")
+                        Text(pairing ? "配对中" : "配对")
                         if pairing { Spacer(); ProgressView() }
                     }
                 }
                 .disabled(pairing)
-                if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+                if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
             }
         }
     }
 
     private func invalid(_ failure: Error) -> some View {
-        ContentUnavailableView("无法使用这个链接", systemImage: "qrcode", description: Text(failure.localizedDescription))
+        ContentUnavailableView("无法使用此链接", systemImage: "qrcode", description: Text(failure.localizedDescription))
     }
 
     private func pair(_ payload: PairingPayload) async {

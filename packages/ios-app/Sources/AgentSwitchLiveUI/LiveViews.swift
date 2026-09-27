@@ -30,8 +30,8 @@ public enum LiveLook {
     public static func word(_ state: LiveState) -> String {
         switch state.phase {
         case .needsYou: return "等你处理"
-        case .running: return "执行中"
-        case .ended: return state.ended?.ok == true ? "完成了" : "没做成"
+        case .running: return "进行中"
+        case .ended: return state.ended?.ok == true ? "已完成" : "未完成"
         }
     }
 
@@ -141,7 +141,7 @@ public struct IslandBottom: View {
                     Spacer(minLength: 0)
                     if lead.needsYou {
                         Link(destination: LiveLink.task(lead.id)) {
-                            Text("去处理").font(.system(size: 14, weight: .semibold)).foregroundStyle(.black)
+                            Text("处理").font(.system(size: 14, weight: .semibold)).foregroundStyle(.black)
                                 .padding(.horizontal, 14).padding(.vertical, 6).background(.orange, in: Capsule())
                         }
                     }
@@ -221,7 +221,7 @@ public struct LockScreenCard: View {
                 }
             }
             if stale {
-                Text("可能不是最新：打开 AgentSwitch 更新").font(.system(size: 11)).foregroundStyle(LiveLook.faint)
+                Text("内容可能已过期，打开 AgentSwitch 以刷新。").font(.system(size: 11)).foregroundStyle(LiveLook.faint)
             }
         }
         .padding(16)

@@ -50,7 +50,7 @@ final class AppLock {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            lastError = "这台设备没有设置密码或生物识别：\(error?.localizedDescription ?? "")"
+            lastError = "此设备未设置密码或生物识别：\(error?.localizedDescription ?? "")"
             return false
         }
         do {

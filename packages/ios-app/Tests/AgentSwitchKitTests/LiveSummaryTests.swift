@@ -37,13 +37,13 @@ final class LiveSummaryTests: XCTestCase {
         XCTAssertEqual(state.running, 3)
         XCTAssertEqual(state.phase, .needsYou)
         XCTAssertEqual(state.lead?.step, "部署到哪个环境？", "the question, not the approval's label (the status says it waits)")
-        XCTAssertEqual(state.rows[1].step, "排队中")
+        XCTAssertEqual(state.rows[1].step, "排队")
         let all = try XCTUnwrap(LiveSummary.state(tasks: tasks, approvals: [], threadTitles: ["th1": "日报汇总"]))
         XCTAssertEqual(all.phase, .running)
         XCTAssertEqual(all.rows.map(\.id), ["newer", "new", "t_x"])
         let old = try XCTUnwrap(LiveSummary.state(tasks: [tasks[0]], approvals: [], threadTitles: ["th1": "日报汇总"])?.lead)
         XCTAssertEqual(old.title, "日报汇总")
-        XCTAssertEqual(old.model, "deepseek-flash")
+        XCTAssertEqual(old.model, "DeepSeek Flash")
     }
 
     func testTheStepIsTheLatestLineOfTheLiveTailAndTextsStayShort() throws {
@@ -77,12 +77,12 @@ final class LiveSummaryTests: XCTestCase {
     func testStepsAreSaidInPlainWordsNotRawToolInputOrStateNames() throws {
         let t = try task("r", "running", created: 1)
         let e = { (type: String, payload: JSONValue) in TaskEvent(taskId: "r", seq: 1, ts: 1, type: type, payload: payload) }
-        XCTAssertEqual(LiveSummary.step(t, nil, [e("tool_call", .object(["tool": .string("read"), "input": .object(["path": .string("/x/y")])]))]), "在用工具 read")
-        XCTAssertEqual(LiveSummary.step(t, nil, [e("tool_call", .object(["tool": .string("bash"), "input": .object(["command": .string("npm test")])]))]), "在运行命令：npm test")
-        XCTAssertEqual(LiveSummary.step(t, nil, [e("dispatched", .object(["harness": .string("claude-code"), "model": .string("claude-opus-5-5")]))]), "交给 claude-opus-5-5")
+        XCTAssertEqual(LiveSummary.step(t, nil, [e("tool_call", .object(["tool": .string("read"), "input": .object(["path": .string("/x/y")])]))]), "读取 /x/y")
+        XCTAssertEqual(LiveSummary.step(t, nil, [e("tool_call", .object(["tool": .string("bash"), "input": .object(["command": .string("npm test")])]))]), "运行 npm test")
+        XCTAssertEqual(LiveSummary.step(t, nil, [e("dispatched", .object(["harness": .string("claude-code"), "model": .string("claude-opus-5-5")]))]), "已交给 Opus 5.5")
         XCTAssertEqual(LiveSummary.step(t, nil, [e("text", .object(["text": .string("第一行\n第二行")])), e("supervisor", .object(["kind": .string("checkin")]))]), "第一行",
                        "a supervisor note says nothing to show: the line before it stays")
-        XCTAssertEqual(LiveSummary.step(try task("q", "routing", created: 1), nil, []), "正在安排执行者")
+        XCTAssertEqual(LiveSummary.step(try task("q", "routing", created: 1), nil, []), "选择模型")
     }
 
     func testTaskLinksGoBothWaysAndOtherLinksAreNotTasks() throws {
@@ -92,5 +92,19 @@ final class LiveSummaryTests: XCTestCase {
         XCTAssertNil(LiveLink.taskId(from: try XCTUnwrap(URL(string: "agentswitch://pair?p=abc"))))
         XCTAssertNil(LiveLink.taskId(from: try XCTUnwrap(URL(string: "https://task/abc"))))
         XCTAssertNil(LiveLink.taskId(from: try XCTUnwrap(URL(string: "agentswitch://task/"))))
+    }
+}
+
+final class ModelNameTests: XCTestCase {
+    func testModelIdsAreSaidAsPeopleSayThem() {
+        XCTAssertEqual(ModelName.display("claude-opus-5-5"), "Opus 5.5")
+        XCTAssertEqual(ModelName.display("claude-opus-5-5[1m]"), "Opus 5.5 1M")
+        XCTAssertEqual(ModelName.display("claude-sonnet-4-6"), "Sonnet 4.6")
+        XCTAssertEqual(ModelName.display("claude-haiku-4-5-20251001"), "Haiku 4.5")
+        XCTAssertEqual(ModelName.display("deepseek/deepseek-flash"), "DeepSeek Flash")
+        XCTAssertEqual(ModelName.display("gpt-6-luna"), "GPT-6 Luna")
+        XCTAssertEqual(ModelName.display("gpt-5.5"), "GPT-5.5")
+        XCTAssertEqual(ModelName.harness("claude-code"), "Claude Code")
+        XCTAssertEqual(ModelName.harness("opencode"), "OpenCode")
     }
 }

@@ -8,7 +8,7 @@ public enum VaultError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .keychain(let status): return "钥匙串错误 \(status)"
-        case .corrupt: return "钥匙串里的令牌已损坏"
+        case .corrupt: return "钥匙串中的令牌已损坏"
         }
     }
 }

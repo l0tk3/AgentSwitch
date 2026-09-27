@@ -19,9 +19,9 @@ public enum SecretUse: String, CaseIterable, Codable, Sendable, Comparable {
     public var title: String {
         switch self {
         case .http: return "http（代理替换）"
-        case .otp: return "otp（取验证码）"
+        case .otp: return "otp（获取验证码）"
         case .exec: return "exec（本地命令模板）"
-        case .fill: return "fill（只填浏览器表单）"
+        case .fill: return "fill（仅填写浏览器表单）"
         }
     }
 }
@@ -37,13 +37,13 @@ public enum GatePolicyError: Error, Equatable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .emptyValue: return "值不能为空"
-        case .invalidLabel(let l): return "label 不合法：\(l)（字母或数字开头，只含字母数字 . _ / -，最长 64）"
-        case .invalidHost(let h): return "host 不合法：\(h)"
-        case .emptyUses: return "至少选一种用途"
-        case .totpNotBase32: return "TOTP 密钥必须是 base32"
-        case .seedImportNeedsTotp: return "种子导入授权只适用于 TOTP"
-        case .seedImportNotAllowed(let h): return "种子导入目标必须是 host 已允许的确切地址：\(h)"
+        case .emptyValue: return "值不可为空"
+        case .invalidLabel(let l): return "label 无效：\(l)（须以字母或数字开头，仅含字母、数字和 . _ / -，最长 64 个字符）"
+        case .invalidHost(let h): return "host 无效：\(h)"
+        case .emptyUses: return "请至少选择一种用途"
+        case .totpNotBase32: return "TOTP 密钥须为 base32 格式"
+        case .seedImportNeedsTotp: return "种子导入授权仅适用于 TOTP"
+        case .seedImportNotAllowed(let h): return "种子导入目标须为 host 已允许的确切地址：\(h)"
         }
     }
 }

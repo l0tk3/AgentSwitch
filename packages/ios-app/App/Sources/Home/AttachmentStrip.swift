@@ -8,7 +8,7 @@ struct AttachmentStrip: View {
 
     var body: some View {
         if model.preparingAttachments > 0 {
-            HStack(spacing: 6) { ProgressView(); Text("正在处理附件…").font(.caption).foregroundStyle(.secondary) }
+            HStack(spacing: 6) { ProgressView(); Text("处理附件中").font(.caption).foregroundStyle(.secondary) }
         }
         if !model.attachments.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
@@ -17,8 +17,8 @@ struct AttachmentStrip: View {
                         ForEach(model.attachments) { item in tile(item) }
                     }
                 }
-                Label("附件不经过自动加密：里面的密码会原样交给模型。", systemImage: "exclamationmark.triangle")
-                    .font(.caption2).foregroundStyle(.orange)
+                Label("附件不经过自动加密，其中的密码将原样提供给模型。", systemImage: "exclamationmark.triangle")
+                    .font(.caption2).foregroundStyle(Theme.waiting)
             }
         }
     }

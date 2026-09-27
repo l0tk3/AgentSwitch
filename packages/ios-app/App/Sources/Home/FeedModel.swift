@@ -8,6 +8,9 @@ import SwiftUI
 @Observable
 final class FeedModel {
     private(set) var tails: [String: [TaskEvent]] = [:]
+    /// The time of each followed task's latest event, shown or not: a running task quiet for 10 minutes says so
+    /// (control-v0 §5).
+    private(set) var lastEventAt: [String: Int64] = [:]
     private var lastSeq: [String: Int64] = [:]
     private var streams: [String: Task<Void, Never>] = [:]
     /// Set by the home view on appear / disappear; a sync while hidden stops everything instead.
@@ -57,6 +60,7 @@ final class FeedModel {
                 for try await event in api.events(taskId: id, after: after) {
                     guard let self, !Task.isCancelled else { return }
                     lastSeq[id] = max(lastSeq[id] ?? 0, event.seq)
+                    lastEventAt[id] = max(lastEventAt[id] ?? 0, event.ts)
                     tails[id] = EventTail.appending(event, to: tails[id] ?? [])
                     if event.touchesApprovals { await model.refreshApprovals() }
                     if event.endsStream || event.type == "dispatched" { await model.refreshTasks() }

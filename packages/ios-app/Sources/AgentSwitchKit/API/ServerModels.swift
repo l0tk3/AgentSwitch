@@ -12,6 +12,17 @@ public struct PairResult: Codable, Sendable, Hashable {
     public let token: String
 }
 
+/// `GET /addresses`: where the Mac can be reached now.
+public struct MacAddresses: Codable, Sendable, Hashable {
+    public let lan: [String]
+    public let tailnet: [String]
+
+    public init(lan: [String], tailnet: [String]) {
+        self.lan = lan
+        self.tailnet = tailnet
+    }
+}
+
 /// `GET /me`. app-v0 does not fix the shape yet; every field is optional and `id`/`deviceId` both count.
 public struct Me: Codable, Sendable, Hashable {
     public let deviceId: String?

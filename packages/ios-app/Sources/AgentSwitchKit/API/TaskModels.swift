@@ -55,15 +55,14 @@ public enum TaskStatus: Sendable, Hashable, Codable {
     public var isTerminal: Bool { [.done, .partial, .blocked, .failed, .cancelled].contains(self) }
     public var isActive: Bool { [.queued, .routing, .running, .waitingApproval].contains(self) }
 
+    /// The fixed status words (docs/ui-v0.md §4).
     public var label: String {
         switch self {
-        case .queued: return "排队中"
-        case .routing: return "分诊中"
-        case .running: return "执行中"
-        case .waitingApproval: return "等待答复"
+        case .queued: return "排队"
+        case .routing, .running: return "进行中"
+        case .waitingApproval: return "等你处理"
         case .done: return "已完成"
-        case .partial: return "部分完成"
-        case .blocked: return "执行受阻"
+        case .partial, .blocked: return "未完成"
         case .failed: return "失败"
         case .cancelled: return "已取消"
         case .other(let s): return s
@@ -110,7 +109,10 @@ public struct AgentTask: Codable, Sendable, Hashable, Identifiable {
     public let spoken: String?
     /// The result retold for listening (threads-v0 §3), for 朗读.
     public let speech: String?
+    /// `question` (waits for your answer) or `interrupted` (the Mac's service restarted mid-run, control-v0 §4).
     public let blockCause: String?
+    /// When the phone last opened it (control-v0 §4, ms); older than `updatedAt` or missing means unread once ended.
+    public let acknowledgedAt: Int64?
 
     public var created: Date { Date(milliseconds: createdAt) }
     public var updated: Date { Date(milliseconds: updatedAt) }
@@ -121,15 +123,18 @@ public struct AgentTask: Codable, Sendable, Hashable, Identifiable {
         return pin?.label
     }
 
-    /// A blocked task's label comes from the structured `blockCause` (same table as the web UI).
+    /// What an interrupted task says when the daemon gives no reason of its own (task page and process line).
+    public static let interruptedText = "服务重启时任务仍在进行，执行进度无法确认。"
+
+    /// The status word; a blocked task that waits for an answer says so (its `blockCause`).
     public var statusLabel: String {
-        guard status == .blocked else { return status.label }
-        switch blockCause {
-        case "question": return "待补充条件"
-        case "planner_timeout": return "规划超时"
-        case "planner_error": return "规划失败"
-        default: return status.label
-        }
+        status == .blocked && blockCause == "question" ? "等你处理" : status.label
+    }
+
+    /// The model at work, as people say it (Opus 5.5), else the executor, else nil.
+    public var modelName: String? {
+        if let model { return ModelName.display(model) }
+        return harness.map(ModelName.harness) ?? pin.map { ModelName.display($0.model) }
     }
 }
 

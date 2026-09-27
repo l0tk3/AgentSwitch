@@ -7,10 +7,13 @@ public struct SecretDraft: Sendable, Equatable {
     public var sites: String      // comma / space / | / ; separated; bare host[:port], *.example.com, or a URL
     public var kind: SecretKind
     public var uses: Set<SecretUse>
+    /// A website password: replaced in requests and typed into the page. With the gate running as its own service
+    /// account (docs/gate-service-v0.md §1) a value without `.fill` is never typed into the browser; API keys can drop it.
+    public static let websiteUses: Set<SecretUse> = [.http, .fill]
     public var value: String
     public var note: String
 
-    public init(label: String = "", sites: String = "", kind: SecretKind = .secret, uses: Set<SecretUse> = [.http],
+    public init(label: String = "", sites: String = "", kind: SecretKind = .secret, uses: Set<SecretUse> = SecretDraft.websiteUses,
                 value: String = "", note: String = "") {
         self.label = label
         self.sites = sites
@@ -47,9 +50,9 @@ public struct SecretDraft: Sendable, Equatable {
     public var problem: String? {
         if label.isEmpty { return "缺少 label" }
         if value.isEmpty { return "缺少值" }
-        if uses.isEmpty { return "至少选一种用途" }
-        if (uses.contains(.http) || uses.contains(.fill)) && hostList.isEmpty { return "http / fill 用途需要站点" }
-        if uses.contains(.otp) && kind != .totp { return "otp 用途只对 TOTP 有效" }
+        if uses.isEmpty { return "请至少选择一种用途" }
+        if (uses.contains(.http) || uses.contains(.fill)) && hostList.isEmpty { return "http / fill 用途须填写站点" }
+        if uses.contains(.otp) && kind != .totp { return "otp 用途仅适用于 TOTP" }
         do { _ = try payload() } catch { return error.localizedDescription }
         return nil
     }

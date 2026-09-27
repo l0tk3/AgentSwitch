@@ -9,34 +9,35 @@ struct ApprovalCard: View {
     @State private var busy = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             if let evidence = approval.questionEvidence {
                 QuestionForm(evidence: evidence, busy: busy) { answers in await run { await onAnswer(answers) } }
             } else if approval.kind == .question {
+                Heading(text: "等你回答")
                 Text(approval.action)
-                Text("这个问题的格式 App 还不认识，请在 Mac 上回答。").font(.footnote).foregroundStyle(.secondary)
+                Text("此问题的格式暂不支持在 iPhone 上回答，请在 Mac 上回答。").font(.footnote).foregroundStyle(.secondary)
             } else {
-                Label(approval.action, systemImage: "exclamationmark.shield").font(.headline)
+                Heading(text: "等你批准")
+                Text(approval.action).font(.callout.monospaced()).textSelection(.enabled)
                 if !approval.evidence.isEmpty {
                     DisclosureGroup("详情") {
-                        Text(approval.evidence).font(.caption.monospaced()).textSelection(.enabled)
+                        Text(approval.evidence).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     }
+                    .font(.footnote)
                 }
-                HStack {
+                HStack(spacing: Theme.Space.m) {
                     Button(role: .destructive) { Task { await run { await onDecide(.deny) } } } label: {
-                        Label("拒绝", systemImage: "xmark").frame(maxWidth: .infinity)
+                        Text("拒绝").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     Button { Task { await run { await onDecide(.allow) } } } label: {
-                        Label("允许", systemImage: "checkmark").frame(maxWidth: .infinity)
+                        Text("允许").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent).tint(Theme.fill)
                 }
                 .disabled(busy)
             }
-            Text(approval.created.relative).font(.caption2).foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4)
     }
 
     private func run(_ body: () async -> Void) async {
@@ -59,16 +60,16 @@ struct QuestionForm: View {
     @State private var problem: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(evidence.source == "executor" ? "执行者问你" : "路由器问你").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Heading(text: "等你回答")
             ForEach(evidence.questions) { q in question(q) }
-            if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }
+            if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.failed) }
             Button {
                 Task { await submit() }
             } label: {
-                Text(busy ? "提交中…" : "提交回答").frame(maxWidth: .infinity)
+                Text(busy ? "提交中" : "提交").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.borderedProminent).tint(Theme.fill)
             .disabled(busy)
         }
         .sheet(item: Binding(get: { pickingFor.map(QuestionID.init) }, set: { pickingFor = $0?.id })) { target in
@@ -78,9 +79,8 @@ struct QuestionForm: View {
 
     @ViewBuilder
     private func question(_ q: UserQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !q.header.isEmpty { Text(q.header).font(.caption.bold()).foregroundStyle(.secondary) }
-            Text(Markdown.inline(q.text))
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text(Markdown.inline(q.text)).font(.body)
             ForEach(q.options, id: \.label) { option in
                 Button { toggle(q, option.label) } label: {
                     HStack(alignment: .top) {
@@ -94,15 +94,15 @@ struct QuestionForm: View {
                 .buttonStyle(.plain)
             }
             if q.secret {
-                HStack {
-                    Text(typed[q.id].flatMap { $0.isEmpty ? nil : "已选密文" } ?? "敏感信息：请用密文回答")
-                        .font(.footnote).foregroundStyle(.orange)
-                    Spacer()
-                    Button("选择密文") { pickingFor = q.id }.buttonStyle(.bordered).disabled(model.ciphertexts.isEmpty)
+                // Typed as is: the Mac seals the answer before anything stores it (router-v0 §9); a saved ciphertext works too.
+                SecureField("直接输入，由 Mac 加密", text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }))
+                    .answerField()
+                if !model.ciphertexts.isEmpty {
+                    Button("使用已存密文", systemImage: "lock.doc") { pickingFor = q.id }.font(.footnote)
                 }
             } else {
-                TextField(q.options.isEmpty ? "你的回答" : "其他回答（可选）", text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                TextField(q.options.isEmpty ? "回答" : "其他回答（可选）", text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }), axis: .vertical)
+                    .answerField()
             }
         }
     }
@@ -134,4 +134,22 @@ struct QuestionForm: View {
 
 private struct QuestionID: Identifiable {
     let id: String
+}
+
+/// "等你回答" / "等你批准": the one line in the waiting colour.
+private struct Heading: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.footnote.weight(.semibold)).foregroundStyle(Theme.waiting)
+    }
+}
+
+private extension View {
+    /// An answer box on the card's grey: a lighter field, not the system's bordered look.
+    func answerField() -> some View {
+        self.padding(.horizontal, 12).padding(.vertical, 10)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+    }
 }

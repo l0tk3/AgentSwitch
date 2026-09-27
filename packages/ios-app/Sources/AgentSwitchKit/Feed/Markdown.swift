@@ -31,9 +31,29 @@ public enum Markdown {
     public static func inline(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace,
                                                               failurePolicy: .returnPartiallyParsedIfPossible)
-        var out = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        let source = cjkEmphasis(text)
+        var out = (try? AttributedString(markdown: source, options: options)) ?? AttributedString(text)
         for run in out.runs {
             if let link = run.link, !isWebLink(link) { out[run.range].link = nil }
+        }
+        if source != text {
+            while let space = out.range(of: zeroWidthSpace) { out.removeSubrange(space) }
+        }
+        return out
+    }
+
+    private static let zeroWidthSpace = "\u{200B}"
+    /// `**未解决阻塞。**本次`: CommonMark does not close a `**` that follows punctuation and precedes a letter (or open
+    /// one the other way round), which Chinese text does all the time. A zero-width space between the punctuation and
+    /// the `**` makes it count (it is neither space nor punctuation); inline() takes it out again.
+    private static let closingAfterPunctuation = try! NSRegularExpression(pattern: #"(\p{P})(\*\*)(?=[^\s\p{P}*])"#)
+    private static let openingBeforePunctuation = try! NSRegularExpression(pattern: #"(?<=[^\s\p{P}*])(\*\*)(\p{P})"#)
+
+    static func cjkEmphasis(_ text: String) -> String {
+        guard text.contains("**") else { return text }
+        var out = text
+        for (regex, template) in [(closingAfterPunctuation, "$1\u{200B}$2"), (openingBeforePunctuation, "$1\u{200B}$2")] {
+            out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
         }
         return out
     }

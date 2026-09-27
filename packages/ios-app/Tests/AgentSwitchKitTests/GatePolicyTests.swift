@@ -100,10 +100,11 @@ final class SecretDraftTests: XCTestCase {
     }
 
     func testProblems() {
+        XCTAssertEqual(SecretDraft(label: "a", sites: "a.com", value: "v").uses, [.http, .fill])   // website password by default
         XCTAssertEqual(SecretDraft(label: "", value: "v").problem, "缺少 label")
         XCTAssertEqual(SecretDraft(label: "a", value: "").problem, "缺少值")
-        XCTAssertEqual(SecretDraft(label: "a", sites: "", value: "v").problem, "http / fill 用途需要站点")
-        XCTAssertEqual(SecretDraft(label: "a", sites: "a.com", uses: [.otp], value: "v").problem, "otp 用途只对 TOTP 有效")
+        XCTAssertEqual(SecretDraft(label: "a", sites: "", value: "v").problem, "http / fill 用途须填写站点")
+        XCTAssertEqual(SecretDraft(label: "a", sites: "a.com", uses: [.otp], value: "v").problem, "otp 用途仅适用于 TOTP")
         XCTAssertNotNil(SecretDraft(label: "a", sites: "a.com", kind: .totp, uses: [.otp], value: "xyz!").problem)
         XCTAssertNil(SecretDraft(label: "a", sites: "", kind: .totp, uses: [.otp], value: "JBSWY3DPEHPK3PXP").problem)
     }

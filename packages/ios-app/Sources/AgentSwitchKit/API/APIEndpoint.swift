@@ -11,6 +11,14 @@ public enum EndpointKind: String, Codable, Sendable, CaseIterable {
         case .tailnet: return "Tailscale"
         }
     }
+
+    /// The line without how it was found: "局域网" or "Tailscale" (the connection state, "已连接（局域网）").
+    public var lineTitle: String {
+        switch self {
+        case .bonjour, .lan: return "局域网"
+        case .tailnet: return "Tailscale"
+        }
+    }
 }
 
 /// One way to reach the Mac's remote listener.

@@ -34,11 +34,11 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 Task { @MainActor [weak self] in
-                    if granted { self?.configure() } else { self?.onProblem?("没有相机权限。可在「设置 › AgentSwitch」里打开。") }
+                    if granted { self?.configure() } else { self?.onProblem?("无相机权限。在「设置 › AgentSwitch」中开启。") }
                 }
             }
         default:
-            onProblem?("没有相机权限。可在「设置 › AgentSwitch」里打开。")
+            onProblem?("无相机权限。在「设置 › AgentSwitch」中开启。")
         }
     }
 
@@ -56,7 +56,7 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         let session = capture.session
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
-            onProblem?("这台设备没有可用的相机。")
+            onProblem?("此设备无可用的相机。")
             return
         }
         session.addInput(input)

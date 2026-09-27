@@ -11,7 +11,7 @@ inside the log. SwiftUI, iOS 17+, Swift 6.
 │   表格已按日期排好…       │ │ 高级                      │
 │   登录 fin 用 🔒密文 查 ▐ │ │   会话（左滑删除）      › │
 │ ● 执行中 codex/gpt-6-astra│ │   任务日志（左滑删除）  › │
-│   工具 shell: curl …      │ │   执行目标与额度        › │
+│   工具 shell: curl …      │ │   模型                  › │
 │ 需要审批 [拒绝] [允许]    │ │ Mac · 连接 · Face ID      │
 │ (+) 让 Mac 上的 agent…  ↑ │ │ 重新配对                  │
 └──────────────────────────┘ └──────────────────────────┘
@@ -39,14 +39,23 @@ AgentSwitchKit, by folder:
 - `API/` — models (`AgentTask`, `TaskEvent`, `Approval`, `AgentThread`, `QuotaReading`, `Targets`, `Me`, `GatePubkey`),
   `AgentSwitchAPI` (async/await), `SSEParser` and the reconnecting event stream (`?after=<seq>`), `CertificatePin` and
   `PinnedSessionTransport` (URLSession accepting only the paired leaf-certificate SHA-256), `EventDescriber` (one line
-  per event, like the web console).
+  per event, like the web console). control-v0: `ControlModels` (permission mode, default folder, search hits),
+  `SessionModels` (the Mac's Claude Code / Codex / OpenCode sessions, grouped by folder), `ControlRoutes`
+  (`/approvals/policy`, `/settings/workdir`, `/sessions`, `/tasks/:id/ack`, `/search`); the event stream drops a
+  connection that has sent no byte for 30 s (the daemon pings every 10 s) and resumes from the last seq.
 - `Connection/` — `EndpointSelector` (Bonjour with matching `fp` prefix → LAN addresses → Tailscale; probe `/healthz`
-  then `/me`), `ConnectionManager` (actor; re-selects on failure and on `NWPathMonitor` changes), Bonjour and path
-  monitor adapters behind protocols.
+  then `/me`), `ConnectionManager` (actor; re-selects on failure and on `NWPathMonitor` changes, checks the address
+  in use with `/healthz` on returning to the foreground, retries on its own while unreachable — 2 s doubling to
+  30 s, no cap), `ConnectionProgress` (连接中 → 重连中 → 无法连接（第 N 次）→ 未找到 Mac after 6 minutes → 配对已失效),
+  `Troubleshooting` (设置 › Mac › 排障), Bonjour and path monitor adapters behind protocols.
 - `Feed/` — the home log's pure parts: `ActivityFeed` (oldest-first timeline, which active tasks get one of the 3 live
   streams, approvals outside the log), `EventTail` (the last lines under a running task), `MessageDisplay` (the
   sealer's legend cut off, ciphertexts shown as 🔒密文), `Markdown` (model output split into blocks — headings, lists,
-  quotes, code, tables — with Foundation's inline parser inside; images are never loaded).
+  quotes, code, tables — with Foundation's inline parser inside; images are never loaded). control-v0: `Attention`
+  (read marks, who-needs-you order, `Staleness` for a running task quiet for 10 minutes), `ProcessFolding` (tool
+  calls in a row as one line, `TaskDuration`), `SearchSnippet` (⟦⟧ hits, and a local search for a Mac without
+  `/search`). ui-v0 §4.2: `Usage` (`GET /quota` as 设置 › 用量 rows — Claude Code and Codex with fixed 5h / 7d slots,
+  a window past its reset reads as none; OpenCode with its balance).
 - `Files/` — `UploadFile` / `Multipart` (the `POST /uploads` body), `TaskFile` (a task's `in/` and `out/`), `ImagePrep`
   (images shrunk to 2048 px, re-encoded without metadata, JPEG unless PNG).
 - `Storage/` — `KeychainTokenVault` (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`), `LocalStore` (profile and saved
@@ -141,8 +150,20 @@ Signing & Capabilities and press Run — but `xcodegen generate` (also run by th
   lines and the warnings are shown; insert a ciphertext; load the example when empty). 密文: mint from label, sites,
   kind, uses and value with the gate key from pairing (refreshed from `/gate/pubkey`); the value field is cleared after
   minting; saved list (ciphertext + note), copy (local-only clipboard, 2-minute expiry), insert into the input box.
-  高级: 会话 and 任务日志 (swipe to delete, confirmed; a running one is refused with the reason), targets and quota. Then
-  Mac info and fingerprint, the path in use (Bonjour / LAN / Tailscale) and re-selection, Face ID lock, re-pair.
+  用量 (docs/ui-v0.md §4.2): right under the Mac, one row per executor with thin 5h / 7d bars (OpenCode: its
+  balance) and when they were read; pull to refresh re-reads (`POST /quota/refresh`). 管理: 会话 and 任务记录 (swipe
+  to delete, confirmed; a running one is refused with the reason), 模型 (the scheduling model and each executor's
+  models). Then Mac info and fingerprint, the path in use (Bonjour / LAN / Tailscale) and re-selection, Face ID lock,
+  re-pair.
+  control-v0: 任务记录 sorted by who needs you, with search; 编码会话 (the Mac's coding sessions by folder, a read-only
+  transcript each, refreshed every 10 s while one runs); 权限 (the mode, changed on the Mac); Mac › 排障 and the
+  default work folder. Opening a task marks it read; unread tasks carry an accent dot; the process folds tool calls
+  in a row and ends with how long the task took.
+
+Demo screens (Debug, `-uiDemo YES -uiDemoScreen <name>`): `settings`, `task`, `done`, `running`, `stale`,
+`interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
+`transcript`; `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
+`offlinemac`) opens the Mac page scrolled to the end of 排障 with 常见原因 open.
 
 ## Not in v0
 

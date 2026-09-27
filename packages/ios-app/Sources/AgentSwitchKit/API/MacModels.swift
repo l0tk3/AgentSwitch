@@ -19,15 +19,3 @@ public struct UpdateOutcome: Decodable, Sendable, Equatable {
 }
 
 struct InstallRequested: Decodable { let requested: Bool }
-
-/// A folder on the Mac a phone task may run in, by name (assistant-v0 §5); added and removed on the Mac only.
-public struct ProjectFolder: Decodable, Sendable, Hashable, Identifiable {
-    public let name: String
-    public let path: String
-    /// Why it cannot be used right now (moved, deleted), if so.
-    public let problem: String?
-
-    public var id: String { name }
-}
-
-struct ProjectFolders: Decodable { let projects: [ProjectFolder] }

@@ -6,7 +6,7 @@ import SwiftUI
 /// The user's pick is kept; without one the best installed Mandarin voice is used.
 enum SpeechVoices {
     static let language = "zh-CN"
-    static let sampleText = "你好，这是 AgentSwitch 的朗读试听。任务完成后，我会用这个声音把结果念给你听。"
+    static let sampleText = "这是 AgentSwitch 的朗读声音。任务结束时，将使用此声音朗读结果。"
     private static let chosenKey = "speechVoiceIdentifier"
 
     /// Installed Mandarin voices, best first; novelty voices left out.
@@ -60,7 +60,8 @@ struct SpeechVoiceView: View {
                                 Text(voice.name)
                                 Text(SpeechVoices.qualityLabel(voice)).font(.caption)
                                     .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(voice.quality == .default ? Color.gray.opacity(0.15) : Color.green.opacity(0.18), in: Capsule())
+                                    .foregroundStyle(.secondary)
+                                    .background(Color(.tertiarySystemFill), in: Capsule())
                             }
                         }
                         .buttonStyle(.plain)
@@ -71,16 +72,16 @@ struct SpeechVoiceView: View {
                     }
                 }
             } footer: {
-                Text("点一个声音选中并试听。")
+                Text("轻点声音以选择并试听。")
             }
             Section {
                 if SpeechVoices.onlyCompact {
-                    Label("现在只有基础声音，听起来比较生硬。", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Text("当前仅安装了基础声音，朗读效果较为生硬。").foregroundStyle(Theme.waiting)
                 }
-                Text("更自然的声音要先下载：打开 设置 › 辅助功能 › 朗读内容 › 声音 › 中文（中国大陆），选一个标着「增强」或「高音质」的声音下载，回到这里就能选。")
+                Text("前往 设置 › 辅助功能 › 朗读内容 › 声音 › 中文（中国大陆），下载标有「增强」或「高音质」的声音。")
                     .font(.footnote)
             } header: {
-                Text("更好的声音")
+                Text("更多声音")
             }
         }
         .navigationTitle("朗读声音")

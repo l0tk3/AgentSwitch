@@ -21,10 +21,21 @@ final class TaskDetailModel {
         self.taskId = taskId
     }
 
-    var task: AgentTask? { detail?.task }
-    var pending: [Approval] { detail?.approvals.filter { $0.status == .pending } ?? [] }
+    /// Until the Mac answers, what the app already knows of the task, so the page shows at once.
+    private var cached: AgentTask?
+    private var cachedApprovals: [Approval] = []
+
+    var task: AgentTask? { detail?.task ?? cached }
+    var pending: [Approval] { (detail?.approvals ?? cachedApprovals).filter { $0.status == .pending } }
 
     func start(_ model: AppModel) {
+        if detail == nil {
+            cached = model.tasks.first { $0.id == taskId }
+            cachedApprovals = model.approvals.filter { $0.taskId == taskId }
+        }
+        #if DEBUG
+        if model.api == nil, events.isEmpty { events = DemoData.events[taskId] ?? [] }
+        #endif
         guard stream == nil, let api = model.api else { return }
         let after = events.last?.seq ?? 0
         let id = taskId

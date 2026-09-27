@@ -16,38 +16,21 @@ struct HomeView: View {
     var body: some View {
         @Bindable var model = model
         NavigationStack(path: $path) {
-            ScrollViewReader { scroller in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        ConnectionBanner()
-                        if let banner = model.banner {
-                            ErrorText(message: $model.banner).id(banner)
-                        }
-                        if timeline.isEmpty && model.outgoing == nil {
-                            EmptyLog()
-                        }
-                        ForEach(timeline) { item in row(item) }
-                        if let outgoing = model.outgoing {
-                            OutgoingBubble(message: outgoing)
-                        }
-                        Color.clear.frame(height: 1).id(Self.bottom)
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
+            // The strip sits above the scroll view, not in its top inset: iOS 26 fades whatever is under the bar there.
+            VStack(spacing: 0) {
+                ActiveThreadsStrip(lastEventAt: feed.lastEventAt, openThread: { openThread($0) }, openTask: { open($0) })
+                // Above the conversation, not in it: the conversation opens at its end, where a line at its top is out
+                // of sight exactly when the Mac cannot be reached.
+                if model.connection.endpoint == nil {
+                    ConnectionBanner()
+                        .padding(.horizontal, Theme.Space.l)
+                        .padding(.vertical, Theme.Space.s)
+                        .background(Color(.systemBackground))
                 }
-                .defaultScrollAnchor(.bottom)
-                // A new message, answer or task: follow it down.
-                .onChange(of: timeline.last?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
-                .onChange(of: model.outgoing?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
+                LooseApprovalsButton(count: looseCount)
+                conversation
             }
-            .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .top) {
-                VStack(spacing: 0) {
-                    ActiveThreadsStrip { openThread($0) }
-                    LooseApprovalsButton(count: looseCount)
-                }
-            }
-            .safeAreaInset(edge: .bottom) { InputBar() }
+            .background(Color(.systemBackground))
             .navigationTitle(model.profile?.name ?? "AgentSwitch")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -58,7 +41,6 @@ struct HomeView: View {
             }
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: ThreadRoute.self) { route in ThreadView(threadId: route.id) { path.append($0) } }
-            .refreshable { await model.refreshAll() }
             .task {
                 // No push in v0: poll while the log is on screen; the live streams cover the active tasks in between.
                 while !Task.isCancelled {
@@ -70,12 +52,9 @@ struct HomeView: View {
             }
             .onChange(of: model.tasks) { feed.sync(model) }
             .onChange(of: feed.tails) { model.liveTails = feed.tails }
-            .onChange(of: model.openTaskRequest) {
-                guard let id = model.openTaskRequest else { return }
-                model.openTaskRequest = nil
-                path = NavigationPath()
-                path.append(id)
-            }
+            .onChange(of: model.openTaskRequest) { openRequestedTask() }
+            // A cold start from a Live Activity: the request is there before this screen is.
+            .onAppear { openRequestedTask() }
             .onChange(of: path) { if !path.isEmpty { Keyboard.dismiss() } }
             .onAppear { feed.visible = true }
             .onDisappear {
@@ -87,10 +66,45 @@ struct HomeView: View {
         }
     }
 
+    /// The conversation, oldest first, following new items down; the input bar under it.
+    private var conversation: some View {
+        @Bindable var model = model
+        return ScrollViewReader { scroller in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Theme.Space.item) {
+                    if let banner = model.banner {
+                        ErrorText(message: $model.banner).id(banner)
+                    }
+                    if timeline.isEmpty && model.outgoing == nil {
+                        EmptyLog()
+                    }
+                    ForEach(timeline) { item in row(item) }
+                    if let outgoing = model.outgoing {
+                        OutgoingBubble(message: outgoing)
+                    }
+                    Color.clear.frame(height: 1).id(Self.bottom)
+                }
+                .padding(.horizontal, Theme.Space.l)
+                .padding(.vertical, Theme.Space.m)
+            }
+            .defaultScrollAnchor(.bottom)
+            .scrollDismissesKeyboard(.interactively)
+            .refreshable { await model.refreshAll() }
+            // A new message, answer or task: follow it down.
+            .onChange(of: timeline.last?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
+            .onChange(of: model.outgoing?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
+            .safeAreaInset(edge: .bottom) { InputBar() }
+        }
+    }
+
     private static let bottom = "bottom"
 
+    /// The conversation; a "waits for you" line is left out while its question is open in the task's card (it would
+    /// say the same thing twice), and shows as history once answered.
     private var timeline: [Conversation.Item] {
-        Conversation.timeline(messages: model.conversation.messages, tasks: ActivityFeed.timeline(model.tasks))
+        let open = Set(model.approvals.filter { $0.status == .pending }.map(\.taskId))
+        let messages = model.conversation.messages.filter { m in !(m.kind == .waiting && m.taskIds.contains(where: open.contains)) }
+        return Conversation.timeline(messages: messages, tasks: ActivityFeed.timeline(model.tasks))
     }
 
     @ViewBuilder
@@ -108,6 +122,7 @@ struct HomeView: View {
     private func entry(_ task: AgentTask, showsRequest: Bool) -> FeedEntry {
         FeedEntry(task: task, showsRequest: showsRequest, tail: feed.tails[task.id] ?? [],
                   pending: ActivityFeed.pending(model.approvals, for: task.id), deliverables: feed.deliverables[task.id] ?? 0,
+                  lastEventAt: feed.lastEventAt[task.id],
                   open: { open(task.id) },
                   delete: { deleting = $0 },
                   openThread: { openThread($0) })
@@ -122,6 +137,13 @@ struct HomeView: View {
             case .task(let task): return [task.id]
             }
         })
+    }
+
+    private func openRequestedTask() {
+        guard let id = model.openTaskRequest else { return }
+        model.openTaskRequest = nil
+        path = NavigationPath()
+        path.append(id)
     }
 
     private func open(_ id: String) {
@@ -164,25 +186,33 @@ private struct LooseApprovalsButton: View {
     var body: some View {
         if count > 0 {
             Button { Keyboard.dismiss(); model.sheet = .approvals } label: {
-                Label("还有 \(count) 项待处理", systemImage: "exclamationmark.bubble")
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.purple.opacity(0.15), in: Capsule())
-                    .foregroundStyle(.purple)
+                HStack(spacing: 6) {
+                    Circle().fill(Theme.waiting).frame(width: 7, height: 7)
+                    Text("另有 \(count) 项等你处理")
+                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Theme.waiting)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(Color(.systemBackground))
             }
-            .padding(.top, 4)
         }
     }
 }
 
 private struct EmptyLog: View {
     var body: some View {
-        ContentUnavailableView {
-            Label("跟助理说吧", systemImage: "text.bubble")
-        } description: {
-            Text("让 Mac 上的 agent 做事，或者问之前的任务怎么样了、让它停下。账号密码可以直接写，Mac 会先加密再交给 agent；相关的任务会自动归到同一个会话里续接。")
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            Text("向 Mac 发送任务或问题").font(.title3.weight(.semibold))
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                ForEach(["整理下载目录", "登录财务平台，汇总首页的待办", "刚才的任务进展如何"], id: \.self) { example in
+                    Text(example).font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            Text("账号和密码可直接填写，由 Mac 加密后存储。").font(.footnote).foregroundStyle(.tertiary)
         }
-        .padding(.top, 40)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 60)
     }
 }

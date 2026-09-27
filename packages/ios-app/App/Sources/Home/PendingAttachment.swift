@@ -20,9 +20,9 @@ struct PendingAttachment: Identifiable {
 
     /// Why `file` cannot join `current`, or nil when it can.
     static func problem(adding file: UploadFile, to current: [PendingAttachment]) -> String? {
-        if current.count >= maxCount { return "一次最多 \(maxCount) 个附件" }
+        if current.count >= maxCount { return "每次最多 \(maxCount) 个附件" }
         if file.data.count > maxFileBytes { return "\(file.name) 超过 50 MB" }
         let total = current.reduce(0) { $0 + $1.file.data.count } + file.data.count
-        return total > maxTotalBytes ? "附件合计不能超过 100 MB" : nil
+        return total > maxTotalBytes ? "附件总大小不可超过 100 MB" : nil
     }
 }
