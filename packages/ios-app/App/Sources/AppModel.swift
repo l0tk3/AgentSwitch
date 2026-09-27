@@ -4,7 +4,7 @@ import UIKit
 
 /// The one sheet the home screen shows at a time (app-v0 §5: one input box, everything else behind it).
 enum HomeSheet: String, Identifiable {
-    case settings, pickCiphertext, makeCiphertext, approvals
+    case settings, pickCiphertext, makeCiphertext, approvals, addMac
     var id: String { rawValue }
 }
 
@@ -15,12 +15,14 @@ enum GateKeyStatus: Equatable {
     case unavailable(String)
 }
 
-/// App-wide state: the paired Mac, the live connection, the log's data and the input box. Views read it from the
+/// App-wide state: the paired Macs and the current one, the live connection, the log's data and the input box. Views read it from the
 /// environment; everything network-bound goes through `api`, which is pinned to the paired certificate.
 @MainActor
 @Observable
 final class AppModel {
-    private(set) var profile: ServerProfile?
+    /// Every paired Mac; the app talks to the current one only (app-v0 §5 多台 Mac).
+    private(set) var macs = PairedMacs()
+    var profile: ServerProfile? { macs.current }
     private(set) var connection: ConnectionState = .idle
     /// How the attempts went since the last connection: the tiers of the connection line (control-v0 §5).
     private(set) var connectionProgress = ConnectionProgress()
@@ -34,7 +36,12 @@ final class AppModel {
     /// The Mac records read marks (`POST /tasks/:id/ack`); an older one answers 404 and then no task shows as unread.
     private(set) var readMarksSupported = true
     private(set) var approvals: [Approval] = []
-    private(set) var ciphertexts: [SavedCiphertext] = []
+    /// Every saved ciphertext, for all Macs; `ciphertexts` is what the current Mac can open.
+    private var allCiphertexts: [SavedCiphertext] = []
+    var ciphertexts: [SavedCiphertext] {
+        let paired = macs.servers.map(\.fingerprint)
+        return allCiphertexts.filter { $0.usable(with: profile?.fingerprint, paired: paired) }
+    }
     private(set) var gateKeyStatus: GateKeyStatus = .unknown
     private(set) var targets: Targets?
     /// `GET /quota` as last read (设置 › 用量); nil until the Mac has answered once. A failed re-read keeps it.
@@ -77,6 +84,8 @@ final class AppModel {
     private let vault: any TokenVault
     let notifications: any NotificationSink
     private var manager: ConnectionManager?
+    /// Bumped whenever the current Mac changes: an answer that arrives later from the one before is dropped.
+    private var session = 0
     private var watcher: Task<Void, Never>?
 
     init(store: LocalStore?, vault: any TokenVault, notifications: any NotificationSink = NoNotifications()) {
@@ -93,7 +102,7 @@ final class AppModel {
         return model
     }
 
-    var isPaired: Bool { profile != nil }
+    var isPaired: Bool { !macs.isEmpty }
     var canMint: Bool { profile?.gate?.isValid == true }
 
     // MARK: - pairing
@@ -102,32 +111,69 @@ final class AppModel {
         incomingPairingLink = text
     }
 
-    /// Pairs with the Mac in `payload`, replacing any earlier pairing only once the new one succeeded.
+    /// Pairs with the Mac in `payload` and makes it the current one: a Mac paired before is renewed in place, a new
+    /// one is added. Nothing saved changes unless the pairing succeeded.
     func pair(_ payload: PairingPayload, deviceName: String) async throws {
         let transport = PinnedSessionTransport(fingerprint: payload.fp)
         let outcome = try await PairingService(transport: transport, discovery: BonjourDiscovery()).pair(payload, deviceName: deviceName)
-        if let old = profile { forgetQuietly(old) }
         try vault.save(outcome.token, account: outcome.profile.tokenAccount)
-        try store?.saveProfile(outcome.profile)
-        profile = outcome.profile
+        stopConnection()
+        resetSession()
+        save(macs.adding(outcome.profile))
         gateKeyStatus = outcome.profile.gate == nil ? .unknown : .available
         connect(token: outcome.token, transport: transport)
     }
 
-    /// Re-pair: drop the token, the profile and everything fetched from that Mac. Saved ciphertexts stay.
-    func forget() {
-        guard let old = profile else { return }
-        forgetQuietly(old)
-        sheet = nil
+    /// Talk to another paired Mac: what came from the current one goes, the input box stays.
+    func switchTo(_ fingerprint: String) {
+        guard fingerprint != profile?.fingerprint, macs.server(fingerprint) != nil else { return }
+        stopConnection()
+        resetSession()
+        save(macs.activating(fingerprint))
+        connectCurrent()
     }
 
-    private func forgetQuietly(_ old: ServerProfile) {
+    /// Removes the current Mac (its token, its details and everything fetched from it) and moves to the next one, or
+    /// back to pairing when none is left. Saved ciphertexts stay.
+    func forget() {
+        guard let old = profile else { return }
         stopConnection()
+        resetSession()
         try? vault.delete(account: old.tokenAccount)
-        try? store?.deleteProfile()
-        profile = nil
+        save(macs.removing(old.fingerprint))
+        sheet = nil
+        connectCurrent()
+    }
+
+    /// The Mac no longer knows this phone: scan its QR code again (pairing renews it in place).
+    func pairAgain() {
+        sheet = .addMac
+    }
+
+    /// `body`'s answer, or nil when the current Mac changed while waiting for it (or it failed: `handle` then).
+    private func fetch<T>(_ body: (AgentSwitchAPI) async throws -> T, quiet: Bool = false) async -> T? {
+        guard let api else { return nil }
+        let asked = session
+        do {
+            let value = try await body(api)
+            return asked == session ? value : nil
+        } catch {
+            if asked == session && !quiet { handle(error) }
+            return nil
+        }
+    }
+
+    private func save(_ next: PairedMacs) {
+        macs = next
+        do { try store?.saveMacs(next) } catch { banner = error.localizedDescription }
+    }
+
+    /// Clears what was fetched from the current Mac, before switching or removing it.
+    private func resetSession() {
+        session += 1
         connection = .idle
         connectionProgress = ConnectionProgress()
+        routeReport = nil
         api = nil
         me = nil
         tasks = []
@@ -135,6 +181,7 @@ final class AppModel {
         readMarksSupported = true
         approvals = []
         threads = []
+        liveTails = [:]
         conversation = ConversationLog()
         conversationLoaded = false
         hasAssistant = false
@@ -144,20 +191,26 @@ final class AppModel {
         quota = nil
         pin = nil
         gateKeyStatus = .unknown
+        syncLive()
     }
 
     // MARK: - connection
 
     private func loadSaved() {
-        ciphertexts = (try? store?.loadCiphertexts()) ?? []
-        guard let saved = try? store?.loadProfile() else { return }
-        profile = saved
-        gateKeyStatus = saved.gate == nil ? .unknown : .available
-        guard let token = try? vault.load(account: saved.tokenAccount) else {
+        allCiphertexts = (try? store?.loadCiphertexts()) ?? []
+        do { macs = try store?.loadMacs() ?? PairedMacs() } catch { banner = error.localizedDescription }
+        connectCurrent()
+    }
+
+    /// Connects to the current Mac with its saved token; without one it is shown as no longer paired.
+    private func connectCurrent() {
+        guard let current = profile else { return }
+        gateKeyStatus = current.gate == nil ? .unknown : .available
+        guard let token = try? vault.load(account: current.tokenAccount) else {
             connection = .unauthorized
             return
         }
-        connect(token: token, transport: PinnedSessionTransport(fingerprint: saved.fingerprint))
+        connect(token: token, transport: PinnedSessionTransport(fingerprint: current.fingerprint))
     }
 
     private func connect(token: String, transport: PinnedSessionTransport) {
@@ -193,7 +246,7 @@ final class AppModel {
                 await refreshAll()
                 await refreshGateKey()
                 await refreshAddresses()
-                me = try? await api?.me()
+                if let who = await fetch({ try await $0.me() }, quiet: true) { me = who }
                 await refreshTargets()
             }
         }
@@ -233,22 +286,27 @@ final class AppModel {
     /// voice mode, read.
     func refreshConversation() async {
         guard let api else { return }
+        let asked = session
         do {
             if !conversationLoaded {
-                conversation = ConversationLog(try await api.assistantMessages(last: Conversation.defaultLimit))
+                let recent = try await api.assistantMessages(last: Conversation.defaultLimit)
+                guard asked == session else { return }
+                conversation = ConversationLog(recent)
                 conversationLoaded = true
                 hasAssistant = true
             } else {
                 let fresh = try await api.assistantMessages(after: conversation.lastSeq)
+                guard asked == session else { return }
                 let arrived = conversation.newAssistantMessages(in: fresh)
                 conversation = conversation.merging(fresh)
                 for message in arrived { announceMessage(message) }
             }
             if let waiting = outgoing, conversation.contains(clientId: waiting.clientId) { outgoing = nil }
         } catch APIError.http(status: 404, message: _) {
+            guard asked == session else { return }
             conversationLoaded = true   // a Mac without the assistant: the log shows tasks only
             hasAssistant = false
-        } catch { handle(error) }
+        } catch { if asked == session { handle(error) } }
     }
 
     /// An assistant message: a sound, and in voice mode its text read aloud. A report of an end or a question has its
@@ -263,8 +321,8 @@ final class AppModel {
     }
 
     func refreshThreads() async {
-        guard let api else { return }
-        if let fresh = try? await api.threads() { threads = fresh }
+        guard api != nil else { return }
+        if let fresh = await fetch({ try await $0.threads() }, quiet: true) { threads = fresh }
         syncLive()
     }
 
@@ -293,28 +351,27 @@ final class AppModel {
     }
 
     func refreshTargets() async {
-        guard let api else { return }
-        do { targets = try await api.targets() } catch { handle(error) }
+        if let fresh = await fetch({ try await $0.targets() }) { targets = fresh }
     }
 
     /// Usage per executor, quietly: an older Mac or a failed read leaves the last numbers (or none) and no banner.
     /// `force` has the Mac read every executor again instead of answering from its cache (pull to refresh).
     func refreshQuota(force: Bool = false) async {
         guard let api else { return }
+        let asked = session
         do {
-            quota = try await force ? api.refreshQuota() : api.quota()
+            let fresh = try await force ? api.refreshQuota() : api.quota()
+            if asked == session { quota = fresh }
         } catch {
-            if case APIError.unauthorized = error { handle(error) }
+            if case APIError.unauthorized = error, asked == session { handle(error) }
         }
     }
 
     func refreshTasks() async {
-        guard let api else { return }
-        do {
-            tasks = withLocalReads(try await api.tasks())
-            announce()
-            syncLive()
-        } catch { handle(error) }
+        guard let fresh = await fetch({ try await $0.tasks() }) else { return }
+        tasks = withLocalReads(fresh)
+        announce()
+        syncLive()
     }
 
     /// Endings get a sound; in voice mode a finished task's spoken script is read once it has arrived (the assistant's
@@ -326,25 +383,22 @@ final class AppModel {
     }
 
     func refreshApprovals() async {
-        guard let api else { return }
-        do {
-            let fresh = try await api.approvals()
-            for approval in cues.newApprovals(fresh) {
-                feedback.play(.needsYou, speaking: speaker.isSpeaking)
-                if feedback.settings.voiceMode && !hasAssistant { speaker.say(Self.spokenQuestion(approval), key: approval.id) }
-                await notifications.needsAttention(taskId: approval.taskId, approval: approval)
-            }
-            approvals = fresh
-            syncLive()
-        } catch { handle(error) }
+        guard let fresh = await fetch({ try await $0.approvals() }) else { return }
+        for approval in cues.newApprovals(fresh) {
+            feedback.play(.needsYou, speaking: speaker.isSpeaking)
+            if feedback.settings.voiceMode && !hasAssistant { speaker.say(Self.spokenQuestion(approval), key: approval.id) }
+            await notifications.needsAttention(taskId: approval.taskId, approval: approval)
+        }
+        approvals = fresh
+        syncLive()
     }
 
     /// The Mac's current addresses into the saved profile and the address choice, so a phone paired while Tailscale was
     /// off (or before the Mac's LAN address changed) still finds it elsewhere next time.
     func refreshAddresses() async {
-        guard let api, let profile, let now = try? await api.addresses(), let updated = profile.updated(with: now) else { return }
-        try? store?.saveProfile(updated)
-        self.profile = updated
+        guard let api, let profile, let now = try? await api.addresses(), let updated = profile.updated(with: now),
+              updated.fingerprint == self.profile?.fingerprint else { return }
+        save(macs.updating(updated))
         await manager?.update(book: updated)
     }
 
@@ -354,12 +408,8 @@ final class AppModel {
         guard let api, let profile else { return }
         do {
             let key = try await api.gatePubkey()
-            guard key.isValid else { return }
-            if key != profile.gate {
-                let updated = profile.with(gate: key)
-                try? store?.saveProfile(updated)
-                self.profile = updated
-            }
+            guard key.isValid, profile.fingerprint == self.profile?.fingerprint else { return }
+            if key != profile.gate { save(macs.updating(profile.with(gate: key))) }
             gateKeyStatus = .available
         } catch APIError.http(status: 503, message: let message) {
             if profile.gate == nil { gateKeyStatus = .unavailable(message.isEmpty ? "公钥暂时不可用" : message) }
@@ -581,16 +631,16 @@ final class AppModel {
 
     /// Seals the draft's value to the gate key on this phone; only the ciphertext and note are kept.
     func mint(_ draft: SecretDraft) throws -> SavedCiphertext {
-        guard let gate = profile?.gate else { throw TokenError.badPublicKey }
+        guard let profile, let gate = profile.gate else { throw TokenError.badPublicKey }
         let token = try TokenMinter(publicKeyBase64URL: gate.publicKey).mint(try draft.payload())
-        let item = SavedCiphertext(token: token, note: draft.effectiveNote)
-        ciphertexts.insert(item, at: 0)
+        let item = SavedCiphertext(token: token, note: draft.effectiveNote, mac: profile.fingerprint)
+        allCiphertexts.insert(item, at: 0)
         persistCiphertexts()
         return item
     }
 
     func deleteCiphertexts(_ ids: Set<UUID>) {
-        ciphertexts.removeAll { ids.contains($0.id) }
+        allCiphertexts.removeAll { ids.contains($0.id) }
         persistCiphertexts()
     }
 
@@ -601,7 +651,7 @@ final class AppModel {
     }
 
     private func persistCiphertexts() {
-        do { try store?.saveCiphertexts(ciphertexts) } catch { banner = error.localizedDescription }
+        do { try store?.saveCiphertexts(allCiphertexts) } catch { banner = error.localizedDescription }
     }
 }
 
@@ -637,9 +687,12 @@ extension AppModel {
         let payload = PairingPayload(name: "Mac mini", port: 4713, fp: String(repeating: "ab", count: 32), code: "7K3M-9QZX",
                                      lan: ["192.168.1.5"], tailnet: ["100.101.102.103"], bonjour: "AgentSwitch on Mac mini",
                                      gate: GateKey(publicKey: Base64URLPreview.key, keypair: "default"))
-        model.profile = ServerProfile(payload: payload, deviceId: "dev-preview", gate: nil)
+        model.macs = PairedMacs(servers: [ServerProfile(payload: payload, deviceId: "dev-preview", gate: nil),
+                                          ServerProfile(name: "MacBook Pro", port: 4713, fingerprint: String(repeating: "cd", count: 32),
+                                                        lan: ["192.168.1.8"], tailnet: [], bonjour: "AgentSwitch on MacBook Pro",
+                                                        gate: nil, deviceId: "dev-preview-2", pairedAt: Date())])
         model.connection = .connected(APIEndpoint(host: "192.168.1.5", port: 4713, kind: .bonjour))
-        model.ciphertexts = [SavedCiphertext(token: "enc:v1:" + String(repeating: "Q", count: 120), note: "公司 VPN（vpn/pass）")]
+        model.allCiphertexts = [SavedCiphertext(token: "enc:v1:" + String(repeating: "Q", count: 120), note: "公司 VPN（vpn/pass）")]
         return model
     }
 }

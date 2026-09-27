@@ -7,12 +7,23 @@ public struct SavedCiphertext: Codable, Sendable, Hashable, Identifiable {
     public let token: String
     public let note: String
     public let createdAt: Date
+    /// Fingerprint of the Mac whose gate key sealed it: only that Mac can open it. Nil for tokens saved before the
+    /// phone knew several Macs.
+    public let mac: String?
 
-    public init(id: UUID = UUID(), token: String, note: String, createdAt: Date = Date()) {
+    public init(id: UUID = UUID(), token: String, note: String, createdAt: Date = Date(), mac: String? = nil) {
         self.id = id
         self.token = token
         self.note = note
         self.createdAt = createdAt
+        self.mac = mac
+    }
+
+    /// Worth offering while `current` is the Mac in use: made for it, untagged, or made for a Mac no longer paired
+    /// (a Mac set up again after a reinstall comes back with a new fingerprint and most likely the same gate).
+    public func usable(with current: String?, paired: [String]) -> Bool {
+        guard let mac else { return true }
+        return mac == current || !paired.contains(mac)
     }
 
     /// `enc:v1:AbCd…wXyZ`, enough to tell tokens apart.
@@ -31,7 +42,7 @@ public enum StoreError: Error, LocalizedError {
     }
 }
 
-/// JSON files under Application Support: the paired server's profile and the saved ciphertexts. No plaintext secret
+/// JSON files under Application Support: the paired Macs and the saved ciphertexts. No plaintext secret
 /// and no device token ever goes here (the token is in the Keychain).
 public struct LocalStore: Sendable {
     public let directory: URL
@@ -48,12 +59,21 @@ public struct LocalStore: Sendable {
         return LocalStore(directory: base.appendingPathComponent("AgentSwitch", isDirectory: true))
     }
 
-    private var profileURL: URL { directory.appendingPathComponent("server.json") }
+    private var macsURL: URL { directory.appendingPathComponent("macs.json") }
+    /// The one Mac of the versions before 2026-09-27, moved into `macs.json` on first load.
+    private var legacyProfileURL: URL { directory.appendingPathComponent("server.json") }
     private var ciphertextsURL: URL { directory.appendingPathComponent("ciphertexts.json") }
 
-    public func loadProfile() throws -> ServerProfile? { try read(ServerProfile.self, from: profileURL) }
-    public func saveProfile(_ profile: ServerProfile) throws { try write(profile, to: profileURL) }
-    public func deleteProfile() throws { try remove(profileURL) }
+    public func loadMacs() throws -> PairedMacs {
+        if let saved = try read(PairedMacs.self, from: macsURL) { return PairedMacs(servers: saved.servers, active: saved.active) }
+        guard let legacy = try read(ServerProfile.self, from: legacyProfileURL) else { return PairedMacs() }
+        let macs = PairedMacs(servers: [legacy])
+        try saveMacs(macs)
+        try remove(legacyProfileURL)
+        return macs
+    }
+
+    public func saveMacs(_ macs: PairedMacs) throws { try write(macs, to: macsURL) }
 
     public func loadCiphertexts() throws -> [SavedCiphertext] { try read([SavedCiphertext].self, from: ciphertextsURL) ?? [] }
     public func saveCiphertexts(_ items: [SavedCiphertext]) throws { try write(items, to: ciphertextsURL) }

@@ -42,7 +42,7 @@ struct ConnectionBanner: View {
             HStack {
                 Label("配对已失效", systemImage: "person.crop.circle.badge.xmark").foregroundStyle(Theme.failed)
                 Spacer()
-                Button("重新配对") { model.forget() }
+                Button("重新配对") { model.pairAgain() }
             }.font(.footnote)
         case .certificateChanged:
             Label("Mac 的证书与配对时不一致，已拒绝连接", systemImage: "exclamationmark.shield")

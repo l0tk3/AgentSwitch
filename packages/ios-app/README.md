@@ -13,7 +13,7 @@ inside the log. SwiftUI, iOS 17+, Swift 6.
 │ ● 执行中 codex/gpt-6-astra│ │   任务日志（左滑删除）  › │
 │   工具 shell: curl …      │ │   模型                  › │
 │ 需要审批 [拒绝] [允许]    │ │ Mac · 连接 · Face ID      │
-│ (+) 让 Mac 上的 agent…  ↑ │ │ 重新配对                  │
+│ (+) 让 Mac 上的 agent…  ↑ │ │ 移除此 Mac（可配多台）    │
 └──────────────────────────┘ └──────────────────────────┘
 ```
 

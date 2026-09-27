@@ -34,6 +34,9 @@ struct HomeView: View {
             .navigationTitle(model.profile?.name ?? "AgentSwitch")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if model.macs.servers.count > 1 {
+                    ToolbarItem(placement: .principal) { MacSwitcher() }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { Keyboard.dismiss(); model.sheet = .settings } label: { Image(systemName: "gearshape") }
                         .accessibilityLabel("设置")
@@ -174,6 +177,8 @@ struct HomeView: View {
             }
         case .approvals:
             ApprovalsView()
+        case .addMac:
+            AddMacSheet()
         }
     }
 }

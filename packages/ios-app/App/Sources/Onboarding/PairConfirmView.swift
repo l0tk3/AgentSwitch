@@ -52,8 +52,10 @@ struct PairConfirmView: View {
             }
             Section("此设备") {
                 TextField("设备名称", text: $deviceName)
-                if let current = model.profile, current.fingerprint != payload.fp {
-                    Text("将替换当前配对的「\(current.name)」").font(.footnote).foregroundStyle(Theme.waiting)
+                if let known = model.macs.server(payload.fp) {
+                    Text("已与「\(known.name)」配对，将更新此配对。").font(.footnote).foregroundStyle(.secondary)
+                } else if !model.macs.isEmpty {
+                    Text("将添加这台 Mac 并切换到它，其他 Mac 的配对保留。").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             Section {

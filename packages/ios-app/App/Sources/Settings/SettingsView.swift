@@ -18,6 +18,7 @@ struct SettingsView: View {
     @Environment(AppLock.self) private var lock
     @Environment(\.dismiss) private var dismiss
     @State private var confirmForget = false
+    @State private var addingMac = false
     @State private var path: [SettingsRoute] = SettingsView.initialPath
     @State private var policy: ApprovalPolicyInfo?
 
@@ -32,9 +33,18 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             Form {
-                if model.profile != nil {
+                if let current = model.profile {
                     Section {
                         NavigationLink(value: SettingsRoute.mac) { MacHeader() }
+                        ForEach(model.macs.servers.filter { $0.fingerprint != current.fingerprint }, id: \.fingerprint) { mac in
+                            Button { model.switchTo(mac.fingerprint) } label: {
+                                LabeledContent(mac.name) { Text("切换").foregroundStyle(.secondary) }
+                            }
+                            .foregroundStyle(.primary)
+                        }
+                        Button("添加 Mac") { addingMac = true }
+                    } footer: {
+                        if model.macs.servers.count > 1 { Text("同一时间只连接一台 Mac。") }
                     }
                     if let quota = model.quota { UsageSection(readings: quota) }
                 }
@@ -77,9 +87,9 @@ struct SettingsView: View {
                     Text("设备丢失时，可在 Mac 上移除此设备。")
                 }
                 Section {
-                    Button("重新配对", role: .destructive) { confirmForget = true }
+                    Button("移除此 Mac", role: .destructive) { confirmForget = true }
                 } footer: {
-                    Text("删除此 iPhone 上的配对信息，已保存的密文不受影响。")
+                    Text("删除此 iPhone 与这台 Mac 的配对，已保存的密文不受影响。")
                 }
             }
             .tint(.accentColor)
@@ -89,9 +99,12 @@ struct SettingsView: View {
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: SettingsRoute.self) { route in destination(route) }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-            .confirmationDialog("忘记此 Mac 并重新配对？", isPresented: $confirmForget, titleVisibility: .visible) {
-                Button("忘记并重新配对", role: .destructive) { model.forget() }
+            .confirmationDialog("移除「\(model.profile?.name ?? "Mac")」？", isPresented: $confirmForget, titleVisibility: .visible) {
+                Button("移除", role: .destructive) { model.forget() }
+            } message: {
+                Text(model.macs.servers.count > 1 ? "将切换到其他已配对的 Mac。" : "之后需要重新扫码配对。")
             }
+            .sheet(isPresented: $addingMac) { AddMacSheet() }
             .task(id: connected) {
                 async let usage: Void = model.refreshQuota()
                 await loadPolicy()
