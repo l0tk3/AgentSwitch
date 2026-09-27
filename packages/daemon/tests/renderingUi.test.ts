@@ -73,7 +73,7 @@ describe("background rendering preserves live editors", () => {
     state.set({ approvals: [question("new-question")], tasks: [task], health: false });
     unchanged(id, saved);
     expect(field("main").scrollTop).toBe(220);
-    expect(dom.window.document.querySelector("aside")?.parentElement?.textContent).toContain("剩 47%");
+    expect(dom.window.document.querySelector("aside")?.parentElement?.textContent).toContain("剩余 47%");
     expect(dom.window.document.querySelector('[data-open="task-one"]')).toBeTruthy();
   });
 

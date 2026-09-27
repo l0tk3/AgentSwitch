@@ -3,14 +3,15 @@
 export const HARNESSES = ["claude-code", "codex", "opencode"];
 export const HARNESS_NAMES = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode · DeepSeek" };
 export const ACTIVE = new Set(["queued", "routing", "running", "waiting_approval"]);
-export const STATUS_LABELS = { queued: "排队中", routing: "分诊中", running: "执行中", waiting_approval: "等待答复", done: "已完成", partial: "部分完成", blocked: "执行受阻", failed: "失败", cancelled: "已取消" };
+/** The fixed status words (docs/ui-v0.md §4), the same as the phone's `TaskStatus.label`. */
+export const STATUS_LABELS = { queued: "排队", routing: "进行中", running: "进行中", waiting_approval: "等你处理", done: "已完成", partial: "未完成", blocked: "未完成", failed: "失败", cancelled: "已取消" };
 export const statusLabel = (status) => STATUS_LABELS[status] || status;
-const BLOCK_LABELS = { question: "待补充条件", planner_timeout: "规划超时", planner_error: "规划失败" };
+const BLOCK_LABELS = { question: "等你处理" };
 
 /** A blocked task's label comes from the engine's structured `blockCause`, never from parsing the error text. */
 export function taskStatusLabel(task) {
   if (task.status !== "blocked") return statusLabel(task.status);
-  return BLOCK_LABELS[task.blockCause] ?? "执行受阻";
+  return BLOCK_LABELS[task.blockCause] ?? "未完成";
 }
 
 export async function api(method, path, body, { timeoutMs = 15_000 } = {}) {
@@ -20,9 +21,9 @@ export async function api(method, path, body, { timeoutMs = 15_000 } = {}) {
     const r = await fetch(path, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined, ...(controller ? { signal: controller.signal } : {}) });
     const t = await r.text();
     let d = {};
-    try { d = t ? JSON.parse(t) : {}; } catch { throw new Error(`HTTP ${r.status}: ${t.slice(0, 120)}（服务端异常，看 daemon 日志）`); }
+    try { d = t ? JSON.parse(t) : {}; } catch { throw new Error(`HTTP ${r.status}: ${t.slice(0, 120)}（服务返回异常，详见服务日志）`); }
     // The console's session ends when the daemon restarts (api/localAuth.ts): open it again from the Mac menu bar.
-    if (r.status === 401) throw Object.assign(new Error("网页控制台的登录已失效：请从 Mac 菜单栏的 AgentSwitch 重新打开网页控制台。"), { status: 401 });
+    if (r.status === 401) throw Object.assign(new Error("网页控制台的登录已失效。请从 Mac 菜单栏的 AgentSwitch 重新打开网页控制台。"), { status: 401 });
     if (!r.ok) throw Object.assign(new Error(d.error || ("HTTP " + r.status)), { status: r.status });
     return d;
   } finally {

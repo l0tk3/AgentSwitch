@@ -7,6 +7,8 @@ import type { Bus } from "../engine/bus.js";
 import type { Store } from "../engine/store.js";
 import { TERMINAL, type Approval, type Task, type TaskEvent } from "../engine/types.js";
 import { takeUnannounced, type UpdateResult } from "../files/appUpdate.js";
+import { localTime } from "../util/localTime.js";
+import { modelName } from "../util/modelName.js";
 import type { AssistantLog } from "./log.js";
 import { withoutLegend } from "./register.js";
 
@@ -20,7 +22,8 @@ const TITLE_CHARS = 24;
 const TOKEN = /enc:(?:v1|ref):[A-Za-z0-9_=-]{8,}/g;
 const LINE_CHARS = 160;
 
-const ENDED: Readonly<Record<string, string>> = { done: "完成了", partial: "只做完了一部分", blocked: "停下了，需要你看一下", failed: "失败了" };
+/** The fixed status words (docs/ui-v0.md §4). */
+const ENDED: Readonly<Record<string, string>> = { done: "已完成", partial: "未完成", blocked: "未完成", failed: "失败" };
 const ended = (status: string): boolean => Object.hasOwn(ENDED, status);
 
 export type ReporterOptions = {
@@ -99,7 +102,7 @@ export class Reporter {
     if (!approval || approval.status !== "pending") return;
     const task = this.o.store.getTask(approval.taskId);
     if (!task || TERMINAL.has(task.status)) return;
-    this.say("notice", task.id, needsYouLine(approval, titleOf(this.o.store, task)));
+    this.say("waiting", task.id, needsYouLine(approval, titleOf(this.o.store, task)));
   }
 
   /** Due watches: a progress line each; a watch on a task that is gone or ended is dropped. */
@@ -113,7 +116,7 @@ export class Reporter {
     }
   }
 
-  private say(kind: "notice" | "progress", taskId: string, text: string): void {
+  private say(kind: "notice" | "waiting" | "progress", taskId: string, text: string): void {
     this.o.log.append({ role: "assistant", text, kind, taskIds: [taskId], clientId: null, replyTo: null });
   }
 }
@@ -136,24 +139,24 @@ export function endLine(task: Task, title: string): string {
 }
 
 export function needsYouLine(approval: Approval, title: string): string {
-  return `「${title}」需要你${approval.kind === "question" ? "回答" : "批准"}：${clip(approval.action, LINE_CHARS)}`;
+  return `「${title}」等你${approval.kind === "question" ? "回答" : "批准"}：${clip(approval.action, LINE_CHARS)}`;
 }
 
 /** How long it has run and the latest thing worth saying: what it waits for, the executor's own words, who has it. */
 export function progressLine(store: Store, task: Task, title: string, now: number): string {
   const minutes = Math.max(1, Math.round((now - task.createdAt) / 60_000));
   const waiting = store.pendingApprovals(task.id)[0];
-  const latest = waiting ? `在等你：${clip(waiting.action, LINE_CHARS)}` : latestWords(store.eventsSince(task.id));
-  return `「${title}」还在进行（${minutes} 分钟）${latest ? `，${latest}` : "。"}`;
+  const latest = waiting ? `等你处理：${clip(waiting.action, LINE_CHARS)}` : latestWords(store.eventsSince(task.id));
+  return `「${title}」进行中，${minutes} 分钟${latest ? `：${latest}` : "。"}`;
 }
 
 function latestWords(events: readonly TaskEvent[]): string | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
     const p = e.payload as Record<string, unknown>;
-    if (e.type === "text" && typeof p.text === "string" && p.text.trim()) return `刚才说：${clip(p.text, LINE_CHARS)}`;
-    if (e.type === "dispatched") return `由 ${String(p.harness)}/${String(p.model)} 在做`;
-    if (e.type === "routed" || e.type === "queued") return "正在安排";
+    if (e.type === "text" && typeof p.text === "string" && p.text.trim()) return clip(p.text, LINE_CHARS);
+    if (e.type === "dispatched") return `交给 ${modelName(String(p.model))}`;
+    if (e.type === "routed" || e.type === "queued") return "排队";
   }
   return null;
 }
@@ -165,7 +168,7 @@ export function announceUpdate(home: string, log: AssistantLog): void {
 }
 
 export function updateLine(r: UpdateResult): string {
-  if (r.ok) return `新版本已装好（构建于 ${r.to || "未知时间"}），服务正常。`;
-  if (r.reverted) return `新版本没能启动，已退回上一版（构建于 ${r.from || "未知时间"}）。${r.reason ? `原因：${clip(r.reason, LINE_CHARS)}` : ""}`;
-  return `新版本没有装上。${r.reason ? `原因：${clip(r.reason, LINE_CHARS)}` : ""}`;
+  if (r.ok) return `新版本已安装（构建于 ${localTime(r.to)}），服务运行正常。`;
+  if (r.reverted) return `新版本未能启动，已恢复为上一版本（构建于 ${localTime(r.from)}）。${r.reason ? `原因：${clip(r.reason, LINE_CHARS)}` : ""}`;
+  return `新版本安装失败。${r.reason ? `原因：${clip(r.reason, LINE_CHARS)}` : ""}`;
 }

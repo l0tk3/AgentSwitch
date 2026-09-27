@@ -48,6 +48,17 @@ describe("Store", () => {
   });
 });
 
+describe("harness sessions", () => {
+  it("lists every session id our executors reported, so the session monitor can leave them out", () => {
+    const store = new Store({ dbPath: ":memory:" });
+    const thread = store.createThread("/tmp/x");
+    store.appendThreadEvent(thread.id, "session", { harness: "opencode", sessionId: "ses_1", taskId: "t1" });
+    store.appendThreadEvent(thread.id, "session", { harness: "claude-code", dropped: true, reason: "provider_safety", taskId: "t2" });
+    expect([...store.harnessSessionIds()]).toEqual(["ses_1"]);
+    store.close();
+  });
+});
+
 describe("migration", () => {
   it("adds columns introduced later to a database created by an older daemon", () => {
     const dir = mkdtempSync(join(tmpdir(), "agentswitch-migrate-"));
@@ -64,5 +75,25 @@ describe("migration", () => {
     expect(store.getTask(t.id)).toMatchObject({ parentId: "a", ephemeral: true });
     store.close();
     expect(migrate(new DatabaseSync(path))).toEqual([]);   // idempotent
+  });
+
+  it("tasks from before read marks count as read, once; tasks after that start unread", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-migrate-"));
+    const path = join(dir, "db.sqlite");
+    const first = new Store({ dbPath: path });
+    const t = first.createTask({ task: "ended before read marks", cwd: "/tmp" });
+    first.updateTask(t.id, { status: "done", result: "ok" });
+    first.close();
+    const raw = new DatabaseSync(path);   // what the first build with the column left: every task null, nothing run
+    raw.exec("UPDATE tasks SET acknowledged_at = NULL; PRAGMA user_version = 0");
+    raw.close();
+    const store = new Store({ dbPath: path });
+    const old = store.getTask(t.id)!;
+    expect(old.acknowledgedAt).toBe(old.updatedAt);
+    const fresh = store.createTask({ task: "new", cwd: "/tmp" });
+    store.close();
+    const again = new Store({ dbPath: path });
+    expect(again.getTask(fresh.id)!.acknowledgedAt).toBeNull();
+    again.close();
   });
 });

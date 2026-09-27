@@ -156,9 +156,9 @@ export function routerSupervisor(router: Router, config: SupervisorConfig, timeo
       const reply = await Promise.race([router.route({ task, cwd, system: `${COMMUNICATION_GUIDANCE}\n\n${system}` }, combined), aborted]);
       combined.throwIfAborted();
       const value = parse(schema, reply.text);
-      return { value, ms: Date.now() - started, error: value ? null : "监督者回复格式无效" };
+      return { value, ms: Date.now() - started, error: value ? null : "调度模型回复格式无效" };
     } catch {
-      return { value: null, ms: Date.now() - started, error: outer?.aborted ? "监督者调用已取消" : controller.signal.aborted ? "监督者调用超时" : "监督者服务暂不可用" };
+      return { value: null, ms: Date.now() - started, error: outer?.aborted ? "调度模型调用已取消" : controller.signal.aborted ? "调度模型调用超时" : "调度模型暂不可用" };
     } finally {
       clearTimeout(timer);
       if (onAbort) combined.removeEventListener("abort", onAbort);
@@ -187,7 +187,7 @@ export function routerSupervisor(router: Router, config: SupervisorConfig, timeo
       if (!r.value) return { answers: null, forward: true, reason: r.error ?? "no reply", ms: r.ms, source: "error" };
       const checked = validateAnswers(input.questions.map((q) => ({ ...q, header: "", multi: false, options: q.options.map((label) => ({ label, description: "" })) })), r.value.answers, true);
       const complete = !r.value.forward && checked.ok;
-      return { answers: complete && checked.ok ? checked.answers : null, forward: !complete, reason: complete || r.value.forward ? r.value.reason : "监督者未完整回答全部问题，转交用户确认", ms: r.ms, source: "router" };
+      return { answers: complete && checked.ok ? checked.answers : null, forward: !complete, reason: complete || r.value.forward ? r.value.reason : "调度模型未完整回答全部问题，已转交你确认", ms: r.ms, source: "router" };
     },
   };
 }

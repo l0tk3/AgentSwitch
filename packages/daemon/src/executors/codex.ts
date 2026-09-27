@@ -1,6 +1,7 @@
 /** Codex executor over `codex app-server`: thread/start → turn/start → items → turn/completed.
  *  Approvals (item/…/requestApproval, execCommandApproval, applyPatchApproval) go to the
- *  engine; MCP elicitations are accepted. A private CODEX_HOME holds a 0600 copy of auth.json and
+ *  engine; a command Codex wants to run outside its sandbox goes as `Bash: <command>`, checked like Claude's (a
+ *  protected path refused here, the rest by the engine's floor and approvals); MCP elicitations are accepted. A private CODEX_HOME holds a 0600 copy of auth.json and
  *  our config (never the user's ~/.codex/config.toml), removed when the run ends. */
 
 import type { ChildProcess } from "node:child_process";
@@ -17,6 +18,8 @@ import { codexMcpToml } from "./extensions.js";
 import { codexGateToml, gateRun, mcpServerEnv, reportTransfer, withoutCredentialRepair, type GateOptions, type GateRun } from "./gate.js";
 import { stripProxy } from "../util/env.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
+import { commandTouchesProtected, NO_PROTECTED, PROTECTED_DENIAL, shellWords, type ProtectedPaths } from "./protected.js";
+import { clipInput, clipOutput } from "./toolEvents.js";
 import { watchRunStop, type RunStop } from "./lifecycle.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS } from "../core/limits.js";
 import { spawnOwned, terminateProcess } from "../harness/processes.js";
@@ -29,6 +32,7 @@ export type CodexExecutorOptions = {
   readonly browser?: boolean;
   readonly maxMs?: number;
   readonly extensions?: Pick<Extensions, "mcpFor" | "skillsInto">;
+  readonly protected?: ProtectedPaths;
 };
 
 const USER_INPUT_METHOD = "item/tool/requestUserInput";
@@ -78,6 +82,78 @@ export function describeApproval(method: string, params: Json): { action: string
   if (changes) return { action: `${method}: file changes`, evidence: JSON.stringify(changes).slice(0, APPROVAL_EVIDENCE_CHARS) };
   return { action: method, evidence: JSON.stringify(params).slice(0, APPROVAL_EVIDENCE_CHARS) };
 }
+
+/** A Codex item as a tool call: a command as its shell line, an MCP call as `server.tool` with its arguments, a file
+ *  change as the files it touches. */
+export function codexToolCall(item: Json, method: string): Record<string, unknown> {
+  const id = typeof item.id === "string" ? item.id : undefined;
+  const type = String(item.type ?? method);
+  const base = { tool: type, ...(id ? { id } : {}) };
+  if (type === "commandExecution") return { ...base, command: codexCommand({ command: item.command }) ?? item.command ?? null };
+  if (type === "mcpToolCall") return { ...base, tool: [item.server, item.tool].filter(Boolean).join("."), input: clipInput(item.arguments) };
+  if (type === "fileChange") return { ...base, input: { files: (Array.isArray(item.changes) ? item.changes : []).map((c) => (c as Json).path) } };
+  if (type === "webSearch") return { ...base, input: { query: item.query ?? null } };
+  return { ...base, command: item.command ?? null };
+}
+
+/** A finished tool item's result (the command's output and exit code, the MCP result or error), or null for items
+ *  that were never a tool call. */
+export function codexToolResult(item: Json, toolIds: readonly string[]): Record<string, unknown> | null {
+  const id = typeof item.id === "string" ? item.id : null;
+  if (!id || !toolIds.includes(id)) return null;
+  const type = String(item.type ?? "");
+  const failed = item.status === "failed" || item.status === "declined";
+  if (type === "commandExecution") {
+    const exit = typeof item.exitCode === "number" ? item.exitCode : null;
+    const output = clipOutput(item.aggregatedOutput ?? "");
+    return { id, ok: !failed && (exit === null || exit === 0), output: exit !== null && exit !== 0 ? `${output}\n（退出码 ${exit}）`.trim() : output };
+  }
+  if (type === "mcpToolCall") return { id, ok: !failed && !item.error, output: clipOutput(item.error ? JSON.stringify(item.error) : (item.result as Json | undefined)?.content ?? item.result ?? "") };
+  if (type === "fileChange") return { id, ok: !failed, output: failed ? String(item.status) : "" };
+  return { id, ok: !failed, output: "" };
+}
+
+/** Approvals that ask to run one command outside the sandbox. */
+const COMMAND_METHODS = new Set(["item/commandExecution/requestApproval", "execCommandApproval"]);
+
+/** The shell line of a command approval: `/bin/zsh -lc 'ps -A'` (or its argv form) → `ps -A`; null when none. */
+export function codexCommand(params: Json): string | null {
+  const item = (params.item as Json | undefined) ?? params;
+  const raw = item.command ?? params.command;
+  const words = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? shellWords(raw) : null;
+  if (!words?.length) return null;
+  const shell = words[0]!.split("/").pop() ?? "";
+  if (words.length === 3 && ["zsh", "bash", "sh"].includes(shell) && /^-l?c$/.test(words[1]!)) return words[2]!;
+  return Array.isArray(raw) ? words.map(quoteWord).join(" ") : String(raw);
+}
+
+function quoteWord(word: string): string {
+  return /^[A-Za-z0-9_./:=+,@%-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+}
+
+export type CodexApproval =
+  | { readonly kind: "deny"; readonly reason: string }
+  | { readonly kind: "ask"; readonly action: string; readonly evidence: string };
+
+/** Codex's sandbox stays closed (it runs its commands without asking anyone); what it wants to run outside the
+ *  sandbox is checked like a Claude Bash call (2026-09-25, user decision): a protected path is refused here, the rest
+ *  goes to the engine as `Bash: <command>`, where a read-only step lets a read-only command through and the rest is
+ *  approved as usual. Other approvals keep their method name. */
+export function codexApproval(method: string, params: Json, cwd: string, prot: ProtectedPaths = NO_PROTECTED): CodexApproval {
+  const { action, evidence } = describeApproval(method, params);
+  const command = COMMAND_METHODS.has(method) ? codexCommand(params) : null;
+  if (command === null) return { kind: "ask", action, evidence };
+  const hit = commandTouchesProtected(command, cwd, prot);
+  if (hit) return { kind: "deny", reason: `${PROTECTED_DENIAL} (${hit})` };
+  return { kind: "ask", action: `Bash: ${command}`, evidence };
+}
+
+/** Codex's own AGENTS.md, after the shared instructions: what its sandbox cannot do and how to get past it. */
+export const CODEX_SANDBOX_GUIDANCE = `Your commands run in a sandbox: they cannot see other processes or run setuid programs (ps, top and lsof fail
+with "operation not permitted") and they write only in the working directory. When a command the task needs fails
+that way, run it again with escalated permissions and a one-line justification instead of reporting a blocker.
+AgentSwitch checks every such request like any other command: in a look-only step read-only commands pass, and its
+own folders and credentials are refused in every step.`;
 
 export type CodexAgentEvent = { readonly agentId: string; readonly status: "started" | "progress" | "completed" | "failed" | "stopped"; readonly description: string; readonly summary?: string };
 
@@ -195,7 +271,7 @@ function fillHome(home: string, opts: CodexExecutorOptions, effort: string | nul
   const ext = opts.extensions ?? NO_EXTENSIONS;
   const mcpToml = codexMcpToml(ext.mcpFor("codex"), mcpServerEnv(opts.gate));
   writeFileSync(join(home, "config.toml"), codexConfigToml(opts.gate, profile, browser, effort, mcpToml, repair, run), { mode: 0o600 });
-  writeFileSync(join(home, "AGENTS.md"), executorInstructions());   // Codex's global instructions live in $CODEX_HOME/AGENTS.md
+  writeFileSync(join(home, "AGENTS.md"), `${executorInstructions()}\n\n${CODEX_SANDBOX_GUIDANCE}`);   // Codex's global instructions live in $CODEX_HOME/AGENTS.md
   ext.skillsInto("codex", join(home, "skills"));                     // Codex discovers $CODEX_HOME/skills/*/SKILL.md
 }
 
@@ -223,15 +299,21 @@ export function codexExecutor(opts: CodexExecutorOptions): Executor {
           if (method === "mcpServer/elicitation/request") return approvalAnswer(method, true);
           if (method === USER_INPUT_METHOD) { const qs = codexQuestions(params); return codexAnswers(qs, qs.length ? await input.ask(qs) : null); }
           if (!APPROVAL_METHODS.has(method)) return { decision: "decline" };
-          const { action, evidence } = describeApproval(method, params);
-          const decision = await input.approve(action, evidence);
+          const request = codexApproval(method, params, input.cwd, opts.protected ?? NO_PROTECTED);
+          if (request.kind === "deny") {
+            input.emit("tool_call", { tool: "commandExecution", denied: request.reason });
+            return approvalAnswer(method, false);
+          }
+          const decision = await input.approve(request.action, request.evidence);
           if (decision === "allow") state = { ...state, approvals: state.approvals + 1 };
           return approvalAnswer(method, decision === "allow" && !input.signal.aborted);
         }, (method, params) => {
           const before = state;
           state = applyNotification(state, method, params);
           if (state.text.length > before.text.length) input.emit("text", { text: state.text.at(-1) });
-          if (state.tools > before.tools) { const item = (params.item as Json) ?? {}; input.emit("tool_call", { tool: String(item.type ?? method), command: item.command ?? null }); }
+          if (state.tools > before.tools) input.emit("tool_call", codexToolCall((params.item as Json) ?? {}, method));
+          const result = method === "item/completed" ? codexToolResult((params.item as Json) ?? {}, state.toolIds) : null;
+          if (result) input.emit("tool_result", result);
           for (const a of state.agentEvents.slice(before.agentEvents.length)) input.emit("agent", { harness: "codex", ...a });
           if (state.completed) notifyDone?.();
         });

@@ -38,7 +38,7 @@ describe("assistant reports", () => {
     f.emit(t.id, "done");
     expect(f.notices()).toEqual([]);   // waits for the summary: the script comes with it
     f.emit(t.id, "summary", { ok: true });
-    expect(f.notices()).toMatchObject([{ kind: "notice", taskIds: [t.id], text: "「整理下载目录」完成了：下载目录整理好了，一共四十二个文件。" }]);
+    expect(f.notices()).toMatchObject([{ kind: "notice", taskIds: [t.id], text: "「整理下载目录」已完成：下载目录整理好了，一共四十二个文件。" }]);
   });
 
   it("without a summary the report still goes, after the wait, with what there is", async () => {
@@ -47,7 +47,7 @@ describe("assistant reports", () => {
     f.store.updateTask(t.id, { status: "failed", error: "gate proxy unreachable" });
     f.emit(t.id, "failed");
     await wait(60);
-    expect(f.notices()).toMatchObject([{ kind: "notice", text: "「登录 x.com 看通知 🔒」失败了：gate proxy unreachable" }]);   // no half ciphertext
+    expect(f.notices()).toMatchObject([{ kind: "notice", text: "「登录 x.com 看通知 🔒」失败：gate proxy unreachable" }]);   // no half ciphertext
   });
 
   it("a cancelled task is not reported, and its watch goes", async () => {
@@ -71,7 +71,7 @@ describe("assistant reports", () => {
     const asked = f.store.createApproval(t.id, "验证码是多少？", "{}", "question");
     f.emit(t.id, "approval_request", { approvalId: asked.id, kind: "question" });
     await wait(60);
-    expect(f.notices()).toMatchObject([{ kind: "notice", taskIds: [t.id], text: "「填表」需要你回答：验证码是多少？" }]);
+    expect(f.notices()).toMatchObject([{ kind: "waiting", taskIds: [t.id], text: "「填表」等你回答：验证码是多少？" }]);
   });
 
   it("a watched task gets a progress line when due, with what it waits for or last said; an ended one drops its watch", () => {
@@ -88,7 +88,7 @@ describe("assistant reports", () => {
     f.reporter.tick();
     const [line] = f.notices();
     expect(line).toMatchObject({ kind: "progress", taskIds: [t.id] });
-    expect(line!.text).toMatch(/^「跑一遍全部测试」还在进行（\d+ 分钟），刚才说：单元测试过了，正在跑端到端$/);
+    expect(line!.text).toMatch(/^「跑一遍全部测试」进行中，\d+ 分钟：单元测试过了，正在跑端到端$/);
     now += 5 * 60_000;
     f.reporter.tick();
     expect(f.notices()).toHaveLength(1);   // the next one is ten minutes after the last

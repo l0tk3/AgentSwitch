@@ -41,7 +41,7 @@ export const NO_ANSWER_MESSAGE = "The required question was not answered. Stop t
 
 /** The router's one free-text question, in the shared shape. */
 export function clarifyQuestion(text: string, originalText?: string): UserQuestion {
-  return { id: CLARIFY_ID, header: "路由器", text, ...(originalText && originalText !== text ? { originalText } : {}), options: [], multi: false, secret: false };
+  return { id: CLARIFY_ID, header: "调度模型", text, ...(originalText && originalText !== text ? { originalText } : {}), options: [], multi: false, secret: false };
 }
 
 export function encodeEvidence(ev: QuestionEvidence): string { return JSON.stringify(ev); }

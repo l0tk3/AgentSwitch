@@ -43,9 +43,10 @@ export type ExecutionInput = {
   readonly browserProfile?: string;
   readonly signal: AbortSignal;
   /** Stream progress; the engine persists and fans out. `agent` = a sub-agent the harness spawned (background-v0 §2). */
-  readonly emit: (type: "text" | "tool_call" | "agent" | "credential_repair" | "transfer_grant", payload: Record<string, unknown>) => void;
+  readonly emit: (type: "text" | "tool_call" | "tool_result" | "agent" | "credential_repair" | "transfer_grant", payload: Record<string, unknown>) => void;
   /** Ask the user; resolves when they answer or the request expires (deny). */
-  readonly approve: (action: string, evidence: string) => Promise<ApprovalDecision>;
+  /** `signal`: this one request's own cancellation (the executor gave up on it); the engine withdraws the card. */
+  readonly approve: (action: string, evidence: string, signal?: AbortSignal) => Promise<ApprovalDecision>;
   /** The harness's question/feedback tool: the router answers from evidence or forwards to the user.
    *  Resolves with the answers, or null when the user declined or nobody answered in time. */
   readonly ask: (questions: readonly UserQuestion[]) => Promise<UserAnswers | null>;

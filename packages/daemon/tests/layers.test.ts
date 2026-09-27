@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src");
 const ROOT = "(root)";
 
-const UPPER = ["util", "core", "harness", "files", "extensions", "secrets", "quota"] as const;
+const UPPER = ["util", "core", "harness", "files", "extensions", "secrets", "quota", "sessions"] as const;
 
 /** Which layers each layer may import (besides itself). Peers not listed may not import each other: router and
  *  executors, router and threads, threads and secrets. */
@@ -23,6 +23,8 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   extensions: ["util", "core"],
   secrets: ["util", "core"],
   quota: ["util", "core", "harness"],
+  /** control-v0 §3: reads the Mac's own Claude Code / Codex / OpenCode session stores; a leaf like files. */
+  sessions: ["util", "core"],
   threads: ["util", "core"],
   router: ["util", "core", "harness"],
   executors: [...UPPER],

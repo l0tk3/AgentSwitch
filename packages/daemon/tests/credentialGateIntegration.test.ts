@@ -60,7 +60,7 @@ describe.skipIf(!existsSync(binary) || !existsSync(python))("daemon ↔ real sec
     const gateway = credentialGate(cfg);
     expect(await gateway.describe(first.token, signal)).toEqual({ label: "fixture/2fa", kind: "totp", hosts: [host], uses: ["otp"], seed_import_hosts: [host] });
     const fresh = await gateway.reissue({ token: first.token, host, purpose: "totp_seed_import" }, signal);
-    expect(fresh).toEqual({ token: expect.stringMatching(/^enc:v1:/), label: "fixture/2fa", kind: "secret", hosts: [host], uses: ["http"], seed_import_hosts: [] });
+    expect(fresh).toEqual({ token: expect.stringMatching(/^enc:v1:/), label: "fixture/2fa", kind: "secret", hosts: [host], uses: ["fill", "http"], seed_import_hosts: [] });
     expect(JSON.stringify(fresh)).not.toContain(seed);
     const checked = spawnSync(python, ["-c", checkInsideGate], { cwd: gatePackage, env: { ...process.env, SECRET_GATE_HOME: cfg.home }, input: JSON.stringify({ old: first.token, new: fresh.token, host, seed }), encoding: "utf8" });
     expect(checked.status).toBe(0);

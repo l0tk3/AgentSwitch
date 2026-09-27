@@ -12,7 +12,7 @@ const fresh = "enc:v1:NewFixtureToken000000000000000000";
 const host = "internal.example:8400";
 const taskText = `请把这条邮箱的 TOTP 种子录入 ${host}，然后生成验证码登录。${old}`;
 const issue: CredentialIssue = { token: old, host, purpose: "totp_seed_import" };
-const result: ReissuedCredential = { token: fresh, label: "mail/2fa", kind: "secret", hosts: [host], uses: ["http"], seed_import_hosts: [] };
+const result: ReissuedCredential = { token: fresh, label: "mail/2fa", kind: "secret", hosts: [host], uses: ["fill", "http"], seed_import_hosts: [] };
 const material = () => ({ task: taskText, context: "", cwd: "/tmp", knownTokens: new Set([old]) });
 const authorized = () => echoRouter([JSON.stringify({ allow: true, evidence: [{ source: "task", quote: `请把这条邮箱的 TOTP 种子录入 ${host}` }] })]);
 const gate = (): CredentialGate => ({

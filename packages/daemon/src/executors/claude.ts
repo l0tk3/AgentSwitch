@@ -2,6 +2,7 @@
  *  edits inside cwd are allowed, everything else (Bash, writes outside cwd, web) asks the engine.
  *  User settings are not loaded (settingSources: []); the gate proxy goes into the tool env. */
 
+import { RATE_LIMIT_PROBE_PROMPT } from "../core/probes.js";
 import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +15,8 @@ import { claudeMcpServers, gateEnv, gateRun, mcpServerEnv, reportTransfer, witho
 import type { TransferGrant } from "../core/transfer.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { interruptedOutcome, watchRunStop } from "./lifecycle.js";
-import { commandTouchesProtected, containsReadDenied, isProtected, isReadDenied, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
+import { commandTouchesProtected, containsReadDenied, isProtected, isReadDenied, NO_PROTECTED, PROTECTED_DENIAL, type ProtectedPaths } from "./protected.js";
+import { clipInput, clipOutput } from "./toolEvents.js";
 import { repairInValue, shortToken } from "./tokens.js";
 import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../core/questions.js";
 import type { ApprovalDecision, ExecutionInput, Executor } from "./types.js";
@@ -39,7 +41,6 @@ const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 export type ToolDecision = { kind: "allow" } | { kind: "ask"; action: string; evidence: string } | { kind: "deny"; reason: string };
 
-export const PROTECTED_DENIAL = "denied by AgentSwitch: this path holds the daemon's own configuration or credentials; the model cannot change its own constraints";
 export const READ_DENIAL = "denied by AgentSwitch: this path holds credentials (gate keys, browser sessions, TLS keys) that executors may not read";
 export const SEARCH_DENIAL = "denied by AgentSwitch: this directory contains credentials (gate keys, browser sessions, TLS keys) that executors may not read; search a narrower directory";
 const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS", "NotebookRead"]);
@@ -104,9 +105,13 @@ export function decideTool(toolName: string, input: Record<string, unknown>, cwd
 
 export type AgentEvent = { readonly agentId: string; readonly status: "started" | "progress" | "completed" | "failed" | "stopped"; readonly description: string; readonly summary?: string; readonly tokens?: number; readonly background?: boolean };
 
-export type Folded = { text: string[]; tools: number; edits: number; result: Extract<SDKMessage, { type: "result" }> | null; refusal: RefusalSignal | null; sessionId?: string; rateLimited: boolean; agents: AgentCounts; agentEvents: AgentEvent[] };
+/** One tool use as the task's events show it (toolEvents.ts); `parent` is the sub-agent call it ran under. */
+export type ToolUse = { readonly id: string; readonly tool: string; readonly input: unknown; readonly parent?: string };
+export type ToolOutput = { readonly id: string; readonly ok: boolean; readonly output: string };
 
-export const EMPTY_FOLD: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: null, rateLimited: false, agents: NO_AGENTS, agentEvents: [] };
+export type Folded = { text: string[]; tools: number; edits: number; result: Extract<SDKMessage, { type: "result" }> | null; refusal: RefusalSignal | null; sessionId?: string; rateLimited: boolean; agents: AgentCounts; agentEvents: AgentEvent[]; uses: ToolUse[]; outputs: ToolOutput[] };
+
+export const EMPTY_FOLD: Folded = { text: [], tools: 0, edits: 0, result: null, refusal: null, rateLimited: false, agents: NO_AGENTS, agentEvents: [], uses: [], outputs: [] };
 
 /** Sub-agent bookends (background-v0 §2): task_started / task_progress / task_notification, ambient tasks ignored. */
 function foldTask(state: Folded, msg: SDKMessage): Folded | null {
@@ -129,13 +134,21 @@ export function foldMessage(state: Folded, msg: SDKMessage): Folded {
   const task = foldTask(state, msg);
   if (task) return task;
   if (msg.type === "assistant") {
-    const blocks = (msg.message as { content?: { type: string; text?: string; name?: string }[] }).content ?? [];
+    const blocks = (msg.message as { content?: { type: string; text?: string; name?: string; id?: string; input?: unknown }[] }).content ?? [];
     const text = blocks.filter((b) => b.type === "text" && b.text).map((b) => b.text!);
     const tools = blocks.filter((b) => b.type === "tool_use");
     const edits = tools.filter((b) => b.name && EDIT_TOOLS.has(b.name)).length;
     const refusal: RefusalSignal | null = !msg.parent_tool_use_id && msg.message.stop_reason === "refusal"
       ? { source: "provider", reason: "Claude assistant stop_reason: refusal" } : state.refusal;
-    return { ...state, text: [...state.text, ...text], tools: state.tools + tools.length, edits: state.edits + edits, refusal };
+    const uses = tools.map((b): ToolUse => ({ id: String(b.id ?? ""), tool: String(b.name ?? "?"), input: clipInput(b.input), ...(msg.parent_tool_use_id ? { parent: msg.parent_tool_use_id } : {}) }));
+    return { ...state, text: [...state.text, ...text], tools: state.tools + tools.length, edits: state.edits + edits, refusal, uses: [...state.uses, ...uses] };
+  }
+  if (msg.type === "user") {
+    const content = (msg.message as { content?: unknown } | undefined)?.content;
+    const results = Array.isArray(content) ? content.filter((b): b is { type: string; tool_use_id?: string; content?: unknown; is_error?: boolean } => (b as { type?: string })?.type === "tool_result") : [];
+    if (!results.length) return state;
+    const outputs = results.map((b): ToolOutput => ({ id: String(b.tool_use_id ?? ""), ok: b.is_error !== true, output: clipOutput(b.content) }));
+    return { ...state, outputs: [...state.outputs, ...outputs] };
   }
   if (msg.type === "result") return { ...state, result: msg };
   if (msg.type === "system" && msg.subtype === "model_refusal_no_fallback") return {
@@ -199,7 +212,7 @@ async function askThroughCard(input: ExecutionInput, toolInput: Record<string, u
 
 /** The approval hook: repair damaged tokens, apply the policy floor, ask the engine for the rest. */
 function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: ReadonlySet<string>, prot: ProtectedPaths, granted: { count: number }): CanUseTool {
-  return async (toolName, rawInput) => {
+  return async (toolName, rawInput, options) => {
     if (input.signal.aborted) return { behavior: "deny", message: "execution stopped" };
     // Damaged enc:v1: copies in tool arguments are put back verbatim before the gate sees them.
     const fixed = repairInValue(rawInput, input.knownTokens);
@@ -209,7 +222,7 @@ function permissionHook(input: ExecutionInput, cwd: string, allowedMcp: Readonly
     const d = decideTool(toolName, toolInput, cwd, allowedMcp, prot);
     if (d.kind === "allow") return { behavior: "allow", updatedInput: toolInput };
     if (d.kind === "deny") { input.emit("tool_call", { tool: toolName, denied: d.reason }); return { behavior: "deny", message: d.reason }; }
-    const decision: ApprovalDecision = await input.approve(d.action, d.evidence);
+    const decision: ApprovalDecision = await input.approve(d.action, d.evidence, options?.signal);
     if (decision === "allow" && !input.signal.aborted) { granted.count++; return { behavior: "allow", updatedInput: toolInput }; }
     return { behavior: "deny", message: "denied by the user via AgentSwitch" };
   };
@@ -269,7 +282,8 @@ function runOptions(runDir: string, input: ExecutionInput, opts: ClaudeExecutorO
 /** Stream what changed between two folds to the engine. */
 function emitDelta(input: ExecutionInput, before: Folded, after: Folded): void {
   for (const t of after.text.slice(before.text.length)) input.emit("text", { text: t });
-  if (after.tools > before.tools) input.emit("tool_call", { tool: "claude", count: after.tools - before.tools });
+  for (const u of after.uses.slice(before.uses.length)) input.emit("tool_call", { ...u });
+  for (const o of after.outputs.slice(before.outputs.length)) input.emit("tool_result", { ...o });
   for (const a of after.agentEvents.slice(before.agentEvents.length)) input.emit("agent", { harness: "claude-code", ...a });
 }
 
@@ -320,7 +334,7 @@ export async function probeRateLimits(model = "claude-haiku-4-5-20251001", execu
   // Neutral cwd, like model discovery: no CLAUDE.md search through privacy-protected parents.
   const options: Options = { model, maxTurns: 1, permissionMode: "default", settingSources: [], abortController, cwd: tmpdir(), canUseTool: async () => ({ behavior: "deny", message: "probe" }), ...(executable ? { pathToClaudeCodeExecutable: executable } : {}) };
   try {
-    probe = query({ prompt: "Reply with the single word: ok", options });
+    probe = query({ prompt: RATE_LIMIT_PROBE_PROMPT, options });
     for await (const msg of probe) {
       if (msg.type === "rate_limit_event") infos.push(msg.rate_limit_info);
     }

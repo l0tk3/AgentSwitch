@@ -9,7 +9,7 @@ import { opencodeExecConfig } from "../src/executors/opencode.js";
 import { extensionsAt } from "../src/extensions/index.js";
 import { McpRegistry, removeServer, serversFor, upsertServer } from "../src/extensions/mcpRegistry.js";
 import { ensureFrontmatter, SkillRegistry } from "../src/extensions/skillRegistry.js";
-import { codexGateToml, gateEnv, inheritedEnv, mcpServerEnv } from "../src/executors/gate.js";
+import { codexGateToml, defaultGate, gateEnv, inheritedEnv, mcpServerEnv } from "../src/executors/gate.js";
 import { McpServer, parseFrontmatter } from "../src/extensions/types.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "agentswitch-ext-"));
@@ -83,6 +83,16 @@ describe("spawned MCP server env", () => {
     const ca = join(home, "ca.pem");
     expect(gateEnv(g, "SCOPE")).toMatchObject({ SSL_CERT_FILE: ca, REQUESTS_CA_BUNDLE: ca, NODE_EXTRA_CA_CERTS: ca, HTTPS_PROXY: "http://scope:SCOPE@127.0.0.1:8080" });
     expect(codexGateToml(g, join(home, "profile"), false)).toContain(`SSL_CERT_FILE = ${JSON.stringify(ca)}`);
+  });
+
+  it("with the gate running as its own service account the CA comes from the published copy (gate-service-v0 §3.3)", () => {
+    const home = tmp();
+    const published = join(tmp(), "ca.pem");
+    writeFileSync(published, "-----BEGIN CERTIFICATE-----");
+    const g = defaultGate({ SECRET_GATE_BIN: "/bin/sh", SECRET_GATE_HOME: home, SECRET_GATE_CA: published })!;
+    expect(g.ca).toBe(published);
+    expect(gateEnv(g)).toMatchObject({ SSL_CERT_FILE: published, REQUESTS_CA_BUNDLE: published, NODE_EXTRA_CA_CERTS: published });
+    expect(defaultGate({ SECRET_GATE_BIN: "/bin/sh", SECRET_GATE_HOME: home })!.ca).toBe(join(home, "ca.pem"));
   });
 });
 

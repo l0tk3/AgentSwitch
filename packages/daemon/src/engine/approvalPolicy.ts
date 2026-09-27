@@ -1,5 +1,7 @@
 /** Who answers an approval (docs/supervisor-v0.md §1b): the user for everything (manual), the router for
- *  everything (auto, the user's explicit grant), or the router except the categories the user keeps (scoped). */
+ *  everything (auto, the user's explicit grant), or the router except the categories the user keeps (scoped). Or
+ *  nobody (skip, docs/control-v0.md §1): every approval an executor raises is allowed at once; the protected folders,
+ *  the read-only steps and the questions to the user are not approvals and still apply. */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { z } from "zod";
@@ -9,15 +11,15 @@ export type Category = (typeof CATEGORIES)[number];
 
 export const CATEGORY_TITLES: Record<Category, string> = {
   delete: "删除文件或数据（rm、git clean、DROP/DELETE）",
-  outside_cwd: "写工作目录以外的文件",
+  outside_cwd: "写入工作目录以外的文件",
   shell: "任何 shell 命令",
-  git_push: "git push / 强推",
-  irreversible: "支付、发送消息或邮件、删账号",
-  browser: "浏览器里的提交类动作",
+  git_push: "git push / 强制推送",
+  irreversible: "支付、发送消息或邮件、删除账号",
+  browser: "浏览器中的提交操作",
 };
 
 export const ApprovalPolicy = z.object({
-  mode: z.enum(["manual", "auto", "scoped"]).default("scoped"),
+  mode: z.enum(["manual", "auto", "scoped", "skip"]).default("scoped"),
   /** scoped only: categories the user answers personally. */
   human: z.array(z.enum(CATEGORIES)).default(["delete", "git_push", "irreversible"]),
 });
@@ -42,7 +44,7 @@ export function categoriesOf(action: string, evidence = ""): Category[] {
 /** "user": only the user answers. "router": the supervisor may answer (the user still can, first answer wins). */
 export function whoAnswers(policy: ApprovalPolicy, action: string, evidence = ""): { who: "user" | "router"; because: string } {
   if (policy.mode === "manual") return { who: "user", because: "manual mode" };
-  if (policy.mode === "auto") return { who: "router", because: "auto mode" };
+  if (policy.mode === "auto" || policy.mode === "skip") return { who: "router", because: `${policy.mode} mode` };
   const kept = categoriesOf(action, evidence).filter((c) => policy.human.includes(c));
   return kept.length ? { who: "user", because: `reserved: ${kept.join(", ")}` } : { who: "router", because: "scoped mode, not reserved" };
 }

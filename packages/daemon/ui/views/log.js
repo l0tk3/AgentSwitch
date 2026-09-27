@@ -20,10 +20,10 @@ function row(r) {
 }
 
 export function render(s) {
-  return `<div class="page-title">路由日志</div>
+  return `<div class="page-title">调度记录</div>
     ${s.log.length
       ? `<table class="list"><thead><tr><th>时间</th><th>来源</th><th>目标</th><th>目录</th><th>备注</th></tr></thead><tbody>${s.log.map(row).join("")}</tbody></table>`
-      : `<div class="empty">还没有路由记录</div>`}`;
+      : `<div class="empty">暂无调度记录</div>`}`;
 }
 
 export const bindings = [];

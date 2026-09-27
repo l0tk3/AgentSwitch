@@ -42,7 +42,7 @@ export async function postTask(body, { onProgress = () => {}, timeoutMs = 120_00
       if (done) {
         const task = parse(pending);
         if (task) return task;
-        throw new Error("接收连接已结束但没有任务回执，结果待确认");
+        throw new Error("接收连接已结束，未收到任务回执，结果待确认");
       }
     }
   } finally {

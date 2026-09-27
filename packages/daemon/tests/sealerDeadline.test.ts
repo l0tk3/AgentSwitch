@@ -35,7 +35,7 @@ describe("sealer compact history view", () => {
     const current = `新种子 ${seed}`;
     const imported: FoundSecret = { ...found, value: seed, purpose: "totp_seed_import", seed_import_evidence: authorization };
     const router = echoRouter([reply([imported]).text]);
-    expect(await routerSealer(router, fakeMinter(), () => authorization)(current)).toMatchObject({ ok: true, sealed: [{ purpose: "totp_seed_import", uses: ["http"] }] });
+    expect(await routerSealer(router, fakeMinter(), () => authorization)(current)).toMatchObject({ ok: true, sealed: [{ purpose: "totp_seed_import", uses: ["http", "fill"] }] });
     expect(router.calls[0]!.task).not.toContain(token);
     const minter = vi.fn(fakeMinter());
     const synthetic = { ...imported, seed_import_evidence: authorization.replace(token, "[existing-sealed:1]") };

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, exis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { commandTouchesProtected, defaultProtected, isProtected, protectedInside, restoreProtected, snapshotProtected, type ProtectedPaths } from "../src/executors/protected.js";
+import { commandTouchesProtected, defaultProtected, isProtected, isReadDenied, protectedInside, restoreProtected, snapshotProtected, type ProtectedPaths } from "../src/executors/protected.js";
 import { decideTool } from "../src/executors/claude.js";
 
 function setup() {
@@ -25,6 +25,15 @@ describe("protected paths", () => {
     expect(p.roots.slice(0, 2)).toEqual(["/h/.as", "/h/.sg"]);
     expect(p.roots[2]).toMatch(/packages\/daemon\/config$/);
     expect(p.exempt).toEqual(["/h/.as/work", "/h/.as/artifacts", "/h/.as/uploads"]);
+  });
+
+  it("the gate service's socket is off limits, its published CA and public keys are not (gate-service-v0 §4)", () => {
+    const p = defaultProtected({ HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg", SECRET_GATE_PUBLIC: "/pub" });
+    expect(isReadDenied("/pub/gate.sock", "/", p)).toBe(true);
+    expect(isProtected("/pub/gate.sock", "/", p)).toBe(true);
+    expect(isReadDenied("/pub/ca.pem", "/", p)).toBe(false);
+    expect(isReadDenied("/pub/keys.json", "/", p)).toBe(false);
+    expect(isReadDenied("/Library/Application Support/AgentSwitch/gate-public/gate.sock", "/", defaultProtected({ HOME: "/h" }))).toBe(true);
   });
 
   it("isProtected: inside a root yes, inside an exempt subtree no, relative paths resolve against cwd", () => {
@@ -80,7 +89,7 @@ describe("read-denied paths (2026-09-24)", () => {
   // read them. Before this, Claude's Read/Glob/Grep/LS were allowed everywhere.
   it("defaultProtected read-denies the gate home, the browser profiles and the remote listener's key", () => {
     const p = defaultProtected({ HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg" });
-    expect(p.readDenied).toEqual(["/h/.sg", "/h/.as/browser-profiles", "/h/.as/remote", "/h/.as/local-token"]);
+    expect(p.readDenied).toEqual(["/h/.sg", "/Library/Application Support/AgentSwitch/gate-public/gate.sock", "/h/.as/browser-profiles", "/h/.as/remote", "/h/.as/local-token"]);
   });
 
   it("Claude's read tools are refused there, whatever form the path takes; elsewhere they stay allowed", () => {

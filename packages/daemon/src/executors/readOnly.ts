@@ -13,7 +13,10 @@ const READERS = new Set([
   "ls", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep", "rg", "pwd", "stat", "file", "du", "df", "which", "echo",
   "printf", "sort", "uniq", "cut", "tr", "nl", "tree", "basename", "dirname", "realpath", "readlink", "date", "whoami",
   "uname", "diff", "cmp", "shasum", "sha256sum", "md5", "jq", "column", "ps", "lsof", "sw_vers", "true", "test", "[",
+  "pgrep", "uptime", "netstat",
 ]);
+/** `top` only in logging mode with a few samples (`top -l 1 …`): otherwise it is interactive or runs for ever. */
+const TOP_MAX_SAMPLES = 5;
 /** `git` subcommands that only read. `branch`, `tag`, `remote`, `config`, `stash` and `reflog` are checked further. */
 const GIT_READ = new Set([
   "log", "status", "diff", "show", "rev-parse", "rev-list", "ls-files", "ls-tree", "blame", "shortlog", "describe",
@@ -47,8 +50,17 @@ function readsOnly(words: readonly string[]): boolean {
   if (base === "cd") return args.length <= 1;
   if (base === "git") return gitReads(args);
   if (base === "find") return !args.some((a) => FIND_ACTIONS.has(a));
+  if (base === "top") return topSamples(args);   // its -o is the sort key, not an output file
+  if (base === "sysctl") return !args.some((a) => a === "-w" || a.includes("="));
+  if (base === "vm_stat") return args.length === 0;
   if (!READERS.has(base)) return false;
   return !args.some((a) => WRITING_OPTIONS.test(a));
+}
+
+function topSamples(args: readonly string[]): boolean {
+  const at = args.indexOf("-l");
+  const samples = at >= 0 ? Number(args[at + 1]) : NaN;
+  return Number.isInteger(samples) && samples >= 1 && samples <= TOP_MAX_SAMPLES;
 }
 
 function gitReads(args: readonly string[]): boolean {

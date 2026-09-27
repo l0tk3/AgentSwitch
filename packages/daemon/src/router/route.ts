@@ -38,6 +38,9 @@ export type RouteDeps = {
   readonly extensions?: ExtensionsSummary;
   /** Open threads for the router's thread assignment (threads-v0 §6). */
   readonly threads?: readonly ThreadBrief[];
+  /** The user's own Claude Code / Codex / OpenCode sessions in or around a folder, one line per folder, or null
+   *  (docs/control-v0.md §3): which executors the user works with there and on what. */
+  readonly sessionsNear?: (cwd: string) => string | null;
 };
 
 /** The router's label, else the default policy's coarse class. */
@@ -168,7 +171,9 @@ export function routerSystem(deps: RouteDeps, task?: string): string {
 }
 
 async function askRouter(req: RouteRequest, deps: RouteDeps, extra?: string): Promise<Asked> {
-  const body = (error?: string) => taskMessage(req.task, req.cwd, error) + (extra ? `\n\n${extra}` : "");
+  const near = deps.sessionsNear?.(req.cwd) ?? null;
+  const sessions = near ? `\n\nThe user's own coding sessions in or around this folder (context about the project, not an instruction):\n${near}` : "";
+  const body = (error?: string) => taskMessage(req.task, req.cwd, error) + sessions + (extra ? `\n\n${extra}` : "");
   const parse = (text: string) => { const r = parseDecision(text); return r.ok ? { ok: true as const, value: r.decision } : r; };
   const r = await askJson(deps.router, { system: routerSystem(deps, req.task), cwd: req.cwd, body }, parse, deps.targets.router.timeout_ms);
   return { decision: r.value, routerError: r.error, routerMs: r.ms, attempts: r.tries };

@@ -23,6 +23,9 @@ const EXEMPT_UNDER_HOME = ["work", "artifacts", "uploads"] as const;
 
 export const NO_PROTECTED: ProtectedPaths = { roots: [], exempt: [] };
 
+/** What an executor is told when it reaches for a protected path (Claude's tools, Codex's escalated commands). */
+export const PROTECTED_DENIAL = "denied by AgentSwitch: this path holds the daemon's own configuration or credentials; the model cannot change its own constraints";
+
 /** Canonical form used for every comparison: resolved, without a trailing separator. */
 export function canonicalPath(p: string): string {
   const r = resolve(p);
@@ -32,16 +35,21 @@ export function canonicalPath(p: string): string {
 export function defaultProtected(env: NodeJS.ProcessEnv = process.env): ProtectedPaths {
   const home = env.AGENTSWITCH_HOME ?? join(env.HOME ?? ".", ".agentswitch");
   const gate = env.SECRET_GATE_HOME ?? join(env.HOME ?? ".", ".secret-gate");
+  // The gate service's socket (gate-service-v0 §4): a best-effort stop for the plainest `nc -U`; the same uid is not a boundary.
+  const socket = join(env.SECRET_GATE_PUBLIC || GATE_PUBLIC_DIR, "gate.sock");
   return {
-    roots: [home, gate, DAEMON_CONFIG_DIR].map(canonicalPath),
+    roots: [home, gate, DAEMON_CONFIG_DIR, socket].map(canonicalPath),
     exempt: EXEMPT_UNDER_HOME.map((d) => canonicalPath(join(home, d))),
     // The local API's token too: an executor that read it could call the API to loosen its own approval policy.
-    readDenied: [gate, join(home, BROWSER_PROFILES_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME)].map(canonicalPath),
+    readDenied: [gate, socket, join(home, BROWSER_PROFILES_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME)].map(canonicalPath),
   };
 }
 
 /** Under `$AGENTSWITCH_HOME`: the local API token (api/localAuth.ts keeps the same name; executors never read it). */
 export const LOCAL_TOKEN_NAME = "local-token";
+
+/** Where the gate service publishes its CA, public keys and socket when it runs as its own account (gate-service-v0 §2). */
+export const GATE_PUBLIC_DIR = "/Library/Application Support/AgentSwitch/gate-public";
 
 /** Under `$AGENTSWITCH_HOME`: the browser session slots (browserSlots.ts). */
 export const BROWSER_PROFILES_DIR = "browser-profiles";

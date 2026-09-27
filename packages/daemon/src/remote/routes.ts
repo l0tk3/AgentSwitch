@@ -1,6 +1,6 @@
 /** The routes a paired phone may use (app-v0 §2 远程可用的路由), exactly as the doc lists them; the remote listener answers
  *  404 to everything else, so the MCP and skill registries, MEMORY.md and platform memory, records, routing log,
- *  approval policy, device and pairing management and the web UI never reach it. `:id` is one path segment, `*` the
+ *  approval policy, device and pairing management and the web UI never reach it. `:id` (any `:name`) is one path segment, `*` the
  *  rest. */
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -10,6 +10,7 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/healthz"],
   ["POST", "/pair"],
   ["GET", "/me"],
+  ["GET", "/addresses"],
   ["GET", "/gate/pubkey"],
   ["GET", "/tasks"],
   ["POST", "/tasks"],
@@ -20,6 +21,8 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/tasks/:id/cancel"],
   ["POST", "/tasks/:id/handoff"],
   ["POST", "/tasks/:id/rate"],
+  ["POST", "/tasks/:id/ack"],
+  ["GET", "/search"],
   ["GET", "/tasks/:id/files"],
   ["GET", "/tasks/:id/files/*"],
   ["GET", "/approvals"],
@@ -39,16 +42,19 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/context/example"],
   ["POST", "/assistant"],
   ["GET", "/assistant"],
-  ["GET", "/projects"],
+  ["GET", "/sessions"],
+  ["GET", "/sessions/:harness/:id"],
+  ["GET", "/approvals/policy"],
+  ["GET", "/settings/workdir"],
   ["GET", "/update"],
   ["POST", "/update/install"],
 ];
 
 /** Routes the remote app answers itself; every other allowed route goes on to the local API unchanged. */
-export const REMOTE_OWN_ROUTES: ReadonlySet<string> = new Set(["/healthz", "/pair", "/me", "/gate/pubkey"]);
+export const REMOTE_OWN_ROUTES: ReadonlySet<string> = new Set(["/healthz", "/pair", "/me", "/addresses", "/gate/pubkey"]);
 
 function compile(pattern: string): RegExp {
-  const body = pattern.split("/").map((seg) => (seg === ":id" ? "[^/]+" : seg === "*" ? ".+" : seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("/");
+  const body = pattern.split("/").map((seg) => (seg.startsWith(":") ? "[^/]+" : seg === "*" ? ".+" : seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("/");
   return new RegExp(`^${body}$`);
 }
 

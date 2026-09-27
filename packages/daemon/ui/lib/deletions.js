@@ -11,7 +11,7 @@ export function deleteButton(kind, id, s, active = false) {
   const status = s.deletions?.[keyFor(kind, id)]?.status;
   if (status === "deleted") return "";
   const busy = status === "sending";
-  return `<button class="bad small" data-delete-${kind}="${esc(id)}" ${active || busy ? "disabled" : ""} aria-busy="${busy}"${active ? ' title="请先取消进行中的任务，再删除"' : ""}>${busy ? "删除中…" : active ? "先取消再删除" : status === "error" ? "重试删除" : kind === "thread" ? "删除整个线程" : "删除"}</button>`;
+  return `<button class="bad small" data-delete-${kind}="${esc(id)}" ${active || busy ? "disabled" : ""} aria-busy="${busy}"${active ? ' title="请取消进行中的任务后再删除"' : ""}>${busy ? "删除中…" : active ? "取消后可删除" : status === "error" ? "重试删除" : kind === "thread" ? "删除整个会话" : "删除"}</button>`;
 }
 
 export function deleteNotice(kind, id, s) {
@@ -31,10 +31,10 @@ export async function deleteRecord(kind, id) {
   const prior = get().deletions[keyFor(kind, id)];
   if (prior?.status === "sending" || prior?.status === "deleted") return;
   if (activeTarget(kind, id, get())) {
-    update(kind, id, { status: "error", message: "该线程还有进行中的任务，请先取消并等待结束，再删除。" });
+    update(kind, id, { status: "error", message: "该会话中有进行中的任务。请取消任务并等待结束后再删除。" });
     return;
   }
-  const what = kind === "thread" ? "此线程内的全部任务、记录及平台保存的产物" : "此任务的记录及平台保存的产物";
+  const what = kind === "thread" ? "此会话内的全部任务、记录及平台保存的产物" : "此任务的记录及平台保存的产物";
   if (!confirm(`将永久删除${what}，无法恢复。工作目录不受影响。\n确定删除吗？`)) return;
   update(kind, id, { status: "sending", message: "正在删除…" });
   try {
@@ -43,7 +43,7 @@ export async function deleteRecord(kind, id) {
     // A repeated DELETE after a lost response is safe; 404 means the desired state already exists.
     if (err.status !== 404) {
       update(kind, id, { status: "error", message: err.status === 409
-        ? "该线程还有任务正在执行或收尾，请先取消并等待结束，再重试删除。"
+        ? "该会话中还有任务正在执行或收尾。请取消任务并等待结束后重试删除。"
         : "删除暂未确认，请稍后重试。" });
       return;
     }

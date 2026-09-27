@@ -73,6 +73,8 @@ Reply with exactly one JSON object and nothing else:
   "spoken": "<one plain sentence, at most 40 characters, in the user's language, saying what this run produced or why it failed, as it would be read aloud to the user>",
   "speech": "<the result itself retold to be read aloud: 2 to 5 short sentences, at most 250 characters, in the user's language, conclusion first; no links, @handles, ids, file paths, code, Markdown or enc:v1: tokens; numbers and dates as a person would say them; end with what the user must do, if anything; empty when spoken already says everything>"
 }
+"spoken" and "speech" in Chinese use the neutral written register of a status report, not chat: 已/未/无/可 rather than
+了/没/能, no 吧/呢/啦/一下, no greeting or exclamation marks.
 Keep the whole object under 700 tokens. Merge the previous summary with the new run; drop nothing that is still true.
 Preserve the terminal status and its error/blocker even when the final output describes useful partial work. "partial", "blocked", "failed" or "cancelled" never mean the original task is complete; put unfinished requirements and the reason in progress/unresolved.
 "facts" are for the dispatcher's long-term memory, not a recap of this run: only what would change how a future task is

@@ -96,7 +96,7 @@ describe("live task intake feedback", () => {
 
   it("separates intake, routing, planning and actual execution feedback", () => {
     expect(detail.eventLine({ type: "step", payload: { action: "intake", durationMs: 12500, sealingMs: 12000 } })).toContain("识别与加密 12.0 秒");
-    expect(feedback(task, []).label).toBe("分诊中…");
+    expect(feedback(task, []).label).toBe("调度中…");
     const planned = [{ type: "routed", seq: 1, payload: { verdict: { ok: true, harness: "codex", model: "fixture" } } },
       { type: "step", seq: 2, payload: { action: "plan", model: "codex/fixture" } }];
     expect(feedback(task, planned)).toMatchObject({ label: "规划中…", detail: expect.stringContaining("尚未派发") });

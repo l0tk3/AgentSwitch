@@ -198,7 +198,7 @@ describe("Engine: thread assignment by the router (threads-v0 §6)", () => {
     replies.push(withThread(th.id, 0.3), withThread(th.id, 0.3), withThread("nope", 0.99), decisionJson({ harness: "codex", model: "gpt-5.5", effort: null, thread: "new", thread_confidence: 1 }));
     const a = engine.submit({ task: "maybe related", cwd: "/tmp" });
     const approvalId = await new Promise<string>((resolve) => bus.subscribe(a.id, (e) => { if (e.type === "approval_request") resolve(String(e.payload.approvalId)); }));
-    expect(store.getApproval(approvalId)!.action).toContain("归到线程");
+    expect(store.getApproval(approvalId)!.action).toContain("是否归入会话");
     engine.resolveApproval(approvalId, "allow");
     await engine.idle();
     expect(store.getTask(a.id)).toMatchObject({ status: "done", threadId: th.id });

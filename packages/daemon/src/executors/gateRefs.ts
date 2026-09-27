@@ -22,13 +22,13 @@ export type GateRefsDeps = {
   readonly log?: (message: string) => void;
 };
 
-export const GATE_DOWN_HINT = "请先启动 gate（secret-gate service install 或 secret-gate proxy）后重试";
+export const GATE_DOWN_HINT = "请启动凭据网关（secret-gate service install 或 secret-gate proxy）后重试";
 
 /** A failed outcome, before any harness started: no side effects, known. `gateUnavailable` stops the task (reroute.ts). */
 export function gateDownOutcome(error: string): ExecutionOutcome {
   return {
     ok: false, exitCode: null, gateUnavailable: true, lastText: "",
-    stderr: `secret-gate 代理未运行（${error.slice(0, PROXY_ERROR_CHARS)}），本次未启动执行器。${GATE_DOWN_HINT}。`,
+    stderr: `凭据网关未运行（${error.slice(0, PROXY_ERROR_CHARS)}），本次未启动执行器。${GATE_DOWN_HINT}。`,
     sideEffects: NO_SIDE_EFFECTS, sideEffectsKnown: true, agents: NO_AGENTS,
   };
 }
@@ -151,7 +151,7 @@ function scopedInput(input: ExecutionInput, scope: string, table: RefTable, regi
     gateScope: scope,
     emit: (type, payload) => input.emit(type, table.toTokensDeep(payload)),
     // The approver (and the stored approval_request) sees the credential that is meant, never a dead reference.
-    approve: (action, evidence) => input.approve(table.toTokens(action), table.toTokens(evidence)),
+    approve: (action, evidence, signal) => input.approve(table.toTokens(action), table.toTokens(evidence), signal),
     ask: async (questions) => {
       const { outward, idBack } = outwardQuestions(questions, table);
       const answers = await input.ask(outward);

@@ -41,6 +41,8 @@ export type EngineDeps = ComposeDeps & {
   readonly approvalTimeoutMs?: number;
   readonly retryBackoffMs?: number;
   readonly cleanupPaths?: CleanupPaths;
+  /** The default work folder in force (docs/control-v0.md §2): a task folder of ours left empty there is removed. */
+  readonly taskFolderRoot?: () => string;
   readonly routingLog?: RoutingLog;
   /** Where <cwd>/out is copied before an ephemeral working directory is deleted. */
   readonly artifactsDir?: string;
@@ -69,11 +71,14 @@ export type EngineDeps = ComposeDeps & {
 
 export { MAX_CLARIFICATIONS } from "./taskLoop.js";
 import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
+import { removeIfEmptyTaskFolder, restoreTaskFolder } from "../files/workdir.js";
 
 export type PlannerFactory = (pick: TargetRef | null) => { readonly router: Router; readonly target: TargetRef } | null;
 
 export type HandoffRequest = { readonly to?: TargetRef; readonly cwd?: string; readonly ephemeral?: boolean };
 export type DeleteResult = { readonly ok: true } | { readonly ok: false; readonly code: "not_found" | "busy"; readonly error: string };
+
+export const INTERRUPTED_MESSAGE = "服务重启时任务仍在进行，执行进度无法确认。";
 
 export class Engine {
   private readonly ctx: EngineContext;
@@ -129,6 +134,19 @@ export class Engine {
     if (from) this.threads.recordUserHandoff(task, from, req.to, next.id);
     else this.ctx.emit(task.id, "handoff", { to: req.to ?? null, taskId: next.id, reason: "user" });
     return next;
+  }
+
+  /** At start (docs/control-v0.md §4): a task that had not ended when the daemon stopped cannot be confirmed either
+   *  way. It becomes blocked ("interrupted"), its open cards expire, and nothing re-runs by itself. */
+  interruptLeftovers(): number {
+    const left = this.ctx.store.unfinishedTasks();
+    for (const task of left) {
+      for (const a of this.ctx.store.pendingApprovals(task.id)) this.ctx.store.resolveApproval(a.id, "expired");
+      const error = INTERRUPTED_MESSAGE;
+      this.ctx.store.updateTask(task.id, { status: "blocked", blockCause: "interrupted", error });
+      this.ctx.emit(task.id, "blocked", { cause: "interrupted", error });
+    }
+    return left.length;
   }
 
   cancel(id: string): Task | undefined {
@@ -228,6 +246,7 @@ export class Engine {
       if (task.parentId) await this.scheduler.awaitParent(task, controller.signal);   // before taking a slot: waiting on a parent costs nothing
       held.push(await this.scheduler.acquireGlobal(task, controller.signal));
       if (controller.signal.aborted) return;
+      if (!task.ephemeral && this.deps.taskFolderRoot) restoreTaskFolder(task.cwd, this.deps.taskFolderRoot());
       await this.loop.run(task, controller.signal, held);
     } catch (err) {
       if (!TERMINAL.has(this.ctx.store.getTask(id)?.status ?? "failed")) {
@@ -252,6 +271,7 @@ export class Engine {
         try {
           const final = this.ctx.store.getTask(id) ?? task;
           if (final.ephemeral && !this.scheduler.pendingExecution(final)) this.cleanup(final);
+          else if (!final.ephemeral && this.deps.taskFolderRoot && TERMINAL.has(final.status)) removeIfEmptyTaskFolder(final.cwd, this.deps.taskFolderRoot());
         } finally { for (const release of held.reverse()) release(); }
       }
     }

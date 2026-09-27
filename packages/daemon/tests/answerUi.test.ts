@@ -129,7 +129,7 @@ describe("answer UI", () => {
     const fetcher = http(async () => reply({ ok: true }));
     await click();
     expect(posts(fetcher)).toHaveLength(0);
-    expect(detail.render(state.get())).toContain("请先回答每个问题，再提交。");
+    expect(detail.render(state.get())).toContain("请回答所有问题后再提交。");
     expect(fields.get("q-question-1-0")!.value).toBe("测试环境");
   });
 

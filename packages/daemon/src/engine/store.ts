@@ -9,6 +9,7 @@ import type { RecordRow } from "../router/record.js";
 import type { Thread, ThreadEvent, ThreadEventType, ThreadStatus } from "../threads/types.js";
 import { TERMINAL, type Approval, type ApprovalKind, type ApprovalStatus, type BlockCause, type Device, type NewTask, type Task, type TaskEvent, type TaskEventType } from "./types.js";
 import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
+import { forgetSearch, searchTasks, SEARCH_SCHEMA, type SearchHit } from "./search.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -53,10 +54,16 @@ type Row = Record<string, unknown>;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to an existing table. */
 const ADDED_COLUMNS: Record<string, string[]> = {
-  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT", "approval_policy TEXT", "route_log_id INTEGER", "rating INTEGER", "block_cause TEXT", "speech TEXT"],
+  tasks: ["ephemeral INTEGER NOT NULL DEFAULT 0", "parent_id TEXT", "attachments TEXT NOT NULL DEFAULT '[]'", "thread_id TEXT", "exclude TEXT NOT NULL DEFAULT '[]'", "handoff_from TEXT", "spoken TEXT", "approval_policy TEXT", "route_log_id INTEGER", "rating INTEGER", "block_cause TEXT", "speech TEXT", "acknowledged_at INTEGER"],
   approvals: ["kind TEXT NOT NULL DEFAULT 'approval'", "answer TEXT"],
   records: ["rating INTEGER"],
 };
+
+/** One-off data fixes, each run once in order; `PRAGMA user_version` counts the ones already run. */
+const DATA_MIGRATIONS: readonly string[] = [
+  // control-v0 §4 (2026-09-27): tasks from before read marks count as read, or every old task would show as unread.
+  "UPDATE tasks SET acknowledged_at = updated_at WHERE acknowledged_at IS NULL",
+];
 
 export function migrate(db: DatabaseSync): string[] {
   const applied: string[] = [];
@@ -69,6 +76,12 @@ export function migrate(db: DatabaseSync): string[] {
       applied.push(`${table}.${name}`);
     }
   }
+  const done = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
+  for (let i = done; i < DATA_MIGRATIONS.length; i++) {
+    db.exec(DATA_MIGRATIONS[i]!);
+    applied.push(`data#${i + 1}`);
+  }
+  if (done < DATA_MIGRATIONS.length) db.exec(`PRAGMA user_version = ${DATA_MIGRATIONS.length}`);
   return applied;
 }
 
@@ -95,6 +108,7 @@ export class Store {
     this.db = new DatabaseSync(opts.dbPath);
     this.db.exec(SCHEMA);
     migrate(this.db);
+    this.db.exec(SEARCH_SCHEMA);
     const root = (path: string): string => { mkdirSync(path, { recursive: true }); return realpathSync(path); };
     this.tasksDir = opts.tasksDir ? root(opts.tasksDir) : undefined;
     this.threadsDir = root(opts.threadsDir ?? join(tmpdir(), `agentswitch-threads-${process.pid}`));
@@ -116,6 +130,21 @@ export class Store {
   getTask(id: string): Task | undefined {
     const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Row | undefined;
     return row ? toTask(row) : undefined;
+  }
+
+  /** The user opened the task: it is read. `updated_at` stays, so reading is not news. */
+  acknowledgeTask(id: string): Task | undefined {
+    this.db.prepare("UPDATE tasks SET acknowledged_at = ? WHERE id = ?").run(this.now(), id);
+    return this.getTask(id);
+  }
+
+  /** Tasks that had not ended, e.g. when the daemon stopped under them. */
+  unfinishedTasks(): Task[] {
+    return (this.db.prepare(`SELECT * FROM tasks WHERE status NOT IN (${[...TERMINAL].map(() => "?").join(", ")}) ORDER BY created_at`).all(...TERMINAL) as Row[]).map(toTask);
+  }
+
+  search(query: string, limit: number): SearchHit[] {
+    return searchTasks(this.db, query, limit);
   }
 
   listTasks(limit = DEFAULT_LIST_LIMIT): Task[] {
@@ -223,6 +252,7 @@ export class Store {
       this.db.prepare("DELETE FROM thread_events WHERE json_extract(payload, '$.taskId') = ? OR json_extract(payload, '$.from.taskId') = ? OR json_extract(payload, '$.to.taskId') = ?").run(task.id, task.id, task.id);
       for (const table of ["events", "approvals", "records"]) this.db.prepare(`DELETE FROM ${table} WHERE task_id = ?`).run(task.id);
       this.db.prepare("DELETE FROM tasks WHERE id = ?").run(task.id);
+      forgetSearch(this.db, task.id);
     }
   }
 
@@ -301,6 +331,13 @@ export class Store {
       handedOff: Number(r.handed_off) === 1, pinned: Number(r.pinned) === 1, userHandoff: Number(r.user_handoff) === 1,
       rating: r.rating === null || r.rating === undefined ? null : Number(r.rating),
     }));
+  }
+
+  /** Every harness session id our executors reported (docs/control-v0.md §3: not the user's own sessions). */
+  harnessSessionIds(): Set<string> {
+    const rows = this.db.prepare("SELECT payload FROM thread_events WHERE type = 'session'").all() as { payload: string }[];
+    const ids = rows.map((r) => { try { return (JSON.parse(r.payload) as { sessionId?: unknown }).sessionId; } catch { return undefined; } });
+    return new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0));
   }
 
   threadEvents(threadId: string): ThreadEvent[] {
@@ -457,6 +494,7 @@ function toTask(r: Row): Task {
     routeLogId: r.route_log_id === null || r.route_log_id === undefined ? null : Number(r.route_log_id),
     rating: r.rating === null || r.rating === undefined ? null : Number(r.rating),
     blockCause: (r.block_cause as BlockCause | null) ?? null,
+    acknowledgedAt: r.acknowledged_at === null || r.acknowledged_at === undefined ? null : Number(r.acknowledged_at),
   };
 }
 

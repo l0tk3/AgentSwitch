@@ -19,16 +19,16 @@ function detail(q) {
   }
   if (q.harness === "claude-code") {
     const noWindows = d.windowsAgeMs === null || d.windowsAgeMs === undefined;
-    return `<div class="kv" style="margin-top:8px"><b>24h 本地统计</b><span>${(d.usedTokens24h || 0).toLocaleString()} tokens</span>${noWindows ? `<b>窗口</b><span class="dim">还没看到额度事件，跑一次 Claude 任务或点强制刷新</span>` : ""}</div>`;
+    return `<div class="kv" style="margin-top:8px"><b>24h 本地统计</b><span>${(d.usedTokens24h || 0).toLocaleString()} tokens</span>${noWindows ? `<b>窗口</b><span class="dim">暂无额度数据。运行一次 Claude 任务，或点击「强制刷新」。</span>` : ""}</div>`;
   }
   if (q.harness === "codex") {
-    return `<div class="kv" style="margin-top:8px"><b>计划</b><span>${esc(d.planType || "?")}</span>${d.credits ? `<b>credits</b><span>${esc(d.credits.balance)}${d.credits.unlimited ? " (unlimited)" : ""}</span>` : ""}${d.rateLimitReachedType ? `<b>状态</b><span class="error">${esc(d.rateLimitReachedType)}</span>` : ""}</div>`;
+    return `<div class="kv" style="margin-top:8px"><b>套餐</b><span>${esc(d.planType || "?")}</span>${d.credits ? `<b>credits</b><span>${esc(d.credits.balance)}${d.credits.unlimited ? "（不限）" : ""}</span>` : ""}${d.rateLimitReachedType ? `<b>状态</b><span class="error">${esc(d.rateLimitReachedType)}</span>` : ""}</div>`;
   }
   return "";
 }
 
 export function quotaCard(q) {
-  const remaining = q.remaining === null ? "未知" : "剩 " + Math.round(q.remaining * 100) + "%";
+  const remaining = q.remaining === null ? "未知" : "剩余 " + Math.round(q.remaining * 100) + "%";
   return `<div class="card">
     <div class="row"><b class="grow">${HARNESS_NAMES[q.harness] || esc(q.harness)}</b><span class="badge">${remaining}</span></div>
     ${windows(q.detail || {})}${detail(q)}
@@ -38,7 +38,7 @@ export function quotaCard(q) {
 }
 
 export function quotaPanel(quota) {
-  return `<h2>额度<span class="spacer"></span><button class="small" id="q-refresh">强制刷新</button></h2>
+  return `<h2>用量<span class="spacer"></span><button class="small" id="q-refresh">强制刷新</button></h2>
     <div class="stack">${quota.length ? quota.map(quotaCard).join("") : `<div class="empty">加载中…</div>`}</div>
-    <p class="dim">Claude 的 5h / 7d 窗口来自订阅的限额事件；Codex 来自 app-server；DeepSeek 是账户余额。</p>`;
+    <p class="dim">Claude 的 5h / 7d 窗口来自订阅的限额事件；Codex 的数据来自 app-server；DeepSeek 显示账户余额。</p>`;
 }

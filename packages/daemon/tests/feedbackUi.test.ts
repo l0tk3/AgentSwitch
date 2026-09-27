@@ -14,7 +14,7 @@ describe("feedback timeline receipts", () => {
     const user = detail.eventLine(receipt());
     const router = detail.eventLine(receipt({ source: "router" }));
     expect(user).toContain("反馈已记录（用户确认）");
-    expect(router).toContain("反馈已记录（路由器答复）");
+    expect(router).toContain("反馈已记录（调度模型答复）");
     expect(router).not.toContain("用户确认");
     for (const line of [user, router]) expect(line).toContain("已加入后续上下文");
   });

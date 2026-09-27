@@ -82,7 +82,7 @@ describe("daemon wiring of the enc:ref: wrapper (real executors)", () => {
     expect(seen).toHaveLength(0);
     const done = d.store.getTask(task.id)!;
     expect(done.status).toBe("failed");
-    expect(done.error).toContain("secret-gate 代理未运行");
+    expect(done.error).toContain("凭据网关未运行");
     expect(done.attempts.map((a) => a.kind)).toEqual(["gate_unavailable"]);
   });
 });

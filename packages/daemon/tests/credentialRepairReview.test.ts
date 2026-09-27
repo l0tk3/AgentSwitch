@@ -16,7 +16,7 @@ const host = "admin.example.test";
 const otherHost = "second.example.test";
 const taskText = `将 ${original} 的 TOTP 种子导入 ${host} 和 ${otherHost} 的种子字段，随后仍用原凭据生成验证码登录。`;
 const metadata: CredentialMetadata = { label: "fake fixture", kind: "totp", hosts: [host, otherHost], uses: ["otp"], seed_import_hosts: [host, otherHost] };
-const issued = (destination = host, token = repaired): ReissuedCredential => ({ label: "fake fixture", kind: "secret", token, hosts: [destination], uses: ["http"], seed_import_hosts: [] });
+const issued = (destination = host, token = repaired): ReissuedCredential => ({ label: "fake fixture", kind: "secret", token, hosts: [destination], uses: ["fill", "http"], seed_import_hosts: [] });
 const fixtures: { store: Store; dir: string }[] = [];
 
 afterEach(() => {

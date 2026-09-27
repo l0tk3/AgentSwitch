@@ -23,6 +23,7 @@ import { runOnServer } from "./opencodeServeRun.js";
 import { opencodeExecConfig, outcomeFromRun, SUBAGENT_TOOL, type OpenCodeExtras, type RunSummary } from "./opencodeShared.js";
 import { spawnOwned, terminateProcess } from "../harness/processes.js";
 import type { ProtectedPaths } from "./protected.js";
+import { clipInput, clipOutput } from "./toolEvents.js";
 import type { ExecutionInput, Executor } from "./types.js";
 
 export { opencodeExecConfig, outcomeFromRun, protectedDeny, type OpenCodeExtras, type RunSummary } from "./opencodeShared.js";
@@ -52,7 +53,10 @@ export function summarizeRun(stdout: string): RunSummary {
     try { ev = JSON.parse(line); } catch { out.telemetryComplete = false; continue; }
     if (typeof ev.sessionID === "string" && !out.sessionId) out.sessionId = ev.sessionID;
     if (ev.type === "text" && typeof ev.part?.text === "string") out.text += ev.part.text;
-    else if (ev.type === "tool_use" && ev.part) out.tools.push({ tool: String(ev.part.tool ?? "?"), input: ev.part.input ?? ev.part.state ?? null });
+    else if (ev.type === "tool_use" && ev.part) {
+      const state = (ev.part.state ?? {}) as { input?: unknown; output?: unknown; status?: string };
+      out.tools.push({ tool: String(ev.part.tool ?? "?"), input: ev.part.input ?? state.input ?? ev.part.state ?? null, ...(state.output !== undefined ? { output: clipOutput(state.output) } : {}) });
+    }
     else if (ev.type === "error") out.errors.push(typeof ev.error === "string" ? ev.error : ev.message ?? JSON.stringify(ev.error ?? ev));
     else if (!["step_start", "step_finish", "reasoning", "text"].includes(ev.type ?? "")) out.telemetryComplete = false;
   }
@@ -85,7 +89,7 @@ function runOnce(binary: string, prompt: string, resume: string | null, input: E
         const one = summarizeRun(line);
         if (one.text) input.emit("text", { text: one.text });
         for (const t of one.tools) {
-          input.emit("tool_call", { tool: t.tool, input: t.input });
+          input.emit("tool_call", { tool: t.tool, input: clipInput(t.input), ...(t.output !== undefined ? { output: t.output } : {}) });
           if (SUBAGENT_TOOL.test(t.tool)) input.emit("agent", { harness: "opencode", agentId: "", status: "completed", description: String((t.input as { description?: string } | null)?.description ?? "sub-agent") });
         }
       }

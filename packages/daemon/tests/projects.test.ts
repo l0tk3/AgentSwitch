@@ -1,7 +1,7 @@
-/** Project folders a phone task may run in (assistant-v0 §5, 2026-09-25): registered on the Mac only, each checked
- *  against the cwd rules when saved and again when a task goes there; a phone task names one instead of a path. */
+/** Folders a phone task runs in (assistant-v0 §5). The registered project list is gone (2026-09-25, user decision):
+ *  a task names a folder by its path, and the assistant offers the folders earlier tasks worked in. */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -24,74 +24,41 @@ function daemon(assistant?: Router) {
   return { d, repo: realpathSync(repo), home: cfg.home, call };
 }
 
-describe("project folders for phone tasks", () => {
-  it("are set on the Mac, read from anywhere; a phone may not change them", async () => {
+describe("folders for phone tasks", () => {
+  it("there is no project list any more: the routes are gone and a task names a folder by its path (2026-09-25)", async () => {
     const f = daemon();
-    const saved = await f.call("PUT", "/projects", { projects: [{ name: "AgentSwitch", path: f.repo }] });
-    expect(saved).toMatchObject({ status: 200, body: { projects: [{ name: "AgentSwitch", path: f.repo }] } });
-    expect((await f.call("GET", "/projects", undefined, true)).body.projects).toEqual([{ name: "AgentSwitch", path: f.repo }]);
-    expect((await f.call("PUT", "/projects", { projects: [] }, true)).status).toBe(403);
-    expect((await f.call("GET", "/projects")).body.projects).toHaveLength(1);
-  });
-
-  it("refuses folders the cwd rules refuse, missing ones and duplicate names", async () => {
-    const f = daemon();
-    for (const path of [process.env.HOME!, "/", join(f.home, "work"), join(f.repo, "missing"), join(process.env.HOME!, ".ssh")]) {
-      expect((await f.call("PUT", "/projects", { projects: [{ name: "x", path }] })).status, path).toBe(400);
-    }
-    expect((await f.call("PUT", "/projects", { projects: [{ name: "a", path: f.repo }, { name: "A", path: f.repo }] })).status).toBe(400);
-  });
-
-  it("a task names a project and runs in its folder, not a throw-away one; also from the phone", async () => {
-    const f = daemon();
-    await f.call("PUT", "/projects", { projects: [{ name: "AgentSwitch", path: f.repo }] });
-    const local = await f.call("POST", "/tasks", { task: "跑一下测试", project: "agentswitch" });
-    expect(local.body).toMatchObject({ cwd: f.repo, ephemeral: false });
-    const phone = await f.call("POST", "/tasks", { task: "跑一下测试", project: "AgentSwitch" }, true);
+    expect((await f.d.app.request("/projects")).status).toBe(404);
+    expect((await f.d.app.request("/projects", {}, markRemote({}, { deviceId: "phone" }))).status).toBe(404);
+    const phone = await f.call("POST", "/tasks", { task: "跑一下测试", cwd: f.repo }, true);
     expect(phone.body).toMatchObject({ cwd: f.repo, ephemeral: false });
-    expect((await f.call("POST", "/tasks", { task: "x", project: "nope" })).status).toBe(400);
-    expect((await f.call("POST", "/tasks", { task: "x", project: "AgentSwitch", cwd: f.repo })).status).toBe(400);
     await f.d.engine.idle();
-  });
-
-  it("a project folder that went away is refused at use, not run somewhere else", async () => {
-    const f = daemon();
-    await f.call("PUT", "/projects", { projects: [{ name: "AgentSwitch", path: f.repo }] });
-    rmSync(f.repo, { recursive: true });
-    const r = await f.call("POST", "/tasks", { task: "x", project: "AgentSwitch" });
-    expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/not an existing directory/);
-    expect((await f.call("GET", "/projects")).body.projects[0].problem).toMatch(/not an existing directory/);
   });
 
   it("the assistant sends a task into a folder the user names (2026-09-25); one the cwd rules refuse is said, not run", async () => {
     const replies: string[] = [];
     const f = daemon({ name: "assistant-test", async route() { return { text: replies.shift() ?? "", elapsedMs: 1 }; } });
-    replies.push(JSON.stringify({ action: "create_task", text: "好的。", cwd: f.repo }), JSON.stringify({ action: "create_task", text: "好的。", cwd: "~" }));
+    replies.push(JSON.stringify({ action: "create_task", text: "已建任务。", cwd: f.repo }), JSON.stringify({ action: "create_task", text: "已建任务。", cwd: "~" }));
     const say = (text: string) => f.call("POST", "/assistant", { text, client_id: `c-${Math.random().toString(36).slice(2, 12)}` }, true);
     const named = await say(`在 ${f.repo} 里跑一下测试`);
     expect(named.body.task).toMatchObject({ cwd: f.repo, ephemeral: false });
     const home = await say("在我的主目录里整理一下");
     expect(home.body.task).toBeUndefined();
-    expect(home.body.assistant.text).toMatch(/没能建成任务.*too broad/);
+    expect(home.body.assistant.text).toMatch(/任务未创建.*too broad/);
     await f.d.engine.idle();
   });
 
-  it("the assistant sees the projects and sends a task into the one the user means; an unknown name gets a scratch folder", async () => {
+  it("the assistant sees the folders earlier tasks worked in, not the scratch ones, and goes back to one the user means", async () => {
     const calls: string[] = [];
-    const replies = [
-      JSON.stringify({ action: "create_task", text: "好的。", project: "AgentSwitch" }),
-      JSON.stringify({ action: "create_task", text: "好的。", project: "Unregistered" }),
-    ];
+    const replies: string[] = [];
     const f = daemon({ name: "assistant-test", async route(input) { calls.push(input.task); return { text: replies.shift() ?? "", elapsedMs: 1 }; } });
-    await f.call("PUT", "/projects", { projects: [{ name: "AgentSwitch", path: f.repo }] });
-    const say = (text: string) => f.call("POST", "/assistant", { text, client_id: `c-${Math.random().toString(36).slice(2, 12)}` }, true);
-    const inRepo = await say("修一下 AgentSwitch 的 bug");
-    expect(calls[0]).toContain(`- "AgentSwitch": ${f.repo}`);
-    expect(inRepo.body.task).toMatchObject({ cwd: f.repo, ephemeral: false });
-    const scratch = await say("随便建个目录试试");
-    expect(scratch.body.task.cwd).not.toBe(f.repo);
-    expect(scratch.body.task.ephemeral).toBe(true);
+    await f.call("POST", "/tasks", { task: "修一下登录页", cwd: f.repo });
+    await f.call("POST", "/tasks", { task: "随便试试" });
+    await f.d.engine.idle();
+    replies.push(JSON.stringify({ action: "create_task", text: "已建任务。", cwd: f.repo }));
+    const again = await f.call("POST", "/assistant", { text: "还是那个仓库，再跑一遍测试", client_id: "c-again-0001" }, true);
+    const folders = calls[0]!.split("Folders earlier tasks worked in (newest first):\n")[1]!.split("\n\n")[0]!;
+    expect(folders).toMatch(new RegExp(`^- ${f.repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} — .*修一下登录页$`));
+    expect(again.body.task).toMatchObject({ cwd: f.repo, ephemeral: false });
     await f.d.engine.idle();
   });
 });

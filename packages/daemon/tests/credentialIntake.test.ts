@@ -20,12 +20,12 @@ describe("credential intake purpose", () => {
     const [entry] = planSeal(text, [found]).entries;
     expect(entry).toMatchObject({ kind: "totp", uses: ["otp"] });
     expect(entry).not.toHaveProperty("seed_import_hosts");
-    expect(planSeal(text, [{ ...found, purpose: "totp_seed_import", seed_import_evidence: text }]).entries[0]).toMatchObject({ kind: "secret", uses: ["http"], purpose: "totp_seed_import" });
+    expect(planSeal(text, [{ ...found, purpose: "totp_seed_import", seed_import_evidence: text }]).entries[0]).toMatchObject({ kind: "secret", uses: ["http", "fill"], purpose: "totp_seed_import" });
   });
 
   it("seed import forces secret/http and removes unnecessary grants rather than making a TOTP/http token", () => {
     const planned = planSeal(text, [{ ...found, purpose: "totp_seed_import", uses: ["otp", "exec", "http"], seed_import_hosts: [host], seed_import_evidence: text }]);
-    expect(planned.entries[0]).toEqual({ label: "admin/seed", field: "2FA seed", value: seed, kind: "secret", uses: ["http"], hosts: [host], purpose: "totp_seed_import" });
+    expect(planned.entries[0]).toEqual({ label: "admin/seed", field: "2FA seed", value: seed, kind: "secret", uses: ["http", "fill"], hosts: [host], purpose: "totp_seed_import" });
   });
 
   it("login verification remains TOTP/otp with no seed-import authorization", () => {
@@ -73,7 +73,7 @@ describe("credential intake purpose", () => {
     const body = JSON.stringify({ secrets: [f] });
     const task = `种子 ${seed}`;
     const seal = () => routerSealer(echoRouter([body]), fakeMinter(), () => `目标 https://${host}/`);
-    expect(await seal()(task, { parentTask: authorization })).toMatchObject({ ok: true, sealed: [{ kind: "secret", uses: ["http"] }] });
+    expect(await seal()(task, { parentTask: authorization })).toMatchObject({ ok: true, sealed: [{ kind: "secret", uses: ["http", "fill"] }] });
     expect(await seal()(task, { threadTitle: authorization })).toMatchObject({ ok: false, error: expect.stringContaining("原文授权依据") });
   });
 

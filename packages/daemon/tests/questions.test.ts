@@ -38,7 +38,7 @@ describe("question helpers", () => {
     const translated = "要检查哪个管理页面？";
     const original = "Which management page should be inspected?";
     const question = clarifyQuestion(translated, original);
-    expect(question).toMatchObject({ header: "路由器", text: translated, originalText: original });
+    expect(question).toMatchObject({ header: "调度模型", text: translated, originalText: original });
     const evidence = { source: "router" as const, questions: [question] };
     expect(parseEvidence(encodeEvidence(evidence))).toEqual(evidence);
     expect(clarifyQuestion(translated, translated)).not.toHaveProperty("originalText");

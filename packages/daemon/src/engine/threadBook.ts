@@ -72,7 +72,7 @@ export class ThreadBook {
     const candidate = wanted && wanted.status === "open" ? wanted : undefined;
     if (!candidate) return this.place(task, this.ctx.store.createThread(task.cwd).id, "new", decision?.thread_confidence ?? null, false);
     if (confidence >= this.deps.targets.router.thread_confidence) return this.place(task, candidate.id, "router", confidence, true);
-    const answer = await askUser(`归到线程「${candidate.title ?? candidate.id}」？允许 = 归入并接着做，拒绝 = 新开线程`, `路由器置信度 ${confidence}；线程目录 ${candidate.cwd}`);
+    const answer = await askUser(`是否归入会话「${candidate.title ?? candidate.id}」？允许：归入并继续；拒绝：新建会话`, `调度模型置信度 ${confidence}；会话目录 ${candidate.cwd}`);
     return answer === "allow" ? this.place(task, candidate.id, "user", confidence, true) : this.place(task, this.ctx.store.createThread(task.cwd).id, "new", confidence, false);
   }
 

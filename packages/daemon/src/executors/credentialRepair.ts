@@ -2,7 +2,7 @@
 import { randomBytes, createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { Executor } from "./types.js";
-import { CredentialIssue, CredentialRepairError, repairCredential, type CredentialGate, type ReissuedCredential } from "../secrets/credentialRepair.js";
+import { CredentialIssue, CredentialRepairError, REISSUED_USES, repairCredential, type CredentialGate, type ReissuedCredential } from "../secrets/credentialRepair.js";
 import { exactHost } from "../util/host.js";
 import type { Router } from "../core/modelCall.js";
 import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
@@ -30,7 +30,7 @@ export function credentialRepairExecutor(executor: Executor, deps: { gate: Crede
         if (!known.has(p.originalToken) || typeof p.token !== "string" || !p.token.startsWith("enc:v1:")) continue;
         notes.push(`Seed import only, destination ${p.host}: ${p.token}. Original OTP token remains valid for generating codes.`);
         known.add(p.token);
-        receipts.set(JSON.stringify([p.originalToken, p.host, p.purpose]), { ok: true, token: p.token, label: p.label, kind: "secret", hosts: [p.host], uses: ["http"], seed_import_hosts: [] });
+        receipts.set(JSON.stringify([p.originalToken, p.host, p.purpose]), { ok: true, token: p.token, label: p.label, kind: "secret", hosts: [p.host], uses: [...REISSUED_USES], seed_import_hosts: [] });
       }
       const inflight = new Map<string, Promise<Reply>>();
       let attempts = 0, active = true;

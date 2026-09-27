@@ -13,6 +13,7 @@ import { markRemote } from "../src/core/caller.js";
 import { buildDaemon, type DaemonConfig } from "../src/daemon.js";
 import { UPDATE_REQUEST_FILE, UPDATE_RESULT_FILE, updateState } from "../src/files/appUpdate.js";
 import { TARGETS_PATH } from "./helpers.js";
+import { localTime } from "../src/util/localTime.js";
 
 function bundle(path: string, built: string): string {
   mkdirSync(join(path, "Contents", "Resources", "runtime"), { recursive: true });
@@ -57,7 +58,7 @@ describe("app updates", () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-update-"));
     writeFileSync(join(home, UPDATE_RESULT_FILE), JSON.stringify({ ok: true, reverted: false, from: "A", to: "2026-09-25T03:00:00Z", at: 1, reason: "" }));
     const first = daemon(undefined, home);
-    expect((await first.conversation()).map((m) => [m.kind, m.text])).toEqual([["notice", "新版本已装好（构建于 2026-09-25T03:00:00Z），服务正常。"]]);
+    expect((await first.conversation()).map((m) => [m.kind, m.text])).toEqual([["notice", `新版本已安装（构建于 ${localTime("2026-09-25T03:00:00Z")}），服务运行正常。`]]);
     expect(existsSync(join(home, UPDATE_RESULT_FILE))).toBe(false);
     expect((await first.call("GET", "/update")).body.last).toMatchObject({ ok: true });   // still readable, marked told
     first.d.close();
@@ -71,11 +72,11 @@ describe("app updates", () => {
     writeFileSync(join(home, UPDATE_RESULT_FILE), JSON.stringify({ ok: false, reverted: false, from: "A", to: "B", at: 1, reason: "macOS 在等你在 Mac 上允许" }));
     const reporter = new Reporter({ log: new AssistantLog(join(home, "assistant.db")), store: f.d.store, bus: new Bus(), home });
     reporter.tick();
-    expect((await f.conversation()).map((m) => m.text)).toEqual(["新版本没有装上。原因：macOS 在等你在 Mac 上允许"]);
+    expect((await f.conversation()).map((m) => m.text)).toEqual(["新版本安装失败。原因：macOS 在等你在 Mac 上允许"]);
   });
 
   it("a switch that fell back says so, with the reason", () => {
     expect(updateLine({ ok: false, reverted: true, from: "2026-09-25T01:00:00Z", to: "B", at: 1, reason: "the new version did not answer on port 4721 within 120s" }))
-      .toBe("新版本没能启动，已退回上一版（构建于 2026-09-25T01:00:00Z）。原因：the new version did not answer on port 4721 within 120s");
+      .toBe(`新版本未能启动，已恢复为上一版本（构建于 ${localTime("2026-09-25T01:00:00Z")}）。原因：the new version did not answer on port 4721 within 120s`);
   });
 });

@@ -214,7 +214,7 @@ describe("gate proxy down (gate-next-v0 §3)", () => {
     expect(seen).toHaveLength(0);
     expect(calls).toHaveLength(0);
     expect(outcome).toMatchObject({ ok: false, gateUnavailable: true, sideEffects: NO_SIDE_EFFECTS, sideEffectsKnown: true });
-    expect(outcome.stderr).toContain("secret-gate 代理未运行（127.0.0.1:8080: ECONNREFUSED）");
+    expect(outcome.stderr).toContain("凭据网关未运行（127.0.0.1:8080: ECONNREFUSED）");
     expect(outcome.stderr).toContain(GATE_DOWN_HINT);
     expect(excerpt(outcome).length).toBeLessThan(240);   // the whole message survives into attempt_failed
     expect(logs[0]).toContain("claude-code not started");

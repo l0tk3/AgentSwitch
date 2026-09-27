@@ -19,7 +19,7 @@ describe("seal helpers", () => {
   });
 
   it("parseSealReply tolerates prose around the JSON and rejects the wrong shape", () => {
-    expect(parseSealReply(`Sure: ${reply([{ value: "Hunter2!", label: "finance/pass", hosts: ["http://core:8600/"] }])} done`)).toMatchObject({ ok: true, secrets: [{ value: "Hunter2!", kind: "secret", uses: ["http"] }] });
+    expect(parseSealReply(`Sure: ${reply([{ value: "Hunter2!", label: "finance/pass", hosts: ["http://core:8600/"] }])} done`)).toMatchObject({ ok: true, secrets: [{ value: "Hunter2!", kind: "secret", uses: ["http", "fill"] }] });
     expect(parseSealReply("nothing here")).toMatchObject({ ok: false });
     expect(parseSealReply(reply([{ value: "", label: "x" }]))).toMatchObject({ ok: false });
   });
@@ -37,6 +37,19 @@ describe("seal helpers", () => {
     expect(plan.entries.map((e) => [e.label, e.hosts])).toEqual([["pass", ["core:8600"]]]);
     expect(plan.skipped).toEqual(["dup", "short", "absent", "x"]);
     expect(plan.unroutable).toEqual(["finance/account"]);
+  });
+
+  it("values typed into a page carry 'fill' so the gate service may type them (gate-service-v0 §1); API keys need not", () => {
+    // The model's reply without "uses" means a website value; seed imports are typed into a form field too.
+    expect(parseSealReply(reply([{ value: "Hunter2!", label: "finance/pass", hosts: ["core"] }]))).toMatchObject({ ok: true, secrets: [{ uses: ["http", "fill"] }] });
+    const text = "密码 Hunter2! 接口密钥 sk-live-abcdef12 种子 JBSWY3DPEHPK3PXP 录入 mfa.example 的种子字段";
+    const plan = planSeal(text, [
+      { value: "Hunter2!", label: "site/pass", field: "", kind: "secret", hosts: ["core"], uses: ["http", "fill"] },
+      { value: "sk-live-abcdef12", label: "api/key", field: "", kind: "secret", hosts: ["api.example"], uses: ["http"] },
+      { value: "JBSWY3DPEHPK3PXP", label: "mfa/seed", field: "", kind: "totp", hosts: ["mfa.example"], uses: ["otp"], purpose: "totp_seed_import", seed_import_evidence: "录入 mfa.example 的种子字段" },
+    ]);
+    expect(plan.entries.map((e) => [e.label, e.uses])).toEqual([["site/pass", ["http", "fill"]], ["api/key", ["http"]], ["mfa/seed", ["http", "fill"]]]);
+    expect(planSeal("pw Hunter2!", [{ value: "Hunter2!", label: "x/pass", field: "", kind: "secret", hosts: [], uses: ["fill"] }]).unroutable).toEqual(["x/pass"]);
   });
 
   it("applyTokens replaces every occurrence, longest value first", () => {
@@ -63,7 +76,7 @@ describe("routerSealer", () => {
     expect(r.text).not.toContain("Hunter2!");
     expect(r.text).not.toContain("lotke@x.io");
     expect(r.text).toContain("导出九月报表");
-    expect(r.sealed.map(({ token: _t, ...rest }) => rest)).toEqual([{ label: "finance/pass", field: "account password", kind: "secret", hosts: ["core.internal:8600"], uses: ["http"] }, { label: "finance/account", field: "login email", kind: "secret", hosts: ["core.internal:8600"], uses: ["http"] }]);
+    expect(r.sealed.map(({ token: _t, ...rest }) => rest)).toEqual([{ label: "finance/pass", field: "account password", kind: "secret", hosts: ["core.internal:8600"], uses: ["http", "fill"] }, { label: "finance/account", field: "login email", kind: "secret", hosts: ["core.internal:8600"], uses: ["http", "fill"] }]);
     const [body, legendPart] = r.text.split(LEGEND_HEADER);
     expect(body!.match(/enc:v1:[A-Za-z0-9_=-]+/g)).toHaveLength(2);
     expect(legendPart).toContain(`- account password (for core.internal:8600): ${r.sealed[0]!.token}`);
@@ -86,7 +99,7 @@ describe("routerSealer", () => {
 
   it("nothing found leaves the text as is; a missing host, a bad reply, a minter failure or a timeout refuse the submission", async () => {
     expect(await routerSealer(echoRouter([reply([])]), fakeMinter(), () => "")("plain")).toMatchObject({ ok: true, text: "plain", sealed: [] });
-    expect(await routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: [] }])]), fakeMinter(), () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unroutable", error: expect.stringContaining("不知道这些凭据要用在哪个站点") });
+    expect(await routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: [] }])]), fakeMinter(), () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unroutable", error: expect.stringContaining("无法确定这些凭据所属的站点") });
     expect(await routerSealer(echoRouter(["no json"]), fakeMinter(), () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unavailable" });
     const refusing = async (entries: readonly MintEntry[]) => entries.map((e) => ({ label: e.label, error: "invalid label" }));
     expect(await routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: ["a"] }])]), refusing, () => "")("pw Hunter2!")).toMatchObject({ ok: false, code: "unavailable", error: "凭据加密暂时不可用，请稍后重试。" });
@@ -137,7 +150,7 @@ describe("POST /tasks with plaintext credentials", () => {
     const unroutable = routerSealer(echoRouter([reply([{ value: "Hunter2!", label: "x/pass", hosts: [] }])]), fakeMinter(), () => "");
     const r = await daemon(unroutable).post({ task: "密码 Hunter2!", cwd: "/tmp" });
     expect(r.status).toBe(400);
-    expect(((await r.json()) as { error: string }).error).toContain("不知道这些凭据要用在哪个站点");
+    expect(((await r.json()) as { error: string }).error).toContain("无法确定这些凭据所属的站点");
   });
 });
 

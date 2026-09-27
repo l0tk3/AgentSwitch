@@ -296,13 +296,23 @@ describe("device tokens", () => {
 describe("remote route allowlist", () => {
   it("lists exactly the doc's routes", () => {
     expect(REMOTE_ROUTES.map(([m, p]) => `${m} ${p}`)).toEqual([
-      "GET /healthz", "POST /pair", "GET /me", "GET /gate/pubkey", "GET /tasks", "POST /tasks", "GET /tasks/:id", "GET /tasks/:id/events",
+      "GET /healthz", "POST /pair", "GET /me", "GET /addresses", "GET /gate/pubkey", "GET /tasks", "POST /tasks", "GET /tasks/:id", "GET /tasks/:id/events",
       "POST /tasks/:id/answer", "POST /tasks/:id/approve", "POST /tasks/:id/cancel", "POST /tasks/:id/handoff", "POST /tasks/:id/rate",
-      "GET /tasks/:id/files", "GET /tasks/:id/files/*", "GET /approvals", "GET /threads", "GET /threads/:id", "PATCH /threads/:id",
+      "POST /tasks/:id/ack", "GET /search", "GET /tasks/:id/files", "GET /tasks/:id/files/*", "GET /approvals", "GET /threads", "GET /threads/:id", "PATCH /threads/:id",
       "POST /threads/:id/archive", "POST /threads/:id/reopen", "DELETE /tasks/:id", "DELETE /threads/:id", "GET /quota", "POST /quota/refresh",
       "GET /targets", "POST /uploads", "GET /context", "PUT /context", "GET /context/example", "POST /assistant", "GET /assistant",
-      "GET /projects", "GET /update", "POST /update/install",
+      "GET /sessions", "GET /sessions/:harness/:id", "GET /approvals/policy", "GET /settings/workdir", "GET /update", "POST /update/install",
     ]);
+  });
+
+  it("every listed route is reachable with real values in its parameters (e.g. /sessions/claude-code/<id>)", () => {
+    for (const [method, pattern] of REMOTE_ROUTES) {
+      const path = pattern.split("/").map((seg) => (seg.startsWith(":") ? "abc" : seg === "*" ? "a/b.png" : seg)).join("/");
+      expect(remoteAllowed(method, path), `${method} ${path}`).toBe(true);
+    }
+    expect(remoteAllowed("GET", "/sessions/claude-code/0e3e5e94-d0e2-4f5b-b869-85d7a3bb725b")).toBe(true);
+    expect(remoteAllowed("GET", "/sessions/claude-code")).toBe(false);
+    expect(remoteAllowed("GET", "/sessions/claude-code/x/y")).toBe(false);
   });
 
   it("matches methods and single path segments exactly", () => {
@@ -310,7 +320,7 @@ describe("remote route allowlist", () => {
       ["PUT", "/context"], ["GET", "/context/example"], ["DELETE", "/tasks/abc"], ["DELETE", "/threads/t1"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(true);
     for (const [m, p] of [["PUT", "/memory"], ["DELETE", "/platform-memory/x"], ["DELETE", "/mcp/x"], ["DELETE", "/skills/x"], ["DELETE", "/tasks/a/b"], ["DELETE", "/threads/"],
       ["POST", "/context"], ["DELETE", "/context"], ["GET", "/mcp"], ["GET", "/skills"], ["GET", "/memory"], ["GET", "/records"],
-      ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["GET", "/approvals/policy"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
+      ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
       ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/tasks/"], ["GET", "/tasks/a/b"], ["GET", "/tasks/a/files/"], ["POST", "/route/preview"],
       ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"], ["PUT", "/projects"], ["POST", "/update"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
   });

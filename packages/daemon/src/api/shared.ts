@@ -18,6 +18,7 @@ import type { RouteDeps } from "../router/route.js";
 import type { Targets } from "../router/targets.js";
 import { zodIssues } from "../util/zod.js";
 import type { CwdRules } from "./cwdPolicy.js";
+import type { SessionMonitor } from "../sessions/monitor.js";
 
 /** The most rows a `?limit=` may ask for. */
 const MAX_LIST_LIMIT = 500;
@@ -37,13 +38,15 @@ export type ApiDeps = {
   readonly platformMemoryPath?: string;
   readonly policyPath: string;
   readonly workRoot: string;
+  /** The default work folder in force (docs/control-v0.md §2); absent = throw-away folders under `workRoot`. */
+  readonly taskFolderRoot?: () => string;
+  /** The Mac's coding sessions (docs/control-v0.md §3); absent = not watched. */
+  readonly sessions?: SessionMonitor;
   readonly uploads: Uploads;
   readonly artifactsDir: string;
   readonly extensions: Extensions;
   readonly version: string;
   readonly cwdRules: CwdRules;
-  /** `$AGENTSWITCH_HOME/projects.json`: the project directories a phone task may name (absent = none). */
-  readonly projectsPath?: string;
   /** `$AGENTSWITCH_HOME`: where the update request and result files are (assistant-v0 §5). */
   readonly home?: string;
   /** The AgentSwitch.app this daemon runs from (the Mac app passes it); absent outside the app: no updates. */

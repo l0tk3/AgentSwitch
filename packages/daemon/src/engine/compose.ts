@@ -38,6 +38,8 @@ export type ComposeDeps = {
   readonly memoryPath?: string;
   readonly platformMemoryPath?: string;
   readonly extensionsSummary?: () => ExtensionsSummary;
+  /** control-v0 §3: the user's own coding sessions around a folder, for the router. */
+  readonly sessionsNear?: (cwd: string) => string | null;
 };
 
 export class Composer {
@@ -169,6 +171,7 @@ export class Composer {
       ...(context ? { context } : {}), ...(memory ? { memory } : {}),
       platformMemory: (task) => platformExperience(this.deps.platformMemoryPath, task, context?.text ?? "", this.ctx.now()),
       ...(this.deps.extensionsSummary ? { extensions: this.deps.extensionsSummary() } : {}),
+      ...(this.deps.sessionsNear ? { sessionsNear: this.deps.sessionsNear } : {}),
     };
   }
 }

@@ -18,6 +18,16 @@ describe("route()", () => {
     expect(r.calls[0]!.task).toContain("Working directory: /tmp/x");
   });
 
+  it("the router reads the user's own coding sessions around the task's folder, when there are any (control-v0 §3)", async () => {
+    const r = echoRouter([decisionJson(), decisionJson()]);
+    const near = (cwd: string) => cwd === "/tmp/x" ? "- /tmp/x · 2 h ago · Codex 3 (latest 2 h ago: \"跑一下测试\")" : null;
+    await route(req, deps(r, { sessionsNear: near }));
+    expect(r.calls[0]!.task).toContain("The user's own coding sessions in or around this folder");
+    expect(r.calls[0]!.task).toContain("Codex 3 (latest 2 h ago");
+    await route({ ...req, cwd: "/tmp/y" }, deps(r, { sessionsNear: near }));
+    expect(r.calls[1]!.task).not.toContain("coding sessions");
+  });
+
   it("invalid JSON is retried once with the error, then falls back to the default policy", async () => {
     const r = echoRouter(["nonsense", "{\"harness\": 1}"]);
     const out = await route(req, deps(r));

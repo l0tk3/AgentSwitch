@@ -38,6 +38,8 @@ export type RemoteAppDeps = {
   readonly pairing: PairingDesk;
   readonly presence: Presence;
   readonly gateKey: GateKeyReader;
+  /** The Mac's addresses now (LAN, Tailscale): a phone keeps its copy from pairing up to date with them. */
+  readonly addresses?: () => Promise<{ readonly lan: readonly string[]; readonly tailnet: readonly string[] }>;
   /** The local API (without its local-only management routes); allowed routes not answered here go to it. */
   readonly local: { readonly fetch: (request: Request, env?: HttpBindings) => Response | Promise<Response> };
   /** Source predicate, the same one the connection hook uses; tests may narrow it. */
@@ -92,6 +94,13 @@ export function createRemoteApp(deps: RemoteAppDeps): Hono<Env> {
   app.get("/me", (c) => {
     const d = c.get("device");
     return c.json({ deviceId: d.id, name: d.name, platform: d.platform });
+  });
+
+  /** Where the Mac can be reached now (2026-09-26: a phone paired before Tailscale was detected had no tailnet address
+   *  and could not connect off the LAN). Separate from /me, which every probe calls: the Tailscale CLI takes seconds. */
+  app.get("/addresses", async (c) => {
+    const found = deps.addresses ? await deps.addresses().catch(() => null) : null;
+    return found ? c.json({ lan: found.lan, tailnet: found.tailnet }) : c.json({ error: "addresses unavailable" }, 503);
   });
 
   app.get("/gate/pubkey", async (c) => {

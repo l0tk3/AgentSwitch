@@ -119,7 +119,7 @@ describe("assistant", () => {
     expect(assistant.calls[2]).toMatch(/watched every 5 min/);
     expect(stop.body.assistant).toMatchObject({ kind: "watch", taskIds: [task.id] });
     const none = await f.say("盯着那个不存在的");
-    expect(none.body.assistant).toMatchObject({ kind: "reply", text: "没有找到正在进行的这个任务。" });
+    expect(none.body.assistant).toMatchObject({ kind: "reply", text: "未找到对应的进行中任务。" });
     expect(assistant.calls[3]).not.toMatch(/watched every/);   // stopped
     f.d.engine.cancel(task.id);
     await f.d.engine.idle();

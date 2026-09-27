@@ -28,7 +28,7 @@ export function submitAnswer(el) {
   if (["sending", "sent", "uncertain", "resolved"].includes(get().answerSubmissions[approvalId]?.status)) return;
   const given = collectAnswers(approvalId);
   if (!given) {
-    setAnswerSubmission(approvalId, { taskId, status: "error", message: "请先回答每个问题，再提交。" });
+    setAnswerSubmission(approvalId, { taskId, status: "error", message: "请回答所有问题后再提交。" });
     return;
   }
   return answer(taskId, approvalId, given);

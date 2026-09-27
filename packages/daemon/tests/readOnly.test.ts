@@ -28,6 +28,8 @@ describe("read-only commands", () => {
       "cat package.json 2>/dev/null; echo done",
       "cd packages/daemon && git log -n 3",
       "ps aux | grep node",
+      // What runs on the Mac (2026-09-25: "查看 mac 占用高 cpu 的进程" was refused `top`).
+      "top -l 1 -n 15 -o cpu 2>&1 | head -n 25", "pgrep -fl node", "uptime", "vm_stat", "sysctl -n hw.ncpu", "netstat -an | grep LISTEN",
       // Other folders of the Mac too (user decision the same day): like Claude Code on it.
       "git -C /Users/u/Desktop/other log -n 5", "cat /etc/hosts", "cd /tmp && ls", "ls ~/Documents", "cat ../outside.txt",
     ]) expect(ro(c), c).toBe(true);
@@ -43,6 +45,7 @@ describe("read-only commands", () => {
       "PATH=/tmp/evil:$PATH git log", "sort -o out.txt in.txt",
       "cat ~/.secret-gate/keys/default.key", "ls /Users/u/.agentswitch", "grep -r x \"$HOME/.secret-gate\"",
       "echo 'unterminated",
+      "top", "top -o cpu", "top -l 0", "top -l 100", "sysctl -w kern.x=1", "sysctl kern.x=1", "vm_stat 1",
     ]) expect(ro(c), c).toBe(false);
   });
 

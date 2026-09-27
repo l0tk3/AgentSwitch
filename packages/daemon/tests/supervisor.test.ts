@@ -50,7 +50,7 @@ describe("supervisor: floor and parsing", () => {
     expect(await bad.checkIn({ brief: "b", elapsedMs: 1, silentMs: 1, recentEvents: [], agentsRunning: 0, continues: 0, cwd: "/w" })).toMatchObject({ action: "continue", source: "error" });
     expect(await bad.accept({ brief: "b", result: "r", diff: "", outFiles: [], cwd: "/w" })).toMatchObject({ accepted: false, source: "error" });
     const thrown = routerSupervisor({ name: "t", route: async () => { throw new Error("boom"); } }, cfg);
-    expect(await thrown.approve({ brief: "b", action: "Bash: ls", evidence: "", recentEvents: [], sideEffects: "", cwd: "/w" })).toMatchObject({ decision: "ask_user", reason: "监督者服务暂不可用" });
+    expect(await thrown.approve({ brief: "b", action: "Bash: ls", evidence: "", recentEvents: [], sideEffects: "", cwd: "/w" })).toMatchObject({ decision: "ask_user", reason: "调度模型暂不可用" });
   });
 });
 

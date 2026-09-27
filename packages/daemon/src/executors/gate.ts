@@ -12,6 +12,9 @@ import type { CredentialRepair, ExecutionInput } from "./types.js";
 export type GateOptions = {
   readonly bin: string;            // .../packages/secret-gate/.venv/bin/secret-gate
   readonly home: string;           // ~/.secret-gate
+  /** The gate's CA certificate the executors trust: `$SECRET_GATE_CA` (the service's published copy, gate-service-v0
+   *  §3.3), else `<home>/ca.pem`. */
+  readonly ca?: string;
   readonly proxy: string;          // http://127.0.0.1:8080
   readonly playwrightVersion: string;
   readonly allowedOrigins: readonly string[];
@@ -41,9 +44,11 @@ export function gateNotFound(env: NodeJS.ProcessEnv = process.env, venv: string 
 export function defaultGate(env: NodeJS.ProcessEnv = process.env, venv: string = VENV_GATE_BIN): GateOptions | null {
   const bin = gateBin(env, venv);
   if (!bin) return null;
+  const home = env.SECRET_GATE_HOME ?? join(env.HOME ?? "", ".secret-gate");
   return {
     bin,
-    home: env.SECRET_GATE_HOME ?? join(env.HOME ?? "", ".secret-gate"),
+    home,
+    ca: env.SECRET_GATE_CA || join(home, "ca.pem"),
     proxy: env.SECRET_GATE_PROXY ?? "http://127.0.0.1:8080",
     playwrightVersion: env.PW_MCP_VERSION ?? "0.0.82",
     allowedOrigins: (env.AGENTSWITCH_BROWSER_ORIGINS ?? "").split(";").filter(Boolean),
@@ -92,8 +97,8 @@ export function gateEnv(gate: GateOptions, scope?: string | null): Record<string
 }
 
 /** The gate CA as trust variables, once `secret-gate install-ca` (or the Mac app) has exported it. */
-function gateTrust(gate: Pick<GateOptions, "home">): Record<string, string> {
-  const ca = join(gate.home, "ca.pem");
+function gateTrust(gate: Pick<GateOptions, "home" | "ca">): Record<string, string> {
+  const ca = gate.ca ?? join(gate.home, "ca.pem");
   return existsSync(ca) ? { SSL_CERT_FILE: ca, REQUESTS_CA_BUNDLE: ca, NODE_EXTRA_CA_CERTS: ca } : {};
 }
 

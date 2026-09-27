@@ -258,6 +258,49 @@ describe("executor questions: the supervisor answers first", () => {
   });
 });
 
+describe("skip-permissions mode and withdrawn approvals (docs/control-v0.md §1, §4)", () => {
+  const outcome = { ok: true, exitCode: 0, lastText: "did it", sideEffects: { filesChanged: 0, commandsRun: 1, approvalsGranted: 0 } };
+
+  it("skip: an executor's approval is allowed at once, no card, nobody asked; a question still reaches the user", async () => {
+    const asked: string[] = [];
+    let answered: unknown = "unset";
+    const executor: Executor = { harness: "codex", async run(input) {
+      asked.push(await input.approve("Bash: git push origin main", "push it"));
+      answered = await input.ask([{ id: "q1", header: "账号", text: "用哪个账号？", options: [], multi: false, secret: false }]);
+      return outcome;
+    } };
+    const { engine, store, events, firstApproval } = build({ router: [codex()], planner: null, executors: [executor] });
+    const t = engine.submit({ task: "push", cwd: "/tmp/skip1", approval: { mode: "skip", human: [] } });
+    const id = await firstApproval(t.id);
+    expect(asked).toEqual(["allow"]);
+    expect(events.find((e) => e.taskId === t.id && e.type === "supervisor")?.payload).toMatchObject({ kind: "approval", decision: "allow", source: "policy", reason: "skip-permissions mode" });
+    expect(store.getApproval(id)).toMatchObject({ kind: "question" });
+    engine.answer(id, { text: "work" });
+    await engine.idle();
+    expect(answered).toEqual({ q1: ["work"] });
+    expect(store.getTask(t.id)!.status).toBe("done");
+  });
+
+  it("an approval the executor gave up on is withdrawn: the card goes, the answer is deny, the event says so", async () => {
+    let decision: unknown = "unset";
+    const executor: Executor = { harness: "codex", async run(input) {
+      const request = new AbortController();
+      const pending = input.approve("Bash: rm -rf build", "clean", request.signal);
+      setTimeout(() => request.abort(), 20);
+      decision = await pending;
+      return outcome;
+    } };
+    const { engine, store, events, firstApproval } = build({ router: [codex()], planner: null, executors: [executor] });
+    const t = engine.submit({ task: "clean", cwd: "/tmp/withdraw1", approval: { mode: "manual", human: [] } });
+    const id = await firstApproval(t.id);
+    await engine.idle();
+    expect(decision).toBe("deny");
+    expect(store.getApproval(id)!.status).toBe("withdrawn");
+    expect(events.find((e) => e.taskId === t.id && e.type === "approval_resolved")?.payload).toMatchObject({ approvalId: id, decision: "withdrawn", status: "withdrawn", by: "executor" });
+    expect(store.pendingApprovals(t.id)).toEqual([]);
+  });
+});
+
 describe("stepsNote", () => {
   it("is empty without dispatch/ask steps and otherwise lists them as context, not approval", () => {
     expect(stepsNote([])).toBe("");

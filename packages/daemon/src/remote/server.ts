@@ -30,6 +30,9 @@ function bind(server: Server, port: number, host: string): Promise<void> {
   });
 }
 
+/** How often one address's handshake failures are logged. */
+const TLS_ERROR_LOG_MS = 10_000;
+
 export async function listenRemote(opts: ListenOptions): Promise<RemoteListener> {
   const allow = opts.allowSource ?? isAllowedSource;
   const log = opts.log ?? console.error;
@@ -39,8 +42,19 @@ export async function listenRemote(opts: ListenOptions): Promise<RemoteListener>
   const server = createServer({ key: opts.tls.key, cert: opts.tls.cert, minVersion: "TLSv1.2" }, listener);
   // Ahead of the TLS server's own listener: a refused socket never starts a handshake.
   server.prependListener("connection", (socket: Socket) => { guardConnection(socket, allow); });
-  // Handshake failures (a refused socket, a scanner, a phone that does not pin this certificate) are not our errors.
-  server.on("tlsClientError", (_err, socket) => socket.destroy());
+  // Handshake failures (a refused socket, a scanner, a phone that does not pin this certificate) are not our errors, but
+  // one from an allowed network is said once per address and 10 s (2026-09-26: over Tailscale the app's handshakes
+  // died unseen while Safari's went through).
+  const told = new Map<string, number>();
+  server.on("tlsClientError", (err, socket) => {
+    const from = socket.remoteAddress;
+    const now = Date.now();
+    if (from && allow(from) && now - (told.get(from) ?? 0) > TLS_ERROR_LOG_MS) {
+      told.set(from, now);
+      log(`remote TLS handshake failed from ${from}: ${(err as NodeJS.ErrnoException).code ?? ""} ${err.message}`.replace(/\s+/g, " "));
+    }
+    socket.destroy();
+  });
   const host = opts.host ?? "::";
   try {
     await bind(server, opts.port, host);

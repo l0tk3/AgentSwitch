@@ -5,6 +5,7 @@
 import type { Store } from "../engine/store.js";
 import { TERMINAL, type Task, type TaskEvent } from "../engine/types.js";
 import { LEGEND_HEADER } from "../secrets/sealer.js";
+import { ago } from "../util/ago.js";
 
 export const REGISTER_ACTIVE = 10;
 export const REGISTER_RECENT = 10;
@@ -12,7 +13,8 @@ const EXCERPT = 240;
 
 export type Register = { readonly text: string; readonly activeIds: ReadonlySet<string>; readonly allIds: ReadonlySet<string> };
 
-const STATUS: Record<string, string> = { queued: "排队中", routing: "分诊中", running: "执行中", waiting_approval: "等你答复", done: "已完成", partial: "部分完成", blocked: "执行受阻", failed: "失败", cancelled: "已取消" };
+/** The apps' fixed status words (docs/ui-v0.md §4), so the assistant says a task's state the way the screens do. */
+const STATUS: Record<string, string> = { queued: "排队", routing: "进行中", running: "进行中", waiting_approval: "等你处理", done: "已完成", partial: "未完成", blocked: "未完成", failed: "失败", cancelled: "已取消" };
 
 /** The user's text without the sealer's executor legend (it is for executors, not for talking about the task). */
 export function withoutLegend(text: string): string {
@@ -25,13 +27,7 @@ const clip = (text: string, n = EXCERPT) => {
   return one.length > n ? `${one.slice(0, n)}…` : one;
 };
 
-function ago(ms: number): string {
-  const min = Math.round(ms / 60_000);
-  if (min < 1) return "just now";
-  if (min < 60) return `${min} min ago`;
-  const h = Math.round(min / 60);
-  return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
-}
+export { ago };
 
 /** The latest line worth telling: a step, a dispatch, the executor's own words. */
 function lastStep(events: readonly TaskEvent[]): string | null {
@@ -62,6 +58,23 @@ function line(store: Store, task: Task, now: number, watchMs: number | undefined
     if (outcome) out.push(`  outcome: ${clip(outcome)}`);
   }
   return out.join("\n");
+}
+
+export const REGISTER_FOLDERS = 8;
+const FOLDER_SCAN = 100;
+
+/** Folders earlier tasks worked in, newest first, each once with the task that last used it — not the throw-away
+ *  ones (ephemeral, or under the data directory's work root). "修一下 AgentSwitch 的 bug" after a task in the repo then
+ *  goes to the repo with no list kept by hand (this replaced the registered project folders, 2026-09-25). */
+export function recentFolders(store: Store, now: number, workRoot?: string): string {
+  const seen = new Map<string, Task>();
+  for (const t of store.listTasks(FOLDER_SCAN)) {
+    if (t.ephemeral || seen.has(t.cwd) || (workRoot && (t.cwd === workRoot || t.cwd.startsWith(`${workRoot}/`)))) continue;
+    seen.set(t.cwd, t);
+    if (seen.size >= REGISTER_FOLDERS) break;
+  }
+  if (!seen.size) return "(none)";
+  return [...seen.values()].map((t) => `- ${t.cwd} — ${ago(now - t.updatedAt)}: ${clip(withoutLegend(t.task), 80)}`).join("\n");
 }
 
 /** `watches`: task id → interval of the watches set (shown so the assistant can change or stop them). */

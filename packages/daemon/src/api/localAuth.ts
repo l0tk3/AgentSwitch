@@ -94,7 +94,7 @@ export class LocalAuth {
     const expires = this.codes.get(code);
     this.codes.delete(code);
     if (expires === undefined || expires <= this.now()) {
-      return new Response("这个链接已失效。请从 Mac 菜单栏的 AgentSwitch 里重新打开网页控制台。", { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } });
+      return new Response("链接已失效。请从菜单栏的 AgentSwitch 重新打开网页控制台。", { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } });
     }
     if (this.sessions.size >= MAX_SESSIONS) this.sessions.delete(this.sessions.values().next().value!);
     const session = randomBytes(TOKEN_BYTES).toString("base64url");

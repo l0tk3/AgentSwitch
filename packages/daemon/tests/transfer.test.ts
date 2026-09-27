@@ -206,6 +206,6 @@ describe("engine: transfer audit and hand-off", () => {
     expect(mine.filter((e) => e.type === "dispatched")).toHaveLength(1);
     expect(mine.some((e) => e.type === "redispatch")).toBe(false);
     expect(mine.find((e) => e.type === "attempt_failed")?.payload).toMatchObject({ kind: "gate_unavailable" });
-    expect(mine.at(-1)).toMatchObject({ type: "failed", payload: { error: "secret-gate 代理未运行", security: false } });
+    expect(mine.at(-1)).toMatchObject({ type: "failed", payload: { error: "凭据网关未运行", security: false } });
   });
 });

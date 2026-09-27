@@ -28,6 +28,7 @@ import { locationQuery, OpenCodeApiError, type CallOptions, type Json, type Open
 import { opencodeExecConfig, outcomeFromRun, SUBAGENT_TOOL } from "./opencodeShared.js";
 import { canonicalPath, NO_PROTECTED, type ProtectedPaths } from "./protected.js";
 import type { ExecutionInput } from "./types.js";
+import { clipInput, clipOutput } from "./toolEvents.js";
 
 export type ServeRunOptions = {
   readonly gate?: GateOptions | null;
@@ -384,7 +385,7 @@ class ServeExecution {
       if (emitted.has(item.key)) continue;
       emitted.add(item.key);
       if (item.kind === "text") { if (item.text) this.input.emit("text", { text: item.text }); continue; }
-      this.input.emit("tool_call", { tool: item.tool, input: item.input, ...(item.error ? { error: item.error } : {}) });
+      this.input.emit("tool_call", { tool: item.tool, input: clipInput(item.input), ...(item.output !== undefined ? { output: clipOutput(item.output) } : {}), ...(item.error ? { error: item.error } : {}) });
       if (SUBAGENT_TOOL.test(item.tool)) this.input.emit("agent", { harness: "opencode", agentId: "", status: item.error ? "failed" : "completed", description: String((item.input as { description?: string } | null)?.description ?? "sub-agent") });
     }
   }

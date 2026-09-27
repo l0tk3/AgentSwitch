@@ -4,7 +4,6 @@
 import { Assistant } from "./assistant/assistant.js";
 import { AssistantLog } from "./assistant/log.js";
 import { announceUpdate, Reporter, type ReporterOptions } from "./assistant/reports.js";
-import { loadProjects, PROJECTS_FILE } from "./files/projects.js";
 import { updateState } from "./files/appUpdate.js";
 import { admitSealed, type TaskBody } from "./api/tasks.js";
 import type { ApiDeps } from "./api/shared.js";
@@ -74,6 +73,9 @@ import type { PlannerFactory } from "./engine/engine.js";
 import { claudeTextRouter, type ClaudeRouterOptions } from "./router/routers/claude.js";
 import { codexTextRouter } from "./router/routers/codex.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS, QUOTA_TTL_MS } from "./core/limits.js";
+import { loadWorkdir } from "./files/workdir.js";
+import { defaultSessionSources, SessionMonitor } from "./sessions/monitor.js";
+import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
 
 export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
@@ -103,6 +105,13 @@ export type DaemonConfig = {
   readonly remote?: { readonly port: number; readonly name?: string };
   /** The AgentSwitch.app this daemon runs from (AGENTSWITCH_APP_BUNDLE, set by the Mac app): staged updates sit next to it. */
   readonly appBundle?: string;
+  /** Tasks with no folder of their own work in a dated subfolder of the user's default work folder (docs/control-v0.md
+   *  §2; `workdir.json`, default ~/AgentSwitch) instead of a throw-away one in the data directory. On unless
+   *  AGENTSWITCH_TASK_FOLDERS=0; tests build configs without it. */
+  readonly taskFolders?: boolean;
+  /** Watch the Mac's own Claude Code / Codex / OpenCode sessions (docs/control-v0.md §3). On unless
+   *  AGENTSWITCH_SESSIONS=0; tests build configs without it. */
+  readonly watchSessions?: boolean;
 };
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
@@ -129,6 +138,8 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
       ? { remote: { port: remotePort(env.AGENTSWITCH_REMOTE_PORT), ...(env.AGENTSWITCH_REMOTE_NAME?.trim() ? { name: env.AGENTSWITCH_REMOTE_NAME.trim() } : {}) } }
       : {}),
     ...(env.AGENTSWITCH_APP_BUNDLE?.trim() ? { appBundle: env.AGENTSWITCH_APP_BUNDLE.trim() } : {}),
+    taskFolders: env.AGENTSWITCH_TASK_FOLDERS !== "0",
+    watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
   };
 }
 
@@ -236,10 +247,15 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const cloneDir = cfg.executors === "real" ? cloneRoot() : null;
   const clones = cloneDir ? new CloneSweeper({ root: cloneDir }) : undefined;
   clones?.schedule();   // what earlier runs left behind
-  const engine = new Engine({ store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
+  const taskFolderRoot = cfg.taskFolders ? () => loadWorkdir(cfg.home) : undefined;
+  const sessions = cfg.watchSessions ? new SessionMonitor({ ...defaultSessionSources(cfg.home), ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []) }) : undefined;
+  const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
+  const engine = new Engine({ ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(nearSessions ? { sessionsNear: nearSessions } : {}), store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
+  // Tasks the last run left unfinished cannot be confirmed either way (docs/control-v0.md §4).
+  engine.interruptLeftovers();
   sweepThreads(store, Date.now(), engine);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const apiDeps: ApiDeps = { ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), projectsPath: join(cfg.home, PROJECTS_FILE), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -249,7 +265,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   reporter.start();
   announceUpdate(cfg.home, conversation);
   const assistant = new Assistant({ log: conversation, store, engine, ...(assistantRouter ? { router: assistantRouter } : {}), ...(sealer ? { sealer } : {}),
-    admit: (body, sealed) => admitSealed(apiDeps, body as TaskBody, sealed), projects: () => loadProjects(apiDeps.projectsPath), stagedUpdate: () => updateState(cfg.appBundle)?.staged?.built ?? null, timeoutMs: targets.router.timeout_ms });
+    admit: (body, sealed) => admitSealed(apiDeps, body as TaskBody, sealed), workRoot: apiDeps.workRoot, ...(sessions ? { sessions } : {}), stagedUpdate: () => updateState(cfg.appBundle)?.staged?.built ?? null, timeoutMs: targets.router.timeout_ms });
   const api = createApp({ ...apiDeps, assistant });
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
@@ -291,7 +307,7 @@ export function realExecutors(targets: Targets, browser: boolean, rateLimits?: R
   const timeout = (h: string) => targets.harnesses[h]?.timeout_ms ?? DEFAULT_EXECUTOR_TIMEOUT_MS;
   return [
     claudeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("claude-code"), ...(rateLimits ? { rateLimits } : {}), ...executableOf(claudeBinary()) }),
-    codexExecutor({ binary: codexBinary(targets), gate, browser, ...ext, maxMs: timeout("codex") }),
+    codexExecutor({ binary: codexBinary(targets), gate, browser, ...ext, protected: prot, maxMs: timeout("codex") }),
     opencodeExecutor({ gate, browser, ...ext, protected: prot, maxMs: timeout("opencode"), ...(opencodeServer ? { server: opencodeServer } : {}) }),
   ];
 }
@@ -379,7 +395,7 @@ export function listenLocal(daemon: Pick<Daemon, "app">, port: number, onListeni
 
 /** app-v0 §2: the HTTPS listener for paired phones, before the local one, so a taken port fails start-up cleanly. */
 export async function startRemote(daemon: Pick<Daemon, "api" | "store">, remote: RemoteRuntime, host?: string): Promise<RemoteListener> {
-  const app = createRemoteApp({ store: daemon.store, pairing: remote.pairing, presence: remote.presence, gateKey: remote.gateKey, local: daemon.api });
+  const app = createRemoteApp({ store: daemon.store, pairing: remote.pairing, presence: remote.presence, gateKey: remote.gateKey, addresses: remote.addresses, local: daemon.api });
   try {
     const listener = await listenRemote({ fetch: app.fetch, tls: remote.tls, port: remote.port, ...(host ? { host } : {}) });
     console.error(`agentswitchd remote listening on https://*:${listener.port}  fingerprint=${remote.tls.fingerprint} name="${remote.name}"`);

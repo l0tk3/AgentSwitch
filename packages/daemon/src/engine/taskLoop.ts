@@ -138,7 +138,7 @@ export class TaskLoop {
     if (routeLogId !== null) this.ctx.store.updateTask(initial.id, { routeLogId });
     this.ctx.emit(initial.id, "routed", { source: routed.source, verdict: routed.verdict, decision: routed.decision, routerMs: routed.routerMs, routerError: routed.routerError });
     if (!routed.verdict.ok) return this.fail(initial.id, routed.decision?.action === "give_up"
-      ? `路由器已停止：${routed.decision.reason || "未提供原因"}`
+      ? `调度模型已停止：${routed.decision.reason || "未提供原因"}`
       : `no target: ${routed.verdict.notes.join("; ")}`);
     const task = await this.d.threads.assign(initial, routed.decision, (q, e) => this.d.desk.request(initial.id, q, e, { humanOnly: true }));
     if (signal.aborted) return;
@@ -217,7 +217,7 @@ export class TaskLoop {
     if (!st.verdict.ok) { this.fail(task.id, `no target: ${st.verdict.notes.join("; ")}`); return null; }
     if (st.dispatches >= st.budget) {
       if (st.clarificationPending) { this.fail(task.id, "refusal: dispatch budget exhausted before the clarification retry"); return null; }
-      const more = await this.askForMore(task, `已派发 ${st.dispatches} 次还没完成，还要继续吗？允许 = 再给 ${MAX_DISPATCHES} 次，拒绝 = 停止`, st);
+      const more = await this.askForMore(task, `已派发 ${st.dispatches} 次，任务仍未完成。是否继续？允许：再派发最多 ${MAX_DISPATCHES} 次；拒绝：停止`, st);
       if (!this.active(task.id, signal)) return null;
       if (!more) { this.incomplete(task, st, `stopped after ${st.dispatches} dispatches`); return null; }
       return { ...st, budget: st.budget + MAX_DISPATCHES };
@@ -301,7 +301,7 @@ export class TaskLoop {
       return { ...base, verdict, handoff: this.d.threads.recordHandoff(current, attempt, reason, step.target, null) };
     }
     if (base.loopCalls >= base.loopBudget) {
-      const more = await this.askForMore(task, `调度已走了 ${base.loopCalls} 步，要增加 ${MAX_LOOP_STEPS} 步以分析这次失败吗？`, base);
+      const more = await this.askForMore(task, `调度已执行 ${base.loopCalls} 步。是否增加 ${MAX_LOOP_STEPS} 步用于分析本次失败？`, base);
       if (!this.active(task.id, signal)) return null;
       if (!more) { this.incomplete(task, base, "调度预算已用尽，失败原因和剩余工作尚未处理"); return null; }
       base = { ...base, loopBudget: base.loopBudget + MAX_LOOP_STEPS };
@@ -316,7 +316,7 @@ export class TaskLoop {
   private async decideNext(task: Task, composed: string, st: State, signal: AbortSignal): Promise<State | null> {
     if (!this.active(task.id, signal)) return null;
     if (st.loopCalls >= st.loopBudget) {
-      const more = await this.askForMore(task, `调度已走了 ${st.loopCalls} 步还没结束，还要继续吗？允许 = 再给 ${MAX_LOOP_STEPS} 步，拒绝 = 保留进度并停止`, st);
+      const more = await this.askForMore(task, `调度已执行 ${st.loopCalls} 步，任务仍未结束。是否继续？允许：再增加 ${MAX_LOOP_STEPS} 步；拒绝：保留进度并停止`, st);
       if (!this.active(task.id, signal)) return null;
       if (!more) { this.incomplete(task, st, "调度预算已用尽，尚未确认原任务完成"); return null; }
       return this.decideNext(task, composed, { ...st, loopBudget: st.loopBudget + MAX_LOOP_STEPS }, signal);
@@ -457,7 +457,7 @@ export class TaskLoop {
           if (type === "text" && typeof payload.text === "string") observedText = evidenceExcerpt([observedText, payload.text].filter(Boolean).join("\n"));
           this.ctx.emit(task.id, type, payload); dog.touch();
         },
-        approve: async (action, evidence) => {
+        approve: async (action, evidence, requestSignal) => {
           if (attemptCtl.signal.aborted || !this.active(task.id, signal)) return "deny";
           if (readOnly) {
             // A command that only reads, inside the task's folder, is what a look needs (readOnly.ts); the rest is refused.
@@ -469,9 +469,16 @@ export class TaskLoop {
             this.ctx.emit(task.id, "supervisor", { kind: "approval", decision: "deny", reason: `${purpose} step is read-only`, source: "floor", action });
             return "deny";
           }
+          // Skip-permissions mode (docs/control-v0.md §1): allowed at once, nobody asked. The protected folders were
+          // refused by the executor before this point; questions still go through `ask`.
+          if (this.d.policyFor(task).mode === "skip") {
+            this.ctx.emit(task.id, "supervisor", { kind: "approval", decision: "allow", reason: "skip-permissions mode", source: "policy", action });
+            observedApprovals++;
+            return "allow";
+          }
           dog.pause();
           try {
-            const decision = await this.d.desk.request(task.id, action, evidence);
+            const decision = await this.d.desk.request(task.id, action, evidence, requestSignal ? { signal: requestSignal } : {});
             if (attemptCtl.signal.aborted || !this.active(task.id, signal)) return "deny";
             if (decision === "allow") observedApprovals++;
             return decision;

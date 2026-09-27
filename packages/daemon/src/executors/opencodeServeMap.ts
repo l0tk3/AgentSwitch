@@ -58,7 +58,7 @@ export function shellEnv(gate: GateOptions | null, scope: string | null, cwd: st
 
 export type TurnItem =
   | { readonly key: string; readonly kind: "text"; readonly text: string }
-  | { readonly key: string; readonly kind: "tool"; readonly tool: string; readonly input: unknown; readonly error: string | null };
+  | { readonly key: string; readonly kind: "tool"; readonly tool: string; readonly input: unknown; readonly error: string | null; readonly output?: unknown };
 
 export type Turn = {
   readonly summary: RunSummary;
@@ -119,7 +119,7 @@ export function foldTurn(messages: readonly Json[], since: number, sessionId: st
         summary.tools.push({ tool, input: state.input ?? null });
         if (finished && !open) {
           const err = state.error as { message?: string } | undefined;
-          items.push({ key: `${String(m.id)}:${String(p.id ?? i)}`, kind: "tool", tool, input: state.input ?? null, error: status === "error" ? String(err?.message ?? "tool error") : null });
+          items.push({ key: `${String(m.id)}:${String(p.id ?? i)}`, kind: "tool", tool, input: state.input ?? null, error: status === "error" ? String(err?.message ?? "tool error") : null, ...(state.output !== undefined ? { output: state.output } : {}) });
         }
       }
     });

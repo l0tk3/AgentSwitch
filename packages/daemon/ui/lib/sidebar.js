@@ -2,7 +2,7 @@
  *  static shell in index.html, which app.js patches in place with its own renderer. */
 import { esc } from "./api.js";
 
-const NAV = [["home", "首页"], ["log", "路由日志"], ["ext", "扩展"], ["ctx", "上下文"]];
+const NAV = [["home", "首页"], ["log", "调度记录"], ["ext", "扩展"], ["ctx", "上下文"]];
 
 export function sidebar(s) {
   const active = s.view === "task" ? "home" : s.view;   // a task detail belongs to 首页

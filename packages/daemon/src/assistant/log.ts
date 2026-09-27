@@ -6,8 +6,9 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-/** `notice`: a task ended or waits for the user; `progress`: a watched task's line; `watch`: the answer that set one. */
-export type AssistantKind = "message" | "reply" | "task" | "status" | "cancel" | "fallback" | "notice" | "watch" | "progress";
+/** `notice`: a task ended; `waiting`: a task waits for the user (the phone shows the question in the task's card and
+ *  hides this line while it is open); `progress`: a watched task's line; `watch`: the answer that set one. */
+export type AssistantKind = "message" | "reply" | "task" | "status" | "cancel" | "fallback" | "notice" | "waiting" | "watch" | "progress";
 
 /** A task the user asked to hear about every `everyMs` until it ends. */
 export type Watch = { readonly taskId: string; readonly everyMs: number; readonly nextAt: number };

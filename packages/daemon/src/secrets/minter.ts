@@ -15,7 +15,7 @@ export type MintEntry = {
   readonly value: string;
   readonly kind: "secret" | "totp";
   readonly hosts: readonly string[];
-  readonly uses: readonly ("http" | "otp" | "exec")[];
+  readonly uses: readonly ("http" | "fill" | "otp" | "exec")[];
   /** Original-user authorization to import a TOTP seed into these exact hosts; absent means no grant. */
   readonly seed_import_hosts?: readonly string[];
 };

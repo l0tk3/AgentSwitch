@@ -151,6 +151,9 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect((await call(s.port, "GET", "/me", { token })).body).toEqual({ deviceId: ok.body.deviceId, name: "Ada's iPhone", platform: "ios" });
     expect((await call(s.port, "GET", "/gate/pubkey", { token })).body).toEqual({ publicKey: KEY, keypair: "default" });
+    // The Mac's addresses now, for a phone whose copy from pairing is out of date (2026-09-26); never without a token.
+    expect((await call(s.port, "GET", "/addresses", { token })).body).toEqual({ lan: ["192.168.1.5"], tailnet: ["100.101.102.103", "mac.tail1234.ts.net"] });
+    expect((await call(s.port, "GET", "/addresses")).status).toBe(401);
 
     const reuse = await call(s.port, "POST", "/pair", { json: { code, name: "thief", platform: "ios" } });
     expect(reuse.status).toBe(401);
@@ -196,7 +199,7 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
   it("only the allowlisted routes exist remotely; management routes exist only locally", async () => {
     const s = await remoteDaemon();
     const { token } = await pair(s);
-    for (const [method, path] of [["GET", "/mcp"], ["GET", "/skills"], ["PUT", "/memory"], ["GET", "/memory"], ["GET", "/records"], ["GET", "/routing/log"], ["GET", "/approvals/policy"],
+    for (const [method, path] of [["GET", "/mcp"], ["GET", "/skills"], ["PUT", "/memory"], ["GET", "/memory"], ["GET", "/records"], ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"],
       ["POST", "/pairing"], ["GET", "/devices"], ["GET", "/remote/info"], ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/ui/app.js"], ["GET", "/"], ["POST", "/route/preview"],
       ["DELETE", "/mcp/x"], ["DELETE", "/platform-memory/x"], ["GET", "/platform-memory"], ["GET", "/tasks/%2e%2e/mcp"]] as const) {
       const withToken = await call(s.port, method, path, { token });
@@ -209,7 +212,7 @@ describe.runIf(existsSync(SYSTEM_OPENSSL))("remote HTTPS listener", () => {
     expect(upload.status).toBe(200);
     expect((upload.body.files as unknown[]).length).toBe(1);
     // and the other way round: the phone's own routes are not on the local listener
-    for (const [method, path] of [["POST", "/pair"], ["GET", "/me"], ["GET", "/gate/pubkey"]] as const) expect((await s.local(method, path)).status, `local ${method} ${path}`).toBe(404);
+    for (const [method, path] of [["POST", "/pair"], ["GET", "/me"], ["GET", "/addresses"], ["GET", "/gate/pubkey"]] as const) expect((await s.local(method, path)).status, `local ${method} ${path}`).toBe(404);
   });
 
   it("tasks over TLS: create, follow the SSE stream with the bearer header, read, rate, threads", async () => {

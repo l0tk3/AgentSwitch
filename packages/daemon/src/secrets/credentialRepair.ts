@@ -18,6 +18,8 @@ const Token = z.string().regex(/^enc:v1:[A-Za-z0-9_=-]{16,}$/).max(MAX_TOKEN_CHA
 export const CredentialIssue = z.object({ token: Token, host: z.string().min(1).max(MAX_HOST_CHARS), purpose: z.literal("totp_seed_import") }).strict();
 export type CredentialIssue = z.infer<typeof CredentialIssue>;
 export class CredentialRepairError extends Error {}
+/** A re-issued seed goes into a form field: "http" and "fill", sorted as the gate reports them (gate-service-v0 §1). */
+export const REISSUED_USES = ["fill", "http"] as const;
 const Metadata = z.object({ label: z.string(), kind: z.enum(["totp", "secret"]), hosts: z.array(z.string()), uses: z.array(z.string()), seed_import_hosts: z.array(z.string()).default([]) });
 const Reissued = Metadata.extend({ token: Token });
 export type CredentialMetadata = z.infer<typeof Metadata>;
@@ -88,6 +90,6 @@ export async function repairCredential(issue: CredentialIssue, material: RepairM
   if (!decision.allow || !decision.evidence.length || decision.evidence.some((e) => !e.quote.trim() || !sources[e.source].includes(e.quote))) throw new CredentialRepairError("原任务未明确授权该种子录入操作，需要你补充确认");
   const repaired = await deps.gate.reissue({ ...issue, host }, signal);
   if (signal.aborted) throw new CredentialRepairError("凭据修复已取消");
-  if (repaired.kind !== "secret" || repaired.hosts.length !== 1 || repaired.hosts[0] !== host || repaired.uses.length !== 1 || repaired.uses[0] !== "http" || repaired.seed_import_hosts.length) throw new CredentialRepairError("凭据服务返回了超出申请范围的授权");
+  if (repaired.kind !== "secret" || repaired.hosts.length !== 1 || repaired.hosts[0] !== host || [...repaired.uses].sort().join(",") !== REISSUED_USES.join(",") || repaired.seed_import_hosts.length) throw new CredentialRepairError("凭据服务返回了超出申请范围的授权");
   return repaired;
 }

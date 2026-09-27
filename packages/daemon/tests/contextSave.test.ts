@@ -47,7 +47,7 @@ describe("PUT /context", () => {
     expect(readFileSync(a.contextPath, "utf8")).toBe("# before\n");
     expect(existsSync(a.historyDir)).toBe(false);
 
-    const lost = vi.fn<Sealer>(async () => ({ ok: false, code: "unroutable", error: "不知道这些凭据要用在哪个站点。", ms: 1 }));
+    const lost = vi.fn<Sealer>(async () => ({ ok: false, code: "unroutable", error: "无法确定这些凭据所属的站点。", ms: 1 }));
     const b = daemon(lost);
     const unroutable = await b.put("- 某个密码 hunter2222\n");
     expect(unroutable.status).toBe(400);

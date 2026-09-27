@@ -89,7 +89,7 @@ describe("cleanupEphemeral", () => {
   });
 
   it("claude project key and path spellings", () => {
-    expect(claudeProjectKey("/Users/l07k3/Desktop/WorkSpace/Projects/AgentSwitch")).toBe("-Users-l07k3-Desktop-WorkSpace-Projects-AgentSwitch");
+    expect(claudeProjectKey("/Users/me/Desktop/WorkSpace/Projects/AgentSwitch")).toBe("-Users-me-Desktop-WorkSpace-Projects-AgentSwitch");
     expect(claudeProjectKey("/private/var/folders/_c/x.y")).toBe("-private-var-folders--c-x-y");
     expect(spellings("/private/var/folders/x")).toContain("/var/folders/x");
     expect(spellings("/var/folders/x")).toContain("/private/var/folders/x");

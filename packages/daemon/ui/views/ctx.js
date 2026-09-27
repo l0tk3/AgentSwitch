@@ -11,15 +11,15 @@ export function render(s) {
   const c = s.ctx;
   const text = c.draft ?? c.text;
   const warnings = c.warnings.length
-    ? `<div class="card warn"><div class="dim">加载时被删掉的行（疑似明文凭据，路由器看不到）</div><div class="warn-list" style="margin-top:6px">${c.warnings.map(esc).join("\n")}</div></div>`
+    ? `<div class="card warn"><div class="dim">加载时已移除的行（疑似明文凭据，调度模型不可见）</div><div class="warn-list" style="margin-top:6px">${c.warnings.map(esc).join("\n")}</div></div>`
     : "";
   const m = s.mem;
   const memText = m.draft ?? m.text;
-  return `<div class="page-title">路由器上下文</div>
+  return `<div class="page-title">调度模型上下文</div>
     <div class="cols">
       <div class="stack">
         ${c.hint ? `<div class="card bad error">${esc(c.hint)}</div>` : ""}
-        <textarea id="ctx-text" data-keep class="doc" spellcheck="false" placeholder="站点与账号（密码只放 enc:v1: 密文）、环境限制、哪个项目偏好哪个 harness…">${esc(text)}</textarea>
+        <textarea id="ctx-text" data-keep class="doc" spellcheck="false" placeholder="站点与账号（密码仅填写 enc:v1: 密文）、环境限制、各项目偏好的执行器…">${esc(text)}</textarea>
         <div class="row">
           <button class="primary" id="ctx-save" ${c.draft === null ? "disabled" : ""}>${c.saved ? "已保存" : "保存"}</button>
           ${text.trim() ? "" : `<button id="ctx-example">载入示例模板</button>`}
@@ -27,10 +27,10 @@ export function render(s) {
         </div>
         <h2 style="margin-top:14px">记忆 MEMORY.md</h2>
         ${m.hint ? `<div class="card bad error">${esc(m.hint)}</div>` : ""}
-        <textarea id="mem-text" data-keep class="doc" spellcheck="false" style="min-height:160px" placeholder="每次执行结束后，摘要器发现的持久事实会追加到这里（带来源任务）。删掉不对的行即可。">${esc(memText)}</textarea>
+        <textarea id="mem-text" data-keep class="doc" spellcheck="false" style="min-height:160px" placeholder="每次执行结束后，调度模型提取的长期事实会追加到此处，并注明来源任务。有误的行可直接删除。">${esc(memText)}</textarea>
         <div class="row">
           <button class="primary" id="mem-save" ${m.draft === null ? "disabled" : ""}>${m.saved ? "已保存" : "保存"}</button>
-          ${m.warnings.length ? `<span class="hint error">${m.warnings.length} 行疑似明文凭据已被删掉</span>` : ""}
+          ${m.warnings.length ? `<span class="hint error">已移除 ${m.warnings.length} 行疑似明文凭据</span>` : ""}
         </div>
         ${platformMemory(s.platformMem)}
       </div>
@@ -39,14 +39,14 @@ export function render(s) {
         ${warnings}
         <div class="card">
           <div class="dim">文件</div><div class="mono" style="margin-top:4px">${esc(c.path)}</div>
-          <div class="dim" style="margin-top:10px">路由器每次分诊都重新读，改完立即生效。上限 64KB。</div>
-          <div class="dim" style="margin-top:6px">这里显示的是 lint 之后的内容，也就是路由器实际看到的。列表项里「密码 / token / api key」后面若不是 enc:v1: 密文，整行会被删掉并列在上方。</div>
+          <div class="dim" style="margin-top:10px">调度模型每次调度时重新读取，修改后立即生效。上限 64 KB。</div>
+          <div class="dim" style="margin-top:6px">此处显示经过检查的内容，即调度模型实际读取的内容。列表项中「密码 / token / api key」之后若不是 enc:v1: 密文，整行会被移除并列在上方。</div>
         </div>
-        <div class="card"><div class="dim">适合写什么</div>
+        <div class="card"><div class="dim">适合填写的内容</div>
           <ul class="dim" style="margin:6px 0 0;padding-left:18px">
             <li>站点 URL、账号、对应的 enc:v1: 密文</li>
-            <li>环境限制：内网可达条件、代理、别用的版本</li>
-            <li>偏好：哪个项目优先哪个 harness，哪类任务别动用 Opus</li>
+            <li>环境限制：内网访问条件、代理、应避免的版本</li>
+            <li>偏好：各项目优先使用的执行器、哪类任务不使用 Opus</li>
           </ul>
         </div>
       </aside>
@@ -70,7 +70,7 @@ function platformMemory(mem = { records: [], loading: false, loaded: false, dele
     </article>`;
   }).join("");
   return `<section><h2>平台经验 <span class="spacer"></span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></h2>
-    <p class="dim">按具体平台保存的观察记录，带来源和有效期。过期记录不会用于后续任务；这些记录不代表操作授权。</p>
+    <p class="dim">按具体平台保存的观察记录，附来源与有效期。过期记录不会用于后续任务；记录不代表操作授权。</p>
     ${mem.hint ? `<div class="card bad error" role="alert">${esc(mem.hint)}</div>` : ""}
     <div class="stack">${records || `<div class="empty">${mem.loading ? "正在加载平台经验…" : mem.loaded ? "暂无平台经验" : "平台经验尚未加载"}</div>`}</div></section>`;
 }
@@ -83,12 +83,12 @@ function policyCard(p) {
   const cats = p.categories.map((c) => `<label class="row" style="gap:8px"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
   return `<div class="card"><div class="dim">审批策略</div>
     <div class="stack" style="margin-top:8px">
-      ${opt("manual", "全部我来批", "路由器不介入任何审批")}
-      ${opt("auto", "全权交给路由器", "包括删除、推送、支付这类不可逆动作；它拿不准仍会问你")}
-      ${opt("scoped", "划定范围", "下面勾选的类别留给我，其余路由器批")}
+      ${opt("manual", "逐项确认", "每个审批都交由你决定，调度模型不介入。")}
+      ${opt("auto", "全部自动", "调度模型代批所有审批，包括删除、推送、支付等不可逆操作；无法判断时仍交由你决定。")}
+      ${opt("scoped", "自动", "下方勾选的类别交由你决定，其余由调度模型代批。")}
     </div>
     <div class="stack" style="margin:8px 0 0 24px;font-size:13px">${cats}</div>
-    <div class="row" style="margin-top:8px"><span class="grow dim">daemon 自己的文件永远不可改，不在此列。路由器分诊时缺信息会直接问你。</span><button class="small" id="pol-save">保存策略</button></div>
+    <div class="row" style="margin-top:8px"><span class="grow dim">服务自身的文件始终禁止修改，不在此列。调度时如缺少信息，调度模型会直接向你提问。</span><button class="small" id="pol-save">保存策略</button></div>
   </div>`;
 }
 

@@ -24,7 +24,7 @@ export const sendBindings = [
     const key = el.dataset.sendUnlock;
     const sub = get().taskSubmissions[key];
     if (sub?.status !== "uncertain") return;
-    if (!confirm("这条消息可能已经创建任务。请先检查最近任务；再次发送可能重复执行。\n确认没有收到这条消息，并允许重新发送吗？")) return;
-    setTaskSubmission(key, { status: "error", message: "已允许重试，请检查保留的草稿后点击重新发送。" });
+    if (!confirm("这条消息可能已创建任务，再次发送可能导致重复执行。请核对最近的任务。\n确认服务未收到这条消息，并允许重新发送吗？")) return;
+    setTaskSubmission(key, { status: "error", message: "已允许重新发送。请检查保留的草稿，然后点击「重新发送」。" });
   } },
 ];

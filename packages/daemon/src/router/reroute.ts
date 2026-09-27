@@ -62,12 +62,12 @@ export function nextStep(input: RerouteInput): NextStep {
   if (!last) return { kind: "stop", reason: "no attempt to recover from", security: false };
   if (last.kind === "gate_denied") return { kind: "stop", reason: "secret-gate denied a request; not re-dispatching", security: true };
   // The proxy is shared by every harness: another target would meet the same dead gate. Not a security event.
-  if (last.kind === "gate_unavailable") return { kind: "stop", reason: last.excerpt || "secret-gate 代理未运行，已停止，未派发其他执行器", security: false };
+  if (last.kind === "gate_unavailable") return { kind: "stop", reason: last.excerpt || "凭据网关未运行，任务已停止，未派发其他执行器", security: false };
   // TaskLoop owns the bounded, evidence-based clarification path. Other callers must not
   // silently treat a refusal as a reason to rotate targets (including the standalone CLI).
   if (last.kind === "refusal") return { kind: "stop", reason: "refusal requires grounded clarification; automatic target switching is disabled", security: false };
   if (!last.sideEffects || last.sideEffectsKnown === false || hasSideEffects(last.sideEffects)) {
-    return { kind: "stop", reason: "执行可能已产生副作用，或记录不完整；已停止自动重试，请先核对现场再继续。", security: false };
+    return { kind: "stop", reason: "执行可能已产生副作用，或记录不完整；已停止自动重试。请核对现场后再继续。", security: false };
   }
   if (input.attempts.length >= limits.maxAttempts) return { kind: "stop", reason: `max attempts (${limits.maxAttempts}) reached`, security: false };
 

@@ -182,9 +182,9 @@ export async function submitTask(body, { onAccepted } = {}) {
   const slow = setTimeout(() => {
     const sub = get().taskSubmissions[key];
     if (sub?.status === "uploading" || sub?.status === "sending") update({ ...sub, message: sub.phase === "sealing"
-      ? "消息已到达，模型仍在检查敏感字段并准备加密；此时还未开始任务分诊。请勿重复发送。"
-      : sub.phase === "creating" ? "敏感信息处理已完成，正在创建任务回执，请勿重复发送。"
-      : "发送仍在处理中，可能需要几十秒；后台会先检查敏感字段并加密，再创建任务。请勿重复点击。" });
+      ? "消息已到达，敏感字段的识别与加密仍在进行，尚未开始调度。请勿重复发送。"
+      : sub.phase === "creating" ? "敏感信息处理已完成，正在创建任务回执。请勿重复发送。"
+      : "发送仍在处理中，可能需要几十秒：敏感字段识别并加密后才会创建任务。请勿重复点击。" });
   }, 8_000);
   let task;
   try {
@@ -194,7 +194,7 @@ export async function submitTask(body, { onAccepted } = {}) {
     task = await postTask(attachments.length ? { ...body, attachments } : body, { onProgress: ({ stage: phase, elapsedMs }) => {
       const checked = get().taskSubmissions[key]?.phase === "sealing";
       update({ status: "sending", phase, serverElapsedMs: elapsedMs, message: phase === "sealing"
-        ? "消息已到达，正在识别敏感字段并加密；完成后进入任务分诊。"
+        ? "消息已到达，正在识别敏感字段并加密，完成后开始调度。"
         : checked ? `敏感信息处理完成（${(elapsedMs / 1000).toFixed(1)} 秒），正在创建任务回执…` : "消息已到达，正在创建任务回执…" });
     } });
     if (!task || typeof task.id !== "string") throw new Error("Missing task receipt");
@@ -202,10 +202,10 @@ export async function submitTask(body, { onAccepted } = {}) {
     const rejected = stage === "uploading" || [400, 401, 403, 404, 409, 413, 422, 429, 503].includes(err.status);
     let message = stage === "uploading"
       ? "附件上传失败，消息尚未发送。草稿和附件已保留，请重试。"
-      : !rejected ? "发送结果待确认，消息可能已收到。请刷新任务列表核对，暂勿重复发送。草稿已保留。"
+      : !rejected ? "发送结果待确认，服务可能已收到消息。请刷新任务列表核对，暂勿重复发送。草稿已保留。"
       : err.status === 503 || err.status === 429 ? "服务暂时无法接收消息，请稍后重试。草稿已保留。"
-      : err.status === 404 ? "原任务已不存在，请回首页发送新消息。草稿已保留。"
-      : err.status === 409 ? "线程状态已变化，请检查是否已归档后重试。草稿已保留。"
+      : err.status === 404 ? "原任务已不存在，请在首页发送新消息。草稿已保留。"
+      : err.status === 409 ? "会话状态已变化，请确认会话是否已归档后重试。草稿已保留。"
       : "发送失败，请检查内容、工作目录和选项后重试。草稿已保留。";
     if (!current()) message = message.replace("草稿和附件已保留，", "").replace("草稿已保留。", "");
     update({ status: rejected ? "error" : "uncertain", message });
@@ -231,8 +231,8 @@ export async function refreshSubmission(key) {
   const results = await Promise.allSettled([loadTasks(), loadThreads()]);
   const sub = get().taskSubmissions[key];
   if (sub?.status === "uncertain") setTaskSubmission(key, { ...sub, message: results.some((r) => r.status === "rejected")
-    ? "暂时无法刷新任务列表，请稍后再试；发送结果仍待确认，请勿重复发送。草稿已保留。"
-    : "任务列表已刷新，请核对是否已收到这条消息。发送结果尚待确认，请勿直接重复发送。草稿已保留。" });
+    ? "暂时无法刷新任务列表，请稍后重试。发送结果仍待确认，请勿重复发送。草稿已保留。"
+    : "任务列表已刷新，请核对列表中是否已有这条消息。发送结果仍待确认，请勿直接重复发送。草稿已保留。" });
 }
 
 /** `given` = {text} for one question, {answers: {id: [..]}} for several (docs/supervisor-v0.md §1c). */
@@ -246,12 +246,12 @@ export async function answer(taskId, approvalId, given) {
     const retryable = err.status === 400 || err.status === 422 || err.status === 503;
     setAnswerSubmission(approvalId, { taskId, status: retryable ? "error" : "uncertain", message: retryable
       ? (err.status === 503 ? "暂时无法处理答复，请稍后重试。输入已保留。" : "提交失败，请检查答复后重试。输入已保留。")
-      : "提交结果待确认，请稍后刷新状态；暂勿重复提交。输入已保留。" });
+      : "提交结果待确认，请稍后刷新状态，暂勿重复提交。输入已保留。" });
     if (!retryable) await refreshAnswer(taskId, approvalId);
     return;
   }
   // Commit success before refresh: a failed GET must never enable a duplicate POST.
-  setAnswerSubmission(approvalId, { taskId, status: "sent", message: "答复已提交，继续处理中…" });
+  setAnswerSubmission(approvalId, { taskId, status: "sent", message: "答复已提交，任务继续处理中…" });
   await refreshAnswer(taskId, approvalId);
 }
 

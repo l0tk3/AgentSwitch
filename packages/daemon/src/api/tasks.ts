@@ -13,9 +13,10 @@ import { remoteCaller } from "../core/caller.js";
 import { TargetRef } from "../core/target.js";
 import { zodIssues } from "../util/zod.js";
 import { checkCwd, checkStoredCwd } from "./cwdPolicy.js";
-import { resolveProject } from "./projects.js";
 import { issues, newWorkDir, limitParam, type ApiDeps } from "./shared.js";
 import { DEFAULT_LIST_LIMIT, SSE_HEARTBEAT_MS } from "../core/limits.js";
+import { mkdirSync } from "node:fs";
+import { newTaskFolder } from "../files/workdir.js";
 
 const NewTaskBody = z.object({
   task: z.string().min(1),
@@ -30,8 +31,6 @@ const NewTaskBody = z.object({
   thread_id: z.string().min(1).optional(),
   /** Per-task approval policy override. */
   approval: ApprovalPolicy.optional(),
-  /** Run in a registered project directory (GET /projects), by name; the phone's way to reach a folder on the Mac. */
-  project: z.string().trim().min(1).max(40).optional(),
 });
 export { NewTaskBody };
 
@@ -94,16 +93,26 @@ export type Admitted = { ok: true; task: Task } | { ok: false; status: 400 | 404
 /** The second half of taking a task, after sealing (shared by POST /tasks and the assistant, assistant-v0 §1.1): the
  *  referenced parent and thread are looked up again (sealing takes seconds; they may be gone or archived meanwhile), the
  *  work dir chosen, attachments moved in, the task submitted. */
+/** A new folder for a task that names none: under the default work folder when it is on and allowed, else a
+ *  throw-away one in the data directory. */
+function defaultTaskFolder(deps: ApiDeps): { dir: string; kept: boolean } {
+  const root = deps.taskFolderRoot?.();
+  if (root) {
+    try {
+      mkdirSync(root, { recursive: true });
+      if (!checkCwd(root, deps.cwdRules)) return { dir: newTaskFolder(root), kept: true };
+    } catch { /* unusable: fall through to a throw-away folder */ }
+  }
+  return { dir: newWorkDir(deps.workRoot), kept: false };
+}
+
+const SEARCH_LIMIT = 30;
+
 export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly text: string; readonly sealed: readonly SealedEntry[] }): Admitted {
-  const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, project, task: _raw, ...rest } = body;
-  if (project && cwd) return { ok: false, status: 400, error: "a task names a project or a cwd, not both" };
+  const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, task: _raw, ...rest } = body;
   // The assistant's folder comes here unchecked (POST /tasks checked its own before sealing): check it now.
   const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
   if (cwdProblem) return { ok: false, status: 400, error: cwdProblem };
-  // Checked here, after sealing, so a project removed or moved meanwhile is refused rather than run somewhere else.
-  const chosen = project ? resolveProject(deps, project) : null;
-  if (chosen && !chosen.ok) return { ok: false, status: 400, error: chosen.error };
-  const projectDir = chosen?.ok ? chosen.path : undefined;
   const parent = parent_id ? deps.store.getTask(parent_id) : undefined;
   if (parent_id && !parent) return { ok: false, status: 404, error: "parent task not found" };
   const effectiveThreadId = thread_id ?? parent?.threadId;
@@ -111,9 +120,11 @@ export function admitSealed(deps: ApiDeps, body: TaskBody, sealed: { readonly te
   if (effectiveThreadId && !thread) return { ok: false, status: 404, error: "thread not found" };
   if (thread?.status === "archived") return { ok: false, status: 409, error: "thread is archived; reopen it first" };
   const inherited = parent && !parent.ephemeral ? parent.cwd : undefined;
-  // A named project wins over the parent's directory: "now do it in the repo" continues the thread, somewhere else.
-  const workDir = projectDir ?? cwd ?? inherited ?? newWorkDir(deps.workRoot);
-  const isEphemeral = projectDir === undefined && (ephemeral ?? (cwd === undefined && inherited === undefined));
+  // A named folder wins over the parent's directory: "now do it in the repo" continues the thread, somewhere else.
+  // Neither: a kept, dated folder under the default work folder, or a throw-away one when that is off or unusable.
+  const folder = cwd === undefined && inherited === undefined ? defaultTaskFolder(deps) : null;
+  const workDir = cwd ?? inherited ?? folder!.dir;
+  const isEphemeral = ephemeral ?? (folder ? !folder.kept : false);
   let attachments: Attachment[] = [];
   try { attachments = uploadIds?.length ? deps.uploads.moveInto(uploadIds, workDir) : []; }
   catch (err) { return { ok: false, status: 400, error: (err as Error).message, streamError: "附件无法移入任务目录，请重新检查附件后提交。" }; }
@@ -129,12 +140,9 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     if (!body.success) return c.json({ error: zodIssues(body.error) }, 400);
     const refused = remoteCaller(c.env) ? remoteRefusal(body.data) : null;
     if (refused) return c.json({ error: refused }, 400);
-    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, project, ...rest } = body.data;
-    if (project && cwd) return c.json({ error: "a task names a project or a cwd, not both" }, 400);
+    const { pin, needs_browser, ephemeral, cwd, parent_id, attachments: uploadIds, thread_id, approval, ...rest } = body.data;
     const cwdProblem = cwd ? checkCwd(cwd, deps.cwdRules) : null;
     if (cwdProblem) return c.json({ error: cwdProblem }, 400);
-    const chosen = project ? resolveProject(deps, project) : null;
-    if (chosen && !chosen.ok) return c.json({ error: chosen.error }, 400);
     let parent = parent_id ? deps.store.getTask(parent_id) : undefined;
     if (parent_id && !parent) return c.json({ error: "parent task not found" }, 404);
     const initialThreadId = thread_id ?? parent?.threadId;
@@ -282,6 +290,17 @@ export function mountTasks(app: Hono, deps: ApiDeps): void {
     const r = deps.engine.answer(body.data.approval_id, { answers, sealed: !!deps.sealer });
     if (r.ok && entries.length) deps.bus.publish(deps.store.appendEvent(task.id, "sealed", { entries, source: "answer", approvalId: approval.id }));
     return r.ok ? c.json({ ok: true }) : c.json({ error: r.error }, r.code === "not_found" ? 404 : 400);
+  });
+
+  // Opened on the phone (docs/control-v0.md §4): read, no longer unread.
+  app.post("/tasks/:id/ack", (c) => {
+    const task = deps.store.acknowledgeTask(c.req.param("id"));
+    return task ? c.json({ acknowledgedAt: task.acknowledgedAt }) : c.json({ error: "task not found" }, 404);
+  });
+
+  app.get("/search", (c) => {
+    const q = (c.req.query("q") ?? "").slice(0, 200);
+    return c.json({ results: q.trim() ? deps.store.search(q, limitParam(c, SEARCH_LIMIT)) : [] });
   });
 
   app.post("/tasks/:id/rate", async (c) => {

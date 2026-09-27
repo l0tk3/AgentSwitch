@@ -27,12 +27,16 @@ const AGENT_ENDED = new Set(["completed", "failed", "stopped"]);
 
 /** Short lines of the task's latest events for the supervisor's prompts. */
 export function recentEventLines(ctx: EngineContext, taskId: string, n = RECENT_EVENTS): string[] {
-  return ctx.store.eventsSince(taskId).slice(-n).map((e) => {
+  return ctx.store.eventsSince(taskId).filter((e) => e.type !== "tool_result").slice(-n).map((e) => {
     const p = e.payload;
     const t = new Date(e.ts).toISOString().slice(11, 19);
     switch (e.type) {
       case "text": return `${t} text: ${String(p.text ?? "").replace(/\s+/g, " ").slice(0, EVENT_TEXT_CHARS)}`;
-      case "tool_call": return `${t} tool ${p.tool ?? "?"}${p.command ? `: ${String(p.command).slice(0, EVENT_DETAIL_CHARS)}` : p.denied ? ` denied: ${String(p.denied).slice(0, EVENT_NOTE_CHARS)}` : ""}`;
+      case "tool_call": {
+        const input = (p.input ?? {}) as Record<string, unknown>;
+        const detail = p.command ?? input.command ?? input.url ?? input.file_path ?? input.path ?? input.pattern ?? input.query;
+        return `${t} tool ${p.tool ?? "?"}${detail ? `: ${String(detail).slice(0, EVENT_DETAIL_CHARS)}` : p.denied ? ` denied: ${String(p.denied).slice(0, EVENT_NOTE_CHARS)}` : ""}`;
+      }
       case "agent": return `${t} sub-agent ${p.status}: ${String(p.description ?? "").slice(0, EVENT_NOTE_CHARS)}`;
       case "approval_request": return `${t} approval requested: ${String(p.action ?? "").slice(0, EVENT_DETAIL_CHARS)}`;
       case "approval_resolved": return `${t} approval ${p.decision} (${p.by ?? p.status})`;
@@ -86,7 +90,7 @@ export function watchdog(ctx: EngineContext, sup: Supervisor | undefined, desk: 
     ctx.emit(task.id, "supervisor", { kind: "checkin", action: v.action, note: v.note, source: v.source, silentMs, ms: v.ms });
     if (v.action === "continue") { state.continues++; arm(); return; }
     if (v.action === "cancel") return cancel(v.note || "no progress", "cancelled by the supervisor");
-    const answer = await desk.request(task.id, `执行已 ${Math.round(silentMs / 1000)} 秒没有动静，继续等吗？允许 = 继续，拒绝 = 取消这次执行并换人`, v.note, { humanOnly: true });
+    const answer = await desk.request(task.id, `执行已 ${Math.round(silentMs / 1000)} 秒无新进展。是否继续等待？允许：继续等待；拒绝：取消本次执行并改派`, v.note, { humanOnly: true });
     if (state.stopped) return;
     if (answer === "allow") { state.continues = 0; arm(); return; }
     cancel(`the user stopped waiting (${v.note || "no progress"})`, "cancelled by the user via the supervisor");
@@ -173,7 +177,7 @@ export async function answerQuestions(ctx: EngineContext, sup: Supervisor | unde
       if (stopped()) return null;
       const checked = v.source === "router" && !v.forward ? validateAnswers(questions, v.answers, true) : null;
       const answers = checked?.ok ? answersUseKnownTokens(checked.answers, material.knownTokens) : null;
-      const reason = v.source === "error" ? "监督者未能核实答复，转交用户确认" : !answers && !v.forward ? "监督者答复不完整或包含未知凭据，转交用户确认" : v.reason;
+      const reason = v.source === "error" ? "调度模型未能核实答复，已转交你确认" : !answers && !v.forward ? "调度模型的答复不完整或含未知凭据，已转交你确认" : v.reason;
       ctx.emit(task.id, "supervisor", { kind: "question", answered: answers !== null, reason, source: v.source, ms: v.ms, questions: questions.map((q) => q.text), text: answers ? describeAnswers(questions, answers) : null });
       if (answers) {
         ctx.emit(task.id, "feedback", { version: 1, source: "router", status: "answered", questions, answers, reason });
@@ -181,7 +185,7 @@ export async function answerQuestions(ctx: EngineContext, sup: Supervisor | unde
       }
     } catch {
       if (stopped()) return null;
-      ctx.emit(task.id, "supervisor", { kind: "question", answered: false, reason: controller.signal.aborted ? "监督者答复超时，转交用户确认" : "监督者服务暂不可用，转交用户确认", source: "error", ms: Date.now() - started, questions: questions.map((q) => q.text), text: null });
+      ctx.emit(task.id, "supervisor", { kind: "question", answered: false, reason: controller.signal.aborted ? "调度模型答复超时，已转交你确认" : "调度模型暂不可用，已转交你确认", source: "error", ms: Date.now() - started, questions: questions.map((q) => q.text), text: null });
     } finally {
       clearTimeout(timer);
       if (onAbort) combined.removeEventListener("abort", onAbort);

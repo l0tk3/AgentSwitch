@@ -47,7 +47,7 @@ const FAILURES: Record<FailureKind, Partial<ExecutionOutcome>> = {
   quota: { httpStatus: 429, stderr: "rate limit exceeded" },
   transport: { stderr: "connect ECONNREFUSED 127.0.0.1:8080" },
   gate_denied: { gateDenied: true, httpStatus: 403, lastText: "X-Secret-Gate: denied" },
-  gate_unavailable: { gateUnavailable: true, exitCode: null, stderr: "secret-gate 代理未运行" },
+  gate_unavailable: { gateUnavailable: true, exitCode: null, stderr: "凭据网关未运行" },
   task_failed: { exitCode: 1, lastText: "tests failed" },
   rejected: { exitCode: 1, lastText: "rejected" },
   unknown: {},

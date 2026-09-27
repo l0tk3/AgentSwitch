@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { AppServerClient, type Json } from "../src/harness/appserver.js";
 import { canonical, decideTool, foldMessage, outcomeFromFold, type Folded, EMPTY_FOLD } from "../src/executors/claude.js";
-import { applyNotification, approvalAnswer, codexConfigToml, describeApproval, outcomeFromTurn, type TurnState, EMPTY_TURN } from "../src/executors/codex.js";
+import { applyNotification, approvalAnswer, codexApproval, codexCommand, codexConfigToml, codexToolCall, codexToolResult, describeApproval, outcomeFromTurn, type TurnState, EMPTY_TURN } from "../src/executors/codex.js";
 import { claudeMcpServers, codexGateToml, gateEnv, opencodeGateConfig, type GateOptions } from "../src/executors/gate.js";
 import { opencodeExecConfig, outcomeFromRun, resumeRefused, summarizeRun } from "../src/executors/opencode.js";
 import { classifyFailure } from "../src/router/failure.js";
@@ -84,6 +84,36 @@ describe("codex executor helpers", () => {
     expect(describeApproval("item/commandExecution/requestApproval", { item: { command: ["rm", "-rf", "x"], cwd: "/w" } }).action).toBe("item/commandExecution/requestApproval: rm -rf x");
     expect(describeApproval("item/fileChange/requestApproval", { item: { changes: [{ path: "a" }] } }).action).toContain("file changes");
     expect(describeApproval("weird", { x: 1 }).evidence).toBe('{"x":1}');
+  });
+
+  it("tool calls carry what went in and what came back, matched by id (2026-09-25: the phone opens a call)", () => {
+    let s = foldMessage(EMPTY_FOLD, { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "tu1", name: "Bash", input: { command: "git log -n 3", description: "recent" } }] } } as never);
+    s = foldMessage(s, { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu1", content: [{ type: "text", text: "a1 one\nb2 two" }], is_error: false }] } } as never);
+    s = foldMessage(s, { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu2", content: "x".repeat(5000), is_error: true }] } } as never);
+    expect(s.uses).toEqual([{ id: "tu1", tool: "Bash", input: { command: "git log -n 3", description: "recent" } }]);
+    expect(s.outputs[0]).toEqual({ id: "tu1", ok: true, output: "a1 one\nb2 two" });
+    expect(s.outputs[1]).toMatchObject({ id: "tu2", ok: false });
+    expect(s.outputs[1]!.output.length).toBeLessThan(1600);
+    expect(s.tools).toBe(1);
+    expect(codexToolCall({ id: "c1", type: "commandExecution", command: "/bin/zsh -lc 'ls -la'" }, "item/started")).toEqual({ tool: "commandExecution", id: "c1", command: "ls -la" });
+    expect(codexToolResult({ id: "c1", type: "commandExecution", aggregatedOutput: "no such file", exitCode: 1, status: "completed" }, ["c1"]))
+      .toEqual({ id: "c1", ok: false, output: "no such file\n（退出码 1）" });
+    expect(codexToolResult({ id: "m1", type: "agentMessage" }, ["c1"])).toBeNull();
+  });
+
+  it("a command Codex wants to run outside its sandbox is checked like Claude's Bash (2026-09-25)", () => {
+    // `ps` and `top` are setuid: no sandbox runs them, so Codex asks; the engine sees the plain command line.
+    expect(codexCommand({ item: { command: "/bin/zsh -lc 'ps -Ao pid,pcpu -r | head -n 20'" } })).toBe("ps -Ao pid,pcpu -r | head -n 20");
+    expect(codexCommand({ command: ["/bin/zsh", "-lc", "top -l 1 -o cpu"] })).toBe("top -l 1 -o cpu");
+    expect(codexCommand({ command: ["ls", "-la", "my dir"] })).toBe("ls -la 'my dir'");
+    expect(codexCommand({ item: {} })).toBeNull();
+    const prot = { roots: ["/Users/u/.agentswitch"], exempt: [] };
+    expect(codexApproval("item/commandExecution/requestApproval", { item: { command: "/bin/zsh -lc 'ps -A'", cwd: "/w" } }, "/w", prot))
+      .toMatchObject({ kind: "ask", action: "Bash: ps -A" });
+    const denied = codexApproval("execCommandApproval", { command: ["/bin/zsh", "-lc", "cat /Users/u/.agentswitch/local-token"] }, "/w", prot);
+    expect(denied.kind).toBe("deny");
+    expect(codexApproval("item/fileChange/requestApproval", { item: { changes: [{ path: "a" }] } }, "/w", prot))
+      .toMatchObject({ kind: "ask", action: "item/fileChange/requestApproval: file changes" });
   });
   it("notifications fold into a turn state and an outcome", () => {
     let s: TurnState = EMPTY_TURN;

@@ -200,7 +200,7 @@ describe("text-only feedback adjudication boundaries", () => {
     const ctl = new AbortController(); ctl.abort();
     expect(await sup.answer!(input, ctl.signal)).toMatchObject({ source: "error", answers: null, forward: true });
     expect(calls).toBe(0);
-    expect(await sup.answer!(input)).toMatchObject({ source: "error", answers: null, forward: true, reason: "监督者调用超时" });
+    expect(await sup.answer!(input)).toMatchObject({ source: "error", answers: null, forward: true, reason: "调度模型调用超时" });
     expect(calls).toBe(1);
     const bad = routerSupervisor({ name: "bad", route: async () => { throw new Error("private-provider-payload"); } }, supervisor().config, 100);
     expect(JSON.stringify(await bad.answer!(input))).not.toContain("private-provider-payload");

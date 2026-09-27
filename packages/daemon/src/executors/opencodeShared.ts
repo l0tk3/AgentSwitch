@@ -81,7 +81,7 @@ export function opencodeExecConfig(gate: GateOptions | null | undefined, profile
   };
 }
 
-export type RunSummary = { text: string; tools: { tool: string; input: unknown }[]; errors: string[]; sessionId: string | null; telemetryComplete: boolean };
+export type RunSummary = { text: string; tools: { tool: string; input: unknown; output?: string }[]; errors: string[]; sessionId: string | null; telemetryComplete: boolean };
 
 /** OpenCode's synchronous sub-agent tool: `subagent` in v2 (seen with 2.0.8), `task` in v1. */
 export const SUBAGENT_TOOL = /^(task|subagent)$/i;

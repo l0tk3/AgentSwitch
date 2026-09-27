@@ -20,7 +20,7 @@ describe("incomplete task UI", () => {
   it.each(["partial", "blocked"])("%s is a yellow terminal result with a reason and a follow-up", (status) => {
     const current = { ...task, status };
     state.set({ task: current, tasks: [current] });
-    expect(feedback.feedback(current, [])).toMatchObject({ stage: 3, tone: "warn", label: status === "partial" ? "部分完成" : "执行受阻" });
+    expect(feedback.feedback(current, [])).toMatchObject({ stage: 3, tone: "warn", label: "未完成" });
     const page = detail.render(state.get());
     expect(page).toContain(`badge ${status}`);
     expect(page).toContain("已保存的进展");
@@ -28,24 +28,25 @@ describe("incomplete task UI", () => {
     expect(page).not.toContain('class="card ok"');
     expect(page).not.toContain('id="t-cancel"');
     expect(page).toContain('id="f-send"');
-    expect(home.render(state.get())).toContain(status === "partial" ? "部分完成" : "执行受阻");
+    expect(home.render(state.get())).toContain("未完成");
   });
 
   it.each([
-    ["规划调用超时：45 秒内未能给出动作", "planner_timeout", "规划超时"],
-    ["规划服务未能给出有效动作，请核对现场后继续", "planner_error", "规划失败"],
-    ["等待你的答复：请选择使用哪个环境", "question", "待补充条件"],
-    ["waiting for your answer: Which environment?", "question", "待补充条件"],
-    ["副作用未知，请先核对现场", null, "执行受阻"],
+    // The fixed status words (docs/ui-v0.md §4): a planner stop is 未完成, its reason is the detail line.
+    ["规划调用超时：45 秒内未能给出动作", "planner_timeout", "未完成"],
+    ["规划服务未能给出有效动作，请核对现场后继续", "planner_error", "未完成"],
+    ["等待你的答复：请选择使用哪个环境", "question", "等你处理"],
+    ["waiting for your answer: Which environment?", "question", "等你处理"],
+    ["副作用未知，请先核对现场", null, "未完成"],
     // The label follows the engine's structured cause, never the wording of the error.
-    ["规划调用超时（旧记录，没有 blockCause）", null, "执行受阻"],
+    ["等待你的答复（旧记录，没有 blockCause）", null, "未完成"],
   ])("blocked reason %s has the matching label without inventing missing information", (error, blockCause, label) => {
     const current = { ...task, status: "blocked", error, blockCause };
     state.set({ task: current, tasks: [current] });
     expect(feedback.feedback(current, [])).toMatchObject({ label, detail: error });
     expect(detail.render(state.get())).toContain(label);
     expect(home.render(state.get())).toContain(label);
-    if (label !== "待补充条件") expect(detail.render(state.get())).not.toContain("待补充条件");
+    if (label !== "等你处理") expect(detail.render(state.get())).not.toContain("等你处理");
   });
 
   it.each([

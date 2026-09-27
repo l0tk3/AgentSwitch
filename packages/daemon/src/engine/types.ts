@@ -11,7 +11,7 @@ import type { SealedEntry } from "../secrets/sealer.js";
 export type HandoffFrom = TargetRef & { readonly taskId: string; readonly reason: "user" | `failure:${string}` | "quota" };
 
 /** question: waiting for the user's answer; planner_timeout / planner_error: the loop model gave no usable next action. */
-export type BlockCause = "question" | "planner_timeout" | "planner_error";
+export type BlockCause = "question" | "planner_timeout" | "planner_error" | "interrupted";
 
 export type TaskStatus = "queued" | "routing" | "running" | "waiting_approval" | "done" | "partial" | "blocked" | "failed" | "cancelled";
 
@@ -72,6 +72,8 @@ export type Task = {
   readonly speech: string | null;
   /** Why a blocked task stopped, for display without parsing `error` (null: not blocked, or no specific cause). */
   readonly blockCause: BlockCause | null;
+  /** When the user last opened the task (docs/control-v0.md §4): an ended task updated after that is unread. */
+  readonly acknowledgedAt: number | null;
 };
 
 export type TaskEventType =
@@ -81,6 +83,7 @@ export type TaskEventType =
   | "dispatched"
   | "text"
   | "tool_call"
+  | "tool_result"   // {id, ok, output}: what a tool call (same id) gave back, clipped (executors/toolEvents.ts)
   | "approval_request"
   | "approval_resolved"
   | "attempt_failed"
@@ -114,7 +117,7 @@ export type TaskEvent = {
   readonly payload: Readonly<Record<string, unknown>>;
 };
 
-export type ApprovalStatus = "pending" | "allowed" | "denied" | "expired";
+export type ApprovalStatus = "pending" | "allowed" | "denied" | "expired" | "withdrawn";
 
 /** approval = allow/deny; question = the router needs text from the user (docs/supervisor-v0.md §1b). */
 export type ApprovalKind = "approval" | "question";

@@ -7,8 +7,10 @@ import type { EngineContext } from "./context.js";
 import { answersFromText, describeAnswers, encodeEvidence, parseEvidence, validateAnswers, type QuestionSource, type UserAnswers, type UserQuestion } from "../core/questions.js";
 import { TERMINAL, type ApprovalStatus } from "./types.js";
 
-export type ResolvedBy = "user" | "router" | "timeout";
-export type RequestOptions = { readonly humanOnly?: boolean };
+export type ResolvedBy = "user" | "router" | "timeout" | "executor";
+/** `signal`: the executor's own handle on this one request; when it aborts (Claude cancelled the tool call) the card
+ *  is withdrawn rather than left for the user to answer into nothing (docs/control-v0.md §4). */
+export type RequestOptions = { readonly humanOnly?: boolean; readonly signal?: AbortSignal };
 /** What the user sent back: plain text answers the first question; `answers` covers several. */
 export type GivenAnswer = { readonly text?: string; readonly answers?: unknown; /** Internal API flag after raw length validation and sealing; never accepted from an HTTP body. */ readonly sealed?: boolean };
 export type AnswerResult = { readonly ok: true } | { readonly ok: false; readonly code: "not_found" | "bad_answer"; readonly error: string };
@@ -39,6 +41,15 @@ export class ApprovalDesk {
       this.pending.set(approval.id, { kind: "approval", resolve, timer: this.expiry(approval.id) });
     });
     if (!opts.humanOnly) this.onRequested(taskId, approval.id, action, evidence);
+    const signal = opts.signal;
+    if (signal) {
+      const withdraw = () => this.resolve(approval.id, "deny", "withdrawn", "executor");
+      if (signal.aborted) withdraw();
+      else {
+        signal.addEventListener("abort", withdraw, { once: true });
+        void promise.finally(() => signal.removeEventListener("abort", withdraw));
+      }
+    }
     return promise;
   }
 
@@ -60,7 +71,7 @@ export class ApprovalDesk {
     const p = this.take(approvalId);
     const approval = this.ctx.store.resolveApproval(approvalId, status);
     if (!p || !approval) return false;
-    this.ctx.emit(approval.taskId, "approval_resolved", { approvalId, decision, status, by, kind: approval.kind });
+    this.ctx.emit(approval.taskId, "approval_resolved", { approvalId, decision: status === "withdrawn" ? "withdrawn" : decision, status, by, kind: approval.kind });
     const evidence = p.kind === "question" ? parseEvidence(approval.evidence) : null;
     const task = this.ctx.store.getTask(approval.taskId);
     if (evidence && task && !TERMINAL.has(task.status)) this.ctx.emit(approval.taskId, "feedback", {

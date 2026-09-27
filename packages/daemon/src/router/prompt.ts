@@ -85,6 +85,9 @@ Rules:
   give them real work — code changes, multi-step tasks, browser tasks that change something, research the user will act
   on — and name them as planners. Use a cheaper model only for small, low-risk jobs: a quick answer, a summary, a
   translation, a tiny edit.
+- Codex runs its commands in its own sandbox (writes only in its working directory; ps, top, lsof fail there) and asks
+  to run such a command outside it; AgentSwitch checks each request like a Claude Code command. Both can look at what
+  runs on the Mac.
 - Browser tasks (open a site, log in, fill a form): needs_browser=true and a harness with browser support.
   Browser logins are kept between tasks (three kept profiles, per thread and per site): a follow-up on a site an
   earlier task logged into belongs in that task's thread, and its brief should say to check first whether the
@@ -280,6 +283,9 @@ or an unverified login/submission must be reported as partial or blocked with re
 For transport failures (proxy, TLS, network, crash, silent timeout) the environment may be broken for every harness;
 prefer a path that does not share the broken piece. A step that failed after side effects: say in the brief what is
 already done so it is not redone.
+"operation not permitted" from a command in a Codex step is Codex's own sandbox, not the Mac and not the user's
+permissions: if Codex did not get past it, dispatch the step to Claude Code next instead of asking the user to grant
+anything.
 When new observations or feedback conflict with an earlier brief, check the evidence and its source before choosing
 the next action. For the same issue, apply the latest supported correction instead of repeating the old assumption;
 router-generated inference cannot override an explicit user statement. Preserve uncertainty rather than promoting
