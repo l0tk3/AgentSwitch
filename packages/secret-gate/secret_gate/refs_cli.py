@@ -21,7 +21,7 @@ MAX_REQUEST_CHARS = 1 << 20
 MAX_TOKENS = 256
 
 
-def _read_request(keys: set[str]) -> dict[str, Any]:
+def read_request(keys: set[str]) -> dict[str, Any]:
     raw = sys.stdin.read(MAX_REQUEST_CHARS + 1)
     if len(raw) > MAX_REQUEST_CHARS:
         raise ValidationError("refs request too large")
@@ -35,14 +35,16 @@ def _read_request(keys: set[str]) -> dict[str, Any]:
     return data
 
 
-def _cmd_register(_: argparse.Namespace) -> int:
-    data = _read_request({"scope", "tokens"})
-    tokens = data["tokens"]
+def check_tokens(tokens: Any) -> list[Any]:
     if not isinstance(tokens, list) or len(tokens) > MAX_TOKENS:
         raise ValidationError(f"tokens must be a list of at most {MAX_TOKENS}")
-    resolver = Resolver.from_home(gate_home(), scope=data["scope"])
+    return tokens
+
+
+def register_tokens(resolver: Resolver, tokens: list[Any]) -> dict[str, list[dict[str, Any]]]:
+    """One item per token, in order: its reference and policy metadata, or an error item. Never a value."""
     out: list[dict[str, Any]] = []
-    for token in tokens:
+    for token in check_tokens(tokens):
         try:
             if not isinstance(token, str) or not is_token(token):
                 raise ValidationError("not a complete enc:v1: token")
@@ -52,12 +54,23 @@ def _cmd_register(_: argparse.Namespace) -> int:
             raise  # the scope itself is unusable: the whole request fails
         except GateError:
             out.append({"error": "not a token of this gate (malformed, tampered, or made for another gate)"})
-    print(json.dumps({"refs": out}))
-    return 0 if all("ref" in item for item in out) else 1
+    return {"refs": out}
+
+
+def print_register(result: dict[str, list[dict[str, Any]]]) -> int:
+    print(json.dumps(result))
+    return 0 if all("ref" in item for item in result["refs"]) else 1
+
+
+def _cmd_register(_: argparse.Namespace) -> int:
+    data = read_request({"scope", "tokens"})
+    check_tokens(data["tokens"])
+    resolver = Resolver.from_home(gate_home(), scope=data["scope"])
+    return print_register(register_tokens(resolver, data["tokens"]))
 
 
 def _cmd_release(_: argparse.Namespace) -> int:
-    data = _read_request({"scope"})
+    data = read_request({"scope"})
     print(json.dumps({"released": RefRegistry.from_home(gate_home()).release(data["scope"])}))
     return 0
 

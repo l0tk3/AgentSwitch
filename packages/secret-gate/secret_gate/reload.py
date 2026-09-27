@@ -16,6 +16,11 @@ Rules:
   the result. Host names are not secret; the added/removed patterns are printed because each addition switches
   verification off for a host and belongs in the log.
 
+Keys (gate-service-v0 §2): when given the proxy's `SecretGateAddon`, the same SIGHUP also reloads every private
+key of the gate home (current and legacy) and swaps the addon's resolver in one assignment. The gate service's rpc
+server sends it after `keys.new/use/retire`, so tokens made for a new current key work without a restart. A home
+whose keys cannot be loaded keeps the previous resolver (the failure is reported, never an empty key set).
+
 Without this addon SIGHUP terminates mitmdump (default action); under launchd `KeepAlive` restarts it, which
 also re-reads the file, but drops every open connection.
 """
@@ -31,9 +36,20 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from typing import TYPE_CHECKING, Protocol
+
 from .constants import HOST_PATTERN
-from .errors import ValidationError
+from .errors import GateError, ValidationError
 from .upstream_tls import UPSTREAM_INSECURE_FILE, UpstreamTlsAddon
+
+if TYPE_CHECKING:
+    from .resolver import Resolver
+
+
+class ResolverHolder(Protocol):
+    """What the reloader swaps keys in: the proxy's SecretGateAddon."""
+
+    def replace_resolver(self, resolver: Resolver) -> None: ...
 
 MAX_FILE_BYTES = 64 * 1024
 MAX_LISTED_CHANGES = 20
@@ -146,9 +162,14 @@ class InsecureHostsReloader:
         emit: Callable[[str], None] = _to_stderr,
         get_loop: Callable[[], asyncio.AbstractEventLoop] = asyncio.get_running_loop,
         signum: int | None = getattr(signal, "SIGHUP", None),
+        keys: ResolverHolder | None = None,
+        load_resolver: Callable[[Path], Resolver] | None = None,
     ) -> None:
         self._target = target
+        self._home = Path(home)
         self._path = home / UPSTREAM_INSECURE_FILE
+        self._keys = keys
+        self._load_resolver = load_resolver
         self._emit = emit
         self._get_loop = get_loop
         self._signum = signum
@@ -159,7 +180,23 @@ class InsecureHostsReloader:
         if result.ok:
             self._target.replace_patterns(result.patterns)
         self._emit(result.message)
+        if self._keys is not None:
+            self.reload_keys()
         return result
+
+    def reload_keys(self) -> bool:
+        """Swap in a resolver holding every key of the home now; keep the previous one when that fails."""
+        if self._keys is None:
+            return False
+        load = self._load_resolver or _default_load_resolver
+        try:
+            resolver = load(self._home)
+        except (GateError, OSError) as exc:
+            self._emit(f"secret-gate: keys reload FAILED, keeping the previous keys: {exc}")
+            return False
+        self._keys.replace_resolver(resolver)
+        self._emit(f"secret-gate: keys reloaded: {resolver.key_count} private key(s)")
+        return True
 
     # mitmproxy hooks -------------------------------------------------------------------------
 
@@ -179,3 +216,9 @@ class InsecureHostsReloader:
         if self._loop is not None and self._signum is not None:
             self._loop.remove_signal_handler(self._signum)
             self._loop = None
+
+
+def _default_load_resolver(home: Path) -> Resolver:
+    from .resolver import Resolver  # local import: the resolver pulls in the refs registry
+
+    return Resolver.from_home(home)

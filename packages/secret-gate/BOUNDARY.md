@@ -5,6 +5,8 @@
 
 信任边界：模型只拿密文（`enc:v1:`）或本次执行的短引用（`enc:ref:`）；gate 进程持有私钥、执行范围和它自己填进页面的值；
 网页是不可信的，下游 Playwright MCP 可信但会把未脱敏的快照和日志写盘。
+安装凭据网关服务（`docs/gate-service-v0.md`）后，私钥、mitmproxy CA 私钥、短引用库、审计日志和可信配置归服务账户
+`_agentswitchgate`，登录用户的进程（daemon、执行器、浏览器组件）在文件系统层面读不到；它们经 `gate.sock` 调用服务，见“凭据网关服务”一节。
 
 ## 工具与参数
 
@@ -71,6 +73,22 @@
 | 审计日志 `logs/browser-audit.jsonl` | 记录填写、封装、截图、拒绝及原因；只有 host、label、引用、计数；范围只记短哈希；0600 | 日志里出现值或范围 | 写不进去时只在 stderr 报告，不阻断 | `tests/test_transfer.py::test_audit_log_is_private_and_best_effort`、`tests/test_transfer.py::test_source_page_output_shows_references_and_legend` |
 | 下游进程环境 | 去掉代理变量、修复通道、执行范围和授权 | 下游或页面拿到 gate 的能力 | — | `tests/test_browser_mcp_integration.py::test_downstream_env_strips_proxy_vars`、`tests/test_browser_mcp_integration.py::test_transfer_grant_without_scope_is_not_applied` |
 
+## 凭据网关服务（gate-service-v0）
+
+| 入口 | 规则 | 挡什么 | 失败行为 | 测试 |
+|---|---|---|---|---|
+| `gate.sock` 连接 | socket 0666；连接时由内核（`LOCAL_PEERCRED`）给出对端 uid，只放行 root 和 `gate-service.json` 的 `ownerUid`；配置缺失或无效时只放行 root | 本机其他用户调用网关 | 不读请求，直接断开 | `tests/test_rpc.py::test_socket_is_0666_and_only_allowed_uids_get_an_answer`、`tests/test_rpc.py::test_peer_uid_is_the_kernels_record_of_the_other_end`、`tests/test_rpc.py::test_allowed_uids_come_from_gate_service_json` |
+| 请求格式 | 每行一个 JSON，单个请求 ≤ 1 MiB；每个方法按字段白名单和类型校验参数；每个连接一个线程，慢调用不阻塞其他客户端 | 超大请求、多余参数、单个慢调用拖住服务 | 回中文原因；超长行回错误后断开 | `tests/test_rpc.py::test_requests_over_one_mebibyte_are_refused`、`tests/test_rpc.py::test_protocol_errors_are_answered_in_chinese_and_the_connection_survives`、`tests/test_rpc.py::test_a_slow_call_does_not_hold_up_other_clients` |
+| 返回值 | 同 uid 分不出 daemon 和 agent，每个方法按“调用方可能是 agent”设计：没有方法返回私钥；只有 `browser.resolve` 返回明文；`mcp.http` / `mcp.exec` 的结果先脱敏；HTTP 传输错误只回异常类名（原文可能带着替换后的 URL） | 调用方拿到私钥或明文 | — | `tests/test_rpc.py::test_mcp_methods_run_inside_the_service_and_redact`、`tests/test_rpc.py::test_mcp_http_transport_errors_name_the_failure_only`、`tests/test_mcp_forward.py::test_every_tool_is_forwarded_with_this_executions_scope` |
+| `browser.resolve` | 密文用途必须含 `fill`（只有 `http` 不够；例外：用迁入的旧密钥封的、用途含 `http` 的密文，那把私钥本来就对登录用户可读过）；`host` 必须是具体的 `host:port` 且在密文允许列表内；引用只在其范围内解析 | 同用户进程借浏览器接口取只用于 http / exec / otp 的密文明文 | 拒绝，浏览器什么都不输入 | `tests/test_rpc.py::test_browser_resolve_is_fill_only_and_host_checked`、`tests/test_rpc.py::test_browser_resolve_lets_http_tokens_of_moved_in_keys_be_typed_but_not_new_ones`、`tests/test_remote_resolver.py::test_remote_resolver_policy`、`tests/test_remote_resolver.py::test_browser_gate_fills_through_the_service_and_redacts` |
+| 审计 `logs/rpc-audit.jsonl` | 每次调用一行：时间、方法、对端 uid、范围的短哈希、label、host、结果和原因；不写值、密文、范围本身；0600 | 日志里出现值或范围 | 写不进去只报 stderr | `tests/test_rpc.py::test_mcp_methods_run_inside_the_service_and_redact`、`tests/test_rpc.py::test_browser_resolve_is_fill_only_and_host_checked` |
+| 密钥变更（`keys.new/use/retire`） | 在服务内串行；legacy 密钥只解密、不能设为当前，当前密钥不能删；变更后原子写 `keys.json`（只含公钥）并向代理发 SIGHUP，代理重新加载全部私钥，加载失败时保留原有密钥 | 把暴露过的旧密钥设回当前；代理继续用旧的密钥集合 | 拒绝；重载失败保留旧密钥并记日志 | `tests/test_keyring_legacy.py::test_legacy_keys_decrypt_but_never_become_current`、`tests/test_keyring_legacy.py::test_retire_deletes_only_legacy_keys`、`tests/test_rpc.py::test_status_and_keys_methods_publish_and_signal_the_proxy`、`tests/test_publish.py::test_keys_json_is_published_atomically_with_public_keys_only`、`tests/test_publish.py::test_sighup_reloads_every_key_of_the_home`、`tests/test_publish.py::test_a_failed_key_reload_keeps_the_previous_keys` |
+| 登录用户的 CLI、MCP、浏览器组件 | `gate.sock` 属于其他 uid 时进入服务模式：`keys.json` 按不可信输入校验；`keygen`、`check`、`proxy`、`service`、`install-ca`、`rpc` 拒绝；服务无响应时报错，从不退回本地网关或在用户目录生成密钥 | 服务模式下悄悄在用户侧恢复私钥，撤销隔离 | 退出码 2，“凭据网关服务无响应” | `tests/test_service_cli.py::test_commands_the_service_owns_are_refused`、`tests/test_service_cli.py::test_unavailable_service_is_reported_not_bypassed`、`tests/test_service_cli.py::test_client_mode_needs_a_socket_of_another_user`、`tests/test_publish.py::test_keys_json_is_validated_as_untrusted_input` |
+| 安装：登录用户的目录 | root 只经以 O_NOFOLLOW 打开的目录描述符访问 `~/.secret-gate`、`~/.mitmproxy`、`~/Library/LaunchAgents`；目录须属于 `ownerUid`；只读属于 `ownerUid`、只有一个硬链接的普通文件；`MOVED.txt` 以 O_EXCL 新建 | 预置的符号链接或硬链接让 root 读取、删除或覆盖别处的文件 | 跳过该项 | `tests/test_system_install.py::test_symlinks_in_the_users_home_are_never_followed` |
+| 安装：密钥迁移 | 先复制并校验（读回比对、私钥须推出同一公钥）；服务启动并列出这些密钥后才删除原件，且只删服务中有相同副本的；任何一步失败即停止并列出已做、未做的步骤，不回滚 | 安装中途失败丢失私钥 | 停止；原件保留 | `tests/test_system_plan.py::test_install_plan_orders_the_steps_so_no_key_is_ever_lost`、`tests/test_system_install.py::test_originals_stay_when_the_service_never_answers`、`tests/test_system_install.py::test_a_failing_command_stops_the_install_and_says_what_was_not_done`、`tests/test_system_install.py::test_unusable_old_keys_are_reported_and_kept` |
+| 安装：运行时副本 | 服务只运行 root 拥有的 `<root>/runtime/`，从不运行 App 包里的程序；目录 0755、文件 0644/0755；指向副本之外的符号链接使安装失败 | 登录用户改 App 包里的 Python 即拿到服务账户 | 安装停止 | `tests/test_system_install.py::test_a_runtime_symlink_leaving_the_copy_is_refused`、`tests/test_system_install.py::test_install_migrates_everything_and_leaves_moved_txt` |
+| LaunchDaemon | `UserName`/`GroupName` 为 `_agentswitchgate`；环境只有 `SECRET_GATE_HOME`、`HOME`、`SECRET_GATE_PUBLIC` 和由 root 拥有的目录组成的 `PATH`，没有代理变量；`Umask` 077；网关目录安装时 `chmod -R go-rwx` | 代理变量或用户可写目录里的程序进入服务 | — | `tests/test_system_plan.py::test_launch_daemon_plists`、`tests/test_system_plan.py::test_install_plan_commands_and_paths` |
+
 ## 已知缺口（不要当成已解决）
 
 - 截图用的快照和实际截图之间页面仍可能变化：新插入的节点若含敏感值，不在遮罩计划里。像素核对只能证明计划内的框被盖住。
@@ -78,6 +96,13 @@
 - 跨域 iframe 的内容若没出现在快照里、关闭的 Shadow DOM、图片和与受保护值无关页面上的 canvas 不会被识别；只在持有过受保护值的页面整块遮 canvas。
 - 个人信息只按邮箱、手机/电话、身份证号、银行卡四类模式识别；姓名、地址等不在模式内的字段既不遮也不封装。
 - 普通凭据（非页面封装值）填写时不核对表单提交去向，只核对页面 host；同 host 其他路径的提交仍依赖密文的 host 绑定。
-- 执行器的路径限制（daemon `protected.ts`，gate 家目录、浏览器会话槽位、远程 TLS 私钥禁读）是字符串匹配：绝对路径、`~`、`$HOME`、`${HOME}`、引号和转义的各种写法都认得出，但 `cd` 之后的相对路径、通配、shell 变量、`find ~ -exec` 认不出；OpenCode 不检查参数带 `$` 的 `cd`；Codex 没有按路径的读限制。这些防的是执行器误读，不防有意绕过；硬边界要靠 gate 以独立用户运行（§3）。
+- 执行器的路径限制（daemon `protected.ts`，gate 家目录、浏览器会话槽位、远程 TLS 私钥禁读）是字符串匹配：绝对路径、`~`、`$HOME`、`${HOME}`、引号和转义的各种写法都认得出，但 `cd` 之后的相对路径、通配、shell 变量、`find ~ -exec` 认不出；OpenCode 不检查参数带 `$` 的 `cd`；Codex 没有按路径的读限制（它在沙箱里读哪都行；申请到沙箱外跑的命令才按禁区检查，2026-09-25）。这些防的是执行器误读，不防有意绕过。装了凭据网关服务后，网关目录对登录用户在文件系统层面不可读，这些规则对它退为锦上添花；没装服务时它们仍是唯一的屏障。
 - 浏览器登录会保留（daemon 的三个会话槽位，threads-v0 §4b）：gate 进程只认得本会话填过、封装过的值，旧会话留在页面上的账号名、页面数据不在它的状态里，截图遮罩和文本脱敏都不覆盖（个人信息四类模式仍生效）。profile 目录对 Claude、OpenCode 执行器禁读；Codex 没有按路径的读限制，能读到 cookie 数据库。
-- 同一 macOS 用户下，其他进程能读到 gate MCP 进程的环境变量（含执行范围）和 shell 的代理地址。执行范围防的是误用和跨任务串值，不防同用户的主动窥探；那要靠 gate 以独立用户运行（§3）。
+- 同一 macOS 用户下，其他进程能读到 gate MCP 进程的环境变量（含执行范围）和 shell 的代理地址。执行范围防的是误用和跨任务串值，不防同用户的主动窥探；凭据网关服务也不改变这一点（范围仍在用户侧进程里，`gate.sock` 分不出 daemon 和 agent）。
+- 凭据网关服务：浏览器组件仍以登录用户身份运行，所以用途含 `fill` 的密文，同用户的进程可以冒充浏览器组件，对它声称的、在允许列表里的站点经 `browser.resolve` 取到明文。服务逐次记审计，但无法核实调用方真的是浏览器组件、页面真的在那个站点。只用于 http / exec / otp 的密文不受影响。
+- 凭据网关服务：`browser.resolve` 只认 `fill`，所以只有 `http` 用途的新密文在服务模式下不能由浏览器填写（用旧密钥封的除外）。2026-09-27 起调度模型封装网站表单要填的值、手机新建密文（默认）、`credential-reissue` 修复出的种子导入密文都带 `http` + `fill`；只由工具放进请求的接口密钥只带 `http`，浏览器那条路取不到它。模型若把网站密码误标成只有 `http`，浏览器填写会被拒绝（失败即关闭），需重新提交。
+- 凭据网关服务：浏览器组件在用户侧做的判断（截图遮罩、填写前的拒绝、封装）不再写 `browser-audit.jsonl`，服务只记录 `browser.resolve` / `browser.register` 调用本身。
+- 凭据网关服务：`secret_exec` 以服务账户运行模板命令。模板若指向登录用户可写位置的程序（如 Homebrew 目录），该程序以服务账户身份拿到明文并可交给登录用户；模板应只写 root 拥有的程序的绝对路径。服务的 `PATH` 只含 root 拥有的目录。
+- 凭据网关服务不防 root 或管理员，也不防安装、更新那一刻 App 包已被篡改：用户输入管理员密码时信任的是当时的 App 包。
+- 本机回环地址上的目标（`127.0.0.1:<port>`）谁先占端口谁拿到明文，与账户无关。
+- `logs.tail` 把代理和 rpc 服务的日志尾部返回给登录用户（Mac 应用的日志按钮）：其中有 host 和错误摘要，不含值，但同 uid 的 agent 也能读到。

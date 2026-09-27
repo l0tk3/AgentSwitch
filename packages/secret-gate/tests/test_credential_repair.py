@@ -35,7 +35,7 @@ def test_seed_reissue_materializes_seed_not_current_code(keypair, resolver):
     with pytest.raises(PolicyViolation, match="does not allow"):
         resolver.resolve(tok, use="http", host=HOST)
     result = repaired(keypair, resolver, tok)
-    assert result == {"token": result["token"], "label": "fixture/2fa", "kind": "secret", "hosts": [HOST], "uses": ["http"]}
+    assert result == {"token": result["token"], "label": "fixture/2fa", "kind": "secret", "hosts": [HOST], "uses": ["fill", "http"]}
     assert fs.TOTP_SECRET_B32 not in json.dumps(result)
     assert resolver.resolve(result["token"], use="http", host=HOST).value == fs.TOTP_SECRET_B32
     assert open_token(keypair.private, result["token"]).seed_import_hosts == ()

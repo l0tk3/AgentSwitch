@@ -12,14 +12,22 @@ cover and which a separate gate user makes unreadable.
 The dispatcher configures one execution through the environment of this process only:
 SECRET_GATE_SCOPE (its enc:ref: scope) and SECRET_GATE_TRANSFER (an authorized field transfer,
 transfer.py). Neither reaches the downstream: it gets no scope, no grant, no repair bridge.
+
+With the gate service installed (gate-service-v0 §4) this process still runs as the login user (Playwright and
+a visible Chrome), but holds no key: values come from `browser.resolve` (fill only), sealed page data is
+registered with `browser.register`, the mask configuration comes from `browser.config`, the service records
+the audit, and the downstream's output goes to a private temporary directory of this user, removed at exit.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
-from collections.abc import Sequence
-from contextlib import AsyncExitStack
+import tempfile
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AsyncExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Self
 
@@ -35,7 +43,11 @@ from .browser_mask import MaskConfig
 from .constants import SCOPE_ENV_VAR
 from .errors import ValidationError
 from .keystore import gate_home, load_public_key
+from .publish import current_public_key, read_rows
+from .remote_resolver import GateResolver, RemoteResolver
 from .resolver import Resolver
+from .rpc_client import RpcClient
+from .service_paths import client_socket, public_dir
 from .transfer import TRANSFER_ENV_VAR, TransferGrant
 
 PROXY_VARS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy")
@@ -52,7 +64,8 @@ def downstream_env(env: dict[str, str] | None = None) -> dict[str, str]:
     return {k: v for k, v in base.items() if k not in (*PROXY_VARS, *GATE_ONLY_VARS)}
 
 
-def execution_config(env: dict[str, str], home: Path) -> tuple[str | None, TransferGrant | None, bytes | None]:
+def execution_config(env: dict[str, str], home: Path, *, public_key: Callable[[], bytes] | None = None,
+                     ) -> tuple[str | None, TransferGrant | None, bytes | None]:
     """(scope, transfer grant, public key) for this execution. A grant without a scope, or one this gate cannot
     parse, is not applied: exactly what the dispatcher does with an invalid grant (nothing sealed, nothing widened)."""
     scope = env.get(SCOPE_ENV_VAR) or None
@@ -67,7 +80,7 @@ def execution_config(env: dict[str, str], home: Path) -> tuple[str | None, Trans
     if scope is None:
         print("secret-gate: SECRET_GATE_TRANSFER ignored: it needs SECRET_GATE_SCOPE from the dispatcher", file=sys.stderr)
         return None, None, None
-    return scope, grant, load_public_key(home)
+    return scope, grant, (public_key or (lambda: load_public_key(home)))()
 
 
 def parse_command(argv: Sequence[str]) -> list[str]:
@@ -141,18 +154,58 @@ def build_server(gate: BrowserGate) -> Server:
     return server
 
 
-async def serve(command: Sequence[str]) -> None:
-    home = gate_home()
-    scope, grant, public_key = execution_config(dict(os.environ), home)
-    resolver = Resolver.from_home(home, scope=scope)
-    mask = MaskConfig.load(home)
-    out_dir = private_output_dir(home)
-    async with StdioDownstream(command, out_dir) as downstream:
-        gate = BrowserGate(resolver, downstream, output_dir=out_dir, transfer=grant, public_key=public_key,
-                           mask=mask, audit=Audit.at_home(home, scope))
+@dataclass(frozen=True)
+class BrowserSetup:
+    resolver: GateResolver
+    grant: TransferGrant | None
+    public_key: bytes | None
+    mask: MaskConfig
+    audit: Audit
+    out_dir: Path
+
+
+def local_setup(env: dict[str, str], home: Path) -> BrowserSetup:
+    scope, grant, public_key = execution_config(env, home)
+    return BrowserSetup(Resolver.from_home(home, scope=scope), grant, public_key, MaskConfig.load(home),
+                        Audit.at_home(home, scope), private_output_dir(home))
+
+
+def service_setup(env: dict[str, str], client: RpcClient, out_dir: Path) -> BrowserSetup:
+    """The browser component of a login user once the gate is a service: no key, no gate home."""
+    public = public_dir(env)
+    scope, grant, public_key = execution_config(env, public, public_key=lambda: current_public_key(read_rows(public)))
+    config = client.call("browser.config")
+    mask = MaskConfig.parse(config.get("screenshotMask") if isinstance(config, dict) else None)
+    return BrowserSetup(RemoteResolver(client, scope, env), grant, public_key, mask, Audit(None), out_dir)
+
+
+@contextmanager
+def user_output_dir() -> Iterator[Path]:
+    """A 0700 temporary directory of the login user for the downstream's output, removed at exit."""
+    path = Path(tempfile.mkdtemp(prefix="secret-gate-browser-"))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+async def _run(command: Sequence[str], setup: BrowserSetup) -> None:
+    async with StdioDownstream(command, setup.out_dir) as downstream:
+        gate = BrowserGate(setup.resolver, downstream, output_dir=setup.out_dir, transfer=setup.grant,
+                           public_key=setup.public_key, mask=setup.mask, audit=setup.audit)
         server = build_server(gate)
         async with stdio_server() as (read, write):
             await server.run(read, write, server.create_initialization_options())
+
+
+async def serve(command: Sequence[str]) -> None:
+    env = dict(os.environ)
+    sock = client_socket(env)
+    if sock is None:
+        await _run(command, local_setup(env, gate_home()))
+        return
+    with user_output_dir() as out_dir:
+        await _run(command, service_setup(env, RpcClient(sock), out_dir))
 
 
 def main(argv: Sequence[str]) -> None:

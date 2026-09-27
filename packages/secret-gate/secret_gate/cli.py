@@ -1,9 +1,12 @@
-"""`secret-gate` command line: keygen | keys | pubkey | enc | check | refs | proxy | mcp | browser | install-ca | service | bootstrap."""
+"""`secret-gate` command line: keygen | keys | pubkey | enc | check | refs | proxy | mcp | browser | install-ca | service | bootstrap | rpc | system.
+
+With the gate service installed (gate-service-v0 §4), a login user's CLI is its client: `main` hands the parsed
+command to service_cli.route, which answers from keys.json / gate.sock or refuses what only the service may do.
+"""
 
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import os
 import shutil
@@ -12,27 +15,23 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .constants import (
-    CA_CERT_FILE,
-    DEFAULT_PROXY_PORT,
-    KIND_SECRET,
-    MITMPROXY_CA_PATH,
-    PUBLIC_KEY_FILE,
-    USE_HTTP,
-    VALID_KINDS,
-    VALID_USES,
-)
 from .bootstrap import add_bootstrap_parser
-from .crypto import generate_keypair
-from .credential_repair import checked_token, credential_info, reissue_totp_seed
-from .errors import GateError, ValidationError
-from .keyring import create_keypair, list_keypairs, set_current
+from .constants import CA_CERT_FILE, DEFAULT_PROXY_PORT, KIND_SECRET, MITMPROXY_CA_PATH, USE_HTTP, VALID_KINDS, VALID_USES
+from .credential_repair import credential_call, read_credential_stdin
+from .crypto import b64url_encode, generate_keypair
+from .enc_cli import run_enc
+from .errors import GateError
+from .keyring import create_keypair, retire_keypair, set_current
 from .keystore import gate_home, load_private_key, load_public_key, parse_public_key, save_keypair
-from .policy import SecretPayload
+from .publish import key_rows
 from .refs_cli import add_refs_parser
 from .resolver import Resolver
-from .service import add_service_parser
-from .tokens import make_token
+from .rpc_methods import LOG_NAMES, MAX_LOG_LINES, tail
+from .rpc_server import add_rpc_parser
+from .service import ERR_LOG, add_service_parser
+from .service_cli import print_keys, route
+from .service_paths import client_socket
+from .system_cli import add_system_parser
 
 
 def _cmd_keygen(args: argparse.Namespace) -> int:
@@ -52,77 +51,25 @@ def _cmd_keygen(args: argparse.Namespace) -> int:
 def _cmd_keys(args: argparse.Namespace) -> int:
     home = gate_home()
     if args.keys_cmd == "new":
-        info = create_keypair(home, args.name)
+        create_keypair(home, args.name)
         if args.use:
             set_current(home, args.name)
-            info = next(k for k in list_keypairs(home) if k.name == args.name)
     elif args.keys_cmd == "use":
         set_current(home, args.name)
-    rows = [{"name": k.name, "public": k.public, "current": k.current} for k in list_keypairs(home)]
-    if args.json:
-        print(json.dumps(rows))
-    else:
-        for r in rows:
-            print(f"{'*' if r['current'] else ' '} {r['name']:20} {r['public']}")
+    elif args.keys_cmd == "retire":
+        retire_keypair(home, args.name)
+    print_keys(key_rows(home), args.json)
     return 0
 
 
 def _cmd_pubkey(_: argparse.Namespace) -> int:
-    print((gate_home() / PUBLIC_KEY_FILE).read_text().strip())
+    """The *current* keypair's public key (an old home's top-level key.pub is its "default" keypair)."""
+    print(b64url_encode(load_public_key(gate_home())))
     return 0
 
 
 def _cmd_enc(args: argparse.Namespace) -> int:
-    public = parse_public_key(args.pubkey) if args.pubkey else load_public_key(gate_home())
-    if args.batch:
-        return _enc_batch(public)
-    value = args.value if args.value is not None else _read_value(args.stdin)
-    payload = SecretPayload.create(
-        value=value, hosts=tuple(args.host), uses=set(args.use), label=args.label, kind=args.kind,
-        seed_import_hosts=args.seed_import_host,
-    )
-    print(make_token(public, payload))
-    return 0
-
-
-def _enc_batch(public: bytes) -> int:
-    """stdin: JSON array of {label, hosts?, kind?, uses?, value}; stdout: JSON array of results.
-
-    Values never touch argv. A bad entry yields {"label", "error"} without aborting the others.
-    """
-    try:
-        entries = json.loads(sys.stdin.read())
-    except json.JSONDecodeError:
-        print("error: batch input must be a JSON array", file=sys.stderr)
-        return 2
-    if not isinstance(entries, list):
-        print("error: batch input must be a JSON array", file=sys.stderr)
-        return 2
-    results = []
-    for entry in entries:
-        label = entry.get("label") if isinstance(entry, dict) else None
-        try:
-            if not isinstance(entry, dict):
-                raise GateError("entry must be an object")
-            payload = SecretPayload.create(
-                value=entry.get("value", ""),
-                hosts=tuple(entry.get("hosts") or ()),
-                uses=set(entry.get("uses") or [USE_HTTP]),
-                label=label or "",
-                kind=entry.get("kind", KIND_SECRET),
-                seed_import_hosts=entry.get("seed_import_hosts", []),
-            )
-            results.append({"label": label, "token": make_token(public, payload)})
-        except GateError as exc:
-            results.append({"label": label, "error": str(exc)})
-    print(json.dumps(results))
-    return 0 if all("token" in r for r in results) else 1
-
-
-def _read_value(from_stdin: bool) -> str:
-    if from_stdin:
-        return sys.stdin.read().rstrip("\n")
-    return getpass.getpass("secret value (not echoed): ")
+    return run_enc(args, parse_public_key(args.pubkey) if args.pubkey else load_public_key(gate_home()))
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
@@ -134,23 +81,9 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 
 def _cmd_credential(args: argparse.Namespace) -> int:
-    """Trusted daemon commands: ciphertext on stdin, policy/ciphertext on stdout, never a secret value."""
-    raw = sys.stdin.read(196609)
-    if len(raw) > 196608:
-        raise ValidationError("credential request too large")
-    try:
-        data = json.loads(raw)
-    except (ValueError, UnicodeDecodeError):
-        raise ValidationError("credential request must be a JSON object") from None
-    keys = {"token"} if args.cmd == "credential-info" else {"token", "host", "purpose"}
-    if not isinstance(data, dict) or set(data) != keys:
-        raise ValidationError("credential request has unexpected fields")
-    token = checked_token(data["token"])
+    data = read_credential_stdin(args.cmd)
     home = gate_home()
-    resolver = Resolver.from_home(home)
-    result = credential_info(resolver, token) if args.cmd == "credential-info" else reissue_totp_seed(
-        resolver, load_public_key(home), token, data["host"], data["purpose"])
-    print(json.dumps(result))
+    print(json.dumps(credential_call(Resolver.from_home(home), lambda: load_public_key(home), args.cmd, data)))
     return 0
 
 
@@ -169,7 +102,7 @@ def _cmd_proxy(args: argparse.Namespace) -> int:
     if not mitmdump:
         print("mitmdump not found; pip install mitmproxy", file=sys.stderr)
         return 1
-    os.execv(mitmdump, mitmdump_argv(mitmdump, entry, args.port))
+    os.execv(mitmdump, mitmdump_argv(mitmdump, entry, args.port, confdir=args.confdir))
     return 0  # pragma: no cover
 
 
@@ -180,12 +113,28 @@ def _cmd_proxy(args: argparse.Namespace) -> int:
 PROXY_OPTIONS: tuple[str, ...] = ("http2=false",)
 
 
-def mitmdump_argv(mitmdump: str, entry: Path, port: int) -> list[str]:
-    """The exact mitmdump command line the proxy runs; kept pure so it can be tested."""
+def mitmdump_argv(mitmdump: str, entry: Path, port: int, *, confdir: str | Path | None = None) -> list[str]:
+    """The exact mitmdump command line the proxy runs; kept pure so it can be tested.
+
+    `confdir`: where mitmproxy keeps its CA (default ~/.mitmproxy); the gate service passes <root>/gate/mitmproxy."""
     argv = [mitmdump, "-q", "-s", str(entry), "-p", str(port), "--listen-host", "127.0.0.1"]
-    for opt in PROXY_OPTIONS:
+    for opt in (*PROXY_OPTIONS, *((f"confdir={confdir}",) if confdir else ())):
         argv += ["--set", opt]
     return argv
+
+
+def print_log(text: str, as_json: bool) -> None:
+    print(json.dumps({"text": text}, ensure_ascii=False) if as_json else text)
+
+
+def _cmd_logs(args: argparse.Namespace) -> int:
+    """Without the service: `<home>/logs/<name>.log`, or the LaunchAgent's `proxy.err.log` (service.py)."""
+    logs = gate_home() / "logs"
+    path = logs / f"{args.name}.log"
+    if not path.exists() and args.name == "proxy":
+        path = logs / ERR_LOG
+    print_log(tail(path, args.lines), args.json or args.json_parent)
+    return 0
 
 
 def _cmd_mcp(_: argparse.Namespace) -> int:
@@ -217,29 +166,22 @@ def _cmd_install_ca(_: argparse.Namespace) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="secret-gate", description=__doc__)
-    p.add_argument("--version", action="version", version=__version__)
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    k = sub.add_parser("keygen", help="generate the gate keypair")
-    k.add_argument("--force", action="store_true", help="overwrite an existing (legacy, unnamed) key")
-    k.add_argument("--name", help="create a named keypair under <home>/keys/<name> instead")
-    k.set_defaults(fn=_cmd_keygen)
-
-    ks = sub.add_parser("keys", help="list / create / switch named keypairs")
+def _add_keys_parser(sub: argparse._SubParsersAction) -> None:
+    ks = sub.add_parser("keys", help="list / create / switch / retire named keypairs")
     ks.add_argument("--json", action="store_true", help="machine-readable output")
     kss = ks.add_subparsers(dest="keys_cmd")
     kss.add_parser("list", help="list keypairs (default)")
     kn = kss.add_parser("new", help="create a named keypair")
     kn.add_argument("name")
     kn.add_argument("--use", action="store_true", help="also make it current")
-    ku = kss.add_parser("use", help="make a keypair current")
+    ku = kss.add_parser("use", help="make a keypair current (not a legacy one)")
     ku.add_argument("name")
+    kr = kss.add_parser("retire", help="delete a legacy (decrypt-only) keypair: its tokens stop working")
+    kr.add_argument("name")
     ks.set_defaults(fn=_cmd_keys, keys_cmd="list")
 
-    sub.add_parser("pubkey", help="print the public key").set_defaults(fn=_cmd_pubkey)
 
+def _add_enc_parser(sub: argparse._SubParsersAction) -> None:
     e = sub.add_parser("enc", help="encrypt a secret into a token")
     e.add_argument("--label", help="e.g. site-a/pass (required unless --batch)")
     e.add_argument("--host", action="append", default=[], help="allowed host, repeatable; *.x.com ok; add :port to bind one port (host:8001)")
@@ -252,6 +194,41 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--batch", action="store_true", help="read a JSON array of entries from stdin, print JSON results")
     e.set_defaults(fn=_cmd_enc)
 
+
+def log_lines(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = 0
+    if not 1 <= value <= MAX_LOG_LINES:
+        raise argparse.ArgumentTypeError(f"--lines must be 1-{MAX_LOG_LINES}")
+    return value
+
+
+def _add_logs_parser(sub: argparse._SubParsersAction) -> None:
+    lg = sub.add_parser("logs", help="the gate's own logs (with the gate service: logs.tail on gate.sock)")
+    lg.add_argument("--json", dest="json_parent", action="store_true", help='print {"text": ...}')
+    lgs = lg.add_subparsers(dest="logs_cmd", required=True)
+    t = lgs.add_parser("tail", help="the last lines of the proxy or rpc log")
+    t.add_argument("--name", required=True, choices=LOG_NAMES)
+    t.add_argument("--lines", type=log_lines, default=200, help=f"1-{MAX_LOG_LINES} (default 200)")
+    t.add_argument("--json", action="store_true", help='print {"text": ...}')
+    lg.set_defaults(fn=_cmd_logs, json_parent=False)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="secret-gate", description=__doc__)
+    p.add_argument("--version", action="version", version=__version__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    k = sub.add_parser("keygen", help="generate the gate keypair")
+    k.add_argument("--force", action="store_true", help="overwrite an existing (legacy, unnamed) key")
+    k.add_argument("--name", help="create a named keypair under <home>/keys/<name> instead")
+    k.set_defaults(fn=_cmd_keygen)
+    _add_keys_parser(sub)
+    sub.add_parser("pubkey", help="print the current public key").set_defaults(fn=_cmd_pubkey)
+    _add_enc_parser(sub)
+
     c = sub.add_parser("check", help="show a token's policy (never its value)")
     c.add_argument("token")
     c.set_defaults(fn=_cmd_check)
@@ -262,6 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr = sub.add_parser("proxy", help="run the substituting HTTPS proxy")
     pr.add_argument("-p", "--port", type=int, default=DEFAULT_PROXY_PORT)
+    pr.add_argument("--confdir", help="mitmproxy directory for the CA (default ~/.mitmproxy)")
     pr.set_defaults(fn=_cmd_proxy)
 
     sub.add_parser("mcp", help="run the MCP stdio server").set_defaults(fn=_cmd_mcp)
@@ -271,6 +249,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("install-ca", help="copy mitmproxy CA and trust it").set_defaults(fn=_cmd_install_ca)
     add_service_parser(sub)
     add_bootstrap_parser(sub)
+    _add_logs_parser(sub)
+    add_rpc_parser(sub)
+    add_system_parser(sub)
     return p
 
 
@@ -278,10 +259,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "enc" and not args.use:
         args.use = [USE_HTTP]
-    if args.cmd == "enc" and args.batch and not args.label:
-        pass  # label comes from each entry
     try:
-        return args.fn(args)
+        sock = client_socket() if args.cmd != "system" else None
+        fn = route(args, sock) if sock is not None else args.fn
+        return fn(args)
     except GateError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

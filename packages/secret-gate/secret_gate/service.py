@@ -1,5 +1,10 @@
 """`secret-gate service`: run the gate proxy as a launchd LaunchAgent of the current user.
 
+This is the single-user setup (development, machines without the gate service). The isolated setup is
+`secret-gate system install` (system_cli.py, docs/gate-service-v0.md): the proxy and an rpc server run as the
+role account `_agentswitchgate` from LaunchDaemons, the keys live where the login user cannot read them, and this
+command is refused once `gate.sock` exists.
+
 Why a LaunchAgent: executors must not keep handling credentials while the gate they rely on is down
 (gate-next-v0 §3). launchd restarts the proxy when it dies (`KeepAlive`), starts it at login
 (`RunAtLoad`), and `service status` gives the daemon a health check with a meaningful exit code.
@@ -8,8 +13,9 @@ What runs, as whom, where:
 * Process: `<this installation's secret-gate> proxy --port N`, i.e. the same `mitmdump` command line as
   `secret-gate proxy` (`cli.mitmdump_argv`), which binds **127.0.0.1 only** (`--listen-host 127.0.0.1`).
   Nothing here changes the listen address.
-* Owner: the user who ran `install`, in the `gui/<uid>` domain (loaded while that user is logged in).
-  Running the gate under a separate macOS user is the stronger isolation and is still a manual setup.
+* Owner: the user who ran `install`, in the `gui/<uid>` domain (loaded while that user is logged in). The keys
+  are then readable by every process of that user, agents included; only the gate service
+  (`secret-gate system install`) puts them out of reach.
 * Environment: only `SECRET_GATE_HOME` and a minimal `PATH`. Never proxy variables: the gate's own
   upstream traffic must not be routed into itself.
 * Files: the plist in `~/Library/LaunchAgents` (mode 0644: it holds paths and a port, no secret; launchd

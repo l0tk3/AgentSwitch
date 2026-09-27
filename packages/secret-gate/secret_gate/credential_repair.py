@@ -7,20 +7,24 @@ it cannot authorize a repair itself and never calls the local reissuer directly.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
-from collections.abc import Mapping
+import sys
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import httpx
 
-from .constants import KIND_SECRET, KIND_TOTP, LABEL_PATTERN, USE_HTTP
+from .constants import KIND_SECRET, KIND_TOTP, LABEL_PATTERN, USE_FILL, USE_HTTP
 from .errors import GateError, PolicyViolation, ValidationError
 from .policy import SecretPayload, normalize_host
 from .resolver import Resolver
 from .tokens import is_ref, is_token, make_token
 
 REPAIR_PURPOSE = "totp_seed_import"
+# A re-issued seed goes into a form field, so the browser gate may type it (gate-service-v0 §1); sorted as described.
+REISSUED_USES = (USE_FILL, USE_HTTP)
 REPAIR_TIMEOUT_SECONDS = 65
 REPAIR_TOOL = "secret_repair"
 REPAIR_DESCRIPTION = (
@@ -85,10 +89,45 @@ def reissue_totp_seed(resolver: Resolver, public_key: bytes, token: Any, host: A
         raise PolicyViolation("credential repair cannot add or broaden the allowed destination")
     if request["host"] not in original.seed_import_hosts:
         raise PolicyViolation("原密文未授权种子导入，请通过新消息重新提交此字段和目标")
-    payload = SecretPayload.create(value=original.value, hosts=[request["host"]], uses=[USE_HTTP],
+    payload = SecretPayload.create(value=original.value, hosts=[request["host"]], uses=list(REISSUED_USES),
                                    label=original.label, kind=KIND_SECRET)
     return {"token": make_token(public_key, payload), "label": payload.label, "kind": payload.kind,
             "hosts": list(payload.hosts), "uses": sorted(payload.uses)}
+
+
+CREDENTIAL_INFO = "credential-info"
+CREDENTIAL_REISSUE = "credential-reissue"
+CREDENTIAL_FIELDS = {CREDENTIAL_INFO: frozenset({"token"}), CREDENTIAL_REISSUE: frozenset({"token", "host", "purpose"})}
+MAX_CREDENTIAL_REQUEST_CHARS = 196608
+
+
+def parse_credential_request(raw: str) -> Any:
+    if len(raw) > MAX_CREDENTIAL_REQUEST_CHARS:
+        raise ValidationError("credential request too large")
+    try:
+        return json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise ValidationError("credential request must be a JSON object") from None
+
+
+def credential_request(command: str, data: Any) -> dict[str, Any]:
+    """The daemon's credential-info / credential-reissue request, checked field by field."""
+    if not isinstance(data, dict) or set(data) != CREDENTIAL_FIELDS[command]:
+        raise ValidationError("credential request has unexpected fields")
+    return {**data, "token": checked_token(data["token"])}
+
+
+def read_credential_stdin(command: str) -> dict[str, Any]:
+    """The daemon's request on stdin: ciphertext in, policy/ciphertext out, never a secret value."""
+    return credential_request(command, parse_credential_request(sys.stdin.read(MAX_CREDENTIAL_REQUEST_CHARS + 1)))
+
+
+def credential_call(resolver: Resolver, public_key: Callable[[], bytes], command: str, data: Any) -> dict:
+    """Trusted dispatcher only: policy metadata, or a re-signed ciphertext; never a value."""
+    request = credential_request(command, data)
+    if command == CREDENTIAL_INFO:
+        return credential_info(resolver, request["token"])
+    return reissue_totp_seed(resolver, public_key(), request["token"], request["host"], request["purpose"])
 
 
 def bridge_config(env: Mapping[str, str]) -> tuple[str, str]:
@@ -110,12 +149,12 @@ def _bridge_result(data: Any, host: str) -> dict:
     required = {"ok", "token", "label", "kind", "hosts", "uses"}
     if not required <= set(data) or set(data) - required - {"seed_import_hosts"}:
         raise ValidationError("invalid credential repair response")
-    if (data.get("kind") != KIND_SECRET or data.get("hosts") != [host] or data.get("uses") != [USE_HTTP]
+    if (data.get("kind") != KIND_SECRET or data.get("hosts") != [host] or data.get("uses") != list(REISSUED_USES)
             or data.get("seed_import_hosts", []) != []
             or not isinstance(data.get("label"), str) or not LABEL_PATTERN.fullmatch(data["label"])):
         raise ValidationError("invalid credential repair response policy")
     return {"token": checked_token(data["token"]), "label": data["label"], "kind": KIND_SECRET,
-            "hosts": [host], "uses": [USE_HTTP]}
+            "hosts": [host], "uses": list(REISSUED_USES)}
 
 
 async def request_repair(token: str, host: str, purpose: str = REPAIR_PURPOSE, *,

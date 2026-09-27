@@ -31,6 +31,8 @@ from .constants import CA_CERT_FILE, DEFAULT_PROXY_PORT, MITMPROXY_CA_PATH
 from .errors import GateError, ValidationError
 from .harness_config import CA_ENV_VARS, HARNESSES, GateContext, HarnessConfig, harness_config
 from .keystore import gate_home, load_private_key
+from .publish import current_public_key, read_rows
+from .service_paths import KEYS_JSON
 from .proxy_probe import LOOPBACK, ProbeResult, probe_gate, tcp_reachable
 from .service import atomic_write, gate_command, port_arg, validate_port
 
@@ -71,7 +73,18 @@ def check_keypair(home: Path) -> Check:
     return Check("keypair", STATUS_OK, f"the current keypair in {home} loads")
 
 
-def check_ca(home: Path, mitmproxy_ca: Path, now: datetime) -> Check:
+def check_keys_json(public: Path) -> Check:
+    """Gate service: the published keys.json names a current keypair (the private keys are the service's)."""
+    try:
+        rows = read_rows(public)
+        current_public_key(rows)
+    except GateError as exc:
+        return Check("keypair", STATUS_FAIL, str(exc))
+    return Check("keypair", STATUS_OK, f"the gate service publishes a current keypair in {public / KEYS_JSON}")
+
+
+def check_ca(home: Path, mitmproxy_ca: Path | None, now: datetime) -> Check:
+    """`mitmproxy_ca` None: the proxy's CA is private to the gate service, which publishes `ca.pem` itself."""
     path = home / CA_CERT_FILE
     if not path.is_file():
         return Check("ca", STATUS_FAIL, f"{path} not found: start the proxy once, then copy its CA there "
@@ -85,6 +98,9 @@ def check_ca(home: Path, mitmproxy_ca: Path, now: datetime) -> Check:
         return Check("ca", STATUS_FAIL, f"{path} is not a PEM certificate")
     if cert.not_valid_after_utc <= now:
         return Check("ca", STATUS_FAIL, f"{path} expired on {cert.not_valid_after_utc:%Y-%m-%d}")
+    if mitmproxy_ca is None:
+        return Check("ca", STATUS_OK, f"{path} is a valid certificate published by the gate service, "
+                                      f"valid until {cert.not_valid_after_utc:%Y-%m-%d}")
     if not mitmproxy_ca.is_file():
         return Check("ca", STATUS_OK, f"{path} is a valid certificate (not compared: {mitmproxy_ca} not found; "
                                       "proxy under another user?)")
@@ -112,14 +128,11 @@ def check_gate(port: int, probe: Callable[[int], ProbeResult], listening: bool) 
     return Check("gate", STATUS_OK if result.is_gate else STATUS_FAIL, result.detail)
 
 
-def run_checks(home: Path, port: int, deps: BootstrapDeps) -> tuple[Check, ...]:
+def run_checks(home: Path, port: int, deps: BootstrapDeps, *, service_public: Path | None = None) -> tuple[Check, ...]:
     listener = check_listener(port, deps.tcp)
-    return (
-        check_keypair(home),
-        check_ca(home, deps.mitmproxy_ca, deps.now()),
-        listener,
-        check_gate(port, deps.probe, listener.status == STATUS_OK),
-    )
+    keys = check_keys_json(service_public) if service_public else check_keypair(home)
+    ca = check_ca(service_public, None, deps.now()) if service_public else check_ca(home, deps.mitmproxy_ca, deps.now())
+    return (keys, ca, listener, check_gate(port, deps.probe, listener.status == STATUS_OK))
 
 
 def checks_pass(checks: tuple[Check, ...]) -> bool:
@@ -183,14 +196,16 @@ def report_lines(ctx: GateContext, config: HarnessConfig, checks: tuple[Check, .
     ]
 
 
-def _cmd_bootstrap(args: argparse.Namespace) -> int:
+def run_bootstrap(args: argparse.Namespace, *, service_public: Path | None = None) -> int:
+    """`service_public`: the gate service's public directory when this CLI is its client (gate-service-v0 §4)."""
     if args.force and not args.write:
         raise ValidationError("--force only applies together with --write PATH")
     deps = system_deps()
     ctx = GateContext(home=gate_home().expanduser().absolute(), port=validate_port(args.port),
-                      command=gate_command(), user_home=deps.user_home)
+                      command=gate_command(), user_home=deps.user_home,
+                      ca_file=service_public / CA_CERT_FILE if service_public else None)
     config = harness_config(args.harness, ctx)
-    checks = run_checks(ctx.home, ctx.port, deps)
+    checks = run_checks(ctx.home, ctx.port, deps, service_public=service_public)
     passed = checks_pass(checks)
     lines = report_lines(ctx, config, checks)
     code, written = (0 if passed else 1), None
@@ -215,4 +230,4 @@ def add_bootstrap_parser(sub: argparse._SubParsersAction) -> None:
     b.add_argument("--port", type=port_arg, default=DEFAULT_PROXY_PORT, help=f"proxy port (default {DEFAULT_PROXY_PORT})")
     b.add_argument("--write", metavar="PATH", help="also write the snippet to PATH, only after all checks pass")
     b.add_argument("--force", action="store_true", help="with --write: replace an existing PATH")
-    b.set_defaults(fn=_cmd_bootstrap)
+    b.set_defaults(fn=run_bootstrap)

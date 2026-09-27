@@ -50,6 +50,7 @@ class GateContext:
     port: int
     command: tuple[str, ...]    # how to run this secret-gate installation
     user_home: Path
+    ca_file: Path | None = None  # the gate service's published ca.pem (gate-service-v0 §3.3); default <home>/ca.pem
 
     @property
     def proxy_url(self) -> str:
@@ -57,7 +58,7 @@ class GateContext:
 
     @property
     def ca_path(self) -> str:
-        return str(self.home / CA_CERT_FILE)
+        return str(self.ca_file or self.home / CA_CERT_FILE)
 
 
 def proxy_env(ctx: GateContext, no_proxy: str) -> dict[str, str]:

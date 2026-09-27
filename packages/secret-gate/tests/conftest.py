@@ -70,3 +70,11 @@ def gate_home(tmp_path, monkeypatch, keypair):
     save_keypair(home, keypair)
     monkeypatch.setenv("SECRET_GATE_HOME", str(home))
     return home
+
+
+@pytest.fixture(autouse=True)
+def no_real_gate_service(tmp_path_factory, monkeypatch):
+    """No test may find the machine's real gate service: SECRET_GATE_PUBLIC points at an empty directory
+    (child processes inherit it), so the CLI, MCP and browser servers stay in local mode unless a test
+    starts its own service on a temporary socket."""
+    monkeypatch.setenv("SECRET_GATE_PUBLIC", str(tmp_path_factory.mktemp("no-gate-public")))

@@ -57,6 +57,17 @@ class MaskConfig:
             return cls()
         try:
             data = json.loads(path.read_text())
+        except ValueError as exc:
+            raise ValidationError(f"{MASK_CONFIG_FILE} is invalid: {exc}") from None
+        return cls.parse(data)
+
+    @classmethod
+    def parse(cls, data: object) -> MaskConfig:
+        """The parsed content of screenshot-mask.json (None: no file). With the gate service installed the
+        browser component gets it from `browser.config` (gate-service-v0 §3.2)."""
+        if data is None:
+            return cls()
+        try:
             if not isinstance(data, dict) or set(data) - {"kinds", "regions"}:
                 raise ValueError("unexpected keys")
             kinds = check_kinds(data.get("kinds", KINDS))

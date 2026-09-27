@@ -32,8 +32,9 @@ and the user does not expect you to.
 - There is nothing to decode, print, base64-decode or "test"; treat the value as opaque text.
 - If a request is answered with `502 Bad Gateway` and `certificate verify failed`, the site uses a
   certificate the gate cannot verify. Stop and report the host and the error verbatim: the user must
-  list it in `~/.secret-gate/upstream-insecure.txt` and reload the gate (`secret-gate service reload`). Do not try other hosts,
-  ports or `-k`/`--insecure` flags.
+  add it to the gate's `upstream-insecure.txt` (in the Mac app, with an administrator password, when the gate
+  runs as a system service; otherwise `~/.secret-gate/upstream-insecure.txt` and `secret-gate service reload`).
+  Do not try other hosts, ports or `-k`/`--insecure` flags.
 - If a request carrying a value is answered with `HTTP 403` and the header `X-Secret-Gate: denied`,
   the value is not allowed for that host or action. Tell the user; do not try other hosts.
 - If the site rejects the login (for example it hashes the password in the browser before sending,
@@ -69,5 +70,7 @@ and the user does not expect you to.
   `page/email-1`, plus a short legend. Place each one with `secret_fill` on the destination named in
   the legend; the gate refuses other sites and forms that submit elsewhere. Do not try to read the
   values some other way; the references are how this task is meant to be done.
-- The gate's key directory (`~/.secret-gate/`, or `$SECRET_GATE_HOME`) belongs to the gate
-  process; there is no reason for you to read it or to run `secret-gate keygen`.
+- The gate's key directory (`~/.secret-gate/`, or `$SECRET_GATE_HOME`; with the gate running as a system
+  service, `/Library/Application Support/AgentSwitch/gate/`, which belongs to another account) belongs to the
+  gate process; there is no reason for you to read it, to talk to its `gate.sock` yourself, or to run
+  `secret-gate keygen`.
