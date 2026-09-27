@@ -117,13 +117,13 @@ final class HarnessTests: XCTestCase {
 final class NetworkTests: XCTestCase {
     func testTailscaleStatusParsing() {
         let json = """
-        {"BackendState":"Running","TailscaleIPs":["100.106.239.45","fd7a:115c:a1e0::d001:ef2d"],
-         "Self":{"DNSName":"mac.tail0c6791.ts.net.","TailscaleIPs":["100.106.239.45"]}}
+        {"BackendState":"Running","TailscaleIPs":["100.101.102.103","fd7a:115c:a1e0::d001:ef2d"],
+         "Self":{"DNSName":"mac.tail1234.ts.net.","TailscaleIPs":["100.101.102.103"]}}
         """
         let parsed = Tailscale.parse(statusJSON: Data(json.utf8))
         XCTAssertEqual(parsed.backendState, "Running")
-        XCTAssertEqual(parsed.dnsName, "mac.tail0c6791.ts.net")
-        XCTAssertEqual(parsed.ipv4, ["100.106.239.45"])
+        XCTAssertEqual(parsed.dnsName, "mac.tail1234.ts.net")
+        XCTAssertEqual(parsed.ipv4, ["100.101.102.103"])
         let stopped = Tailscale.parse(statusJSON: Data(#"{"BackendState":"NeedsLogin","Self":{"DNSName":""}}"#.utf8))
         XCTAssertEqual(stopped.backendState, "NeedsLogin")
         XCTAssertNil(stopped.dnsName)
@@ -137,7 +137,7 @@ final class NetworkTests: XCTestCase {
         XCTAssertTrue(NetworkAddresses.isPrivateIPv4("172.31.255.255"))
         XCTAssertFalse(NetworkAddresses.isPrivateIPv4("172.32.0.1"))
         XCTAssertTrue(NetworkAddresses.isPrivateIPv4("192.168.31.1"))
-        XCTAssertFalse(NetworkAddresses.isPrivateIPv4("100.106.239.45"))
+        XCTAssertFalse(NetworkAddresses.isPrivateIPv4("100.101.102.103"))
         XCTAssertFalse(NetworkAddresses.isPrivateIPv4("8.8.8.8"))
         XCTAssertFalse(NetworkAddresses.isPrivateIPv4("192.168.1"))
         XCTAssertFalse(NetworkAddresses.isPrivateIPv4("192.168.1.256"))

@@ -29,7 +29,7 @@ final class PairingSession {
             pairing = fresh
             qr = QRCodeRenderer.image(for: fresh.link)
             paired = nil
-            problem = qr == nil ? "二维码生成失败，可以复制链接发给手机" : nil
+            problem = qr == nil ? "二维码生成失败。可复制链接并发送到 iPhone。" : nil
             watch(model: model, until: fresh.expiresAt)
         } catch {
             problem = error.localizedDescription

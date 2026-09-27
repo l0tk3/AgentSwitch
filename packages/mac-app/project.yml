@@ -39,9 +39,11 @@ targets:
         LSUIElement: true
         NSHumanReadableCopyright: AgentSwitch
         # macOS 15+ local network privacy: Bonjour registration and LAN traffic of the children.
-        NSLocalNetworkUsageDescription: AgentSwitch 在局域网里广播自己，让配对过的 iPhone 找到这台 Mac。
+        NSLocalNetworkUsageDescription: AgentSwitch 在局域网内发布 Bonjour 服务，供已配对的 iPhone 发现这台 Mac。
         NSBonjourServices:
           - _agentswitch._tcp
+        # 环境 › 设置清单 › 登录 (docs/control-v0.md §6): the harness's login command in a Terminal window via osascript.
+        NSAppleEventsUsageDescription: AgentSwitch 在“终端”中运行执行器的登录命令（例如 claude auth login），登录由你在终端中完成。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     settings:

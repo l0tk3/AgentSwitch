@@ -7,57 +7,57 @@ struct DevicesView: View {
     @State private var pendingRevoke: Device?
     @State private var busy = false
 
-    private var rows: [Device] {
-        model.devices.sorted { ($0.isRevoked ? 1 : 0, -($0.createdAt?.timeIntervalSince1970 ?? 0)) < ($1.isRevoked ? 1 : 0, -($1.createdAt?.timeIntervalSince1970 ?? 0)) }
+    private var sorted: [Device] {
+        model.devices.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
     }
+    private var active: [Device] { sorted.filter { !$0.isRevoked } }
+    private var revoked: [Device] { sorted.filter(\.isRevoked) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("已配对的设备").font(.title3.weight(.semibold))
-                Spacer()
-                Button { Task { await model.refreshDevices() } } label: { Image(systemName: "arrow.clockwise") }.help("刷新")
-            }
-            if rows.isEmpty {
-                ContentUnavailableView("还没有配对的设备", systemImage: "iphone.slash",
-                                       description: Text(model.daemonReady ? "在「配对」里生成二维码，用 iPhone 扫描。" : model.daemonLine.text))
-            } else {
-                Table(rows) {
-                    TableColumn("名称") { d in Text(d.name).foregroundStyle(d.isRevoked ? .secondary : .primary) }
-                    TableColumn("平台") { d in Text(d.platform) }.width(70)
-                    TableColumn("配对时间") { d in Text(Formatters.dateTime(d.createdAt)) }
-                    TableColumn("最近连接") { d in Text(Formatters.relative(d.lastSeenAt)) }
-                    TableColumn("状态") { d in status(d) }.width(70)
-                    TableColumn("") { d in
-                        if !d.isRevoked {
-                            Button("吊销", role: .destructive) { pendingRevoke = d }.disabled(busy)
-                        }
-                    }
-                    .width(60)
+        content
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { Task { await model.refreshDevices() } } label: { Label("刷新", systemImage: "arrow.clockwise") }
+                        .help("刷新")
                 }
             }
-            Text("吊销后这台设备立刻无法访问，要再用只能重新配对。手机丢了就在这里吊销。")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(12)
-        .task { await model.refreshDevices() }
-        .confirmationDialog("吊销「\(pendingRevoke?.name ?? "")」？", isPresented: Binding(get: { pendingRevoke != nil }, set: { if !$0 { pendingRevoke = nil } })) {
-            Button("吊销", role: .destructive) {
-                if let device = pendingRevoke { Task { await revoke(device) } }
+            .task { await model.refreshDevices() }
+            .confirmationDialog("吊销「\(pendingRevoke?.name ?? "")」？", isPresented: Binding(get: { pendingRevoke != nil }, set: { if !$0 { pendingRevoke = nil } })) {
+                Button("吊销", role: .destructive) {
+                    if let device = pendingRevoke { Task { await revoke(device) } }
+                }
+            } message: {
+                Text("该设备将立即断开连接，再次使用需重新配对。")
             }
-        } message: {
-            Text("这台设备的令牌会立刻失效，正在进行的连接也会断开。")
-        }
     }
 
     @ViewBuilder
-    private func status(_ d: Device) -> some View {
-        if d.isRevoked {
-            Text("已吊销").foregroundStyle(.secondary)
-        } else if d.online == true {
-            Label("在线", systemImage: "circle.fill").foregroundStyle(.green).labelStyle(.titleAndIcon).font(.caption)
+    private var content: some View {
+        if model.devices.isEmpty {
+            EmptyPage(title: "无已配对设备", symbol: "iphone.slash",
+                      message: model.daemonReady ? "在「配对」中生成配对码，然后使用 iPhone 扫描。" : model.daemonLine.text)
         } else {
-            Text("离线").foregroundStyle(.secondary)
+            Form {
+                Section {
+                    if active.isEmpty {
+                        Text("无可用设备").foregroundStyle(.secondary)
+                    }
+                    ForEach(active) { device in
+                        DeviceRow(device: device) {
+                            Button(role: .destructive) { pendingRevoke = device } label: { Text("吊销…").foregroundStyle(.red) }
+                                .disabled(busy)
+                        }
+                    }
+                } footer: {
+                    Footer("设备丢失时可在此吊销，吊销后立即断开连接。")
+                }
+                if !revoked.isEmpty {
+                    Section("已吊销") {
+                        ForEach(revoked) { device in DeviceRow(device: device) { EmptyView() } }
+                    }
+                }
+            }
+            .formStyle(.grouped)
         }
     }
 
@@ -70,5 +70,41 @@ struct DevicesView: View {
             model.errorMessage = error.localizedDescription
         }
         await model.refreshDevices()
+    }
+}
+
+/// `[iPhone]  小林的 iPhone                ● 在线  [吊销…]`
+///            `iOS · 5 天前配对 · 2 分钟前连接`
+private struct DeviceRow<Trailing: View>: View {
+    let device: Device
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "iphone").font(.title3).foregroundStyle(.secondary).frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.name).foregroundStyle(device.isRevoked ? .secondary : .primary)
+                Text(details).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            if !device.isRevoked { StatusBadge(line: status) }
+            trailing
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var details: String {
+        var parts = [platformName(device.platform)].filter { !$0.isEmpty }
+        if let created = device.createdAt { parts.append("配对于 \(TimeText.day(created))") }
+        if let revokedAt = device.revokedAt {
+            parts.append("吊销于 \(TimeText.day(revokedAt))")
+        } else {
+            parts.append(device.lastSeenAt.map { "最近连接 \(TimeText.moment($0))" } ?? "从未连接")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var status: StatusLine {
+        device.online == true ? StatusLine("在线", .ok) : StatusLine("离线", .off)
     }
 }

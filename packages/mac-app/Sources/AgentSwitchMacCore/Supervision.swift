@@ -41,7 +41,7 @@ public struct ExitRecord: Sendable, Equatable {
     }
 
     public var summary: String {
-        if let detail { return "没能启动：\(detail)" }
+        if let detail { return "无法启动：\(detail)" }
         return signaled ? "被信号 \(status) 终止（运行 \(Int(uptime)) 秒）" : "退出码 \(status)（运行 \(Int(uptime)) 秒）"
     }
 }

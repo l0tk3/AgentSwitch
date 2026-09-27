@@ -28,9 +28,12 @@ public enum ChildEnvironment {
     /// `remoteName` is the Mac name in the pairing payload; the daemon derives the Bonjour name
     /// "AgentSwitch on <name>" from it, which is the name the app publishes. `opencodeBinary` because the daemon
     /// looks only at ~/.opencode/bin/opencode otherwise, not PATH.
+    /// `gateMode` `.service`: the gate is the system service (docs/gate-service-v0.md §4); `SECRET_GATE_PROXY` is its
+    /// port, and `SECRET_GATE_PUBLIC` / `SECRET_GATE_CA` point at its public directory and published CA.
     public static func daemon(base: [String: String], paths: AppPaths, ports: PortSettings, options: DaemonOptions,
                               path: String, remote: Bool = true, remoteName: String? = nil,
-                              opencodeBinary: String? = nil, claudeBinary: String? = nil) -> [String: String] {
+                              opencodeBinary: String? = nil, claudeBinary: String? = nil,
+                              gateMode: GateRunMode = .userProcess) -> [String: String] {
         var env = base
         env["PATH"] = path
         env["AGENTSWITCH_HOME"] = paths.agentswitchHome.path
@@ -47,7 +50,8 @@ public enum ChildEnvironment {
         env["SECRET_GATE_BIN"] = paths.runtime.secretGate.path
         // Staged updates sit next to the bundle; the daemon offers them to the phone (assistant-v0 §5).
         if let bundle = paths.runtime.appBundle { env["AGENTSWITCH_APP_BUNDLE"] = bundle.path }
-        env["SECRET_GATE_PROXY"] = "http://127.0.0.1:\(ports.gate)"
+        env["SECRET_GATE_PROXY"] = "http://127.0.0.1:\(gatePort(ports, gateMode))"
+        env.merge(service(gateMode)) { _, new in new }
         if let opencodeBinary { env["OPENCODE_BIN"] = opencodeBinary }
         if let claudeBinary { env["CLAUDE_BIN"] = claudeBinary }
         // Tailscale.app's binary acts as the CLI only with a TERM or this flag; a Finder-launched app has neither,
@@ -59,13 +63,26 @@ public enum ChildEnvironment {
     }
 
     /// `secret-gate proxy` and every other call of the bundled CLI. Like the launchd service: gate home, a
-    /// minimal PATH, no proxy variables.
-    public static func gate(base: [String: String], paths: AppPaths) -> [String: String] {
+    /// minimal PATH, no proxy variables. In service mode the CLI finds the service through `SECRET_GATE_PUBLIC`.
+    public static func gate(base: [String: String], paths: AppPaths, gateMode: GateRunMode = .userProcess) -> [String: String] {
         var env = base
         env["PATH"] = [paths.runtime.pythonBin.path, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].joined(separator: ":")
         env["SECRET_GATE_HOME"] = paths.gateHome.path
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONNOUSERSITE"] = "1"
+        env.merge(service(gateMode)) { _, new in new }
         return env
+    }
+
+    /// The proxy port children use: the service's own in service mode.
+    public static func gatePort(_ ports: PortSettings, _ mode: GateRunMode) -> Int {
+        if case .service(_, let port) = mode { return port }
+        return ports.gate
+    }
+
+    /// `SECRET_GATE_PUBLIC` and `SECRET_GATE_CA`; nothing for the user process (today's environment, unchanged).
+    static func service(_ mode: GateRunMode) -> [String: String] {
+        guard let dir = mode.publicDir, let ca = mode.ca else { return [:] }
+        return ["SECRET_GATE_PUBLIC": dir.path, "SECRET_GATE_CA": ca.path]
     }
 }

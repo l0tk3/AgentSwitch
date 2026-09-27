@@ -9,6 +9,12 @@ public enum LoginShellPath {
         public let source: Source
         /// Why the fallback was used, for the 环境 tab.
         public let note: String?
+
+        public init(path: String, source: Source, note: String?) {
+            self.path = path
+            self.source = source
+            self.note = note
+        }
     }
 
     static let begin = "__AGENTSWITCH_PATH_BEGIN__"
@@ -63,7 +69,7 @@ public enum LoginShellPath {
             if let found = extract(from: result.stdoutText) {
                 return Resolution(path: merge(shellPath: found, home: home), source: .loginShell, note: nil)
             }
-            let why = result.timedOut ? "登录 shell 超过 \(Int(timeout)) 秒没有返回" : "登录 shell 没有输出 PATH（退出码 \(result.status)）"
+            let why = result.timedOut ? "登录 shell 超过 \(Int(timeout)) 秒未返回" : "登录 shell 未输出 PATH（退出码 \(result.status)）"
             return Resolution(path: merge(shellPath: nil, home: home), source: .fallback, note: why)
         } catch {
             return Resolution(path: merge(shellPath: nil, home: home), source: .fallback, note: error.localizedDescription)

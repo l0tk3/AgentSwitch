@@ -42,8 +42,8 @@ public struct HarnessDetector: Sendable {
         switch harness {
         case .claude:
             if fm.fileExists(atPath: "\(home)/.claude/.credentials.json") { return "~/.claude/.credentials.json" }
-            if await keychainItemExists(service: "Claude Code-credentials") { return "钥匙串里的 Claude Code 登录项" }
-            if HarnessDetector.claudeConfigHasAccount(URL(fileURLWithPath: "\(home)/.claude.json")) { return "~/.claude.json 里的账户" }
+            if await keychainItemExists(service: "Claude Code-credentials") { return "钥匙串中的 Claude Code 登录项" }
+            if HarnessDetector.claudeConfigHasAccount(URL(fileURLWithPath: "\(home)/.claude.json")) { return "~/.claude.json 中的账户" }
             return nil
         case .codex:
             let codexHome = environment["CODEX_HOME"] ?? "\(home)/.codex"
@@ -52,7 +52,7 @@ public struct HarnessDetector: Sendable {
             let data = environment["XDG_DATA_HOME"].map { "\($0)/opencode" } ?? "\(home)/.local/share/opencode"
             if fm.fileExists(atPath: "\(data)/auth.json") { return "\(data)/auth.json" }
             if let count = HarnessDetector.credentialRows(URL(fileURLWithPath: "\(data)/opencode.db")), count > 0 {
-                return "opencode 凭据库里 \(count) 条"
+                return "opencode 凭据库中的 \(count) 条凭据"
             }
             return nil
         }

@@ -1,83 +1,131 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// 环境: harnesses (installed? logged in?), Tailscale, the gate CA, and the PATH children get.
+/// 环境: the setup checklist, harnesses (installed? logged in?), the services and the network in detail, the gate as a
+/// system service, the gate CA, file access and the PATH children get.
 struct EnvironmentView: View {
     @Environment(AppModel.self) private var model
     @State private var trusting = false
+    @State private var confirmTrust = false
     @State private var trustResult: String?
 
     var body: some View {
         Form {
+            SetupChecklistSection()
+
             Section {
                 if model.harnesses.isEmpty {
-                    HStack { ProgressView().controlSize(.small); Text("检测中…") }
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("检测中").foregroundStyle(.secondary) }
                 }
-                ForEach(model.harnesses) { HarnessRow(report: $0) }
+                ForEach(model.harnesses) { HarnessRow(report: $0, path: model.shortPath($0.binary ?? "")) }
             } header: {
-                HStack {
-                    Text("执行器（需要你自己安装并登录）")
-                    Spacer()
-                    Button("重新检测") { model.detectEnvironment() }.disabled(model.detecting)
-                }
+                Text("执行器")
             } footer: {
-                Text("只检查命令是否存在和登录凭据是否在（文件、钥匙串条目），不会调用任何模型。").foregroundStyle(.secondary)
+                Footer("执行器需自行安装并登录。此处仅检查命令和登录凭据，不调用模型。")
             }
 
-            Section("Tailscale") {
-                if let ts = model.tailscale {
-                    Label(ts.summary, systemImage: ts.state == .running ? "checkmark.circle.fill" : "info.circle")
-                        .foregroundStyle(ts.state == .running ? .green : .secondary)
-                    if ts.state == .notInstalled {
-                        Text("在外面用手机需要 Tailscale：Mac 和 iPhone 装上并登录同一个账号，然后重新生成配对码。").font(.caption).foregroundStyle(.secondary)
+            Section {
+                StatusRow(label: "服务", line: model.daemonLine)
+                StatusRow(label: "凭据网关", line: model.gateLine)
+                StatusRow(label: "远程接口", line: model.remoteLine)
+                StatusRow(label: "Bonjour", line: model.bonjourLine)
+                StatusRow(label: "局域网", line: model.lanAddresses.isEmpty ? StatusLine("无私有网段地址", .warning)
+                                                                        : StatusLine(model.lanAddresses.joined(separator: "、"), .ok))
+                StatusRow(label: "Tailscale", line: tailscaleLine)
+            } header: {
+                Text("服务与网络")
+            } footer: {
+                if let note = networkFooter { Footer(note) }
+            }
+
+            GateServiceSection()
+
+            Section {
+                StatusRow(label: "证书文件", line: model.caFilePresent ? StatusLine(model.shortPath(model.gateCA), .ok)
+                                                                   : StatusLine("网关首次启动后生成", .busy))
+                LabeledContent("登录钥匙串") {
+                    HStack(spacing: 8) {
+                        if trusting { ProgressView().controlSize(.small) }
+                        Text(trustResult ?? (model.caTrusted ? "已加入" : "未加入")).foregroundStyle(.secondary)
+                        if !model.caTrusted {
+                            Button("加入…") { confirmTrust = true }.disabled(!model.caFilePresent || trusting)
+                        }
                     }
-                } else {
-                    Text("检测中…")
                 }
+            } header: {
+                Text("网关证书")
+            } footer: {
+                Footer("执行器通过环境变量单独信任此证书，通常无需加入钥匙串。")
             }
 
-            Section("凭据网关证书（CA）") { caSection }
-
-            Section("文件访问") {
-                Text("任务在“桌面”“文稿”“下载”里的项目上运行时，macOS 要求 AgentSwitch 有对应文件夹的访问权限。没有授权时，执行器会停在读文件那一步不动。请在「系统设置 › 隐私与安全性 › 文件和文件夹」里给 AgentSwitch 打开这些文件夹（或在「完全磁盘访问权限」里加入 AgentSwitch）。")
-                    .font(.callout).foregroundStyle(.secondary)
-                HStack {
-                    Button("打开「文件和文件夹」") { openPrivacyPane("Privacy_FilesAndFolders") }
-                    Button("打开「完全磁盘访问权限」") { openPrivacyPane("Privacy_AllFiles") }
+            Section {
+                LabeledContent("打开系统设置") {
+                    HStack(spacing: 8) {
+                        Button("文件和文件夹") { openPrivacyPane("Privacy_FilesAndFolders") }
+                        Button("完全磁盘访问权限") { openPrivacyPane("Privacy_AllFiles") }
+                    }
                 }
-                Text("建议把 AgentSwitch.app 放进“应用程序”文件夹再运行：放在桌面上时，它自己也位于受保护的文件夹里。")
-                    .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                Text("文件访问")
+            } footer: {
+                Footer("项目位于桌面、文稿或下载文件夹时，需要为 AgentSwitch 授权，否则任务无法读取文件。建议将 AgentSwitch 放在“应用程序”文件夹中。")
             }
 
-            Section("子进程使用的 PATH") {
+            Section {
                 if let lp = model.loginPath {
-                    Text(lp.source == .loginShell ? "来自登录 shell（\(model.paths.userHome.path) 下的 shell 配置）" : "登录 shell 没给出 PATH，用了常见目录：\(lp.note ?? "")")
-                        .font(.caption).foregroundStyle(lp.source == .loginShell ? Color.secondary : Color.orange)
-                    Text(lp.path).font(.caption.monospaced()).textSelection(.enabled)
+                    LabeledContent("来源") {
+                        if lp.source == .loginShell {
+                            Text("登录 shell").foregroundStyle(.secondary)
+                        } else {
+                            HStack(spacing: 6) {
+                                StatusDot(level: .warning)
+                                Text("常用目录").foregroundStyle(.secondary)
+                            }
+                            .help(lp.note ?? "")
+                        }
+                    }
+                    Text(lp.path.split(separator: ":").map { model.shortPath(String($0)) }.joined(separator: ":"))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                 } else {
-                    Text("读取中…")
+                    Text("读取中").foregroundStyle(.secondary)
                 }
+            } header: {
+                Text("命令搜索路径（PATH）")
+            } footer: {
+                if let note = model.loginPath?.note { Footer("无法从登录 shell 读取 PATH：\(note)。") }
             }
         }
         .formStyle(.grouped)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { model.detectEnvironment() } label: { Label("重新检测", systemImage: "arrow.clockwise") }
+                    .help("重新检测")
+                    .disabled(model.detecting)
+            }
+        }
+        .confirmationDialog("将网关证书加入登录钥匙串？", isPresented: $confirmTrust) {
+            Button("加入") { Task { await trust() } }
+        } message: {
+            Text(GateCATrustText.confirmation(service: model.gateMode.isService))
+        }
     }
 
-    @ViewBuilder
-    private var caSection: some View {
-        let hasCopy = FileManager.default.fileExists(atPath: model.paths.gateCA.path)
-        Label(hasCopy ? "已复制到 \(model.paths.gateCA.path)" : "还没有：网关第一次启动后自动生成并复制",
-              systemImage: hasCopy ? "checkmark.circle.fill" : "hourglass")
-            .foregroundStyle(hasCopy ? .green : .secondary)
-        Label(model.caTrusted ? "已加入登录钥匙串（本机所有程序都信任它）" : "没有加入钥匙串（一般不需要）",
-              systemImage: model.caTrusted ? "lock.shield" : "lock.open")
-            .foregroundStyle(.secondary)
-        Text("网关用这张 mitmproxy 证书解开 HTTPS，把请求里的密文换成真实值。执行器通过 SSL_CERT_FILE、NODE_EXTRA_CA_CERTS 等环境变量单独信任 \(model.paths.gateCA.lastPathComponent)，所以通常不用改钥匙串。只有想让本机其他程序（比如浏览器）也经过网关时才需要加入钥匙串；加入后本机所有程序都会信任它签发的任何网站证书，而签发用的私钥就在 ~/.mitmproxy 里。只在你自己的电脑上这样做。")
-            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        HStack {
-            Button("加入登录钥匙串…") { Task { await trust() } }
-                .disabled(!hasCopy || model.caTrusted || trusting)
-            if trusting { ProgressView().controlSize(.small) }
-            if let trustResult { Text(trustResult).font(.caption).foregroundStyle(.secondary) }
+    private var tailscaleLine: StatusLine {
+        guard let ts = model.tailscale else { return StatusLine("检测中", .busy) }
+        switch ts.state {
+        case .notInstalled: return StatusLine("未安装", .off)
+        case .stopped: return StatusLine("未连接（\(ts.backendState ?? "未知")）", .warning)
+        case .running: return StatusLine((ts.ipv4 + [ts.dnsName].compactMap { $0 }).joined(separator: " · "), .ok)
+        }
+    }
+
+    private var networkFooter: String? {
+        switch model.tailscale?.state {
+        case .notInstalled: return "未安装 Tailscale 时，iPhone 仅可在同一局域网内连接。在 Mac 和 iPhone 上登录同一 Tailscale 账户并重新配对后，可在局域网外使用。"
+        case .stopped: return "打开并登录 Tailscale 后，iPhone 可在局域网外连接。"
+        default: return nil
         }
     }
 
@@ -85,68 +133,36 @@ struct EnvironmentView: View {
     private func trust() async {
         trusting = true
         defer { trusting = false }
-        let (exe, args) = GateCA.trustCommand(ca: model.paths.gateCA, userHome: model.paths.userHome)
-        do {
-            let result = try await ProcessRunner.run(exe, args, timeout: 120)
-            trustResult = result.ok ? "已加入" : "没有加入：\(result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines))"
-        } catch {
-            trustResult = error.localizedDescription
-        }
-        model.detectEnvironment()
+        trustResult = await model.trustGateCA()
     }
 }
 
+/// `● Claude Code  2.1.278                         可用`
+///   `~/.local/bin/claude`, then install or login steps when there are any.
 private struct HarnessRow: View {
     let report: HarnessReport
+    let path: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: icon).foregroundStyle(color)
-                Text(report.harness.title).fontWeight(.semibold)
-                if let version = report.version { Text(version).foregroundStyle(.secondary) }
-                Spacer()
-                Text(stateText).foregroundStyle(color)
+        let status = StatusText.harness(report.state)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            StatusDot(level: status.level).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(report.harness.title)
+                    if let version = report.version { Text(version).foregroundStyle(.secondary).monospacedDigit() }
+                }
+                if report.binary != nil {
+                    Text(path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .help(report.evidence.map { "登录凭据：\($0)" } ?? "未找到登录凭据")
+                }
+                ForEach(report.guidance, id: \.self) { line in
+                    Text(line).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
             }
-            if let binary = report.binary {
-                Text(binary + (report.evidence.map { " · 登录凭据：\($0)" } ?? "")).font(.caption.monospaced()).foregroundStyle(.secondary)
-            }
-            ForEach(report.guidance, id: \.self) { line in
-                Text(line).font(.caption).textSelection(.enabled)
-            }
+            Spacer(minLength: 12)
+            Text(status.text).foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
-    }
-
-    private var stateText: String {
-        switch report.state {
-        case .ready: return "可用"
-        case .notLoggedIn: return "没有登录"
-        case .missing: return "没有安装"
-        }
-    }
-
-    private var icon: String {
-        switch report.state {
-        case .ready: return "checkmark.circle.fill"
-        case .notLoggedIn: return "person.crop.circle.badge.exclamationmark"
-        case .missing: return "xmark.circle"
-        }
-    }
-
-    private var color: Color {
-        switch report.state {
-        case .ready: return .green
-        case .notLoggedIn: return .orange
-        case .missing: return .secondary
-        }
-    }
-}
-
-/// Opens a Privacy & Security pane of System Settings (the anchors are the documented x-apple.systempreferences ones).
-@MainActor
-private func openPrivacyPane(_ anchor: String) {
-    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
-        NSWorkspace.shared.open(url)
     }
 }

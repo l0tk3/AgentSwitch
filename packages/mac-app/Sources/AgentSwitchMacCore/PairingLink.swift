@@ -23,7 +23,7 @@ public enum PairingLinkError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .notAPairingLink: return "不是 agentswitch://pair 链接"
+        case .notAPairingLink: return "非 agentswitch://pair 链接"
         case .badPayload(let why): return "配对链接内容无效：\(why)"
         }
     }
@@ -40,7 +40,7 @@ public enum PairingLink {
               let p = components.queryItems?.first(where: { $0.name == "p" })?.value else {
             throw PairingLinkError.notAPairingLink
         }
-        guard let data = Base64URL.decode(p) else { throw PairingLinkError.badPayload("p 不是 base64url") }
+        guard let data = Base64URL.decode(p) else { throw PairingLinkError.badPayload("参数 p 不是 base64url 编码") }
         do {
             return try JSONDecoder().decode(PairingPayload.self, from: data)
         } catch {

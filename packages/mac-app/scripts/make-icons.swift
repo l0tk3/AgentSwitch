@@ -1,10 +1,12 @@
 // Draws the AgentSwitch app icon for both apps with CoreGraphics (no SF Symbols: their license excludes app icons).
-// One node on the left routes to three on the right: a task dispatched to the agents.
+// The switch: one input and three lanes, the chosen one solid, the others faint; on the accent blue of docs/ui-v0.md.
+// The menu bar glyph (MenuBarGlyph.swift) is the same drawing, bolder.
 //
 //   swift scripts/make-icons.swift
 //
 // Writes Resources/AppIcon.icns (macOS: rounded tile on a transparent canvas, per the macOS icon grid) and
-// ../ios-app/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png (iOS: full bleed, the system applies the mask).
+// ../ios-app/App/Assets.xcassets/AppIcon.appiconset/icon-1024{,-dark,-tinted}.png (iOS: full bleed, the system applies
+// the mask; the dark and tinted variants are the glyph alone on a transparent canvas, the system draws the ground).
 import AppKit
 import CoreGraphics
 import Foundation
@@ -12,43 +14,82 @@ import Foundation
 let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent()
 let size = 1024
 
-func render(tile: CGRect, cornerRadius: CGFloat) -> CGImage {
+func srgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
+    CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
+}
+
+/// `plain`: the accent tile with a white glyph. `dark`: the glyph alone in the dark-mode accent. `tinted`: the glyph
+/// alone in white, for the system to tint.
+enum Style { case plain, dark, tinted }
+
+func render(tile: CGRect, cornerRadius: CGFloat, shadow: Bool, style: Style = .plain) -> CGImage {
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
     let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     let path = CGPath(roundedRect: tile, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
 
+    // The tile: the accent (#2F5BEA), a little lighter at the top; on macOS a soft shadow under it.
+    if shadow && style == .plain {
+        ctx.saveGState()
+        ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28, color: srgb(0x000000, 0.28))
+        ctx.addPath(path)
+        ctx.setFillColor(srgb(0x2F5BEA))
+        ctx.fillPath()
+        ctx.restoreGState()
+    }
+    if style == .plain { drawTile(ctx, space, path, tile) }
+    drawGlyph(ctx, tile, color: style == .dark ? srgb(0x6D8BFF) : srgb(0xFFFFFF))
+    return ctx.makeImage()!
+}
+
+func drawTile(_ ctx: CGContext, _ space: CGColorSpace, _ path: CGPath, _ tile: CGRect) {
     ctx.saveGState()
     ctx.addPath(path)
     ctx.clip()
-    let gradient = CGGradient(colorsSpace: space, colors: [
-        CGColor(srgbRed: 0.24, green: 0.36, blue: 0.89, alpha: 1),
-        CGColor(srgbRed: 0.43, green: 0.26, blue: 0.85, alpha: 1),
-    ] as CFArray, locations: [0, 1])!
-    ctx.drawLinearGradient(gradient, start: CGPoint(x: tile.minX, y: tile.maxY), end: CGPoint(x: tile.maxX, y: tile.minY), options: [])
+    let gradient = CGGradient(colorsSpace: space, colors: [srgb(0x4570F5), srgb(0x2F5BEA), srgb(0x2449CF)] as CFArray,
+                              locations: [0, 0.45, 1])!
+    ctx.drawLinearGradient(gradient, start: CGPoint(x: tile.midX, y: tile.maxY), end: CGPoint(x: tile.midX, y: tile.minY), options: [])
     ctx.restoreGState()
+}
 
-    // Geometry in tile-relative units so the glyph scales with the tile.
+func drawGlyph(_ ctx: CGContext, _ tile: CGRect, color: CGColor) {
+    // Geometry in tile-relative units (y up) so the glyph scales with the tile.
     let unit = tile.width / 1024
     func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: tile.minX + x * unit, y: tile.minY + y * unit) }
-    let source = p(330, 512)
-    let targets = [p(700, 300), p(700, 512), p(700, 724)]
-
-    ctx.setStrokeColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.95))
-    ctx.setLineWidth(46 * unit)
+    let source = p(292, 512)
+    let lanes: [CGFloat] = [732, 512, 292]
+    let chosen = 0
+    func lane(_ y: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: source)
+        path.addCurve(to: p(560, y), control1: p(440, 512), control2: p(412, y))
+        path.addLine(to: p(736, y))
+        return path
+    }
+    func dot(_ center: CGPoint, _ r: CGFloat) -> CGRect {
+        CGRect(x: center.x - r * unit, y: center.y - r * unit, width: 2 * r * unit, height: 2 * r * unit)
+    }
+    ctx.setLineWidth(40 * unit)
     ctx.setLineCap(.round)
-    for t in targets {
-        ctx.move(to: source)
-        ctx.addCurve(to: t, control1: p(500, 512), control2: CGPoint(x: tile.minX + 530 * unit, y: t.y))
-    }
-    ctx.strokePath()
+    ctx.setStrokeColor(color)
+    ctx.setFillColor(color)
 
-    ctx.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
-    ctx.fillEllipse(in: CGRect(x: source.x - 82 * unit, y: source.y - 82 * unit, width: 164 * unit, height: 164 * unit))
-    for t in targets {
-        ctx.fillEllipse(in: CGRect(x: t.x - 60 * unit, y: t.y - 60 * unit, width: 120 * unit, height: 120 * unit))
+    // The lanes not taken, as one faint layer (no darker overlaps where they meet).
+    ctx.saveGState()
+    ctx.setAlpha(0.34)
+    ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+    for (i, y) in lanes.enumerated() where i != chosen {
+        ctx.addPath(lane(y))
+        ctx.strokePath()
+        ctx.fillEllipse(in: dot(p(736, y), 50))
     }
-    return ctx.makeImage()!
+    ctx.endTransparencyLayer()
+    ctx.restoreGState()
+
+    ctx.addPath(lane(lanes[chosen]))
+    ctx.strokePath()
+    ctx.fillEllipse(in: dot(p(736, lanes[chosen]), 58))
+    ctx.fillEllipse(in: dot(source, 76))
 }
 
 func writePNG(_ image: CGImage, to url: URL, pixels: Int) throws {
@@ -67,12 +108,16 @@ func writePNG(_ image: CGImage, to url: URL, pixels: Int) throws {
 }
 
 // iOS: full bleed, opaque.
-let ios = render(tile: CGRect(x: 0, y: 0, width: size, height: size), cornerRadius: 0)
-let iosIcon = root.deletingLastPathComponent().appendingPathComponent("ios-app/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png")
+let ios = render(tile: CGRect(x: 0, y: 0, width: size, height: size), cornerRadius: 0, shadow: false)
+let iconSet = root.deletingLastPathComponent().appendingPathComponent("ios-app/App/Assets.xcassets/AppIcon.appiconset")
+let iosIcon = iconSet.appendingPathComponent("icon-1024.png")
 try writePNG(ios, to: iosIcon, pixels: 1024)
+let full = CGRect(x: 0, y: 0, width: size, height: size)
+try writePNG(render(tile: full, cornerRadius: 0, shadow: false, style: .dark), to: iconSet.appendingPathComponent("icon-1024-dark.png"), pixels: 1024)
+try writePNG(render(tile: full, cornerRadius: 0, shadow: false, style: .tinted), to: iconSet.appendingPathComponent("icon-1024-tinted.png"), pixels: 1024)
 
 // macOS: 824-pt tile with ~185-pt corners centred on the 1024 canvas.
-let mac = render(tile: CGRect(x: 100, y: 100, width: 824, height: 824), cornerRadius: 185)
+let mac = render(tile: CGRect(x: 100, y: 100, width: 824, height: 824), cornerRadius: 185, shadow: true)
 let iconset = FileManager.default.temporaryDirectory.appendingPathComponent("AppIcon-\(UUID().uuidString).iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 for base in [16, 32, 128, 256, 512] {

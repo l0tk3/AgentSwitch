@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, devices, projects, models, keys, environment, general
+    case pairing, devices, models, permissions, keys, environment, general
 
     var id: String { rawValue }
 
@@ -11,8 +11,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "配对"
         case .devices: return "设备"
-        case .projects: return "项目"
         case .models: return "模型"
+        case .permissions: return "权限"
         case .keys: return "密钥"
         case .environment: return "环境"
         case .general: return "通用"
@@ -23,8 +23,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .pairing: return "qrcode"
         case .devices: return "iphone"
-        case .projects: return "folder"
         case .models: return "cpu"
+        case .permissions: return "checkmark.shield"
         case .keys: return "key"
         case .environment: return "checklist"
         case .general: return "gearshape"
@@ -54,6 +54,31 @@ extension EnvironmentValues {
 @Observable
 final class SettingsNavigation {
     var tab: SettingsTab = .pairing
+    /// The first-run wizard's current step while it is open over the window (docs/control-v0.md §6).
+    var wizardStep: SetupStep?
+    @ObservationIgnored let wizardStore: SetupWizardStore
+
+    init(wizardStore: SetupWizardStore = SetupWizardStore(defaults: .standard)) {
+        self.wizardStore = wizardStore
+    }
+
+    func openWizard(at step: SetupStep = .executors) { wizardStep = step }
+
+    /// 继续 / 跳过此步: the step counts as passed either way, and the progress is saved before the next one shows.
+    func advanceWizard(from step: SetupStep) {
+        wizardStore.save((wizardStore.load() ?? .fresh).completing(step))
+        wizardStep = step.next
+    }
+
+    func backWizard(from step: SetupStep) { wizardStep = step.previous ?? step }
+
+    /// 完成 or 跳过引导: recorded, never opened by itself again.
+    func closeWizard(_ outcome: SetupWizardState.Outcome, at step: SetupStep) {
+        let state = wizardStore.load() ?? .fresh
+        let passed = outcome == .completed ? state.completing(step) : state
+        wizardStore.save(passed.closing(outcome, at: Date()))
+        wizardStep = nil
+    }
 }
 
 /// The settings window, hosted in AppKit so it can be opened from anywhere (menu, first run, launch arguments)
@@ -80,13 +105,36 @@ final class SettingsWindowController {
         window.makeKeyAndOrderFront(nil)
     }
 
-    private func makeWindow() -> NSWindow {
+    /// The first-run wizard over the window (docs/control-v0.md §6), on 环境 so the checklist is behind it.
+    func showWizard(at step: SetupStep) {
+        show(.environment)
+        navigation.openWizard(at: step)
+    }
+
+    /// The window, not yet on screen; `-designPreview` draws the same one off-screen. System Settings style: a sidebar
+    /// under a unified toolbar that carries the page title and the page's own actions (SwiftUI bridges both).
+    static func makeWindow(model: AppModel, navigation: SettingsNavigation, windowClass: NSWindow.Type = NSWindow.self,
+                           appearance: NSAppearance? = nil) -> NSWindow {
         let root = SettingsView().environment(model).environment(navigation)
-        let window = NSWindow(contentViewController: NSHostingController(rootView: root))
+        let window = windowClass.init(contentRect: NSRect(origin: .zero, size: contentSize),
+                                      styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                                      backing: .buffered, defer: false)
+        window.appearance = appearance
+        let controller = NSHostingController(rootView: root)
+        controller.sceneBridgingOptions = [.title, .toolbars]
+        window.toolbar = NSToolbar(identifier: "settings")
+        window.contentViewController = controller
         window.title = "AgentSwitch 设置"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 720, height: 560))
+        window.toolbarStyle = .unified
+        window.setContentSize(contentSize)
         window.isReleasedWhenClosed = false
+        return window
+    }
+
+    static let contentSize = NSSize(width: 780, height: 560)
+
+    private func makeWindow() -> NSWindow {
+        let window = SettingsWindowController.makeWindow(model: model, navigation: navigation)
         window.center()
         closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.onVisibilityChange(false) }
@@ -96,29 +144,51 @@ final class SettingsWindowController {
 }
 
 struct SettingsView: View {
+    @Environment(AppModel.self) private var model
     @Environment(SettingsNavigation.self) private var navigation
 
     var body: some View {
-        @Bindable var navigation = navigation
-        TabView(selection: $navigation.tab) {
-            ForEach(SettingsTab.allCases) { tab in
-                content(tab)
-                    .tabItem { Label(tab.title, systemImage: tab.symbol) }
-                    .tag(tab)
+        NavigationSplitView {
+            List(selection: selection) {
+                ForEach(SettingsTab.allCases) { tab in
+                    Label(tab.title, systemImage: tab.symbol).tag(tab)
+                }
             }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            VStack(spacing: 0) {
+                ErrorBanner()
+                page(navigation.tab)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            // The wizard shows it itself while it is up: one sheet at a time.
+            .gateServiceSheet(model, active: navigation.wizardStep == nil)
         }
-        .padding(16)
-        .frame(minWidth: 680, minHeight: 520)
-        .overlay(alignment: .bottom) { ErrorBanner() }
+        .navigationTitle(navigation.tab.title)
+        .background(WindowTitle(title: navigation.tab.title))
+        .frame(minWidth: 720, minHeight: 480)
+        .tint(.brand)
+        .sheet(isPresented: wizardShown) {
+            SetupWizardView().environment(model).environment(navigation)
+        }
+    }
+
+    private var wizardShown: Binding<Bool> {
+        Binding(get: { navigation.wizardStep != nil }, set: { if !$0 { navigation.wizardStep = nil } })
+    }
+
+    private var selection: Binding<SettingsTab?> {
+        Binding(get: { navigation.tab }, set: { if let tab = $0 { navigation.tab = tab } })
     }
 
     @ViewBuilder
-    private func content(_ tab: SettingsTab) -> some View {
+    private func page(_ tab: SettingsTab) -> some View {
         switch tab {
         case .pairing: PairingView()
         case .devices: DevicesView()
-        case .projects: ProjectsView()
         case .models: ModelsView()
+        case .permissions: PermissionsView()
         case .keys: KeysView()
         case .environment: EnvironmentView()
         case .general: GeneralView()
@@ -126,20 +196,34 @@ struct SettingsView: View {
     }
 }
 
-/// The model's last error, dismissible, shown over any tab.
+/// The page title in the toolbar, as System Settings does (the hosting controller does not bridge a split view's title).
+private struct WindowTitle: NSViewRepresentable {
+    let title: String
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        let title = title
+        DispatchQueue.main.async { view.window?.title = title }
+    }
+}
+
+/// The model's last error, above any page until dismissed.
 struct ErrorBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         if let message = model.errorMessage {
-            HStack(alignment: .top) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(message).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                Button { model.errorMessage = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
+            VStack(spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.attention)
+                    Text(message).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    Button("关闭") { model.errorMessage = nil }.controlSize(.small)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                Divider()
             }
-            .padding(10)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .padding(8)
         }
     }
 }

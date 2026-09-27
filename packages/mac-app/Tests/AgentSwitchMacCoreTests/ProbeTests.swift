@@ -60,7 +60,9 @@ final class GateProbeIntegrationTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: TestSupport.devGate.path), "dev secret-gate venv not present")
         let home = TestSupport.tempDir("gatehome")
         defer { try? FileManager.default.removeItem(at: home) }
-        let env = ["HOME": NSHomeDirectory(), "SECRET_GATE_HOME": home.path, "PATH": "/usr/bin:/bin"]
+        // SECRET_GATE_PUBLIC: an empty directory, so a gate service installed on this Mac does not turn the CLI into its client.
+        let env = ["HOME": NSHomeDirectory(), "SECRET_GATE_HOME": home.path, "SECRET_GATE_PUBLIC": home.appendingPathComponent("public").path,
+                   "PATH": "/usr/bin:/bin"]
         let cli = GateCLI(executable: TestSupport.devGate, environment: env)
         let first = try await cli.ensureKeypair()
         XCTAssertTrue(first.created)

@@ -60,9 +60,9 @@ public enum AppUpdate {
         switch answer {
         case .done: return nil
         case .failed(let error):
-            return "AgentSwitch 不能改动 \(dir.path) 里的 App：\(error.localizedDescription)。在「系统设置 › 隐私与安全性」的「App 管理」和「文件和文件夹」里给 AgentSwitch 打开。"
+            return "AgentSwitch 无法修改 \(dir.path) 中的 App：\(error.localizedDescription)。请在「系统设置 › 隐私与安全性」的「App 管理」和「文件和文件夹」中允许 AgentSwitch。"
         case .timedOut:
-            return "macOS 在等你在 Mac 上允许 AgentSwitch 修改 App（「系统设置 › 隐私与安全性 › App 管理」，App 在桌面、文稿或下载里时还有「文件和文件夹」）。允许之后再装一次。"
+            return "macOS 正在等待授权，AgentSwitch 暂时无法修改 App。请在 Mac 上允许（「系统设置 › 隐私与安全性 › App 管理」；App 位于桌面、文稿或下载文件夹时，还需允许「文件和文件夹」），然后重新安装。"
         }
     }
 

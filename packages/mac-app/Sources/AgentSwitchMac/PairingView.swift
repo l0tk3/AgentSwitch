@@ -9,93 +9,106 @@ struct PairingView: View {
 
     var body: some View {
         if !model.remoteEnabled {
-            ContentUnavailableView {
-                Label("远程已关闭", systemImage: "iphone.slash")
-            } description: {
-                Text("打开「通用 › 允许 iPhone 连接」后才能配对和使用手机。")
-            } actions: {
-                Button("打开远程") { model.setRemoteAccess(true) }
+            EmptyPage(title: "iPhone 连接已关闭", symbol: "iphone.slash", message: "配对和使用 iPhone 需要打开此连接。") {
+                Button("打开连接") { model.setRemoteAccess(true) }
             }
         } else if !model.daemonReady {
-            ContentUnavailableView("守护进程还没就绪", systemImage: "hourglass", description: Text(model.daemonLine.text))
+            EmptyPage(title: "服务未就绪", symbol: "hourglass", message: model.daemonLine.text)
         } else {
-            HStack(alignment: .top, spacing: 24) {
-                qrPanel
-                details
+            Form {
+                Section {
+                    PairingCodeView()
+                } footer: {
+                    Footer("使用 iPhone 上的 AgentSwitch 扫描二维码。配对码 5 分钟内有效，仅可使用一次。")
+                }
+                if let paired = session.paired {
+                    Section {
+                        Label("已配对 \(paired.name)（\(platformName(paired.platform))）", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } footer: {
+                        Footer("如非本人设备，请在「设备」中吊销。")
+                    }
+                }
+                if let problem = session.problem {
+                    Section {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Color.attention).textSelection(.enabled)
+                    }
+                }
+                if let payload = session.pairing?.payload {
+                    Section {
+                        LabeledContent("名称", value: payload.name)
+                        LabeledContent("端口", value: String(payload.port))
+                        LabeledContent("局域网", value: payload.lan.isEmpty ? "无" : payload.lan.joined(separator: "、"))
+                        LabeledContent("Tailscale", value: payload.tailnet.isEmpty ? "无（仅限同一局域网）" : payload.tailnet.joined(separator: "、"))
+                        LabeledContent("证书指纹", value: String(payload.fp.prefix(16)) + "…")
+                        LabeledContent("网关公钥", value: payload.gate.map { "\($0.keypair) · \($0.publicKey.prefix(12))…" } ?? "无")
+                    } header: {
+                        Text("二维码内容")
+                    } footer: {
+                        Footer("仅包含地址、证书指纹和公钥，不含密码。")
+                    }
+                    .textSelection(.enabled)
+                }
             }
-            .padding(8)
+            .formStyle(.grouped)
         }
     }
+}
 
-    private var qrPanel: some View {
-        VStack(spacing: 10) {
+/// The pairing code: QR on the left; code, countdown and the two buttons on the right. Also the wizard's 配对手机 step.
+struct PairingCodeView: View {
+    @Environment(AppModel.self) private var model
+    /// Return presses 生成配对码; off inside the wizard, where Return is 继续.
+    var returnGenerates = true
+
+    private var session: PairingSession { model.pairingSession }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 24) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(.white).frame(width: 260, height: 260)
+                RoundedRectangle(cornerRadius: 12).fill(.white)
                 if let qr = session.qr {
-                    Image(decorative: qr, scale: 1).interpolation(.none).resizable().frame(width: 236, height: 236)
+                    Image(decorative: qr, scale: 1).interpolation(.none).resizable().padding(12)
                 } else {
-                    Image(systemName: "qrcode").font(.system(size: 80)).foregroundStyle(.gray.opacity(0.4))
+                    Image(systemName: "qrcode").font(.system(size: 64, weight: .light)).foregroundStyle(Color.gray.opacity(0.35))
                 }
             }
-            if let pairing = session.pairing {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let left = Countdown.remaining(until: pairing.expiresAt, now: context.date)
-                    VStack(spacing: 4) {
-                        Text(PairingLink.displayCode(pairing.code))
-                            .font(.system(size: 30, weight: .semibold, design: .monospaced))
-                            .textSelection(.enabled)
-                            .opacity(left > 0 ? 1 : 0.35)
-                        Text(left > 0 ? "有效期还剩 \(Countdown.format(left))" : "配对码已过期，请重新生成")
-                            .foregroundStyle(left > 60 ? Color.secondary : Color.orange)
+            .frame(width: 184, height: 184)
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.08)))
+            VStack(alignment: .leading, spacing: 12) {
+                if let pairing = session.pairing {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let left = Countdown.remaining(until: pairing.expiresAt, now: context.date)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(PairingLink.displayCode(pairing.code))
+                                .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                                .textSelection(.enabled)
+                                .foregroundStyle(left > 0 ? .primary : .tertiary)
+                            Text(left > 0 ? "\(Countdown.format(left)) 后过期" : "已过期")
+                                .monospacedDigit()
+                                .foregroundStyle(left > 60 ? Color.secondary : Color.attention)
+                        }
                     }
-                }
-            }
-        }
-    }
-
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("用 iPhone 上的 AgentSwitch 扫描二维码").font(.title3.weight(.semibold))
-            Text("配对码 5 分钟内有效、只能用一次，输错 5 次作废。二维码里有这台 Mac 的地址、证书指纹和凭据网关的公钥（公钥可以公开），没有任何密码。")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button(session.pairing == nil ? "生成配对二维码" : "重新生成") { Task { await session.start(model: model) } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(session.busy)
-                if session.pairing != nil {
-                    Button("复制链接") { session.copyLink() }
-                        .help("只复制到这台 Mac（不经通用剪贴板同步到其他设备），配对码过期时自动清掉")
-                }
-                if session.busy { ProgressView().controlSize(.small) }
-            }
-            if let payload = session.pairing?.payload {
-                GroupBox {
+                } else {
                     VStack(alignment: .leading, spacing: 4) {
-                        labelled("名称", payload.name)
-                        labelled("端口", String(payload.port))
-                        labelled("局域网", payload.lan.isEmpty ? "无" : payload.lan.joined(separator: "、"))
-                        labelled("Tailscale", payload.tailnet.isEmpty ? "无（只能在同一局域网使用）" : payload.tailnet.joined(separator: "、"))
-                        labelled("证书指纹", String(payload.fp.prefix(16)) + "…")
-                        labelled("网关公钥", payload.gate.map { "\($0.keypair) · \($0.publicKey.prefix(12))…" } ?? "无")
+                        Text("未生成配对码").font(.title3.weight(.semibold))
+                        Text("生成后使用 iPhone 扫描。").foregroundStyle(.secondary)
                     }
-                    .font(.caption)
+                }
+                HStack(spacing: 8) {
+                    Button(session.pairing == nil ? "生成配对码" : "重新生成") { Task { await session.start(model: model) } }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(returnGenerates ? .defaultAction : nil)
+                        .disabled(session.busy)
+                    if session.pairing != nil {
+                        Button("复制链接") { session.copyLink() }
+                            .help("仅复制到这台 Mac，不同步到其他设备；配对码过期时自动清除")
+                    }
+                    if session.busy { ProgressView().controlSize(.small) }
                 }
             }
-            if let paired = session.paired {
-                Label("已配对：\(paired.name)（\(paired.platform)）。不认识这台设备就去「设备」里吊销。", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
-            if let problem = session.problem {
-                Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.orange).textSelection(.enabled)
-            }
-            Spacer()
+            Spacer(minLength: 0)
         }
-    }
-
-    private func labelled(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
-            Text(value).textSelection(.enabled)
-        }
+        .padding(.vertical, 4)
     }
 }

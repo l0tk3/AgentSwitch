@@ -16,7 +16,7 @@ public struct URLSessionTransport: HTTPTransport {
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw DaemonError.unreachable("不是 HTTP 响应") }
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.unreachable("非 HTTP 响应") }
         return (data, http)
     }
 }
@@ -30,11 +30,17 @@ public enum DaemonError: LocalizedError, Equatable, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .unreachable(let why): return "连不上守护进程：\(why)"
-        case .http(let status, let message): return "守护进程返回 \(status)：\(message)"
-        case .notSupported(let path): return "守护进程不支持 \(path)（404）。内置 daemon 需要更新，或远程模式没有打开。"
-        case .decoding(let why): return "守护进程的回应无法解析：\(why)"
+        case .unreachable(let why): return "无法连接服务：\(why)"
+        case .http(let status, let message): return "服务返回 \(status)：\(message)"
+        case .notSupported(let path): return "服务不支持 \(path)（404）：内置服务版本较旧，或 iPhone 连接已关闭。"
+        case .decoding(let why): return "无法解析服务的响应：\(why)"
         }
+    }
+
+    /// A refused request (400, 403, 409) in the daemon's own words, without the status; anything else as described.
+    public var reason: String {
+        if case .http(let status, let message) = self, (400..<500).contains(status) { return message }
+        return errorDescription ?? ""
     }
 }
 
@@ -94,15 +100,32 @@ public struct DaemonClient: Sendable {
         return try decode(ModelSettingsSaveResult.self, try await call("PUT", "/settings/models", body: body))
     }
 
-    /// Folders a phone task may run in (assistant-v0 §5); each with why it cannot be used now, if so.
-    public func projects() async throws -> [ProjectEntry] {
-        try decode(ProjectList.self, try await call("GET", "/projects")).projects
+    /// `GET /approvals/policy`: the mode, the categories kept for the user, and every category with its title.
+    public func approvalPolicy() async throws -> ApprovalPolicySettings {
+        try decode(ApprovalPolicySettings.self, try await call("GET", "/approvals/policy"))
     }
 
-    /// Replaces the list; the daemon checks every folder against its cwd rules and refuses the whole list otherwise.
-    public func saveProjects(_ projects: [ProjectEntry]) async throws -> [ProjectEntry] {
-        let body = try JSONEncoder().encode(ProjectList(projects: projects.map { ProjectEntry(name: $0.name, path: $0.path) }))
-        return try decode(ProjectList.self, try await call("PUT", "/projects", body: body)).projects
+    /// `PUT /approvals/policy` (local only): applies to approvals from now on, no restart. The answer has no categories.
+    public func saveApprovalPolicy(_ update: ApprovalPolicyUpdate) async throws -> ApprovalPolicySettings {
+        let body = try JSONEncoder().encode(update)
+        return try decode(ApprovalPolicySettings.self, try await call("PUT", "/approvals/policy", body: body))
+    }
+
+    /// `GET /settings/workdir` (control-v0 §2).
+    public func workDir() async throws -> WorkDirSettings {
+        try decode(WorkDirSettings.self, try await call("GET", "/settings/workdir"))
+    }
+
+    /// `PUT /settings/workdir {path}` (local only): the daemon checks the folder and creates it; a 400 says why not.
+    public func saveWorkDir(_ update: WorkDirUpdate) async throws {
+        _ = try await call("PUT", "/settings/workdir", body: try JSONEncoder().encode(update))
+    }
+
+    /// `GET /quota`: the daemon's cached readings (it reads again once they are a minute old). `refresh`: read every
+    /// provider now (`?refresh=1`).
+    public func quota(refresh: Bool = false) async throws -> [QuotaReading] {
+        let data = try await call("GET", refresh ? "/quota?refresh=1" : "/quota")
+        do { return try QuotaReading.decodeList(data) } catch { throw DaemonError.decoding(String(describing: error)) }
     }
 
     // MARK: plumbing

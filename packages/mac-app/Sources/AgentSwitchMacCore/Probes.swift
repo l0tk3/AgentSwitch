@@ -110,7 +110,7 @@ public enum GateProbe {
         let statusLine = lines.isEmpty ? "" : lines.removeFirst()
         let parts = statusLine.split(separator: " ", maxSplits: 2).map(String.init)
         guard parts.count >= 2, parts[0].hasPrefix("HTTP/1."), let status = Int(parts[1]) else {
-            return Result(verdict: .notHTTP, detail: "监听者不说 HTTP/1.x")
+            return Result(verdict: .notHTTP, detail: "监听程序未使用 HTTP/1.x")
         }
         var headers: [String: String] = [:]
         for line in lines {
@@ -122,25 +122,25 @@ public enum GateProbe {
         }
         let server = headers["server"] ?? ""
         if status == 403 && headers["x-secret-gate"]?.lowercased() == "denied" {
-            return Result(verdict: .gate, detail: "以 403 X-Secret-Gate: denied 拒绝了探测值")
+            return Result(verdict: .gate, detail: "以 403 X-Secret-Gate: denied 拒绝探测值")
         }
         if server.lowercased().hasPrefix("mitmproxy") {
-            return Result(verdict: .mitmproxy, detail: "没有 secret-gate 插件的 mitmproxy 回了 \(status)（\(server)）")
+            return Result(verdict: .mitmproxy, detail: "未加载 secret-gate 插件的 mitmproxy 返回 \(status)（\(server)）")
         }
-        return Result(verdict: .otherHTTP, detail: "其他 HTTP 服务回了 \(status)" + (server.isEmpty ? "" : "（Server: \(server)）"))
+        return Result(verdict: .otherHTTP, detail: "其他 HTTP 服务返回 \(status)" + (server.isEmpty ? "" : "（Server: \(server)）"))
     }
 
     /// Blocking; call off the main thread.
     public static func probe(port: Int, host: String = "127.0.0.1", timeout: TimeInterval = 2) -> Result {
         guard let fd = LoopbackSocket.connect(host: host, port: port, timeout: timeout) else {
-            return Result(verdict: .unreachable, detail: "\(host):\(port) 没有监听")
+            return Result(verdict: .unreachable, detail: "\(host):\(port) 无监听")
         }
         defer { close(fd) }
         guard LoopbackSocket.sendAll(fd, request()) else {
             return Result(verdict: .notHTTP, detail: "连接在发送探测时断开")
         }
         let raw = LoopbackSocket.readHead(fd, limit: maxHeadBytes, timeout: timeout)
-        guard !raw.isEmpty else { return Result(verdict: .notHTTP, detail: "监听者没有回应就关闭了连接") }
+        guard !raw.isEmpty else { return Result(verdict: .notHTTP, detail: "监听程序未响应即关闭连接") }
         return classify(raw)
     }
 }

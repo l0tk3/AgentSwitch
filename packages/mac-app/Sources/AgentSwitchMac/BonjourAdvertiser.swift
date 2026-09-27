@@ -30,19 +30,19 @@ final class BonjourAdvertiser: NSObject, NetServiceDelegate {
         s.setTXTRecord(NetService.data(fromTXTRecord: next.txt))
         s.publish()
         service = s
-        onStatus?(StatusLine("发布中…", .busy))
+        onStatus?(StatusLine("发布中", .busy))
         watchdog = Task { [weak self] in
             try? await Task.sleep(for: BonjourAdvertiser.publishTimeout)
             guard let self, !Task.isCancelled, !self.published, self.service === s else { return }
-            self.onStatus?(StatusLine("还没发布出去：请在「系统设置 › 隐私与安全性 › 本地网络」里允许 AgentSwitch", .warning))
+            self.onStatus?(StatusLine("未发布：请在“系统设置 › 隐私与安全性 › 本地网络”中允许 AgentSwitch", .warning))
         }
     }
 
     nonisolated func netServiceDidPublish(_ sender: NetService) {
-        let name = sender.name, port = sender.port
+        let port = sender.port
         MainActor.assumeIsolated {
             published = true
-            onStatus?(StatusLine("_agentswitch._tcp「\(name)」端口 \(port)", .ok))
+            onStatus?(StatusLine("已发布 · 端口 \(port)", .ok))
         }
     }
 

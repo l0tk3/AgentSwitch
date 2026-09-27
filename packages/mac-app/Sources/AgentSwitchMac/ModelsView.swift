@@ -1,7 +1,8 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// 模型: router model and default target via `GET|PUT /settings/models`; the daemon applies them on restart.
+/// 模型: usage on top (docs/ui-v0.md §4.2), then router model and default target via `GET|PUT /settings/models`; the
+/// daemon applies them on restart. Pickers show model names (Opus 5.5) and save the ids.
 struct ModelsView: View {
     @Environment(AppModel.self) private var model
     @State private var settings: ModelSettings?
@@ -15,58 +16,89 @@ struct ModelsView: View {
     var body: some View {
         Group {
             if !model.daemonReady {
-                ContentUnavailableView("守护进程还没就绪", systemImage: "hourglass", description: Text(model.daemonLine.text))
+                EmptyPage(title: "服务未就绪", symbol: "hourglass", message: model.daemonLine.text)
             } else if let settings {
                 form(settings)
             } else if let problem {
-                ContentUnavailableView("读不到模型设置", systemImage: "exclamationmark.triangle", description: Text(problem))
+                EmptyPage(title: "无法读取模型设置", symbol: "exclamationmark.triangle", message: problem) {
+                    Button("重试") { Task { await load() } }
+                }
             } else {
-                ProgressView()
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: model.daemonReady) { await load() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { Task { await load() } } label: { Label("重新读取", systemImage: "arrow.clockwise") }
+                    .help("重新读取")
+                    .disabled(!model.daemonReady)
+            }
+        }
+        .task(id: model.daemonReady) {
+            await load()
+            await model.refreshUsage()
+        }
     }
 
     private func form(_ s: ModelSettings) -> some View {
-        Form {
+        let changes = ModelSettingsUpdate.diff(current: s, routerModel: routerModel, defaultHarness: harness, defaultModel: targetModel)
+        return Form {
+            UsageSection()
             Section {
-                Picker("路由模型", selection: $routerModel) {
-                    ForEach(options(s.router.options, current: s.router.model), id: \.self) { Text($0).tag($0) }
+                Picker("调度模型", selection: $routerModel) {
+                    ForEach(options(s.router.options, current: s.router.model), id: \.self) { Text(ModelName.display($0)).tag($0) }
                 }
-            } header: { Text("路由") } footer: {
-                Text("路由器读你的任务，决定交给哪个执行器、哪个模型。").foregroundStyle(.secondary)
+            } header: {
+                Text("调度")
+            } footer: {
+                Footer("根据消息内容选择执行器和模型。")
             }
             Section {
                 Picker("执行器", selection: $harness) {
-                    ForEach(s.harnessNames, id: \.self) { Text($0).tag($0) }
+                    ForEach(s.harnessNames, id: \.self) { Text(HarnessName.display($0)).tag($0) }
                 }
                 Picker("模型", selection: $targetModel) {
-                    ForEach(options(s.models(for: harness), current: targetModel), id: \.self) { Text($0).tag($0) }
+                    ForEach(options(s.models(for: harness), current: targetModel), id: \.self) { Text(ModelName.display($0)).tag($0) }
                 }
-            } header: { Text("默认执行目标") } footer: {
-                Text("路由器拿不定主意时用它。").foregroundStyle(.secondary)
+            } header: {
+                Text("默认")
+            } footer: {
+                Footer("调度模型无法判断、所选模型均不可用或调度出错时，任务交由此模型执行。")
             }
             Section {
-                HStack {
-                    Button("保存并重启守护进程") { Task { await save(s) } }
-                        .disabled(busy || ModelSettingsUpdate.diff(current: s, routerModel: routerModel, defaultHarness: harness, defaultModel: targetModel).isEmpty)
+            } footer: {
+                HStack(alignment: .center, spacing: 8) {
+                    status(s, unsaved: !changes.isEmpty)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if busy { ProgressView().controlSize(.small) }
-                    Spacer()
-                    Button("重新读取") { Task { await load() } }
+                    Button("保存并重启") { Task { await save(s) } }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(busy || changes.isEmpty)
+                        .help("保存到 \(model.shortPath(model.paths.modelsOverride))，覆盖 targets.yaml 中的对应设置")
                 }
-                if s.restartPending {
-                    Label("已保存的设置还没生效：重启守护进程后生效。", systemImage: "info.circle").foregroundStyle(.orange)
-                }
-                if let saved { Label(saved, systemImage: "checkmark.circle").foregroundStyle(.green) }
-                if let problem { Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
-                Text("重启会中断正在运行的任务。设置写在 \(model.paths.modelsOverride.path)，叠加在 targets.yaml 之上。")
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
         .onChange(of: harness) { _, next in
             let models = s.models(for: next)
             if !models.contains(targetModel) { targetModel = s.harnesses[next]?.defaultModel ?? models.first ?? "" }
+        }
+    }
+
+    /// What the last save did, or whether saved settings still wait for a restart.
+    @ViewBuilder
+    private func status(_ s: ModelSettings, unsaved: Bool) -> some View {
+        if let problem {
+            Label(problem, systemImage: "xmark.circle.fill").foregroundStyle(.red).textSelection(.enabled)
+        } else if let saved, !unsaved {
+            Label(saved, systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
+        } else if s.restartPending && !unsaved {
+            HStack(spacing: 6) {
+                StatusDot(level: .warning)
+                Text("已保存，重启服务后生效").foregroundStyle(.secondary)
+            }
+        } else {
+            Footer("保存后服务将重启，正在运行的任务将中断。")
         }
     }
 
@@ -98,13 +130,37 @@ struct ModelsView: View {
             let result = try await model.client.saveModelSettings(update)
             problem = nil
             if result.restartRequired {
-                saved = "已保存，正在重启守护进程…"
+                saved = "已保存，服务重启中"
                 model.restartDaemon()
             } else {
                 saved = "已保存"
             }
         } catch {
             problem = error.localizedDescription
+        }
+    }
+}
+
+/// 模型 › 用量: the same rows as the menu panel, roomier, with when they were read and 刷新 (every provider read now).
+/// Hidden when the daemon has no readings (not running, or a build without `GET /quota`).
+private struct UsageSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let rows = model.usageRows
+        if !rows.isEmpty {
+            Section {
+                ForEach(rows) { UsageRowView(row: $0) }
+            } header: {
+                Text("用量")
+            } footer: {
+                HStack(alignment: .center, spacing: 8) {
+                    Footer(model.usageReadAt.map { "读数更新于 \(TimeText.at($0))" } ?? "无读数")
+                    if model.usageRefreshing { ProgressView().controlSize(.small) }
+                    Button("刷新") { Task { await model.refreshUsage(force: true) } }
+                        .disabled(model.usageRefreshing)
+                }
+            }
         }
     }
 }

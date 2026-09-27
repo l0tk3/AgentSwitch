@@ -18,10 +18,12 @@ public struct RuntimeConfig: Sendable, Equatable {
     public let claudeBinary: String?
     /// 通用 › 允许 iPhone 连接 (RemoteAccess): the daemon's remote listener.
     public let remoteEnabled: Bool
+    /// Own `secret-gate proxy` child, or the system service (docs/gate-service-v0.md).
+    public let gateMode: GateRunMode
 
     public init(paths: AppPaths, ports: PortSettings, options: DaemonOptions, path: String, baseEnvironment: [String: String],
                 remoteName: String? = nil, opencodeBinary: String? = nil, claudeBinary: String? = nil,
-                remoteEnabled: Bool = RemoteAccess.defaultValue) {
+                remoteEnabled: Bool = RemoteAccess.defaultValue, gateMode: GateRunMode = .userProcess) {
         self.paths = paths
         self.ports = ports
         self.options = options
@@ -31,9 +33,10 @@ public struct RuntimeConfig: Sendable, Equatable {
         self.opencodeBinary = opencodeBinary
         self.claudeBinary = claudeBinary
         self.remoteEnabled = remoteEnabled
+        self.gateMode = gateMode
     }
 
-    public var gateEnvironment: [String: String] { ChildEnvironment.gate(base: baseEnvironment, paths: paths) }
+    public var gateEnvironment: [String: String] { ChildEnvironment.gate(base: baseEnvironment, paths: paths, gateMode: gateMode) }
     public var gateCLI: GateCLI { GateCLI(executable: paths.runtime.secretGate, environment: gateEnvironment) }
 }
 
@@ -51,7 +54,7 @@ public enum RuntimePlan {
     public static func daemonSpec(_ c: RuntimeConfig) -> LaunchSpec {
         let env = ChildEnvironment.daemon(base: c.baseEnvironment, paths: c.paths, ports: c.ports, options: c.options, path: c.path,
                                           remote: c.remoteEnabled, remoteName: c.remoteName, opencodeBinary: c.opencodeBinary,
-                                          claudeBinary: c.claudeBinary)
+                                          claudeBinary: c.claudeBinary, gateMode: c.gateMode)
         // `npm start` of packages/daemon, with absolute paths.
         let args = ["--no-warnings=ExperimentalWarning", c.paths.runtime.daemonCLI.path, "serve"]
         return LaunchSpec(executable: c.paths.runtime.node, arguments: args,
@@ -64,8 +67,8 @@ public enum RuntimePlan {
     /// Gate port busy: reuse a listener that passes the bootstrap probe, refuse anything else (app-v0 §4).
     public static func gateDecision(port: Int, probe: GateProbe.Result?) -> Preflight? {
         guard let probe, probe.verdict != .unreachable else { return nil }
-        if probe.isGate { return .adopt("复用 127.0.0.1:\(port) 上已在运行的 secret-gate") }
-        return .fail("端口 \(port) 被占用，但不是 secret-gate（\(probe.detail)）。在「通用」里换一个网关端口，或停掉占用它的程序。")
+        if probe.isGate { return .adopt("复用 127.0.0.1:\(port) 上已运行的 secret-gate") }
+        return .fail("端口 \(port) 已被占用，占用程序不是 secret-gate（\(probe.detail)）。请在「通用」中更换网关端口，或退出占用该端口的程序。")
     }
 
     /// Ports the daemon will bind, checked before launch: the remote one only while remote access is on.
@@ -77,17 +80,30 @@ public enum RuntimePlan {
     public static func daemonPortProblem(busy: [(label: String, port: Int)]) -> String? {
         guard !busy.isEmpty else { return nil }
         let list = busy.map { "\($0.label) \($0.port)" }.joined(separator: "、")
-        return "端口已被占用：\(list)。可能是另一个 agentswitch 守护进程；在「通用」里换端口后重启服务。"
+        return "端口已被占用：\(list)。占用程序可能是另一个 AgentSwitch 服务。请在「通用」中更换端口后重启服务。"
     }
 
+    /// No `secret-gate proxy` as this user while the system service is there, whatever asked for one (a lost adopted
+    /// gate, a restart, a mode not yet switched): it would quietly undo the isolation (gate-service-v0 §4).
+    public static func serviceGuard(mode: GateRunMode, installedOnDisk: Bool) -> Preflight? {
+        if mode.isService { return .fail(serviceNotResponding) }
+        if installedOnDisk { return .fail("凭据网关已安装为系统服务，不再由 AgentSwitch 启动。") }
+        return nil
+    }
+
+    public static let serviceNotResponding =
+        "凭据网关服务无响应。系统服务由 launchd 自动重启；持续无响应时，可在「环境」中修复（需要管理员授权）。"
+
     public static func missingRuntime(_ missing: [String]) -> String? {
-        missing.isEmpty ? nil : "内置运行时不完整，缺少：\(missing.joined(separator: "、"))。请重新构建应用（scripts/build-app.sh）。"
+        missing.isEmpty ? nil : "内置运行时不完整，缺少：\(missing.joined(separator: "、"))。请重新构建应用（scripts/build-app.sh）后重试。"
     }
 }
 
 /// The effectful preflight checks the supervisors run before every launch.
 public enum RuntimePreflight {
     public static func gate(_ c: RuntimeConfig) async -> Preflight {
+        let onDisk = GateServiceProbe.installedOnDisk(c.paths.gateService)
+        if let refused = RuntimePlan.serviceGuard(mode: c.gateMode, installedOnDisk: onDisk) { return refused }
         if !FileManager.default.isExecutableFile(atPath: c.paths.runtime.secretGate.path) {
             return .fail(RuntimePlan.missingRuntime([c.paths.runtime.secretGate.path])!)
         }
@@ -99,7 +115,7 @@ public enum RuntimePreflight {
         do {
             _ = try await c.gateCLI.ensureKeypair()   // the proxy refuses to start without one
         } catch {
-            return .fail("没能准备网关密钥对：\(error.localizedDescription)")
+            return .fail("无法准备网关密钥对：\(error.localizedDescription)")
         }
         return .launch(RuntimePlan.gateSpec(c))
     }
@@ -116,7 +132,7 @@ public enum RuntimePreflight {
         do {
             try c.paths.prepareDirectories()
         } catch {
-            return .fail("没能创建数据目录 \(c.paths.agentswitchHome.path)：\(error.localizedDescription)")
+            return .fail("无法创建数据目录 \(c.paths.agentswitchHome.path)：\(error.localizedDescription)")
         }
         return .launch(RuntimePlan.daemonSpec(c))
     }

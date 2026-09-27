@@ -266,30 +266,3 @@ public struct Health: Decodable, Equatable, Sendable {
         version = c.first(String.self, "version")
     }
 }
-
-/// A project folder a phone task may name (assistant-v0 §5). `problem`: why it cannot be used now (moved, deleted).
-public struct ProjectEntry: Codable, Sendable, Hashable, Identifiable {
-    public let name: String
-    public let path: String
-    public let problem: String?
-
-    public var id: String { name }
-
-    public init(name: String, path: String, problem: String? = nil) {
-        self.name = name
-        self.path = path
-        self.problem = problem
-    }
-
-    /// A name for a picked folder: its last component, made unique among `taken` with a number.
-    public static func name(for folder: URL, taken: [String]) -> String {
-        let base = String(folder.lastPathComponent.prefix(36))
-        let used = Set(taken.map { $0.lowercased() })
-        guard used.contains(base.lowercased()) else { return base }
-        return (2...).lazy.map { "\(base) \($0)" }.first { !used.contains($0.lowercased()) }!
-    }
-}
-
-struct ProjectList: Codable {
-    let projects: [ProjectEntry]
-}

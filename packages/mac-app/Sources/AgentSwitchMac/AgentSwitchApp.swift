@@ -8,7 +8,7 @@ struct AgentSwitchApp: App {
 
     var body: some Scene {
         // Hidden while this copy only waits on a newly installed one (AppModel.installUpdate).
-        MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating }, set: { _ in })) {
+        MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating && !AppDelegate.previewOnly }, set: { _ in })) {
             MenuContentView()
                 .environment(delegate.model)
                 .environment(\.showSettings, ShowSettingsAction { [delegate] tab in delegate.settings.show(tab) })
@@ -28,14 +28,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     private var shutdownDone = false
     private var quitting = false
+    /// This copy holds the lock and started the runtime (a second copy that hands over never does).
+    private var running = false
     /// Held until the process exits: this copy is the one that looks after the children of its AGENTSWITCH_HOME.
     private var instanceLock: InstanceLock?
     /// Posted by a second copy that found the lock taken; the object is the lock file's path, so only the copy
     /// holding that lock reacts. It carries no payload, and all it does is bring up the settings window.
     static let anotherCopyOpened = Notification.Name("com.agentswitch.mac.anotherCopyOpened")
 
+    /// `-designPreview <dir>`: draw the UI with sample data and quit (DesignPreview); no menu bar item, nothing started.
+    static var previewOnly: Bool {
+        #if DEBUG
+        return DesignPreview.directory != nil
+        #else
+        return false
+        #endif
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if let directory = DesignPreview.directory {
+            DesignPreview.run(model: model, into: directory)
+            return
+        }
+        #endif
         guard claimInstance() else { return }
+        running = true
         // The bundle has LSUIElement; `swift run` has no bundle, so decide the Dock presence here in both cases.
         settings.onVisibilityChange = { [weak self] open in self?.updateDockPresence(settingsWindowOpen: open) }
         updateDockPresence(settingsWindowOpen: false)
@@ -58,13 +76,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let defaults = UserDefaults.standard
         if let tab = defaults.string(forKey: "openSettings").flatMap(SettingsTab.init(rawValue:)) {
             settings.show(tab)
-        } else if !defaults.bool(forKey: "onboarded") {
-            defaults.set(true, forKey: "onboarded")
-            settings.show(.environment)
+        } else if !SetupWizardLaunch.truthy(defaults.volatileDomain(forName: UserDefaults.argumentDomain)["onboarded"]) {
+            offerSetupWizard()
         }
         if let dir = defaults.string(forKey: "snapshotDir") {
             SnapshotRunner(model: model, settings: settings, directory: URL(fileURLWithPath: dir), quit: { [weak self] in self?.quit() }).start()
         }
+    }
+
+    /// The first-run wizard (docs/control-v0.md §6), once: shown to someone without a paired phone, recorded as done
+    /// without showing for someone who has one. Waits for the daemon's device list, at most SetupWizardLaunch.deviceWait.
+    /// `-onboarded YES` on the command line skips it for that launch.
+    private func offerSetupWizard() {
+        let store = settings.navigation.wizardStore
+        let started = Date()
+        Task { [weak self] in
+            while let self {
+                let known = self.model.devicesKnown ? self.model.activeDevices.count : nil
+                let waited = Date().timeIntervalSince(started) > SetupWizardLaunch.deviceWait
+                switch SetupWizardLaunch.decide(state: store.load(), pairedDevices: known, gaveUpWaiting: waited) {
+                case .wait:
+                    try? await Task.sleep(for: .seconds(1))
+                    continue
+                case .show(let step):
+                    self.settings.showWizard(at: step)
+                case .markAlreadySetUp:
+                    store.save((store.load() ?? .fresh).closing(.alreadySetUp, at: Date()))
+                case .nothing:
+                    break
+                }
+                return
+            }
+        }
+    }
+
+    /// Back from Terminal after 登录, or from installing something: check the environment again (AppModel).
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard running else { return }
+        model.appBecameActive()
     }
 
     /// One copy per AGENTSWITCH_HOME (InstanceLock), taken before any pid file, port or child is touched. A second
@@ -82,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             handOver(to: pid, lockFile: lockFile)
             return false
         case .failed(let why):
-            model.errorMessage = "没能确认只有一个 AgentSwitch 在运行：\(why)。如果同时开着两个 AgentSwitch，请退出其中一个。"
+            model.errorMessage = "无法确认是否只有一个 AgentSwitch 在运行：\(why)。如有两个 AgentSwitch 同时运行，请退出其中一个。"
             return true
         }
     }
@@ -101,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func heardFromAnotherCopy(_ note: Notification) {
-        model.errorMessage = "AgentSwitch 已经在运行（\(Bundle.main.bundlePath)）。刚才又打开了一个 AgentSwitch，它已自动退出：同一个数据目录只能由一个 AgentSwitch 看护服务。要换用另一个，先在菜单栏里退出这一个。"
+        model.errorMessage = "AgentSwitch 已在运行（\(DisplayPath.short(Bundle.main.bundlePath, home: NSHomeDirectory()))），新打开的副本已自动退出：每个数据目录只能由一个 AgentSwitch 管理。如需改用另一个副本，请从菜单栏退出当前副本后再打开。"
         settings.show(nil)
     }
 
@@ -148,10 +197,6 @@ struct MenuBarIcon: View {
     let level: StatusLevel
 
     var body: some View {
-        switch level {
-        case .ok: Image(systemName: "antenna.radiowaves.left.and.right")
-        case .busy, .off: Image(systemName: "antenna.radiowaves.left.and.right.slash")
-        case .warning, .error: Image(systemName: "exclamationmark.triangle")
-        }
+        Image(nsImage: MenuBarGlyph.image(level))
     }
 }

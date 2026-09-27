@@ -23,8 +23,8 @@ public struct TailscaleStatus: Sendable, Equatable {
 
     public var summary: String {
         switch state {
-        case .notInstalled: return "没装 Tailscale：手机只能在同一局域网里使用"
-        case .stopped: return "Tailscale 已安装但没有连接（\(backendState ?? "未知")）：打开 Tailscale 登录后，手机在外也能连"
+        case .notInstalled: return "未安装 Tailscale，iPhone 仅可在同一局域网内连接"
+        case .stopped: return "Tailscale 未连接（\(backendState ?? "未知")）。打开并登录后，iPhone 可在局域网外连接"
         case .running: return "Tailscale 已连接：" + (ipv4 + [dnsName].compactMap { $0 }).joined(separator: " · ")
         }
     }

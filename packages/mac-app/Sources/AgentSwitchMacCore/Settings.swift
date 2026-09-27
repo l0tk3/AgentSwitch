@@ -25,7 +25,7 @@ public struct PortSettings: Codable, Equatable, Sendable {
 
     /// Named ports in display order.
     public var labelled: [(label: String, port: Int)] {
-        [("本地接口", local), ("远程接口", remote), ("凭据网关", gate), ("OpenCode 路由", opencode)]
+        [("本地接口", local), ("远程接口", remote), ("凭据网关", gate), ("OpenCode 服务", opencode)]
     }
 
     /// Human-readable problems; empty means the set can be applied.

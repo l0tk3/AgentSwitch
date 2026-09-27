@@ -31,16 +31,16 @@ public final class InstanceLock {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
         } catch {
-            return .failed("没能创建 \(url.deletingLastPathComponent().path)：\(error.localizedDescription)")
+            return .failed("无法创建 \(url.deletingLastPathComponent().path)：\(error.localizedDescription)")
         }
         let fd = open(url.path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { return .failed("打不开 \(url.path)：\(String(cString: strerror(errno)))") }
+        guard fd >= 0 else { return .failed("无法打开 \(url.path)：\(String(cString: strerror(errno)))") }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             let reason = errno
             let holder = readPid(fd)
             close(fd)
             if reason == EWOULDBLOCK { return .held(by: holder) }
-            return .failed("没能锁住 \(url.path)：\(String(cString: strerror(reason)))")
+            return .failed("无法锁定 \(url.path)：\(String(cString: strerror(reason)))")
         }
         // The pid is only a hint for a second copy's hand-over; the lock holds without it.
         let text = Array("\(getpid())\n".utf8)

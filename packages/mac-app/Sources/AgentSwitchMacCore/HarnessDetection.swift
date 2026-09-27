@@ -76,15 +76,15 @@ public enum HarnessEvaluator {
         case (_, .ready):
             return []
         case (.claude, .missing):
-            return ["安装：curl -fsSL https://claude.ai/install.sh | bash", "装好后在终端运行 claude，按提示登录"]
+            return ["安装：curl -fsSL https://claude.ai/install.sh | bash", "安装后在终端运行 claude，按提示登录"]
         case (.claude, .notLoggedIn):
-            return ["在终端运行 claude，按提示登录（或在 claude 里输入 /login）"]
+            return ["在终端运行 claude，按提示登录（或在 claude 中输入 /login）"]
         case (.codex, .missing):
-            return ["安装：brew install codex，或 npm install -g @openai/codex", "ChatGPT 桌面应用自带的 codex 也可以"]
+            return ["安装：brew install codex，或 npm install -g @openai/codex", "也可使用 ChatGPT 桌面应用自带的 codex"]
         case (.codex, .notLoggedIn):
-            return ["在终端运行 codex login，用 ChatGPT 账号登录"]
+            return ["在终端运行 codex login，使用 ChatGPT 账户登录"]
         case (.opencode, .missing):
-            return ["安装：curl -fsSL https://opencode.ai/install | bash", "装好后运行 opencode auth login 配置 DeepSeek 等模型"]
+            return ["安装：curl -fsSL https://opencode.ai/install | bash", "安装后运行 opencode auth login，配置 DeepSeek 等模型提供商"]
         case (.opencode, .notLoggedIn):
             return ["在终端运行 opencode auth login，配置 DeepSeek 等模型提供商"]
         }
