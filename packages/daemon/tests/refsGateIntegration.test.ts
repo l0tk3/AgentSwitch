@@ -10,6 +10,9 @@ import type { ExecutionInput } from "../src/executors/types.js";
 import { gateMinter } from "../src/secrets/minter.js";
 import { gateRefs } from "../src/secrets/refs.js";
 
+// An empty public dir: with an installed gate service (gate-service-v0) the CLI would otherwise find its socket and
+// talk to the system gate instead of the temporary home (and refuse keygen there).
+process.env.SECRET_GATE_PUBLIC = mkdtempSync(join(tmpdir(), "agentswitch-no-gate-service-"));
 const binary = join(resolve(import.meta.dirname, "../../secret-gate"), ".venv/bin/secret-gate");
 const REF = /^enc:ref:[A-Za-z0-9_-]{16}$/;
 const homes: string[] = [];

@@ -45,6 +45,24 @@ final class LiveDaemonTests: XCTestCase {
         let stranger = AgentSwitchAPI(endpoints: FixedEndpoint(outcome.endpoint), transport: transport, token: "not-a-device-token")
         do { _ = try await stranger.me(); XCTFail("an unknown token must be refused") } catch APIError.unauthorized {}
 
+        // The terminals tab over the pinned channel (docs/terminal-v0.md §4): the list and colours read, a stream of a
+        // terminal that does not exist ends as removed, and what a phone may not do is refused — nothing is started.
+        let terminals = try await api.terminals()
+        XCTAssertTrue(Set(terminals.models.keys).isSubset(of: Set(terminals.agents)), "models only for agents this Mac has")
+        let style = try await api.terminalStyle()
+        XCTAssertNotNil(style.background)
+        var gone: [TerminalEvent] = []
+        for try await event in api.terminalEvents("ffffffff") { gone.append(event) }
+        XCTAssertEqual(gone, [.removed])
+        do {
+            _ = try await api.resumeTerminal(ResumeTerminalRequest(harness: "claude-code", cwd: "/tmp", agentSessionId: "--dangerously-skip-permissions"))
+            XCTFail("a session id that reads as a flag is refused")
+        } catch APIError.http(let status, _) { XCTAssertEqual(status, 400) }
+        do {
+            _ = try await api.createTerminal(NewTerminalRequest(harness: "claude-code", cwd: "/tmp", mode: "bypass"))
+            XCTFail("bypass is the Mac's to choose")
+        } catch APIError.http(let status, _) { XCTAssertEqual(status, 403) }
+
         // Writes that would change a real Mac: only against the throw-away runtime of scripts/e2e-live.sh.
         guard ProcessInfo.processInfo.environment["AGENTSWITCH_E2E_THROWAWAY"] == "1" else { return }
 

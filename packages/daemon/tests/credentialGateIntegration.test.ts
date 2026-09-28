@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { credentialGate } from "../src/secrets/credentialRepair.js";
 import { gateMinter } from "../src/secrets/minter.js";
 
+// An empty public dir: with an installed gate service (gate-service-v0) the CLI would otherwise find its socket and
+// talk to the system gate instead of the temporary home (and refuse keygen there).
+process.env.SECRET_GATE_PUBLIC = mkdtempSync(join(tmpdir(), "agentswitch-no-gate-service-"));
 const gatePackage = resolve(import.meta.dirname, "../../secret-gate");
 const binary = join(gatePackage, ".venv/bin/secret-gate");
 const python = join(gatePackage, ".venv/bin/python");

@@ -12,12 +12,15 @@ LOCAL=${LOCAL:-4911} REMOTE=${REMOTE:-4913} GATE=${GATE:-8190} OPENCODE=${OPENCO
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/agentswitch-e2e.XXXXXX")"
 mkdir -p "$WORK/as-home" "$WORK/sg-home" "$WORK/logs"
 BASE_ENV=(HOME="$HOME" USER="$USER" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}")
-GATE_ENV=("${BASE_ENV[@]}" PATH="$RUNTIME/python/bin:/usr/bin:/bin" SECRET_GATE_HOME="$WORK/sg-home")
+# SECRET_GATE_PUBLIC: an empty dir, so the CLI never finds an installed gate service's socket and works on the
+# throw-away home (gate-service-v0 §3: with gate.sock present the CLI would talk to the system gate instead).
+GATE_ENV=("${BASE_ENV[@]}" PATH="$RUNTIME/python/bin:/usr/bin:/bin" SECRET_GATE_HOME="$WORK/sg-home" SECRET_GATE_PUBLIC="$WORK/no-gate-service")
 pids=()
 cleanup() {
-  for pid in "${pids[@]}"; do kill -INT "$pid" 2>/dev/null || true; done
+  # "${pids[@]+...}": an empty array under `set -u` is an error in the bash macOS ships (3.2).
+  for pid in ${pids[@]+"${pids[@]}"}; do kill -INT "$pid" 2>/dev/null || true; done
   sleep 1
-  for pid in "${pids[@]}"; do kill -KILL "$pid" 2>/dev/null || true; done
+  for pid in ${pids[@]+"${pids[@]}"}; do kill -KILL "$pid" 2>/dev/null || true; done
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -32,7 +35,7 @@ pids+=($!)
 env -i "${BASE_ENV[@]}" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
   AGENTSWITCH_HOME="$WORK/as-home" AGENTSWITCH_PORT="$LOCAL" AGENTSWITCH_REMOTE=1 AGENTSWITCH_REMOTE_PORT="$REMOTE" \
   AGENTSWITCH_OPENCODE_PORT="$OPENCODE" AGENTSWITCH_EXECUTORS=echo AGENTSWITCH_ROUTER=echo AGENTSWITCH_REMOTE_NAME="E2E Mac" \
-  SECRET_GATE_HOME="$WORK/sg-home" SECRET_GATE_BIN="$RUNTIME/python/bin/secret-gate" SECRET_GATE_PROXY="http://127.0.0.1:$GATE" \
+  SECRET_GATE_HOME="$WORK/sg-home" SECRET_GATE_PUBLIC="$WORK/no-gate-service" SECRET_GATE_BIN="$RUNTIME/python/bin/secret-gate" SECRET_GATE_PROXY="http://127.0.0.1:$GATE" \
   "$RUNTIME/node/bin/node" --no-warnings=ExperimentalWarning "$RUNTIME/daemon/dist/cli.js" serve >"$WORK/logs/daemon.log" 2>&1 &
 pids+=($!)
 
