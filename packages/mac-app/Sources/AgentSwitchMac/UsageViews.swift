@@ -2,30 +2,23 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-/// One harness of the usage block (docs/ui-v0.md §4.2): a monochrome tile, the name, and below it either the two
-/// windows `5h ▬▬ 20%   7d ▬▬ 82%` or OpenCode's `余额 ¥96.23`. The menu panel uses the compact size, 模型 the regular.
+/// One harness of the usage block (docs/ui-v0.md §4.2, §7): the agent's pixel mark, the name, and either the two
+/// windows `5h ██░░░░░░ 20%   7d ████████░░ 82%` in characters or OpenCode's `balance ¥96.23`. The menu panel uses the
+/// compact size, 模型 the regular.
 struct UsageRowView: View {
     let row: UsageRow
     var compact = false
 
-    private var tile: CGFloat { compact ? 24 : 30 }
-
     var body: some View {
-        HStack(alignment: .center, spacing: compact ? 10 : 12) {
-            Image(systemName: row.harness.usageSymbol)
-                .font(.system(size: compact ? 11 : 13, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: tile, height: tile)
-                .background(Color(nsColor: .quaternarySystemFill), in: RoundedRectangle(cornerRadius: compact ? 6 : 7))
-            VStack(alignment: .leading, spacing: compact ? 3 : 5) {
-                Text(row.title).font(compact ? .callout : .body).lineLimit(1)
+        HStack(alignment: .top, spacing: compact ? 10 : 12) {
+            PixelSprite(rows: row.harness.pixelMark, pixel: 2, color: .secondary)
+                .padding(.top, compact ? 3 : 4)
+            VStack(alignment: .leading, spacing: compact ? 2 : 4) {
+                Text(row.title).mono(compact ? 12 : 13).lineLimit(1)
                 if row.showsBalance {
-                    Text(row.balanceText)
-                        .font(compact ? .caption : .callout)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                    Text(row.balanceText).mono(compact ? 11 : 12).foregroundStyle(.secondary)
                 } else {
-                    HStack(spacing: compact ? 12 : 20) {
+                    HStack(spacing: compact ? 12 : 22) {
                         ForEach(row.slots, id: \.label) { UsageSlotView(slot: $0, compact: compact) }
                     }
                 }
@@ -35,23 +28,20 @@ struct UsageRowView: View {
     }
 }
 
-/// `5h ▬▬▬ 20%`: the label, a thin bar filling the space between, the value at a fixed width so rows line up.
+/// `5h ██░░░░░░ 20%`: the label, a character meter, the value at a fixed width so rows line up.
 private struct UsageSlotView: View {
     let slot: UsageSlot
     let compact: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(slot.label)
-                .foregroundStyle(.secondary)
-                .frame(width: compact ? 15 : 18, alignment: .leading)
-            UsageBar(fraction: slot.fraction, high: slot.isHigh, height: compact ? 4 : 5)
+        HStack(spacing: 5) {
+            Text(slot.label).foregroundStyle(.secondary)
+            CharMeter(fraction: slot.fraction, high: slot.isHigh, cells: compact ? 8 : 12)
             Text(slot.valueText)
                 .foregroundStyle(.secondary)
-                .frame(width: compact ? 30 : 36, alignment: .trailing)
+                .frame(width: compact ? 28 : 34, alignment: .trailing)
         }
-        .font((compact ? Font.caption : .callout).monospacedDigit())
-        .frame(maxWidth: .infinity)
+        .mono(compact ? 10.5 : 11.5)
         .contentShape(Rectangle())
         .help(slot.note)
         .accessibilityElement(children: .ignore)
@@ -59,34 +49,13 @@ private struct UsageSlotView: View {
     }
 }
 
-/// A capsule track in the tertiary fill; the used part in system green, red from Usage.highPercent on.
-private struct UsageBar: View {
-    let fraction: Double
-    let high: Bool
-    let height: CGFloat
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color(nsColor: .tertiarySystemFill))
-                if fraction > 0 {
-                    Capsule()
-                        .fill(high ? Color.red : Color.green)
-                        .frame(width: max(height, geometry.size.width * min(1, fraction)))
-                }
-            }
-        }
-        .frame(height: height)
-    }
-}
-
 extension Harness {
-    /// Generic SF Symbols (no product logos, docs/ui-v0.md §3); they follow the text colour.
-    var usageSymbol: String {
+    /// The agent's 5 × 5 pixel mark (docs/ui-v0.md §7.3), the same as the terminal window's.
+    var pixelMark: [String] {
         switch self {
-        case .claude: return "terminal"
-        case .codex: return "curlybraces"
-        case .opencode: return "chevron.left.forwardslash.chevron.right"
+        case .claude: return PixelArt.agents["claude-code"]!
+        case .codex: return PixelArt.agents["codex"]!
+        case .opencode: return PixelArt.agents["opencode"]!
         }
     }
 }

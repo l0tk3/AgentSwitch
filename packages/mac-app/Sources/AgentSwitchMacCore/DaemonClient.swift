@@ -61,9 +61,11 @@ public struct DaemonClient: Sendable {
     public static let tokenFileName = "local-token"
 
     /// A one-time link that opens the web console signed in (valid for a minute, used once; never the token itself).
-    public func consoleLink() async throws -> URL {
+    /// `next`: the console page to land on (a `/ui/…` path; the daemon ignores anything else), e.g. the terminal page.
+    public func consoleLink(next: String? = nil) async throws -> URL {
         struct Link: Decodable { let path: String }
-        let link = try decode(Link.self, try await call("POST", "/local/console-link", body: Data("{}".utf8)))
+        let query = next.flatMap { $0.addingPercentEncoding(withAllowedCharacters: .alphanumerics) }.map { "?next=\($0)" } ?? ""
+        let link = try decode(Link.self, try await call("POST", "/local/console-link" + query, body: Data("{}".utf8)))
         guard let url = URL(string: baseURL.absoluteString + link.path) else { throw DaemonError.decoding("console link \(link.path)") }
         return url
     }

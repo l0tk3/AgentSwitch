@@ -17,13 +17,13 @@ struct DevicesView: View {
         content
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button { Task { await model.refreshDevices() } } label: { Label("刷新", systemImage: "arrow.clockwise") }
-                        .help("刷新")
+                    Button { Task { await model.refreshDevices() } } label: { Label("refresh", systemImage: "arrow.clockwise") }
+                        .help("refresh")
                 }
             }
             .task { await model.refreshDevices() }
             .confirmationDialog("吊销「\(pendingRevoke?.name ?? "")」？", isPresented: Binding(get: { pendingRevoke != nil }, set: { if !$0 { pendingRevoke = nil } })) {
-                Button("吊销", role: .destructive) {
+                Button("revoke", role: .destructive) {
                     if let device = pendingRevoke { Task { await revoke(device) } }
                 }
             } message: {
@@ -34,17 +34,17 @@ struct DevicesView: View {
     @ViewBuilder
     private var content: some View {
         if model.devices.isEmpty {
-            EmptyPage(title: "无已配对设备", symbol: "iphone.slash",
-                      message: model.daemonReady ? "在「配对」中生成配对码，然后使用 iPhone 扫描。" : model.daemonLine.text)
+            EmptyPage(title: "no paired devices", symbol: "iphone.slash",
+                      message: model.daemonReady ? "在「pairing」中生成配对码，然后使用 iPhone 扫描。" : model.daemonLine.text)
         } else {
             Form {
                 Section {
                     if active.isEmpty {
-                        Text("无可用设备").foregroundStyle(.secondary)
+                        Text("no active devices").foregroundStyle(.secondary)
                     }
                     ForEach(active) { device in
                         DeviceRow(device: device) {
-                            Button(role: .destructive) { pendingRevoke = device } label: { Text("吊销…").foregroundStyle(.red) }
+                            Button(role: .destructive) { pendingRevoke = device } label: { Text("revoke…").foregroundStyle(.red) }
                                 .disabled(busy)
                         }
                     }
@@ -52,8 +52,10 @@ struct DevicesView: View {
                     Footer("设备丢失时可在此吊销，吊销后立即断开连接。")
                 }
                 if !revoked.isEmpty {
-                    Section("已吊销") {
+                    Section {
                         ForEach(revoked) { device in DeviceRow(device: device) { EmptyView() } }
+                    } header: {
+                        SectionLabel("revoked")
                     }
                 }
             }
@@ -95,16 +97,16 @@ private struct DeviceRow<Trailing: View>: View {
 
     private var details: String {
         var parts = [platformName(device.platform)].filter { !$0.isEmpty }
-        if let created = device.createdAt { parts.append("配对于 \(TimeText.day(created))") }
+        if let created = device.createdAt { parts.append("paired \(TimeText.day(created))") }
         if let revokedAt = device.revokedAt {
-            parts.append("吊销于 \(TimeText.day(revokedAt))")
+            parts.append("revoked \(TimeText.day(revokedAt))")
         } else {
-            parts.append(device.lastSeenAt.map { "最近连接 \(TimeText.moment($0))" } ?? "从未连接")
+            parts.append(device.lastSeenAt.map { "seen \(TimeText.moment($0))" } ?? "never seen")
         }
         return parts.joined(separator: " · ")
     }
 
     private var status: StatusLine {
-        device.online == true ? StatusLine("在线", .ok) : StatusLine("离线", .off)
+        device.online == true ? StatusLine("online", .ok) : StatusLine("offline", .off)
     }
 }

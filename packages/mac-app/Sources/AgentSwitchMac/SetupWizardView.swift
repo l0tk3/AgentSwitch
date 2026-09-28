@@ -43,9 +43,9 @@ struct SetupWizardView: View {
         .interactiveDismissDisabled()
         .gateServiceSheet(model, active: true)
         .confirmationDialog("跳过引导？", isPresented: $confirmSkip) {
-            Button("跳过") { navigation.closeWizard(.skipped, at: step) }
+            Button("skip") { navigation.closeWizard(.skipped, at: step) }
         } message: {
-            Text("之后可在「通用」中重新运行。")
+            Text("之后可在「general」中重新运行。")
         }
     }
 
@@ -53,10 +53,10 @@ struct SetupWizardView: View {
 
     private var heading: String {
         switch step {
-        case .executors: return "安装并登录执行器"
-        case .pairing: return "配对手机"
-        case .permissions: return "权限与启动"
-        case .done: return "引导完成"
+        case .executors: return "executors"
+        case .pairing: return "pair iPhone"
+        case .permissions: return "permissions & launch"
+        case .done: return "done"
         }
     }
 
@@ -64,7 +64,7 @@ struct SetupWizardView: View {
         switch step {
         case .executors: return "任务由这台 Mac 上的 Claude Code、Codex 或 OpenCode 执行，至少需要一个可用。"
         case .pairing: return "在 iPhone 上打开 AgentSwitch，扫描此二维码。"
-        case .permissions: return "选择执行器进行有风险的操作时由谁批准。推荐“自动”，之后可在「权限」中更改。"
+        case .permissions: return "选择执行器进行有风险的操作时由谁批准。推荐「auto」，之后可在「permissions」中更改。"
         case .done: return "在 iPhone 上打开 AgentSwitch 并发送任务。"
         }
     }
@@ -95,12 +95,12 @@ struct SetupWizardView: View {
     private var buttons: some View {
         HStack(spacing: 8) {
             if step != .done {
-                Button("跳过引导") { confirmSkip = true }
+                Button("skip guide") { confirmSkip = true }
                     .keyboardShortcut(.cancelAction)
             }
             Spacer()
             if step.previous != nil {
-                Button("上一步") { navigation.backWizard(from: step) }
+                Button("back") { navigation.backWizard(from: step) }
             }
             forward
         }
@@ -109,15 +109,15 @@ struct SetupWizardView: View {
     @ViewBuilder
     private var forward: some View {
         if step == .done {
-            Button("完成") { navigation.closeWizard(.completed, at: step) }
+            Button("done") { navigation.closeWizard(.completed, at: step) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
         } else if stepMet {
-            Button("继续") { navigation.advanceWizard(from: step) }
+            Button("continue") { navigation.advanceWizard(from: step) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
         } else {
-            Button("跳过此步") { navigation.advanceWizard(from: step) }
+            Button("skip step") { navigation.advanceWizard(from: step) }
                 .keyboardShortcut(.defaultAction)
         }
     }
@@ -149,16 +149,13 @@ private struct StepIndicator: View {
     @ViewBuilder
     private func marker(_ step: SetupStep) -> some View {
         ZStack {
+            // square cells on the grid (docs/ui-v0.md §7): the current step in the signal, done ones hollow with ✓
             if step == current {
-                Circle().fill(Color.brandFill)
-                Text("\(step.rawValue + 1)").font(.caption.weight(.semibold)).foregroundStyle(.white)
+                Rectangle().fill(Color.signal)
+                Text("\(step.rawValue + 1)").mono(11, weight: .bold).foregroundStyle(.black)
             } else {
-                Circle().strokeBorder(Color.secondary.opacity(0.5), lineWidth: 1)
-                if step.rawValue < current.rawValue {
-                    Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
-                } else {
-                    Text("\(step.rawValue + 1)").font(.caption).foregroundStyle(.secondary)
-                }
+                Rectangle().strokeBorder(Color.secondary.opacity(0.5), lineWidth: 1)
+                Text(step.rawValue < current.rawValue ? "✓" : "\(step.rawValue + 1)").mono(11).foregroundStyle(.secondary)
             }
         }
         .frame(width: 20, height: 20)
@@ -177,7 +174,7 @@ private struct ExecutorsStep: View {
             } footer: {
                 HStack(alignment: .top, spacing: 8) {
                     Footer("登录在“终端”中完成，返回此窗口后自动重新检测。")
-                    Button("重新检测") { model.detectEnvironment() }.disabled(model.detecting)
+                    Button("check again") { model.detectEnvironment() }.disabled(model.detecting)
                 }
             }
         }
@@ -192,11 +189,11 @@ private struct PairingStep: View {
 
     var body: some View {
         if !model.remoteEnabled {
-            EmptyPage(title: "iPhone 连接已关闭", symbol: "iphone.slash", message: "配对和使用 iPhone 需要打开此连接。") {
-                Button("打开连接") { model.setRemoteAccess(true) }
+            EmptyPage(title: "iPhone off", symbol: "iphone.slash", message: "配对和使用 iPhone 需要打开此连接。") {
+                Button("turn on") { model.setRemoteAccess(true) }
             }
         } else if !model.daemonReady {
-            EmptyPage(title: "服务未就绪", symbol: "hourglass", message: model.daemonLine.text)
+            EmptyPage(title: "service not ready", symbol: "hourglass", message: model.daemonLine.text)
         } else {
             Form {
                 Section {
@@ -206,7 +203,7 @@ private struct PairingStep: View {
                 }
                 if !model.activeDevices.isEmpty {
                     Section {
-                        Label("已配对 \(model.activeDevices.map(\.name).joined(separator: "、"))", systemImage: "checkmark.circle.fill")
+                        Label("paired · \(model.activeDevices.map(\.name).joined(separator: ", "))", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     }
                 }
@@ -237,7 +234,7 @@ private struct PermissionsStep: View {
                 if let policy = model.control.policy {
                     ApprovalModePicker(policy: policy, compact: true)
                 } else if !model.daemonReady {
-                    Text("服务未就绪。之后可在「权限」中选择。").foregroundStyle(.secondary)
+                    Text("服务未就绪。之后可在「permissions」中选择。").foregroundStyle(.secondary)
                 } else if let problem = model.control.policyLoadProblem {
                     Text(problem).foregroundStyle(.secondary)
                 } else {
@@ -279,7 +276,7 @@ private struct DoneStep: View {
                     Text("“\(example)”")
                 }
             } header: {
-                Text("示例")
+                SectionLabel("examples")
             } footer: {
                 Footer("需要你批准或回答时，iPhone 上会显示卡片。")
             }
@@ -287,15 +284,15 @@ private struct DoneStep: View {
                 Section {
                     HStack(spacing: 8) {
                         StatusDot(level: .warning)
-                        Text("设置清单中 \(model.setupUnmet) 项未完成")
+                        Text("setup: \(model.setupUnmet) left")
                         Spacer(minLength: 8)
-                        Button("查看") {
+                        Button("view") {
                             navigation.closeWizard(.completed, at: .done)
                             navigation.tab = .environment
                         }
                     }
                 } footer: {
-                    Footer("可在「环境」中继续完成。")
+                    Footer("可在「environment」中继续完成。")
                 }
             }
         }

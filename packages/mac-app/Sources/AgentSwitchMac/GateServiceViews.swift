@@ -58,7 +58,7 @@ struct GateServiceSheet: View {
         .tint(.brand)
         .interactiveDismissDisabled(running)
         .confirmationDialog("删除全部密钥？", isPresented: $confirmDelete) {
-            Button("删除密钥并卸载", role: .destructive) { start() }
+            Button("delete keys & uninstall", role: .destructive) { start() }
         } message: {
             Text("用这些密钥加密的密文将全部无法解密，此操作无法撤销。")
         }
@@ -106,11 +106,11 @@ struct GateServiceSheet: View {
 
     private var confirmTitle: String {
         switch operation {
-        case .install: return "安装"
-        case .update: return "更新"
-        case .repair: return "修复"
-        case .changePort: return "更改"
-        case .uninstall: return "卸载"
+        case .install: return "install"
+        case .update: return "update"
+        case .repair: return "repair"
+        case .changePort: return "change"
+        case .uninstall: return "uninstall"
         }
     }
 
@@ -128,13 +128,13 @@ struct GateServiceSheet: View {
             }
             if case .update = operation, let installed = model.gateService.runtimeVersion {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("已安装：\(GateVersionText.label(installed))")
-                    Text("App 内置：\(model.bundledGateVersion.map(GateVersionText.label) ?? "未知")")
+                    Text("installed · \(GateVersionText.label(installed))")
+                    Text("bundled · \(model.bundledGateVersion.map(GateVersionText.label) ?? "unknown")")
                 }
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             if case .uninstall = operation {
-                Toggle("同时删除密钥", isOn: $deleteKeys)
+                Toggle("delete keys too", isOn: $deleteKeys)
                 if deleteKeys {
                     Label("密钥删除后无法恢复，用这些密钥加密的所有密文将永久无法解密。", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
@@ -143,7 +143,7 @@ struct GateServiceSheet: View {
             }
             Text(footnote).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.gateServiceResult?.outcome == .cancelled {
-                Text("已取消").font(.callout).foregroundStyle(.secondary)
+                Text("cancelled").font(.callout).foregroundStyle(.secondary)
             }
         }
     }
@@ -188,12 +188,12 @@ struct GateServiceSheet: View {
             if running {
                 EmptyView()   // nothing to press until macOS and the command are done
             } else if let result, result != .cancelled {
-                Button(result.succeeded ? "完成" : "关闭") { model.dismissGateServiceRequest() }
+                Button(result.succeeded ? "done" : "close") { model.dismissGateServiceRequest() }
                     .keyboardShortcut(.defaultAction)
             } else {
-                Button("取消") { model.dismissGateServiceRequest() }.keyboardShortcut(.cancelAction)
+                Button("cancel") { model.dismissGateServiceRequest() }.keyboardShortcut(.cancelAction)
                 if case .uninstall = operation {
-                    Button(deleteKeys ? "卸载并删除密钥" : confirmTitle, role: .destructive) {
+                    Button(deleteKeys ? "uninstall & delete keys" : confirmTitle, role: .destructive) {
                         if deleteKeys { confirmDelete = true } else { start() }
                     }
                     .keyboardShortcut(.defaultAction)
@@ -244,9 +244,9 @@ struct GateLogSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("凭据网关日志").font(.headline)
+                Text("gateway log").font(.headline)
                 Spacer()
-                Picker("日志", selection: $name) {
+                Picker("log", selection: $name) {
                     ForEach(GateLogName.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -254,7 +254,7 @@ struct GateLogSheet: View {
                 .fixedSize()
             }
             ScrollView {
-                Text(problem ?? (text.isEmpty ? (loading ? "读取中" : "无日志") : text))
+                Text(problem ?? (text.isEmpty ? (loading ? "loading" : "no log") : text))
                     .font(.caption.monospaced())
                     .foregroundStyle(problem == nil ? .primary : .secondary)
                     .textSelection(.enabled)
@@ -266,8 +266,8 @@ struct GateLogSheet: View {
             Text("最近 300 行，由凭据网关服务提供。").font(.callout).foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("刷新") { Task { await load() } }.disabled(loading)
-                Button("关闭") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("refresh") { Task { await load() } }.disabled(loading)
+                Button("close") { dismiss() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
@@ -297,15 +297,15 @@ struct GateServiceSection: View {
         let state = facts.state
         Section {
             // The full line is under 服务与网络 › 凭据网关.
-            StatusRow(label: "状态", line: GateServiceText.short(facts))
+            StatusRow(label: "status", line: GateServiceText.short(facts))
             if state.isInstalled {
-                LabeledContent("运行账户", value: GateServicePaths.account)
-                LabeledContent("程序版本") {
+                LabeledContent("account", value: GateServicePaths.account)
+                LabeledContent("version") {
                     HStack(spacing: 6) {
                         if facts.updateAvailable { StatusDot(level: .warning) }
-                        Text(state.runtimeVersion.map(GateVersionText.label) ?? "未知").foregroundStyle(.secondary).monospacedDigit()
+                        Text(state.runtimeVersion.map(GateVersionText.label) ?? "unknown").foregroundStyle(.secondary).monospacedDigit()
                     }
-                    .help(facts.updateAvailable ? "App 内置：\(model.bundledGateVersion ?? "未知")" : (state.runtimeVersion ?? ""))
+                    .help(facts.updateAvailable ? "bundled · \(model.bundledGateVersion ?? "unknown")" : (state.runtimeVersion ?? ""))
                 }
             }
             if let problem = state.problem {
@@ -315,10 +315,10 @@ struct GateServiceSection: View {
                 }
             }
             if state.availability != .unsupported {
-                LabeledContent("操作") { actions(facts) }
+                LabeledContent("actions") { actions(facts) }
             }
         } header: {
-            Text("凭据网关服务")
+            SectionLabel("gateway service")
         } footer: {
             Footer(footer(state))
         }
@@ -331,13 +331,13 @@ struct GateServiceSection: View {
             if busy { ProgressView().controlSize(.small) }
             if facts.state.isInstalled {
                 if facts.health == .notResponding {
-                    Button("修复…") { model.requestGateService(.repair) }.disabled(busy)
+                    Button("repair…") { model.requestGateService(.repair) }.disabled(busy)
                 } else if facts.updateAvailable {
-                    Button("更新…") { model.requestGateService(.update) }.disabled(busy)
+                    Button("update…") { model.requestGateService(.update) }.disabled(busy)
                 }
-                Button("卸载…") { model.requestGateService(.uninstall(deleteKeys: false)) }.disabled(busy)
+                Button("uninstall…") { model.requestGateService(.uninstall(deleteKeys: false)) }.disabled(busy)
             } else {
-                Button("安装…") { model.requestGateService(.install) }.disabled(busy || facts.state.availability == .unknown)
+                Button("install…") { model.requestGateService(.install) }.disabled(busy || facts.state.availability == .unknown)
             }
         }
     }
@@ -360,7 +360,7 @@ enum GateVersionText {
         let parts = version.split(separator: "+", maxSplits: 1).map(String.init)
         let built = parts.last ?? version
         guard built.contains("T"), FlexibleDate.parse(built) != nil else { return version }
-        let when = "构建于 \(TimeText.build(built))"
+        let when = "built \(TimeText.build(built))"
         return parts.count == 2 ? "\(parts[0]) · \(when)" : when
     }
 }

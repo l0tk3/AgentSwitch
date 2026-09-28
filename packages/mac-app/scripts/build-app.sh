@@ -89,6 +89,10 @@ build_daemon() {
     npm ci --no-progress
     npm run build
     npm prune --omit=dev --no-progress
+    # node-pty (terminals, docs/terminal-v0.md §2): only this Mac's prebuilt binary, and its spawn helper executable
+    # (npm drops the bit when it skips install scripts; the daemon would otherwise chmod inside the signed bundle).
+    find node_modules/node-pty/prebuilds -mindepth 1 -maxdepth 1 -type d ! -name "darwin-arm64" -exec rm -rf {} +
+    find node_modules/node-pty -name spawn-helper -type f -exec chmod 755 {} +
   )
   [ -f "$src/dist/cli.js" ] || die "daemon build produced no dist/cli.js"
   mkdir -p "$RUNTIME/daemon"

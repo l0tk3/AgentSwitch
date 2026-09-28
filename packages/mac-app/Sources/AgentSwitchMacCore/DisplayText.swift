@@ -93,38 +93,38 @@ public enum DisplayPath {
     }
 }
 
-/// Times as docs/ui-v0.md §4 writes them: 刚刚, 3 分钟前, 今天 14:20, 昨天 09:05, 9月20日, 2025年9月20日.
+/// Times as units (docs/ui-v0.md §7.2.7): now, 3m ago, today 14:20, yesterday 09:05, 9/20, 2025/9/20.
 public enum TimeText {
     /// A moment: relative within the hour, then the day and the time.
     public static func moment(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let seconds = now.timeIntervalSince(date)
-        if seconds < 60 && seconds > -60 { return "刚刚" }
-        if seconds > 0 && seconds < 3600 { return "\(Int(seconds / 60)) 分钟前" }
+        if seconds < 60 && seconds > -60 { return "now" }
+        if seconds > 0 && seconds < 3600 { return "\(Int(seconds / 60))m ago" }
         let time = clock(date, calendar: calendar)
-        if calendar.isDate(date, inSameDayAs: now) { return "今天 \(time)" }
+        if calendar.isDate(date, inSameDayAs: now) { return "today \(time)" }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            return "昨天 \(time)"
+            return "yesterday \(time)"
         }
         return "\(day(date, now: now, calendar: calendar)) \(time)"
     }
 
-    /// A day: 今天, 昨天, 9月20日, or with the year when it is not this year.
+    /// A day: today, yesterday, 9/20, or with the year when it is not this year.
     public static func day(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return "今天" }
+        if calendar.isDate(date, inSameDayAs: now) { return "today" }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            return "昨天"
+            return "yesterday"
         }
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
-        let monthDay = "\(parts.month ?? 0)月\(parts.day ?? 0)日"
-        return calendar.component(.year, from: now) == parts.year ? monthDay : "\(parts.year ?? 0)年\(monthDay)"
+        let monthDay = "\(parts.month ?? 0)/\(parts.day ?? 0)"
+        return calendar.component(.year, from: now) == parts.year ? monthDay : "\(parts.year ?? 0)/\(monthDay)"
     }
 
-    /// A clock time, with the day when it is not today: 12:30, 明天 09:00, 昨天 18:05, 9月30日 12:30.
+    /// A clock time, with the day when it is not today: 12:30, tomorrow 09:00, yesterday 18:05, 9/30 12:30.
     public static func at(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let time = clock(date, calendar: calendar)
         if calendar.isDate(date, inSameDayAs: now) { return time }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) {
-            return "明天 \(time)"
+            return "tomorrow \(time)"
         }
         return "\(day(date, now: now, calendar: calendar)) \(time)"
     }

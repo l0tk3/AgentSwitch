@@ -16,16 +16,16 @@ struct SetupChecklistSection: View {
         Section {
             ForEach(working + todo) { SetupItemRow(item: $0) }
             if !checking.isEmpty {
-                SetupSummaryRow(level: .busy, label: "检测中", names: checking.map(\.title))
+                SetupSummaryRow(level: .busy, label: "checking", names: checking.map(\.title))
             }
             if !done.isEmpty {
-                SetupSummaryRow(level: .ok, label: todo.isEmpty && checking.isEmpty ? "全部就绪" : "已完成", names: done.map(\.title))
+                SetupSummaryRow(level: .ok, label: todo.isEmpty && checking.isEmpty ? "all set" : "done", names: done.map(\.title))
             }
         } header: {
             HStack {
-                Text("设置清单")
+                SectionLabel("setup")
                 Spacer()
-                if !todo.isEmpty { Text("\(todo.count) 项未完成").font(.callout).foregroundStyle(.secondary) }
+                if !todo.isEmpty { Text("\(todo.count) left").font(.callout).foregroundStyle(.secondary) }
             }
         } footer: {
             if todo.contains(where: { if case .login = $0.action { return true } else { return false } }) {
@@ -46,7 +46,7 @@ private struct SetupSummaryRow: View {
             StatusDot(level: level).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             Text(label)
             Spacer(minLength: 12)
-            Text(names.joined(separator: "、")).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+            Text(names.joined(separator: ", ")).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
         }
         .padding(.vertical, 2)
     }
@@ -76,14 +76,14 @@ struct SetupItemRow: View {
             }
             Spacer(minLength: 12)
             if item.state == .working || busy { ProgressView().controlSize(.small) }
-            Text(item.status).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            Text(item.status).mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             if let action = item.action {
-                Button(copied ? "已复制" : action.title) { perform(action) }.disabled(busy)
+                Button(copied ? "copied" : action.title) { perform(action) }.disabled(busy)
             }
         }
         .padding(.vertical, 2)
         .confirmationDialog("将网关证书加入登录钥匙串？", isPresented: $confirmTrust) {
-            Button("加入") { run { _ = await model.trustGateCA() } }
+            Button("trust") { run { _ = await model.trustGateCA() } }
         } message: {
             Text(GateCATrustText.confirmation(service: model.gateMode.isService))
         }

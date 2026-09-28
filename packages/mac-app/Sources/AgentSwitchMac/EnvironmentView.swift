@@ -15,25 +15,25 @@ struct EnvironmentView: View {
 
             Section {
                 if model.harnesses.isEmpty {
-                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("检测中").foregroundStyle(.secondary) }
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("checking").foregroundStyle(.secondary) }
                 }
                 ForEach(model.harnesses) { HarnessRow(report: $0, path: model.shortPath($0.binary ?? "")) }
             } header: {
-                Text("执行器")
+                SectionLabel("executors")
             } footer: {
                 Footer("执行器需自行安装并登录。此处仅检查命令和登录凭据，不调用模型。")
             }
 
             Section {
-                StatusRow(label: "服务", line: model.daemonLine)
-                StatusRow(label: "凭据网关", line: model.gateLine)
-                StatusRow(label: "远程接口", line: model.remoteLine)
+                StatusRow(label: "service", line: model.daemonLine)
+                StatusRow(label: "gateway", line: model.gateLine)
+                StatusRow(label: "remote", line: model.remoteLine)
                 StatusRow(label: "Bonjour", line: model.bonjourLine)
-                StatusRow(label: "局域网", line: model.lanAddresses.isEmpty ? StatusLine("无私有网段地址", .warning)
-                                                                        : StatusLine(model.lanAddresses.joined(separator: "、"), .ok))
+                StatusRow(label: "LAN", line: model.lanAddresses.isEmpty ? StatusLine("no private address", .warning)
+                                                                        : StatusLine(model.lanAddresses.joined(separator: ", "), .ok))
                 StatusRow(label: "Tailscale", line: tailscaleLine)
             } header: {
-                Text("服务与网络")
+                SectionLabel("service & network")
             } footer: {
                 if let note = networkFooter { Footer(note) }
             }
@@ -41,45 +41,45 @@ struct EnvironmentView: View {
             GateServiceSection()
 
             Section {
-                StatusRow(label: "证书文件", line: model.caFilePresent ? StatusLine(model.shortPath(model.gateCA), .ok)
-                                                                   : StatusLine("网关首次启动后生成", .busy))
-                LabeledContent("登录钥匙串") {
+                StatusRow(label: "cert file", line: model.caFilePresent ? StatusLine(model.shortPath(model.gateCA), .ok)
+                                                                   : StatusLine("created on first gateway start", .busy))
+                LabeledContent("login keychain") {
                     HStack(spacing: 8) {
                         if trusting { ProgressView().controlSize(.small) }
-                        Text(trustResult ?? (model.caTrusted ? "已加入" : "未加入")).foregroundStyle(.secondary)
+                        Text(trustResult ?? (model.caTrusted ? "trusted" : "not trusted")).foregroundStyle(.secondary)
                         if !model.caTrusted {
-                            Button("加入…") { confirmTrust = true }.disabled(!model.caFilePresent || trusting)
+                            Button("trust…") { confirmTrust = true }.disabled(!model.caFilePresent || trusting)
                         }
                     }
                 }
             } header: {
-                Text("网关证书")
+                SectionLabel("gateway cert")
             } footer: {
                 Footer("执行器通过环境变量单独信任此证书，通常无需加入钥匙串。")
             }
 
             Section {
-                LabeledContent("打开系统设置") {
+                LabeledContent("System Settings") {
                     HStack(spacing: 8) {
-                        Button("文件和文件夹") { openPrivacyPane("Privacy_FilesAndFolders") }
-                        Button("完全磁盘访问权限") { openPrivacyPane("Privacy_AllFiles") }
+                        Button("Files & Folders") { openPrivacyPane("Privacy_FilesAndFolders") }
+                        Button("Full Disk Access") { openPrivacyPane("Privacy_AllFiles") }
                     }
                 }
             } header: {
-                Text("文件访问")
+                SectionLabel("file access")
             } footer: {
                 Footer("项目位于桌面、文稿或下载文件夹时，需要为 AgentSwitch 授权，否则任务无法读取文件。建议将 AgentSwitch 放在“应用程序”文件夹中。")
             }
 
             Section {
                 if let lp = model.loginPath {
-                    LabeledContent("来源") {
+                    LabeledContent("source") {
                         if lp.source == .loginShell {
-                            Text("登录 shell").foregroundStyle(.secondary)
+                            Text("login shell").foregroundStyle(.secondary)
                         } else {
                             HStack(spacing: 6) {
                                 StatusDot(level: .warning)
-                                Text("常用目录").foregroundStyle(.secondary)
+                                Text("common folders").foregroundStyle(.secondary)
                             }
                             .help(lp.note ?? "")
                         }
@@ -89,10 +89,10 @@ struct EnvironmentView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 } else {
-                    Text("读取中").foregroundStyle(.secondary)
+                    Text("loading").foregroundStyle(.secondary)
                 }
             } header: {
-                Text("命令搜索路径（PATH）")
+                SectionLabel("PATH")
             } footer: {
                 if let note = model.loginPath?.note { Footer("无法从登录 shell 读取 PATH：\(note)。") }
             }
@@ -100,23 +100,23 @@ struct EnvironmentView: View {
         .formStyle(.grouped)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.detectEnvironment() } label: { Label("重新检测", systemImage: "arrow.clockwise") }
-                    .help("重新检测")
+                Button { model.detectEnvironment() } label: { Label("check again", systemImage: "arrow.clockwise") }
+                    .help("check again")
                     .disabled(model.detecting)
             }
         }
         .confirmationDialog("将网关证书加入登录钥匙串？", isPresented: $confirmTrust) {
-            Button("加入") { Task { await trust() } }
+            Button("trust") { Task { await trust() } }
         } message: {
             Text(GateCATrustText.confirmation(service: model.gateMode.isService))
         }
     }
 
     private var tailscaleLine: StatusLine {
-        guard let ts = model.tailscale else { return StatusLine("检测中", .busy) }
+        guard let ts = model.tailscale else { return StatusLine("checking", .busy) }
         switch ts.state {
-        case .notInstalled: return StatusLine("未安装", .off)
-        case .stopped: return StatusLine("未连接（\(ts.backendState ?? "未知")）", .warning)
+        case .notInstalled: return StatusLine("not installed", .off)
+        case .stopped: return StatusLine("disconnected · \(ts.backendState ?? "unknown")", .warning)
         case .running: return StatusLine((ts.ipv4 + [ts.dnsName].compactMap { $0 }).joined(separator: " · "), .ok)
         }
     }
@@ -154,14 +154,14 @@ private struct HarnessRow: View {
                 }
                 if report.binary != nil {
                     Text(path).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .help(report.evidence.map { "登录凭据：\($0)" } ?? "未找到登录凭据")
+                        .help(report.evidence.map { "credentials · \($0)" } ?? "no credentials found")
                 }
                 ForEach(report.guidance, id: \.self) { line in
                     Text(line).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
             Spacer(minLength: 12)
-            Text(status.text).foregroundStyle(.secondary)
+            Text(status.text).mono(12).foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
     }

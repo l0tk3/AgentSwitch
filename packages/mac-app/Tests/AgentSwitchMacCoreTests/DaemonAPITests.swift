@@ -123,6 +123,8 @@ final class DaemonClientTests: XCTestCase {
         let link = try await client.consoleLink()
         XCTAssertEqual(link.absoluteString, "http://127.0.0.1:4811/ui/login?code=abc")
         XCTAssertEqual(stub.requests[2].httpMethod, "POST")
+        _ = try await client.consoleLink(next: "/ui/terminal.html")
+        XCTAssertEqual(stub.requests[3].url?.query, "next=%2Fui%2Fterminal%2Ehtml")
     }
 
     func testRoutesMethodsAndBodies() async throws {

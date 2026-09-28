@@ -44,7 +44,7 @@ final class ControlSettings {
             policySaveProblem = nil
             return true
         } catch {
-            policySaveProblem = "未保存：" + ((error as? DaemonError)?.reason ?? error.localizedDescription)
+            policySaveProblem = "not saved · " + ((error as? DaemonError)?.reason ?? error.localizedDescription)
             return false
         }
     }

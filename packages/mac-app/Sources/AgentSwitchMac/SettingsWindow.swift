@@ -9,13 +9,13 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .pairing: return "配对"
-        case .devices: return "设备"
-        case .models: return "模型"
-        case .permissions: return "权限"
-        case .keys: return "密钥"
-        case .environment: return "环境"
-        case .general: return "通用"
+        case .pairing: return "pairing"
+        case .devices: return "devices"
+        case .models: return "models"
+        case .permissions: return "permissions"
+        case .keys: return "keys"
+        case .environment: return "environment"
+        case .general: return "general"
         }
     }
 
@@ -39,6 +39,13 @@ struct ShowSettingsAction {
     @MainActor func callAsFunction(_ tab: SettingsTab?) { action(tab) }
 }
 
+/// Opens the terminal window (docs/terminal-v0.md §1).
+struct ShowTerminalsAction {
+    let action: @MainActor () -> Void
+
+    @MainActor func callAsFunction() { action() }
+}
+
 struct QuitAction {
     let action: @MainActor () -> Void
 
@@ -47,6 +54,7 @@ struct QuitAction {
 
 extension EnvironmentValues {
     @Entry var showSettings = ShowSettingsAction { _ in }
+    @Entry var showTerminals = ShowTerminalsAction {}
     @Entry var quitApp = QuitAction { NSApp.terminate(nil) }
 }
 
@@ -124,7 +132,7 @@ final class SettingsWindowController {
         controller.sceneBridgingOptions = [.title, .toolbars]
         window.toolbar = NSToolbar(identifier: "settings")
         window.contentViewController = controller
-        window.title = "AgentSwitch 设置"
+        window.title = "AgentSwitch settings"
         window.toolbarStyle = .unified
         window.setContentSize(contentSize)
         window.isReleasedWhenClosed = false
@@ -218,7 +226,7 @@ struct ErrorBanner: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.attention)
                     Text(message).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    Button("关闭") { model.errorMessage = nil }.controlSize(.small)
+                    Button("close") { model.errorMessage = nil }.controlSize(.small)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)

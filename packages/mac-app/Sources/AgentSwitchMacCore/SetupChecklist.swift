@@ -20,17 +20,17 @@ public enum SetupAction: Equatable, Sendable {
     /// Verb first, two to four characters (docs/ui-v0.md §4) where the product name allows.
     public var title: String {
         switch self {
-        case .login: return "登录"
-        case .copyInstall: return "复制命令"
-        case .pair: return "配对"
-        case .openTailscale: return "打开 Tailscale"
-        case .installTailscale: return "下载 Tailscale"
-        case .chooseWorkDir: return "选择文件夹"
-        case .installGateService: return "安装"
-        case .updateGateService: return "更新"
-        case .repairGateService: return "修复"
-        case .trustGateCA: return "加入"
-        case .removePreviousGateCA: return "移除"
+        case .login: return "sign in"
+        case .copyInstall: return "copy command"
+        case .pair: return "pair"
+        case .openTailscale: return "open Tailscale"
+        case .installTailscale: return "get Tailscale"
+        case .chooseWorkDir: return "choose…"
+        case .installGateService: return "install…"
+        case .updateGateService: return "update…"
+        case .repairGateService: return "repair…"
+        case .trustGateCA: return "trust…"
+        case .removePreviousGateCA: return "remove…"
         }
     }
 }
@@ -101,7 +101,7 @@ public enum SetupChecklist {
     public static func harnessItems(_ reports: [HarnessReport]) -> [SetupItem] {
         Harness.allCases.map { harness in
             guard let report = reports.first(where: { $0.harness == harness }) else {
-                return SetupItem(id: harness.rawValue, title: harness.title, state: .checking, status: "检测中")
+                return SetupItem(id: harness.rawValue, title: harness.title, state: .checking, status: "checking")
             }
             let status = StatusText.harness(report.state).text
             switch report.state {
@@ -117,25 +117,25 @@ public enum SetupChecklist {
     }
 
     static func phone(_ devices: [Device]?) -> SetupItem {
-        guard let devices else { return SetupItem(id: "phone", title: "iPhone", state: .checking, status: "读取中") }
+        guard let devices else { return SetupItem(id: "phone", title: "iPhone", state: .checking, status: "loading") }
         let active = devices.filter { !$0.isRevoked }.count
         return active > 0
-            ? SetupItem(id: "phone", title: "iPhone", state: .done, status: "已配对 \(active) 台")
-            : SetupItem(id: "phone", title: "iPhone", state: .todo, status: "未配对", action: .pair)
+            ? SetupItem(id: "phone", title: "iPhone", state: .done, status: "\(active) paired")
+            : SetupItem(id: "phone", title: "iPhone", state: .todo, status: "not paired", action: .pair)
     }
 
     static func tailscale(_ status: TailscaleStatus?, tailnet: [String]) -> SetupItem {
-        if !tailnet.isEmpty { return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "已连接") }
+        if !tailnet.isEmpty { return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "connected") }
         switch status?.state {
         case .none:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .checking, status: "检测中")
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .checking, status: "checking")
         case .running:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "已连接")
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "connected")
         case .stopped:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "未连接",
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "disconnected",
                              detail: "打开并登录 Tailscale 后，iPhone 可在局域网外连接", action: .openTailscale)
         case .notInstalled:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "未安装",
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "not installed",
                              detail: "iPhone 仅可在同一局域网内连接", action: .installTailscale)
         }
     }
@@ -147,16 +147,16 @@ public enum SetupChecklist {
     }
 
     static func workDir(_ fact: WorkDirFact, home: String) -> SetupItem? {
-        let title = "默认工作目录"
+        let title = "work folder"
         switch fact {
         case .unsupported:
             return nil
         case .unknown:
-            return SetupItem(id: "workdir", title: title, state: .checking, status: "读取中")
+            return SetupItem(id: "workdir", title: title, state: .checking, status: "loading")
         case .known(let s):
             let path = DisplayPath.short(s.path, home: home)
             guard let problem = s.problem else { return SetupItem(id: "workdir", title: title, state: .done, status: path) }
-            return SetupItem(id: "workdir", title: title, state: .todo, status: "不可用", detail: "\(path)：\(problem)",
+            return SetupItem(id: "workdir", title: title, state: .todo, status: "unavailable", detail: "\(path)：\(problem)",
                              action: .chooseWorkDir)
         }
     }

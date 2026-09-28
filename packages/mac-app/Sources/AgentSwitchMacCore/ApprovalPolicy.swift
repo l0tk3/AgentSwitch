@@ -6,13 +6,13 @@ public enum ApprovalMode: String, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
-    /// The interface words of control-v0 §1.
+    /// The interface words (control-v0 §1; docs/ui-v0.md §7.2.7: lowercase English).
     public var title: String {
         switch self {
-        case .manual: return "逐项确认"
-        case .scoped: return "自动"
-        case .auto: return "全部自动"
-        case .skip: return "跳过权限"
+        case .manual: return "ask each"
+        case .scoped: return "auto"
+        case .auto: return "all auto"
+        case .skip: return "bypass"
         }
     }
 

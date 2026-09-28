@@ -164,17 +164,17 @@ final class StatusTextTests: XCTestCase {
         XCTAssertEqual(StatusText.remote(nil, problem: nil, daemonReady: false).level, .off)
         XCTAssertEqual(StatusText.remote(nil, problem: "404", daemonReady: true).level, .warning)
         let info = RemoteInfo(port: 4713, fingerprint: String(repeating: "ab", count: 32), lan: [], tailnet: [], bonjour: nil, onlineDevices: 1)
-        XCTAssertEqual(StatusText.remote(info, problem: nil, daemonReady: true).text, "HTTPS 0.0.0.0:4713 · 指纹 abababab…")
+        XCTAssertEqual(StatusText.remote(info, problem: nil, daemonReady: true).text, "HTTPS 0.0.0.0:4713 · fingerprint abababab…")
         XCTAssertEqual(StatusText.remote(RemoteInfo(enabled: false, port: nil, fingerprint: nil, lan: [], tailnet: [], bonjour: nil, onlineDevices: 0),
                                          problem: nil, daemonReady: true).level, .warning)
         let devices = [Device(id: "a", name: "A", platform: "ios", createdAt: nil, lastSeenAt: nil, revokedAt: nil, online: true),
                        Device(id: "b", name: "B", platform: "ios", createdAt: nil, lastSeenAt: nil, revokedAt: now)]
-        XCTAssertEqual(StatusText.devices(devices, online: nil).text, "1 台（在线 1）")
-        XCTAssertEqual(StatusText.remote(info, problem: nil, daemonReady: true, enabled: false), StatusLine("远程已关闭", .off))
-        XCTAssertEqual(StatusText.remote(nil, problem: nil, daemonReady: false, enabled: false).text, "远程已关闭")
+        XCTAssertEqual(StatusText.devices(devices, online: nil).text, "1 paired · 1 online")
+        XCTAssertEqual(StatusText.remote(info, problem: nil, daemonReady: true, enabled: false), StatusLine("off", .off))
+        XCTAssertEqual(StatusText.remote(nil, problem: nil, daemonReady: false, enabled: false).text, "off")
         let published = StatusLine("_agentswitch._tcp「x」端口 4713", .ok)
         XCTAssertEqual(StatusText.bonjour(published, remoteEnabled: true), published)
-        XCTAssertEqual(StatusText.bonjour(published, remoteEnabled: false), StatusLine("远程已关闭", .off))
+        XCTAssertEqual(StatusText.bonjour(published, remoteEnabled: false), StatusLine("off", .off))
         XCTAssertEqual(StatusText.devices([], online: 0).level, .off)
         XCTAssertEqual(StatusText.overall([StatusLine("", .ok), StatusLine("", .warning)]), .warning)
     }

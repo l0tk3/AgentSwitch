@@ -106,7 +106,7 @@ final class SetupChecklistTests: XCTestCase {
         XCTAssertEqual(SetupChecklist.unmet(items), 0)
         XCTAssertTrue(items.allSatisfy { $0.action == nil })
         XCTAssertEqual(items.last?.status, "~/AgentSwitch")
-        XCTAssertEqual(items[3].status, "已配对 1 台")
+        XCTAssertEqual(items[3].status, "1 paired")
     }
 
     func testAFreshMacHasOneActionPerUnmetItem() {
@@ -125,7 +125,7 @@ final class SetupChecklistTests: XCTestCase {
         XCTAssertEqual(actions["workdir"], .chooseWorkDir)
         XCTAssertEqual(items.first { $0.id == "codex" }?.detail, "brew install codex")
         XCTAssertEqual(items.first { $0.id == "workdir" }?.detail, "~/AgentSwitch：不能写入")
-        XCTAssertEqual(SetupAction.login(.claude).title, "登录")
+        XCTAssertEqual(SetupAction.login(.claude).title, "sign in")
     }
 
     func testUnknownIsCheckingNotMissing() {
@@ -159,7 +159,7 @@ final class SetupChecklistTests: XCTestCase {
 
 final class SetupWizardTests: XCTestCase {
     func testStepsAndProgress() {
-        XCTAssertEqual(SetupStep.allCases.map(\.title), ["执行器", "配对手机", "权限与启动", "完成"])
+        XCTAssertEqual(SetupStep.allCases.map(\.title), ["executors", "pair iPhone", "permissions & launch", "done"])
         XCTAssertEqual(SetupStep.executors.next, .pairing)
         XCTAssertNil(SetupStep.done.next)
         XCTAssertNil(SetupStep.executors.previous)

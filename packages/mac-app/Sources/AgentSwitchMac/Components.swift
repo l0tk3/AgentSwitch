@@ -2,15 +2,24 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-// MARK: - colours (docs/ui-v0.md §2)
+// MARK: - colours (docs/ui-v0.md §7.3)
 
 extension Color {
-    /// The one accent: buttons, selection, things in progress.
-    static let brand = Color(nsColor: .dynamic(light: 0x2F5BEA, dark: 0x6D8BFF, name: "AgentSwitchBrand"))
-    /// The accent as a fill under white text (docs/ui-v0.md §2: darker than the accent in dark mode).
-    static let brandFill = Color(nsColor: .dynamic(light: 0x2F5BEA, dark: 0x3F66F0, name: "AgentSwitchBrandFill"))
-    /// 等你处理: only for things the user has to act on.
-    static let attention = Color(nsColor: .dynamic(light: 0xE8891C, dark: 0xF5A54A, name: "AgentSwitchAttention"))
+    /// The one signal color: selection, the brand mark, the primary action (and the system controls' tint).
+    static let signal = Color(nsColor: .dynamic(light: 0xE0106E, dark: 0xFF2E88, name: "AgentSwitchSignal"))
+    /// The tint of the app's controls: the signal.
+    static let brand = signal
+    /// Status colors, only ever for status and never alone (always with a shape or a word).
+    static let busy = Color(nsColor: .dynamic(light: 0x0086A8, dark: 0x2EE6FF, name: "AgentSwitchBusy"))
+    static let waiting = Color(nsColor: .dynamic(light: 0xC27400, dark: 0xFFB000, name: "AgentSwitchWaiting"))
+    static let ok = Color(nsColor: .dynamic(light: 0x3F8F00, dark: 0x9BE22D, name: "AgentSwitchOK"))
+    static let failed = Color(nsColor: .dynamic(light: 0xD7261B, dark: 0xFF4A3D, name: "AgentSwitchFailed"))
+    /// Waiting on the user (the old name for it).
+    static let attention = waiting
+    /// Faint ink: dim lanes, hollow squares, the empty part of a meter, dotted rules.
+    static let inkDim = Color(nsColor: .dynamic(light: 0xA29D93, dark: 0x4D4B48, name: "AgentSwitchInkDim"))
+    /// A pixel mark's 1-pixel hard shadow.
+    static let pixelShadow = Color(nsColor: .dynamic(light: 0xCFC9BC, dark: 0x2C2A28, name: "AgentSwitchPixelShadow"))
 }
 
 extension NSColor {
@@ -26,38 +35,37 @@ extension NSColor {
 extension StatusLevel {
     var color: Color {
         switch self {
-        case .ok: return .green
-        case .off: return Color(nsColor: .tertiaryLabelColor)
-        case .busy: return .brand
-        case .warning: return .attention
-        case .error: return .red
+        case .ok: return .ok
+        case .off: return .inkDim
+        case .busy: return .busy
+        case .warning: return .waiting
+        case .error: return .failed
         }
     }
 }
 
 // MARK: - status
 
+/// The status mark (a pixel square, the spinner while busy); the old name.
 struct StatusDot: View {
     let level: StatusLevel
 
-    var body: some View {
-        Circle().fill(level.color).frame(width: 8, height: 8)
-    }
+    var body: some View { StatusMark(level: level) }
 }
 
-/// `● 运行中`: the dot and one word, the word in secondary text.
+/// `■ ok`: the mark and one word, the word monospaced in secondary text.
 struct StatusBadge: View {
     let line: StatusLine
 
     var body: some View {
         HStack(spacing: 6) {
-            StatusDot(level: line.level)
-            Text(line.text).foregroundStyle(.secondary)
+            StatusMark(level: line.level)
+            Text(line.text).mono(12).foregroundStyle(.secondary)
         }
     }
 }
 
-/// A settings row: label on the left, the status (dot + text) on the right; the full text on hover.
+/// A settings row: label on the left, the status (mark + text) on the right; the full text on hover.
 struct StatusRow: View {
     let label: String
     let line: StatusLine
@@ -65,8 +73,8 @@ struct StatusRow: View {
     var body: some View {
         LabeledContent(label) {
             HStack(spacing: 6) {
-                StatusDot(level: line.level)
-                Text(line.text).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                StatusMark(level: line.level)
+                Text(line.text).mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
             }
             .help(line.text)
         }
@@ -148,7 +156,7 @@ enum FolderPanel {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择"
+        panel.prompt = "choose"
         panel.message = message
         if let path { panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true) }
         return panel.runModal() == .OK ? panel.url : nil

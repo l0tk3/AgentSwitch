@@ -41,28 +41,28 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(claude.slots.map(\.label), ["5h", "7d"])
         XCTAssertEqual(claude.slots.map(\.percent), [20, 82])
         XCTAssertEqual(claude.slots.map(\.valueText), ["20%", "82%"])
-        XCTAssertEqual(claude.slots.map(\.note), ["08:10 重置", "05:00 重置"])
+        XCTAssertEqual(claude.slots.map(\.note), ["resets 08:10", "resets 05:00"])
         XCTAssertFalse(claude.showsBalance)
 
         let codex = rows[1]
         XCTAssertEqual(codex.slots.map(\.label), ["5h", "7d"])
         XCTAssertEqual(codex.slots.map(\.percent), [nil, 8])
         XCTAssertEqual(codex.slots[0].valueText, "—")
-        XCTAssertEqual(codex.slots[0].note, "无读数")
+        XCTAssertEqual(codex.slots[0].note, "no reading")
         XCTAssertEqual(codex.slots[0].fraction, 0)
-        XCTAssertEqual(codex.slots[1].note, "10月3日 18:59 重置")
+        XCTAssertEqual(codex.slots[1].note, "resets 10/3 18:59")
 
         let opencode = rows[2]
         XCTAssertTrue(opencode.showsBalance)
         XCTAssertEqual(opencode.slots, [])
-        XCTAssertEqual(opencode.balanceText, "余额 ¥96.23")
+        XCTAssertEqual(opencode.balanceText, "balance ¥96.23")
     }
 
     func testAWindowWhoseResetHasPassedShowsNoReading() throws {
         let later = Date(timeIntervalSince1970: 1_790_490_000)   // 06:20: after 7d's reset (05:00), before 5h's (08:10)
         let claude = Usage.rows(try readings(), now: later, calendar: calendar)[0]
         XCTAssertEqual(claude.slots.map(\.percent), [20, nil])
-        XCTAssertEqual(claude.slots[1].note, "已重置")
+        XCTAssertEqual(claude.slots[1].note, "reset")
         XCTAssertNil(claude.slots[1].resetsAt)
     }
 
@@ -89,7 +89,7 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(rows.map(\.title), ["Claude Code", "Codex", "OpenCode"], "a harness the daemon did not report still gets its row")
         XCTAssertEqual(rows[0].slots.map(\.valueText), ["—", "—"])
         XCTAssertEqual(rows[1].slots.map(\.valueText), ["—", "—"])
-        XCTAssertEqual(rows[2].balanceText, "余额 —")
+        XCTAssertEqual(rows[2].balanceText, "balance —")
     }
 
     func testNoReadingsNoRows() {
@@ -123,9 +123,9 @@ final class UsageTests: XCTestCase {
     }
 
     func testResetTimes() {
-        XCTAssertEqual(Usage.resetText(Date(timeIntervalSince1970: 1_790_496_600), now: now, calendar: calendar), "08:10 重置")
-        XCTAssertEqual(Usage.resetText(now.addingTimeInterval(86_400), now: now, calendar: calendar), "明天 04:07 重置")
-        XCTAssertEqual(TimeText.at(now.addingTimeInterval(-86_400), now: now, calendar: calendar), "昨天 04:07")
+        XCTAssertEqual(Usage.resetText(Date(timeIntervalSince1970: 1_790_496_600), now: now, calendar: calendar), "resets 08:10")
+        XCTAssertEqual(Usage.resetText(now.addingTimeInterval(86_400), now: now, calendar: calendar), "resets tomorrow 04:07")
+        XCTAssertEqual(TimeText.at(now.addingTimeInterval(-86_400), now: now, calendar: calendar), "yesterday 04:07")
         XCTAssertEqual(TimeText.at(now, now: now, calendar: calendar), "04:07")
     }
 

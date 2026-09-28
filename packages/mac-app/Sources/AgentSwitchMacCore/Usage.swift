@@ -101,7 +101,7 @@ public struct UsageSlot: Equatable, Sendable {
     /// Nil when there is no reading, or the window has reset since it was read.
     public let percent: Int?
     public let resetsAt: Date?
-    /// The hover text: `12:30 重置`, `已重置`, `无读数`; empty when a reading has no reset time.
+    /// The hover text: `resets 12:30`, `reset`, `no reading`; empty when a reading has no reset time.
     public let note: String
 
     public init(label: String, percent: Int?, resetsAt: Date?, note: String) {
@@ -132,8 +132,8 @@ public struct UsageRow: Equatable, Sendable, Identifiable {
     public var id: String { harness.rawValue }
     /// OpenCode is prepaid: a balance instead of windows.
     public var showsBalance: Bool { harness == .opencode }
-    /// `余额 ¥96.23`, or `余额 —`.
-    public var balanceText: String { "余额 " + (balance ?? Usage.none) }
+    /// `balance ¥96.23`, or `balance —`.
+    public var balanceText: String { "balance " + (balance ?? Usage.none) }
 
     public init(harness: Harness, title: String, slots: [UsageSlot], balance: String?) {
         self.harness = harness
@@ -180,10 +180,10 @@ public enum Usage {
     /// A window by its label; one whose reset time has passed has reset and shows no reading.
     public static func slot(_ label: String, windows: [QuotaWindow], now: Date, calendar: Calendar = .current) -> UsageSlot {
         guard let window = windows.first(where: { $0.label.trimmingCharacters(in: .whitespaces).lowercased() == label }) else {
-            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "无读数")
+            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "no reading")
         }
         if let reset = window.resetsAt, reset <= now {
-            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "已重置")
+            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "reset")
         }
         let percent = min(100, max(0, Int(window.usedPercent.rounded())))
         let note = window.resetsAt.map { resetText($0, now: now, calendar: calendar) } ?? ""
@@ -227,8 +227,8 @@ public enum Usage {
         readings.compactMap(\.fetchedAt).max()
     }
 
-    /// `12:30 重置`, `明天 09:00 重置`, `9月30日 12:30 重置`.
+    /// `resets 12:30`, `resets tomorrow 09:00`, `resets 9/30 12:30`.
     public static func resetText(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-        TimeText.at(date, now: now, calendar: calendar) + " 重置"
+        "resets " + TimeText.at(date, now: now, calendar: calendar)
     }
 }

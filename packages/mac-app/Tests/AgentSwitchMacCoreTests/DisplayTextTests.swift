@@ -55,17 +55,17 @@ final class TimeTextTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_790_346_000)
 
     func testMoments() {
-        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-20), now: now, calendar: calendar), "刚刚")
-        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-180), now: now, calendar: calendar), "3 分钟前")
-        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-4 * 3600), now: now, calendar: calendar), "今天 10:20")
-        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-86_400), now: now, calendar: calendar), "昨天 14:20")
-        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-5 * 86_400), now: now, calendar: calendar), "9月20日 14:20")
+        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-20), now: now, calendar: calendar), "now")
+        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-180), now: now, calendar: calendar), "3m ago")
+        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-4 * 3600), now: now, calendar: calendar), "today 10:20")
+        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-86_400), now: now, calendar: calendar), "yesterday 14:20")
+        XCTAssertEqual(TimeText.moment(now.addingTimeInterval(-5 * 86_400), now: now, calendar: calendar), "9/20 14:20")
     }
 
     func testDaysAndBuilds() {
-        XCTAssertEqual(TimeText.day(now, now: now, calendar: calendar), "今天")
-        XCTAssertEqual(TimeText.day(now.addingTimeInterval(-400 * 86_400), now: now, calendar: calendar), "2025年8月21日")
-        XCTAssertEqual(TimeText.build("2026-09-25T06:20:00Z", now: now, calendar: calendar), "今天 06:20")
+        XCTAssertEqual(TimeText.day(now, now: now, calendar: calendar), "today")
+        XCTAssertEqual(TimeText.day(now.addingTimeInterval(-400 * 86_400), now: now, calendar: calendar), "2025/8/21")
+        XCTAssertEqual(TimeText.build("2026-09-25T06:20:00Z", now: now, calendar: calendar), "today 06:20")
         XCTAssertEqual(TimeText.build("dev", now: now, calendar: calendar), "dev")
     }
 }
@@ -77,24 +77,24 @@ final class ShortStatusTests: XCTestCase {
 
     func testServiceWords() {
         let since = Date(timeIntervalSince1970: 0)
-        XCTAssertEqual(StatusText.service(state(.running(pid: 1, since: since)), ready: true), StatusLine("运行中", .ok))
-        XCTAssertEqual(StatusText.service(state(.running(pid: 1, since: since)), ready: false), StatusLine("启动中", .busy))
-        XCTAssertEqual(StatusText.service(state(.external("x")), ready: false), StatusLine("无响应", .warning))
-        XCTAssertEqual(StatusText.service(state(.failed("端口被占用")), ready: false), StatusLine("失败", .error))
-        XCTAssertEqual(StatusText.service(.initial, ready: false), StatusLine("已停止", .off))
-        XCTAssertEqual(StatusText.headline(.ok), "运行中")
+        XCTAssertEqual(StatusText.service(state(.running(pid: 1, since: since)), ready: true), StatusLine("ok", .ok))
+        XCTAssertEqual(StatusText.service(state(.running(pid: 1, since: since)), ready: false), StatusLine("starting", .busy))
+        XCTAssertEqual(StatusText.service(state(.external("x")), ready: false), StatusLine("no response", .warning))
+        XCTAssertEqual(StatusText.service(state(.failed("端口被占用")), ready: false), StatusLine("failed", .error))
+        XCTAssertEqual(StatusText.service(.initial, ready: false), StatusLine("stopped", .off))
+        XCTAssertEqual(StatusText.headline(.ok), "ok")
     }
 
     func testPhoneAndTailscale() {
         let ok = StatusLine("HTTPS", .ok)
         let phone = Device(id: "a", name: "A", platform: "ios", createdAt: nil, lastSeenAt: nil, revokedAt: nil, online: false)
-        XCTAssertEqual(StatusText.phone(remote: ok, enabled: false, devices: [phone], online: 1), StatusLine("已关闭", .off))
-        XCTAssertEqual(StatusText.phone(remote: StatusLine("404", .warning), enabled: true, devices: [], online: nil).text, "不可用")
-        XCTAssertEqual(StatusText.phone(remote: ok, enabled: true, devices: [], online: nil), StatusLine("未配对", .off))
-        XCTAssertEqual(StatusText.phone(remote: ok, enabled: true, devices: [phone], online: 1).text, "1 台在线")
-        XCTAssertEqual(StatusText.phone(remote: ok, enabled: true, devices: [phone], online: nil).text, "已配对 1 台")
+        XCTAssertEqual(StatusText.phone(remote: ok, enabled: false, devices: [phone], online: 1), StatusLine("off", .off))
+        XCTAssertEqual(StatusText.phone(remote: StatusLine("404", .warning), enabled: true, devices: [], online: nil).text, "unavailable")
+        XCTAssertEqual(StatusText.phone(remote: ok, enabled: true, devices: [], online: nil), StatusLine("not paired", .off))
+        XCTAssertEqual(StatusText.phone(remote: ok, enabled: true, devices: [phone], online: 1).text, "1 online")
+        XCTAssertEqual(StatusText.phone(remote: ok, enabled: true, devices: [phone], online: nil).text, "1 paired")
         XCTAssertEqual(StatusText.tailscale(nil, tailnet: ["100.64.0.1"]), StatusLine("100.64.0.1", .ok))
-        XCTAssertEqual(StatusText.tailscale(.notInstalled, tailnet: []), StatusLine("未安装", .off))
-        XCTAssertEqual(StatusText.harness(.notLoggedIn), StatusLine("未登录", .warning))
+        XCTAssertEqual(StatusText.tailscale(.notInstalled, tailnet: []), StatusLine("not installed", .off))
+        XCTAssertEqual(StatusText.harness(.notLoggedIn), StatusLine("signed out", .warning))
     }
 }

@@ -33,16 +33,16 @@ public enum GateServiceText {
     public static func line(_ f: GateServiceFacts) -> StatusLine {
         if let op = f.operation { return StatusLine(op.progressText, .busy) }
         switch f.state.availability {
-        case .unknown: return StatusLine("检测中", .busy)
-        case .unsupported: return StatusLine("内置 secret-gate 不支持系统服务", .off)
-        case .notInstalled: return StatusLine("未安装", .off)
+        case .unknown: return StatusLine("checking", .busy)
+        case .unsupported: return StatusLine("not supported by the bundled secret-gate", .off)
+        case .notInstalled: return StatusLine("not installed", .off)
         case .installed: break
         }
-        if f.ownedByAnotherUser { return StatusLine("属于其他用户（uid \(f.state.ownerUid ?? 0)）", .error) }
+        if f.ownedByAnotherUser { return StatusLine("owned by uid \(f.state.ownerUid ?? 0)", .error) }
         switch f.health {
-        case .checking: return StatusLine("检测中", .busy)
-        case .notResponding: return StatusLine("凭据网关服务无响应", .error)
-        case .responding: return StatusLine("运行中 · 系统服务 · 127.0.0.1:\(f.port)", .ok)
+        case .checking: return StatusLine("checking", .busy)
+        case .notResponding: return StatusLine("no response", .error)
+        case .responding: return StatusLine("ok · system service · 127.0.0.1:\(f.port)", .ok)
         }
     }
 
@@ -50,11 +50,11 @@ public enum GateServiceText {
     public static func short(_ f: GateServiceFacts) -> StatusLine {
         let full = line(f)
         guard f.state.isInstalled, f.operation == nil else { return full }
-        if f.ownedByAnotherUser { return StatusLine("不可用", .error) }
+        if f.ownedByAnotherUser { return StatusLine("unavailable", .error) }
         switch f.health {
-        case .checking: return StatusLine("检测中", .busy)
-        case .notResponding: return StatusLine("无响应", .error)
-        case .responding: return StatusLine("运行中", .ok)
+        case .checking: return StatusLine("checking", .busy)
+        case .notResponding: return StatusLine("no response", .error)
+        case .responding: return StatusLine("ok", .ok)
         }
     }
 
@@ -62,11 +62,11 @@ public enum GateServiceText {
     public static func attention(_ f: GateServiceFacts) -> String? {
         guard f.operation == nil else { return nil }
         switch f.state.availability {
-        case .notInstalled: return "凭据网关服务未安装"
+        case .notInstalled: return "gateway service: not installed"
         case .installed:
-            if f.ownedByAnotherUser { return "凭据网关服务不可用" }
-            if f.health == .notResponding { return "凭据网关服务无响应" }
-            return f.updateAvailable && f.health == .responding ? "凭据网关有更新" : nil
+            if f.ownedByAnotherUser { return "gateway service: unavailable" }
+            if f.health == .notResponding { return "gateway service: no response" }
+            return f.updateAvailable && f.health == .responding ? "gateway service: update available" : nil
         case .unknown, .unsupported: return nil
         }
     }
@@ -84,32 +84,32 @@ extension SetupChecklist {
     }
 
     static func gateServiceItem(_ f: GateServiceFacts) -> SetupItem? {
-        let title = "凭据网关服务"
+        let title = "gateway service"
         if let op = f.operation { return SetupItem(id: gateServiceID, title: title, state: .working, status: op.progressText) }
         switch f.state.availability {
         case .unknown:
-            return SetupItem(id: gateServiceID, title: title, state: .checking, status: "检测中")
+            return SetupItem(id: gateServiceID, title: title, state: .checking, status: "checking")
         case .unsupported:
             return nil
         case .notInstalled:
-            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "未安装",
+            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "not installed",
                              detail: "安装后，私钥由独立的系统账户保管，执行器无法读取。", action: .installGateService)
         case .installed:
             break
         }
         if f.ownedByAnotherUser {
-            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "不可用",
+            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "unavailable",
                              detail: "此服务为另一个 macOS 用户（uid \(f.state.ownerUid ?? 0)）安装，当前用户无法使用。")
         }
         switch f.health {
         case .checking:
-            return SetupItem(id: gateServiceID, title: title, state: .checking, status: "检测中")
+            return SetupItem(id: gateServiceID, title: title, state: .checking, status: "checking")
         case .notResponding:
-            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "无响应",
+            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "no response",
                              detail: "系统服务由 launchd 自动重启。持续无响应时，可重新安装服务程序。", action: .repairGateService)
         case .responding:
-            guard f.updateAvailable else { return SetupItem(id: gateServiceID, title: title, state: .done, status: "运行中") }
-            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "有更新",
+            guard f.updateAvailable else { return SetupItem(id: gateServiceID, title: title, state: .done, status: "ok") }
+            return SetupItem(id: gateServiceID, title: title, state: .todo, status: "update",
                              detail: "App 内置的凭据网关程序与已安装的版本不同。", action: .updateGateService)
         }
     }
@@ -118,11 +118,11 @@ extension SetupChecklist {
         guard f.state.isInstalled, f.operation == nil, let ca = f.previousCA, !ca.settled else { return [] }
         var out: [SetupItem] = []
         if ca.oldTrusted {
-            out.append(SetupItem(id: previousGateCAID, title: "旧网关证书", state: .todo, status: "仍受信任",
+            out.append(SetupItem(id: previousGateCAID, title: "old gateway cert", state: .todo, status: "still trusted",
                                  detail: "旧证书的私钥曾对当前用户可读，建议从登录钥匙串中移除。", action: .removePreviousGateCA))
         }
         if !ca.newTrusted {
-            out.append(SetupItem(id: gateCAID, title: "网关证书", state: .todo, status: "未加入钥匙串",
+            out.append(SetupItem(id: gateCAID, title: "gateway cert", state: .todo, status: "not in keychain",
                                  detail: "安装服务前的证书曾加入登录钥匙串。网关证书已重新生成，需重新加入。", action: .trustGateCA))
         }
         return out

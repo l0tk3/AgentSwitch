@@ -11,12 +11,12 @@ struct PermissionsView: View {
     var body: some View {
         Group {
             if !model.daemonReady {
-                EmptyPage(title: "服务未就绪", symbol: "hourglass", message: model.daemonLine.text)
+                EmptyPage(title: "service not ready", symbol: "hourglass", message: model.daemonLine.text)
             } else if let policy = control.policy {
                 form(policy)
             } else if let problem = control.policyLoadProblem {
-                EmptyPage(title: "无法读取权限设置", symbol: "exclamationmark.triangle", message: problem) {
-                    Button("重试") { Task { await control.loadPolicy(model.client) } }
+                EmptyPage(title: "permissions: unavailable", symbol: "exclamationmark.triangle", message: problem) {
+                    Button("retry") { Task { await control.loadPolicy(model.client) } }
                 }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -24,8 +24,8 @@ struct PermissionsView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await control.loadPolicy(model.client) } } label: { Label("重新读取", systemImage: "arrow.clockwise") }
-                    .help("重新读取")
+                Button { Task { await control.loadPolicy(model.client) } } label: { Label("reload", systemImage: "arrow.clockwise") }
+                    .help("reload")
                     .disabled(!model.daemonReady)
             }
         }
@@ -39,7 +39,7 @@ struct PermissionsView: View {
             Section {
                 ApprovalModePicker(policy: policy)
             } header: {
-                Text("审批")
+                SectionLabel("approvals")
             } footer: {
                 Footer(policy.mode == nil ? "服务报告的模式为 \(policy.rawMode)，当前版本的应用无法识别。" : "更改立即生效，仅影响之后的审批。")
             }
@@ -53,7 +53,7 @@ struct PermissionsView: View {
                             .disabled(control.savingPolicy)
                     }
                 } header: {
-                    Text("以下类别仍由你确认")
+                    SectionLabel("still ask me for")
                 } footer: {
                     Footer("未勾选的类别由调度模型代为批准。")
                 }
@@ -62,7 +62,7 @@ struct PermissionsView: View {
                 Section {
                     ForEach(ApprovalMode.alwaysApplies, id: \.self) { Text($0) }
                 } header: {
-                    Text("仍然生效")
+                    SectionLabel("always on")
                 } footer: {
                     Footer("此模式仅跳过审批；以上限制在任何模式下均有效。")
                 }
@@ -87,7 +87,7 @@ struct ApprovalModePicker: View {
     @State private var confirmSkip = false
 
     var body: some View {
-        Picker("审批方式", selection: selection) {
+        Picker("approvals", selection: selection) {
             ForEach(ApprovalMode.allCases) { mode in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(mode.title)
@@ -100,8 +100,8 @@ struct ApprovalModePicker: View {
         .pickerStyle(.radioGroup)
         .labelsHidden()
         .disabled(model.control.savingPolicy)
-        .confirmationDialog("跳过权限？", isPresented: $confirmSkip) {
-            Button("跳过权限", role: .destructive) { save(.skip) }
+        .confirmationDialog("使用 bypass？", isPresented: $confirmSkip) {
+            Button("bypass", role: .destructive) { save(.skip) }
         } message: {
             Text(ApprovalMode.skipWarning)
         }

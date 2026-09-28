@@ -12,9 +12,10 @@ struct AgentSwitchApp: App {
             MenuContentView()
                 .environment(delegate.model)
                 .environment(\.showSettings, ShowSettingsAction { [delegate] tab in delegate.settings.show(tab) })
+                .environment(\.showTerminals, ShowTerminalsAction { [delegate] in delegate.terminals.show() })
                 .environment(\.quitApp, QuitAction { [delegate] in delegate.quit() })
         } label: {
-            MenuBarIcon(level: delegate.model.overallLevel)
+            MenuBarIcon(level: delegate.model.overallLevel, waiting: delegate.model.waitingCount)
         }
         .menuBarExtraStyle(.window)
     }
@@ -25,6 +26,9 @@ struct AgentSwitchApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     lazy var settings = SettingsWindowController(model: model)
+    lazy var terminals = TerminalWindowController(model: model)
+    /// Which of our windows are open: the Dock icon shows while any is.
+    private var openWindows: Set<String> = []
     private var signalSources: [DispatchSourceSignal] = []
     private var shutdownDone = false
     private var quitting = false
@@ -55,7 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard claimInstance() else { return }
         running = true
         // The bundle has LSUIElement; `swift run` has no bundle, so decide the Dock presence here in both cases.
-        settings.onVisibilityChange = { [weak self] open in self?.updateDockPresence(settingsWindowOpen: open) }
+        settings.onVisibilityChange = { [weak self] open in self?.windowVisibility("settings", open) }
+        terminals.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminals", open) }
         updateDockPresence(settingsWindowOpen: false)
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
@@ -154,7 +159,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.show(nil)
     }
 
-    /// Dock icon: while the settings window is open, or always when the user asked for it (DockPresence).
+    private func windowVisibility(_ name: String, _ open: Bool) {
+        if open { openWindows.insert(name) } else { openWindows.remove(name) }
+        updateDockPresence(settingsWindowOpen: !openWindows.isEmpty)
+    }
+
+    /// Dock icon: while the settings or terminal window is open, or always when the user asked for it (DockPresence).
     func updateDockPresence(settingsWindowOpen: Bool) {
         let always = UserDefaults.standard.bool(forKey: DockPresence.alwaysShowKey)
         NSApp.setActivationPolicy(DockPresence.showsInDock(alwaysShow: always, settingsWindowOpen: settingsWindowOpen) ? .regular : .accessory)
@@ -195,8 +205,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct MenuBarIcon: View {
     let level: StatusLevel
+    /// Things waiting for the user: the mark shows it, as the menu's header does.
+    var waiting = 0
 
     var body: some View {
-        Image(nsImage: MenuBarGlyph.image(level))
+        Image(nsImage: MenuBarGlyph.image(level, waiting: waiting))
     }
 }

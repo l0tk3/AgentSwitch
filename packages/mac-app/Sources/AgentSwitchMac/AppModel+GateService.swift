@@ -199,12 +199,12 @@ extension AppModel {
     /// 加入: the keychain step of `secret-gate install-ca` for the CA in use, only on the user's click (macOS asks for
     /// the login password). The result in words.
     func trustGateCA() async -> String {
-        guard !isDemo else { return "已加入" }
+        guard !isDemo else { return "trusted" }
         let (exe, args) = GateCA.trustCommand(ca: gateCA, userHome: paths.userHome)
         let text: String
         do {
             let result = try await ProcessRunner.run(exe, args, timeout: 120)
-            text = result.ok ? "已加入" : "未加入：\(result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines))"
+            text = result.ok ? "trusted" : "not trusted：\(result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines))"
         } catch {
             text = error.localizedDescription
         }
