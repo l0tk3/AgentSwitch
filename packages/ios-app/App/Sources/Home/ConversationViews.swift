@@ -1,7 +1,8 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// What you said, on the right, in the accent colour. Ciphertexts show as a lock mark; the Mac's legend is not shown.
+/// What you said, on the right, in a raised square box (the signal colour is not for text backgrounds). Ciphertexts
+/// show as a lock mark; the Mac's legend is not shown.
 struct UserBubble: View {
     let text: String
     var attachments: Int = 0
@@ -12,14 +13,15 @@ struct UserBubble: View {
             Spacer(minLength: 56)
             VStack(alignment: .trailing, spacing: Theme.Space.xs) {
                 Text(MessageDisplay.readable(text))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.ink)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.Radius.bubble, style: .continuous))
+                    .background(Theme.raised)
+                    .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
                     .textSelection(.enabled)
                     .opacity(faded ? 0.55 : 1)
                 if attachments > 0 {
-                    Label("\(attachments) 个附件", systemImage: "paperclip").font(.caption).foregroundStyle(.secondary)
+                    Text("\(attachments) attached").mono(11).foregroundStyle(.secondary)
                 }
             }
         }
@@ -39,7 +41,7 @@ struct AssistantBubble: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                if let dot { Circle().fill(dot).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
+                if let dot { Rectangle().fill(dot).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
                 Text(MessageDisplay.readable(message.text))
                     .foregroundStyle(message.unprompted ? .secondary : .primary)
                     .textSelection(.enabled)
@@ -80,8 +82,8 @@ struct AssistantBubble: View {
     private var playButton: some View {
         let speaking = model.speaker.speakingTaskId == speakKey
         return Button(action: toggleSpeech) {
-            Label(speaking ? "停止" : "朗读", systemImage: speaking ? "stop.fill" : "speaker.wave.2")
-                .font(.footnote)
+            Label(speaking ? "stop" : "read aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2")
+                .mono(12)
                 .foregroundStyle(speaking ? Color.accentColor : .secondary)
         }
         .buttonStyle(.plain)
@@ -90,8 +92,8 @@ struct AssistantBubble: View {
     @ViewBuilder
     private var readAloud: some View {
         let speaking = model.speaker.speakingTaskId == speakKey
-        Button(speaking ? "停止朗读" : "朗读", systemImage: speaking ? "stop.circle" : "speaker.wave.2", action: toggleSpeech)
-        Button("拷贝", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
+        Button(speaking ? "stop" : "read aloud", action: toggleSpeech)
+        Button("copy") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
     }
 }
 
@@ -109,11 +111,11 @@ struct TaskLink: View {
                 Text(title).font(.subheadline).foregroundStyle(.primary).lineLimit(1)
                 Spacer(minLength: 0)
                 if model.isUnread(task) { UnreadDot() }
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                Text("›").mono(13).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, 10)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -135,17 +137,16 @@ struct OutgoingBubble: View {
             if let failure = message.failure {
                 Text(failure).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.trailing)
                 HStack(spacing: Theme.Space.m) {
-                    Button("修改") { model.editOutgoing() }.buttonStyle(.bordered)
-                    Button("重发") { Task { await model.resend() } }.buttonStyle(.borderedProminent).tint(Theme.fill)
+                    Button("[ edit ]") { model.editOutgoing() }.buttonStyle(SquareButtonStyle(expand: false))
+                    Button("[ resend ]") { Task { await model.resend() } }.buttonStyle(SquareButtonStyle(prominent: true, expand: false))
                 }
-                .controlSize(.small)
                 .disabled(model.sending)
             } else {
                 HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
-                    Text(message.staged == nil && !message.attachments.isEmpty ? "上传附件中" : "发送中")
+                    BrailleSpinner(color: .secondary)
+                    Text(message.staged == nil && !message.attachments.isEmpty ? "uploading" : "sending")
                 }
-                .font(.caption)
+                .mono(11)
                 .foregroundStyle(.secondary)
             }
         }

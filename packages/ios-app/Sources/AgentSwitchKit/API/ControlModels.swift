@@ -32,10 +32,10 @@ public enum PermissionMode: Sendable, Hashable, Codable {
     /// The words of the Mac's picker (control-v0 §1).
     public var label: String {
         switch self {
-        case .manual: return "逐项确认"
-        case .scoped: return "自动"
-        case .auto: return "全部自动"
-        case .skip: return "跳过权限"
+        case .manual: return "ask each"
+        case .scoped: return "auto"
+        case .auto: return "all auto"
+        case .skip: return "bypass"
         case .other(let s): return s
         }
     }

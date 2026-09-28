@@ -29,15 +29,15 @@ struct SessionsView: View {
                         NavigationLink(value: SettingsRoute.session(session)) { SessionRow(session: session) }
                     }
                 } header: {
-                    Text(group.folder.isEmpty ? "未知目录" : PathDisplay.short(group.folder))
+                    SectionLabel(group.folder.isEmpty ? "unknown folder" : PathDisplay.short(group.folder))
                         .textCase(nil)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
             }
         }
-        .overlay { if !loaded { ProgressView() } }
-        .navigationTitle("编码会话")
+        .overlay { if !loaded { BrailleSpinner(color: .secondary) } }
+        .navigationTitle("coding sessions")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task {
@@ -82,8 +82,8 @@ private struct SessionRow: View {
             Text(MessageDisplay.readable(session.displayTitle)).font(.subheadline).lineLimit(2)
             HStack(spacing: 6) {
                 if session.active {
-                    Circle().fill(Color.accentColor).frame(width: 7, height: 7)
-                    Text("进行中").foregroundStyle(Color.accentColor).fontWeight(.medium)
+                    BrailleSpinner()
+                    Text("busy").foregroundStyle(Theme.busy).fontWeight(.medium)
                     Text("·").foregroundStyle(.tertiary)
                 }
                 Text(meta).foregroundStyle(.secondary).lineLimit(1)

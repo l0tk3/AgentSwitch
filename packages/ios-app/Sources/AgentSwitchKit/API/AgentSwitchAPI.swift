@@ -165,7 +165,7 @@ public struct AgentSwitchAPI: Sendable {
         return req
     }
 
-    private func perform<T: Decodable>(_ method: String, _ path: [String], query: [URLQueryItem], body: Data?,
+    func perform<T: Decodable>(_ method: String, _ path: [String], query: [URLQueryItem], body: Data?,
                                        timeout: TimeInterval? = nil, contentType: String = "application/json") async throws -> T {
         let endpoint = try await endpoints.endpoint()
         let (data, response): (Data, HTTPURLResponse)

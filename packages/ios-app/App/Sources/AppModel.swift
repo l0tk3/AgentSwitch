@@ -3,6 +3,11 @@ import SwiftUI
 import UIKit
 
 /// The one sheet the home screen shows at a time (app-v0 §5: one input box, everything else behind it).
+/// The two entries (docs/terminal-v0.md §1): tasks (managed, the conversation) and terminals (manual).
+enum MainTab: Hashable {
+    case tasks, terminals
+}
+
 enum HomeSheet: String, Identifiable {
     case settings, pickCiphertext, makeCiphertext, approvals, addMac
     var id: String { rawValue }
@@ -76,6 +81,11 @@ final class AppModel {
     private(set) var threads: [AgentThread] = []
     private var cues = CueTracker()
     var sheet: HomeSheet?
+    var tab: MainTab = .tasks
+    /// The terminals tab (its list, the Mac's other sessions, the colours).
+    let terminals = TerminalsStore()
+    /// A terminal to open on the terminals tab (a demo screen); the tab takes it.
+    var openTerminalRequest: String?
     /// A pairing link from a tap or a scan, waiting for the user to confirm.
     var incomingPairingLink: String?
     var banner: String?
@@ -667,6 +677,7 @@ extension AppModel {
         model.conversation = ConversationLog(DemoData.messages)
         model.hasAssistant = true
         model.quota = DemoData.quota
+        model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions)
         model.routeReport = (Date().addingTimeInterval(-40), DemoData.routeReport)
         model.connectionProgress = ConnectionProgress().after(model.connection)
         if offline {

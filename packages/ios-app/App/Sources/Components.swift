@@ -24,29 +24,34 @@ struct ConnectionBanner: View {
         case .connected:
             EmptyView()
         case .connecting, .reconnecting:
-            Label(phase.text, systemImage: "antenna.radiowaves.left.and.right")
-                .font(.footnote).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                BrailleSpinner(color: .secondary)
+                Text(phase.text).mono(12).foregroundStyle(.secondary)
+            }
         case .failing, .lost:
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                HStack {
-                    Label(phase.text, systemImage: "wifi.exclamationmark").foregroundStyle(Theme.waiting)
+                HStack(spacing: 6) {
+                    PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
+                    Text(phase.text).mono(12).foregroundStyle(Theme.waiting)
                     Spacer()
-                    Button("重试") { model.reconnect() }
+                    Button("retry") { model.reconnect() }.mono(12)
                 }
                 if phase == .lost {
-                    Text("Mac 可能处于睡眠状态或已离线。查看 设置 › Mac › 排障。").foregroundStyle(.secondary)
+                    Text("Mac 可能处于睡眠状态或已离线。请查看 settings › Mac › troubleshooting。").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .font(.footnote)
         case .unpaired:
-            HStack {
-                Label("配对已失效", systemImage: "person.crop.circle.badge.xmark").foregroundStyle(Theme.failed)
+            HStack(spacing: 6) {
+                PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.failed)
+                Text(phase.text).mono(12).foregroundStyle(Theme.failed)
                 Spacer()
-                Button("重新配对") { model.pairAgain() }
-            }.font(.footnote)
+                Button("pair again") { model.pairAgain() }.mono(12)
+            }
         case .certificateChanged:
-            Label("Mac 的证书与配对时不一致，已拒绝连接", systemImage: "exclamationmark.shield")
-                .font(.footnote).foregroundStyle(Theme.failed)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.failed)
+                Text("Mac 的证书与配对时不一致，已拒绝连接。").font(.footnote).foregroundStyle(Theme.failed)
+            }
         }
     }
 }
@@ -58,11 +63,12 @@ struct ErrorText: View {
     var body: some View {
         if let message {
             HStack(alignment: .top) {
-                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.failed)
+                PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.failed).padding(.top, 4)
                 Text(message).font(.footnote)
                 Spacer()
-                Button { self.message = nil } label: { Image(systemName: "xmark.circle.fill") }
+                Button { self.message = nil } label: { Text("×").mono(15) }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .accessibilityLabel("close")
             }
         }
     }
@@ -89,15 +95,16 @@ enum Clipboard {
 }
 
 extension Date {
-    /// 刚刚 · 3 分钟前 · 今天 14:20 · 9月24日 (docs/ui-v0.md §4).
+    /// now · 3m ago · today 14:20 · yesterday 14:20 · 9/24 (docs/ui-v0.md §7.2.7, as on the Mac).
     var relative: String {
         let seconds = Date().timeIntervalSince(self)
-        if seconds < 60 { return "刚刚" }
-        if seconds < 3600 { return "\(Int(seconds / 60)) 分钟前" }
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
         let calendar = Calendar.current
         let time = formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-        if calendar.isDateInToday(self) { return "今天 \(time)" }
-        if calendar.isDateInYesterday(self) { return "昨天 \(time)" }
-        return formatted(.dateTime.month(.defaultDigits).day())
+        if calendar.isDateInToday(self) { return "today \(time)" }
+        if calendar.isDateInYesterday(self) { return "yesterday \(time)" }
+        let parts = calendar.dateComponents([.month, .day], from: self)
+        return "\(parts.month ?? 0)/\(parts.day ?? 0)"
     }
 }

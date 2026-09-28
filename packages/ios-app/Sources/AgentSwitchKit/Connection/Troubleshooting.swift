@@ -20,7 +20,7 @@ public enum Troubleshooting {
 
     public static func checks(state: ConnectionState, reports: [ProbeReport]?, book: any ServerAddressBook) -> [Check] {
         [macCheck(state)] + [
-            lineCheck("局域网", kinds: [.bonjour, .lan], hasAddresses: !book.lan.isEmpty, reports: reports,
+            lineCheck("LAN", kinds: [.bonjour, .lan], hasAddresses: !book.lan.isEmpty, reports: reports,
                       missing: "无局域网地址（Mac 可能在配对后更换了网络）。"),
             lineCheck("Tailscale", kinds: [.tailnet], hasAddresses: !book.tailnet.isEmpty, reports: reports,
                       missing: "Mac 无 Tailscale 地址。在 Mac 上登录 Tailscale 后，离开当前 Wi-Fi 时也可连接。"),
@@ -29,7 +29,7 @@ public enum Troubleshooting {
 
     static func macCheck(_ state: ConnectionState) -> Check {
         switch state {
-        case .connected(let endpoint): return Check(title: "Mac", ok: true, detail: "已通过\(endpoint.kind.title)连接")
+        case .connected(let endpoint): return Check(title: "Mac", ok: true, detail: "已通过 \(endpoint.kind.title) 连接")
         case .selecting, .idle: return Check(title: "Mac", ok: nil, detail: "正在选择线路")
         case .unreachable: return Check(title: "Mac", ok: false, detail: "所有线路均无响应")
         case .unauthorized: return Check(title: "Mac", ok: false, detail: "配对已失效，请重新配对。")
@@ -43,7 +43,7 @@ public enum Troubleshooting {
             if !hasAddresses { return Check(title: title, ok: false, detail: missing) }
             return Check(title: title, ok: nil, detail: "未尝试")
         }
-        if mine.contains(where: { $0.outcome == .ok }) { return Check(title: title, ok: true, detail: "可用") }
+        if mine.contains(where: { $0.outcome == .ok }) { return Check(title: title, ok: true, detail: "ok") }
         let reasons = mine.compactMap { report -> String? in
             switch report.outcome {
             case .unreachable(let reason)?: return reason
@@ -52,7 +52,7 @@ public enum Troubleshooting {
             case .ok?, nil: return nil
             }
         }
-        guard let reason = reasons.first else { return Check(title: title, ok: nil, detail: "未使用（已通过其他线路连接）") }
+        guard let reason = reasons.first else { return Check(title: title, ok: nil, detail: "unused · 已通过其他线路连接") }
         return Check(title: title, ok: false, detail: "无法连接：\(reason)")
     }
 

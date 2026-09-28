@@ -25,7 +25,7 @@ final class Speaker: NSObject, AVSpeechSynthesizerDelegate {
         if let written { return written }
         let result = String(Markdown.flattened(task.result ?? task.error ?? "").characters)
         let body = Speech.speakable(String(result.prefix(200)))
-        return body.isEmpty ? task.statusLabel : "\(task.statusLabel)。\(body)"
+        return body.isEmpty ? task.spokenStatus : "\(task.spokenStatus)。\(body)"
     }
 
     func toggle(_ task: AgentTask) {

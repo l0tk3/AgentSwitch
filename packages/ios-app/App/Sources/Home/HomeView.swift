@@ -25,17 +25,26 @@ struct HomeView: View {
                     ConnectionBanner()
                         .padding(.horizontal, Theme.Space.l)
                         .padding(.vertical, Theme.Space.s)
-                        .background(Color(.systemBackground))
+                        .background(Theme.base)
                 }
                 LooseApprovalsButton(count: looseCount)
                 conversation
             }
-            .background(Color(.systemBackground))
+            .background(Theme.base)
             .navigationTitle(model.profile?.name ?? "AgentSwitch")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if model.macs.servers.count > 1 {
-                    ToolbarItem(placement: .principal) { MacSwitcher() }
+                // The app's mark in the state of the Mac and the tasks (§7.3; ≥ 20 pt, so with depth), beside the title
+                // rather than in a button's glass.
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 8) {
+                        HomeMark()
+                        if model.macs.servers.count > 1 {
+                            MacSwitcher()
+                        } else {
+                            Text(model.profile?.name ?? "AgentSwitch").font(.headline).lineLimit(1)
+                        }
+                    }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button { Keyboard.dismiss(); model.sheet = .settings } label: { Image(systemName: "gearshape") }
@@ -173,7 +182,7 @@ struct HomeView: View {
         case .makeCiphertext:
             NavigationStack {
                 CiphertextsView()
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("完成") { model.sheet = nil } } }
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("done") { model.sheet = nil } } }
             }
         case .approvals:
             ApprovalsView()
@@ -192,15 +201,15 @@ private struct LooseApprovalsButton: View {
         if count > 0 {
             Button { Keyboard.dismiss(); model.sheet = .approvals } label: {
                 HStack(spacing: 6) {
-                    Circle().fill(Theme.waiting).frame(width: 7, height: 7)
-                    Text("另有 \(count) 项等你处理")
-                    Image(systemName: "chevron.right").font(.caption2.weight(.semibold))
+                    PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
+                    Text("\(count) more waiting")
+                    Text("›")
                 }
-                .font(.footnote.weight(.medium))
+                .mono(12, weight: .medium)
                 .foregroundStyle(Theme.waiting)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity)
-                .background(Color(.systemBackground))
+                .background(Theme.base)
             }
         }
     }
@@ -219,5 +228,31 @@ private struct EmptyLog: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 60)
+    }
+}
+
+/// The mark in the navigation bar: off (dithered) while the Mac is out of reach, waiting while something waits for you,
+/// busy while a task runs, else idle. Its state in words for VoiceOver.
+private struct HomeMark: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let waiting = model.approvals.filter { $0.status == .pending }.count
+        let state = PixelArt.markState(reachable: model.connection.endpoint != nil, waiting: waiting,
+                                       busy: model.tasks.contains { $0.status == .routing || $0.status == .running })
+        PixelMarkView(state: state, pixel: 2)
+            .accessibilityElement()
+            .accessibilityLabel("AgentSwitch")
+            .accessibilityValue(label(state))
+    }
+
+    private func label(_ state: PixelArt.MarkState) -> String {
+        switch state {
+        case .idle: return "idle"
+        case .busy: return "busy"
+        case .waiting: return "waiting"
+        case .error: return "failed"
+        case .off: return "Mac not reachable"
+        }
     }
 }

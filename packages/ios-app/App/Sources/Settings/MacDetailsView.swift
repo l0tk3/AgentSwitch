@@ -19,13 +19,13 @@ struct MacDetailsView: View {
 
     private var form: some View {
         Form {
-            Section("连接") {
+            Section(label: "connection") {
                 switch model.connection {
                 case .connected(let endpoint):
-                    LabeledContent("线路", value: endpoint.kind.title)
-                    LabeledContent("地址") { Text(endpoint.authority).monospaced() }
+                    LabeledContent("route", value: endpoint.kind.title)
+                    LabeledContent("address") { Text(endpoint.authority).mono(13) }
                 case .idle, .selecting:
-                    HStack { Text(model.connectionPhase.text); Spacer(); ProgressView() }
+                    HStack { Text(model.connectionPhase.text).mono(13); Spacer(); BrailleSpinner(color: .secondary) }
                 case .unreachable:
                     Text(model.connectionPhase.text).foregroundStyle(Theme.waiting)
                 case .unauthorized:
@@ -36,32 +36,32 @@ struct MacDetailsView: View {
                         if let seen { Text(ServerProfile.grouped(seen)).font(.caption2.monospaced()).foregroundStyle(.secondary) }
                     }
                 }
-                Button("重新选择线路") { model.reconnect() }
+                Button("choose route again") { model.reconnect() }
             }
             if let report = model.routeReport {
                 Section {
                     ForEach(Array(report.reports.enumerated()), id: \.offset) { _, probe in RouteProbeRow(probe: probe) }
                 } header: {
-                    Text("上次选择线路")
+                    SectionLabel("last route choice")
                 } footer: {
                     Text("\(report.at.formatted(date: .omitted, time: .standard)) · 同时探测所有地址，按顺序选用第一个可用地址。")
                 }
             }
             TroubleshootingSection(profile: profile)
             Section("Mac") {
-                LabeledContent("名称", value: profile.name)
-                LabeledContent("端口", value: String(profile.port))
-                if !profile.lan.isEmpty { LabeledContent("局域网", value: profile.lan.joined(separator: ", ")) }
+                LabeledContent("name", value: profile.name)
+                LabeledContent("port") { Text(String(profile.port)).mono(13) }
+                if !profile.lan.isEmpty { LabeledContent("LAN") { Text(profile.lan.joined(separator: ", ")).mono(13) } }
                 if !profile.tailnet.isEmpty { LabeledContent("Tailscale", value: profile.tailnet.joined(separator: ", ")) }
-                LabeledContent("密钥对", value: profile.gate?.keypair ?? "未取得")
-                LabeledContent("此设备", value: model.me?.name ?? profile.deviceId)
-                LabeledContent("配对于", value: profile.pairedAt.formatted(date: .abbreviated, time: .shortened))
+                LabeledContent("keypair") { Text(profile.gate?.keypair ?? "—").mono(13) }
+                LabeledContent("this device", value: model.me?.name ?? profile.deviceId)
+                LabeledContent("paired", value: profile.pairedAt.formatted(date: .abbreviated, time: .shortened))
             }
             if let workdir { WorkdirSection(workdir: workdir) }
             Section {
                 Text(ServerProfile.grouped(profile.fingerprint)).font(.caption.monospaced()).textSelection(.enabled)
             } header: {
-                Text("证书指纹")
+                SectionLabel("certificate fingerprint")
             } footer: {
                 Text("与 Mac 上「配对」页显示的指纹一致，即为同一台 Mac。")
             }
@@ -97,7 +97,7 @@ private struct WorkdirSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("默认工作目录") {
+            LabeledContent("default folder") {
                 Text(PathDisplay.short(workdir.path)).monospaced().lineLimit(1).truncationMode(.middle)
             }
             if let problem = workdir.problem {
@@ -142,7 +142,7 @@ private struct TroubleshootingSection: View {
                 }
             }
         } header: {
-            Text("排障")
+            SectionLabel("troubleshooting")
         } footer: {
             Text("连接中断时会自动重试，无需停留在此页面。")
         }
@@ -154,7 +154,7 @@ private struct CheckRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-            Circle().fill(color).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+            Rectangle().fill(color).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             VStack(alignment: .leading, spacing: 2) {
                 Text(check.title).font(.subheadline)
                 Text(check.detail).font(.caption).foregroundStyle(.secondary)
@@ -188,15 +188,15 @@ struct RouteProbeRow: View {
         }
     }
 
-    private var seconds: String { String(format: "%.1f 秒", probe.seconds) }
+    private var seconds: String { String(format: "%.1fs", probe.seconds) }
 
     private var verdict: String {
         switch probe.outcome {
-        case .ok?: return "可用 · \(seconds)"
-        case nil: return "未使用"
-        case .unauthorized?: return "配对已失效"
-        case .pinMismatch?: return "证书不一致"
-        case .unreachable?: return "无响应 · \(seconds)"
+        case .ok?: return "ok · \(seconds)"
+        case nil: return "unused"
+        case .unauthorized?: return "unpaired"
+        case .pinMismatch?: return "certificate changed"
+        case .unreachable?: return "no response · \(seconds)"
         }
     }
 

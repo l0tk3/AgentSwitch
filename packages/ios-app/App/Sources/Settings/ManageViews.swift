@@ -27,11 +27,11 @@ struct ThreadsManageView: View {
                     DeleteButton { deleting = request }
                 }
                 .swipeActions(allowsFullSwipe: false) {
-                    Button("删除", systemImage: "trash") { deleting = request }.tint(.red)
+                    Button("delete") { deleting = request }.tint(.red)
                 }
             }
         }
-        .navigationTitle("会话")
+        .navigationTitle("threads")
         .deleteConfirmation($deleting, error: $error) { _ in Task { await load() } }
         .task { await load() }
         .refreshable { await load() }
@@ -56,7 +56,7 @@ private struct DeleteButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) { Image(systemName: "trash") }
+        Button(action: action) { Text("delete").mono(12) }
             .buttonStyle(.borderless)
             .foregroundStyle(disabled ? Color.secondary : Theme.failed)
             .disabled(disabled)
@@ -120,14 +120,14 @@ struct TasksManageView: View {
                         DeleteButton(disabled: task.status.isActive) { deleting = .task(task) }
                     }
                     .swipeActions(allowsFullSwipe: false) {
-                        Button("删除", systemImage: "trash") { deleting = .task(task) }
+                        Button("delete") { deleting = .task(task) }
                             .tint(.red)
                             .disabled(task.status.isActive)
                     }
                 }
             }
         }
-        .navigationTitle("任务记录")
+        .navigationTitle("task log")
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索任务、结果和会话")
         .task(id: query) { await search.run(query, model) }
         .deleteConfirmation($deleting, error: $error)

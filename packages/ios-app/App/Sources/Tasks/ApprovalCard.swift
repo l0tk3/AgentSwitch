@@ -13,27 +13,23 @@ struct ApprovalCard: View {
             if let evidence = approval.questionEvidence {
                 QuestionForm(evidence: evidence, busy: busy) { answers in await run { await onAnswer(answers) } }
             } else if approval.kind == .question {
-                Heading(text: "等你回答")
+                Heading(text: "answer")
                 Text(approval.action)
                 Text("此问题的格式暂不支持在 iPhone 上回答，请在 Mac 上回答。").font(.footnote).foregroundStyle(.secondary)
             } else {
-                Heading(text: "等你批准")
+                Heading(text: "approve")
                 Text(approval.action).font(.callout.monospaced()).textSelection(.enabled)
                 if !approval.evidence.isEmpty {
-                    DisclosureGroup("详情") {
+                    DisclosureGroup("details") {
                         Text(approval.evidence).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                     .font(.footnote)
                 }
                 HStack(spacing: Theme.Space.m) {
-                    Button(role: .destructive) { Task { await run { await onDecide(.deny) } } } label: {
-                        Text("拒绝").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    Button { Task { await run { await onDecide(.allow) } } } label: {
-                        Text("允许").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent).tint(Theme.fill)
+                    Button { Task { await run { await onDecide(.deny) } } } label: { Text("[ deny ]") }
+                        .buttonStyle(SquareButtonStyle(destructive: true))
+                    Button { Task { await run { await onDecide(.allow) } } } label: { Text("[ allow ]") }
+                        .buttonStyle(SquareButtonStyle(prominent: true))
                 }
                 .disabled(busy)
             }
@@ -61,15 +57,15 @@ struct QuestionForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Heading(text: "等你回答")
+            Heading(text: "answer")
             ForEach(evidence.questions) { q in question(q) }
             if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.failed) }
             Button {
                 Task { await submit() }
             } label: {
-                Text(busy ? "提交中" : "提交").frame(maxWidth: .infinity)
+                Text(busy ? "[ submitting ]" : "[ submit ]")
             }
-            .buttonStyle(.borderedProminent).tint(Theme.fill)
+            .buttonStyle(SquareButtonStyle(prominent: true))
             .disabled(busy)
         }
         .sheet(item: Binding(get: { pickingFor.map(QuestionID.init) }, set: { pickingFor = $0?.id })) { target in
@@ -83,8 +79,9 @@ struct QuestionForm: View {
             Text(Markdown.inline(q.text)).font(.body)
             ForEach(q.options, id: \.label) { option in
                 Button { toggle(q, option.label) } label: {
-                    HStack(alignment: .top) {
-                        Image(systemName: isChosen(q, option.label) ? (q.multi ? "checkmark.square.fill" : "largecircle.fill.circle") : (q.multi ? "square" : "circle"))
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        // one of several: < > / <x>; several: [ ] / [x] (§7.2.6)
+                        Text(mark(q, option.label)).mono(14).foregroundStyle(isChosen(q, option.label) ? Theme.signal : .secondary)
                         VStack(alignment: .leading) {
                             Text(option.label)
                             if !option.description.isEmpty { Text(option.description).font(.caption).foregroundStyle(.secondary) }
@@ -98,7 +95,7 @@ struct QuestionForm: View {
                 SecureField("直接输入，由 Mac 加密", text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }))
                     .answerField()
                 if !model.ciphertexts.isEmpty {
-                    Button("使用已存密文", systemImage: "lock.doc") { pickingFor = q.id }.font(.footnote)
+                    Button("use saved ciphertext") { pickingFor = q.id }.mono(12)
                 }
             } else {
                 TextField(q.options.isEmpty ? "回答" : "其他回答（可选）", text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }), axis: .vertical)
@@ -108,6 +105,11 @@ struct QuestionForm: View {
     }
 
     private func isChosen(_ q: UserQuestion, _ label: String) -> Bool { chosen[q.id]?.contains(label) == true }
+
+    private func mark(_ q: UserQuestion, _ label: String) -> String {
+        let on = isChosen(q, label)
+        return q.multi ? (on ? "[x]" : "[ ]") : (on ? "<x>" : "< >")
+    }
 
     private func toggle(_ q: UserQuestion, _ label: String) {
         var set = chosen[q.id] ?? []
@@ -136,19 +138,22 @@ private struct QuestionID: Identifiable {
     let id: String
 }
 
-/// "等你回答" / "等你批准": the one line in the waiting colour.
+/// `approve` / `answer`: the one line in the waiting colour, with its square.
 private struct Heading: View {
     let text: String
     var body: some View {
-        Text(text).font(.footnote.weight(.semibold)).foregroundStyle(Theme.waiting)
+        HStack(spacing: 6) {
+            PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
+            Text(text).mono(12, weight: .semibold).foregroundStyle(Theme.waiting)
+        }
     }
 }
 
 private extension View {
-    /// An answer box on the card's grey: a lighter field, not the system's bordered look.
+    /// An answer box: a square 1 px frame, not the system's bordered look.
     func answerField() -> some View {
         self.padding(.horizontal, 12).padding(.vertical, 10)
-            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
     }

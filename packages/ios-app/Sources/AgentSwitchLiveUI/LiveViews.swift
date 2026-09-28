@@ -11,27 +11,27 @@ public enum LiveLook {
     public static let faint = Color.white.opacity(0.5)
     public static let background = Color.black.opacity(0.82)
 
+    /// docs/ui-v0.md §7.3's status colours (dark set: the island and the card are dark): waiting amber, busy cyan, ok
+    /// green, failed red.
+    public static let waiting = Color(red: 1, green: 0.69, blue: 0)
+    public static let busy = Color(red: 0.18, green: 0.9, blue: 1)
+    public static let ok = Color(red: 0.61, green: 0.89, blue: 0.18)
+    public static let failed = Color(red: 1, green: 0.29, blue: 0.24)
+
     public static func tint(_ state: LiveState) -> Color {
         switch state.phase {
-        case .needsYou: return .orange
-        case .running: return Color(red: 0.35, green: 0.68, blue: 1)
-        case .ended: return state.ended?.ok == true ? .green : Color(red: 1, green: 0.4, blue: 0.4)
+        case .needsYou: return waiting
+        case .running: return busy
+        case .ended: return state.ended?.ok == true ? ok : failed
         }
     }
 
-    public static func symbol(_ state: LiveState) -> String {
-        switch state.phase {
-        case .needsYou: return "hand.raised.fill"
-        case .running: return "bolt.fill"
-        case .ended: return state.ended?.ok == true ? "checkmark" : "xmark"
-        }
-    }
-
+    /// The status word (§7.2.7, the same as in the app).
     public static func word(_ state: LiveState) -> String {
         switch state.phase {
-        case .needsYou: return "等你处理"
-        case .running: return "进行中"
-        case .ended: return state.ended?.ok == true ? "已完成" : "未完成"
+        case .needsYou: return "waiting"
+        case .running: return "busy"
+        case .ended: return state.ended?.ok == true ? "done" : "incomplete"
         }
     }
 
@@ -40,14 +40,15 @@ public enum LiveLook {
         (state.lead?.id ?? state.ended?.taskId).map(LiveLink.task)
     }
 
-    /// "另有 2 个任务" when the island shows one of several.
+    /// "+2 more" when the island shows one of several.
     public static func others(_ state: LiveState) -> String? {
         let more = state.running + state.waiting - 1
-        return more > 0 ? "另有 \(more) 个任务" : nil
+        return more > 0 ? "+\(more) more" : nil
     }
 }
 
-/// The status symbol in a tinted disc: the compact and minimal island, and the leading corner.
+/// The status in pixels (§7.2.4: static places show the spinner's first frame): ⠋ while busy, a square otherwise, in
+/// the status colour. The compact and minimal island, and the leading corner.
 public struct StatusGlyph: View {
     let state: LiveState
     let size: CGFloat
@@ -58,11 +59,15 @@ public struct StatusGlyph: View {
     }
 
     public var body: some View {
-        Image(systemName: LiveLook.symbol(state))
-            .font(.system(size: size * 0.52, weight: .bold))
-            .foregroundStyle(.black)
-            .frame(width: size, height: size)
-            .background(LiveLook.tint(state), in: Circle())
+        Group {
+            if state.phase == .running {
+                Text("⠋").font(.system(size: size * 0.8, weight: .bold, design: .monospaced))
+            } else {
+                Rectangle().frame(width: size * 0.4, height: size * 0.4)
+            }
+        }
+        .foregroundStyle(LiveLook.tint(state))
+        .frame(width: size, height: size)
     }
 }
 
@@ -93,7 +98,7 @@ public struct IslandLeading: View {
     public var body: some View {
         HStack(spacing: 6) {
             StatusGlyph(state: state, size: 24)
-            Text(LiveLook.word(state)).font(.system(size: 14, weight: .semibold)).foregroundStyle(LiveLook.tint(state))
+            Text(LiveLook.word(state)).font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundStyle(LiveLook.tint(state))
                 .lineLimit(1).fixedSize()
         }
         .padding(.leading, 6)
@@ -137,12 +142,12 @@ public struct IslandBottom: View {
                     .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 8) {
                     if let model = lead.model { Chip(text: model) }
-                    if let others = LiveLook.others(state) { Text(others).font(.system(size: 12)).foregroundStyle(LiveLook.faint) }
+                    if let others = LiveLook.others(state) { Text(others).font(.system(size: 12, design: .monospaced)).foregroundStyle(LiveLook.faint) }
                     Spacer(minLength: 0)
                     if lead.needsYou {
                         Link(destination: LiveLink.task(lead.id)) {
-                            Text("处理").font(.system(size: 14, weight: .semibold)).foregroundStyle(.black)
-                                .padding(.horizontal, 14).padding(.vertical, 6).background(.orange, in: Capsule())
+                            Text("[ open ]").font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundStyle(.black)
+                                .padding(.horizontal, 10).padding(.vertical, 6).background(LiveLook.waiting)
                         }
                     }
                 }
@@ -168,7 +173,7 @@ public struct IslandCompactTrailing: View {
         } else if let lead = state.lead {
             LiveClock(since: lead.startedAt, width: 40).font(.system(size: 13, weight: .semibold)).foregroundStyle(LiveLook.tint(state))
         } else {
-            Image(systemName: LiveLook.symbol(state)).foregroundStyle(LiveLook.tint(state))
+            StatusGlyph(state: state, size: 18)
         }
     }
 }
@@ -176,9 +181,9 @@ public struct IslandCompactTrailing: View {
 struct Chip: View {
     let text: String
     var body: some View {
-        Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(LiveLook.secondary).lineLimit(1)
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(Color.white.opacity(0.14), in: Capsule())
+        Text(text).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(LiveLook.secondary).lineLimit(1)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .overlay(Rectangle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
     }
 }
 
@@ -199,11 +204,11 @@ public struct LockScreenCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 StatusGlyph(state: state, size: 22)
-                Text(LiveLook.word(state)).font(.system(size: 15, weight: .semibold)).foregroundStyle(LiveLook.tint(state))
+                Text(LiveLook.word(state)).font(.system(size: 15, weight: .semibold, design: .monospaced)).foregroundStyle(LiveLook.tint(state))
                 Text("AgentSwitch · \(mac)").font(.system(size: 13)).foregroundStyle(LiveLook.faint).lineLimit(1)
                 Spacer(minLength: 4)
                 if state.running + state.waiting > 1 {
-                    Text("\(state.running + state.waiting) 个任务").font(.system(size: 13, weight: .medium)).foregroundStyle(LiveLook.secondary)
+                    Text("\(state.running + state.waiting) tasks").font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(LiveLook.secondary)
                 }
             }
             if let ended = state.ended, state.rows.isEmpty {
@@ -214,7 +219,7 @@ public struct LockScreenCard: View {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(LiveLook.text).lineLimit(1)
-                        Text(row.step).font(.system(size: 13)).foregroundStyle(row.needsYou ? .orange : LiveLook.secondary).lineLimit(1)
+                        Text(row.step).font(.system(size: 13)).foregroundStyle(row.needsYou ? LiveLook.waiting : LiveLook.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
                     LiveClock(since: row.startedAt, width: 52).font(.system(size: 13, weight: .medium)).foregroundStyle(LiveLook.secondary)

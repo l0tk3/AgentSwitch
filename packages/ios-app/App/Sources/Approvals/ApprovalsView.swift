@@ -27,9 +27,9 @@ struct ApprovalsView: View {
                     }
                 }
             }
-            .navigationTitle("等你处理")
+            .navigationTitle("waiting")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("done") { dismiss() } } }
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .refreshable { await model.refreshApprovals() }
             .task {

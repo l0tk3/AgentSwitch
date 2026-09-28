@@ -59,7 +59,7 @@ struct TaskSearchResults: View {
             Text(error).font(.footnote).foregroundStyle(Theme.failed)
         } else if search.results.isEmpty {
             if search.searching {
-                HStack { Spacer(); ProgressView(); Spacer() }
+                HStack { Spacer(); BrailleSpinner(color: .secondary); Spacer() }
             } else {
                 ContentUnavailableView.search
             }
@@ -81,12 +81,12 @@ private struct SearchResultRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Circle().fill(Theme.color(result.status)).frame(width: 7, height: 7)
+                StatusMark(status: result.status)
                 Text(result.status.label).foregroundStyle(Theme.color(result.status)).fontWeight(.medium)
                 Spacer()
                 Text(result.updated.relative).foregroundStyle(.secondary)
             }
-            .font(.caption)
+            .mono(11)
             Text(MessageDisplay.readable(result.title)).font(.subheadline.weight(.semibold)).lineLimit(1)
             if !result.snippet.isEmpty {
                 Text(Self.highlighted(result.snippet)).font(.footnote).foregroundStyle(.secondary).lineLimit(3)

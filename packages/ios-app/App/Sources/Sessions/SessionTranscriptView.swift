@@ -3,9 +3,11 @@ import SwiftUI
 
 /// One coding session, read only (control-v0 §3): the latest messages, oldest first — what you wrote on the right,
 /// the model's answers as text, tool calls as small grey lines. Plain text throughout (the Mac clips each message at
-/// 2000 characters), all of it selectable. A running session is fetched again every 10 s.
+/// 2000 characters), all of it selectable. A running session is fetched again every 10 s. From the terminals tab it
+/// ends with `resume` (docs/terminal-v0.md §5: go on with it in a terminal here).
 struct SessionTranscriptView: View {
     let session: SessionSummary
+    var resume: (() -> Void)?
     @Environment(AppModel.self) private var model
     @State private var detail: SessionDetail?
     @State private var error: String?
@@ -18,13 +20,13 @@ struct SessionTranscriptView: View {
                     if let error { ErrorText(message: $error).id(error) }
                     if let detail {
                         if detail.messages.isEmpty {
-                            Text("无记录").font(.footnote).foregroundStyle(.tertiary)
+                            Text("无记录。").font(.footnote).foregroundStyle(.tertiary)
                         }
                         ForEach(Array(detail.messages.enumerated()), id: \.offset) { _, message in
                             SessionMessageRow(message: message)
                         }
                     } else if error == nil {
-                        ProgressView().frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
+                        BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
                     }
                     Color.clear.frame(height: 1).id(Self.end)
                 }
@@ -35,7 +37,16 @@ struct SessionTranscriptView: View {
             // defaultScrollAnchor(.bottom), which also pushes a short transcript down to the bottom of the screen.)
             .onChange(of: detail?.messages.last) { scroller.scrollTo(Self.end, anchor: .bottom) }
         }
-        .background(Color(.systemBackground))
+        .background(Theme.base)
+        .safeAreaInset(edge: .bottom) {
+            if let resume, TerminalsTab.resumable.contains(session.harness) {
+                Button("[ resume ]", action: resume)
+                    .buttonStyle(SquareButtonStyle(prominent: true))
+                    .padding(.horizontal, Theme.Space.l)
+                    .padding(.vertical, Theme.Space.s)
+                    .background(Theme.base)
+            }
+        }
         .navigationTitle(session.harnessName)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
@@ -56,16 +67,16 @@ struct SessionTranscriptView: View {
             Text(MessageDisplay.readable(s.displayTitle)).font(.title3.weight(.semibold)).textSelection(.enabled)
             HStack(spacing: 6) {
                 if s.active {
-                    Circle().fill(Color.accentColor).frame(width: 7, height: 7)
-                    Text("进行中").foregroundStyle(Color.accentColor).fontWeight(.medium)
+                    BrailleSpinner()
+                    Text("busy").foregroundStyle(Theme.busy).fontWeight(.medium)
                     Text("·").foregroundStyle(.tertiary)
                 }
                 Text(meta(s)).foregroundStyle(.secondary).lineLimit(1)
             }
-            .font(.footnote)
+            .mono(12)
             if !s.cwd.isEmpty {
-                Label(PathDisplay.short(s.cwd), systemImage: "folder")
-                    .font(.footnote).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text(PathDisplay.short(s.cwd))
+                    .mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -110,7 +121,7 @@ private struct SessionMessageRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .tool, .other:
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                Image(systemName: "terminal").font(.caption2).foregroundStyle(.tertiary)
+                Text("·").mono(12).foregroundStyle(.tertiary)
                 Text(toolLine)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)

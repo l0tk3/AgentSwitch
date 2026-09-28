@@ -54,8 +54,8 @@ final class AttentionTests: XCTestCase {
         XCTAssertNil(Staleness.minutes(running, lastEventAt: nil, now: now, waiting: true), "a question waits for you, not the task")
         XCTAssertNil(Staleness.minutes(try task("q", "queued", updated: 0), lastEventAt: nil, now: now), "queued waits its turn")
         XCTAssertNil(Staleness.minutes(try task("d", "done", updated: 0), lastEventAt: nil, now: now))
-        XCTAssertEqual(Staleness.text(minutes: 14), "14 分钟无更新")
-        XCTAssertEqual(Staleness.text(minutes: 190), "3 小时无更新")
+        XCTAssertEqual(Staleness.text(minutes: 14), "quiet 14m")
+        XCTAssertEqual(Staleness.text(minutes: 190), "quiet 3h")
     }
 
     // MARK: - folding

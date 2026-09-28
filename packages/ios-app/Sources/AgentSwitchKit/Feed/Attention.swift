@@ -69,7 +69,8 @@ public enum Staleness {
         return Int(quiet / 60)
     }
 
+    /// `quiet 14m` / `quiet 3h`: how long nothing has come from a task that still runs.
     public static func text(minutes: Int) -> String {
-        minutes >= 120 ? "\(minutes / 60) 小时无更新" : "\(minutes) 分钟无更新"
+        minutes >= 120 ? "quiet \(minutes / 60)h" : "quiet \(minutes)m"
     }
 }

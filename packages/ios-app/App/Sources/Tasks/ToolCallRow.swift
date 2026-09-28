@@ -36,10 +36,8 @@ struct ToolCallRow: View {
                         .foregroundStyle(failed ? Theme.failed : .secondary)
                         .lineLimit(open ? nil : 2)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(open ? 180 : 0))
+                    // ▸ / ▾ mean folded / open, as the system uses them (§7.2.6).
+                    Text(open ? "▾" : "▸").mono(12).foregroundStyle(.tertiary)
                 }
                 .contentShape(Rectangle())
             }
@@ -60,7 +58,7 @@ struct ToolCallRow: View {
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
         .transition(.opacity)
     }
 
@@ -75,10 +73,10 @@ struct ToolCallRow: View {
     }
 
     private var outcome: (title: String, text: String, faint: Bool) {
-        if let error = event.payload["error"]?.string { return ("错误", MessageDisplay.readable(error), false) }
+        if let error = event.payload["error"]?.string { return ("error", MessageDisplay.readable(error), false) }
         let output = result?.payload["output"]?.string ?? event.payload["output"]?.string
-        if let output { return (failed ? "结果（失败）" : "结果", output.isEmpty ? "无输出" : MessageDisplay.readable(output), output.isEmpty) }
-        return ("结果", active ? "进行中" : "无记录", true)
+        if let output { return (failed ? "result · failed" : "result", output.isEmpty ? "no output" : MessageDisplay.readable(output), output.isEmpty) }
+        return ("result", active ? "busy" : "none", true)
     }
 
     /// Input keys as words; unknown ones stay as the tool named them.
@@ -87,11 +85,12 @@ struct ToolCallRow: View {
     }
 
     private static let names = [
-        "command": "命令", "description": "说明", "file_path": "文件", "filePath": "文件", "notebook_path": "文件", "path": "路径",
-        "url": "网址", "pattern": "匹配", "query": "查询", "element": "元素", "ref": "页面引用", "text": "文字", "timeout": "超时",
-        "content": "内容", "old_string": "原文", "new_string": "改为", "replace_all": "全部替换", "offset": "起始行",
-        "limit": "行数", "glob": "文件范围", "output_mode": "输出方式", "prompt": "要求", "subagent_type": "子任务类型",
-        "files": "文件", "key": "按键", "values": "选项", "time": "时间", "filename": "文件名", "skill": "技能",
+        // Short words in English (docs/ui-v0.md §7.2.7), the tools' own names where they read well.
+        "command": "command", "description": "about", "file_path": "file", "filePath": "file", "notebook_path": "file", "path": "path",
+        "url": "url", "pattern": "pattern", "query": "query", "element": "element", "ref": "ref", "text": "text", "timeout": "timeout",
+        "content": "content", "old_string": "old", "new_string": "new", "replace_all": "replace all", "offset": "from line",
+        "limit": "lines", "glob": "files", "output_mode": "output", "prompt": "prompt", "subagent_type": "agent type",
+        "files": "files", "key": "key", "values": "values", "time": "time", "filename": "file", "skill": "skill",
     ]
 }
 

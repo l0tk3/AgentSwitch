@@ -56,17 +56,17 @@ struct SpeechVoiceView: View {
                             model.speaker.sample(voice)
                         } label: {
                             HStack {
-                                Image(systemName: chosen == voice.identifier ? "checkmark.circle.fill" : "circle")
+                                Text(chosen == voice.identifier ? "<x>" : "< >").mono(14)
                                 Text(voice.name)
-                                Text(SpeechVoices.qualityLabel(voice)).font(.caption)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                Text(SpeechVoices.qualityLabel(voice)).mono(11)
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
                                     .foregroundStyle(.secondary)
-                                    .background(Color(.tertiarySystemFill), in: Capsule())
+                                    .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
                             }
                         }
                         .buttonStyle(.plain)
                         Spacer()
-                        Button { model.speaker.sample(voice) } label: { Image(systemName: "play.circle") }
+                        Button { model.speaker.sample(voice) } label: { Text("play").mono(12) }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("试听 \(voice.name)")
                     }
@@ -81,10 +81,10 @@ struct SpeechVoiceView: View {
                 Text("前往 设置 › 辅助功能 › 朗读内容 › 声音 › 中文（中国大陆），下载标有「增强」或「高音质」的声音。")
                     .font(.footnote)
             } header: {
-                Text("更多声音")
+                SectionLabel("more voices")
             }
         }
-        .navigationTitle("朗读声音")
+        .navigationTitle("voice")
         .onAppear { voices = SpeechVoices.installed() }   // a voice downloaded meanwhile shows up
         .onDisappear { model.speaker.stop() }
     }

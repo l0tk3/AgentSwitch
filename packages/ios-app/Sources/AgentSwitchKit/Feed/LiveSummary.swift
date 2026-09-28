@@ -62,10 +62,10 @@ public enum LiveSummary {
 
     static func plainStatus(_ status: TaskStatus) -> String {
         switch status {
-        case .queued: return "排队"
+        case .queued: return TaskStatus.queued.label
         case .routing: return "选择模型"
-        case .running: return "进行中"
-        case .waitingApproval: return "等你处理"
+        case .running: return TaskStatus.running.label
+        case .waitingApproval: return TaskStatus.waitingApproval.label
         default: return status.label
         }
     }
@@ -96,7 +96,7 @@ public enum LiveSummary {
             }
         case "redispatch": return "重试"
         case "attempt_failed": return "一次尝试失败"
-        case "queued": return "排队"
+        case "queued": return TaskStatus.queued.label
         default: return nil
         }
     }

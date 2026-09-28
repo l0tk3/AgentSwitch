@@ -40,7 +40,7 @@ struct TaskDetailView: View {
                         .buttonStyle(.plain)
                     }
                 } else if detail.error == nil {
-                    ProgressView().frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
+                    BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
                 }
                 if let error = detail.error {
                     ErrorText(message: $detail.error).id(error)
@@ -50,12 +50,12 @@ struct TaskDetailView: View {
             .padding(.horizontal, Theme.Space.l)
             .padding(.vertical, Theme.Space.m)
         }
-        .background(Color(.systemBackground))
-        .navigationTitle("任务")
+        .background(Theme.base)
+        .navigationTitle("task")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { actions }
         .confirmationDialog("取消此任务？", isPresented: $confirmCancel, titleVisibility: .visible) {
-            Button("取消任务", role: .destructive) { Task { await detail.cancel(model) } }
+            Button("cancel task", role: .destructive) { Task { await detail.cancel(model) } }
         }
         .deleteConfirmation($deleting, error: $detail.error) { _ in dismiss() }
         .quickLookPreview($previewURL)
@@ -84,13 +84,17 @@ struct TaskDetailView: View {
                     Text(part).foregroundStyle(.secondary)
                 }
             }
-            .font(.footnote)
+            .mono(12)
             .lineLimit(1)
-            StaleNote(task: task, lastEventAt: detail.events.last?.ts, waiting: !detail.pending.isEmpty).font(.footnote)
+            StaleNote(task: task, lastEventAt: detail.events.last?.ts, waiting: !detail.pending.isEmpty).mono(12)
             if let threadId = task.threadId, let title = model.thread(threadId)?.title, !title.isEmpty {
                 NavigationLink(value: ThreadRoute(id: threadId)) {
-                    Label("会话：\(title)", systemImage: "rectangle.stack")
-                        .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text("thread").mono(12).foregroundStyle(.tertiary)
+                        Text(title).font(.footnote).foregroundStyle(.secondary)
+                        Text("›").mono(12).foregroundStyle(.tertiary)
+                    }
+                    .lineLimit(1)
                 }
                 .buttonStyle(.plain)
             }
@@ -106,29 +110,29 @@ struct TaskDetailView: View {
     @ViewBuilder
     private func outcome(_ task: AgentTask) -> some View {
         if task.status.isTerminal, let speech = task.speech.map(Speech.speakable), !speech.isEmpty {
-            Block("摘要") { Text(speech).textSelection(.enabled) }
+            Block("summary") { Text(speech).textSelection(.enabled) }
         } else if task.status.isTerminal, detail.awaitingSummary {
             Text("摘要生成中").font(.footnote).foregroundStyle(.secondary)
         }
         if let result = task.result, !result.isEmpty {
-            Block("结果") { MarkdownView(text: result).textSelection(.enabled) }
+            Block("result") { MarkdownView(text: result).textSelection(.enabled) }
         }
         if task.isInterrupted {
             interrupted(task)
         } else if let error = task.error, !error.isEmpty, task.status != .done {
-            Block("原因") { MarkdownView(text: error).foregroundStyle(Theme.failed).textSelection(.enabled) }
+            Block("reason") { MarkdownView(text: error).foregroundStyle(Theme.failed).textSelection(.enabled) }
         }
     }
 
     /// Stopped by a restart of the Mac's service (control-v0 §4): not a failure, just unknown how far it got. It is
     /// never rerun by itself; 继续执行 hands it on, the way 交给其他模型 does with the choice left to the router.
     private func interrupted(_ task: AgentTask) -> some View {
-        Block("原因") {
+        Block("reason") {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(task.error.map(MessageDisplay.readable) ?? AgentTask.interruptedText)
                     .textSelection(.enabled)
                 if detail.handedOffTo == nil {
-                    Button("继续执行") { Task { await detail.handoff(to: nil, model) } }
+                    Button("[ continue ]") { Task { await detail.handoff(to: nil, model) } }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
@@ -149,7 +153,7 @@ struct TaskDetailView: View {
                                  uniquingKeysWith: { first, _ in first })
         let active = detail.task?.status.isActive ?? false
         let items = ProcessFolding.items(detail.events)
-        return Block("过程", trailing: detail.live ? "实时" : nil) {
+        return Block("process", trailing: detail.live ? "live" : nil) {
             if detail.events.isEmpty {
                 Text(detail.live ? "暂无记录" : "无记录").font(.footnote).foregroundStyle(.tertiary)
             } else {
@@ -194,32 +198,32 @@ struct TaskDetailView: View {
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 if detail.task?.status.isActive == true {
-                    Button("取消任务", systemImage: "stop.circle", role: .destructive) { confirmCancel = true }
+                    Button("cancel task", role: .destructive) { confirmCancel = true }
                 }
-                Menu("交给其他模型", systemImage: "arrow.triangle.branch") {
-                    Button("自动选择") { Task { await detail.handoff(to: nil, model) } }
+                Menu("hand to another model") {
+                    Button("auto") { Task { await detail.handoff(to: nil, model) } }
                     ForEach(targets?.pinOptions ?? [], id: \.self) { ref in
                         Button(ref.displayName) { Task { await detail.handoff(to: ref, model) } }
                     }
                 }
                 if let task = detail.task {
                     Section {
-                        Button("删除任务", systemImage: "trash", role: .destructive) { deleting = .task(task) }
+                        Button("delete task", role: .destructive) { deleting = .task(task) }
                             .disabled(task.status.isActive)
                         if let threadId = task.threadId {
-                            Button("删除整个会话", systemImage: "trash.slash", role: .destructive) { deleting = .thread(id: threadId, title: nil) }
+                            Button("delete thread", role: .destructive) { deleting = .thread(id: threadId, title: nil) }
                         }
                     }
                 }
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Text("⋯").mono(17)
             }
             .disabled(detail.task == nil)
         }
     }
 }
 
-/// A part of a content page: a small grey heading, then its content; no box (docs/ui-v0.md §1.3).
+/// A part of a content page: a `// label` heading, then its content; no box (docs/ui-v0.md §1.3, §7.2.7).
 struct Block<Content: View>: View {
     let title: String
     var trailing: String?
@@ -234,11 +238,11 @@ struct Block<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: 6) {
-                Text(title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                SectionLabel(title)
                 Spacer()
                 if let trailing {
-                    Circle().fill(Color.accentColor).frame(width: 6, height: 6)
-                    Text(trailing).font(.caption).foregroundStyle(.secondary)
+                    BrailleSpinner()
+                    Text(trailing).mono(11).foregroundStyle(Theme.busy)
                 }
             }
             content

@@ -11,6 +11,12 @@ options:
 packages:
   AgentSwitchKit:
     path: .
+  # The terminals tab's screen (docs/terminal-v0.md §0: SwiftTerm on macOS and iOS, not a terminal core of our own).
+  # 1.18.x: from 1.19 SwiftTerm runs a build-tool plugin of its own (build info from git) that every build would have
+  # to trust; nothing here needs it.
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    minorVersion: 1.18.0
 
 settings:
   base:
@@ -36,6 +42,8 @@ targets:
         product: AgentSwitchKit
       - package: AgentSwitchKit
         product: AgentSwitchLive
+      - package: SwiftTerm
+        product: SwiftTerm
       # The Live Activity's UI (assistant-v0 §4), embedded in the app.
       - target: AgentSwitchWidgets
     settings:

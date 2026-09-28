@@ -21,7 +21,7 @@ struct RootView: View {
         } else {
             Group {
                 if model.isPaired {
-                    HomeView()
+                    MainTabs()
                 } else {
                     OnboardingView()
                 }
@@ -31,6 +31,42 @@ struct RootView: View {
                 PairConfirmView(link: pending.text)
             }
         }
+    }
+}
+
+/// The two entries side by side (docs/terminal-v0.md §1): `tasks` (the conversation) and `terminals`; their icons are
+/// pixel marks (§7.3: the app's mark for tasks, a framed terminal window for terminals — `>_` alone means Codex).
+struct MainTabs: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        TabView(selection: $model.tab) {
+            HomeView()
+                .tabItem { Label { Text("tasks") } icon: { Image(uiImage: TabIcons.tasks) } }
+                .tag(MainTab.tasks)
+            TerminalsTab()
+                .tabItem { Label { Text("terminals") } icon: { Image(uiImage: TabIcons.terminals) } }
+                .badge(model.terminals.waiting)
+                .tag(MainTab.terminals)
+        }
+        .tint(Theme.ink)
+    }
+}
+
+/// The tab icons: pixel sprites as template images (the tab bar tints them), whole points per cell.
+enum TabIcons {
+    static let tasks = image(PixelArt.markRows, pixel: 2)
+    static let terminals = image(PixelArt.terminalWindow, pixel: 3)
+
+    static func image(_ rows: [String], pixel: CGFloat) -> UIImage {
+        let lit = PixelArt.sprite(rows.map { row in String(row.map { $0 == "." ? Character(".") : Character("#") }) })
+        let size = CGSize(width: CGFloat(rows.first?.count ?? 0) * pixel, height: CGFloat(rows.count) * pixel)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.black.setFill()
+            for cell in lit { context.fill(CGRect(x: CGFloat(cell.x) * pixel, y: CGFloat(cell.y) * pixel, width: pixel, height: pixel)) }
+        }
+        .withRenderingMode(.alwaysTemplate)
     }
 }
 
@@ -45,10 +81,10 @@ struct LockView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "lock.fill").font(.system(size: 40)).foregroundStyle(.secondary)
+            PixelSprite(rows: PixelArt.lock, pixel: 6, color: .secondary)
             Text("AgentSwitch 已锁定").font(.title3.bold())
-            Button("用 \(lock.biometryName) 解锁") { Task { await lock.unlock() } }
-                .buttonStyle(.borderedProminent).tint(Theme.fill)
+            Button("[ unlock with \(lock.biometryName) ]") { Task { await lock.unlock() } }
+                .buttonStyle(SquareButtonStyle(prominent: true, expand: false))
             if let error = lock.lastError {
                 Text(error).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.center)
             }

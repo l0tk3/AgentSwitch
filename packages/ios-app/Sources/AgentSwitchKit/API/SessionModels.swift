@@ -16,9 +16,13 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
     public let origin: String?
     public let branch: String?
     public let model: String?
+    /// How it last asked before acting (manual · auto · bypass), when the record says: resuming keeps it.
+    public let mode: String?
+    /// The session this one was forked from.
+    public let forkedFrom: String?
 
     public init(harness: String, id: String, cwd: String, title: String, lastText: String = "", updatedAt: Int64, active: Bool = false,
-                origin: String? = nil, branch: String? = nil, model: String? = nil) {
+                origin: String? = nil, branch: String? = nil, model: String? = nil, mode: String? = nil, forkedFrom: String? = nil) {
         self.harness = harness
         self.sessionId = id
         self.cwd = cwd
@@ -29,6 +33,8 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         self.origin = origin
         self.branch = branch
         self.model = model
+        self.mode = mode
+        self.forkedFrom = forkedFrom
     }
 
     /// Unique across harnesses (two tools could reuse an id).
@@ -44,7 +50,7 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         return last.isEmpty ? "未命名会话" : last
     }
 
-    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, active, origin, branch, model }
+    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, active, origin, branch, model, mode, forkedFrom }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -58,6 +64,8 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         origin = try? c.decodeIfPresent(String.self, forKey: .origin)
         branch = try? c.decodeIfPresent(String.self, forKey: .branch)
         model = try? c.decodeIfPresent(String.self, forKey: .model)
+        mode = try? c.decodeIfPresent(String.self, forKey: .mode)
+        forkedFrom = try? c.decodeIfPresent(String.self, forKey: .forkedFrom)
     }
 }
 

@@ -8,7 +8,7 @@ struct AttachmentStrip: View {
 
     var body: some View {
         if model.preparingAttachments > 0 {
-            HStack(spacing: 6) { ProgressView(); Text("处理附件中").font(.caption).foregroundStyle(.secondary) }
+            HStack(spacing: 6) { BrailleSpinner(color: .secondary); Text("preparing").mono(11).foregroundStyle(.secondary) }
         }
         if !model.attachments.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
@@ -38,9 +38,9 @@ struct AttachmentStrip: View {
             }
             .frame(width: 60, height: 60)
             .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(Rectangle())
             Button { model.removeAttachment(item.id) } label: {
-                Image(systemName: "xmark.circle.fill").symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.6))
+                Text("×").mono(14, weight: .bold).foregroundStyle(.white).frame(width: 20, height: 20).background(Color.black.opacity(0.7))
             }
             .offset(x: 6, y: -6)
             .accessibilityLabel("移除 \(item.file.name)")

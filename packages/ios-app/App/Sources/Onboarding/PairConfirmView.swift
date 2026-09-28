@@ -21,9 +21,9 @@ struct PairConfirmView: View {
                 case .failure(let failure): invalid(failure)
                 }
             }
-            .navigationTitle("配对")
+            .navigationTitle("pair")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("cancel") { dismiss() } } }
             .interactiveDismissDisabled(pairing)
         }
     }
@@ -31,26 +31,26 @@ struct PairConfirmView: View {
     private func form(_ payload: PairingPayload) -> some View {
         Form {
             Section("Mac") {
-                LabeledContent("名称", value: payload.name)
+                LabeledContent("name", value: payload.name)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("证书指纹（与 Mac 上显示的一致时再继续）").font(.caption).foregroundStyle(.secondary)
                     Text(ServerProfile.grouped(payload.fp)).font(.footnote.monospaced()).textSelection(.enabled)
                 }
-                LabeledContent("配对码", value: payload.code).font(.body.monospaced())
+                LabeledContent("code") { Text(payload.code).mono(15) }
             }
-            Section("地址") {
-                ForEach(payload.lan, id: \.self) { LabeledContent("局域网", value: "\($0):\(payload.port)") }
+            Section(label: "addresses") {
+                ForEach(payload.lan, id: \.self) { address in LabeledContent("LAN") { Text("\(address):\(payload.port)").mono(13) } }
                 ForEach(payload.tailnet, id: \.self) { LabeledContent("Tailscale", value: "\($0):\(payload.port)") }
                 if !payload.bonjour.isEmpty { LabeledContent("Bonjour", value: payload.bonjour) }
             }
-            Section("加密公钥") {
+            Section(label: "gate key") {
                 if let gate = payload.gate {
-                    LabeledContent("密钥对", value: gate.keypair)
+                    LabeledContent("keypair") { Text(gate.keypair).mono(13) }
                 } else {
                     Text("二维码中无公钥，将在配对后向 Mac 获取").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            Section("此设备") {
+            Section(label: "this device") {
                 TextField("设备名称", text: $deviceName)
                 if let known = model.macs.server(payload.fp) {
                     Text("已与「\(known.name)」配对，将更新此配对。").font(.footnote).foregroundStyle(.secondary)
@@ -64,7 +64,7 @@ struct PairConfirmView: View {
                 } label: {
                     HStack {
                         Text(pairing ? "配对中" : "配对")
-                        if pairing { Spacer(); ProgressView() }
+                        if pairing { Spacer(); BrailleSpinner(color: .secondary) }
                     }
                 }
                 .disabled(pairing)

@@ -30,8 +30,8 @@ final class ConnectionRecoveryTests: XCTestCase {
         XCTAssertNil(progress.failingSince)
         XCTAssertEqual(progress.phase(.idle), .reconnecting)
         XCTAssertEqual([ConnectionPhase.connecting, .reconnecting, .failing(attempt: 3), .lost, .unpaired].map(\.text),
-                       ["连接中", "重连中", "无法连接（第 3 次）", "未找到 Mac", "配对已失效"])
-        XCTAssertEqual(ConnectionPhase.connected(lan).text, "已连接（局域网）")
+                       ["connecting", "reconnecting", "unreachable · try 3", "Mac not found", "unpaired"])
+        XCTAssertEqual(ConnectionPhase.connected(lan).text, "connected · LAN")
         XCTAssertTrue(ConnectionPhase.lost.canRetry)
         XCTAssertFalse(ConnectionPhase.unpaired.canRetry)
     }
@@ -45,7 +45,7 @@ final class ConnectionRecoveryTests: XCTestCase {
             ProbeReport(endpoint: APIEndpoint(host: "mac.tail1234.ts.net", port: 4713, kind: .tailnet), outcome: nil, seconds: 0),
         ]
         let checks = Troubleshooting.checks(state: .unreachable, reports: reports, book: book)
-        XCTAssertEqual(checks.map(\.title), ["Mac", "局域网", "Tailscale"])
+        XCTAssertEqual(checks.map(\.title), ["Mac", "LAN", "Tailscale"])
         XCTAssertEqual(checks.map(\.ok), [false, false, false])
         XCTAssertEqual(checks[1].detail, "无法连接：请求超时。")
         XCTAssertEqual(checks[2].detail, "无法连接：无法连接服务器。")
@@ -53,7 +53,7 @@ final class ConnectionRecoveryTests: XCTestCase {
         let connected = Troubleshooting.checks(state: .connected(lan), reports: [ProbeReport(endpoint: lan, outcome: .ok, seconds: 0.2),
                                                                                   ProbeReport(endpoint: reports[1].endpoint, outcome: nil, seconds: 0)], book: book)
         XCTAssertEqual(connected.map(\.ok), [true, true, nil], "Tailscale was not needed")
-        XCTAssertEqual(connected.map(\.detail), ["已通过局域网连接", "可用", "未使用（已通过其他线路连接）"])
+        XCTAssertEqual(connected.map(\.detail), ["已通过 LAN 连接", "ok", "unused · 已通过其他线路连接"])
 
         let noTailnet = ServerProfile(name: "Mac", port: 4713, fingerprint: book.fp, lan: ["192.168.1.5"], tailnet: [], bonjour: "b", gate: nil,
                                       deviceId: "d", pairedAt: Date())

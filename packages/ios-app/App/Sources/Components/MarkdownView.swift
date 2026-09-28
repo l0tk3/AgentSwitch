@@ -33,7 +33,7 @@ private struct BlockView: View {
             .padding(.leading, CGFloat(depth) * 16)
         case .quote(let text):
             HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1.5).fill(.tertiary).frame(width: 3)
+                Rectangle().fill(.tertiary).frame(width: 3)
                 Text(Markdown.inline(text)).foregroundStyle(.secondary)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -41,7 +41,8 @@ private struct BlockView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(text).font(.caption.monospaced()).padding(10)
             }
-            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+            .background(Theme.raised)
+            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
         case .table(let header, let rows):
             ScrollView(.horizontal, showsIndicators: false) {
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
@@ -58,7 +59,8 @@ private struct BlockView: View {
                 .font(.callout)
                 .padding(10)
             }
-            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+            .background(Theme.raised)
+            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
         case .rule:
             Divider()
         }

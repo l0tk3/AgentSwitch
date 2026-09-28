@@ -19,13 +19,13 @@ public enum ConnectionPhase: Sendable, Equatable {
 
     public var text: String {
         switch self {
-        case .connected(let endpoint): return "已连接（\(endpoint.kind.lineTitle)）"
-        case .connecting: return "连接中"
-        case .reconnecting: return "重连中"
-        case .failing(let n): return "无法连接（第 \(n) 次）"
-        case .lost: return "未找到 Mac"
-        case .unpaired: return "配对已失效"
-        case .certificateChanged: return "证书不一致，已拒绝连接"
+        case .connected(let endpoint): return "connected · \(endpoint.kind.lineTitle)"
+        case .connecting: return "connecting"
+        case .reconnecting: return "reconnecting"
+        case .failing(let n): return "unreachable · try \(n)"
+        case .lost: return "Mac not found"
+        case .unpaired: return "unpaired"
+        case .certificateChanged: return "certificate changed · refused"
         }
     }
 

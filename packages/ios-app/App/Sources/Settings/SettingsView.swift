@@ -38,21 +38,21 @@ struct SettingsView: View {
                         NavigationLink(value: SettingsRoute.mac) { MacHeader() }
                         ForEach(model.macs.servers.filter { $0.fingerprint != current.fingerprint }, id: \.fingerprint) { mac in
                             Button { model.switchTo(mac.fingerprint) } label: {
-                                LabeledContent(mac.name) { Text("切换").foregroundStyle(.secondary) }
+                                LabeledContent(mac.name) { Text("switch").mono(13).foregroundStyle(.secondary) }
                             }
                             .foregroundStyle(.primary)
                         }
-                        Button("添加 Mac") { addingMac = true }
+                        Button("add Mac") { addingMac = true }
                     } footer: {
                         if model.macs.servers.count > 1 { Text("同一时间只连接一台 Mac。") }
                     }
                     if let quota = model.quota { UsageSection(readings: quota) }
                 }
                 Section {
-                    NavigationLink("环境说明") { ContextEditorView() }
-                    NavigationLink("密文") { CiphertextsView() }
+                    NavigationLink("context") { ContextEditorView() }
+                    NavigationLink("ciphertexts") { CiphertextsView() }
                 } header: {
-                    Text("任务")
+                    SectionLabel("tasks")
                 } footer: {
                     Text("环境说明记录站点、账号和偏好，供每个任务参考。")
                 }
@@ -60,47 +60,46 @@ struct SettingsView: View {
                 FeedbackSection()
                 if connected { MacAppSection() }
                 Section {
-                    NavigationLink("会话") { ThreadsManageView() }
-                    NavigationLink("任务记录", value: SettingsRoute.tasks)
-                    NavigationLink("编码会话", value: SettingsRoute.sessions)
-                    NavigationLink("模型") { ModelsView() }
+                    NavigationLink("threads") { ThreadsManageView() }
+                    NavigationLink("task log", value: SettingsRoute.tasks)
+                    NavigationLink("models") { ModelsView() }
                 } header: {
-                    Text("管理")
+                    SectionLabel("manage")
                 } footer: {
-                    Text("编码会话是 Mac 上 Claude Code、Codex 和 OpenCode 的会话，仅供查看。")
+                    Text("Mac 上 Claude Code、Codex 和 OpenCode 的会话在 terminals 中，可查看和继续。")
                 }
                 .disabled(!connected)
                 if let policy {
                     Section {
-                        LabeledContent("权限", value: policy.policy.mode.label)
+                        LabeledContent("permissions") { Text(policy.policy.mode.label).mono(13) }
                     } footer: {
                         Text(policy.policy.mode.explanation + "。在 Mac 上修改。")
                     }
                 }
                 Section {
-                    Toggle("用 \(lock.biometryName) 解锁", isOn: Binding(get: { lock.enabled },
+                    Toggle("unlock with \(lock.biometryName)", isOn: Binding(get: { lock.enabled },
                                                                         set: { on in Task { await lock.setEnabled(on) } }))
                     if let error = lock.lastError { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
                 } header: {
-                    Text("安全")
+                    SectionLabel("security")
                 } footer: {
                     Text("设备丢失时，可在 Mac 上移除此设备。")
                 }
                 Section {
-                    Button("移除此 Mac", role: .destructive) { confirmForget = true }
+                    Button("remove this Mac", role: .destructive) { confirmForget = true }
                 } footer: {
                     Text("删除此 iPhone 与这台 Mac 的配对，已保存的密文不受影响。")
                 }
             }
             .tint(.accentColor)
-            .navigationTitle("设置")
+            .navigationTitle("settings")
             .navigationBarTitleDisplayMode(.inline)
             // Task pages opened from 任务记录 link on to other tasks (a hand-off) by id.
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: SettingsRoute.self) { route in destination(route) }
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("done") { dismiss() } } }
             .confirmationDialog("移除「\(model.profile?.name ?? "Mac")」？", isPresented: $confirmForget, titleVisibility: .visible) {
-                Button("移除", role: .destructive) { model.forget() }
+                Button("remove", role: .destructive) { model.forget() }
             } message: {
                 Text(model.macs.servers.count > 1 ? "将切换到其他已配对的 Mac。" : "之后需要重新扫码配对。")
             }
@@ -153,16 +152,13 @@ private struct MacHeader: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
-            Image(systemName: "desktopcomputer")
-                .font(.title3)
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            // The app's mark, with depth (an identity mark of 20 pt and up): lit while connected, dithered while not.
+            PixelMarkView(state: model.connection.endpoint == nil ? .off : .idle, pixel: 3)
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.profile?.name ?? "Mac").font(.headline)
-                HStack(spacing: 5) {
-                    Circle().fill(color).frame(width: 7, height: 7)
-                    Text(model.connectionPhase.text).font(.footnote).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    PixelSprite(rows: PixelArt.square, pixel: 2, color: color)
+                    Text(model.connectionPhase.text).mono(12).foregroundStyle(.secondary)
                 }
             }
         }
@@ -188,12 +184,12 @@ private struct FeedbackSection: View {
     var body: some View {
         @Bindable var settings = model.feedback.settings
         Section {
-            Toggle("提示音", isOn: $settings.sound)
-            Toggle("振动", isOn: $settings.haptics)
-            Toggle("静音模式下播放", isOn: $settings.audibleInSilent).disabled(!settings.sound)
-            Toggle("自动朗读", isOn: $settings.voiceMode)
-            NavigationLink("朗读声音") { SpeechVoiceView() }
-            Toggle("实时活动", isOn: Binding(get: { liveOn }, set: { on in
+            Toggle("sound", isOn: $settings.sound)
+            Toggle("haptics", isOn: $settings.haptics)
+            Toggle("sound in silent mode", isOn: $settings.audibleInSilent).disabled(!settings.sound)
+            Toggle("read aloud", isOn: $settings.voiceMode)
+            NavigationLink("voice") { SpeechVoiceView() }
+            Toggle("live activity", isOn: Binding(get: { liveOn }, set: { on in
                 liveOn = on
                 model.live.enabled = on
                 if on { model.syncLive() }
@@ -202,9 +198,9 @@ private struct FeedbackSection: View {
                 Text("已在系统设置中关闭：设置 › AgentSwitch › 实时活动").font(.footnote).foregroundStyle(Theme.waiting)
             }
         } header: {
-            Text("提示与朗读")
+            SectionLabel("alerts & voice")
         } footer: {
-            Text("自动朗读用于朗读回复和任务通知；实时活动显示在锁定屏幕和灵动岛上。")
+            Text("read aloud 开启时自动朗读回复和任务通知；live activity 显示在锁定屏幕和灵动岛上。")
         }
         .onAppear { liveOn = model.live.enabled }
     }

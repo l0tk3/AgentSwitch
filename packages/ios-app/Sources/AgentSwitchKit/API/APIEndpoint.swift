@@ -6,8 +6,8 @@ public enum EndpointKind: String, Codable, Sendable, CaseIterable {
 
     public var title: String {
         switch self {
-        case .bonjour: return "局域网（Bonjour）"
-        case .lan: return "局域网"
+        case .bonjour: return "LAN (Bonjour)"
+        case .lan: return "LAN"
         case .tailnet: return "Tailscale"
         }
     }
@@ -15,7 +15,7 @@ public enum EndpointKind: String, Codable, Sendable, CaseIterable {
     /// The line without how it was found: "局域网" or "Tailscale" (the connection state, "已连接（局域网）").
     public var lineTitle: String {
         switch self {
-        case .bonjour, .lan: return "局域网"
+        case .bonjour, .lan: return "LAN"
         case .tailnet: return "Tailscale"
         }
     }

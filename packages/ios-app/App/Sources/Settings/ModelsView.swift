@@ -14,10 +14,10 @@ struct ModelsView: View {
             if let targets {
                 if let router = targets.router {
                     Section {
-                        LabeledContent("模型", value: ModelName.display(router.model))
-                        if let fallback = router.defaultTarget { LabeledContent("默认模型", value: fallback.displayName) }
+                        LabeledContent("model", value: ModelName.display(router.model))
+                        if let fallback = router.defaultTarget { LabeledContent("default model", value: fallback.displayName) }
                     } header: {
-                        Text("调度")
+                        SectionLabel("router")
                     } footer: {
                         Text("调度模型根据消息内容选择执行的模型；无法判断时交由默认模型执行。")
                     }
@@ -27,7 +27,7 @@ struct ModelsView: View {
                 }
             }
         }
-        .navigationTitle("模型")
+        .navigationTitle("models")
         .task { await load() }
         .refreshable { await load() }
     }
@@ -59,8 +59,8 @@ private struct HarnessSection: View {
                     Text(m?.unavailable == true ? "不可用" : (m?.cost ?? "")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            LabeledContent("同时运行", value: "最多 \(spec.maxConcurrent) 个")
-            LabeledContent("浏览器", value: spec.browser ? "支持" : "不支持")
+            LabeledContent("max at once") { Text("\(spec.maxConcurrent)").mono(13) }
+            LabeledContent("browser") { Text(spec.browser ? "yes" : "no").mono(13) }
         }
     }
 }

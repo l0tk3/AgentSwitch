@@ -9,9 +9,8 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: Theme.Space.xl) {
             Spacer()
-            Image(systemName: "qrcode.viewfinder")
-                .font(.system(size: 56, weight: .light))
-                .foregroundStyle(Color.accentColor)
+            // The app's mark, with depth (an identity mark of 20 pt and up, §7.2.10), off until a Mac is paired.
+            PixelMarkView(state: .idle, pixel: 5)
             VStack(spacing: Theme.Space.s) {
                 Text("连接你的 Mac").font(.title2.weight(.semibold))
                 Text("在 Mac 上打开 AgentSwitch，点按「配对」，然后用此 iPhone 扫描二维码。")
@@ -23,12 +22,9 @@ struct OnboardingView: View {
                 if let banner = model.banner {
                     Text(banner).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.center)
                 }
-                Button { scanning = true } label: {
-                    Text("扫描二维码").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent).tint(Theme.fill)
-                .controlSize(.large)
-                Button("粘贴配对链接") { paste() }
+                Button { scanning = true } label: { Text("[ scan QR code ]") }
+                    .buttonStyle(SquareButtonStyle(prominent: true))
+                Button("paste pairing link") { paste() }
                     .controlSize(.large)
                 Text("iPhone 与 Mac 需在同一局域网，或登录同一 Tailscale 网络。")
                     .font(.footnote).foregroundStyle(.tertiary)
@@ -76,9 +72,9 @@ struct ScannerSheet: View {
                     .background(.background)
                 }
             }
-            .navigationTitle("扫描二维码")
+            .navigationTitle("scan QR code")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("close") { dismiss() } } }
         }
     }
 }

@@ -27,7 +27,7 @@ struct ContextEditorView: View {
                 Text("记录站点、账号、环境和偏好。密码可直接填写，保存时由 Mac 加密。")
             }
             if !warnings.isEmpty {
-                Section("保存提示") {
+                Section(label: "save notes") {
                     ForEach(warnings, id: \.self) { Text($0).font(.footnote).foregroundStyle(Theme.waiting) }
                 }
             }
@@ -38,18 +38,18 @@ struct ContextEditorView: View {
                 Section { Label(Self.savedLine(saved), systemImage: "checkmark.circle").foregroundStyle(Theme.done) }
             }
         }
-        .navigationTitle("环境说明")
+        .navigationTitle("context")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
-                    Button("插入密文", systemImage: "lock.doc") { picking = true }
+                    Button("insert ciphertext") { picking = true }
                         .disabled(model.ciphertexts.isEmpty)
-                    Button("载入示例", systemImage: "doc.badge.plus") { Task { await loadExample() } }
+                    Button("load example") { Task { await loadExample() } }
                         .disabled(!text.isEmpty)
-                    Button("撤销修改", systemImage: "arrow.uturn.backward") { text = stored ?? "" }
+                    Button("revert") { text = stored ?? "" }
                         .disabled(!dirty)
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Text("⋯").mono(17) }
                 Button(saving ? "保存中" : "保存") { Task { await save() } }
                     .disabled(saving || !dirty || stored == nil)
             }

@@ -34,7 +34,7 @@ struct FeedEntry: View {
                     .buttonStyle(.plain)
                     .contextMenu { menu }
                 ForEach(pending) { approval in
-                    Divider()
+                    DottedRule()
                     ApprovalCard(approval: approval,
                                  onDecide: { decision in await model.decide(approval, decision) },
                                  onAnswer: { answers in await model.answer(approval, answers) })
@@ -49,7 +49,7 @@ struct FeedEntry: View {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
-                Text(task.updated.relative).font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                Text(task.updated.relative).mono(11).foregroundStyle(.tertiary)
                 if model.isUnread(task) { UnreadDot() }
             }
             HStack(spacing: 6) {
@@ -60,7 +60,7 @@ struct FeedEntry: View {
                 }
                 StaleNote(task: task, lastEventAt: lastEventAt, waiting: !pending.isEmpty, separated: true)
             }
-            .font(.footnote)
+            .mono(12)
             .lineLimit(1)
             detail
         }
@@ -83,7 +83,7 @@ struct FeedEntry: View {
                 Text(Markdown.flattened(result)).font(.subheadline).lineLimit(Self.resultLines)
             }
             if deliverables > 0 {
-                Label("\(deliverables) 个文件", systemImage: "paperclip").font(.footnote).foregroundStyle(.secondary)
+                Text(deliverables == 1 ? "1 file" : "\(deliverables) files").mono(12).foregroundStyle(.secondary)
             }
             // A restart of the Mac's service is not the task failing: said plainly, not in red.
             if let error = task.error, !error.isEmpty, task.status != .done {
@@ -98,19 +98,19 @@ struct FeedEntry: View {
 
     @ViewBuilder
     private var menu: some View {
-        Button("打开", systemImage: "arrow.up.right") { open() }
+        Button("open") { open() }
         if let threadId = task.threadId, let openThread {
-            Button("查看会话", systemImage: "rectangle.stack") { openThread(threadId) }
+            Button("thread") { openThread(threadId) }
         }
         if task.status.isTerminal {
             let speaking = model.speaker.speakingTaskId == task.id
-            Button(speaking ? "停止朗读" : "朗读", systemImage: speaking ? "stop.circle" : "speaker.wave.2") { model.speaker.toggle(task) }
+            Button(speaking ? "stop" : "read aloud") { model.speaker.toggle(task) }
         }
         Divider()
-        Button("删除任务", systemImage: "trash", role: .destructive) { delete(.task(task)) }
+        Button("delete task", role: .destructive) { delete(.task(task)) }
             .disabled(task.status.isActive)
         if let threadId = task.threadId {
-            Button("删除整个会话", systemImage: "trash.slash", role: .destructive) { delete(.thread(id: threadId, title: nil)) }
+            Button("delete thread", role: .destructive) { delete(.thread(id: threadId, title: nil)) }
         }
     }
 }

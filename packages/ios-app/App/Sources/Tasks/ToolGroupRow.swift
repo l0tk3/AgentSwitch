@@ -19,10 +19,8 @@ struct ToolGroupRow: View {
                     summary
                         .font(.footnote)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(open ? 180 : 0))
+                    // ▸ / ▾ mean folded / open, as the system uses them (§7.2.6).
+                    Text(open ? "▾" : "▸").mono(12).foregroundStyle(.tertiary)
                 }
                 .contentShape(Rectangle())
             }

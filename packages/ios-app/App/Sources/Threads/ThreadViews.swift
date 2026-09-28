@@ -39,9 +39,9 @@ struct ActiveThreadsStrip: View {
                     .padding(.horizontal, Theme.Space.l)
                     .padding(.vertical, Theme.Space.s)
                 }
-                Divider()
+                Theme.line.frame(height: 1)
             }
-            .background(Color(.systemBackground))
+            .background(Theme.base)
         }
     }
 
@@ -70,24 +70,24 @@ struct ActiveThreadsStrip: View {
     }
 
     private func state(_ item: Item) -> String {
-        if item.waiting { return "等你处理" }
+        if item.waiting { return TaskStatus.waitingApproval.label }
         let stale = Staleness.minutes(item.task, lastEventAt: lastEventAt[item.task.id]).map(Staleness.text(minutes:))
         return [item.task.statusLabel, stale ?? item.task.modelName].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func chip(_ item: Item) -> some View {
         HStack(spacing: Theme.Space.s) {
-            Circle().fill(item.waiting ? Theme.waiting : Theme.color(item.task.status)).frame(width: 7, height: 7)
+            StatusMark(status: item.waiting ? .waitingApproval : item.task.status)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).font(.footnote.weight(.semibold)).lineLimit(1)
-                Text(state(item)).font(.caption).foregroundStyle(item.waiting ? Theme.waiting : .secondary).lineLimit(1)
+                Text(state(item)).mono(11).foregroundStyle(item.waiting ? Theme.waiting : .secondary).lineLimit(1)
             }
             if item.unread { UnreadDot() }
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, 7)
         .frame(maxWidth: 210, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
     }
 }
 
@@ -111,7 +111,7 @@ struct ThreadView: View {
                     FeedEntry(task: task, tail: [], pending: ActivityFeed.pending(model.approvals, for: task.id), open: { openTask(task.id) },
                               delete: { deleting = $0 })
                 }
-                if detail == nil && error == nil { ProgressView().frame(maxWidth: .infinity) }
+                if detail == nil && error == nil { BrailleSpinner(color: .secondary).frame(maxWidth: .infinity) }
             }
             .padding()
         }
@@ -120,10 +120,10 @@ struct ThreadView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("删除整个会话", systemImage: "trash.slash", role: .destructive) {
+                    Button("delete thread", role: .destructive) {
                         deleting = .thread(id: threadId, title: detail?.thread.title)
                     }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Text("⋯").mono(17) }
             }
         }
         .deleteConfirmation($deleting, error: $error) { deleted in

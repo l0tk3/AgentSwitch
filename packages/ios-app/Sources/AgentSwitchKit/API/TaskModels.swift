@@ -55,8 +55,22 @@ public enum TaskStatus: Sendable, Hashable, Codable {
     public var isTerminal: Bool { [.done, .partial, .blocked, .failed, .cancelled].contains(self) }
     public var isActive: Bool { [.queued, .routing, .running, .waitingApproval].contains(self) }
 
-    /// The fixed status words (docs/ui-v0.md §4).
+    /// The fixed status words on screen, one meaning each (docs/ui-v0.md §7.2.7).
     public var label: String {
+        switch self {
+        case .queued: return "queued"
+        case .routing, .running: return "busy"
+        case .waitingApproval: return "waiting"
+        case .done: return "done"
+        case .partial, .blocked: return "incomplete"
+        case .failed: return "failed"
+        case .cancelled: return "cancelled"
+        case .other(let s): return s
+        }
+    }
+
+    /// The same, said aloud in Chinese (read-aloud, the Live Activity).
+    public var spokenLabel: String {
         switch self {
         case .queued: return "排队"
         case .routing, .running: return "进行中"
@@ -128,7 +142,11 @@ public struct AgentTask: Codable, Sendable, Hashable, Identifiable {
 
     /// The status word; a blocked task that waits for an answer says so (its `blockCause`).
     public var statusLabel: String {
-        status == .blocked && blockCause == "question" ? "等你处理" : status.label
+        status == .blocked && blockCause == "question" ? TaskStatus.waitingApproval.label : status.label
+    }
+
+    public var spokenStatus: String {
+        status == .blocked && blockCause == "question" ? TaskStatus.waitingApproval.spokenLabel : status.spokenLabel
     }
 
     /// The model at work, as people say it (Opus 5.5), else the executor, else nil.

@@ -13,7 +13,7 @@ struct AgentSwitchApp: App {
     private static func makeModel() -> AppModel {
         #if DEBUG
         // Screens with sample data and no Mac: `-uiDemo YES`, optionally `-uiDemoScreen settings|task|done|onboarding|
-        // stale|interrupted|mac|offline|offlinemac|tasks|search|sessions|transcript`.
+        // stale|interrupted|mac|offline|offlinemac|tasks|search|sessions|transcript|terminals|terminal|newterminal`.
         if let hosts = UserDefaults.standard.string(forKey: "tlsProbe"), let pin = UserDefaults.standard.string(forKey: "tlsProbePin") {
             TLSProbe.run(hosts: hosts.split(separator: ",").map(String.init), pin: pin)
         }
@@ -30,6 +30,9 @@ struct AgentSwitchApp: App {
             case "running": model.openTaskRequest = "t1"
             case "stale": model.openTaskRequest = "t4"
             case "interrupted": model.openTaskRequest = "t6"
+            case "terminals": model.tab = .terminals
+            case "terminal": model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
+            case "newterminal": model.tab = .terminals; model.openTerminalRequest = "new"
             default: break
             }
             return model

@@ -1,13 +1,13 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// Ended and not opened yet (control-v0 §5): a small dot in the accent colour, at the trailing end so it is never
-/// mistaken for the status dot. No new status colour.
+/// Ended and not opened yet (control-v0 §5): a small signal-coloured square at the trailing end, so it is never
+/// mistaken for the status mark. No new status colour.
 struct UnreadDot: View {
     var body: some View {
-        Circle()
-            .fill(Color.accentColor)
-            .frame(width: 8, height: 8)
+        Rectangle()
+            .fill(Theme.signal)
+            .frame(width: 6, height: 6)
             .accessibilityLabel("未读")
     }
 }

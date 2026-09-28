@@ -142,6 +142,50 @@ enum DemoData {
         ]
     }
 
+    // MARK: - terminal-v0
+
+    static var terminalList: TerminalList {
+        let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+        return TerminalList(terminals: [
+            TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
+                         status: .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
+                         permissions: [TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")]),
+            TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
+                         createdAt: ago(900), lastOutputAt: ago(2)),
+            TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,
+                         createdAt: ago(7200), lastOutputAt: ago(3000)),
+        ], agents: ["claude-code", "codex", "opencode"], models: [
+            "claude-code": [TerminalModelOption(id: "claude-opus-5-5", name: "Opus 5.5"), TerminalModelOption(id: "claude-sonnet-5", name: "Sonnet 5")],
+            "codex": [TerminalModelOption(id: "gpt-6-luna", name: "GPT-6 Luna")],
+            "opencode": [TerminalModelOption(id: "deepseek/deepseek-flash", name: "DeepSeek Flash")],
+        ])
+    }
+
+    /// A Claude Code screen as a snapshot draws it (escape sequences, CR LF).
+    static let terminalScreen: String = {
+        let dim = "\u{1b}[2m", off = "\u{1b}[0m", orange = "\u{1b}[38;5;209m", green = "\u{1b}[32m", bold = "\u{1b}[1m", cyan = "\u{1b}[36m"
+        let lines = [
+            "\(orange)✻\(off) \(bold)Claude Code\(off) \(dim)· Opus 5.5\(off)",
+            "\(dim)  ~/Desktop/WorkSpace/Projects/AgentSwitch\(off)",
+            "",
+            "\(dim)>\(off) 给 iPhone 加终端标签页，列表按目录树排",
+            "",
+            "\(green)⏺\(off) 先看服务端的终端接口和手机能用的路由。",
+            "",
+            "\(green)⏺\(off) \(bold)Read\(off)(packages/daemon/src/api/terminals.ts)",
+            "  \(dim)⎿  Read 301 lines\(off)",
+            "",
+            "\(green)⏺\(off) \(bold)Write\(off)(Sources/AgentSwitchKit/API/TerminalRoutes.swift)",
+            "  \(dim)⎿  Wrote 132 lines\(off)",
+            "",
+            "\(green)⏺\(off) 接口和事件流写好了，跑一下测试。",
+            "",
+            "\(cyan)⏺\(off) \(bold)Bash\(off)(swift test --filter TerminalTests)",
+            "  \(dim)⎿  Waiting for permission…\(off)",
+        ]
+        return lines.joined(separator: "\r\n")
+    }()
+
     static func sessionMessages(_ session: SessionSummary) -> [SessionMessage] {
         let base = session.updatedAt
         func m(_ role: SessionMessage.Role, _ text: String, _ secondsBefore: Int64, tool: String? = nil) -> SessionMessage {

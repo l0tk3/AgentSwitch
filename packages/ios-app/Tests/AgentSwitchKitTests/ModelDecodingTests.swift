@@ -16,7 +16,8 @@ final class ModelDecodingTests: XCTestCase {
     func testTaskDetailWithApprovals() throws {
         let d = try Fixture.decode(TaskDetail.self, "task_detail.json")
         XCTAssertEqual(d.task.status, .waitingApproval)
-        XCTAssertEqual(d.task.statusLabel, "等你处理")
+        XCTAssertEqual(d.task.statusLabel, "waiting")
+        XCTAssertEqual(d.task.spokenStatus, "等你处理")
         XCTAssertEqual(d.task.targetLabel, "opencode/deepseek-flash", "pin shows when nothing ran yet")
         XCTAssertEqual(d.approvals.count, 2)
         let question = try XCTUnwrap(d.approvals[0].questionEvidence)

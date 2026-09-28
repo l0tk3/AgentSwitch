@@ -94,6 +94,7 @@ iPhone: AgentSwitch (SwiftUI)                        Mac: AgentSwitch.app (菜�
 - SwiftUI，iOS 17+，Swift 6，xcodegen 生成工程；纯逻辑放在可在 macOS 上 `swift test` 的 `AgentSwitchKit` 包里（接口模型、配对链接解析、造密文、地址选择、SSE 解析）。密文用 `jedisct1/swift-sodium`（libsodium 的 `crypto_box_seal`，与 gate 用的 PyNaCl 同一实现），不手写密码学。
 - 构建环境：Xcode 26.4（iOS 26.4 SDK）；部署目标 iOS 17，可装到 iOS 27 的手机上。用 iOS 27 SDK 构建需要 Xcode 27。模拟器构建需要安装 iOS 模拟器运行时（约 8.5 GB）。
 - **配对**：相机扫码或粘贴链接 → 钉住指纹调 `/pair` → 令牌存 Keychain（仅本机、解锁后可用），服务器信息存本地。
+- **两个标签页（2026-09-28）**：`tasks`（托管：现在的对话首页）与 `terminals`（手动：AgentSwitch 的终端，terminal-v0 §1）。终端屏幕用 SwiftTerm（固定 1.18.x；构建需 Xcode 的 Metal Toolchain）。「设置 › 编码会话」移到 terminals 里。视觉按 ui-v0 §7。
 - **多台 Mac（2026-09-27）**：手机可以配对多台 Mac，同一时间只连“当前 Mac”，在设置顶部切换。
   - 存储：`macs.json` = `{active: <指纹>, servers: [ServerProfile…]}`，按证书指纹区分；令牌仍按指纹存 Keychain，每台一个。旧版的 `server.json` 在首次启动时迁移成只有一台的 `macs.json` 并删掉。
   - 配对：扫到已配对的指纹就更新那一台（新令牌、新地址），扫到新指纹就加一台，两种情况都切到它。配对成功前不动已有的配对。

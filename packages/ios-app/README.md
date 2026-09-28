@@ -87,6 +87,9 @@ Requires Xcode 26.4 or newer with its iOS platform installed (Xcode › Settings
 `xcodebuild -downloadPlatform iOS`; without it Xcode offers no simulator destination at all) and
 [xcodegen](https://github.com/yonaskolb/XcodeGen). The deployment target is iOS 17, so a build made with the iOS 26.4
 SDK runs on current iOS 27 phones; building against the iOS 27 SDK or running an iOS 27 simulator needs Xcode 27.
+The terminals tab draws with [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) (pinned to 1.18.x: from 1.19 it
+runs a build-tool plugin of its own), whose Metal shaders need Xcode's Metal Toolchain
+(`xcodebuild -downloadComponent MetalToolchain`, once).
 
 ```bash
 cd packages/ios-app
@@ -160,7 +163,8 @@ Signing & Capabilities and press Run — but `xcodegen generate` (also run by th
   default work folder. Opening a task marks it read; unread tasks carry an accent dot; the process folds tool calls
   in a row and ends with how long the task took.
 
-Demo screens (Debug, `-uiDemo YES -uiDemoScreen <name>`): `settings`, `task`, `done`, `running`, `stale`,
+Demo screens (Debug, `-uiDemo YES -uiDemoScreen <name>`): `terminals`, `terminal` (a terminal waiting for a
+permission), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
 `interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
 `transcript`; `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
 `offlinemac`) opens the Mac page scrolled to the end of 排障 with 常见原因 open.

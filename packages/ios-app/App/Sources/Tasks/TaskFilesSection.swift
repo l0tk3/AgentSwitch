@@ -15,17 +15,17 @@ struct TaskFilesSection: View {
 
     var body: some View {
         if !files.isEmpty {
-            Block("文件") {
+            Block("files") {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
-                        if index > 0 { Divider().padding(.leading, 34) }
+                        if index > 0 { Theme.line.frame(height: 1).padding(.leading, 34) }
                         Button { Task { await open(file) } } label: { row(file) }
                             .buttonStyle(.plain)
                             .disabled(downloading != nil)
                     }
                 }
                 .padding(.horizontal, 14)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
                 if error != nil { ErrorText(message: $error) }
             }
         }
@@ -40,7 +40,7 @@ struct TaskFilesSection: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if downloading == file.path { ProgressView() } else { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
+            if downloading == file.path { BrailleSpinner(color: .secondary) } else { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
         }
         .padding(.vertical, 10)
         .contentShape(Rectangle())
@@ -118,7 +118,7 @@ struct SourceFileView: View {
             .navigationTitle(file.url.lastPathComponent)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("done") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) { ShareLink(item: file.url) }
             }
         }

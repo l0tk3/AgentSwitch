@@ -18,15 +18,15 @@ struct InputBar: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let pin = model.pin {
                 HStack(spacing: 6) {
-                    Text("指定 \(ModelName.display(pin.model))").font(.caption.weight(.medium))
-                    Button { model.pin = nil } label: { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
+                    Text("pin → \(ModelName.display(pin.model))").mono(12, weight: .medium)
+                    Button { model.pin = nil } label: { Text("×").mono(14) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("恢复自动选择")
                 }
-                .foregroundStyle(Color.accentColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.accentColor.opacity(0.1), in: Capsule())
+                .foregroundStyle(Theme.signal)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .overlay(Rectangle().strokeBorder(Theme.signal, lineWidth: 1))
             }
             AttachmentStrip()
             if error != nil {
@@ -39,22 +39,20 @@ struct InputBar: View {
                     // Passwords may be typed here: keep the keyboard from learning or suggesting them.
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                // Square; ink once there is something to send (the primary button, §7.2.3), pink while pressed.
                 Button { Task { error = await model.send() } } label: {
-                    ZStack {
-                        Circle().fill(canSend ? Theme.fill : Color(.tertiarySystemFill))
-                        if model.sending {
-                            ProgressView().tint(.white)
-                        } else {
-                            Image(systemName: "arrow.up").font(.system(size: 16, weight: .bold)).foregroundStyle(canSend ? .white : Color(.tertiaryLabel))
-                        }
+                    if model.sending {
+                        BrailleSpinner(color: Theme.base)
+                    } else {
+                        Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced))
                     }
-                    .frame(width: 36, height: 36)
                 }
+                .buttonStyle(SquareIconButtonStyle(active: canSend || model.sending))
                 .disabled(!canSend)
-                .accessibilityLabel("发送")
+                .accessibilityLabel("send")
             }
         }
         .padding(.horizontal, Theme.Space.l)
@@ -62,7 +60,7 @@ struct InputBar: View {
         .padding(.bottom, Theme.Space.s)
         // Down to the screen's edge: the conversation scrolls under the bar and must not show below it.
         .background(alignment: .top) {
-            VStack(spacing: 0) { Divider(); Color(.systemBackground) }
+            VStack(spacing: 0) { Theme.line.frame(height: 1); Theme.base }
                 .ignoresSafeArea(.container, edges: .bottom)
         }
         .fullScreenCover(isPresented: $takingPhoto) {
@@ -142,28 +140,30 @@ struct InputBar: View {
     private var extras: some View {
         Menu {
             Section {
-                Button("拍照", systemImage: "camera") { Keyboard.dismiss(); takingPhoto = true }
+                // Words only, as the Mac's menus (§7.2.5: every row an icon, or none).
+                Button("camera") { Keyboard.dismiss(); takingPhoto = true }
                     .disabled(!CameraPicker.isAvailable)
-                Button("照片", systemImage: "photo.on.rectangle") { Keyboard.dismiss(); pickingPhotos = true }
-                Button("文件", systemImage: "folder") { Keyboard.dismiss(); pickingFiles = true }
-                Button("粘贴图片", systemImage: "doc.on.clipboard") { pasteImages() }
+                Button("photos") { Keyboard.dismiss(); pickingPhotos = true }
+                Button("files") { Keyboard.dismiss(); pickingFiles = true }
+                Button("paste image") { pasteImages() }
             }
-            Button("插入密文", systemImage: "lock.doc") { Keyboard.dismiss(); model.sheet = .pickCiphertext }
+            Button("insert ciphertext") { Keyboard.dismiss(); model.sheet = .pickCiphertext }
                 .disabled(model.ciphertexts.isEmpty)
-            Button("生成密文", systemImage: "key") { Keyboard.dismiss(); model.sheet = .makeCiphertext }
-            Menu("指定模型", systemImage: "cpu") {
-                Button("自动") { model.pin = nil }
+            Button("new ciphertext") { Keyboard.dismiss(); model.sheet = .makeCiphertext }
+            Menu("pin model") {
+                Button("auto") { model.pin = nil }
                 ForEach(model.targets?.pinOptions ?? [], id: \.self) { ref in
                     Button(ref.displayName) { model.pin = ref }
                 }
             }
         } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 17, weight: .semibold))
+            Text("+")
+                .font(.system(size: 20, weight: .regular, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .frame(width: 36, height: 36)
-                .background(Theme.card, in: Circle())
+                .frame(width: 38, height: 38)
+                .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
         }
-        .accessibilityLabel("附件与更多")
+        .tint(Theme.ink)   // not the signal colour: it is neither selected nor the primary action
+        .accessibilityLabel("more")
     }
 }
