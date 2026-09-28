@@ -12,10 +12,10 @@ import { cloneRoot, CloneSweeper } from "./executors/chromeClones.js";
 import { BROWSER_PROFILES_DIR } from "./executors/protected.js";
 import { serve as listen, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import { defaultCwdRules } from "./api/cwdPolicy.js";
@@ -25,7 +25,7 @@ import { Bus } from "./engine/bus.js";
 import { defaultCleanupPaths } from "./engine/cleanup.js";
 import { DEFAULT_MAX_TASKS, Engine } from "./engine/engine.js";
 import { Store } from "./engine/store.js";
-import { claudeExecutor, probeRateLimits } from "./executors/claude.js";
+import { canonical, claudeExecutor, decideTool, probeRateLimits } from "./executors/claude.js";
 import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
 import { defaultGate, gateHealth, gateNotFound, type GateOptions } from "./executors/gate.js";
@@ -76,6 +76,12 @@ import { DEFAULT_EXECUTOR_TIMEOUT_MS, QUOTA_TTL_MS } from "./core/limits.js";
 import { loadWorkdir } from "./files/workdir.js";
 import { defaultSessionSources, SessionMonitor } from "./sessions/monitor.js";
 import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
+import { TerminalAudit } from "./terminals/audit.js";
+import { TerminalHost, type Launcher, type TerminalHarness } from "./terminals/host.js";
+import { agentLauncher } from "./terminals/launch.js";
+import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
+import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
+import { TERMINAL_HARNESSES } from "./terminals/host.js";
 
 export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
@@ -112,6 +118,9 @@ export type DaemonConfig = {
   /** Watch the Mac's own Claude Code / Codex / OpenCode sessions (docs/control-v0.md §3). On unless
    *  AGENTSWITCH_SESSIONS=0; tests build configs without it. */
   readonly watchSessions?: boolean;
+  /** AgentSwitch's own terminals, the manual entry (docs/terminal-v0.md). On unless AGENTSWITCH_TERMINALS=0; tests build
+   *  configs without it. */
+  readonly terminals?: boolean;
 };
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
@@ -140,6 +149,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     ...(env.AGENTSWITCH_APP_BUNDLE?.trim() ? { appBundle: env.AGENTSWITCH_APP_BUNDLE.trim() } : {}),
     taskFolders: env.AGENTSWITCH_TASK_FOLDERS !== "0",
     watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
+    terminals: env.AGENTSWITCH_TERMINALS !== "0",
   };
 }
 
@@ -154,6 +164,10 @@ export type Daemon = {
   readonly store: Store;
   readonly quota: QuotaService;
   readonly targets: Targets;
+  /** AgentSwitch's own terminals (docs/terminal-v0.md), or null when off. */
+  readonly terminals: TerminalHost | null;
+  /** The port the 127.0.0.1 listener got: the terminals' hook command calls it. */
+  setLocalPort(port: number): void;
   close(): void;
 };
 
@@ -179,7 +193,29 @@ export type BuildOverrides = {
   readonly reports?: Omit<ReporterOptions, "log" | "store" | "bus">;
   /** Tests: the assistant's model (assistant-v0 §1.1) without OpenCode. */
   readonly assistant?: Router;
+  /** Tests: how terminals start (a fake agent); also turns terminals on whatever cfg.terminals says. */
+  readonly terminalLauncher?: Launcher;
+  /** Tests: whether a session is open in another program (default: this Mac's agents; none with a fake launcher). */
+  readonly terminalElsewhere?: ElsewhereCheck;
 };
+
+/** The agent CLIs a terminal can start, as absolute paths; a missing one is left out (docs/terminal-v0.md §2). The user's
+ *  own `claude` (CLAUDE_BIN, else PATH, else the installer's place), not the Agent SDK's bundled copy. */
+export function terminalBinaries(targets: Pick<Targets, "harnesses">, opencodeBinary: string, env: NodeJS.ProcessEnv = process.env): Partial<Record<TerminalHarness, string>> {
+  const home = env.HOME ?? "";
+  const real = (p: string | undefined): string | undefined => (p && isAbsolute(p) && existsSync(p) ? p : undefined);
+  const first = (...paths: (string | undefined)[]): string | undefined => paths.map(real).find(Boolean);
+  const out: Partial<Record<TerminalHarness, string>> = {};
+  const claude = first(env.CLAUDE_BIN ? resolveCommand(env.CLAUDE_BIN, "claude", env.PATH) : undefined, resolveCommand(undefined, "claude", env.PATH), join(home, ".local", "bin", "claude"));
+  const codex = first(codexBinary(targets, env));
+  const opencode = first(resolveCommand(opencodeBinary || undefined, "opencode", env.PATH), join(home, ".opencode", "bin", "opencode"));
+  const pi = first(resolveCommand(undefined, "pi", env.PATH), join(home, ".local", "bin", "pi"));
+  if (claude) out["claude-code"] = claude;
+  if (codex) out.codex = codex;
+  if (opencode) out.opencode = opencode;
+  if (pi) out.pi = pi;
+  return out;
+}
 
 /** The user's own Claude Code CLI (`CLAUDE_BIN`, set by the Mac app) instead of the copy bundled with the Agent SDK:
  *  it already has the user's Keychain grant for its login, where the bundled copy (another code signature) would make
@@ -248,6 +284,24 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const clones = cloneDir ? new CloneSweeper({ root: cloneDir }) : undefined;
   clones?.schedule();   // what earlier runs left behind
   const taskFolderRoot = cfg.taskFolders ? () => loadWorkdir(cfg.home) : undefined;
+  // docs/terminal-v0.md: the manual entry's terminals, with the gate like the executors when the gate is there.
+  let localPort = cfg.port;
+  const agentBinaries = cfg.terminals && !overrides.terminalLauncher ? terminalBinaries(targets, cfg.opencodeBinary) : {};
+  const terminalHost = cfg.terminals || overrides.terminalLauncher
+    ? new TerminalHost({
+      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: prot }),
+      // The executors' protected paths hold in terminals too, whatever the permission mode (docs/terminal-v0.md §3).
+      floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), prot); return d.kind === "deny" ? d.reason : null; },
+    })
+    : null;
+  let style: TerminalStyle | null = null;
+  const terminals = terminalHost ? {
+    host: terminalHost,
+    audit: new TerminalAudit(join(cfg.home, "terminals", "audit.jsonl")),
+    agents: overrides.terminalLauncher ? [...TERMINAL_HARNESSES] : TERMINAL_HARNESSES.filter((h) => agentBinaries[h]),
+    style: () => (style ??= readTerminalStyle()),
+    elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
+  } : undefined;
   const sessions = cfg.watchSessions ? new SessionMonitor({ ...defaultSessionSources(cfg.home), ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []) }) : undefined;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
   const engine = new Engine({ ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(nearSessions ? { sessionsNear: nearSessions } : {}), store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
@@ -255,7 +309,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   engine.interruptLeftovers();
   sweepThreads(store, Date.now(), engine);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const apiDeps: ApiDeps = { ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -269,7 +323,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const api = createApp({ ...apiDeps, assistant });
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
-  return { app, api, remote, engine, store, quota, targets, close: () => { reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+  return { app, api, remote, engine, store, quota, targets, terminals: terminalHost, setLocalPort: (port) => { localPort = port; },
+    close: () => { terminalHost?.closeAll(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml
@@ -378,6 +433,7 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   // Every local caller shows the token (api/localAuth.ts); made on first start, read by the Mac app and the CLI.
   const auth = new LocalAuth(ensureLocalToken(cfg.home));
   const server = listenLocal(daemon, cfg.port, (info) => {
+    daemon.setLocalPort(info.port);
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   }, auth);
   void daemon.quota.refresh();

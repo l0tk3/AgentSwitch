@@ -301,7 +301,10 @@ describe("remote route allowlist", () => {
       "POST /tasks/:id/ack", "GET /search", "GET /tasks/:id/files", "GET /tasks/:id/files/*", "GET /approvals", "GET /threads", "GET /threads/:id", "PATCH /threads/:id",
       "POST /threads/:id/archive", "POST /threads/:id/reopen", "DELETE /tasks/:id", "DELETE /threads/:id", "GET /quota", "POST /quota/refresh",
       "GET /targets", "POST /uploads", "GET /context", "PUT /context", "GET /context/example", "POST /assistant", "GET /assistant",
-      "GET /sessions", "GET /sessions/:harness/:id", "GET /approvals/policy", "GET /settings/workdir", "GET /update", "POST /update/install",
+      "GET /sessions", "GET /sessions/:harness/:id", "DELETE /sessions/:harness/:id",
+      "GET /terminals", "GET /terminals/style", "POST /terminals", "POST /terminals/resume", "GET /terminals/:id", "PATCH /terminals/:id", "GET /terminals/:id/stream", "POST /terminals/:id/input",
+      "POST /terminals/:id/keys", "POST /terminals/:id/resize", "POST /terminals/:id/redraw", "POST /terminals/:id/permissions/:pid", "POST /terminals/:id/kill", "DELETE /terminals/:id",
+      "GET /approvals/policy", "GET /settings/workdir", "GET /update", "POST /update/install",
     ]);
   });
 

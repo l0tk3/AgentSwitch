@@ -13,6 +13,8 @@ import { RATE_LIMIT_PROBE_PROMPT } from "../src/core/probes.js";
 import { folderLines, sessionsNear } from "../src/sessions/folders.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
 import { maskSecrets, type SessionSummary } from "../src/sessions/types.js";
+import { claudeFacts, claudeMode } from "../src/sessions/claude.js";
+import { codexMode } from "../src/sessions/codex.js";
 
 const NOW = Date.parse("2026-09-27T10:00:00Z");
 const line = (o: unknown) => JSON.stringify(o);
@@ -185,5 +187,88 @@ describe("what the models see of the sessions", () => {
     expect(maskSecrets("/Users/l07k3/Downloads/917/baseline.xlsx 首页的公式")).toBe("/Users/l07k3/Downloads/917/baseline.xlsx 首页的公式");
     expect(maskSecrets("token Zm9vYmFyYmF6cXV4cXV1eHF1dXhxdXV4cXV1eA== end")).toBe("token 🔒 end");
     expect(maskSecrets("ab3/Kx9Qm2Lp8Zt4Wv6Yr1Ns5Hd7Fg0Jc2Bn4Mx8Pq")).toBe("🔒");
+  });
+});
+
+describe("a session's permission mode", () => {
+  it("reads Claude Code's last permissionMode and Codex's last approval policy and sandbox", () => {
+    expect(claudeMode("bypassPermissions")).toBe("bypass");
+    expect(claudeMode("auto")).toBe("auto");
+    // narrower than auto continues as asking, never as more than the session had
+    expect(claudeMode("acceptEdits")).toBe("manual");
+    expect(claudeMode("dontAsk")).toBe("manual");
+    expect(claudeMode("plan")).toBe("manual");
+    expect(claudeMode("default")).toBe("manual");
+    expect(claudeMode("")).toBeUndefined();
+    expect(codexMode({ approval_policy: "never", sandbox_policy: { type: "danger-full-access" } })).toBe("bypass");
+    expect(codexMode({ approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } })).toBe("auto");
+    expect(codexMode({ approval_policy: "untrusted", sandbox_policy: { type: "read-only" } })).toBe("manual");
+    expect(codexMode({ approval_policy: "never", sandbox_policy: { type: "read-only" } })).toBe("manual");
+    expect(codexMode({ approval_policy: "on-request" })).toBe("manual");
+    expect(codexMode({ approval_policy: "on-request", sandbox_policy: { type: "danger-full-access" } })).toBe("auto");
+    expect(codexMode({})).toBeUndefined();
+  });
+
+  it("takes the latest mode of a Claude Code session file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-mode-"));
+    const file = join(dir, "11111111-2222-3333-4444-555555555555.jsonl");
+    const line = (mode: string, text: string) => JSON.stringify({ type: "user", cwd: "/Users/me/p", permissionMode: mode, timestamp: "2026-09-28T08:00:00Z", message: { role: "user", content: text } });
+    writeFileSync(file, [line("default", "hello there"), line("bypassPermissions", "go on")].join("\n") + "\n");
+    expect(claudeFacts(file, Date.now())?.mode).toBe("bypass");
+  });
+});
+
+describe("deleting a session's record", () => {
+  it("removes only the agent's own file for that session; OpenCode and path-like ids are refused", () => {
+    const { sources } = fixture();
+    const monitor = new SessionMonitor(sources);
+    const none = { removed: [], failed: [] };
+    expect(monitor.remove("claude-code", "../c1")).toEqual(none);
+    expect(monitor.remove("opencode", "o1")).toEqual(none);
+    const claude = monitor.remove("claude-code", "c1").removed;
+    expect(claude).toHaveLength(1);
+    expect(claude[0]!.endsWith("/-Users-u-code-site/c1.jsonl")).toBe(true);
+    expect(monitor.remove("codex", "x1").removed[0]!.endsWith("rollout-2026-09-26T20-00-00-x1.jsonl")).toBe(true);
+    expect(monitor.remove("codex", "x1")).toEqual(none);   // gone already: nothing claimed
+    expect(monitor.list(10).map((s) => s.id)).toEqual(["o1"]);
+  });
+
+  it("over the API: gone after, refused while open in a terminal, OpenCode not yet", async () => {
+    const { sources } = fixture();
+    const monitor = new SessionMonitor(sources);
+    let open: string[] = ["x1"];
+    let heldElsewhere = true;
+    const terminals = { host: { list: () => open.map((agentSessionId) => ({ agentSessionId })) }, audit: { record: () => undefined },
+      elsewhere: async (_harness: string, id: string) => (id === "c1" && heldElsewhere ? { pid: 7, app: "iTerm2" } : null) };
+    const app = new Hono();
+    mountSessions(app, { sessions: monitor, terminals } as unknown as ApiDeps);
+    const del = (path: string) => app.request(path, { method: "DELETE" });
+    expect((await del("/sessions/codex/x1")).status).toBe(409);
+    open = [];
+    expect((await del("/sessions/codex/x1")).status).toBe(200);
+    expect((await del("/sessions/codex/x1")).status).toBe(404);
+    expect((await del("/sessions/opencode/o1")).status).toBe(400);
+    // Held by another program (Claude's session registry, Codex's writer lock): not while it may still write.
+    expect((await del("/sessions/claude-code/c1")).status).toBe(409);
+    heldElsewhere = false;
+    expect(await (await del("/sessions/claude-code/c1")).json()).toEqual({ ok: true, files: 1 });
+  });
+});
+
+describe("Codex threads", () => {
+  it("leaves out the sub-agents Codex spawns inside a thread and tells which session a fork came from", () => {
+    const { sources } = fixture();
+    const dir = join(sources.codexSessions, "2026", "09", "27");
+    mkdirSync(dir, { recursive: true });
+    const rollout = (id: string, meta: Record<string, unknown>, text: string) => writeFileSync(join(dir, `rollout-2026-09-27T09-00-00-${id}.jsonl`), [
+      line({ timestamp: "2026-09-27T09:00:00Z", type: "session_meta", payload: { id, cwd: "/Users/u/code/api", originator: "Codex Desktop", ...meta } }),
+      line({ timestamp: "2026-09-27T09:00:01Z", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } }),
+    ].join("\n") + "\n");
+    rollout("sub1", { thread_source: "subagent", forked_from_id: "x1", source: { subagent: { thread_spawn: { parent_thread_id: "x1" } } } }, "跑一下测试");
+    rollout("fork1", { thread_source: "user", forked_from_id: "x1" }, "跑一下测试");
+    const codex = new SessionMonitor(sources, () => NOW).list().filter((s) => s.harness === "codex");
+    expect(codex.map((s) => s.id).sort()).toEqual(["fork1", "x1"]);
+    expect(codex.find((s) => s.id === "fork1")?.forkedFrom).toBe("x1");
+    expect(codex.find((s) => s.id === "x1")?.forkedFrom).toBeUndefined();
   });
 });

@@ -1,15 +1,16 @@
 /** Watching the Mac's coding sessions (docs/control-v0.md §3): newest first across Claude Code, Codex and OpenCode,
  *  each file parsed again only when it changed. Sessions that ran in a temporary folder or in AgentSwitch's own data
- *  directory are left out (probes, tests, AgentSwitch's executors). Read-only: nothing here writes to those stores. */
+ *  directory are left out (probes, tests, AgentSwitch's executors). Read-only, except `remove`: the user deleting a
+ *  session's record (docs/terminal-v0.md §5). */
 
 import { RATE_LIMIT_PROBE_PROMPT } from "../core/probes.js";
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeFacts, claudeMessages } from "./claude.js";
 import { codexFacts, codexMessages } from "./codex.js";
 import { openCodeMessages, openCodeSessions } from "./opencode.js";
-import { ACTIVE_MS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionSummary } from "./types.js";
+import { ACTIVE_MS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
   readonly claudeProjects: string;   // ~/.claude/projects
@@ -87,14 +88,47 @@ export class SessionMonitor {
     });
   }
 
-  private summary(harness: SessionHarness, f: { id: string; cwd: string; title: string; lastText: string; updatedAt: number; origin?: string; branch?: string; model?: string }, now: number): SessionSummary {
+  private summary(harness: SessionHarness, f: { id: string; cwd: string; title: string; lastText: string; updatedAt: number; origin?: string; branch?: string; model?: string; mode?: SessionMode; forkedFrom?: string }, now: number): SessionSummary {
     return {
       harness, id: f.id, cwd: f.cwd, title: oneLine(f.title, TITLE_CHARS), lastText: oneLine(f.lastText, TITLE_CHARS), updatedAt: f.updatedAt,
       active: now - f.updatedAt < ACTIVE_MS, ...(f.origin ? { origin: f.origin } : {}), ...(f.branch ? { branch: f.branch } : {}), ...(f.model ? { model: f.model } : {}),
+      ...(f.mode ? { mode: f.mode } : {}), ...(f.forkedFrom ? { forkedFrom: f.forkedFrom } : {}),
     };
   }
 
   private get scanFiles(): number { return this.sources.scanFiles ?? SCAN_FILES; }
+
+  /** Deletes the agent's own record of a session (docs/terminal-v0.md §5, the user's own management): Claude Code's
+   *  `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`; nothing else is touched. OpenCode keeps sessions in its
+   *  database and is not supported. The file the list read comes first (it may sit where the id alone does not say);
+   *  one that cannot be removed is reported, not thrown, so what did go is still known. */
+  remove(harness: SessionHarness, id: string): { removed: string[]; failed: string[] } {
+    const removed: string[] = [], failed: string[] = [];
+    if (!SESSION_ID.test(id)) return { removed, failed };
+    const drop = (file: string) => {
+      if (removed.includes(file) || failed.includes(file) || !existsSync(file)) return;
+      try { rmSync(file); removed.push(file); } catch { failed.push(file); }
+    };
+    const listed = this.files.get(`${harness}:${id}`);
+    if (listed) drop(listed);
+    if (harness === "claude-code") {
+      for (const dir of safeDirs(this.sources.claudeProjects)) {
+        const file = join(this.sources.claudeProjects, dir, `${id}.jsonl`);
+        if (existsSync(file)) drop(file);
+      }
+    } else if (harness === "codex") {
+      const walk = (dir: string, left: number) => {
+        for (const name of safeDirs(dir, true)) {
+          const path = join(dir, name);
+          if (left > 0) walk(path, left - 1);
+          else if (name.startsWith("rollout-") && name.endsWith(`-${id}.jsonl`)) drop(path);
+        }
+      };
+      walk(this.sources.codexSessions, 3);
+    }
+    if (removed.length) this.files.delete(`${harness}:${id}`);
+    return { removed, failed };
+  }
 
   /** The folder or anything under it; `/private/tmp/` and `/private/tmp` mean the same. */
   private isExcluded(cwd: string): boolean {
@@ -109,6 +143,18 @@ export class SessionMonitor {
 
   private excludedRoots(): string[] {
     return [...this.sources.excluded, ...(this.sources.ownFolders?.() ?? [])].map((p) => p.replace(/\/+$/, "")).filter(Boolean);
+  }
+}
+
+/** Session ids as the agents write them (uuids, short ids): never a path. */
+const SESSION_ID = /^[A-Za-z0-9-]{1,80}$/;
+
+/** Entry names in `dir` (directories only unless `all`); none when it cannot be read. */
+function safeDirs(dir: string, all = false): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((e) => all || e.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
   }
 }
 

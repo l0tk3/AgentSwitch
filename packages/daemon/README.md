@@ -259,6 +259,23 @@ OpenCode's shared db either way, so ephemeral cleanup works unchanged. `scripts/
 real thing on deepseek-flash (2026-09-24: server up in 160-190 ms, ~150-290 ms of API setup per step; a short task
 2.0-2.8 s on the server vs 2.7-2.8 s standalone, a resumed turn 0.6 s).
 
+## Terminals (terminal-v0)
+
+The manual entry: agent CLIs (`claude`, `codex`, `opencode`, `pi`) in pseudo-terminals the daemon holds
+(`src/terminals/`, `node-pty` + `@xterm/headless`), next to the managed tasks. `POST /terminals {harness, cwd, model?}`
+starts one; `GET /terminals/:id/stream` (SSE) sends a snapshot, then output, status and permission requests;
+`/input` (sealed reply), `/keys` (named keys), `/write` (raw keystrokes, this Mac only), `/resize`,
+`/permissions/:pid {decision}`, `/kill`, `DELETE` (`?transcript=1` also deletes Claude Code's own record);
+`POST /terminals/resume {harness, cwd, agentSessionId}` continues a session started elsewhere. Claude Code gets this
+terminal's own hooks through `--settings` (status, session id, `PermissionRequest` answered from any screen); the hook
+command calls `/terminals/hook` with a per-terminal hook token, never the local token. The protected paths are refused
+each agent's own way (terminal-v0 §3): Claude Code's `PreToolUse` hook plus `permissions.deny`; Codex's own permission
+profile (`default_permissions`, enforced by its sandbox; the gate only in `shell_environment_policy`); OpenCode with
+`--standalone` and an `OPENCODE_CONFIG` of deny rules; pi through `src/terminals/piExtension.ts` (`--extension`), which
+also reports its status. The web console has a page for it
+(控制台 › 终端, `ui/terminal.html`). `AGENTSWITCH_TERMINALS=0` turns it off; audit in `$AGENTSWITCH_HOME/terminals/audit.jsonl`.
+node-pty's spawn helper needs its execute bit (npm skips install scripts): the daemon sets it before the first spawn.
+
 ## MCP servers and skills
 
 Managed in the UI's 扩展 tab (or `GET /mcp`, `GET /skills`), stored under `$AGENTSWITCH_HOME`:

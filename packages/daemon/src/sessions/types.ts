@@ -3,6 +3,10 @@
 
 export type SessionHarness = "claude-code" | "codex" | "opencode";
 
+/** How the session last asked before acting, in the terminals' three words (docs/terminal-v0.md §3): every time, the
+ *  agent's automatic mode, or not at all. Continuing the session keeps it. */
+export type SessionMode = "manual" | "auto" | "bypass";
+
 export type SessionSummary = {
   readonly harness: SessionHarness;
   readonly id: string;
@@ -18,6 +22,10 @@ export type SessionSummary = {
   readonly origin?: string;
   readonly branch?: string;
   readonly model?: string;
+  /** Its permission mode at the last turn (Claude Code, Codex); absent when the record does not say. */
+  readonly mode?: SessionMode;
+  /** Codex: the session this one was forked from (`codex fork`), e.g. by continuing it in an AgentSwitch terminal. */
+  readonly forkedFrom?: string;
 };
 
 export type SessionMessage = {

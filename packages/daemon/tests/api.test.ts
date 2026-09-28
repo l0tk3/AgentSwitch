@@ -151,6 +151,12 @@ describe("HTTP API", () => {
     const html = await res.text();
     expect(html).toContain("<title>AgentSwitch</title>");
     expect(html).toContain('src="/ui/app.js"');
+    // only its own scripts, never framed (the terminal page can reach the Mac app's bridge)
+    for (const path of ["/ui", "/ui/terminal.html"]) {
+      const csp = (await d.app.request(path)).headers.get("content-security-policy") ?? "";
+      expect(csp).toContain("script-src 'self'");
+      expect(csp).toContain("frame-ancestors 'none'");
+    }
     const js = await d.app.request("/ui/lib/actions.js");
     expect(js.status).toBe(200);
     expect(js.headers.get("content-type")).toContain("javascript");

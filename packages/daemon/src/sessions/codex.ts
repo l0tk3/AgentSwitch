@@ -3,9 +3,21 @@
  *  items are the harness's own context blocks, not what the user typed. */
 
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
-import { clipText, type SessionMessage } from "./types.js";
+import { clipText, type SessionMessage, type SessionMode } from "./types.js";
 
-export type CodexFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly origin?: string; readonly model?: string };
+export type CodexFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly origin?: string; readonly model?: string; readonly mode?: SessionMode; readonly forkedFrom?: string };
+
+/** A turn's approval policy and sandbox in the terminals' three words, never one that allows more than the session
+ *  did: never asking with full access is a bypass; a writable sandbox is auto (`-s workspace-write`); read-only, an
+ *  unknown sandbox or asking about everything continues as asking (`-s read-only`). */
+export function codexMode(context: Json): SessionMode | undefined {
+  const approval = str(context.approval_policy);
+  const sandbox = str(obj(context.sandbox_policy).type) || str(context.sandbox_mode);
+  if (!approval) return undefined;
+  if (approval === "never" && sandbox === "danger-full-access") return "bypass";
+  if (approval === "untrusted" || !["workspace-write", "danger-full-access"].includes(sandbox)) return "manual";
+  return "auto";
+}
 
 function messageText(payload: Json, role: "user" | "assistant"): string | null {
   if (payload.type !== "message" || payload.role !== role) return null;
@@ -37,13 +49,19 @@ export function codexFacts(path: string, mtime: number): CodexFacts | null {
   const cwd = str(meta.cwd);
   const id = str(meta.id) || str(meta.session_id);
   if (!cwd || !id) return null;
+  // Sub-agents Codex spawned inside a thread (thread_source "subagent"): each starts with a copy of the thread's first
+  // message, so they read as duplicates of it; they are part of that thread, not sessions of the user's own.
+  if (str(meta.thread_source) === "subagent" || obj(meta.source).subagent) return null;
+  const forkedFrom = str(meta.forked_from_id);
   const tail = tailLines(path).map(obj);
   const title = head.map((l) => messageText(obj(l.payload), "user")).find((t) => t !== null) ?? "";
   const last = [...tail].reverse();
   const lastText = last.map((l) => messageText(obj(l.payload), "assistant")).find((t) => t !== null) ?? "";
   const model = last.map((l) => (l.type === "turn_context" ? str(obj(l.payload).model) : "")).find(Boolean);
+  const context = last.find((l) => l.type === "turn_context");
+  const mode = context ? codexMode(obj(context.payload)) : undefined;
   const origin = originOf(meta);
-  return { id, cwd, title, lastText, updatedAt: Math.max(time(last.find((l) => l.timestamp)?.timestamp), mtime), ...(origin ? { origin } : {}), ...(model ? { model } : {}) };
+  return { id, cwd, title, lastText, updatedAt: Math.max(time(last.find((l) => l.timestamp)?.timestamp), mtime), ...(origin ? { origin } : {}), ...(model ? { model } : {}), ...(mode ? { mode } : {}), ...(forkedFrom ? { forkedFrom } : {}) };
 }
 
 export function codexMessages(path: string, limit: number): SessionMessage[] {

@@ -10,6 +10,7 @@ import { mountSessions } from "./sessions.js";
 import { mountSettings } from "./settings.js";
 import { type ApiDeps } from "./shared.js";
 import { mountTasks } from "./tasks.js";
+import { mountTerminals } from "./terminals.js";
 import { mountThreads } from "./threads.js";
 import { mountUi, uiFile } from "./ui.js";
 
@@ -27,6 +28,7 @@ export function createApp(deps: ApiDeps): Hono {
   mountFiles(app, deps);
   mountThreads(app, deps);
   mountSessions(app, deps);
+  mountTerminals(app, deps);
   mountExtensions(app, deps.extensions);
   return app;
 }

@@ -3,9 +3,18 @@
 
 import { basename } from "node:path";
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
-import { clipText, type SessionMessage } from "./types.js";
+import { clipText, type SessionMessage, type SessionMode } from "./types.js";
 
-export type ClaudeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly branch?: string; readonly model?: string };
+export type ClaudeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly branch?: string; readonly model?: string; readonly mode?: SessionMode };
+
+/** Claude Code's `permissionMode` in the terminals' three words, never one that allows more than the session did:
+ *  a mode narrower than `auto` (edits only, pre-approved only, plan) continues as asking each time. */
+export function claudeMode(permissionMode: string): SessionMode | undefined {
+  if (permissionMode === "bypassPermissions") return "bypass";
+  if (permissionMode === "auto") return "auto";
+  if (["default", "manual", "plan", "acceptEdits", "dontAsk"].includes(permissionMode)) return "manual";
+  return undefined;
+}
 
 function content(line: Json): unknown[] {
   const c = obj(line.message).content;
@@ -37,9 +46,10 @@ export function claudeFacts(path: string, mtime: number): ClaudeFacts | null {
   const stamped = last.find((l) => l.timestamp);
   const branch = last.map((l) => str(l.gitBranch)).find(Boolean);
   const model = last.map((l) => str(obj(l.message).model)).find((m) => m && !m.startsWith("<"));
+  const mode = claudeMode(last.map((l) => str(l.permissionMode)).find(Boolean) ?? "");
   return {
     id: basename(path, ".jsonl"), cwd, title, lastText, updatedAt: Math.max(time(stamped?.timestamp), mtime),
-    ...(branch ? { branch } : {}), ...(model ? { model } : {}),
+    ...(branch ? { branch } : {}), ...(model ? { model } : {}), ...(mode ? { mode } : {}),
   };
 }
 

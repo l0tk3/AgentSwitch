@@ -9,7 +9,9 @@
  *  - the web console: a session cookie, got through a one-time link the Mac app asks for (`POST /local/console-link`
  *    with the token) — the link carries a code valid for a minute and once, never the token itself;
  *  - no proof needed: `GET /healthz` (the Mac app's liveness probe) and the console's static files (`/`, `/ui`,
- *    `/ui/*`), which hold no data; their API calls carry the cookie.
+ *    `/ui/*`), which hold no data; their API calls carry the cookie;
+ *  - the terminals' hook command (`POST /terminals/hook`) shows its own terminal's hook token instead, which the route
+ *    checks (docs/terminal-v0.md §3): the agent in the terminal can read that token, so it must never be the local one.
  *  The remote listener hands requests to the API in process and never comes through here (device tokens there). */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -23,6 +25,8 @@ const TOKEN_BYTES = 32;
 const MIN_TOKEN_CHARS = 40;
 const CODE_TTL_MS = 60_000;
 const MAX_SESSIONS = 50;
+/** Where a console link may land after signing in: a page of the console itself (`?next=`), never another site. */
+const CONSOLE_PAGE = /^\/ui(\/(?!\.\.?(?:\/|$))[A-Za-z0-9._-]+)*$/;
 
 /** The token in `home`, made on first use; a file too short to be one is replaced. */
 export function ensureLocalToken(home: string): string {
@@ -63,9 +67,11 @@ export class LocalAuth {
     const method = request.method;
     if (method === "GET" && path === "/ui/login") return this.login(url);
     if (method === "GET" && (path === "/healthz" || path === "/" || path === "/ui" || path.startsWith("/ui/"))) return null;
+    if (method === "POST" && path === "/terminals/hook") return null;
     if (method === "POST" && path === "/local/console-link") {
       if (!this.bearer(request)) return this.refuse();
-      return json(200, { path: `/ui/login?code=${this.mint()}` });
+      const next = url.searchParams.get("next");
+      return json(200, { path: `/ui/login?code=${this.mint()}${next && CONSOLE_PAGE.test(next) ? `&next=${encodeURIComponent(next)}` : ""}` });
     }
     return this.bearer(request) || this.session(request) ? null : this.refuse();
   }
@@ -99,7 +105,9 @@ export class LocalAuth {
     if (this.sessions.size >= MAX_SESSIONS) this.sessions.delete(this.sessions.values().next().value!);
     const session = randomBytes(TOKEN_BYTES).toString("base64url");
     this.sessions.add(session);
-    return new Response(null, { status: 302, headers: { location: "/ui", "set-cookie": `${CONSOLE_COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/` } });
+    const next = url.searchParams.get("next");
+    const location = next && CONSOLE_PAGE.test(next) ? next : "/ui";
+    return new Response(null, { status: 302, headers: { location, "set-cookie": `${CONSOLE_COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/` } });
   }
 
   private refuse(): Response {

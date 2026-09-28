@@ -71,6 +71,19 @@ describe("local API token", () => {
     expect((await f.call("/tasks", { headers: { cookie: "agentswitch_console=made-up" } })).status).toBe(401);
   });
 
+  it("a console link can land on another console page (the Mac app's terminal window), never off the console", async () => {
+    const f = await start();
+    const link = async (next: string) => (await (await f.call(`/local/console-link?next=${encodeURIComponent(next)}`, { method: "POST", headers: { authorization: `Bearer ${f.token}` } })).json() as { path: string }).path;
+    const terminal = await link("/ui/terminal.html");
+    expect(terminal).toMatch(/^\/ui\/login\?code=[A-Za-z0-9_-]+&next=%2Fui%2Fterminal\.html$/);
+    expect((await f.call(terminal)).headers.get("location")).toBe("/ui/terminal.html");
+    for (const bad of ["https://evil.example/ui", "//evil.example", "/ui/../tasks", "/tasks"]) {
+      const path = await link(bad);
+      expect(path).not.toContain("next=");
+      expect((await f.call(`${path}&next=${encodeURIComponent(bad)}`)).headers.get("location")).toBe("/ui");
+    }
+  });
+
   it("a console link runs out after a minute", async () => {
     let now = 1_000_000;
     const f = await start(() => now);
