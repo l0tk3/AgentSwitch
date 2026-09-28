@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · 视觉方向（整体）</title>
+<style>
+/* One direction for the whole program: the medium shows (cells, pixels, dither), used sparingly. Content text is
+   set for reading; the texture lives in marks, labels, meters, empty states and moments of change. */
+:root {
+  --bg: #000; --panel: #0b0b0b; --raise: #151515;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+}
+.light {
+  --px-shadow: #cfc9bc;
+  --bg: #f3f1ea; --panel: #ebe8df; --raise: #e2ded3;
+  --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3;
+  --signal: #e0106e; --cyan: #0086a8; --green: #3f8f00; --amber: #c27400; --red: #d7261b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: #1b1b1d; color: #e9e6df; font: 13px/1.5 var(--ui); padding: 28px 24px 60px; }
+a { color: inherit; }
+.page { max-width: 1240px; margin: 0 auto; }
+.top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 26px; }
+.top h1 { font: 700 15px var(--mono); margin: 0; display: flex; gap: 12px; align-items: center; }
+.top nav { font: 12px var(--mono); color: #8e8e93; display: flex; gap: 16px; }
+.sec { font: 11px var(--mono); letter-spacing: .14em; color: #77746e; margin: 34px 0 12px; }
+
+/* rules */
+.rules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #2a2a2d; border: 1px solid #2a2a2d; }
+.rules div { background: #111; padding: 14px 16px 16px; }
+.rules b { font: 700 12.5px var(--mono); display: block; margin-bottom: 6px; color: #fff; }
+.rules p { margin: 0; color: #a9a6a0; font-size: 12.5px; line-height: 1.6; }
+.rules code { font: 12px var(--mono); color: #d8d4cc; }
+
+/* tokens */
+.tokens { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 18px; }
+.card { background: var(--bg); color: var(--ink); border: 1px solid #2a2a2d; padding: 16px; font-family: var(--mono); }
+.card h3 { font: 11px var(--mono); letter-spacing: .14em; color: var(--ink3); margin: 0 0 12px; font-weight: 400; }
+.sw { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.sw div { font-size: 10.5px; color: var(--ink2); }
+.sw i { display: block; height: 34px; margin-bottom: 4px; border: 1px solid var(--ink4); }
+.marks { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-end; }
+.marks figure { margin: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; font-size: 10.5px; color: var(--ink2); }
+.dither { display: flex; gap: 6px; margin-top: 14px; }
+.brandrow { display: flex; gap: 18px; align-items: center; margin-top: 16px; }
+.appicon { width: 84px; height: 84px; flex: none; border-radius: 19px; display: grid; place-items: center; color: var(--ink);
+  background: radial-gradient(120% 90% at 30% 20%, #1a1a1c, #000); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+.dither i { width: 36px; height: 22px; display: block; border: 1px solid var(--ink4); }
+.type .l1 { font: 12px/1.5 var(--ui); color: var(--ink); }
+.type .l2 { font: 11px var(--mono); letter-spacing: .14em; color: var(--ink3); margin-top: 10px; }
+.type .l3 { font: 12px var(--mono); color: var(--ink2); margin-top: 6px; }
+.type .l4 { font: 12px var(--mono); margin-top: 6px; }
+.meter { font: 12px var(--mono); letter-spacing: -.5px; }
+.meter .f { color: var(--ink); } .meter .e { color: var(--ink4); }
+.px { display: block; }
+.sq { display: inline-flex; vertical-align: -1px; }
+
+/* surfaces */
+.surfaces { display: grid; grid-template-columns: 1fr 360px 360px; gap: 26px; align-items: start; }
+.cap { font: 11.5px var(--mono); color: #8e8e93; margin-top: 10px; line-height: 1.6; }
+
+/* Mac: menu bar and its menu */
+.desk { background: linear-gradient(160deg, #2b2f3a, #1a1c22); border-radius: 12px; padding: 0 0 26px; overflow: hidden; border: 1px solid #2a2a2d; }
+.menubar { height: 26px; background: rgba(20,20,22,.72); display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 14px; color: #f2f2f2; font: 12.5px var(--ui); }
+.menubar .mb-mark { display: flex; align-items: center; padding: 3px 6px; border-radius: 4px; background: rgba(255,255,255,.18); }
+.menu { width: 330px; margin: 6px 14px 0 auto; background: #0d0d0d; color: var(--ink); border: 1px solid #3a3936; font-family: var(--mono); font-size: 12.5px; position: relative; }
+.menu::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(rgba(0,0,0,.55) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.menu .hd { display: flex; align-items: center; gap: 10px; padding: 12px 14px 10px; }
+.menu .hd b { font-weight: 700; flex: 1; }
+.menu .hd span { color: var(--ink3); font-size: 11px; }
+.menu .lab { font-size: 10.5px; letter-spacing: .14em; color: var(--ink3); padding: 10px 14px 4px; }
+.menu .it { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; padding: 3px 14px; line-height: 20px; }
+.menu .it:hover { background: var(--raise); }
+.menu .it .v { color: var(--ink2); font-size: 11.5px; }
+.menu hr { border: 0; height: 1px; margin: 6px 0; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); }
+.menu .use { display: grid; grid-template-columns: 14px 82px 1fr 38px; gap: 8px; padding: 2px 14px; align-items: center; }
+.menu .use .n { color: var(--ink2); }
+.menu .use .p { text-align: right; color: var(--ink2); font-size: 11.5px; }
+.menu .upd { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; padding: 6px 14px 10px; font-size: 11.5px; color: var(--ink2); }
+.btn { font: 12px var(--mono); background: none; color: var(--ink); border: 0; padding: 1px 6px; cursor: default; white-space: nowrap; }
+.btn.pri { background: var(--ink); color: var(--bg); }
+.btn.pri:hover { background: var(--signal); color: #000; }
+.btn.line { box-shadow: inset 0 0 0 1px var(--ink3); }
+
+/* iPhone */
+.phone { width: 360px; height: 760px; border-radius: 46px; padding: 12px; background: #111; border: 1px solid #333; }
+.scr { position: relative; width: 100%; height: 100%; border-radius: 36px; overflow: hidden; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; font: 15px/1.45 var(--ui); }
+.sb { height: 46px; display: flex; justify-content: space-between; align-items: center; padding: 6px 28px 0; font: 600 14px var(--ui); flex: none; }
+.nav { display: flex; align-items: center; gap: 10px; padding: 4px 18px 10px; flex: none; }
+.nav .mac { flex: 1; font: 600 16px var(--ui); display: flex; align-items: center; gap: 6px; }
+.nav .mac small { font: 12px var(--mono); color: var(--ink3); }
+.nav .ic { font: 18px var(--ui); color: var(--ink2); }
+.attn { margin: 0 14px 10px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; font: 12.5px var(--mono); color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); }
+.attn span { flex: 1; }
+.feed { flex: 1; overflow: hidden; padding: 0 14px; display: flex; flex-direction: column; gap: 14px; }
+.me { align-self: flex-end; max-width: 80%; background: var(--raise); padding: 9px 12px; border-radius: 2px; font-size: 14.5px; }
+.entry .meta { font: 11px var(--mono); color: var(--ink3); display: flex; gap: 8px; align-items: center; margin-bottom: 5px; }
+.entry .meta .st { color: var(--ink2); display: flex; gap: 6px; align-items: center; }
+.entry .txt { font-size: 14.5px; }
+.entry .bar { font: 12px var(--mono); margin-top: 6px; color: var(--ink2); display: flex; gap: 10px; }
+.entry .files { font: 12px var(--mono); margin-top: 8px; display: flex; gap: 12px; align-items: center; color: var(--ink2); }
+.entry .files .btn { font-size: 12px; }
+.ask { border: 1px solid var(--amber); }
+.ask .h { background: var(--amber); color: #000; font: 12px var(--mono); padding: 3px 10px; display: flex; justify-content: space-between; }
+.ask .b { padding: 10px 12px 4px; font: 12.5px/1.5 var(--mono); word-break: break-all; }
+.ask .b small { display: block; color: var(--ink3); font-size: 11px; margin-top: 4px; }
+.ask .f { display: flex; justify-content: flex-end; gap: 10px; padding: 8px 12px 10px; }
+.ask .f .btn { font-size: 13px; padding: 4px 12px; }
+.input { margin: 8px 12px 6px; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--panel); border-radius: 2px; flex: none; }
+.input .ph { flex: 1; color: var(--ink3); font-size: 14.5px; }
+.input .k { color: var(--ink2); font: 13px var(--mono); }
+.tabs { height: 74px; flex: none; display: flex; justify-content: space-around; align-items: flex-start; padding-top: 9px; border-top: 1px solid var(--ink4); background: var(--bg); }
+.tabs div { display: flex; flex-direction: column; align-items: center; gap: 5px; font: 10.5px var(--ui); color: var(--ink3); }
+.tabs .on { color: var(--signal); }
+.tlist { flex: 1; overflow: hidden; font: 13.5px/30px var(--mono); }
+.tlist .dir { padding: 6px 18px 0; font-weight: 700; display: flex; justify-content: space-between; }
+.tlist .dir.parent { color: var(--ink2); font-weight: 500; }
+.tlist .dir i { font-style: normal; font-weight: 400; color: var(--ink3); font-size: 12px; }
+.tlist .row { display: grid; grid-template-columns: 2.6ch 2.2ch minmax(0,1fr) auto; align-items: center; padding: 0 18px; white-space: nowrap; }
+.tlist .row .tr { color: var(--ink4); }
+.tlist .row .nm { overflow: hidden; text-overflow: ellipsis; }
+.tlist .row .mt { color: var(--ink3); font-size: 12px; padding-left: 8px; }
+.tlist .row.s .nm { color: var(--ink2); }
+.tlist .row .w { color: var(--amber); }
+.tlist .empty { margin: 28px 18px 0; padding: 18px; font: 12px/1.6 var(--mono); color: var(--ink3); text-align: center;
+  background: repeating-conic-gradient(var(--ink4) 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+.tlist .empty span { background: var(--bg); padding: 2px 6px; }
+.blink { animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: .2; } }
+.ctl { display: flex; gap: 8px; margin-top: 10px; }
+.ctl button { font: 12px var(--ui); color: #b5b5b8; background: #2a2a2d; border: 0; padding: 5px 11px; border-radius: 6px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <h1><span id="brand" style="color:#e9e6df"></span>AgentSwitch · 视觉方向（草案）</h1>
+    <nav><a href="terminal.html">终端窗口 →</a><a href="depth.html">层次 →</a></nav>
+  </div>
+
+  <div class="sec">// 规则（已按 tonsky《It's hard to justify Tahoe icons》对照修订）</div>
+  <div class="rules">
+    <div><b>01 · 格子</b><p>一切落在字符格上：等宽、方角、1px 线。像素图标每格是整点（1pt 或 2pt），外接普通屏也清楚；每个尺寸单独画一张，不缩放。圆角只留给系统控件。</p></div>
+    <div><b>02 · 读的字不加工</b><p>正文、对话、终端输出不抖、不加扫描线、不加阴影。质感只在标记、标签、计量条、空状态和“变化的那一刻”。</p></div>
+    <div><b>03 · 一个信号色</b><p>粉 <code>#FF2E88</code> 只用在选中、品牌标记、主按钮悬停、glitch 的第二通道。状态色只表状态，且从不单独表意：总配形状或文字。</p></div>
+    <div><b>04 · 一个图标一个意思</b><p><code>×</code> 只表示关闭；删除记录写 <code>delete</code>。<code>&gt;_</code> 只表示 Codex，终端标签页用带框的终端窗口。进行中处处是同一个转圈。找不到好隐喻就只写字。</p></div>
+    <div><b>05 · 图标要区分，不要铺满</b><p>只有在跑的终端带状态标记；会话记录不带。有无图标的行共用同一列，文字起点对齐。菜单里要么都留图标列，要么都不留。</p></div>
+    <div><b>06 · 系统符号按系统的意思用</b><p><code>▸ ▾</code> 只表示展开/收起（“▸ 2 more”）；<code>…</code> 只表示“还需要输入”（settings…）；<code>⌘</code> 只写快捷键；单选是 <code>&lt; &gt; &lt;x&gt;</code>，复选才是 <code>[ ] [x]</code>。</p></div>
+    <div><b>07 · 短词英文，整句中文</b><p>短词用小写等宽英文：状态、按钮、标签页与导航标题、分组标签、快捷键、单位（busy · waiting · resume · delete · tasks · // status）。成句的用正式中文：说明、确认、报错、空状态、占位提示。用户内容原样。一个词也只有一个意思：busy = 正在干活，ok = 服务正常。</p></div>
+    <div><b>08 · 抖动代替淡出，glitch 是事件</b><p>停止、已结束、未安装用 50% 抖动。glitch 在新的权限请求、失败、意外退出时闪一次，用户主动选择（选 agent、打开加密发送）时也闪一次（≤ 0.5 秒），不循环；“减少动态效果”打开时不出现；动画用 steps()。</p></div>
+    <div><b>09 · 层次只给大的身份标记</b><p>图标、文字标、≥ 24pt 的标记：1 像素硬阴影 + 台阶补半亮；文字标加 1 像素信号色错位。状态方块、agent 小图、菜单栏图标保持平的。</p></div>
+  </div>
+
+  <div class="sec">// 基础</div>
+  <div class="tokens">
+    <div class="card">
+      <h3>// 颜色 · 深 / 浅</h3>
+      <div class="sw" id="swDark"></div>
+      <div class="sw light" id="swLight" style="margin-top:10px;background:var(--bg);padding:8px"></div>
+    </div>
+    <div class="card">
+      <h3>// 标记</h3>
+      <div class="marks" id="marks"></div>
+      <div class="dither" id="dither"></div>
+      <div class="brandrow"><div class="appicon" id="appIcon"></div><div id="wordmark"></div></div>
+      <div style="font-size:10.5px;color:var(--ink2);margin-top:6px">app icon · wordmark（有层次）</div>
+      <div style="font-size:10.5px;color:var(--ink2);margin-top:6px">抖动 0 · 25 · 50 · 75 · 100%</div>
+    </div>
+    <div class="card type">
+      <h3>// 字</h3>
+      <div class="l1">正文用系统字体：“把 iOS 端打包装到手机上”</div>
+      <div class="l2">// status   （分组标签：等宽小写英文，带 //）</div>
+      <div class="l3">元信息等宽英文：Claude Code · Opus 5.5 · 3m · ~/Projects/AgentSwitch</div>
+      <div class="l4 meter">usage <span class="f">████████</span><span class="e">░░░░</span> 62%</div>
+      <div class="l4">按钮 <button class="btn pri">[ allow ⌘↩ ]</button> <button class="btn line">deny</button> <button class="btn line">resume</button> <button class="btn line">delete</button></div>
+    </div>
+  </div>
+
+  <div class="sec">// 落到各处</div>
+  <div class="surfaces">
+    <div>
+      <div class="desk">
+        <div class="menubar"><span>A</span><span class="mb-mark" id="mbMark"></span><span>9月28日 周一 18:04</span></div>
+        <div class="menu" id="menu">
+          <div class="hd"><span id="menuMark" style="color:var(--ink)"></span><b>AgentSwitch</b><span>0.1 · 9/28</span></div>
+          <div class="lab">// status</div>
+          <div class="it"><span class="sq" style="color:var(--green)" data-sq></span><span>service</span><span class="v">ok</span></div>
+          <div class="it"><span class="sq" style="color:var(--green)" data-sq></span><span>gateway</span><span class="v">ok</span></div>
+          <div class="it"><span class="sq" style="color:var(--green)" data-sq></span><span>iPhone</span><span class="v">2 connected</span></div>
+          <div class="lab">// waiting</div>
+          <div class="it" id="menuAsk"><span class="sq blink" style="color:var(--amber)" data-sq></span><span>run command · Bybit 卡</span><span class="v">›</span></div>
+          <div class="lab">// usage</div>
+          <div class="use"><span></span><span class="n">Claude Max</span><span class="meter"><span class="f">████████</span><span class="e">░░░░</span></span><span class="p">62%</span></div>
+          <div class="use"><span></span><span class="n">Codex Pro</span><span class="meter"><span class="f">███</span><span class="e">░░░░░░░░░</span></span><span class="p">24%</span></div>
+          <hr>
+          <div class="it"><span></span><span>open terminal</span><span class="v">⌘⇧T</span></div>
+          <div class="it"><span></span><span>console</span><span class="v"></span></div>
+          <div class="it"><span></span><span>settings…</span><span class="v">⌘,</span></div>
+          <hr>
+          <div class="upd"><span></span><span class="t">new build · 9/28 18:02</span><button class="btn pri">[ install ]</button></div>
+        </div>
+      </div>
+      <div class="cap">Mac 菜单栏：图标是像素版的“一分三”，单色模板图，1pt 一格，静止不动（菜单栏一直闪太吵）。idle = 亮着的那条车道；busy = 源点和车道中段一块；waiting = 只亮车道尽头；off = 整体抖到一半。菜单每一行都留出图标列，文字从同一列开始。</div>
+      <div class="ctl"><button data-mb="idle">idle</button><button data-mb="busy">busy</button><button data-mb="waiting">waiting</button><button data-mb="off">off</button></div>
+    </div>
+
+    <div>
+      <div class="phone"><div class="scr" id="phone1">
+        <div class="sb"><span>18:04</span><span>▮▮▮ 86%</span></div>
+        <div class="nav"><span id="navMark" style="color:var(--ink)"></span><span class="mac">MacBook Pro <small>▾</small></span><span class="ic">≡</span></div>
+        <div class="attn"><span class="sq blink" data-sq></span><span>2 waiting</span>›</div>
+        <div class="feed">
+          <div class="me">把 AgentSwitch 的 iOS 端打包装到手机上</div>
+          <div class="entry">
+            <div class="meta"><span class="st"><span class="spin" style="color:var(--cyan)">⠋</span>busy</span><span>Claude Code · Opus 5.5</span><span>2m</span></div>
+            <div class="txt">构建 AgentSwitch.app，第 3 步 / 共 5 步</div>
+            <div class="bar"><span class="meter"><span class="f" style="color:var(--cyan)">██████</span><span class="e">░░░░</span></span><span>3/5</span></div>
+          </div>
+          <div class="entry ask" id="ask">
+            <div class="h"><span>[!] approval</span><span>install app</span></div>
+            <div class="b">xcrun devicectl device install app --device 00008150-…<small>~/Projects/AgentSwitch/packages/ios-app</small></div>
+            <div class="f"><button class="btn line">deny</button><button class="btn pri">allow</button></div>
+          </div>
+          <div class="entry">
+            <div class="meta"><span class="st"><span class="sq" style="color:var(--green)" data-sq></span>done</span><span>Codex · GPT-6 Luna</span><span>1d</span></div>
+            <div class="txt">已导出 12 个会话的聊天记录</div>
+            <div class="files"><span>▤ 2 files</span><button class="btn line">open</button></div>
+          </div>
+        </div>
+        <div class="input"><span class="k">＋</span><span class="ph">向 Mac 发送任务或问题</span><span class="k" id="lockKey"></span></div>
+        <div class="tabs"><div class="on"><span id="tab1"></span>tasks</div><div><span id="tab2"></span>terminals</div></div>
+      </div></div>
+      <div class="cap">iPhone · tasks（深色）：用户的话、任务正文是系统字体的中文；状态、模型、时间、按钮是等宽英文。进行中与 Mac 同一个转圈。新的权限请求到达时整张卡闪一次。</div>
+      <div class="ctl"><button id="askBtn">模拟：新的权限请求</button></div>
+    </div>
+
+    <div>
+      <div class="phone"><div class="scr light" id="phone2">
+        <div class="sb"><span>18:04</span><span>▮▮▮ 86%</span></div>
+        <div class="nav"><span id="navMark2" style="color:var(--ink)"></span><span class="mac">terminals <small>3 running</small></span><span class="ic">＋</span></div>
+        <div class="tlist" id="tlist"></div>
+        <div class="tabs"><div><span id="tab3"></span>tasks</div><div class="on"><span id="tab4"></span>terminals</div></div>
+      </div></div>
+      <div class="cap">iPhone · terminals（浅色）：和 Mac 终端窗口同一套目录树，同一父目录合并。终端标签页的图标是带框的终端窗口，和 Codex 的 &gt;_ 区分开。空状态用抖动底纹。</div>
+    </div>
+  </div>
+</div>
+
+<script src="pixel.js"></script>
+<script>
+const { sprite, AGENT_PX, SQUARE, HOLLOW, mark, wordmark, glitch, GLITCH_CSS } = window.Pixel;
+document.head.append(Object.assign(document.createElement("style"), { textContent: GLITCH_CSS }));
+
+for (const el of document.querySelectorAll("[data-sq]")) el.innerHTML = sprite(SQUARE, { px: 2 });
+
+const swatches = [["ink", "--ink"], ["ink 2", "--ink2"], ["ink 3", "--ink3"], ["signal", "--signal"], ["busy", "--cyan"], ["waiting", "--amber"], ["ok", "--green"], ["failed", "--red"]];
+for (const id of ["swDark", "swLight"]) document.getElementById(id).innerHTML = swatches.map(([n, v]) => `<div><i style="background:var(${v})"></i>${n}</div>`).join("");
+
+// marks, animated
+let t = 0, mbState = "busy";
+function drawMarks() {
+  document.getElementById("marks").innerHTML = [["idle", "idle"], ["busy", "busy"], ["waiting", "waiting"], ["error", "failed"], ["off", "off"]]
+    .map(([s, n]) => `<figure><span style="color:var(--ink)">${mark({ px: 3, state: s, t, depth: true })}</span>${n}</figure>`).join("")
+    + `<figure><span style="display:flex;gap:8px;color:var(--ink2)">${["cc", "codex", "oc", "pi"].map((a) => sprite(AGENT_PX[a], { px: 3 })).join("")}</span>agent</figure>`
+    + `<figure><span style="display:flex;gap:8px;align-items:center"><span class="spin" style="color:var(--cyan);font:16px var(--mono)">⠋</span><span style="color:var(--amber)">${sprite(SQUARE, { px: 3 })}</span><span style="color:var(--green)">${sprite(SQUARE, { px: 3 })}</span><span style="color:var(--ink3)">${sprite(HOLLOW, { px: 3 })}</span></span>busy · waiting · ok · exited</figure>`;
+  document.getElementById("mbMark").innerHTML = `<span style="color:#f2f2f2">${mark({ px: 1, state: mbState, t, mono: true })}</span>`;
+  // identity marks of 20–30pt: 1-pixel shadow, half-lit steps, the busy block's trail (§7.2.10); the menu bar icon stays flat
+  document.getElementById("menuMark").innerHTML = mark({ px: 2, state: "waiting", t, depth: true });
+  document.getElementById("brand").innerHTML = mark({ px: 2, state: "busy", t, depth: true });
+  document.getElementById("navMark").innerHTML = mark({ px: 2, state: "waiting", t, depth: true });
+  document.getElementById("navMark2").innerHTML = mark({ px: 2, state: "busy", t, depth: true });
+  document.getElementById("appIcon").innerHTML = mark({ px: 4, state: "busy", t, depth: true });
+}
+setInterval(() => { t++; drawMarks(); }, 140);
+drawMarks();
+document.getElementById("wordmark").innerHTML = wordmark("AGENTSWITCH", { px: 4 });
+
+const dith = [0, 0.25, 0.5, 0.75, 1];
+const ditherBox = document.getElementById("dither");
+for (const d of dith) {
+  // 4x4 ordered (Bayer) dither at this density
+  const B = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  let r = "";
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) if (B[y * 4 + x] < d * 16) r += `<rect x="${x}" y="${y}" width="1" height="1"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4" shape-rendering="crispEdges" fill="#e9e6df">${r}</svg>`;
+  const i = document.createElement("i");
+  i.style.background = `url("data:image/svg+xml,${encodeURIComponent(svg)}") 0 0 / 4px 4px`;
+  i.style.imageRendering = "pixelated";
+  ditherBox.append(i);
+}
+
+document.getElementById("tab1").innerHTML = mark({ px: 2, state: "idle" });
+document.getElementById("tab3").innerHTML = mark({ px: 2, state: "idle" });
+// the terminals tab: a framed terminal window (">_" alone means Codex)
+const WINDOW = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"];
+document.getElementById("tab2").innerHTML = sprite(WINDOW, { px: 2 });
+document.getElementById("tab4").innerHTML = sprite(WINDOW, { px: 2 });
+document.getElementById("lockKey").innerHTML = sprite([".###.", "#...#", "#####", "##.##", "#####"], { px: 2 });
+
+// the phone's terminal list: the same tree as the Mac window
+const T = [
+  { dir: "Projects/", parent: true, n: "▪3 · 6" },
+  { dir: "AgentSwitch", depth: 1, n: "▪3 · 5", rows: [["t", "busy", "本地构建应用和手机连接", "cc"], ["t", "waiting", "Bybit 卡", "waiting"], ["t", "idle", "Claude-hud 安装", "cc"], ["s", "", "终端服务 demo 与窗口", "3h"], ["s", "", "本地模型前台设计", "1d"]] },
+  { dir: "Worktop/", parent: true, n: "4" },
+  { dir: "Codex", depth: 1, n: "2", rows: [["s", "", "我电脑上是不是没有 adb…", "20h"], ["s", "", "微信聊天记录导出", "2d"]] },
+];
+function statusSq(s) {
+  if (s === "busy") return `<span class="spin" style="color:var(--cyan)">⠋</span>`;
+  if (s === "waiting") return `<span class="blink" style="color:var(--amber)">${sprite(SQUARE, { px: 2 })}</span>`;
+  if (s === "idle") return `<span style="color:var(--green)">${sprite(SQUARE, { px: 2 })}</span>`;
+  return "";
+}
+document.getElementById("tlist").innerHTML = T.map((g) => g.parent
+  ? `<div class="dir parent"><span>${g.dir}</span><i>${g.n}</i></div>`
+  : `<div class="dir" style="padding-left:calc(18px + ${(g.depth ?? 0) * 2}ch)"><span>${g.dir}/</span><i>${g.n}</i></div>` + g.rows.map((r, i) =>
+  `<div class="row ${r[0]}" style="padding-left:calc(18px + ${(g.depth ?? 0) * 2}ch)"><span class="tr">${i === g.rows.length - 1 ? "└─" : "├─"}</span><span>${statusSq(r[1])}</span><span class="nm">${r[2]}</span><span class="mt">${r[3] === "cc" ? `<span style="color:var(--ink3)">${sprite(AGENT_PX.cc, { px: 2 })}</span>` : r[3] === "waiting" ? `<span class="w">waiting</span>` : r[3]}</span></div>`).join("")).join("")
+  + `<div class="empty"><span>clash-verge/ 中暂无会话</span></div>`;
+// in progress: the same braille spinner as the Mac
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let sf = 0;
+setInterval(() => { sf = (sf + 1) % SPIN.length; for (const el of document.querySelectorAll(".spin")) el.textContent = SPIN[sf]; }, 90);
+
+document.getElementById("askBtn").addEventListener("click", () => glitch(document.getElementById("ask")));
+for (const b of document.querySelectorAll("[data-mb]")) b.addEventListener("click", () => { mbState = b.dataset.mb; drawMarks(); });
+if (location.search.includes("ask")) setTimeout(() => glitch(document.getElementById("ask")), 200);
+</script>
+</body>
+</html>

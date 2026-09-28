@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · 像素的层次（阴影与次像素）</title>
+<style>
+/* Depth for the pixel marks, where they are big enough to carry it: hard shadows and extrusion (layers), sub-pixel
+   anti-aliasing (half-lit pixels in the staircase), LCD sub-pixels and glow (the screen itself). Small functional
+   marks stay flat. */
+:root {
+  --bg: #000; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --amber: #ffb000;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+.light { --bg: #f3f1ea; --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3; --signal: #e0106e; --cyan: #0086a8; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: #1b1b1d; color: #e9e6df; font: 13px/1.5 var(--ui); padding: 26px 24px 60px; }
+.page { max-width: 1240px; margin: 0 auto; }
+.top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.top h1 { font: 700 15px var(--mono); margin: 0; }
+.top nav { font: 12px var(--mono); color: #8e8e93; display: flex; gap: 16px; }
+.top nav a { color: inherit; }
+.lead { color: #a9a6a0; font-size: 12.5px; max-width: 900px; margin: 0 0 6px; }
+.sec { font: 11px var(--mono); letter-spacing: .14em; color: #77746e; margin: 30px 0 12px; display: flex; justify-content: space-between; align-items: center; }
+.sec .t button { font: 11.5px var(--ui); color: #b5b5b8; background: #2a2a2d; border: 0; padding: 4px 10px; border-radius: 6px; cursor: pointer; letter-spacing: 0; }
+
+.row { display: grid; gap: 1px; background: #2a2a2d; border: 1px solid #2a2a2d; }
+.row.c5 { grid-template-columns: repeat(3, 1fr); }
+.row.c4 { grid-template-columns: repeat(4, 1fr); }
+.row.c2 { grid-template-columns: 1fr 1fr; }
+.cell { background: var(--bg); color: var(--ink); padding: 22px 16px 14px; display: flex; flex-direction: column; align-items: center; gap: 14px; font-family: var(--mono); min-height: 170px; justify-content: space-between; }
+.cell .lab { font-size: 11px; color: var(--ink2); text-align: center; line-height: 1.5; }
+.cell .lab b { color: var(--ink); font-weight: 700; display: block; }
+.cell.pick { box-shadow: inset 0 0 0 1px var(--signal); }
+.cell.pick .lab b::after { content: "  ← 建议"; color: var(--signal); font-weight: 400; }
+.stage { display: flex; align-items: center; justify-content: center; flex: 1; }
+svg { display: block; overflow: visible; }
+
+/* in context */
+.ctx { display: grid; grid-template-columns: 250px 1fr; gap: 18px; }
+.ctx .box { background: #111; border: 1px solid #2a2a2d; padding: 18px; font-family: var(--mono); }
+.ctx .box h4 { font: 11px var(--mono); letter-spacing: .14em; color: #77746e; margin: 0 0 14px; font-weight: 400; }
+.icons { display: flex; flex-direction: column; gap: 18px; align-items: center; }
+.icon { width: 180px; height: 180px; border-radius: 40px; display: grid; place-items: center; position: relative; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.08); }
+.icon.dark { background: radial-gradient(120% 90% at 30% 20%, #1a1a1c, #000); }
+.icon.dark::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(to bottom, rgba(255,255,255,.03) 0 1px, transparent 1px 3px); pointer-events: none; }
+.icon.paper { background: radial-gradient(120% 90% at 30% 20%, #fbfaf6, #e7e3d8); }
+.hero { background: #000; color: var(--ink); padding: 38px 30px 28px; display: flex; flex-direction: column; gap: 16px; }
+.hero .sub { font: 11px var(--mono); letter-spacing: .16em; color: var(--ink3); }
+.small { display: flex; gap: 30px; align-items: flex-end; margin-top: 18px; color: var(--ink); }
+.small figure { margin: 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; font: 11px var(--mono); color: var(--ink2); }
+.band { display: flex; align-items: center; gap: 10px; background: #000; padding: 10px 14px; border: 1px solid #222; }
+.band .l { display: flex; gap: 7px; } .band .l i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.band .l i:nth-child(1) { background: #ff5f57; } .band .l i:nth-child(2) { background: #febc2e; } .band .l i:nth-child(3) { background: #28c840; }
+.band .sp { flex: 1; }
+.band .tag { font: 11px var(--mono); color: var(--ink3); }
+.keys { display: flex; gap: 14px; font: 11.5px var(--mono); color: var(--ink2); background: #000; padding: 10px 14px; border: 1px solid #222; }
+.keys span { display: inline-flex; gap: 5px; align-items: center; }
+.keys b { font-weight: 400; color: var(--ink); background: #2e2e30; padding: 0 5px; }
+.keys.cap b { box-shadow: 0 2px 0 #0f0f10, inset 0 1px 0 #3d3d40; position: relative; top: -1px; }
+.keys.cap .seal b { background: var(--signal); color: #000; box-shadow: 0 2px 0 #7a0f40, inset 0 1px 0 #ff6aab; }
+.keys .seal b { background: var(--signal); color: #000; }
+.where { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #2a2a2d; border: 1px solid #2a2a2d; }
+.where div { background: #111; padding: 14px 16px; }
+.where b { font: 700 12.5px var(--mono); display: block; margin-bottom: 8px; }
+.where ul { margin: 0; padding-left: 18px; color: #a9a6a0; font-size: 12.5px; line-height: 1.75; }
+.where code { font: 12px var(--mono); color: #d8d4cc; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <h1>像素的层次：阴影与次像素（演示）</h1>
+    <nav><a href="app.html">← 整体方向</a><a href="terminal.html">终端窗口 →</a></nav>
+  </div>
+  <p class="lead">只在标记足够大（≥ 24pt）且是“身份”而不是“功能”的地方加层次：图标、文字标、空状态和引导页的大标题。列表里的状态方块、agent 小图、菜单栏图标保持平的——小尺寸上阴影只会糊成一团，反而看不清状态。</p>
+
+  <div class="sec"><span>// 标记 · 六种做法</span><span class="t"><button id="bgBtn">切换深 / 浅底</button></span></div>
+  <div class="row c5" id="markRow"></div>
+
+  <div class="sec"><span>// 文字标 · 四种做法</span></div>
+  <div class="row c2" id="wordRow"></div>
+
+  <div class="sec"><span>// 进行中的小方块 · 次像素拖尾</span></div>
+  <div class="row c2" id="trailRow"></div>
+
+  <div class="sec"><span>// 放进去的样子</span></div>
+  <div class="ctx">
+    <div class="box"><h4>// 应用图标</h4><div class="icons"><div class="icon dark" id="iconDark"></div><div class="icon paper" id="iconPaper"></div></div></div>
+    <div class="box">
+      <h4>// 新建终端的空状态（大标题：信号色错位 + 补半亮）</h4>
+      <div class="hero"><div id="heroWord"></div><div class="sub">// 新建终端 · ⌘T</div></div>
+      <h4 style="margin-top:22px">// 窗口顶边的小标记：平的 vs 1 像素硬阴影（实际大小）</h4>
+      <div class="small">
+        <figure><div class="band"><span class="l"><i></i><i></i><i></i></span><span class="sp" style="width:120px"></span><span class="tag">进行中</span><span id="bandFlat"></span></div>平的</figure>
+        <figure><div class="band"><span class="l"><i></i><i></i><i></i></span><span class="sp" style="width:120px"></span><span class="tag">进行中</span><span id="bandShadow"></span></div>1 像素阴影 + 台阶补半亮</figure>
+      </div>
+      <h4 style="margin-top:22px">// 按键栏的键帽：平的 vs 底边 2px 厚度</h4>
+      <div class="small">
+        <figure><div class="keys"><span><b>⌘T</b>新建</span><span class="seal"><b>⌘⇧V</b>加密发送</span><span><b>⌘W</b>关闭</span></div>平的</figure>
+        <figure><div class="keys cap"><span><b>⌘T</b>新建</span><span class="seal"><b>⌘⇧V</b>加密发送</span><span><b>⌘W</b>关闭</span></div>键帽（像素式，不用模糊阴影）</figure>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec"><span>// 用在哪 / 不用在哪</span></div>
+  <div class="where">
+    <div><b>用</b><ul>
+      <li>应用图标（Mac、iPhone）：1 像素硬阴影 + 台阶补半亮 + 亮车道微辉光</li>
+      <li>文字标 AGENTSWITCH：新建终端空状态、iPhone 配对/引导页、设置里的“关于”——1 像素信号色错位 + 补半亮；第一次出现时从字符噪点里显形（最后一帧是 LCD 次像素），之后静止</li>
+      <li>中号标记（窗口顶边、手机导航栏、菜单下拉的头部，约 20–30pt）：只加 1 像素硬阴影和台阶补半亮</li>
+      <li>进行中的小方块：次像素拖尾（亮 → 半亮 → 暗），看起来走得更顺，不用加快帧率</li>
+      <li>按键栏键帽：底边 2px 厚度；浮层（权限卡、加密发送、菜单）：抖动硬阴影（已有）</li>
+    </ul></div>
+    <div><b>不用</b><ul>
+      <li>菜单栏图标：16pt 单色模板图，只能靠形状和透明度；可以用半透明补台阶，不能加阴影</li>
+      <li>列表里的状态方块、agent 小图（10pt 左右）：保持平的，一眼分辨状态比立体感重要</li>
+      <li>任何要读的字：正文、对话、终端输出、按钮文字</li>
+      <li>LCD 次像素条纹：只在深色、只在大标题上，而且只在显形动画那一刻出现（静止时是普通像素），浅色下不用</li>
+    </ul></div>
+  </div>
+</div>
+
+<script>
+// ---------- bitmaps ----------
+// The mark: one source switched onto three lanes (the icon). Upper-case / S = the lit lane, lower-case = the others.
+const MARK = [
+  "...........AAA",
+  "......aaaaaAAA",
+  ".....a.....AAA",
+  "....a.........",
+  "SSSa.......BBB",
+  "SSSbbbbbbbbBBB",
+  "SSSc.......BBB",
+  "....c.........",
+  ".....c.....CCC",
+  "......cccccCCC",
+  "...........CCC",
+];
+const FONT = {
+  A: [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+  G: [".###.", "#...#", "#....", "#.###", "#...#", "#...#", ".###."],
+  E: ["#####", "#....", "#....", "####.", "#....", "#....", "#####"],
+  N: ["#...#", "##..#", "#.#.#", "#..##", "#...#", "#...#", "#...#"],
+  T: ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
+  S: [".####", "#....", "#....", ".###.", "....#", "....#", "####."],
+  W: ["#...#", "#...#", "#...#", "#.#.#", "#.#.#", "##.##", "#...#"],
+  I: ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "#####"],
+  C: [".###.", "#...#", "#....", "#....", "#....", "#...#", ".###."],
+  H: ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+};
+const word = (w, gap = 1) => { const rows = []; for (let y = 0; y < 7; y++) rows.push([...w].map((c) => FONT[c][y]).join(".".repeat(gap))); return rows; };
+const WORD = word("AGENTSWITCH");
+const WORD2 = word("AGENTSWITCH", 2);   // room for the layers under each letter
+// the same letters with 2-cell strokes on a half-size grid: an offset of one fine cell is half a stroke
+const WORD_FINE = WORD.flatMap((r) => { const w = [...r].map((c) => c + c).join(""); return [w, w]; });
+const LANE = [[3, 4], [4, 3], [5, 2], [6, 1], [7, 1], [8, 1], [9, 1], [10, 1]];
+
+// ---------- renderer ----------
+const on = (rows, x, y) => y >= 0 && y < rows.length && x >= 0 && x < rows[0].length && rows[y][x] !== ".";
+/** Empty cells in an inside corner of the staircase: they get a half-lit pixel (sub-pixel anti-aliasing). */
+function aaCells(rows) {
+  const out = [];
+  rows.forEach((r, y) => [...r].forEach((c, x) => {
+    if (c !== ".") return;
+    const n = on(rows, x, y - 1), s = on(rows, x, y + 1), w = on(rows, x - 1, y), e = on(rows, x + 1, y);
+    const diag = (n && e && !on(rows, x + 1, y - 1)) || (n && w && !on(rows, x - 1, y - 1)) || (s && e && !on(rows, x + 1, y + 1)) || (s && w && !on(rows, x - 1, y + 1));
+    // an inside corner of a diagonal step, not the inside of a closed shape
+    if (diag && [n, s, w, e].filter(Boolean).length === 2) {
+      const src = n && e ? rows[y - 1][x] : n && w ? rows[y - 1][x] : s ? rows[y + 1][x] : rows[y][x];
+      out.push([x, y, src]);
+    }
+  }));
+  return out;
+}
+let uid = 0;
+/**
+ * tone(ch) → fill for a lit cell. opts: px, shadow {dx, dy, fill}, extrude {depth, fill(k)}, aa, lcd, glow {color, r},
+ * packet [[x,y,alpha]] cells drawn over in `packetFill`.
+ */
+function render(rows, o) {
+  const px = o.px ?? 8, id = `f${uid++}`;
+  const ex = o.extrude?.depth ?? 0, sdx = Math.max(o.shadow?.dx ?? 0, 0), sdy = Math.max(o.shadow?.dy ?? 0, 0);
+  const W = (rows[0].length + Math.max(ex, sdx)) * px, H = (rows.length + Math.max(ex, sdy)) * px;
+  const cells = [];
+  rows.forEach((r, y) => [...r].forEach((c, x) => { if (c !== ".") cells.push([x, y, c]); }));
+  const rect = (x, y, fill, op = 1, dx = 0, dy = 0) => `<rect x="${(x + dx) * px}" y="${(y + dy) * px}" width="${px}" height="${px}" fill="${fill}"${op < 1 ? ` opacity="${op}"` : ""}/>`;
+  let body = "";
+  const raised = o.extrude?.only ? cells.filter(([, , c]) => o.extrude.only.includes(c)) : cells;
+  if (o.extrude) for (let k = ex; k >= 1; k--) body += raised.map(([x, y]) => rect(x, y, o.extrude.fill(k), 1, k, k)).join("");
+  if (o.shadow) body += cells.map(([x, y]) => rect(x, y, o.shadow.fill, o.shadow.op ?? 1, o.shadow.dx, o.shadow.dy)).join("");
+  let top = "";
+  if (o.aa) top += aaCells(rows).map(([x, y, c]) => rect(x, y, o.tone(c), 0.42)).join("");
+  if (o.lcd) {
+    const sw = px / 3;
+    const RGB = ["#ff3b3b", "#3bff7a", "#3b7bff"];
+    top += cells.map(([x, y, c]) => {
+      const dim = o.tone(c) !== o.tone("S");
+      return RGB.map((col, i) => `<rect x="${x * px + i * sw + sw * 0.12}" y="${y * px + px * 0.06}" width="${sw * 0.76}" height="${px * 0.88}" fill="${col}" opacity="${dim ? 0.35 : 0.95}"/>`).join("");
+    }).join("");
+  } else {
+    top += cells.map(([x, y, c]) => rect(x, y, o.tone(c))).join("");
+  }
+  if (o.packet) top += o.packet.map(([x, y, a]) => rect(x, y, o.packetFill, a)).join("");
+  const glow = o.glow ? `<defs><filter id="${id}" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${o.glow.r}"/></filter></defs><g filter="url(#${id})" opacity="${o.glow.op ?? .55}">${o.glowCells ? o.glowCells.map(([x, y]) => rect(x, y, o.glow.color)).join("") : cells.filter(([, , c]) => o.tone(c) === o.tone("S")).map(([x, y]) => rect(x, y, o.glow.color)).join("")}</g>` : "";
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges">${glow}${body}${top}</svg>`;
+}
+
+const css = (v) => getComputedStyle(document.body).getPropertyValue(v).trim();
+const markTone = (lightBg) => (c) => ("aAS".includes(c) ? (lightBg ? "#151413" : "#e9e6df") : (lightBg ? "#a29d93" : "#5b5955"));
+let light = false;
+
+function drawMarks() {
+  const tone = markTone(light);
+  const shadowFill = light ? "#c9c3b6" : "#2c2a28";
+  const variants = [
+    ["平的", "现在的样子", {}],
+    ["硬阴影", "右下错 1 像素，深一档", { shadow: { dx: 1, dy: 1, fill: shadowFill } }],
+    ["台阶补半亮", "斜线台阶里补半亮像素（次像素抗锯齿）", { aa: true }],
+    ["硬阴影 + 补半亮", "两样叠在一起：有了一层底，斜线也顺了", { aa: true, shadow: { dx: 1, dy: 1, fill: shadowFill }, glow: light ? null : { color: "#e9e6df", r: 3, op: .22 }, pick: true }],
+    ["亮车道立起来", "只有源点和亮着的车道有 2 层厚度；试过，这个尺寸下显得挤", { aa: true, extrude: { depth: 2, only: "aAS", fill: (k) => (light ? ["#b9b2a3", "#d3cdc0"][k - 1] : ["#3a3835", "#1c1b1a"][k - 1]) } }],
+    ["LCD 次像素", "每个像素拆成 R/G/B 三条，外加辉光；只在深色大标题的显形那一刻", { lcd: true, glow: { color: "#ffffff", r: 4, op: .45 }, darkOnly: true }],
+  ];
+  document.getElementById("markRow").innerHTML = variants.map(([n, d, o]) => {
+    const disabled = o.darkOnly && light;
+    const svg = disabled ? `<div style="font:11px var(--mono);color:var(--ink3)">浅色下不用</div>` : render(MARK, { px: 7, tone, ...o });
+    return `<div class="cell ${light ? "light" : ""} ${o.pick ? "pick" : ""}"><div class="stage">${svg}</div><div class="lab"><b>${n}</b>${d}</div></div>`;
+  }).join("");
+}
+
+function drawWords() {
+  const ink = "#e9e6df";
+  const W = [
+    ["平的", "", { px: 5, tone: () => ink }],
+    ["信号色错位 + 补半亮", "笔画 2 格粗，粉色层右下错 1 个细格（半个笔画），像印刷套色没对准；补半亮让 G、S、C 的圆角顺一点", { px: 3, rows: WORD_FINE, tone: () => ink, aa: true, shadow: { dx: 1, dy: 1, fill: "#ff2e88" }, pick: true }],
+    ["厚度 + 信号色错位", "字距放宽一格，深灰 1 层厚度再垫一层粉；试过，字母底下拖出“腿”，偏乱", { px: 5, rows: WORD2, tone: () => ink, aa: true, extrude: { depth: 2, fill: (k) => ["#3a3835", "#ff2e88"][k - 1] } }],
+    ["LCD 次像素 + 辉光", "显形动画的最后一帧：像凑近看屏幕，随后退成左边那种", { px: 5, tone: () => ink, lcd: true, glow: { color: "#ffffff", r: 3.2, op: .5 } }],
+  ];
+  document.getElementById("wordRow").innerHTML = W.map(([n, d, o]) =>
+    `<div class="cell ${o.pick ? "pick" : ""}" style="min-height:150px"><div class="stage">${render(o.rows ?? WORD, o)}</div><div class="lab"><b>${n}</b>${d}</div></div>`).join("");
+  document.getElementById("heroWord").innerHTML = render(WORD_FINE, { px: 3, tone: () => ink, aa: true, shadow: { dx: 1, dy: 1, fill: "#ff2e88" } });
+}
+
+// the busy block along the lit lane: flat vs sub-pixel trail
+let t = 0;
+function drawTrail() {
+  const tone = markTone(false);
+  const i = t % LANE.length;
+  const at = (k) => LANE[(i - k + LANE.length * 4) % LANE.length];
+  const flat = [[...LANE[i], 1], [...LANE[(i + 1) % LANE.length], 1]];
+  const trail = [[...at(0), 1], [...at(1), .55], [...at(2), .25]];
+  const cyan = "#2ee6ff";
+  document.getElementById("trailRow").innerHTML =
+    `<div class="cell"><div class="stage">${render(MARK, { px: 7, tone, packet: flat, packetFill: cyan })}</div><div class="lab"><b>平的</b>两格一起跳</div></div>` +
+    `<div class="cell pick"><div class="stage">${render(MARK, { px: 7, tone, aa: true, packet: trail, packetFill: cyan, glow: { color: cyan, r: 3, op: .6 }, glowCells: [at(0)] })}</div><div class="lab"><b>次像素拖尾</b>亮 → 半亮 → 暗，头部一点青色辉光</div></div>`;
+  document.getElementById("bandFlat").innerHTML = render(MARK, { px: 2, tone, packet: flat, packetFill: cyan });
+  document.getElementById("bandShadow").innerHTML = render(MARK, { px: 2, tone, aa: true, shadow: { dx: 1, dy: 1, fill: "#2c2a28" }, packet: trail, packetFill: cyan });
+}
+
+function drawIcons() {
+  document.getElementById("iconDark").innerHTML = render(MARK, { px: 9, tone: markTone(false), aa: true, shadow: { dx: 1, dy: 1, fill: "#2c2a28" }, glow: { color: "#e9e6df", r: 4, op: .28 } });
+  document.getElementById("iconPaper").innerHTML = render(MARK, { px: 9, tone: markTone(true), aa: true, shadow: { dx: 1, dy: 1, fill: "#cfc9bc" } });
+}
+
+document.getElementById("bgBtn").addEventListener("click", () => { light = !light; drawMarks(); });
+drawMarks(); drawWords(); drawIcons(); drawTrail();
+setInterval(() => { t++; drawTrail(); }, 120);
+</script>
+</body>
+</html>

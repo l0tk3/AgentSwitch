@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>terminals — AgentSwitch</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/ui/vendor/xterm.css">
+<link rel="stylesheet" href="/ui/terminal.css">
+</head>
+<body>
+<aside class="side" id="side">
+  <div class="side-band">
+    <a class="console-link" href="/ui" id="consoleLink">console</a>
+    <span class="grow"></span>
+    <span class="band-tag" id="markTag"></span>
+    <span class="band-mark" id="mark"></span>
+  </div>
+  <div class="side-scroll"><div id="groups" class="groups"></div></div>
+  <div class="keybar">
+    <button id="newBtn"><b>⌘T</b>new</button>
+    <button id="closeBtn"><b>⌘W</b>close</button>
+  </div>
+</aside>
+
+<main class="main">
+  <header class="band" id="band">
+    <button class="menu-btn" id="menuBtn" aria-label="terminals">≡</button>
+    <span class="band-name" id="bandName"></span>
+    <span class="band-status" id="bandStatus"></span>
+  </header>
+
+  <section class="stage" id="stage">
+    <div class="screen" id="screen"></div>
+    <div class="scan" id="scan"></div>
+    <div class="link-hint" id="linkHint" hidden></div>
+    <div class="toasts" id="toasts"></div>
+    <div class="notice box" id="notice" hidden></div>
+    <div class="loading" id="loading" hidden><span class="spin" aria-hidden="true">⠋</span><span id="loadingText"></span></div>
+
+    <div class="create" id="create" hidden>
+      <div class="create-card">
+        <div class="wordmark" id="wordmark"></div>
+        <div class="label">// new terminal</div>
+        <div class="agents" id="agents"></div>
+        <label class="field">
+          <span class="label">// model</span>
+          <span class="select"><select id="model"></select></span>
+        </label>
+        <label class="field">
+          <span class="label">// folder</span>
+          <span class="folder">
+            <span class="prompt" aria-hidden="true">❯</span>
+            <input id="cwd" list="folders" spellcheck="false" autocomplete="off">
+            <button class="btn line" id="chooseFolder" type="button" hidden>choose…</button>
+          </span>
+          <datalist id="folders"></datalist>
+        </label>
+        <div class="field">
+          <span class="label">// permissions</span>
+          <div class="radios" id="modes"></div>
+        </div>
+        <div class="create-foot">
+          <span class="error" id="createError"></span>
+          <button class="btn" id="createCancel" hidden>cancel <kbd>esc</kbd></button>
+          <button class="btn pri" id="createStart">[ start <kbd>↩</kbd> ]</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <button class="sealbar" id="sealBar" title="密码与令牌在发送前加密，agent 仅接收密文。" hidden><span class="lock" id="sealLock"></span><span class="word">encrypt &amp; send</span><span class="grow"></span><kbd>⌘⇧V</kbd></button>
+
+  <div class="composer-layer">
+  <div class="composer box" id="composer" hidden>
+    <div class="composer-head"><span class="lock" id="composerLock"></span><span>encrypt &amp; send</span><span class="grow"></span><span class="to" id="composerTo"></span></div>
+    <textarea id="composerText" rows="3" spellcheck="false" placeholder="message"></textarea>
+    <div class="composer-foot">
+      <span class="hint" id="composerHint">esc cancel</span>
+      <button class="btn pri" id="composerSend">[ send <kbd>↩</kbd> ]</button>
+    </div>
+  </div>
+  </div>
+
+  <div class="keys" id="keys">
+    <button data-key="esc">esc</button><button data-key="tab">tab</button><button data-key="shift-tab">⇧tab</button>
+    <button data-key="up">↑</button><button data-key="down">↓</button><button data-key="left">←</button><button data-key="right">→</button>
+    <button data-key="enter">↩</button><button data-key="ctrl-c">⌃C</button>
+    <button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button>
+  </div>
+</main>
+
+<div class="menu box" id="menu" hidden></div>
+
+<div class="sheet" id="sheet" hidden>
+  <div class="sheet-card box">
+    <h2 id="sheetTitle"></h2>
+    <p id="sheetBody"></p>
+    <label class="check" id="sheetCheck" hidden><input type="checkbox" id="sheetCheckbox"> <span id="sheetCheckText"></span></label>
+    <div class="sheet-foot">
+      <button class="btn line" id="sheetCancel">cancel</button>
+      <button class="btn pri" id="sheetConfirm"></button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/ui/terminal.js"></script>
+</body>
+</html>
