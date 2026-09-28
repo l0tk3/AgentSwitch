@@ -140,6 +140,7 @@ final class EventDescriberTests: XCTestCase {
         XCTAssertEqual(EventDescriber.line(try event("feedback", ["version": 2])), "反馈记录（格式待核对）")
         XCTAssertEqual(EventDescriber.line(try event("step", ["action": "intake", "sealingMs": 2379, "durationMs": 2390])), "已接收 · 加密敏感字段 2.4 秒")
         XCTAssertEqual(EventDescriber.line(try event("step", ["n": 0, "action": "plan", "model": "claude-code/m", "reason": "要多步"])), "多步任务，由 M 规划：要多步")
+        XCTAssertEqual(EventDescriber.line(try event("step", ["n": 0, "action": "plan", "source": "retry", "model": "opencode-serve:dispatcher", "timeoutMs": 45000])), "规划调用超时（45 秒），正在重试一次")
         XCTAssertEqual(EventDescriber.line(try event("cleaned", ["workDirRemoved": true, "artifacts": 2])), "已清理临时目录，保留 2 个文件")
         XCTAssertEqual(EventDescriber.line(try event("checkpoint", ["purpose": "do", "ok": true])), "已保存进展 · 执行 · 本步已结束")
     }

@@ -141,6 +141,9 @@ export function acceptMessage(i: AcceptInput): string {
 
 /** Supervisor on top of a text-only Router (same model as dispatch); every call has its own timeout and never throws. */
 export function routerSupervisor(router: Router, config: SupervisorConfig, timeoutMs = SUPPORT_CALL_TIMEOUT_MS): Supervisor {
+  // One shared deadline for the whole ask (both tries): a format hiccup on the first reply gets one more chance to come
+  // back as valid JSON — the same one retry the dispatch loop already has (router/ask.ts) — so a stray reply no longer
+  // turns a finished task into partial. A timeout or a cancellation ends it at once, with no retry.
   async function ask<T>(system: string, task: string, cwd: string, schema: z.ZodType<T>, outer?: AbortSignal): Promise<{ value: T | null; ms: number; error: string | null }> {
     const controller = new AbortController();
     const combined = AbortSignal.any([controller.signal, ...(outer ? [outer] : [])]);
@@ -152,11 +155,15 @@ export function routerSupervisor(router: Router, config: SupervisorConfig, timeo
         onAbort = () => reject(new Error("supervisor cancelled or timed out"));
         combined.addEventListener("abort", onAbort, { once: true });
       });
-      combined.throwIfAborted();
-      const reply = await Promise.race([router.route({ task, cwd, system: `${COMMUNICATION_GUIDANCE}\n\n${system}` }, combined), aborted]);
-      combined.throwIfAborted();
-      const value = parse(schema, reply.text);
-      return { value, ms: Date.now() - started, error: value ? null : "调度模型回复格式无效" };
+      for (let tries = 1; tries <= 2; tries++) {
+        combined.throwIfAborted();
+        const message = tries === 1 ? task : `${task}\n\n上一次回复的格式无效（不是符合要求的 JSON 对象）。请只回复一个有效的 JSON 对象。`;
+        const reply = await Promise.race([router.route({ task: message, cwd, system: `${COMMUNICATION_GUIDANCE}\n\n${system}`, ...(tries > 1 ? { previousError: "调度模型回复格式无效" } : {}) }, combined), aborted]);
+        combined.throwIfAborted();
+        const value = parse(schema, reply.text);
+        if (value) return { value, ms: Date.now() - started, error: null };
+      }
+      return { value: null, ms: Date.now() - started, error: "调度模型回复格式无效" };
     } catch {
       return { value: null, ms: Date.now() - started, error: outer?.aborted ? "调度模型调用已取消" : controller.signal.aborted ? "调度模型调用超时" : "调度模型暂不可用" };
     } finally {

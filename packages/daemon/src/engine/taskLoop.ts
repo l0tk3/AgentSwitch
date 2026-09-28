@@ -125,6 +125,11 @@ export class TaskLoop {
     return !signal?.aborted && !!current && !TERMINAL.has(current.status);
   }
 
+  /** The loop model timed out once and is asked again (loop-v0 §8): shown, so the longer wait is not silence. */
+  private retrying(task: Task, planner: Router | null): () => void {
+    return () => this.ctx.emit(task.id, "step", { n: 0, action: "plan", source: "retry", model: (planner ?? this.d.engine.router).name, timeoutMs: this.loopTimeout(planner) });
+  }
+
   private loopTimeout(planner: Router | null): number {
     return planner ? this.d.engine.targets.router.planner_timeout_ms : this.d.engine.targets.router.timeout_ms;
   }
@@ -205,7 +210,7 @@ export class TaskLoop {
     const planner = chosen.router;
     this.ctx.emit(task.id, "step", { n: 0, action: "plan", model: `${chosen.target.harness}/${chosen.target.model}`, pick, reason: st.current.decision?.reason ?? "" });
     const note: StepRecord = { kind: "note", text: `The dispatcher triaged this as a multi-step task: ${st.current.decision?.reason || "(no reason given)"}. Plan it from the start.` };
-    const r = await nextAction(planner, this.d.routeDeps(), { req: this.request(task, composed), steps: [note], used: 0, budget: st.budget, exclude: [], timeoutMs: this.loopTimeout(planner), transfer: st.transfer }, signal);
+    const r = await nextAction(planner, this.d.routeDeps(), { req: this.request(task, composed), steps: [note], used: 0, budget: st.budget, exclude: [], timeoutMs: this.loopTimeout(planner), transfer: st.transfer }, signal, this.retrying(task, planner));
     if (!this.active(task.id, signal)) return null;
     if (!r.action) return this.planningFailure(task, st, r, "initial_plan", `${chosen.target.harness}/${chosen.target.model}`);
     return this.applyAction(task, composed, { ...st, planner, loopCalls: 1 }, r, null, signal);
@@ -306,7 +311,7 @@ export class TaskLoop {
       if (!more) { this.incomplete(task, base, "调度预算已用尽，失败原因和剩余工作尚未处理"); return null; }
       base = { ...base, loopBudget: base.loopBudget + MAX_LOOP_STEPS };
     }
-    const r = await nextAction(st.planner ?? deps.router, deps, { req, steps: st.steps, used: st.dispatches, budget: st.budget, exclude: step.exclude, timeoutMs: this.loopTimeout(st.planner), transfer: st.transfer }, signal);
+    const r = await nextAction(st.planner ?? deps.router, deps, { req, steps: st.steps, used: st.dispatches, budget: st.budget, exclude: step.exclude, timeoutMs: this.loopTimeout(st.planner), transfer: st.transfer }, signal, this.retrying(task, st.planner));
     if (!this.active(task.id, signal)) return null;
     const asked = this.ctx.store.updateTask(task.id, { routerAsks: current.routerAsks + 1 });
     return this.applyAction(task, composed, { ...base, current: asked, loopCalls: st.loopCalls + 1 }, r, { failed: attempt, reason, exclude: step.exclude }, signal);
@@ -323,7 +328,7 @@ export class TaskLoop {
     }
     this.ctx.store.updateTask(task.id, { status: "routing" });
     const deps = this.d.routeDeps();
-    const r = await nextAction(st.planner ?? deps.router, deps, { req: this.request(task, composed), steps: st.steps, used: st.dispatches, budget: st.budget, exclude: excludedTargets(st.attempts), timeoutMs: this.loopTimeout(st.planner), transfer: st.transfer }, signal);
+    const r = await nextAction(st.planner ?? deps.router, deps, { req: this.request(task, composed), steps: st.steps, used: st.dispatches, budget: st.budget, exclude: excludedTargets(st.attempts), timeoutMs: this.loopTimeout(st.planner), transfer: st.transfer }, signal, this.retrying(task, st.planner));
     return this.applyAction(task, composed, { ...st, loopCalls: st.loopCalls + 1 }, r, null, signal);
   }
 

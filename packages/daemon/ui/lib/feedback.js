@@ -26,7 +26,7 @@ export function feedback(t, events) {
   const routed = last("routed");
   const waiting = last("waiting");
   const dispatched = last("dispatched");
-  const planning = [...events].reverse().find((e) => e.type === "step" && e.payload.action === "plan" && !["error", "none"].includes(e.payload.source));
+  const planning = [...events].reverse().find((e) => e.type === "step" && e.payload.action === "plan" && !["error", "none", "retry"].includes(e.payload.source));
   if (waiting && waiting.seq > Math.max(dispatched?.seq || 0, routed?.seq || 0, planning?.seq || 0)) return { stage: 2, tone: "", label: WAIT_LABEL(waiting.payload), detail: routed && routed.payload.verdict && routed.payload.verdict.ok ? `将交给 ${routed.payload.verdict.harness}/${routed.payload.verdict.model}` : "" };
   if (t.status === "routing" && (planning || dispatched)) return { stage: 2, tone: "", label: dispatched ? "正在规划下一步…" : "规划中…", detail: `${planning?.payload.model || "调度模型"} 正在规划${dispatched ? "后续步骤，已完成的步骤已保留" : "执行步骤，尚未派发给执行器"}` };
   if (routed && routed.payload.verdict && routed.payload.verdict.ok) return { stage: 2, tone: "", label: `已交给 ${routed.payload.verdict.harness}/${routed.payload.verdict.model}`, detail: routed.payload.routerMs ? `调度耗时 ${(routed.payload.routerMs / 1000).toFixed(1)} 秒` : "" };

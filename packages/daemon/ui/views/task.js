@@ -28,7 +28,7 @@ export function eventLine(ev) {
   switch (ev.type) {
     case "queued": return "已排队";
     case "step": return p.action === "intake" ? `已接收 · 敏感字段识别与加密 ${((p.sealingMs || 0) / 1000).toFixed(1)} 秒 · 从接收到创建任务共 ${((p.durationMs || 0) / 1000).toFixed(1)} 秒`
-      : p.action === "plan" ? (p.source === "error" ? planningFailure(p) : `多步任务，交由规划模型 ${p.model || ""}${p.reason ? "：" + p.reason : ""}`)
+      : p.action === "plan" ? (p.source === "error" ? planningFailure(p) : p.source === "retry" ? `规划调用超时（${Math.round((p.timeoutMs || 0) / 1000)} 秒），正在重试一次` : `多步任务，交由规划模型 ${p.model || ""}${p.reason ? "：" + p.reason : ""}`)
       : p.action === "dispatch" ? `第 ${p.n} 步：派发${p.purpose === "research" ? "调研（只读）" : p.purpose === "verify" ? "复查（只读）" : ""} → ${p.target ? p.target.harness + "/" + p.target.model : "无目标"}${p.reason ? "，" + p.reason : ""}`
       : p.action === "ask_user" ? `第 ${p.n} 步：向你提问：${p.question}`
       : p.action === "finish" ? `第 ${p.n} 步：收尾检查${p.reason ? "，" + p.reason : ""}` : `第 ${p.n} 步：${p.action}`;

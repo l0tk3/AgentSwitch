@@ -9,6 +9,7 @@ import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import type { ExecutionInput } from "../src/executors/types.js";
 import type { ExecutionOutcome } from "../src/core/outcome.js";
+import type { Router } from "../src/core/modelCall.js";
 import { MAX_LOOP_STEPS, nextAction, parseLoopReply } from "../src/router/loop.js";
 import { evidenceExcerpt } from "../src/core/evidence.js";
 import { echoRouter, type EchoScript } from "../src/router/routers/echo.js";
@@ -288,10 +289,23 @@ describe("checkpoints and bounded observations", () => {
     expect(String(checkpoint.result).length).toBeLessThanOrEqual(20_000);
   });
 
-  it("the loop model has a deadline even if its implementation ignores abort", async () => {
+  it("the loop model has a deadline even if its implementation ignores abort, and a timeout is retried once", async () => {
     const f = build({ timeoutMs: 20 });
     const router = { name: "hung fake", route: async () => new Promise<never>(() => {}) };
     const out = await nextAction(router, { router, targets: f.targets, quota: {} }, { req: { task: goal, cwd: f.dir }, steps: [], used: 0, budget: 5, exclude: [] });
-    expect(out).toMatchObject({ action: null, routerError: expect.stringContaining("超时"), failure: { kind: "timeout", tries: 1 } });
+    // both attempts time out: still no action, but the retry shows in the try count
+    expect(out).toMatchObject({ action: null, routerError: expect.stringContaining("超时"), failure: { kind: "timeout", tries: 2 } });
+  });
+
+  it("a planner that times out once, then answers, recovers instead of ending the task", async () => {
+    const f = build({ timeoutMs: 40 });
+    let n = 0;
+    const flaky: Router = { name: "flaky", route: async (_req, signal) => {
+      if (n++ === 0) return new Promise<never>((_r, reject) => signal?.addEventListener("abort", () => reject(new Error("timed out")), { once: true }));
+      return { text: finish(), elapsedMs: 1 };
+    } };
+    const out = await nextAction(flaky, { router: flaky, targets: f.targets, quota: {} }, { req: { task: goal, cwd: f.dir }, steps: [], used: 0, budget: 5, exclude: [] });
+    expect(out.action?.kind).toBe("finish");
+    expect(n).toBe(2);
   });
 });

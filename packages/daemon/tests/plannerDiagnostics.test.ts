@@ -96,14 +96,29 @@ describe("safe loop failure diagnostics", () => {
     });
     const running = direct(router, 30);
     await vi.advanceTimersByTimeAsync(30);   // a per-attempt deadline would still leave the correction 20 ms
+    expect(router.calls).toHaveLength(3);    // so the timeout retry (loop-v0 §8) has already started
+    await vi.advanceTimersByTimeAsync(30);
     const result = await running;
-    expect(result).toMatchObject({ action: null, failure: { kind: "timeout", tries: 2, timeoutMs: 30 } });
-    expect(result.routerMs).toBe(30);
+    expect(result).toMatchObject({ action: null, failure: { kind: "timeout", tries: 3, timeoutMs: 30 } });
+    expect(result.routerMs).toBe(60);
     expect(JSON.stringify(result)).not.toContain(sentinel);
     resolveLate(finish);
     await vi.advanceTimersByTimeAsync(0);
-    expect(router.calls).toHaveLength(2);
+    expect(router.calls).toHaveLength(3);
     expect(result.action).toBeNull();
+  });
+
+  it("a cancellation during the timeout retry ends as cancelled, counting both attempts", async () => {
+    vi.useFakeTimers();
+    const ctl = new AbortController();
+    const hung = fake(() => new Promise<string>(() => {}));
+    const running = direct(hung, 30, ctl.signal);
+    await vi.advanceTimersByTimeAsync(30);   // the first attempt times out; the retry is asking
+    expect(hung.calls).toHaveLength(2);
+    ctl.abort();
+    const result = await running;
+    expect(result).toMatchObject({ action: null, failure: { kind: "cancelled", tries: 2 } });
+    expect(result.routerMs).toBe(30);
   });
 
   it("counts no model attempts when already cancelled and classifies an in-flight cancellation independently", async () => {
@@ -144,7 +159,7 @@ describe("planner failure events and independent deadlines", () => {
       blockCause: kind === "timeout" ? "planner_timeout" : "planner_error" });
     expect(f.runs).toBe(0);
     expect(failures(f.events)).toHaveLength(1);
-    expect(failures(f.events)[0]!.payload).toMatchObject({ stage: "initial_plan", model: "codex/gpt-5.5", failureKind: kind, tries: kind === "timeout" ? 1 : 2, timeoutMs: 30, dispatches: 0 });
+    expect(failures(f.events)[0]!.payload).toMatchObject({ stage: "initial_plan", model: "codex/gpt-5.5", failureKind: kind, tries: 2, timeoutMs: 30, dispatches: 0 });   // a timeout is retried once, a bad reply corrected once
     expect(JSON.stringify({ events: f.events, task: f.store.getTask(task.id) })).not.toContain(sentinel);
   });
 
@@ -170,7 +185,12 @@ describe("planner failure events and independent deadlines", () => {
     await f.engine.idle();
     expect(f.store.getTask(task.id)).toMatchObject({ status: "partial", result: "已保存步骤进展", error: expect.stringContaining("超时") });
     expect(f.runs).toBe(1);
-    expect(failures(f.events)[0]!.payload).toMatchObject({ stage: "next_action", failureKind: "timeout", tries: 1, timeoutMs: 25, dispatches: 1 });
+    expect(failures(f.events)[0]!.payload).toMatchObject({ stage: "next_action", failureKind: "timeout", tries: 2, timeoutMs: 25, dispatches: 1 });
+    // the retry is shown before the failure, so the doubled wait is not silence
+    const retry = f.events.findIndex((e) => e.type === "step" && e.payload.source === "retry");
+    expect(retry).toBeGreaterThan(-1);
+    expect(f.events[retry]!.payload).toMatchObject({ action: "plan", timeoutMs: 25 });
+    expect(retry).toBeLessThan(f.events.indexOf(failures(f.events)[0]!));
   });
 
   it("cancelling the planner discards late success without replacing cancelled with an error terminal", async () => {

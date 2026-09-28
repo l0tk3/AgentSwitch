@@ -104,8 +104,19 @@ export const LOOP_FAILURE_MESSAGE: Readonly<Record<AskFailureKind, string>> = {
 };
 
 /** Ask the loop model what to do next. A dispatch is validated like any routing decision (excluded targets fall to the
- *  default policy); an unusable reply gives `action: null`, never a completion assertion. */
-export async function nextAction(router: Router, deps: RouteDeps, input: NextInput, signal?: AbortSignal): Promise<NextResult> {
+ *  default policy); an unusable reply gives `action: null`, never a completion assertion. A timeout gets one more
+ *  attempt with a fresh deadline before the task stops (loop-v0 §8); a cancellation is never retried. */
+export async function nextAction(router: Router, deps: RouteDeps, input: NextInput, signal?: AbortSignal, onRetry?: () => void): Promise<NextResult> {
+  const first = await nextActionOnce(router, deps, input, signal);
+  if (first.failure?.kind !== "timeout" || signal?.aborted) return first;
+  onRetry?.();   // the screens say so: the wait is about to double
+  const again = await nextActionOnce(router, deps, input, signal);
+  // Diagnostics cover both attempts, whatever the second one did.
+  const routerMs = first.routerMs + again.routerMs;
+  return again.failure ? { ...again, routerMs, failure: { ...again.failure, tries: first.failure.tries + again.failure.tries } } : { ...again, routerMs };
+}
+
+async function nextActionOnce(router: Router, deps: RouteDeps, input: NextInput, signal?: AbortSignal): Promise<NextResult> {
   const started = Date.now();
   const timeoutMs = input.timeoutMs ?? deps.targets.router.timeout_ms;
   let tries = 0;

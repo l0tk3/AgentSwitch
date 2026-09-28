@@ -52,6 +52,17 @@ describe("supervisor: floor and parsing", () => {
     const thrown = routerSupervisor({ name: "t", route: async () => { throw new Error("boom"); } }, cfg);
     expect(await thrown.approve({ brief: "b", action: "Bash: ls", evidence: "", recentEvents: [], sideEffects: "", cwd: "/w" })).toMatchObject({ decision: "ask_user", reason: "调度模型暂不可用" });
   });
+
+  it("a stray first reply gets one retry, so a valid second reply still accepts (no task poisoned by a format hiccup)", async () => {
+    let n = 0;
+    const bodies: string[] = [];
+    // first reply is garbage, second is valid JSON; the retry must be told what was wrong
+    const flaky: Router = { name: "f", route: async (req) => { bodies.push(req.task); const text = n++ === 0 ? "sorry, here you go: (no json)" : JSON.stringify({ accepted: true, missing: [], note: "ok" }); return { text, elapsedMs: 1 }; } };
+    const sup = routerSupervisor(flaky, cfg);
+    expect(await sup.accept({ brief: "b", result: "done", diff: "", outFiles: [], cwd: "/w" })).toMatchObject({ accepted: true, source: "router" });
+    expect(n).toBe(2);
+    expect(bodies[1]).toContain("上一次回复的格式无效");
+  });
 });
 
 type Fake = Supervisor & { calls: string[] };

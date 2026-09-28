@@ -178,6 +178,8 @@ public enum EventDescriber {
         case "intake":
             return "已接收" + (p["sealingMs"]?.number.map { " · 加密敏感字段 \(seconds($0)) 秒" } ?? "")
         case "plan" where p["source"]?.string == "error": return planningFailure(p)
+        case "plan" where p["source"]?.string == "retry":
+            return "规划调用超时\(p["timeoutMs"]?.number.map { "（\(Int(($0 / 1000).rounded())) 秒）" } ?? "")，正在重试一次"
         case "plan": return "多步任务，由 \(p["model"]?.string.map(ModelName.display) ?? "?") 规划\(p["reason"]?.string.map { "：" + $0 } ?? "")"
         case "dispatch":
             guard let to = p["target"].flatMap({ t in t["harness"]?.string.map { _ in target(t) } }) else { return "第 \(n) 步：无可用模型" }
