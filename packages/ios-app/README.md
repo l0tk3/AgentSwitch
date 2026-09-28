@@ -89,7 +89,8 @@ Requires Xcode 26.4 or newer with its iOS platform installed (Xcode › Settings
 SDK runs on current iOS 27 phones; building against the iOS 27 SDK or running an iOS 27 simulator needs Xcode 27.
 The terminals tab draws with [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) (pinned to 1.18.x: from 1.19 it
 runs a build-tool plugin of its own), whose Metal shaders need Xcode's Metal Toolchain
-(`xcodebuild -downloadComponent MetalToolchain`, once).
+(`xcodebuild -downloadComponent MetalToolchain`, once). `Package.resolved` is shared by the app project and the
+package: `swift test` rewrites it without the app's pins (SwiftTerm), so commit the version the Xcode build writes.
 
 ```bash
 cd packages/ios-app
