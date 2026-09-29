@@ -230,6 +230,7 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 <div class="ctl">
   <div class="seg" id="variant"><button data-v="tree" class="on">目录树</button><button data-v="ls">列表</button></div>
   <div class="seg" id="lang"><button data-l="en" class="on">English</button><button data-l="zh">正式中文</button></div>
+  <div class="seg" id="iconWeight"><button data-w="fine" class="on">工具栏图标：细像素</button><button data-w="coarse">粗像素</button></div>
   <button data-do="perm">模拟：权限请求</button>
   <button data-do="switch">切换终端</button>
   <button data-do="seal">加密发送 ⌘⇧V</button>
@@ -242,9 +243,9 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 
 <div class="win" id="win">
   <div class="bar"><div class="lights"><i></i><i></i><i></i></div>
-    <button class="tb" id="sidebtn" data-do="hide" title="list ⌘B"><svg width="19" height="15" viewBox="0 0 19 15" fill="none" stroke="currentColor" stroke-width="1.4"><rect x=".7" y=".7" width="17.6" height="13.6" rx="3.2"/><path d="M6.6 .7v13.6M2.6 4h2M2.6 6.4h2M2.6 8.8h2" stroke-linecap="round"/></svg></button>
+    <button class="tb" id="sidebtn" data-do="hide" title="list ⌘B"><span id="icoSide"></span></button>
     <div class="title" id="title"></div>
-    <div class="end"><button class="tb" data-do="create" title="new terminal ⌘T"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7.5 1.5v12M1.5 7.5h12"/></svg></button><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
+    <div class="end"><button class="tb" data-do="create" title="new terminal ⌘T"><span id="icoNew"></span></button><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
   </div>
   <aside class="side">
     <div class="list v-tree" id="list"></div>
@@ -705,6 +706,32 @@ document.addEventListener("click", (e) => {
 // The list's edge: dragged, it follows the pointer; let go near the left and the list closes.
 const win = document.getElementById("win");
 const sideIcon = () => undefined;   // the toolbar's list button is one icon either way, as a Mac app's
+// The toolbar's icons, pixel drawn in two weights to compare: fine (1 pt cells, the weight of the system's line icons
+// beside the traffic lights, corners stepped) and coarse (2 pt cells, the list's own marks).
+const TOOL_ICONS = {
+  fine: { px: 1,
+    side: [".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#",
+           "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", ".################."],
+    plus: ["......#......", "......#......", "......#......", "......#......", "......#......", "......#......", "#############",
+           "......#......", "......#......", "......#......", "......#......", "......#......", "......#......"] },
+  coarse: { px: 2,
+    side: [".#######.", "#.#.....#", "#.#.....#", "#.#.....#", "#.#.....#", "#.#.....#", ".#######."],
+    plus: ["...#...", "...#...", "...#...", "#######", "...#...", "...#...", "...#..."] },
+};
+let toolWeight = "fine";
+function toolIcons() {
+  const set = TOOL_ICONS[toolWeight];
+  document.getElementById("icoSide").innerHTML = sprite(set.side, { px: set.px });
+  document.getElementById("icoNew").innerHTML = sprite(set.plus, { px: set.px });
+}
+toolIcons();
+document.getElementById("iconWeight").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-w]");
+  if (!b) return;
+  toolWeight = b.dataset.w;
+  for (const x of document.querySelectorAll("#iconWeight button")) x.classList.toggle("on", x === b);
+  toolIcons();
+});
 let sideWidth = 300;
 document.getElementById("grip").addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
