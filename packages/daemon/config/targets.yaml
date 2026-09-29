@@ -99,7 +99,8 @@ categories:
 router:
   harness: opencode
   model: deepseek/deepseek-flash
-  timeout_ms: 45000                # the agent reads the repo first; a real run took 19 s
+  effort: high                     # the model's thinking: DeepSeek V4.1 Flash has none | low | high | max (2026-09-29, user: raise it)
+  timeout_ms: 90000                # the agent reads the repo first; a real run took 19 s, 27 s thinking at high (2026-09-29)
   planner_timeout_ms: 120000       # separate budget for planner startup and one JSON correction
   min_confidence: 0.5
   quota_threshold: 0.05

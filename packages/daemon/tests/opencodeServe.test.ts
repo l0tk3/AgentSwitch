@@ -6,9 +6,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeServer, serveConfig, serveRouter } from "../src/router/routers/opencodeServe.js";
 
 /** A fake `opencode serve`: sessions, async prompts that complete after a tick, message lists with an idle marker. */
-function fakeServe(): { server: Server; port: () => number; calls: string[]; deleted: string[] } {
+function fakeServe(): { server: Server; port: () => number; calls: string[]; deleted: string[]; models: unknown[] } {
   const calls: string[] = [];
   const deleted: string[] = [];
+  /** The model of each session created, as sent. */
+  const models: unknown[] = [];
+  let modelLooks = 0;
   const sessions = new Map<string, { messages: Record<string, unknown>[] }>();
   let n = 0;
   const server = createServer((req, res) => {
@@ -21,7 +24,12 @@ function fakeServe(): { server: Server; port: () => number; calls: string[]; del
       const url = req.url ?? "";
       const json = (code: number, v: unknown) => { res.statusCode = code; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(v)); };
       if (req.method === "GET" && url === "/api/config") return json(200, []);
-      if (req.method === "POST" && url === "/api/session") { const id = `ses_${++n}`; sessions.set(id, { messages: [] }); return json(200, { data: { id, agent: JSON.parse(body).agent } }); }
+      // A cold location lists no models the first time (as OpenCode does), then DeepSeek Flash with its variants.
+      if (req.method === "GET" && url.startsWith("/api/model?")) {
+        if (modelLooks++ === 0) return json(200, { data: [] });
+        return json(200, { data: [{ providerID: "deepseek", id: "deepseek-flash", variants: [{ id: "none" }, { id: "low" }, { id: "high" }, { id: "max" }] }, { providerID: "opencode", id: "plain", variants: [] }] });
+      }
+      if (req.method === "POST" && url === "/api/session") { const id = `ses_${++n}`; sessions.set(id, { messages: [] }); models.push(JSON.parse(body).model); return json(200, { data: { id, agent: JSON.parse(body).agent } }); }
       const m = /^\/api\/session\/(ses_\d+)(\/prompt|\/message)?$/.exec(url);
       if (!m) return json(404, { error: "no route" });
       const s = sessions.get(m[1]!);
@@ -41,7 +49,7 @@ function fakeServe(): { server: Server; port: () => number; calls: string[]; del
       return json(404, { error: "no route" });
     });
   });
-  return { server, port: () => (server.address() as { port: number }).port, calls, deleted };
+  return { server, port: () => (server.address() as { port: number }).port, calls, deleted, models };
 }
 
 describe("OpenCodeServer client", () => {
@@ -71,6 +79,28 @@ describe("OpenCodeServer client", () => {
     expect(fake.calls.some((c) => c === "POST /api/session")).toBe(true);
     const ac = new AbortController(); ac.abort(new Error("stop"));
     await expect(s.ask("oracle", "deepseek/deepseek-flash", "x", "/tmp", ac.signal)).rejects.toThrow();
+  });
+
+  it("the router's effort goes as the model's variant when the model has one by that name, else not at all", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-ocs-"));
+    const lines: string[] = [];
+    const s = new OpenCodeServer({ binary: "/nonexistent", home, gateHome: "/h/.secret-gate", endpoint: { url: `http://127.0.0.1:${fake.port()}`, password: "pw" }, log: (l) => lines.push(l) });
+    await s.start();
+    const input = { task: "TASK", cwd: "/tmp", system: "SYSTEM" };
+    const from = fake.models.length;
+    await serveRouter(s, "dispatcher", "deepseek/deepseek-flash", "high").route(input, new AbortController().signal);
+    await serveRouter(s, "oracle", "deepseek/deepseek-flash", "ultra").route(input, new AbortController().signal);   // not one of its levels
+    await serveRouter(s, "oracle", "opencode/plain", "high").route(input, new AbortController().signal);            // a model without levels
+    await serveRouter(s, "oracle", "deepseek/deepseek-flash").route(input, new AbortController().signal);           // none set
+    expect(fake.models.slice(from)).toEqual([
+      { providerID: "deepseek", id: "deepseek-flash", variant: "high" },
+      { providerID: "deepseek", id: "deepseek-flash" },
+      { providerID: "opencode", id: "plain" },
+      { providerID: "deepseek", id: "deepseek-flash" },
+    ]);
+    // OpenCode would fail the turn for a variant the model lacks: said once per call, never sent.
+    expect(lines.join("\n")).toContain('router effort "ultra" is not a variant of deepseek/deepseek-flash (none, low, high, max)');
+    expect(fake.calls.filter((c) => c.startsWith("GET /api/model?")).length).toBeLessThanOrEqual(3);   // looked up once per model, after the cold look
   });
 
   it("start() fails fast when the binary is missing", async () => {

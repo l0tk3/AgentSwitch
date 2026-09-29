@@ -48,8 +48,9 @@ router: {harness: x, model: a, default: {harness: x, model: a}}`;
   it("default models and the router default are listed", () => {
     for (const h of Object.values(t.harnesses)) expect(modelKey(h, h.default_model)).toBeDefined();
     expect(t.router.default).toEqual({ harness: "opencode", model: "deepseek/deepseek-flash" });
-    expect(t.router.timeout_ms).toBe(45_000);
+    expect(t.router.timeout_ms).toBe(90_000);   // thinking at high (2026-09-29)
     expect(t.router.planner_timeout_ms).toBe(120_000);
+    expect(t.router.effort).toBe("high");
   });
 
   it("accepts an independent planner deadline and rejects nonpositive values", () => {

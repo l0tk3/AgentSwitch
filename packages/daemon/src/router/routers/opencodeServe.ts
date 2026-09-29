@@ -16,6 +16,8 @@ import type { Router, RouterInput, RouterReply } from "../../core/modelCall.js";
 
 export const DEFAULT_OPENCODE_PORT = 4712;
 const POLL_MS = 250;
+/** A cold location lists no models at first: looks before giving up on a model's variants. */
+const VARIANT_LOOKS = 20;
 /** Response text quoted in an API error. */
 const ERROR_BODY_CHARS = 200;
 const AGENT_PROMPT = "You are an AgentSwitch service agent. Your full instructions come at the head of each message, followed by the material to act on. Follow the instructions exactly and reply only as they say.";
@@ -57,6 +59,8 @@ export class OpenCodeServer {
   private password = "";
   private readonly fetchImpl: typeof fetch;
   private readonly log: (line: string) => void;
+  /** Per model, the variants OpenCode knows for it (its reasoning levels), looked up once. */
+  private readonly variants = new Map<string, Promise<ReadonlySet<string> | null>>();
 
   constructor(private readonly opts: OpenCodeServerOptions) {
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -100,10 +104,39 @@ export class OpenCodeServer {
     return text ? (JSON.parse(text) as Json) : {};
   }
 
-  /** One question, one answer: create a session for the agent/model, prompt, wait for the idle marker, read the text, delete. */
-  async ask(agent: ServeAgent, model: string, text: string, cwd: string, signal: AbortSignal): Promise<string> {
+  /** `effort` when it is one of the model's variants (DeepSeek V4.1 Flash: none, low, high, max), else undefined and a
+   *  log line: OpenCode fails a turn whose variant the model does not have, so an unknown one is never sent. */
+  async variant(model: string, effort: string): Promise<string | undefined> {
+    let known = this.variants.get(model);
+    if (!known) {
+      known = this.lookVariants(model).catch(() => null);
+      this.variants.set(model, known);
+      void known.then((v) => { if (v === null) this.variants.delete(model); });   // not found yet: look again next time
+    }
+    const set = await known;
+    if (set?.has(effort)) return effort;
+    if (set) this.log(`router effort "${effort}" is not a variant of ${model} (${[...set].join(", ") || "none"}): the model's default is used`);
+    return undefined;
+  }
+
+  private async lookVariants(model: string): Promise<ReadonlySet<string> | null> {
     const [providerID, ...rest] = model.split("/");
-    const created = await this.call("POST", "/api/session", { agent, model: { providerID, id: rest.join("/") || model }, location: { directory: cwd } }, signal);
+    const id = rest.join("/") || model;
+    const loc = `directory=${encodeURIComponent(this.opts.home)}`;
+    for (let i = 0; i < VARIANT_LOOKS; i++) {
+      const listed = ((await this.call("GET", `/api/model?${loc}`)).data as Json[] | undefined) ?? [];
+      const entry = listed.find((m) => m.providerID === providerID && m.id === id);
+      if (entry) return new Set(((entry.variants as Json[] | undefined) ?? []).map((v) => String(v.id)));
+      if (listed.length) return new Set();   // loaded, and the model is not there
+      await sleep(POLL_MS);
+    }
+    return null;
+  }
+
+  /** One question, one answer: create a session for the agent/model, prompt, wait for the idle marker, read the text, delete. */
+  async ask(agent: ServeAgent, model: string, text: string, cwd: string, signal: AbortSignal, variant?: string): Promise<string> {
+    const [providerID, ...rest] = model.split("/");
+    const created = await this.call("POST", "/api/session", { agent, model: { providerID, id: rest.join("/") || model, ...(variant ? { variant } : {}) }, location: { directory: cwd } }, signal);
     const sessionId = String((created.data as Json | undefined)?.id ?? "");
     if (!sessionId) throw new Error("opencode serve: session create returned no id");
     try {
@@ -127,14 +160,16 @@ export class OpenCodeServer {
   }
 }
 
-/** A Router on the resident server. `system` is prepended to the message (the API has no per-call system). */
-export function serveRouter(server: OpenCodeServer, agent: ServeAgent, model: string): Router {
+/** A Router on the resident server. `system` is prepended to the message (the API has no per-call system). `effort`:
+ *  the model's reasoning level (targets.yaml router.effort), used when the model has it. */
+export function serveRouter(server: OpenCodeServer, agent: ServeAgent, model: string, effort: string | null = null): Router {
   return {
     name: `opencode-serve:${agent}`,
     async route(input: RouterInput, signal: AbortSignal): Promise<RouterReply> {
       const started = Date.now();
       const message = `${input.system}\n\n=====\n\n${input.task}${input.previousError ? `\n\n(previous reply rejected: ${input.previousError})` : ""}`;
-      const text = await server.ask(agent, model, message, input.cwd, signal);
+      const variant = effort ? await server.variant(model, effort) : undefined;
+      const text = await server.ask(agent, model, message, input.cwd, signal, variant);
       return { text, elapsedMs: Date.now() - started };
     },
   };

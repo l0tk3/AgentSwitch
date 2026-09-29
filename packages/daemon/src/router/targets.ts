@@ -54,6 +54,10 @@ export const Targets = z
     router: z.object({
       harness: z.string().min(1),
       model: z.string().min(1),
+      /** The router model's reasoning level for every call on it (dispatch, the assistant, acceptance, summaries): an
+       *  OpenCode variant of the model (DeepSeek V4.1 Flash: none, low, high, max); null = the model's default. Used on
+       *  the resident server only, and only when the model has it. */
+      effort: z.string().min(1).nullable().default(null),
       timeout_ms: z.number().int().positive().default(ROUTER_TIMEOUT_MS),
       /** Independent planner invocation, including process startup and one JSON correction. */
       planner_timeout_ms: z.number().int().positive().default(PLANNER_TIMEOUT_MS),

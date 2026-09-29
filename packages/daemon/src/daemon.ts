@@ -249,7 +249,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const platformMemoryPath = join(cfg.home, "platform-memory.json");
   const policyPath = join(cfg.home, "approvals.json");
   const resident = overrides.opencode;
-  const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : resident ? serveRouter(resident, "dispatcher", targets.router.model) : opencodeRouter({ model: targets.router.model }));
+  const router = overrides.router ?? (cfg.router === "echo" ? defaultEchoRouter(targets) : resident ? serveRouter(resident, "dispatcher", targets.router.model, targets.router.effort) : opencodeRouter({ model: targets.router.model }));
   const rateLimits = new RateLimitCache();
   const extensions = extensionsAt(cfg.home);
   const prot = defaultProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
@@ -267,7 +267,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // The summarizer rides on the real router agent; the echo router's fixed replies are not summaries.
   // The summarizer is a text-only agent on the router's model, run in a scratch dir so it never explores the repo.
   mkdirSync(join(cfg.home, "router-scratch"), { recursive: true });
-  const oracle = (agentName: string): Router => resident ? serveRouter(resident, "oracle", targets.router.model) : opencodeRouter({ model: targets.router.model, agentName, tools: "none", runIn: join(cfg.home, "router-scratch") });
+  const oracle = (agentName: string): Router => resident ? serveRouter(resident, "oracle", targets.router.model, targets.router.effort) : opencodeRouter({ model: targets.router.model, agentName, tools: "none", runIn: join(cfg.home, "router-scratch") });
   const summarizer = cfg.router === "echo" || overrides.router ? undefined : routerSummarizer(oracle("summarizer"), targets.router.timeout_ms);
   // The supervisor is the same text-only agent shape: approvals on the user's behalf, watchdog, acceptance.
   const supervisor = summarizer ? routerSupervisor(oracle("supervisor"), targets.router.supervisor, targets.router.timeout_ms) : undefined;
