@@ -107,7 +107,7 @@ describe("quota refresh deadlines", () => {
   it("the quota HTTP route returns even when a provider never finishes", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-quota-api-"));
     const quota = new QuotaService([{ harness: "stuck", read: async () => new Promise(() => undefined) }], 1000, Date.now, 25);
-    const daemon = buildDaemon(defaultConfig({ AGENTSWITCH_HOME: home, AGENTSWITCH_ROUTER: "echo", AGENTSWITCH_EXECUTORS: "echo" }), { quota });
+    const daemon = buildDaemon(defaultConfig({ AGENTSWITCH_HOME: home, AGENTSWITCH_ROUTER: "echo", AGENTSWITCH_EXECUTORS: "echo", AGENTSWITCH_TERMINALS: "0" }), { quota });
     vi.useFakeTimers();
     try {
       const pending = daemon.app.request("/quota");

@@ -40,8 +40,9 @@ export class CodexHookTrust {
   private state: "unknown" | "trusted" | "failed" = "unknown";
   private running: Promise<boolean> | null = null;
   private checkedAt = 0;
-  /** A check stands this long; the next Codex terminal after it checks again (another AgentSwitch — a developer's
-   *  copy — writes its own hashes under the same keys, and the user may edit the file). */
+  /** A check stands this long for the launcher's `trusted`; a Codex terminal about to start always checks again
+   *  (`fresh`): another AgentSwitch — a developer's copy — writes its own hashes under the same keys, and the user may
+   *  edit the file, and a terminal started with hooks Codex does not trust stops at Codex's "Hooks need review". */
   static readonly FRESH_MS = 10 * 60_000;
 
   constructor(private readonly o: CodexHookTrustOptions) {}
@@ -49,10 +50,13 @@ export class CodexHookTrust {
   /** Trusted as far as this service knows (a failed or pending check is not). */
   get trusted(): boolean { return this.state === "trusted"; }
 
-  /** Checks, and writes what is missing; a second call while one runs waits for it; a recent check stands. True when
-   *  all are trusted. */
-  ensure(now = Date.now()): Promise<boolean> {
-    if (this.state === "trusted" && now - this.checkedAt < CodexHookTrust.FRESH_MS) return Promise.resolve(true);
+  /** Checks, and writes what is missing; a second call while one runs waits for it; a recent check stands unless
+   *  `fresh`. True when all are trusted. */
+  ensure(o: { fresh?: boolean; now?: number } = {}): Promise<boolean> {
+    if (!o.fresh && this.state === "trusted" && (o.now ?? Date.now()) - this.checkedAt < CodexHookTrust.FRESH_MS) return Promise.resolve(true);
+    // Not known again until this check ends: a terminal that cannot wait for it starts without the hooks, not with
+    // hooks Codex may stop at.
+    if (!this.running && o.fresh) this.state = "unknown";
     this.running ??= this.check().then(
       (ok) => { this.state = ok ? "trusted" : "failed"; this.checkedAt = Date.now(); return ok; },
       (err: Error) => { this.state = "failed"; (this.o.log ?? console.error)(`codex hooks: ${err.message}`); return false; },

@@ -36,6 +36,14 @@ describe("Codex hooks in AgentSwitch's terminals", () => {
     // the hook command changed (the app moved): its hashes are trusted afresh
     const moved = new CodexHookTrust({ binary: FAKE, args: codexHookArgs('"/n" "/elsewhere/h.js"', 10, 1800), env, log: () => undefined });
     expect(await moved.ensure()).toBe(true);
+    // another copy wrote its hashes under the same keys: a recent check stands, a terminal about to start checks again
+    lines.length = 0;
+    expect(await trust.ensure()).toBe(true);
+    expect(lines).toEqual([]);
+    const checking = trust.ensure({ fresh: true });
+    expect(trust.trusted).toBe(false);   // not known while it checks: a terminal that cannot wait goes without the hooks
+    expect(await checking).toBe(true);
+    expect(lines.join("\n")).toContain("trusted 6");
     // a Codex without hooks: not trusted, and said why
     const old = new CodexHookTrust({ binary: FAKE, args, env: { ...env, FAKE_CODEX_MODE: "old" }, log: (l) => lines.push(l) });
     expect(await old.ensure()).toBe(false);

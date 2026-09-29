@@ -65,7 +65,9 @@ describe("production build", () => {
     expect(help).toMatch(/^usage: serve/);
 
     const home = join(root, "home");
-    const env = { HOME: process.env.HOME ?? root, PATH: "/usr/bin:/bin", AGENTSWITCH_HOME: home, AGENTSWITCH_PORT: "0", AGENTSWITCH_ROUTER: "echo", AGENTSWITCH_EXECUTORS: "echo", AGENTSWITCH_REMOTE: "1", AGENTSWITCH_REMOTE_PORT: "0", AGENTSWITCH_REMOTE_NAME: "Build Test" };
+    const env = { HOME: process.env.HOME ?? root, PATH: "/usr/bin:/bin", AGENTSWITCH_HOME: home, AGENTSWITCH_PORT: "0", AGENTSWITCH_ROUTER: "echo", AGENTSWITCH_EXECUTORS: "echo", AGENTSWITCH_REMOTE: "1", AGENTSWITCH_REMOTE_PORT: "0", AGENTSWITCH_REMOTE_NAME: "Build Test",
+      // Not the user's agents: a daemon with terminals has the user's Codex trust its hooks (codexHooks.ts).
+      AGENTSWITCH_TERMINALS: "0", CODEX_HOME: process.env.CODEX_HOME! };
     const child = spawn(node, ["--no-warnings=ExperimentalWarning", join(dist, "cli.js"), "serve"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
     try {
       const ports = await new Promise<{ local: number; remote: number }>((ok, fail) => {

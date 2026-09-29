@@ -312,7 +312,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     agents: overrides.terminalLauncher ? [...TERMINAL_HARNESSES] : TERMINAL_HARNESSES.filter((h) => agentBinaries[h]),
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
-    ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure(), 8000); } } : {}),
+    ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure({ fresh: true }), 8000); } } : {}),
     ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current() } : {}),
   } : undefined;
   const sessions = cfg.watchSessions ? new SessionMonitor({ ...defaultSessionSources(cfg.home), ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []) }) : undefined;
