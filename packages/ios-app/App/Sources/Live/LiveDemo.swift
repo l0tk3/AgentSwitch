@@ -9,8 +9,8 @@ enum LiveDemo {
               startedAt: Date().addingTimeInterval(-95), needsYou: true),
         .init(id: "demo2", title: "修复 AgentSwitch 的 bug", step: "第 2 步：运行 daemon 测试", model: "Opus 5.5",
               startedAt: Date().addingTimeInterval(-640), needsYou: false),
-        .init(id: "demo3", title: "整理下载目录", step: "进行中", model: "DeepSeek Flash",
-              startedAt: Date().addingTimeInterval(-20), needsYou: false),
-    ], running: 2, waiting: 1)
+        .init(id: "a1b2c3d4", title: "fix-login", step: "Bash: npm test", model: "Claude Code",
+              startedAt: Date().addingTimeInterval(-20), needsYou: true, kind: .terminal),
+    ], running: 1, waiting: 2)
 }
 #endif

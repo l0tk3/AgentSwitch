@@ -25,6 +25,11 @@ final class LiveRenderTests: XCTestCase {
             .init(id: "a", title: "登录财务平台", step: "短信验证码是多少？", model: "claude-sonnet-4-6", startedAt: now.addingTimeInterval(-95), needsYou: true),
             .init(id: "b", title: "修 AgentSwitch 的 bug", step: "第 2 步：交给 Opus 5.5", model: "Opus 5.5", startedAt: now.addingTimeInterval(-640), needsYou: false),
         ], running: 1, waiting: 1)),
+        ("terminal", LiveState(rows: [
+            .init(id: "a", title: "fix-login", step: "Bash: npm test -- --watch=false", model: "Claude Code",
+                  startedAt: now.addingTimeInterval(-42), needsYou: true, kind: .terminal),
+            .init(id: "b", title: "整理下载目录", step: "交给 DeepSeek Flash", model: "DeepSeek Flash", startedAt: now.addingTimeInterval(-40), needsYou: false),
+        ], running: 1, waiting: 1)),
         ("endedOK", .finished(.init(taskId: "a", title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。", ok: true))),
         ("endedFail", .finished(.init(taskId: "a", title: "登录财务平台", line: "登录页一直打不开，gate 代理连不上。", ok: false))),
     ]

@@ -80,6 +80,7 @@ final class AppModel {
     /// Threads as the router filed the tasks (the home screen labels and strip, the thread page).
     private(set) var threads: [AgentThread] = []
     private var cues = CueTracker()
+    private var terminalCues = TerminalCueTracker()
     var sheet: HomeSheet?
     var tab: MainTab = .tasks
     /// The terminals tab (its list, the Mac's other sessions, the colours).
@@ -197,6 +198,8 @@ final class AppModel {
         hasAssistant = false
         outgoing = nil
         cues = CueTracker()
+        terminalCues = TerminalCueTracker()
+        terminals.reset()
         targets = nil
         quota = nil
         pin = nil
@@ -336,10 +339,12 @@ final class AppModel {
         syncLive()
     }
 
-    /// The Live Activity follows the tasks, the questions waiting for you and the live tails (assistant-v0 §4).
+    /// The Live Activity follows the tasks, the questions waiting for you, the live tails and the terminals waiting for
+    /// you (assistant-v0 §4).
     func syncLive() {
         let titles = Dictionary(threads.compactMap { t in t.title.map { (t.id, $0) } }, uniquingKeysWith: { a, _ in a })
-        let state = LiveSummary.state(tasks: tasks, approvals: approvals, threadTitles: titles, tails: liveTails)
+        let state = LiveSummary.state(tasks: tasks, approvals: approvals, threadTitles: titles, tails: liveTails,
+                                      terminals: terminals.terminals)
         let ended = state == nil ? LiveSummary.ended(tasks: tasks, threadTitles: titles) : nil
         let mac = profile?.name ?? "Mac"
         let live = live
@@ -353,7 +358,32 @@ final class AppModel {
     /// From a Live Activity: the home screen opens the task (sheets close first).
     func openTask(_ id: String) {
         sheet = nil
+        tab = .tasks
         openTaskRequest = id
+    }
+
+    /// From a Live Activity: the terminals tab opens the terminal.
+    func openTerminal(_ id: String) {
+        sheet = nil
+        tab = .terminals
+        openTerminalRequest = id
+    }
+
+    /// The terminals' list, from any tab (terminal-v0 §1): the tab's badge, the Live Activity, and the "needs you" cue
+    /// for a terminal that newly waits (read aloud in voice mode; the assistant does not report terminals). `sessions`:
+    /// the Mac's other sessions too (the tab's own refresh).
+    func refreshTerminals(sessions: Bool = false) async {
+        guard let api else { return }
+        let asked = session
+        await terminals.refreshList(api)
+        if sessions { await terminals.refreshSessions(api) }
+        guard asked == session else { return }
+        let fresh = terminalCues.newlyWaiting(terminals.terminals)
+        if !fresh.isEmpty {
+            feedback.play(.needsYou, speaking: speaker.isSpeaking)
+            if feedback.settings.voiceMode { speaker.say(fresh.map(\.spokenWait).joined(separator: "。"), key: "terminals:" + fresh.map(\.id).joined(separator: ",")) }
+        }
+        syncLive()
     }
 
     func thread(_ id: String?) -> AgentThread? {

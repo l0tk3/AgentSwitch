@@ -1,28 +1,41 @@
 import AgentSwitchLive
 import Foundation
 
-/// Tasks, pending approvals and the live event tails, as the Live Activity's state (assistant-v0 §4).
+/// Tasks, pending approvals, the live event tails and the terminals waiting for you, as the Live Activity's state
+/// (assistant-v0 §4).
 public enum LiveSummary {
     public static let maxRows = 3
     static let titleChars = 28
     static let stepChars = 60
     static let endedChars = 90
 
-    /// The tasks in progress, the ones waiting for you first, then the newest; nil when none is in progress.
+    /// The tasks in progress and the terminals waiting for you (terminal-v0 §1), the ones waiting first, then the newest;
+    /// nil when there are none. A terminal at work is not in it: it has no end to report.
     public static func state(tasks: [AgentTask], approvals: [Approval], threadTitles: [String: String],
-                             tails: [String: [TaskEvent]] = [:]) -> LiveState? {
+                             tails: [String: [TaskEvent]] = [:], terminals: [TerminalInfo] = []) -> LiveState? {
         let active = tasks.filter(\.status.isActive)
-        guard !active.isEmpty else { return nil }
+        let asking = terminals.filter(\.waitsForYou)
+        guard !active.isEmpty || !asking.isEmpty else { return nil }
         let pending = Dictionary(grouping: approvals.filter { $0.status == .pending }, by: \.taskId)
         let rows = active.map { task -> LiveState.Row in
             let waitingOn = pending[task.id]?.first
             let needsYou = waitingOn != nil || task.status == .waitingApproval
             return LiveState.Row(id: task.id, title: title(task, threadTitles), step: step(task, waitingOn, tails[task.id] ?? []),
                                  model: task.model.map(ModelName.display), startedAt: task.created, needsYou: needsYou)
-        }
+        } + asking.map(row)
         let ordered = rows.sorted { ($0.needsYou ? 0 : 1, $1.startedAt) < ($1.needsYou ? 0 : 1, $0.startedAt) }
         let waiting = rows.filter(\.needsYou).count
         return LiveState(rows: Array(ordered.prefix(maxRows)), running: rows.count - waiting, waiting: waiting)
+    }
+
+    /// A terminal waiting for you: its name, what it asks to run ("Bash: npm test"), its agent, since when it asks.
+    static func row(_ terminal: TerminalInfo) -> LiveState.Row {
+        let ask = terminal.permissions.first
+        let since = ask.map(\.at).flatMap { $0 > 0 ? $0 : nil } ?? terminal.lastOutputAt
+        let agent = ModelName.harness(terminal.harness)
+        return LiveState.Row(id: terminal.id, title: clip(terminal.name.isEmpty ? agent : terminal.name, titleChars),
+                             step: clip(ask.map { MessageDisplay.readable($0.summary) } ?? "等你处理", stepChars), model: agent,
+                             startedAt: Date(milliseconds: since), needsYou: true, kind: .terminal)
     }
 
     /// The conclusion to show once nothing runs: the task that ended last (a cancelled one too, said as such).

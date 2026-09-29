@@ -48,14 +48,12 @@ struct AgentSwitchApp: App {
             RootView()
                 .environment(model)
                 .environment(lock)
-                // A Live Activity's agentswitch://task/<id> opens that task; an agentswitch://pair link opens pairing,
-                // the same as a scanned QR code.
-                .onOpenURL { url in
-                    if let id = LiveLink.taskId(from: url) { model.openTask(id) } else { model.receivePairingLink(url.absoluteString) }
-                }
+                .onOpenURL { open($0) }
                 #if DEBUG
                 // Simulator has no camera: `simctl launch <dev> com.agentswitch.ios -pairLink 'agentswitch://pair?p=…'`.
                 .task { if let link = UserDefaults.standard.string(forKey: "pairLink") { model.receivePairingLink(link) } }
+                // Any link without the system's "Open in" prompt: `-openLink agentswitch://terminal/<id>`.
+                .task { if let link = UserDefaults.standard.string(forKey: "openLink"), let url = URL(string: link) { open(url) } }
                 // A sample Live Activity for looking at the island and the lock screen: `-liveDemo YES`.
                 .task { if UserDefaults.standard.bool(forKey: "liveDemo") { await model.live.sync(LiveDemo.state, ended: nil, macName: "Mac mini") } }
                 #endif
@@ -66,6 +64,18 @@ struct AgentSwitchApp: App {
             case .active: model.resume()
             default: break
             }
+        }
+    }
+
+    /// A Live Activity's agentswitch://task/<id> or …/terminal/<id> opens that task or terminal; an agentswitch://pair
+    /// link opens pairing, the same as a scanned QR code.
+    private func open(_ url: URL) {
+        if let id = LiveLink.taskId(from: url) {
+            model.openTask(id)
+        } else if let id = LiveLink.terminalId(from: url) {
+            model.openTerminal(id)
+        } else {
+            model.receivePairingLink(url.absoluteString)
         }
     }
 }

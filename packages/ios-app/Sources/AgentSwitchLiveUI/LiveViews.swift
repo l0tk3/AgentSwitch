@@ -35,9 +35,9 @@ public enum LiveLook {
         }
     }
 
-    /// A tap opens the task that matters most: the one waiting for you, the newest, or the one that ended last.
+    /// A tap opens what matters most: the task or terminal waiting for you, the newest task, or the one that ended last.
     public static func link(_ state: LiveState) -> URL? {
-        (state.lead?.id ?? state.ended?.taskId).map(LiveLink.task)
+        state.lead?.link ?? state.ended.map { LiveLink.task($0.taskId) }
     }
 
     /// "+2 more" when the island shows one of several.
@@ -105,7 +105,7 @@ public struct IslandLeading: View {
     }
 }
 
-/// Expanded island, trailing corner: how long the leading task has run.
+/// Expanded island, trailing corner: how long the leading task has run (a terminal: how long it has waited).
 public struct IslandTrailing: View {
     let state: LiveState
     public init(state: LiveState) { self.state = state }
@@ -145,7 +145,7 @@ public struct IslandBottom: View {
                     if let others = LiveLook.others(state) { Text(others).font(.system(size: 12, design: .monospaced)).foregroundStyle(LiveLook.faint) }
                     Spacer(minLength: 0)
                     if lead.needsYou {
-                        Link(destination: LiveLink.task(lead.id)) {
+                        Link(destination: lead.link) {
                             Text("[ open ]").font(.system(size: 14, weight: .semibold, design: .monospaced)).foregroundStyle(.black)
                                 .padding(.horizontal, 10).padding(.vertical, 6).background(LiveLook.waiting)
                         }
@@ -178,6 +178,34 @@ public struct IslandCompactTrailing: View {
     }
 }
 
+/// How many wait and how many run, by their marks (■ 1 ⠋ 2): tasks and terminals together.
+struct Tally: View {
+    let state: LiveState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if state.waiting > 0 {
+                HStack(spacing: 4) {
+                    Rectangle().fill(LiveLook.waiting).frame(width: 7, height: 7)
+                    Text("\(state.waiting)")
+                }
+            }
+            if state.running > 0 {
+                HStack(spacing: 3) {
+                    Text("⠋").foregroundStyle(LiveLook.busy)
+                    Text("\(state.running)")
+                }
+            }
+        }
+        .font(.system(size: 13, weight: .medium, design: .monospaced))
+        .foregroundStyle(LiveLook.secondary)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([state.waiting > 0 ? "\(state.waiting) waiting" : nil, state.running > 0 ? "\(state.running) busy" : nil]
+            .compactMap { $0 }.joined(separator: ", "))
+    }
+}
+
 struct Chip: View {
     let text: String
     var body: some View {
@@ -187,8 +215,8 @@ struct Chip: View {
     }
 }
 
-/// The lock screen: a header with the status and counts, then up to three tasks (the one waiting for you first, its
-/// question in orange), or the last conclusion.
+/// The lock screen: a header with the status and counts, then up to three rows — tasks and terminals waiting for you
+/// first, their question in amber, then tasks in progress — or the last conclusion.
 public struct LockScreenCard: View {
     let state: LiveState
     let mac: String
@@ -207,9 +235,7 @@ public struct LockScreenCard: View {
                 Text(LiveLook.word(state)).font(.system(size: 15, weight: .semibold, design: .monospaced)).foregroundStyle(LiveLook.tint(state))
                 Text("AgentSwitch · \(mac)").font(.system(size: 13)).foregroundStyle(LiveLook.faint).lineLimit(1)
                 Spacer(minLength: 4)
-                if state.running + state.waiting > 1 {
-                    Text("\(state.running + state.waiting) tasks").font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundStyle(LiveLook.secondary)
-                }
+                if state.running + state.waiting > 1 { Tally(state: state) }
             }
             if let ended = state.ended, state.rows.isEmpty {
                 Text(ended.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(LiveLook.text).lineLimit(1)

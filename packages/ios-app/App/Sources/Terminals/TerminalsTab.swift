@@ -55,12 +55,15 @@ struct TerminalsTab: View {
                 case .session(let s): SessionTranscriptView(session: s, resume: { Task { await resume(s) } })
                 }
             }
-            .refreshable { await store.refresh(model.api) }
+            .refreshable { await model.refreshTerminals(sessions: true) }
             .onAppear { openRequested() }
             .onChange(of: model.openTerminalRequest) { openRequested() }
+            // A cold start from the Live Activity: the request is there before the list.
+            .onChange(of: store.list == nil) { openRequested() }
+            // The list itself is followed from every tab (MainTabs); the sessions while this tab is on screen.
             .task(id: model.connection.endpoint) {
                 while !Task.isCancelled {
-                    await store.refresh(model.api)
+                    await store.refreshSessions(model.api)
                     try? await Task.sleep(for: Self.pollInterval)
                 }
             }
@@ -156,11 +159,13 @@ struct TerminalsTab: View {
 
     static let resumable: Set<String> = ["claude-code", "codex", "opencode"]
 
+    /// `new`, or a terminal (from the Live Activity) in place of the page open now; one closed since is not found.
     private func openRequested() {
         guard let id = model.openTerminalRequest else { return }
+        if id == "new" { model.openTerminalRequest = nil; creating = true; return }
+        guard let list = model.terminals.list else { return }
         model.openTerminalRequest = nil
-        if id == "new" { creating = true; return }
-        if let t = model.terminals.terminals.first(where: { $0.id == id }) { path.append(TerminalRoute.terminal(t)) }
+        if let t = list.terminals.first(where: { $0.id == id }) { path = NavigationPath([TerminalRoute.terminal(t)]) }
     }
 
     private struct Elsewhere {

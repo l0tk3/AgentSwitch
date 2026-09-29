@@ -36,8 +36,16 @@ struct RootView: View {
 
 /// The two entries side by side (docs/terminal-v0.md §1): `tasks` (the conversation) and `terminals`; their icons are
 /// pixel marks (§7.3: the app's mark for tasks, a framed terminal window for terminals — `>_` alone means Codex).
+///
+/// No push: while the app is open the terminals are followed from every tab and page (the badge, the waiting cue, the
+/// Live Activity), and the tasks from the terminals tab too (their cues); the home screen follows them itself.
 struct MainTabs: View {
     @Environment(AppModel.self) private var model
+
+    private struct Watch: Equatable {
+        let endpoint: APIEndpoint?
+        let tab: MainTab
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -51,6 +59,20 @@ struct MainTabs: View {
                 .tag(MainTab.terminals)
         }
         .tint(Theme.ink)
+        .task(id: model.connection.endpoint) {
+            while !Task.isCancelled {
+                await model.refreshTerminals()
+                try? await Task.sleep(for: TerminalsTab.pollInterval)
+            }
+        }
+        .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
+            guard model.tab != .tasks else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: HomeView.pollInterval)
+                guard !Task.isCancelled else { break }
+                await model.refreshAll()
+            }
+        }
     }
 }
 

@@ -107,6 +107,7 @@ xcrun simctl install booted build/DerivedData/Build/Products/Debug-iphonesimulat
 xcrun simctl launch booted com.agentswitch.ios
 xcrun simctl openurl booted 'agentswitch://pair?p=…'               # the Mac app's link opens the pairing sheet
 xcrun simctl launch booted com.agentswitch.ios -pairLink 'agentswitch://pair?p=…'   # Debug builds: same, no prompt
+xcrun simctl launch booted com.agentswitch.ios -uiDemo YES -openLink agentswitch://terminal/a1b2c3d4   # a Live Activity's link, no prompt
 ```
 
 The simulator has no camera; use "粘贴配对链接".
