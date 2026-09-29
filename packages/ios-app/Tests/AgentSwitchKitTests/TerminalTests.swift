@@ -22,6 +22,20 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(list.terminals[1].status, .other("something-new"))
         XCTAssertEqual(list.models["claude-code"]?.first?.name, "Opus 5.5")
         XCTAssertEqual(TerminalStatus.working.label, "busy")
+        XCTAssertEqual(list.defaults, [:], "a Mac that predates it")
+        XCTAssertFalse(list.models["claude-code"]?.first?.older ?? true)
+    }
+
+    func testModelsAsTheAgentListsThem() throws {
+        let list = try JSONDecoder().decode(TerminalList.self, from: json([
+            "terminals": [], "agents": ["claude-code"],
+            "models": ["claude-code": [["id": "opus", "name": "Opus 5.5", "description": "For complex work"],
+                                       ["id": "claude-opus-4-8", "name": "Opus 4.8", "older": true]]],
+            "defaults": ["claude-code": "Opus 5.5"],
+        ]))
+        XCTAssertEqual(list.defaults["claude-code"], "Opus 5.5")
+        XCTAssertEqual(list.models["claude-code"]?.map(\.older), [false, true])
+        XCTAssertEqual(list.models["claude-code"]?.first?.description, "For complex work")
     }
 
     func testEventsParseAndUnknownOnesAreSkipped() {

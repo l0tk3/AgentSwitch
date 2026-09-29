@@ -262,8 +262,10 @@ real thing on deepseek-flash (2026-09-24: server up in 160-190 ms, ~150-290 ms o
 ## Terminals (terminal-v0)
 
 The manual entry: agent CLIs (`claude`, `codex`, `opencode`, `pi`) in pseudo-terminals the daemon holds
-(`src/terminals/`, `node-pty` + `@xterm/headless`), next to the managed tasks. `POST /terminals {harness, cwd, model?}`
-starts one; `GET /terminals/:id/stream` (SSE) sends a snapshot, then output, status and permission requests;
+(`src/terminals/`, `node-pty` + `@xterm/headless`), next to the managed tasks. `GET /terminals` lists them with the
+agents this Mac can start and each one's models as the agent offers them today (`src/router/modelOffers.ts`: its
+order and names, superseded ones `older`, refreshed every 6 h and when the agent updates; `defaults` names what the
+agent's default is). `POST /terminals {harness, cwd, model?}` starts one; `GET /terminals/:id/stream` (SSE) sends a snapshot, then output, status and permission requests;
 `/input` (a reply, sealed unless `seal: false`), `/keys` (named keys; `wheel-up`/`wheel-down` follow the program's
 mouse and screen modes), `/commands` (the agent's slash commands, `src/terminals/commands.ts`), `/write` (raw
 keystrokes, this Mac only), `/resize`,

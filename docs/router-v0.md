@@ -156,7 +156,7 @@ router:
 
 - `models` 里的 key 是执行器实际接受的模型 ID：Claude Code 走 `--model` / SDK 的 `model` 字段，Codex 走 app-server `newConversation.model`，OpenCode 走 `provider/model`。
 - Codex 每个模型还有 `efforts`（推理强度，`ultra` 会自动委派子任务）。Decision 里可选 `effort` 字段，缺省 `medium`；校验只检查它在该模型的 `efforts` 里。Claude Code 的对应物是 `--effort`/settings 的 effortLevel，v1 不路由这一维。
-- **发现与刷新**（2026-09-22 决定并实现，`src/router/discovery.ts`）：启动时 Codex 走 app-server `model/list`，Claude Code 走 Agent SDK 的 `supportedModels()`（不发消息，2.4 s，返回 `resolvedModel` 规范 id）；结果与 yaml **求并集**：老模型保留（按 id 仍可派发），新 id 加进目录，cost 按名字猜（fable/gpt-6→top、opus→high、haiku/mini/flash→low、其余 mid），strengths 标 `discovered`。不做 `unavailable` 标记。OpenCode 侧不发现（只用 deepseek-flash）。
+- **发现与刷新**（2026-09-22 决定并实现，`src/router/discovery.ts`）：启动时 Codex 走 app-server `model/list`，Claude Code 走 Agent SDK 的 `supportedModels()`（不发消息，2.4 s，返回 `resolvedModel` 规范 id）；结果与 yaml **求并集**：老模型保留（按 id 仍可派发），新 id 加进目录，cost 按名字猜（fable/gpt-6→top、opus→high、haiku/mini/flash→low、其余 mid），strengths 标 `discovered`。不做 `unavailable` 标记。OpenCode 侧不发现（只用 deepseek-flash）。2026-09-29 起发现改由 `src/router/modelOffers.ts` 发起并**在运行中保持新鲜**：每 6 小时、以及 agent 的可执行文件变了（真实路径或修改时间，10 分钟查一次；Claude Code 自动更新就是换了文件）时再问一次。新问到的清单立即用于终端的模型菜单（terminal-v0 §1）；路由目录仍只在启动时并入新 id（下次重启服务生效）。
 - `cost` / `strengths` 是给路由器看的自然语言标签，不参与代码校验；`quota`、`max_concurrent`、`browser`、`models` 键集合参与校验。
 - 用户在手机上也能**手动指定**模型：任务带 `pin: {harness, model}` 时跳过分诊，只做校验。
 

@@ -118,8 +118,10 @@ function applyChrome(style) {
 // ---------- state ----------
 let terminals = [];
 let agents = AGENTS.map((a) => a.id);
-/** Each agent's models ({id, name}) from GET /terminals; none chosen = the agent's own default. */
+/** Each agent's models ({id, name, older?}) from GET /terminals — what the agent offers today, in its order; none
+ *  chosen = the agent's own default, which `defaults` names when the agent says what it is. */
 let models = {};
+let modelDefaults = {};
 let sessions = [];
 let current = null;
 let source = null;
@@ -696,7 +698,11 @@ function showCreate(folder = null) {
   if (flashAgent) { glitch($("agents").querySelector(`[data-agent="${flashAgent}"]`)); flashAgent = null; }
   const list = models[pickedAgent] ?? [];
   const chosen = list.some((m) => m.id === pickedModels[pickedAgent]) ? pickedModels[pickedAgent] : "";
-  $("model").replaceChildren(h("option", { value: "" }, "default"), ...list.map((m) => h("option", { value: m.id }, list.filter((x) => x.name === m.name).length > 1 ? `${m.name} · ${m.id}` : m.name)));
+  // The current models, then the ones a newer model superseded folded under `older` (as the agent's own picker).
+  const option = (m) => h("option", { value: m.id, title: m.description ?? "" }, list.filter((x) => x.name === m.name).length > 1 ? `${m.name} · ${m.id}` : m.name);
+  const older = list.filter((m) => m.older);
+  $("model").replaceChildren(h("option", { value: "" }, modelDefaults[pickedAgent] ? `default · ${modelDefaults[pickedAgent]}` : "default"),
+    ...list.filter((m) => !m.older).map(option), ...(older.length ? [h("optgroup", { label: "older" }, ...older.map(option))] : []));
   $("model").value = chosen;
   $("model").disabled = list.length === 0;
   // one of three: angle-bracket marks (< > / <x>), not checkboxes ([ ] / [x] are for picking several)
@@ -946,6 +952,7 @@ async function refresh() {
   terminals = r.terminals;
   agents = r.agents ?? agents;
   models = r.models ?? models;
+  modelDefaults = r.defaults ?? modelDefaults;
   if (current) current = terminals.find((t) => t.id === current.id) ?? null;
   render();
   for (const t of terminals) {

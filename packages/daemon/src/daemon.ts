@@ -67,7 +67,8 @@ import { createRemoteApp } from "./remote/app.js";
 import { DEFAULT_REMOTE_PORT, remoteRuntime, type RemoteRuntime } from "./remote/runtime.js";
 import { listenRemote, type RemoteListener } from "./remote/server.js";
 import type { TargetRef } from "./core/target.js";
-import { discoverTargets } from "./router/discovery.js";
+import { mergeLogged } from "./router/discovery.js";
+import { ModelOffers } from "./router/modelOffers.js";
 import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
 import type { PlannerFactory } from "./engine/engine.js";
 import { claudeTextRouter, type ClaudeRouterOptions } from "./router/routers/claude.js";
@@ -177,6 +178,8 @@ export type BuildOverrides = {
   readonly quota?: QuotaService;
   /** Catalog after discovery (serve() passes it); default: the yaml as is. */
   readonly targets?: Targets;
+  /** What the agents offer today, kept fresh (serve() passes it with real executors): the terminals' model menus. */
+  readonly modelOffers?: ModelOffers;
   /** The resident OpenCode server; when absent, router-type calls fall back to `opencode run --standalone`. */
   readonly opencode?: OpenCodeServer;
   /** The OpenCode executors' own resident server (real executors only); when absent they run `opencode run --standalone`. */
@@ -301,6 +304,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     agents: overrides.terminalLauncher ? [...TERMINAL_HARNESSES] : TERMINAL_HARNESSES.filter((h) => agentBinaries[h]),
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
+    ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current() } : {}),
   } : undefined;
   const sessions = cfg.watchSessions ? new SessionMonitor({ ...defaultSessionSources(cfg.home), ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []) }) : undefined;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
@@ -421,12 +425,15 @@ export async function startOpenCodeExecServer(cfg: DaemonConfig): Promise<OpenCo
   return server;
 }
 
-/** Start-up: discover models (real executors only), bring up the resident OpenCode servers (router: real router only;
- *  executors: real executors in serve mode), then listen. */
+/** Start-up: discover models (real executors only: the catalog takes new ids, the terminals' model menus what each
+ *  agent offers, kept fresh from then on), bring up the resident OpenCode servers (router: real router only; executors:
+ *  real executors in serve mode), then listen. */
 export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close: () => void }> {
   if (cfg.executors === "real") await checkGateProxy(defaultGate());
   const yaml = loadTargets(cfg.targetsPath);
-  const targets = cfg.executors === "real" ? await discoverTargets(yaml, { codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()) }) : yaml;
+  const modelOffers = cfg.executors === "real" ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()) }) : undefined;
+  const targets = modelOffers ? mergeLogged(yaml, await modelOffers.refresh()) : yaml;
+  const stopOffers = modelOffers?.start();
   let opencode: OpenCodeServer | undefined;
   if (cfg.router === "opencode") {
     const gate = defaultGate();
@@ -435,7 +442,7 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
     catch (err) { console.error(`${(err as Error).message}; router-type calls fall back to opencode run --standalone`); }
   }
   const opencodeExec = cfg.executors === "real" && (cfg.opencodeExecutor ?? "serve") === "serve" ? await startOpenCodeExecServer(cfg) : undefined;
-  const daemon = buildDaemon(cfg, { targets, ...(opencode ? { opencode } : {}), ...(opencodeExec ? { opencodeExec } : {}) });
+  const daemon = buildDaemon(cfg, { targets, ...(modelOffers ? { modelOffers } : {}), ...(opencode ? { opencode } : {}), ...(opencodeExec ? { opencodeExec } : {}) });
   const remote: RemoteListener | undefined = daemon.remote
     ? await startRemote(daemon, daemon.remote).catch((err: Error) => { daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); throw err; })
     : undefined;
@@ -448,7 +455,7 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   void daemon.quota.refresh();
   const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), THREAD_SWEEP_INTERVAL_MS);
   sweeper.unref();
-  return { daemon, close: () => { clearInterval(sweeper); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); } };
+  return { daemon, close: () => { clearInterval(sweeper); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); } };
 }
 
 /** The 127.0.0.1 listener (web UI, CLI, Mac app): the local app behind the browser guard (api/localGuard.ts: Host,

@@ -41,12 +41,17 @@ struct NewTerminalSheet: View {
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         SectionLabel("model")
+                        // The agent's own list: its current models, then those a newer one superseded under `older`.
                         Menu {
-                            Button("default") { modelId = "" }
-                            ForEach(models) { m in Button(m.name) { modelId = m.id } }
+                            Button(defaultLabel) { modelId = "" }
+                            ForEach(models.filter { !$0.older }) { m in Button(m.name) { modelId = m.id } }
+                            let older = models.filter(\.older)
+                            if !older.isEmpty {
+                                Menu("older") { ForEach(older) { m in Button(m.name) { modelId = m.id } } }
+                            }
                         } label: {
                             HStack {
-                                Text(models.first { $0.id == modelId }?.name ?? "default").mono(14)
+                                Text(models.first { $0.id == modelId }?.name ?? defaultLabel).mono(14)
                                 Spacer()
                                 Text("▾").mono(13).foregroundStyle(.secondary)
                             }
@@ -135,6 +140,11 @@ struct NewTerminalSheet: View {
                          actions: [.init(label: "use bypass", role: .primary) { mode = "bypass" }])
             }
         }
+    }
+
+    /// `default`, and what it is today when the Mac knows (`default · Opus 5.5`).
+    private var defaultLabel: String {
+        model.terminals.list?.defaults[agent].map { "default · \($0)" } ?? "default"
     }
 
     /// What bypass leaves in force, said before it is chosen (here and when a bypass session is continued).

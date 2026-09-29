@@ -165,7 +165,8 @@ enum DemoData {
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,
                          createdAt: ago(7200), lastOutputAt: ago(3000)),
         ], agents: ["claude-code", "codex", "opencode"], models: [
-            "claude-code": [TerminalModelOption(id: "claude-opus-5-5", name: "Opus 5.5"), TerminalModelOption(id: "claude-sonnet-5", name: "Sonnet 5")],
+            "claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5"), TerminalModelOption(id: "claude-fable-5-1", name: "Fable 5.1"),
+                            TerminalModelOption(id: "sonnet", name: "Sonnet 5.5"), TerminalModelOption(id: "claude-opus-4-8", name: "Opus 4.8", older: true)],
             "codex": [TerminalModelOption(id: "gpt-6-luna", name: "GPT-6 Luna")],
             "opencode": [TerminalModelOption(id: "deepseek/deepseek-flash", name: "DeepSeek Flash")],
         ])

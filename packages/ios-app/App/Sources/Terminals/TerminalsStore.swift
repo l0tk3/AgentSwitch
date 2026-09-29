@@ -63,12 +63,12 @@ final class TerminalsStore {
     /// A terminal just started or resumed: listed at once, before the next read.
     func add(_ terminal: TerminalInfo) {
         guard let list, !list.terminals.contains(where: { $0.id == terminal.id }) else { return }
-        self.list = TerminalList(terminals: [terminal] + list.terminals, agents: list.agents, models: list.models)
+        self.list = TerminalList(terminals: [terminal] + list.terminals, agents: list.agents, models: list.models, defaults: list.defaults)
     }
 
     func remove(_ id: String) {
         guard let list else { return }
-        self.list = TerminalList(terminals: list.terminals.filter { $0.id != id }, agents: list.agents, models: list.models)
+        self.list = TerminalList(terminals: list.terminals.filter { $0.id != id }, agents: list.agents, models: list.models, defaults: list.defaults)
     }
 
     #if DEBUG

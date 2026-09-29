@@ -39,15 +39,43 @@ export function mergeDiscovered(targets: Targets, found: Discovered): { targets:
   return { targets: { ...targets, harnesses }, added };
 }
 
-/** Codex app-server `model/list`; tolerant of the result's shape. */
-export async function discoverCodexModels(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<string[]> {
+/** One entry of Codex's `model/list`: what its own picker shows. */
+export type CodexModelInfo = { readonly id: string; readonly displayName?: string; readonly description?: string; readonly hidden?: boolean; readonly upgrade?: string | null };
+
+/** Codex app-server `model/list`, entries as it gives them; tolerant of the result's shape. */
+export async function listCodexModels(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<CodexModelInfo[]> {
   const r = await appServerRequest(binary, "model/list", {}, timeoutMs);
   const list = (Array.isArray(r.models) ? r.models : Array.isArray(r.data) ? r.data : Array.isArray(r.items) ? r.items : []) as Array<Record<string, unknown> | string>;
-  return [...new Set(list.map((m) => (typeof m === "string" ? m : String(m.id ?? m.model ?? m.name ?? ""))).filter((id) => id.length > 0))];
+  const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+  return list.map((m): CodexModelInfo => {
+    if (typeof m === "string") return { id: m };
+    const displayName = str(m.displayName), description = str(m.description), upgrade = str(m.upgrade);
+    return {
+      id: String(m.id ?? m.model ?? m.name ?? ""),
+      ...(displayName ? { displayName } : {}), ...(description ? { description } : {}),
+      ...(m.hidden === true ? { hidden: true } : {}), ...(upgrade ? { upgrade } : {}),
+    };
+  }).filter((m) => m.id.length > 0);
 }
+
+export async function discoverCodexModels(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<string[]> {
+  return codexIds(await listCodexModels(binary, timeoutMs));
+}
+export const codexIds = (list: readonly CodexModelInfo[]): string[] => [...new Set(list.map((m) => m.id))];
+
+/** One entry of Claude Code's model picker: `value` is what `--model` takes (an alias like "opus" follows new
+ *  releases), `resolvedModel` the id it means today. */
+export type ClaudeModelInfo = { readonly value: string; readonly resolvedModel?: string; readonly displayName: string; readonly description: string };
 
 /** Claude Agent SDK `supportedModels()` without sending a message: canonical ids only (aliases like "default" dropped). */
 export async function discoverClaudeModels(executable?: string, timeoutMs = CLAUDE_DISCOVERY_TIMEOUT_MS): Promise<string[]> {
+  return claudeIds(await listClaudeModels(executable, timeoutMs));
+}
+export const claudeIds = (list: readonly ClaudeModelInfo[]): string[] =>
+  [...new Set(list.map((m) => m.resolvedModel ?? m.value).filter((id) => id.startsWith("claude-")))];
+
+/** The picker's entries as Claude Code gives them, in its order (current models first). */
+export async function listClaudeModels(executable?: string, timeoutMs = CLAUDE_DISCOVERY_TIMEOUT_MS): Promise<ClaudeModelInfo[]> {
   // A neutral cwd: the CLI looks for CLAUDE.md in every parent of its cwd, and a cwd under a privacy-protected folder
   // (e.g. an app bundle on the Desktop) blocks the whole CLI in open() until macOS grants that folder.
   const abortController = new AbortController();
@@ -56,7 +84,7 @@ export async function discoverClaudeModels(executable?: string, timeoutMs = CLAU
   const timer = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`supportedModels timed out after ${timeoutMs} ms`)), timeoutMs); timeout.unref(); });
   try {
     const models = await Promise.race([q.supportedModels(), timer]);
-    return [...new Set(models.map((m) => m.resolvedModel ?? m.value).filter((id) => id.startsWith("claude-")))];
+    return models.map((m) => ({ value: m.value, ...(m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}), displayName: m.displayName, description: m.description }));
   } finally {
     clearTimeout(timeout);
     abortController.abort();  // a CLI stuck at start-up must not outlive the discovery as an orphan
@@ -73,7 +101,12 @@ export async function discoverTargets(targets: Targets, opts: DiscoveryOptions =
     discoverClaudeModels(opts.claudeExecutable).catch((e: Error) => { log(`model discovery (claude-code): ${e.message}`); return [] as string[]; }),
     opts.codexBinary ? discoverCodexModels(opts.codexBinary).catch((e: Error) => { log(`model discovery (codex): ${e.message}`); return [] as string[]; }) : Promise.resolve([] as string[]),
   ]);
-  const merged = mergeDiscovered(targets, { "claude-code": claude, codex });
-  log(`model discovery: claude-code ${claude.length} ids, codex ${codex.length} ids${merged.added.length ? `; new in catalog: ${merged.added.join(", ")}` : "; nothing new"}`);
+  return mergeLogged(targets, { "claude-code": claude, codex }, log);
+}
+
+/** The catalog with what was found, and one log line saying what. */
+export function mergeLogged(targets: Targets, found: Discovered, log: (line: string) => void = (l) => console.error(l)): Targets {
+  const merged = mergeDiscovered(targets, found);
+  log(`model discovery: claude-code ${found["claude-code"].length} ids, codex ${found.codex.length} ids${merged.added.length ? `; new in catalog: ${merged.added.join(", ")}` : "; nothing new"}`);
   return merged.targets;
 }

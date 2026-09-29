@@ -153,36 +153,56 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public var harnessName: String { ModelName.harness(harness) }
 }
 
-/// A model the new-terminal menu offers: its id and how people say it.
+/// A model the new-terminal menu offers, as the agent itself lists it: the id `--model` takes (Claude's `opus` follows
+/// the next Opus), the agent's name for it, and whether a newer model of its family superseded it (the menu folds those
+/// under `older`, as the agent's own picker does).
 public struct TerminalModelOption: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
+    public let description: String?
+    public let older: Bool
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, description: String? = nil, older: Bool = false) {
         self.id = id
         self.name = name
+        self.description = description
+        self.older = older
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, description, older }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        older = try c.decodeIfPresent(Bool.self, forKey: .older) ?? false
     }
 }
 
-/// `GET /terminals`: the terminals, the agents this Mac can start, and each one's models.
+/// `GET /terminals`: the terminals, the agents this Mac can start, each one's models, and what "default" is today for
+/// the agents that say (a Mac that predates it sends none).
 public struct TerminalList: Decodable, Sendable, Hashable {
     public let terminals: [TerminalInfo]
     public let agents: [String]
     public let models: [String: [TerminalModelOption]]
+    public let defaults: [String: String]
 
-    public init(terminals: [TerminalInfo], agents: [String], models: [String: [TerminalModelOption]] = [:]) {
+    public init(terminals: [TerminalInfo], agents: [String], models: [String: [TerminalModelOption]] = [:], defaults: [String: String] = [:]) {
         self.terminals = terminals
         self.agents = agents
         self.models = models
+        self.defaults = defaults
     }
 
-    private enum CodingKeys: String, CodingKey { case terminals, agents, models }
+    private enum CodingKeys: String, CodingKey { case terminals, agents, models, defaults }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         terminals = (try? c.decodeIfPresent([TerminalInfo].self, forKey: .terminals)) ?? []
         agents = (try? c.decodeIfPresent([String].self, forKey: .agents)) ?? []
         models = (try? c.decodeIfPresent([String: [TerminalModelOption]].self, forKey: .models)) ?? [:]
+        defaults = (try? c.decodeIfPresent([String: String].self, forKey: .defaults)) ?? [:]
     }
 }
 

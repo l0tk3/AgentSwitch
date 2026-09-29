@@ -13,6 +13,7 @@ import type { TerminalAudit } from "../terminals/audit.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
 import { PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type TerminalEvent, type TerminalHarness, type TerminalHost } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
+import type { Offers } from "../router/modelOffers.js";
 import { slashCommands } from "../terminals/commands.js";
 import { KEY_NAMES, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
@@ -30,6 +31,8 @@ export type Terminals = {
   readonly style: () => TerminalStyle;
   /** Whether a session is open in another program (it is continued in place, so only one may write it). */
   readonly elsewhere: ElsewhereCheck;
+  /** What each agent offers today for the model menu (its own list); the catalog stands in for an agent not asked. */
+  readonly offers?: () => Offers;
 };
 
 const MAX_INPUT = 20_000;
@@ -95,12 +98,16 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     } catch (err) { return failed(c, err); }
   });
 
-  // The agents this Mac can start, and each one's models from the catalog (targets.yaml after discovery) for the new
-  // terminal's model menu; none chosen = the agent's own default.
+  // The agents this Mac can start, and each one's models for the new terminal's model menu: what the agent offers
+  // today, in its order and names, the superseded ones marked `older` (else the catalog, targets.yaml after discovery);
+  // none chosen = the agent's own default, named in `defaults` when the agent says what it is.
   app.get("/terminals", (c) => {
     const catalog = modelSettings(deps.targets).harnesses;
-    const models = Object.fromEntries(agents.map((a) => [a, (catalog[a]?.models ?? []).map((id) => ({ id, name: modelName(id) }))]));
-    return c.json({ terminals: host.list(), agents, models });
+    const offers = t.offers?.() ?? {};
+    const models = Object.fromEntries(agents.map((a) => [a, offers[a as keyof Offers]?.models
+      ?? (catalog[a]?.models ?? []).map((id) => ({ id, name: modelName(id) }))]));
+    const defaults = Object.fromEntries(Object.entries(offers).flatMap(([a, o]) => (o?.defaultName ? [[a, o.defaultName]] : [])));
+    return c.json({ terminals: host.list(), agents, models, defaults });
   });
   app.get("/terminals/style", (c) => c.json(t.style()));
 
