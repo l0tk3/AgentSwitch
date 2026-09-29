@@ -135,16 +135,29 @@ const pickedModels = (() => { try { return JSON.parse(recall("terminal.models") 
 const collapsed = new Set(JSON.parse(recall("terminal.collapsed") || "[]"));
 const expanded = new Set();  // folders showing all their sessions
 
-// ---------- the sidebar's width: its edge is dragged; past the left it closes to a rail ----------
+// ---------- the sidebar: its width by dragging its edge; closed past the left edge, by the top bar's button or ⌘B ----------
 const SIDE = { width: 290, min: 220, closeBelow: 120 };
 let side = (() => {
   try { return { width: SIDE.width, closed: false, ...JSON.parse(recall("terminal.side") || "{}") }; } catch { return { width: SIDE.width, closed: false }; }
 })();
 /** Room for the screen stays (the Mac window is at least 800 wide). */
 const sideWidth = (x) => Math.round(Math.max(SIDE.min, Math.min(x, 560, innerWidth - 420)));
+/** The top bar's button draws the list's state: its pane filled while the list shows. */
+const SIDE_SHOWN = ["#######", "###...#", "###...#", "###...#", "#######"];
+const SIDE_HIDDEN = ["#######", "#.#...#", "#.#...#", "#.#...#", "#######"];
+function renderSideBtn() {
+  const shown = narrow.matches ? document.body.classList.contains("list-open") : !side.closed;
+  $("sideBtn").innerHTML = sprite(shown ? SIDE_SHOWN : SIDE_HIDDEN, { px: 2 });
+  $("sideBtn").setAttribute("aria-expanded", String(shown));
+}
 function applySide() {
   document.documentElement.style.setProperty("--side-w", `${sideWidth(side.width)}px`);
   document.body.classList.toggle("side-closed", side.closed);
+  renderSideBtn();
+}
+/** The list: a drawer over the screen on a narrow one, else the column beside it. */
+function toggleList() {
+  if (narrow.matches) { document.body.classList.toggle("list-open"); renderSideBtn(); } else toggleSide();
 }
 function setSide(next) {
   side = { ...side, ...next };
@@ -154,12 +167,11 @@ function setSide(next) {
 const toggleSide = () => setSide({ closed: !side.closed });
 applySide();
 addEventListener("resize", applySide);
-// A drag follows the pointer (the screen refits as it goes); let go left of `closeBelow` and the list closes. On the
-// rail, a click opens it again where it was, a drag pulls it out.
+// A drag follows the pointer (the screen refits as it goes); let go left of `closeBelow` and the list closes.
 $("sideGrip").addEventListener("pointerdown", (e) => {
   if (e.button !== 0 || narrow.matches) return;
   e.preventDefault();
-  const grip = e.currentTarget, from = e.clientX, wasClosed = side.closed;
+  const grip = e.currentTarget, from = e.clientX;
   let moved = false;
   grip.setPointerCapture(e.pointerId);
   document.body.classList.add("side-dragging");
@@ -176,7 +188,7 @@ $("sideGrip").addEventListener("pointerdown", (e) => {
     grip.removeEventListener("pointercancel", end);
     document.body.classList.remove("side-dragging");
     if (ev.type === "pointercancel") { applySide(); return; }
-    if (!moved) { if (wasClosed) setSide({ closed: false }); return; }
+    if (!moved) return;
     setSide(ev.clientX < SIDE.closeBelow ? { closed: true } : { closed: false, width: sideWidth(ev.clientX) });
   };
   grip.addEventListener("pointermove", move);
@@ -334,6 +346,7 @@ function select(id, { loading = null } = {}) {
   lastSeq = 0;
   $("toasts").replaceChildren();
   document.body.classList.remove("list-open");
+  renderSideBtn();
   if (loading) showLoading(loading); else hideLoading();
   term.reset();
   fit.fit();
@@ -625,8 +638,8 @@ function markState() {
 function renderMark() {
   const [state, tag] = markState();
   // In the list's band, and in the top band while the list is closed.
-  $("mark").innerHTML = $("bandMark").innerHTML = mark({ px: 2, state, t: markFrame, depth: true });
-  $("markTag").textContent = $("bandTag").textContent = tag;
+  $("mark").innerHTML = mark({ px: 2, state, t: markFrame, depth: true });
+  $("markTag").textContent = tag;
   document.body.classList.toggle("any-waiting", state === "waiting");
 }
 
@@ -672,6 +685,7 @@ function showCreate(folder = null) {
   if (first) { stopReveal(); stopReveal = revealWordmark($("wordmark"), "AGENTSWITCH", { px: 6 }); }
   $("toasts").replaceChildren();
   document.body.classList.remove("list-open");
+  renderSideBtn();
   if (!agents.includes(pickedAgent)) pickedAgent = agents[0] ?? "claude-code";
   $("agents").replaceChildren(...AGENTS.map((a) => {
     const installed = agents.includes(a.id);
@@ -846,7 +860,7 @@ function shortcut(e) {
   const key = e.key.toLowerCase();
   const asking = $("toasts").childElementCount > 0 && current;
   if (key === "t" && !e.shiftKey) return () => showCreate();
-  if (key === "b" && !e.shiftKey) return () => (narrow.matches ? document.body.classList.toggle("list-open") : toggleSide());
+  if (key === "b" && !e.shiftKey) return toggleList;
   if (key === "w" && !e.shiftKey && current && !creating) return () => closeTerminal(current);
   if (key === "v" && e.shiftKey) return () => openComposer();
   if (e.key === "Enter" && asking) return () => decideFirst("allow");
@@ -877,9 +891,9 @@ $("sealLock").innerHTML = sprite(LOCK, { px: 2 });
 $("composerLock").innerHTML = sprite(LOCK, { px: 2 });
 $("newBtn").addEventListener("click", () => showCreate());
 $("closeBtn").addEventListener("click", () => current && !creating && closeTerminal(current));
-$("hideBtn").addEventListener("click", () => (narrow.matches ? document.body.classList.remove("list-open") : toggleSide()));
+$("hideBtn").addEventListener("click", toggleList);
 $("sealBar").addEventListener("click", () => ($("composer").hidden ? openComposer() : closeComposer()));
-$("menuBtn").addEventListener("click", () => document.body.classList.toggle("list-open"));
+$("sideBtn").addEventListener("click", toggleList);
 $("createStart").addEventListener("click", start);
 $("model").addEventListener("change", () => { pickedModels[pickedAgent] = $("model").value; remember("terminal.models", JSON.stringify(pickedModels)); });
 $("createCancel").addEventListener("click", () => current && select(current.id));
@@ -891,10 +905,16 @@ $("keys").addEventListener("click", (e) => {
   if (key && current) api("POST", `/terminals/${current.id}/keys`, { keys: [key] }).catch((err) => notify(err.message));
 });
 const dock = () => { $("composer").hidden = !narrow.matches; renderSeal(); };
-narrow.addEventListener("change", dock);
+narrow.addEventListener("change", () => { dock(); renderSideBtn(); });
 
 // The Mac app picks folders with its own open panel.
 if (native) {
+  // The window's drag strip lies over the top bar: it leaves the bar's controls to the page.
+  const reportControls = () => native.postMessage({ type: "titlebarControls",
+    rects: [...document.querySelectorAll("[data-titlebar-control]")].map((el) => el.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0).map((r) => [r.x, r.y, r.width, r.height]) });
+  new ResizeObserver(reportControls).observe($("band"));
+  reportControls();
   $("chooseFolder").hidden = false;
   $("chooseFolder").addEventListener("click", () => native.postMessage({ type: "chooseFolder", path: $("cwd").value }));
   window.agentswitch = {

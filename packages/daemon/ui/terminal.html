@@ -9,30 +9,27 @@
 <link rel="stylesheet" href="/ui/terminal.css">
 </head>
 <body>
+<header class="top" id="band">
+  <button class="side-btn" id="sideBtn" data-titlebar-control aria-label="terminals list" title="list ⌘B"></button>
+  <span class="band-name" id="bandName"></span>
+  <span class="band-status" id="bandStatus"></span>
+  <span class="grow"></span>
+  <a class="console-link" href="/ui" id="consoleLink">console</a>
+  <span class="band-tag" id="markTag"></span>
+  <span class="band-mark" id="mark"></span>
+</header>
+
 <aside class="side" id="side">
-  <div class="side-band">
-    <a class="console-link" href="/ui" id="consoleLink">console</a>
-    <span class="grow"></span>
-    <span class="band-tag" id="markTag"></span>
-    <span class="band-mark" id="mark"></span>
-  </div>
   <div class="side-scroll"><div id="groups" class="groups"></div></div>
   <div class="keybar">
     <button id="newBtn"><b>⌘T</b>new</button>
     <button id="closeBtn"><b>⌘W</b>close</button>
     <button id="hideBtn"><b>⌘B</b>hide</button>
   </div>
-  <div class="side-grip" id="sideGrip" title="drag · double-click resets · ⌘B hides"></div>
+  <div class="side-grip" id="sideGrip" title="drag · double-click resets"></div>
 </aside>
 
 <main class="main">
-  <header class="band" id="band">
-    <button class="menu-btn" id="menuBtn" aria-label="terminals">≡</button>
-    <span class="band-name" id="bandName"></span>
-    <span class="band-status" id="bandStatus"></span>
-    <span class="band-end"><span class="band-tag" id="bandTag"></span><span class="band-mark" id="bandMark"></span></span>
-  </header>
-
   <section class="stage" id="stage">
     <div class="screen" id="screen"></div>
     <div class="scan" id="scan"></div>

@@ -135,6 +135,10 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         window?.contentView?.subviews.compactMap { $0 as? WKWebView }.first
     }
 
+    fileprivate var dragStrip: DragStrip? {
+        window?.contentView?.subviews.compactMap { $0 as? DragStrip }.first
+    }
+
     /// Next time the window signs in afresh (the daemon may have restarted and forgotten the session).
     private func closed() {
         if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
@@ -205,6 +209,9 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
             if let text = body["url"] as? String, let url = URL(string: text) { MainActor.assumeIsolated { Self.open(url) } }
         case "signIn":
             MainActor.assumeIsolated { owner?.signIn() }
+        case "titlebarControls":
+            let rects = (body["rects"] as? [[Double]] ?? []).compactMap { r in r.count == 4 ? CGRect(x: r[0], y: r[1], width: r[2], height: r[3]) : nil }
+            MainActor.assumeIsolated { owner?.dragStrip?.holes = rects }
         default:
             break
         }
@@ -232,10 +239,20 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// The window's top strip (the page's band, which holds no controls): drag to move the window; a double click does
-/// what the user chose in System Settings (zoom, minimize or nothing), as on a titlebar.
+/// The window's top strip over the page's top bar: drag to move the window; a double click does what the user chose in
+/// System Settings (zoom, minimize or nothing), as on a titlebar. The bar's own controls (the list's button) are holes
+/// the page reports, in its coordinates: clicks there go through to the page.
 final class DragStrip: NSView {
     static let height: CGFloat = 30
+    var holes: [CGRect] = []
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        if holes.contains(where: { $0.contains(local) }) { return nil }
+        return super.hitTest(point)
+    }
 
     override func mouseDown(with event: NSEvent) {
         guard let window else { return }
