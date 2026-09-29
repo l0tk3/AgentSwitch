@@ -13,6 +13,17 @@ import { AGENT_PX, glitch, HOLLOW, LOCK, mark, reducedMotion, revealWordmark, SP
 const $ = (id) => document.getElementById(id);
 const IN_MAC_APP = /AgentSwitchMac/.test(navigator.userAgent);
 const native = IN_MAC_APP ? window.webkit?.messageHandlers?.agentswitch : null;
+/** The Mac window's toolbar (native) shows what the page tells it: each kind of report sent only when it changes. */
+const tellWindow = (() => {
+  const last = {};
+  return (type, msg) => {
+    if (!native) return;
+    const s = JSON.stringify(msg);
+    if (last[type] === s) return;
+    last[type] = s;
+    native.postMessage({ type, ...msg });
+  };
+})();
 if (IN_MAC_APP) document.documentElement.classList.add("mac-app");
 const narrow = matchMedia("(max-width: 760px), (pointer: coarse)");
 
@@ -144,12 +155,13 @@ let side = (() => {
 })();
 /** Room for the screen stays (the Mac window is at least 800 wide). */
 const sideWidth = (x) => Math.round(Math.max(SIDE.min, Math.min(x, 560, innerWidth - 420)));
-/** The top bar's button draws the list's state: its pane filled while the list shows. */
-const SIDE_SHOWN = ["#######", "###...#", "###...#", "###...#", "#######"];
-const SIDE_HIDDEN = ["#######", "#.#...#", "#.#...#", "#.#...#", "#######"];
+/** The top bar's list button (a browser's; the Mac window has it in its toolbar): the fine pixel icon, 1 pt cells. */
+const LIST_ICON = [".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#",
+  "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#",
+  "#.....#..........#", ".################."];
 function renderSideBtn() {
   const shown = narrow.matches ? document.body.classList.contains("list-open") : !side.closed;
-  $("sideBtn").innerHTML = sprite(shown ? SIDE_SHOWN : SIDE_HIDDEN, { px: 2 });
+  if (!$("sideBtn").firstChild) $("sideBtn").innerHTML = sprite(LIST_ICON, { px: 1 });
   $("sideBtn").setAttribute("aria-expanded", String(shown));
 }
 function applySide() {
@@ -283,6 +295,12 @@ term.attachCustomWheelEventHandler((ev) => {
   if (notches) queueWheel(notches);
   return false;
 });
+/** Notches from the Mac window (up positive): to a program that scrolls itself, else through this screen's history. */
+function wheelNotches(n) {
+  if (!n || !current || current.status === "exited" || creating) return;
+  if (term.modes.mouseTrackingMode === "none" && term.buffer.active.type !== "alternate") term.scrollLines(-3 * n);
+  else queueWheel(-n);
+}
 /** Notches (up negative, as deltaY) sent together, 20 at most a request. */
 function queueWheel(n) {
   wheelQueued += n;
@@ -685,6 +703,7 @@ function renderMark() {
   // In the list's band, and in the top band while the list is closed.
   $("mark").innerHTML = mark({ px: 2, state, t: markFrame, depth: true });
   $("markTag").textContent = tag;
+  tellWindow("mark", { state, tag });
   document.body.classList.toggle("any-waiting", state === "waiting");
 }
 
@@ -703,6 +722,15 @@ function renderHead() {
   $("bandStatus").textContent = word;
   $("closeBtn").disabled = create;
   document.title = create ? "new terminal" : t.name;
+  // The Mac window's toolbar: the terminal on screen as its title (none while one is being made), and where the screen
+  // is, so the window can hand the wheel over it to the page.
+  tellWindow("head", { name: create ? "" : t.name, status: create ? null : t.status });
+  tellScreen();
+}
+function tellScreen() {
+  const r = $("screen").getBoundingClientRect();
+  const cell = $("screen").querySelector(".xterm-rows > div")?.getBoundingClientRect().height || 16;
+  tellWindow("screen", !current || creating ? { rect: null } : { rect: [r.x, r.y, r.width, r.height].map(Math.round), cell: Math.round(cell * 10) / 10 });
 }
 
 function render() {
@@ -959,11 +987,7 @@ narrow.addEventListener("change", () => { dock(); renderSideBtn(); });
 // The Mac app picks folders with its own open panel.
 if (native) {
   // The window's drag strip lies over the top bar: it leaves the bar's controls to the page.
-  const reportControls = () => native.postMessage({ type: "titlebarControls",
-    rects: [...document.querySelectorAll("[data-titlebar-control]")].map((el) => el.getBoundingClientRect())
-      .filter((r) => r.width > 0 && r.height > 0).map((r) => [r.x, r.y, r.width, r.height]) });
-  new ResizeObserver(reportControls).observe($("band"));
-  reportControls();
+  new ResizeObserver(tellScreen).observe($("screen"));
   $("chooseFolder").hidden = false;
   $("chooseFolder").addEventListener("click", () => native.postMessage({ type: "chooseFolder", path: $("cwd").value }));
   window.agentswitch = {
@@ -972,6 +996,11 @@ if (native) {
     shortcut: (key) => shortcut({ metaKey: true, shiftKey: false, key })?.(),
     // ⌘A: the terminal's own selection when it has the keyboard, else the field in focus.
     selectAll: () => (document.activeElement === term.textarea ? term.selectAll() : document.execCommand("selectAll")),
+    // The toolbar's buttons.
+    toggleList: () => toggleList(),
+    newTerminal: () => showCreate(),
+    // The wheel over the screen, as notches (up positive): the window takes it, WebKit gives the page none there.
+    wheel: (n) => wheelNotches(n),
   };
 }
 

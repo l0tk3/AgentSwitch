@@ -71,6 +71,18 @@ public enum PixelArt {
     /// The terminals tab and window: a framed terminal (">_" alone means Codex).
     public static let terminalWindow = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"]
 
+    /// The terminal window's toolbar, in 1 pt cells (the weight of the system's icons beside the traffic lights; corners
+    /// stepped): the list (a window with its sidebar) and new terminal. docs/design/visual-v1/terminal.html, "细像素".
+    public static let toolbarList = [
+        ".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#",
+        "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#",
+        "#.....#..........#", ".################.",
+    ]
+    public static let toolbarNew = [
+        "......#......", "......#......", "......#......", "......#......", "......#......", "......#......", "#############",
+        "......#......", "......#......", "......#......", "......#......", "......#......", "......#......",
+    ]
+
     /// The lit cells of a sprite.
     public static func sprite(_ rows: [String]) -> [(x: Int, y: Int)] {
         rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, c in c == "#" ? (x, y) : nil } }

@@ -74,7 +74,8 @@ button:focus-visible, select:focus-visible { outline: 1px solid var(--signal); o
    a transparent titlebar), then the list's button; the name and state of the terminal on screen while the list is
    closed; all the terminals' mark at the right. The rest of the bar moves the window. ---------- */
 .top { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 14px 0 8px; background: var(--term); }
-.mac-app .top { padding-left: 72px; }
+/* The Mac window has a native toolbar in its place (the traffic lights, the list's button, the title, the mark). */
+.mac-app .top { display: none; }
 .side-btn { flex: none; display: grid; place-items: center; width: 28px; height: 22px; color: var(--ink2); }
 .side-btn:hover { color: var(--ink); background: var(--hover); }
 body.side-closed.any-waiting .side-btn { color: var(--amber); animation: blink 1.1s steps(1) infinite; }
@@ -174,8 +175,8 @@ body.side-dragging .screen { pointer-events: none; }
 
 /* ---------- main ---------- */
 .main { grid-column: 2; grid-row: 2; position: relative; isolation: isolate; display: grid; grid-template-rows: minmax(0, 1fr) auto auto auto; min-width: 0; min-height: 0; background: var(--term); }
-/* In the Mac window the page runs under a transparent titlebar: the band is where the window is dragged from. */
-.mac-app { --band: 30px; }
+/* In the Mac window the page starts under the window's own toolbar: no band of its own. */
+.mac-app { --band: 0px; }
 
 .stage { position: relative; isolation: isolate; min-height: 0; overflow: hidden; background: var(--term); }
 .screen { position: absolute; inset: 4px 4px 4px 16px; overflow: hidden; }
