@@ -10,11 +10,23 @@ import { echoExecutor } from "../src/executors/echo.js";
 import type { Executor } from "../src/executors/types.js";
 import { echoRouter } from "../src/router/routers/echo.js";
 import type { Router } from "../src/core/modelCall.js";
-import { acceptMessage, isDestructive, routerSupervisor, SupervisorConfig, type Supervisor } from "../src/router/supervisor.js";
+import { ACCEPT_SYSTEM, acceptMessage, isDestructive, routerSupervisor, SupervisorConfig, type Supervisor } from "../src/router/supervisor.js";
+import { systemPrompt } from "../src/router/prompt.js";
+import { executorInstructions } from "../src/executors/instructions.js";
 import { decisionJson, realTargets } from "./helpers.js";
 
 const targets = realTargets();
 const cfg = SupervisorConfig.parse({ watchdog_ms: 120 });
+
+describe("files for the user", () => {
+  // 2026-09-29: "send it to me" was briefed as a preview panel that does not exist, and the archive the executor then
+  // put in out/ was judged undelivered.
+  it("out/ is the one way a file reaches the user, for the router, the executor and the acceptance check", () => {
+    expect(systemPrompt(targets)).toContain("Files reach the user one way only: the task's out/ folder");
+    expect(executorInstructions()).toContain("that is the only way a file reaches the user");
+    expect(ACCEPT_SYSTEM).toContain("A request to send, give or share a\nfile with the user is met when that file is under out/");
+  });
+});
 
 describe("supervisor: floor and parsing", () => {
   it("long original goals and execution evidence retain blockers and final conclusions for acceptance", () => {

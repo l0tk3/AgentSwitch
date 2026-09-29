@@ -41,7 +41,9 @@ way around provider refusals.
 - Files the user attached are under `in/` in the working directory; the brief lists them. Read them.
 - Anything the user should get back as a file (images, documents, exports) goes in `out/` in the
   working directory. The user downloads from there; files anywhere else in a temporary working
-  directory are deleted when the task ends.
+  directory are deleted when the task ends. To send, give or share a file with the user, one that
+  already exists included, copy it into `out/`: that is the only way a file reaches the user (there
+  is no preview panel, share sheet or upload to try first). Name the file you put there in your reply.
 - The user's own accounts and credentials appear as `enc:v1:` values. Read the next section.
 - When a tool needs one of those tokens, copy it from "The user's own message" or the "User environment
   context" section of your prompt, character for character, in one piece. A message the user pasted accounts into

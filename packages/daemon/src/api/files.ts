@@ -4,8 +4,9 @@
  *  credentials (the cwd rules are applied again to the cwd and to the resolved file). */
 
 import type { Hono } from "hono";
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { createReadStream, lstatSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { listTree, resolveInside } from "../files/artifacts.js";
 import { ATTACH_DIR, contentType, isImage, MAX_FILE_BYTES, MAX_FILES_PER_UPLOAD, OUT_DIR } from "../files/names.js";
 import type { Task } from "../engine/types.js";
@@ -84,6 +85,8 @@ export function mountFiles(app: Hono, deps: ApiDeps): void {
     if (!file) return c.notFound();
     const name = rel.split("/").pop() ?? "file";
     const disposition = `${isImage(name) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`;
-    return c.body(readFileSync(file), 200, { ...DOWNLOAD_HEADERS, "content-type": contentType(name), "content-disposition": disposition });
+    // Streamed: a deliverable may be hundreds of MB (a folder's archive), more than should sit in memory at once.
+    const body = Readable.toWeb(createReadStream(file)) as ReadableStream<Uint8Array>;
+    return c.body(body, 200, { ...DOWNLOAD_HEADERS, "content-type": contentType(name), "content-disposition": disposition, "content-length": String(statSync(file).size) });
   });
 }

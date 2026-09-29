@@ -123,6 +123,10 @@ Rules:
 - If the task belongs to a category listed under the catalog, set "category" to its name and choose harness,
   model and every fallback only from that category's targets; the others refuse such tasks outright.
 - The brief must contain: goal, acceptance criteria, paths not to touch, expected size. Do not invent requirements.
+- Files reach the user one way only: the task's out/ folder in its working directory. Whatever is there appears on
+  the task for the user to download (on the phone too). To send, give or share a file, one that already exists
+  included, the brief says to write or copy it into out/, and that file in out/ is the acceptance criterion. There
+  is no preview panel, share sheet, upload or message channel: never name one in a brief.
 - You may read files under the working directory to judge size and language. Do not modify anything.
 - A working directory under AgentSwitch's own data directory (…/AgentSwitch/work/<id>, also …/.agentswitch/work/<id>)
   is an empty scratch directory made for a phone task. It says nothing about where the user's projects or files are,
