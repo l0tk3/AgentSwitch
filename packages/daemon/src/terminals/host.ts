@@ -155,11 +155,19 @@ const HOLD_LIMIT = 4096;
 const MAX_NAME = 80;
 /** Agents put status glyphs in front of the title (Claude Code: ✳ idle, ✶ ✻ ✽ ✢ · while working; braille spinners). */
 const TITLE_GLYPHS = /^[\s✳✶✷✸✹✺✻✼✽✢✣✤✥*·•●○◐◑◒◓⏺⏵▶►⠀-⣿]+/u;
+/** Codex puts this in front of its title while something on its screen waits for you — an approval, an app's form, a
+ *  question — alternating `!` and `.`; its hooks do not cover all of these (an app tool's approval is a form). */
+const ACTION_REQUIRED = /^\[ [!.] \] Action Required(?:\s*\|\s*)?/;
 const AGENT_LABELS: Record<TerminalHarness, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi" };
 
-/** The title without the agent's status glyphs. */
+/** The title without the agent's status glyphs and markers. */
 export function cleanTitle(raw: string): string {
-  return raw.replace(TITLE_GLYPHS, "").replace(/\s+/g, " ").trim().slice(0, MAX_TITLE);
+  return raw.trim().replace(ACTION_REQUIRED, "").replace(TITLE_GLYPHS, "").replace(/\s+/g, " ").trim().slice(0, MAX_TITLE);
+}
+
+/** The agent's title says something waits for you. */
+export function titleAsks(raw: string): boolean {
+  return ACTION_REQUIRED.test(raw.trim());
 }
 
 /** A title worth showing: not the agent's own name, a bare program name or a shell's `user@host: dir`. */
@@ -262,6 +270,8 @@ class Session {
   ownSessionId: string | null = null;
   hooks = false;
   companion: Companion | null = null;
+  /** The agent's title says something waits for you (titleAsks). */
+  titleAsks = false;
   idleTimer: NodeJS.Timeout | null = null;
   /** Output until then answers what was just sent (an agent without hooks is not busy for it). */
   quietUntil = 0;
@@ -332,6 +342,12 @@ export class TerminalHost {
     if (req.resume && !s.forked) s.agentSessionId = req.resume;
     s.givenName = req.name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     s.term.onTitleChange((t) => {
+      const asks = titleAsks(t);
+      if (asks !== s.titleAsks) {
+        s.titleAsks = asks;
+        if (asks) this.setStatus(s, "waiting");
+        else if (s.status === "waiting" && !s.pending.size) this.busy(s);   // answered: the turn goes on
+      }
       const title = cleanTitle(t);
       if (title === s.title) return;
       const before = this.nameOf(s);
@@ -594,16 +610,23 @@ export class TerminalHost {
     s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; });
     s.lastOutputAt = this.o.now();
     s.emit({ type: "output", seq, data });
-    if (!s.hooks && s.status !== "exited") {
+    // Waiting as the title says, it waits whatever it draws (Codex's marker blinks).
+    if (!s.hooks && s.status !== "exited" && !s.titleAsks) {
       // A full-screen agent redraws while it waits — for the typing it echoes, a mouse move over the screen, a focus
       // change, a resize or a redraw asked for — and none of that is work: output answering what was just sent does not
       // make an idle terminal busy (a busy one stays busy while anything comes).
       if (s.status !== "working" && this.o.now() < s.quietUntil) return;
-      this.setStatus(s, "working");
-      if (s.idleTimer) clearTimeout(s.idleTimer);
-      s.idleTimer = setTimeout(() => { if (s.status === "working") this.setStatus(s, "idle"); }, this.o.idleAfterMs);
-      s.idleTimer.unref();
+      this.busy(s);
     }
+  }
+
+  /** Working; without hooks, until the output stops for a while. */
+  private busy(s: Session): void {
+    this.setStatus(s, "working");
+    if (s.hooks) return;
+    if (s.idleTimer) clearTimeout(s.idleTimer);
+    s.idleTimer = setTimeout(() => { if (s.status === "working") this.setStatus(s, "idle"); }, this.o.idleAfterMs);
+    s.idleTimer.unref();
   }
 
   private exited(s: Session, code: number): void {
@@ -642,7 +665,7 @@ export class TerminalHost {
     clearTimeout(p.timer);
     p.resolve(decision);
     s.emit({ type: "permission_resolved", id, decision });
-    if (s.status === "waiting" && !s.pending.size) this.setStatus(s, after ?? (decision ? "working" : "waiting"));
+    if (s.status === "waiting" && !s.pending.size && !s.titleAsks) this.setStatus(s, after ?? (decision ? "working" : "waiting"));
   }
 
   private settleAll(s: Session, after: TerminalStatus): void {
@@ -651,6 +674,7 @@ export class TerminalHost {
 
   private setStatus(s: Session, status: TerminalStatus): void {
     if (s.status === status || s.status === "exited") return;
+    if (status === "working" && s.titleAsks) return;   // a hook from a tool running meanwhile: still waits for you
     s.status = status;
     s.emit({ type: "status", status });
   }

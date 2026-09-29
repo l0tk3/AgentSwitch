@@ -32,6 +32,13 @@ async function handle(line) {
     process.stdout.write("\r\nwork done\r\n");
     return;
   }
+  // Codex's marker while its screen waits for you (a form, an approval), blinking; "answered" clears it.
+  if (line === "form") {
+    process.stdout.write("\x1b]0;[ ! ] Action Required | 查看进程 | Codex\x07Allow Computer Use?\r\n");
+    setTimeout(() => process.stdout.write("\x1b]0;[ . ] Action Required | 查看进程 | Codex\x07"), 100);
+    return;
+  }
+  if (line === "answered") { process.stdout.write("\x1b]0;查看进程 | Codex\x07allowed\r\n"); return; }
   process.stdout.write(`got: ${line}\r\n`);
 }
 

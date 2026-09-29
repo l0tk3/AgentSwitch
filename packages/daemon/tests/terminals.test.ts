@@ -128,6 +128,22 @@ describe("terminal host", () => {
     expect(host.get(info.id)).toBeNull();
   });
 
+  it("waits while Codex's title says something on its screen waits for you (an app's form, not a hook)", async () => {
+    for (const hooks of [false, true]) {
+      const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", hooks), idleAfterMs: 150 });
+      closers.push(() => host.closeAll());
+      const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+      await until(() => host.get(info.id)!.title === "fake agent");
+      host.write(info.id, "form\r");
+      await until(() => host.get(info.id)!.status === "waiting");
+      await new Promise((r) => setTimeout(r, 400));   // the marker blinks and the idle timer runs out: still waiting
+      expect(host.get(info.id)).toMatchObject({ status: "waiting", title: "查看进程 | Codex" });
+      host.write(info.id, "answered\r");
+      await until(() => host.get(info.id)!.status === "working");
+      if (!hooks) await until(() => host.get(info.id)!.status === "idle");
+    }
+  });
+
   it("a permission request whose hook goes away (answered in the terminal) leaves the screens", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());
@@ -415,6 +431,8 @@ describe("terminal pieces", () => {
     expect(cleanTitle("✳ Claude Code")).toBe("Claude Code");
     expect(cleanTitle("✶  创建 hello.txt 文件")).toBe("创建 hello.txt 文件");
     expect(cleanTitle("⠋ Working")).toBe("Working");
+    expect(cleanTitle("[ ! ] Action Required | 查看进程 | Codex")).toBe("查看进程 | Codex");
+    expect(cleanTitle("[ . ] Action Required")).toBe("");
     expect(meaningfulTitle("✳ Claude Code", "claude-code")).toBeNull();
     expect(meaningfulTitle("codex", "codex")).toBeNull();
     expect(meaningfulTitle("me@mac: ~/proj", "claude-code")).toBeNull();
