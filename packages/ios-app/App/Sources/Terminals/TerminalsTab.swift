@@ -361,6 +361,9 @@ private struct SessionRow: View {
             HStack(spacing: 8) {
                 Text(session.displayTitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
+                // Which agent wrote it, before its time (as on the Mac): the mark a running terminal has, dimmed.
+                PixelSprite(rows: PixelArt.agents[session.harness] ?? PixelArt.square, pixel: 2, color: Theme.inkDim)
+                    .accessibilityLabel(NewTerminalSheet.agents.first { $0.id == session.harness }?.name ?? session.harness)
                 Text(session.updated.relative).mono(11).foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())

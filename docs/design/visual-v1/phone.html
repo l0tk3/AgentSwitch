@@ -332,15 +332,15 @@ function p1reset() {
   tree = [
     { parent: "Work", groups: [
       { path: "api", terms: [{ id: "a", name: "修复登录超时", st: "busy", agent: "cc" }],
-        sessions: [["给健康检查加缓存", "51m ago"], ["升级到 Node 22", "today 16:50"], ["统一日志格式", "yesterday 22:04"]] },
+        sessions: [["给健康检查加缓存", "51m ago", "cc"], ["升级到 Node 22", "today 16:50", "codex"], ["统一日志格式", "yesterday 22:04", "cc"]] },
       { path: "web", terms: [{ id: "b", name: "首页改版", st: "idle", agent: "codex" }],
-        sessions: [["表单校验", "9/27"], ["暗色模式", "9/27"], ["图片懒加载", "9/26"], ["替换图标库", "9/25"], ["修复移动端菜单", "9/24"]] },
+        sessions: [["表单校验", "9/27", "codex"], ["暗色模式", "9/27", "oc"], ["图片懒加载", "9/26", "codex"], ["替换图标库", "9/25", "pi"], ["修复移动端菜单", "9/24", "cc"]] },
     ] },
     { parent: null, groups: [
       { path: "AgentSwitch", terms: [{ id: "c", name: "iPhone 终端标签页", st: "idle", agent: "cc" }],
-        sessions: [["读取 Codex 的会话记录", "25m ago"], ["未读标记", "yesterday 09:10"]] },
+        sessions: [["读取 Codex 的会话记录", "25m ago", "cc"], ["未读标记", "yesterday 09:10", "codex"]] },
     ] },
-    { parent: null, groups: [{ path: "Blog", terms: [], sessions: [["换主题后的构建报错", "today 06:35"], ["加一个 RSS", "9/20"]] }] },
+    { parent: null, groups: [{ path: "Blog", terms: [], sessions: [["换主题后的构建报错", "today 06:35", "oc"], ["加一个 RSS", "9/20", "cc"]] }] },
   ];
   folded = new Set(); all = new Set(); badge = 0;
   p1draw();
@@ -374,8 +374,9 @@ function p1draw(reveal = null) {
       for (const t of g.terms) {
         html += `<div class="row tm${anim(key)}" data-term="${t.id}">${line()}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
       }
-      for (const [title, when] of shown) {
-        html += `<div class="row sess${anim(key)}" data-sess="${esc(key + "|" + title)}">${line()}<span class="nm">${esc(title)}</span><span class="when">${when}</span><span class="act">resume</span></div>`;
+      // Which agent wrote it, before its time (as on the Mac): the same mark a running terminal has.
+      for (const [title, when, agent] of shown) {
+        html += `<div class="row sess${anim(key)}" data-sess="${esc(key + "|" + title)}">${line()}<span class="nm">${esc(title)}</span><span class="faint">${P.sprite(P.AGENT_PX[agent], { px: 2 })}</span><span class="when">${when}</span><span class="act">resume</span></div>`;
       }
       if (foot) html += `<div class="row more${anim(key)}" data-more="${key}">${line()}<span>${showAll ? "▾ less" : `▸ ${more} more`}</span></div>`;
     }
