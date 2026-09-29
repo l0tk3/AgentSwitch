@@ -32,7 +32,7 @@ struct AgentSwitchApp: App {
             case "stale": model.openTaskRequest = "t4"
             case "interrupted": model.openTaskRequest = "t6"
             case "terminals", "terminalmenu", "terminaldelete": model.tab = .terminals
-            case "terminal", "terminalsealed", "terminalslash", "terminalclose": model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
+            case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard": model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
             case "newterminal", "newterminalbypass": model.tab = .terminals; model.openTerminalRequest = "new"
             default: break
             }

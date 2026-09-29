@@ -51,7 +51,7 @@ struct TerminalPage: View {
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
         }
-        .background(Color.black)
+        .background { Color.black.ignoresSafeArea() }
         .safeAreaInset(edge: .bottom, spacing: 0) { controls }
         // The whole height for the screen; back returns to the tabs.
         .toolbar(.hidden, for: .tabBar)
@@ -108,6 +108,7 @@ struct TerminalPage: View {
                 // After the page has slid in, as a tap on the lock would: the box glitches open.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { sealing = true }
             case "terminalslash": reply = "/co"
+            case "terminalkeyboard": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { replying = true }
             case "terminalclose": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { confirmClose = true }
             default: break
             }
@@ -212,7 +213,9 @@ struct TerminalPage: View {
                     .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
             }
         }
-        .background(page.ground)
+        // Down to the screen's bottom edge, under the keyboard too: its rounded corners and the gap above it would
+        // otherwise show the window's light ground.
+        .background { page.ground.ignoresSafeArea(edges: .bottom) }
         // One dark block with the screen whatever the phone's appearance (ui-v0 §7): the keys, the reply box, the
         // sealed box and its keyboard take the dark palette.
         .environment(\.colorScheme, .dark)
