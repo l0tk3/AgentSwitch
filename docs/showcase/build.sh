@@ -5,7 +5,10 @@
 #
 #   docs/showcase/build.sh capture   # draw and record everything into $SRC (Mac app, iOS Simulator, swift test)
 #   docs/showcase/build.sh media     # $SRC → docs/showcase/media (web sizes: JPEG screens, mp4 clips)
-#   docs/showcase/build.sh zip       # docs/showcase + docs/design/visual-v1 → ~/Desktop/AgentSwitch-showcase.zip
+#   docs/showcase/build.sh zip       # docs/showcase → ~/Desktop/AgentSwitch-showcase.zip
+#
+# The page uses only files in its own folder (media/, demo/): Safari opens a local page's subfolders but not its
+# parent's, so the design pages it embeds are copied into demo/.
 #
 # Needs Xcode with an iPhone 17 simulator (SIM=<udid> to pick another). media/ and .src/ are not in git.
 set -euo pipefail
@@ -72,7 +75,14 @@ capture_clips() {
   xcrun simctl status_bar "$SIM" clear
 }
 
+# The design pages the showcase embeds and links, and the pixel library they share (docs/design/visual-v1).
+pages() {
+  rm -rf "$HERE/demo"; mkdir -p "$HERE/demo"
+  for f in pixel.js terminal.html phone.html island.html app.html depth.html; do cp "$ROOT/docs/design/visual-v1/$f" "$HERE/demo/"; done
+}
+
 media() {
+  pages
   rm -rf "$MEDIA"; mkdir -p "$MEDIA/phone/light" "$MEDIA/phone/dark" "$MEDIA/mac" "$MEDIA/live" "$MEDIA/video"
   for look in light dark; do
     for f in "$SRC/phone/$look"/*.png; do
@@ -106,7 +116,8 @@ media() {
 zip_it() {
   local out="$HOME/Desktop/AgentSwitch-showcase.zip"
   rm -f "$out"
-  (cd "$ROOT/docs" && zip -qr "$out" showcase/index.html showcase/media design/visual-v1 -x '*.DS_Store')
+  pages
+  (cd "$ROOT/docs" && zip -qr "$out" showcase/index.html showcase/media showcase/demo -x '*.DS_Store')
   echo "$out ($(du -h "$out" | cut -f1)); unzip and open showcase/index.html"
 }
 
