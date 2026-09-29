@@ -6,8 +6,9 @@ import SwiftUI
 import XCTest
 
 /// Renders the Live Activity's views to PNG for a look before a phone does (`AGENTSWITCH_RENDER_DIR=<dir> swift test
-/// --filter LiveRenderTests`). The island's regions are laid out the way the expanded and compact island place them,
-/// on black; the lock screen card on a busy background standing in for a wallpaper.
+/// --filter LiveRenderTests`; also the showcase's, docs/showcase/build.sh). The island's regions are laid out the way
+/// the expanded and compact island place them, black on a clear margin; the lock screen card on a busy background
+/// standing in for a wallpaper.
 @MainActor
 final class LiveRenderTests: XCTestCase {
     private static let now = Date()
@@ -19,10 +20,10 @@ final class LiveRenderTests: XCTestCase {
             .init(id: "a", title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "Opus 5.5",
                   startedAt: now.addingTimeInterval(-640), needsYou: false),
             .init(id: "b", title: "整理下载目录", step: "交给 DeepSeek Flash", model: "DeepSeek Flash", startedAt: now.addingTimeInterval(-40), needsYou: false),
-            .init(id: "c", title: "登录 x.com 看通知", step: "在用工具 browser_navigate", model: "claude-sonnet-4-6", startedAt: now.addingTimeInterval(-15), needsYou: false),
+            .init(id: "c", title: "登录 x.com 看通知", step: "在用工具 browser_navigate", model: "Sonnet 4.6", startedAt: now.addingTimeInterval(-15), needsYou: false),
         ], running: 3, waiting: 0)),
         ("needsYou", LiveState(rows: [
-            .init(id: "a", title: "登录财务平台", step: "短信验证码是多少？", model: "claude-sonnet-4-6", startedAt: now.addingTimeInterval(-95), needsYou: true),
+            .init(id: "a", title: "登录财务平台", step: "短信验证码是多少？", model: "Sonnet 4.6", startedAt: now.addingTimeInterval(-95), needsYou: true),
             .init(id: "b", title: "修 AgentSwitch 的 bug", step: "第 2 步：交给 Opus 5.5", model: "Opus 5.5", startedAt: now.addingTimeInterval(-640), needsYou: false),
         ], running: 1, waiting: 1)),
         ("terminal", LiveState(rows: [
@@ -55,7 +56,7 @@ final class LiveRenderTests: XCTestCase {
             try write(ExpandedIsland(state: state), "island-expanded-\(name)", to: dir)
             try write(CompactIsland(state: state), "island-compact-\(name)", to: dir)
             try write(LockScreen(state: state), "lock-\(name)", to: dir)
-            try write(LiveMark(state: state).padding(4).background(.black, in: Circle()).padding(12).background(Color(white: 0.85)), "island-minimal-\(name)", to: dir)
+            try write(LiveMark(state: state).padding(5).background(.black, in: Circle()).padding(12), "island-minimal-\(name)", to: dir)
         }
     }
 }
@@ -72,13 +73,12 @@ private struct ExpandedIsland: View {
                 IslandTrailing(state: state)
             }
             .frame(height: 36)
-            IslandBottom(state: state)
+            IslandBottom(state: state, linked: false)
         }
         .padding(.top, 12).padding(.horizontal, 14).padding(.bottom, 14)
         .frame(width: 372)
         .background(.black, in: RoundedRectangle(cornerRadius: 44, style: .continuous))
         .padding(12)
-        .background(Color(white: 0.85))
     }
 }
 
@@ -93,7 +93,6 @@ private struct CompactIsland: View {
         .frame(width: 250, height: 37)
         .background(.black, in: Capsule())
         .padding(12)
-        .background(Color(white: 0.85))
     }
 }
 

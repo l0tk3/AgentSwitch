@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentSwitch 功能展示</title>
+<style>
+/* AgentSwitch's showcase: every screen of the iPhone and Mac apps (drawn from their demo data), their effects (screen
+   recordings and the live design pages), for people who have not used it. Media come from build.sh. Dark by design,
+   in the product's own language: pixel marks, lowercase mono labels, status colours, hard edges. */
+:root {
+  color-scheme: dark;
+  --board: #111112; --panel: #1a1a1c; --raise: #222225; --line: #2c2c30; --line2: #3a3a3f;
+  --ink: #ece9e2; --ink2: #aeaaa2; --ink3: #7b7872; --ink4: #4d4b48;
+  --signal: #ff2e88; --busy: #2ee6ff; --cyan: #2ee6ff; --amber: #ffb000; --green: #9be22d; --red: #ff4a3d; --px-shadow: #2c2a28;
+  --mono: "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+html, body { margin: 0; }
+body { background: var(--board); color: var(--ink); font: 15px/1.7 var(--ui); padding-inline: 16px; -webkit-font-smoothing: antialiased; }
+a { color: var(--ink); }
+.px { display: block; }
+.wrap { max-width: 1180px; margin: 0 auto; }
+.mono { font-family: var(--mono); }
+
+/* ---------- nav ---------- */
+nav { position: sticky; top: 0; z-index: 20; margin-inline: -16px; padding: 10px 16px; background: rgba(17,17,18,.88); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line); }
+nav .wrap { display: flex; align-items: center; gap: 14px; }
+nav .brand { display: flex; align-items: center; gap: 8px; font: 700 13px var(--mono); text-decoration: none; flex: none; }
+nav .links { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+nav .links::-webkit-scrollbar { display: none; }
+nav .links a { font: 12px var(--mono); color: var(--ink2); text-decoration: none; padding: 4px 8px; white-space: nowrap; }
+nav .links a:hover { color: var(--ink); background: var(--raise); }
+.seg { display: inline-flex; border: 1px solid var(--line2); flex: none; }
+.seg button { background: none; border: 0; color: var(--ink2); font: 12px var(--mono); padding: 4px 10px; cursor: pointer; }
+.seg button.on { background: var(--ink); color: #111; }
+
+/* ---------- type ---------- */
+section { padding-block: 72px 8px; }
+.label { font: 12px var(--mono); letter-spacing: .12em; color: var(--ink3); margin: 0 0 10px; }
+h2 { font: 600 30px/1.25 var(--ui); margin: 0 0 12px; text-wrap: balance; letter-spacing: -.01em; }
+h3 { font: 600 18px/1.35 var(--ui); margin: 44px 0 6px; }
+.lede { color: var(--ink2); max-width: 62ch; margin: 0 0 8px; font-size: 16px; }
+.note { color: var(--ink3); font-size: 13px; max-width: 70ch; }
+.dots { height: 1px; background: repeating-linear-gradient(90deg, var(--ink4) 0 2px, transparent 2px 4px); margin: 28px 0; }
+
+/* ---------- hero ---------- */
+.hero { padding-block: 72px 40px; display: grid; gap: 40px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: center; }
+.hero .word { overflow: hidden; }
+.hero .word svg { max-width: 100%; height: auto; }
+.hero h1 { font: 600 34px/1.3 var(--ui); margin: 26px 0 12px; text-wrap: balance; letter-spacing: -.01em; }
+.hero p { color: var(--ink2); font-size: 17px; max-width: 46ch; margin: 0; }
+.stage { border: 1px solid var(--line); background: var(--panel); padding: 28px; display: grid; place-items: center; gap: 18px; position: relative; }
+.stage .state { font: 600 14px var(--mono); }
+.stage .cap { font: 12px var(--mono); color: var(--ink3); text-align: center; max-width: 32ch; }
+.pillars { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 8px; }
+.pillars div { background: var(--board); padding: 18px 18px 20px; }
+.pillars b { display: flex; align-items: center; gap: 8px; font: 600 15px var(--ui); margin-bottom: 6px; }
+.pillars p { margin: 0; color: var(--ink2); font-size: 13.5px; line-height: 1.65; }
+.sq { display: inline-block; width: 8px; height: 8px; flex: none; }
+
+/* ---------- how it works ---------- */
+.flow { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 2.2fr); gap: 0; align-items: stretch; border: 1px solid var(--line); background: var(--panel); }
+.flow .col { padding: 22px; }
+.flow .col h4 { font: 600 12px var(--mono); letter-spacing: .1em; color: var(--ink3); margin: 0 0 14px; }
+.flow .link { display: grid; place-items: center; padding: 0 6px; border-inline: 1px dashed var(--line2); color: var(--ink3); font: 11px/1.5 var(--mono); text-align: center; writing-mode: vertical-rl; letter-spacing: .12em; }
+.chip { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line2); background: var(--board); padding: 9px 12px; font-size: 13.5px; }
+.chip + .chip { margin-top: 8px; }
+.chip small { color: var(--ink3); font: 11.5px var(--mono); margin-left: auto; white-space: nowrap; }
+.mac-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mac-grid .chip + .chip { margin-top: 0; }
+.agents { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.agents .chip { flex-direction: column; align-items: flex-start; gap: 8px; margin: 0; }
+.agents .chip span { font: 12px var(--mono); color: var(--ink2); }
+
+/* ---------- phone gallery ---------- */
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 30px 22px; margin-top: 22px; }
+.shot { margin: 0; }
+.shot figcaption { margin-top: 12px; }
+.shot figcaption b { display: block; font: 600 14px var(--ui); }
+.shot figcaption span { display: block; color: var(--ink2); font-size: 13px; line-height: 1.6; margin-top: 3px; }
+.shot figcaption i { font: normal 11px var(--mono); color: var(--ink3); }
+.phone { position: relative; aspect-ratio: 1206 / 2622; border-radius: 30px; overflow: hidden; background: #000;
+  box-shadow: 0 0 0 5px #242427, 0 0 0 6px #3a3a3f, 0 18px 40px rgba(0,0,0,.45); cursor: zoom-in; }
+.phone img, .phone video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.phone::after { content: ""; position: absolute; top: 1.35%; left: 50%; transform: translateX(-50%); width: 31%; height: 3.4%; border-radius: 99px; background: #000; }
+
+/* ---------- live activity ---------- */
+.live { display: grid; gap: 22px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin-top: 22px; align-items: start; }
+.tile { border: 1px solid var(--line); background: linear-gradient(160deg, #4d5b74, #232b3a 60%, #161b25); padding: 18px; }
+.tile img { display: block; max-width: 100%; height: auto; margin: 0 auto; cursor: zoom-in; }
+.tile.wall { background: none; padding: 0; border: 0; }
+.tile + .cap, .tile .cap { font-size: 13px; color: var(--ink2); margin-top: 10px; }
+.minis { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.minis img { width: 60px; }
+
+/* ---------- mac ---------- */
+.macrow { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 36px; margin-top: 22px; align-items: start; }
+.menuimg { width: 100%; max-width: 320px; display: block; border-radius: 12px; box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 18px 40px rgba(0,0,0,.5); cursor: zoom-in; }
+.viewer { border: 1px solid var(--line); background: var(--panel); }
+.tabs { display: flex; gap: 0; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { background: none; border: 0; border-right: 1px solid var(--line); color: var(--ink2); font: 12.5px var(--mono); padding: 9px 14px; cursor: pointer; white-space: nowrap; }
+.tabs button.on { background: var(--ink); color: #111; }
+.viewer .frame { padding: 18px; }
+.viewer .frame img { display: block; width: 100%; height: auto; border-radius: 10px; box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 14px 34px rgba(0,0,0,.45); cursor: zoom-in; }
+.viewer .desc { padding: 0 18px 18px; color: var(--ink2); font-size: 14px; max-width: 72ch; }
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+.steps figure { margin: 0; }
+.steps img, .sheets img { width: 100%; display: block; border-radius: 8px; box-shadow: 0 0 0 1px rgba(255,255,255,.08); cursor: zoom-in; }
+.steps figcaption, .sheets figcaption { font: 12px var(--mono); color: var(--ink3); margin-top: 8px; }
+.sheets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+
+/* ---------- live demos ---------- */
+.demo { border: 1px solid var(--line); background: var(--panel); margin-top: 22px; }
+.demo .bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 12px var(--mono); color: var(--ink3); }
+.demo .bar b { color: var(--green); font-weight: 600; }
+.demo .bar a { margin-left: auto; color: var(--ink2); text-decoration: none; }
+.demo .bar a:hover { color: var(--ink); }
+.demo iframe { display: block; width: 100%; border: 0; background: #1b1b1d; }
+.bullets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 28px; margin: 18px 0 0; padding: 0; list-style: none; }
+.bullets li { display: flex; gap: 10px; color: var(--ink2); font-size: 14px; line-height: 1.6; }
+.bullets li::before { content: "└─"; font: 12px/1.9 var(--mono); color: var(--ink4); flex: none; }
+.bullets b { color: var(--ink); font-weight: 600; }
+
+/* ---------- motion ---------- */
+.clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 30px 22px; margin-top: 22px; }
+
+/* ---------- security ---------- */
+.sec { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 22px; }
+.sec div { background: var(--board); padding: 18px 18px 20px; }
+.sec b { display: block; font: 600 15px var(--ui); margin-bottom: 6px; }
+.sec p { margin: 0; color: var(--ink2); font-size: 13.5px; }
+.token { font: 12.5px var(--mono); color: var(--signal); word-break: break-all; }
+
+/* ---------- design pages ---------- */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-top: 22px; }
+.cards a { display: block; border: 1px solid var(--line); background: var(--panel); padding: 16px; text-decoration: none; }
+.cards a:hover { border-color: var(--line2); background: var(--raise); }
+.cards b { display: block; font: 600 13px var(--mono); margin-bottom: 4px; }
+.cards span { color: var(--ink2); font-size: 13px; line-height: 1.6; }
+
+footer { margin-top: 90px; padding: 26px 0 60px; border-top: 1px solid var(--line); color: var(--ink3); font-size: 13px; }
+footer code { font: 12px var(--mono); color: var(--ink2); }
+
+/* ---------- lightbox ---------- */
+.lb { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.88); display: grid; place-items: center; padding: 24px; cursor: zoom-out; }
+.lb[hidden] { display: none; }
+.lb img { max-width: 100%; max-height: calc(100vh - 90px); display: block; border-radius: 8px; }
+.lb p { color: var(--ink2); font-size: 14px; text-align: center; margin: 12px 0 0; }
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 44px; }
+  .pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow { grid-template-columns: minmax(0, 1fr); }
+  .flow .link { writing-mode: horizontal-tb; border-inline: 0; border-block: 1px dashed var(--line2); padding: 8px; }
+  .macrow { grid-template-columns: minmax(0, 1fr); }
+  .steps, .sheets, .sec { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agents { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  h2 { font-size: 25px; }
+  .hero h1 { font-size: 27px; }
+}
+@media (max-width: 460px) {
+  .pillars, .mac-grid, .sec { grid-template-columns: minmax(0, 1fr); }
+  .gallery, .clips { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 14px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top" id="navmark">agentswitch</a>
+    <div class="links">
+      <a href="#how">how it works</a><a href="#tasks">iphone · tasks</a><a href="#terminals">iphone · terminals</a><a href="#live">live activity</a>
+      <a href="#mac">mac</a><a href="#window">terminal window</a><a href="#motion">motion</a><a href="#security">security</a><a href="#design">design</a>
+    </div>
+    <span class="seg" id="look" title="截图的外观"><button type="button" data-look="light">light</button><button type="button" class="on" data-look="dark">dark</button></span>
+  </div>
+</nav>
+
+<div class="wrap">
+  <header class="hero" id="top">
+    <div>
+      <div class="word" id="wordmark"></div>
+    </div>
+    <div class="stage">
+      <div id="bigmark"></div>
+      <div class="state" id="bigstate">busy</div>
+    </div>
+  </header>
+
+  <!-- ============ how it works ============ -->
+  <section id="how">
+    <div class="label">// how it works</div>
+    <h2>结构</h2>
+    <div class="flow" style="margin-top:22px">
+      <div class="col">
+        <h4>// iphone</h4>
+        <div class="chip">tasks</div>
+        <div class="chip">terminals</div>
+        <div class="chip">live activity</div>
+        <div class="chip">sealed input</div>
+      </div>
+      <div class="link">tls · pinned cert</div>
+      <div class="col">
+        <h4>// mac</h4>
+        <div class="mac-grid">
+          <div class="chip">router</div>
+          <div class="chip">engine</div>
+          <div class="chip">terminal host</div>
+          <div class="chip">secret-gate</div>
+        </div>
+        <div class="agents" id="agents"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ phone: tasks ============ -->
+  <section id="tasks">
+    <div class="label">// iphone · tasks</div>
+    <h2>任务</h2>
+    <div class="gallery" data-set="tasks"></div>
+  </section>
+
+  <!-- ============ phone: terminals ============ -->
+  <section id="terminals">
+    <div class="label">// iphone · terminals</div>
+    <h2>终端</h2>
+    <div class="gallery" data-set="terminals"></div>
+  </section>
+
+  <!-- ============ live activity ============ -->
+  <section id="live">
+    <div class="label">// live activity · dynamic island</div>
+    <h2>实时活动 · 灵动岛</h2>
+    <div class="live" id="livegrid"></div>
+  </section>
+
+  <!-- ============ mac ============ -->
+  <section id="mac">
+    <div class="label">// mac</div>
+    <h2>Mac</h2>
+    <div class="macrow">
+      <figure class="shot" style="margin:0">
+        <img class="menuimg" id="menuimg" alt="菜单栏">
+        <figcaption><b>菜单栏</b></figcaption>
+      </figure>
+      <div class="viewer">
+        <div class="tabs" id="settabs"></div>
+        <div class="frame"><img id="setimg" alt=""></div>
+      </div>
+    </div>
+    <h3>首次启动</h3>
+    <div class="steps" id="wizard"></div>
+    <h3>凭据网关服务</h3>
+    <div class="sheets" id="gate"></div>
+  </section>
+
+  <!-- ============ mac terminal window ============ -->
+  <section id="window">
+    <div class="label">// mac · terminal window</div>
+    <h2>终端窗口</h2>
+    <div class="demo">
+      <div class="bar"><b>live</b><a href="../design/visual-v1/terminal.html" target="_blank" rel="noopener">新窗口打开 ↗</a></div>
+      <iframe src="../design/visual-v1/terminal.html?bare" title="终端窗口" loading="lazy" style="height:830px"></iframe>
+    </div>
+  </section>
+
+  <!-- ============ motion ============ -->
+  <section id="motion">
+    <div class="label">// motion</div>
+    <h2>动效</h2>
+    <div class="clips" id="clips"></div>
+    <div class="demo">
+      <div class="bar"><b>live</b><a href="../design/visual-v1/phone.html" target="_blank" rel="noopener">新窗口打开 ↗</a></div>
+      <iframe src="../design/visual-v1/phone.html?bare&amp;dark" title="iPhone 终端" loading="lazy" style="height:1860px"></iframe>
+    </div>
+  </section>
+
+  <!-- ============ security ============ -->
+  <section id="security">
+    <div class="label">// security</div>
+    <h2>安全</h2>
+    <div class="sec">
+      <div><b>凭据只以密文交给 agent</b><p class="token">enc:v1:Q2x7mV0pT9cWfL3aRk8uN5eYh1sJd6gBzO4iPq7tXwE…</p></div>
+      <div><b>手机本地加密</b></div>
+      <div><b>私钥在独立系统账户</b></div>
+      <div><b>一次性配对 · TLS 钉证书</b></div>
+      <div><b>审批</b></div>
+      <div><b>禁区</b></div>
+    </div>
+  </section>
+
+  <!-- ============ design ============ -->
+  <section id="design">
+    <div class="label">// design language</div>
+    <h2>设计</h2>
+    <div class="cards">
+      <a href="../design/visual-v1/app.html" target="_blank" rel="noopener"><b>app.html ↗</b></a>
+      <a href="../design/visual-v1/terminal.html" target="_blank" rel="noopener"><b>terminal.html ↗</b></a>
+      <a href="../design/visual-v1/phone.html" target="_blank" rel="noopener"><b>phone.html ↗</b></a>
+      <a href="../design/visual-v1/island.html" target="_blank" rel="noopener"><b>island.html ↗</b></a>
+      <a href="../design/visual-v1/depth.html" target="_blank" rel="noopener"><b>depth.html ↗</b></a>
+    </div>
+  </section>
+
+  <footer>演示数据。</footer>
+</div>
+
+<div class="lb" id="lb" hidden><div><img id="lbimg" alt=""><p id="lbcap"></p></div></div>
+
+<script src="../design/visual-v1/pixel.js"></script>
+<script>
+const P = window.Pixel;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let look = "dark";
+
+/* ---------- data ---------- */
+const TASKS = [
+  ["home", "对话"], ["running", "进行中"], ["task", "等你回答"], ["done", "完成"], ["interrupted", "未完成 · 继续"], ["stale", "没有动静"],
+  ["tasks", "历史"], ["search", "搜索"], ["sessions", "编码会话"], ["transcript", "会话记录"], ["settings", "设置"], ["mac", "连接诊断"],
+  ["offline", "离线"], ["onboarding", "配对"],
+];
+const TERMINALS = [
+  ["terminals", "终端列表"], ["terminal", "终端 · 权限请求"], ["terminalslash", "斜杠命令"], ["terminalsealed", "加密发送"], ["newterminal", "新建"],
+  ["newterminalbypass", "跳过权限"], ["terminalmenu", "长按菜单"], ["terminaldelete", "删除记录"], ["terminalclose", "关闭"],
+];
+const LIVE = [
+  { img: "island-compact-running3", t: "紧凑 · 进行中" }, { img: "island-compact-needsYou", t: "紧凑 · 等你" }, { img: "island-compact-endedOK", t: "紧凑 · 完成" },
+  { img: "island-expanded-needsYou", t: "展开 · 等你" }, { img: "island-expanded-running3", t: "展开 · 进行中" }, { img: "island-expanded-terminal", t: "展开 · 终端" },
+  { img: "lock-running3", wall: true, t: "锁屏 · 进行中" }, { img: "lock-needsYou", wall: true, t: "锁屏 · 等你" }, { img: "lock-endedFail", wall: true, t: "锁屏 · 未完成" },
+];
+const SETTINGS = [
+  ["settings-pairing", "pairing"], ["settings-devices", "devices"], ["settings-models", "models"], ["settings-permissions", "permissions"],
+  ["settings-keys", "keys"], ["settings-environment", "environment"], ["settings-general", "general"],
+];
+const WIZARD = [["wizard-1-executors", "1 · executors"], ["wizard-2-pairing", "2 · pairing"], ["wizard-3-permissions", "3 · permissions"], ["wizard-4-done", "4 · done"]];
+const GATE = [["sheet-gate-install", "install"], ["sheet-gate-installing", "installing"], ["sheet-gate-installed", "installed"]];
+const CLIPS = [
+  ["home", "启动"], ["terminals", "列表"], ["terminal", "打开终端"], ["terminalsealed", "加密框"], ["newterminal", "文字标"], ["terminalclose", "确认框"], ["running", "进行中"],
+];
+
+/* ---------- media paths ---------- */
+const phoneSrc = (id) => `media/phone/${look}/${id}.jpg`;
+const macSrc = (id) => `media/mac/${id}${look === "dark" ? "-dark" : ""}.jpg`;
+
+/* ---------- renderers ---------- */
+function galleries() {
+  for (const el of document.querySelectorAll(".gallery")) {
+    const items = el.dataset.set === "tasks" ? TASKS : TERMINALS;
+    el.innerHTML = items.map(([id, t]) => `<figure class="shot"><div class="phone"><img loading="lazy" src="${phoneSrc(id)}" alt="${esc(t)}" data-cap="${esc(t)}"></div>
+      <figcaption><b>${esc(t)}</b></figcaption></figure>`).join("");
+  }
+}
+function live() {
+  $("livegrid").innerHTML = LIVE.map((x) => `<figure class="shot"><div class="tile ${x.wall ? "wall" : ""}"><img loading="lazy" src="media/live/${x.img}.png" alt="${esc(x.t)}" data-cap="${esc(x.t)}"></div>
+    <figcaption><b>${esc(x.t)}</b></figcaption></figure>`).join("")
+    + `<figure class="shot"><div class="tile"><div class="minis">${["running3", "needsYou", "endedOK", "endedFail"].map((s) => `<img src="media/live/island-minimal-${s}.png" alt="">`).join("")}</div></div>
+    <figcaption><b>最小</b></figcaption></figure>`;
+}
+let setting = 0;
+function mac() {
+  $("menuimg").src = macSrc("menu");
+  $("menuimg").dataset.cap = "菜单栏面板";
+  $("settabs").innerHTML = SETTINGS.map(([, n], i) => `<button type="button" class="${i === setting ? "on" : ""}" data-i="${i}">${n}</button>`).join("");
+  const [id, n] = SETTINGS[setting];
+  $("setimg").src = macSrc(id); $("setimg").alt = n; $("setimg").dataset.cap = n;
+  $("wizard").innerHTML = WIZARD.map(([id, c]) => `<figure><img loading="lazy" src="${macSrc(id)}" alt="${c}" data-cap="${c}"><figcaption>${c}</figcaption></figure>`).join("");
+  $("gate").innerHTML = GATE.map(([id, c]) => `<figure><img loading="lazy" src="${macSrc(id)}" alt="${c}" data-cap="${c}"><figcaption>${c}</figcaption></figure>`).join("");
+}
+function clips() {
+  $("clips").innerHTML = CLIPS.map(([id, t]) => `<figure class="shot"><div class="phone" style="cursor:default"><video src="media/video/${id}.mp4" muted loop playsinline preload="none" aria-label="${esc(t)}"></video></div>
+    <figcaption><b>${esc(t)}</b></figcaption></figure>`).join("");
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) e.target.play().catch(() => {}); else e.target.pause(); }), { threshold: 0.35 });
+  document.querySelectorAll("#clips video").forEach((v) => io.observe(v));
+}
+function agents() {
+  const list = [["cc", "Claude Code"], ["codex", "Codex"], ["oc", "OpenCode"], ["pi", "pi"]];
+  $("agents").innerHTML = list.map(([k, n]) => `<div class="chip">${P.sprite(P.AGENT_PX[k], { px: 3 })}<b style="font-weight:600">${n}</b></div>`).join("");
+}
+
+/* ---------- hero: the wordmark shows itself, the mark cycles through its states ---------- */
+function wordmark() {
+  $("wordmark").innerHTML = P.wordmark("AGENTSWITCH", { px: 8, ink: "var(--ink)", signal: "var(--signal)" });
+  const rects = [...$("wordmark").querySelectorAll("rect")];
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !rects.length) return;
+  let frame = 0;
+  rects.forEach((r) => (r.style.opacity = "0"));
+  const t = setInterval(() => {
+    frame++;
+    const shown = frame / 14;
+    rects.forEach((r, i) => { r.style.opacity = ((i * 7919) % 97) / 97 < shown ? (frame < 14 && Math.random() < 0.25 ? "0.35" : "1") : "0"; });
+    if (frame >= 16) { clearInterval(t); rects.forEach((r) => (r.style.opacity = "")); }
+  }, 55);
+}
+function bigmark() {
+  const states = [["busy", "var(--busy)", 26], ["waiting", "var(--amber)", 18], ["idle", "var(--ink2)", 12]];
+  let s = 0, t = 0, left = states[0][2];
+  const draw = () => {
+    const [state, color] = states[s];
+    $("bigmark").innerHTML = P.mark({ px: 9, state, t, depth: true });
+    $("bigstate").textContent = state;
+    $("bigstate").style.color = color;
+  };
+  draw();
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  setInterval(() => { t++; if (--left <= 0) { s = (s + 1) % states.length; left = states[s][2]; } draw(); }, 140);
+  $("navmark").innerHTML = `${P.mark({ px: 1.5, state: "idle" })}agentswitch`;
+}
+
+/* ---------- controls ---------- */
+function render() { galleries(); mac(); }
+$("look").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  look = b.dataset.look;
+  document.querySelectorAll("#look button").forEach((x) => x.classList.toggle("on", x === b));
+  render();
+});
+$("settabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; setting = Number(b.dataset.i); mac(); });
+document.addEventListener("click", (e) => {
+  const img = e.target.closest("img[data-cap]");
+  if (img) { $("lbimg").src = img.src; $("lbcap").textContent = img.dataset.cap; $("lb").hidden = false; return; }
+  if (e.target.closest("#lb")) $("lb").hidden = true;
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("lb").hidden = true; });
+
+wordmark(); bigmark(); agents(); render(); live(); clips();
+</script>
+</body>
+</html>

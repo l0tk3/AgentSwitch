@@ -233,6 +233,12 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 <style id="gcss"></style>
 </head>
 <body>
+<script>
+  // ?bare (the showcase embeds it): the phones, their titles and the buttons that play what happens; no review notes.
+  // ?dark: the phones in dark.
+  if (new URLSearchParams(location.search).has("bare")) document.documentElement.classList.add("bare");
+</script>
+<style>.bare .top, .bare .lede, .bare figcaption p, .bare .sec, .bare .fxwrap { display: none !important; }</style>
 <div class="page">
   <div class="top">
     <h1><span id="brand"></span>iPhone · terminals</h1>
@@ -837,5 +843,6 @@ p1reset();
 p2open();
 p3open();
 </script>
+<script>if (new URLSearchParams(location.search).has("dark")) document.querySelector('#theme [data-t="dark"]')?.click();</script>
 </body>
 </html>

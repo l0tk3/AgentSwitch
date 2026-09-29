@@ -227,18 +227,29 @@ struct Worker: View {
     }
 }
 
-/// The way in when something waits for you: a bracket button on amber with a key cap's darker lower edge.
+/// The way in when something waits for you: a bracket button on amber with a key cap's darker lower edge. `linked`
+/// false draws it without its link, for a picture of the island (a renderer cannot draw a link).
 struct OpenButton: View {
     let link: URL
+    var linked = true
 
     var body: some View {
-        Link(destination: link) {
-            Text("[ open ]").font(LiveLook.mono(13, .semibold)).foregroundStyle(.black)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(LiveLook.waiting)
-                .background(LiveLook.waitingEdge.offset(y: 3))
+        Group {
+            if linked { Link(destination: link) { face } } else { face }
         }
         .padding(.bottom, 3)
+    }
+
+    private var face: some View {
+        Text("[ open ]").font(LiveLook.mono(13, .semibold)).foregroundStyle(.black)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            // Square (§7: hard edges), drawn as rectangles: a plain colour background comes out rounded here.
+            .background {
+                ZStack {
+                    Rectangle().fill(LiveLook.waitingEdge).offset(y: 3)
+                    Rectangle().fill(LiveLook.waiting)
+                }
+            }
     }
 }
 
@@ -304,7 +315,12 @@ public struct IslandTrailing: View {
 /// who works on it, how many more, and `[ open ]` when it waits for you; or how it ended.
 public struct IslandBottom: View {
     let state: LiveState
-    public init(state: LiveState) { self.state = state }
+    let linked: Bool
+    /// `linked` false: the open button without its link, for a picture of the island (LiveRenderTests).
+    public init(state: LiveState, linked: Bool = true) {
+        self.state = state
+        self.linked = linked
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -316,7 +332,7 @@ public struct IslandBottom: View {
                     Worker(row: lead)
                     if let others = LiveLook.others(state) { Text("· \(others)").lineLimit(1) }
                     Spacer(minLength: 4)
-                    if lead.needsYou { OpenButton(link: lead.link) }
+                    if lead.needsYou { OpenButton(link: lead.link, linked: linked) }
                 }
                 .font(LiveLook.mono(12))
                 .foregroundStyle(LiveLook.faint)

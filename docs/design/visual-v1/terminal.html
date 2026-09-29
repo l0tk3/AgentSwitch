@@ -227,6 +227,11 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 </style>
 </head>
 <body>
+<script>
+  // ?bare (the showcase embeds it): the window and the buttons that play what happens, not the review notes and choices.
+  if (new URLSearchParams(location.search).has("bare")) document.documentElement.classList.add("bare");
+</script>
+<style>.bare .note, .bare #variant, .bare #lang, .bare #iconWeight, .bare .ctl a { display: none !important; }</style>
 <div class="ctl">
   <div class="seg" id="variant"><button data-v="tree" class="on">目录树</button><button data-v="ls">列表</button></div>
   <div class="seg" id="lang"><button data-l="en" class="on">English</button><button data-l="zh">正式中文</button></div>
