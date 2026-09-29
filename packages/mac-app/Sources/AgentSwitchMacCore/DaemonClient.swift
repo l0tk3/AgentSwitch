@@ -130,6 +130,40 @@ public struct DaemonClient: Sendable {
         do { return try QuotaReading.decodeList(data) } catch { throw DaemonError.decoding(String(describing: error)) }
     }
 
+    // MARK: the Live Activity (assistant-v0 §4)
+
+    /// `GET /live`: what the menu bar's Live Activity shows.
+    public func live() async throws -> LiveSnapshot {
+        try decode(LiveSnapshot.self, try await call("GET", "/live"))
+    }
+
+    /// Allow or deny what a row waits for: a terminal's permission request (`POST /terminals/:id/permissions/:pid`) or
+    /// a task's approval (`POST /tasks/:id/approve`).
+    public func decide(_ row: LiveSnapshot.Row, allow: Bool) async throws {
+        guard case .decide(let id, _, _, _)? = row.ask else { return }
+        let decision = allow ? "allow" : "deny"
+        switch row.kind {
+        case .terminal:
+            _ = try await call("POST", "/terminals/\(Self.segment(row.id))/permissions/\(Self.segment(id))",
+                               body: try JSONEncoder().encode(["decision": decision]))
+        case .task:
+            _ = try await call("POST", "/tasks/\(Self.segment(row.id))/approve",
+                               body: try JSONEncoder().encode(["approval_id": id, "decision": decision]))
+        }
+    }
+
+    /// Answer a task's question with one of its options (`POST /tasks/:id/answer`).
+    public func answer(_ row: LiveSnapshot.Row, option: String) async throws {
+        guard case .question(let id, let questionId, _, _, true)? = row.ask else { return }
+        struct Body: Encodable { let approval_id: String; let answers: [String: [String]] }
+        _ = try await call("POST", "/tasks/\(Self.segment(row.id))/answer",
+                           body: try JSONEncoder().encode(Body(approval_id: id, answers: [questionId: [option]])))
+    }
+
+    static func segment(_ id: String) -> String {
+        id.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_.~"))) ?? id
+    }
+
     // MARK: plumbing
 
     private func call(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {

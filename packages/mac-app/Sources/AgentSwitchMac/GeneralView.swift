@@ -16,6 +16,8 @@ struct GeneralView: View {
     /// On by default: the Dock icon opens the terminal window, the app's main one (AgentSwitchApp registers the default).
     @AppStorage(DockPresence.alwaysShowKey) private var alwaysShowInDock = true
     @AppStorage(AppDelegate.quitWithoutAskingKey) private var quitWithoutAsking = false
+    @AppStorage(LiveActivity.enabledKey) private var liveActivity = true
+    @AppStorage(LiveActivity.soundKey) private var liveSound = true
 
     private var draft: PortSettings? {
         guard let l = Int(local), let r = Int(remote), let g = Int(gate), let o = Int(opencode) else { return nil }
@@ -56,6 +58,16 @@ struct GeneralView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(!portProblems.isEmpty || draft == model.ports)
                 }
+            }
+
+            Section {
+                Toggle("show in menu bar", isOn: $liveActivity)
+                Toggle("sound when waiting", isOn: $liveSound)
+                    .disabled(!liveActivity)
+            } header: {
+                SectionLabel("live activity")
+            } footer: {
+                Footer("任务进行、等你处理或刚结束时，菜单栏显示一个小胶囊，点开可直接批准或拒绝。")
             }
 
             Section {

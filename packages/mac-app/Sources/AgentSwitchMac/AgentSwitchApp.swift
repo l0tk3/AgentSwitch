@@ -8,7 +8,7 @@ struct AgentSwitchApp: App {
 
     var body: some Scene {
         // Hidden while this copy only waits on a newly installed one (AppModel.installUpdate).
-        MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating && !AppDelegate.previewOnly }, set: { _ in })) {
+        MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating && !AppDelegate.previewOnly && !AppDelegate.liveDemoOnly }, set: { _ in })) {
             MenuContentView()
                 .environment(delegate.model)
                 .environment(\.showSettings, ShowSettingsAction { [delegate] tab in delegate.settings.show(tab) })
@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     lazy var settings = SettingsWindowController(model: model)
     lazy var terminals = TerminalWindowController(model: model)
+    /// The menu bar's Live Activity (assistant-v0 §4): its own status item, left of the app's.
+    lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id in self?.terminals.show(terminal: id) })
     /// Which of our windows are open: the Dock icon shows while any is.
     private var openWindows: Set<String> = []
     private var signalSources: [DispatchSourceSignal] = []
@@ -49,10 +51,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
+    /// `-liveDemo YES`: the menu bar's Live Activity alone, from made-up work (LiveDemo.swift); nothing else starts.
+    static var liveDemoOnly: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "liveDemo")
+        #else
+        return false
+        #endif
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
         if let directory = DesignPreview.directory {
             DesignPreview.run(model: model, into: directory)
+            return
+        }
+        if Self.liveDemoOnly {
+            NSApp.setActivationPolicy(.accessory)
+            live.startDemo()
             return
         }
         #endif
@@ -81,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
         }
         model.launch()
+        live.start()
         let defaults = UserDefaults.standard
         if let tab = defaults.string(forKey: "openSettings").flatMap(SettingsTab.init(rawValue:)) {
             settings.show(tab)

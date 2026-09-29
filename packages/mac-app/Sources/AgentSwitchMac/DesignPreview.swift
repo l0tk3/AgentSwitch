@@ -5,7 +5,8 @@ import SwiftUI
 
 /// `-designPreview <dir>` (debug builds, docs/ui-v0.md §5): loads DemoData, draws the menu panel, every settings page,
 /// a few states of the control-v0 pages (skip mode, a folder problem, a fresh Mac), each first-run wizard step and the
-/// gate service's states and sheets (gate-service-v0) into PNG files in light and dark, then exits. It runs before the single-instance lock and never calls `launch()`:
+/// gate service's states and sheets (gate-service-v0) into PNG files in light and dark, and the menu bar's Live Activity
+/// (LivePreview), then exits. It runs before the single-instance lock and never calls `launch()`:
 /// no gate, no daemon, no port, no poll. Nothing is put on screen: each view is hosted in a window that is never
 /// ordered in and drawn with `cacheDisplay`.
 @MainActor
@@ -47,6 +48,7 @@ enum DesignPreview {
                         }
                     }
                 }
+                try LivePreview.render(into: directory)
                 FileHandle.standardError.write(Data("design preview written to \(directory.path)\n".utf8))
                 exit(0)
             } catch {

@@ -134,7 +134,7 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 
   <div class="sec">// menu bar · 菜单栏</div>
   <div class="fit"><div class="grid zoom static" id="bar"></div></div>
-  <p class="note">只在有任务或请求时出现，在 AgentSwitch 图标左边。菜单栏挤的时候只剩标记。</p>
+  <p class="note">只在有任务或请求时出现，在 AgentSwitch 图标左边。胶囊不动，只有计时在走。</p>
 
   <div class="sec">// card · 卡片</div>
   <div class="fit"><div class="grid zoom static" id="card"></div></div>
@@ -202,8 +202,9 @@ function capsule(m, live, { min = false, on = false } = {}) {
   const s = sum(m), e = showsEnded(m) ? m.flash || m.ended : null;
   const st = e ? e.st : s.st;
   let right = "";
-  if (!min) right = e ? sq(TINT[e.st]) : s.n > 1 ? tally(s.w, s.r, live) : clock(ordered(m)[0], live, s.st === "waiting");
-  return `<span class="live${min ? " min" : ""}${on ? " on" : ""}" data-do="capsule">${markEl(st, live)}${right}</span>`;
+  // The menu bar never moves (ui-v0 §7): the mark is one frame, the spinner its first; only the clock counts.
+  if (!min) right = e ? sq(TINT[e.st]) : s.n > 1 ? tally(s.w, s.r, false) : clock(ordered(m)[0], live, s.st === "waiting");
+  return `<span class="live${min ? " min" : ""}${on ? " on" : ""}" data-do="capsule">${markEl(st, false)}${right}</span>`;
 }
 
 function card(m, live) {
@@ -271,7 +272,6 @@ document.getElementById("bar").innerHTML = [
   ["waiting 2 · busy 1", { items: [I.term, I.sms, I.bug] }],
   ["done", { items: [], ended: END.done }],
   ["incomplete", { items: [], ended: END.incomplete }],
-  ["挤的时候", { items: [I.term, I.bug] }, { min: true }],
 ].map(([c, m, o]) => cell(c, strip(m, o))).join("");
 
 document.getElementById("card").innerHTML = [

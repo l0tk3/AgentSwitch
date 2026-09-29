@@ -52,12 +52,28 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             window.makeKeyAndOrderFront(nil)
             return
         }
+        open(page: Self.page)
+    }
+
+    /// One terminal on screen (the menu bar's Live Activity card): the open window switches to it, a new one opens on it.
+    func show(terminal id: String) {
+        if let window, let webView {
+            let arg = (try? JSONEncoder().encode(id)).map { String(decoding: $0, as: UTF8.self) } ?? "null"
+            webView.evaluateJavaScript("window.agentswitch?.show(\(arg))", completionHandler: nil)
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        open(page: "\(Self.page)?id=\(id)")
+    }
+
+    private func open(page: String) {
         guard !opening else { return }
         opening = true
         Task {
             defer { opening = false }
             do {
-                let link = try await model.client.consoleLink(next: Self.page)
+                let link = try await model.client.consoleLink(next: page)
                 open(link)
             } catch {
                 model.errorMessage = "无法打开终端窗口：\(error.localizedDescription)"
