@@ -606,8 +606,12 @@ export class TerminalHost {
     s.emit({ type: "status", status });
   }
 
+  /** The screen as a newly attached one needs it. The serializer restores mouse tracking but not how it reports:
+   *  SGR (1006, which Claude Code turns on) is added back, or a desktop screen would send the wheel and clicks in the
+   *  old byte form, which the page does not forward and the program does not read. */
   private snapshot(s: Session): TerminalEvent {
-    return { type: "snapshot", seq: s.parsedSeq, cols: s.cols, rows: s.rows, data: s.ser.serialize({ scrollback: this.o.snapshotScrollback }) };
+    const data = s.ser.serialize({ scrollback: this.o.snapshotScrollback }) + (s.sgrMouse ? "\x1b[?1006h" : "");
+    return { type: "snapshot", seq: s.parsedSeq, cols: s.cols, rows: s.rows, data };
   }
 
   private need(id: string): Session {

@@ -57,9 +57,19 @@ describe("terminal host", () => {
     await until(() => text(events).includes("fullscreen on"));
     expect(host.keyContext(info.id)).toMatchObject({ mouse: "any", sgrMouse: true, alternate: true, cols: 80, rows: 20 });
     expect(keySequence("wheel-up", host.keyContext(info.id))).toBe("\x1b[<64;41;11M");
+    // A screen attaching now (the desktop window opening, or switching to this terminal) is put in the same modes,
+    // the mouse's SGR reporting included (the serializer alone drops it).
+    const late: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => late.push(e));
+    expect(late[0]?.type).toBe("snapshot");
+    expect(text(late)).toContain("\x1b[?1003h");
+    expect(text(late)).toContain("\x1b[?1006h");
     host.write(info.id, "normal\r");
     await until(() => text(events).includes("normal again"));
     expect(host.keyContext(info.id)).toMatchObject({ mouse: "none", sgrMouse: false, alternate: false });
+    const after: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => after.push(e));
+    expect(text(after)).not.toContain("\x1b[?1006h");
   });
 
   it("runs a program in a pseudo-terminal: output, title, replies, status by activity, replay, snapshot, exit", async () => {
