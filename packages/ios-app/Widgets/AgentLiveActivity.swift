@@ -24,17 +24,17 @@ struct AgentLiveActivity: Widget {
                 .widgetURL(LiveLook.link(context.state))
         } dynamicIsland: { context in
             let state = context.state
+            // docs/design/visual-v1/island.html: the mark beside the camera, everything else aligned left below it.
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { IslandLeading(state: state) }
                 DynamicIslandExpandedRegion(.trailing) { IslandTrailing(state: state) }
-                DynamicIslandExpandedRegion(.center) { IslandCenter(state: state) }
                 DynamicIslandExpandedRegion(.bottom) { IslandBottom(state: state) }
             } compactLeading: {
-                StatusGlyph(state: state, size: 22)
+                IslandCompactLeading(state: state)
             } compactTrailing: {
                 IslandCompactTrailing(state: state)
             } minimal: {
-                StatusGlyph(state: state, size: 22)
+                LiveMark(state: state)
             }
             .widgetURL(LiveLook.link(state))
             .keylineTint(LiveLook.tint(state))

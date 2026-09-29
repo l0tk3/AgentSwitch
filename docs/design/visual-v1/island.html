@@ -176,7 +176,7 @@ function expanded(s) {
     <div class="foot">${who}${n > 1 ? `<span>· +${n - 1} more</span>` : ""}<span class="sp"></span>${lead.ask ? `<span class="btn">[ open ]</span>` : ""}</div></div>`;
 }
 
-function lock(s, mac = "0x90's mac mini") {
+function lock(s, mac = "Studio Mac") {
   const n = (s.w ?? 0) + (s.r ?? 0);
   const right = s.ended ? `<span class="word" style="color:${TINT[s.st]}">${s.st}</span>` : n > 1 ? tally(s.w, s.r) : `<span class="word" style="color:${TINT[s.st]}">${s.st}</span>`;
   const head = `<div class="hd">${mark(s.st, 2)}<span class="name">agentswitch</span><span class="mac">· ${esc(mac)}</span><span class="sp"></span>${right}</div><div class="dots"></div>`;

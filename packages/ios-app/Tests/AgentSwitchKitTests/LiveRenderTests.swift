@@ -55,12 +55,13 @@ final class LiveRenderTests: XCTestCase {
             try write(ExpandedIsland(state: state), "island-expanded-\(name)", to: dir)
             try write(CompactIsland(state: state), "island-compact-\(name)", to: dir)
             try write(LockScreen(state: state), "lock-\(name)", to: dir)
+            try write(LiveMark(state: state).padding(4).background(.black, in: Circle()).padding(12).background(Color(white: 0.85)), "island-minimal-\(name)", to: dir)
         }
     }
 }
 
-/// The expanded island as WidgetKit lays it out: leading and trailing beside the camera, the center under it, the
-/// bottom across; black, with rounded ends.
+/// The expanded island as WidgetKit lays it out: leading and trailing beside the camera, the bottom across; black,
+/// with rounded ends.
 private struct ExpandedIsland: View {
     let state: LiveState
     var body: some View {
@@ -71,7 +72,6 @@ private struct ExpandedIsland: View {
                 IslandTrailing(state: state)
             }
             .frame(height: 36)
-            IslandCenter(state: state)
             IslandBottom(state: state)
         }
         .padding(.top, 12).padding(.horizontal, 14).padding(.bottom, 14)
@@ -86,9 +86,9 @@ private struct CompactIsland: View {
     let state: LiveState
     var body: some View {
         HStack {
-            StatusGlyph(state: state, size: 22).padding(.leading, 10)
+            IslandCompactLeading(state: state).padding(.leading, 8)
             Spacer(minLength: 126)   // the camera
-            IslandCompactTrailing(state: state).padding(.trailing, 12)
+            IslandCompactTrailing(state: state).padding(.trailing, 10)
         }
         .frame(width: 250, height: 37)
         .background(.black, in: Capsule())
@@ -100,7 +100,7 @@ private struct CompactIsland: View {
 private struct LockScreen: View {
     let state: LiveState
     var body: some View {
-        LockScreenCard(state: state, mac: "Mac mini", stale: false)
+        LockScreenCard(state: state, mac: "Studio Mac", stale: false)
             .frame(width: 370, alignment: .leading)
             .background(LiveLook.background, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .padding(16)

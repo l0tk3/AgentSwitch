@@ -1,3 +1,4 @@
+import AgentSwitchLive
 import Foundation
 
 /// The app's pixel marks (docs/ui-v0.md §7.3) as data: the views draw them. The same shapes as the terminal page's
@@ -13,26 +14,14 @@ public enum PixelArt {
 
     /// One source switched onto three lanes, as the app icon: S = source, a/b/c = lanes, A/B/C = their ends; the top
     /// lane is the lit one. 14 × 11, y down.
-    public static let markRows = [
-        "...........AAA",
-        "......aaaaaAAA",
-        ".....a.....AAA",
-        "....a.........",
-        "SSSa.......BBB",
-        "SSSbbbbbbbbBBB",
-        "SSSc.......BBB",
-        "....c.........",
-        ".....c.....CCC",
-        "......cccccCCC",
-        "...........CCC",
-    ]
+    public static let markRows = LiveArt.markRows
     public static let markWidth = 14
     public static let markHeight = 11
 
     public static let markCells: [Cell] = cells(markRows)
 
     /// The lit lane from the source to its end, the way the busy block runs.
-    public static let laneA: [(x: Int, y: Int)] = [(3, 4), (4, 3), (5, 2), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1)]
+    public static let laneA: [(x: Int, y: Int)] = LiveArt.laneA
 
     /// Empty cells in an inside corner of a diagonal step: a half-lit pixel there smooths the step (sub-pixel
     /// anti-aliasing, for marks of 20 pt and up). Each carries the lit/dim role of the cell it leans on.
@@ -58,12 +47,7 @@ public enum PixelArt {
     public static let hollow = ["####", "#..#", "#..#", "####"]
     public static let lock = [".###.", "#...#", "#####", "##.##", "#####"]
     /// Each agent's mark, from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π.
-    public static let agents: [String: [String]] = [
-        "claude-code": ["#.#.#", ".###.", "#####", ".###.", "#.#.#"],
-        "codex": ["#....", ".#...", "..#..", ".#...", "#.###"],
-        "opencode": ["##.##", "#...#", "#...#", "#...#", "##.##"],
-        "pi": ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"],
-    ]
+    public static let agents: [String: [String]] = LiveArt.agents
     /// The terminals tab and window: a framed terminal (">_" alone means Codex).
     public static let terminalWindow = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"]
 
