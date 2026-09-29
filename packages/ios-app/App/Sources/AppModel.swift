@@ -386,6 +386,11 @@ final class AppModel {
         syncLive()
     }
 
+    /// What a task is called where it is listed (TaskTitle).
+    func title(of task: AgentTask) -> String {
+        TaskTitle.of(task, threadTitle: thread(task.threadId)?.title, tasks: tasks)
+    }
+
     func thread(_ id: String?) -> AgentThread? {
         id.flatMap { id in threads.first { $0.id == id } }
     }

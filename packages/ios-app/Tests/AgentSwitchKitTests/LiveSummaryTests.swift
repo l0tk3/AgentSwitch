@@ -19,6 +19,21 @@ final class LiveSummaryTests: XCTestCase {
         return try JSONDecoder().decode([Approval].self, from: Data(contentsOf: url))
     }
 
+    /// 2026-09-29: "pack it" and "send it to me" after a listing all read "列出下载目录文件清单", the thread's name.
+    func testALaterTaskInAThreadIsCalledByItsOwnRequest() throws {
+        let first = try task("a", "done", created: 1_000, thread: "th1", text: "列出下载目录中有哪些文件。")
+        let pack = try task("b", "done", created: 2_000, thread: "th1", text: "下载目录打包发给我", extra: ["parentId": "a"])
+        let send = try task("c", "running", created: 3_000, thread: "th1", text: "把归档文件发送给我。")   // its parent not given
+        let alone = try task("d", "done", created: 4_000, text: "查一下天气")
+        let tasks = [first, pack, send, alone]
+        XCTAssertEqual(TaskTitle.of(first, threadTitle: "列出下载目录文件清单", tasks: tasks), "列出下载目录文件清单")
+        XCTAssertEqual(TaskTitle.of(pack, threadTitle: "列出下载目录文件清单", tasks: tasks), "下载目录打包发给我")
+        XCTAssertEqual(TaskTitle.of(send, threadTitle: "列出下载目录文件清单", tasks: tasks), "把归档文件发送给我。")
+        XCTAssertEqual(TaskTitle.of(alone, threadTitle: nil, tasks: tasks), "查一下天气")
+        let state = try XCTUnwrap(LiveSummary.state(tasks: tasks, approvals: [], threadTitles: ["th1": "列出下载目录文件清单"]))
+        XCTAssertEqual(state.lead?.title, "把归档文件发送给我。")
+    }
+
     func testNothingInProgressIsNoState() throws {
         XCTAssertNil(LiveSummary.state(tasks: [try task("a", "done", created: 1)], approvals: [], threadTitles: [:]))
     }

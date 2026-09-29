@@ -121,7 +121,7 @@ struct FeedEntry: View {
     }
 
     private var title: String {
-        task.threadId.flatMap { model.thread($0)?.title } ?? MessageDisplay.readable(task.task)
+        model.title(of: task)
     }
 
     @ViewBuilder

@@ -20,7 +20,7 @@ public enum LiveSummary {
         let rows = active.map { task -> LiveState.Row in
             let waitingOn = pending[task.id]?.first
             let needsYou = waitingOn != nil || task.status == .waitingApproval
-            return LiveState.Row(id: task.id, title: title(task, threadTitles), step: step(task, waitingOn, tails[task.id] ?? []),
+            return LiveState.Row(id: task.id, title: title(task, threadTitles, tasks), step: step(task, waitingOn, tails[task.id] ?? []),
                                  model: task.model.map(ModelName.display), startedAt: task.created, needsYou: needsYou)
         } + asking.map(row)
         let ordered = rows.sorted { ($0.needsYou ? 0 : 1, $1.startedAt) < ($1.needsYou ? 0 : 1, $0.startedAt) }
@@ -43,13 +43,12 @@ public enum LiveSummary {
         guard let last = tasks.filter(\.status.isTerminal).max(by: { $0.updatedAt < $1.updatedAt }) else { return nil }
         let said = [last.spoken, last.speech, last.status == .done ? last.result : last.error ?? last.result]
             .compactMap { $0.map(Speech.speakable) }.first { !$0.isEmpty }
-        return LiveState.Ended(taskId: last.id, title: title(last, threadTitles), line: clip(said ?? last.status.label, endedChars),
+        return LiveState.Ended(taskId: last.id, title: title(last, threadTitles, tasks), line: clip(said ?? last.status.label, endedChars),
                                ok: last.status == .done)
     }
 
-    static func title(_ task: AgentTask, _ threadTitles: [String: String]) -> String {
-        if let id = task.threadId, let title = threadTitles[id], !title.isEmpty { return clip(title, titleChars) }
-        return clip(MessageDisplay.readable(task.task), titleChars)
+    static func title(_ task: AgentTask, _ threadTitles: [String: String], _ tasks: [AgentTask]) -> String {
+        clip(TaskTitle.of(task, threadTitle: task.threadId.flatMap { threadTitles[$0] }, tasks: tasks), titleChars)
     }
 
     /// What it waits for; else what it is doing, in plain words, from the latest event that says something (not raw

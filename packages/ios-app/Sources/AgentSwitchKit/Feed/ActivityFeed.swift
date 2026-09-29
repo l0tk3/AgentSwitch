@@ -47,6 +47,18 @@ public enum EventTail {
 
 /// How a stored task text reads on the phone: the sealer's legend (router-v0 §9, meant for the executor) is cut off
 /// and each ciphertext shows as a lock.
+/// A task's name where it is listed (its card, the conversation's end line, the Live Activity): its thread's title for
+/// the thread's first task, else its own request — a later task in a thread asks for something else ("pack it", "send
+/// it to me") and under the thread's name every card would read the same.
+public enum TaskTitle {
+    public static func of(_ task: AgentTask, threadTitle: String?, tasks: [AgentTask]) -> String {
+        let own = MessageDisplay.readable(task.task)
+        guard let threadId = task.threadId, let title = threadTitle, !title.isEmpty else { return own }
+        let later = task.parentId != nil || tasks.contains { $0.threadId == threadId && $0.id != task.id && $0.createdAt < task.createdAt }
+        return later ? own : title
+    }
+}
+
 public enum MessageDisplay {
     public static let tokenMark = "🔒密文"
     /// The start of the daemon's LEGEND_HEADER after the blank line `legend()` puts before it (daemon src/secrets/sealer.ts).

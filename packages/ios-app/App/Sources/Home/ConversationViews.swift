@@ -72,7 +72,7 @@ struct AssistantBubble: View {
         Button { open(task.id) } label: {
             HStack(spacing: Theme.Space.s) {
                 StatusMark(status: task.status)
-                Text(task.threadId.flatMap { model.thread($0)?.title } ?? MessageDisplay.readable(task.task))
+                Text(model.title(of: task))
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Text(task.status.label).mono(11).foregroundStyle(Theme.color(task.status))
                 Spacer(minLength: 0)
@@ -153,7 +153,7 @@ struct TaskLink: View {
     }
 
     private var title: String {
-        task.threadId.flatMap { model.thread($0)?.title } ?? MessageDisplay.readable(task.task)
+        model.title(of: task)
     }
 }
 
