@@ -72,6 +72,42 @@ public enum PixelArt {
         rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, c in c == "#" ? (x, y) : nil } }
     }
 
+    // MARK: the wordmark
+
+    /// The wordmark's letters, 5 × 7 (pixel.js `FONT`).
+    public static let letters: [Character: [String]] = [
+        "A": [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+        "G": [".###.", "#...#", "#....", "#.###", "#...#", "#...#", ".###."],
+        "E": ["#####", "#....", "#....", "####.", "#....", "#....", "#####"],
+        "N": ["#...#", "##..#", "#.#.#", "#..##", "#...#", "#...#", "#...#"],
+        "T": ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
+        "S": [".####", "#....", "#....", ".###.", "....#", "....#", "####."],
+        "W": ["#...#", "#...#", "#...#", "#.#.#", "#.#.#", "##.##", "#...#"],
+        "I": ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "#####"],
+        "C": [".###.", "#...#", "#....", "#....", "#....", "#...#", ".###."],
+        "H": ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+    ]
+
+    /// A word in the wordmark's letters, 7 rows, one empty column between letters; letters it lacks are left out.
+    public static func wordRows(_ word: String) -> [String] {
+        let glyphs = word.uppercased().compactMap { letters[$0] }
+        return (0..<7).map { y in glyphs.map { $0[y] }.joined(separator: ".") }
+    }
+
+    /// The same rows with 2-cell strokes on half-size cells: the settled wordmark's grid (its signal offset is one of
+    /// these cells, half a stroke).
+    public static func fine(_ rows: [String]) -> [String] {
+        rows.flatMap { row -> [String] in
+            let wide = String(row.flatMap { [$0, $0] })
+            return [wide, wide]
+        }
+    }
+
+    /// The half-lit cells in the diagonal steps of any "#" sprite (as `markSmoothing` for the mark).
+    public static func halfLit(_ rows: [String]) -> [(x: Int, y: Int)] {
+        smoothing(rows).map { ($0.x, $0.y) }
+    }
+
     // MARK: helpers
 
     static func cells(_ rows: [String]) -> [Cell] {

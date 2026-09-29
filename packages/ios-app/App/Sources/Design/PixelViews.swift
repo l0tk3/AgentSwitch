@@ -76,8 +76,8 @@ struct PixelMarkView: View {
     }
 }
 
-/// A task's status in pixels: the braille spinner while it runs, a square while it waits or once done, hollow once it
-/// ended otherwise (cancelled, incomplete, failed keep their colour).
+/// A task's status in pixels: the braille spinner while it runs, a square while it waits (blinking) or once done,
+/// hollow once it ended otherwise (cancelled, incomplete, failed keep their colour).
 struct StatusMark: View {
     let status: TaskStatus
 
@@ -85,6 +85,7 @@ struct StatusMark: View {
         switch status {
         case .routing, .running: BrailleSpinner()
         case .queued, .cancelled, .other: PixelSprite(rows: PixelArt.hollow, pixel: 2, color: Theme.color(status))
+        case .waitingApproval: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink()
         default: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.color(status))
         }
     }

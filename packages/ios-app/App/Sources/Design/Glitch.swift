@@ -7,6 +7,8 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
     let trigger: Trigger
     /// Also when the view appears (a box that only exists while open).
     var onAppear = false
+    /// Only a change to a value this accepts (needs you, exited), not every change.
+    var when: ((Trigger) -> Bool)?
     @State private var frame: Frame?
     @State private var run: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -45,7 +47,7 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
             .offset(x: f?.dx ?? 0, y: f?.dy ?? 0)
             .modifier(Band(frame: f))
             .modifier(Inverted(on: f?.invert == true))
-            .onChange(of: trigger) { play() }
+            .onChange(of: trigger) { _, new in if when?(new) ?? true { play() } }
             .onAppear { if onAppear { play() } }
             .onDisappear { run?.cancel() }
     }
@@ -91,6 +93,9 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
 }
 
 extension View {
-    /// A glitch burst each time `trigger` changes (and as the view appears, with `onAppear`).
-    func glitch<T: Equatable>(on trigger: T, onAppear: Bool = false) -> some View { modifier(Glitch(trigger: trigger, onAppear: onAppear)) }
+    /// A glitch burst each time `trigger` changes (to a value `when` accepts, if given; and as the view appears, with
+    /// `onAppear`).
+    func glitch<T: Equatable>(on trigger: T, onAppear: Bool = false, when: ((T) -> Bool)? = nil) -> some View {
+        modifier(Glitch(trigger: trigger, onAppear: onAppear, when: when))
+    }
 }

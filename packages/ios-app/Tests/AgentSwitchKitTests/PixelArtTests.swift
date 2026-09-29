@@ -41,4 +41,19 @@ final class PixelArtTests: XCTestCase {
         // the terminals tab is not Codex's >_ (one icon, one meaning)
         XCTAssertNotEqual(PixelArt.terminalWindow, PixelArt.agents["codex"])
     }
+
+    func testTheWordmark() {
+        let rows = PixelArt.wordRows("AGENTSWITCH")
+        XCTAssertEqual(rows.count, 7)
+        XCTAssertTrue(rows.allSatisfy { $0.count == 11 * 5 + 10 })
+        XCTAssertEqual(rows[0].prefix(5), ".###.")
+        XCTAssertEqual(PixelArt.wordRows("agent?"), PixelArt.wordRows("AGENT"), "lowercase reads as capitals; unknown letters drop")
+        let fine = PixelArt.fine(rows)
+        XCTAssertEqual(fine.count, 14)
+        XCTAssertEqual(fine[0].count, rows[0].count * 2)
+        XCTAssertEqual(PixelArt.sprite(fine).count, PixelArt.sprite(rows).count * 4)
+        // G, S and C round their corners with half-lit pixels; a block has none
+        XCTAssertFalse(PixelArt.halfLit(PixelArt.fine(PixelArt.wordRows("C"))).isEmpty)
+        XCTAssertTrue(PixelArt.halfLit(PixelArt.square).isEmpty)
+    }
 }

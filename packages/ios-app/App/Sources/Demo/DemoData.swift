@@ -137,8 +137,8 @@ enum DemoData {
                            lastText: "已读取 session_meta 中的 cwd 和 originator。", updatedAt: ago(1500), origin: "desktop", branch: "main", model: "gpt-6-luna"),
             SessionSummary(harness: "opencode", id: "o1", cwd: "/Users/me/Blog", title: "换主题后的构建报错",
                            lastText: "hexo-renderer-marked 升级到 7.0 后构建成功。", updatedAt: ago(3 * 3600), model: "deepseek/deepseek-flash"),
-            SessionSummary(harness: "claude-code", id: "c2", cwd: "/Users/me/Desktop/WorkSpace/Lab/CVE", title: "复现 PoC 并写记录",
-                           lastText: "记录已写入 README.md。", updatedAt: ago(26 * 3600)),
+            SessionSummary(harness: "claude-code", id: "c2", cwd: "/Users/me/Work/api", title: "给健康检查加缓存",
+                           lastText: "缓存 30 秒，命中率 92%。", updatedAt: ago(26 * 3600)),
         ]
     }
 

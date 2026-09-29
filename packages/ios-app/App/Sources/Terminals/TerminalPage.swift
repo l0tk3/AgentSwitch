@@ -1,10 +1,12 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// One terminal on the phone (docs/terminal-v0.md §1): the live screen (drag to scroll, pinch for the text size, tap to
-/// put the keyboard away), permission requests as cards over its top, the key bar and the reply box under it. A reply
-/// goes as typed (checked for secret-looking text first) or, from the lock, through the Mac's sealer in the sealed box;
-/// `/` lists the agent's commands; keys go by name. The menu renames or closes it (asked first; the record may go too).
+/// One terminal on the phone (docs/terminal-v0.md §1): the live screen (drag to scroll — the wheel notches sent show at
+/// its right; pinch for the text size; tap to put the keyboard away), drawn in top down with a scanline as it comes,
+/// permission requests as cards over its top, the key bar and the reply box under it. A reply goes as typed (checked
+/// for secret-looking text first) or, from the lock, through the Mac's sealer in the sealed box; `/` lists the agent's
+/// commands; keys go by name. The menu renames or closes it (asked first; the record may go too). What needs you — a
+/// permission, the exit, an error — glitches once; the questions are pixel boxes.
 struct TerminalPage: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -19,6 +21,9 @@ struct TerminalPage: View {
     /// A direct reply that looks like it holds a secret, asked about before it goes.
     @State private var secretCheck: String?
     @FocusState private var replying: Bool
+    /// Wheel notches sent in this drag (up positive), shown at the screen's right while it goes on.
+    @State private var wheeled = 0
+    @State private var wheelChipHides: Task<Void, Never>?
 
     init(terminal: TerminalInfo) {
         let size = UserDefaults.standard.object(forKey: "terminal.fontSize") as? Double ?? 10
@@ -28,8 +33,11 @@ struct TerminalPage: View {
     var body: some View {
         ZStack(alignment: .top) {
             TerminalScreen(controller: page.screen, onPinchEnded: { size in fontSize = Double(size) },
-                           onWheel: { up, count in page.wheel(up: up, count: count) }, onTap: { replying = false })
+                           onWheel: { up, count in wheel(up: up, count: count) }, onTap: { replying = false })
                 .padding(.horizontal, 6)
+                .background(page.ground)
+                .screenRefresh(on: page.snapshots, ground: page.ground)
+                .overlay(alignment: .trailing) { if wheeled != 0 { wheelChip } }
             if !page.drawn {
                 HStack(spacing: 6) {
                     BrailleSpinner(color: .secondary)
@@ -53,13 +61,15 @@ struct TerminalPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
+                let status = page.permissions.isEmpty ? page.status : .waiting
                 VStack(spacing: 1) {
                     Text(page.name).font(.headline).lineLimit(1)
                     HStack(spacing: 5) {
-                        TerminalStatusMark(status: page.permissions.isEmpty ? page.status : .waiting)
+                        TerminalStatusMark(status: status)
                         Text(page.permissions.isEmpty ? page.status.label : "waiting").mono(11).foregroundStyle(.secondary)
                     }
                 }
+                .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
@@ -74,20 +84,20 @@ struct TerminalPage: View {
             Button("save") { Task { await page.rename(newName) } }
             Button("cancel", role: .cancel) {}
         }
-        .confirmationDialog("关闭「\(page.name)」？", isPresented: $confirmClose, titleVisibility: .visible) {
-            Button("close", role: .destructive) { Task { await close() } }
-            if canDeleteRecord {
-                Button("close and delete record", role: .destructive) { Task { await close(deleteRecord: true) } }
-            }
-        } message: {
-            Text(canDeleteRecord ? "程序将结束并从列表移除。会话记录默认保留，之后可继续；删除记录后无法恢复。" : "程序将结束并从列表移除；会话记录保留，之后可继续。")
+        .pixelBox(isPresented: $confirmClose) {
+            var actions: [PixelBox.Action] = []
+            if canDeleteRecord { actions.append(.init(label: "delete record", role: .destructive) { Task { await close(deleteRecord: true) } }) }
+            actions.append(.init(label: "close", role: .primary) { Task { await close() } })
+            return PixelBox(head: "close", tone: .red,
+                            message: "关闭「\(page.name)」？" + (canDeleteRecord ? "程序将结束并从列表移除。会话记录默认保留，之后可继续；删除记录后无法恢复。"
+                                                                               : "程序将结束并从列表移除；会话记录保留，之后可继续。"),
+                            actions: actions)
         }
-        .confirmationDialog("这段文字可能包含密码或令牌", isPresented: Binding(get: { secretCheck != nil }, set: { if !$0 { secretCheck = nil } }),
-                            titleVisibility: .visible, presenting: secretCheck) { text in
-            Button("加密发送") { Task { await send(text, sealed: true) } }
-            Button("仍然直接发送", role: .destructive) { Task { await send(text, sealed: false) } }
-        } message: { _ in
-            Text("加密发送时，Mac 会先把其中的凭据换成密文，再交给 agent。")
+        // Either way is an answer; a tap outside keeps the reply in the box.
+        .pixelBox(item: $secretCheck) { text in
+            PixelBox(head: "这段文字可能包含密码或令牌", tone: .amber, message: "加密发送时，Mac 会先把其中的凭据换成密文，再交给 agent。", cancel: nil,
+                     actions: [.init(label: "send as typed") { Task { await send(text, sealed: false) } },
+                               .init(label: "sealed", role: .primary) { Task { await send(text, sealed: true) } }])
         }
         .onAppear {
             page.start(model.api, style: model.terminals.style)
@@ -98,6 +108,7 @@ struct TerminalPage: View {
                 // After the page has slid in, as a tap on the lock would: the box glitches open.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { sealing = true }
             case "terminalslash": reply = "/co"
+            case "terminalclose": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { confirmClose = true }
             default: break
             }
             #endif
@@ -126,6 +137,32 @@ struct TerminalPage: View {
         .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
         // The floating layer's hard, dithered shadow (§7.3), not a blur.
         .background(DitherShadow().offset(x: 6, y: 6))
+        .glitch(on: p.id, onAppear: true)
+    }
+
+    /// `wheel ↑ 3`: what this drag has sent, gone 0.7 s after the last notch.
+    private var wheelChip: some View {
+        Text("wheel \(wheeled > 0 ? "↑" : "↓") \(abs(wheeled))")
+            .mono(11)
+            .foregroundStyle(Color(white: 0.91))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.black)
+            .overlay(Rectangle().strokeBorder(Color(white: 0.91), lineWidth: 1))
+            .padding(.trailing, 8)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+
+    private func wheel(up: Bool, count: Int) {
+        page.wheel(up: up, count: count)
+        guard page.wheelWorks else { return }
+        wheeled += up ? count : -count
+        wheelChipHides?.cancel()
+        wheelChipHides = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            wheeled = 0
+        }
     }
 
     // MARK: keys and reply
@@ -143,7 +180,7 @@ struct TerminalPage: View {
                     .padding(.horizontal, Theme.Space.l).padding(.vertical, 8)
                     .background(Theme.raised)
             }
-            Theme.line.frame(height: 1)
+            DottedRule()
             if let error = page.error {
                 HStack {
                     Text(error).font(.footnote).foregroundStyle(Theme.failed).lineLimit(2)
@@ -151,6 +188,7 @@ struct TerminalPage: View {
                     Button { page.error = nil } label: { Text("×").mono(15) }.buttonStyle(.plain).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, Theme.Space.l).padding(.top, 6)
+                .glitch(on: error, onAppear: true)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -315,36 +353,21 @@ struct TerminalPage: View {
     }
 }
 
-/// A key on the bar: a small square cap with a 2 pt base (§7.3: the key bar's caps have 2 px of thickness).
+/// A key on the bar: a small square cap with a 3 pt base; pressed, it sinks 2 pt onto a 1 pt base (the demo page's
+/// key caps).
 private struct KeyCapStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
         configuration.label
             .foregroundStyle(Theme.ink)
             .frame(minWidth: 34)
             .padding(.horizontal, 6)
-            .padding(.vertical, 7)
-            .background(configuration.isPressed ? Theme.line : Theme.raised)
+            .padding(.top, 6)
+            .padding(.bottom, pressed ? 6 : 8)
+            .background(pressed ? Theme.line : Theme.raised)
             .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
-            .overlay(alignment: .bottom) { Theme.inkDim.frame(height: 2) }
-    }
-}
-
-/// The dithered hard shadow of a floating layer (a 50 % checkerboard of 1 pt cells).
-struct DitherShadow: View {
-    var body: some View {
-        Canvas { context, size in
-            var y: CGFloat = 0
-            var row = 0
-            while y < size.height {
-                var x: CGFloat = row % 2 == 0 ? 0 : 1
-                while x < size.width {
-                    context.fill(Path(CGRect(x: x, y: y, width: 1, height: 1)), with: .color(Theme.inkDim))
-                    x += 2
-                }
-                y += 1
-                row += 1
-            }
-        }
-        .accessibilityHidden(true)
+            .overlay(alignment: .bottom) { Theme.inkDim.frame(height: pressed ? 1 : 3) }
+            .offset(y: pressed ? 2 : 0)
+            .padding(.bottom, pressed ? 2 : 0)
     }
 }

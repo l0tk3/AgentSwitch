@@ -10,7 +10,9 @@ enum TerminalRoute: Hashable {
 /// The terminals tab (docs/terminal-v0.md §1): a directory tree of the Mac's terminals and its earlier sessions, as the
 /// web page's sidebar — each project folder with its running terminals (status mark, name, agent) and then its sessions
 /// (resume); projects under one parent merged under it. A folder or parent row folds and unfolds (remembered); `▸ N
-/// more` lists all of a folder's sessions; a long press on a session offers resume and delete. `new` starts one.
+/// more` lists all of a folder's sessions, the rows drawn line by line; a long press on a session opens its menu
+/// (resume, delete — a deleted row is wiped out). A terminal that needs you or exits glitches once. Menus and confirm
+/// boxes are the desktop's pixel boxes; the list has its scanlines and a dotted rule under the bar. `new` starts one.
 struct TerminalsTab: View {
     @Environment(AppModel.self) private var model
     @State private var path = NavigationPath()
@@ -22,9 +24,16 @@ struct TerminalsTab: View {
     /// Folders showing all their sessions (this visit).
     @State private var showingAll: Set<String> = []
     @State private var deletingSession: SessionSummary?
+    /// The session whose menu is open (a long press), and where its row is.
+    @State private var menuFor: SessionMenu?
+    /// The folder just unfolded: its rows are drawn line by line.
+    @State private var revealed: Reveal?
+    /// Sessions being wiped out, and those gone from the list until the next one comes without them.
+    @State private var wiping: Set<String> = []
+    @State private var gone: Set<String> = []
     /// A session last run in bypass, asked about before it goes on.
     @State private var bypassResume: SessionSummary?
-    /// Why continuing or deleting a session failed: an alert over whatever page is open.
+    /// Why continuing or deleting a session failed: a box over whatever page is open.
     @State private var failure: String?
 
     static let pollInterval: Duration = .seconds(4)
@@ -50,7 +59,8 @@ struct TerminalsTab: View {
                 .padding(.horizontal, Theme.Space.l)
                 .padding(.vertical, Theme.Space.m)
             }
-            .background(Theme.base)
+            .background { ZStack { Theme.base; Scanlines() }.ignoresSafeArea() }
+            .safeAreaInset(edge: .top, spacing: 0) { DottedRule() }
             .navigationTitle("terminals")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -66,7 +76,19 @@ struct TerminalsTab: View {
                 }
             }
             .refreshable { await model.refreshTerminals(sessions: true) }
-            .onAppear { openRequested() }
+            .onAppear {
+                openRequested()
+                #if DEBUG
+                // The session menu and the delete box, as a long press and its delete would open them.
+                if let first = store.nodes.first?.groups.first?.sessions.first {
+                    switch UserDefaults.standard.string(forKey: "uiDemoScreen") {
+                    case "terminalmenu": menuFor = SessionMenu(session: first, anchor: CGRect(x: 16, y: 210, width: 360, height: 36))
+                    case "terminaldelete": deletingSession = first
+                    default: break
+                    }
+                }
+                #endif
+            }
             .onChange(of: model.openTerminalRequest) { openRequested() }
             // A cold start from the Live Activity: the request is there before the list.
             .onChange(of: store.list == nil) { openRequested() }
@@ -83,37 +105,44 @@ struct TerminalsTab: View {
                     path.append(TerminalRoute.terminal(terminal))
                 }
             }
-            .confirmationDialog("「\(bypassResume?.displayTitle ?? "")」上次以 bypass 运行", isPresented: Binding(
-                get: { bypassResume != nil }, set: { if !$0 { bypassResume = nil } }), titleVisibility: .visible, presenting: bypassResume) { s in
-                Button("继续使用 bypass", role: .destructive) { Task { await resume(s, mode: "bypass") } }
-                Button("改用 auto") { Task { await resume(s, mode: "auto") } }
-            } message: { _ in
-                Text(NewTerminalSheet.bypassNote)
+            .pixelBox(item: $menuFor) { m in
+                var items: [PixelBox.Action] = []
+                if TerminalsTab.resumable.contains(m.session.harness) { items.append(.init(label: "resume") { Task { await resume(m.session) } }) }
+                if TerminalsTab.deletable.contains(m.session.harness) { items.append(.init(label: "delete", role: .destructive) { deletingSession = m.session }) }
+                return PixelBox(cancel: nil, actions: items, anchor: m.anchor)
             }
-            .confirmationDialog("删除会话记录「\(deletingSession?.displayTitle ?? "")」？", isPresented: Binding(
-                get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }), titleVisibility: .visible, presenting: deletingSession) { s in
-                Button("删除记录", role: .destructive) { Task { await deleteSession(s) } }
-            } message: { _ in
-                Text("Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。")
+            .pixelBox(item: $bypassResume) { s in
+                PixelBox(head: "bypass", tone: .amber, message: "「\(s.displayTitle)」上次以 bypass 运行。\(NewTerminalSheet.bypassNote)",
+                         actions: [.init(label: "auto") { Task { await resume(s, mode: "auto") } },
+                                   .init(label: "bypass", role: .primary) { Task { await resume(s, mode: "bypass") } }])
             }
-            .confirmationDialog(elsewhere.map { "「\($0.session.displayTitle)」正在 \($0.app) 中运行" } ?? "", isPresented: Binding(
-                get: { elsewhere != nil }, set: { if !$0 { elsewhere = nil } }), titleVisibility: .visible) {
-                Button("fork") { if let e = elsewhere { Task { await resume(e.session, fork: true, mode: e.mode) } } }
-            } message: {
-                Text("同一会话同时只能由一个程序写入。请先在 \(elsewhere?.app ?? "该程序") 中退出，或创建分支：新会话包含全部历史，原会话保持不变。")
+            .pixelBox(item: $deletingSession) { s in
+                PixelBox(head: "delete record", tone: .red, message: "删除会话记录「\(s.displayTitle)」？Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。",
+                         actions: [.init(label: "delete", role: .primary) { Task { await deleteSession(s) } }])
+            }
+            .pixelBox(item: $elsewhere) { e in
+                PixelBox(head: "in use", tone: .amber,
+                         message: "「\(e.session.displayTitle)」正在 \(e.app) 中运行。同一会话同时只能由一个程序写入。请先在 \(e.app) 中退出，或创建分支：新会话包含全部历史，原会话保持不变。",
+                         actions: [.init(label: "fork", role: .primary) { Task { await resume(e.session, fork: true, mode: e.mode) } }])
             }
         }
-        .alert("未能完成", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } }), presenting: failure) { _ in
-            Button("OK", role: .cancel) {}
-        } message: { Text($0) }
+        .pixelBox(item: $failure) { message in
+            PixelBox(head: "error", tone: .red, message: message, cancel: nil, actions: [.init(label: "ok", role: .primary) {}])
+        }
     }
 
     private var folded: Set<String> { Set(foldedRaw.split(separator: "\n").map(String.init)) }
 
     private func toggleFold(_ key: String) {
         var set = folded
-        if set.remove(key) == nil { set.insert(key) }
+        if set.remove(key) == nil { set.insert(key) } else { revealed = Reveal(key: key) }
         foldedRaw = set.sorted().joined(separator: "\n")
+    }
+
+    /// A row that came with the unfold of `keys` just now (either its folder or its parent) draws at its turn.
+    private func stepIn(_ index: Int, under keys: String?...) -> StepIn {
+        let active = revealed.map { r in keys.contains(r.key) && Date.now.timeIntervalSince(r.at) < 0.4 } ?? false
+        return StepIn(index: index, active: active)
     }
 
     @ViewBuilder
@@ -132,7 +161,9 @@ struct TerminalsTab: View {
                 }
                 .buttonStyle(.plain)
                 if !isFolded {
-                    ForEach(node.groups) { group in folder(group, nested: true) }
+                    ForEach(Array(node.groups.enumerated()), id: \.element.id) { i, group in
+                        folder(group, nested: true, parent: parent, base: node.groups.prefix(i).reduce(0) { $0 + 1 + rowCount($1) })
+                    }
                 }
             } else {
                 ForEach(node.groups) { group in folder(group, nested: false) }
@@ -146,12 +177,27 @@ struct TerminalsTab: View {
         return terminals > 0 ? "\(terminals) · \(sessions)" : "\(sessions)"
     }
 
-    private func folder(_ group: TerminalTree.Group, nested: Bool) -> some View {
+    /// The sessions a folder lists: those not deleted just now, the first few unless all are asked for.
+    private func listed(_ group: TerminalTree.Group) -> (sessions: [SessionSummary], more: Int, foot: Bool) {
+        let kept = group.sessions.filter { !gone.contains($0.id) }
+        let all = showingAll.contains(group.cwd)
+        let sessions = all ? kept : Array(kept.prefix(Self.sessionsShown))
+        return (sessions, kept.count - sessions.count, kept.count > Self.sessionsShown)
+    }
+
+    /// The rows under a folder's line while it is open (the folder's own line not counted).
+    private func rowCount(_ group: TerminalTree.Group) -> Int {
+        guard !folded.contains(group.cwd) else { return 0 }
+        let l = listed(group)
+        return group.terminals.count + l.sessions.count + (l.foot ? 1 : 0)
+    }
+
+    /// A folder and its rows; `base` is where its line falls among the rows an unfolded parent draws.
+    private func folder(_ group: TerminalTree.Group, nested: Bool, parent: String? = nil, base: Int = 0) -> some View {
         let isFolded = folded.contains(group.cwd)
         let all = showingAll.contains(group.cwd)
-        let sessions = all ? group.sessions : Array(group.sessions.prefix(Self.sessionsShown))
-        let more = group.sessions.count - sessions.count
-        let rows = group.terminals.count + sessions.count + (more > 0 || all && group.sessions.count > Self.sessionsShown ? 1 : 0)
+        let (sessions, more, foot) = listed(group)
+        let rows = rowCount(group)
         return VStack(alignment: .leading, spacing: 0) {
             Button { toggleFold(group.cwd) } label: {
                 HStack(spacing: 6) {
@@ -165,17 +211,27 @@ struct TerminalsTab: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(isFolded ? "展开" : "收起")
+            .modifier(stepIn(base, under: parent))
             if !isFolded {
                 ForEach(Array(group.terminals.enumerated()), id: \.element.id) { i, t in
                     Button { path.append(TerminalRoute.terminal(t)) } label: { terminalRow(t, last: i == rows - 1, nested: nested) }
                         .buttonStyle(.plain)
+                        .modifier(stepIn(base + 1 + i, under: group.cwd, parent))
                 }
                 ForEach(Array(sessions.enumerated()), id: \.element.id) { i, s in
-                    sessionRow(s, last: group.terminals.count + i == rows - 1, nested: nested)
+                    let index = group.terminals.count + i
+                    SessionRow(session: s, last: index == rows - 1, nested: nested, opening: opening,
+                               open: { path.append(TerminalRoute.session(s)) },
+                               resume: { Task { await resume(s) } },
+                               menu: { anchor in menuFor = SessionMenu(session: s, anchor: anchor) },
+                               delete: { deletingSession = s })
+                        .modifier(WipeOut(on: wiping.contains(s.id)))
+                        // Those "more" brings are drawn from the first of them.
+                        .modifier(stepIn(base + 1 + (all && i >= Self.sessionsShown ? index - Self.sessionsShown : index), under: group.cwd, parent))
                 }
-                if more > 0 || all && group.sessions.count > Self.sessionsShown {
+                if foot {
                     Button {
-                        if all { showingAll.remove(group.cwd) } else { showingAll.insert(group.cwd) }
+                        if all { showingAll.remove(group.cwd) } else { showingAll.insert(group.cwd); revealed = Reveal(key: group.cwd) }
                     } label: {
                         HStack(spacing: 6) {
                             TreeLine(last: true, nested: nested)
@@ -186,15 +242,17 @@ struct TerminalsTab: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .modifier(stepIn(base + rows, under: group.cwd, parent))
                 }
             }
         }
     }
 
     private func terminalRow(_ t: TerminalInfo, last: Bool, nested: Bool) -> some View {
-        HStack(spacing: 8) {
+        let status = t.permissions.isEmpty ? t.status : .waiting
+        return HStack(spacing: 8) {
             TreeLine(last: last, nested: nested)
-            TerminalStatusMark(status: t.permissions.isEmpty ? t.status : .waiting)
+            TerminalStatusMark(status: status)
             Text(t.name).font(.subheadline).foregroundStyle(t.isRunning ? Theme.ink : .secondary).lineLimit(1)
             Spacer(minLength: 6)
             PixelSprite(rows: PixelArt.agents[t.harness] ?? PixelArt.square, pixel: 2, color: .secondary)
@@ -202,48 +260,26 @@ struct TerminalsTab: View {
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
-    }
-
-    private func sessionRow(_ s: SessionSummary, last: Bool, nested: Bool) -> some View {
-        HStack(spacing: 8) {
-            TreeLine(last: last, nested: nested)
-            Button { path.append(TerminalRoute.session(s)) } label: {
-                HStack(spacing: 8) {
-                    Text(s.displayTitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(s.updated.relative).mono(11).foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if TerminalsTab.resumable.contains(s.harness) {
-                Button { Task { await resume(s) } } label: {
-                    if opening == s.id { BrailleSpinner(color: .secondary) } else { Text("resume").mono(12) }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.ink)
-                .disabled(opening != nil)
-            }
-        }
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .contextMenu {
-            if TerminalsTab.resumable.contains(s.harness) { Button("resume") { Task { await resume(s) } } }
-            if TerminalsTab.deletable.contains(s.harness) {
-                Button("delete", role: .destructive) { deletingSession = s }
-            }
-        }
+        // Once, as it comes to need you or exits.
+        .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
     }
 
     /// Sessions whose record the Mac can delete (OpenCode keeps its own database).
     static let deletable: Set<String> = ["claude-code", "codex"]
 
+    /// The row is wiped out while the Mac deletes the record; it comes back if that fails.
     private func deleteSession(_ s: SessionSummary) async {
         guard let api = model.api else { return }
+        wiping.insert(s.id)
+        async let deleted: Void = api.deleteSession(harness: s.harness, id: s.sessionId)
+        try? await Task.sleep(for: .milliseconds(210))
+        gone.insert(s.id)
+        wiping.remove(s.id)
         do {
-            try await api.deleteSession(harness: s.harness, id: s.sessionId)
+            try await deleted
             await model.refreshTerminals(sessions: true)
         } catch {
+            gone.remove(s.id)
             failure = error.localizedDescription
         }
     }
@@ -259,7 +295,7 @@ struct TerminalsTab: View {
         if let t = list.terminals.first(where: { $0.id == id }) { path = NavigationPath([TerminalRoute.terminal(t)]) }
     }
 
-    private struct Elsewhere {
+    private struct Elsewhere: Equatable {
         let session: SessionSummary
         let app: String
         let mode: String?
@@ -288,6 +324,71 @@ struct TerminalsTab: View {
     }
 }
 
+private struct SessionMenu: Equatable {
+    let session: SessionSummary
+    let anchor: CGRect
+}
+
+private struct Reveal {
+    let key: String
+    var at = Date.now
+}
+
+/// Where a view is on the screen, kept without redrawing anything as it scrolls (read when its menu opens).
+private final class FrameRef {
+    var rect: CGRect = .zero
+}
+
+/// One of the Mac's earlier sessions under its folder: a tap reads it, `resume` goes on with it, a long press opens
+/// its menu by the row (the row is lit while held).
+private struct SessionRow: View {
+    let session: SessionSummary
+    let last: Bool
+    let nested: Bool
+    let opening: String?
+    let open: () -> Void
+    let resume: () -> Void
+    let menu: (CGRect) -> Void
+    let delete: () -> Void
+    @State private var held = false
+    @State private var frame = FrameRef()
+
+    var body: some View {
+        let resumable = TerminalsTab.resumable.contains(session.harness)
+        let deletable = TerminalsTab.deletable.contains(session.harness)
+        HStack(spacing: 8) {
+            TreeLine(last: last, nested: nested)
+            HStack(spacing: 8) {
+                Text(session.displayTitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 6)
+                Text(session.updated.relative).mono(11).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: open)
+            .onLongPressGesture(minimumDuration: 0.45) {
+                guard resumable || deletable else { return }
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                menu(frame.rect)
+            } onPressingChanged: { held = $0 }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: "delete") { if deletable { delete() } }
+            if resumable {
+                Button(action: resume) {
+                    if opening == session.id { BrailleSpinner(color: .secondary) } else { Text("resume").mono(12) }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.ink)
+                .disabled(opening != nil)
+            }
+        }
+        .padding(.vertical, 8)
+        .background(held ? Theme.raised : Color.clear)
+        .contentShape(Rectangle())
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame.rect = $0 }
+    }
+}
+
 /// `├─` / `└─` in front of a row (indented once more under a merged parent).
 private struct TreeLine: View {
     let last: Bool
@@ -299,14 +400,14 @@ private struct TreeLine: View {
 }
 
 /// A terminal's state in pixels (§7.2.5: only running terminals carry one): the spinner while busy, a square while
-/// waiting or idle, hollow once exited.
+/// waiting (blinking) or idle, hollow once exited.
 struct TerminalStatusMark: View {
     let status: TerminalStatus
 
     var body: some View {
         switch status {
         case .working: BrailleSpinner()
-        case .waiting: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
+        case .waiting: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink()
         case .exited: PixelSprite(rows: PixelArt.hollow, pixel: 2, color: Theme.inkDim)
         default: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.done)
         }

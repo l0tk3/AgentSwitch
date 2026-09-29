@@ -1,10 +1,11 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// `new` in the terminals tab (docs/terminal-v0.md §1): an agent (its pixel mark and name; one not installed on the Mac
-/// is dithered and cannot be picked; the one picked glitches once), its model (default = the agent's own), the folder
-/// (typed, or one used before), and how it asks (`< > ask each` `<x> auto` `< > bypass`, bypass confirmed first). The
-/// page it opens takes the size.
+/// `new` in the terminals tab (docs/terminal-v0.md §1): the wordmark resolving out of glyph noise as it opens, then an
+/// agent (its pixel mark and name; one not installed on the Mac is dithered and cannot be picked; the one picked
+/// glitches once), its model (default = the agent's own), the folder (a prompt with a block caret: typed, or one used
+/// before), and how it asks (`< > ask each` `<x> auto` `< > bypass`, bypass confirmed first in a pixel box). The page
+/// it opens takes the size.
 struct NewTerminalSheet: View {
     let started: (TerminalInfo) -> Void
     @Environment(AppModel.self) private var model
@@ -16,6 +17,7 @@ struct NewTerminalSheet: View {
     @State private var starting = false
     @State private var error: String?
     @State private var confirmBypass = false
+    @FocusState private var typingFolder: Bool
 
     static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi")]
     /// `< >` is one of several (§7.2.6).
@@ -28,6 +30,7 @@ struct NewTerminalSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                    Wordmark(reveal: true)
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         SectionLabel("agent")
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
@@ -61,6 +64,19 @@ struct NewTerminalSheet: View {
                                 .mono(14)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
+                                .focused($typingFolder)
+                                // The prompt's block caret after the text while it is not being typed in (the system's
+                                // caret then takes over).
+                                .overlay(alignment: .leading) {
+                                    if !typingFolder {
+                                        HStack(spacing: 1) {
+                                            Text(folder.isEmpty ? "" : folder).mono(14).hidden()
+                                            BlockCaret(width: 8, height: 17)
+                                        }
+                                        .allowsHitTesting(false)
+                                    }
+                                }
+                                .clipped()
                         }
                         .padding(.vertical, 8)
                         .overlay(alignment: .bottom) { Theme.line.frame(height: 1) }
@@ -87,7 +103,13 @@ struct NewTerminalSheet: View {
                         }
                     }
                     if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
-                    Button { Task { await start() } } label: { Text(starting ? "[ starting ]" : "[ start ]") }
+                    Button { Task { await start() } } label: {
+                        if starting {
+                            HStack(spacing: 6) { Text("[ starting"); BrailleSpinner(color: Theme.base); Text("]") }
+                        } else {
+                            Text("[ start ]")
+                        }
+                    }
                         .buttonStyle(SquareButtonStyle(prominent: true))
                         .disabled(starting || !installed.contains(agent) || folder.trimmingCharacters(in: .whitespaces).isEmpty || model.api == nil)
                 }
@@ -101,12 +123,16 @@ struct NewTerminalSheet: View {
                 if folder.isEmpty, let first = store.recentFolders.first { folder = MacPath.tilde(first) }
                 if !installed.contains(agent), let first = Self.agents.first(where: { installed.contains($0.id) }) { agent = first.id }
                 if !Self.modes.contains(where: { $0.id == mode }) { mode = "manual" }
+                #if DEBUG
+                if UserDefaults.standard.string(forKey: "uiDemoScreen") == "newterminalbypass" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { confirmBypass = true }
+                }
+                #endif
             }
             .onChange(of: agent) { modelId = "" }
-            .confirmationDialog("跳过全部权限确认？", isPresented: $confirmBypass, titleVisibility: .visible) {
-                Button("使用 bypass", role: .destructive) { mode = "bypass" }
-            } message: {
-                Text(Self.bypassNote)
+            .pixelBox(isPresented: $confirmBypass) {
+                PixelBox(head: "bypass", tone: .amber, message: "跳过全部权限确认？\(Self.bypassNote)",
+                         actions: [.init(label: "use bypass", role: .primary) { mode = "bypass" }])
             }
         }
     }
@@ -122,8 +148,8 @@ struct NewTerminalSheet: View {
             agent = id
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.square, pixel: 4, color: on ? Theme.signal : Theme.ink)
-                Text(name).mono(13)
+                PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.square, pixel: 4, color: on ? Theme.signal : installed ? Theme.ink : Theme.inkDim)
+                Text(name).mono(13).foregroundStyle(installed ? Theme.ink : Theme.inkDim)
                 if !installed { Text("not installed").mono(10).foregroundStyle(.tertiary) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,7 +157,8 @@ struct NewTerminalSheet: View {
             .glitch(on: on)
         }
         .buttonStyle(AgentTileStyle(on: on))
-        .opacity(installed ? 1 : 0.4)
+        // Not on this Mac: half of it dithered away (the desktop's), not faded.
+        .dithered(!installed)
         .disabled(!installed)
         .accessibilityLabel(name)
         .accessibilityAddTraits(on ? .isSelected : [])

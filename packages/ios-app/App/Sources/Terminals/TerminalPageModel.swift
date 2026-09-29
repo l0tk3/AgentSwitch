@@ -25,6 +25,10 @@ final class TerminalPageModel {
     private(set) var removed = false
     /// Drawn at least once (the placeholder goes).
     private(set) var drawn = false
+    /// Screens drawn afresh from a snapshot (each comes in top down).
+    private(set) var snapshots = 0
+    /// The Mac takes the wheel (one that predates it says so once, and the drag stops sending).
+    private(set) var wheelWorks = true
     var error: String?
     /// "1 secret sealed" after a reply the sealer changed; cleared by the next one.
     private(set) var sealedNote: String?
@@ -58,6 +62,7 @@ final class TerminalPageModel {
             #if DEBUG
             screen.snapshot(DemoData.terminalScreen)
             drawn = true
+            snapshots += 1
             commands = DemoData.slashCommands
             #endif
             return
@@ -84,6 +89,9 @@ final class TerminalPageModel {
         }
     }
 
+    /// The screen's own background (the Mac's terminal colours): what covers it before it is drawn.
+    var ground: Color { Color(uiColor: screen.view.nativeBackgroundColor) }
+
     func stop() {
         follow?.cancel()
         follow = nil
@@ -98,6 +106,7 @@ final class TerminalPageModel {
         case .snapshot(_, let cols, let rows, let data):
             screen.snapshot(data)
             drawn = true
+            snapshots += 1
             // Drawn at the size it had (the Mac, another phone); now at this phone's, and the agent draws again (its
             // links and status line are not in a snapshot).
             told = (cols, rows)
@@ -188,6 +197,7 @@ final class TerminalPageModel {
                 } catch {
                     // Said once, and this drag stops: a Mac that predates the wheel answers 400.
                     if case APIError.http(status: 400, message: _) = error {
+                        self.wheelWorks = false
                         self.error = "此 Mac 上的 AgentSwitch 版本不支持滑动翻页，请先更新。"
                     } else {
                         self.error = error.localizedDescription

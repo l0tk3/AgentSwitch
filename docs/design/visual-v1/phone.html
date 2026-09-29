@@ -110,7 +110,7 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .in { animation: rowin .2s steps(1) both; }
 @keyframes rowin { 0% { opacity: 0; } 100% { opacity: 1; } }
 .gone { animation: wipeout .2s steps(5) forwards; }
-@keyframes wipeout { from { clip-path: inset(0 0 0 0); } to { clip-path: inset(0 0 100% 0); } }
+@keyframes wipeout { from { clip-path: inset(0 0 0 0); } to { clip-path: inset(100% 0 0 0); } }
 
 /* ---------- status marks ---------- */
 .sq { display: inline-block; width: 8px; height: 8px; flex: none; }
@@ -262,19 +262,19 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
   <div class="fxwrap"><table class="fx">
     <thead><tr><th>效果</th><th>规格</th><th>桌面</th><th>手机</th></tr></thead>
     <tbody>
-      <tr><td>glitch</td><td>0.45 s 分步：横向错位、条带裁切、青 / 粉分离、一帧反色</td><td>权限请求、终端退出、报错、选 agent、打开加密发送</td><td>同左，另加长按菜单、确认框 <span class="new">待做：权限、退出、报错</span></td></tr>
-      <tr><td>刷新</td><td>0.26 s，13 步自上而下，扫描线在前</td><td>切换终端</td><td>打开终端、切换终端 <span class="new">待做</span></td></tr>
-      <tr><td>显形</td><td>字符噪声逐格落定，末帧 LCD 次像素，然后定格</td><td>新建面板的文字标</td><td>新建面板 <span class="new">待做</span></td></tr>
-      <tr><td>闪烁</td><td>1.1 s 分步，每秒少于 3 次</td><td>等你的状态方块</td><td>同左 <span class="new">待做</span></td></tr>
-      <tr><td>光标</td><td>1 s 分步的方块</td><td>文件夹提示符</td><td>同左 <span class="new">待做</span></td></tr>
-      <tr><td>逐行画出</td><td>每行 22 ms，分步出现</td><td>—</td><td>展开文件夹、展开更多 <span class="new">待做</span></td></tr>
-      <tr><td>擦除</td><td>0.2 s，5 步自上而下</td><td>—</td><td>删除一行 <span class="new">待做</span></td></tr>
-      <tr><td>硬阴影</td><td>6 px 棋盘抖动，不模糊</td><td>浮动框</td><td>权限卡、加密框（已有），菜单、确认框 <span class="new">待做</span></td></tr>
-      <tr><td>扫描线</td><td>3 px 一条，4% 亮度</td><td>侧栏</td><td>终端列表 <span class="new">待做</span></td></tr>
-      <tr><td>点线</td><td>2 on 2 off</td><td>窗格分隔</td><td>导航栏下 <span class="new">待做</span></td></tr>
-      <tr><td>键帽</td><td>3 px 底边，按下沉 2 px</td><td>键帽栏</td><td>按键条（已有底边，按下沉 <span class="new">待做</span>）</td></tr>
-      <tr><td>抖动禁用</td><td>50% 棋盘遮罩</td><td>未安装的 agent</td><td>同左 <span class="new">待做</span></td></tr>
-      <tr><td>转圈</td><td>盲文 ⠋⠙⠹…，90 ms 一帧</td><td>进行中</td><td>同左（已有）</td></tr>
+      <tr><td>glitch</td><td>0.45 s 分步：横向错位、条带裁切、青 / 粉分离、一帧反色</td><td>权限请求、终端退出、报错、选 agent、打开加密发送</td><td>同左，另加长按菜单、确认框、权限卡片出现</td></tr>
+      <tr><td>刷新</td><td>0.26 s，13 步自上而下，扫描线在前</td><td>切换终端</td><td>打开终端、重连后重画</td></tr>
+      <tr><td>显形</td><td>字符噪声逐格落定，末帧 LCD 次像素，然后定格</td><td>新建面板的文字标</td><td>新建面板</td></tr>
+      <tr><td>闪烁</td><td>1.1 s 分步，每秒少于 3 次</td><td>等你的状态方块</td><td>同左（终端和任务）</td></tr>
+      <tr><td>光标</td><td>1 s 分步的方块</td><td>文件夹提示符</td><td>同左（输入时换成系统光标）</td></tr>
+      <tr><td>逐行画出</td><td>每行 22 ms，分步出现</td><td>—</td><td>展开文件夹、展开更多</td></tr>
+      <tr><td>擦除</td><td>0.2 s，5 步自上而下</td><td>—</td><td>删除一行</td></tr>
+      <tr><td>硬阴影</td><td>6 px 棋盘抖动，不模糊</td><td>浮动框</td><td>权限卡、加密框、菜单、确认框</td></tr>
+      <tr><td>扫描线</td><td>3 px 一条，4% 亮度</td><td>侧栏</td><td>终端列表</td></tr>
+      <tr><td>点线</td><td>2 on 2 off</td><td>窗格分隔</td><td>导航栏下、按键条上</td></tr>
+      <tr><td>键帽</td><td>3 px 底边，按下沉 2 px</td><td>键帽栏</td><td>按键条</td></tr>
+      <tr><td>抖动禁用</td><td>50% 棋盘遮罩</td><td>未安装的 agent</td><td>同左</td></tr>
+      <tr><td>转圈</td><td>盲文 ⠋⠙⠹…，90 ms 一帧</td><td>进行中</td><td>同左</td></tr>
     </tbody>
   </table></div>
 </div>
