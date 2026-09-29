@@ -25,8 +25,9 @@ const TOKEN_BYTES = 32;
 const MIN_TOKEN_CHARS = 40;
 const CODE_TTL_MS = 60_000;
 const MAX_SESSIONS = 50;
-/** Where a console link may land after signing in: a page of the console itself (`?next=`), never another site. */
-const CONSOLE_PAGE = /^\/ui(\/(?!\.\.?(?:\/|$))[A-Za-z0-9._-]+)*$/;
+/** Where a console link may land after signing in: a page of the console itself (`?next=`), never another site; with
+ *  one task or terminal to open there (`?task=<id>`, `?id=<id>`: the Mac's Live Activity card). */
+const CONSOLE_PAGE = /^\/ui(\/(?!\.\.?(?:\/|$))[A-Za-z0-9._-]+)*(\?(?:task|id)=[A-Za-z0-9_-]{1,64})?$/;
 
 /** The token in `home`, made on first use; a file too short to be one is replaced. */
 export function ensureLocalToken(home: string): string {

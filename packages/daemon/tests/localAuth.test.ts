@@ -77,7 +77,10 @@ describe("local API token", () => {
     const terminal = await link("/ui/terminal.html");
     expect(terminal).toMatch(/^\/ui\/login\?code=[A-Za-z0-9_-]+&next=%2Fui%2Fterminal\.html$/);
     expect((await f.call(terminal)).headers.get("location")).toBe("/ui/terminal.html");
-    for (const bad of ["https://evil.example/ui", "//evil.example", "/ui/../tasks", "/tasks"]) {
+    // One task or terminal to open there (the Live Activity card), nothing else in the query.
+    expect((await f.call(await link("/ui/terminal.html?id=ab12cd"))).headers.get("location")).toBe("/ui/terminal.html?id=ab12cd");
+    expect((await f.call(await link("/ui?task=0f9e8d7c-1234"))).headers.get("location")).toBe("/ui?task=0f9e8d7c-1234");
+    for (const bad of ["https://evil.example/ui", "//evil.example", "/ui/../tasks", "/tasks", "/ui?task=a&next=//evil.example", "/ui?other=1", "/ui?task=a/b"]) {
       const path = await link(bad);
       expect(path).not.toContain("next=");
       expect((await f.call(`${path}&next=${encodeURIComponent(bad)}`)).headers.get("location")).toBe("/ui");

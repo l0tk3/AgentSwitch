@@ -7,7 +7,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { RecordRow } from "../router/record.js";
 import type { Thread, ThreadEvent, ThreadEventType, ThreadStatus } from "../threads/types.js";
-import { TERMINAL, type Approval, type ApprovalKind, type ApprovalStatus, type BlockCause, type Device, type NewTask, type Task, type TaskEvent, type TaskEventType } from "./types.js";
+import { TERMINAL, type Approval, type ApprovalKind, type ApprovalStatus, type BlockCause, type Device, type NewTask, type Task, type TaskEvent, type TaskEventType, type TaskStatus } from "./types.js";
 import { DEFAULT_LIST_LIMIT } from "../core/limits.js";
 import { forgetSearch, searchTasks, SEARCH_SCHEMA, type SearchHit } from "./search.js";
 
@@ -388,7 +388,21 @@ export class Store {
 
   eventsSince(taskId: string, afterSeq = 0): TaskEvent[] {
     const rows = this.db.prepare("SELECT * FROM events WHERE task_id = ? AND seq > ? ORDER BY seq").all(taskId, afterSeq) as Row[];
-    return rows.map((r) => ({ taskId: String(r.task_id), seq: Number(r.seq), ts: Number(r.ts), type: String(r.type) as TaskEventType, payload: JSON.parse(String(r.payload)) }));
+    return rows.map(toEvent);
+  }
+
+  /** A task's last `limit` events, oldest first: what it is doing now, without reading its whole history. */
+  lastEvents(taskId: string, limit: number): TaskEvent[] {
+    const rows = this.db.prepare("SELECT * FROM events WHERE task_id = ? ORDER BY seq DESC LIMIT ?").all(taskId, limit) as Row[];
+    return rows.reverse().map(toEvent);
+  }
+
+  /** Tasks in one of `statuses` changed at or after `since`, the latest first. */
+  tasksUpdatedSince(since: number, statuses: readonly TaskStatus[], limit: number): Task[] {
+    if (!statuses.length) return [];
+    const rows = this.db.prepare(`SELECT * FROM tasks WHERE updated_at >= ? AND status IN (${statuses.map(() => "?").join(", ")}) ORDER BY updated_at DESC LIMIT ?`)
+      .all(since, ...statuses, limit) as Row[];
+    return rows.map(toTask);
   }
 
   createApproval(taskId: string, action: string, evidence: string, kind: ApprovalKind = "approval"): Approval {
@@ -514,6 +528,10 @@ function toThread(r: Row): Thread {
     status: String(r.status) as ThreadStatus,
     expiresAt: r.expires_at === null || r.expires_at === undefined ? null : Number(r.expires_at),
   };
+}
+
+function toEvent(r: Row): TaskEvent {
+  return { taskId: String(r.task_id), seq: Number(r.seq), ts: Number(r.ts), type: String(r.type) as TaskEventType, payload: JSON.parse(String(r.payload)) };
 }
 
 function toApproval(r: Row): Approval {

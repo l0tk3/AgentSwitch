@@ -1002,6 +1002,8 @@ if (native) {
     newTerminal: () => showCreate(),
     // The wheel over the screen, as notches (up positive): the window takes it, WebKit gives the page none there.
     wheel: (n) => wheelNotches(n),
+    // One terminal on screen (the menu bar's Live Activity card): the list read again first, it may be new.
+    show: async (id) => { await refresh(); if (terminals.some((t) => t.id === id)) select(id); },
   };
 }
 

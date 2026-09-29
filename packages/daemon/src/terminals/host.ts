@@ -231,12 +231,17 @@ function sequenceEnd(data: string, at: number): number {
   return at + 2;                                        // two-byte sequences (ESC =, ESC 7, …)
 }
 
-/** One line a person can read for a permission request. */
-export function permissionSummary(tool: string, input: unknown): string {
+/** The one thing a request works on: the command, else the file, page, pattern or path, else the input as JSON. */
+export function permissionTarget(tool: string, input: unknown): string {
   const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const pick = (k: string) => (typeof i[k] === "string" ? (i[k] as string) : null);
-  const text = tool === "Bash" ? pick("command") : pick("file_path") ?? pick("notebook_path") ?? pick("url") ?? pick("pattern") ?? pick("path") ?? JSON.stringify(input ?? {});
-  const line = `${tool}: ${text ?? ""}`.replace(/\s+/g, " ").trim();
+  if (tool === "Bash") return pick("command") ?? "";
+  return pick("file_path") ?? pick("notebook_path") ?? pick("url") ?? pick("pattern") ?? pick("path") ?? JSON.stringify(input ?? {});
+}
+
+/** One line a person can read for a permission request. */
+export function permissionSummary(tool: string, input: unknown): string {
+  const line = `${tool}: ${permissionTarget(tool, input)}`.replace(/\s+/g, " ").trim();
   return line.length > MAX_SUMMARY ? `${line.slice(0, MAX_SUMMARY - 1)}…` : line;
 }
 

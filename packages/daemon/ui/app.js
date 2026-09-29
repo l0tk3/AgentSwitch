@@ -3,7 +3,7 @@
 import { get, subscribe } from "./lib/state.js";
 import { createRenderer } from "./lib/rendering.js";
 import { sidebar } from "./lib/sidebar.js";
-import { addPending, goto, health, loadApprovals, loadArchivedThreads, loadQuota, loadTasks, loadThreads, refresh, removePending } from "./lib/actions.js";
+import { addPending, goto, health, loadApprovals, loadArchivedThreads, loadQuota, loadTasks, loadThreads, openTask, refresh, removePending } from "./lib/actions.js";
 import * as home from "./views/home.js";
 import * as task from "./views/task.js";
 import * as log from "./views/log.js";
@@ -100,6 +100,9 @@ async function tick(n) {
 }
 
 render(get());
+// `?task=<id>`: opened on one task (the Mac's Live Activity card); the address goes back to the console's own.
+const wantedTask = globalThis.location ? new URLSearchParams(location.search).get("task") : null;
+if (wantedTask) { history.replaceState(null, "", location.pathname); openTask(wantedTask); }
 void tick(0);
 let pollNumber = 0;
 setInterval(() => { void tick(++pollNumber); }, 5000);

@@ -5,6 +5,7 @@ import { mountAssistant } from "./assistant.js";
 import { mountUpdate } from "./update.js";
 import { mountExtensions } from "./extensions.js";
 import { mountFiles } from "./files.js";
+import { mountLive } from "./live.js";
 import { mountModelSettings } from "./models.js";
 import { mountSessions } from "./sessions.js";
 import { mountSettings } from "./settings.js";
@@ -29,6 +30,7 @@ export function createApp(deps: ApiDeps): Hono {
   mountThreads(app, deps);
   mountSessions(app, deps);
   mountTerminals(app, deps);
+  mountLive(app, deps);
   mountExtensions(app, deps.extensions);
   return app;
 }
