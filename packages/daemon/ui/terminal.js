@@ -257,6 +257,49 @@ term.onData((data) => {
     api("POST", `/terminals/${current.id}/write`, { data }).catch((e) => notify(e.message));
   }, 6);
 });
+// The wheel over a program that scrolls itself (every agent's full screen: it tracks the mouse, or sits on the
+// alternate screen). xterm turns wheel movement into notches at 30 % below 50 px an event, and WebKit (the Mac window)
+// reports a slow wheel click as about 4 px, so clicks and gentle swipes sent nothing. As iTerm: a new movement is one
+// notch at once, a continuing one a notch per two lines of travel; the service encodes them as the program asked
+// (`/keys` wheel-up/down, as the phone). A plain screen keeps xterm's own scrolling through its history.
+const WHEEL_GESTURE_GAP_MS = 120;
+let wheelTravel = 0, wheelDir = 0, wheelLast = 0, wheelQueued = 0, wheelSending = false;
+term.attachCustomWheelEventHandler((ev) => {
+  if (ev.shiftKey || !current || current.status === "exited") return true;
+  if (term.modes.mouseTrackingMode === "none" && term.buffer.active.type !== "alternate") return true;
+  ev.preventDefault();
+  if (ev.deltaY === 0) return false;
+  const cell = $("screen").querySelector(".xterm-rows > div")?.getBoundingClientRect().height || 16;
+  const px = ev.deltaMode === 1 ? ev.deltaY * cell : ev.deltaMode === 2 ? ev.deltaY * cell * term.rows : ev.deltaY;
+  const now = performance.now();
+  let notches = 0;
+  if (now - wheelLast > WHEEL_GESTURE_GAP_MS || Math.sign(px) !== wheelDir) { wheelDir = Math.sign(px); wheelTravel = 0; notches = wheelDir; }
+  else {
+    wheelTravel += px;
+    notches = Math.trunc(wheelTravel / (2 * cell));
+    wheelTravel -= notches * 2 * cell;
+  }
+  wheelLast = now;
+  if (notches) queueWheel(notches);
+  return false;
+});
+/** Notches (up negative, as deltaY) sent together, 20 at most a request. */
+function queueWheel(n) {
+  wheelQueued += n;
+  if (wheelSending) return;
+  wheelSending = true;
+  const id = current.id;
+  (async () => {
+    while (wheelQueued !== 0 && current?.id === id) {
+      const count = Math.min(20, Math.abs(wheelQueued));
+      const key = wheelQueued < 0 ? "wheel-up" : "wheel-down";
+      wheelQueued -= Math.sign(wheelQueued) * count;
+      await api("POST", `/terminals/${id}/keys`, { keys: Array(count).fill(key) }).catch((e) => notify(e.message));
+    }
+    wheelQueued = 0;
+    wheelSending = false;
+  })();
+}
 // A page shortcut is not the terminal's: xterm leaves it, and the document's listener runs it (once).
 term.attachCustomKeyEventHandler((e) => !(e.type === "keydown" && shortcut(e)));
 
