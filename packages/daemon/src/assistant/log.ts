@@ -97,8 +97,28 @@ export class AssistantLog {
     return drop.size;
   }
 
-  /** Clearing the conversation (threads-v0 手动删除): every line and every watch; the tasks and threads stay. The
-   *  sequence goes on, so a phone that reads `after` a number it held gets only what comes next. */
+  /** One entry of the phone's home screen, from any of its lines (threads-v0 手动删除): a user message with every answer
+   *  to it, or a line said on its own (an end, a question, an update notice); with the tasks its answers created. */
+  entry(seq: number): { lines: number[]; created: string[] } | null {
+    const row = this.db.prepare("SELECT * FROM messages WHERE seq = ?").get(seq) as Row | undefined;
+    if (!row) return null;
+    const line = toMessage(row);
+    const root = line.role === "user" ? line.seq : line.replyTo;
+    const lines = root === null ? [line] : [
+      ...(this.db.prepare("SELECT * FROM messages WHERE seq = ?").all(root) as Row[]).map(toMessage),
+      ...(this.db.prepare("SELECT * FROM messages WHERE reply_to = ? ORDER BY seq").all(root) as Row[]).map(toMessage),
+    ];
+    const created = lines.filter((m) => m.kind === "task" || m.kind === "fallback").flatMap((m) => m.taskIds);
+    return { lines: lines.map((m) => m.seq), created: [...new Set(created)] };
+  }
+
+  remove(seqs: readonly number[]): number {
+    const del = this.db.prepare("DELETE FROM messages WHERE seq = ?");
+    return seqs.reduce((n, seq) => n + Number(del.run(seq).changes), 0);
+  }
+
+  /** Clearing all history (threads-v0 手动删除): every line and every watch. The sequence goes on, so a phone that reads
+   *  `after` a number it held gets only what comes next. */
   clear(): number {
     const lines = Number(this.db.prepare("DELETE FROM messages").run().changes);
     this.db.prepare("DELETE FROM watches").run();

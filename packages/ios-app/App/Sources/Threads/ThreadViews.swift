@@ -7,7 +7,7 @@ struct ThreadRoute: Hashable {
 }
 
 extension AgentThread {
-    var displayTitle: String { title ?? "未命名会话" }
+    var displayTitle: String { title ?? "未命名话题" }
 }
 
 /// The strip above the conversation (assistant-v0 §2, control-v0 §5): one chip per thread that needs a look, in the
@@ -115,19 +115,19 @@ struct ThreadView: View {
             }
             .padding()
         }
-        .navigationTitle(detail?.thread.displayTitle ?? "会话")
+        .navigationTitle(detail?.thread.displayTitle ?? "话题")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("delete thread", role: .destructive) {
-                        deleting = .thread(id: threadId, title: detail?.thread.title)
+                    Button("delete topic", role: .destructive) {
+                        deleting = .topic(id: threadId, title: detail?.thread.title)
                     }
                 } label: { Text("⋯").mono(17) }
             }
         }
         .deleteConfirmation($deleting, error: $error) { deleted in
-            if case .thread = deleted { dismiss() } else { Task { await load() } }
+            if case .topic = deleted { dismiss() } else { Task { await load() } }
         }
         .task {
             while !Task.isCancelled {

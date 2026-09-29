@@ -20,6 +20,8 @@ public struct AssistantMessage: Decodable, Sendable, Hashable, Identifiable {
     public let taskIds: [String]
     /// The phone's id for a message it sent (user messages only): how a send the phone never heard back from is found.
     public let clientId: String?
+    /// On an answer: the message it answers.
+    public let replyTo: Int?
 
     public var id: Int { seq }
     public var date: Date { Date(milliseconds: ts) }
@@ -56,11 +58,40 @@ public struct ConversationLog: Sendable, Equatable {
         messages.contains { $0.role == .user && $0.clientId == clientId }
     }
 
+    /// The entry `message` belongs to, as a delete takes it (threads-v0 手动删除): a message you sent with every answer to
+    /// it, or a line said on its own; with the tasks its answers created.
+    public func entry(of message: AssistantMessage) -> ConversationEntry {
+        let root = message.role == .user ? message.seq : message.replyTo
+        var lines = root.map { root in messages.filter { $0.seq == root || $0.replyTo == root } } ?? []
+        if !lines.contains(message) { lines.append(message) }
+        var seen = Set<String>()
+        let created = lines.filter(\.createdTasks).flatMap(\.taskIds).filter { seen.insert($0).inserted }
+        return ConversationEntry(seq: message.seq, seqs: lines.map(\.seq).sorted(), exchange: root != nil, createdTaskIds: created)
+    }
+
+    /// Without these lines (deleted on the Mac); the next full load confirms.
+    public func removing(_ seqs: [Int]) -> ConversationLog {
+        let gone = Set(seqs)
+        return ConversationLog(messages.filter { !gone.contains($0.seq) }, keep: keep)
+    }
+
     /// Assistant messages in `incoming` this log does not hold yet, oldest first (what to sound or read aloud).
     public func newAssistantMessages(in incoming: [AssistantMessage]) -> [AssistantMessage] {
         let known = Set(messages.map(\.seq))
         return incoming.filter { $0.role == .assistant && !known.contains($0.seq) }.sorted { $0.seq < $1.seq }
     }
+}
+
+/// One entry of the home screen (ConversationLog.entry): the Mac finds all of it from any one line.
+public struct ConversationEntry: Sendable, Hashable {
+    /// The line it was chosen by.
+    public let seq: Int
+    /// The lines the phone holds of it.
+    public let seqs: [Int]
+    /// A message and its answers, rather than one line said on its own.
+    public let exchange: Bool
+    /// The tasks its answers created: deleted with it.
+    public let createdTaskIds: [String]
 }
 
 /// `POST /assistant`: the stored message, the answer, and the task when one was created.

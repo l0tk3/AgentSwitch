@@ -1,43 +1,52 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// What a delete button removes: one task (its log, files and resume state), a whole thread with all its tasks, or the
-/// conversation with the assistant (threads and tasks stay). Every delete is confirmed first; the Mac refuses (409)
-/// while something in a task or thread still runs.
+/// What a delete removes — only what the user sees (threads-v0 手动删除; ui-v0 §4: a thread is a "topic"): one entry
+/// of the home screen (a message with its answers and the tasks they created, or one line on its own), one task, one
+/// topic with all its tasks (from the topic page), or all history. Every delete is confirmed first; the Mac refuses
+/// (409) while something in it still runs.
 enum DeleteRequest: Identifiable {
+    case entry(ConversationEntry)
     case task(AgentTask)
-    case thread(id: String, title: String?)
-    case conversation
+    case topic(id: String, title: String?)
+    case history
 
     var id: String {
         switch self {
+        case .entry(let entry): return "entry:\(entry.seq)"
         case .task(let task): return "task:\(task.id)"
-        case .thread(let id, _): return "thread:\(id)"
-        case .conversation: return "conversation"
+        case .topic(let id, _): return "topic:\(id)"
+        case .history: return "history"
         }
     }
 
     var question: String {
         switch self {
+        case .entry(let entry): return entry.exchange ? "删除这段对话？" : "删除这条提示？"
         case .task: return "删除此任务？"
-        case .thread(_, let title): return "删除会话「\(title ?? "未命名会话")」？"
-        case .conversation: return "清空与助理的对话？"
+        case .topic(_, let title): return "删除话题「\(title ?? "未命名话题")」？"
+        case .history: return "清空全部记录？"
         }
     }
 
     var action: String {
         switch self {
+        case .entry(let entry): return entry.createdTaskIds.isEmpty ? "删除" : "删除对话和任务"
         case .task: return "删除任务"
-        case .thread: return "删除会话和其中所有任务"
-        case .conversation: return "清空对话"
+        case .topic: return "删除话题和其中所有任务"
+        case .history: return "清空记录"
         }
     }
 
     var detail: String {
         switch self {
-        case .task: return "任务的记录和文件将一并删除，且无法恢复。"
-        case .thread: return "会话中所有任务的记录和文件将一并删除，且无法恢复。"
-        case .conversation: return "对话记录将全部删除，且无法恢复。会话和任务不受影响，从对话创建的任务之后在首页单独显示；助理的定时进度提醒一并取消。"
+        case .entry(let entry):
+            if !entry.exchange { return "此提示将被删除，且无法恢复。" }
+            return entry.createdTaskIds.isEmpty ? "你的话和助理的回答将被删除，且无法恢复。"
+                : "你的话、助理的回答，以及由此创建的任务（结果和文件）将一并删除，且无法恢复。"
+        case .task: return "任务的结果和文件，以及对话中关于它的内容将一并删除，且无法恢复。"
+        case .topic: return "话题中所有任务的结果和文件，以及对话中关于它们的内容将一并删除，且无法恢复。"
+        case .history: return "首页的对话和所有任务（结果、文件）将全部删除，且无法恢复。环境说明、密文、配对和终端不受影响。"
         }
     }
 

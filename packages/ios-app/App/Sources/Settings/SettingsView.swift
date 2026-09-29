@@ -1,7 +1,7 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// Where 设置 can lead by value: the Mac's details, the task log, the Mac's coding sessions and one of them. The demo
+/// Where 设置 can lead by value: the Mac's details, the history, the Mac's coding sessions and one of them. The demo
 /// screens open straight onto them (`-uiDemoScreen mac|tasks|search|sessions|transcript`).
 enum SettingsRoute: Hashable {
     case mac, tasks, sessions
@@ -10,7 +10,7 @@ enum SettingsRoute: Hashable {
 
 /// Everything behind the gear (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top, then the executors' usage
 /// (§4.2); what every task reads (CONTEXT.md, ciphertexts); sounds and reading; the Mac app's new version; the
-/// threads, the task log, the Mac's coding sessions and the models (delete and read only); the permission mode
+/// history (every task; clear history deletes it all) and the models; the permission mode
 /// (changed on the Mac); the Face ID lock; re-pairing. Rows carry no icons (the usage rows' tiles are content, not
 /// row icons); footers are one sentence. Pull to refresh re-reads the usage.
 struct SettingsView: View {
@@ -21,7 +21,7 @@ struct SettingsView: View {
     @State private var addingMac = false
     @State private var path: [SettingsRoute] = SettingsView.initialPath
     @State private var policy: ApprovalPolicyInfo?
-    /// clear conversation: confirmed first (DeleteRequest), then done or why not.
+    /// clear history: confirmed first (DeleteRequest), then done or why not.
     @State private var clearing: DeleteRequest?
     @State private var clearError: String?
     @State private var cleared = false
@@ -64,14 +64,11 @@ struct SettingsView: View {
                 FeedbackSection()
                 if connected { MacAppSection() }
                 Section {
-                    NavigationLink("threads") { ThreadsManageView() }
-                    NavigationLink("task log", value: SettingsRoute.tasks)
+                    NavigationLink("history", value: SettingsRoute.tasks)
                     NavigationLink("models") { ModelsView() }
-                    if model.hasAssistant {
-                        Button("clear conversation", role: .destructive) { cleared = false; clearing = .conversation }
-                        if let clearError { Text(clearError).font(.footnote).foregroundStyle(Theme.failed) }
-                        if cleared { Text("对话已清空。").font(.footnote).foregroundStyle(.secondary) }
-                    }
+                    Button("clear history", role: .destructive) { cleared = false; clearing = .history }
+                    if let clearError { Text(clearError).font(.footnote).foregroundStyle(Theme.failed) }
+                    if cleared { Text("记录已清空。").font(.footnote).foregroundStyle(.secondary) }
                 } header: {
                     SectionLabel("manage")
                 } footer: {

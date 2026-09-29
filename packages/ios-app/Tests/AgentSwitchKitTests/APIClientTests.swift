@@ -95,12 +95,12 @@ final class APIClientTests: XCTestCase {
         XCTAssertNil(transport.requests[0].httpBody)
     }
 
-    func testClearingTheConversationIsOneDeleteOfTheAssistant() async throws {
-        let transport = FakeTransport { req, _ in (json(["ok": true, "removed": 24]), httpResponse(req.url)) }
+    func testAnEntryAndAllHistoryAreDeletesOfTheirOwn() async throws {
+        let transport = FakeTransport { req, _ in (json(["ok": true]), httpResponse(req.url)) }
         let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
-        let removed = try await api.clearConversation()
-        XCTAssertEqual(removed, 24)
-        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["DELETE /assistant"])
+        try await api.deleteEntry(12)
+        try await api.clearHistory()
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["DELETE /assistant/12", "DELETE /history"])
     }
 
     func testIdsArePathSegmentsNotRoutes() {

@@ -664,17 +664,25 @@ final class AppModel {
         guard let api else { return nil }
         do {
             switch request {
+            case .entry(let entry):
+                try await api.deleteEntry(entry.seq)
+                for id in entry.createdTaskIds { taskDeleted(id) }
+                conversation = conversation.removing(entry.seqs)
+                reloadConversation()
             case .task(let task):
                 try await api.deleteTask(task.id)
                 taskDeleted(task.id)
-            case .thread(let id, _):
+            case .topic(let id, _):
                 try await api.deleteThread(id)
                 await refreshAll()
-            case .conversation:
-                try await api.clearConversation()
+            case .history:
+                try await api.clearHistory()
+                tasks = []
+                approvals = []
+                threads = []
                 conversation = ConversationLog()
                 conversationLoaded = false
-                await refreshConversation()
+                await refreshAll()
             }
             return nil
         } catch {

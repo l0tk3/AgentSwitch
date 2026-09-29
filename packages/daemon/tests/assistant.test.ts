@@ -40,25 +40,6 @@ function daemon(assistant: Router | undefined) {
 }
 
 describe("assistant", () => {
-  it("clearing the conversation removes every line and leaves the tasks it created (threads-v0 手动删除)", async () => {
-    const f = daemon(scripted([
-      JSON.stringify({ action: "create_task", text: "好的。", task: "整理下载目录" }),
-      JSON.stringify({ action: "reply", text: "在。" }),
-      JSON.stringify({ action: "reply", text: "还在。" }),
-    ]));
-    const created = (await f.say("整理下载目录")).body.task as { id: string };
-    await f.say("在吗");
-    const before = await f.messages();
-    expect(before).toHaveLength(4);
-    const res = await f.d.app.request("/assistant", { method: "DELETE" });
-    expect(await res.json()).toEqual({ ok: true, removed: 4 });
-    expect(await f.messages()).toEqual([]);
-    expect(f.d.store.getTask(created.id)).toBeDefined();
-    await f.say("还在吗");
-    const after = await f.messages(before.at(-1)!.seq);
-    expect(after.map((m) => m.text)).toEqual(["还在吗", "还在。"]);
-  });
-
   it("answers without creating a task, and the conversation keeps only sealed text", async () => {
     const f = daemon(scripted([JSON.stringify({ action: "reply", text: "你好，我在。" })]));
     const r = await f.say("在吗？密码是 hunter2222");

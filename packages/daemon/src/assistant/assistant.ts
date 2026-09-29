@@ -129,6 +129,15 @@ export class Assistant {
     return this.deps.log.clear();
   }
 
+  /** The lines of one home-screen entry and the tasks it created (AssistantLog.entry). */
+  entry(seq: number): { lines: number[]; created: string[] } | null {
+    return this.deps.log.entry(seq);
+  }
+
+  remove(seqs: readonly number[]): number {
+    return this.deps.log.remove(seqs);
+  }
+
   private replay(user: AssistantMessage, assistant: AssistantMessage): Answered {
     const task = assistant.kind === "task" || assistant.kind === "fallback" ? this.deps.store.getTask(assistant.taskIds[0] ?? "") : undefined;
     return { ok: true, user, assistant, ...(task ? { task } : {}) };

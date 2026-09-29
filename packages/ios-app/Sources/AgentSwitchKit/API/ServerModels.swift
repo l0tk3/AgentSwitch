@@ -260,6 +260,5 @@ struct ContextExample: Decodable, Sendable { let text: String }
 
 /// `{ok:true}` replies.
 public struct OKReply: Decodable, Sendable { public let ok: Bool? }
-struct ClearReply: Decodable, Sendable { let removed: Int? }
 
 struct ErrorReply: Decodable { let error: String }

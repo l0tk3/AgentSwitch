@@ -88,12 +88,15 @@ public struct AgentSwitchAPI: Sendable {
         (try await get(["assistant"], query: [URLQueryItem(name: "last", value: String(count))]) as AssistantMessages).messages
     }
 
-    /// Clears the conversation (threads-v0 手动删除): every line and the assistant's progress reminders; threads and tasks
-    /// stay. Returns how many lines went.
-    @discardableResult
-    public func clearConversation() async throws -> Int {
-        let reply: ClearReply = try await perform("DELETE", ["assistant"], query: [], body: nil)
-        return reply.removed ?? 0
+    /// Deletes one entry of the home screen from any of its lines (threads-v0 手动删除): a message with its answers and
+    /// the tasks they created, or a line on its own. 409 while such a task still runs.
+    public func deleteEntry(_ seq: Int) async throws {
+        let _: OKReply = try await perform("DELETE", ["assistant", String(seq)], query: [], body: nil)
+    }
+
+    /// Deletes all history: every topic, task and conversation line. 409 while a task runs; then nothing is deleted.
+    public func clearHistory() async throws {
+        let _: OKReply = try await perform("DELETE", ["history"], query: [], body: nil)
     }
 
     /// Stages files for a task (multipart, sent once); pass the ids as `NewTaskRequest.attachments`.

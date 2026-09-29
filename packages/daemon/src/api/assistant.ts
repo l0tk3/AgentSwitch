@@ -1,6 +1,6 @@
 /** The assistant conversation over HTTP (assistant-v0 §1.1): POST a message (the phone's input box), GET the messages
- *  after a sequence number (`?after=`) or the newest ones (`?last=`, for a first load), DELETE to clear it (threads and
- *  tasks stay; threads-v0 手动删除). The phone may use all three. */
+ *  after a sequence number (`?after=`) or the newest ones (`?last=`, for a first load). And the phone's deletes, only of
+ *  what it shows (threads-v0 手动删除): one entry of the home screen, or all history. */
 
 import type { Hono } from "hono";
 import { z } from "zod";
@@ -37,8 +37,24 @@ export function mountAssistant(app: Hono, deps: ApiDeps): void {
     return c.json({ messages: deps.assistant.messages(after, limitParam(c, 100, 500)) });
   });
 
-  app.delete("/assistant", (c) => {
+  // One entry, from any of its lines: a message with its answers and the tasks they created, or a line on its own.
+  app.delete("/assistant/:seq", (c) => {
     if (!deps.assistant) return c.json({ error: "assistant unavailable" }, 503);
-    return c.json({ ok: true, removed: deps.assistant.clear() });
+    const seq = Number(c.req.param("seq"));
+    if (!Number.isSafeInteger(seq) || seq < 1) return c.json({ error: "seq must be a message number" }, 400);
+    const entry = deps.assistant.entry(seq);
+    if (!entry) return c.json({ error: "not found" }, 404);
+    const tasks = deps.engine.deleteTasks(entry.created);
+    if (!tasks.ok) return c.json({ error: tasks.error }, 409);
+    deps.assistant.remove(entry.lines);
+    return c.json({ ok: true });
+  });
+
+  // Everything the home screen shows: every thread and task (all or none), then the whole conversation.
+  app.delete("/history", (c) => {
+    const tasks = deps.engine.clearHistory();
+    if (!tasks.ok) return c.json({ error: tasks.error }, 409);
+    deps.assistant?.clear();
+    return c.json({ ok: true });
   });
 }

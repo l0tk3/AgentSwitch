@@ -100,17 +100,14 @@ struct FeedEntry: View {
     private var menu: some View {
         Button("open") { open() }
         if let threadId = task.threadId, let openThread {
-            Button("thread") { openThread(threadId) }
+            Button("topic") { openThread(threadId) }
         }
         if task.status.isTerminal {
             let speaking = model.speaker.speakingTaskId == task.id
             Button(speaking ? "stop" : "read aloud") { model.speaker.toggle(task) }
         }
         Divider()
-        Button("delete task", role: .destructive) { delete(.task(task)) }
+        Button("delete", role: .destructive) { delete(.task(task)) }
             .disabled(task.status.isActive)
-        if let threadId = task.threadId {
-            Button("delete thread", role: .destructive) { delete(.thread(id: threadId, title: nil)) }
-        }
     }
 }

@@ -30,12 +30,13 @@ struct UserBubble: View {
 
 /// AgentSwitch's side of the conversation: plain text on the left, no bubble (docs/ui-v0.md: not a chat robot). A
 /// notice carries a small dot in the state of the task it is about; the tasks an answer created hang under it as
-/// cards, the ones it only talks about as small links.
+/// cards, the ones it only talks about as small links. Long press: read aloud, copy, delete (the whole entry).
 struct AssistantBubble: View {
     let message: AssistantMessage
     let created: [AgentTask]
     let entry: (AgentTask) -> FeedEntry
     let open: (String) -> Void
+    let delete: (DeleteRequest) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -94,6 +95,8 @@ struct AssistantBubble: View {
         let speaking = model.speaker.speakingTaskId == speakKey
         Button(speaking ? "stop" : "read aloud", action: toggleSpeech)
         Button("copy") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
+        Divider()
+        Button("delete", role: .destructive) { delete(.entry(model.conversation.entry(of: message))) }
     }
 }
 

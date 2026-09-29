@@ -164,13 +164,33 @@ export class Engine {
 
   /** Terminal status is published before summaries and cleanup finish; deletion also waits for that work. */
   deleteTask(id: string): DeleteResult {
-    const task = this.ctx.store.getTask(id);
-    if (!task) return { ok: false, code: "not_found", error: "not found" };
-    const related = task.threadId ? this.ctx.store.tasksInThread(task.threadId) : [task];
-    const blocked = this.deletionBlocker(related);
+    if (!this.ctx.store.getTask(id)) return { ok: false, code: "not_found", error: "not found" };
+    return this.deleteTasks([id]);
+  }
+
+  /** Several tasks together (the ones one conversation entry created), all or none: busy while any of them, or a task
+   *  in their threads, still runs. Ids already gone are skipped. */
+  deleteTasks(ids: readonly string[]): DeleteResult {
+    const tasks = ids.map((id) => this.ctx.store.getTask(id)).filter((task): task is Task => task !== undefined);
+    const related = new Map(tasks.flatMap((task) => (task.threadId ? this.ctx.store.tasksInThread(task.threadId) : [task])).map((task) => [task.id, task]));
+    const blocked = this.deletionBlocker([...related.values()]);
     if (blocked) return blocked;
-    this.ctx.store.deleteTask(id);
-    this.forgetTasks([task]);
+    for (const task of tasks) this.ctx.store.deleteTask(task.id);
+    this.forgetTasks(tasks);
+    return { ok: true };
+  }
+
+  /** Everything the phone's home screen shows (threads-v0 手动删除): every thread and task, all or none. */
+  clearHistory(): DeleteResult {
+    const tasks = this.ctx.store.listTasks(Number.MAX_SAFE_INTEGER);
+    const blocked = this.deletionBlocker(tasks);
+    if (blocked) return blocked;
+    for (const thread of this.ctx.store.listThreads({ limit: Number.MAX_SAFE_INTEGER })) {
+      this.ctx.store.deleteThread(thread.id);
+      this.deps.browserSlots?.forgetThread(thread.id);
+    }
+    for (const task of this.ctx.store.listTasks(Number.MAX_SAFE_INTEGER)) this.ctx.store.deleteTask(task.id);
+    this.forgetTasks(tasks);
     return { ok: true };
   }
 

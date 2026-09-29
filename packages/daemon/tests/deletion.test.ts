@@ -234,6 +234,68 @@ describe("the conversation goes with the task (threads-v0 手动删除)", () => 
     expect(lines()).toEqual([`assistant notice ${other.id}`]);
   });
 
+  it("deleting one entry of the home screen: a message with its answers and the tasks they created, or one line", async () => {
+    const f = fixture(), made = f.create(), other = f.create();
+    const { say, lines } = conversation(f.home);
+    const ask = say("user", "message");
+    const created = say("assistant", "task", [made.id], ask);
+    const notice = say("assistant", "notice", [made.id]);
+    const chat = say("user", "message");
+    say("assistant", "reply", [], chat);
+    const status = say("assistant", "status", [other.id], say("user", "message"));
+    const update = say("assistant", "notice");
+    const del = (seq: number | string) => f.app.request(`/assistant/${seq}`, { method: "DELETE" });
+    expect((await del(update)).status).toBe(200);
+    expect(lines()).not.toContain("assistant notice");
+    expect((await del(status)).status).toBe(200);
+    expect(f.store.getTask(other.id), "a status answer only names a task; it did not create it").toBeDefined();
+    expect((await del(chat)).status).toBe(200);
+    expect(lines()).toEqual(["user message", `assistant task ${made.id}`, `assistant notice ${made.id}`]);
+    expect((await del(created)).status).toBe(200);
+    expect(f.store.getTask(made.id)).toBeUndefined();
+    expect(lines(), "the task's own lines went with it").toEqual([]);
+    expect((await del(ask)).status).toBe(404);
+    expect((await del(notice)).status).toBe(404);
+    expect((await del("x")).status).toBe(400);
+  });
+
+  it("an entry whose task still runs, or all history while one does, is refused and nothing goes", async () => {
+    const f = fixture(), done = f.create();
+    const running = f.store.updateTask(f.store.createTask({ task: "long", cwd: f.cwd }).id, { status: "running" });
+    const { say, lines } = conversation(f.home);
+    const ask = say("user", "message");
+    say("assistant", "task", [running.id], ask);
+    say("assistant", "notice", [done.id]);
+    const before = lines();
+    expect((await f.app.request(`/assistant/${ask}`, { method: "DELETE" })).status).toBe(409);
+    expect((await f.app.request("/history", { method: "DELETE" })).status).toBe(409);
+    expect(lines()).toEqual(before);
+    expect(f.store.getTask(running.id)).toBeDefined();
+    expect(f.store.getTask(done.id)).toBeDefined();
+  });
+
+  it("clearing all history removes every topic, task and conversation line, and keeps the context and handwritten memory", async () => {
+    const f = fixture(), thread = f.store.createThread(f.cwd, "t");
+    const a = f.create(thread.id), loose = f.create();
+    const { log, say, lines } = conversation(f.home);
+    say("assistant", "task", [a.id], say("user", "message"));
+    say("assistant", "reply", [], say("user", "message"));
+    say("assistant", "notice");
+    log.setWatch(loose.id, 60_000);
+    const memory = join(f.home, "MEMORY.md");
+    writeFileSync(memory, "# user note\nKeep handwritten facts.\n");
+    appendMemory(memory, ["learned"], { taskId: a.id });
+    const res = await f.app.request("/history", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    expect(f.store.listTasks(100)).toEqual([]);
+    expect(f.store.listThreads({ limit: 100 })).toEqual([]);
+    expect(lines()).toEqual([]);
+    expect(log.watches()).toEqual([]);
+    expect(readFileSync(memory, "utf8")).toContain("Keep handwritten facts.");
+    expect(readFileSync(memory, "utf8")).not.toContain("learned");
+    expect(existsSync(join(f.cwd, "keep.txt")), "the user's own files stay").toBe(true);
+  });
+
   it("lines about tasks deleted before are cleaned at start", () => {
     const f = fixture(), kept = f.create();
     const { log, say, lines } = conversation(f.home);

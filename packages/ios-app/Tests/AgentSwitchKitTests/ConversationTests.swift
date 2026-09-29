@@ -100,6 +100,26 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(ConversationLog().lastSeq, 0)
     }
 
+    func testAnEntryIsAMessageWithItsAnswersOrOneLineOnItsOwn() throws {
+        func m(_ seq: Int, _ role: String, kind: String, tasks: [String] = [], replyTo: Int? = nil) throws -> AssistantMessage {
+            var object = Self.message(seq, role, "m\(seq)", kind: kind, tasks: tasks)
+            object["replyTo"] = replyTo.map { $0 as Any } ?? NSNull()
+            return try decode(AssistantMessage.self, object)
+        }
+        let log = ConversationLog(try [
+            m(1, "user", kind: "message"), m(2, "assistant", kind: "task", tasks: ["a"], replyTo: 1),
+            m(3, "assistant", kind: "notice", tasks: ["a"]),
+            m(4, "user", kind: "message"), m(5, "assistant", kind: "status", tasks: ["a"], replyTo: 4),
+        ])
+        let asked = log.entry(of: log.messages[0])
+        XCTAssertEqual(asked, ConversationEntry(seq: 1, seqs: [1, 2], exchange: true, createdTaskIds: ["a"]))
+        XCTAssertEqual(log.entry(of: log.messages[1]).seqs, [1, 2], "the answer takes its question along")
+        XCTAssertEqual(log.entry(of: log.messages[2]), ConversationEntry(seq: 3, seqs: [3], exchange: false, createdTaskIds: []),
+                       "a notice is one line and deletes no task")
+        XCTAssertEqual(log.entry(of: log.messages[4]).createdTaskIds, [], "a status answer only names the task")
+        XCTAssertEqual(log.removing([1, 2]).messages.map(\.seq), [3, 4, 5])
+    }
+
     func testALostAnswerIsFoundByTheClientIdAndNewRepliesAreSingledOut() throws {
         let sent = try decode(AssistantMessage.self, Self.message(5, "user", "整理下载目录", kind: "message", clientId: "client-0001"))
         let answer = try decode(AssistantMessage.self, Self.message(6, "assistant", "收到。", kind: "task", tasks: ["t1"]))

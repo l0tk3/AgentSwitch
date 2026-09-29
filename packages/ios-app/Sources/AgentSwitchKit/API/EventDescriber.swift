@@ -56,9 +56,9 @@ public enum EventDescriber {
         case "handoff":
             let to = p["to"]?["harness"]?.string.map { _ in target(p["to"]) } ?? "重新选择"
             return "交接 → \(to)\(p["reason"]?.string.map { "（\($0)）" } ?? "")"
-        case "thread": return "归入会话"
+        case "thread": return "归入话题"
         case "summary":
-            return p["ok"]?.bool == true ? "会话标题：「\(p["title"]?.string ?? "")」" : "会话摘要未更新：\(p["error"]?.string ?? "")"
+            return p["ok"]?.bool == true ? "话题标题：「\(p["title"]?.string ?? "")」" : "话题摘要未更新：\(p["error"]?.string ?? "")"
         case "sealed":
             let entries = p["entries"]?.array?.compactMap { $0["field"]?.string ?? $0["label"]?.string } ?? []
             return "已加密：\(entries.joined(separator: "；"))"
@@ -217,7 +217,7 @@ public enum EventDescriber {
     private static func waitingText(_ p: JSONValue) -> String {
         switch p["for"]?.string {
         case "parent": return "上一个任务结束"
-        case "thread": return "同一会话的另一个任务"
+        case "thread": return "同一话题的另一个任务"
         case "cwd": return "同一目录的另一个任务"
         case "global": return "空闲名额（同时运行的任务已满）"
         case let what? where what.hasPrefix("harness:"): return " \(ModelName.harness(String(what.dropFirst(8)))) 空闲"

@@ -90,7 +90,7 @@ struct TaskDetailView: View {
             if let threadId = task.threadId, let title = model.thread(threadId)?.title, !title.isEmpty {
                 NavigationLink(value: ThreadRoute(id: threadId)) {
                     HStack(spacing: 6) {
-                        Text("thread").mono(12).foregroundStyle(.tertiary)
+                        Text("topic").mono(12).foregroundStyle(.tertiary)
                         Text(title).font(.footnote).foregroundStyle(.secondary)
                         Text("›").mono(12).foregroundStyle(.tertiary)
                     }
@@ -210,9 +210,6 @@ struct TaskDetailView: View {
                     Section {
                         Button("delete task", role: .destructive) { deleting = .task(task) }
                             .disabled(task.status.isActive)
-                        if let threadId = task.threadId {
-                            Button("delete thread", role: .destructive) { deleting = .thread(id: threadId, title: nil) }
-                        }
                     }
                 }
             } label: {
