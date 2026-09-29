@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentSwitch · 菜单栏实时活动</title>
+<style>
+/* The Mac's Live Activity, in the form macOS 26 gives an iPhone's Live Activity in the menu bar: the compact
+   presentation (mark | clock) as a small black capsule among the status items, there only while something runs or
+   waits; a click drops the lock-screen card under it — the phone's card (island.html). A request drops the card by
+   itself and it stays until answered; a result drops it for four seconds. The card's buttons act (allow, deny, an
+   option); a question to type opens the task. Drawn at 1 CSS px = 1 pt; the menu bar 32 pt (14-inch MacBook Pro),
+   transparent as in macOS 26. The card is always dark, as on the phone. */
+:root {
+  color-scheme: dark;
+  --board: #1b1b1d; --board-ink: #e9e6df;
+  --ink: #ffffff; --ink2: rgba(255,255,255,.72); --ink3: rgba(255,255,255,.5); --ink4: rgba(255,255,255,.18);
+  --busy: #2ee6ff; --amber: #ffb000; --green: #9be22d; --red: #ff4a3d; --signal: #ff2e88;
+  --cyan: var(--busy); --px-shadow: #2c2a28;
+  --mono: "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+  --wall: linear-gradient(160deg, #3b4b6e 0%, #222a44 45%, #121626 100%); --mb-ink: #fff; --mb-shadow: 0 1px 2px rgba(0,0,0,.3);
+}
+body.wall-light { --wall: linear-gradient(160deg, #eef2f7 0%, #cfdbe8 50%, #b3c3d6 100%); --mb-ink: #1d1d1f; --mb-shadow: none; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--board); color: var(--board-ink); font: 13px/1.55 var(--ui); padding-block: 28px 64px; padding-inline: 16px; }
+.page { max-width: 1120px; margin: 0 auto; }
+h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
+.lede { color: #a9a6a0; max-width: 76ch; margin: 0 0 8px; font-size: 12.5px; line-height: 1.7; }
+.sec { font: 11px var(--mono); letter-spacing: .14em; color: #77746e; margin: 36px 0 14px; }
+.note { color: #8f8b84; font-size: 12px; margin: 10px 0 0; max-width: 76ch; }
+.px { display: block; }
+.tools { display: flex; gap: 8px 14px; align-items: center; margin: 18px 0 0; font: 12px var(--mono); color: #8f8b84; flex-wrap: wrap; }
+.tools > span { display: inline-flex; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid #3a3a3e; }
+.seg button { background: none; border: 0; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; cursor: pointer; }
+.seg button.on { background: var(--board-ink); color: #111; }
+.grid { display: flex; flex-wrap: wrap; gap: 26px 30px; align-items: flex-start; }
+.cell { display: flex; flex-direction: column; gap: 8px; max-width: 100%; }
+.cp { font: 11px var(--mono); color: #8f8b84; }
+.fit { max-width: 100%; overflow-x: auto; }
+.zoom { zoom: var(--z, 1); }
+.others { margin: 0; padding-left: 18px; color: #a9a6a0; font-size: 12.5px; line-height: 1.9; }
+
+/* ---------- a crop of the screen's top right ---------- */
+.screen { position: relative; overflow: hidden; border-radius: 12px 12px 0 0; background: var(--wall); }
+.screen.strip { border-radius: 10px; }
+.mb { position: absolute; top: 0; left: 0; right: 0; height: 32px; display: flex; align-items: center; justify-content: flex-end; gap: 15px;
+  padding: 0 14px; font: 500 13px var(--ui); color: var(--mb-ink); text-shadow: var(--mb-shadow); white-space: nowrap; }
+.mb .ic, .mb .mbm { display: flex; flex: none; }
+.mb .menus { margin-right: auto; display: flex; gap: 18px; }
+.mb .menus b { font-weight: 700; }
+
+/* the live item: the compact presentation in a black capsule */
+.live { height: 22px; border-radius: 11px; background: #000; display: inline-flex; align-items: center; gap: 7px; padding: 0 9px 0 8px;
+  color: var(--ink); text-shadow: none; cursor: default; flex: none; user-select: none; }
+.live:hover, .live.on { background: #2a2a2d; }
+.live.min { padding: 0 8px; }
+.live .mk { display: flex; }
+
+/* the card under it */
+.panel { position: absolute; top: 37px; width: 360px; border-radius: 22px; padding: 14px 16px 15px; color: var(--ink); z-index: 5;
+  background: rgba(8,8,10,.9); -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: inset 0 0 0 .5px rgba(255,255,255,.16), 0 16px 48px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.22); transform-origin: 50% 0; }
+.panel.in { animation: drop .2s cubic-bezier(.2,.9,.3,1.12) both; }
+.panel.out { animation: lift .14s ease-in both; }
+@keyframes drop { from { opacity: 0; transform: translateY(-6px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes lift { to { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.hd { display: flex; align-items: center; gap: 8px; }
+.hd .name { font: 600 12px var(--mono); }
+.hd .sp { flex: 1; }
+.dots { height: 1px; margin: 11px 0 9px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 2px, transparent 2px 4px); }
+.item + .item { margin-top: 11px; }
+.row1 { display: flex; align-items: baseline; gap: 10px; }
+.row1 .st { width: 12px; display: inline-flex; justify-content: center; flex: none; align-self: center; }
+.title { font: 600 14px/1.3 var(--ui); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
+  background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.title:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.agent { color: var(--ink2); display: inline-flex; align-self: center; flex: none; }
+.clock { font: 500 12.5px var(--mono); color: var(--ink2); font-variant-numeric: tabular-nums; flex: none; }
+.step { display: flex; gap: 6px; margin: 1px 0 0 22px; font: 13px/1.4 var(--ui); color: var(--ink2); }
+.step .tr { font: 12px/1.55 var(--mono); color: var(--ink3); flex: none; }
+.step .tx { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.ask .step .tx, .ended .step .tx { -webkit-line-clamp: 2; }
+.step.ask { color: var(--amber); }
+.step.ask b { font: 600 12.5px var(--mono); margin-right: 6px; }
+.where { margin: 1px 0 0 43px; font: 11.5px var(--mono); color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; padding-bottom: 3px; }
+.more { margin-top: 11px; font: 12px var(--mono); color: var(--ink3); }
+.b { font: 600 12.5px var(--mono); color: var(--ink); background: none; border: 0; padding: 4px 8px; cursor: pointer; white-space: nowrap; }
+.b:hover { background: var(--ink); color: #000; }
+.b.pri { color: #000; background: var(--amber); box-shadow: 0 3px 0 #a36f00; }
+.b.pri:hover { background: #ffc233; }
+.b.pri:active { transform: translateY(2px); box-shadow: 0 1px 0 #a36f00; }
+.word { font: 600 12px var(--mono); }
+.tally { display: inline-flex; gap: 8px; font: 500 12px var(--mono); color: var(--ink2); align-items: center; }
+.tally > span { display: inline-flex; gap: 3px; align-items: center; }
+.spin { font: 700 12px var(--mono); color: var(--busy); line-height: 1; display: inline-block; width: 1ch; text-align: center; }
+.sq { width: 7px; height: 7px; flex: none; display: inline-block; }
+.static .panel { animation: none; }
+
+/* the live stage's controls */
+.sim { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.sim button { background: none; border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; cursor: pointer; }
+.sim button:hover { background: var(--board-ink); color: #111; }
+.log { font: 12px var(--mono); color: #8f8b84; margin-top: 8px; min-height: 1.6em; }
+@media (prefers-reduced-motion: reduce) { .panel.in, .panel.out { animation: none; } }
+</style>
+</head>
+<body class="wall-dark">
+<div class="page">
+  <h1>菜单栏实时活动 · Mac</h1>
+  <p class="lede">照 macOS 26 把 iPhone 实时活动放进菜单栏的样子：菜单栏里一个小胶囊，点开是和手机锁屏同一张卡。有请求时卡片自己落下，在卡上批准或拒绝；任务结束时落下几秒显示结论。</p>
+  <div class="tools">
+    <span>壁纸 <span class="seg" id="wall"><button type="button" class="on" data-v="dark">深</button><button type="button" data-v="light">浅</button></span></span>
+    <span>大小 <span class="seg" id="zoom"><button type="button" class="on" data-z="1">1×</button><button type="button" data-z="1.5">1.5×</button><button type="button" data-z="2">2×</button></span></span>
+  </div>
+
+  <div class="sec">// live · 动态</div>
+  <div class="fit"><div class="zoom" id="stage"></div></div>
+  <div class="sim" id="sim">
+    <button type="button" data-sim="task">新任务</button>
+    <button type="button" data-sim="perm">终端请求</button>
+    <button type="button" data-sim="approve">任务确认</button>
+    <button type="button" data-sim="options">选项</button>
+    <button type="button" data-sim="question">提问</button>
+    <button type="button" data-sim="done">完成</button>
+    <button type="button" data-sim="fail">失败</button>
+    <button type="button" data-sim="clear">清空</button>
+  </div>
+  <div class="log" id="log"></div>
+  <p class="note">点胶囊展开或收起，双击打开；点别处收起。演示里结果 10 秒后消失（应用里 1 分钟）。</p>
+
+  <div class="sec">// menu bar · 菜单栏</div>
+  <div class="fit"><div class="grid zoom static" id="bar"></div></div>
+  <p class="note">只在有任务或请求时出现，在 AgentSwitch 图标左边。菜单栏挤的时候只剩标记。</p>
+
+  <div class="sec">// card · 卡片</div>
+  <div class="fit"><div class="grid zoom static" id="card"></div></div>
+  <p class="note">能用按钮答的在卡上答；要打字的点 [ open ]，打开任务页。点标题打开终端窗口或任务页。</p>
+
+  <div class="sec">// other · 其他</div>
+  <ul class="others">
+    <li>不抢焦点：在卡上点 allow，当前窗口不会被切走。</li>
+    <li>等你时响一声，和手机同一个提示音。</li>
+    <li>全屏应用里菜单栏藏起来，请求的卡片照样落下。</li>
+    <li>设置 › 通用 可关。AgentSwitch 自己的菜单栏图标不变。</li>
+  </ul>
+</div>
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+document.head.insertAdjacentHTML("beforeend", `<style>${P.GLITCH_CSS}</style>`);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const TINT = { busy: "var(--busy)", waiting: "var(--amber)", done: "var(--green)", incomplete: "var(--red)" };
+const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+const nowS = () => Date.now() / 1000;
+const pad = (n) => String(n).padStart(2, "0");
+function fmt(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
+
+/** The mark in a state (island.html); done and incomplete colour the lit end. `t` is the animation frame. */
+function mark(state, t = 3, px = 1.5) {
+  const colors = { dim: "rgba(255,255,255,.45)", ink: "#fff" };
+  if (state === "done") return P.mark({ px, state: "error", colors: { ...colors, error: "var(--green)" } });
+  if (state === "incomplete") return P.mark({ px, state: "error", colors });
+  return P.mark({ px, state, t, colors });
+}
+const markEl = (st, live) => `<span class="mk"${live ? ` data-mark="${st}"` : ""}>${mark(st)}</span>`;
+const sq = (color) => `<i class="sq" style="background:${color}"></i>`;
+const spin = (live) => `<span class="spin"${live ? " data-spin" : ""}>⠋</span>`;
+const tally = (w, r, live) => `<span class="tally">${w ? `<span>${sq(TINT.waiting)}${w}</span>` : ""}${r ? `<span>${spin(live)}${r}</span>` : ""}</span>`;
+const word = (st) => `<span class="word" style="color:${TINT[st]}">${st}</span>`;
+const clock = (i, live, amber) => `<span class="clock"${amber ? ' style="color:var(--amber)"' : ""}${live ? ` data-since="${i.since}"` : ""}>${live ? fmt(nowS() - i.since) : i.clock}</span>`;
+
+// The other status items, as generic shapes.
+const IC = {
+  wifi: `<span class="ic"><svg width="17" height="13" viewBox="0 0 17 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1.6 4.9a10 10 0 0 1 13.8 0"/><path d="M4.3 7.7a6.1 6.1 0 0 1 8.4 0"/><circle cx="8.5" cy="10.9" r="1.35" fill="currentColor" stroke="none"/></svg></span>`,
+  bat: `<span class="ic"><svg width="27" height="13" viewBox="0 0 27 13"><rect x=".75" y=".75" width="23" height="11.5" rx="3.5" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-width="1.2"/><rect x="2.5" y="2.5" width="16" height="8" rx="2" fill="currentColor"/><path d="M25.3 4.5v4c.8-.3 1.3-1.1 1.3-2s-.5-1.7-1.3-2z" fill="currentColor" fill-opacity=".5"/></svg></span>`,
+  cc: `<span class="ic"><svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1" y="1" width="14" height="5" rx="2.5"/><circle cx="12.5" cy="3.5" r="1.3" fill="currentColor" stroke="none"/><rect x="1" y="8" width="14" height="5" rx="2.5"/><circle cx="3.5" cy="10.5" r="1.3" fill="currentColor" stroke="none"/></svg></span>`,
+};
+function menubar(live, { wide = true, menus = false } = {}) {
+  const apps = menus ? `<span class="menus"><b>Terminal</b><span>Shell</span><span>Edit</span><span>View</span></span>` : "";
+  return `<div class="mb">${apps}${live}<span class="mbm">${P.mark({ px: 1.5, mono: true })}</span>${IC.wifi}${IC.bat}${IC.cc}<span>${wide ? "9月29日 周二 9:41" : "周二 9:41"}</span></div>`;
+}
+
+// ---------- what is shown ----------
+/** Waiting first, then running; newest first within each (static samples keep their order). */
+const ordered = (m) => [...m.items.filter((i) => i.ask), ...m.items.filter((i) => !i.ask)];
+function sum(m) {
+  const w = m.items.filter((i) => i.ask).length, r = m.items.length - w;
+  return { w, r, n: w + r, st: w ? "waiting" : r ? "busy" : m.ended ? m.ended.st : "idle" };
+}
+/** A result is shown (in the capsule and the card) while nothing waits: a request is never covered. */
+const showsEnded = (m) => { const s = sum(m); return (m.flash && !s.w) || (!s.n && m.ended); };
+
+function capsule(m, live, { min = false, on = false } = {}) {
+  const s = sum(m), e = showsEnded(m) ? m.flash || m.ended : null;
+  const st = e ? e.st : s.st;
+  let right = "";
+  if (!min) right = e ? sq(TINT[e.st]) : s.n > 1 ? tally(s.w, s.r, live) : clock(ordered(m)[0], live, s.st === "waiting");
+  return `<span class="live${min ? " min" : ""}${on ? " on" : ""}" data-do="capsule">${markEl(st, live)}${right}</span>`;
+}
+
+function card(m, live) {
+  const s = sum(m);
+  if (showsEnded(m)) {
+    const e = m.flash || m.ended;
+    return head(e.st, word(e.st), live) + `<div class="item ended" data-id="${e.id}">
+      <div class="row1"><span class="st">${sq(TINT[e.st])}</span><button type="button" class="title" data-do="open">${esc(e.title)}</button><span class="clock">${e.took}</span></div>
+      <div class="step"><span class="tr">└─</span><span class="tx">${esc(e.line)}</span></div></div>`;
+  }
+  const all = ordered(m);
+  return head(s.st, s.n > 1 ? tally(s.w, s.r, live) : word(s.st), live)
+    + all.slice(0, 3).map((i) => item(i, live)).join("")
+    + (all.length > 3 ? `<div class="more">+${all.length - 3} more</div>` : "");
+}
+const head = (st, right, live) => `<div class="hd">${markEl(st, live)}<span class="name">agentswitch</span><span class="sp"></span>${right}</div><div class="dots"></div>`;
+
+function item(i, live) {
+  const a = i.ask;
+  const line = !a ? esc(i.step) : a.tool ? `<b>${esc(a.tool)}</b>${esc(a.target)}` : esc(a.question);
+  return `<div class="item${a ? " ask" : ""}" data-id="${i.id}">
+    <div class="row1"><span class="st">${a ? sq(TINT.waiting) : spin(live)}</span><button type="button" class="title" data-do="open">${esc(i.title)}</button>${i.agent ? `<span class="agent">${P.sprite(P.AGENT_PX[i.agent], { px: 2 })}</span>` : ""}${clock(i, live, !!a)}</div>
+    <div class="step${a ? " ask" : ""}"><span class="tr">└─</span><span class="tx">${line}</span></div>
+    ${a?.where ? `<div class="where">${esc(a.where)}</div>` : ""}${a ? `<div class="acts">${acts(a)}</div>` : ""}</div>`;
+}
+function acts(a) {
+  if (a.type === "perm" || a.type === "approve") return `<button type="button" class="b" data-do="deny">[ deny ]</button><button type="button" class="b pri" data-do="allow">[ allow ]</button>`;
+  if (a.type === "options") return a.options.map((o) => `<button type="button" class="b" data-do="pick" data-v="${esc(o)}">[ ${esc(o)} ]</button>`).join("");
+  return `<button type="button" class="b pri" data-do="open">[ open ]</button>`;
+}
+
+/** Centre the card under the capsule, kept on the screen. */
+function place(screen) {
+  const mb = screen.querySelector(".mb"), cap = screen.querySelector(".live"), panel = screen.querySelector(".panel");
+  if (!cap || !panel) return;
+  const centre = mb.offsetLeft + cap.offsetLeft + cap.offsetWidth / 2;
+  panel.style.left = `${Math.max(8, Math.min(screen.offsetWidth - panel.offsetWidth - 8, centre - panel.offsetWidth / 2))}px`;
+}
+
+// ---------- samples ----------
+const I = {
+  sum:   { id: "t4", title: "总结一下这周的提交", step: "选择模型", clock: "0:08" },
+  bug:   { id: "t1", title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", clock: "10:40" },
+  dl:    { id: "t2", title: "整理下载目录", step: "交给 DeepSeek Flash", clock: "0:40" },
+  x:     { id: "t3", title: "登录 x.com 看通知", step: "在用工具 browser_navigate", clock: "0:15" },
+  term:  { id: "k1", title: "fix-login", agent: "cc", clock: "0:42", ask: { type: "perm", tool: "Bash", target: "npm test -- --watch=false", where: "~/Projects/web" } },
+  xok:   { id: "t5", title: "登录 x.com 发一条动态", clock: "2:10", ask: { type: "approve", tool: "点击", target: "“发布”", where: "x.com/compose/post" } },
+  clean: { id: "t7", title: "清理旧构建", clock: "3:02", ask: { type: "options", question: "build/ 里有 3.2 GB 旧产物，要删掉吗？", options: ["删掉", "保留"] } },
+  sms:   { id: "t6", title: "登录财务平台", clock: "1:35", ask: { type: "question", question: "短信验证码是多少？" } },
+};
+const END = {
+  done: { id: "e1", st: "done", title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。", took: "3:12" },
+  incomplete: { id: "e2", st: "incomplete", title: "登录财务平台", line: "登录页一直打不开，gate 代理连不上。", took: "4:47" },
+};
+
+// ---------- the static cells ----------
+const cell = (cap, html) => `<div class="cell"><div class="cp">${cap}</div>${html}</div>`;
+const strip = (m, opts) => `<div class="screen strip" style="width:460px;height:44px">${menubar(capsule(m, false, opts), { wide: true })}</div>`;
+const withCard = (m) => `<div class="screen" style="width:460px;height:420px">${menubar(capsule(m, false, { on: true }))}<div class="panel">${card(m, false)}</div></div>`;
+
+document.getElementById("bar").innerHTML = [
+  ["busy · 一个任务", { items: [I.sum] }],
+  ["busy · 三个", { items: [I.bug, I.dl, I.x] }],
+  ["waiting", { items: [I.term] }],
+  ["waiting 2 · busy 1", { items: [I.term, I.sms, I.bug] }],
+  ["done", { items: [], ended: END.done }],
+  ["incomplete", { items: [], ended: END.incomplete }],
+  ["挤的时候", { items: [I.term, I.bug] }, { min: true }],
+].map(([c, m, o]) => cell(c, strip(m, o))).join("");
+
+document.getElementById("card").innerHTML = [
+  ["busy · 三个", { items: [I.bug, I.dl, I.x] }],
+  ["终端请求", { items: [I.term, I.bug] }],
+  ["任务确认", { items: [I.xok] }],
+  ["选项", { items: [I.clean, I.dl] }],
+  ["提问", { items: [I.sms] }],
+  ["done", { items: [], ended: END.done }],
+  ["incomplete", { items: [], ended: END.incomplete }],
+].map(([c, m]) => cell(c, withCard(m))).join("");
+
+function fitStatic() {
+  for (const screen of document.querySelectorAll(".static .screen:not(.strip)")) {
+    const panel = screen.querySelector(".panel");
+    place(screen);
+    screen.style.height = `${panel.offsetTop + panel.offsetHeight + 18}px`;
+  }
+}
+
+// ---------- the live stage ----------
+const stage = document.getElementById("stage");
+const logEl = document.getElementById("log");
+const W = 720, H = 420;
+const later = (s) => nowS() - s;
+const S = {
+  items: [
+    { id: "a1", title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", since: later(640) },
+    { id: "a2", title: "整理下载目录", step: "交给 DeepSeek Flash", since: later(40) },
+  ],
+  ended: null, endedUntil: 0, flash: null,
+  open: true, openedBy: "user", closing: false, fresh: false, burst: null,
+};
+let seq = 0;
+const TASKS = [
+  { title: "总结一下这周的提交", step: "在运行命令：git log --since=1.week", done: "这周 23 个提交，主要是终端和实时活动；要点写在 out/summary.md。", fail: "仓库里没有这周的提交。" },
+  { title: "把 README 翻成英文", step: "选择模型", done: "译好了，放在 out/README.en.md。", fail: "README 太长，额度用完了。" },
+  { title: "查一下 4173 端口被谁占了", step: "在运行命令：lsof -i :4173", done: "是上次没关的 vite 预览，进程 51234。", fail: "没有权限查看这个进程。" },
+];
+const RESULTS = {
+  a1: { done: "修好了：路径带空格时项目不再重复，补了两条测试。", fail: "测试环境起不来：端口 4173 被占用。" },
+  a2: { done: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。", fail: "没有下载目录的访问权限。" },
+};
+const REQUESTS = {
+  perm: [
+    { title: "fix-login", agent: "cc", ask: { type: "perm", tool: "Bash", target: "npm test -- --watch=false", where: "~/Projects/web" } },
+    { title: "api-refactor", agent: "codex", ask: { type: "perm", tool: "Edit", target: "src/routes/users.ts", where: "~/Projects/api" } },
+  ],
+  approve: [{ title: "登录 x.com 发一条动态", ask: { type: "approve", tool: "点击", target: "“发布”", where: "x.com/compose/post" } }],
+  options: [{ title: "清理旧构建", ask: { type: "options", question: "build/ 里有 3.2 GB 旧产物，要删掉吗？", options: ["删掉", "保留"] } }],
+  question: [{ title: "登录财务平台", ask: { type: "question", question: "短信验证码是多少？" } }],
+};
+const pick = { task: 0, perm: 0, approve: 0, options: 0, question: 0 };
+const say = (text) => { logEl.textContent = text; };
+
+function draw() {
+  const vis = S.items.length || S.ended;
+  const showCard = vis && (S.open || S.closing);
+  stage.innerHTML = `<div class="screen" style="width:${W}px;height:${H}px">${menubar(vis ? capsule(S, true, { on: S.open }) : "", { menus: true })}${showCard ? `<div class="panel${S.closing ? " out" : S.fresh ? " in" : ""}">${card(S, true)}</div>` : ""}</div>`;
+  S.fresh = false;
+  place(stage.querySelector(".screen"));
+  if (S.burst) {
+    P.glitch(stage.querySelector(`.item[data-id="${S.burst}"]`));
+    P.glitch(stage.querySelector(".live"));
+    S.burst = null;
+  }
+}
+function open(by) {
+  if (!S.open) S.fresh = true;
+  S.open = true; S.openedBy = by; S.closing = false;
+  draw();
+}
+function close() {
+  if (!S.open) return;
+  S.open = false; S.closing = true;
+  draw();
+  setTimeout(() => { S.closing = false; draw(); }, 140);
+}
+
+function add(kind) {
+  if (kind === "task") {
+    const t = TASKS[pick.task++ % TASKS.length];
+    const id = `n${++seq}`;
+    RESULTS[id] = { done: t.done, fail: t.fail };
+    S.items.push({ id, title: t.title, step: t.step, since: nowS() });
+    say(`+ ${t.title}`);
+    return draw();
+  }
+  const list = REQUESTS[kind], r = list[pick[kind]++ % list.length];
+  const id = `n${++seq}`;
+  S.items.push({ id, title: r.title, agent: r.agent, since: nowS(), ask: { ...r.ask } });
+  S.burst = id;
+  say(`! ${r.title}`);
+  open("ask");
+}
+
+function finish(st) {
+  const i = [...S.items].filter((x) => !x.ask).sort((a, b) => a.since - b.since)[0];
+  if (!i) return say("没有进行中的任务");
+  S.items = S.items.filter((x) => x !== i);
+  const r = RESULTS[i.id] ?? { done: "做完了。", fail: "没做成。" };
+  S.ended = { id: i.id, st, title: i.title, line: st === "done" ? r.done : r.fail, took: fmt(nowS() - i.since) };
+  S.endedUntil = nowS() + 10;
+  S.flash = { ...S.ended, until: nowS() + 4 };
+  if (st === "incomplete") S.burst = i.id;
+  say(`${st} · ${i.title}`);
+  if (S.items.some((x) => x.ask)) return draw();   // a request stays in front
+  if (S.open) draw(); else open("flash");
+}
+
+function resolve(id, how, value) {
+  const i = S.items.find((x) => x.id === id);
+  if (!i?.ask) return;
+  const a = i.ask;
+  i.ask = null;
+  i.step = how === "deny" ? "已拒绝" : a.type === "perm" ? `${a.tool}: ${a.target}` : a.type === "approve" ? "在用工具 browser_click" : `选了“${value}”，继续`;
+  say(`${how === "pick" ? value : how} → ${i.title}`);
+  if (!S.items.some((x) => x.ask) && S.openedBy === "ask") close(); else draw();
+}
+
+function openThing(id) {
+  const i = S.items.find((x) => x.id === id) ?? (S.ended?.id === id ? S.ended : null) ?? ordered(S)[0] ?? S.ended;
+  if (!i) return;
+  say(`→ 打开${i.agent ? "终端窗口" : "任务页"} · ${i.title}`);
+}
+
+stage.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-do]");
+  if (!el) { if (!e.target.closest(".panel")) close(); return; }
+  const id = el.closest(".item")?.dataset.id;
+  switch (el.dataset.do) {
+    case "capsule": if (e.detail > 1) return; S.open ? close() : open("user"); break;
+    case "open": openThing(id); break;
+    case "allow": case "deny": resolve(id, el.dataset.do); break;
+    case "pick": resolve(id, "pick", el.dataset.v); break;
+  }
+});
+stage.addEventListener("dblclick", (e) => { if (e.target.closest(".live")) openThing(null); });
+document.getElementById("sim").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-sim]");
+  if (!b) return;
+  const k = b.dataset.sim;
+  if (k === "done") finish("done");
+  else if (k === "fail") finish("incomplete");
+  else if (k === "clear") { S.items = []; S.ended = null; S.flash = null; S.open = false; S.closing = false; say(""); draw(); }
+  else add(k);
+});
+
+// 140 ms a frame: the mark's busy block and waiting end, the spinner, the clocks; results expire.
+let T = 0;
+setInterval(() => {
+  T++;
+  stage.querySelectorAll("[data-mark]").forEach((el) => { el.innerHTML = mark(el.dataset.mark, T); });
+  stage.querySelectorAll("[data-spin]").forEach((el) => { el.textContent = SPIN[T % SPIN.length]; });
+  stage.querySelectorAll("[data-since]").forEach((el) => { el.textContent = fmt(nowS() - Number(el.dataset.since)); });
+  if (S.flash && nowS() > S.flash.until) {
+    S.flash = null;
+    if (S.open && S.openedBy === "flash") close(); else draw();
+  }
+  if (S.ended && !S.items.length && nowS() > S.endedUntil) { S.ended = null; S.open = false; draw(); }
+}, 140);
+
+// ---------- tools ----------
+for (const b of document.querySelectorAll("#zoom button")) b.addEventListener("click", () => {
+  document.querySelectorAll("#zoom button").forEach((x) => x.classList.toggle("on", x === b));
+  document.documentElement.style.setProperty("--z", b.dataset.z);
+  draw(); fitStatic();
+});
+for (const b of document.querySelectorAll("#wall button")) b.addEventListener("click", () => {
+  document.querySelectorAll("#wall button").forEach((x) => x.classList.toggle("on", x === b));
+  document.body.className = `wall-${b.dataset.v}`;
+});
+
+draw();
+fitStatic();
+</script>
+</body>
+</html>
