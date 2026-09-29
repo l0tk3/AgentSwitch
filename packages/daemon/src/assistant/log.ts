@@ -71,6 +71,42 @@ export class AssistantLog {
     return (this.db.prepare("SELECT * FROM messages WHERE seq < ? ORDER BY seq DESC LIMIT ?").all(beforeSeq, limit) as Row[]).map(toMessage).reverse();
   }
 
+  /** Deleting tasks takes the conversation about them along (threads-v0 手动删除): every line that names one of them —
+   *  the reply that created it, its end, question and progress lines, a status or cancel answer — and the user message
+   *  such a reply answers; its watch too. Lines about no task (small talk, update notices) stay. Returns the lines gone. */
+  forgetTasks(ids: readonly string[]): number {
+    if (!ids.length) return 0;
+    const gone = new Set(ids);
+    const drop = new Set<number>();
+    for (const r of this.db.prepare("SELECT seq, task_ids, reply_to FROM messages WHERE task_ids != '[]'").all() as Row[]) {
+      if (!parseIds(r.task_ids).some((id) => gone.has(id))) continue;
+      drop.add(Number(r.seq));
+      if (r.reply_to !== null) drop.add(Number(r.reply_to));
+    }
+    const del = this.db.prepare("DELETE FROM messages WHERE seq = ?");
+    const unwatch = this.db.prepare("DELETE FROM watches WHERE task_id = ?");
+    this.db.exec("BEGIN");
+    try {
+      for (const seq of drop) del.run(seq);
+      for (const id of gone) unwatch.run(id);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return drop.size;
+  }
+
+  /** Every task a line names (to find the ones deleted while this log was not told). */
+  taskIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const r of this.db.prepare("SELECT task_ids FROM messages WHERE task_ids != '[]'").all() as Row[]) {
+      for (const id of parseIds(r.task_ids)) ids.add(id);
+    }
+    for (const w of this.watches()) ids.add(w.taskId);
+    return ids;
+  }
+
   /** Starts or changes the watch on a task; the first line is due one interval from now. */
   setWatch(taskId: string, everyMs: number): Watch {
     const w: Watch = { taskId, everyMs, nextAt: this.now() + everyMs };
@@ -101,12 +137,19 @@ function toWatch(r: Row): Watch {
   return { taskId: String(r.task_id), everyMs: Number(r.every_ms), nextAt: Number(r.next_at) };
 }
 
+function parseIds(value: unknown): string[] {
+  try {
+    const ids = JSON.parse(String(value)) as unknown;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function toMessage(r: Row): AssistantMessage {
-  let taskIds: string[] = [];
-  try { taskIds = JSON.parse(String(r.task_ids)) as string[]; } catch { taskIds = []; }
   return {
     seq: Number(r.seq), ts: Number(r.ts), role: r.role === "user" ? "user" : "assistant", text: String(r.text),
-    kind: String(r.kind) as AssistantKind, taskIds, clientId: r.client_id === null ? null : String(r.client_id),
+    kind: String(r.kind) as AssistantKind, taskIds: parseIds(r.task_ids), clientId: r.client_id === null ? null : String(r.client_id),
     replyTo: r.reply_to === null ? null : Number(r.reply_to),
   };
 }

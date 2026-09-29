@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildDaemon, sweepThreads, type BuildOverrides, type DaemonConfig } from "../src/daemon.js";
+import { AssistantLog, type AssistantKind } from "../src/assistant/log.js";
+import { buildDaemon, forgetDeletedTasks, sweepThreads, type BuildOverrides, type DaemonConfig } from "../src/daemon.js";
 import { Bus } from "../src/engine/bus.js";
 import { Engine } from "../src/engine/engine.js";
 import { Store } from "../src/engine/store.js";
@@ -192,5 +193,56 @@ describe("permanent task deletion", () => {
     const res = await request;
     expect(res.status).toBe(kind === "archived" ? 409 : 404);
     expect(f.store.listTasks()).toHaveLength(kind === "archived" ? 1 : 0);
+  });
+});
+
+describe("the conversation goes with the task (threads-v0 手动删除)", () => {
+  function conversation(home: string) {
+    const log = new AssistantLog(join(home, "assistant.db"));
+    cleanup.push(() => log.close());
+    const say = (role: "user" | "assistant", kind: AssistantKind, taskIds: string[] = [], replyTo: number | null = null) =>
+      log.append({ role, text: kind, kind, taskIds, clientId: null, replyTo }).seq;
+    const lines = () => log.recent(100).map((m) => `${m.role} ${m.kind} ${m.taskIds.join(",")}`.trim());
+    return { log, say, lines };
+  }
+
+  it("drops every line that names a deleted task and the message it answers; small talk and update notices stay", async () => {
+    const f = fixture(), a = f.create(), b = f.create();
+    const { log, say, lines } = conversation(f.home);
+    say("assistant", "task", [a.id], say("user", "message"));
+    say("assistant", "waiting", [a.id]);
+    say("assistant", "notice", [a.id]);
+    say("assistant", "reply", [], say("user", "message"));
+    say("assistant", "notice");
+    say("assistant", "status", [a.id, b.id], say("user", "message"));
+    say("assistant", "notice", [b.id]);
+    log.setWatch(a.id, 60_000);
+    log.setWatch(b.id, 60_000);
+    expect((await f.app.request(`/tasks/${a.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(lines()).toEqual(["user message", "assistant reply", "assistant notice", `assistant notice ${b.id}`]);
+    expect(log.watches().map((w) => w.taskId)).toEqual([b.id]);
+  });
+
+  it("a deleted thread takes the lines of all its tasks", async () => {
+    const f = fixture(), thread = f.store.createThread(f.cwd, "t");
+    const a = f.create(thread.id), b = f.create(thread.id), other = f.create();
+    const { say, lines } = conversation(f.home);
+    say("assistant", "task", [a.id], say("user", "message"));
+    say("assistant", "notice", [b.id]);
+    say("assistant", "notice", [other.id]);
+    expect((await f.app.request(`/threads/${thread.id}`, { method: "DELETE" })).status).toBe(200);
+    expect(lines()).toEqual([`assistant notice ${other.id}`]);
+  });
+
+  it("lines about tasks deleted before are cleaned at start", () => {
+    const f = fixture(), kept = f.create();
+    const { log, say, lines } = conversation(f.home);
+    say("assistant", "task", ["gone0001"], say("user", "message"));
+    say("assistant", "notice", [kept.id]);
+    log.setWatch("gone0002", 60_000);
+    expect(forgetDeletedTasks(log, f.store)).toBe(2);
+    expect(lines()).toEqual([`assistant notice ${kept.id}`]);
+    expect(log.watches()).toEqual([]);
+    expect(forgetDeletedTasks(log, f.store)).toBe(0);
   });
 });

@@ -17,6 +17,15 @@ extension AgentTask {
         status == .waitingApproval || (status == .blocked && blockCause == "question")
     }
 
+    /// Tasks of `before` that `after` (the newest `limit`) no longer has although they would still be in it: deleted,
+    /// here or elsewhere — the conversation lines about them went too (threads-v0 手动删除). One older than all of a full
+    /// list only fell off its end.
+    public static func deleted(from before: [AgentTask], in after: [AgentTask], limit: Int) -> [String] {
+        let kept = Set(after.map(\.id))
+        let oldest = after.count < limit ? Int64.min : after.map(\.createdAt).min() ?? Int64.min
+        return before.filter { !kept.contains($0.id) && $0.createdAt >= oldest }.map(\.id)
+    }
+
     /// The same task, read at `ms` (the local copy after opening it, before the Mac's list says so).
     public func acknowledged(at ms: Int64) -> AgentTask {
         AgentTask(id: id, createdAt: createdAt, updatedAt: updatedAt, status: status, task: task, cwd: cwd, pin: pin,

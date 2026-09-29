@@ -29,7 +29,10 @@ public struct AgentSwitchAPI: Sendable {
     public func addresses() async throws -> MacAddresses { try await get(["addresses"]) }
     public func gatePubkey() async throws -> GatePubkey { try await get(["gate", "pubkey"]) }
 
-    public func tasks(limit: Int = 50) async throws -> [AgentTask] {
+    /// How many of the newest tasks the list asks for.
+    public static let taskListLimit = 50
+
+    public func tasks(limit: Int = taskListLimit) async throws -> [AgentTask] {
         try await get(["tasks"], query: [URLQueryItem(name: "limit", value: String(limit))])
     }
 

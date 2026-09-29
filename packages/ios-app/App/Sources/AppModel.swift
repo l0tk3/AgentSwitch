@@ -409,7 +409,9 @@ final class AppModel {
 
     func refreshTasks() async {
         guard let fresh = await fetch({ try await $0.tasks() }) else { return }
+        let deleted = AgentTask.deleted(from: tasks, in: fresh, limit: AgentSwitchAPI.taskListLimit)
         tasks = withLocalReads(fresh)
+        if !deleted.isEmpty { reloadConversation() }
         announce()
         syncLive()
     }
@@ -646,6 +648,15 @@ final class AppModel {
     func taskDeleted(_ id: String) {
         tasks.removeAll { $0.id == id }
         approvals.removeAll { $0.taskId == id }
+        reloadConversation()
+    }
+
+    /// The conversation again from its newest lines, not only what came after: lines about a deleted task went with it
+    /// on the Mac (threads-v0 手动删除).
+    private func reloadConversation() {
+        guard conversationLoaded, hasAssistant else { return }
+        conversationLoaded = false
+        Task { await refreshConversation() }
     }
 
     /// The explicit deletes (log entry, task page, settings): nil when done, else the message to show.

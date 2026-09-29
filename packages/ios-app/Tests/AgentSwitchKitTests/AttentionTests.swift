@@ -13,6 +13,17 @@ final class AttentionTests: XCTestCase {
         return try JSONDecoder().decode(AgentTask.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
+    func testTasksGoneFromTheListAreDeletedUnlessTheyOnlyFellOffAFullList() throws {
+        let before = try [task("a", "done", created: 30), task("b", "done", created: 20), task("c", "done", created: 10)]
+        XCTAssertEqual(AgentTask.deleted(from: before, in: try [task("a", "done", created: 30), task("c", "done", created: 10)], limit: 50), ["b"])
+        XCTAssertEqual(AgentTask.deleted(from: before, in: before, limit: 50), [])
+        XCTAssertEqual(AgentTask.deleted(from: [], in: before, limit: 50), [], "the first look")
+        let full = try [task("n", "running", created: 40), task("a", "done", created: 30), task("b", "done", created: 20)]
+        XCTAssertEqual(AgentTask.deleted(from: before, in: full, limit: 3), [], "c is older than all of a full list: it fell off the end")
+        XCTAssertEqual(AgentTask.deleted(from: before, in: [full[0], full[1]] + [try task("d", "done", created: 5)], limit: 3), ["b", "c"],
+                       "newer than a task still listed: gone for good")
+    }
+
     private func call(_ seq: Int64, _ tool: String, _ input: [String: String] = [:], denied: Bool = false) -> TaskEvent {
         var payload: [String: JSONValue] = ["tool": .string(tool), "id": .string("c\(seq)"), "input": .object(input.mapValues(JSONValue.string))]
         if denied { payload["denied"] = .string("protected") }

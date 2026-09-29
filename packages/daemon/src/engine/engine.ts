@@ -44,6 +44,8 @@ export type EngineDeps = ComposeDeps & {
   /** The default work folder in force (docs/control-v0.md §2): a task folder of ours left empty there is removed. */
   readonly taskFolderRoot?: () => string;
   readonly routingLog?: RoutingLog;
+  /** The assistant's conversation: the lines about a deleted task go with it (threads-v0 手动删除). */
+  readonly conversation?: { forgetTasks(ids: readonly string[]): unknown };
   /** Where <cwd>/out is copied before an ephemeral working directory is deleted. */
   readonly artifactsDir?: string;
   /** Rewrites the thread summary after every execution (threads-v0 §3); absent in tests. */
@@ -194,6 +196,7 @@ export class Engine {
 
   private forgetTasks(tasks: readonly Task[]): void {
     for (const task of tasks) this.deps.routingLog?.deleteTask(task.id, task.routeLogId);
+    this.deps.conversation?.forgetTasks(tasks.map((task) => task.id));
     removeTaskMemories(this.deps.memoryPath, tasks.map((task) => task.id));
     if (this.deps.platformMemoryPath) removeTaskPlatformMemories(this.deps.platformMemoryPath, tasks.map((task) => task.id));
   }
