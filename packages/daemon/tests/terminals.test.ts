@@ -16,7 +16,7 @@ import { cleanTitle, meaningfulTitle, piTool, safeCut, TerminalHost, terminalNam
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
-import { agentLauncher, claudeHookSettings, HOOK_SCRIPT, withoutParentSession } from "../src/terminals/launch.js";
+import { agentLauncher, claudeHookSettings, CODEX_ATTENTION, HOOK_SCRIPT, withoutParentSession } from "../src/terminals/launch.js";
 import { deleteTranscript } from "../src/terminals/transcripts.js";
 import { elsewhereCheck, type ElsewhereCheck, type Proc } from "../src/terminals/elsewhere.js";
 import { TARGETS_PATH } from "./helpers.js";
@@ -128,19 +128,23 @@ describe("terminal host", () => {
     expect(host.get(info.id)).toBeNull();
   });
 
-  it("waits while Codex's title says something on its screen waits for you (an app's form, not a hook)", async () => {
+  it("waits while Codex says something on its screen waits for you (its notification: an app's form is no hook)", async () => {
     for (const hooks of [false, true]) {
-      const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", hooks), idleAfterMs: 150 });
+      let token = "";
+      const launcher: Launcher = (req) => { token = req.hookToken; return fakeLauncher(() => "http://127.0.0.1:9", hooks)(req); };
+      const host = new TerminalHost({ launcher, idleAfterMs: 150 });
       closers.push(() => host.closeAll());
       const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
       await until(() => host.get(info.id)!.title === "fake agent");
       host.write(info.id, "form\r");
       await until(() => host.get(info.id)!.status === "waiting");
-      await new Promise((r) => setTimeout(r, 400));   // the marker blinks and the idle timer runs out: still waiting
-      expect(host.get(info.id)).toMatchObject({ status: "waiting", title: "查看进程 | Codex" });
-      host.write(info.id, "answered\r");
+      await new Promise((r) => setTimeout(r, 400));   // it redraws and blinks while it waits, the idle time runs out: still waiting
+      expect(host.get(info.id)).toMatchObject({ status: "waiting", title: "查看进程 | Codex" });   // the marker is not in the name
+      if (hooks) await host.hook(info.id, token, { event: "PostToolUse", payload: { tool_name: "mcp__computer_use__open", tool_input: {} } });
+      else host.write(info.id, "answered\r");
       await until(() => host.get(info.id)!.status === "working");
       if (!hooks) await until(() => host.get(info.id)!.status === "idle");
+      else host.write(info.id, "answered\r");
     }
   });
 
@@ -494,7 +498,7 @@ describe("terminal pieces", () => {
     expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(1800);
     // "Continue" goes on in the same session; a fork only when asked for.
     const codex = launch({ id: "t2", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
-    expect(codex.args).toEqual(["resume", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
+    expect(codex.args).toEqual(["resume", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
     expect(launch({ id: "t9", harness: "codex", cwd: "/tmp", resume: "abc", fork: true, mode: "manual", hookToken: "tok" }).args.slice(0, 2)).toEqual(["fork", "abc"]);
     expect(launch({ id: "t4", harness: "claude-code", cwd: "/tmp", resume: "s-1", mode: "manual", hookToken: "tok" }).args.slice(-2)).toEqual(["--resume", "s-1"]);
     expect(launch({ id: "t10", harness: "claude-code", cwd: "/tmp", resume: "s-1", fork: true, mode: "manual", hookToken: "tok" }).args.slice(-3)).toEqual(["--resume", "s-1", "--fork-session"]);
@@ -514,6 +518,9 @@ describe("terminal pieces", () => {
     // Codex: a profile its sandbox enforces; the gate's proxy only for the commands it runs, not for Codex itself.
     const codex = launch({ id: "x1", harness: "codex", cwd: "/tmp", mode: "auto", hookToken: "tok" });
     expect(codex.args).toContain('permissions.agentswitch={ extends = ":workspace", filesystem = { "/as/home" = "read", "/as/gate" = "deny", "/as/home/local-token" = "deny" } }');
+    // With its hooks the reads are the PreToolUse floor's: a deny entry would keep an approved command sandboxed.
+    const hooked = agentLauncher({ binaries: { codex: "/bin/codex" }, gate, protected: prot, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: {}, codexHooks: () => true });
+    expect(hooked({ id: "x2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args).toContain('permissions.agentswitch={ extends = ":read-only", filesystem = { "/as/home" = "read", "/as/gate" = "read" } }');
     expect(codex.args).not.toContain("-s");
     expect(codex.args.find((a) => a.startsWith("shell_environment_policy.set="))).toContain('"HTTPS_PROXY" = "http://127.0.0.1:8080"');
     expect(codex.env.HTTPS_PROXY).toBeUndefined();

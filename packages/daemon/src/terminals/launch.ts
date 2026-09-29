@@ -129,12 +129,18 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         const args = ["-c", `notify=${JSON.stringify([node, script, "codex"])}`];
         const hooked = opts.codexHooks?.() ?? false;
         if (hooked) args.push(...codexHookArgs(hookCommand, QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S));
+        // Codex's own "needs you" notifications, as terminal notifications (OSC 9) whether or not its window has focus:
+        // the host reads them as waiting. They cover what no hook does (an app tool's approval form, a question).
+        args.push(...CODEX_ATTENTION);
         // The gate's proxy and CA reach the commands Codex runs, never Codex's own traffic (as the managed executor).
         if (opts.gate) args.push("-c", `shell_environment_policy.set=${tomlInline(gated)}`);
         if (req.model) args.push("-m", req.model);
         if (req.mode === "bypass") args.push("--dangerously-bypass-approvals-and-sandbox");
         // Asking is stated, not left to config.toml (which may never ask): it asks before anything outside the sandbox.
-        else args.push("-a", "on-request", ...codexPermissions(req.mode === "auto" ? ":workspace" : ":read-only", opts.protected));
+        // With the hooks, the read-denied paths are the PreToolUse floor's (as for Claude Code), not the profile's: Codex
+        // never lifts a deny entry, so with one an approved "outside the sandbox" still runs sandboxed, where no setuid
+        // program (ps, top, sudo, ping) can start.
+        else args.push("-a", "on-request", ...codexPermissions(req.mode === "auto" ? ":workspace" : ":read-only", opts.protected, { denyReads: !hooked }));
         // `resume` goes on in the same conversation (Codex locks it against a second writer); `fork` starts a new one.
         if (req.resume) args.unshift(req.fork ? "fork" : "resume", req.resume);
         return { file, args, env: own, hooks: hooked };
@@ -170,13 +176,17 @@ const tomlInline = (table: Record<string, string>): string => {
   return pairs.length ? `{ ${pairs.join(", ")} }` : "{}";
 };
 
+/** The TUI's notifications Codex sends for what waits for you (not for a finished turn), as OSC 9. */
+export const CODEX_ATTENTION = ["-c", 'tui.notifications=["approval-requested","async-question","plan-mode-prompt"]', "-c", 'tui.notification_method="osc9"', "-c", 'tui.notification_condition="always"'];
+
 /** Codex's own permission profile for one terminal: asking or auto (`:read-only` / `:workspace`) with the protected
- *  paths on top, read-denied ones unreadable and the rest not writable. Codex's sandbox enforces it, for the commands it
- *  runs sandboxed (not in bypass, not for a command the user lets run outside the sandbox). */
-export function codexPermissions(base: ":read-only" | ":workspace", prot?: ProtectedPaths): string[] {
+ *  paths on top, not writable, and (`denyReads`) the read-denied ones unreadable. Codex's sandbox enforces it, for the
+ *  commands it runs sandboxed (not in bypass). A deny entry holds even for a command the user lets run outside the
+ *  sandbox: Codex then keeps it sandboxed. */
+export function codexPermissions(base: ":read-only" | ":workspace", prot?: ProtectedPaths, o: { denyReads?: boolean } = {}): string[] {
   const filesystem: Record<string, string> = {};
   for (const p of prot?.roots ?? []) filesystem[p] = "read";
-  for (const p of prot?.readDenied ?? []) filesystem[p] = "deny";
+  if (o.denyReads ?? true) for (const p of prot?.readDenied ?? []) filesystem[p] = "deny";
   const profile = `{ extends = ${JSON.stringify(base)}, filesystem = ${tomlInline(filesystem)} }`;
   return ["-c", 'default_permissions="agentswitch"', "-c", `permissions.agentswitch=${profile}`];
 }

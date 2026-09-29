@@ -14,6 +14,8 @@ function hook(payload) {
   });
 }
 
+let blink = null;
+
 async function handle(line) {
   if (!line) return;
   if (line === "exit") process.exit(3);
@@ -32,13 +34,15 @@ async function handle(line) {
     process.stdout.write("\r\nwork done\r\n");
     return;
   }
-  // Codex's marker while its screen waits for you (a form, an approval), blinking; "answered" clears it.
+  // Codex when its screen waits for you (an app's form, an approval): its notification (OSC 9), the title marker
+  // blinking, and redraws while it waits; "answered" ends it.
   if (line === "form") {
-    process.stdout.write("\x1b]0;[ ! ] Action Required | 查看进程 | Codex\x07Allow Computer Use?\r\n");
-    setTimeout(() => process.stdout.write("\x1b]0;[ . ] Action Required | 查看进程 | Codex\x07"), 100);
+    process.stdout.write("\x1b]9;Approval requested: Computer Use\x07\x1b]0;[ ! ] Action Required | 查看进程 | Codex\x07Allow Computer Use?\r\n");
+    let n = 0;
+    blink = setInterval(() => process.stdout.write(`\x1b]0;[ ${n++ % 2 ? "!" : "."} ] Action Required | 查看进程 | Codex\x07\r> 1. Allow`), 60);
     return;
   }
-  if (line === "answered") { process.stdout.write("\x1b]0;查看进程 | Codex\x07allowed\r\n"); return; }
+  if (line === "answered") { clearInterval(blink); process.stdout.write("\x1b]0;查看进程 | Codex\x07\r\nallowed\r\n"); return; }
   process.stdout.write(`got: ${line}\r\n`);
 }
 
