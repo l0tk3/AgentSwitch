@@ -33,6 +33,8 @@ export type Terminals = {
   readonly elsewhere: ElsewhereCheck;
   /** What each agent offers today for the model menu (its own list); the catalog stands in for an agent not asked. */
   readonly offers?: () => Offers;
+  /** Before an agent starts (Codex: its hooks trusted, codexHooks.ts); whatever happens, the start goes on. */
+  readonly prepare?: (harness: TerminalHarness) => Promise<unknown>;
 };
 
 const MAX_INPUT = 20_000;
@@ -126,6 +128,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (resumed && !RESUMES.has(resumed.harness)) return c.json({ error: `${resumed.harness} cannot continue a session` }, 400);
     if (fork && !FORKS.has(body.data.harness)) return c.json({ error: `${body.data.harness} cannot fork a session` }, 400);
     const openHere = () => host.list().find((x) => x.status !== "exited" && x.harness === body.data.harness && x.agentSessionId === agentSessionId);
+    // The agent made ready (Codex: its hooks trusted, a few seconds at most); the start goes on whatever happens.
+    await t.prepare?.(body.data.harness).catch(() => undefined);
     // One session, one writer (docs/terminal-v0.md §5): already open here → that terminal; open in another program → say
     // where, and the client may fork instead.
     if (agentSessionId && !fork) {
@@ -139,7 +143,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       if (raced) return c.json({ terminal: raced, existing: true });
     }
     try {
-      const info = host.spawn({ harness: body.data.harness, cwd, ...(body.data.model ? { model: body.data.model } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
+      const info = await host.spawn({ harness: body.data.harness, cwd, ...(body.data.model ? { model: body.data.model } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });

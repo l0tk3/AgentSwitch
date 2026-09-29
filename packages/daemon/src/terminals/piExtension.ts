@@ -1,6 +1,8 @@
 /** AgentSwitch's extension for pi in its terminals (docs/terminal-v0.md §3; pi has no permission layer of its own):
- *  every tool call goes to the service first and is blocked when it touches a protected path; the agent's start and
- *  end give the terminal's status. It runs inside pi (`pi --extension <this file>`), so it imports nothing of the
+ *  every tool call goes to the service first and is blocked when it touches a protected path; pi's own run events give
+ *  the terminal's status — busy from `agent_start`; idle at `agent_settled` (nothing more will run: `agent_end` ends
+ *  one run, and a retry, compaction or queued follow-up may start another; `agent_end` still counts for a pi without
+ *  `agent_settled`); waiting for you while pi blocks on a question of its own (`ui_prompt_start` … `ui_prompt_end`). It runs inside pi (`pi --extension <this file>`), so it imports nothing of the
  *  service: it only calls the hook route with this terminal's own hook token, as the hook command does. */
 
 type PiEvent = Record<string, unknown>;
@@ -33,6 +35,10 @@ export default function agentswitch(pi: Pi): void {
       return { block: true, reason: NO_ANSWER };
     }
   });
-  pi.on("agent_start", () => { void call("PiAgentStart", {}).catch(() => undefined); });
-  pi.on("agent_end", () => { void call("PiAgentEnd", {}).catch(() => undefined); });
+  const say = (event: string) => () => { void call(event, {}).catch(() => undefined); };
+  pi.on("agent_start", say("PiAgentStart"));
+  pi.on("agent_end", say("PiAgentEnd"));
+  pi.on("agent_settled", say("PiAgentEnd"));
+  pi.on("ui_prompt_start", say("PiWaiting"));
+  pi.on("ui_prompt_end", say("PiAgentStart"));
 }

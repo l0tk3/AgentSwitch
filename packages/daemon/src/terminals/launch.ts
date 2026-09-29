@@ -3,6 +3,8 @@
  *  executors', and the hooks go into this terminal's own settings — the user's global agent configuration is never
  *  touched, so agents they start in iTerm are unaffected. */
 
+import { codexHookArgs } from "./codexHooks.js";
+import { OpenCodeCompanion } from "./opencodeTerminal.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +21,7 @@ export const PI_EXTENSION = fileURLToPath(new URL(`./piExtension.${EXT}`, import
 
 /** Seconds Claude Code waits for the permission hook: a screen has this long to answer before the terminal asks. */
 export const PERMISSION_HOOK_TIMEOUT_S = 30 * 60;
-const QUICK_HOOK_TIMEOUT_S = 10;
+export const QUICK_HOOK_TIMEOUT_S = 10;
 
 export type LauncherOptions = {
   /** Agent executables; a missing one cannot be started. */
@@ -35,7 +37,18 @@ export type LauncherOptions = {
   readonly env?: NodeJS.ProcessEnv;
   /** The protected paths (the managed executors' table): each agent gets them refused its own way (docs/terminal-v0.md §3). */
   readonly protected?: ProtectedPaths;
+  /** Codex gets AgentSwitch's hooks (status, permission requests, the protected-path check), once the user's Codex
+   *  trusts them (codexHooks.ts); until then it goes without and its status is guessed. */
+  readonly codexHooks?: () => boolean;
+  /** OpenCode's TUI attaches to a private server the service starts and watches (status, permission requests;
+   *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
+   *  guessed. */
+  readonly opencodeServer?: boolean;
 };
+
+/** The hook command a terminal's agent runs (the service's node and hook client). */
+export const hookCommandOf = (opts: Pick<LauncherOptions, "node" | "hookScript">): string =>
+  `${shq(opts.node ?? process.execPath)} ${shq(opts.hookScript ?? HOOK_SCRIPT)}`;
 
 /** Markers of the Claude Code session the service itself was started from (a developer running it from Claude Code):
  *  inherited, they make the new agent think it is a child session (no transcript) and hand it that session's messaging
@@ -77,7 +90,7 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
 export function agentLauncher(opts: LauncherOptions): Launcher {
   const node = opts.node ?? process.execPath;
   const script = opts.hookScript ?? HOOK_SCRIPT;
-  const hookCommand = `${shq(node)} ${shq(script)}`;
+  const hookCommand = hookCommandOf(opts);
   return (req: LaunchRequest): LaunchPlan => {
     const file = opts.binaries[req.harness];
     if (!file) throw new Error(`${req.harness} is not installed on this Mac`);
@@ -114,6 +127,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
       case "codex": {
         // `notify` runs a program with the event JSON as its last argument when a turn ends.
         const args = ["-c", `notify=${JSON.stringify([node, script, "codex"])}`];
+        const hooked = opts.codexHooks?.() ?? false;
+        if (hooked) args.push(...codexHookArgs(hookCommand, QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S));
         // The gate's proxy and CA reach the commands Codex runs, never Codex's own traffic (as the managed executor).
         if (opts.gate) args.push("-c", `shell_environment_policy.set=${tomlInline(gated)}`);
         if (req.model) args.push("-m", req.model);
@@ -122,18 +137,23 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         else args.push("-a", "on-request", ...codexPermissions(req.mode === "auto" ? ":workspace" : ":read-only", opts.protected));
         // `resume` goes on in the same conversation (Codex locks it against a second writer); `fork` starts a new one.
         if (req.resume) args.unshift(req.fork ? "fork" : "resume", req.resume);
-        return { file, args, env: own, hooks: false };
+        return { file, args, env: own, hooks: hooked };
       }
       case "opencode": {
-        // A private server: by default OpenCode 2 runs the session in the user's shared background service, where this
-        // terminal's environment (its config, the gate) never arrives.
-        const args = ["--standalone", ...(req.model ? ["-m", req.model] : [])];
-        if (req.mode !== "manual") args.push("--auto");   // OpenCode has one switch: approve what is not denied
-        if (req.resume) args.push("--session", req.resume);   // OpenCode cannot fork: always the same session
-        if (!opts.protected) return { file, args, env, hooks: false };
-        const config = join(dir, "opencode.json");
-        writeFileSync(config, JSON.stringify(opencodeTerminalConfig(opts.protected, env), null, 2), { mode: 0o600 });
-        return { file, args, env: { ...env, OPENCODE_CONFIG: config }, hooks: false };
+        // A private server — the service's own, which it watches (opencodeTerminal.ts), else the TUI's `--standalone` one:
+        // by default OpenCode 2 runs the session in the user's shared background service, where this terminal's
+        // environment (its config, the gate) never arrives.
+        const rest = req.model ? ["-m", req.model] : [];
+        if (req.mode !== "manual") rest.push("--auto");   // OpenCode has one switch: approve what is not denied
+        if (req.resume) rest.push("--session", req.resume);   // OpenCode cannot fork: always the same session
+        let own = env;
+        if (opts.protected) {
+          const config = join(dir, "opencode.json");
+          writeFileSync(config, JSON.stringify(opencodeTerminalConfig(opts.protected, env), null, 2), { mode: 0o600 });
+          own = { ...env, OPENCODE_CONFIG: config };
+        }
+        const companion = opts.opencodeServer ? new OpenCodeCompanion({ binary: file, cwd: req.cwd, env: own, args: rest, asks: req.mode === "manual" }) : undefined;
+        return { file, args: ["--standalone", ...rest], env: own, hooks: false, ...(companion ? { companion } : {}) };
       }
       case "pi": {
         const args = ["--extension", opts.piExtension ?? PI_EXTENSION];

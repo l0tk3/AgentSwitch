@@ -1,7 +1,7 @@
 /** Terminal sessions the service holds (docs/terminal-v0.md): each one an agent CLI in a pseudo-terminal of its own,
  *  mirrored into a headless terminal so a screen that connects gets the current picture first, then the output as it
- *  comes. Status comes from the agent's hooks where it has them (Claude Code, pi's extension), else from output
- *  activity. Permission requests from a hook wait here until a screen answers (or the wait runs out and the agent asks
+ *  comes. Status comes from the agent's hooks where it has them (Claude Code, Codex, pi's extension) or from a
+ *  companion beside it (OpenCode's own server), else from output activity. Permission requests from a hook wait here until a screen answers (or the wait runs out and the agent asks
  *  in the terminal). */
 
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -51,7 +51,7 @@ export type TerminalInfo = {
   readonly resumedFrom: string | null;
   /** Continued as a fork: a new session with the history of `resumedFrom`. */
   readonly forked: boolean;
-  /** Status and permissions come from the agent's hooks (else status is guessed from output). */
+  /** Status and permissions come from the agent's hooks or its companion (else status is guessed from output). */
   readonly hooks: boolean;
   readonly permissions: readonly PermissionAsk[];
   readonly seq: number;
@@ -79,8 +79,26 @@ export type LaunchRequest = {
   readonly allowBypass?: boolean;
   readonly hookToken: string;
 };
-export type LaunchPlan = { readonly file: string; readonly args: readonly string[]; readonly env: Record<string, string>; readonly hooks: boolean };
+export type LaunchPlan = { readonly file: string; readonly args: readonly string[]; readonly env: Record<string, string>; readonly hooks: boolean; readonly companion?: Companion };
 export type Launcher = (req: LaunchRequest) => LaunchPlan;
+
+/** Runs beside the program and reports for it, for an agent whose status and permission requests live in a server of
+ *  its own (OpenCode, opencodeTerminal.ts). Started before the program; it may change how the program starts. */
+export type Companion = {
+  /** The command line and env to start the program with instead of the plan's, or null to start as planned (then
+   *  nothing comes from the companion and the status is guessed). */
+  start(): Promise<{ readonly args: readonly string[]; readonly env: Record<string, string> } | null>;
+  /** The program runs: report through `link` until stopped. */
+  attach(link: CompanionLink): void;
+  /** The program has ended or the terminal is gone (called once or more). */
+  stop(): void;
+};
+export type CompanionLink = {
+  status(status: Exclude<TerminalStatus, "exited">): void;
+  /** A permission request for the screens: the answer, or null when none came or `signal` withdrew it (it was
+   *  answered in the terminal). */
+  ask(tool: string, input: unknown, signal: AbortSignal): Promise<PermissionDecision | null>;
+};
 
 /** pi's built-in tools under the names and fields the protected-path floor reads (Claude Code's); anything else, an
  *  extension's own tool, goes as it is and the floor leaves it to the agent. */
@@ -125,6 +143,8 @@ type Pending = { readonly ask: PermissionAsk; readonly resolve: (d: PermissionDe
 type Chunk = { readonly seq: number; readonly data: string };
 
 const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
+/** How long output counts as the program answering what was just sent (echo, a mouse move, a resize), not work. */
+const ECHO_MS = 600;
 const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000 };
 const MAX_TITLE = 200;
 /** A split escape sequence is held this long at most, and never more than this much of it. */
@@ -211,7 +231,7 @@ function sequenceEnd(data: string, at: number): number {
 export function permissionSummary(tool: string, input: unknown): string {
   const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const pick = (k: string) => (typeof i[k] === "string" ? (i[k] as string) : null);
-  const text = tool === "Bash" ? pick("command") : pick("file_path") ?? pick("notebook_path") ?? pick("url") ?? pick("pattern") ?? JSON.stringify(input ?? {});
+  const text = tool === "Bash" ? pick("command") : pick("file_path") ?? pick("notebook_path") ?? pick("url") ?? pick("pattern") ?? pick("path") ?? JSON.stringify(input ?? {});
   const line = `${tool}: ${text ?? ""}`.replace(/\s+/g, " ").trim();
   return line.length > MAX_SUMMARY ? `${line.slice(0, MAX_SUMMARY - 1)}…` : line;
 }
@@ -241,7 +261,10 @@ class Session {
   /** The session this terminal started (a new one, or a fork's): the only record closing it may delete. */
   ownSessionId: string | null = null;
   hooks = false;
+  companion: Companion | null = null;
   idleTimer: NodeJS.Timeout | null = null;
+  /** Output until then answers what was just sent (an agent without hooks is not busy for it). */
+  quietUntil = 0;
   killTimer: NodeJS.Timeout | null = null;
   /** The start of an escape sequence the last piece of output ended in, sent with the next piece. */
   held = "";
@@ -289,7 +312,9 @@ export class TerminalHost {
     };
   }
 
-  spawn(req: { harness: TerminalHarness; cwd: string; model?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number }): TerminalInfo {
+  /** Starts an agent. The terminal is listed from the moment it is made (a second resume of the same session finds it),
+   *  while a companion starts; the program follows. */
+  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number }): Promise<TerminalInfo> {
     if (!this.helperChecked) { ensureSpawnHelper(); this.helperChecked = true; }
     const id = randomUUID().slice(0, 8);
     const hookToken = randomBytes(24).toString("base64url");
@@ -314,17 +339,30 @@ export class TerminalHost {
       const after = this.nameOf(s);
       if (after !== before) s.emit({ type: "name", name: after });
     });
+    this.sessions.set(id, s);
+    let { args, env } = plan;
+    if (plan.companion) {
+      const started = await plan.companion.start().catch(() => null);
+      if (this.sessions.get(id) !== s) {   // deleted while it started
+        plan.companion.stop();
+        throw new TerminalError("not_found", `terminal ${id} was deleted while it started`);
+      }
+      if (started) { ({ args, env } = started); s.hooks = true; s.companion = plan.companion; }
+      else plan.companion.stop();
+    }
     let proc: pty.IPty;
     try {
-      proc = pty.spawn(plan.file, [...plan.args], { name: "xterm-256color", cols: s.cols, rows: s.rows, cwd: req.cwd, env: plan.env });
+      proc = pty.spawn(plan.file, [...args], { name: "xterm-256color", cols: s.cols, rows: s.rows, cwd: req.cwd, env });
     } catch (err) {
+      this.sessions.delete(id);
+      s.companion?.stop();
       s.term.dispose();
       throw new TerminalError("unavailable", `could not start ${req.harness}: ${(err as Error).message}`);
     }
     s.proc = proc;
     proc.onData((data) => this.receive(s, data));
     proc.onExit(({ exitCode }) => this.exited(s, exitCode));
-    this.sessions.set(id, s);
+    s.companion?.attach({ status: (status) => this.setStatus(s, status), ask: (tool, input, signal) => this.ask(s, tool, input, signal) });
     return this.info(s);
   }
 
@@ -349,6 +387,7 @@ export class TerminalHost {
   /** Bytes typed into the terminal, as they are. */
   write(id: string, data: string): void {
     const s = this.live(id);
+    s.quietUntil = this.o.now() + ECHO_MS;
     s.proc!.write(data);
   }
 
@@ -373,6 +412,7 @@ export class TerminalHost {
     if (cols === s.cols && rows === s.rows) return;
     s.cols = cols;
     s.rows = rows;
+    s.quietUntil = this.o.now() + ECHO_MS;
     s.proc!.resize(cols, rows);
     s.term.resize(cols, rows);
     s.emit({ type: "resize", cols, rows });
@@ -384,6 +424,7 @@ export class TerminalHost {
   redraw(id: string): void {
     const s = this.live(id);
     if (s.rows < 2) return;
+    s.quietUntil = this.o.now() + REDRAW_MS + ECHO_MS;
     s.proc!.resize(s.cols, s.rows - 1);
     setTimeout(() => { if (s.proc && s.status !== "exited") try { s.proc.resize(s.cols, s.rows); } catch { /* ended meanwhile */ } }, REDRAW_MS).unref();
   }
@@ -447,6 +488,8 @@ export class TerminalHost {
       }
       case "PiAgentStart": this.setStatus(s, "working"); return null;
       case "PiAgentEnd": this.setStatus(s, "idle"); return null;
+      // pi blocks on a question of its own (a confirm or a choice in its screen): the terminal waits for you.
+      case "PiWaiting": this.setStatus(s, "waiting"); return null;
       case "CodexNotify": {
         if (typeof p["thread-id"] === "string" && p["thread-id"]) this.reported(s, p["thread-id"]);
         if (p.type === "agent-turn-complete") this.setStatus(s, "idle");
@@ -514,6 +557,7 @@ export class TerminalHost {
     const s = this.need(id);
     const info = this.info(s);
     this.kill(id);
+    s.companion?.stop();
     for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
     s.emit({ type: "removed" });
     s.listeners.clear();
@@ -551,6 +595,10 @@ export class TerminalHost {
     s.lastOutputAt = this.o.now();
     s.emit({ type: "output", seq, data });
     if (!s.hooks && s.status !== "exited") {
+      // A full-screen agent redraws while it waits — for the typing it echoes, a mouse move over the screen, a focus
+      // change, a resize or a redraw asked for — and none of that is work: output answering what was just sent does not
+      // make an idle terminal busy (a busy one stays busy while anything comes).
+      if (s.status !== "working" && this.o.now() < s.quietUntil) return;
       this.setStatus(s, "working");
       if (s.idleTimer) clearTimeout(s.idleTimer);
       s.idleTimer = setTimeout(() => { if (s.status === "working") this.setStatus(s, "idle"); }, this.o.idleAfterMs);
@@ -564,6 +612,7 @@ export class TerminalHost {
     if (s.killTimer) clearTimeout(s.killTimer);
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.exitCode = code;
+    s.companion?.stop();
     for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
     this.setStatus(s, "exited");
     s.emit({ type: "exit", code });

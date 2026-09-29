@@ -109,23 +109,26 @@ SessionHost
 - `@xterm/headless` 维护屏幕，`@xterm/addon-serialize` 出快照；输出按序号切块保存在内存环形缓冲（默认 2 MB/会话），供断线续传。
 - 输出只在转义序列之间切块：程序的一块输出可能停在一个序列中间，从快照接着画的屏幕会把序列后半截当文字显示（实测出现过 `27;2H`）。没写完的尾巴留到下一块一起发，50 毫秒内没有下一块就照发。
 - 状态：
-  - 进行中 / 等你 / 空闲来自 hook（§3）；没有 hook 的执行器按“最近 N 秒有输出”估计进行中，其余为空闲。
+  - 进行中 / 等你 / 空闲来自 hook 或伴随进程（§3）；两者都没有时按“最近 N 秒有输出”估计进行中，其余为空闲。估计时不把“对刚发过去的东西的回应”算作工作（2026-09-29，用户：闲置状态经常判定为工作中）：全屏的 agent 在等待时也会重画——回显你敲的字、鼠标在屏幕上移动、焦点变化、改尺寸、服务请求的重画——所以写入、改尺寸、重画之后 600 毫秒内的输出不会把空闲的终端变成进行中（已在进行中的照旧保持）。
+  - 伴随进程（`Companion`，2026-09-29）：和程序一起启动、替它报状态和权限请求，先于程序启动，可以改程序的启动参数；启动失败就按原计划启动程序，状态靠估计。终端从创建那一刻就在列表里（`pid` 为空），伴随进程启动期间第二次续接同一会话会找到它；期间被删除则不再启动程序。目前只有 OpenCode 用（§3）。
   - 已结束：进程退出，保留最后屏幕与退出码，直到你删除。
 - 服务重启（含 Mac 应用换新版）时伪终端随之结束。v0 不保存终端列表，重启后列表为空；agent 自己的会话记录仍在，出现在会话列表里，可“继续”（§5）。（原计划标“已中断”，未实现。）Mac 的终端窗口在页面收到 401 或网页进程退出时自动重新登录。
 - 打包：`node-pty` 是原生模块，Mac 应用的运行时要带 darwin-arm64 的预编译产物，`build-app.sh` 加检查。
 
 ## 3. hook：状态与权限
 
-AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命令行参数或会话专用的配置目录），**不改用户的全局配置**；用户在 iTerm 里自己开的 agent 不受影响。
+AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命令行参数或会话专用的配置目录），**不改用户的全局配置**；用户在 iTerm 里自己开的 agent 不受影响。唯一的例外是 Codex 的 hook 信任记录（见下，2026-09-29 用户同意）。
 
 | 执行器 | 状态 | 权限请求 | 注入方式 |
 |---|---|---|---|
 | Claude Code | `SessionStart`→空闲（并报会话 id），`PreToolUse`→进行中（并过禁区），`UserPromptSubmit`→进行中，`Notification`/`Stop`→等你/空闲，`PostToolUse`（撤掉在终端里答过的请求） | `PermissionRequest` hook 返回 `{"behavior":"allow"}` 或 `{"behavior":"deny","message":…}`（结构化，不按键） | `--settings <会话专用 settings.json>`，有 gate 时另加 `--mcp-config` |
-| Codex | `notify`（一轮结束） | 终端界面里的确认：显示屏幕上的确认原文，按键作答 | `-c notify=…`、`-c default_permissions=…` 等命令行覆盖 |
-| OpenCode | 按输出估计（2.x 的插件接口未核实，见下） | 终端界面里的确认，按键作答 | `--standalone` + `OPENCODE_CONFIG=<会话专用配置>`（只加禁区的拒绝规则） |
-| pi | 扩展：`agent_start`→进行中，`agent_end`→空闲；`tool_call` 过禁区 | 无权限层 | `--extension <AgentSwitch 自带的扩展>` |
+| Codex | hook（与 Claude Code 同名同格式）：`SessionStart`、`UserPromptSubmit`、`PreToolUse`（过禁区）、`PostToolUse`、`Stop`；信任之前退回 `notify` + 按输出估计 | `PermissionRequest` hook，同 Claude Code | `-c hooks.<事件>=[…]`、`-c notify=…`、`-c default_permissions=…` 等命令行覆盖；hook 的信任记录写进用户的 `~/.codex/config.toml`（见下） |
+| OpenCode | 伴随进程看它的服务：有会话在跑→进行中，有待答的问题或（逐项确认时）待批的权限请求→等你，否则空闲 | 服务上的权限请求出卡片，在服务上作答；在 TUI 里先答了就撤卡片；`--auto` 下 TUI 自己批，不出卡片 | 服务自己起 `opencode serve --stdio`（带终端的环境与 `OPENCODE_CONFIG=<会话专用配置>`），TUI 用 `--server <url>` 连上，密码经 `OPENCODE_PASSWORD`；起不来时退回 `--standalone`，状态靠估计 |
+| pi | 扩展：`agent_start`→进行中，`agent_settled`→空闲（没有它的旧版用 `agent_end`），`ui_prompt_start`/`ui_prompt_end`→等你/进行中；`tool_call` 过禁区 | 无权限层 | `--extension <AgentSwitch 自带的扩展>` |
 
 - hook 命令（`src/terminals/hookClient.ts`，用服务自己的 node 运行）只做一件事：把事件 POST 到本机 `/terminals/hook`，带 `AGENTSWITCH_TERMINAL_ID` 和**这个终端自己的 hook 令牌**（`AGENTSWITCH_TERMINAL_HOOK_TOKEN`）。**不能用本机令牌**：终端里的 agent 读得到自己的环境变量，拿到本机令牌就能调任何本机接口。hook 令牌只能给自己这个终端报事件、提权限请求，不能替自己作答；本机令牌检查对这一条路由放行，由路由自己核对 hook 令牌。权限请求的 hook 等服务回答（最长 30 分钟），没人回答就不给结论，agent 照常在终端里问。hook 命令出任何问题都静默退出，不影响 agent。
+- **Codex 的 hook**（2026-09-29，codex 0.158）：事件名和输入输出与 Claude Code 相同（`hook_event_name`、`session_id`、`tool_name`、`tool_input`；`hookSpecificOutput.permissionDecision`、`decision.behavior`），用 `-c hooks.<事件>=[{matcher="*",hooks=[{type="command",command=…,timeout=N}]}]` 按终端传入。Codex 只运行**已信任**的 hook，信任不能从命令行给：它是用户 `~/.codex/config.toml` 里 `hooks.state."<键>".trusted_hash` 记的哈希，哈希覆盖整条定义，命令一变就要重新信任。经用户同意（“直接加入 ~/.codex/config.toml 哈希不行吗”→“可以”）由服务写入，这是 AgentSwitch 对这个文件唯一的改动：服务起一个一次性的 `codex app-server`（同样的 `-c` 参数，不调模型），用 `hooks/list` 看哪几条没信任，再让 Codex 自己用 `config/batchWrite` 写入哈希（文件其余内容原样保留），写完再查一遍。查的结果保留 10 分钟，之后新开 Codex 终端前再查（开发者的另一份 AgentSwitch 会在同样的键下写自己的哈希）。信任确认之前 Codex 终端不带 hook（没有权限卡片），状态靠 `notify` 与估计；列出的 hook 不满 6 条（Codex 太旧）时同样如此。`SessionStart` 在第一次提交时才触发。
+- **OpenCode 的伴随进程**（2026-09-29，OpenCode 2.0.18，`src/terminals/opencodeTerminal.ts`）：2.x 的插件是装在目录里的 Effect 模块（配置里的 `plugins` 只认目录，1.x 的单文件插件不加载），没有能按终端传入的 hook；但它的 TUI 本身是服务的客户端，服务知道什么在跑、什么在等。所以服务替每个 OpenCode 终端起一个私有服务（和 `--standalone` 起的一样，只是地址和密码在服务手里），TUI 用 `--server` 连上；服务每 0.5 秒看一次 `GET /api/session/active`、`/api/permission/request`、`/api/form`。权限卡片按 Claude 的工具名显示（`shell`→Bash、`edit`→Edit、`read`→Read、`webfetch`→WebFetch，其余用 OpenCode 的动作名）；允许回 `once`（不回 `always`，那会在 OpenCode 共用的数据库里存一条以后都生效的规则），拒绝回 `reject`。TUI 进程的环境里有这个私有服务的密码（TUI 从 `OPENCODE_PASSWORD` 读），只能访问这个终端自己的回环服务；私有服务自己的环境里没有密码（`--stdio` 启动后删掉）。终端结束时私有服务一起结束；AgentSwitch 服务退出时它的标准输入关闭，也会自己退出。实测：TUI 连上后显示正常；用接口造一个待批请求，出卡片、状态变“等你”，在卡片上拒绝后请求在 OpenCode 里消失，状态回到空闲；终端退出后私有服务也退出。
 - 实测（Claude Code 2.1.283）：`PermissionRequest` hook 运行期间，终端里**同时**显示 Claude 自己的确认框，两边谁先答算谁的。在终端里答了，Claude 不会结束那个 hook，所以服务端靠随后的事件撤卡片：工具执行了（`PostToolUse`，按工具名和输入对上那一条）、这一轮结束（`Stop`）、用户又发了话（`UserPromptSubmit`）。
 - 环境：去掉“当前是某个 Claude Code 会话”的标记（`CLAUDECODE`、`CLAUDE_CODE_CHILD_SESSION`、`CLAUDE_CODE_SESSION_*`、`CLAUDE_CODE_MESSAGING_*` 等）。服务从 Claude Code 里启动时（开发者这样跑过）会被新终端继承，Claude 会以为自己是子会话、不存会话记录，还会拿到上层会话的消息通道令牌。用户自己的设置（`ANTHROPIC_*`、`CLAUDE_CONFIG_DIR`）保留。
 - **权限模式**（2026-09-28，用户：iTerm 里用 `claude --dangerously-skip-permissions`，AgentSwitch 的终端却回到了自动或逐项确认）：新建和“继续”时选“逐项确认 / 自动 / 跳过权限”，页面记住上次的选择，第一次跟随 Mac 的审批模式（control-v0 §1：manual→逐项确认，scoped/auto→自动，skip→跳过权限）。对应参数：Claude Code `--permission-mode manual|auto` 或 `--dangerously-skip-permissions`；Codex 逐项确认为 `-a on-request -s read-only`（2026-09-28 审计：原先不带参数，实际权限取决于用户的 `config.toml`，可能是从不询问），自动为 `-a on-request -s workspace-write`，跳过为 `--dangerously-bypass-approvals-and-sandbox`；OpenCode 自动和跳过都是 `--auto`；pi 没有这一层。跳过权限在 Mac 和手机上都能选（2026-09-29 用户要求；原先手机请求 403），手机上选它先确认；标题带上显示“跳过权限”。
@@ -134,7 +137,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - **禁区**（2026-09-28 审计后补齐；用户决定不另加系统沙箱，各用 agent 自己的机制）：
   - Claude Code：`PreToolUse` hook 把每次工具调用交给服务，按托管执行器同一套规则（`decideTool` + 禁区表）判断，碰到本机令牌、gate 密钥、浏览器会话目录等就拒绝，其余不给结论、交回 agent 自己的模式决定；任何模式下都在（实测跳过权限模式下让它读本机令牌，被这一层拒绝）。会话配置另带 `permissions.deny` 的 `Read`/`Edit` 规则，服务无响应（hook 放行）时仍挡直接读取。
   - Codex：用它自己的权限配置（`default_permissions` + `[permissions.agentswitch]`，逐项确认继承 `:read-only`、自动继承 `:workspace`），禁读目录设 `deny`、其余禁区设 `read`。由 Codex 的系统沙箱执行，换写法（`cd` 后用通配符、脚本）也读不到（实测，codex 0.158）；但只管沙箱里跑的命令：跳过权限模式没有沙箱，用户批准到沙箱外运行的命令也不受限。gate 代理与 CA 只经 `shell_environment_policy.set` 给它执行的命令，不放进 Codex 进程自己的环境（同托管执行器）。
-  - OpenCode：会话专用配置里的 `permission` 拒绝规则（读按路径、bash 按命令文本、写与外部目录按路径），与托管执行器同一份禁区表；只加拒绝，不改用户其余的权限设置；`--auto` 下同样生效。终端里的 OpenCode 带 `--standalone`：2.x 默认把会话放进用户共用的后台服务（`opencode serve --service`）里跑，终端进程的环境（这份配置、gate 代理）到不了那里（2026-09-28 实测：私有服务的 agent 权限里有这些拒绝规则，后台服务里没有）。2.x 的插件接口未核实（1.x 的文件插件在 2.0.18 不加载），核实后可改用插件，顺带上报状态。
+  - OpenCode：会话专用配置里的 `permission` 拒绝规则（读按路径、bash 按命令文本、写与外部目录按路径），与托管执行器同一份禁区表；只加拒绝，不改用户其余的权限设置；`--auto` 下同样生效。终端里的 OpenCode 用私有服务（AgentSwitch 起的；退回时是 `--standalone` 起的）：2.x 默认把会话放进用户共用的后台服务（`opencode serve --service`）里跑，终端进程的环境（这份配置、gate 代理）到不了那里（2026-09-28 实测：私有服务的 agent 权限里有这些拒绝规则，后台服务里没有）。
   - pi：没有权限层；AgentSwitch 自带扩展在 `tool_call` 时把工具与参数交给服务，按 `decideTool` 判断，拒绝即 `block`。扩展出错或服务无响应时拦截（pi 的约定：处理出错即拦截）。
   - 除 Codex 外都是按字符串比对工具参数，挡直接的读取，挡不住有意绕过（BOUNDARY.md）；同一系统账户下真正的隔离只有网关的独立账户。
 - 各家 hook 名称与返回格式随版本变化：实现前逐家核实并在测试里固定样例；探测不到 hook 能力的版本退回“按键作答 + 屏幕原文”。
@@ -189,7 +192,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 1. 会话宿主 + hook（Claude Code 先行）+ 接口 + 审计；单元测试用假 agent（一个会打印、会等输入、会发 hook 的小脚本），不打真模型。**已做**（附网页演示页）；测试 `tests/terminals.test.ts`。
 2. Mac 终端窗口（SwiftTerm）。**v0 已做**：原生窗口里嵌终端页（见 §1），SwiftTerm 版待做。
 3. iPhone 终端标签页：列表、实时终端、回话框、按键条、权限卡片、提醒。**已做**（2026-09-28，§1 的 iPhone 落地说明），提醒（提示音、实时活动）2026-09-29 接上；Kit 测试 `TerminalTests`、`TerminalTreeTests`、`TerminalAttentionTests`。
-4. Codex、OpenCode、pi 的 hook；“在 AgentSwitch 里继续”。
+4. Codex、OpenCode、pi 的 hook；“在 AgentSwitch 里继续”。**已做**：“继续”（§5）；Codex 的 hook 与信任、pi 的扩展、OpenCode 的伴随进程（2026-09-29，§3）；测试 `tests/codexHooks.test.ts`、`tests/opencodeTerminal.test.ts`。
 
 ## 9. 待拍板
 

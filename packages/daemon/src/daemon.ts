@@ -68,6 +68,7 @@ import { DEFAULT_REMOTE_PORT, remoteRuntime, type RemoteRuntime } from "./remote
 import { listenRemote, type RemoteListener } from "./remote/server.js";
 import type { TargetRef } from "./core/target.js";
 import { mergeLogged } from "./router/discovery.js";
+import { CodexHookTrust, codexHookArgs } from "./terminals/codexHooks.js";
 import { ModelOffers } from "./router/modelOffers.js";
 import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
 import type { PlannerFactory } from "./engine/engine.js";
@@ -79,7 +80,7 @@ import { defaultSessionSources, SessionMonitor } from "./sessions/monitor.js";
 import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
 import { TerminalAudit } from "./terminals/audit.js";
 import { TerminalHost, type Launcher, type TerminalHarness } from "./terminals/host.js";
-import { agentLauncher } from "./terminals/launch.js";
+import { agentLauncher, hookCommandOf, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S } from "./terminals/launch.js";
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
 import { TERMINAL_HARNESSES } from "./terminals/host.js";
@@ -290,9 +291,16 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // docs/terminal-v0.md: the manual entry's terminals, with the gate like the executors when the gate is there.
   let localPort = cfg.port;
   const agentBinaries = cfg.terminals && !overrides.terminalLauncher ? terminalBinaries(targets, cfg.opencodeBinary) : {};
+  // Codex terminals get AgentSwitch's hooks once the user's Codex trusts them (docs/terminal-v0.md §3): checked now and
+  // again before a Codex terminal starts.
+  const codexTrust = agentBinaries.codex
+    ? new CodexHookTrust({ binary: agentBinaries.codex, args: codexHookArgs(hookCommandOf({}), QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S) })
+    : undefined;
+  void codexTrust?.ensure();
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
-      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: prot }),
+      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: prot,
+        codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true }),
       // The executors' protected paths hold in terminals too, whatever the permission mode (docs/terminal-v0.md §3).
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), prot); return d.kind === "deny" ? d.reason : null; },
     })
@@ -304,6 +312,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     agents: overrides.terminalLauncher ? [...TERMINAL_HARNESSES] : TERMINAL_HARNESSES.filter((h) => agentBinaries[h]),
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
+    ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure(), 8000); } } : {}),
     ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current() } : {}),
   } : undefined;
   const sessions = cfg.watchSessions ? new SessionMonitor({ ...defaultSessionSources(cfg.home), ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []) }) : undefined;
@@ -423,6 +432,11 @@ export async function startOpenCodeExecServer(cfg: DaemonConfig): Promise<OpenCo
   try { await server.start(); }
   catch (err) { console.error(`${(err as Error).message}; OpenCode executors run opencode run --standalone until it starts`); }
   return server;
+}
+
+/** A promise's result, or undefined once `ms` passed. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+  return Promise.race([p, new Promise<undefined>((r) => { setTimeout(() => r(undefined), ms).unref(); })]);
 }
 
 /** Start-up: discover models (real executors only: the catalog takes new ids, the terminals' model menus what each

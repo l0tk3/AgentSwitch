@@ -26,6 +26,12 @@ async function handle(line) {
     process.stdout.write(`answer: ${out || "(none)"}\r\n`);
     return;
   }
+  // Busy a while, as an agent at work: a spinner frame every 150 ms for 1.2 s.
+  if (line === "work") {
+    for (let i = 0; i < 8; i++) { process.stdout.write(`\rworking ${"|/-\\"[i % 4]}`); await new Promise((r) => setTimeout(r, 150)); }
+    process.stdout.write("\r\nwork done\r\n");
+    return;
+  }
   process.stdout.write(`got: ${line}\r\n`);
 }
 

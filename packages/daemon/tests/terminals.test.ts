@@ -48,7 +48,7 @@ describe("terminal host", () => {
   it("follows the program's screen and mouse modes for the wheel", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false) });
     closers.push(() => host.closeAll());
-    const info = host.spawn({ harness: "codex", cwd: tmpdir(), cols: 80, rows: 20 });
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir(), cols: 80, rows: 20 });
     const events: TerminalEvent[] = [];
     host.subscribe(info.id, null, (e) => events.push(e));
     await until(() => text(events).includes("fake agent ready"));
@@ -75,7 +75,7 @@ describe("terminal host", () => {
   it("runs a program in a pseudo-terminal: output, title, replies, status by activity, replay, snapshot, exit", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false), idleAfterMs: 150 });
     closers.push(() => host.closeAll());
-    const info = host.spawn({ harness: "codex", cwd: tmpdir(), cols: 80, rows: 20 });
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir(), cols: 80, rows: 20 });
     const events: TerminalEvent[] = [];
     host.subscribe(info.id, null, (e) => events.push(e));
     await until(() => text(events).includes("fake agent ready"));
@@ -85,9 +85,19 @@ describe("terminal host", () => {
     expect(host.rename(info.id, "  my   work ").name).toBe("my work");
     expect(host.rename(info.id, "")).toMatchObject({ name: "fake agent", customName: false });
 
+    // A reply answered at once (an echo, a redraw for what was sent) is not work; output going on is.
+    await until(() => host.get(info.id)!.status === "idle");   // its start-up output was its own
+    const sent = events.length;
     host.write(info.id, replyBytes("hello there", host.bracketedPaste(info.id), true));
     await until(() => text(events).includes("got: hello there"));
-    expect(events.some((e) => e.type === "status" && e.status === "working")).toBe(true);
+    expect(events.slice(sent).some((e) => e.type === "status" && e.status === "working")).toBe(false);
+    host.write(info.id, "\x1b[<35;10;5M\r");   // a mouse move over a screen that tracks it (the fake reads lines)
+    host.resize(info.id, 81, 20);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(host.get(info.id)!.status).toBe("idle");
+    host.write(info.id, "work\r");
+    await until(() => host.get(info.id)!.status === "working");
+    await until(() => text(events).includes("work done"));
     await until(() => host.get(info.id)!.status === "idle");
 
     // A screen that saw everything up to `seq` gets only what came after; a new one gets a snapshot first.
@@ -121,7 +131,7 @@ describe("terminal host", () => {
   it("a permission request whose hook goes away (answered in the terminal) leaves the screens", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());
-    const info = host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
     const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
     const events: TerminalEvent[] = [];
     host.subscribe(info.id, null, (e) => events.push(e));
@@ -137,7 +147,7 @@ describe("terminal host", () => {
   it("a permission request answered in the terminal leaves the screens once the tool runs or the turn ends", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());
-    const info = host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
     const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
     const ask = (file: string) => host.hook(info.id, token, { event: "PermissionRequest", payload: { tool_name: "Write", tool_input: { file_path: file } } });
     const first = ask("/tmp/a");
@@ -155,7 +165,7 @@ describe("terminal host", () => {
     const floor = (tool: string, input: Record<string, unknown>) => (tool === "Bash" && String(input.command).includes("local-token") ? "denied by AgentSwitch" : null);
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), floor });
     closers.push(() => host.closeAll());
-    const info = host.spawn({ harness: "claude-code", cwd: tmpdir(), mode: "bypass" });
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir(), mode: "bypass" });
     expect(host.get(info.id)!.mode).toBe("bypass");
     const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
     expect(await host.hook(info.id, token, { event: "PreToolUse", payload: { tool_name: "Bash", tool_input: { command: "cat ~/x/local-token" } } }))
@@ -169,17 +179,17 @@ describe("terminal host", () => {
     closers.push(() => host.closeAll());
     const tokenOf = (id: string) => (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(id)!.hookToken;
     const report = (id: string, session: string) => host.hook(id, tokenOf(id), { event: "SessionStart", payload: { session_id: session } });
-    const fresh = host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const fresh = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
     await report(fresh.id, "new-1");
     await report(fresh.id, "someone-elses");   // `/resume someone-elses` typed inside it
     expect(host.get(fresh.id)!.agentSessionId).toBe("someone-elses");
     expect(host.ownSession(fresh.id)).toBe("new-1");
-    const fork = host.spawn({ harness: "claude-code", cwd: tmpdir(), resume: "orig", fork: true });
+    const fork = await host.spawn({ harness: "claude-code", cwd: tmpdir(), resume: "orig", fork: true });
     await report(fork.id, "orig");
     expect(host.ownSession(fork.id)).toBeNull();
     await report(fork.id, "fork-1");
     expect(host.ownSession(fork.id)).toBe("fork-1");
-    const same = host.spawn({ harness: "claude-code", cwd: tmpdir(), resume: "orig" });
+    const same = await host.spawn({ harness: "claude-code", cwd: tmpdir(), resume: "orig" });
     await report(same.id, "orig");
     expect(host.ownSession(same.id)).toBeNull();
   });
@@ -187,10 +197,10 @@ describe("terminal host", () => {
   it("refuses a hook call with the wrong token, and a launcher that cannot start the agent", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());
-    const info = host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
     await expect(host.hook(info.id, "not-the-token", { event: "Stop", payload: {} })).rejects.toThrow(/hook token/);
     const broken = new TerminalHost({ launcher: () => { throw new Error("codex is not installed on this Mac"); } });
-    expect(() => broken.spawn({ harness: "codex", cwd: tmpdir() })).toThrow(/not installed/);
+    await expect(broken.spawn({ harness: "codex", cwd: tmpdir() })).rejects.toThrow(/not installed/);
   });
 });
 
@@ -509,7 +519,7 @@ describe("terminal pieces", () => {
       (String(input.file_path ?? input.path ?? input.command ?? "").includes("local-token") ? `denied ${tool}` : null);
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), floor });
     closers.push(() => host.closeAll());
-    const info = host.spawn({ harness: "pi", cwd: tmpdir() });
+    const info = await host.spawn({ harness: "pi", cwd: tmpdir() });
     const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
     const tool = (name: string, input: object) => host.hook(info.id, token, { event: "PiToolCall", payload: { tool: name, input } });
     expect(await tool("read", { path: "/x/local-token" })).toEqual({ block: true, reason: "denied Read" });
@@ -520,6 +530,10 @@ describe("terminal pieces", () => {
     expect(piTool("find", { path: "/a", pattern: "*.ts" }).tool).toBe("Glob");
     await host.hook(info.id, token, { event: "PiAgentEnd", payload: {} });
     expect(host.get(info.id)!.status).toBe("idle");
+    await host.hook(info.id, token, { event: "PiAgentStart", payload: {} });
+    expect(host.get(info.id)!.status).toBe("working");
+    await host.hook(info.id, token, { event: "PiWaiting", payload: {} });
+    expect(host.get(info.id)!.status).toBe("waiting");
     await host.hook(info.id, token, { event: "PiAgentStart", payload: {} });
     expect(host.get(info.id)!.status).toBe("working");
   });
