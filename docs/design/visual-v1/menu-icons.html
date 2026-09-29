@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Menu Icons</title>
+<style>
+/* The Mac menu's six actions with a pixel icon each, in the column the status squares and agent marks already use:
+   5×5 cells of 2pt, the secondary colour (as the agent marks), inverted with the row on hover. For review. */
+:root {
+  color-scheme: dark;
+  --board: #1b1b1d; --board-ink: #e9e6df; --board-dim: #8e8e93; --board-line: #2a2a2d;
+  --signal: #ff2e88; --green: #3f8f00;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--board); color: var(--board-ink); font: 13px/1.55 var(--ui); padding-block: 28px 60px; padding-inline: 16px; }
+.page { max-width: 1060px; margin: 0 auto; }
+h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
+.lede { color: #a9a6a0; max-width: 72ch; margin: 0 0 24px; font-size: 12.5px; line-height: 1.7; }
+.sec { font: 11px var(--mono); letter-spacing: .14em; color: #77746e; margin: 34px 0 12px; }
+.px { display: block; }
+
+/* ---------- the menus, at their real size (1 CSS px = 1 pt) ---------- */
+.menus { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+.desk { border-radius: 12px; padding: 18px; flex: 1 1 340px; max-width: 400px; }
+.desk.light { background: linear-gradient(150deg, #c9cfd8, #9aa3b0); }
+.desk.dark { background: linear-gradient(150deg, #2b2f3a, #15161a); }
+.panel { --text: #1d1d1f; --sec: #6e6e73; --tert: #a1a1a6; --inv: #ececec;
+  width: 320px; max-width: 100%; margin: 0 auto; border-radius: 12px; padding: 0 0 6px; font: 12px/1 var(--mono); color: var(--text);
+  background: rgba(236, 236, 236, .86); box-shadow: 0 0 0 .5px rgba(0,0,0,.25), 0 14px 40px rgba(0,0,0,.25); backdrop-filter: blur(20px); }
+.dark .panel { --text: #f2f2f7; --sec: #98989d; --tert: #636366; --inv: #1e1e1e; background: rgba(40, 40, 42, .86); box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 14px 40px rgba(0,0,0,.5); }
+.hd { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+.hd b { font-size: 13.5px; flex: 1; }
+.hd span { color: var(--sec); }
+.lab { font-size: 11px; letter-spacing: .14em; color: var(--sec); padding: 4px 16px 0; }
+.st { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; padding: 0 16px; height: 23px; }
+.st .v { color: var(--sec); }
+.us { padding: 3px 16px; }
+.us .top { display: grid; grid-template-columns: 10px 1fr; gap: 8px; align-items: center; height: 19px; }
+.us .bot { padding-left: 18px; color: var(--sec); font-size: 11px; height: 17px; }
+.rule { height: 1px; margin: 10px 12px 6px; background: repeating-linear-gradient(to right, var(--tert) 0 2px, transparent 2px 4px); }
+.rule.short { margin: 5px 12px; }
+.acts { padding: 0 6px; }
+.act { display: grid; grid-template-columns: 10px 1fr; gap: 8px; align-items: center; height: 22px; padding: 0 10px; cursor: default; }
+.act .ic { color: var(--sec); }
+.act:hover { background: var(--text); color: var(--inv); }
+.act:hover .ic { color: var(--inv); }
+.panel.bare .act .ic { visibility: hidden; }
+.sq { color: #3f8f00; }
+.dark .sq { color: #9be22d; }
+.cap { font: 11.5px var(--mono); color: var(--board-dim); margin-top: 10px; text-align: center; }
+.seg { display: inline-flex; border: 1px solid var(--board-line); margin-left: 8px; vertical-align: 1px; }
+.seg button { background: none; border: 0; padding: 2px 10px; color: var(--board-dim); cursor: pointer; font: 11.5px var(--mono); }
+.seg button.on { background: var(--board-ink); color: #000; }
+
+/* ---------- each icon, enlarged ---------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.cell { border: 1px solid var(--board-line); padding: 14px 12px 12px; display: flex; flex-direction: column; gap: 10px; background: #141416; }
+.cell.alt { border-style: dashed; }
+.cell.pick { cursor: pointer; }
+.cell.on { border-color: var(--signal); }
+.big { align-self: center; color: var(--board-ink); }
+.big .px rect.off { fill: #26262a; }
+.cell b { font: 600 12px var(--mono); }
+.cell p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
+.cell .tag { font: 10.5px var(--mono); color: var(--signal); }
+.near { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end; }
+.near figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--board-dim); }
+.near .big { color: #8d8a84; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>menu icons · 菜单操作的像素图标</h1>
+  <p class="lede">Mac 菜单栏面板里六个操作各配一个 5×5 像素图标，每格 2pt，放在状态方块、agent 小图已经占用的那一列，文字起点不变。颜色用次要色（和用量里的 agent 小图相同），文字保持主色；悬停时整行反色，图标跟着反色。下面两个面板按实际尺寸画，浅色和深色各一个，鼠标移上去可看悬停效果。<b>待定一处</b>：设置用开关、滑块还是齿轮，点下方带虚线框的格子可以换到面板里看。右下角 <span style="font-family:var(--mono)">now</span> 切回现在只有文字的样子对比。</p>
+
+  <div class="menus">
+    <div>
+      <div class="desk light"><div class="panel" id="panelLight"></div></div>
+      <div class="cap">light</div>
+    </div>
+    <div>
+      <div class="desk dark"><div class="panel" id="panelDark"></div></div>
+      <div class="cap">dark · <span class="seg" id="compare"><button type="button" class="on" data-c="icons">icons</button><button type="button" data-c="bare">now</button></span></div>
+    </div>
+  </div>
+
+  <div class="sec">// 六个图标（放大 × 10）</div>
+  <div class="grid" id="icons"></div>
+
+  <div class="sec">// 同一面板里已有的小图（避免一个形状两个意思）</div>
+  <div class="near" id="near"></div>
+</div>
+
+<script>
+const sprite = (rows, px = 2, grid = false) => {
+  const w = rows[0].length, h = rows.length;
+  let r = "";
+  rows.forEach((row, y) => [...row].forEach((c, x) => {
+    if (c === "#") r += `<rect x="${x * px}" y="${y * px}" width="${px}" height="${px}"/>`;
+    else if (grid) r += `<rect class="off" x="${x * px + 1}" y="${y * px + 1}" width="${px - 2}" height="${px - 2}"/>`;
+  }));
+  return `<svg class="px" width="${w * px}" height="${h * px}" viewBox="0 0 ${w * px} ${h * px}" fill="currentColor" shape-rendering="crispEdges">${r}</svg>`;
+};
+
+// The six (settings has two alternatives; click one to try it in the panels).
+const ICONS = {
+  phone:    { rows: [".###.", ".#.#.", ".#.#.", ".###.", ".###."], name: "pair device…", say: "手机：竖着的机身，下面一截实心。配对的就是这台 iPhone。（二维码试过：它的方块和 console 的四格撞了。）" },
+  terminal: { rows: ["#####", "#####", "##..#", "#...#", "#####"], name: "open terminal", say: "带标题栏的窗口，第一行左边一格光标：终端窗口（手机 terminals 标签页也是带框的终端窗口）。不用 >_，那是 Codex。" },
+  console:  { rows: ["##.##", "##.##", ".....", "##.##", "##.##"], name: "open console", say: "四格面板：浏览器里的网页控制台（任务、用量、设置分块排着）。和终端的窗口形状分开。" },
+  restart:  { rows: [".##.#", "#..##", "#...#", "#...#", ".###."], name: "restart service", say: "转一圈的箭头 ↻：重启服务。" },
+  toggle:   { rows: [".....", ".###.", "#.###", ".###.", "....."], name: "settings…", say: "开关：设置。实际尺寸下最清楚。" },
+  sliders:  { rows: [".#...", "#####", ".#.#.", "#####", "...#."], name: "settings…", say: "两根滑块：实际尺寸下像“井”或 #。", alt: true },
+  gear:     { rows: [".#.#.", "#####", "##.##", "#####", ".#.#."], name: "settings…", say: "齿轮：最常见，但 5×5 里成了一团，和 Claude Code 的星芒也近（见下方）。", alt: true },
+  power:    { rows: ["..#..", "#.#.#", "#...#", "#...#", ".###."], name: "quit AgentSwitch", say: "电源符号 ⏻：退出。" },
+};
+let choice = { pair: "phone", settings: "toggle" };
+let bare = false;
+
+const SQUARE = ["####", "####", "####", "####"];
+const AGENTS = {
+  cc: ["#.#.#", ".###.", "#####", ".###.", "#.#.#"],
+  codex: ["#....", ".#...", "..#..", ".#...", "#.###"],
+  oc: ["##.##", "#...#", "#...#", "#...#", "##.##"],
+};
+// The app's mark (PixelArt.markRows), flat.
+const MARK = ["...........AAA", "......aaaaaAAA", ".....a.....AAA", "....a.........", "SSSa.......BBB", "SSSbbbbbbbbBBB", "SSSc.......BBB",
+  "....c.........", ".....c.....CCC", "......cccccCCC", "...........CCC"].map((r) => r.replace(/[^.]/g, "#"));
+
+function panel(el) {
+  const act = (key, label) => `<div class="act"><span class="ic">${sprite(ICONS[key].rows)}</span><span>${label}</span></div>`;
+  el.classList.toggle("bare", bare);
+  el.innerHTML = `
+    <div class="hd">${sprite(MARK, 2)}<b>AgentSwitch</b><span>ok</span></div>
+    <div class="lab">// status</div>
+    ${[["service", "ok"], ["gateway", "ok"], ["iPhone", "1 paired"], ["Tailscale", "100.77.168.100"]].map(([n, v]) =>
+      `<div class="st"><span class="sq">${sprite(SQUARE)}</span><span>${n}</span><span class="v">${v}</span></div>`).join("")}
+    <div class="lab" style="padding-top:10px">// usage</div>
+    <div class="us"><div class="top"><span style="color:var(--sec)">${sprite(AGENTS.cc)}</span><span>Claude Code</span></div><div class="bot">5h — 7d ▮▮ 22%</div></div>
+    <div class="us"><div class="top"><span style="color:var(--sec)">${sprite(AGENTS.codex)}</span><span>Codex · Pro</span></div><div class="bot">5h — 7d ▮▮▮▮ 46%</div></div>
+    <div class="us"><div class="top"><span style="color:var(--sec)">${sprite(AGENTS.oc)}</span><span>OpenCode</span></div><div class="bot">balance ¥79.97</div></div>
+    <div class="rule"></div>
+    <div class="acts">
+      ${act(choice.pair, "pair device…")}
+      ${act("terminal", "open terminal")}
+      ${act("console", "open console")}
+      ${act("restart", "restart service")}
+      ${act(choice.settings, "settings…")}
+      <div class="rule short"></div>
+      ${act("power", "quit AgentSwitch")}
+    </div>`;
+}
+function renderIcons() {
+  document.getElementById("icons").innerHTML = Object.entries(ICONS).map(([key, i]) => {
+    const slot = ["toggle", "sliders", "gear"].includes(key) ? "settings" : null;
+    const on = slot && choice[slot] === key;
+    return `<div class="cell ${i.alt ? "alt" : ""} ${slot ? "pick" : ""} ${on ? "on" : ""}" ${slot ? `data-slot="${slot}" data-key="${key}"` : ""}>
+      <div class="big">${sprite(i.rows, 20, true)}</div>
+      <b>${i.name}</b>${slot ? `<span class="tag">${on ? "● 使用中" : "○ 点此换成这个"}</span>` : ""}<p>${i.say}</p></div>`;
+  }).join("");
+}
+function renderAll() {
+  panel(document.getElementById("panelLight"));
+  panel(document.getElementById("panelDark"));
+  renderIcons();
+}
+document.getElementById("icons").addEventListener("click", (e) => {
+  const c = e.target.closest("[data-slot]");
+  if (!c) return;
+  choice[c.dataset.slot] = c.dataset.key;
+  renderAll();
+});
+document.getElementById("compare").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-c]");
+  if (!b) return;
+  bare = b.dataset.c === "bare";
+  for (const x of document.querySelectorAll("#compare button")) x.classList.toggle("on", x === b);
+  renderAll();
+});
+document.getElementById("near").innerHTML = [
+  ["status", SQUARE], ["Claude Code", AGENTS.cc], ["Codex", AGENTS.codex], ["OpenCode", AGENTS.oc], ["open terminal", ICONS.terminal.rows], ["open console", ICONS.console.rows], ["gear（备选）", ICONS.gear.rows],
+].map(([n, rows]) => `<figure><div class="big">${sprite(rows, 12, true)}</div>${n}</figure>`).join("");
+renderAll();
+</script>
+</body>
+</html>
