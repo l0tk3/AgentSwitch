@@ -1,5 +1,5 @@
 /** `GET /live`: what the Mac's menu bar Live Activity shows (assistant-v0 §4, docs/design/visual-v1/mac-live.html) — the
- *  tasks in progress and the terminals waiting for you, the waiting ones first, then the newest, each with what it waits
+ *  tasks in progress and the terminals at work or waiting for you, the waiting ones first, then the newest, each with what it waits
  *  for in a form the card can answer (allow / deny, one option), and the tasks that ended in the last minute. The phone's
  *  Live Activity follows the same rules (AgentSwitchKit LiveSummary): titles, steps and conclusions read the same on
  *  both. Built from the store and the terminal host on each call; nothing is kept. The Mac app asks every second while
@@ -73,8 +73,9 @@ export function liveSnapshot(store: Store, terminals: TerminalHost | undefined, 
   const pending = new Map<string, Approval>();
   for (const a of store.pendingApprovals()) if (!pending.has(a.taskId)) pending.set(a.taskId, a);
   const tasks = store.unfinishedTasks().filter((t) => ACTIVE.has(t.status)).map((t) => taskRow(store, t, pending.get(t.id)));
-  const asking = (terminals?.list() ?? []).filter(waitsForYou).map(terminalRow);
-  const rows = [...tasks, ...asking].sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.startedAt - a.startedAt);
+  // A terminal at work counts as a task in progress does (2026-09-30); an idle or ended one does not.
+  const busy = (terminals?.list() ?? []).filter((t) => waitsForYou(t) || t.status === "working").map(terminalRow);
+  const rows = [...tasks, ...busy].sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.startedAt - a.startedAt);
   const waiting = rows.filter((r) => r.needsYou).length;
   return { rows, running: rows.length - waiting, waiting, ended: ended(store, now), now };
 }
@@ -92,13 +93,19 @@ function taskRow(store: Store, task: Task, waitingOn: Approval | undefined): Liv
 }
 
 function terminalRow(t: TerminalInfo): LiveRow {
-  const ask = t.permissions[0];
   const agent = HARNESS[t.harness] ?? t.harness;
+  if (!waitsForYou(t)) {
+    // At work: the tool it reported last, said as people say it; the clock from when this turn began.
+    const doing = t.activity ? clip(readable(toolPhrase(t.activity.tool, t.activity.target)), STEP_CHARS) : "进行中";
+    return { id: t.id, kind: "terminal", title: clip(t.name || agent, TITLE_CHARS), step: doing, model: agent, agent: t.harness,
+      startedAt: t.statusSince || t.lastOutputAt, needsYou: false, ask: null };
+  }
+  const ask = t.permissions[0];
   const target = ask ? clip(readable(permissionTarget(ask.tool, ask.input)), TARGET_CHARS) : "";
   return {
     id: t.id, kind: "terminal", title: clip(t.name || agent, TITLE_CHARS),
     step: ask ? clip(readable(ask.summary), STEP_CHARS) : "等你处理", model: agent, agent: t.harness,
-    startedAt: ask && ask.at > 0 ? ask.at : t.lastOutputAt, needsYou: true,
+    startedAt: ask && ask.at > 0 ? ask.at : t.statusSince || t.lastOutputAt, needsYou: true,
     ask: ask ? { kind: "permission", id: ask.id, tool: ask.tool, target, where: tilde(t.cwd) } : null,
   };
 }
@@ -211,6 +218,13 @@ const BROWSER: Readonly<Record<string, string>> = {
 };
 const SECRET: Readonly<Record<string, string>> = { secret_fill: "填入密文", secret_type: "填入密文", secret_repair: "修复密文", credential_repair: "修复密文" };
 const TARGET_KEYS = ["url", "file_path", "filePath", "notebook_path", "path", "pattern", "query", "element", "description", "skill", "prompt"];
+
+/** A tool and what it works on, as people say it: `运行 npm test`, `修改 /w/a.ts`, `浏览器 · 点击 发布`. */
+export function toolPhrase(tool: string, target: string): string {
+  const label = toolLabel(tool);
+  const what = tool === "Bash" || /^(zsh|bash|sh) /.test(target) ? unwrapShell(target) : target;
+  return what ? `${label} ${firstLine(what)}` : label;
+}
 
 export function toolLine(p: Record<string, unknown>): string {
   const label = toolLabel(typeof p.tool === "string" ? p.tool : "?");

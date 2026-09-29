@@ -181,6 +181,23 @@ describe("terminal host", () => {
     expect(host.get(info.id)).toMatchObject({ status: "idle", permissions: [] });
   });
 
+  it("remembers the tool it is using and since when it works, for the Live Activity; idle forgets the tool", async () => {
+    let now = 1_000;
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), now: () => now });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    now = 5_000;
+    await host.hook(info.id, token, { event: "PreToolUse", payload: { tool_name: "Bash", tool_input: { command: "npm   test" } } });
+    expect(host.get(info.id)).toMatchObject({ status: "working", statusSince: 5_000, activity: { tool: "Bash", target: "npm test" } });
+    now = 6_000;
+    await host.hook(info.id, token, { event: "PreToolUse", payload: { tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "x" } } });
+    expect(host.get(info.id)).toMatchObject({ statusSince: 5_000, activity: { tool: "Edit", target: "/w/a.ts" } });
+    now = 9_000;
+    await host.hook(info.id, token, { event: "Stop", payload: {} });
+    expect(host.get(info.id)).toMatchObject({ status: "idle", statusSince: 9_000, activity: null });
+  });
+
   it("keeps the protected paths closed in every permission mode (PreToolUse)", async () => {
     const floor = (tool: string, input: Record<string, unknown>) => (tool === "Bash" && String(input.command).includes("local-token") ? "denied by AgentSwitch" : null);
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), floor });

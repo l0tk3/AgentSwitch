@@ -42,8 +42,8 @@ final class TerminalAttentionTests: XCTestCase {
     }
 
     func testAWaitingTerminalIsARowAndStartsTheSummaryOnItsOwn() throws {
-        XCTAssertNil(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("a"), terminal("b", .idle)]),
-                     "a terminal at work has no end to report")
+        XCTAssertNil(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("b", .idle), terminal("c", .exited)]),
+                     "an idle or ended terminal is not in it")
         let state = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("a", asks: ["p1"])]))
         XCTAssertEqual(state.phase, .needsYou)
         XCTAssertEqual(state.waiting, 1)
@@ -59,6 +59,25 @@ final class TerminalAttentionTests: XCTestCase {
         let screen = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("a", .waiting)])?.lead)
         XCTAssertEqual(screen.step, "等你处理")
         XCTAssertEqual(screen.startedAt, Date(timeIntervalSince1970: 1_600_000_000), "no request: since its last output")
+    }
+
+    /// 2026-09-30, user: 实时活动应该包括终端里的活动，不只是路由器调度的.
+    func testATerminalAtWorkIsARowInProgressSayingWhatItUses() throws {
+        let busy = TerminalInfo(id: "k1", harness: "codex", cwd: "/p", name: "api-refactor", status: .working, createdAt: 1, lastOutputAt: 9,
+                                activity: TerminalActivity(tool: "Bash", target: "/bin/zsh -lc 'npm test'"), statusSince: 1_700_000_000_000)
+        let state = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [busy, terminal("b", .idle)]))
+        XCTAssertEqual(state.phase, .running)
+        XCTAssertEqual(state.running, 1)
+        XCTAssertEqual(state.waiting, 0)
+        let row = try XCTUnwrap(state.lead)
+        XCTAssertEqual(row.kind, .terminal)
+        XCTAssertFalse(row.needsYou)
+        XCTAssertEqual(row.title, "api-refactor")
+        XCTAssertEqual(row.step, "运行 npm test")
+        XCTAssertEqual(row.model, "Codex")
+        XCTAssertEqual(row.startedAt, Date(timeIntervalSince1970: 1_700_000_000), "since this turn began")
+        let quiet = try XCTUnwrap(LiveSummary.state(tasks: [], approvals: [], threadTitles: [:], terminals: [terminal("a")])?.lead)
+        XCTAssertEqual(quiet.step, "进行中", "no tool reported yet")
     }
 
     func testTerminalsAndTasksWaitingComeFirstNewestFirst() throws {

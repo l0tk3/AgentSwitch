@@ -78,6 +78,24 @@ public struct TerminalPermission: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// The tool a terminal's agent is using now and what on (a command, a file, a page), as it reported it before use.
+public struct TerminalActivity: Decodable, Sendable, Hashable {
+    public let tool: String
+    public let target: String
+
+    public init(tool: String, target: String) {
+        self.tool = tool
+        self.target = target
+    }
+
+    /// As people say it: `运行 npm test`, `修改 /w/a.ts` (the Live Activity's step).
+    public var phrase: String {
+        let label = ToolDisplay.label(tool)
+        let what = EventDescriber.unwrapShell(target).split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? ""
+        return what.isEmpty ? label : "\(label) \(what)"
+    }
+}
+
 public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let harness: String
@@ -97,11 +115,15 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let resumedFrom: String?
     public let forked: Bool
     public let permissions: [TerminalPermission]
+    /// What it is using now, while it works (a service from before 2026-09-30 does not say).
+    public let activity: TerminalActivity?
+    /// When its status last changed, in milliseconds (older services: nil).
+    public let statusSince: Int64?
 
     public init(id: String, harness: String, cwd: String, model: String? = nil, mode: String = "manual", name: String,
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
-                forked: Bool = false, permissions: [TerminalPermission] = []) {
+                forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil) {
         self.id = id
         self.harness = harness
         self.cwd = cwd
@@ -119,11 +141,13 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         self.resumedFrom = resumedFrom
         self.forked = forked
         self.permissions = permissions
+        self.activity = activity
+        self.statusSince = statusSince
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, model, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
-             agentSessionId, resumedFrom, forked, permissions
+             agentSessionId, resumedFrom, forked, permissions, activity, statusSince
     }
 
     public init(from decoder: Decoder) throws {
@@ -145,6 +169,8 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         resumedFrom = try? c.decodeIfPresent(String.self, forKey: .resumedFrom)
         forked = (try? c.decodeIfPresent(Bool.self, forKey: .forked)) ?? false
         permissions = (try? c.decodeIfPresent([TerminalPermission].self, forKey: .permissions)) ?? []
+        activity = try? c.decodeIfPresent(TerminalActivity.self, forKey: .activity)
+        statusSince = try? c.decodeIfPresent(Int64.self, forKey: .statusSince)
     }
 
     public var created: Date { Date(milliseconds: createdAt) }

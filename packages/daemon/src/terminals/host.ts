@@ -54,6 +54,11 @@ export type TerminalInfo = {
   /** Status and permissions come from the agent's hooks or its companion (else status is guessed from output). */
   readonly hooks: boolean;
   readonly permissions: readonly PermissionAsk[];
+  /** The tool it is using now (the last one it reported before use, PreToolUse / pi's tool_call) and what on, until
+   *  it is idle again; null when it has reported none (the Live Activity's step, assistant-v0 §4). */
+  readonly activity: { readonly tool: string; readonly target: string } | null;
+  /** When the status last changed (the Live Activity's clock: working since, waiting since). */
+  readonly statusSince: number;
   readonly seq: number;
 };
 
@@ -257,6 +262,8 @@ class Session {
   parsedSeq = 0;
   proc: pty.IPty | null = null;
   status: TerminalStatus = "idle";
+  statusSince: number;
+  activity: { tool: string; target: string } | null = null;
   title: string;
   lastOutputAt: number;
   /** The user's own name for it; null = derived. */
@@ -298,6 +305,7 @@ class Session {
     this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, sgr(false));
     this.title = "";
     this.lastOutputAt = createdAt;
+    this.statusSince = createdAt;
   }
 
   emit(ev: TerminalEvent): void {
@@ -478,8 +486,9 @@ export class TerminalHost {
       case "UserPromptSubmit": this.settleAll(s, "working"); this.setStatus(s, "working"); return null;
       case "Stop": this.settleAll(s, "idle"); this.setStatus(s, "idle"); return null;
       case "PreToolUse": {
-        this.setStatus(s, "working");
         const input = (p.tool_input && typeof p.tool_input === "object" ? p.tool_input : {}) as Record<string, unknown>;
+        this.using(s, String(p.tool_name ?? ""), input);
+        this.setStatus(s, "working");
         const refused = this.opts.floor?.(String(p.tool_name ?? ""), input, s.cwd) ?? null;
         return refused ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: refused } } : null;
       }
@@ -499,8 +508,9 @@ export class TerminalHost {
       }
       // pi's extension (piExtension.ts): every tool call is checked here first; a refusal blocks it.
       case "PiToolCall": {
-        this.setStatus(s, "working");
         const call = piTool(String(p.tool ?? ""), p.input);
+        this.using(s, call.tool, call.input);
+        this.setStatus(s, "working");
         const refused = this.opts.floor?.(call.tool, call.input, s.cwd) ?? null;
         return refused ? { block: true, reason: refused } : null;
       }
@@ -678,7 +688,16 @@ export class TerminalHost {
   private setStatus(s: Session, status: TerminalStatus): void {
     if (s.status === status || s.status === "exited") return;
     s.status = status;
+    s.statusSince = this.o.now();
+    if (status === "idle" || status === "exited") s.activity = null;
     s.emit({ type: "status", status });
+  }
+
+  /** The tool the agent reports it is about to use, and what on (a command, a file, a page). */
+  private using(s: Session, tool: string, input: unknown): void {
+    if (!tool) return;
+    const target = permissionTarget(tool, input).replace(/\s+/g, " ").trim();
+    s.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target };
   }
 
   /** The screen as a newly attached one needs it. The serializer restores mouse tracking but not how it reports:
@@ -710,7 +729,8 @@ export class TerminalHost {
       id: s.id, harness: s.harness, cwd: s.cwd, model: s.model, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
-      agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask), seq: s.seq,
+      agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),
+      activity: s.activity, statusSince: s.statusSince, seq: s.seq,
     };
   }
 }

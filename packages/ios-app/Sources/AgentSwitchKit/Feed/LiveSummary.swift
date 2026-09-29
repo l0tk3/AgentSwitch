@@ -9,12 +9,13 @@ public enum LiveSummary {
     static let stepChars = 60
     static let endedChars = 90
 
-    /// The tasks in progress and the terminals waiting for you (terminal-v0 §1), the ones waiting first, then the newest;
-    /// nil when there are none. A terminal at work is not in it: it has no end to report.
+    /// The tasks in progress and the terminals at work or waiting for you (terminal-v0 §1), the ones waiting first, then
+    /// the newest; nil when there are none. A terminal at work counts as a task in progress (2026-09-30, user: 实时活动应该
+    /// 包括终端里的活动); an idle or ended one does not.
     public static func state(tasks: [AgentTask], approvals: [Approval], threadTitles: [String: String],
                              tails: [String: [TaskEvent]] = [:], terminals: [TerminalInfo] = []) -> LiveState? {
         let active = tasks.filter(\.status.isActive)
-        let asking = terminals.filter(\.waitsForYou)
+        let asking = terminals.filter { $0.waitsForYou || $0.status == .working }
         guard !active.isEmpty || !asking.isEmpty else { return nil }
         let pending = Dictionary(grouping: approvals.filter { $0.status == .pending }, by: \.taskId)
         let rows = active.map { task -> LiveState.Row in
@@ -28,11 +29,17 @@ public enum LiveSummary {
         return LiveState(rows: Array(ordered.prefix(maxRows)), running: rows.count - waiting, waiting: waiting)
     }
 
-    /// A terminal waiting for you: its name, what it asks to run ("Bash: npm test"), its agent, since when it asks.
+    /// A terminal waiting for you: its name, what it asks to run ("Bash: npm test"), its agent, since when it asks. At
+    /// work: what it is using ("运行 npm test", else 进行中), since this turn began.
     static func row(_ terminal: TerminalInfo) -> LiveState.Row {
-        let ask = terminal.permissions.first
-        let since = ask.map(\.at).flatMap { $0 > 0 ? $0 : nil } ?? terminal.lastOutputAt
         let agent = ModelName.harness(terminal.harness)
+        guard terminal.waitsForYou else {
+            return LiveState.Row(id: terminal.id, title: clip(terminal.name.isEmpty ? agent : terminal.name, titleChars),
+                                 step: clip(terminal.activity.map { MessageDisplay.readable($0.phrase) } ?? "进行中", stepChars), model: agent,
+                                 startedAt: Date(milliseconds: terminal.statusSince ?? terminal.lastOutputAt), needsYou: false, kind: .terminal)
+        }
+        let ask = terminal.permissions.first
+        let since = ask.map(\.at).flatMap { $0 > 0 ? $0 : nil } ?? terminal.statusSince ?? terminal.lastOutputAt
         return LiveState.Row(id: terminal.id, title: clip(terminal.name.isEmpty ? agent : terminal.name, titleChars),
                              step: clip(ask.map { MessageDisplay.readable($0.summary) } ?? "等你处理", stepChars), model: agent,
                              startedAt: Date(milliseconds: since), needsYou: true, kind: .terminal)

@@ -26,7 +26,7 @@ function terminal(over: Partial<TerminalInfo>): TerminalInfo {
   return {
     id: "t1", harness: "claude-code", cwd: join(homedir(), "Projects/web"), model: null, mode: "manual", name: "fix-login", customName: false,
     title: "", status: "working", pid: 1, cols: 80, rows: 24, createdAt: 0, lastOutputAt: 0, exitCode: null, agentSessionId: null,
-    resumedFrom: null, forked: false, hooks: true, permissions: [], seq: 0, ...over,
+    resumedFrom: null, forked: false, hooks: true, permissions: [], activity: null, statusSince: 0, seq: 0, ...over,
   };
 }
 const host = (list: TerminalInfo[]) => ({ list: () => list }) as unknown as TerminalHost;
@@ -51,7 +51,7 @@ describe("live snapshot", () => {
     f.store.updateTask(f.store.createTask({ task: "早就做完了", cwd: "/w" }).id, { status: "done" });
 
     const waiting = terminal({ id: "k1", status: "waiting", permissions: [{ id: "p1", tool: "Bash", summary: "Bash: npm test", input: { command: "npm test" }, at: t0 + 2_000 }] });
-    const snap = liveSnapshot(f.store, host([waiting, terminal({ id: "k2", status: "working" }), terminal({ id: "k3", status: "exited", permissions: waiting.permissions })]), t0 + 10_000);
+    const snap = liveSnapshot(f.store, host([waiting, terminal({ id: "k2", status: "idle" }), terminal({ id: "k3", status: "exited", permissions: waiting.permissions })]), t0 + 10_000);
 
     expect(snap.rows.map((r) => r.id)).toEqual([asks.id, "k1", fresh.id, old.id]);
     expect(snap).toMatchObject({ running: 2, waiting: 2 });
@@ -103,6 +103,22 @@ describe("live snapshot", () => {
     const titles = new Map(liveSnapshot(f.store, undefined, f.now()).rows.map((r) => [r.id, r.title]));
     expect(titles.get(first.id)).toBe("整理下载目录");
     expect(titles.get(later.id)).toBe("把结果发给我 🔒");
+  });
+
+  it("a terminal at work is a row in progress too (2026-09-30): what it is using, since this turn began", () => {
+    const f = build();
+    const t0 = f.now();
+    const t = f.store.createTask({ task: "整理下载目录", cwd: "/w" });
+    f.store.updateTask(t.id, { status: "running" });
+    const snap = liveSnapshot(f.store, host([
+      terminal({ id: "k1", name: "fix-login", status: "working", statusSince: t0 + 3_000, activity: { tool: "Bash", target: "/bin/zsh -lc 'npm test'" } }),
+      terminal({ id: "k2", name: "api-refactor", harness: "codex", status: "working", statusSince: t0 - 60_000, activity: null }),
+      terminal({ id: "k3", status: "idle", activity: { tool: "Read", target: "/w/a.ts" } }),
+    ]), t0 + 5_000);
+    expect(snap).toMatchObject({ running: 3, waiting: 0 });
+    expect(snap.rows.map((r) => r.id)).toEqual(["k1", t.id, "k2"]);
+    expect(snap.rows[0]).toMatchObject({ kind: "terminal", title: "fix-login", step: "运行 npm test", model: "Claude Code", agent: "claude-code", startedAt: t0 + 3_000, needsYou: false, ask: null });
+    expect(snap.rows[2]).toMatchObject({ step: "进行中", model: "Codex", agent: "codex" });
   });
 
   it("a waiting terminal without a request (a form on its screen) asks to be opened", () => {
