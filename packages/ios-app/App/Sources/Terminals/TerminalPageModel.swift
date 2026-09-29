@@ -18,6 +18,8 @@ final class TerminalPageModel {
     let ownsRecord: Bool
     /// What `/` offers: the agent's slash commands in this folder.
     private(set) var commands: [SlashCommand] = []
+    /// The Mac's AgentSwitch is too old to list them (said when `/` is typed).
+    private(set) var commandsUnavailable = false
     private(set) var permissions: [TerminalPermission] = []
     /// The terminal was closed (here or elsewhere): the page leaves.
     private(set) var removed = false
@@ -62,8 +64,13 @@ final class TerminalPageModel {
         }
         let id = id
         Task { [weak self] in
-            let commands = (try? await api.terminalCommands(id)) ?? []
-            self?.commands = commands
+            do {
+                let listed = try await api.terminalCommands(id)
+                self?.commands = listed ?? []
+                self?.commandsUnavailable = listed == nil
+            } catch {
+                self?.commandsUnavailable = true
+            }
         }
         follow = Task { [weak self] in
             do {
@@ -176,7 +183,18 @@ final class TerminalPageModel {
             while let self, self.wheelPending != 0, !Task.isCancelled {
                 let n = max(-20, min(20, self.wheelPending))
                 self.wheelPending -= n
-                try? await self.api?.sendTerminalKeys(self.id, Array(repeating: n > 0 ? .wheelUp : .wheelDown, count: abs(n)))
+                do {
+                    try await self.api?.sendTerminalKeys(self.id, Array(repeating: n > 0 ? .wheelUp : .wheelDown, count: abs(n)))
+                } catch {
+                    // Said once, and this drag stops: a Mac that predates the wheel answers 400.
+                    if case APIError.http(status: 400, message: _) = error {
+                        self.error = "此 Mac 上的 AgentSwitch 版本不支持滑动翻页，请先更新。"
+                    } else {
+                        self.error = error.localizedDescription
+                    }
+                    self.wheelPending = 0
+                    break
+                }
                 try? await Task.sleep(for: .milliseconds(50))
             }
             self?.wheeling = nil

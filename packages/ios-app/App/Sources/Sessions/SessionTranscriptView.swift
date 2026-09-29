@@ -7,6 +7,8 @@ import SwiftUI
 /// 10 s. From the terminals tab it ends with `resume` (docs/terminal-v0.md §5: go on with it in a terminal here).
 struct SessionTranscriptView: View {
     let session: SessionSummary
+    /// Opening it in a terminal is under way (the button turns).
+    var resuming = false
     var resume: (() -> Void)?
     @Environment(AppModel.self) private var model
     @State private var detail: SessionDetail?
@@ -40,8 +42,11 @@ struct SessionTranscriptView: View {
         .background(Theme.base)
         .safeAreaInset(edge: .bottom) {
             if let resume, TerminalsTab.resumable.contains(session.harness) {
-                Button("[ resume ]", action: resume)
+                Button(action: resume) {
+                    if resuming { BrailleSpinner(color: Theme.base) } else { Text("[ resume ]") }
+                }
                     .buttonStyle(SquareButtonStyle(prominent: true))
+                    .disabled(resuming)
                     .padding(.horizontal, Theme.Space.l)
                     .padding(.vertical, Theme.Space.s)
                     .background(Theme.base)

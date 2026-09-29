@@ -49,12 +49,12 @@ extension AgentSwitchAPI {
                        timeout: sealed ? Self.createTaskTimeout : requestTimeout)
     }
 
-    /// The slash commands this terminal's agent takes in its folder; none from a Mac that does not say (404).
-    public func terminalCommands(_ id: String) async throws -> [SlashCommand] {
+    /// The slash commands this terminal's agent takes in its folder; nil from a Mac too old to say (404).
+    public func terminalCommands(_ id: String) async throws -> [SlashCommand]? {
         do {
             return (try await get(["terminals", id, "commands"]) as CommandList).commands
         } catch APIError.http(status: 404, message: _) {
-            return []
+            return nil
         }
     }
 

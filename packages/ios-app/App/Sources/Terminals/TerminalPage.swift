@@ -137,6 +137,12 @@ struct TerminalPage: View {
     private var controls: some View {
         VStack(spacing: 0) {
             if !suggestions.isEmpty { suggestionList }
+            if commandsMissing {
+                Text("命令补全需要更新 Mac 上的 AgentSwitch。").font(.footnote).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.l).padding(.vertical, 8)
+                    .background(Theme.raised)
+            }
             Theme.line.frame(height: 1)
             if let error = page.error {
                 HStack {
@@ -162,7 +168,7 @@ struct TerminalPage: View {
                 .padding(.horizontal, Theme.Space.l)
                 .padding(.vertical, 8)
             }
-            if sealing { sealedBox } else { replyRow }
+            composer
             if let note = page.sealedNote {
                 Text(note).mono(11).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
@@ -171,76 +177,77 @@ struct TerminalPage: View {
         .background(Theme.base)
     }
 
-    /// Typed as it is (the lock opens the sealed box instead).
-    private var replyRow: some View {
-        HStack(alignment: .bottom, spacing: Theme.Space.s) {
-            Button { withAnimation(.snappy(duration: 0.18)) { sealing = true } } label: {
-                PixelSprite(rows: PixelArt.lock, pixel: 3, color: Theme.signal)
+    /// One box for both ways of replying, so switching keeps the text and the keyboard as they were (one text field,
+    /// never swapped): typed as it is, with the lock beside it; or, from the lock, the desktop's sealed composer
+    /// (ui-v0 §7.4) — a framed box with a signal head bar naming the terminal and a hard dithered shadow, glitching as it
+    /// opens; the reply then goes through the sealer and the box closes.
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if sealing {
+                HStack(spacing: 8) {
+                    PixelSprite(rows: PixelArt.lock, pixel: 2, color: .black)
+                    Text("sealed → \(page.name)").mono(12).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button { toggleSealing() } label: { Text("×").mono(15).frame(width: 28, height: 26) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("cancel")
+                }
+                .foregroundStyle(.black)
+                .padding(.leading, 8)
+                .frame(height: 26)
+                .background(Theme.signal)
             }
-            .buttonStyle(SquareIconButtonStyle(active: false))
-            .accessibilityLabel("sealed reply")
-            TextField("回复", text: $reply, axis: .vertical)
-                .lineLimit(1...5)
-                .focused($replying)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                if !sealing {
+                    Button { toggleSealing() } label: { PixelSprite(rows: PixelArt.lock, pixel: 3, color: Theme.signal) }
+                        .buttonStyle(SquareIconButtonStyle(active: false))
+                        .accessibilityLabel("sealed reply")
+                }
+                TextField(sealing ? "message" : "回复", text: $reply, axis: .vertical)
+                    .font(sealing ? .system(size: 14, design: .monospaced) : .body)
+                    .lineLimit(sealing ? 2...6 : 1...5)
+                    .focused($replying)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .overlay(Rectangle().strokeBorder(sealing ? Color.clear : Theme.line, lineWidth: 1))
+                if !sealing {
+                    Button { Task { await sendDirect() } } label: { sendLabel }
+                        .buttonStyle(SquareIconButtonStyle(active: canSend || page.sending))
+                        .disabled(!canSend)
+                        .accessibilityLabel("send")
+                }
+            }
+            .padding(.horizontal, sealing ? 0 : Theme.Space.l)
+            .padding(.top, sealing ? 4 : 0)
+            if sealing {
+                HStack(spacing: Theme.Space.s) {
+                    Text("凭据在 Mac 上换成密文后再交给 agent").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button { Task { await send(reply, sealed: true) } } label: {
+                        if page.sending { BrailleSpinner(color: Theme.base) } else { Text("[ send ]") }
+                    }
+                    .buttonStyle(SquareButtonStyle(prominent: true))
+                    .fixedSize()
+                    .disabled(!canSend)
+                }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
-            Button { Task { await sendDirect() } } label: { sendLabel }
-                .buttonStyle(SquareIconButtonStyle(active: canSend || page.sending))
-                .disabled(!canSend)
-                .accessibilityLabel("send")
+                .padding(.vertical, 10)
+            }
         }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.bottom, Theme.Space.s)
+        .background(sealing ? Theme.base : Color.clear)
+        .overlay(Rectangle().strokeBorder(sealing ? Theme.ink : Color.clear, lineWidth: 1))
+        .background(DitherShadow().offset(x: 6, y: 6).opacity(sealing ? 1 : 0))
+        .glitch(on: sealing)
+        .padding(.leading, sealing ? Theme.Space.l : 0)
+        .padding(.trailing, sealing ? Theme.Space.l + 6 : 0)
+        .padding(.bottom, sealing ? Theme.Space.m + 6 : Theme.Space.s)
     }
 
-    /// The desktop's sealed composer (ui-v0 §7.4): a framed box with a signal head bar naming the terminal and a hard
-    /// dithered shadow; it glitches as it opens; the reply goes through the sealer, then the box closes.
-    private var sealedBox: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                PixelSprite(rows: PixelArt.lock, pixel: 2, color: .black)
-                Text("sealed → \(page.name)").mono(12).lineLimit(1)
-                Spacer(minLength: 4)
-                Button { withAnimation(.snappy(duration: 0.18)) { sealing = false } } label: { Text("×").mono(15) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("cancel")
-            }
-            .foregroundStyle(.black)
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Theme.signal)
-            TextField("message", text: $reply, axis: .vertical)
-                .mono(14)
-                .lineLimit(2...6)
-                .focused($replying)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-            HStack(spacing: Theme.Space.s) {
-                Text("凭据在 Mac 上换成密文后再交给 agent").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Spacer(minLength: 4)
-                Button { Task { await send(reply, sealed: true) } } label: {
-                    if page.sending { BrailleSpinner(color: Theme.base) } else { Text("[ send ]") }
-                }
-                .buttonStyle(SquareButtonStyle(prominent: true))
-                .fixedSize()
-                .disabled(!canSend)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-        }
-        .background(Theme.base)
-        .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
-        .background(DitherShadow().offset(x: 6, y: 6))
-        .glitch(on: sealing, onAppear: true)
-        .padding(.leading, Theme.Space.l)
-        .padding(.trailing, Theme.Space.l + 6)
-        .padding(.bottom, Theme.Space.m + 6)
-        .onAppear { replying = true }
+    /// Between the two ways; the keyboard stays as it was.
+    private func toggleSealing() {
+        withAnimation(.snappy(duration: 0.18)) { sealing.toggle() }
     }
 
     @ViewBuilder
@@ -251,6 +258,11 @@ struct TerminalPage: View {
     // MARK: slash commands
 
     private var suggestions: [SlashCommand] { sealing ? [] : SlashCommand.matching(reply, in: page.commands) }
+
+    /// `/` typed on a Mac that cannot list the commands: say so instead of showing nothing.
+    private var commandsMissing: Bool {
+        !sealing && page.commandsUnavailable && reply.hasPrefix("/") && !reply.contains(where: \.isWhitespace)
+    }
 
     /// What `/` may be: tap one to put it in the box (a space after it, ready for arguments).
     private var suggestionList: some View {
@@ -288,7 +300,7 @@ struct TerminalPage: View {
     private func send(_ text: String, sealed: Bool) async {
         if await page.send(text, sealed: sealed) {
             if reply == text { reply = "" }
-            if sealed { withAnimation(.snappy(duration: 0.18)) { sealing = false } }
+            if sealed { toggleSealing() }
         }
     }
 

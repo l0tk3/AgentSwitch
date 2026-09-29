@@ -24,6 +24,8 @@ struct TerminalsTab: View {
     @State private var deletingSession: SessionSummary?
     /// A session last run in bypass, asked about before it goes on.
     @State private var bypassResume: SessionSummary?
+    /// Why continuing or deleting a session failed: an alert over whatever page is open.
+    @State private var failure: String?
 
     static let pollInterval: Duration = .seconds(4)
     /// Sessions shown per folder before `▸ N more`.
@@ -60,7 +62,7 @@ struct TerminalsTab: View {
             .navigationDestination(for: TerminalRoute.self) { route in
                 switch route {
                 case .terminal(let t): TerminalPage(terminal: t)
-                case .session(let s): SessionTranscriptView(session: s, resume: { Task { await resume(s) } })
+                case .session(let s): SessionTranscriptView(session: s, resuming: opening == s.id, resume: { Task { await resume(s) } })
                 }
             }
             .refreshable { await model.refreshTerminals(sessions: true) }
@@ -101,6 +103,9 @@ struct TerminalsTab: View {
                 Text("同一会话同时只能由一个程序写入。请先在 \(elsewhere?.app ?? "该程序") 中退出，或创建分支：新会话包含全部历史，原会话保持不变。")
             }
         }
+        .alert("未能完成", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } }), presenting: failure) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { Text($0) }
     }
 
     private var folded: Set<String> { Set(foldedRaw.split(separator: "\n").map(String.init)) }
@@ -237,10 +242,9 @@ struct TerminalsTab: View {
         guard let api = model.api else { return }
         do {
             try await api.deleteSession(harness: s.harness, id: s.sessionId)
-            model.terminals.error = nil
             await model.refreshTerminals(sessions: true)
         } catch {
-            model.terminals.error = error.localizedDescription
+            failure = error.localizedDescription
         }
     }
 
@@ -279,7 +283,7 @@ struct TerminalsTab: View {
                 elsewhere = Elsewhere(session: s, app: app ?? "其他程序", mode: mode)
             }
         } catch {
-            model.terminals.error = error.localizedDescription
+            failure = error.localizedDescription
         }
     }
 }
