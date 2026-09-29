@@ -553,7 +553,7 @@ function p2bypass() {
   const box = document.createElement("div");
   box.className = "box";
   box.style.cssText = "left:22px;right:28px;top:300px";
-  box.innerHTML = `<div class="hd amber"><span>bypass</span></div><div class="bd"><p>跳过全部权限确认？agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：禁区（本机令牌、凭据网关密钥等）和凭据网关。</p></div>
+  box.innerHTML = `<div class="hd amber"><span>bypass</span></div><div class="bd"><p>跳过全部权限确认？agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：凭据网关（密钥不可读）。</p></div>
     <div class="ft"><button type="button" class="btn" data-a="no">[ cancel ]</button><button type="button" class="btn pri" data-a="yes">[ use bypass ]</button></div>`;
   box.onclick = (e) => {
     const a = e.target.closest("[data-a]")?.dataset.a;

@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ensureLocalToken, LocalAuth } from "../src/api/localAuth.js";
@@ -242,7 +242,7 @@ describe("terminals over HTTP", () => {
       const res = await fetch(base + path, { method, headers: { ...(auth ? { authorization: `Bearer ${token}` } : {}), ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
       return { status: res.status, json: (await res.json().catch(() => ({}))) as Record<string, any> };
     };
-    return { home, cwd, base, token, call };
+    return { home, cwd, base, token, call, daemon };
   }
 
   /** The SSE stream read into `events` until `stop()`. */
@@ -332,6 +332,23 @@ describe("terminals over HTTP", () => {
     expect((await call("DELETE", `/terminals/${id}`)).status).toBe(200);
     await until(() => events.find((e) => e.event === "removed"));
     expect((await call("GET", `/terminals/${id}`)).status).toBe(404);
+  });
+
+  it("a terminal opens in any folder, the home folder too, and reads the local token; tasks keep their rules (2026-09-30)", async () => {
+    const { home, call, daemon } = await start();
+    const created = await call("POST", "/terminals", { harness: "claude-code", cwd: "~" });
+    expect(created.status).toBe(201);
+    expect(created.json.terminal.cwd).toBe(homedir());
+    expect((await call("POST", "/terminals", { harness: "claude-code", cwd: join(home, "no-such-folder") })).status).toBe(400);
+    const host = daemon.terminals!;
+    const id = created.json.terminal.id as string;
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(id)!.hookToken;
+    const pre = (tool: string, input: Record<string, unknown>) => host.hook(id, token, { event: "PreToolUse", payload: { tool_name: tool, tool_input: input } });
+    expect(await pre("Bash", { command: `cat "${join(home, "local-token")}"` })).toBeNull();
+    expect(await pre("Edit", { file_path: join(home, "CONTEXT.md") })).toBeNull();
+    expect(await pre("Read", { file_path: join(home, "browser-profiles", "slot-1", "Cookies") })).toBeNull();
+    const gate = process.env.SECRET_GATE_HOME ?? join(homedir(), ".secret-gate");
+    expect(await pre("Read", { file_path: join(gate, "keys", "default.key") })).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
   });
 
   it("bypass can be chosen from a paired device too (the phone asks first); every terminal may switch to it later", async () => {

@@ -39,7 +39,7 @@ import { routerSealer, type Sealer } from "./secrets/sealer.js";
 import { type Extensions, extensionsAt } from "./extensions/index.js";
 import { opencodeExecutor } from "./executors/opencode.js";
 import { OpenCodeExecServer, opencodeServeConfig } from "./executors/opencodeServer.js";
-import { defaultProtected, type ProtectedPaths } from "./executors/protected.js";
+import { defaultProtected, terminalProtected, type ProtectedPaths } from "./executors/protected.js";
 import { routerSummarizer } from "./threads/summary.js";
 import { routerSupervisor } from "./router/supervisor.js";
 import { loadMemory } from "./threads/memory.js";
@@ -297,12 +297,14 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ? new CodexHookTrust({ binary: agentBinaries.codex, args: codexHookArgs(hookCommandOf({}), QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S) })
     : undefined;
   void codexTrust?.ensure();
+  // Terminals are used like any terminal: only the credentials at rest stay closed there (docs/terminal-v0.md §3).
+  const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
-      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: prot,
+      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
         codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true }),
-      // The executors' protected paths hold in terminals too, whatever the permission mode (docs/terminal-v0.md §3).
-      floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), prot); return d.kind === "deny" ? d.reason : null; },
+      // Whatever the permission mode.
+      floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
     })
     : null;
   let style: TerminalStyle | null = null;

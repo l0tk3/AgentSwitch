@@ -32,11 +32,28 @@ export function canonicalPath(p: string): string {
   try { return realpathSync(r); } catch { return r; }
 }
 
+/** The daemon's home, the gate's home and the gate service's socket, as `env` places them. */
+function places(env: NodeJS.ProcessEnv): { home: string; gate: string; socket: string } {
+  return {
+    home: env.AGENTSWITCH_HOME ?? join(env.HOME ?? ".", ".agentswitch"),
+    gate: env.SECRET_GATE_HOME ?? join(env.HOME ?? ".", ".secret-gate"),
+    // The gate service's socket (gate-service-v0 §4): a best-effort stop for the plainest `nc -U`; the same uid is not a boundary.
+    socket: join(env.SECRET_GATE_PUBLIC || GATE_PUBLIC_DIR, "gate.sock"),
+  };
+}
+
+/** What stays closed in AgentSwitch's own terminals (docs/terminal-v0.md §3; 2026-09-30, user: a terminal is used like
+ *  any terminal): only the gate's keys and socket, which open every ciphertext — neither read nor written. The daemon's
+ *  files, its local token, the kept browser sessions and the remote TLS key are open there; the managed executors keep
+ *  the whole table (`defaultProtected`). */
+export function terminalProtected(env: NodeJS.ProcessEnv = process.env): ProtectedPaths {
+  const { gate, socket } = places(env);
+  const closed = [gate, socket].map(canonicalPath);
+  return { roots: closed, exempt: [], readDenied: closed };
+}
+
 export function defaultProtected(env: NodeJS.ProcessEnv = process.env): ProtectedPaths {
-  const home = env.AGENTSWITCH_HOME ?? join(env.HOME ?? ".", ".agentswitch");
-  const gate = env.SECRET_GATE_HOME ?? join(env.HOME ?? ".", ".secret-gate");
-  // The gate service's socket (gate-service-v0 §4): a best-effort stop for the plainest `nc -U`; the same uid is not a boundary.
-  const socket = join(env.SECRET_GATE_PUBLIC || GATE_PUBLIC_DIR, "gate.sock");
+  const { home, gate, socket } = places(env);
   return {
     roots: [home, gate, DAEMON_CONFIG_DIR, socket].map(canonicalPath),
     exempt: EXEMPT_UNDER_HOME.map((d) => canonicalPath(join(home, d))),

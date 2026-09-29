@@ -97,6 +97,11 @@ export function checkCwd(cwd: string, rules: CwdRules): string | null {
   return placeProblem(cwd, rules) ?? (isDirectory(cwd) ? null : `cwd ${physicalPath(cwd)} is not an existing directory`);
 }
 
+/** A terminal's folder (docs/terminal-v0.md §2, 2026-09-30): any existing one, as in any terminal. */
+export function checkTerminalCwd(cwd: string): string | null {
+  return isDirectory(cwd) ? null : `cwd ${physicalPath(cwd)} is not an existing directory`;
+}
+
 /** True when `cwd` is a work dir the daemon made (under `workRoot`, inside the daemon's own home). */
 export function isWorkDir(cwd: string, workRoot: string): boolean {
   const p = physicalPath(cwd);

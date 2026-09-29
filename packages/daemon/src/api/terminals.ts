@@ -19,7 +19,7 @@ import { KEY_NAMES, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { modelSettings } from "../router/modelOverlay.js";
 import { modelName } from "../util/modelName.js";
-import { checkCwd } from "./cwdPolicy.js";
+import { checkTerminalCwd } from "./cwdPolicy.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 export type Terminals = {
@@ -120,7 +120,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!isAbsolute(typed)) return c.json({ error: "cwd must be an absolute path" }, 400);
     const cwd = resolve(typed);   // `~/proj/` and `~/proj` are one folder
 
-    const problem = checkCwd(cwd, deps.cwdRules);
+    // Any folder, as in any terminal (docs/terminal-v0.md §2, 2026-09-30); tasks keep control-v0 §2's rules.
+    const problem = checkTerminalCwd(cwd);
     if (problem) return c.json({ error: problem }, 400);
     const resumed = resume ? (body.data as z.infer<typeof ResumeTerminal>) : null;
     const agentSessionId = resumed?.agentSessionId;

@@ -29,13 +29,14 @@ export type LauncherOptions = {
   readonly gate: GateOptions | null;
   /** The service's local URL the hook command calls (http://127.0.0.1:<port>). */
   readonly hookUrl: () => string;
-  /** Per-terminal files (settings, MCP config) go under here: `<dir>/<id>/`. Executors may not read it. */
+  /** Per-terminal files (settings, MCP config) go under here: `<dir>/<id>/`. The managed executors may not read it. */
   readonly stateDir: string;
   readonly node?: string;
   readonly hookScript?: string;
   readonly piExtension?: string;
   readonly env?: NodeJS.ProcessEnv;
-  /** The protected paths (the managed executors' table): each agent gets them refused its own way (docs/terminal-v0.md §3). */
+  /** The protected paths (terminals: only the credentials at rest, `terminalProtected`): each agent gets them refused its
+   *  own way (docs/terminal-v0.md §3). */
   readonly protected?: ProtectedPaths;
   /** Codex gets AgentSwitch's hooks (status, permission requests, the protected-path check), once the user's Codex
    *  trusts them (codexHooks.ts); until then it goes without and its status is guessed. */

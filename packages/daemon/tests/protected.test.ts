@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, exis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { commandTouchesProtected, defaultProtected, isProtected, isReadDenied, protectedInside, restoreProtected, snapshotProtected, type ProtectedPaths } from "../src/executors/protected.js";
+import { commandTouchesProtected, defaultProtected, terminalProtected, isProtected, isReadDenied, protectedInside, restoreProtected, snapshotProtected, type ProtectedPaths } from "../src/executors/protected.js";
 import { decideTool } from "../src/executors/claude.js";
 
 function setup() {
@@ -90,6 +90,33 @@ describe("read-denied paths (2026-09-24)", () => {
   it("defaultProtected read-denies the gate home, the browser profiles and the remote listener's key", () => {
     const p = defaultProtected({ HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg" });
     expect(p.readDenied).toEqual(["/h/.sg", "/Library/Application Support/AgentSwitch/gate-public/gate.sock", "/h/.as/browser-profiles", "/h/.as/remote", "/h/.as/local-token"]);
+  });
+
+  it("AgentSwitch's own terminals keep only the gate's keys and socket closed (2026-09-30)", () => {
+    const env = { HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg" };
+    const closed = ["/h/.sg", "/Library/Application Support/AgentSwitch/gate-public/gate.sock"];
+    expect(terminalProtected(env)).toEqual({ roots: closed, exempt: [], readDenied: closed });
+    const term = terminalProtected(env);
+    const full = defaultProtected(env);
+    // Open in a terminal, as in any terminal: the local token, the remote key, the browser sessions, the daemon's files.
+    for (const [tool, input] of [
+      ["Read", { file_path: "/h/.as/local-token" }],
+      ["Bash", { command: "cat /h/.as/browser-profiles/slot-1/Default/Cookies" }],
+      ["Bash", { command: 'curl -H "Authorization: Bearer $(cat /h/.as/local-token)" http://127.0.0.1:4711/update' }],
+      ["Read", { file_path: "/h/.as/remote/key.pem" }],
+      ["Edit", { file_path: "/h/.as/CONTEXT.md" }],
+    ] as const) {
+      expect(decideTool(tool, input as Record<string, unknown>, "/w", new Set(), term).kind, `${tool} ${JSON.stringify(input)}`).not.toBe("deny");
+      expect(decideTool(tool, input as Record<string, unknown>, "/w", new Set(), full).kind, `managed: ${tool}`).toBe("deny");
+    }
+    for (const [tool, input] of [
+      ["Read", { file_path: "/h/.sg/keys/default.key" }],
+      ["Bash", { command: "cat /h/.sg/keys/default.key" }],
+      ["Edit", { file_path: "/h/.sg/keys/default.key" }],
+      ["Grep", { pattern: "BEGIN", path: "/h" }],
+    ] as const) {
+      expect(decideTool(tool, input as Record<string, unknown>, "/w", new Set(), term), `${tool} ${JSON.stringify(input)}`).toMatchObject({ kind: "deny" });
+    }
   });
 
   it("Claude's read tools are refused there, whatever form the path takes; elsewhere they stay allowed", () => {

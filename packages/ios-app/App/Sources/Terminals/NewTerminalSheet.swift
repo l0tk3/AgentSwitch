@@ -148,7 +148,7 @@ struct NewTerminalSheet: View {
     }
 
     /// What bypass leaves in force, said before it is chosen (here and when a bypass session is continued).
-    static let bypassNote = "agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：禁区（本机令牌、凭据网关密钥等）和凭据网关。"
+    static let bypassNote = "agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：凭据网关（密钥不可读）。"
 
     private func agentTile(_ id: String, _ name: String, installed: Bool) -> some View {
         let on = agent == id

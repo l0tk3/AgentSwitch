@@ -7,7 +7,7 @@
 现有三档（`engine/approvalPolicy.ts`）：`manual` 每项都问你；`scoped`（默认）调度模型代批，删除 / git push / 付款发消息留给你；`auto` 全部由调度模型代批。新增第四档：
 
 - **`skip` 跳过权限**：执行器提的每个审批当场放行，不建卡片、不调调度模型，事件 `supervisor {kind:"approval", decision:"allow", reason:"skip-permissions mode", source:"policy", action}`。
-- **仍然生效的**（这些不是“权限”，是边界）：禁区照拒——AgentSwitch 自己的数据和配置、secret-gate 密钥、本机令牌、浏览器会话目录、远程 TLS 私钥（执行器层直接拒，不走审批）；只读步骤（research / verify）照旧只放行只读命令；执行器或路由器**问你的问题**照旧来问（问题不是权限）；Codex 仍在它的沙箱里，只是它申请到沙箱外跑的命令过完禁区检查后直接放行。
+- **仍然生效的**（这些不是“权限”，是边界）：禁区照拒——AgentSwitch 自己的数据和配置、secret-gate 密钥、本机令牌、浏览器会话目录、远程 TLS 私钥（执行器层直接拒，不走审批；AgentSwitch 自己的终端只拒网关密钥，terminal-v0 §3）；只读步骤（research / verify）照旧只放行只读命令；执行器或路由器**问你的问题**照旧来问（问题不是权限）；Codex 仍在它的沙箱里，只是它申请到沙箱外跑的命令过完禁区检查后直接放行。
 - **只在 Mac 上改**：`PUT /approvals/policy` 只收本机请求（远程 403，同 `approval` 字段的规矩）；手机 `GET /approvals/policy` 只读，用来显示当前模式。
 - 界面词：逐项确认（manual）· 自动（scoped，删除、推送、付款仍问你）· 全部自动（auto）· 跳过权限（skip）。选 skip 时 Mac 要二次确认，写清上面“仍然生效的”。
 
