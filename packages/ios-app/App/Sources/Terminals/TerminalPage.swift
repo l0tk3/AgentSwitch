@@ -212,7 +212,10 @@ struct TerminalPage: View {
                     .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
             }
         }
-        .background(Theme.base)
+        .background(page.ground)
+        // One dark block with the screen whatever the phone's appearance (ui-v0 §7): the keys, the reply box, the
+        // sealed box and its keyboard take the dark palette.
+        .environment(\.colorScheme, .dark)
     }
 
     /// One box for both ways of replying, so switching keeps the text and the keyboard as they were (one text field,

@@ -23,6 +23,15 @@
   --signal: #e0106e; --cyan: #0086a8; --green: #3f8f00; --amber: #c27400; --red: #d7261b;
   --px-shadow: #cfc9bc;
 }
+/* The terminal page is dark whatever the phone's appearance (ui-v0 §7): the bar over the screen, the keys, the reply
+   box and the keyboard read as one block with the screen. */
+.dark {
+  color-scheme: dark; color: var(--ink);
+  --bg: #000; --panel: #0b0b0b; --raise: #151515;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  --px-shadow: #2c2a28;
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body { background: var(--board); color: var(--board-ink); font: 13px/1.5 var(--ui); padding-block: 28px 60px; padding-inline: 16px; }
@@ -199,12 +208,12 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .composer.sealed .ft span { flex: 1; font: 11px var(--ui); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kb { flex: none; background: #d1d3d9; padding: 8px 4px 26px; display: grid; gap: 9px; color: #000; }
 .kb[hidden] { display: none; }
-.scr:not(.light) .kb { background: #2b2b2d; color: #fff; }
+.scr:not(.light) .kb, .kb.dark { background: #2b2b2d; color: #fff; }
 .kr { display: flex; gap: 5px; justify-content: center; }
 .kr button { flex: 1; max-width: 33px; height: 40px; border: 0; border-radius: 6px; background: #fff; font: 18px var(--ui); box-shadow: 0 1px 0 rgba(0,0,0,.3); cursor: pointer; padding: 0; }
-.scr:not(.light) .kr button { background: #6b6b70; color: #fff; }
+.scr:not(.light) .kr button, .kb.dark .kr button { background: #6b6b70; color: #fff; }
 .kr button.w { max-width: none; flex: 1.6; font-size: 14px; background: #adb3bc; }
-.scr:not(.light) .kr button.w { background: #46464a; }
+.scr:not(.light) .kr button.w, .kb.dark .kr button.w { background: #46464a; }
 .kr button.sp { max-width: none; flex: 5; font-size: 14px; }
 .kr button:active { filter: brightness(.8); }
 
@@ -596,11 +605,11 @@ function p3reset() {
   text = ""; err = null; oldMac = false; note = null; shift = false; exited = false;
 }
 function p3build() {
-  p3.innerHTML = `<div style="background:#000;color:#e9e6df;--ink:#e9e6df;--ink2:#8d8a84;--ink3:#4d4b48;--ink4:#262524;--raise:#151515;--bg:#000">
+  p3.innerHTML = `<div class="dark" style="background:#000">
       ${statusBar()}<div class="navb"><span class="l"><button type="button" class="cap">‹</button></span><span class="t" id="p3title"></span><span class="r"><button type="button" class="cap">⋯</button></span></div></div>
     <div class="term" id="p3term"><div class="lines" id="p3lines"></div><div class="fixed" id="p3fixed"></div><div class="scanline" id="p3scan"></div><div class="wheel" id="p3wheel"></div></div>
-    <div class="controls" id="p3ctl"></div>
-    <div class="kb" id="p3kb" hidden>
+    <div class="controls dark" id="p3ctl"></div>
+    <div class="kb dark" id="p3kb" hidden>
       <div class="kr">${[..."qwertyuiop"].map((c) => `<button type="button" data-k="${c}">${c}</button>`).join("")}</div>
       <div class="kr">${[..."asdfghjkl"].map((c) => `<button type="button" data-k="${c}">${c}</button>`).join("")}</div>
       <div class="kr"><button type="button" class="w" data-k="shift">⇧</button>${[..."zxcvbnm"].map((c) => `<button type="button" data-k="${c}">${c}</button>`).join("")}<button type="button" class="w" data-k="back">⌫</button></div>
