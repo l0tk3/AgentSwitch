@@ -670,6 +670,11 @@ final class AppModel {
             case .thread(let id, _):
                 try await api.deleteThread(id)
                 await refreshAll()
+            case .conversation:
+                try await api.clearConversation()
+                conversation = ConversationLog()
+                conversationLoaded = false
+                await refreshConversation()
             }
             return nil
         } catch {

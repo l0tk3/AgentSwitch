@@ -1,5 +1,6 @@
 /** The assistant conversation over HTTP (assistant-v0 §1.1): POST a message (the phone's input box), GET the messages
- *  after a sequence number (`?after=`) or the newest ones (`?last=`, for a first load). The phone may use both. */
+ *  after a sequence number (`?after=`) or the newest ones (`?last=`, for a first load), DELETE to clear it (threads and
+ *  tasks stay; threads-v0 手动删除). The phone may use all three. */
 
 import type { Hono } from "hono";
 import { z } from "zod";
@@ -34,5 +35,10 @@ export function mountAssistant(app: Hono, deps: ApiDeps): void {
     if (Number.isInteger(last) && last > 0) return c.json({ messages: deps.assistant.latest(Math.min(last, MAX_LAST)) });
     const after = Math.max(0, Number(c.req.query("after") ?? 0) || 0);
     return c.json({ messages: deps.assistant.messages(after, limitParam(c, 100, 500)) });
+  });
+
+  app.delete("/assistant", (c) => {
+    if (!deps.assistant) return c.json({ error: "assistant unavailable" }, 503);
+    return c.json({ ok: true, removed: deps.assistant.clear() });
   });
 }

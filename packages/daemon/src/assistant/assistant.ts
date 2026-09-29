@@ -124,6 +124,11 @@ export class Assistant {
     return this.deps.log.recent(limit);
   }
 
+  /** Clears the conversation and its watches; returns the lines removed. */
+  clear(): number {
+    return this.deps.log.clear();
+  }
+
   private replay(user: AssistantMessage, assistant: AssistantMessage): Answered {
     const task = assistant.kind === "task" || assistant.kind === "fallback" ? this.deps.store.getTask(assistant.taskIds[0] ?? "") : undefined;
     return { ok: true, user, assistant, ...(task ? { task } : {}) };

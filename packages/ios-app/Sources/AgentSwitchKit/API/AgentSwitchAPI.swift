@@ -88,6 +88,14 @@ public struct AgentSwitchAPI: Sendable {
         (try await get(["assistant"], query: [URLQueryItem(name: "last", value: String(count))]) as AssistantMessages).messages
     }
 
+    /// Clears the conversation (threads-v0 手动删除): every line and the assistant's progress reminders; threads and tasks
+    /// stay. Returns how many lines went.
+    @discardableResult
+    public func clearConversation() async throws -> Int {
+        let reply: ClearReply = try await perform("DELETE", ["assistant"], query: [], body: nil)
+        return reply.removed ?? 0
+    }
+
     /// Stages files for a task (multipart, sent once); pass the ids as `NewTaskRequest.attachments`.
     public func upload(_ files: [UploadFile]) async throws -> [StagedUpload] {
         let boundary = "agentswitch-\(UUID().uuidString)"

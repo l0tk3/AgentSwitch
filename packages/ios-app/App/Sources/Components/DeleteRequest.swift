@@ -1,16 +1,19 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// What a delete button removes: one task (its log, files and resume state) or a whole thread with all its tasks.
-/// Every delete is confirmed first; the Mac refuses (409) while something in it still runs.
+/// What a delete button removes: one task (its log, files and resume state), a whole thread with all its tasks, or the
+/// conversation with the assistant (threads and tasks stay). Every delete is confirmed first; the Mac refuses (409)
+/// while something in a task or thread still runs.
 enum DeleteRequest: Identifiable {
     case task(AgentTask)
     case thread(id: String, title: String?)
+    case conversation
 
     var id: String {
         switch self {
         case .task(let task): return "task:\(task.id)"
         case .thread(let id, _): return "thread:\(id)"
+        case .conversation: return "conversation"
         }
     }
 
@@ -18,6 +21,7 @@ enum DeleteRequest: Identifiable {
         switch self {
         case .task: return "删除此任务？"
         case .thread(_, let title): return "删除会话「\(title ?? "未命名会话")」？"
+        case .conversation: return "清空与助理的对话？"
         }
     }
 
@@ -25,6 +29,7 @@ enum DeleteRequest: Identifiable {
         switch self {
         case .task: return "删除任务"
         case .thread: return "删除会话和其中所有任务"
+        case .conversation: return "清空对话"
         }
     }
 
@@ -32,6 +37,7 @@ enum DeleteRequest: Identifiable {
         switch self {
         case .task: return "任务的记录和文件将一并删除，且无法恢复。"
         case .thread: return "会话中所有任务的记录和文件将一并删除，且无法恢复。"
+        case .conversation: return "对话记录将全部删除，且无法恢复。会话和任务不受影响，从对话创建的任务之后在首页单独显示；助理的定时进度提醒一并取消。"
         }
     }
 

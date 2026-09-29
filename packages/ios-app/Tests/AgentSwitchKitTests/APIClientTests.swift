@@ -95,6 +95,14 @@ final class APIClientTests: XCTestCase {
         XCTAssertNil(transport.requests[0].httpBody)
     }
 
+    func testClearingTheConversationIsOneDeleteOfTheAssistant() async throws {
+        let transport = FakeTransport { req, _ in (json(["ok": true, "removed": 24]), httpResponse(req.url)) }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let removed = try await api.clearConversation()
+        XCTAssertEqual(removed, 24)
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["DELETE /assistant"])
+    }
+
     func testIdsArePathSegmentsNotRoutes() {
         let url = tailnet.url(["tasks", "a/../b?x#y", "events"], query: [URLQueryItem(name: "after", value: "12")])
         XCTAssertEqual(url.absoluteString, "https://[fd7a:115c:a1e0::5]:4713/tasks/a%2F..%2Fb%3Fx%23y/events?after=12")

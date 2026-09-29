@@ -97,6 +97,14 @@ export class AssistantLog {
     return drop.size;
   }
 
+  /** Clearing the conversation (threads-v0 手动删除): every line and every watch; the tasks and threads stay. The
+   *  sequence goes on, so a phone that reads `after` a number it held gets only what comes next. */
+  clear(): number {
+    const lines = Number(this.db.prepare("DELETE FROM messages").run().changes);
+    this.db.prepare("DELETE FROM watches").run();
+    return lines;
+  }
+
   /** Every task a line names (to find the ones deleted while this log was not told). */
   taskIds(): Set<string> {
     const ids = new Set<string>();

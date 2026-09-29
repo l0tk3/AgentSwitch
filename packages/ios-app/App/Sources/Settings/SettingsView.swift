@@ -21,6 +21,10 @@ struct SettingsView: View {
     @State private var addingMac = false
     @State private var path: [SettingsRoute] = SettingsView.initialPath
     @State private var policy: ApprovalPolicyInfo?
+    /// clear conversation: confirmed first (DeleteRequest), then done or why not.
+    @State private var clearing: DeleteRequest?
+    @State private var clearError: String?
+    @State private var cleared = false
 
     private static var initialPath: [SettingsRoute] {
         #if DEBUG
@@ -63,6 +67,11 @@ struct SettingsView: View {
                     NavigationLink("threads") { ThreadsManageView() }
                     NavigationLink("task log", value: SettingsRoute.tasks)
                     NavigationLink("models") { ModelsView() }
+                    if model.hasAssistant {
+                        Button("clear conversation", role: .destructive) { cleared = false; clearing = .conversation }
+                        if let clearError { Text(clearError).font(.footnote).foregroundStyle(Theme.failed) }
+                        if cleared { Text("对话已清空。").font(.footnote).foregroundStyle(.secondary) }
+                    }
                 } header: {
                     SectionLabel("manage")
                 } footer: {
@@ -104,6 +113,7 @@ struct SettingsView: View {
                 Text(model.macs.servers.count > 1 ? "将切换到其他已配对的 Mac。" : "之后需要重新扫码配对。")
             }
             .sheet(isPresented: $addingMac) { AddMacSheet() }
+            .deleteConfirmation($clearing, error: $clearError) { _ in cleared = true }
             .task(id: connected) {
                 async let usage: Void = model.refreshQuota()
                 await loadPolicy()
