@@ -259,8 +259,9 @@ final class TerminalWebView: WKWebView {
         guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, let key = event.charactersIgnoringModifiers else {
             return super.performKeyEquivalent(with: event)
         }
-        // The page's own shortcuts: ⌘W closes the terminal on screen (not the window), ⌘T opens a new one, ⌘1–9 switch.
-        if key == "w" || key == "t" || (key.count == 1 && ("1"..."9").contains(key)) {
+        // The page's own shortcuts: ⌘W closes the terminal on screen (not the window), ⌘T opens a new one, ⌘B hides or
+        // shows the list, ⌘1–9 switch.
+        if key == "w" || key == "t" || key == "b" || (key.count == 1 && ("1"..."9").contains(key)) {
             evaluateJavaScript("window.agentswitch?.shortcut(\"\(key)\")", completionHandler: nil)
             return true
         }

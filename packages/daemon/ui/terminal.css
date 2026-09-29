@@ -68,12 +68,33 @@ button:focus-visible, select:focus-visible { outline: 1px solid var(--signal); o
 }
 .blink { animation: blink 1.1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: .25; } }
-@media (prefers-reduced-motion: reduce) { .blink, .glitch { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .blink, .glitch, body.side-closed.any-waiting .side-grip::after { animation: none; } }
 
 /* ---------- sidebar: the same surface, a dotted pane border, faint scanlines ---------- */
 .side { position: relative; isolation: isolate; display: flex; flex-direction: column; min-height: 0; background: var(--term);
   background-image: repeating-linear-gradient(to bottom, rgba(255, 255, 255, .022) 0 1px, transparent 1px 3px); line-height: 22px; }
 .side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink4) 0 2px, transparent 2px 4px); }
+/* its width: drag the dotted edge (a double click puts it back); past the left edge it closes to a rail, which a click
+   or a drag brings back out (⌘B both ways). Closed, the top band says the terminal, its state and all the terminals'. */
+.side-grip { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; z-index: 2; cursor: col-resize; }
+.side-grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; }
+.side-grip:hover::after { background: var(--ink2); }
+body.side-dragging, body.side-dragging * { cursor: col-resize !important; }
+body.side-dragging .side-grip::after { background: var(--signal); }
+body.side-dragging .screen { pointer-events: none; }
+.band-end { display: none; }
+@media (min-width: 761px) and (pointer: fine) {
+  body.side-closed { --side-w: 12px; }
+  body.side-closed .side > :not(.side-grip) { display: none; }
+  body.side-closed .side-grip { left: 0; right: 0; width: auto; cursor: e-resize; }
+  body.side-closed .side-grip:hover { background: var(--hover); }
+  body.side-closed .side-grip::after { left: auto; right: 0; background: repeating-linear-gradient(to bottom, var(--ink3) 0 2px, transparent 2px 4px); }
+  body.side-closed.any-waiting .side-grip::after { background: var(--amber); animation: blink 1.1s steps(1) infinite; }
+  body.side-closed .band-name, body.side-closed .band-status { display: inline; }
+  body.side-closed .band-end { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  /* the window's buttons sit over the band's left once the list is closed */
+  .mac-app body.side-closed .band { padding-left: 68px; }
+}
 .side-band { height: 40px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 14px 0 12px; }
 .console-link { color: var(--ink3); text-decoration: none; }
 .console-link:hover { color: var(--ink2); }
@@ -96,6 +117,11 @@ button:focus-visible, select:focus-visible { outline: 1px solid var(--signal); o
 .dir.parent + .dir { margin-top: 2px; }
 .dir .count { color: var(--ink3); font-size: 11px; display: flex; gap: 6px; }
 .dir .count b { color: var(--green); font-weight: 400; }
+.dir .count b.w { color: var(--amber); }
+/* a folded folder holding the terminal on screen is marked as its row would be */
+.dir { position: relative; }
+.dir.holds { background: var(--sel); }
+.dir.holds::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--signal); }
 .dir .add { display: none; color: var(--ink2); padding: 0 4px; }
 .dir .add:hover { color: var(--ink); background: var(--hover); }
 .dir:hover .count { display: none; }
@@ -134,7 +160,7 @@ button:focus-visible, select:focus-visible { outline: 1px solid var(--signal); o
 .sq-idle { color: var(--green); } .sq-waiting { color: var(--amber); } .sq-exited { color: var(--ink3); }
 
 /* the key bar, htop style: the key in reverse with a 2px keycap edge, then what it does */
-.keybar { flex: none; position: relative; display: flex; gap: 2px 14px; padding: 8px 12px 10px; font-size: 11.5px; line-height: 18px; }
+.keybar { flex: none; position: relative; display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 8px 12px 10px; font-size: 11.5px; line-height: 18px; }
 .keybar::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); }
 .keybar button { color: var(--ink2); display: inline-flex; align-items: center; gap: 6px; }
 .keybar button b { font-weight: 400; color: var(--ink); background: #2e2e30; padding: 0 5px; position: relative; top: -1px; box-shadow: 0 2px 0 #0f0f10, inset 0 1px 0 #3d3d40; }

@@ -135,6 +135,56 @@ const pickedModels = (() => { try { return JSON.parse(recall("terminal.models") 
 const collapsed = new Set(JSON.parse(recall("terminal.collapsed") || "[]"));
 const expanded = new Set();  // folders showing all their sessions
 
+// ---------- the sidebar's width: its edge is dragged; past the left it closes to a rail ----------
+const SIDE = { width: 290, min: 220, closeBelow: 120 };
+let side = (() => {
+  try { return { width: SIDE.width, closed: false, ...JSON.parse(recall("terminal.side") || "{}") }; } catch { return { width: SIDE.width, closed: false }; }
+})();
+/** Room for the screen stays (the Mac window is at least 800 wide). */
+const sideWidth = (x) => Math.round(Math.max(SIDE.min, Math.min(x, 560, innerWidth - 420)));
+function applySide() {
+  document.documentElement.style.setProperty("--side-w", `${sideWidth(side.width)}px`);
+  document.body.classList.toggle("side-closed", side.closed);
+}
+function setSide(next) {
+  side = { ...side, ...next };
+  remember("terminal.side", JSON.stringify(side));
+  applySide();
+}
+const toggleSide = () => setSide({ closed: !side.closed });
+applySide();
+addEventListener("resize", applySide);
+// A drag follows the pointer (the screen refits as it goes); let go left of `closeBelow` and the list closes. On the
+// rail, a click opens it again where it was, a drag pulls it out.
+$("sideGrip").addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || narrow.matches) return;
+  e.preventDefault();
+  const grip = e.currentTarget, from = e.clientX, wasClosed = side.closed;
+  let moved = false;
+  grip.setPointerCapture(e.pointerId);
+  document.body.classList.add("side-dragging");
+  const move = (ev) => {
+    moved ||= Math.abs(ev.clientX - from) > 3;
+    if (!moved) return;
+    const closing = ev.clientX < SIDE.closeBelow;
+    document.body.classList.toggle("side-closed", closing);
+    if (!closing) document.documentElement.style.setProperty("--side-w", `${sideWidth(ev.clientX)}px`);
+  };
+  const end = (ev) => {
+    grip.removeEventListener("pointermove", move);
+    grip.removeEventListener("pointerup", end);
+    grip.removeEventListener("pointercancel", end);
+    document.body.classList.remove("side-dragging");
+    if (ev.type === "pointercancel") { applySide(); return; }
+    if (!moved) { if (wasClosed) setSide({ closed: false }); return; }
+    setSide(ev.clientX < SIDE.closeBelow ? { closed: true } : { closed: false, width: sideWidth(ev.clientX) });
+  };
+  grip.addEventListener("pointermove", move);
+  grip.addEventListener("pointerup", end);
+  grip.addEventListener("pointercancel", end);
+});
+$("sideGrip").addEventListener("dblclick", () => { if (!side.closed) setSide({ width: SIDE.width }); });
+
 // ---------- the screen ----------
 const style = await api("GET", "/terminals/style").catch(() => null);
 applyChrome(style);
@@ -500,9 +550,17 @@ async function deleteSession(s) {
   } catch (err) { notify(err.message); }
 }
 
+/** "▪2 5": running terminals (amber, blinking, while one waits for you — it may be folded away) · sessions. */
+/** A terminal just started or continued shows in the list: its folder (and the parent it sits under) open. */
+function unfold(cwd) {
+  const parent = cwd.replace(/\/[^/]*$/, "") || "/";
+  if (collapsed.delete(cwd) | collapsed.delete(`parent:${parent}`)) remember("terminal.collapsed", JSON.stringify([...collapsed]));
+}
+
 function counts(ts, ss) {
   const live = ts.filter((t) => t.status !== "exited").length;
-  return h("span", { class: "count" }, live ? h("b", {}, `▪${live}`) : null, ss.length ? String(ss.length) : null);
+  const waiting = ts.some((t) => t.status === "waiting");
+  return h("span", { class: "count" }, live ? h("b", { class: waiting ? "w blink" : "" }, `▪${live}`) : null, ss.length ? String(ss.length) : null);
 }
 
 function renderSidebar() {
@@ -514,16 +572,19 @@ function renderSidebar() {
     remember("terminal.collapsed", JSON.stringify([...collapsed]));
     renderSidebar();
   };
-  const holdsCurrent = (ts) => ts.some((t) => t.id === current?.id);
+  // Any folder folds, the one with the terminal on screen too (its line is marked instead); folded terminals keep
+  // their ⌘1–9.
+  const holds = (ts) => (ts.some((t) => t.id === current?.id && !creating) ? "holds" : "");
+  const skip = (ts) => { for (const t of ts) { terminalOrder.push(t.id); index++; } };
   const out = [];
   const renderGroup = (g, depth) => {
-    const closed = collapsed.has(g.cwd) && !holdsCurrent(g.terminals);
-    out.push(h("div", { class: "dir", title: tilde(g.cwd), style: `padding-left:calc(10px + ${depth * 2}ch)`, onclick: () => toggle(g.cwd) },
+    const closed = collapsed.has(g.cwd);
+    out.push(h("div", { class: `dir ${closed ? holds(g.terminals) : ""}`, title: tilde(g.cwd), style: `padding-left:calc(10px + ${depth * 2}ch)`, onclick: () => toggle(g.cwd) },
       h("span", { class: "chev" }, closed ? "▸" : "▾"),
       h("span", { class: "name" }, `${g.label}/`),
       counts(g.terminals, g.sessions),
       h("button", { class: "add", title: "new terminal here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, "+")));
-    if (closed) return;
+    if (closed) { skip(g.terminals); return; }
     const all = expanded.has(g.cwd);
     const list = all ? g.sessions : g.sessions.slice(0, SESSIONS_SHOWN);
     const hidden = g.sessions.length - list.length;
@@ -542,12 +603,12 @@ function renderSidebar() {
   for (const node of folderTree()) {
     if (!node.parent) { renderGroup(node.groups[0], 0); continue; }
     const key = `parent:${node.parent}`;
-    const closed = collapsed.has(key) && !holdsCurrent(node.terminals);
-    out.push(h("div", { class: "dir parent", title: tilde(node.parent), onclick: () => toggle(key) },
+    const closed = collapsed.has(key);
+    out.push(h("div", { class: `dir parent ${closed ? holds(node.terminals) : ""}`, title: tilde(node.parent), onclick: () => toggle(key) },
       h("span", { class: "chev" }, closed ? "▸" : "▾"),
       h("span", { class: "name" }, `${node.label}/`),
       counts(node.terminals, node.groups.flatMap((g) => g.sessions))));
-    if (!closed) for (const g of node.groups) renderGroup(g, 1);
+    if (closed) skip(node.terminals); else for (const g of node.groups) renderGroup(g, 1);
   }
   $("groups").replaceChildren(...(out.length ? out : [h("div", { class: "empty-note" }, "暂无会话。")]));
 }
@@ -563,8 +624,10 @@ function markState() {
 }
 function renderMark() {
   const [state, tag] = markState();
-  $("mark").innerHTML = mark({ px: 2, state, t: markFrame, depth: true });
-  $("markTag").textContent = tag;
+  // In the list's band, and in the top band while the list is closed.
+  $("mark").innerHTML = $("bandMark").innerHTML = mark({ px: 2, state, t: markFrame, depth: true });
+  $("markTag").textContent = $("bandTag").textContent = tag;
+  document.body.classList.toggle("any-waiting", state === "waiting");
 }
 
 /** The sealed reply's bar under the terminal: while one is on screen and running (the composer opens above it). */
@@ -645,6 +708,7 @@ async function start() {
     const { terminal } = await api("POST", "/terminals", { harness: pickedAgent, cwd, mode: pickedMode, ...(model ? { model } : {}), cols: term.cols, rows: term.rows });
     remember("terminal.agent", pickedAgent);
     remember("terminal.cwd", cwd);
+    unfold(terminal.cwd);
     await refresh();
     select(terminal.id, { loading: `starting ${AGENT[pickedAgent]}` });
   } catch (err) {
@@ -692,6 +756,7 @@ async function resume(s) {
       showLoading(`opening 「${name}」`);
       r = await api("POST", "/terminals/resume", { ...body, fork: true, cols: term.cols, rows: term.rows });
     }
+    unfold(r.terminal.cwd);
     await refresh();
     opening = null;
     select(r.terminal.id, r.existing ? {} : { loading: `opening 「${name}」` });
@@ -781,6 +846,7 @@ function shortcut(e) {
   const key = e.key.toLowerCase();
   const asking = $("toasts").childElementCount > 0 && current;
   if (key === "t" && !e.shiftKey) return () => showCreate();
+  if (key === "b" && !e.shiftKey) return () => (narrow.matches ? document.body.classList.toggle("list-open") : toggleSide());
   if (key === "w" && !e.shiftKey && current && !creating) return () => closeTerminal(current);
   if (key === "v" && e.shiftKey) return () => openComposer();
   if (e.key === "Enter" && asking) return () => decideFirst("allow");
@@ -811,6 +877,7 @@ $("sealLock").innerHTML = sprite(LOCK, { px: 2 });
 $("composerLock").innerHTML = sprite(LOCK, { px: 2 });
 $("newBtn").addEventListener("click", () => showCreate());
 $("closeBtn").addEventListener("click", () => current && !creating && closeTerminal(current));
+$("hideBtn").addEventListener("click", () => (narrow.matches ? document.body.classList.remove("list-open") : toggleSide()));
 $("sealBar").addEventListener("click", () => ($("composer").hidden ? openComposer() : closeComposer()));
 $("menuBtn").addEventListener("click", () => document.body.classList.toggle("list-open"));
 $("createStart").addEventListener("click", start);
@@ -832,7 +899,7 @@ if (native) {
   $("chooseFolder").addEventListener("click", () => native.postMessage({ type: "chooseFolder", path: $("cwd").value }));
   window.agentswitch = {
     folderChosen: (path) => { $("cwd").value = tilde(path); $("createStart").focus(); },
-    // ⌘W, ⌘T, ⌘1–9 as the window hands them over (a menu would take them first otherwise).
+    // ⌘W, ⌘T, ⌘B, ⌘1–9 as the window hands them over (a menu would take them first otherwise).
     shortcut: (key) => shortcut({ metaKey: true, shiftKey: false, key })?.(),
     // ⌘A: the terminal's own selection when it has the keyboard, else the field in focus.
     selectAll: () => (document.activeElement === term.textarea ? term.selectAll() : document.execCommand("selectAll")),
