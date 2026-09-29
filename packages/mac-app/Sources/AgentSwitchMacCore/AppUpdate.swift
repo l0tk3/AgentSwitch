@@ -101,6 +101,17 @@ public enum AppUpdate {
             throw error
         }
         try? fm.removeItem(at: staged.deletingLastPathComponent())
+        refreshIcon(app)
+    }
+
+    /// The Dock and Finder keep the old bundle's icon for the same path (2026-09-29: the new icon did not show after an
+    /// update): the bundle is marked changed and registered again, so the icon is read afresh.
+    static func refreshIcon(_ app: URL) {
+        let now = Date()
+        for url in [app, app.appendingPathComponent("Contents"), app.appendingPathComponent("Contents/Info.plist")] {
+            try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: url.path)
+        }
+        _ = LSRegisterURL(app as CFURL, true)
     }
 
     /// The previous bundle back in place; the one that did not start is kept as failed-AgentSwitch.app for a look.

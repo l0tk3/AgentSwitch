@@ -1,18 +1,23 @@
 import AgentSwitchMacCore
 import AppKit
+import OSLog
 import SwiftUI
 import WebKit
+
+/// `log show --predicate 'subsystem == "com.agentswitch.mac" && category == "terminal-window"'`
+private let windowLog = Logger(subsystem: "com.agentswitch.mac", category: "terminal-window")
 
 /// The terminal window (docs/terminal-v0.md §1, Mac): AgentSwitch's own terminals — list, live screen, permission
 /// requests, sealed replies, full keyboard. v0 shows the daemon's terminal page in a web view signed in through a
 /// one-time console link, in a data store of its own (the page's remembered choices survive; the session cookie is
 /// only good until the daemon restarts); a native
 /// SwiftTerm view comes later. One dark surface: a native toolbar (52 pt, the traffic lights centred in it) over the
-/// page, in the page's black — the list's button, the terminal on screen as the title, new terminal and all the
-/// terminals' mark (docs/design/visual-v1/terminal.html); the page says what they show and does what they ask.
+/// page, in the page's black, its items flat on it (no glass) — the list's button, the terminal on screen as the
+/// title, new terminal and all the terminals' mark (docs/design/visual-v1/terminal.html); the page says what they show
+/// and does what they ask.
 /// Closing the window leaves the terminals running: the daemon holds them.
 @MainActor
-final class TerminalWindowController: NSObject, WKNavigationDelegate, NSToolbarDelegate {
+final class TerminalWindowController: NSObject, WKNavigationDelegate {
     private let model: AppModel
     private(set) var window: NSWindow?
     /// Told when the window opens (true) or closes (false), for the Dock icon.
@@ -25,6 +30,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate, NSToolbarD
     private var lastSignIn = Date.distantPast
     /// What the toolbar shows, as the page reports it.
     let head = TerminalHead()
+    private weak var webView: TerminalWebView?
 
     static let page = "/ui/terminal.html"
     /// This window's own website data: the page remembers the agent, folder and permission mode chosen last.
@@ -84,7 +90,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate, NSToolbarD
         web.setValue(false, forKey: "drawsBackground")
         web.underPageBackgroundColor = Self.background
 
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.contentSize),
+        let window = TerminalNSWindow(contentRect: NSRect(origin: .zero, size: Self.contentSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
         window.title = "terminal"
@@ -93,14 +99,16 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate, NSToolbarD
         window.titlebarSeparatorStyle = .none
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = Self.background
-        let toolbar = NSToolbar(identifier: "AgentSwitchTerminal")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsUserCustomization = false
-        toolbar.centeredItemIdentifiers = [.terminalTitle]
-        window.toolbar = toolbar
+        // The toolbar comes from SwiftUI (its items can go without the glass background) into this window.
+        let host = NSHostingController(rootView: TerminalWindowRoot(web: web, head: head,
+                                                                    toggleList: { [weak web] in web?.evaluateJavaScript("window.agentswitch?.toggleList()", completionHandler: nil) },
+                                                                    newTerminal: { [weak web] in web?.evaluateJavaScript("window.agentswitch?.newTerminal()", completionHandler: nil) }))
+        host.sceneBridgingOptions = [.toolbars]
+        host.sizingOptions = []
+        window.contentViewController = host
+        window.setContentSize(Self.contentSize)
         window.toolbarStyle = .unified
-        window.contentView = web
+        webView = web
         // Wider than the page's narrow layout (760 pt, terminal.css): the sidebar stays on screen at the smallest size.
         window.minSize = NSSize(width: 800, height: 480)
         window.isReleasedWhenClosed = false
@@ -122,44 +130,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate, NSToolbarD
         window.makeKeyAndOrderFront(nil)
     }
 
-    private var webView: TerminalWebView? { window?.contentView as? TerminalWebView }
-
     // MARK: toolbar
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.terminalList, .flexibleSpace, .terminalTitle, .flexibleSpace, .terminalNew, .terminalMark]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { toolbarDefaultItemIdentifiers(toolbar) }
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        let item = NSToolbarItem(itemIdentifier: id)
-        switch id {
-        case .terminalList:
-            item.image = PixelImage.template(PixelArt.toolbarList)
-            item.label = "list"
-            item.toolTip = "list ⌘B"
-            item.action = #selector(toggleList)
-        case .terminalNew:
-            item.image = PixelImage.template(PixelArt.toolbarNew)
-            item.label = "new"
-            item.toolTip = "new terminal ⌘T"
-            item.action = #selector(newTerminal)
-        case .terminalTitle:
-            item.view = NSHostingView(rootView: TerminalTitleView(head: head))
-            item.label = "terminal"
-        case .terminalMark:
-            item.view = NSHostingView(rootView: TerminalMarkView(head: head))
-            item.label = "status"
-        default:
-            return nil
-        }
-        item.target = self
-        return item
-    }
-
-    @objc private func toggleList() { webView?.evaluateJavaScript("window.agentswitch?.toggleList()", completionHandler: nil) }
-    @objc private func newTerminal() { webView?.evaluateJavaScript("window.agentswitch?.newTerminal()", completionHandler: nil) }
 
     /// The page's report: the terminal on screen, all the terminals' mark, where its screen is (for the wheel).
     fileprivate func pageSaid(_ body: [String: Any]) {
@@ -174,6 +145,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate, NSToolbarD
             let r = body["rect"] as? [Double]
             webView?.screenRect = r.flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
             if let cell = body["cell"] as? Double, cell > 0 { webView?.cellHeight = cell }
+            windowLog.debug("screen \(String(describing: self.webView?.screenRect), privacy: .public) cell \(String(describing: body["cell"]), privacy: .public)")
         default:
             break
         }
@@ -251,6 +223,8 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
             MainActor.assumeIsolated { owner?.signIn() }
         case "head", "mark", "screen":
             MainActor.assumeIsolated { owner?.pageSaid(body) }
+        case "log":
+            windowLog.notice("page: \(body["text"] as? String ?? "", privacy: .public)")
         default:
             break
         }
@@ -278,6 +252,21 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
+/// The terminal window: it sees every scroll event first and lets the web view take the ones over the terminal screen
+/// (WebKit's own subviews would otherwise get them and give the page nothing).
+final class TerminalNSWindow: NSWindow {
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .scrollWheel, let web = contentView.flatMap(Self.web(in:)), web.takeWheel(event) { return }
+        super.sendEvent(event)
+    }
+
+    private static func web(in view: NSView) -> TerminalWebView? {
+        if let web = view as? TerminalWebView { return web }
+        for sub in view.subviews { if let web = web(in: sub) { return web } }
+        return nil
+    }
+}
+
 /// A menu bar app has no Edit menu, so ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z never reach the page on their own: send them here.
 final class TerminalWebView: WKWebView {
     /// The terminal's screen in the page (its coordinates, top left origin), while one is shown; its line height.
@@ -286,15 +275,26 @@ final class TerminalWebView: WKWebView {
     private var notches = WheelNotches()
 
     /// WebKit gives the page no scroll events in this window (a titled one; a borderless one does get them), so over
-    /// the terminal the wheel is taken here and handed to the page as notches — the page sends them to a program that
-    /// scrolls itself or scrolls its own history (docs/terminal-v0.md). Elsewhere (the list) it scrolls as usual.
-    override func scrollWheel(with event: NSEvent) {
+    /// the terminal the window hands the wheel here (TerminalNSWindow, before any of WebKit's own views sees it) and it
+    /// goes to the page as notches — the page sends them to a program that scrolls itself or scrolls its own history
+    /// (docs/terminal-v0.md). Elsewhere (the list) it scrolls as usual. True when taken.
+    func takeWheel(_ event: NSEvent) -> Bool {
         let local = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(local) else { return false }
         let point = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
-        guard let screen = screenRect, screen.contains(point) else { return super.scrollWheel(with: event) }
+        guard let screen = screenRect, screen.contains(point) else {
+            windowLog.debug("wheel at \(point.x, privacy: .public),\(point.y, privacy: .public) outside the screen \(String(describing: self.screenRect), privacy: .public)")
+            return false
+        }
         let n = notches.add(deltaY: Double(event.scrollingDeltaY), precise: event.hasPreciseScrollingDeltas,
                             began: event.phase == .began, lineHeight: Double(cellHeight))
-        if n != 0 { evaluateJavaScript("window.agentswitch?.wheel(\(n))", completionHandler: nil) }
+        windowLog.debug("wheel \(event.scrollingDeltaY, privacy: .public) precise \(event.hasPreciseScrollingDeltas, privacy: .public) → \(n, privacy: .public) notches")
+        if n != 0 {
+            evaluateJavaScript("window.agentswitch?.wheel(\(n))") { result, error in
+                if let error { windowLog.error("wheel to the page failed: \(error.localizedDescription, privacy: .public)") }
+            }
+        }
+        return true
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -324,11 +324,71 @@ final class TerminalWebView: WKWebView {
     }
 }
 
-extension NSToolbarItem.Identifier {
-    static let terminalList = NSToolbarItem.Identifier("terminal.list")
-    static let terminalTitle = NSToolbarItem.Identifier("terminal.title")
-    static let terminalNew = NSToolbarItem.Identifier("terminal.new")
-    static let terminalMark = NSToolbarItem.Identifier("terminal.mark")
+/// The window's content: the page, and the toolbar's items — flat on the window's black, without the glass
+/// background macOS 26 gives toolbar items (it does not go with the pixel look): the list's button beside the traffic
+/// lights, the terminal on screen centred, new terminal and all the terminals' mark at the end.
+private struct TerminalWindowRoot: View {
+    let web: TerminalWebView
+    let head: TerminalHead
+    let toggleList: () -> Void
+    let newTerminal: () -> Void
+
+    var body: some View {
+        WebViewHost(web: web)
+            .background(Color.black)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    ToolbarPixelButton(rows: PixelArt.toolbarList, help: "list ⌘B", action: toggleList)
+                }
+                .flat()
+                ToolbarItem(placement: .principal) { TerminalTitleView(head: head) }
+                    .flat()
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: 6) {
+                        ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "new terminal ⌘T", action: newTerminal)
+                        TerminalMarkView(head: head)
+                    }
+                }
+                .flat()
+            }
+    }
+}
+
+private extension ToolbarContent {
+    /// Without the shared glass background (macOS 26 and later; earlier toolbars have none).
+    @ToolbarContentBuilder
+    func flat() -> some ToolbarContent {
+        if #available(macOS 26.0, *) { sharedBackgroundVisibility(.hidden) } else { self }
+    }
+}
+
+/// The page's web view, as it is (the window keeps it; SwiftUI only places it).
+private struct WebViewHost: NSViewRepresentable {
+    let web: TerminalWebView
+    func makeNSView(context: Context) -> TerminalWebView { web }
+    func updateNSView(_ view: TerminalWebView, context: Context) {}
+}
+
+/// A toolbar button as a pixel icon (1 pt cells) on the black: secondary ink, brighter with a faint square behind it
+/// under the pointer, as the demo page's.
+private struct ToolbarPixelButton: View {
+    let rows: [String]
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            PixelSprite(rows: rows, pixel: 1, color: hovering ? .primary : .secondary)
+                .frame(width: 32, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(hovering ? 0.08 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
 }
 
 /// What the toolbar shows, from the page: the terminal on screen (none while one is being made) and all the terminals'
@@ -371,7 +431,8 @@ private struct TerminalTitleView: View {
                 Text(head.name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
             }
         }
-        .frame(maxWidth: 420)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: 460)
     }
 }
 
@@ -385,19 +446,5 @@ private struct TerminalMarkView: View {
             PixelMarkView(state: head.mark, pixel: 2, depth: true)
         }
         .padding(.horizontal, 4)
-    }
-}
-
-/// A pixel sprite as a template image (the toolbar tints it; 1 pt cells stay whole pixels on any screen).
-enum PixelImage {
-    static func template(_ rows: [String], cell: CGFloat = 1) -> NSImage {
-        let size = NSSize(width: CGFloat(rows.first?.count ?? 0) * cell, height: CGFloat(rows.count) * cell)
-        let image = NSImage(size: size, flipped: true) { _ in
-            NSColor.black.setFill()
-            for p in PixelArt.sprite(rows) { NSRect(x: CGFloat(p.x) * cell, y: CGFloat(p.y) * cell, width: cell, height: cell).fill() }
-            return true
-        }
-        image.isTemplate = true
-        return image
     }
 }

@@ -297,9 +297,10 @@ term.attachCustomWheelEventHandler((ev) => {
 });
 /** Notches from the Mac window (up positive): to a program that scrolls itself, else through this screen's history. */
 function wheelNotches(n) {
-  if (!n || !current || current.status === "exited" || creating) return;
-  if (term.modes.mouseTrackingMode === "none" && term.buffer.active.type !== "alternate") term.scrollLines(-3 * n);
-  else queueWheel(-n);
+  const took = !n || !current || current.status === "exited" || creating ? "none"
+    : term.modes.mouseTrackingMode === "none" && term.buffer.active.type !== "alternate" ? "history" : "program";
+  if (took === "history") term.scrollLines(-3 * n);
+  else if (took === "program") queueWheel(-n);
 }
 /** Notches (up negative, as deltaY) sent together, 20 at most a request. */
 function queueWheel(n) {
@@ -312,7 +313,7 @@ function queueWheel(n) {
       const count = Math.min(20, Math.abs(wheelQueued));
       const key = wheelQueued < 0 ? "wheel-up" : "wheel-down";
       wheelQueued -= Math.sign(wheelQueued) * count;
-      await api("POST", `/terminals/${id}/keys`, { keys: Array(count).fill(key) }).catch((e) => notify(e.message));
+      await api("POST", `/terminals/${id}/keys`, { keys: Array(count).fill(key) }).catch((e) => { native?.postMessage({ type: "log", text: `wheel keys failed: ${e.message}` }); notify(e.message); });
     }
     wheelQueued = 0;
     wheelSending = false;

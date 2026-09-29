@@ -1,10 +1,11 @@
 import Foundation
 
 /// Scroll-wheel movement as the notches a terminal program takes (docs/terminal-v0.md, the Mac window). The web view
-/// in the Mac window hands its page no scroll events, so the window turns them into notches itself, as iTerm does: a
-/// wheel's click is at least one notch (macOS reports a slow click as a tenth of a line) and a fast spin a notch a line;
-/// a trackpad or Magic Mouse gives one notch as a movement begins, then one per two lines of travel (its momentum
-/// included). Up — back through what the program showed — is positive.
+/// in the Mac window hands its page no scroll events, so the window turns them into notches itself, as iTerm does. A
+/// program moves about three lines a notch, so: a wheel's click is one notch (macOS reports a slow click as a tenth of
+/// a line) and a fast spin, which macOS speeds up to ten lines an event, a notch per three; a trackpad or Magic Mouse
+/// gives one notch as a movement begins, then one per three lines of travel (its momentum included) — the text
+/// follows the finger. Up — back through what the program showed — is positive.
 public struct WheelNotches: Sendable {
     private var travel: Double = 0
 
@@ -17,7 +18,7 @@ public struct WheelNotches: Sendable {
         let sign = deltaY > 0 ? 1 : -1
         guard precise else {
             travel = 0
-            return sign * max(1, min(10, Int(abs(deltaY).rounded())))
+            return sign * max(1, min(5, Int((abs(deltaY) / 3).rounded())))
         }
         if began {
             travel = 0
@@ -25,7 +26,7 @@ public struct WheelNotches: Sendable {
         }
         if travel != 0 && (travel > 0) != (deltaY > 0) { travel = 0 }   // turned around mid-movement
         travel += deltaY
-        let step = 2 * max(8, lineHeight)
+        let step = 3 * max(8, lineHeight)
         let notches = Int(travel / step)
         travel -= Double(notches) * step
         return notches
