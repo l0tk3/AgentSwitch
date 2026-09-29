@@ -36,7 +36,7 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 .note { color: #8e8e93; font-size: 12px; max-width: 1100px; text-align: center; }
 
 /* ---------- the window ---------- */
-.win { --side-w: var(--side-open, 300px); position: relative; width: min(1180px, 100%); height: 720px; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: 52px minmax(0, 1fr); background: var(--bg); border-radius: 10px; overflow: hidden;
+.win { --side-w: var(--side-open, 300px); position: relative; width: min(1180px, 100%); height: 720px; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: 32px minmax(0, 1fr); background: var(--bg); border-radius: 10px; overflow: hidden;
   box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); font-family: var(--mono); }
 .side { grid-column: 1; grid-row: 2; position: relative; display: flex; flex-direction: column; min-height: 0; font-size: 12.5px; line-height: 22px;
   /* faint scanlines: the chrome reads as part of the same screen */
@@ -45,13 +45,12 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 .side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink4) 0 2px, transparent 2px 4px); }
 /* The list's width: drag its dotted edge (a double click puts it back); past the left edge it closes, and the toolbar's
    list button or ⌘B brings it back. */
-/* The window's toolbar, as a Mac app's (the native NSToolbar in the app: the system centres the traffic lights, drags
-   the window and draws the buttons with SF Symbols, which system controls keep): 52 pt; the list's button beside the
-   lights; the terminal on screen as the window's title, centred, with its status mark (nothing while one is being
+/* The window's bar: the title bar's one row, as iTerm's compact tabs (2026-09-30, user: 顶栏太宽了; it was a 52 pt
+   toolbar): 32 pt, the traffic lights centred in it; the list's button beside the lights; the terminal on screen as the window's title, centred, with its status mark (nothing while one is being
    made: the panel says so); actions at the right — new terminal, then all the terminals' mark — with room for more. */
 .bar { position: relative; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; font-family: var(--ui); }
 .bar .lights { margin-right: 18px; }
-.tb { display: grid; place-items: center; width: 32px; height: 28px; border-radius: 7px; color: var(--ink2); background: none; border: 0; padding: 0; cursor: default; }
+.tb { display: grid; place-items: center; width: 28px; height: 24px; border-radius: 6px; color: var(--ink2); background: none; border: 0; padding: 0; cursor: default; }
 .tb:hover { color: var(--ink); background: rgba(255,255,255,.08); }
 .win.closed.waiting #sidebtn { color: var(--amber); }
 .bar .title { position: absolute; left: 50%; transform: translateX(-50%); max-width: 42%; display: flex; align-items: center; gap: 8px; font: 600 13px var(--ui); color: var(--ink); white-space: nowrap; }
@@ -244,7 +243,7 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
   <a href="app.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">整体方向 →</a>
   <a href="depth.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">层次 →</a>
 </div>
-<div class="note">静态演示，不连服务。同一父目录下的项目合并成一层（Projects/、Worktop/）；点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，工具栏里红绿灯旁的按钮或 ⌘B 展开 / 收起。顶上是 Mac 应用标准的工具栏（52pt）：标题居中写当前终端，右侧 + 新建和总体状态。</div>
+<div class="note">静态演示，不连服务。同一父目录下的项目合并成一层（Projects/、Worktop/）；点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，红绿灯旁的按钮或 ⌘B 展开 / 收起。顶上是标题栏的一行（32pt，像 iTerm 的紧凑标签栏）：红绿灯旁是列表按钮，标题居中写当前终端，右侧 + 新建和总体状态。</div>
 
 <div class="win" id="win">
   <div class="bar"><div class="lights"><i></i><i></i><i></i></div>

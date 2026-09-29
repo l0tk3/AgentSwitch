@@ -256,19 +256,34 @@ term.unicode.activeVersion = "11";
 // twice the size on a Retina screen in testing).
 term.open($("screen"));
 
-// Keystrokes go straight in, a few at a time.
+// Keystrokes go straight in, a few at a time, one request after another: typed text and named keys (Shift+Enter)
+// reach the program in the order they were pressed.
 let pendingKeys = "";
 let keyTimer = null;
-term.onData((data) => {
+let sending = Promise.resolve();
+const inOrder = (send) => { sending = sending.then(send).catch((e) => notify(e.message)); };
+function flushKeys() {
+  clearTimeout(keyTimer);
+  keyTimer = null;
+  if (!pendingKeys || !current) return;
+  const data = pendingKeys, id = current.id;
+  pendingKeys = "";
+  inOrder(() => api("POST", `/terminals/${id}/write`, { data }));
+}
+function typed(data) {
   if (!current || current.status === "exited") return;
   pendingKeys += data;
   clearTimeout(keyTimer);
-  keyTimer = setTimeout(() => {
-    const data = pendingKeys;
-    pendingKeys = "";
-    api("POST", `/terminals/${current.id}/write`, { data }).catch((e) => notify(e.message));
-  }, 6);
-});
+  keyTimer = setTimeout(flushKeys, 6);
+}
+term.onData(typed);
+/** A key the service encodes as the program asked (keys.ts), after what was typed before it. */
+function namedKey(name) {
+  if (!current || current.status === "exited") return;
+  flushKeys();
+  const id = current.id;
+  inOrder(() => api("POST", `/terminals/${id}/keys`, { keys: [name] }));
+}
 // The wheel over a program that scrolls itself (every agent's full screen: it tracks the mouse, or sits on the
 // alternate screen). xterm turns wheel movement into notches at 30 % below 50 px an event, and WebKit (the Mac window)
 // reports a slow wheel click as about 4 px, so clicks and gentle swipes sent nothing. As iTerm: a new movement is one
@@ -319,8 +334,16 @@ function queueWheel(n) {
     wheelSending = false;
   })();
 }
-// A page shortcut is not the terminal's: xterm leaves it, and the document's listener runs it (once).
-term.attachCustomKeyEventHandler((e) => !(e.type === "keydown" && shortcut(e)));
+// A page shortcut is not the terminal's: xterm leaves it, and the document's listener runs it (once). Shift+Enter is a
+// new line in the agent's prompt: xterm would send it as a plain Enter, and the prompt would go.
+const shiftEnter = (e) => e.key === "Enter" && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !e.isComposing;
+term.attachCustomKeyEventHandler((e) => {
+  if (shiftEnter(e)) {
+    if (e.type === "keydown") { e.preventDefault(); namedKey("shift-enter"); }
+    return false;
+  }
+  return !(e.type === "keydown" && shortcut(e));
+});
 
 /** This window's size for terminal `id`: fit the screen and tell the service when it differs. True when it did (the
  *  size change makes the agent draw again). */
@@ -338,13 +361,25 @@ function fitTo(id) {
 }
 
 function fitAndTell() {
-  if (!current || creating) return;
+  if (!current || creating || !inUse()) return;
   fit.fit();
   if (term.cols !== current.cols || term.rows !== current.rows) {
     api("POST", `/terminals/${current.id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined);
+    current.cols = term.cols;
+    current.rows = term.rows;
   }
 }
 new ResizeObserver(() => { clearTimeout(fitAndTell.t); fitAndTell.t = setTimeout(fitAndTell, 80); }).observe($("stage"));
+// The screen in use sets a terminal's size (2026-09-30): one nobody is looking at (a browser tab in the background,
+// a window behind) follows the size and never changes it; coming back to this one, typing or clicking in it fits the
+// terminal here again, after the phone or another window had it.
+let nativeActive = null;   // the Mac window says when it is the key window (window.agentswitch.active)
+function inUse() { return (nativeActive ?? document.hasFocus()) && !document.hidden; }
+const reclaim = () => fitAndTell();
+addEventListener("focus", reclaim);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) reclaim(); });
+term.textarea.addEventListener("keydown", reclaim, true);
+$("screen").addEventListener("mousedown", reclaim, true);
 
 // ---------- feedback: loading, notices, confirmations ----------
 let loadingTimer = null;
@@ -414,7 +449,8 @@ function select(id, { loading = null } = {}) {
   if (loading) showLoading(loading); else hideLoading();
   term.reset();
   fit.fit();
-  api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined).finally(() => follow(id));
+  // Only the screen in use changes the size; another follows it (the snapshot brings it).
+  (inUse() ? api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined) : Promise.resolve()).finally(() => follow(id));
   render();
   term.focus();
   remember("terminal.last", id);
@@ -442,7 +478,7 @@ function follow(id) {
     if (paints(ev.data)) hideLoading();
     // Drawn at the size it had (another window, the phone); now fit this window and have the agent redraw to it —
     // also when the size is the same, since a snapshot drops what the agent drew as links (its status line).
-    setTimeout(() => { if (!fitTo(id) && current?.id === id && current.status !== "exited") api("POST", `/terminals/${id}/redraw`).catch(() => undefined); }, 0);
+    setTimeout(() => { if (!(inUse() && fitTo(id)) && current?.id === id && current.status !== "exited") api("POST", `/terminals/${id}/redraw`).catch(() => undefined); }, 0);
   });
   on("output", (ev) => {
     if (ev.seq <= lastSeq) return;
@@ -997,6 +1033,8 @@ if (native) {
     shortcut: (key) => shortcut({ metaKey: true, shiftKey: false, key })?.(),
     // ⌘A: the terminal's own selection when it has the keyboard, else the field in focus.
     selectAll: () => (document.activeElement === term.textarea ? term.selectAll() : document.execCommand("selectAll")),
+    // The window became the key window, or stopped being it (the screen in use sets the size).
+    active: (on) => { nativeActive = on; if (on) reclaim(); },
     // The toolbar's buttons.
     toggleList: () => toggleList(),
     newTerminal: () => showCreate(),

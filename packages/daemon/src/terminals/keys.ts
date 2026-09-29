@@ -1,7 +1,7 @@
 /** The key bar of the phone and the web page (docs/terminal-v0.md §1): named keys, sent as the bytes a terminal
  *  keyboard would. Arrow keys follow the program's cursor-key mode; the wheel follows its mouse mode. */
 
-export const KEY_NAMES = ["esc", "tab", "shift-tab", "enter", "backspace", "up", "down", "left", "right", "pgup", "pgdn", "wheel-up", "wheel-down",
+export const KEY_NAMES = ["esc", "tab", "shift-tab", "enter", "shift-enter", "backspace", "up", "down", "left", "right", "pgup", "pgdn", "wheel-up", "wheel-down",
   "ctrl-c", "ctrl-d", "ctrl-l", "ctrl-r", "y", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 export type KeyName = (typeof KEY_NAMES)[number];
 
@@ -16,6 +16,8 @@ export type KeyContext = {
   readonly alternate: boolean;
   readonly cols: number;
   readonly rows: number;
+  /** The program turned on the kitty keyboard protocol (Codex and pi do): it reads modified keys as `CSI … u`. */
+  readonly kittyKeys?: boolean;
 };
 
 const FIXED: Partial<Record<KeyName, string>> = {
@@ -28,6 +30,10 @@ export function keySequence(name: KeyName, ctx: KeyContext): string {
   const arrow = ARROWS[name];
   if (arrow) return ctx.applicationCursor ? `\x1bO${arrow}` : `\x1b[${arrow}`;
   if (name === "wheel-up" || name === "wheel-down") return wheel(name === "wheel-up", ctx);
+  // A new line in the agent's prompt, not a send (xterm gives Shift+Enter as a plain Enter): `CSI 13;2u` to a program
+  // that reads the kitty protocol, else a line feed (Ctrl+J), which Claude Code, Codex and OpenCode take as a new line
+  // too. Checked 2026-09-30 against all four; pi sends its prompt on a line feed, and has the protocol on.
+  if (name === "shift-enter") return ctx.kittyKeys ? "\x1b[13;2u" : "\n";
   return FIXED[name] ?? name;
 }
 

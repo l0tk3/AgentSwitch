@@ -11,10 +11,10 @@ private let windowLog = Logger(subsystem: "com.agentswitch.mac", category: "term
 /// requests, sealed replies, full keyboard. v0 shows the daemon's terminal page in a web view signed in through a
 /// one-time console link, in a data store of its own (the page's remembered choices survive; the session cookie is
 /// only good until the daemon restarts); a native
-/// SwiftTerm view comes later. One dark surface: a native toolbar (52 pt, the traffic lights centred in it) over the
-/// page, in the page's black, its items flat on it (no glass) — the list's button, the terminal on screen as the
-/// title, new terminal and all the terminals' mark (docs/design/visual-v1/terminal.html); the page says what they show
-/// and does what they ask.
+/// SwiftTerm view comes later. One dark surface: the title bar's one row (32 pt, as iTerm's compact tabs) over the
+/// page, in the page's black, beside the traffic lights — the list's button, the terminal on screen as the title, new
+/// terminal and all the terminals' mark (docs/design/visual-v1/terminal.html); the page says what they show and does
+/// what they ask.
 /// Closing the window leaves the terminals running: the daemon holds them.
 @MainActor
 final class TerminalWindowController: NSObject, WKNavigationDelegate {
@@ -23,6 +23,8 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
     /// Told when the window opens (true) or closes (false), for the Dock icon.
     var onVisibilityChange: (Bool) -> Void = { _ in }
     private var closeObserver: NSObjectProtocol?
+    /// The window becoming and ceasing to be the key window, told to the page (the screen in use sets the size).
+    private var keyObservers: [NSObjectProtocol] = []
     private var titleObservation: NSKeyValueObservation?
     /// A sign-in link is being fetched: a second click waits for that window instead of making another.
     private var opening = false
@@ -106,8 +108,10 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         web.setValue(false, forKey: "drawsBackground")
         web.underPageBackgroundColor = Self.background
 
+        // No toolbar (2026-09-30, user: 顶栏太宽了，像 iTerm 一样紧凑): the content runs under the title bar and the
+        // bar's items sit in its one row beside the traffic lights, 32 pt instead of the unified toolbar's 66.
         let window = TerminalNSWindow(contentRect: NSRect(origin: .zero, size: Self.contentSize),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "terminal"
         window.titleVisibility = .hidden
@@ -115,16 +119,21 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         window.titlebarSeparatorStyle = .none
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = Self.background
-        // The toolbar comes from SwiftUI (its items can go without the glass background) into this window.
         let host = NSHostingController(rootView: TerminalWindowRoot(web: web, head: head,
                                                                     toggleList: { [weak web] in web?.evaluateJavaScript("window.agentswitch?.toggleList()", completionHandler: nil) },
                                                                     newTerminal: { [weak web] in web?.evaluateJavaScript("window.agentswitch?.newTerminal()", completionHandler: nil) }))
-        host.sceneBridgingOptions = [.toolbars]
         host.sizingOptions = []
         window.contentViewController = host
         window.setContentSize(Self.contentSize)
-        window.toolbarStyle = .unified
+        // The title bar's height and where the traffic lights end, for the bar drawn in that row.
+        head.barHeight = max(28, window.frame.height - window.contentLayoutRect.height)
+        head.lightsEnd = window.standardWindowButton(.zoomButton)?.frame.maxX ?? 70
         webView = web
+        for (name, on) in [(NSWindow.didBecomeKeyNotification, true), (NSWindow.didResignKeyNotification, false)] {
+            keyObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak web] _ in
+                MainActor.assumeIsolated { web?.evaluateJavaScript("window.agentswitch?.active(\(on))", completionHandler: nil) }
+            })
+        }
         // Wider than the page's narrow layout (760 pt, terminal.css): the sidebar stays on screen at the smallest size.
         window.minSize = NSSize(width: 800, height: 480)
         window.isReleasedWhenClosed = false
@@ -171,6 +180,8 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
     private func closed() {
         if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
         closeObserver = nil
+        for observer in keyObservers { NotificationCenter.default.removeObserver(observer) }
+        keyObservers = []
         titleObservation = nil
         if let web = webView {
             web.navigationDelegate = nil
@@ -202,6 +213,47 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { signIn() }
+
+    #if DEBUG
+    /// `-designPreview`: the window's top as it opens — the bar in the title bar's row over a blank page, with a
+    /// terminal named and busy — drawn to `file` without going on screen.
+    static func previewBar(to file: URL) throws {
+        let head = TerminalHead()
+        head.name = "本地构建应用和手机连接"
+        head.status = "working"
+        head.mark = .busy
+        head.tag = "busy"
+        let web = TerminalWebView(frame: NSRect(origin: .zero, size: contentSize), configuration: WKWebViewConfiguration())
+        web.setValue(false, forKey: "drawsBackground")
+        let window = TerminalNSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 160),
+                                      styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = background
+        let host = NSHostingController(rootView: TerminalWindowRoot(web: web, head: head, toggleList: {}, newTerminal: {}))
+        host.sizingOptions = []
+        window.contentViewController = host
+        window.setContentSize(NSSize(width: 1000, height: 160))
+        head.barHeight = max(28, window.frame.height - window.contentLayoutRect.height)
+        head.lightsEnd = window.standardWindowButton(.zoomButton)?.frame.maxX ?? 70
+        let frame = window.contentView?.superview ?? window.contentView!
+        frame.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        frame.layoutSubtreeIfNeeded()
+        guard let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { return }
+        frame.cacheDisplay(in: frame.bounds, to: rep)
+        try rep.representation(using: .png, properties: [:])?.write(to: file)
+        window.close()
+    }
+    #endif
+
+    /// The page loaded: keys go to it, and it learns whether this is the window in use.
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let window else { return }
+        window.makeFirstResponder(webView)
+        webView.evaluateJavaScript("window.agentswitch?.active(\(window.isKeyWindow))", completionHandler: nil)
+    }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { signIn() }
 
@@ -340,9 +392,9 @@ final class TerminalWebView: WKWebView {
     }
 }
 
-/// The window's content: the page, and the toolbar's items — flat on the window's black, without the glass
-/// background macOS 26 gives toolbar items (it does not go with the pixel look): the list's button beside the traffic
-/// lights, the terminal on screen centred, new terminal and all the terminals' mark at the end.
+/// The window's content: the bar in the title bar's row, then the page. The bar, flat on the window's black as iTerm's
+/// compact tabs: the list's button beside the traffic lights, the terminal on screen centred, new terminal and all the
+/// terminals' mark at the end; its empty part moves the window and a double click zooms, as a title bar does.
 private struct TerminalWindowRoot: View {
     let web: TerminalWebView
     let head: TerminalHead
@@ -350,31 +402,42 @@ private struct TerminalWindowRoot: View {
     let newTerminal: () -> Void
 
     var body: some View {
-        WebViewHost(web: web)
-            .background(Color.black)
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
+        VStack(spacing: 0) {
+            ZStack {
+                WindowDragArea()
+                HStack(spacing: 4) {
                     ToolbarPixelButton(rows: PixelArt.toolbarList, help: "list ⌘B", action: toggleList)
+                    Spacer(minLength: 0)
+                    ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "new terminal ⌘T", action: newTerminal)
+                    TerminalMarkView(head: head)
                 }
-                .flat()
-                ToolbarItem(placement: .principal) { TerminalTitleView(head: head) }
-                    .flat()
-                ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 6) {
-                        ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "new terminal ⌘T", action: newTerminal)
-                        TerminalMarkView(head: head)
-                    }
-                }
-                .flat()
+                .padding(.leading, head.lightsEnd + 10)
+                .padding(.trailing, 8)
+                TerminalTitleView(head: head).allowsHitTesting(false)
             }
+            .frame(height: head.barHeight)
+            WebViewHost(web: web)
+        }
+        .background(Color.black)
+        .ignoresSafeArea(.container, edges: .top)
     }
 }
 
-private extension ToolbarContent {
-    /// Without the shared glass background (macOS 26 and later; earlier toolbars have none).
-    @ToolbarContentBuilder
-    func flat() -> some ToolbarContent {
-        if #available(macOS 26.0, *) { sharedBackgroundVisibility(.hidden) } else { self }
+/// The bar's empty part: it moves the window, and a double click does what the system's title bars do (zoom, minimise
+/// or nothing, System Settings › Desktop & Dock).
+private struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { DragView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    final class DragView: NSView {
+        override func mouseDown(with event: NSEvent) {
+            guard event.clickCount == 2 else { window?.performDrag(with: event); return }
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize": window?.performMiniaturize(nil)
+            case "None": break
+            default: window?.performZoom(nil)
+            }
+        }
     }
 }
 
@@ -396,7 +459,7 @@ private struct ToolbarPixelButton: View {
     var body: some View {
         Button(action: action) {
             PixelSprite(rows: rows, pixel: 1, color: hovering ? .primary : .secondary)
-                .frame(width: 32, height: 28)
+                .frame(width: 28, height: 24)
                 .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(hovering ? 0.08 : 0)))
                 .contentShape(Rectangle())
         }
@@ -416,6 +479,9 @@ final class TerminalHead {
     var status: String?
     var mark: PixelArt.MarkState = .off
     var tag = ""
+    /// The title bar's height (the bar fills that row) and where the traffic lights end.
+    var barHeight: CGFloat = 32
+    var lightsEnd: CGFloat = 70
 }
 
 extension PixelArt.MarkState {
@@ -459,7 +525,7 @@ private struct TerminalMarkView: View {
     var body: some View {
         HStack(spacing: 8) {
             if !head.tag.isEmpty { Text(head.tag).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary) }
-            PixelMarkView(state: head.mark, pixel: 2, depth: true)
+            PixelMarkView(state: head.mark, pixel: 1.5, depth: true)
         }
         .padding(.horizontal, 4)
     }

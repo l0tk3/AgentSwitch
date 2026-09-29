@@ -72,6 +72,23 @@ describe("terminal host", () => {
     expect(text(after)).not.toContain("\x1b[?1006h");
   });
 
+  it("follows the kitty keyboard protocol for Shift+Enter: CSI 13;2u while it is on, a line feed otherwise", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir(), cols: 80, rows: 20 });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    await until(() => text(events).includes("fake agent ready"));
+    expect(keySequence("shift-enter", host.keyContext(info.id))).toBe("\n");
+    host.write(info.id, "kitty\r");
+    await until(() => text(events).includes("kitty on"));
+    expect(host.keyContext(info.id).kittyKeys).toBe(true);
+    expect(keySequence("shift-enter", host.keyContext(info.id))).toBe("\x1b[13;2u");
+    host.write(info.id, "nokitty\r");
+    await until(() => text(events).includes("kitty off"));
+    expect(keySequence("shift-enter", host.keyContext(info.id))).toBe("\n");
+  });
+
   it("runs a program in a pseudo-terminal: output, title, replies, status by activity, replay, snapshot, exit", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false), idleAfterMs: 150 });
     closers.push(() => host.closeAll());

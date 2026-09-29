@@ -49,6 +49,7 @@ enum DesignPreview {
                     }
                 }
                 try LivePreview.render(into: directory)
+                try TerminalWindowController.previewBar(to: directory.appendingPathComponent("terminal-bar.png"))
                 FileHandle.standardError.write(Data("design preview written to \(directory.path)\n".utf8))
                 exit(0)
             } catch {

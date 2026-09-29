@@ -289,6 +289,8 @@ class Session {
   held = "";
   /** The program asked for mouse reports in SGR form. */
   sgrMouse = false;
+  /** The kitty keyboard protocol's flags, the current ones last. */
+  kitty: number[] = [];
   heldTimer: NodeJS.Timeout | null = null;
 
   constructor(readonly id: string, readonly harness: TerminalHarness, readonly cwd: string, readonly model: string | null, readonly mode: PermissionMode, readonly hookToken: string,
@@ -303,6 +305,17 @@ class Session {
     };
     this.term.parser.registerCsiHandler({ prefix: "?", final: "h" }, sgr(true));
     this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, sgr(false));
+    // The kitty keyboard protocol's flags, a stack the program pushes (`CSI > f u`), pops (`CSI < n u`) and sets
+    // (`CSI = f ; m u`). Its query (`CSI ? u`) goes unanswered: xterm encodes no other key that way, so Claude Code,
+    // which asks first, keeps the legacy keys.
+    const num = (p: number | number[] | undefined, d: number): number => (typeof p === "number" ? p : d);
+    this.term.parser.registerCsiHandler({ prefix: ">", final: "u" }, (params) => { this.kitty.push(num(params[0], 0)); return true; });
+    this.term.parser.registerCsiHandler({ prefix: "<", final: "u" }, (params) => { this.kitty.splice(-Math.max(1, num(params[0], 1))); return true; });
+    this.term.parser.registerCsiHandler({ prefix: "=", final: "u" }, (params) => {
+      const flags = num(params[0], 0), mode = num(params[1], 1), top = this.kitty.pop() ?? 0;
+      this.kitty.push(mode === 1 ? flags : mode === 2 ? top | flags : top & ~flags);
+      return true;
+    });
     this.title = "";
     this.lastOutputAt = createdAt;
     this.statusSince = createdAt;
@@ -428,7 +441,7 @@ export class TerminalHost {
   keyContext(id: string): KeyContext {
     const s = this.need(id);
     return { applicationCursor: s.term.modes.applicationCursorKeysMode, mouse: s.term.modes.mouseTrackingMode, sgrMouse: s.sgrMouse,
-      alternate: s.term.buffer.active.type === "alternate", cols: s.cols, rows: s.rows };
+      alternate: s.term.buffer.active.type === "alternate", cols: s.cols, rows: s.rows, kittyKeys: (s.kitty.at(-1) ?? 0) > 0 };
   }
 
   resize(id: string, cols: number, rows: number): void {
