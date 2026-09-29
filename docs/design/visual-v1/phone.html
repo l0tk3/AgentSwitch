@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentSwitch · iPhone 终端</title>
+<style>
+/* The iPhone's terminals with the desktop window's effects (terminal.html): glitch on change, the refresh when a screen
+   opens, the reveal, the blinks, hard shadows, scanlines, key caps. Every phone here is live. */
+:root {
+  color-scheme: dark;
+  --bg: #000; --panel: #0b0b0b; --raise: #151515;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  --px-shadow: #2c2a28;
+  --board: #1b1b1d; --board-ink: #e9e6df; --board-dim: #8e8e93; --board-line: #2a2a2d;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+.light {
+  --bg: #f3f1ea; --panel: #ebe8df; --raise: #e6e2d8;
+  --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3;
+  --signal: #e0106e; --cyan: #0086a8; --green: #3f8f00; --amber: #c27400; --red: #d7261b;
+  --px-shadow: #cfc9bc;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--board); color: var(--board-ink); font: 13px/1.5 var(--ui); padding-block: 28px 60px; padding-inline: 16px; }
+button { font: inherit; color: inherit; }
+.page { max-width: 1240px; margin: 0 auto; }
+.top { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.top h1 { font: 700 15px var(--mono); margin: 0; display: flex; gap: 12px; align-items: center; }
+.top nav { display: flex; gap: 8px; font: 12px var(--mono); color: var(--board-dim); align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--board-line); }
+.seg button { background: none; border: 0; padding: 2px 10px; color: var(--board-dim); cursor: pointer; }
+.seg button.on { background: var(--board-ink); color: #000; }
+.lede { color: #a9a6a0; max-width: 72ch; margin: 0 0 22px; font-size: 12.5px; line-height: 1.7; }
+.sec { font: 11px var(--mono); letter-spacing: .14em; color: #77746e; margin: 34px 0 12px; }
+
+/* ---------- the phones ---------- */
+.phones { display: flex; flex-wrap: wrap; gap: 28px 26px; justify-content: center; align-items: flex-start; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 12px; align-items: center; width: min(375px, 100%); }
+figcaption { width: 100%; display: flex; flex-direction: column; gap: 8px; }
+figcaption b { font: 700 12px var(--mono); color: #fff; }
+figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
+.tr { display: flex; flex-wrap: wrap; gap: 6px; }
+.tr button { background: #111; border: 1px solid var(--board-line); padding: 3px 9px; font: 11.5px var(--mono); color: #d8d4cc; cursor: pointer; }
+.tr button:hover { border-color: #8e8e93; }
+.phone { position: relative; width: 100%; max-width: 375px; height: 780px; border-radius: 50px; padding: 11px; background: #0a0a0b;
+  box-shadow: 0 0 0 1.5px #3a3a3e, 0 24px 60px rgba(0,0,0,.55); }
+.scr { position: relative; height: 100%; border-radius: 40px; overflow: hidden; background: var(--bg); color: var(--ink); font-family: var(--ui); isolation: isolate;
+  display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; }
+.status { flex: none; height: 44px; display: flex; justify-content: space-between; align-items: center; padding: 6px 28px 0 34px; font: 600 14px var(--ui); }
+.status i { font: 11px var(--mono); letter-spacing: 1px; font-style: normal; }
+.island { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); width: 108px; height: 30px; background: #000; border-radius: 16px; z-index: 30; }
+.navb { flex: none; height: 46px; display: grid; grid-template-columns: 60px 1fr 60px; align-items: center; padding: 0 14px; }
+.navb .t { text-align: center; font: 600 16px var(--ui); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.navb .t small { font: 11px var(--mono); color: var(--ink2); display: flex; gap: 5px; align-items: center; }
+.navb .l { justify-self: start; } .navb .r { justify-self: end; }
+.cap { background: none; border: 1px solid var(--ink4); padding: 4px 12px; font: 14px var(--mono); cursor: pointer; }
+.cap:active { background: var(--ink); color: var(--bg); }
+.tabbar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 4px; padding: 5px; border-radius: 30px;
+  background: color-mix(in srgb, var(--bg) 84%, transparent); box-shadow: 0 0 0 1px var(--ink4), 0 8px 24px rgba(0,0,0,.25); backdrop-filter: blur(12px); z-index: 5; }
+.tabbar span { width: 86px; height: 50px; border-radius: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 10.5px; position: relative; }
+.tabbar span.on { background: var(--raise); }
+.badge { position: absolute; top: 4px; right: 20px; min-width: 16px; height: 16px; border-radius: 8px; background: #ff3b30; color: #fff; font: 600 10px/16px var(--ui); text-align: center; padding: 0 4px; font-style: normal; }
+.mono { font-family: var(--mono); }
+.faint { color: var(--ink3); }
+.px { display: block; image-rendering: pixelated; }
+
+/* scanlines and dotted rules: the chrome reads as part of one screen (terminal.html .side) */
+.scan-bg { background-image: repeating-linear-gradient(to bottom, color-mix(in srgb, var(--ink) 4%, transparent) 0 1px, transparent 1px 3px); }
+.dots { height: 1px; flex: none; background: repeating-linear-gradient(to right, var(--ink3) 0 2px, transparent 2px 4px); }
+
+/* boxes on the cell grid: a 1 px ink frame, square corners, a dithered hard shadow */
+.box { position: absolute; background: var(--bg); border: 1px solid var(--ink); z-index: 20; font-family: var(--mono); }
+.box::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1;
+  background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.box .hd { display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 24px; font-size: 12px; }
+.box .hd .sp { flex: 1; }
+.box .bd { padding: 10px 12px 4px; font-size: 13px; line-height: 1.55; }
+.box .bd p { margin: 0 0 6px; font: 12.5px/1.6 var(--ui); color: var(--ink2); }
+.box .ft { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 8px 12px 10px; font-size: 12px; }
+.btn { font: 13px var(--mono); background: none; border: 0; padding: 3px 6px; cursor: pointer; white-space: nowrap; }
+.btn.pri { background: var(--ink); color: var(--bg); }
+.btn.pri:active { background: var(--signal); }
+.hd.amber { background: var(--amber); color: #000; } .hd.pink { background: var(--signal); color: #000; } .hd.red { background: var(--red); color: #000; }
+.menu { min-width: 150px; }
+.menu button { display: flex; width: 100%; justify-content: space-between; background: none; border: 0; padding: 7px 12px; font: 13px var(--mono); cursor: pointer; text-align: left; }
+.menu button:active { background: var(--ink); color: var(--bg); }
+.menu button.bad { color: var(--red); }
+.veil { position: absolute; inset: 0; background: rgba(0,0,0,.45); z-index: 19; }
+.veil.clear { background: transparent; }
+
+/* ---------- the terminals list ---------- */
+.list { flex: 1; overflow-y: auto; padding: 4px 16px 90px; font-family: var(--mono); scrollbar-width: none; }
+.list::-webkit-scrollbar { display: none; }
+.dir { display: flex; gap: 8px; align-items: baseline; padding: 12px 0 4px; cursor: pointer; font-weight: 600; font-size: 13px; }
+.dir.parent { font-weight: 400; color: var(--ink3); font-size: 12px; }
+.dir .n { font-weight: 400; color: var(--ink3); font-size: 11px; }
+.row { display: flex; gap: 8px; align-items: center; padding: 7px 0; font-size: 14px; cursor: pointer; }
+.row .tree { color: var(--ink3); font-size: 13px; white-space: pre; }
+.row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--ui); }
+.row.sess .nm { color: var(--ink2); }
+.row .when { font-size: 11px; color: var(--ink3); white-space: nowrap; }
+.row .act { font-size: 12px; }
+.row .chev { color: var(--ink3); }
+.row.held { background: var(--raise); }
+.more { color: var(--ink2); font-size: 12px; }
+.in { animation: rowin .2s steps(1) both; }
+@keyframes rowin { 0% { opacity: 0; } 100% { opacity: 1; } }
+.gone { animation: wipeout .2s steps(5) forwards; }
+@keyframes wipeout { from { clip-path: inset(0 0 0 0); } to { clip-path: inset(0 0 100% 0); } }
+
+/* ---------- status marks ---------- */
+.sq { display: inline-block; width: 8px; height: 8px; flex: none; }
+.sq.hollow { box-shadow: inset 0 0 0 2px var(--ink3); }
+.blinker { animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.spin { display: inline-block; width: 9px; color: var(--cyan); font-family: var(--mono); }
+
+/* ---------- the new terminal sheet ---------- */
+.sheet { flex: 1; margin-top: 8px; border-radius: 22px 22px 0 0; background: var(--bg); box-shadow: 0 -1px 0 var(--ink4); display: flex; flex-direction: column; overflow: hidden; }
+.sheet .body { flex: 1; overflow-y: auto; padding: 4px 16px 24px; font-family: var(--mono); scrollbar-width: none; }
+.sheet .body::-webkit-scrollbar { display: none; }
+.banner { height: 48px; display: flex; align-items: center; font-size: 4.9px; line-height: 4.9px; white-space: pre; margin: 4px 0 4px; overflow: hidden; }
+.banner .on { color: var(--ink); } .banner .hot { color: var(--signal); } .banner .off { color: var(--ink4); }
+.label { font-size: 11px; letter-spacing: .16em; color: var(--ink3); margin: 16px 0 8px; }
+.agents { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.agent { border: 1px solid var(--ink4); padding: 12px; display: flex; flex-direction: column; gap: 10px; cursor: pointer; font: 13px var(--mono); background: none; text-align: left; }
+.agent:active { background: var(--raise); border-color: var(--ink); }
+.agent.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.agent.on .px { color: var(--signal); }
+.agent.off { color: var(--ink3); cursor: not-allowed; -webkit-mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.agent small { font-size: 10px; color: var(--ink3); }
+.select { border: 1px solid var(--ink4); display: flex; }
+.select select { flex: 1; appearance: none; -webkit-appearance: none; background: none; border: 0; color: var(--ink); font: 14px var(--mono); padding: 9px 12px; }
+.select::after { content: "▾"; color: var(--ink3); padding: 9px 12px; }
+.prompt { display: flex; gap: 8px; font-size: 13px; padding: 7px 0; border-bottom: 1px solid var(--ink4); white-space: nowrap; overflow: hidden; }
+.prompt .p { color: var(--signal); }
+.caret { display: inline-block; width: .6em; background: var(--ink); animation: blinkc 1s steps(1) infinite; }
+@keyframes blinkc { 50% { opacity: 0; } }
+.recent { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--ink3); }
+.recent span { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent span.on { color: var(--ink); }
+.radios { display: flex; gap: 16px; font-size: 13px; color: var(--ink2); flex-wrap: wrap; }
+.radios span { cursor: pointer; } .radios span.on { color: var(--ink); }
+.warn { font: 12px/1.6 var(--ui); color: var(--amber); margin-top: 8px; }
+.start { margin-top: 22px; width: 100%; padding: 11px; font: 14px var(--mono); background: var(--ink); color: var(--bg); border: 0; cursor: pointer; }
+.start:active { background: var(--signal); }
+
+/* ---------- the terminal page ---------- */
+.term { flex: 1; min-height: 0; position: relative; background: #000; color: #e9e6df; font: 10.5px/15px var(--mono); overflow: hidden; touch-action: none; cursor: grab; }
+.term .lines { position: absolute; left: 10px; right: 10px; top: 6px; white-space: pre; }
+.term .fixed { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 10px 6px; white-space: pre; background: #000; }
+.c-dim { color: #6f6c66; } .c-grn { color: #9be22d; } .c-cyn { color: #7fd8e6; } .c-yel { color: #e5c07b; } .c-org { color: #e08a52; }
+.screen-wipe { animation: wipe .26s steps(13) 1; }
+@keyframes wipe { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+.scanline { position: absolute; left: 0; right: 0; height: 2px; top: 0; background: #fff; opacity: 0; pointer-events: none; mix-blend-mode: difference; z-index: 4; }
+.scanline.run { animation: scan .26s steps(13) 1; }
+@keyframes scan { 0% { top: 0; opacity: .9; } 99% { top: 100%; opacity: .9; } 100% { opacity: 0; } }
+.wheel { position: absolute; right: 8px; top: 40%; background: #000; border: 1px solid #e9e6df; color: #e9e6df; font: 11px var(--mono); padding: 2px 6px; z-index: 5; opacity: 0; }
+.wheel.on { opacity: 1; }
+.perm { left: 12px; right: 18px; top: 10px; }
+.controls { flex: none; background: var(--bg); position: relative; }
+.err { display: flex; gap: 8px; align-items: flex-start; padding: 6px 16px 0; font: 12px/1.5 var(--ui); color: var(--red); }
+.err span { flex: 1; } .err button { background: none; border: 0; color: var(--ink2); font: 14px var(--mono); cursor: pointer; padding: 0 2px; }
+.keys { display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px; scrollbar-width: none; }
+.keys::-webkit-scrollbar { display: none; }
+.key { flex: none; min-width: 36px; padding: 6px 7px 5px; font: 13px var(--mono); text-align: center; background: var(--raise); border: 1px solid var(--ink4); border-bottom: 3px solid var(--ink3); cursor: pointer; }
+.key:active { transform: translateY(2px); border-bottom-width: 1px; margin-bottom: 2px; background: var(--ink4); }
+.sugs { background: var(--raise); border-top: 1px solid var(--ink4); }
+.sugs div { display: flex; gap: 10px; align-items: baseline; padding: 7px 16px; cursor: pointer; font-size: 12px; }
+.sugs div:active { background: var(--ink4); }
+.sugs b { font: 600 13px var(--mono); white-space: nowrap; }
+.sugs span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+.sugs i { font: 10px var(--mono); color: var(--ink3); font-style: normal; }
+.composer { margin: 0 16px 10px; display: flex; flex-direction: column; position: relative; }
+.composer .hd, .composer .ft { display: none; }
+.composer .rowc { display: flex; gap: 8px; align-items: flex-end; }
+.sqbtn { flex: none; width: 44px; height: 42px; display: grid; place-items: center; background: none; border: 1px solid var(--ink4); cursor: pointer; color: var(--signal); }
+.sqbtn.go { background: var(--ink); color: var(--bg); border-color: var(--ink); font: 700 18px var(--mono); }
+.sqbtn.go:disabled { background: none; color: var(--ink3); border-color: var(--ink4); cursor: default; }
+.sqbtn:active { background: var(--signal); }
+.field { flex: 1; min-height: 42px; border: 1px solid var(--ink4); padding: 10px 12px; font: 15px/1.35 var(--ui); cursor: text; word-break: break-all; }
+.field .ph { color: var(--ink3); }
+.field .cur { display: none; }
+.field.focus .cur { display: inline-block; width: 2px; height: 1.1em; vertical-align: -3px; background: var(--signal); animation: blinkc 1s steps(1) infinite; }
+/* the same field in the sealed box: the frame and shadow come around it; the field stays, and the keyboard with it */
+.composer.sealed { border: 1px solid var(--ink); background: var(--bg); margin: 2px 22px 16px 16px; }
+.composer.sealed::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1;
+  background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.composer.sealed .hd { display: flex; align-items: center; gap: 8px; padding: 0 0 0 8px; height: 26px; background: var(--signal); color: #000; font: 12px var(--mono); }
+.composer.sealed .hd .sp { flex: 1; }
+.composer.sealed .hd button { background: none; border: 0; width: 30px; height: 26px; font: 15px var(--mono); color: #000; cursor: pointer; }
+.composer.sealed .lock, .composer.sealed .go { display: none; }
+.composer.sealed .field { border: 0; font: 14px/1.4 var(--mono); min-height: 52px; }
+.composer.sealed .ft { display: flex; align-items: center; gap: 8px; padding: 6px 12px 10px; }
+.composer.sealed .ft span { flex: 1; font: 11px var(--ui); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb { flex: none; background: #d1d3d9; padding: 8px 4px 26px; display: grid; gap: 9px; color: #000; }
+.kb[hidden] { display: none; }
+.scr:not(.light) .kb { background: #2b2b2d; color: #fff; }
+.kr { display: flex; gap: 5px; justify-content: center; }
+.kr button { flex: 1; max-width: 33px; height: 40px; border: 0; border-radius: 6px; background: #fff; font: 18px var(--ui); box-shadow: 0 1px 0 rgba(0,0,0,.3); cursor: pointer; padding: 0; }
+.scr:not(.light) .kr button { background: #6b6b70; color: #fff; }
+.kr button.w { max-width: none; flex: 1.6; font-size: 14px; background: #adb3bc; }
+.scr:not(.light) .kr button.w { background: #46464a; }
+.kr button.sp { max-width: none; flex: 5; font-size: 14px; }
+.kr button:active { filter: brightness(.8); }
+
+/* ---------- the effects table ---------- */
+.fxwrap { overflow-x: auto; border: 1px solid var(--board-line); }
+.fx { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 640px; }
+.fx th, .fx td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--board-line); vertical-align: top; }
+.fx th { font: 11px var(--mono); letter-spacing: .1em; color: #77746e; font-weight: 400; background: #141416; }
+.fx td:first-child { font: 600 12px var(--mono); color: #fff; white-space: nowrap; }
+.fx td { color: #a9a6a0; }
+.fx .new { color: #ff2e88; font: 11px var(--mono); }
+:focus-visible { outline: 2px solid #ff2e88; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .blinker, .caret, .field.focus .cur, .screen-wipe, .scanline.run, .in, .gone, .glitch { animation: none !important; }
+}
+</style>
+<style id="gcss"></style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <h1><span id="brand"></span>iPhone · terminals</h1>
+    <nav>手机界面 <span class="seg" id="theme"><button type="button" class="on" data-t="light">light</button><button type="button" data-t="dark">dark</button></span></nav>
+  </div>
+  <p class="lede">桌面终端窗口（terminal.html）的特效搬到手机上的样子。三台手机都能直接操作：点、长按、在终端画面上拖动、用手机里的键盘打字（不会弹出你设备的键盘）。每台下面的按钮模拟 Mac 那边发生的事。系统开了“减少动态效果”时，闪烁、刷新和 glitch 都不播放。</p>
+
+  <div class="phones">
+    <figure>
+      <div class="phone"><div class="scr light scan-bg" id="p1"></div></div>
+      <figcaption>
+        <b>terminals · 列表</b>
+        <p>文件夹和父目录点一下折叠 / 展开，展开时逐行画出；<span class="mono">▸ N more</span> 展开全部。按住会话行出菜单（硬阴影框，出现时 glitch），删除先确认，确认后这一行自上而下擦掉。终端等你时那一行 glitch，方块琥珀色闪烁，标签页角标加一。</p>
+        <div class="tr"><button type="button" data-do="p1perm">权限请求到达</button><button type="button" data-do="p1exit">终端退出</button><button type="button" data-do="p1reset">重置</button></div>
+      </figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr light" id="p2"></div></div>
+      <figcaption>
+        <b>new terminal · 新建</b>
+        <p>打开时文字标从字符噪声里显形，最后一帧是近看的 LCD 次像素，然后定格。选 agent 按下立刻有反馈，选中的格子 glitch；未安装的 agent 用棋盘抖动遮罩。文件夹提示符是闪烁的方块光标。选 bypass 先弹确认框。</p>
+        <div class="tr"><button type="button" data-do="p2open">重新打开</button></div>
+      </figcaption>
+    </figure>
+    <figure>
+      <div class="phone"><div class="scr light" id="p3"></div></div>
+      <figcaption>
+        <b>terminal · 终端页</b>
+        <p>打开时画面自上而下 13 步刷出，扫描线在前。在画面上下拖动：每拖一行高发一格滚轮，右边显示发出的格数，快速一划会继续滚几格。点锁：同一个输入框被加密框围住，键盘保持原样。输入 <span class="mono">/</span> 出命令补全。直接发送像密码的文字会先问一句。</p>
+        <div class="tr"><button type="button" data-do="p3open">打开终端</button><button type="button" data-do="p3perm">权限请求到达</button><button type="button" data-do="p3err">滚动被拒（旧版 Mac）</button><button type="button" data-do="p3exit">终端退出</button></div>
+      </figcaption>
+    </figure>
+  </div>
+
+  <div class="sec">// 特效清单：桌面有的，手机一样有</div>
+  <div class="fxwrap"><table class="fx">
+    <thead><tr><th>效果</th><th>规格</th><th>桌面</th><th>手机</th></tr></thead>
+    <tbody>
+      <tr><td>glitch</td><td>0.45 s 分步：横向错位、条带裁切、青 / 粉分离、一帧反色</td><td>权限请求、终端退出、报错、选 agent、打开加密发送</td><td>同左，另加长按菜单、确认框 <span class="new">待做：权限、退出、报错</span></td></tr>
+      <tr><td>刷新</td><td>0.26 s，13 步自上而下，扫描线在前</td><td>切换终端</td><td>打开终端、切换终端 <span class="new">待做</span></td></tr>
+      <tr><td>显形</td><td>字符噪声逐格落定，末帧 LCD 次像素，然后定格</td><td>新建面板的文字标</td><td>新建面板 <span class="new">待做</span></td></tr>
+      <tr><td>闪烁</td><td>1.1 s 分步，每秒少于 3 次</td><td>等你的状态方块</td><td>同左 <span class="new">待做</span></td></tr>
+      <tr><td>光标</td><td>1 s 分步的方块</td><td>文件夹提示符</td><td>同左 <span class="new">待做</span></td></tr>
+      <tr><td>逐行画出</td><td>每行 22 ms，分步出现</td><td>—</td><td>展开文件夹、展开更多 <span class="new">待做</span></td></tr>
+      <tr><td>擦除</td><td>0.2 s，5 步自上而下</td><td>—</td><td>删除一行 <span class="new">待做</span></td></tr>
+      <tr><td>硬阴影</td><td>6 px 棋盘抖动，不模糊</td><td>浮动框</td><td>权限卡、加密框（已有），菜单、确认框 <span class="new">待做</span></td></tr>
+      <tr><td>扫描线</td><td>3 px 一条，4% 亮度</td><td>侧栏</td><td>终端列表 <span class="new">待做</span></td></tr>
+      <tr><td>点线</td><td>2 on 2 off</td><td>窗格分隔</td><td>导航栏下 <span class="new">待做</span></td></tr>
+      <tr><td>键帽</td><td>3 px 底边，按下沉 2 px</td><td>键帽栏</td><td>按键条（已有底边，按下沉 <span class="new">待做</span>）</td></tr>
+      <tr><td>抖动禁用</td><td>50% 棋盘遮罩</td><td>未安装的 agent</td><td>同左 <span class="new">待做</span></td></tr>
+      <tr><td>转圈</td><td>盲文 ⠋⠙⠹…，90 ms 一帧</td><td>进行中</td><td>同左（已有）</td></tr>
+    </tbody>
+  </table></div>
+</div>
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+document.getElementById("gcss").textContent = P.GLITCH_CSS;
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const glitch = (el) => P.glitch(el);
+const TERM_WIN = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"];
+const LOCK = [".###.", "#...#", "#####", "##.##", "#####"];
+const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+document.getElementById("brand").innerHTML = P.mark({ px: 2, state: "idle", depth: true });
+
+// One clock for every braille spinner (90 ms a frame; still under Reduce Motion).
+let tick = 0;
+setInterval(() => { if (reduce) return; tick++; for (const s of document.querySelectorAll(".spin")) s.textContent = FRAMES[tick % FRAMES.length]; }, 90);
+const spin = () => `<span class="spin">${FRAMES[0]}</span>`;
+const mark = (st) => st === "busy" ? spin()
+  : st === "waiting" ? `<span class="sq blinker" style="background:var(--amber)"></span>`
+  : st === "exited" ? `<span class="sq hollow"></span>`
+  : `<span class="sq" style="background:var(--green)"></span>`;
+const statusBar = () => `<div class="island"></div><div class="status"><span>09:48</span><i>▮▮▮▯ ◠ ▭</i></div>`;
+const tabbar = (on, badge) => `<div class="tabbar"><span class="${on === "tasks" ? "on" : ""}">${P.mark({ px: 2, mono: true })}tasks</span>
+  <span class="${on === "terminals" ? "on" : ""}">${P.sprite(TERM_WIN, { px: 3 })}terminals${badge ? `<em class="badge">${badge}</em>` : ""}</span></div>`;
+function closeOver(scr) { for (const x of scr.querySelectorAll(".box, .veil")) x.remove(); }
+/** A framed box over a phone's screen, glitching in; `veil` dims what is under it. */
+function overlay(scr, box, { veil = true, clear = false } = {}) {
+  closeOver(scr);
+  if (veil) {
+    const v = document.createElement("div");
+    v.className = clear ? "veil clear" : "veil";
+    v.onclick = () => closeOver(scr);
+    scr.append(v);
+  }
+  scr.append(box);
+  glitch(box);
+  return box;
+}
+
+/* ================= phone 1: the terminals list ================= */
+const p1 = document.getElementById("p1");
+let tree, folded, all, badge;
+function p1reset() {
+  tree = [
+    { parent: "Work", groups: [
+      { path: "api", terms: [{ id: "a", name: "修复登录超时", st: "busy", agent: "cc" }],
+        sessions: [["给健康检查加缓存", "51m ago"], ["升级到 Node 22", "today 16:50"], ["统一日志格式", "yesterday 22:04"]] },
+      { path: "web", terms: [{ id: "b", name: "首页改版", st: "idle", agent: "codex" }],
+        sessions: [["表单校验", "9/27"], ["暗色模式", "9/27"], ["图片懒加载", "9/26"], ["替换图标库", "9/25"], ["修复移动端菜单", "9/24"]] },
+    ] },
+    { parent: null, groups: [
+      { path: "AgentSwitch", terms: [{ id: "c", name: "iPhone 终端标签页", st: "idle", agent: "cc" }],
+        sessions: [["读取 Codex 的会话记录", "25m ago"], ["未读标记", "yesterday 09:10"]] },
+    ] },
+    { parent: null, groups: [{ path: "Blog", terms: [], sessions: [["换主题后的构建报错", "today 06:35"], ["加一个 RSS", "9/20"]] }] },
+  ];
+  folded = new Set(); all = new Set(); badge = 0;
+  p1draw();
+}
+const count = (groups) => {
+  const t = groups.reduce((n, g) => n + g.terms.length, 0), s = groups.reduce((n, g) => n + g.sessions.length, 0);
+  return t ? `${t} · ${s}` : `${s}`;
+};
+/** The list; `reveal` names the folder just opened, whose rows are drawn one after another. */
+function p1draw(reveal = null) {
+  let html = `${statusBar()}<div class="navb"><span class="l"></span><span class="t">terminals</span><span class="r"><button type="button" class="cap">new</button></span></div><div class="dots"></div><div class="list" id="p1list">`;
+  let n = 0;
+  const anim = (key) => (reveal === key ? ` in" style="animation-delay:${(n++) * 22}ms` : "");
+  for (const node of tree) {
+    const nested = node.parent !== null;
+    if (nested) {
+      const f = folded.has(node.parent);
+      html += `<div class="dir parent" data-fold="${node.parent}">${f ? "▸" : "▾"} ${node.parent}/${f ? ` <span class="n">${count(node.groups)}</span>` : ""}</div>`;
+      if (f) continue;
+    }
+    for (const g of node.groups) {
+      const key = g.path, f = folded.has(key), showAll = all.has(key);
+      const shown = showAll ? g.sessions : g.sessions.slice(0, 3), more = g.sessions.length - shown.length;
+      const foot = more > 0 || (showAll && g.sessions.length > 3);
+      const pad = nested ? "  " : "";
+      html += `<div class="dir" data-fold="${key}">${pad}${f ? "▸" : "▾"} ${g.path}/${f ? ` <span class="n">${count([g])}</span>` : ""}</div>`;
+      if (f) continue;
+      const rows = g.terms.length + shown.length + (foot ? 1 : 0);
+      let i = 0;
+      const line = () => `<span class="tree">${pad}${++i === rows ? "└─" : "├─"}</span>`;
+      for (const t of g.terms) {
+        html += `<div class="row tm${anim(key)}" data-term="${t.id}">${line()}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
+      }
+      for (const [title, when] of shown) {
+        html += `<div class="row sess${anim(key)}" data-sess="${esc(key + "|" + title)}">${line()}<span class="nm">${esc(title)}</span><span class="when">${when}</span><span class="act">resume</span></div>`;
+      }
+      if (foot) html += `<div class="row more${anim(key)}" data-more="${key}">${line()}<span>${showAll ? "▾ less" : `▸ ${more} more`}</span></div>`;
+    }
+  }
+  html += `</div>${tabbar("terminals", badge)}`;
+  const scroll = document.getElementById("p1list")?.scrollTop ?? 0;
+  p1.innerHTML = html;
+  document.getElementById("p1list").scrollTop = scroll;
+}
+p1.addEventListener("click", (e) => {
+  if (e.target.closest(".box, .veil")) return;
+  const f = e.target.closest("[data-fold]");
+  if (f) { const k = f.dataset.fold; const opening = folded.has(k); opening ? folded.delete(k) : folded.add(k); p1draw(opening ? k : null); return; }
+  const m = e.target.closest("[data-more]");
+  if (m) { const k = m.dataset.more; const opening = !all.has(k); opening ? all.add(k) : all.delete(k); p1draw(opening ? k : null); }
+});
+// Hold a session row: its menu.
+let holdTimer = null;
+p1.addEventListener("pointerdown", (e) => {
+  const r = e.target.closest(".row.sess");
+  if (!r || e.target.closest(".box")) return;
+  r.classList.add("held");
+  holdTimer = setTimeout(() => { holdTimer = null; r.classList.remove("held"); p1menu(r); }, 450);
+});
+for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+  p1.addEventListener(ev, () => { clearTimeout(holdTimer); holdTimer = null; for (const r of p1.querySelectorAll(".held")) r.classList.remove("held"); });
+}
+p1.addEventListener("contextmenu", (e) => { if (e.target.closest(".row.sess")) e.preventDefault(); });
+function p1menu(row) {
+  const top = row.getBoundingClientRect().bottom - p1.getBoundingClientRect().top + 4;
+  const box = document.createElement("div");
+  box.className = "box menu";
+  box.style.cssText = `right:28px;top:${Math.min(top, 560)}px`;
+  box.innerHTML = `<button type="button" data-a="resume">resume <span class="faint">↩</span></button><button type="button" class="bad" data-a="delete">delete</button>`;
+  box.onclick = (e) => { const a = e.target.closest("[data-a]")?.dataset.a; if (a === "delete") p1confirm(row); else if (a) closeOver(p1); };
+  overlay(p1, box, { clear: true });
+}
+function p1confirm(row) {
+  const [key, title] = row.dataset.sess.split("|");
+  const box = document.createElement("div");
+  box.className = "box";
+  box.style.cssText = "left:22px;right:28px;top:250px";
+  box.innerHTML = `<div class="hd red"><span>delete record</span></div><div class="bd"><p>删除会话记录「${esc(title)}」？Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。</p></div>
+    <div class="ft"><button type="button" class="btn" data-a="no">[ cancel ]</button><button type="button" class="btn pri" data-a="yes">[ delete ]</button></div>`;
+  box.onclick = (e) => {
+    const a = e.target.closest("[data-a]")?.dataset.a;
+    if (!a) return;
+    closeOver(p1);
+    if (a !== "yes") return;
+    row.classList.add("gone");
+    setTimeout(() => {
+      for (const node of tree) for (const g of node.groups) if (g.path === key) g.sessions = g.sessions.filter(([x]) => x !== title);
+      p1draw();
+    }, reduce ? 0 : 210);
+  };
+  overlay(p1, box);
+}
+function p1perm() {
+  const t = tree[0].groups[1].terms[0];
+  if (t.st === "waiting") return;
+  t.st = "waiting"; badge++;
+  folded.delete("Work"); folded.delete("web");
+  p1draw();
+  glitch(p1.querySelector('[data-term="b"]'));
+}
+function p1exit() {
+  const t = tree[1].groups[0].terms[0];
+  if (t.st === "exited") return;
+  t.st = "exited";
+  p1draw();
+  glitch(p1.querySelector('[data-term="c"]'));
+}
+
+/* ================= phone 2: new terminal ================= */
+const p2 = document.getElementById("p2");
+const MODELS = { cc: ["Opus 5.5", "Sonnet 5", "Haiku 4.5"], codex: ["GPT-6 Astra", "GPT-6 Sol", "GPT-5.5"], oc: ["DeepSeek Flash", "Kimi K3"] };
+const FOLDERS = ["~/Work/api", "~/Work/web", "~/Desktop/WorkSpace/Projects/AgentSwitch", "~/Blog"];
+const MODES = ["ask each", "auto", "bypass"];
+let agent = "cc", model = "", folder = FOLDERS[0], mode = 0, bannerTimer = null;
+// The wordmark's letters, 5×7 (pixel.js keeps its own copy for the settled mark).
+const FONT = {
+  A: [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"], G: [".###.", "#...#", "#....", "#.###", "#...#", "#...#", ".###."],
+  E: ["#####", "#....", "#....", "####.", "#....", "#....", "#####"], N: ["#...#", "##..#", "#.#.#", "#..##", "#...#", "#...#", "#...#"],
+  T: ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."], S: [".####", "#....", "#....", ".###.", "....#", "....#", "####."],
+  W: ["#...#", "#...#", "#...#", "#.#.#", "#.#.#", "##.##", "#...#"], I: ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "#####"],
+  C: [".###.", "#...#", "#....", "#....", "#....", "#...#", ".###."], H: ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+};
+const RAMP = " .:-=+*#%@█";
+/** The name resolves out of glyph noise, cell by cell; the last frame is the screen seen up close (LCD sub-pixels),
+ *  then the wordmark settles. */
+function reveal(el, word) {
+  clearInterval(bannerTimer); clearTimeout(bannerTimer);
+  if (reduce) { el.innerHTML = P.wordmark(word, { px: 4 }); return; }
+  const grid = [];
+  for (let y = 0; y < 7; y++) grid.push([...word].map((ch) => FONT[ch][y] + ".").join(""));
+  const at = grid.map((row) => [...row].map(() => 120 + Math.random() * 760));
+  const start = performance.now();
+  bannerTimer = setInterval(() => {
+    const t = performance.now() - start;
+    let html = "";
+    grid.forEach((row, y) => {
+      [...row].forEach((c, x) => {
+        const on = c === "#";
+        if (t >= at[y][x]) html += on ? `<span class="${t - at[y][x] < 90 ? "hot" : "on"}">█</span>` : " ";
+        else html += `<span class="${on ? "on" : "off"}">${RAMP[Math.floor(Math.random() * (on ? RAMP.length : 4))]}</span>`;
+      });
+      html += "\n";
+    });
+    el.innerHTML = html;
+    if (t > 1100) {
+      clearInterval(bannerTimer);
+      el.innerHTML = P.wordmark(word, { px: 4, lcd: true });
+      bannerTimer = setTimeout(() => { el.innerHTML = P.wordmark(word, { px: 4 }); }, 280);
+    }
+  }, 45);
+}
+function p2draw() {
+  const models = MODELS[agent] ?? [];
+  p2.innerHTML = `${statusBar()}<div class="sheet"><div class="navb"><span class="l"><button type="button" class="cap">cancel</button></span><span class="t">new terminal</span><span class="r"></span></div>
+    <div class="body">
+      <div class="banner" id="banner"></div>
+      <div class="label">// agent</div>
+      <div class="agents">${["cc", "codex", "oc", "pi"].map((a) => `<button type="button" class="agent ${a === agent ? "on" : ""} ${a === "pi" ? "off" : ""}" data-agent="${a}">${P.sprite(P.AGENT_PX[a], { px: 4 })}<span>${P.AGENT_NAME[a]}</span>${a === "pi" ? "<small>not installed</small>" : ""}</button>`).join("")}</div>
+      <div class="label">// model</div>
+      <div class="select"><select id="p2model" aria-label="model">${[`<option value="">default</option>`, ...models.map((m) => `<option ${m === model ? "selected" : ""}>${m}</option>`)].join("")}</select></div>
+      <div class="label">// folder</div>
+      <div class="prompt"><span class="p">❯</span><span>${esc(folder)}</span><span class="caret"> </span></div>
+      <div class="recent">${FOLDERS.map((f) => `<span class="${f === folder ? "on" : ""}" data-folder="${esc(f)}">${esc(f)}</span>`).join("")}</div>
+      <div class="label">// permissions</div>
+      <div class="radios">${MODES.map((m, i) => `<span class="${i === mode ? "on" : ""}" data-mode="${i}">${i === mode ? "&lt;x&gt;" : "&lt; &gt;"} ${m}</span>`).join("")}</div>
+      ${mode === 2 ? `<div class="warn">agent 的任何操作都不再询问你；禁区和凭据网关仍然生效。</div>` : ""}
+      <button type="button" class="start" id="p2start">[ start ]</button>
+    </div></div>`;
+}
+function p2open() {
+  p2draw();
+  reveal(document.getElementById("banner"), "AGENTSWITCH");
+}
+/** Redraws the sheet but keeps the settled wordmark where it is. */
+function p2redraw() {
+  const b = document.getElementById("banner")?.innerHTML ?? "";
+  const scroll = p2.querySelector(".body")?.scrollTop ?? 0;
+  p2draw();
+  document.getElementById("banner").innerHTML = b;
+  p2.querySelector(".body").scrollTop = scroll;
+}
+p2.addEventListener("click", (e) => {
+  if (e.target.closest(".box, .veil")) return;
+  const a = e.target.closest("[data-agent]");
+  if (a && a.dataset.agent !== "pi" && a.dataset.agent !== agent) {
+    agent = a.dataset.agent; model = "";
+    p2redraw();
+    glitch(p2.querySelector(`[data-agent="${agent}"]`));
+    return;
+  }
+  const f = e.target.closest("[data-folder]");
+  if (f) { folder = f.dataset.folder; p2redraw(); return; }
+  const m = e.target.closest("[data-mode]");
+  if (m) {
+    const i = Number(m.dataset.mode);
+    if (i === 2 && mode !== 2) { p2bypass(); return; }
+    mode = i; p2redraw(); return;
+  }
+  if (e.target.closest("#p2start")) p2start();
+});
+p2.addEventListener("change", (e) => { if (e.target.id === "p2model") model = e.target.value; });
+function p2bypass() {
+  const box = document.createElement("div");
+  box.className = "box";
+  box.style.cssText = "left:22px;right:28px;top:300px";
+  box.innerHTML = `<div class="hd amber"><span>bypass</span></div><div class="bd"><p>跳过全部权限确认？agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：禁区（本机令牌、凭据网关密钥等）和凭据网关。</p></div>
+    <div class="ft"><button type="button" class="btn" data-a="no">[ cancel ]</button><button type="button" class="btn pri" data-a="yes">[ use bypass ]</button></div>`;
+  box.onclick = (e) => {
+    const a = e.target.closest("[data-a]")?.dataset.a;
+    if (!a) return;
+    closeOver(p2);
+    if (a === "yes") { mode = 2; p2redraw(); }
+  };
+  overlay(p2, box);
+}
+function p2start() {
+  const b = document.getElementById("p2start");
+  b.innerHTML = `[ starting ${spin()} ]`;
+  setTimeout(() => { p3open(); b.textContent = "[ start ]"; }, 700);
+}
+
+/* ================= phone 3: one terminal ================= */
+const p3 = document.getElementById("p3");
+const KEYS = ["esc", "tab", "⇧tab", "↑", "↓", "←", "→", "pgup", "pgdn", "^C", "⏎", "y", "n", "1", "2", "3"];
+const COMMANDS = [
+  ["compact", "Free up context by summarizing the conversation so far"], ["config", "Open settings"],
+  ["context", "Show how the context window is used"], ["clear", "Start a new session with empty context"],
+  ["code-review", "Review the current diff for bugs and cleanups"], ["init", "Write a CLAUDE.md for this project"],
+  ["model", "Choose the model"], ["resume", "Continue an earlier session"], ["status", "Show version, model and account"],
+  ["usage", "Show plan usage and limits"], ["commit", "Stage and commit the current changes", "user"], ["deploy", "Build and deploy to staging", "project"],
+];
+const HEAD = [
+  `<span class="c-org">▟█▙</span>  Claude Code <span class="c-dim">v2.1.284</span>`,
+  `<span class="c-org">▜█▛</span>  <span class="c-dim">Opus 5.5 · ~/Work/api</span>`,
+  ``,
+];
+const TURNS = [
+  [`<span class="c-dim">&gt; 登录接口偶尔超时，帮我查一下</span>`, ``,
+   `<span class="c-grn">●</span> Read(src/auth/login.ts)`, `  <span class="c-dim">⎿  Read 142 lines</span>`,
+   `<span class="c-grn">●</span> Search(pattern: "timeout", path: "src")`, `  <span class="c-dim">⎿  Found 6 files</span>`,
+   `<span class="c-grn">●</span> 问题在连接池：每次登录都新建数据库连接，`, `  高峰时排队超过 5 秒。`, ``],
+  [`<span class="c-grn">●</span> Update(src/db/pool.ts)`, `  <span class="c-dim">⎿  Updated with 4 additions and 1 removal</span>`,
+   `     <span class="c-dim">12</span> <span style="color:#ff6b6b">-  const pool = createPool({ max: 2 });</span>`,
+   `     <span class="c-dim">12</span> <span class="c-grn">+  const pool = createPool({</span>`,
+   `     <span class="c-dim">13</span> <span class="c-grn">+    max: 20, idleTimeoutMillis: 30_000,</span>`,
+   `     <span class="c-dim">14</span> <span class="c-grn">+  });</span>`, ``],
+  [`<span class="c-grn">●</span> Bash(npm test -- auth)`, `  <span class="c-dim">⎿  PASS  tests/auth.test.ts (12 tests)</span>`,
+   `  <span class="c-dim">   PASS  tests/pool.test.ts (4 tests)</span>`,
+   `<span class="c-grn">●</span> 测试全部通过。连接池上限从 2 调到 20，`, `  空闲 30 秒回收。`, ``],
+  [`<span class="c-dim">&gt; 顺便把登录的慢日志也加上</span>`, ``,
+   `<span class="c-grn">●</span> Read(src/log/slow.ts)`, `  <span class="c-dim">⎿  Read 38 lines</span>`,
+   `<span class="c-grn">●</span> Update(src/auth/login.ts)`, `  <span class="c-dim">⎿  Updated with 6 additions</span>`,
+   `     <span class="c-dim">40</span> <span class="c-grn">+  const started = performance.now();</span>`,
+   `     <span class="c-dim">58</span> <span class="c-grn">+  slowLog("login", started, 800);</span>`, ``],
+  [`<span class="c-grn">●</span> Bash(npm run lint)`, `  <span class="c-dim">⎿  0 problems</span>`,
+   `<span class="c-grn">●</span> 登录超过 800 ms 会写一条慢日志，`, `  带用户 id 和耗时。`, ``],
+];
+let lines, offset, tstatus, tname, sealed, kbUp, typing, text, err, oldMac, note, shift, exited;
+function p3reset() {
+  lines = [...HEAD, ...TURNS.flat(), ...TURNS.slice(0, 3).flat()];
+  offset = 0; tstatus = "busy"; tname = "修复登录超时"; sealed = false; kbUp = false; typing = false;
+  text = ""; err = null; oldMac = false; note = null; shift = false; exited = false;
+}
+function p3build() {
+  p3.innerHTML = `<div style="background:#000;color:#e9e6df;--ink:#e9e6df;--ink2:#8d8a84;--ink3:#4d4b48;--ink4:#262524;--raise:#151515;--bg:#000">
+      ${statusBar()}<div class="navb"><span class="l"><button type="button" class="cap">‹</button></span><span class="t" id="p3title"></span><span class="r"><button type="button" class="cap">⋯</button></span></div></div>
+    <div class="term" id="p3term"><div class="lines" id="p3lines"></div><div class="fixed" id="p3fixed"></div><div class="scanline" id="p3scan"></div><div class="wheel" id="p3wheel"></div></div>
+    <div class="controls" id="p3ctl"></div>
+    <div class="kb" id="p3kb" hidden>
+      <div class="kr">${[..."qwertyuiop"].map((c) => `<button type="button" data-k="${c}">${c}</button>`).join("")}</div>
+      <div class="kr">${[..."asdfghjkl"].map((c) => `<button type="button" data-k="${c}">${c}</button>`).join("")}</div>
+      <div class="kr"><button type="button" class="w" data-k="shift">⇧</button>${[..."zxcvbnm"].map((c) => `<button type="button" data-k="${c}">${c}</button>`).join("")}<button type="button" class="w" data-k="back">⌫</button></div>
+      <div class="kr"><button type="button" class="w" data-k="/">/</button><button type="button" data-k=":">:</button><button type="button" class="sp" data-k=" ">space</button><button type="button" class="w" data-k="send">send</button></div>
+    </div>`;
+  p3title(); p3lines(); p3controls();
+}
+function p3title() {
+  const word = exited ? "exited" : tstatus === "waiting" ? "waiting" : tstatus;
+  document.getElementById("p3title").innerHTML = `<span>${esc(tname)}</span><small>${mark(exited ? "exited" : tstatus)} ${word}</small>`;
+}
+const fixedLines = () => [
+  `<span class="c-dim">────────────────────────────────────────────────────</span>`,
+  `&gt; ${exited ? "" : `<span style="background:#e9e6df"> </span>`}`,
+  `<span class="c-dim">────────────────────────────────────────────────────</span>`,
+  `  <span class="c-cyn">[Opus 5.5]</span> <span class="c-dim">|</span> <span class="c-yel">api</span> <span class="c-dim">| ctx 12%</span>`,
+  `  <span class="c-dim">⏵⏵ auto mode on (shift+tab to cycle)</span>`,
+];
+/** The program's own full screen: the transcript scrolls above its fixed prompt; `offset` lines back from the end. */
+function p3lines() {
+  const term = document.getElementById("p3term");
+  const fixed = document.getElementById("p3fixed");
+  fixed.innerHTML = fixedLines().join("\n");
+  const room = Math.max(4, Math.floor((term.clientHeight - fixed.offsetHeight - 10) / 15));
+  offset = Math.max(0, Math.min(offset, lines.length - room));
+  const end = lines.length - offset;
+  document.getElementById("p3lines").innerHTML = lines.slice(Math.max(0, end - room), end).join("\n");
+}
+const secretish = (s) => /sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|(password|passwd|token|api[ _-]?key|密码|口令|验证码|令牌)\s*(?:[:：=]|是|为)\s*\S{4,}/i.test(s.replace(/enc:(?:v1|ref):\S+/g, " "));
+function matches(t) {
+  if (!t.startsWith("/") || /\s/.test(t)) return [];
+  const q = t.slice(1).toLowerCase();
+  const starts = COMMANDS.filter(([n]) => n.startsWith(q));
+  const inside = q ? COMMANDS.filter(([n]) => !n.startsWith(q) && n.split(/[:\-_]/).some((w) => w.startsWith(q))) : [];
+  const found = [...starts, ...inside];
+  return found.length === 1 && found[0][0] === q ? [] : found.slice(0, 6);
+}
+function p3controls() {
+  const sugs = sealed ? [] : matches(text);
+  const canSend = !exited && text.trim().length > 0;
+  const field = `<div class="field ${typing ? "focus" : ""}" id="p3field">${text ? esc(text) : ""}<span class="cur"></span>${text ? "" : `<span class="ph">${sealed ? "message" : "回复"}</span>`}</div>`;
+  document.getElementById("p3ctl").innerHTML = `
+    ${sugs.length ? `<div class="sugs">${sugs.map(([n, d, src]) => `<div data-cmd="${n}"><b>/${n}</b><span>${esc(d)}</span>${src ? `<i>${src}</i>` : ""}</div>`).join("")}</div>` : ""}
+    <div class="dots"></div>
+    ${err ? `<div class="err" id="p3err"><span>${esc(err)}</span><button type="button" data-x="err" aria-label="dismiss">×</button></div>` : ""}
+    <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="hide keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key">${k}</button>`).join("")}</div>
+    <div class="composer ${sealed ? "sealed" : ""}" id="p3comp">
+      <div class="hd">${P.sprite(LOCK, { px: 2 })}<span>sealed → ${esc(tname)}</span><span class="sp"></span><button type="button" data-x="unseal" aria-label="cancel">×</button></div>
+      <div class="rowc"><button type="button" class="sqbtn lock" data-x="seal" aria-label="sealed reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="send">↑</button></div>
+      <div class="ft"><span>凭据在 Mac 上换成密文后再交给 agent</span><button type="button" class="btn pri" data-x="send" ${canSend ? "" : "disabled"}>[ send ]</button></div>
+    </div>
+    ${note ? `<div class="mono" style="padding:0 16px 8px;font-size:11px;color:var(--ink2)">${note}</div>` : ""}`;
+  document.getElementById("p3kb").hidden = !kbUp;
+  requestAnimationFrame(p3lines);   // the keyboard takes room from the screen
+}
+function setErr(message) {
+  err = message; p3controls();
+  glitch(document.getElementById("p3err"));
+}
+function type(k) {
+  if (exited) return;
+  if (k === "shift") { shift = !shift; return; }
+  if (k === "back") text = text.slice(0, -1);
+  else if (k === "send") { send(); return; }
+  else { text += shift ? k.toUpperCase() : k; shift = false; }
+  p3controls();
+}
+function send(asTyped = false) {
+  if (exited || !text.trim()) return;
+  if (!sealed && !asTyped && secretish(text)) { askSecret(); return; }
+  const sealedCount = sealed && secretish(text) ? 1 : 0;
+  const shown = sealedCount ? text.replace(/(\S+)$/, "🔒") : text;
+  lines.push(`<span class="c-dim">&gt; ${esc(shown)}</span>`, ``, `<span class="c-grn">●</span> 好的。`, ``);
+  offset = 0; text = "";
+  note = sealed ? (sealedCount ? "1 secret sealed" : null) : null;
+  if (sealed) sealed = false;
+  p3controls();
+}
+function askSecret() {
+  const box = document.createElement("div");
+  box.className = "box";
+  box.style.cssText = "left:22px;right:28px;top:220px";
+  box.innerHTML = `<div class="hd amber"><span>这段文字可能包含密码或令牌</span></div><div class="bd"><p>加密发送时，Mac 会先把其中的凭据换成密文，再交给 agent。</p></div>
+    <div class="ft"><button type="button" class="btn" data-a="plain">[ send as typed ]</button><button type="button" class="btn pri" data-a="seal">[ sealed ]</button></div>`;
+  box.onclick = (e) => {
+    const a = e.target.closest("[data-a]")?.dataset.a;
+    if (!a) return;
+    closeOver(p3);
+    if (a === "seal") { sealed = true; send(); } else send(true);
+  };
+  overlay(p3, box);
+}
+function toggleSeal() {
+  sealed = !sealed;
+  p3controls();
+  if (sealed) glitch(document.getElementById("p3comp"));
+}
+p3.addEventListener("click", (e) => {
+  if (e.target.closest(".box, .veil")) return;
+  const k = e.target.closest("[data-k]");
+  if (k) { type(k.dataset.k); return; }
+  const c = e.target.closest("[data-cmd]");
+  if (c) { text = `/${c.dataset.cmd} `; p3controls(); return; }
+  const x = e.target.closest("[data-x]")?.dataset.x;
+  if (x === "err") { err = null; oldMac = false; p3controls(); return; }
+  if (x === "hide") { kbUp = false; typing = false; p3controls(); return; }
+  if (x === "seal" || x === "unseal") { toggleSeal(); return; }
+  if (x === "send") { send(); return; }
+  if (e.target.closest("#p3field")) { typing = true; kbUp = true; p3controls(); }
+});
+// A typing keyboard on a computer works too, while the reply box has the focus.
+document.addEventListener("keydown", (e) => {
+  if (!typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "Backspace") { e.preventDefault(); type("back"); }
+  else if (e.key === "Enter") { e.preventDefault(); send(); }
+  else if (e.key === "Escape") { e.preventDefault(); if (sealed) toggleSeal(); }
+  else if (e.key.length === 1) { e.preventDefault(); text += e.key; p3controls(); }
+});
+
+/* dragging the screen: one wheel notch per line of drag; the program scrolls itself 3 lines a notch */
+let drag = null, coast = null, chipTimer = null;
+function wheel(up, n) {
+  if (exited) return;
+  if (oldMac) { if (!err) setErr("此 Mac 上的 AgentSwitch 版本不支持滑动翻页，请先更新。"); return; }
+  offset += (up ? 3 : -3) * n;
+  p3lines();
+  const chip = document.getElementById("p3wheel");
+  drag && (drag.sent += up ? n : -n);
+  const total = drag ? drag.sent : (up ? n : -n);
+  chip.textContent = `wheel ${total >= 0 ? "↑" : "↓"} ${Math.abs(total)}`;
+  chip.classList.add("on");
+  clearTimeout(chipTimer);
+  chipTimer = setTimeout(() => chip.classList.remove("on"), 700);
+}
+p3.addEventListener("pointerdown", (e) => {
+  if (!e.target.closest("#p3term") || e.target.closest(".box")) return;
+  clearInterval(coast);
+  drag = { y: e.clientY, last: e.clientY, t: performance.now(), v: 0, acc: 0, moved: false, sent: 0 };
+  e.target.closest("#p3term").setPointerCapture(e.pointerId);
+});
+p3.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const now = performance.now(), dy = e.clientY - drag.last;
+  drag.v = dy / Math.max(1, now - drag.t);
+  drag.t = now; drag.last = e.clientY;
+  if (Math.abs(e.clientY - drag.y) > 4) drag.moved = true;
+  drag.acc += dy;
+  const n = Math.trunc(drag.acc / 15);
+  if (n) { drag.acc -= n * 15; wheel(n > 0, Math.abs(n)); }
+});
+p3.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  if (!d.moved) { if (kbUp || typing) { kbUp = false; typing = false; p3controls(); } return; }
+  // a flick carries on, slowing: fewer notches each step
+  let left = Math.min(24, Math.floor(Math.abs(d.v) * 1000 / 220));
+  const up = d.v > 0;
+  if (!left || reduce) return;
+  coast = setInterval(() => {
+    const now = Math.max(1, Math.floor(left / 2));
+    wheel(up, now);
+    left -= now;
+    if (left <= 0) clearInterval(coast);
+  }, 70);
+});
+p3.addEventListener("pointercancel", () => { drag = null; });
+
+function p3open() {
+  closeOver(p3);
+  p3reset();
+  p3build();
+  if (reduce) return;
+  const term = document.getElementById("p3term"), scan = document.getElementById("p3scan");
+  for (const el of [term, scan]) { el.classList.remove("screen-wipe", "run"); void el.offsetWidth; }
+  term.classList.add("screen-wipe");
+  scan.classList.add("run");
+}
+function p3perm() {
+  if (exited || p3.querySelector(".perm")) return;
+  tstatus = "waiting"; p3title();
+  lines.push(`<span class="c-grn">●</span> Bash(npm run build)`, `  <span class="c-dim">⎿  Waiting for permission…</span>`);
+  offset = 0; p3lines();
+  const box = document.createElement("div");
+  box.className = "box perm";
+  box.innerHTML = `<div class="hd amber">${P.sprite(P.SQUARE, { px: 2 })}<span>permission · Bash</span></div>
+    <div class="bd"><div>npm run build</div><div class="faint" style="font-size:11px">~/Work/api</div></div>
+    <div class="ft"><button type="button" class="btn" data-do="deny">[ deny ]</button><button type="button" class="btn pri" data-do="allow">[ allow ]</button></div>`;
+  box.onclick = (e) => { const d = e.target.closest("[data-do]")?.dataset.do; if (d) answer(d); };
+  document.getElementById("p3term").append(box);
+  glitch(box);
+  glitch(document.getElementById("p3title"));
+}
+function answer(d) {
+  p3.querySelector(".perm")?.remove();
+  lines.pop();
+  lines.push(`  <span class="c-dim">⎿  ${d === "allow" ? "Allowed by PermissionRequest hook" : "Denied by PermissionRequest hook"}</span>`, ``);
+  tstatus = "busy"; p3title(); p3lines();
+}
+function p3exit() {
+  if (exited) return;
+  exited = true; tstatus = "exited"; kbUp = false; typing = false; sealed = false;
+  p3.querySelector(".perm")?.remove();
+  lines.push(``, `<span class="c-dim">[exited · code 0]</span>`);
+  offset = 0;
+  p3title(); p3controls();
+  glitch(document.getElementById("p3title"));
+}
+function p3err() { if (exited) return; oldMac = true; setErr("此 Mac 上的 AgentSwitch 版本不支持滑动翻页，请先更新。"); }
+
+/* ================= wiring ================= */
+const actions = { p1perm, p1exit, p1reset: () => { closeOver(p1); p1reset(); }, p2open: () => { closeOver(p2); p2open(); }, p3open, p3perm, p3err, p3exit };
+document.querySelector(".phones").addEventListener("click", (e) => {
+  const b = e.target.closest("figcaption [data-do]");
+  if (b) actions[b.dataset.do]?.();
+});
+document.getElementById("theme").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-t]");
+  if (!b) return;
+  for (const x of document.querySelectorAll("#theme button")) x.classList.toggle("on", x === b);
+  for (const s of document.querySelectorAll(".scr")) s.classList.toggle("light", b.dataset.t === "light");
+});
+p1reset();
+p2open();
+p3open();
+</script>
+</body>
+</html>
