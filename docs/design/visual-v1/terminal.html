@@ -36,26 +36,29 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 .note { color: #8e8e93; font-size: 12px; max-width: 1100px; text-align: center; }
 
 /* ---------- the window ---------- */
-.win { --side-w: var(--side-open, 300px); position: relative; width: min(1180px, 100%); height: 720px; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: 30px minmax(0, 1fr); background: var(--bg); border-radius: 10px; overflow: hidden;
+.win { --side-w: var(--side-open, 300px); position: relative; width: min(1180px, 100%); height: 720px; display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: 52px minmax(0, 1fr); background: var(--bg); border-radius: 10px; overflow: hidden;
   box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); font-family: var(--mono); }
 .side { grid-column: 1; grid-row: 2; position: relative; display: flex; flex-direction: column; min-height: 0; font-size: 12.5px; line-height: 22px;
   /* faint scanlines: the chrome reads as part of the same screen */
   background-image: repeating-linear-gradient(to bottom, rgba(255,255,255,.022) 0 1px, transparent 1px 3px); }
 /* the pane border: a dotted column, like a tmux split */
 .side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink4) 0 2px, transparent 2px 4px); }
-/* the top bar across the window: the traffic lights, the list's button, then (list closed) the terminal's name and state;
-   all the terminals' mark at the right. The list's width: drag its dotted edge (a double click puts it back); past the
-   left edge it closes, and the button or ⌘B brings it back. */
-.bar { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-size: 12.5px; }
-.bar .lights { margin-right: 6px; }
-.sidebtn { display: grid; place-items: center; width: 28px; height: 22px; color: var(--ink2); background: none; border: 0; padding: 0; cursor: default; }
-.sidebtn:hover { color: var(--ink); background: var(--hover); }
-.win.closed.waiting .sidebtn { color: var(--amber); animation: blink 1.1s steps(1) infinite; }
-.bar .nm, .bar .st { display: none; }
-.win.closed .bar .nm { display: inline; font-weight: 700; }
-.win.closed .bar .st { display: inline; color: var(--ink3); font-size: 11px; }
-.bar .st.waiting { color: var(--amber); }
-.bar .eyes { margin-left: auto; }
+/* The list's width: drag its dotted edge (a double click puts it back); past the left edge it closes, and the toolbar's
+   list button or ⌘B brings it back. */
+/* The window's toolbar, as a Mac app's (the native NSToolbar in the app: the system centres the traffic lights, drags
+   the window and draws the buttons with SF Symbols, which system controls keep): 52 pt; the list's button beside the
+   lights; the terminal on screen as the window's title, centred, with its status mark (nothing while one is being
+   made: the panel says so); actions at the right — new terminal, then all the terminals' mark — with room for more. */
+.bar { position: relative; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; font-family: var(--ui); }
+.bar .lights { margin-right: 18px; }
+.tb { display: grid; place-items: center; width: 32px; height: 28px; border-radius: 7px; color: var(--ink2); background: none; border: 0; padding: 0; cursor: default; }
+.tb:hover { color: var(--ink); background: rgba(255,255,255,.08); }
+.win.closed.waiting #sidebtn { color: var(--amber); }
+.bar .title { position: absolute; left: 50%; transform: translateX(-50%); max-width: 42%; display: flex; align-items: center; gap: 8px; font: 600 13px var(--ui); color: var(--ink); white-space: nowrap; }
+.bar .title span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.bar .end { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.bar .eyes { padding-left: 8px; }
+.bar .eyes .tag { font-family: var(--mono); }
 .grip { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; z-index: 2; cursor: col-resize; }
 .grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; }
 .grip:hover::after { background: var(--ink2); }
@@ -235,10 +238,14 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
   <a href="app.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">整体方向 →</a>
   <a href="depth.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">层次 →</a>
 </div>
-<div class="note">静态演示，不连服务。同一父目录下的项目合并成一层（Projects/、Worktop/）；点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，顶栏里红绿灯旁的按钮或 ⌘B 展开 / 收起。</div>
+<div class="note">静态演示，不连服务。同一父目录下的项目合并成一层（Projects/、Worktop/）；点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，工具栏里红绿灯旁的按钮或 ⌘B 展开 / 收起。顶上是 Mac 应用标准的工具栏（52pt）：标题居中写当前终端，右侧 + 新建和总体状态。</div>
 
 <div class="win" id="win">
-  <div class="bar"><div class="lights"><i></i><i></i><i></i></div><button class="sidebtn" id="sidebtn" data-do="hide" title="list ⌘B"></button><span class="nm" id="topName"></span><span class="st" id="topStatus"></span><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
+  <div class="bar"><div class="lights"><i></i><i></i><i></i></div>
+    <button class="tb" id="sidebtn" data-do="hide" title="list ⌘B"><svg width="19" height="15" viewBox="0 0 19 15" fill="none" stroke="currentColor" stroke-width="1.4"><rect x=".7" y=".7" width="17.6" height="13.6" rx="3.2"/><path d="M6.6 .7v13.6M2.6 4h2M2.6 6.4h2M2.6 8.8h2" stroke-linecap="round"/></svg></button>
+    <div class="title" id="title"></div>
+    <div class="end"><button class="tb" data-do="create" title="new terminal ⌘T"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7.5 1.5v12M1.5 7.5h12"/></svg></button><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
+  </div>
   <aside class="side">
     <div class="list v-tree" id="list"></div>
     <div class="keys">
@@ -320,9 +327,14 @@ function renderEyes() {
   document.getElementById("eyes").innerHTML = `<span class="tag">${label}</span><span style="color:var(--ink)">${Pixel.mark({ px: 2, state, t: lookFrame, depth: true })}</span>`;
   document.getElementById("win").classList.toggle("waiting", state === "waiting");
   const t = terms.find((x) => x.id === selected);
-  document.getElementById("topName").textContent = t && !document.querySelector(".create") ? t.name : L("kNew");
-  document.getElementById("topStatus").textContent = t ? L(t.st === "working" ? "busy" : t.st) : "";
-  document.getElementById("topStatus").className = `st ${t?.st ?? ""}`;
+  // The window's title: the terminal on screen with its mark; nothing while a new one is being made.
+  const making = document.querySelector(".create");
+  const title = document.getElementById("title");
+  const key = t && !making ? `${t.id}:${t.st}:${t.name}` : "";
+  if (title.dataset.key !== key) {
+    title.dataset.key = key;
+    title.innerHTML = key ? `${statusMark(t.st)}<span>${esc(t.name)}</span>` : "";
+  }
 }
 
 // ---------- data (shaped like GET /terminals + /sessions), by project folder ----------
@@ -330,7 +342,7 @@ const now = Date.now(), m = 60e3, hr = 3600e3, d = 86400e3;
 const folders = [
   { path: "Projects/AgentSwitch", items: [
     { kind: "term", id: "b89e", st: "working", name: "本地构建应用和手机连接", ag: "cc", screen: "claude" },
-    { kind: "term", id: "ba82", st: "idle", name: "Bybit 卡", ag: "cc", screen: "bybit" },
+    { kind: "term", id: "ba82", st: "idle", name: "发布前检查", ag: "cc", screen: "release" },
     { kind: "term", id: "233a", st: "idle", name: "Claude-hud 安装", ag: "cc", screen: "hud" },
     { kind: "session", name: "终端服务 demo 与窗口", ag: "cc", at: now - 3 * hr },
     { kind: "session", name: "本地模型前台设计", ag: "cc", at: now - 1 * d },
@@ -338,20 +350,20 @@ const folders = [
     { kind: "session", name: "Playwright 用的是哪个 Chrome", ag: "cc", at: now - 3 * d },
     { kind: "session", name: "截图打码演示", ag: "cc", at: now - 3 * d },
   ] },
-  { path: "Projects/clash-verge", collapsed: true, items: [
-    { kind: "session", name: "安卓端配置迁移", ag: "oc", at: now - 4 * d },
+  { path: "Projects/blog", collapsed: true, items: [
+    { kind: "session", name: "换主题后的构建报错", ag: "oc", at: now - 4 * d },
   ] },
   { path: "Worktop/Codex", items: [
     { kind: "term", id: "2ecb", st: "exited", name: "orca是什么", ag: "codex", screen: "codex" },
-    { kind: "session", name: "我电脑上是不是没有 adb…", ag: "codex", at: now - 20 * hr },
-    { kind: "session", name: "微信聊天记录导出", ag: "codex", at: now - 2 * d },
+    { kind: "session", name: "给脚本加上重试", ag: "codex", at: now - 20 * hr },
+    { kind: "session", name: "整理下载文件夹", ag: "codex", at: now - 2 * d },
   ] },
   { path: "Worktop/Claude", items: [
     { kind: "session", name: "给 iTerm 配 MesloLGS 字体", ag: "cc", at: now - 25 * m },
     { kind: "session", name: "statusline 显示 git 分支", ag: "cc", at: now - 5 * hr },
   ] },
-  { path: "Downloads/idacrack", items: [
-    { kind: "session", name: "IDA Pro 官方 MCP 配置", ag: "oc", at: now - 21 * hr },
+  { path: "Work/api", items: [
+    { kind: "session", name: "给健康检查加缓存", ag: "oc", at: now - 21 * hr },
   ] },
 ];
 const all = () => folders.flatMap((f) => f.items);
@@ -447,11 +459,11 @@ const SCREENS = {
   <span class="c-dim">⎿</span>  <span class="c-grn">✓</span> tests/terminals.test.ts (18 tests) 1206ms
 
 <span class="c-mag">✻</span> <span class="c-mag">Pondering… (12s · ↓ 1.2k tokens)</span>`,
-  bybit: `<span class="c-org"> ▐▛███▛█</span>   <span class="c-b">Claude Code</span> <span class="c-dim">v2.1.283</span>
+  release: `<span class="c-org"> ▐▛███▛█</span>   <span class="c-b">Claude Code</span> <span class="c-dim">v2.1.283</span>
 <span class="c-org">▝▜██████▀</span>  <span class="c-dim">Opus 5.5 · Claude Max</span>
 <span class="c-org"> ▝▝   ▝▝</span>   <span class="c-dim">~/Desktop/WorkSpace/Projects/AgentSwitch</span>
 
-<span class="c-dim">❯</span> bybit 的卡为什么一直在审核中
+<span class="c-dim">❯</span> 发布前把构建再跑一遍
 
 <span class="c-grn">⏺</span> 我先看一下构建目录里残留的旧产物，清掉再重新打包。
 
@@ -511,7 +523,7 @@ function permissionBox(animate = true) {
   box.className = "box toast";
   box.innerHTML = `<div class="hd"><span>${L("perm")}</span><span class="sp"></span><span>${L("tool")}</span></div>
     <div class="bd"><code>rm -rf build &amp;&amp; npm run build</code><div class="path">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>
-    <div class="ft"><span class="hint">Bybit 卡</span><button class="btn" data-do="deny">[ ${L("deny")} <kbd>⌘⌫</kbd> ]</button><button class="btn pri" data-do="allow">[ ${L("allow")} <kbd>⌘↩</kbd> ]</button></div>`;
+    <div class="ft"><span class="hint">发布前检查</span><button class="btn" data-do="deny">[ ${L("deny")} <kbd>⌘⌫</kbd> ]</button><button class="btn pri" data-do="allow">[ ${L("allow")} <kbd>⌘↩</kbd> ]</button></div>`;
   document.getElementById("main").append(box);
   if (animate) glitch(box);
 }
@@ -692,10 +704,7 @@ document.addEventListener("click", (e) => {
 });
 // The list's edge: dragged, it follows the pointer; let go near the left and the list closes.
 const win = document.getElementById("win");
-/** The top bar's button: the list's pane filled while it shows. */
-const sideIcon = () => { document.getElementById("sidebtn").innerHTML = sprite(win.classList.contains("closed")
-  ? ["#######", "#.#...#", "#.#...#", "#.#...#", "#######"] : ["#######", "###...#", "###...#", "###...#", "#######"], { px: 2 }); };
-sideIcon();
+const sideIcon = () => undefined;   // the toolbar's list button is one icon either way, as a Mac app's
 let sideWidth = 300;
 document.getElementById("grip").addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
