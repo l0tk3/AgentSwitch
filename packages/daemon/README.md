@@ -264,7 +264,9 @@ real thing on deepseek-flash (2026-09-24: server up in 160-190 ms, ~150-290 ms o
 The manual entry: agent CLIs (`claude`, `codex`, `opencode`, `pi`) in pseudo-terminals the daemon holds
 (`src/terminals/`, `node-pty` + `@xterm/headless`), next to the managed tasks. `POST /terminals {harness, cwd, model?}`
 starts one; `GET /terminals/:id/stream` (SSE) sends a snapshot, then output, status and permission requests;
-`/input` (sealed reply), `/keys` (named keys), `/write` (raw keystrokes, this Mac only), `/resize`,
+`/input` (a reply, sealed unless `seal: false`), `/keys` (named keys; `wheel-up`/`wheel-down` follow the program's
+mouse and screen modes), `/commands` (the agent's slash commands, `src/terminals/commands.ts`), `/write` (raw
+keystrokes, this Mac only), `/resize`,
 `/permissions/:pid {decision}`, `/kill`, `DELETE` (`?transcript=1` also deletes Claude Code's own record);
 `POST /terminals/resume {harness, cwd, agentSessionId}` continues a session started elsewhere. Claude Code gets this
 terminal's own hooks through `--settings` (status, session id, `PermissionRequest` answered from any screen); the hook

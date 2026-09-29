@@ -15,6 +15,7 @@ import { markRemote } from "../src/core/caller.js";
 import { cleanTitle, meaningfulTitle, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
+import type { Sealer } from "../src/secrets/sealer.js";
 import { agentLauncher, claudeHookSettings, HOOK_SCRIPT, withoutParentSession } from "../src/terminals/launch.js";
 import { deleteTranscript } from "../src/terminals/transcripts.js";
 import { elsewhereCheck, type ElsewhereCheck, type Proc } from "../src/terminals/elsewhere.js";
@@ -44,6 +45,23 @@ async function until<T>(get: () => T | undefined | null | false, ms = 8000): Pro
 const text = (events: TerminalEvent[]): string => events.map((e) => (e.type === "snapshot" || e.type === "output" ? e.data : "")).join("");
 
 describe("terminal host", () => {
+  it("follows the program's screen and mouse modes for the wheel", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false) });
+    closers.push(() => host.closeAll());
+    const info = host.spawn({ harness: "codex", cwd: tmpdir(), cols: 80, rows: 20 });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    await until(() => text(events).includes("fake agent ready"));
+    expect(host.keyContext(info.id)).toMatchObject({ mouse: "none", sgrMouse: false, alternate: false });
+    host.write(info.id, "fullscreen\r");
+    await until(() => text(events).includes("fullscreen on"));
+    expect(host.keyContext(info.id)).toMatchObject({ mouse: "any", sgrMouse: true, alternate: true, cols: 80, rows: 20 });
+    expect(keySequence("wheel-up", host.keyContext(info.id))).toBe("\x1b[<64;41;11M");
+    host.write(info.id, "normal\r");
+    await until(() => text(events).includes("normal again"));
+    expect(host.keyContext(info.id)).toMatchObject({ mouse: "none", sgrMouse: false, alternate: false });
+  });
+
   it("runs a program in a pseudo-terminal: output, title, replies, status by activity, replay, snapshot, exit", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false), idleAfterMs: 150 });
     closers.push(() => host.closeAll());
@@ -235,6 +253,14 @@ describe("terminals over HTTP", () => {
     const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
     await until(() => screen().includes("fake agent ready"));
 
+    // `/` on the phone: this agent's commands in the terminal's folder (a command file of the project's among them).
+    mkdirSync(join(cwd, ".claude", "commands"), { recursive: true });
+    writeFileSync(join(cwd, ".claude", "commands", "ship.md"), "---\ndescription: Ship it\n---\nbody");
+    const commands = (await call("GET", `/terminals/${id}/commands`)).json.commands as { name: string; source: string }[];
+    expect(commands).toContainEqual(expect.objectContaining({ name: "ship", source: "project" }));
+    expect(commands.some((c) => c.name === "compact" && c.source === "builtin")).toBe(true);
+    expect((await call("GET", "/terminals/nope/commands")).status).toBe(404);
+
     expect((await call("POST", `/terminals/${id}/input`, { text: "hi from the phone" })).status).toBe(200);
     await until(() => screen().includes("got: hi from the phone"));
     // An empty line (⌃C here would really interrupt the agent: the terminal sends it SIGINT).
@@ -268,17 +294,38 @@ describe("terminals over HTTP", () => {
     expect((await call("GET", `/terminals/${id}`)).status).toBe(404);
   });
 
-  it("no asking at all (bypass) is chosen on the Mac only, never from a paired device", async () => {
+  it("bypass can be chosen from a paired device too (the phone asks first); every terminal may switch to it later", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => daemon.close());
     const post = (body: unknown, env?: object) => daemon.api.request("/terminals", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, env);
-    expect((await post({ harness: "claude-code", cwd, mode: "bypass" }, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
-    expect((await post({ harness: "claude-code", cwd, mode: "auto" }, markRemote({}, { deviceId: "phone" }))).status).toBe(201);
+    const fromPhone = await post({ harness: "claude-code", cwd, mode: "bypass" }, markRemote({}, { deviceId: "phone" }));
+    expect(fromPhone.status).toBe(201);
+    expect(((await fromPhone.json()) as { terminal: { mode: string } }).terminal.mode).toBe("bypass");
     const fromMac = await post({ harness: "claude-code", cwd, mode: "bypass" });
     expect(((await fromMac.json()) as { terminal: { mode: string } }).terminal.mode).toBe("bypass");
+  });
+
+  it("a reply is sealed unless sent directly, as typed", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
+    const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const TOKEN = "enc:v1:" + "S".repeat(40);
+    const sealer: Sealer = async (text) => ({ ok: true, text: text.split("hunter2").join(TOKEN), sealed: text.includes("hunter2") ? [{ label: "x/pw", field: "password", kind: "secret", hosts: ["x.com"], uses: ["http"], token: TOKEN }] : [], ms: 1 });
+    const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false), sealer });
+    closers.push(() => daemon.close());
+    const req = (path: string, body: unknown) => daemon.api.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, markRemote({}, { deviceId: "phone" }));
+    const created = (await (await req("/terminals", { harness: "codex", cwd })).json()) as { terminal: { id: string } };
+    const id = created.terminal.id;
+    const events: TerminalEvent[] = [];
+    daemon.terminals!.subscribe(id, null, (e) => events.push(e));
+    await until(() => text(events).includes("fake agent ready"));
+    expect(await (await req(`/terminals/${id}/input`, { text: "pw hunter2" })).json()).toEqual({ ok: true, sealed: 1 });
+    await until(() => text(events).includes(`got: pw ${TOKEN}`));
+    expect(await (await req(`/terminals/${id}/input`, { text: "ls -la", seal: false })).json()).toEqual({ ok: true, sealed: 0 });
+    await until(() => text(events).includes("got: ls -la"));
   });
 
   it("continues a session in place, once: the same terminal again, a session open elsewhere refused unless forked", async () => {
@@ -375,9 +422,17 @@ describe("terminal pieces", () => {
   });
 
   it("keys follow the cursor mode; a reply is pasted as one block when the program asks for it", () => {
-    expect(keySequence("up", false)).toBe("\x1b[A");
-    expect(keySequence("up", true)).toBe("\x1bOA");
-    expect(keySequence("ctrl-c", false)).toBe("\x03");
+    const plain = { applicationCursor: false, mouse: "none", sgrMouse: false, alternate: false, cols: 80, rows: 24 } as const;
+    expect(keySequence("up", plain)).toBe("\x1b[A");
+    expect(keySequence("up", { ...plain, applicationCursor: true })).toBe("\x1bOA");
+    expect(keySequence("ctrl-c", plain)).toBe("\x03");
+    expect(keySequence("pgup", plain)).toBe("\x1b[5~");
+    // The wheel: a mouse report in the middle when the program tracks the mouse, an arrow on a full screen without it,
+    // nothing on the normal screen (the screen scrolls its own history).
+    expect(keySequence("wheel-up", { ...plain, mouse: "any", sgrMouse: true })).toBe("\x1b[<64;41;13M");
+    expect(keySequence("wheel-down", { ...plain, mouse: "vt200" })).toBe("\x1b[M" + String.fromCharCode(32 + 65, 32 + 41, 32 + 13));
+    expect(keySequence("wheel-down", { ...plain, alternate: true, applicationCursor: true })).toBe("\x1bOB");
+    expect(keySequence("wheel-up", plain)).toBe("");
     expect(replyBytes("a\nb", true, true)).toBe("\x1b[200~a\nb\x1b[201~\r");
     expect(replyBytes("a\nb", false, true)).toBe("a\rb\r");
     expect(replyBytes("x\x1b[201~y", true, false)).toBe("\x1b[200~xy\x1b[201~");

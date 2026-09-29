@@ -14,7 +14,7 @@
 - **终端进程归服务所有**：daemon 启动并持有每个会话的伪终端（像 tmux 的服务端），Mac 和手机都只是显示端。关掉窗口、手机断线，会话照跑；任一端连上都看到当前屏幕。
 - **不做终端模拟器内核**：显示用 SwiftTerm（macOS 与 iOS 同一套），服务端用 `node-pty` 起进程、`@xterm/headless` 维护屏幕与回滚。
 - **只能开 agent，不能开 shell**：可启动的程序限定为 `claude`、`codex`、`opencode`、`pi`（及它们的参数），手机上没有“开一个终端”这种能力。
-- **会话同样在凭据网关后面**：环境与托管执行器相同（代理、CA、secret-gate MCP、禁区），所以密文在手动会话里也能用；回话先过 sealer（或本地前台，local-model-v0）。
+- **会话同样在凭据网关后面**：环境与托管执行器相同（代理、CA、secret-gate MCP、禁区），所以密文在手动会话里也能用；加密发送的回话先过 sealer（或本地前台，local-model-v0），直接发送的同在 Mac 上敲键盘。
 - **权限请求直接给你**：手动入口里不经调度模型代批；按钮来自 agent 的 hook，不靠识别屏幕。
 
 ## 1. 界面
@@ -38,6 +38,15 @@
 > - 提醒（2026-09-29）：终端列表在应用打开时一直刷新（不论在哪个标签页、哪一页），标签页角标就是等你的终端数。出现新的权限请求、或终端转为“等你”时，和任务的提问一样响“等你”提示音并震动，朗读模式下读一句“终端「名字」等你批准：工具”；刚打开应用时已经在等的不算（和审批一样以第一次看到为基线）。实时活动把等你的终端和任务并列（assistant-v0 §4）。没有推送，应用挂起后这些都停，和任务相同。
 > - 未做：没有用真机和真 agent 连 Mac 验证过，目前只在模拟器的演示数据上看过（Kit 的接口、事件流与提醒逻辑有单元测试）。
 > - SwiftTerm 固定 1.18.x（1.19 起自带一个构建插件，每次构建都要信任它，这里用不到）；它的 Metal 着色器需要 Xcode 的 Metal Toolchain 组件。
+> - 2026-09-29 第二轮（用户在真机上试过：目录树点不动、“更多”点不动；新建时选 agent 卡顿、没有 glitch；记录预览太简陋；只能加密发送、加密发送的样子远不如桌面；要 `/` 命令补全；手机上删不掉会话记录；要能选 bypass；键盘收不起来；终端滑不动）：
+>   - 目录树：文件夹和父目录行点一下折叠 / 展开（记住），`▸ N more` 点开列出这个文件夹的全部会话。会话行左滑或长按 `delete`（`DELETE /sessions/:harness/:id`，先确认）；会话时间是小数毫秒时曾解码失败显示成 1/1，两端都修。
+>   - 新建：选 agent 立即生效，所选的格子闪一次 glitch（同桌面第 9 条）并轻震；`// permissions` 加 `bypass`，选它时先确认，写明仍然生效的是禁区和凭据网关（原先手机 403）。
+>   - 记录预览：标题是会话名，下面一行 agent · 文件夹 · 时间；你的话在右、agent 的回答按 Markdown 排版，工具调用收成一行；底部 `resume`。
+>   - 回话：默认直接发送（同在 Mac 上敲键盘，`POST /input {seal:false}`）；锁按钮切到加密发送，输入区换成桌面同款的浮动框（粉色标题栏 `sealed → 终端名`、硬阴影，打开时闪一次 glitch），发送过 sealer。直接发送前手机本地检查像不像密码或令牌（常见令牌前缀、“密码/password/token …”后跟值、长的高熵串），像就问要不要改用加密发送。
+>   - `/` 补全：输入框以 `/` 开头时，上方列出这个 agent 可用的斜杠命令（内置 + 自己写的命令和技能，`GET /terminals/:id/commands`），按前缀过滤，点一下填入。
+>   - 键盘：按键条最前面多一个收起键盘的键，点终端画面也收起。
+>   - 触摸：单指上下滑动翻看——普通屏幕是本地回滚；程序在全屏且开了鼠标时（Claude Code 新版就是：`?1049h` + `?1003h`，没有终端回滚）把滑动换成滚轮发给程序（`POST /keys` 的 `wheel-up`/`wheel-down`），由它自己翻页；双指缩放改字号；按键条加 `pgup` `pgdn`。
+>   - 关闭：确认框里可选“同时删除会话记录”（同桌面）。
 
 **Mac**：菜单栏面板不变，加“打开终端窗口”。窗口左侧列表（同手机），右侧 SwiftTerm，完整键盘；标签页可拖出成独立窗口。
 
@@ -103,8 +112,8 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - hook 命令（`src/terminals/hookClient.ts`，用服务自己的 node 运行）只做一件事：把事件 POST 到本机 `/terminals/hook`，带 `AGENTSWITCH_TERMINAL_ID` 和**这个终端自己的 hook 令牌**（`AGENTSWITCH_TERMINAL_HOOK_TOKEN`）。**不能用本机令牌**：终端里的 agent 读得到自己的环境变量，拿到本机令牌就能调任何本机接口。hook 令牌只能给自己这个终端报事件、提权限请求，不能替自己作答；本机令牌检查对这一条路由放行，由路由自己核对 hook 令牌。权限请求的 hook 等服务回答（最长 30 分钟），没人回答就不给结论，agent 照常在终端里问。hook 命令出任何问题都静默退出，不影响 agent。
 - 实测（Claude Code 2.1.283）：`PermissionRequest` hook 运行期间，终端里**同时**显示 Claude 自己的确认框，两边谁先答算谁的。在终端里答了，Claude 不会结束那个 hook，所以服务端靠随后的事件撤卡片：工具执行了（`PostToolUse`，按工具名和输入对上那一条）、这一轮结束（`Stop`）、用户又发了话（`UserPromptSubmit`）。
 - 环境：去掉“当前是某个 Claude Code 会话”的标记（`CLAUDECODE`、`CLAUDE_CODE_CHILD_SESSION`、`CLAUDE_CODE_SESSION_*`、`CLAUDE_CODE_MESSAGING_*` 等）。服务从 Claude Code 里启动时（开发者这样跑过）会被新终端继承，Claude 会以为自己是子会话、不存会话记录，还会拿到上层会话的消息通道令牌。用户自己的设置（`ANTHROPIC_*`、`CLAUDE_CONFIG_DIR`）保留。
-- **权限模式**（2026-09-28，用户：iTerm 里用 `claude --dangerously-skip-permissions`，AgentSwitch 的终端却回到了自动或逐项确认）：新建和“继续”时选“逐项确认 / 自动 / 跳过权限”，页面记住上次的选择，第一次跟随 Mac 的审批模式（control-v0 §1：manual→逐项确认，scoped/auto→自动，skip→跳过权限）。对应参数：Claude Code `--permission-mode manual|auto` 或 `--dangerously-skip-permissions`；Codex 逐项确认为 `-a on-request -s read-only`（2026-09-28 审计：原先不带参数，实际权限取决于用户的 `config.toml`，可能是从不询问），自动为 `-a on-request -s workspace-write`，跳过为 `--dangerously-bypass-approvals-and-sandbox`；OpenCode 自动和跳过都是 `--auto`；pi 没有这一层。跳过权限只能在 Mac 上选（手机请求 403，同审批模式里的 skip）；标题带上显示“跳过权限”。
-- **继续沿用原会话的模式**（用户：点“继续”没地方选跳过权限，进去就是 auto）：会话列表从记录里读出每个会话最后用的模式（Claude Code 取最后一条 `permissionMode`；Codex 取最后一次的 `approval_policy` 与沙箱，`never` + `danger-full-access` 即跳过权限），“继续”就用它，读不出时才用记住的选择。归入三个词时只能收紧、不能放宽（2026-09-28 审计）：Claude Code 的 `acceptEdits`、`dontAsk`、`plan` 都比 auto 窄，一律按逐项确认继续；Codex 只读沙箱或记录里没有沙箱的，按逐项确认继续，可写沙箱才算自动。侧栏里跳过权限的会话和终端标“跳过权限”。在 Mac 上开的 Claude Code 终端另带 `--allow-dangerously-skip-permissions`，以别的模式启动后也能在终端里按 ⇧Tab 切到跳过权限（和 iTerm 一样；手机开的不带）。
+- **权限模式**（2026-09-28，用户：iTerm 里用 `claude --dangerously-skip-permissions`，AgentSwitch 的终端却回到了自动或逐项确认）：新建和“继续”时选“逐项确认 / 自动 / 跳过权限”，页面记住上次的选择，第一次跟随 Mac 的审批模式（control-v0 §1：manual→逐项确认，scoped/auto→自动，skip→跳过权限）。对应参数：Claude Code `--permission-mode manual|auto` 或 `--dangerously-skip-permissions`；Codex 逐项确认为 `-a on-request -s read-only`（2026-09-28 审计：原先不带参数，实际权限取决于用户的 `config.toml`，可能是从不询问），自动为 `-a on-request -s workspace-write`，跳过为 `--dangerously-bypass-approvals-and-sandbox`；OpenCode 自动和跳过都是 `--auto`；pi 没有这一层。跳过权限在 Mac 和手机上都能选（2026-09-29 用户要求；原先手机请求 403），手机上选它先确认；标题带上显示“跳过权限”。
+- **继续沿用原会话的模式**（用户：点“继续”没地方选跳过权限，进去就是 auto）：会话列表从记录里读出每个会话最后用的模式（Claude Code 取最后一条 `permissionMode`；Codex 取最后一次的 `approval_policy` 与沙箱，`never` + `danger-full-access` 即跳过权限），“继续”就用它，读不出时才用记住的选择。归入三个词时只能收紧、不能放宽（2026-09-28 审计）：Claude Code 的 `acceptEdits`、`dontAsk`、`plan` 都比 auto 窄，一律按逐项确认继续；Codex 只读沙箱或记录里没有沙箱的，按逐项确认继续，可写沙箱才算自动。侧栏里跳过权限的会话和终端标“跳过权限”。Claude Code 终端另带 `--allow-dangerously-skip-permissions`，以别的模式启动后也能在终端里按 ⇧Tab 切到跳过权限（和 iTerm 一样；2026-09-29 起手机开的也带）。
 - **不重复继续**：对已经在终端里打开（或已分叉出终端）的会话再点“继续”，直接切到那个终端（服务端同样：`/terminals/resume` 返回已开着的那个）。现在“继续”接着写原会话，不再每次多出一份记录；分叉只在用户选了“分叉一份”时发生（§5）。
 - **禁区**（2026-09-28 审计后补齐；用户决定不另加系统沙箱，各用 agent 自己的机制）：
   - Claude Code：`PreToolUse` hook 把每次工具调用交给服务，按托管执行器同一套规则（`decideTool` + 禁区表）判断，碰到本机令牌、gate 密钥、浏览器会话目录等就拒绝，其余不给结论、交回 agent 自己的模式决定；任何模式下都在（实测跳过权限模式下让它读本机令牌，被这一层拒绝）。会话配置另带 `permissions.deny` 的 `Read`/`Edit` 规则，服务无响应（hook 放行）时仍挡直接读取。
@@ -123,7 +132,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - `GET /terminals/style` → 屏幕的字体与配色（§1）。`PATCH /terminals/:id {name}` → 改名，`null` 或空串恢复自动命名。
 - `POST /terminals {harness, cwd, model?}` → 新建；`POST /terminals/resume {harness, agentSessionId, cwd, fork?}` → 续接（§5）：接着写同一个会话；它已开在 AgentSwitch 的终端里时返回那个终端（200，`existing: true`）；开在别的程序里时 409 `{error, elsewhere: {app, pid}}`；`fork: true` 分叉一份。会话 id 与模型 id 一样不得以 `-` 开头（它跟在 `--resume` 后面，否则可被当成参数，例如借此绕过“跳过权限只能在 Mac 上选”）；agent 不支持的续接或分叉返回 400（pi 不能续接，OpenCode 不能分叉）。服务在启动进程前再查一次“已开在这里”，两个画面同时续接同一会话只得到一个终端。`cwd` 规范化后保存（`~/p/` 与 `~/p` 是同一个文件夹）。
 - `GET /terminals/:id/stream?after=<seq>`（SSE）：先发快照 `{seq, cols, rows, data}`，再发输出块 `{seq, data}`（UTF-8 文本）、状态变化、权限请求；断线按 `after` 续传，缓冲外的旧序号直接给新快照。某个画面积压超过 5000 条未发出的事件时服务断开它，重连后从新快照开始。
-- `POST /terminals/:id/input {text, submit?}`：回话，先过 sealer（发现凭据就换成密文再写入；本地前台可用时由它处理）。程序开了 bracketed paste 时整段粘贴再回车，多行回复不会被拆成几次发送。`POST /terminals/:id/keys {keys:["esc","ctrl-c",…]}`：控制键，不过 sealer；方向键跟随程序的光标键模式。
+- `POST /terminals/:id/input {text, submit?, seal?}`：回话。`seal` 缺省为真：先过 sealer（发现凭据就换成密文再写入；本地前台可用时由它处理）；`seal:false` 直接写入（同在 Mac 上敲键盘，2026-09-29）。程序开了 bracketed paste 时整段粘贴再回车，多行回复不会被拆成几次发送。`POST /terminals/:id/keys {keys:["esc","ctrl-c",…]}`：控制键，不过 sealer；方向键跟随程序的光标键模式；`pgup` `pgdn`；`wheel-up` `wheel-down` 是滚轮：程序开了鼠标时按它的编码（SGR 1006 或默认）发在屏幕中间，全屏但没开鼠标时发方向键，普通屏幕不发（显示端自己回滚）。`GET /terminals/:id/commands`：这个 agent 在这个文件夹里可用的斜杠命令（内置、自己写的命令和技能）。
 - `POST /terminals/:id/write {data}`：原始按键，给本机的完整键盘（网页、Mac 窗口），**不在手机可用的路由里**（手机只走 `/input` 和 `/keys`）。
 - `POST /terminals/:id/resize {cols, rows}`：多个显示端同时连着时以最后一次交互的那一端为准。
 - `POST /terminals/:id/permissions/:pid {decision: "allow"|"deny"}`。（`allow_session` 未实现。）
@@ -156,7 +165,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 
 - 只能启动白名单里的 agent；参数由服务端拼，客户端只给执行器名、目录、模型、续接 id。
 - 只有配对设备和本机能访问；手机的每一次回话、按键、权限决定都进审计。
-- 回话过 sealer；终端输出流不入库，只在内存缓冲里，经 TLS 给自己的设备（同 control-v0 §3 的规则）。
+- 加密发送的回话过 sealer；终端输出流不入库，只在内存缓冲里，经 TLS 给自己的设备（同 control-v0 §3 的规则）。
 - 会话有 gate 环境与禁区保护（各 agent 的做法与强度见 §3）；手动会话里 agent 的权限模式默认是“逐项问你”。
 
 ## 8. 分阶段

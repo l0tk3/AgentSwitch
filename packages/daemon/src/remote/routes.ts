@@ -54,6 +54,7 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/terminals/:id"],
   ["PATCH", "/terminals/:id"],
   ["GET", "/terminals/:id/stream"],
+  ["GET", "/terminals/:id/commands"],
   ["POST", "/terminals/:id/input"],
   ["POST", "/terminals/:id/keys"],
   ["POST", "/terminals/:id/resize"],

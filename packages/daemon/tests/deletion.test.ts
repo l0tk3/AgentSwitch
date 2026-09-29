@@ -296,6 +296,36 @@ describe("the conversation goes with the task (threads-v0 手动删除)", () => 
     expect(existsSync(join(f.cwd, "keep.txt")), "the user's own files stay").toBe(true);
   });
 
+  it("a dated folder AgentSwitch made goes with the last task working there; the user's own folders and links stay", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-folders-"));
+    cleanup.push(() => rmSync(dir, { force: true, recursive: true }));
+    const home = join(dir, "state"), root = join(dir, "AgentSwitch"), project = join(dir, "project"), elsewhere = join(dir, "elsewhere");
+    for (const d of [home, root, project, elsewhere]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(home, "workdir.json"), JSON.stringify({ path: root }));
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "", taskFolders: true };
+    const d = buildDaemon(cfg, { quota: new QuotaService([]), router: echoRouter([decisionJson({ model: "gpt-5.5", effort: null })]) });
+    cleanup.push(() => d.close());
+    const folder = (name: string) => { const p = join(root, name); mkdirSync(join(p, "out"), { recursive: true }); writeFileSync(join(p, "out", "result.zip"), "x"); return p; };
+    const shared = folder("2026-09-29-aaaaaaaa"), alone = folder("2026-09-29-bbbbbbbb");
+    const link = join(root, "2026-09-29-cccccccc");
+    symlinkSync(elsewhere, link);
+    writeFileSync(join(elsewhere, "keep.txt"), "user file");
+    const task = (cwd: string) => d.store.updateTask(d.store.createTask({ task: "x", cwd }).id, { status: "done" });
+    const first = task(shared), followUp = task(shared), other = task(alone), mine = task(project), linked = task(link);
+    const del = (id: string) => d.app.request(`/tasks/${id}`, { method: "DELETE" });
+    expect((await del(first.id)).status).toBe(200);
+    expect(existsSync(shared), "another task still works there").toBe(true);
+    expect((await del(followUp.id)).status).toBe(200);
+    expect(existsSync(shared)).toBe(false);
+    expect((await del(mine.id)).status).toBe(200);
+    expect(existsSync(project), "a folder the user chose").toBe(true);
+    expect((await del(linked.id)).status).toBe(200);
+    expect(existsSync(join(elsewhere, "keep.txt")), "a link is never followed").toBe(true);
+    expect((await d.app.request("/history", { method: "DELETE" })).status).toBe(200);
+    expect(existsSync(alone)).toBe(false);
+    expect(d.store.getTask(other.id)).toBeUndefined();
+  });
+
   it("lines about tasks deleted before are cleaned at start", () => {
     const f = fixture(), kept = f.create();
     const { log, say, lines } = conversation(f.home);

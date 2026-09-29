@@ -13,6 +13,7 @@ import type { TerminalAudit } from "../terminals/audit.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
 import { PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type TerminalEvent, type TerminalHarness, type TerminalHost } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
+import { slashCommands } from "../terminals/commands.js";
 import { KEY_NAMES, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { modelSettings } from "../router/modelOverlay.js";
@@ -39,7 +40,7 @@ const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not
 const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a session id");
 const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), model: ModelId.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
-const Input = z.object({ text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true) });
+const Input = z.object({ text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true), seal: z.boolean().default(true) });
 const Keys = z.object({ keys: z.array(z.enum(KEY_NAMES)).min(1).max(20) });
 const Resize = z.object(Size);
 const Decide = z.object({ decision: z.enum(["allow", "deny"]) });
@@ -106,8 +107,6 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   const start = async (c: Context, resume: boolean) => {
     const body = resume ? await parseBody(c, ResumeTerminal) : await parseBody(c, NewTerminal);
     if (!body.ok) return c.json({ error: body.error }, 400);
-    // Like the approval policy's skip mode (control-v0 §1): no asking at all is chosen on the Mac only.
-    if (body.data.mode === "bypass" && remoteCaller(c.env)) return c.json({ error: "跳过权限只能在 Mac 上选择" }, 403);
     const typed = expandCwd(body.data.cwd);
     if (!isAbsolute(typed)) return c.json({ error: "cwd must be an absolute path" }, 400);
     const cwd = resolve(typed);   // `~/proj/` and `~/proj` are one folder
@@ -135,7 +134,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     try {
       const info = host.spawn({ harness: body.data.harness, cwd, ...(body.data.model ? { model: body.data.model } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
-        ...(remoteCaller(c.env) ? {} : { allowBypass: true }),
+        allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
       audit.record({ terminal: info.id, action: resume ? "resume" : "create", via: via(c), detail: { harness: info.harness, cwd, model: info.model, mode: info.mode, ...(resume ? { fork } : {}) } });
       return c.json({ terminal: info }, 201);
@@ -195,7 +194,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     });
   });
 
-  // A reply goes through the sealer first, like a task (router-v0 §9): credentials in it reach the agent as ciphertext.
+  // A sealed reply goes through the sealer first, like a task (router-v0 §9): credentials in it reach the agent as
+  // ciphertext. `seal: false` types it as it is, as a keyboard on the Mac would (the phone checks for secrets first).
   app.post("/terminals/:id/input", async (c) => {
     const id = c.req.param("id");
     const body = await parseBody(c, Input);
@@ -205,7 +205,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (info.status === "exited") return c.json({ error: `terminal ${id} has ended` }, 409);
     let text = body.data.text;
     let sealed = 0;
-    if (deps.sealer) {
+    if (deps.sealer && body.data.seal) {
       const r = await deps.sealer(text);
       if (!r.ok) return c.json({ error: r.error }, r.code === "unroutable" ? 400 : 503);
       text = r.text;
@@ -214,8 +214,16 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     try {
       host.write(id, replyBytes(text, host.bracketedPaste(id), body.data.submit));
     } catch (err) { return failed(c, err); }
-    audit.record({ terminal: id, action: "input", via: via(c), detail: { length: body.data.text.length, sealed } });
+    audit.record({ terminal: id, action: "input", via: via(c), detail: { length: body.data.text.length, sealed, direct: !body.data.seal } });
     return c.json({ ok: true, sealed });
+  });
+
+  // What `/` offers on the phone: the agent's slash commands in the terminal's folder (read afresh: a command file
+  // written a moment ago is there).
+  app.get("/terminals/:id/commands", (c) => {
+    const info = host.get(c.req.param("id"));
+    if (!info) return c.json({ error: "not found" }, 404);
+    return c.json({ commands: slashCommands(info.harness, info.cwd) });
   });
 
   app.post("/terminals/:id/keys", async (c) => {
@@ -223,10 +231,12 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const body = await parseBody(c, Keys);
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
-      const appCursor = host.applicationCursor(id);
-      host.write(id, body.data.keys.map((k) => keySequence(k, appCursor)).join(""));
+      const ctx = host.keyContext(id);
+      const bytes = body.data.keys.map((k) => keySequence(k, ctx)).join("");
+      if (bytes) host.write(id, bytes);
     } catch (err) { return failed(c, err); }
-    audit.record({ terminal: id, action: "keys", via: via(c), detail: { keys: body.data.keys } });
+    // Scrolling is not an action worth a line each notch.
+    if (!body.data.keys.every((k) => k.startsWith("wheel-"))) audit.record({ terminal: id, action: "keys", via: via(c), detail: { keys: body.data.keys } });
     return c.json({ ok: true });
   });
 

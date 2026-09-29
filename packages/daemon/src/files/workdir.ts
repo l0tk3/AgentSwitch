@@ -1,9 +1,10 @@
 /** Where a task with no folder of its own works (docs/control-v0.md §2): a dated subfolder of a visible folder the user
  *  picks on the Mac (default `~/AgentSwitch`), kept after the task, instead of a hidden throw-away one in the data
- *  directory. A subfolder still empty when its task ends is removed, so a quick question leaves nothing behind. */
+ *  directory. A subfolder still empty when its task ends is removed, so a quick question leaves nothing behind; one
+ *  with files goes when its last task is deleted (threads-v0 手动删除). */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
@@ -57,6 +58,19 @@ export function removeIfEmptyTaskFolder(cwd: string, root: string): boolean {
   try {
     if (readdirSync(cwd).length) return false;
     rmdirSync(cwd);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Removes `cwd` with what is in it, when it is one of our task folders directly under `root` (never a symlink, never
+ *  anywhere else): the caller has checked no other task works there. */
+export function removeTaskFolder(cwd: string, root: string): boolean {
+  if (!isTaskFolder(cwd, root) || !existsSync(cwd)) return false;
+  try {
+    if (lstatSync(cwd).isSymbolicLink() || realpathSync(dirname(cwd)) !== realpathSync(root)) return false;
+    rmSync(cwd, { recursive: true, force: true });
     return true;
   } catch {
     return false;

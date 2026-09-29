@@ -11,6 +11,7 @@ import { basename, dirname, join } from "node:path";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
+import type { KeyContext } from "./keys.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
 export type TerminalHarness = (typeof TERMINAL_HARNESSES)[number];
@@ -244,6 +245,8 @@ class Session {
   killTimer: NodeJS.Timeout | null = null;
   /** The start of an escape sequence the last piece of output ended in, sent with the next piece. */
   held = "";
+  /** The program asked for mouse reports in SGR form. */
+  sgrMouse = false;
   heldTimer: NodeJS.Timeout | null = null;
 
   constructor(readonly id: string, readonly harness: TerminalHarness, readonly cwd: string, readonly model: string | null, readonly mode: PermissionMode, readonly hookToken: string,
@@ -251,6 +254,13 @@ class Session {
     this.term = new headless.Terminal({ cols, rows, scrollback, allowProposedApi: true });
     this.ser = new serialize.SerializeAddon();
     this.term.loadAddon(this.ser);
+    // xterm's modes do not say how mouse reports are encoded: watch the program set and reset SGR form (1006).
+    const sgr = (on: boolean) => (params: (number | number[])[]) => {
+      if (params.some((p) => p === 1006 || (Array.isArray(p) && p.includes(1006)))) this.sgrMouse = on;
+      return false;   // the terminal still handles the sequence itself
+    };
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "h" }, sgr(true));
+    this.term.parser.registerCsiHandler({ prefix: "?", final: "l" }, sgr(false));
     this.title = "";
     this.lastOutputAt = createdAt;
   }
@@ -349,6 +359,13 @@ export class TerminalHost {
 
   applicationCursor(id: string): boolean {
     return this.need(id).term.modes.applicationCursorKeysMode;
+  }
+
+  /** What the program asked for that named keys follow (keys.ts). */
+  keyContext(id: string): KeyContext {
+    const s = this.need(id);
+    return { applicationCursor: s.term.modes.applicationCursorKeysMode, mouse: s.term.modes.mouseTrackingMode, sgrMouse: s.sgrMouse,
+      alternate: s.term.buffer.active.type === "alternate", cols: s.cols, rows: s.rows };
   }
 
   resize(id: string, cols: number, rows: number): void {

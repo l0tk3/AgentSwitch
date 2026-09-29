@@ -17,6 +17,9 @@ function hook(payload) {
 async function handle(line) {
   if (!line) return;
   if (line === "exit") process.exit(3);
+  // A full-screen program with the mouse on, as Claude Code's current screen is; "normal" goes back.
+  if (line === "fullscreen") { process.stdout.write("\x1b[?1049h\x1b[?1003h\x1b[?1006hfullscreen on\r\n"); return; }
+  if (line === "normal") { process.stdout.write("\x1b[?1006l\x1b[?1003l\x1b[?1049lnormal again\r\n"); return; }
   if (line === "perm") {
     await hook({ hook_event_name: "SessionStart", session_id: "11111111-2222-3333-4444-555555555555" });
     const out = await hook({ hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "rm -rf build" } });

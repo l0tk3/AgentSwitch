@@ -73,7 +73,7 @@ export type EngineDeps = ComposeDeps & {
 
 export { MAX_CLARIFICATIONS } from "./taskLoop.js";
 import { SUPPORT_CALL_TIMEOUT_MS } from "../core/limits.js";
-import { removeIfEmptyTaskFolder, restoreTaskFolder } from "../files/workdir.js";
+import { removeIfEmptyTaskFolder, removeTaskFolder, restoreTaskFolder } from "../files/workdir.js";
 
 export type PlannerFactory = (pick: TargetRef | null) => { readonly router: Router; readonly target: TargetRef } | null;
 
@@ -216,6 +216,9 @@ export class Engine {
 
   private forgetTasks(tasks: readonly Task[]): void {
     for (const task of tasks) this.deps.routingLog?.deleteTask(task.id, task.routeLogId);
+    // The dated folders AgentSwitch made for them, once no task works there any more; a folder the user chose stays.
+    const root = this.deps.taskFolderRoot?.();
+    if (root) for (const cwd of new Set(tasks.map((task) => task.cwd))) if (!this.ctx.store.cwdInUse(cwd)) removeTaskFolder(cwd, root);
     this.deps.conversation?.forgetTasks(tasks.map((task) => task.id));
     removeTaskMemories(this.deps.memoryPath, tasks.map((task) => task.id));
     if (this.deps.platformMemoryPath) removeTaskPlatformMemories(this.deps.platformMemoryPath, tasks.map((task) => task.id));

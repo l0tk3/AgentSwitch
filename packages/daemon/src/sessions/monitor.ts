@@ -90,7 +90,9 @@ export class SessionMonitor {
 
   private summary(harness: SessionHarness, f: { id: string; cwd: string; title: string; lastText: string; updatedAt: number; origin?: string; branch?: string; model?: string; mode?: SessionMode; forkedFrom?: string }, now: number): SessionSummary {
     return {
-      harness, id: f.id, cwd: f.cwd, title: oneLine(f.title, TITLE_CHARS), lastText: oneLine(f.lastText, TITLE_CHARS), updatedAt: f.updatedAt,
+      harness, id: f.id, cwd: f.cwd, title: oneLine(f.title, TITLE_CHARS), lastText: oneLine(f.lastText, TITLE_CHARS),
+      // Whole milliseconds: a file's mtime has a fraction, which a client reading an integer may refuse.
+      updatedAt: Math.round(f.updatedAt),
       active: now - f.updatedAt < ACTIVE_MS, ...(f.origin ? { origin: f.origin } : {}), ...(f.branch ? { branch: f.branch } : {}), ...(f.model ? { model: f.model } : {}),
       ...(f.mode ? { mode: f.mode } : {}), ...(f.forkedFrom ? { forkedFrom: f.forkedFrom } : {}),
     };

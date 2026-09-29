@@ -151,6 +151,11 @@ export class Store {
     return (this.db.prepare("SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC LIMIT ?").all(limit) as Row[]).map(toTask);
   }
 
+  /** Whether any task (of any state) works in `cwd`. */
+  cwdInUse(cwd: string): boolean {
+    return this.db.prepare("SELECT 1 FROM tasks WHERE cwd = ? LIMIT 1").get(cwd) !== undefined;
+  }
+
   tasksInThread(threadId: string): Task[] {
     return (this.db.prepare("SELECT * FROM tasks WHERE thread_id = ? ORDER BY created_at, rowid").all(threadId) as Row[]).map(toTask);
   }
