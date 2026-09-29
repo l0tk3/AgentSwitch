@@ -59,7 +59,8 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         cwd = (try? c.decodeIfPresent(String.self, forKey: .cwd)) ?? ""
         title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         lastText = (try? c.decodeIfPresent(String.self, forKey: .lastText)) ?? ""
-        updatedAt = (try? c.decodeIfPresent(Int64.self, forKey: .updatedAt)) ?? 0
+        // A file's mtime in milliseconds may carry a fraction (older Macs send it as is).
+        updatedAt = (try? c.decodeIfPresent(Int64.self, forKey: .updatedAt)) ?? (try? c.decodeIfPresent(Double.self, forKey: .updatedAt)).map { Int64($0.rounded()) } ?? 0
         active = (try? c.decodeIfPresent(Bool.self, forKey: .active)) ?? false
         origin = try? c.decodeIfPresent(String.self, forKey: .origin)
         branch = try? c.decodeIfPresent(String.self, forKey: .branch)

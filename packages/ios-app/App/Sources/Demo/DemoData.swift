@@ -144,6 +144,16 @@ enum DemoData {
 
     // MARK: - terminal-v0
 
+    /// What `/` offers in the demo terminal.
+    static let slashCommands: [SlashCommand] = [
+        .init(name: "compact", description: "Clear conversation history but keep a summary in context"),
+        .init(name: "config", description: "Open the settings panel"),
+        .init(name: "context", description: "Show how the context window is used"),
+        .init(name: "cost", description: "Show the cost and duration of this session"),
+        .init(name: "clear", description: "Clear conversation history and free up context"),
+        .init(name: "commit", description: "Stage and commit the current changes", source: "user"),
+    ]
+
     static var terminalList: TerminalList {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         return TerminalList(terminals: [

@@ -50,9 +50,10 @@ final class ConversationTests: XCTestCase {
         let watch = try decode(AssistantMessage.self, Self.message(9, "assistant", "每 10 分钟告诉你", kind: "watch", tasks: ["t1"]))
         XCTAssertEqual([notice.kind, progress.kind, watch.kind], [.notice, .progress, .watch])
         XCTAssertEqual([notice.unprompted, progress.unprompted, watch.unprompted], [true, true, false])
-        let items = Conversation.timeline(messages: [notice], tasks: [try task("t1", at: 1)])
-        XCTAssertEqual(items.map(\.id), ["task-t1", "m7"], "a report does not own the task: the task stays where it was made")
-        XCTAssertEqual(items[1].mentions, ["t1"])
+        let other = try decode(AssistantMessage.self, Self.message(6, "user", "另一件事", kind: "message", ts: 3000))
+        let items = Conversation.timeline(messages: [other, notice], tasks: [try task("t1", at: 1)])
+        XCTAssertEqual(items.map(\.id), ["task-t1", "m6", "m7"], "a report does not own the task: the task stays where it was made")
+        XCTAssertEqual(items[2].mentions, ["t1"])
     }
 
     func testUnknownKindsStillDecode() throws {
@@ -76,6 +77,22 @@ final class ConversationTests: XCTestCase {
         guard case .assistant(_, let mentioned) = items[4] else { return XCTFail() }
         XCTAssertEqual(mentioned, [], "a status answer only mentions tasks, it does not own them")
         XCTAssertEqual(items[4].mentions, ["t1"])
+    }
+
+    func testATasksEndRightUnderItsCardIsNotSaidAgain() throws {
+        let m = { (seq: Int, role: String, kind: String, tasks: [String], ts: Int64) in
+            try self.decode(AssistantMessage.self, Self.message(seq, role, "m\(seq)", kind: kind, tasks: tasks, ts: ts))
+        }
+        let messages = try [
+            m(1, "user", "message", [], 1000), m(2, "assistant", "task", ["a"], 1100), m(3, "assistant", "task", ["b"], 1200),
+            m(4, "assistant", "notice", ["a"], 2000),                     // b's card is between: said
+            m(5, "assistant", "notice", ["b"], 2100),                     // right under b's card, only a's end line between: left out
+            m(6, "user", "message", [], 3000), m(7, "assistant", "reply", [], 3100),
+            m(8, "assistant", "notice", ["loose"], 4000),                  // the loose task's card is further up
+            m(9, "assistant", "notice", ["gone"], 4100),                   // no card on the phone: said
+        ]
+        let items = Conversation.timeline(messages: messages, tasks: try [task("a", at: 1050), task("b", at: 1150), task("loose", at: 2500)])
+        XCTAssertEqual(items.map(\.id), ["m1", "m2", "m3", "m4", "task-loose", "m6", "m7", "m8", "m9"])
     }
 
     func testTimelineKeepsTheNewestItems() throws {

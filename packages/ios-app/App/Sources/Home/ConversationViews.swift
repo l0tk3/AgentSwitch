@@ -41,6 +41,14 @@ struct AssistantBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
+            if let ended { endLine(ended) } else { line }
+            ForEach(created) { task in entry(task) }
+            ForEach(mentioned) { task in TaskLink(task: task, waiting: waiting(task)) { open(task.id) } }
+        }
+    }
+
+    private var line: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 if let dot { Rectangle().fill(dot).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
                 Text(MessageDisplay.readable(message.text))
@@ -50,9 +58,30 @@ struct AssistantBubble: View {
             }
             .contextMenu { readAloud }
             if isAnswer { playButton }
-            ForEach(created) { task in entry(task) }
-            ForEach(mentioned) { task in TaskLink(task: task, waiting: waiting(task)) { open(task.id) } }
         }
+    }
+
+    /// A task's end, further down than its card (Conversation.timeline leaves out one right under it): one line — its
+    /// state, its title, the word — that opens it; the result is on the card, not said twice (ui-v0 §7.4).
+    private var ended: AgentTask? {
+        guard message.kind == .notice, let id = message.taskIds.first else { return nil }
+        return model.tasks.first { $0.id == id }
+    }
+
+    private func endLine(_ task: AgentTask) -> some View {
+        Button { open(task.id) } label: {
+            HStack(spacing: Theme.Space.s) {
+                StatusMark(status: task.status)
+                Text(task.threadId.flatMap { model.thread($0)?.title } ?? MessageDisplay.readable(task.task))
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(task.status.label).mono(11).foregroundStyle(Theme.color(task.status))
+                Spacer(minLength: 0)
+                Text("›").mono(12).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu { readAloud }
     }
 
     /// A notice or progress line: the state of its task; nothing for plain answers.

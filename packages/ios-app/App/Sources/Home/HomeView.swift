@@ -10,6 +10,8 @@ struct HomeView: View {
     @State private var feed = FeedModel()
     @State private var path = NavigationPath()
     @State private var deleting: DeleteRequest?
+    /// The cards' files: downloaded and previewed here.
+    @State private var opener = TaskFileOpener()
 
     static let pollInterval: Duration = .seconds(6)
 
@@ -74,6 +76,8 @@ struct HomeView: View {
                 feed.stopAll()
             }
             .sheet(item: $model.sheet) { sheet in sheetContent(sheet) }
+            .taskFilePreview(opener)
+            .onChange(of: opener.error) { if let error = opener.error { model.banner = error; opener.error = nil } }
             .deleteConfirmation($deleting, error: $model.banner)
         }
     }
@@ -101,6 +105,8 @@ struct HomeView: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
+            // A short conversation cannot be dragged: a tap anywhere in it puts the keyboard away too.
+            .simultaneousGesture(TapGesture().onEnded { Keyboard.dismiss() })
             .refreshable { await model.refreshAll() }
             // A new message, answer or task: follow it down.
             .onChange(of: timeline.last?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
@@ -140,7 +146,7 @@ struct HomeView: View {
 
     private func entry(_ task: AgentTask, showsRequest: Bool) -> FeedEntry {
         FeedEntry(task: task, showsRequest: showsRequest, tail: feed.tails[task.id] ?? [],
-                  pending: ActivityFeed.pending(model.approvals, for: task.id), deliverables: feed.deliverables[task.id] ?? 0,
+                  pending: ActivityFeed.pending(model.approvals, for: task.id), files: feed.files[task.id] ?? [], opener: opener,
                   lastEventAt: feed.lastEventAt[task.id],
                   open: { open(task.id) },
                   delete: { deleting = $0 },
@@ -222,19 +228,12 @@ private struct LooseApprovalsButton: View {
     }
 }
 
+/// Nothing yet: one line (ui-v0 §7.4; the input box says the rest).
 private struct EmptyLog: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
-            Text("向 Mac 发送任务或问题").font(.title3.weight(.semibold))
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                ForEach(["整理下载目录", "登录财务平台，汇总首页的待办", "刚才的任务进展如何"], id: \.self) { example in
-                    Text(example).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            Text("账号和密码可直接填写，由 Mac 加密后存储。").font(.footnote).foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 60)
+        Text("发送任务或问题").font(.subheadline).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 60)
     }
 }
 

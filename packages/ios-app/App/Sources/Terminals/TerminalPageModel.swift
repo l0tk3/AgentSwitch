@@ -14,6 +14,10 @@ final class TerminalPageModel {
     private(set) var name: String
     private(set) var harness: String
     private(set) var status: TerminalStatus
+    /// It writes a session of its own (not one it continues in place): closing may delete that record.
+    let ownsRecord: Bool
+    /// What `/` offers: the agent's slash commands in this folder.
+    private(set) var commands: [SlashCommand] = []
     private(set) var permissions: [TerminalPermission] = []
     /// The terminal was closed (here or elsewhere): the page leaves.
     private(set) var removed = false
@@ -29,6 +33,9 @@ final class TerminalPageModel {
     @ObservationIgnored private var resizing: Task<Void, Never>?
     /// The grid the service last heard from this phone.
     @ObservationIgnored private var told: (cols: Int, rows: Int)?
+    /// Wheel notches not sent yet (up positive), and the send under way.
+    @ObservationIgnored private var wheelPending = 0
+    @ObservationIgnored private var wheeling: Task<Void, Never>?
 
     init(terminal: TerminalInfo, fontSize: CGFloat) {
         id = terminal.id
@@ -36,6 +43,7 @@ final class TerminalPageModel {
         harness = terminal.harness
         status = terminal.status
         permissions = terminal.permissions
+        ownsRecord = terminal.resumedFrom == nil || terminal.forked
         screen = TerminalScreenController(fontSize: fontSize)
         screen.onSize = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }
     }
@@ -48,10 +56,15 @@ final class TerminalPageModel {
             #if DEBUG
             screen.snapshot(DemoData.terminalScreen)
             drawn = true
+            commands = DemoData.slashCommands
             #endif
             return
         }
         let id = id
+        Task { [weak self] in
+            let commands = (try? await api.terminalCommands(id)) ?? []
+            self?.commands = commands
+        }
         follow = Task { [weak self] in
             do {
                 for try await event in api.terminalEvents(id) {
@@ -68,6 +81,9 @@ final class TerminalPageModel {
         follow?.cancel()
         follow = nil
         resizing?.cancel()
+        wheeling?.cancel()
+        wheeling = nil
+        wheelPending = 0
     }
 
     func handle(_ event: TerminalEvent) {
@@ -134,20 +150,36 @@ final class TerminalPageModel {
 
     // MARK: sending
 
-    /// A reply: sealed on the Mac first, then pasted in and entered.
-    func send(_ text: String) async -> Bool {
+    /// A reply, pasted in and entered: as typed, or sealed on the Mac first (credentials become ciphertext).
+    func send(_ text: String, sealed: Bool) async -> Bool {
         guard let api, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         sending = true
         defer { sending = false }
         claimSize()
         do {
-            let result = try await api.sendTerminalInput(id, text: text)
+            let result = try await api.sendTerminalInput(id, text: text, sealed: sealed)
             sealedNote = result.sealed == 0 ? nil : result.sealed == 1 ? "1 secret sealed" : "\(result.sealed) secrets sealed"
             error = nil
             return true
         } catch {
             self.error = error.localizedDescription
             return false
+        }
+    }
+
+    /// Notches from a drag, sent together every 50 ms (at most 20 at a time) instead of one request each.
+    func wheel(up: Bool, count: Int) {
+        guard api != nil, status != .exited else { return }
+        wheelPending += up ? count : -count
+        guard wheeling == nil else { return }
+        wheeling = Task { [weak self] in
+            while let self, self.wheelPending != 0, !Task.isCancelled {
+                let n = max(-20, min(20, self.wheelPending))
+                self.wheelPending -= n
+                try? await self.api?.sendTerminalKeys(self.id, Array(repeating: n > 0 ? .wheelUp : .wheelDown, count: abs(n)))
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            self?.wheeling = nil
         }
     }
 
@@ -171,10 +203,10 @@ final class TerminalPageModel {
         do { name = try await api.renameTerminal(id, name: newName.isEmpty ? nil : newName).name } catch { self.error = error.localizedDescription }
     }
 
-    func close() async -> Bool {
+    func close(deleteRecord: Bool = false) async -> Bool {
         guard let api else { return true }
         do {
-            try await api.closeTerminal(id)
+            try await api.closeTerminal(id, deleteRecord: deleteRecord)
             return true
         } catch {
             self.error = error.localizedDescription

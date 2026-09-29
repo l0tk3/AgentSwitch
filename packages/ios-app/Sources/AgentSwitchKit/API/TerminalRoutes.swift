@@ -8,7 +8,8 @@ private struct ElsewhereReply: Decodable {
     struct Place: Decodable { let app: String?; let pid: Int? }
     let elsewhere: Place?
 }
-private struct InputBody: Encodable { let text: String; let submit: Bool }
+private struct InputBody: Encodable { let text: String; let submit: Bool; let seal: Bool }
+private struct CommandList: Decodable { let commands: [SlashCommand] }
 private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int }
 private struct DecisionBody: Encodable { let decision: String }
@@ -42,8 +43,19 @@ extension AgentSwitchAPI {
     }
 
     /// A reply, sealed on the Mac first (credentials reach the agent as ciphertext); `submit` presses return after it.
-    public func sendTerminalInput(_ id: String, text: String, submit: Bool = true) async throws -> TerminalInputResult {
-        try await send("POST", ["terminals", id, "input"], body: InputBody(text: text, submit: submit), timeout: Self.createTaskTimeout)
+    /// A reply: sealed on the Mac first (the sealer may take a while), or `sealed: false` typed as it is.
+    public func sendTerminalInput(_ id: String, text: String, submit: Bool = true, sealed: Bool = true) async throws -> TerminalInputResult {
+        try await send("POST", ["terminals", id, "input"], body: InputBody(text: text, submit: submit, seal: sealed),
+                       timeout: sealed ? Self.createTaskTimeout : requestTimeout)
+    }
+
+    /// The slash commands this terminal's agent takes in its folder; none from a Mac that does not say (404).
+    public func terminalCommands(_ id: String) async throws -> [SlashCommand] {
+        do {
+            return (try await get(["terminals", id, "commands"]) as CommandList).commands
+        } catch APIError.http(status: 404, message: _) {
+            return []
+        }
     }
 
     public func sendTerminalKeys(_ id: String, _ keys: [TerminalKey]) async throws {
@@ -69,8 +81,10 @@ extension AgentSwitchAPI {
     }
 
     /// Ends it and forgets it; the agent's own record of the session stays (it can be resumed).
-    public func closeTerminal(_ id: String) async throws {
-        let _: OKReply = try await perform("DELETE", ["terminals", id], query: [], body: nil)
+    /// Ends the terminal and takes it off the list; `deleteRecord` deletes the session it wrote too (not a session it
+    /// continued in place: 409).
+    public func closeTerminal(_ id: String, deleteRecord: Bool = false) async throws {
+        let _: OKReply = try await perform("DELETE", ["terminals", id], query: deleteRecord ? [URLQueryItem(name: "transcript", value: "1")] : [], body: nil)
     }
 
     /// A terminal's screen and what happens to it: the snapshot, then output, status, name, permission requests. On a

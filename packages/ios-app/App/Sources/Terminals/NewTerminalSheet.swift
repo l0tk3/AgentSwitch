@@ -2,8 +2,9 @@ import AgentSwitchKit
 import SwiftUI
 
 /// `new` in the terminals tab (docs/terminal-v0.md §1): an agent (its pixel mark and name; one not installed on the Mac
-/// is dithered and cannot be picked), its model (default = the agent's own), the folder (typed, or one used before),
-/// and how it asks (`< > ask each` `<x> auto`; bypass is chosen on the Mac only). The page it opens takes the size.
+/// is dithered and cannot be picked; the one picked glitches once), its model (default = the agent's own), the folder
+/// (typed, or one used before), and how it asks (`< > ask each` `<x> auto` `< > bypass`, bypass confirmed first). The
+/// page it opens takes the size.
 struct NewTerminalSheet: View {
     let started: (TerminalInfo) -> Void
     @Environment(AppModel.self) private var model
@@ -14,10 +15,11 @@ struct NewTerminalSheet: View {
     @State private var modelId = ""
     @State private var starting = false
     @State private var error: String?
+    @State private var confirmBypass = false
 
     static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi")]
-    /// `< >` is one of several (§7.2.6); no bypass here.
-    static let modes: [(id: String, name: String)] = [("manual", "ask each"), ("auto", "auto")]
+    /// `< >` is one of several (§7.2.6).
+    static let modes: [(id: String, name: String)] = [("manual", "ask each"), ("auto", "auto"), ("bypass", "bypass")]
 
     var body: some View {
         let store = model.terminals
@@ -73,14 +75,16 @@ struct NewTerminalSheet: View {
                         SectionLabel("permissions")
                         HStack(spacing: Theme.Space.l) {
                             ForEach(Self.modes, id: \.id) { m in
-                                Button { mode = m.id } label: {
+                                Button { if m.id == "bypass" && mode != "bypass" { confirmBypass = true } else { mode = m.id } } label: {
                                     Text("\(mode == m.id ? "<x>" : "< >") \(m.name)").mono(14)
                                         .foregroundStyle(mode == m.id ? Theme.ink : .secondary)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        Text("bypass 只能在 Mac 上选择。").font(.footnote).foregroundStyle(.tertiary)
+                        if mode == "bypass" {
+                            Text("agent 的任何操作都不再询问你；禁区和凭据网关仍然生效。").font(.footnote).foregroundStyle(Theme.waiting)
+                        }
                     }
                     if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
                     Button { Task { await start() } } label: { Text(starting ? "[ starting ]" : "[ start ]") }
@@ -99,12 +103,24 @@ struct NewTerminalSheet: View {
                 if !Self.modes.contains(where: { $0.id == mode }) { mode = "manual" }
             }
             .onChange(of: agent) { modelId = "" }
+            .confirmationDialog("跳过全部权限确认？", isPresented: $confirmBypass, titleVisibility: .visible) {
+                Button("使用 bypass", role: .destructive) { mode = "bypass" }
+            } message: {
+                Text(Self.bypassNote)
+            }
         }
     }
 
+    /// What bypass leaves in force, said before it is chosen (here and when a bypass session is continued).
+    static let bypassNote = "agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：禁区（本机令牌、凭据网关密钥等）和凭据网关。"
+
     private func agentTile(_ id: String, _ name: String, installed: Bool) -> some View {
         let on = agent == id
-        return Button { agent = id } label: {
+        return Button {
+            guard agent != id else { return }
+            UISelectionFeedbackGenerator().selectionChanged()
+            agent = id
+        } label: {
             VStack(alignment: .leading, spacing: 10) {
                 PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.square, pixel: 4, color: on ? Theme.signal : Theme.ink)
                 Text(name).mono(13)
@@ -112,10 +128,10 @@ struct NewTerminalSheet: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .overlay(Rectangle().strokeBorder(on ? Theme.ink : Theme.line, lineWidth: on ? 2 : 1))
-            .opacity(installed ? 1 : 0.4)
+            .glitch(on: on)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AgentTileStyle(on: on))
+        .opacity(installed ? 1 : 0.4)
         .disabled(!installed)
         .accessibilityLabel(name)
         .accessibilityAddTraits(on ? .isSelected : [])
@@ -133,5 +149,18 @@ struct NewTerminalSheet: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// An agent's tile: a 2 pt ink frame once picked; while a finger is on it, raised at once (the tap answers before the
+/// scroll view decides it was not a drag).
+private struct AgentTileStyle: ButtonStyle {
+    let on: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(configuration.isPressed ? Theme.raised : Color.clear)
+            .overlay(Rectangle().strokeBorder(on || configuration.isPressed ? Theme.ink : Theme.line, lineWidth: on ? 2 : 1))
+            .contentShape(Rectangle())
     }
 }

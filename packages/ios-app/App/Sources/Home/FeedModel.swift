@@ -15,8 +15,8 @@ final class FeedModel {
     private var streams: [String: Task<Void, Never>] = [:]
     /// Set by the home view on appear / disappear; a sync while hidden stops everything instead.
     var visible = false
-    /// Deliverable counts of finished tasks, asked once per task (a finished task's files do not change).
-    private(set) var deliverables: [String: Int] = [:]
+    /// The files finished tasks handed back (`out/`, kept artifacts), asked once per task (they do not change after).
+    private(set) var files: [String: [TaskFile]] = [:]
     private var asked: Set<String> = []
 
     /// Start streams for the tasks that should have one, stop the rest.
@@ -33,17 +33,17 @@ final class FeedModel {
         for id in wanted where streams[id] == nil {
             start(id, api, model)
         }
-        countDeliverables(ActivityFeed.timeline(model.tasks).filter { $0.status.isTerminal && !asked.contains($0.id) }.map(\.id), api)
+        loadFiles(ActivityFeed.timeline(model.tasks).filter { $0.status.isTerminal && !asked.contains($0.id) }.map(\.id), api)
     }
 
-    private func countDeliverables(_ ids: [String], _ api: AgentSwitchAPI) {
+    private func loadFiles(_ ids: [String], _ api: AgentSwitchAPI) {
         guard !ids.isEmpty else { return }
         asked.formUnion(ids)
         Task { [weak self] in
             for id in ids {
                 // Asked once: a failure is not retried every poll (the task page lists the files anyway).
                 guard let files = try? await api.taskFiles(id) else { continue }
-                self?.deliverables[id] = files.filter(\.isDeliverable).count
+                self?.files[id] = files.filter(\.isDeliverable).sorted { $0.path < $1.path }
             }
         }
     }

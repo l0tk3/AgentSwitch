@@ -4,8 +4,8 @@ import SwiftUI
 import UIKit
 
 /// SwiftTerm as a display only (docs/terminal-v0.md §1 iPhone): it never takes the keyboard and never sends what it
-/// would type or report — the phone has no raw keystroke route; replies go through the box (sealed), keys through the
-/// key bar (by name).
+/// would type or report — the phone has no raw keystroke route; replies go through the box (as typed, or sealed), keys
+/// and the wheel by name.
 final class DisplayTerminalView: TerminalView {
     override var canBecomeFirstResponder: Bool { false }
 }
@@ -65,6 +65,16 @@ final class TerminalScreenController: NSObject {
         let t = view.getTerminal()
         return (t.cols, t.rows)
     }
+
+    /// A drag scrolls the program rather than this screen: it tracks the mouse, or it is full screen (no history of the
+    /// terminal's own; Claude Code's current screen is both).
+    var scrollsByWheel: Bool {
+        let t = view.getTerminal()
+        return t.mouseMode != .off || t.isCurrentBufferAlternate
+    }
+
+    /// One notch of the wheel per this much drag.
+    var notch: CGFloat { max(8, view.font.lineHeight) }
 }
 
 extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
@@ -88,31 +98,99 @@ extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }
 
-/// The controller's view in SwiftUI, with pinch to change the text size (the grid follows, and with it the agent).
+/// The controller's view in SwiftUI, and touch (terminal-v0 §1 second round): a drag scrolls — this screen's history,
+/// or the program itself by wheel notches when it is full screen or tracks the mouse (a flick carries on a little);
+/// pinch changes the text size (the grid follows, and with it the agent); a tap puts the keyboard away.
 struct TerminalScreen: UIViewRepresentable {
     let controller: TerminalScreenController
     var onPinchEnded: (CGFloat) -> Void = { _ in }
+    /// Wheel notches for the program: up (back through what it showed), and how many.
+    var onWheel: (Bool, Int) -> Void = { _, _ in }
+    var onTap: () -> Void = {}
 
     func makeUIView(context: Context) -> DisplayTerminalView {
-        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinched(_:)))
-        controller.view.addGestureRecognizer(pinch)
+        let c = context.coordinator
+        let pinch = UIPinchGestureRecognizer(target: c, action: #selector(Coordinator.pinched(_:)))
+        let pan = UIPanGestureRecognizer(target: c, action: #selector(Coordinator.panned(_:)))
+        let tap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.tapped(_:)))
+        pan.maximumNumberOfTouches = 1
+        for g in [pinch, pan, tap] as [UIGestureRecognizer] {
+            g.delegate = c
+            g.cancelsTouchesInView = false
+            controller.view.addGestureRecognizer(g)
+        }
         return controller.view
     }
 
-    func updateUIView(_ uiView: DisplayTerminalView, context: Context) {}
+    func updateUIView(_ uiView: DisplayTerminalView, context: Context) {
+        context.coordinator.onWheel = onWheel
+        context.coordinator.onTap = onTap
+    }
 
-    func makeCoordinator() -> Coordinator { Coordinator(controller: controller, ended: onPinchEnded) }
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller, ended: onPinchEnded, onWheel: onWheel, onTap: onTap) }
 
     @MainActor
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let controller: TerminalScreenController
         let ended: (CGFloat) -> Void
+        var onWheel: (Bool, Int) -> Void
+        var onTap: () -> Void
         private var start: CGFloat = 10
+        private var dragged: CGFloat = 0
+        private var coast: Task<Void, Never>?
 
-        init(controller: TerminalScreenController, ended: @escaping (CGFloat) -> Void) {
+        init(controller: TerminalScreenController, ended: @escaping (CGFloat) -> Void, onWheel: @escaping (Bool, Int) -> Void, onTap: @escaping () -> Void) {
             self.controller = controller
             self.ended = ended
+            self.onWheel = onWheel
+            self.onTap = onTap
         }
+
+        nonisolated func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        /// The wheel drag only while the program takes the wheel, and only up and down.
+        nonisolated func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+            MainActor.assumeIsolated {
+                guard let pan = g as? UIPanGestureRecognizer else { return true }
+                let v = pan.velocity(in: pan.view)
+                return controller.scrollsByWheel && abs(v.y) > abs(v.x)
+            }
+        }
+
+        @objc func panned(_ gesture: UIPanGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                coast?.cancel()
+                dragged = 0
+            case .changed:
+                dragged += gesture.translation(in: gesture.view).y
+                gesture.setTranslation(.zero, in: gesture.view)
+                let notches = Int(dragged / controller.notch)
+                if notches != 0 {
+                    dragged -= CGFloat(notches) * controller.notch
+                    // The finger going down brings back what was above: the wheel turns up.
+                    onWheel(notches > 0, abs(notches))
+                }
+            case .ended:
+                // A flick carries on, slowing: a few more notches, fewer each time.
+                let v = gesture.velocity(in: gesture.view).y
+                var left = Int(min(24, abs(v) / 220))
+                guard left > 0 else { return }
+                let up = v > 0
+                coast = Task { [weak self] in
+                    while left > 0, !Task.isCancelled {
+                        let now = max(1, left / 2)
+                        self?.onWheel(up, now)
+                        left -= now
+                        try? await Task.sleep(for: .milliseconds(70))
+                    }
+                }
+            default:
+                break
+            }
+        }
+
+        @objc func tapped(_ gesture: UITapGestureRecognizer) { onTap() }
 
         @objc func pinched(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {

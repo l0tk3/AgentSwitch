@@ -1,10 +1,10 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// One coding session, read only (control-v0 §3): the latest messages, oldest first — what you wrote on the right,
-/// the model's answers as text, tool calls as small grey lines. Plain text throughout (the Mac clips each message at
-/// 2000 characters), all of it selectable. A running session is fetched again every 10 s. From the terminals tab it
-/// ends with `resume` (docs/terminal-v0.md §5: go on with it in a terminal here).
+/// One coding session, read only (control-v0 §3; terminal-v0 §1 second round): the latest messages, oldest first —
+/// what you wrote on the right under its time, the agent's answers laid out as Markdown, a run of tool calls folded
+/// into one line that opens (the Mac clips each message at 2000 characters). A running session is fetched again every
+/// 10 s. From the terminals tab it ends with `resume` (docs/terminal-v0.md §5: go on with it in a terminal here).
 struct SessionTranscriptView: View {
     let session: SessionSummary
     var resume: (() -> Void)?
@@ -22,8 +22,8 @@ struct SessionTranscriptView: View {
                         if detail.messages.isEmpty {
                             Text("无记录。").font(.footnote).foregroundStyle(.tertiary)
                         }
-                        ForEach(Array(detail.messages.enumerated()), id: \.offset) { _, message in
-                            SessionMessageRow(message: message)
+                        ForEach(Array(SessionItem.items(detail.messages).enumerated()), id: \.offset) { _, item in
+                            SessionItemRow(item: item)
                         }
                     } else if error == nil {
                         BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
@@ -47,7 +47,7 @@ struct SessionTranscriptView: View {
                     .background(Theme.base)
             }
         }
-        .navigationTitle(session.harnessName)
+        .navigationTitle(MessageDisplay.readable((detail?.session ?? session).displayTitle))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task {
@@ -106,35 +106,77 @@ struct SessionTranscriptView: View {
     }
 }
 
-/// One message: yours in a bubble on the right, the model's as text, a tool call as one grey line (up to three).
-private struct SessionMessageRow: View {
-    let message: SessionMessage
+/// What the transcript shows: a message of yours, an answer, or a run of tool calls between them.
+enum SessionItem {
+    case user(SessionMessage)
+    case answer(SessionMessage)
+    case tools([SessionMessage])
+
+    static func items(_ messages: [SessionMessage]) -> [SessionItem] {
+        var out: [SessionItem] = []
+        for m in messages {
+            switch m.role {
+            case .user: out.append(.user(m))
+            case .assistant: out.append(.answer(m))
+            case .tool, .other:
+                if case .tools(let run)? = out.last { out[out.count - 1] = .tools(run + [m]) } else { out.append(.tools([m])) }
+            }
+        }
+        return out
+    }
+}
+
+private struct SessionItemRow: View {
+    let item: SessionItem
+    @State private var open = false
 
     var body: some View {
-        switch message.role {
-        case .user:
-            UserBubble(text: message.text)
-        case .assistant:
-            Text(MessageDisplay.readable(message.text))
-                .font(.subheadline)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case .tool, .other:
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                Text("·").mono(12).foregroundStyle(.tertiary)
-                Text(toolLine)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        switch item {
+        case .user(let m):
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(m.date.relative).mono(11).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
+                UserBubble(text: m.text)
+            }
+            .padding(.top, Theme.Space.s)
+        case .answer(let m):
+            MarkdownView(text: m.text).textSelection(.enabled)
+        case .tools(let run):
+            VStack(alignment: .leading, spacing: 4) {
+                Button { withAnimation(.snappy(duration: 0.2)) { open.toggle() } } label: {
+                    HStack(spacing: 6) {
+                        Text(open ? "▾" : "▸").mono(12).foregroundStyle(.tertiary)
+                        Text(Self.summary(run)).mono(12).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if open {
+                    ForEach(Array(run.enumerated()), id: \.offset) { _, m in
+                        Text(Self.line(m))
+                            .font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(4)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 18)
+                    }
+                }
             }
         }
     }
 
-    private var toolLine: String {
-        let text = MessageDisplay.readable(message.text)
-        guard let tool = message.tool, !tool.isEmpty else { return text }
+    /// "Read ×2 · Bash · Edit": the tools of a run, in order, repeats counted.
+    static func summary(_ run: [SessionMessage]) -> String {
+        var names: [(String, Int)] = []
+        for m in run {
+            let name = m.tool.map(ToolDisplay.label) ?? "tool"
+            if let i = names.firstIndex(where: { $0.0 == name }) { names[i].1 += 1 } else { names.append((name, 1)) }
+        }
+        return names.map { $0.1 > 1 ? "\($0.0) ×\($0.1)" : $0.0 }.joined(separator: " · ")
+    }
+
+    static func line(_ m: SessionMessage) -> String {
+        let text = MessageDisplay.readable(m.text)
+        guard let tool = m.tool, !tool.isEmpty else { return text }
         return "\(ToolDisplay.label(tool)) \(text)"
     }
 }

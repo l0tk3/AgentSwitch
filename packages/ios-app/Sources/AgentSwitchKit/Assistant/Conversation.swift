@@ -128,6 +128,12 @@ public enum Conversation {
         case assistant(AssistantMessage, created: [AgentTask])
         case task(AgentTask)
 
+        /// Said by the assistant on its own (an end, a question, progress).
+        var unprompted: Bool {
+            if case .assistant(let m, _) = self { return m.unprompted }
+            return false
+        }
+
         public var id: String {
             switch self {
             case .user(let m), .assistant(let m, _): return "m\(m.seq)"
@@ -151,6 +157,8 @@ public enum Conversation {
 
     public static let defaultLimit = 60
 
+    /// A task's end is said once (ui-v0 §7.4): the card has the result, so a "task ended" line right under its card —
+    /// nothing but other such lines in between — is left out; further down it stays, as one line (the view's part).
     public static func timeline(messages: [AssistantMessage], tasks: [AgentTask], limit: Int = defaultLimit) -> [Item] {
         let byId = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let owned = Set(messages.filter(\.createdTasks).flatMap(\.taskIds))
@@ -159,7 +167,21 @@ public enum Conversation {
         }
         let loose: [Item] = tasks.filter { !owned.contains($0.id) }.map { .task($0) }
         let ordered = (talk + loose).enumerated().sorted { ($0.element.time, $0.offset) < ($1.element.time, $1.offset) }.map(\.element)
-        return Array(ordered.suffix(limit))
+        var kept: [Item] = []
+        var cardAt: [String: Int] = [:]
+        for item in ordered {
+            switch item {
+            case .assistant(let m, let created):
+                if m.kind == .notice, let id = m.taskIds.first, let card = cardAt[id], kept[(card + 1)...].allSatisfy(\.unprompted) { continue }
+                for task in created { cardAt[task.id] = kept.count }
+            case .task(let task):
+                cardAt[task.id] = kept.count
+            case .user:
+                break
+            }
+            kept.append(item)
+        }
+        return Array(kept.suffix(limit))
     }
 
     /// A fresh id for a new message (not for a resend).

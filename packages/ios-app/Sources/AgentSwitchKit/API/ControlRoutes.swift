@@ -17,6 +17,12 @@ extension AgentSwitchAPI {
         try await get(["sessions", harness, id], query: [URLQueryItem(name: "limit", value: String(limit))])
     }
 
+    /// Deletes a session's record on the Mac (terminal-v0 §5): refused while it is open anywhere (409); OpenCode's
+    /// cannot be deleted there yet (400).
+    public func deleteSession(harness: String, id: String) async throws {
+        let _: OKReply = try await perform("DELETE", ["sessions", harness, id], query: [], body: nil)
+    }
+
     /// Records the task as read now; returns the time the Mac recorded, when it says.
     @discardableResult
     public func acknowledge(taskId: String) async throws -> Int64? {

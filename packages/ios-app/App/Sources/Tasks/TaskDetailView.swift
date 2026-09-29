@@ -12,8 +12,7 @@ struct TaskDetailView: View {
     @State private var targets: Targets?
     @State private var confirmCancel = false
     @State private var deleting: DeleteRequest?
-    @State private var previewURL: URL?
-    @State private var sourceFile: SourceFile?
+    @State private var opener = TaskFileOpener()
     @State private var files: [TaskFile] = []
 
     init(taskId: String) {
@@ -32,7 +31,7 @@ struct TaskDetailView: View {
                             .card()
                     }
                     outcome(task)
-                    TaskFilesSection(taskId: task.id, files: files, preview: $previewURL, source: $sourceFile)
+                    TaskFilesSection(taskId: task.id, files: files, opener: opener)
                     if let next = detail.handedOffTo {
                         NavigationLink(value: next.id) {
                             LinkRow(title: "已交给新任务", detail: next.modelName)
@@ -58,8 +57,7 @@ struct TaskDetailView: View {
             Button("cancel task", role: .destructive) { Task { await detail.cancel(model) } }
         }
         .deleteConfirmation($deleting, error: $detail.error) { _ in dismiss() }
-        .quickLookPreview($previewURL)
-        .sheet(item: $sourceFile) { SourceFileView(file: $0) }
+        .taskFilePreview(opener)
         // Deliverables appear as the task runs: list them again whenever its state changes.
         .task(id: detail.task?.status) { await loadFiles() }
         .onDisappear { if model.speaker.speakingTaskId == detail.task?.id { model.speaker.stop() } }

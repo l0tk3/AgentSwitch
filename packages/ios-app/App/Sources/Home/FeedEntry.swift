@@ -10,8 +10,10 @@ struct FeedEntry: View {
     var showsRequest = true
     let tail: [TaskEvent]
     let pending: [Approval]
-    /// Files the executor handed back, once known (FeedModel looks once per finished task).
-    var deliverables: Int = 0
+    /// Files the executor handed back, once known (FeedModel looks once per finished task): listed on the card, a tap
+    /// downloads and previews one.
+    var files: [TaskFile] = []
+    var opener: TaskFileOpener?
     /// When the live stream last delivered an event (any, shown or not); nil without a stream.
     var lastEventAt: Int64?
     let open: () -> Void
@@ -23,6 +25,7 @@ struct FeedEntry: View {
 
     static let resultLines = 5
     static let scriptLines = 4
+    static let filesShown = 4
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -33,6 +36,7 @@ struct FeedEntry: View {
                 Button(action: open) { summary }
                     .buttonStyle(.plain)
                     .contextMenu { menu }
+                if !task.status.isActive && !files.isEmpty { fileList }
                 ForEach(pending) { approval in
                     DottedRule()
                     ApprovalCard(approval: approval,
@@ -82,14 +86,38 @@ struct FeedEntry: View {
             } else if let result = task.result, !result.isEmpty {
                 Text(Markdown.flattened(result)).font(.subheadline).lineLimit(Self.resultLines)
             }
-            if deliverables > 0 {
-                Text(deliverables == 1 ? "1 file" : "\(deliverables) files").mono(12).foregroundStyle(.secondary)
-            }
             // A restart of the Mac's service is not the task failing: said plainly, not in red.
             if let error = task.error, !error.isEmpty, task.status != .done {
                 Text(Markdown.flattened(error)).font(.footnote).foregroundStyle(task.isInterrupted ? Color.secondary : Theme.failed).lineLimit(3)
             }
         }
+    }
+
+    /// The files handed back, each its own button (outside the card's open button, so a tap reaches it).
+    private var fileList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(files.prefix(Self.filesShown)) { file in
+                Button { Task { await opener?.open(file, taskId: task.id, model: model) } } label: {
+                    HStack(spacing: 8) {
+                        Text(file.name).font(.footnote).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 6)
+                        Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file)).mono(11).foregroundStyle(.tertiary)
+                        FileStateMark(state: opener?.state(file, taskId: task.id) ?? .remote).frame(width: 14)
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(opener?.downloading != nil)
+            }
+            if files.count > Self.filesShown {
+                Button(action: open) { Text("+\(files.count - Self.filesShown) files").mono(11).foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 4)
+            }
+        }
+        .padding(.horizontal, 10)
+        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
     }
 
     private var title: String {

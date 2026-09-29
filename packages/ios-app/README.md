@@ -166,7 +166,8 @@ Signing & Capabilities and press Run — but `xcodegen generate` (also run by th
   in a row and ends with how long the task took.
 
 Demo screens (Debug, `-uiDemo YES -uiDemoScreen <name>`): `terminals`, `terminal` (a terminal waiting for a
-permission), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
+permission), `terminalsealed` (the sealed box opens 3 s in, with its glitch), `terminalslash` (`/co` and its
+suggestions), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
 `interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
 `transcript`; `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
 `offlinemac`) opens the Mac page scrolled to the end of 排障 with 常见原因 open.

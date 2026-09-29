@@ -9,13 +9,21 @@ enum TerminalRoute: Hashable {
 
 /// The terminals tab (docs/terminal-v0.md §1): a directory tree of the Mac's terminals and its earlier sessions, as the
 /// web page's sidebar — each project folder with its running terminals (status mark, name, agent) and then its sessions
-/// (resume); projects under one parent merged under it. `new` starts one.
+/// (resume); projects under one parent merged under it. A folder or parent row folds and unfolds (remembered); `▸ N
+/// more` lists all of a folder's sessions; a long press on a session offers resume and delete. `new` starts one.
 struct TerminalsTab: View {
     @Environment(AppModel.self) private var model
     @State private var path = NavigationPath()
     @State private var creating = false
     @State private var elsewhere: Elsewhere?
     @State private var opening: String?
+    /// Folded folders and parents, by path, one per line.
+    @AppStorage("terminals.folded") private var foldedRaw = ""
+    /// Folders showing all their sessions (this visit).
+    @State private var showingAll: Set<String> = []
+    @State private var deletingSession: SessionSummary?
+    /// A session last run in bypass, asked about before it goes on.
+    @State private var bypassResume: SessionSummary?
 
     static let pollInterval: Duration = .seconds(4)
     /// Sessions shown per folder before `▸ N more`.
@@ -73,49 +81,107 @@ struct TerminalsTab: View {
                     path.append(TerminalRoute.terminal(terminal))
                 }
             }
+            .confirmationDialog("「\(bypassResume?.displayTitle ?? "")」上次以 bypass 运行", isPresented: Binding(
+                get: { bypassResume != nil }, set: { if !$0 { bypassResume = nil } }), titleVisibility: .visible, presenting: bypassResume) { s in
+                Button("继续使用 bypass", role: .destructive) { Task { await resume(s, mode: "bypass") } }
+                Button("改用 auto") { Task { await resume(s, mode: "auto") } }
+            } message: { _ in
+                Text(NewTerminalSheet.bypassNote)
+            }
+            .confirmationDialog("删除会话记录「\(deletingSession?.displayTitle ?? "")」？", isPresented: Binding(
+                get: { deletingSession != nil }, set: { if !$0 { deletingSession = nil } }), titleVisibility: .visible, presenting: deletingSession) { s in
+                Button("删除记录", role: .destructive) { Task { await deleteSession(s) } }
+            } message: { _ in
+                Text("Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。")
+            }
             .confirmationDialog(elsewhere.map { "「\($0.session.displayTitle)」正在 \($0.app) 中运行" } ?? "", isPresented: Binding(
                 get: { elsewhere != nil }, set: { if !$0 { elsewhere = nil } }), titleVisibility: .visible) {
-                Button("fork") { if let e = elsewhere { Task { await resume(e.session, fork: true) } } }
+                Button("fork") { if let e = elsewhere { Task { await resume(e.session, fork: true, mode: e.mode) } } }
             } message: {
                 Text("同一会话同时只能由一个程序写入。请先在 \(elsewhere?.app ?? "该程序") 中退出，或创建分支：新会话包含全部历史，原会话保持不变。")
             }
         }
     }
 
+    private var folded: Set<String> { Set(foldedRaw.split(separator: "\n").map(String.init)) }
+
+    private func toggleFold(_ key: String) {
+        var set = folded
+        if set.remove(key) == nil { set.insert(key) }
+        foldedRaw = set.sorted().joined(separator: "\n")
+    }
+
     @ViewBuilder
     private func nodeView(_ node: TerminalTree.Node) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let parent = node.parentName {
-                Text("▾ \(parent)/").mono(12).foregroundStyle(Theme.inkDim).padding(.top, Theme.Space.m).padding(.bottom, 2)
-            }
-            ForEach(node.groups) { group in
-                folder(group, nested: node.parent != nil)
+            if let parent = node.parent, let name = node.parentName {
+                let isFolded = folded.contains(parent)
+                Button { toggleFold(parent) } label: {
+                    HStack(spacing: 6) {
+                        Text("\(isFolded ? "▸" : "▾") \(name)/").mono(12).foregroundStyle(Theme.inkDim)
+                        if isFolded { Text(count(node.groups)).mono(11).foregroundStyle(.tertiary) }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.top, Theme.Space.m).padding(.bottom, 2)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if !isFolded {
+                    ForEach(node.groups) { group in folder(group, nested: true) }
+                }
+            } else {
+                ForEach(node.groups) { group in folder(group, nested: false) }
             }
         }
     }
 
+    /// "2 · 5": running terminals · sessions, for a folded row.
+    private func count(_ groups: [TerminalTree.Group]) -> String {
+        let terminals = groups.reduce(0) { $0 + $1.terminals.count }, sessions = groups.reduce(0) { $0 + $1.sessions.count }
+        return terminals > 0 ? "\(terminals) · \(sessions)" : "\(sessions)"
+    }
+
     private func folder(_ group: TerminalTree.Group, nested: Bool) -> some View {
-        let sessions = Array(group.sessions.prefix(Self.sessionsShown))
+        let isFolded = folded.contains(group.cwd)
+        let all = showingAll.contains(group.cwd)
+        let sessions = all ? group.sessions : Array(group.sessions.prefix(Self.sessionsShown))
         let more = group.sessions.count - sessions.count
-        let rows = group.terminals.count + sessions.count + (more > 0 ? 1 : 0)
+        let rows = group.terminals.count + sessions.count + (more > 0 || all && group.sessions.count > Self.sessionsShown ? 1 : 0)
         return VStack(alignment: .leading, spacing: 0) {
-            Text("\(nested ? "  " : "")▾ \(group.name)/")
-                .mono(13, weight: .semibold)
+            Button { toggleFold(group.cwd) } label: {
+                HStack(spacing: 6) {
+                    Text("\(nested ? "  " : "")\(isFolded ? "▸" : "▾") \(group.name)/").mono(13, weight: .semibold)
+                    if isFolded { Text(count([group])).mono(11).foregroundStyle(.tertiary) }
+                    Spacer(minLength: 0)
+                }
                 .padding(.top, nested ? Theme.Space.s : Theme.Space.m)
                 .padding(.bottom, 4)
-            ForEach(Array(group.terminals.enumerated()), id: \.element.id) { i, t in
-                Button { path.append(TerminalRoute.terminal(t)) } label: { terminalRow(t, last: i == rows - 1, nested: nested) }
-                    .buttonStyle(.plain)
+                .contentShape(Rectangle())
             }
-            ForEach(Array(sessions.enumerated()), id: \.element.id) { i, s in
-                sessionRow(s, last: group.terminals.count + i == rows - 1, nested: nested)
-            }
-            if more > 0 {
-                HStack(spacing: 6) {
-                    TreeLine(last: true, nested: nested)
-                    Text("▸ \(more) more").mono(12).foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            .accessibilityHint(isFolded ? "展开" : "收起")
+            if !isFolded {
+                ForEach(Array(group.terminals.enumerated()), id: \.element.id) { i, t in
+                    Button { path.append(TerminalRoute.terminal(t)) } label: { terminalRow(t, last: i == rows - 1, nested: nested) }
+                        .buttonStyle(.plain)
                 }
-                .padding(.vertical, 6)
+                ForEach(Array(sessions.enumerated()), id: \.element.id) { i, s in
+                    sessionRow(s, last: group.terminals.count + i == rows - 1, nested: nested)
+                }
+                if more > 0 || all && group.sessions.count > Self.sessionsShown {
+                    Button {
+                        if all { showingAll.remove(group.cwd) } else { showingAll.insert(group.cwd) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            TreeLine(last: true, nested: nested)
+                            Text(all ? "▾ less" : "▸ \(more) more").mono(12).foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
@@ -155,6 +221,27 @@ struct TerminalsTab: View {
             }
         }
         .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .contextMenu {
+            if TerminalsTab.resumable.contains(s.harness) { Button("resume") { Task { await resume(s) } } }
+            if TerminalsTab.deletable.contains(s.harness) {
+                Button("delete", role: .destructive) { deletingSession = s }
+            }
+        }
+    }
+
+    /// Sessions whose record the Mac can delete (OpenCode keeps its own database).
+    static let deletable: Set<String> = ["claude-code", "codex"]
+
+    private func deleteSession(_ s: SessionSummary) async {
+        guard let api = model.api else { return }
+        do {
+            try await api.deleteSession(harness: s.harness, id: s.sessionId)
+            model.terminals.error = nil
+            await model.refreshTerminals(sessions: true)
+        } catch {
+            model.terminals.error = error.localizedDescription
+        }
     }
 
     static let resumable: Set<String> = ["claude-code", "codex", "opencode"]
@@ -171,15 +258,17 @@ struct TerminalsTab: View {
     private struct Elsewhere {
         let session: SessionSummary
         let app: String
+        let mode: String?
     }
 
     /// Continue a session in place (one record, one writer): the terminal that has it already, a new one, or — open in
-    /// another program — the choice to fork. Bypass is the Mac's to choose: a bypass session goes on here in auto.
-    private func resume(_ s: SessionSummary, fork: Bool = false) async {
+    /// another program — the choice to fork. It goes on in the mode it last had; bypass is asked about first.
+    private func resume(_ s: SessionSummary, fork: Bool = false, mode chosen: String? = nil) async {
         guard let api = model.api else { return }
+        if s.mode == "bypass" && chosen == nil { bypassResume = s; return }
         opening = s.id
         defer { opening = nil }
-        let mode = s.mode == "bypass" ? "auto" : s.mode
+        let mode = chosen ?? s.mode
         do {
             switch try await api.resumeTerminal(ResumeTerminalRequest(harness: s.harness, cwd: s.cwd, agentSessionId: s.sessionId,
                                                                       title: s.title.isEmpty ? nil : s.title, mode: mode, fork: fork ? true : nil)) {
@@ -187,7 +276,7 @@ struct TerminalsTab: View {
                 model.terminals.add(t)
                 path.append(TerminalRoute.terminal(t))
             case .elsewhere(let app, _):
-                elsewhere = Elsewhere(session: s, app: app ?? "其他程序")
+                elsewhere = Elsewhere(session: s, app: app ?? "其他程序", mode: mode)
             }
         } catch {
             model.terminals.error = error.localizedDescription

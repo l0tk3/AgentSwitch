@@ -239,7 +239,9 @@ public enum ResumeOutcome: Sendable, Equatable {
 
 /// The named keys `POST /terminals/:id/keys` takes (daemon terminals/keys.ts).
 public enum TerminalKey: String, Sendable, CaseIterable, Codable {
-    case esc, tab, shiftTab = "shift-tab", enter, backspace, up, down, left, right
+    case esc, tab, shiftTab = "shift-tab", enter, backspace, up, down, left, right, pageUp = "pgup", pageDown = "pgdn"
+    /// One notch of the wheel: the Mac sends it the way the program asked (a mouse report, an arrow, or nothing).
+    case wheelUp = "wheel-up", wheelDown = "wheel-down"
     case ctrlC = "ctrl-c", ctrlD = "ctrl-d", ctrlL = "ctrl-l", ctrlR = "ctrl-r"
     case y, n, one = "1", two = "2", three = "3", four = "4", five = "5", six = "6", seven = "7", eight = "8", nine = "9"
 }
