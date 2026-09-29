@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentSwitch · 灵动岛</title>
+<style>
+/* The Live Activity in the app's own language (ui-v0 §7): the pixel mark as the identity and the state, status squares
+   and the spinner's first frame, tree lines and dotted rules, lowercase mono words, a bracket button. Drawn at 1 CSS
+   px = 1 pt on an iPhone 17's measures (393 pt wide; the island 126 × 37 pt, its expanded form 371 pt with 44 pt
+   corners). Always dark: the island is black, the lock screen card dark over any wallpaper. */
+:root {
+  color-scheme: dark;
+  --board: #1b1b1d; --board-ink: #e9e6df; --board-dim: #8e8e93; --board-line: #2a2a2d;
+  --ink: #ffffff; --ink2: rgba(255,255,255,.72); --ink3: rgba(255,255,255,.5); --ink4: rgba(255,255,255,.18);
+  --busy: #2ee6ff; --amber: #ffb000; --green: #9be22d; --red: #ff4a3d; --signal: #ff2e88;
+  --cyan: var(--busy); --px-shadow: #2c2a28;
+  --mono: "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--board); color: var(--board-ink); font: 13px/1.55 var(--ui); padding-block: 28px 64px; padding-inline: 16px; }
+.page { max-width: 1120px; margin: 0 auto; }
+h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
+.lede { color: #a9a6a0; max-width: 76ch; margin: 0 0 8px; font-size: 12.5px; line-height: 1.7; }
+.sec { font: 11px var(--mono); letter-spacing: .14em; color: #77746e; margin: 36px 0 14px; }
+.note { color: #8f8b84; font-size: 12px; margin: 8px 0 0; max-width: 76ch; }
+.px { display: block; }
+.tools { display: flex; gap: 8px; align-items: center; margin: 18px 0 0; font: 12px var(--mono); color: #8f8b84; flex-wrap: wrap; }
+.seg { display: inline-flex; border: 1px solid #3a3a3e; }
+.seg button { background: none; border: 0; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; cursor: pointer; }
+.seg button.on { background: var(--board-ink); color: #111; }
+.grid { display: flex; flex-wrap: wrap; gap: 26px 30px; align-items: flex-start; }
+.cell { display: flex; flex-direction: column; gap: 8px; }
+.cap { font: 11px var(--mono); color: #8f8b84; }
+.zoom { zoom: var(--z, 1.5); }
+
+/* ---------- the phone's top edge, where the island lives ---------- */
+.edge { width: 393px; height: 64px; border-radius: 22px 22px 0 0; position: relative; overflow: hidden;
+  background: linear-gradient(160deg, #5a6b86, #2c3547 55%, #1b2230); }
+.edge .time { position: absolute; left: 34px; top: 20px; font: 600 16px var(--ui); color: #fff; }
+.edge .bat { position: absolute; right: 30px; top: 22px; width: 25px; height: 12px; border: 1.5px solid rgba(255,255,255,.9); border-radius: 3.5px; }
+.edge .bat::after { content: ""; position: absolute; inset: 1.5px 6px 1.5px 1.5px; background: #fff; border-radius: 1.5px; }
+.pill { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); height: 37px; background: #000; border-radius: 19px;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 12px 0 13px; }
+.lens { position: absolute; top: 50%; right: 50%; transform: translate(calc(50% + var(--lens-shift, 0px)), -50%); width: 11px; height: 11px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #26304a, #0b0d14 60%); box-shadow: 0 0 0 1.5px #0d0d10; }
+.pill .lead, .pill .trail { display: flex; align-items: center; gap: 6px; }
+.minimal { position: absolute; top: 11px; right: 18px; width: 37px; height: 37px; border-radius: 50%; background: #000; display: grid; place-items: center; }
+
+/* ---------- expanded island ---------- */
+.island { width: 371px; background: #000; border-radius: 44px; position: relative; padding: 14px 22px 20px; color: var(--ink); }
+.island .cam { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 126px; height: 37px; border-radius: 19px; background: #000; }
+.island .cam .lens { --lens-shift: 36px; }
+.island .top { height: 37px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.island .top .l { display: flex; align-items: center; padding-left: 2px; }
+.island .top .r { display: flex; align-items: center; gap: 8px; }
+.word { font: 600 13px var(--mono); letter-spacing: .01em; }
+.clock { font: 500 13px var(--mono); color: var(--ink2); font-variant-numeric: tabular-nums; }
+.title { font: 600 15px/1.3 var(--ui); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row1 { display: flex; align-items: baseline; gap: 10px; }
+.row1 .title { flex: 1; min-width: 0; }
+.step { display: flex; gap: 6px; margin-top: 3px; font: 14px/1.4 var(--ui); color: var(--ink2); }
+.step .tr { font: 13px/1.5 var(--mono); color: var(--ink3); flex: none; }
+.step .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.step.ask { color: var(--amber); }
+.dots { height: 1px; margin: 12px 0 10px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 2px, transparent 2px 4px); }
+.foot { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--ink3); min-height: 26px; }
+.foot .sp { flex: 1; }
+.foot .agent { color: var(--ink2); display: inline-flex; }
+.btn { font: 600 13px var(--mono); color: #000; background: var(--amber); padding: 5px 10px; white-space: nowrap; box-shadow: 0 3px 0 #a36f00; }
+.tally { display: inline-flex; gap: 10px; font: 500 12px var(--mono); color: var(--ink2); align-items: center; }
+.tally span { display: inline-flex; gap: 4px; align-items: center; }
+.spin { font: 700 13px var(--mono); color: var(--busy); line-height: 1; }
+.sq { width: 7px; height: 7px; flex: none; display: inline-block; }
+
+/* ---------- lock screen ---------- */
+.wall { width: 393px; padding: 18px 14px 20px; border-radius: 22px; background: linear-gradient(170deg, #b76e4a, #6d3b52 45%, #29233d); }
+.card { background: rgba(0,0,0,.82); border-radius: 22px; padding: 14px 16px 15px; color: var(--ink); }
+.card .hd { display: flex; align-items: center; gap: 8px; }
+.card .hd .name { font: 600 12px var(--mono); }
+.card .hd .mac { font: 12px var(--mono); color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .hd .sp { flex: 1; }
+.card .dots { margin: 11px 0 9px; }
+.card .item + .item { margin-top: 9px; }
+.card .row1 .st { width: 12px; display: inline-flex; justify-content: center; flex: none; align-self: center; }
+.card .title { font-size: 14.5px; }
+.card .step { margin-left: 22px; font-size: 13px; margin-top: 1px; }
+.card .step .tx { -webkit-line-clamp: 1; }
+.card .ended .step .tx { -webkit-line-clamp: 2; }
+.card .stale { margin-top: 10px; font-size: 11px; color: var(--ink3); }
+
+/* ---------- now, for comparison ---------- */
+.now { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+.now img { display: block; max-width: 100%; height: auto; border-radius: 6px; background: #d9d9d9; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>灵动岛 · 实时活动</h1>
+  <p class="lede">同一套视觉语言放进灵动岛：应用标记既是身份也是状态（进行中时青色小块在上线，等你时末端琥珀，完成绿、未完成红），状态方块与转圈第一帧，树形连线和点线分隔，小写等宽短词，方括号按钮。标题统一靠左；模型只写短名；计时用等宽数字。</p>
+  <div class="tools">大小 <span class="seg" id="zoom"><button type="button" data-z="1">1×</button><button type="button" class="on" data-z="1.5">1.5×</button><button type="button" data-z="2">2×</button></span></div>
+
+  <!--NOW-->
+
+  <div class="sec">// compact · 紧凑态</div>
+  <div class="grid zoom" id="compact"></div>
+  <p class="note">左：应用标记（状态在标记上）。右：一个任务时是它的计时，几个时是计数（■ 等你的、⠋ 进行中的），结束时是结果的颜色方块。</p>
+
+  <div class="sec">// minimal · 最小态（和别的实时活动同时出现时）</div>
+  <div class="grid zoom" id="minimal"></div>
+
+  <div class="sec">// expanded · 展开态</div>
+  <div class="grid zoom" id="expanded"></div>
+  <p class="note">上排：标记 + 状态词 | 计时。下面：标题、树形连线接当前一步（等你的时候是琥珀色的问题），点线下是模型短名、还有几个，以及等你时的 [ open ]。终端的一行用 agent 像素图代替模型名。</p>
+
+  <div class="sec">// lock screen · 锁屏</div>
+  <div class="grid zoom" id="lock"></div>
+</div>
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const TINT = { busy: "var(--busy)", waiting: "var(--amber)", done: "var(--green)", incomplete: "var(--red)" };
+
+/** The mark in a state; done and incomplete colour the lit end (as waiting does). */
+function mark(state, px = 2) {
+  if (state === "done") return P.mark({ px, state: "error", colors: { error: "var(--green)", dim: "rgba(255,255,255,.45)", ink: "#fff" } });
+  if (state === "incomplete") return P.mark({ px, state: "error", colors: { dim: "rgba(255,255,255,.45)", ink: "#fff" } });
+  return P.mark({ px, state, t: 3, colors: { dim: "rgba(255,255,255,.45)", ink: "#fff" } });
+}
+const sq = (color) => `<i class="sq" style="background:${color}"></i>`;
+const glyph = (st) => (st === "busy" ? `<span class="spin">⠋</span>` : sq(TINT[st]));
+const tally = (w, r) => `<span class="tally">${w ? `<span>${sq(TINT.waiting)}${w}</span>` : ""}${r ? `<span><span class="spin">⠋</span>${r}</span>` : ""}</span>`;
+const agent = (a) => `<span class="agent">${P.sprite(P.AGENT_PX[a], { px: 2 })}</span>`;
+
+const S = {
+  busy1: { st: "busy", rows: [{ title: "总结一下 AgentSwitch 最近的改动", step: "选择模型", model: null, clock: "0:08" }], w: 0, r: 1 },
+  busy3: { st: "busy", rows: [
+    { title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "opus 5.5", clock: "10:40" },
+    { title: "整理下载目录", step: "交给 DeepSeek Flash", model: "deepseek flash", clock: "0:40" },
+    { title: "登录 x.com 看通知", step: "在用工具 browser_navigate", model: "sonnet 4.6", clock: "0:15" }], w: 0, r: 3 },
+  waiting: { st: "waiting", rows: [
+    { title: "登录财务平台", step: "短信验证码是多少？", model: "sonnet 4.6", clock: "1:35", ask: true },
+    { title: "修 AgentSwitch 的 bug", step: "第 2 步：交给 Opus 5.5", model: "opus 5.5", clock: "10:40" }], w: 1, r: 1 },
+  terminal: { st: "waiting", rows: [
+    { title: "fix-login", step: "Bash: npm test -- --watch=false", agent: "cc", clock: "0:42", ask: true },
+    { title: "整理下载目录", step: "交给 DeepSeek Flash", model: "deepseek flash", clock: "0:40" }], w: 1, r: 1 },
+  done: { st: "done", ended: { title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。" } },
+  incomplete: { st: "incomplete", ended: { title: "登录财务平台", line: "登录页一直打不开，gate 代理连不上。" } },
+};
+
+function compact(s) {
+  const n = (s.w ?? 0) + (s.r ?? 0);
+  const trail = s.ended ? sq(TINT[s.st]) : n > 1 ? tally(s.w, s.r) : `<span class="clock" style="color:${s.st === "waiting" ? "var(--amber)" : "var(--ink2)"}">${s.rows[0].clock}</span>`;
+  return `<div class="edge"><span class="time">9:41</span><span class="bat"></span>
+    <div class="pill" style="width:${n > 1 ? 232 : 214}px"><span class="lead">${mark(s.st)}</span><span class="lens"></span><span class="trail">${trail}</span></div></div>`;
+}
+
+function expanded(s) {
+  const lead = s.rows?.[0];
+  const n = (s.w ?? 0) + (s.r ?? 0);
+  // Left of the camera only the mark (a word would run under it); the state's word and the clock on the right.
+  const top = `<div class="top"><span class="l">${mark(s.st)}</span><span class="r"><span class="word" style="color:${TINT[s.st]}">${s.st}</span>${lead ? `<span class="clock">${lead.clock}</span>` : ""}</span></div>`;
+  if (s.ended) {
+    return `<div class="island"><div class="cam"><span class="lens"></span></div>${top}
+      <div class="title">${esc(s.ended.title)}</div>
+      <div class="step"><span class="tr">└─</span><span class="tx">${esc(s.ended.line)}</span></div></div>`;
+  }
+  const who = lead.agent ? `${agent(lead.agent)}<span>${P.AGENT_NAME[lead.agent].toLowerCase()}</span>` : lead.model ? `<span>${esc(lead.model)}</span>` : `<span>routing</span>`;
+  return `<div class="island"><div class="cam"><span class="lens"></span></div>${top}
+    <div class="title">${esc(lead.title)}</div>
+    <div class="step ${lead.ask ? "ask" : ""}"><span class="tr">└─</span><span class="tx">${esc(lead.step)}</span></div>
+    <div class="dots"></div>
+    <div class="foot">${who}${n > 1 ? `<span>· +${n - 1} more</span>` : ""}<span class="sp"></span>${lead.ask ? `<span class="btn">[ open ]</span>` : ""}</div></div>`;
+}
+
+function lock(s, mac = "0x90's mac mini") {
+  const n = (s.w ?? 0) + (s.r ?? 0);
+  const right = s.ended ? `<span class="word" style="color:${TINT[s.st]}">${s.st}</span>` : n > 1 ? tally(s.w, s.r) : `<span class="word" style="color:${TINT[s.st]}">${s.st}</span>`;
+  const head = `<div class="hd">${mark(s.st, 2)}<span class="name">agentswitch</span><span class="mac">· ${esc(mac)}</span><span class="sp"></span>${right}</div><div class="dots"></div>`;
+  if (s.ended) {
+    return `<div class="wall"><div class="card">${head}<div class="item ended">
+      <div class="row1"><span class="st">${sq(TINT[s.st])}</span><span class="title">${esc(s.ended.title)}</span></div>
+      <div class="step"><span class="tr">└─</span><span class="tx">${esc(s.ended.line)}</span></div></div></div></div>`;
+  }
+  const items = s.rows.map((r) => `<div class="item">
+      <div class="row1"><span class="st">${r.ask ? sq(TINT.waiting) : `<span class="spin">⠋</span>`}</span><span class="title">${esc(r.title)}</span>${r.agent ? agent(r.agent) : ""}<span class="clock">${r.clock}</span></div>
+      <div class="step ${r.ask ? "ask" : ""}"><span class="tr">└─</span><span class="tx">${esc(r.step)}</span></div></div>`).join("");
+  return `<div class="wall"><div class="card">${head}${items}</div></div>`;
+}
+
+const cell = (cap, html) => `<div class="cell"><div class="cap">${cap}</div>${html}</div>`;
+document.getElementById("compact").innerHTML = [
+  ["busy · 一个任务", S.busy1], ["busy · 三个", S.busy3], ["waiting", S.waiting], ["done", S.done], ["incomplete", S.incomplete],
+].map(([c, s]) => cell(c, compact(s))).join("");
+document.getElementById("minimal").innerHTML = ["busy", "waiting", "done", "incomplete"].map((st) =>
+  cell(st, `<div class="edge" style="width:200px"><span class="time">9:41</span><div class="pill" style="width:126px;left:40%"><span class="lens"></span></div><div class="minimal">${mark(st, 2)}</div></div>`)).join("");
+document.getElementById("expanded").innerHTML = [
+  ["busy · 三个任务", S.busy3], ["waiting · 问你", S.waiting], ["waiting · 终端", S.terminal], ["done", S.done], ["incomplete", S.incomplete],
+].map(([c, s]) => cell(c, expanded(s))).join("");
+document.getElementById("lock").innerHTML = [
+  ["busy · 三个任务", S.busy3], ["waiting", S.waiting], ["done", S.done],
+].map(([c, s]) => cell(c, lock(s))).join("");
+
+for (const b of document.querySelectorAll("#zoom button")) b.addEventListener("click", () => {
+  document.querySelectorAll("#zoom button").forEach((x) => x.classList.toggle("on", x === b));
+  document.documentElement.style.setProperty("--z", b.dataset.z);
+});
+</script>
+</body>
+</html>
