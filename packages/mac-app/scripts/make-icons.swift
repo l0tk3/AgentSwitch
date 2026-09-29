@@ -1,12 +1,13 @@
-// Draws the AgentSwitch app icon for both apps with CoreGraphics (no SF Symbols: their license excludes app icons).
-// The switch: one input and three lanes, the chosen one solid, the others faint; on the accent blue of docs/ui-v0.md.
-// The menu bar glyph (MenuBarGlyph.swift) is the same drawing, bolder.
+// Draws the AgentSwitch app icon for both apps with CoreGraphics: the pixel mark of docs/ui-v0.md §7 (one source
+// switched onto three lanes, the lit one on top) with the depth of an identity mark (§7.2.10: a 1-pixel hard shadow,
+// half-lit pixels in the diagonal steps, a faint glow on the lit lane), on the terminal's black with faint scanlines —
+// docs/design/visual-v1/depth.html, "应用图标". Every cell is a whole number of pixels at 1024.
 //
 //   swift scripts/make-icons.swift
 //
 // Writes Resources/AppIcon.icns (macOS: rounded tile on a transparent canvas, per the macOS icon grid) and
 // ../ios-app/App/Assets.xcassets/AppIcon.appiconset/icon-1024{,-dark,-tinted}.png (iOS: full bleed, the system applies
-// the mask; the dark and tinted variants are the glyph alone on a transparent canvas, the system draws the ground).
+// the mask; the dark and tinted variants are the mark alone on a transparent canvas, the system draws the ground).
 import AppKit
 import CoreGraphics
 import Foundation
@@ -18,8 +19,38 @@ func srgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
     CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
 }
 
-/// `plain`: the accent tile with a white glyph. `dark`: the glyph alone in the dark-mode accent. `tinted`: the glyph
-/// alone in white, for the system to tint.
+/// PixelArt.markRows (AgentSwitchKit / AgentSwitchMacCore): S the source, a/A the lit lane and its end, b/B and c/C the
+/// others.
+let mark = [
+    "...........AAA",
+    "......aaaaaAAA",
+    ".....a.....AAA",
+    "....a.........",
+    "SSSa.......BBB",
+    "SSSbbbbbbbbBBB",
+    "SSSc.......BBB",
+    "....c.........",
+    ".....c.....CCC",
+    "......cccccCCC",
+    "...........CCC",
+].map { Array($0) }
+
+func lit(_ c: Character) -> Bool { "aAS".contains(c) }
+func on(_ x: Int, _ y: Int) -> Bool { y >= 0 && y < mark.count && x >= 0 && x < mark[y].count && mark[y][x] != "." }
+
+/// Empty cells in an inside corner of a diagonal step, with the cell they lean on (pixel.js aaCells).
+let halfLit: [(x: Int, y: Int, c: Character)] = mark.indices.flatMap { y in
+    mark[y].indices.compactMap { x -> (x: Int, y: Int, c: Character)? in
+        guard mark[y][x] == "." else { return nil }
+        let n = on(x, y - 1), s = on(x, y + 1), w = on(x - 1, y), e = on(x + 1, y)
+        let corner = (n && e && !on(x + 1, y - 1)) || (n && w && !on(x - 1, y - 1)) || (s && e && !on(x + 1, y + 1)) || (s && w && !on(x - 1, y + 1))
+        guard corner, [n, s, w, e].filter({ $0 }).count == 2 else { return nil }
+        return (x, y, n ? mark[y - 1][x] : mark[y + 1][x])
+    }
+}
+
+/// `plain`: the black tile with the mark. `dark`: the mark alone (the system draws the dark ground). `tinted`: the mark
+/// alone in greys, for the system to tint.
 enum Style { case plain, dark, tinted }
 
 func render(tile: CGRect, cornerRadius: CGFloat, shadow: Bool, style: Style = .plain) -> CGImage {
@@ -27,69 +58,79 @@ func render(tile: CGRect, cornerRadius: CGFloat, shadow: Bool, style: Style = .p
     let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     let path = CGPath(roundedRect: tile, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
-
-    // The tile: the accent (#2F5BEA), a little lighter at the top; on macOS a soft shadow under it.
-    if shadow && style == .plain {
-        ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28, color: srgb(0x000000, 0.28))
-        ctx.addPath(path)
-        ctx.setFillColor(srgb(0x2F5BEA))
-        ctx.fillPath()
-        ctx.restoreGState()
+    if style == .plain {
+        if shadow {
+            ctx.saveGState()
+            ctx.setShadow(offset: CGSize(width: 0, height: -12), blur: 28, color: srgb(0x000000, 0.35))
+            ctx.addPath(path)
+            ctx.setFillColor(srgb(0x000000))
+            ctx.fillPath()
+            ctx.restoreGState()
+        }
+        drawTile(ctx, space, path, tile)
     }
-    if style == .plain { drawTile(ctx, space, path, tile) }
-    drawGlyph(ctx, tile, color: style == .dark ? srgb(0x6D8BFF) : srgb(0xFFFFFF))
+    drawMark(ctx, tile, style: style)
     return ctx.makeImage()!
 }
 
+/// Black, a little lifted toward the top left, with scanlines (the terminal window's surface).
 func drawTile(_ ctx: CGContext, _ space: CGColorSpace, _ path: CGPath, _ tile: CGRect) {
     ctx.saveGState()
     ctx.addPath(path)
     ctx.clip()
-    let gradient = CGGradient(colorsSpace: space, colors: [srgb(0x4570F5), srgb(0x2F5BEA), srgb(0x2449CF)] as CFArray,
-                              locations: [0, 0.45, 1])!
-    ctx.drawLinearGradient(gradient, start: CGPoint(x: tile.midX, y: tile.maxY), end: CGPoint(x: tile.midX, y: tile.minY), options: [])
+    ctx.setFillColor(srgb(0x000000))
+    ctx.fill(tile)
+    let gradient = CGGradient(colorsSpace: space, colors: [srgb(0x1C1C1F), srgb(0x000000)] as CFArray, locations: [0, 1])!
+    let center = CGPoint(x: tile.minX + tile.width * 0.3, y: tile.maxY - tile.height * 0.2)
+    ctx.drawRadialGradient(gradient, startCenter: center, startRadius: 0, endCenter: center, endRadius: tile.width * 1.1, options: [])
+    let period = (tile.height / 64).rounded()
+    var y = tile.maxY
+    ctx.setFillColor(srgb(0xFFFFFF, 0.03))
+    while y > tile.minY {
+        ctx.fill(CGRect(x: tile.minX, y: y - period / 3, width: tile.width, height: period / 3))
+        y -= period
+    }
     ctx.restoreGState()
 }
 
-func drawGlyph(_ ctx: CGContext, _ tile: CGRect, color: CGColor) {
-    // Geometry in tile-relative units (y up) so the glyph scales with the tile.
-    let unit = tile.width / 1024
-    func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: tile.minX + x * unit, y: tile.minY + y * unit) }
-    let source = p(292, 512)
-    let lanes: [CGFloat] = [732, 512, 292]
-    let chosen = 0
-    func lane(_ y: CGFloat) -> CGPath {
-        let path = CGMutablePath()
-        path.move(to: source)
-        path.addCurve(to: p(560, y), control1: p(440, 512), control2: p(412, y))
-        path.addLine(to: p(736, y))
-        return path
-    }
-    func dot(_ center: CGPoint, _ r: CGFloat) -> CGRect {
-        CGRect(x: center.x - r * unit, y: center.y - r * unit, width: 2 * r * unit, height: 2 * r * unit)
-    }
-    ctx.setLineWidth(40 * unit)
-    ctx.setLineCap(.round)
-    ctx.setStrokeColor(color)
-    ctx.setFillColor(color)
+/// The mark centred in the tile at about three quarters of its width (with the shadow's extra cell). Cells and their
+/// origin fall on multiples of 8 at 1024, so they stay whole pixels down to the 128 export.
+func drawMark(_ ctx: CGContext, _ tile: CGRect, style: Style) {
+    let cols = mark[0].count, rows = mark.count
+    func snap(_ v: CGFloat) -> CGFloat { (v / 8).rounded() * 8 }
+    let cell = ((tile.width * 0.75 / CGFloat(cols + 1)) / 8).rounded(.down) * 8
+    let originX = snap(tile.midX - CGFloat(cols) * cell / 2)
+    let top = snap(tile.midY + CGFloat(rows) * cell / 2)
+    func rect(_ x: Int, _ y: Int) -> CGRect { CGRect(x: originX + CGFloat(x) * cell, y: top - CGFloat(y + 1) * cell, width: cell, height: cell) }
+    let cells = mark.indices.flatMap { y in mark[y].indices.compactMap { x in mark[y][x] == "." ? nil : (x: x, y: y, c: mark[y][x]) } }
 
-    // The lanes not taken, as one faint layer (no darker overlaps where they meet).
-    ctx.saveGState()
-    ctx.setAlpha(0.34)
-    ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-    for (i, y) in lanes.enumerated() where i != chosen {
-        ctx.addPath(lane(y))
-        ctx.strokePath()
-        ctx.fillEllipse(in: dot(p(736, y), 50))
-    }
-    ctx.endTransparencyLayer()
-    ctx.restoreGState()
+    let ink: UInt32 = style == .tinted ? 0xFFFFFF : 0xE9E6DF
+    let dim: UInt32 = style == .tinted ? 0x7A7A7A : 0x5B5955
+    func tone(_ c: Character) -> CGColor { srgb(lit(c) ? ink : dim) }
 
-    ctx.addPath(lane(lanes[chosen]))
-    ctx.strokePath()
-    ctx.fillEllipse(in: dot(p(736, lanes[chosen]), 58))
-    ctx.fillEllipse(in: dot(source, 76))
+    // A faint glow under the lit lane.
+    if style != .tinted {
+        ctx.saveGState()
+        ctx.setShadow(offset: .zero, blur: cell * 0.9, color: srgb(0xE9E6DF, 0.55))
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        ctx.setFillColor(srgb(0xE9E6DF, 0.28))
+        for c in cells where lit(c.c) { ctx.fill(rect(c.x, c.y)) }
+        ctx.endTransparencyLayer()
+        ctx.restoreGState()
+    }
+    // The hard shadow: one cell down and right, a step darker than the ground.
+    if style == .plain {
+        ctx.setFillColor(srgb(0x2C2A28))
+        for c in cells { ctx.fill(rect(c.x + 1, c.y + 1)) }
+    }
+    for h in halfLit {
+        ctx.setFillColor(tone(h.c).copy(alpha: 0.42)!)
+        ctx.fill(rect(h.x, h.y))
+    }
+    for c in cells {
+        ctx.setFillColor(tone(c.c))
+        ctx.fill(rect(c.x, c.y))
+    }
 }
 
 func writePNG(_ image: CGImage, to url: URL, pixels: Int) throws {
@@ -108,11 +149,10 @@ func writePNG(_ image: CGImage, to url: URL, pixels: Int) throws {
 }
 
 // iOS: full bleed, opaque.
-let ios = render(tile: CGRect(x: 0, y: 0, width: size, height: size), cornerRadius: 0, shadow: false)
+let full = CGRect(x: 0, y: 0, width: size, height: size)
 let iconSet = root.deletingLastPathComponent().appendingPathComponent("ios-app/App/Assets.xcassets/AppIcon.appiconset")
 let iosIcon = iconSet.appendingPathComponent("icon-1024.png")
-try writePNG(ios, to: iosIcon, pixels: 1024)
-let full = CGRect(x: 0, y: 0, width: size, height: size)
+try writePNG(render(tile: full, cornerRadius: 0, shadow: false), to: iosIcon, pixels: 1024)
 try writePNG(render(tile: full, cornerRadius: 0, shadow: false, style: .dark), to: iconSet.appendingPathComponent("icon-1024-dark.png"), pixels: 1024)
 try writePNG(render(tile: full, cornerRadius: 0, shadow: false, style: .tinted), to: iconSet.appendingPathComponent("icon-1024-tinted.png"), pixels: 1024)
 

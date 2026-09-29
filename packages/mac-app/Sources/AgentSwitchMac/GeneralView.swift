@@ -13,7 +13,9 @@ struct GeneralView: View {
     @State private var gate = ""
     @State private var opencode = ""
     @State private var showingGateLog = false
-    @AppStorage(DockPresence.alwaysShowKey) private var alwaysShowInDock = false
+    /// On by default: the Dock icon opens the terminal window, the app's main one (AgentSwitchApp registers the default).
+    @AppStorage(DockPresence.alwaysShowKey) private var alwaysShowInDock = true
+    @AppStorage(AppDelegate.quitWithoutAskingKey) private var quitWithoutAsking = false
 
     private var draft: PortSettings? {
         guard let l = Int(local), let r = Int(remote), let g = Int(gate), let o = Int(opencode) else { return nil }
@@ -63,6 +65,8 @@ struct GeneralView: View {
                     .onChange(of: alwaysShowInDock) { _, always in
                         NSApp.setActivationPolicy(DockPresence.showsInDock(alwaysShow: always, settingsWindowOpen: true) ? .regular : .accessory)
                     }
+                // ⌘Q stops the service with the app: asked first unless the user said not to.
+                Toggle("confirm quit", isOn: Binding(get: { !quitWithoutAsking }, set: { quitWithoutAsking = !$0 }))
                 LabeledContent("setup guide") {
                     Button("run again") { navigation.openWizard() }
                 }

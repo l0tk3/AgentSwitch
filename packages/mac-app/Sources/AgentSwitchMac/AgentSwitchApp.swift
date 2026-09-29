@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         guard claimInstance() else { return }
         running = true
+        // The terminal window is the app's main window: the Dock icon is there by default (settings can take it away).
+        UserDefaults.standard.register(defaults: [DockPresence.alwaysShowKey: true])
+        let atLogin = Self.launchedAtLogin
         // The bundle has LSUIElement; `swift run` has no bundle, so decide the Dock presence here in both cases.
         settings.onVisibilityChange = { [weak self] open in self?.windowVisibility("settings", open) }
         terminals.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminals", open) }
@@ -86,6 +89,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let dir = defaults.string(forKey: "snapshotDir") {
             SnapshotRunner(model: model, settings: settings, directory: URL(fileURLWithPath: dir), quit: { [weak self] in self?.quit() }).start()
+        }
+        // Opened by the user, the app opens its terminal window; not at login, and not over a settings tab asked for,
+        // the first-run wizard (until it has been through) or a snapshot run.
+        if !atLogin, defaults.string(forKey: "openSettings") == nil, defaults.string(forKey: "snapshotDir") == nil,
+           settings.navigation.wizardStore.load()?.isClosed == true {
+            showTerminalsWhenReady()
+        }
+    }
+
+    /// Started by macOS at login (the open-application event says so), not by the user.
+    private static var launchedAtLogin: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent, event.eventID == AEEventID(kAEOpenApplication) else { return false }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem)
+    }
+
+    /// The terminal window once the service answers (it signs in to it); a minute at most.
+    private func showTerminalsWhenReady() {
+        Task { [weak self] in
+            for _ in 0..<120 {
+                guard let self else { return }
+                if self.model.daemonReady { self.terminals.show(); return }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         }
     }
 
@@ -170,9 +196,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(DockPresence.showsInDock(alwaysShow: always, settingsWindowOpen: settingsWindowOpen) ? .regular : .accessory)
     }
 
-    /// Clicking the Dock icon (or opening the app again from Finder) brings up the settings window.
+    /// Clicking the Dock icon (or opening the app again from Finder) brings up the terminal window, the app's main one;
+    /// the settings window while the service is not up.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        settings.show(nil)
+        if model.daemonReady { terminals.show() } else { settings.show(nil) }
         return true
     }
 
@@ -193,6 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if shutdownDone { return .terminateNow }
         guard !quitting else { return .terminateCancel }
+        if Self.userAskedToQuit && !confirmQuit() { return .terminateCancel }
         quitting = true
         Task {
             await model.shutdown()
@@ -200,6 +228,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+}
+
+extension AppDelegate {
+    /// ⌘Q or the Dock's Quit: no reason comes with it, unlike logout, restart or shutdown (which are not asked about).
+    static var userAskedToQuit: Bool {
+        NSAppleEventManager.shared().currentAppleEvent?.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason)) == nil
+    }
+
+    static let quitWithoutAskingKey = "quitWithoutAsking"
+
+    /// The app is also the service: say what stops before it does (a Dock app is quit out of habit to close a window).
+    func confirmQuit() -> Bool {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: Self.quitWithoutAskingKey) { return true }
+        let alert = NSAlert()
+        alert.messageText = "退出 AgentSwitch？"
+        alert.informativeText = "退出后服务停止：正在运行的终端和任务将中断，手机也无法连接。只关闭窗口时，请点窗口左上角的关闭按钮。"
+        alert.addButton(withTitle: "quit")
+        alert.addButton(withTitle: "cancel")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "不再询问"
+        NSApp.activate(ignoringOtherApps: true)
+        let quit = alert.runModal() == .alertFirstButtonReturn
+        if quit, alert.suppressionButton?.state == .on { defaults.set(true, forKey: Self.quitWithoutAskingKey) }
+        return quit
     }
 }
 
