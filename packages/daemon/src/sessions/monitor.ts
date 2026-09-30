@@ -65,6 +65,11 @@ export class SessionMonitor {
       .slice(0, limit);
   }
 
+  /** Where a listed session is kept: its file (Claude Code, Codex) or OpenCode's database; null for one not listed. */
+  source(harness: SessionHarness, id: string): string | null {
+    return harness === "opencode" ? this.sources.opencodeDb : this.files.get(`${harness}:${id}`) ?? null;
+  }
+
   read(harness: SessionHarness, id: string, limit = 80): { session: SessionSummary; messages: SessionMessage[] } | null {
     const session = this.list(200).find((s) => s.harness === harness && s.id === id);
     if (!session) return null;

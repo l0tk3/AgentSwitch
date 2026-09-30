@@ -724,7 +724,7 @@ function statusMark(t) {
 }
 const agentMark = (harness) => raw(sprite(AGENT_PX[harness] ?? AGENT_PX.pi, { px: 2 }), "agent-mark");
 
-function terminalRow(t, tr, depth) {
+function terminalRow(t, tr, depth, name = t.name) {
   const index = terminalOrder.indexOf(t.id);
   const meta = t.status === "waiting" ? h("span", { class: "w" }, "waiting")
     : t.status === "exited" ? (t.exitCode ? h("span", { class: "x" }, `exit ${t.exitCode}`) : "exited")
@@ -734,7 +734,7 @@ function terminalRow(t, tr, depth) {
     h("span", { class: "ix" }, index < 9 ? String(index + 1).padStart(2, "0") : ""),
     h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr),
     h("span", { class: "st" }, statusMark(t)),
-    h("span", { class: `nm ${t.status === "exited" ? "dither" : ""}`, "data-rename": t.id }, t.name),
+    h("span", { class: `nm ${t.status === "exited" ? "dither" : ""}`, "data-rename": t.id }, name),
     h("span", { class: "mt" }, meta),
     h("span", { class: "ac" }, h("button", { title: "close ⌘W", onclick: (e) => { e.stopPropagation(); closeTerminal(t); } }, "×")));
 }
@@ -752,14 +752,14 @@ function subagentRows(t, tr, depth) {
     h("span", { class: "mt" }, a.type)));
 }
 
-function sessionRow(s, tr, depth) {
+function sessionRow(s, tr, depth, name = s.title || "(untitled)") {
   const canResume = RESUMABLE.has(s.harness);
   const meta = opening === s.id ? "opening" : s.active ? "busy" : ago(s.updatedAt);
   return h("div", { class: `row session ${opening === s.id ? "opening" : ""}`, title: `${AGENT[s.harness] ?? s.harness} · ${tilde(s.cwd)}`, onclick: canResume ? () => resume(s) : null },
     h("span", { class: "ix" }),
     h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr),
     h("span", { class: "st" }),
-    h("span", { class: "nm" }, s.title || "(untitled)"),
+    h("span", { class: "nm" }, name),
     h("span", { class: "mt" }, agentMark(s.harness), h("span", {}, meta)),
     h("span", { class: "ac" },
       canResume ? h("button", { class: "go", onclick: (e) => { e.stopPropagation(); resume(s); } }, "resume") : null,
@@ -791,6 +791,93 @@ async function deleteSession(s) {
   } catch (err) { notify(err.message); }
 }
 
+// ---------- search (docs/terminal-v0.md §1 搜索) ----------
+/** What is typed in the list's search line; the sessions whose words matched (`harness:id` → the words around it),
+ *  from the Mac, for the query `textFor`. */
+let query = "";
+let textHits = new Map();
+let textFor = "";
+let textTimer = null;
+let textAsked = 0;
+
+/** `text` with the first match of `q` marked. */
+function marked(text, q) {
+  const i = text.toLowerCase().indexOf(q);
+  return i < 0 ? [text] : [text.slice(0, i), h("mark", {}, text.slice(i, i + q.length)), text.slice(i + q.length)];
+}
+
+/** The words from a little before the match: the list is narrow, and the match must show. */
+function near(text, q) {
+  const i = text.toLowerCase().indexOf(q);
+  return i > 10 ? `…${text.slice(i - 8).replace(/^…/, "")}` : text;
+}
+
+function searchFor(value) {
+  query = value;
+  renderSidebar();
+  clearTimeout(textTimer);
+  const q = value.trim();
+  if (!q) { textHits = new Map(); textFor = ""; return; }
+  // The words only the Mac has, once typing pauses; an answer to an older query is dropped.
+  textTimer = setTimeout(async () => {
+    const asked = ++textAsked;
+    const r = await api("GET", `/sessions/search?q=${encodeURIComponent(q)}`).catch(() => null);
+    if (asked !== textAsked || query.trim() !== q) return;
+    textHits = new Map((r?.hits ?? []).map((x) => [`${x.harness}:${x.id}`, x.excerpt]));
+    textFor = q.toLowerCase();
+    renderSidebar();
+  }, 250);
+}
+
+/** The tree with only what matches, in its own order and shape: a folder whose name matches with all it holds, else
+ *  the terminals and sessions whose name or words match; a match in the words shows them under the row. */
+function renderSearch(q) {
+  const out = [];
+  let folderHits = 0, titleHits = 0, textCount = 0;
+  const words = (key) => (textFor === q ? textHits.get(key) : undefined);
+  for (const node of folderTree()) {
+    for (const g of node.groups) {
+      const label = node.parent ? `${node.label}/${g.label}` : g.label;
+      const nameHit = label.toLowerCase().includes(q) || tilde(g.cwd).toLowerCase().includes(q);
+      const rows = [
+        ...g.terminals.map((t) => ({ t, title: t.name.toLowerCase().includes(q), said: t.agentSessionId ? words(`${t.harness}:${t.agentSessionId}`) : undefined })),
+        ...g.sessions.map((s) => ({ s, title: (s.title || "").toLowerCase().includes(q), said: words(`${s.harness}:${s.id}`) })),
+      ].filter((r) => nameHit || r.title || r.said);
+      if (!nameHit && !rows.length) continue;
+      if (nameHit) folderHits++;
+      out.push(h("div", { class: "dir", title: tilde(g.cwd) },
+        h("span", { class: "chev" }, "▾"),
+        h("span", { class: "name" }, ...marked(label, q), "/", gitMark(gits[g.cwd])),
+        counts(g.terminals, g.sessions)));
+      rows.forEach((r, i) => {
+        const tr = i === rows.length - 1 ? "└─" : "├─";
+        if (r.title) titleHits++;
+        else if (r.said) textCount++;
+        if (r.t) out.push(terminalRow(r.t, tr, 0, r.title ? marked(r.t.name, q) : r.t.name), ...subagentRows(r.t, tr, 0));
+        else out.push(sessionRow(r.s, tr, 0, r.title ? marked(r.s.title, q) : r.s.title || "(untitled)"));
+        if (r.said && !r.title) {
+          out.push(h("div", { class: "row hit", onclick: () => (r.t ? select(r.t.id) : RESUMABLE.has(r.s.harness) && resume(r.s)) },
+            h("span", { class: "ix" }),
+            h("span", { class: "tr" }, `${tr === "└─" ? "\u00a0\u00a0" : "│\u00a0"}└─`),
+            h("span", { class: "st" }),
+            h("span", { class: "nm" }, ...marked(near(r.said, q), q))));
+        }
+      });
+    }
+  }
+  if (!out.length) return [h("div", { class: "none" }, `没有找到与“${query.trim()}”相关的文件夹或会话。`)];
+  const n = (k, one, many) => (k ? `${k} ${k === 1 ? one : many}` : "");
+  const said = [n(folderHits, "folder", "folders"), n(titleHits, "title", "titles"), n(textCount, "in text", "in text")].filter(Boolean).join(" · ");
+  return [h("div", { class: "found" }, said ? `// ${said}` : "//"), ...out];
+}
+
+function focusSearch() {
+  if (narrow.matches) document.body.classList.add("list-open"); else if (side.closed) setSide({ closed: false });
+  native?.postMessage({ type: "focusPage" });
+  $("find").focus();
+  $("find").select();
+}
+
 /** "▪2 5": running terminals (amber, blinking, while one waits for you — it may be folded away) · sessions. */
 /** A terminal just started or continued shows in the list: its folder (and the parent it sits under) open. */
 function unfold(cwd) {
@@ -815,6 +902,8 @@ function counts(ts, ss) {
 function renderSidebar() {
   if (renaming) return;
   terminalOrder = [...terminals].sort((a, b) => a.createdAt - b.createdAt).map((t) => t.id);
+  const q = query.trim().toLowerCase();
+  if (q) { $("groups").replaceChildren(...renderSearch(q)); return; }
   const toggle = (key) => {
     if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
     remember("terminal.collapsed", JSON.stringify([...collapsed]));
@@ -1121,6 +1210,7 @@ function shortcut(e) {
   const asking = $("toasts").childElementCount > 0 && current;
   if (key === "t" && !e.shiftKey) return () => showCreate();
   if (key === "b" && !e.shiftKey) return toggleList;
+  if (key === "f" && !e.shiftKey) return focusSearch;
   if (key === "w" && !e.shiftKey && current && !creating) return () => closeTerminal(current);
   if (key === "v" && e.shiftKey) return () => openComposer();
   if (e.key === "Enter" && asking) return () => decideFirst("allow");
@@ -1134,6 +1224,10 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); sheetDone(false); }
     else if (e.key === "Enter") { e.preventDefault(); sheetDone(true); }
     return;
+  }
+  if (e.target === $("find")) {
+    if (e.key === "Escape") { e.preventDefault(); $("find").value = ""; searchFor(""); $("find").blur(); return; }
+    if (!e.metaKey) return;
   }
   if (e.target === $("composerText")) {
     if (e.key === "Escape") { e.preventDefault(); closeComposer(); }
@@ -1152,6 +1246,7 @@ $("composerLock").innerHTML = sprite(LOCK, { px: 2 });
 $("newBtn").addEventListener("click", () => showCreate());
 $("sealBar").addEventListener("click", () => ($("composer").hidden ? openComposer() : closeComposer()));
 $("sideBtn").addEventListener("click", toggleList);
+$("find").addEventListener("input", () => searchFor($("find").value));
 $("createStart").addEventListener("click", start);
 $("model").addEventListener("change", () => { pickedModels[pickedAgent] = $("model").value; remember("terminal.models", JSON.stringify(pickedModels)); });
 $("createCancel").addEventListener("click", () => current && select(current.id));

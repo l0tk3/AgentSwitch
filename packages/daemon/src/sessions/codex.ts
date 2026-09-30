@@ -26,6 +26,13 @@ function messageText(payload: Json, role: "user" | "assistant"): string | null {
   return role === "user" ? typedRequest(text) : text || null;
 }
 
+/** What a line says, for search: a request the user typed or the agent's reply. */
+export function codexSaid(line: Json): string | null {
+  if (line.type !== "response_item") return null;
+  const payload = obj(line.payload);
+  return messageText(payload, "user") ?? messageText(payload, "assistant");
+}
+
 /** Codex desktop puts the files the user attached ahead of the request (`# Files mentioned by the user: … ## My
  *  request: …`): the request is what the user typed. */
 function typedRequest(text: string): string | null {

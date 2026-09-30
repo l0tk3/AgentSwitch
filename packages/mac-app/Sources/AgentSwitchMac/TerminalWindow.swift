@@ -203,6 +203,9 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             webView?.overlays = (body["rects"] as? [Any] ?? []).compactMap(Self.rect)
         case "focus":
             screen?.focus()
+        case "focusPage":
+            // A field on the page wants the keyboard (the list's search, ⌘F from the terminal).
+            if let webView { webView.window?.makeFirstResponder(webView) }
         case "note":
             if let text = body["text"] as? String { screen?.note(text) }
         case "claim":
@@ -461,8 +464,8 @@ final class TerminalWebView: WKWebView {
             return super.performKeyEquivalent(with: event)
         }
         // The page's own shortcuts: ⌘W closes the terminal on screen (not the window), ⌘T opens a new one, ⌘B hides or
-        // shows the list, ⌘1–9 switch.
-        if key == "w" || key == "t" || key == "b" || (key.count == 1 && ("1"..."9").contains(key)) {
+        // shows the list, ⌘F searches it, ⌘1–9 switch.
+        if key == "w" || key == "t" || key == "b" || key == "f" || (key.count == 1 && ("1"..."9").contains(key)) {
             evaluateJavaScript("window.agentswitch?.shortcut(\"\(key)\")", completionHandler: nil)
             return true
         }

@@ -154,12 +154,20 @@ enum DemoData {
         .init(name: "commit", description: "Stage and commit the current changes", source: "user"),
     ]
 
+    /// The folders' git, after their names in the tree.
+    static let git: [String: GitSummary] = [
+        "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch": GitSummary(branch: "main", changed: 5, ahead: 2),
+        "/Users/me/Work/api": GitSummary(branch: "feat/health", changed: 3, behind: 4),
+    ]
+
     static var terminalList: TerminalList {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
                          status: .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
-                         permissions: [TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")]),
+                         permissions: [TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
+                         subagents: [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
+                                     TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
                          createdAt: ago(900), lastOutputAt: ago(2)),
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,

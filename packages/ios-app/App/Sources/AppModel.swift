@@ -739,7 +739,7 @@ extension AppModel {
         model.conversation = ConversationLog(DemoData.messages)
         model.hasAssistant = true
         model.quota = DemoData.quota
-        model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions)
+        model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git)
         model.routeReport = (Date().addingTimeInterval(-40), DemoData.routeReport)
         model.connectionProgress = ConnectionProgress().after(model.connection)
         if offline {

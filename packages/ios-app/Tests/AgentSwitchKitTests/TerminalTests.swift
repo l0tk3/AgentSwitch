@@ -258,3 +258,46 @@ final class TerminalDraftTests: XCTestCase {
         XCTAssertNil(plain["attachments"])
     }
 }
+
+/// The terminals tab's search (2026-09-30, user: 支持搜索目录名、session 标题、session 内容，手机和电脑都可以搜).
+final class TerminalSearchTests: XCTestCase {
+    private func session(_ id: String, _ cwd: String, _ title: String) -> SessionSummary {
+        SessionSummary(harness: "claude-code", id: id, cwd: cwd, title: title, updatedAt: 1, startedAt: 1)
+    }
+
+    private var nodes: [TerminalTree.Node] {
+        let terminal = TerminalInfo(id: "t1", harness: "claude-code", cwd: "/Users/u/Work/api", name: "修复登录超时", status: .working,
+                                    createdAt: 1, lastOutputAt: 1, agentSessionId: "c9")
+        return TerminalTree.build(terminals: [terminal], sessions: [
+            session("s1", "/Users/u/Work/api", "给健康检查加缓存"), session("s2", "/Users/u/Work/web", "表单校验"),
+            session("s3", "/Users/u/AgentSwitch", "未读标记"),
+        ], git: ["/Users/u/AgentSwitch": GitSummary(branch: "main")])
+    }
+
+    func testFoldersByNameWithAllTheyHold() {
+        let result = TerminalSearch.run(nodes, query: "agentsw")
+        XCTAssertEqual(result.folders.map(\.name), ["AgentSwitch"])
+        XCTAssertEqual(result.folders[0].rows.map(\.id), ["s:claude-code/s3"])
+        XCTAssertEqual(result.folders[0].git?.branch, "main")
+        XCTAssertEqual(result.summary, "// 1 folder")
+    }
+
+    func testTitlesAndWordsKeepTheTreeOrder() {
+        let said = ["claude-code:c9": "…连接池太小，改成 64。", "claude-code:s2": "校验放在失焦时"]
+        let result = TerminalSearch.run(nodes, query: "缓存", said: said)
+        XCTAssertEqual(result.folders.map(\.name), ["Work/api", "Work/web"])
+        // The terminal by the words of the session it writes; a title that matched carries no line of words.
+        XCTAssertEqual(result.folders[0].rows.map(\.id), ["t:t1", "s:claude-code/s1"])
+        XCTAssertEqual(result.folders[0].rows.map(\.said), ["…连接池太小，改成 64。", nil])
+        XCTAssertEqual(result.folders[0].rows.map(\.titleHit), [false, true])
+        XCTAssertEqual(result.summary, "// 1 title · 2 in text")
+        XCTAssertTrue(TerminalSearch.run(nodes, query: "没有这个").folders.isEmpty)
+        XCTAssertTrue(TerminalSearch.run(nodes, query: "  ").folders.isEmpty)
+    }
+
+    func testTheMatchShowsInANarrowRow() {
+        XCTAssertEqual(TerminalSearch.near("连接池", in: "…先看了一下配置文件，发现连接池太小"), "…置文件，发现连接池太小")
+        XCTAssertEqual(TerminalSearch.near("池", in: "连接池太小"), "连接池太小")
+        XCTAssertNotNil(TerminalSearch.match("KEY", in: "a key here"))
+    }
+}

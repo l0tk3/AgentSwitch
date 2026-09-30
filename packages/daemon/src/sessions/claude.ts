@@ -33,6 +33,12 @@ function assistantText(line: Json): string | null {
   return text || null;
 }
 
+/** What a line says, for search: a prompt the user typed or the agent's reply (not tool calls, their results, or a
+ *  sub-agent's lines). */
+export function claudeSaid(line: Json): string | null {
+  return userText(line) ?? assistantText(line);
+}
+
 /** What the list shows: the first typed prompt from the head, the latest reply and where it ran from the tail. */
 export function claudeFacts(path: string, mtime: number): ClaudeFacts | null {
   const head = headLines(path).map(obj);

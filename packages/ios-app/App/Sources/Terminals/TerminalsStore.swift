@@ -82,9 +82,10 @@ final class TerminalsStore {
     }
 
     #if DEBUG
-    func setDemo(_ list: TerminalList, sessions: [SessionSummary]) {
+    func setDemo(_ list: TerminalList, sessions: [SessionSummary], git: [String: GitSummary] = [:]) {
         self.list = list
         self.sessions = sessions
+        self.git = git
     }
     #endif
 }

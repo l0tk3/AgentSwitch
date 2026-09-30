@@ -14,8 +14,8 @@ private let screenLog = Logger(subsystem: "com.agentswitch.mac", category: "term
 final class NativeTerminalView: TerminalView {
     weak var owner: TerminalScreenController?
 
-    /// A menu bar app has no Edit menu: ⌘C / ⌘V / ⌘A act here, the page's own shortcuts (⌘T, ⌘W, ⌘B, ⌘1–9, ⌘⇧V, ⌘↩ and
-    /// ⌘⌫ on a request) go to the page.
+    /// A menu bar app has no Edit menu: ⌘C / ⌘V / ⌘A act here, the page's own shortcuts (⌘T, ⌘W, ⌘B, ⌘F, ⌘1–9, ⌘⇧V, ⌘↩
+    /// and ⌘⌫ on a request) go to the page.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard window?.firstResponder === self else { return super.performKeyEquivalent(with: event) }
         let mods = event.modifierFlags.intersection([.shift, .control, .option, .command])
@@ -32,7 +32,7 @@ final class NativeTerminalView: TerminalView {
             }
         }
         let name = event.keyCode == 36 ? "Enter" : event.keyCode == 51 ? "Backspace" : key
-        let page = shift ? ["v"] : ["t", "w", "b", "Enter", "Backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        let page = shift ? ["v"] : ["t", "w", "b", "f", "Enter", "Backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
         guard page.contains(name) else { return super.performKeyEquivalent(with: event) }
         owner?.pageShortcut(name, shift: shift)
         return true

@@ -12,6 +12,16 @@ extension AgentSwitchAPI {
         (try await get(["sessions"], query: [URLQueryItem(name: "limit", value: String(limit))]) as SessionList).sessions
     }
 
+    /// Sessions whose words (prompts and replies) contain `query` (docs/terminal-v0.md §1 搜索); none from a Mac that
+    /// cannot search them.
+    public func searchSessions(_ query: String) async throws -> [SessionHit] {
+        do {
+            return (try await get(["sessions", "search"], query: [URLQueryItem(name: "q", value: query)]) as SessionHits).hits
+        } catch APIError.http(let status, _) where status == 404 {
+            return []
+        }
+    }
+
     /// One session and its latest `limit` messages.
     public func session(harness: String, id: String, limit: Int = 80) async throws -> SessionDetail {
         try await get(["sessions", harness, id], query: [URLQueryItem(name: "limit", value: String(limit))])

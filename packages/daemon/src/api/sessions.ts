@@ -4,6 +4,7 @@
 import type { Hono } from "hono";
 import type { SessionMonitor } from "../sessions/monitor.js";
 import type { SessionHarness } from "../sessions/types.js";
+import { SessionSearch } from "../sessions/search.js";
 import { join } from "node:path";
 import { remoteCaller } from "../core/caller.js";
 import { TerminalAudit } from "../terminals/audit.js";
@@ -13,11 +14,21 @@ const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "
 const LIST_LIMIT = 60;
 const MESSAGE_LIMIT = 80;
 const MAX_MESSAGES = 300;
+const MAX_QUERY = 200;
+/** As many sessions as the tree lists. */
+const SEARCH_WITHIN = 80;
 
 export function mountSessions(app: Hono, deps: ApiDeps): void {
   const monitor: SessionMonitor | undefined = deps.sessions;
   if (!monitor) return;
   app.get("/sessions", (c) => c.json({ sessions: monitor.list(limitParam(c, LIST_LIMIT)) }));
+  // What was said in them (docs/terminal-v0.md §1 搜索): the tree's search, for the words only the Mac has.
+  const search = new SessionSearch(monitor);
+  app.get("/sessions/search", async (c) => {
+    const q = (c.req.query("q") ?? "").trim();
+    if (!q || q.length > MAX_QUERY) return c.json({ error: `q: 1–${MAX_QUERY} characters` }, 400);
+    return c.json({ hits: await search.search(q, SEARCH_WITHIN) });
+  });
   app.get("/sessions/:harness/:id", (c) => {
     const harness = c.req.param("harness");
     if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);

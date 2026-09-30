@@ -1,7 +1,7 @@
 /** Watching the Mac's own coding sessions (docs/control-v0.md §3, 2026-09-27): Claude Code, Codex and OpenCode, read-only,
  *  newest first, the user's own only; the assistant sees folder, title and when, with anything credential-like masked. */
 
-import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,6 +12,7 @@ import type { ApiDeps } from "../src/api/shared.js";
 import { RATE_LIMIT_PROBE_PROMPT } from "../src/core/probes.js";
 import { folderLines, sessionsNear } from "../src/sessions/folders.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
+import { SessionSearch } from "../src/sessions/search.js";
 import { maskSecrets, type SessionSummary } from "../src/sessions/types.js";
 import { claudeFacts, claudeMode } from "../src/sessions/claude.js";
 import { codexMode } from "../src/sessions/codex.js";
@@ -94,6 +95,33 @@ describe("the Mac's coding sessions", () => {
     expect(((await (await app.request("/sessions?limit=2")).json()) as { sessions: unknown[] }).sessions).toHaveLength(2);
     expect((await app.request("/sessions/codex/x1")).status).toBe(200);
     expect((await app.request("/sessions/vim/x1")).status).toBe(404);
+  });
+
+  it("searches what was said: prompts and replies of all three, not tool calls, their output or a sub-agent's lines (2026-09-30)", async () => {
+    const { sources } = fixture();
+    const monitor = new SessionMonitor(sources, () => NOW);
+    const search = new SessionSearch(monitor);
+    const ids = async (q: string) => (await search.search(q)).map((h) => `${h.harness}:${h.id}`);
+    expect(await ids("登录页")).toEqual(["claude-code:c1"]);
+    expect(await ids("全部通过")).toEqual(["codex:x1"]);
+    expect(await ids("12 个月")).toEqual(["opencode:o1"]);
+    expect(await ids("src/login.ts")).toEqual([]);
+    expect(await ids("sub-agent chatter")).toEqual([]);
+    expect(await ids("npm")).toEqual([]);
+    // Case aside, and the words around the match.
+    expect((await search.search("KEY=SK"))[0]?.excerpt).toBe("修一下登录页 key=sk-ant-abcdefghijklmnop 先看表单。");
+    // A tool's result (a whole file) is not searched; a reply added since is, read from where it left off.
+    const file = join(sources.claudeProjects, "-Users-u-code-site", "c1.jsonl");
+    appendFileSync(file, [
+      line({ type: "user", cwd: "/Users/u/code/site", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "export const pool = createPool(64)" }] }, timestamp: "2026-09-27T09:59:50Z" }),
+      line({ type: "assistant", cwd: "/Users/u/code/site", message: { role: "assistant", content: [{ type: "text", text: "连接池太小，改成 64。" }] }, timestamp: "2026-09-27T09:59:55Z" }),
+    ].join("\n") + "\n");
+    expect(await ids("createPool")).toEqual([]);
+    expect(await ids("连接池")).toEqual(["claude-code:c1"]);
+    const app = new Hono();
+    mountSessions(app, { sessions: monitor } as unknown as ApiDeps);
+    expect(await (await app.request(`/sessions/search?q=${encodeURIComponent("全部通过")}`)).json()).toEqual({ hits: [{ harness: "codex", id: "x1", excerpt: "跑一下测试 测试全部通过。" }] });
+    expect((await app.request("/sessions/search?q=")).status).toBe(400);
   });
 
   it("a folder that is itself excluded (e.g. /private/tmp) is left out, not only folders under it", () => {

@@ -35,6 +35,11 @@ struct TerminalsTab: View {
     @State private var bypassResume: SessionSummary?
     /// Why continuing or deleting a session failed: a box over whatever page is open.
     @State private var failure: String?
+    /// The search line (docs/terminal-v0.md §1 搜索); the Mac's answer for the words said in sessions, and what it was
+    /// asked.
+    @State private var query = ""
+    @State private var said: [String: String] = [:]
+    @State private var saidFor = ""
 
     static let pollInterval: Duration = .seconds(4)
     /// Sessions shown per folder before `▸ N more`.
@@ -51,10 +56,15 @@ struct TerminalsTab: View {
                     if let error = store.error {
                         Text(error).font(.footnote).foregroundStyle(Theme.failed).padding(.bottom, Theme.Space.m)
                     }
-                    if store.list != nil && store.nodes.isEmpty {
+                    if store.list != nil && store.nodes.isEmpty && query.isEmpty {
                         Text("尚无终端。点 new 在 Mac 上启动 agent。").font(.footnote).foregroundStyle(.secondary).padding(.top, 40)
                     }
-                    ForEach(store.nodes) { node in nodeView(node) }
+                    if store.list != nil && !(store.nodes.isEmpty && query.isEmpty) { searchLine }
+                    if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                        ForEach(store.nodes) { node in nodeView(node) }
+                    } else {
+                        searchResults(TerminalSearch.run(store.nodes, query: query, said: saidFor == query ? said : [:]))
+                    }
                 }
                 .padding(.horizontal, Theme.Space.l)
                 .padding(.vertical, Theme.Space.m)
@@ -76,6 +86,15 @@ struct TerminalsTab: View {
                 }
             }
             .refreshable { await model.refreshTerminals(sessions: true) }
+            // The words said in sessions, once typing pauses; an answer to an older query is not kept.
+            .task(id: query) {
+                let q = query.trimmingCharacters(in: .whitespaces)
+                guard !q.isEmpty, let api = model.api else { said = [:]; saidFor = ""; return }
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let hits = try? await api.searchSessions(q), !Task.isCancelled else { return }
+                said = Dictionary(hits.map { ("\($0.harness):\($0.id)", $0.excerpt) }, uniquingKeysWith: { a, _ in a })
+                saidFor = query
+            }
             .onAppear {
                 openRequested()
                 #if DEBUG
@@ -83,6 +102,7 @@ struct TerminalsTab: View {
                 if let first = store.nodes.first?.groups.first?.sessions.first {
                     switch UserDefaults.standard.string(forKey: "uiDemoScreen") {
                     case "terminalmenu": menuFor = SessionMenu(session: first, anchor: CGRect(x: 16, y: 210, width: 360, height: 36))
+                    case "terminalsearch": query = "终端"
                     case "terminaldelete": deletingSession = first
                     default: break
                     }
@@ -264,12 +284,12 @@ struct TerminalsTab: View {
         }
     }
 
-    private func terminalRow(_ t: TerminalInfo, last: Bool, nested: Bool) -> some View {
+    private func terminalRow(_ t: TerminalInfo, last: Bool, nested: Bool, title: Text? = nil) -> some View {
         let status = t.permissions.isEmpty ? t.status : .waiting
         return HStack(spacing: 8) {
             TreeLine(last: last, nested: nested)
             TerminalStatusMark(status: status)
-            Text(t.name).font(.subheadline).foregroundStyle(t.isRunning ? Theme.ink : .secondary).lineLimit(1)
+            (title ?? Text(t.name)).font(.subheadline).foregroundStyle(t.isRunning ? Theme.ink : .secondary).lineLimit(1)
             Spacer(minLength: 6)
             PixelSprite(rows: PixelArt.agents[t.harness] ?? PixelArt.square, pixel: 2, color: .secondary)
             Text("›").mono(13).foregroundStyle(.tertiary)
@@ -278,6 +298,95 @@ struct TerminalsTab: View {
         .contentShape(Rectangle())
         // Once, as it comes to need you or exits.
         .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
+    }
+
+    // MARK: search
+
+    /// A prompt line over the list: `/` as less and vim search, then what is typed; × clears it.
+    private var searchLine: some View {
+        HStack(spacing: 6) {
+            Text("/").mono(14, weight: .bold).foregroundStyle(Theme.signal)
+            TextField("", text: $query, prompt: Text("search").foregroundStyle(Theme.inkDim))
+                .font(.system(size: 14, design: .monospaced))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .tint(Theme.signal)
+                .accessibilityLabel("搜索文件夹和会话")
+            if !query.isEmpty {
+                Button { query = "" } label: { Text("×").mono(15).foregroundStyle(.secondary).frame(minWidth: 24, minHeight: 24) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("清除搜索")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+    }
+
+    /// What matched, in the tree's order and shape, the match marked; a match in the words shows them under the row.
+    @ViewBuilder
+    private func searchResults(_ result: TerminalSearch.Result) -> some View {
+        if result.folders.isEmpty {
+            Text("没有找到与“\(query.trimmingCharacters(in: .whitespaces))”相关的文件夹或会话。")
+                .font(.footnote).foregroundStyle(.secondary).padding(.vertical, 18)
+        } else {
+            Text(result.summary).mono(11).foregroundStyle(.tertiary).padding(.top, 8)
+            ForEach(result.folders) { folder in
+                HStack(spacing: 6) {
+                    (Text("▾ ") + marked(folder.name) + Text("/")).mono(13, weight: .semibold)
+                    if let git = folder.git { Text(git.said).mono(11).foregroundStyle(.tertiary).lineLimit(1) }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, Theme.Space.m)
+                .padding(.bottom, 4)
+                ForEach(Array(folder.rows.enumerated()), id: \.element.id) { i, row in
+                    let last = i == folder.rows.count - 1
+                    switch row.item {
+                    case .terminal(let t):
+                        Button { path.append(TerminalRoute.terminal(t)) } label: {
+                            terminalRow(t, last: last, nested: false, title: row.titleHit ? marked(t.name) : nil)
+                        }
+                        .buttonStyle(.plain)
+                        if let words = row.said { hitLine(words, last: last) { path.append(TerminalRoute.terminal(t)) } }
+                    case .session(let s):
+                        SessionRow(session: s, last: last, nested: false, opening: opening, title: row.titleHit ? marked(s.displayTitle) : nil,
+                                   open: { path.append(TerminalRoute.session(s)) },
+                                   resume: { Task { await resume(s) } },
+                                   menu: { anchor in menuFor = SessionMenu(session: s, anchor: anchor) },
+                                   delete: { deletingSession = s })
+                        if let words = row.said { hitLine(words, last: last) { path.append(TerminalRoute.session(s)) } }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A line of the words where a session matched, quiet, under its row.
+    private func hitLine(_ words: String, last: Bool, open: @escaping () -> Void) -> some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                Text("\(last ? "  " : "│ ")└─").mono(13).foregroundStyle(Theme.inkDim)
+                marked(TerminalSearch.near(query, in: words)).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.bottom, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// `text` with the match on the signal colour, as the web list marks it.
+    private func marked(_ text: String) -> Text {
+        var attributed = AttributedString(text)
+        let q = query.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty, let range = attributed.range(of: q, options: [.caseInsensitive]) {
+            attributed[range].backgroundColor = Theme.signal
+            attributed[range].foregroundColor = .black
+        }
+        return Text(attributed)
     }
 
     /// Sessions whose record the Mac can delete (OpenCode keeps its own database).
@@ -362,6 +471,8 @@ private struct SessionRow: View {
     let last: Bool
     let nested: Bool
     let opening: String?
+    /// Its title as a search marks it; else as it is.
+    var title: Text? = nil
     let open: () -> Void
     let resume: () -> Void
     let menu: (CGRect) -> Void
@@ -375,7 +486,7 @@ private struct SessionRow: View {
         HStack(spacing: 8) {
             TreeLine(last: last, nested: nested)
             HStack(spacing: 8) {
-                Text(session.displayTitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                (title ?? Text(session.displayTitle)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
                 // Which agent wrote it, before its time (as on the Mac): the mark a running terminal has, dimmed.
                 PixelSprite(rows: PixelArt.agents[session.harness] ?? PixelArt.square, pixel: 2, color: Theme.inkDim)
