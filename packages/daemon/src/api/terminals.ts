@@ -16,7 +16,7 @@ import { PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type TerminalEvent
 import type { TerminalStyle } from "../terminals/style.js";
 import type { Offers } from "../router/modelOffers.js";
 import { slashCommands } from "../terminals/commands.js";
-import { KEY_NAMES, keySequence, replyBytes } from "../terminals/keys.js";
+import { CLICK, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { modelSettings } from "../router/modelOverlay.js";
 import { modelName } from "../util/modelName.js";
@@ -50,7 +50,7 @@ const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a 
 const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), model: ModelId.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
 const Input = z.object({ text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true), seal: z.boolean().default(true) });
-const Keys = z.object({ keys: z.array(z.enum(KEY_NAMES)).min(1).max(20) });
+const Keys = z.object({ keys: z.array(z.union([z.enum(KEY_NAMES), z.string().regex(CLICK).transform((k) => k as KeyName)])).min(1).max(20) });
 /** `screen`: the asking screen's own id, which then owns the size (terminal-v0 §1). */
 const SCREEN_ID = /^[\w-]{1,64}$/;
 const Resize = z.object({ ...Size, screen: z.string().regex(SCREEN_ID).optional() });
@@ -274,6 +274,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
       const ctx = host.keyContext(id);
+      // A click outside the screen is a phone that has not heard the size yet: nothing of it is sent.
+      const outside = body.data.keys.some((k) => { const m = CLICK.exec(k); return !!m && (Number(m[1]) >= ctx.cols || Number(m[2]) >= ctx.rows); });
+      if (outside) return c.json({ error: "click outside the screen" }, 400);
       const bytes = body.data.keys.map((k) => keySequence(k, ctx)).join("");
       if (bytes) host.write(id, bytes);
     } catch (err) { return failed(c, err); }

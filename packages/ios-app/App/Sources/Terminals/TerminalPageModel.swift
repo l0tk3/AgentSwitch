@@ -44,6 +44,7 @@ final class TerminalPageModel {
     /// Wheel notches not sent yet (up positive), and the send under way.
     @ObservationIgnored private var wheelPending = 0
     @ObservationIgnored private var wheeling: Task<Void, Never>?
+    @ObservationIgnored private var clickRefused = false
     /// This phone as a screen: the size it takes is its own until another takes it or this page's stream ends (the
     /// page closed, the app in the background).
     let screenId = "phone-" + UUID().uuidString.prefix(8).lowercased()
@@ -342,6 +343,19 @@ final class TerminalPageModel {
                 try? await Task.sleep(for: .milliseconds(50))
             }
             self?.wheeling = nil
+        }
+    }
+
+    /// A left click on a cell, for a program that tracks the mouse. A Mac that predates it says so once.
+    func click(col: Int, row: Int) async {
+        guard let api, status != .exited else { return }
+        do {
+            try await api.clickTerminal(id, col: col, row: row)
+        } catch APIError.http(status: 400, message: _) {
+            if !clickRefused { error = "此 Mac 上的 AgentSwitch 版本不支持在手机上点击，请先更新。" }
+            clickRefused = true
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 

@@ -94,6 +94,10 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(result.sealed, 1)
         try await api.decideTerminalPermission("t1", permissionId: "p1", allow: true)
         XCTAssertEqual(transport.paths, ["/terminals/t1/keys", "/terminals/t1/input", "/terminals/t1/permissions/p1"])
+        // A tap on a program that tracks the mouse (2026-09-30, user: 手机上的终端只能滚动，点击操作没透传).
+        try await api.clickTerminal("t1", col: 4, row: 2)
+        let click = try XCTUnwrap(transport.requests.last?.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: [String]] })
+        XCTAssertEqual(click["keys"], ["click:4:2"])
         let keys = try XCTUnwrap(transport.requests[0].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: [String]] })
         XCTAssertEqual(keys["keys"], ["esc", "shift-tab", "ctrl-c", "1"])
         let decision = try XCTUnwrap(transport.requests[2].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: String] })

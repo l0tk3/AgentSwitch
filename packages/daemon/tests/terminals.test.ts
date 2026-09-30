@@ -454,6 +454,8 @@ describe("terminals over HTTP", () => {
     // An empty line (⌃C here would really interrupt the agent: the terminal sends it SIGINT).
     expect((await call("POST", `/terminals/${id}/keys`, { keys: ["enter"] })).status).toBe(200);
     expect((await call("POST", `/terminals/${id}/keys`, { keys: ["rm -rf"] })).status).toBe(400);
+    expect((await call("POST", `/terminals/${id}/keys`, { keys: ["click:999:2"] })).status).toBe(400);   // outside the screen
+    expect((await call("POST", `/terminals/${id}/keys`, { keys: ["click:3:4;rm"] })).status).toBe(400);
 
     // The hook route takes the terminal's own hook token, never the local one, and not someone else's.
     const forged = await fetch(`${base}/terminals/hook`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id }, body: JSON.stringify({ event: "Stop", payload: {} }) });
@@ -663,6 +665,12 @@ describe("terminal pieces", () => {
     expect(keySequence("wheel-down", { ...plain, mouse: "vt200" })).toBe("\x1b[M" + String.fromCharCode(32 + 65, 32 + 41, 32 + 13));
     expect(keySequence("wheel-down", { ...plain, alternate: true, applicationCursor: true })).toBe("\x1bOB");
     expect(keySequence("wheel-up", plain)).toBe("");
+    // A tap on the phone (2026-09-30, user: 手机上的终端只能滚动，点击操作没透传): a left click on that cell, pressed and
+    // released, as the program asked for mouse reports; nothing to one that does not track the mouse.
+    expect(keySequence("click:4:2", { ...plain, mouse: "any", sgrMouse: true })).toBe("\x1b[<0;5;3M\x1b[<0;5;3m");
+    expect(keySequence("click:4:2", { ...plain, mouse: "vt200" })).toBe("\x1b[M" + String.fromCharCode(32, 37, 35) + "\x1b[M" + String.fromCharCode(35, 37, 35));
+    expect(keySequence("click:4:2", { ...plain, mouse: "x10", sgrMouse: true })).toBe("\x1b[<0;5;3M");
+    expect(keySequence("click:4:2", plain)).toBe("");
     expect(replyBytes("a\nb", true, true)).toBe("\x1b[200~a\nb\x1b[201~\r");
     expect(replyBytes("a\nb", false, true)).toBe("a\rb\r");
     expect(replyBytes("x\x1b[201~y", true, false)).toBe("\x1b[200~xy\x1b[201~");

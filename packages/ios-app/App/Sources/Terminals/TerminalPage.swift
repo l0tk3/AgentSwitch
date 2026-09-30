@@ -40,7 +40,7 @@ struct TerminalPage: View {
     var body: some View {
         ZStack(alignment: .top) {
             TerminalScreen(controller: page.screen, onPinchEnded: { size in fontSize = Double(size) },
-                           onWheel: { up, count in wheel(up: up, count: count) }, onTap: { replying = false; page.userActed() })
+                           onWheel: { up, count in wheel(up: up, count: count) }, onTap: { point in tapped(point) })
                 .padding(.horizontal, 6)
                 .background(page.ground)
                 .screenRefresh(on: page.snapshots, ground: page.ground)
@@ -181,6 +181,17 @@ struct TerminalPage: View {
         // The floating layer's hard, dithered shadow (§7.3), not a blur.
         .background(DitherShadow().offset(x: 6, y: 6))
         .glitch(on: p.id, onAppear: true)
+    }
+
+    /// A tap on the screen: a click there when the program tracks the mouse (Claude Code's full screen: its options,
+    /// its links), the keyboard staying as it is; else the keyboard goes away.
+    private func tapped(_ point: CGPoint) {
+        page.userActed()
+        if let cell = page.screen.clickCell(at: point) {
+            Task { await page.click(col: cell.col, row: cell.row) }
+        } else {
+            replying = false
+        }
     }
 
     // MARK: in use elsewhere

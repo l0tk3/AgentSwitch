@@ -75,6 +75,19 @@ final class TerminalScreenController: NSObject {
 
     /// One notch of the wheel per this much drag.
     var notch: CGFloat { max(8, view.font.lineHeight) }
+
+    /// The cell under a point of the view while the program tracks the mouse (a tap then clicks there); nil when it does
+    /// not, or the point is off the grid. The program's own full screen has no history, so the top of what shows is row 0.
+    func clickCell(at point: CGPoint) -> (col: Int, row: Int)? {
+        let t = view.getTerminal()
+        guard t.mouseMode != .off, t.cols > 0, t.rows > 0 else { return nil }
+        let grid = view.getOptimalFrameSize().size
+        guard grid.width > 0, grid.height > 0 else { return nil }
+        let col = Int(point.x / (grid.width / CGFloat(t.cols)))
+        let row = Int((point.y - view.contentOffset.y) / (grid.height / CGFloat(t.rows)))
+        guard (0..<t.cols).contains(col), (0..<t.rows).contains(row) else { return nil }
+        return (col, row)
+    }
 }
 
 extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
@@ -100,13 +113,14 @@ extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
 
 /// The controller's view in SwiftUI, and touch (terminal-v0 §1 second round): a drag scrolls — this screen's history,
 /// or the program itself by wheel notches when it is full screen or tracks the mouse (a flick carries on a little);
-/// pinch changes the text size (the grid follows, and with it the agent); a tap puts the keyboard away.
+/// pinch changes the text size (the grid follows, and with it the agent); a tap clicks in a program that tracks the
+/// mouse, else puts the keyboard away.
 struct TerminalScreen: UIViewRepresentable {
     let controller: TerminalScreenController
     var onPinchEnded: (CGFloat) -> Void = { _ in }
     /// Wheel notches for the program: up (back through what it showed), and how many.
     var onWheel: (Bool, Int) -> Void = { _, _ in }
-    var onTap: () -> Void = {}
+    var onTap: (CGPoint) -> Void = { _ in }
 
     func makeUIView(context: Context) -> DisplayTerminalView {
         let c = context.coordinator
@@ -134,12 +148,12 @@ struct TerminalScreen: UIViewRepresentable {
         let controller: TerminalScreenController
         let ended: (CGFloat) -> Void
         var onWheel: (Bool, Int) -> Void
-        var onTap: () -> Void
+        var onTap: (CGPoint) -> Void
         private var start: CGFloat = 10
         private var dragged: CGFloat = 0
         private var coast: Task<Void, Never>?
 
-        init(controller: TerminalScreenController, ended: @escaping (CGFloat) -> Void, onWheel: @escaping (Bool, Int) -> Void, onTap: @escaping () -> Void) {
+        init(controller: TerminalScreenController, ended: @escaping (CGFloat) -> Void, onWheel: @escaping (Bool, Int) -> Void, onTap: @escaping (CGPoint) -> Void) {
             self.controller = controller
             self.ended = ended
             self.onWheel = onWheel
@@ -190,7 +204,7 @@ struct TerminalScreen: UIViewRepresentable {
             }
         }
 
-        @objc func tapped(_ gesture: UITapGestureRecognizer) { onTap() }
+        @objc func tapped(_ gesture: UITapGestureRecognizer) { onTap(gesture.location(in: gesture.view)) }
 
         @objc func pinched(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {

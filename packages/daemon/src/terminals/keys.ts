@@ -3,7 +3,10 @@
 
 export const KEY_NAMES = ["esc", "tab", "shift-tab", "enter", "shift-enter", "backspace", "up", "down", "left", "right", "pgup", "pgdn", "wheel-up", "wheel-down",
   "ctrl-c", "ctrl-d", "ctrl-l", "ctrl-r", "y", "n", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
-export type KeyName = (typeof KEY_NAMES)[number];
+/** A named key, or a left click on a cell (`click:<col>:<row>`, from 0): the phone's tap on a program that tracks the
+ *  mouse (terminal-v0 §4). */
+export type KeyName = (typeof KEY_NAMES)[number] | `click:${number}:${number}`;
+export const CLICK = /^click:(\d{1,3}):(\d{1,3})$/;
 
 /** What the program in the terminal asked for, as far as the keys care. */
 export type KeyContext = {
@@ -30,6 +33,8 @@ export function keySequence(name: KeyName, ctx: KeyContext): string {
   const arrow = ARROWS[name];
   if (arrow) return ctx.applicationCursor ? `\x1bO${arrow}` : `\x1b[${arrow}`;
   if (name === "wheel-up" || name === "wheel-down") return wheel(name === "wheel-up", ctx);
+  const click = CLICK.exec(name);
+  if (click) return leftClick(Number(click[1]), Number(click[2]), ctx);
   // A new line in the agent's prompt, not a send (xterm gives Shift+Enter as a plain Enter): `CSI 13;2u` to a program
   // that reads the kitty protocol, else a line feed (Ctrl+J), which Claude Code, Codex and OpenCode take as a new line
   // too. Checked 2026-09-30 against all four; pi sends its prompt on a line feed, and has the protocol on.
@@ -50,6 +55,16 @@ function wheel(up: boolean, ctx: KeyContext): string {
   }
   if (ctx.alternate) return keySequence(up ? "up" : "down", ctx);
   return "";
+}
+
+/** A left click on a cell (from 0), as a terminal reports one: pressed and released (x10 reports presses only); nothing
+ *  to a program that does not track the mouse. */
+function leftClick(col: number, row: number, ctx: KeyContext): string {
+  if (ctx.mouse === "none") return "";
+  const x = Math.min(col, ctx.cols - 1) + 1, y = Math.min(row, ctx.rows - 1) + 1;
+  if (ctx.sgrMouse) return `\x1b[<0;${x};${y}M` + (ctx.mouse === "x10" ? "" : `\x1b[<0;${x};${y}m`);
+  const at = String.fromCharCode(32 + Math.min(x, 223), 32 + Math.min(y, 223));
+  return `\x1b[M${String.fromCharCode(32)}${at}` + (ctx.mouse === "x10" ? "" : `\x1b[M${String.fromCharCode(32 + 3)}${at}`);
 }
 
 /** A reply typed into the agent: pasted as one block when the program asked for bracketed paste (so a line break does

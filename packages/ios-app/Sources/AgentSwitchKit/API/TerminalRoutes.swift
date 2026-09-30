@@ -12,6 +12,7 @@ private struct InputBody: Encodable { let text: String; let submit: Bool; let se
 private struct CommandList: Decodable { let commands: [SlashCommand] }
 private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int; let screen: String? }
+private struct ClickBody: Encodable { let keys: [String] }
 private struct DecisionBody: Encodable { let decision: String }
 private struct RenameBody: Encodable { let name: String? }
 private struct AttachBody: Encodable { let uploads: [String] }
@@ -80,6 +81,12 @@ extension AgentSwitchAPI {
 
     public func sendTerminalKeys(_ id: String, _ keys: [TerminalKey]) async throws {
         let _: OKReply = try await post(["terminals", id, "keys"], body: KeysBody(keys: keys))
+    }
+
+    /// A left click on a cell (from 0), for a program that tracks the mouse: the Mac sends it the way the program asked
+    /// (docs/terminal-v0.md §4 `click:<col>:<row>`). A Mac that predates it answers 400.
+    public func clickTerminal(_ id: String, col: Int, row: Int) async throws {
+        let _: OKReply = try await post(["terminals", id, "keys"], body: ClickBody(keys: ["click:\(col):\(row)"]))
     }
 
     /// `screen`: this phone's screen, which owns the size from now on (docs/terminal-v0.md §1 "尺寸有主").
