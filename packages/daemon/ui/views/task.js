@@ -1,12 +1,14 @@
-/** Task detail: text, result, approvals, live event stream, follow-up composer; meta in the side column. */
+/** A task beside the tasks (docs/ui-v0.md §7.4 网页控制台): its status line and actions, what was asked and what came of
+ *  it, the requests for you, the steps (from its events), files, facts, the live events, a follow-up, its topic. */
 
-import { ACTIVE, esc, stamp, target, taskStatusLabel, when } from "../lib/api.js";
+import { ACTIVE, esc, stamp, statusTone, statusWord, target, taskStatusLabel, when } from "../lib/api.js";
 import { approve, archiveThread, cancelTask, goto, handoffTask, openTask, rateTask, submitTask } from "../lib/actions.js";
 import { get, set } from "../lib/state.js";
-import { approvalCard, answerNotices } from "./home.js";
+import { approvalCard, answerNotices, statusLine } from "./home.js";
 import { questionBindings } from "../lib/questions.js";
 import { fileList, pendingList } from "../lib/files.js";
-import { feedbackStrip } from "../lib/feedback.js";
+import { feedback, feedbackStrip, firstLine } from "../lib/feedback.js";
+import { spinner, square, topicSquare } from "../lib/sidebar.js";
 import { deleteBindings, deleteButton, deleteNotice } from "../lib/deletions.js";
 import { sendBindings, sendFeedback, sendState } from "../lib/sending.js";
 
@@ -92,95 +94,137 @@ function overrideNote(t, events) {
   const picked = `${t.decision.harness}/${t.decision.model || "默认"}`;
   const actual = `${v.harness}/${v.model}`;
   if (picked === actual && !(v.notes || []).length) return "";
-  return `<div class="card warn"><div class="dim">校验层已调整调度结果</div><div style="margin-top:4px">调度模型选择 <span class="mono">${esc(picked)}</span>，实际派发给 <span class="mono">${esc(actual)}</span>（${esc(v.chosen)}）</div>${(v.notes || []).length ? `<div class="dim" style="margin-top:4px">${v.notes.map(esc).join("<br>")}</div>` : ""}</div>`;
+  return `<div class="note warn"><div class="faint">校验层已调整调度结果</div><div>调度模型选择 <code>${esc(picked)}</code>，实际派发给 <code>${esc(actual)}</code>（${esc(v.chosen)}）</div>${(v.notes || []).length ? `<div class="faint">${v.notes.map(esc).join("<br>")}</div>` : ""}</div>`;
 }
 
 function meta(t, events) {
   const d = t.decision || {};
-  const attempts = (t.attempts || []).map((a, i) => `<div class="dim">${i + 1}. ${esc(a.harness)}/${esc(a.model)} → ${esc(a.kind)}${a.excerpt ? `：${esc(a.excerpt.slice(0, 120))}` : ""}</div>`).join("");
-  return `<div class="card kv">
-      <b>ID</b><span class="mono">${esc(t.id)}</span>
-      <b>状态</b><span><span class="badge ${t.status}">${esc(taskStatusLabel(t))}</span></span>
-      <b>目标</b><span>${esc(target(t) || "—")}${t.effort ? ` · effort ${esc(t.effort)}` : ""}</span>
-      <b>目录</b><span class="mono">${esc(t.cwd)}${t.ephemeral ? "（临时）" : ""}</span>
-      <b>创建</b><span>${stamp(t.createdAt)}</span>
-      ${t.pin ? `<b>指定</b><span>${esc(t.pin.harness)}/${esc(t.pin.model)}</span>` : ""}
+  const attempts = (t.attempts || []).map((a, i) => `<div class="faint">${i + 1}. ${esc(a.harness)}/${esc(a.model)} → ${esc(a.kind)}${a.excerpt ? `：${esc(a.excerpt.slice(0, 120))}` : ""}</div>`).join("");
+  return `<div class="kv">
+      <span>id</span><b class="mono">${esc(t.id)}</b>
+      <span>status</span><b><span class="badge ${t.status}">${esc(statusWord(t))}</span> <span class="faint">${esc(taskStatusLabel(t))}</span></b>
+      <span>target</span><b>${esc(target(t) || "—")}${t.effort ? ` · effort ${esc(t.effort)}` : ""}</b>
+      <span>folder</span><b class="mono">${esc(t.cwd)}${t.ephemeral ? " <span class=\"faint\">（临时）</span>" : ""}</b>
+      <span>created</span><b>${stamp(t.createdAt)}</b>
+      ${t.pin ? `<span>pinned</span><b>${esc(t.pin.harness)}/${esc(t.pin.model)}</b>` : ""}
     </div>
     ${overrideNote(t, events)}
-    ${d.reason ? `<div class="card"><div class="dim">调度理由</div><div>${esc(d.reason)}</div>${d.confidence !== undefined ? `<div class="dim" style="margin-top:4px">置信度 ${d.confidence}${d.expected_size ? " · " + esc(d.expected_size) : ""}${d.needs_browser ? " · 需要浏览器" : ""}</div>` : ""}</div>` : ""}
-    ${t.brief && t.brief !== t.task ? `<div class="card"><div class="dim">调度模型给执行器的简报</div><div class="pre" style="margin-top:4px;font-size:13px">${esc(t.brief)}</div></div>` : ""}
-    ${attempts ? `<div class="card"><div class="dim">尝试</div>${attempts}</div>` : ""}
-    ${t.decision ? `<details class="card"><summary>完整决策 JSON</summary><pre class="mono pre" style="margin:8px 0 0">${esc(JSON.stringify(t.decision, null, 2))}</pre></details>` : ""}`;
+    ${d.reason ? `<div class="note"><div class="faint">调度理由</div><div>${esc(d.reason)}</div>${d.confidence !== undefined ? `<div class="faint">置信度 ${d.confidence}${d.expected_size ? " · " + esc(d.expected_size) : ""}${d.needs_browser ? " · 需要浏览器" : ""}</div>` : ""}</div>` : ""}
+    ${t.brief && t.brief !== t.task ? `<details class="note"><summary>调度模型给执行器的简报</summary><div class="pre">${esc(t.brief)}</div></details>` : ""}
+    ${attempts ? `<div class="note"><div class="faint">尝试</div>${attempts}</div>` : ""}
+    ${t.decision ? `<details class="note"><summary>完整决策 JSON</summary><pre class="mono pre">${esc(JSON.stringify(t.decision, null, 2))}</pre></details>` : ""}`;
 }
 
 function filesCards(t, files) {
   const inputs = files.files.filter((f) => f.path.startsWith("in/"));
   const outputs = files.files.filter((f) => !f.path.startsWith("in/"));
   const where = files.root === "artifacts" ? "任务目录已清理，产物保留 7 天" : files.root === "cwd" ? "工作目录中的文件" : "目录已清理，无 out/ 产物";
-  return `${outputs.length || files.root ? `<div class="card"><div class="dim">产物 · ${where}</div><div class="stack" style="margin-top:8px">${fileList(t.id, outputs, "暂无产物。模型交付的文件会放在 out/ 中。")}</div></div>` : ""}
-    ${(t.attachments || []).length ? `<div class="card"><div class="dim">上传的附件</div><div class="stack" style="margin-top:8px">${fileList(t.id, inputs.length ? inputs : t.attachments.map((a) => ({ path: a.path, size: a.size })), "")}</div></div>` : ""}`;
+  const out = outputs.length || files.root ? `<div class="files-l"><div class="faint">产物 · ${where}</div>${fileList(t.id, outputs, "暂无产物。模型交付的文件会放在 out/ 中。")}</div>` : "";
+  const att = (t.attachments || []).length ? `<div class="files-l"><div class="faint">上传的附件</div>${fileList(t.id, inputs.length ? inputs : t.attachments.map((a) => ({ path: a.path, size: a.size })), "")}</div>` : "";
+  return out || att ? `<div class="lbl">// files</div>${out}${att}` : "";
 }
 
-/** The thread this task belongs to: title, last summary, every execution in it, and archive. */
+/** The topic this task belongs to: title, last summary, every run in it, and archive. */
 function threadCard(t, th, s) {
-  if (!th) return t.threadId ? `<div class="card dim">会话 <span class="mono">${esc(t.threadId)}</span> 加载中…</div>` : "";
+  if (!th) return t.threadId ? `<div class="lbl">// topic</div><div class="faint">话题 <span class="mono">${esc(t.threadId)}</span> 加载中…</div>` : "";
   const sm = th.state && th.state.summary;
-  const list = (label, items) => (items && items.length ? `<div class="dim" style="margin-top:6px">${label}</div>${items.map((i) => `<div>· ${esc(i)}</div>`).join("")}` : "");
-  const tasks = (th.tasks || []).map((x) => `<div class="${x.id === t.id ? "" : "dim"}" ${x.id === t.id ? "" : `data-open="${x.id}" style="cursor:pointer"`}><span class="badge ${x.status}">${esc(taskStatusLabel(x))}</span> ${esc(target(x) || "—")}${x.handoffFrom ? " ↤ " + esc(x.handoffFrom.harness) : ""} <span class="mono">${esc(x.id)}</span></div>`).join("");
-  return `<div class="card">
-      <div class="row"><b class="grow">会话 · ${esc(th.title || "（未命名）")}</b><span class="badge ${th.status}">${esc(THREAD_STATUS[th.status] || th.status)}</span></div>
-      <div class="dim mono" style="font-size:12px">${esc(th.id)} · ${(th.tasks || []).length} 次执行 · ${th.handoffs || 0} 次交接${th.expiresAt ? " · 将于 " + stamp(th.expiresAt) + " 删除" : ""}</div>
-      ${sm ? `<div style="margin-top:8px"><div class="dim">目标</div><div>${esc(sm.goal)}</div><div class="dim" style="margin-top:6px">进展</div><div>${esc(sm.progress || "—")}</div>${list("文件", sm.files)}${list("未解决", sm.unresolved)}${list("决定", sm.decisions)}</div>` : `<div class="dim" style="margin-top:8px">暂无摘要（每次执行结束后由调度模型生成）</div>`}
-      <div class="stack" style="margin-top:8px;font-size:13px">${tasks}</div>
-      ${th.status === "open" && !(th.tasks || []).some((x) => ACTIVE.has(x.status)) ? `<div class="row" style="margin-top:8px"><span class="grow"></span><button class="small" id="t-archive">归档会话（7 天后删除）</button></div>` : ""}
-      ${th.status === "archived" ? `<div style="margin-top:8px">${deleteButton("thread", th.id, s, (th.tasks || []).some((x) => ACTIVE.has(x.status)))}${deleteNotice("thread", th.id, s)}</div>` : ""}
+  const list = (label, items) => (items && items.length ? `<div class="faint">${label}</div>${items.map((i) => `<div>· ${esc(i)}</div>`).join("")}` : "");
+  const tasks = (th.tasks || []).map((x, i, all) => `<div class="trow ${x.id === t.id ? "on" : ""}" ${x.id === t.id ? "" : `data-open="${x.id}"`}><span class="tr">${i === all.length - 1 ? "└─" : "├─"}</span><span class="badge ${x.status}">${esc(statusWord(x))}</span><span>${esc(target(x) || "—")}${x.handoffFrom ? " ↤ " + esc(x.handoffFrom.harness) : ""}</span><span class="faint mono">${esc(x.id)}</span></div>`).join("");
+  return `<div class="lbl">// topic</div>
+    <div class="topic-card">
+      <div class="th">${topicSquare(th.id)}<b>${esc(th.title || "（未命名）")}</b><span class="sp"></span><span class="faint">${th.status === "archived" ? "archived" : "open"}</span></div>
+      <div class="faint mono small">${esc(th.id)} · ${(th.tasks || []).length} 次执行 · ${th.handoffs || 0} 次交接${th.expiresAt ? " · 将于 " + stamp(th.expiresAt) + " 删除" : ""}</div>
+      ${sm ? `<div class="sum"><div class="faint">目标</div><div>${esc(sm.goal)}</div><div class="faint">进展</div><div>${esc(sm.progress || "—")}</div>${list("文件", sm.files)}${list("未解决", sm.unresolved)}${list("决定", sm.decisions)}</div>` : `<div class="faint">暂无摘要（每次执行结束后由调度模型生成）</div>`}
+      <div class="trows">${tasks}</div>
+      ${th.status === "open" && !(th.tasks || []).some((x) => ACTIVE.has(x.status)) ? `<div class="acts"><button id="t-archive" title="归档后 7 天删除">archive</button></div>` : ""}
+      ${th.status === "archived" ? `<div class="acts">${deleteButton("thread", th.id, s, (th.tasks || []).some((x) => ACTIVE.has(x.status)))}${deleteNotice("thread", th.id, s)}</div>` : ""}
     </div>`;
 }
 
 function handoffBar(t) {
-  return `<div class="card composer" style="margin-top:10px">
-    <div class="row"><span class="dim grow">交接：在同一会话中改由其他执行器继续，排除当前执行器；填写执行器/模型可直接指定。</span></div>
-    <div class="row" style="margin-top:6px"><input id="t-handoff-pin" data-keep class="pin grow" placeholder="留空由调度模型选择，或填写 codex/gpt-5.5"><button id="t-handoff">交接</button></div>
-  </div>`;
+  return `<div class="handoff"><span class="lbl">// hand to</span><input id="t-handoff-pin" data-keep class="pin" placeholder="auto，或 codex/gpt-5.5" title="交接：在同一话题中改由其他执行器继续，排除当前执行器；填写执行器/模型可直接指定"><button id="t-handoff">hand off</button></div>`;
 }
 
 function followUp(s) {
   const key = `followup:${s.task.id}`;
   const sub = sendState(s, key);
   const disabled = sub.locked ? "disabled" : "";
-  return `<div class="card composer" style="margin-top:10px" data-dropzone data-composer-key="${esc(key)}" aria-busy="${sub.busy}">
-    <textarea id="f-task" data-keep ${disabled} rows="2" placeholder="追问（附带本任务的上下文）  ⌘↵ 发送"></textarea>
-    <div class="row" style="margin-top:8px"><span class="hint error grow">${esc(s.hint)}</span><button data-attach ${disabled}>添加附件</button><button class="primary" id="f-send" ${disabled}>${sub.status ? sub.label : "追问"}</button></div>
-    ${pendingList(s.pending, sub.locked)}
+  return `<div class="compose small-c" data-dropzone data-composer-key="${esc(key)}" aria-busy="${sub.busy}">
+    ${s.pendingFor === key ? pendingList(s.pending, sub.locked) : ""}
+    <div class="crow"><button class="sqb" data-attach ${disabled} title="添加附件" aria-label="attach">+</button><textarea id="f-task" data-keep ${disabled} rows="2" placeholder="追问（附带本任务的上下文）"></textarea><button class="sqb go" id="f-send" ${disabled} title="${esc(sub.status ? sub.label : "追问")} ⌘↩" aria-label="${esc(sub.status ? sub.label : "追问")}">${sub.busy ? spinner() : "↑"}</button></div>
+    ${sub.status ? `<div class="opts"><span class="sp"></span><kbd>${esc(sub.label)}</kbd></div>` : ""}
     ${sendFeedback(s, key)}
   </div>`;
 }
 
+/** The steps, from the events: received, planned, each step sent out, a question, the finish, the outcome. */
+function steps(t, events) {
+  const rows = [];
+  const hm = (ts) => new Date(ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const stepped = events.some((e) => e.type === "step" && e.payload?.action === "dispatch");
+  for (const e of events) {
+    const p = e.payload || {};
+    if (e.type === "step" && p.action === "intake") rows.push({ x: "已接收", small: p.sealingMs ? `加密 ${(p.sealingMs / 1000).toFixed(1)} 秒` : "", at: e.ts });
+    else if (e.type === "step" && p.action === "plan" && !["error", "retry", "none"].includes(p.source)) rows.push({ x: "规划", small: p.model || "", at: e.ts });
+    else if (e.type === "step" && p.action === "dispatch") rows.push({ x: `${p.n} · ${p.purpose === "research" ? "调研" : p.purpose === "verify" ? "复查" : "执行"}${p.target ? " · " + p.target.harness + "/" + p.target.model : ""}`, small: p.reason || "", at: e.ts });
+    else if (e.type === "step" && p.action === "ask_user") rows.push({ x: `${p.n} · 向你提问`, small: p.question || "", at: e.ts, wait: true });
+    else if (e.type === "step" && p.action === "finish") rows.push({ x: "收尾检查", small: p.reason || "", at: e.ts });
+    else if (e.type === "routed" && !stepped && p.verdict?.ok) rows.push({ x: `调度 → ${p.verdict.harness}/${p.verdict.model}`, small: p.routerMs ? `${(p.routerMs / 1000).toFixed(1)} 秒` : "", at: e.ts });
+    else if (e.type === "approval_request") rows.push({ x: p.kind === "question" ? "等你回答" : "等你批准", small: String(p.action || "").slice(0, 80), at: e.ts, wait: true });
+    else if (e.type === "approval_resolved" && rows.at(-1)?.wait) rows.at(-1).wait = false;
+  }
+  const ended = !ACTIVE.has(t.status);
+  if (ended) {
+    const f = feedback(t, events);
+    rows.push({ x: t.status === "done" ? "完成" : t.status === "failed" ? "失败" : t.status === "cancelled" ? "已取消" : "未完成", small: t.status === "done" ? "" : f.detail || "", at: t.updatedAt, end: statusTone(t) });
+  }
+  if (!rows.length) return '<div class="faint">等待事件…</div>';
+  const last = rows.length - 1;
+  return `<div class="tl">${rows.map((r, i) => {
+    const now = !ended && i === last;
+    const mark = r.end ? square(r.end, t.status === "cancelled") : now ? (r.wait || t.status === "waiting_approval" ? square("waiting") : spinner()) : square(r.wait ? "waiting" : "ok");
+    return `<div class="e${now ? " now" : ""}"><span class="tr">${i === last ? "└─" : "├─"}</span>${mark}<span class="x">${esc(r.x)}${r.small ? `<small>${esc(r.small)}</small>` : ""}</span><span class="r">${r.at ? hm(r.at) : ""}</span></div>`;
+  }).join("")}</div>`;
+}
+
 export function render(s) {
   const t = s.task;
-  if (!t) return `<div class="page-title"><a data-nav="home">← 首页</a> 任务</div><div class="empty">${esc(s.hint || "加载中…")}</div>`;
+  if (!t) return `<div class="head"><div class="l1"><span class="faint">task</span><span class="sp"></span><button class="x" data-nav="home" title="close · esc" aria-label="close">×</button></div></div><div class="body"><div class="empty">${esc(s.hint || "加载中…")}</div></div>`;
   const pending = s.approvals.filter((a) => a.taskId === t.id);
   const parent = t.parentId ? s.tasks.find((x) => x.id === t.parentId) : null;
   // A tool's result belongs to its call (the phone opens a call to show it); the list shows the calls only.
   const events = s.events.filter((e) => e.type !== "tool_result").map((e) => `<div class="ev ${e.type}"><span class="ts">${when(e.ts)}</span>${esc(eventLine(e))}</div>`).join("");
   const incomplete = ["partial", "blocked"].includes(t.status);
-  return `<div class="page-title"><a data-nav="home">← 首页</a><span class="badge ${t.status}">${esc(taskStatusLabel(t))}</span><span class="dim grow ellipsis">${esc(target(t))}</span>${ACTIVE.has(t.status) ? `<button class="bad small" id="t-cancel">取消任务</button>` : `<button class="small ${t.rating === 1 ? "ok" : ""}" data-rate="1" title="结果有用，调度模型后续会参考">👍</button><button class="small ${t.rating === -1 ? "bad" : ""}" data-rate="-1" title="结果无用">👎</button>${deleteButton("task", t.id, s, (s.thread?.tasks || []).some((x) => ACTIVE.has(x.status)))}`}</div>
+  const acts = ACTIVE.has(t.status) ? `<button class="warn" id="t-cancel">cancel</button>`
+    : `<button class="${t.rating === 1 ? "on" : ""}" data-rate="1" title="结果有用，调度模型后续会参考">useful</button><button class="${t.rating === -1 ? "on" : ""}" data-rate="-1" title="结果无用">not useful</button>${deleteButton("task", t.id, s, (s.thread?.tasks || []).some((x) => ACTIVE.has(x.status)))}`;
+  return `<div class="head">
+      <div class="l1">${statusLine(t)}<span class="sp"></span><button class="x" data-nav="home" title="close · esc" aria-label="close">×</button></div>
+      <h2>${esc(firstLine(t.task).slice(0, 120) || t.task.slice(0, 120))}</h2>
+    </div>
+    <div class="acts">${acts}</div>
     ${deleteNotice("task", t.id, s)}
-    <div class="cols">
-      <div class="stack">
-        ${parent ? `<div class="card dim" data-open="${parent.id}" style="cursor:pointer">↩ 追问自：${esc(parent.task.slice(0, 120))}</div>` : ""}
-        ${feedbackStrip(t, s.events)}
-        <div class="card"><div class="task-text">${esc(t.task)}</div></div>
-        ${t.result ? `<div class="card ${incomplete ? "warn" : t.status === "done" ? "ok" : ""}"><div class="dim">${incomplete ? "已保存的进展" : "结果"}</div><div class="pre" style="margin-top:4px">${esc(t.result)}</div></div>` : ""}
-        ${t.error ? `<div class="card ${incomplete ? "warn" : "bad"}"><div class="dim">${incomplete ? "未完成原因" : "错误"}</div><div class="pre ${incomplete ? "" : "error"}" style="margin-top:4px">${esc(t.error)}</div></div>` : ""}
-        ${pending.length ? `<div class="approvals">${pending.map((a) => approvalCard(a, null, s.answerSubmissions?.[a.id])).join("")}</div>` : ""}
-        ${answerNotices(s, t.id)}
-        <h2>事件 ${s.events.length}</h2>
-        <div class="card events" id="events">${events || '<span class="dim">等待事件…</span>'}</div>
-        ${followUp(s)}
-        ${t.harness ? handoffBar(t) : ""}
-      </div>
-      <aside class="stack">${threadCard(t, s.thread, s)}${filesCards(t, s.files)}${meta(t, s.events)}</aside>
+    <div class="rule"></div>
+    <div class="body">
+      ${parent ? `<div class="parent" data-open="${parent.id}">↩ 追问自：${esc(parent.task.slice(0, 120))}</div>` : ""}
+      ${feedbackStrip(t, s.events)}
+      <div class="lbl">// asked</div>
+      <div class="asked">${esc(t.task)}</div>
+      ${t.result ? `<div class="lbl">// ${incomplete ? "saved" : "result"}</div><div class="result ${incomplete ? "warn" : t.status === "done" ? "ok" : ""}"><div class="faint">${incomplete ? "已保存的进展" : "结果"}</div><div class="pre">${esc(t.result)}</div></div>` : ""}
+      ${t.error ? `<div class="result ${incomplete ? "warn" : "bad"}"><div class="faint">${incomplete ? "未完成原因" : "错误"}</div><div class="pre">${esc(t.error)}</div></div>` : ""}
+      ${pending.map((a) => approvalCard(a, null, s.answerSubmissions?.[a.id])).join("")}
+      ${answerNotices(s, t.id)}
+      <div class="lbl">// steps</div>
+      ${steps(t, s.events)}
+      ${filesCards(t, s.files)}
+      <div class="lbl">// task</div>
+      ${meta(t, s.events)}
+      <details class="evs" id="events-box" data-keep-open ${ACTIVE.has(t.status) ? "open" : ""}><summary>// events ${s.events.length}</summary>
+        <div class="events" id="events">${events || '<span class="faint">等待事件…</span>'}</div>
+      </details>
+      <div class="lbl">// follow up</div>
+      ${followUp(s)}
+      ${t.harness ? handoffBar(t) : ""}
+      ${threadCard(t, s.thread, s)}
     </div>`;
 }
 

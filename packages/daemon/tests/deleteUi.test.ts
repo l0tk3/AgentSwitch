@@ -103,7 +103,7 @@ describe("permanent deletion UI", () => {
     const fetcher = http(async () => reply({ ok: true }));
     const rendered = home.render(state.get());
     expect(rendered).toContain('id="archived-threads" data-keep-open');
-    expect(rendered).toContain("已归档会话 1");
+    expect(rendered).toContain("// archived topics 1");
     expect(rendered).toContain('data-delete-thread="thread-1"');
     await click("thread", home);
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("此会话内的全部任务、记录"));

@@ -7,18 +7,10 @@
 <link rel="stylesheet" href="/ui/app.css">
 </head>
 <body>
-<aside class="side">
-  <div class="brand"><span class="dot" id="dot"></span><b>AgentSwitch</b></div>
-  <nav>
-    <a data-nav="home" class="active">首页<span class="count" id="apCount"></span></a>
-    <a data-nav="log">调度记录</a>
-    <a data-nav="ext">扩展</a>
-    <a data-nav="ctx">上下文</a>
-    <a href="/ui/terminal.html">终端</a>
-  </nav>
-  <div class="side-foot"><span class="dim" id="version"></span><button class="small" id="refresh">刷新</button></div>
-</aside>
+<header class="band" id="band"></header>
+<aside class="side" id="side"></aside>
 <main id="main"></main>
+<section class="detail" id="detail" hidden></section>
 <script type="module" src="/ui/app.js"></script>
 </body>
 </html>

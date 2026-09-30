@@ -1,63 +1,166 @@
-/** Home: composer, pending approvals, task table, quota panel. */
+/** Tasks (docs/ui-v0.md §7.4 网页控制台): the phone's tasks page on a desk — what is going on across the top, the record
+ *  below it with the requests for you in their place, the composer at the bottom; a task opens beside (task.js). */
 
-import { ACTIVE, ago, esc, target, taskStatusLabel, when } from "../lib/api.js";
-import { approve, loadQuota, openTask, submitTask } from "../lib/actions.js";
+import { ACTIVE, agoShort, dayOf, esc, span, statusTone, statusWord, target, when } from "../lib/api.js";
+import { approve, openTask, submitTask } from "../lib/actions.js";
 import { get, set } from "../lib/state.js";
 import { questionsOf, questionBindings } from "../lib/questions.js";
 import { pendingList } from "../lib/files.js";
-import { quotaPanel } from "./quota.js";
-import { firstLine } from "../lib/feedback.js";
+import { feedback, firstLine } from "../lib/feedback.js";
 import { deleteBindings, deleteButton, deleteNotice } from "../lib/deletions.js";
 import { sendBindings, sendFeedback, sendState } from "../lib/sending.js";
+import { agentMark, spinner, square, topicSquare } from "../lib/sidebar.js";
 
 const $ = (s) => document.querySelector(s);
 
+const FEED = 40;
+
+/** The composer, at the bottom as on the phone, with what a desk has room for under it. */
 function composer(s) {
-  const { hint, pending } = s;
+  const { hint } = s;
   const sub = sendState(s, "home");
   const disabled = sub.locked ? "disabled" : "";
-  return `<section class="card composer" data-dropzone data-composer-key="home" aria-busy="${sub.busy}">
-    <textarea id="c-task" data-keep ${disabled} rows="3" placeholder="输入任务或问题  ⌘↵ 发送"></textarea>
-    <div class="row opts">
-      <input id="c-cwd" data-keep ${disabled} placeholder="工作目录（留空则使用临时目录，任务结束后删除）">
-      <input id="c-pin" data-keep ${disabled} class="pin" placeholder="指定执行器/模型，留空由调度模型决定">
-      <select id="c-browser" data-keep ${disabled}><option value="">浏览器：由调度模型决定</option><option value="1">需要浏览器</option></select>
-      <select id="c-approval" data-keep ${disabled} title="本任务的审批方式；默认使用「上下文」页的审批策略"><option value="">审批：默认策略</option><option value="manual">审批：逐项确认</option><option value="auto">审批：全部自动</option><option value="scoped">审批：自动</option></select>
-      <button data-attach ${disabled} title="也可拖入文件或粘贴截图">添加附件</button>
-      <button class="primary" id="c-send" ${disabled}>${sub.label}</button>
+  return `<section class="compose" data-dropzone data-composer-key="home" aria-busy="${sub.busy}">
+    ${s.pendingFor === "home" ? pendingList(s.pending, sub.locked) : ""}
+    <div class="crow"><button class="sqb" data-attach ${disabled} title="添加附件（也可拖入文件或粘贴截图）" aria-label="attach">+</button><textarea id="c-task" data-keep ${disabled} rows="1" placeholder="向 Mac 发送任务或问题"></textarea><button class="sqb go" id="c-send" ${disabled} title="${esc(sub.label)} ⌘↩" aria-label="${esc(sub.label)}">${sub.busy ? spinner() : "↑"}</button></div>
+    <div class="opts">
+      <label><span>// folder</span><input id="c-cwd" data-keep ${disabled} placeholder="临时目录" title="工作目录；留空则使用临时目录，任务结束后删除"></label>
+      <label><span>// model</span><input id="c-pin" data-keep ${disabled} class="pin" placeholder="auto" title="指定执行器/模型，如 codex/gpt-5.5；留空由调度模型决定"></label>
+      <label><span>// browser</span><select id="c-browser" data-keep ${disabled}><option value="">auto</option><option value="1">yes</option></select></label>
+      <label><span>// approval</span><select id="c-approval" data-keep ${disabled} title="本任务的审批方式；默认使用「context」页的审批策略"><option value="">default</option><option value="manual">ask each</option><option value="scoped">auto</option><option value="auto">auto · all</option></select></label>
+      <span class="sp"></span><kbd>${esc(sub.busy || sub.status === "uncertain" ? sub.label : "⌘↩ send")}</kbd>
     </div>
-    ${pendingList(pending, sub.locked)}
     ${sendFeedback(s, "home")}
-    <div class="hint" style="margin-top:8px">${hint ? `<span class="error">${esc(hint)}</span> · ` : ""}附件存入任务目录的 in/，内容原样进入模型上下文，截图中请勿包含密码。任务中可直接填写账号密码或粘贴账号表，保存前会转为密文，执行器只接触密文。模型交付的文件可在任务页下载。</div>
+    ${hint ? `<div class="hint error">${esc(hint)}</div>` : ""}
   </section>`;
+}
+
+/** A task's status line, as the phone's: the mark, the word, the agent, who, how long. */
+export function statusLine(t) {
+  const tone = statusTone(t);
+  const mark = tone === "busy" ? spinner() : square(tone, t.status === "cancelled");
+  const clock = ACTIVE.has(t.status) ? span(Date.now() - t.createdAt) : span((t.updatedAt || t.createdAt) - t.createdAt);
+  return `${mark}<span class="word ${tone}">${esc(statusWord(t))}</span>${t.harness ? agentMark(t.harness) : ""}<span class="who" title="${esc(target(t))}">${esc(target(t) || (t.status === "routing" ? "routing" : ""))}</span><span class="faint">${clock}</span>`;
+}
+
+/** A task as the record says it: its outcome, or where it is now. */
+function outcome(t, s) {
+  const f = feedback(t, []);
+  if (t.status === "done") return `<div class="say">${esc(t.spoken || firstLine(t.result) || "已完成")}</div>`;
+  if (t.status === "failed") return `<div class="say bad">${esc(t.spoken || firstLine(t.error) || "失败")}</div>`;
+  if (t.status === "partial" || t.status === "blocked") return `<div class="say"><span class="w">${esc(f.label)}</span> · ${esc(f.detail)}</div>`;
+  if (t.status === "cancelled") return "";
+  const waiting = s.approvals.some((a) => a.taskId === t.id);
+  return waiting ? "" : `<div class="step"><span class="tr">└─</span>${esc(f.label)}${f.detail ? ` <span class="faint">${esc(f.detail)}</span>` : ""}</div>`;
+}
+
+function entry(t, s) {
+  const open = s.view === "task" && s.task?.id === t.id ? " sel" : "";
+  // A task in progress can be deleted once cancelled (the button says so).
+  const actions = deleteButton("task", t.id, s, ACTIVE.has(t.status));
+  return `<div class="entry${open}" id="entry-${esc(t.id)}" data-open="${t.id}">
+    <div class="l1">${statusLine(t)}<span class="sp"></span><span class="acts">${actions}</span></div>
+    ${outcome(t, s)}${deleteNotice("task", t.id, s)}
+  </div>`;
+}
+
+/** Cards for what is going on: in progress and waiting for you, across the top. */
+function strip(s) {
+  const active = s.tasks.filter((t) => ACTIVE.has(t.status));
+  if (!active.length) return "";
+  const cards = active.map((t) => {
+    const ask = s.approvals.find((a) => a.taskId === t.id);
+    const waiting = t.status === "waiting_approval" || !!ask;
+    const f = feedback(t, []);
+    const line = ask ? (ask.kind === "question" ? questionsOf(ask).questions[0]?.text || ask.action : ask.action) : f.label;
+    return `<div class="card${waiting ? " wait" : ""}${s.task?.id === t.id && s.view === "task" ? " on" : ""}" id="card-${esc(t.id)}" data-open="${t.id}">
+      <div class="l1">${statusLine(t)}</div>
+      <div class="t">${esc(titleOf(t, s))}</div>
+      <div class="s">└─ ${esc(line || "")}</div>
+    </div>`;
+  }).join("");
+  return `<div class="strip">${cards}</div><div class="rule"></div>`;
+}
+
+/** The thread's title for its first task, else the first line of what was asked. */
+function titleOf(t, s) {
+  const th = s.threads.find((x) => x.id === t.threadId);
+  const first = th && s.tasks.filter((x) => x.threadId === th.id).sort((a, b) => a.createdAt - b.createdAt)[0];
+  return th?.title && first?.id === t.id ? th.title : firstLine(t.task).slice(0, 90) || t.task.slice(0, 90);
+}
+
+/** The record, oldest first like a conversation: the day, the topic when it changes, what you asked, the task, and a
+ *  request for you right under its task. */
+function feed(s) {
+  const tasks = s.tasks.slice(0, FEED).sort((a, b) => a.createdAt - b.createdAt);
+  const byId = new Map(s.tasks.map((t) => [t.id, t]));
+  const out = [];
+  let day = "", topic = "";
+  for (const t of tasks) {
+    const d = dayOf(t.createdAt);
+    if (d !== day) { out.push(`<div class="day">${esc(d)}</div>`); day = d; topic = ""; }
+    if (t.threadId && t.threadId !== topic) {
+      const th = s.threads.find((x) => x.id === t.threadId) || (s.archivedThreads || []).find((x) => x.id === t.threadId);
+      if (th?.title) out.push(`<div class="tag">${topicSquare(th.id)}<span>${esc(th.title)}</span></div>`);
+      topic = t.threadId;
+    }
+    out.push(`<div class="me"><div>${esc(t.task.length > 600 ? t.task.slice(0, 600) + "…" : t.task)}</div></div>`);
+    out.push(entry(t, s));
+    for (const a of s.approvals.filter((x) => x.taskId === t.id)) out.push(approvalCard(a, null, s.answerSubmissions?.[a.id]));
+  }
+  // A request whose task is not in the record (an older one) waits at the end, where the eye is.
+  const shown = new Set(tasks.map((t) => t.id));
+  for (const a of s.approvals.filter((x) => !shown.has(x.taskId))) out.push(approvalCard(a, byId.get(a.taskId), s.answerSubmissions?.[a.id]));
+  out.push(answerNotices(s));
+  if (!tasks.length && !s.approvals.length) out.push('<div class="empty">发送任务或问题</div>');
+  return out.join("");
+}
+
+function archived(s) {
+  const list = s.archivedThreads || [];
+  return `<details id="archived-threads" data-keep-open class="archived"><summary>// archived topics ${list.length}</summary>
+    ${list.length ? list.map((th) => `<div class="arow">${topicSquare(th.id)}<span class="t">${esc(th.title || "（未命名）")}</span><span class="faint">${esc(agoShort(th.lastActivity || th.updatedAt))}</span>${deleteButton("thread", th.id, s, s.tasks.some((t) => t.threadId === th.id && ACTIVE.has(t.status)))}${deleteNotice("thread", th.id, s)}</div>`).join("") : '<div class="faint arow">暂无已归档的话题。</div>'}
+  </details>`;
+}
+
+export function render(s) {
+  return `${strip(s)}<div class="feed" id="feed">${archived(s)}${feed(s)}</div>${composer(s)}`;
+}
+
+/** The record opens at its end, as a conversation does. */
+export function afterRender() {
+  const feedEl = document.getElementById("feed");
+  if (feedEl) feedEl.scrollTop = feedEl.scrollHeight;
 }
 
 function questionBlock(a, q, i, disabled) {
   const box = `q-${a.id}-${i}`;
-  const options = (q.options || []).length ? `<div class="chips" style="margin-top:6px">${q.options.map((o) => `<button class="chip" data-opt="${esc(o.label)}" data-for="${box}" data-multi="${!!q.multi}" title="${esc(o.description || "")}" ${disabled ? "disabled" : ""}>${esc(o.label)}</button>`).join("")}</div>` : "";
-  return `<div style="margin-top:8px">${q.header ? `<span class="badge">${esc(q.header)}</span> ` : ""}<b>${esc(q.text)}</b>
-    ${q.secret ? '<div class="dim error">敏感信息：请填写凭据网关密文（enc:v1:…），勿填明文</div>' : ""}${options}
-    <textarea id="${box}" data-keep rows="2" ${disabled ? "disabled" : ""} placeholder="${(q.options || []).length ? "选择上方选项，或直接输入" : "输入答复"}${q.multi ? "，多项用逗号分隔" : ""}" style="margin-top:6px"></textarea></div>`;
+  const options = (q.options || []).length ? `<div class="chips">${q.options.map((o) => `<button class="chip" data-opt="${esc(o.label)}" data-for="${box}" data-multi="${!!q.multi}" title="${esc(o.description || "")}" ${disabled ? "disabled" : ""}>${esc(o.label)}</button>`).join("")}</div>` : "";
+  return `<div class="qb">${q.header ? `<span class="lbl">// ${esc(q.header)}</span> ` : ""}<div class="qt">${esc(q.text)}</div>
+    ${q.secret ? '<div class="hint error">敏感信息：请填写凭据网关密文（enc:v1:…），勿填明文</div>' : ""}${options}
+    <textarea id="${box}" data-keep rows="2" ${disabled ? "disabled" : ""} placeholder="${(q.options || []).length ? "选择上方选项，或直接输入" : "输入答复"}${q.multi ? "，多项用逗号分隔" : ""}"></textarea></div>`;
 }
 
+/** A request for you, a floating box as on the phone and the Mac: amber for a permission, ink for a question. */
 export function approvalCard(a, task, submission = {}) {
+  const about = `${task ? esc(task.task.slice(0, 60)) + " · " : ""}${when(a.createdAt)}`;
   if (a.kind === "question") {
     const { source, questions } = questionsOf(a);
     const fromExecutor = source === "executor";
     const locked = ["sending", "sent", "uncertain", "resolved"].includes(submission.status);
     const label = { sending: "提交中…", sent: "已提交", uncertain: "结果待确认", resolved: "问题已结束", error: "重新提交" }[submission.status] || "提交";
-    return `<div class="card warn" aria-busy="${submission.status === "sending"}">
-      <div class="dim">${task ? esc(task.task.slice(0, 80)) + " · " : ""}${when(a.createdAt)} · ${fromExecutor ? "执行器提问（答复直接交给执行器）" : "调度模型提问"}</div>
+    return `<div class="box q" id="ask-${esc(a.id)}" aria-busy="${submission.status === "sending"}">
+      <div class="hd"><span>? question</span><span class="sp"></span><span>${fromExecutor ? "执行器提问（答复直接交给执行器）" : "调度模型提问"}</span></div>
+      <div class="bd"><div class="faint about">${about}</div>
       ${["sent", "resolved"].includes(submission.status) ? "" : questions.map((q, i) => questionBlock(a, q, i, locked)).join("")}
-      ${submission.message ? `<div class="hint ${submission.status === "error" ? "error" : ""}" role="${submission.status === "error" ? "alert" : "status"}" aria-live="polite" style="margin-top:8px">${esc(submission.message)}</div>` : ""}
-      <div class="row" style="margin-top:8px"><button class="primary grow" data-answer="${a.id}" data-task="${a.taskId}" ${locked ? "disabled" : ""}>${label}</button><button class="bad" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny" ${locked ? "disabled" : ""}>暂不回答，停止执行</button>${["sent", "uncertain"].includes(submission.status) ? `<button data-answer-refresh="${a.id}" data-task="${a.taskId}">刷新状态</button>` : ""}</div>
+      ${submission.message ? `<div class="hint ${submission.status === "error" ? "error" : ""}" role="${submission.status === "error" ? "alert" : "status"}" aria-live="polite">${esc(submission.message)}</div>` : ""}</div>
+      <div class="ft"><span class="hint-l">回答后任务继续</span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny" ${locked ? "disabled" : ""}>暂不回答，停止执行</button>${["sent", "uncertain"].includes(submission.status) ? `<button data-answer-refresh="${a.id}" data-task="${a.taskId}">刷新状态</button>` : ""}<button class="primary" data-answer="${a.id}" data-task="${a.taskId}" ${locked ? "disabled" : ""}>${label}</button></div>
     </div>`;
   }
-  return `<div class="card warn">
-    <div class="dim">${task ? esc(task.task.slice(0, 80)) + " · " : ""}${when(a.createdAt)}</div>
-    <div style="margin-top:4px"><b>${esc(a.action)}</b></div>
-    <div class="dim pre">${esc(a.evidence)}</div>
-    <div class="row" style="margin-top:10px"><button class="ok grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">允许</button><button class="bad grow" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">拒绝</button></div>
+  return `<div class="box ask" id="ask-${esc(a.id)}">
+    <div class="hd"><span>[!] approval</span><span class="sp"></span><span>${about}</span></div>
+    <div class="bd"><code>${esc(a.action)}</code>${a.evidence ? `<div class="path pre">${esc(a.evidence)}</div>` : ""}</div>
+    <div class="ft"><span class="hint-l"></span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">deny</button><button class="primary" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">allow</button></div>
   </div>`;
 }
 
@@ -66,64 +169,7 @@ export function answerNotices(s, taskId) {
   return Object.entries(s.answerSubmissions || {}).filter(([, sub]) => {
     const t = taskId && s.task?.id === sub.taskId ? s.task : s.tasks.find((t) => t.id === sub.taskId);
     return (!taskId || sub.taskId === taskId) && ["sent", "uncertain"].includes(sub.status) && t?.status === "waiting_approval" && !s.approvals.some((a) => a.taskId === sub.taskId);
-  }).map(([id, sub]) => `<div class="card" role="status"><div>${esc(sub.status === "sent" ? sub.message : "问题状态已更新，请查看任务进展。")}</div><button class="small" style="margin-top:8px" data-answer-refresh="${id}" data-task="${sub.taskId}">刷新状态</button></div>`).join("");
-}
-
-function taskRow(t, s) {
-  const who = target(t) || (t.status === "routing" ? "调度中…" : "—");
-  const tail = t.status === "done" ? `<div class="dim ellipsis">${esc(t.spoken || firstLine(t.result).slice(0, 160))}</div>`
-    : ["partial", "blocked"].includes(t.status) ? `<div class="dim ellipsis">${esc(firstLine(t.error || t.result).slice(0, 160))}</div>`
-    : t.status === "failed" ? `<div class="dim error ellipsis">${esc(t.spoken || firstLine(t.error).slice(0, 160))}</div>` : "";
-  return `<tr data-open="${t.id}">
-    <td class="nowrap"><span class="badge ${t.status}">${esc(taskStatusLabel(t))}</span></td>
-    <td class="task-cell"><div class="t">${esc(t.task)}</div>${tail}</td>
-    <td class="nowrap dim">${esc(who)}${t.ephemeral ? '<div class="dim">临时目录</div>' : ""}</td>
-    <td class="nowrap dim">${ago(t.createdAt)}</td>
-    <td>${deleteButton("task", t.id, s, ACTIVE.has(t.status))}${deleteNotice("task", t.id, s)}</td>
-  </tr>`;
-}
-
-function taskTable(tasks, s) {
-  if (!tasks.length) return "";
-  return `<table class="list task-list"><thead><tr><th>状态</th><th>任务</th><th>目标</th><th>时间</th><th>操作</th></tr></thead><tbody>${tasks.map((t) => taskRow(t, s)).join("")}</tbody></table>`;
-}
-
-/** One open thread: title, a line of summary, who did it last; click opens its latest task. */
-function threadRow(th, tasks, s, archived = false) {
-  const latest = tasks.filter((t) => t.threadId === th.id).sort((a, b) => b.createdAt - a.createdAt)[0];
-  const running = tasks.some((t) => t.threadId === th.id && ACTIVE.has(t.status));
-  const line = th.summary ? (th.summary.progress || th.summary.goal) : (latest ? latest.task : "");
-  return `<tr ${latest ? `data-open="${latest.id}"` : ""}>
-    <td class="nowrap">${running ? '<span class="badge running">进行中</span>' : `<span class="badge">${th.taskCount} 次</span>`}</td>
-    <td class="task-cell"><div class="t">${esc(th.title || "（未命名）")}</div><div class="dim ellipsis">${esc((line || "").slice(0, 160))}</div></td>
-    <td class="nowrap dim">${esc(th.lastTarget ? th.lastTarget.harness + "/" + th.lastTarget.model : "—")}</td>
-    <td class="nowrap dim">${ago(th.lastActivity || th.updatedAt)}</td>
-    ${archived ? `<td>${deleteButton("thread", th.id, s, running)}${deleteNotice("thread", th.id, s)}</td>` : ""}
-  </tr>`;
-}
-
-function threadTable(threads, tasks, s, archived = false) {
-  if (!threads.length) return "";
-  return `<table class="list"><thead><tr><th>执行</th><th>会话</th><th>上次目标</th><th>最近活动</th>${archived ? "<th>操作</th>" : ""}</tr></thead><tbody>${threads.map((th) => threadRow(th, tasks, s, archived)).join("")}</tbody></table>`;
-}
-
-export function render(s) {
-  const active = s.tasks.filter((t) => ACTIVE.has(t.status));
-  const recent = s.tasks.filter((t) => !ACTIVE.has(t.status));
-  const byId = new Map(s.tasks.map((t) => [t.id, t]));
-  return `<div class="page-title">首页</div>
-    ${composer(s)}
-    <div class="cols" style="margin-top:22px">
-      <div>
-        ${s.approvals.length ? `<h2>等你处理 ${s.approvals.length}</h2><div class="approvals">${s.approvals.map((a) => approvalCard(a, byId.get(a.taskId), s.answerSubmissions?.[a.id])).join("")}</div>` : ""}
-        ${answerNotices(s)}
-        ${active.length ? `<h2>进行中 ${active.length}</h2>${taskTable(active, s)}` : ""}
-        ${s.threads.length ? `<h2>会话 ${s.threads.length}</h2>${threadTable(s.threads, s.tasks, s)}` : ""}
-        <details id="recent-tasks" data-keep-open ${s.threads.length ? "" : "open"} style="margin-top:14px"><summary><h2 style="display:inline">最近任务</h2></summary>${taskTable(recent, s) || `<div class="empty">暂无任务。在上方输入任务，调度模型会选择执行模型；相关的追问会归入已有会话。</div>`}</details>
-        <details id="archived-threads" data-keep-open style="margin-top:14px"><summary><h2 style="display:inline">已归档会话 ${(s.archivedThreads || []).length}</h2></summary>${threadTable(s.archivedThreads || [], s.tasks, s, true) || '<div class="empty">暂无已归档会话。</div>'}</details>
-      </div>
-      <aside>${quotaPanel(s.quota)}</aside>
-    </div>`;
+  }).map(([id, sub]) => `<div class="note" role="status"><span>${esc(sub.status === "sent" ? sub.message : "问题状态已更新，请查看任务进展。")}</span><button class="small" data-answer-refresh="${id}" data-task="${sub.taskId}">刷新状态</button></div>`).join("");
 }
 
 async function send() {
@@ -142,11 +188,11 @@ async function send() {
 export const bindings = [
   ...sendBindings,
   { sel: "#c-send", run: () => send() },
-  { sel: "#q-refresh", run: async (el) => { el.disabled = true; try { await loadQuota(true); } finally { el.disabled = false; } } },
   ...deleteBindings,
-  { sel: "tr[data-open]", run: (el) => openTask(el.dataset.open) },
   { sel: "[data-approve]", run: (el) => { el.disabled = true; return approve(el.dataset.task, el.dataset.approve, el.dataset.decision); } },
   ...questionBindings,
+  // Anywhere else on a task (its card, its entry) opens it beside.
+  { sel: "[data-open]", run: (el) => openTask(el.dataset.open) },
 ];
 
 export const submitKeys = { "c-task": "c-send" };

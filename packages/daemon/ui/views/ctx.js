@@ -15,7 +15,7 @@ export function render(s) {
     : "";
   const m = s.mem;
   const memText = m.draft ?? m.text;
-  return `<div class="page-title">调度模型上下文</div>
+  return `<div class="page-title"><h1>context</h1><span class="faint">调度模型每次调度前读取，改了立即生效</span></div>
     <div class="cols">
       <div class="stack">
         ${c.hint ? `<div class="card bad error">${esc(c.hint)}</div>` : ""}
@@ -69,7 +69,7 @@ function platformMemory(mem = { records: [], loading: false, loaded: false, dele
       ${removal.message ? `<div class="hint ${removal.status === "error" ? "error" : ""}" role="${removal.status === "error" ? "alert" : "status"}" aria-live="polite" style="margin-top:8px">${esc(removal.message)}</div>` : ""}
     </article>`;
   }).join("");
-  return `<section><h2>平台经验 <span class="spacer"></span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></h2>
+  return `<section><h2>// experience <span class="spacer"></span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></h2>
     <p class="dim">按具体平台保存的观察记录，附来源与有效期。过期记录不会用于后续任务；记录不代表操作授权。</p>
     ${mem.hint ? `<div class="card bad error" role="alert">${esc(mem.hint)}</div>` : ""}
     <div class="stack">${records || `<div class="empty">${mem.loading ? "正在加载平台经验…" : mem.loaded ? "暂无平台经验" : "平台经验尚未加载"}</div>`}</div></section>`;

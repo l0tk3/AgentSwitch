@@ -1,7 +1,8 @@
 // Pixel marks for the terminal window (docs/ui-v0.md §7): 1-bit sprites on whole-point cells, the app's mark (the
 // icon's switch: one source, three lanes) with its states, the wordmark, and the glitch that marks a change of state.
 
-export const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+// A page without matchMedia (a test's DOM) moves.
+export const reducedMotion = globalThis.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: false, addEventListener() {} };
 
 /** A 1-bit sprite ("#" lit) as crisp SVG squares; `px` is a whole number of points. */
 export function sprite(rows, { px = 2, cls = "" } = {}) {

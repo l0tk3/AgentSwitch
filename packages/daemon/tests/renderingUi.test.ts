@@ -73,7 +73,7 @@ describe("background rendering preserves live editors", () => {
     state.set({ approvals: [question("new-question")], tasks: [task], health: false });
     unchanged(id, saved);
     expect(field("main").scrollTop).toBe(220);
-    expect(dom.window.document.querySelector("aside")?.parentElement?.textContent).toContain("剩余 47%");
+    expect(dom.window.document.querySelector("aside")?.textContent).toContain("47% left");
     expect(dom.window.document.querySelector('[data-open="task-one"]')).toBeTruthy();
   });
 
@@ -97,7 +97,8 @@ describe("background rendering preserves live editors", () => {
     unchanged("f-task", saved);
     expect(field("events")).toBe(events);
     expect(events.scrollTop).toBe(140);
-    expect(dom.window.document.querySelector("#main")!.textContent).toContain("已保存的进展");
+    // The task opens beside the tasks.
+    expect(dom.window.document.querySelector("#detail")!.textContent).toContain("已保存的进展");
   });
 
   it.each(["ctx-text", "mem-text"])("keeps %s while context hints and platform records change", (id) => {

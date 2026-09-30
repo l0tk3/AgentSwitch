@@ -10,7 +10,9 @@ const initial = {
   taskSubmissions: {},               // home / followup:taskId -> submission status; no message text is stored here
   navigationId: 0,                   // protects newer drafts from an older request's completion
   hint: "",
-  pending: [],                       // [{file, url}] attached to the visible composer
+  pending: [],                       // [{file, url}] attached to one composer
+  pendingFor: "home",                // which: "home" or "followup:<task id>"
+  allTopics: false,                  // the side lists every topic
   files: { root: null, files: [] },  // files of the open task (in/ + out/, or the artifacts store)
   thread: null,
   policy: null,                      // {policy:{mode,human}, categories:[{id,title}]} from /approvals/policy                      // the open task's thread (GET /threads/:id), with folded state and tasks

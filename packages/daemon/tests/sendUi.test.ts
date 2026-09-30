@@ -49,7 +49,7 @@ describe("send UI", () => {
     const pending = deferred<Response>();
     const fetcher = http(() => pending.promise);
     const sending = click();
-    expect(home.render(state.get())).toMatch(/id="c-send" disabled>发送中…/);
+    expect(home.render(state.get())).toMatch(/id="c-send" disabled[^>]*aria-label="发送中…"/);
     await Promise.resolve();
     state.set({ health: true });
     expect(home.render(state.get())).toContain("正在发送消息");
@@ -88,7 +88,7 @@ describe("send UI", () => {
     const fetcher = http(async () => reject ? reply({ error: "unavailable" }, 503) : reply(newTask, 201));
     await click();
     expect(home.render(state.get())).toContain("服务暂时无法接收消息");
-    expect(home.render(state.get())).toMatch(/id="c-send" >重新发送/);
+    expect(home.render(state.get())).toMatch(/id="c-send" (?!disabled)[^>]*aria-label="重新发送"/);
     expect(fields.get("c-task")!.value).toBe("这是一条消息");
     reject = false;
     await click();
@@ -101,7 +101,7 @@ describe("send UI", () => {
     const pending = deferred<Response>();
     const fetcher = http(() => pending.promise);
     const sending = click(detail);
-    expect(detail.render(state.get())).toMatch(/id="f-send" disabled>发送中…/);
+    expect(detail.render(state.get())).toMatch(/id="f-send" disabled[^>]*aria-label="发送中…"/);
     await Promise.resolve();
     expect(JSON.parse(posts(fetcher)[0]![1].body as string)).toEqual({ task: "这是一条消息", parent_id: oldTask.id });
     state.set({ events: [] });

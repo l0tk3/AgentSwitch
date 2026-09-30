@@ -55,15 +55,15 @@ afterEach(() => {
 
 describe("sidebar", () => {
   it("is a function of state: health, escaped version, approval count and the active tab", async () => {
-    const { sidebar } = await import(join(UI, "lib/sidebar.js"));
-    const base = { health: false, version: "", approvals: [], view: "home" };
-    expect(sidebar(base)).toContain('<span class="dot" id="dot">');
-    expect(sidebar({ ...base, health: true })).toContain('<span class="dot on" id="dot">');
-    expect(sidebar({ ...base, version: "1<2" })).toContain('id="version">v1&lt;2</span>');
-    expect(sidebar(base)).toContain('id="apCount"></span>');   // empty keeps .count:not(:empty) hidden
-    expect(sidebar({ ...base, approvals: [{}, {}] })).toContain('id="apCount">2</span>');
-    expect(sidebar({ ...base, view: "task" })).toContain('data-nav="home" class="active">');   // a task belongs to 首页
-    expect(sidebar({ ...base, view: "ctx" })).toMatch(/data-nav="home">首页.*data-nav="ctx" class="active">上下文/s);
+    const { band, sidebar } = await import(join(UI, "lib/sidebar.js"));
+    const base = { health: false, version: "", approvals: [], tasks: [], threads: [], quota: [], view: "home" };
+    expect(band(base)).toContain('<span class="dot" id="dot">');
+    expect(band({ ...base, health: true })).toContain('<span class="dot on" id="dot">');
+    expect(band({ ...base, version: "1<2" })).toContain('id="version">v1&lt;2</span>');
+    expect(sidebar(base)).toContain('id="apCount"></span>');   // nothing waiting: nothing said
+    expect(sidebar({ ...base, approvals: [{}, {}] })).toContain('id="apCount">▪2</span>');
+    expect(sidebar({ ...base, view: "task" })).toContain('data-nav="home" class="on">');   // a task opens beside the tasks
+    expect(sidebar({ ...base, view: "ctx" })).toMatch(/data-nav="home">.*tasks.*data-nav="ctx" class="on">.*context/s);
   });
 
   it("is patched in place as state changes: dot, version, count, tabs and the refresh button keep their elements", () => {
@@ -74,10 +74,10 @@ describe("sidebar", () => {
     expect($("#dot")).toBe(dot);
     expect(dot.className).toBe("dot");
     expect($("#version")!.textContent).toBe("v2.0");
-    expect($("#apCount")!.textContent).toBe("1");
+    expect($("#apCount")!.textContent).toBe("▪1");
     expect($('nav a[data-nav="ext"]')).toBe(ext);
-    expect(ext.classList.contains("active")).toBe(true);
-    expect($('nav a[data-nav="home"]')!.classList.contains("active")).toBe(false);
+    expect(ext.classList.contains("on")).toBe(true);
+    expect($('nav a[data-nav="home"]')!.classList.contains("on")).toBe(false);
     expect($("#refresh")).toBe(refresh);
     state.set({ approvals: [] });
     expect($("#apCount")!.textContent).toBe("");
@@ -87,7 +87,7 @@ describe("sidebar", () => {
     $<HTMLElement>('nav a[data-nav="log"]')!.click();
     await flush();
     expect(state.get().view).toBe("log");
-    expect([...dom.window.document.querySelectorAll("nav a.active")].map((a) => (a as HTMLElement).dataset.nav)).toEqual(["log"]);
+    expect([...dom.window.document.querySelectorAll("nav a.on")].map((a) => (a as HTMLElement).dataset.nav)).toEqual(["log"]);
   });
 });
 

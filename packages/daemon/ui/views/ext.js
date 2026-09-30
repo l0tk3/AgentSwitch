@@ -64,16 +64,16 @@ function discovered(found) {
 
 export function render(s) {
   const found = s.discovered.filter((d) => !d.installed);
-  return `<div class="page-title">扩展</div>
+  return `<div class="page-title"><h1>extensions</h1><span class="faint">执行器可用的 MCP 服务与 skills</span></div>
     ${s.extHint ? `<div class="card bad error" style="margin-bottom:14px">${esc(s.extHint)}</div>` : ""}
     <div class="ext-cols">
       <div class="stack">
-        <h2>MCP 服务 ${s.mcp.length}<span class="spacer"></span>${s.edit.mcp === null ? `<button class="small" id="mcp-new">＋ 添加</button>` : ""}</h2>
+        <h2>// mcp ${s.mcp.length}<span class="spacer"></span>${s.edit.mcp === null ? `<button class="small" id="mcp-new">＋ 添加</button>` : ""}</h2>
         ${s.edit.mcp !== null ? mcpForm(s.edit.mcp, picked(s.edit, "mcp")) : ""}
         ${s.mcp.map(mcpCard).join("") || `<div class="empty">暂无 MCP 服务。凭据网关自带的 secret-gate / playwright 不在此处管理。</div>`}
       </div>
       <div class="stack">
-        <h2>Skills ${s.skills.length}<span class="spacer"></span>${s.edit.skill === null ? `<button class="small" id="skill-new">＋ 新建</button>` : ""}</h2>
+        <h2>// skills ${s.skills.length}<span class="spacer"></span>${s.edit.skill === null ? `<button class="small" id="skill-new">＋ 新建</button>` : ""}</h2>
         ${s.edit.skill !== null ? skillForm(s.edit.skill, picked(s.edit, "skill")) : ""}
         ${s.skills.map(skillCard).join("") || `<div class="empty">暂无 skill</div>`}
         ${discovered(found)}

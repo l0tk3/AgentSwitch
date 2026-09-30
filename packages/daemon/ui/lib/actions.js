@@ -97,9 +97,19 @@ export const loadThread = async (threadId) => {
   if (get().deletions === generation && get().view === "task" && get().task?.threadId === threadId && !isDeleted("thread", threadId)) set({ thread });
 };
 
-export function addPending(fileList) { if (fileList?.length) set((s) => ({ pending: [...s.pending, ...toPending(fileList)] })); }
+/** Files for the composer `key` ("home", or "followup:<task id>" beside it): one composer holds attachments at a time;
+ *  adding to the other moves them there. */
+export function addPending(fileList, key = "home") {
+  if (!fileList?.length) return;
+  set((s) => ({ pending: [...(s.pendingFor === key ? s.pending : []), ...toPending(fileList)], pendingFor: key }));
+}
 export function removePending(i) { set((s) => { s.pending[i]?.url && URL.revokeObjectURL(s.pending[i].url); return { pending: s.pending.filter((_, k) => k !== i) }; }); }
-export function clearPending() { releasePending(get().pending); set({ pending: [] }); }
+/** `followUpOnly`: only a follow-up's attachments go (the task beside changes; the new task's composer keeps its own). */
+export function clearPending(followUpOnly = false) {
+  if (followUpOnly && !String(get().pendingFor || "").startsWith("followup:")) return;
+  releasePending(get().pending);
+  set({ pending: [], pendingFor: "home" });
+}
 
 export function closeStream() {
   const es = get().es;
@@ -111,7 +121,8 @@ const LOADERS = { home: [loadTasks, loadThreads, loadArchivedThreads, loadQuota,
 
 export async function goto(view) {
   closeStream();
-  clearPending();
+  // Closing the task beside the tasks keeps the new task's draft and files.
+  clearPending(view === "home" && get().view === "task");
   set((s) => ({ view, hint: "", navigationId: s.navigationId + 1 }));
   await Promise.all((LOADERS[view] || []).map((f) => f()));
 }
@@ -130,7 +141,7 @@ const RELOAD_ON = new Set(["approval_request", "approval_resolved", "done", "par
 export function openTask(id) {
   if (isDeleted("task", id)) return;
   closeStream();
-  clearPending();
+  clearPending(true);
   set((s) => ({ view: "task", task: s.tasks.find((t) => t.id === id) || null, events: [], hint: "", files: { root: null, files: [] }, thread: null, navigationId: s.navigationId + 1 }));
   const es = new EventSource(`/tasks/${id}/events`);
   const current = () => get().view === "task" && get().es === es && !isDeleted("task", id);
@@ -173,7 +184,8 @@ export async function submitTask(body, { onAccepted } = {}) {
   const key = submissionKey(body.parent_id);
   if (["uploading", "sending", "uncertain"].includes(get().taskSubmissions[key]?.status)) return;
   const origin = { navigationId: get().navigationId, view: get().view, taskId: get().task?.id };
-  const pending = [...get().pending];
+  // Only the files added to this composer.
+  const pending = (get().pendingFor ?? "home") === key ? [...get().pending] : [];
   const startedAt = Date.now();
   const update = (value) => setTaskSubmission(key, { startedAt, ...value });
   const current = () => get().navigationId === origin.navigationId && get().view === origin.view && (origin.view !== "task" || get().task?.id === origin.taskId);

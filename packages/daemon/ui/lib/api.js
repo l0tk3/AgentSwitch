@@ -14,6 +14,18 @@ export function taskStatusLabel(task) {
   return BLOCK_LABELS[task.blockCause] ?? "未完成";
 }
 
+/** A status line's word (docs/ui-v0.md §7.4 网页控制台): the phone's short English words. */
+const STATUS_WORDS = { queued: "queued", routing: "busy", running: "busy", waiting_approval: "waiting", done: "done", partial: "incomplete", blocked: "incomplete", failed: "failed", cancelled: "cancelled" };
+export function statusWord(task) {
+  if (task.status === "blocked" && task.blockCause === "question") return "waiting";
+  return STATUS_WORDS[task.status] || task.status;
+}
+/** The status's tone: busy, waiting, ok, bad or off (its square's colour). */
+export function statusTone(task) {
+  const word = statusWord(task);
+  return word === "busy" || word === "queued" ? "busy" : word === "waiting" ? "waiting" : word === "done" ? "ok" : word === "incomplete" ? "waiting" : word === "failed" ? "bad" : "off";
+}
+
 export async function api(method, path, body, { timeoutMs = 15_000 } = {}) {
   const controller = timeoutMs ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
@@ -42,6 +54,36 @@ export function ago(ts) {
   if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
   if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
   return `${Math.floor(s / 86400)} 天前`;
+}
+
+/** Short English times, as the phone and the Mac say them: now, 3m ago, 2h ago, today 21:06, yesterday, 9/20. */
+export function agoShort(ts) {
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  const d = new Date(ts), today = new Date();
+  const hm = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === today.toDateString()) return s < 6 * 3600 ? `${Math.floor(s / 3600)}h ago` : `today ${hm}`;
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `yesterday ${hm}`;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/** A day's heading in the record: today, yesterday, else the date. */
+export function dayOf(ts) {
+  const d = new Date(ts), today = new Date();
+  if (d.toDateString() === today.toDateString()) return "today";
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return "yesterday";
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/** How long it ran: 40s, 2m 14s, 1h 05m. */
+export function span(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }
 
 export function until(epochSec) {
