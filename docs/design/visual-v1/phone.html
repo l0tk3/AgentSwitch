@@ -115,6 +115,22 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .row .act { font-size: 12px; }
 .row .chev { color: var(--ink3); }
 .row.held { background: var(--raise); }
+/* search (2026-09-30): a prompt line over the list, "/" as less and vim search */
+.find { display: grid; grid-template-columns: 2ch 1fr; align-items: center; margin: 8px 16px 2px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--ink) 28%, transparent); font: 14px var(--mono); }
+.find .slash { color: var(--signal); font-weight: 700; }
+.find input { font: inherit; color: var(--ink); background: none; border: 0; outline: 0; padding: 0; min-width: 0; caret-color: var(--signal); }
+.find input::placeholder { color: var(--ink3); }
+.found { font-size: 11px; color: var(--ink3); padding: 8px 0 0; }
+.none { font: 13px/1.6 var(--ui); color: var(--ink3); padding: 18px 0; }
+.list mark { background: var(--signal); color: #000; }
+/* git after a folder's name; sub-agents under their terminal; a line of the text where a search matched */
+.dir .git { font-weight: 400; color: var(--ink3); font-size: 11px; }
+.row.sub { padding: 4px 0; font-size: 12.5px; }
+.row.sub .nm { color: var(--ink2); }
+.row.sub .nm i { font-style: normal; color: var(--ink3); margin-left: 6px; }
+.row.sub .spin { color: var(--cyan); }
+.row.hit { padding: 0 0 6px; font-size: 12px; }
+.row.hit .nm { color: var(--ink3); }
 .more { color: var(--ink2); font-size: 12px; }
 .in { animation: rowin .2s steps(1) both; }
 @keyframes rowin { 0% { opacity: 0; } 100% { opacity: 1; } }
@@ -349,21 +365,56 @@ function overlay(scr, box, { veil = true, clear = false } = {}) {
 const p1 = document.getElementById("p1");
 let tree, folded, all, badge;
 function p1reset() {
+  // In the fixed order (2026-09-30): folders by path, terminals as opened, sessions newest-begun first.
   tree = [
-    { parent: "Work", groups: [
-      { path: "api", terms: [{ id: "a", name: "修复登录超时", st: "busy", agent: "cc" }],
-        sessions: [["给健康检查加缓存", "51m ago", "cc"], ["升级到 Node 22", "today 16:50", "codex"], ["统一日志格式", "yesterday 22:04", "cc"]] },
-      { path: "web", terms: [{ id: "b", name: "首页改版", st: "idle", agent: "codex" }],
-        sessions: [["表单校验", "9/27", "codex"], ["暗色模式", "9/27", "oc"], ["图片懒加载", "9/26", "codex"], ["替换图标库", "9/25", "pi"], ["修复移动端菜单", "9/24", "cc"]] },
-    ] },
     { parent: null, groups: [
-      { path: "AgentSwitch", terms: [{ id: "c", name: "iPhone 终端标签页", st: "idle", agent: "cc" }],
-        sessions: [["读取 Codex 的会话记录", "25m ago", "cc"], ["未读标记", "yesterday 09:10", "codex"]] },
+      { path: "AgentSwitch", git: "main ±5 ↑2", terms: [{ id: "c", name: "iPhone 终端标签页", st: "idle", agent: "cc" }],
+        sessions: [["读取 Codex 的会话记录", "25m ago", "cc", "Codex 的记录在 ~/.codex/sessions 下按日期分目录"], ["未读标记", "yesterday 09:10", "codex", "终端有新输出而你没看时，列表那一行加粗"]] },
     ] },
-    { parent: null, groups: [{ path: "Blog", terms: [], sessions: [["换主题后的构建报错", "today 06:35", "oc"], ["加一个 RSS", "9/20", "cc"]] }] },
+    { parent: null, groups: [{ path: "Blog", git: "theme-v2", terms: [], sessions: [["换主题后的构建报错", "today 06:35", "oc", "hugo 升级后模板函数改名"], ["加一个 RSS", "9/20", "cc", ""]] }] },
+    { parent: "Work", groups: [
+      { path: "api", git: "feat/health ±3 ↓4", terms: [{ id: "a", name: "修复登录超时", st: "busy", agent: "cc",
+          subs: [{ name: "审查改动", type: "code-reviewer", doing: "运行 git diff" }, { name: "查连接池", type: "Explore", doing: "读 pool.ts" }] }],
+        sessions: [["给健康检查加缓存", "51m ago", "cc", "健康检查结果缓存 5 秒，终端服务重启时清掉"], ["升级到 Node 22", "today 16:50", "codex", ""], ["统一日志格式", "yesterday 22:04", "cc", ""]] },
+      { path: "web", git: "main", terms: [{ id: "b", name: "首页改版", st: "idle", agent: "codex" }],
+        sessions: [["表单校验", "9/27", "codex", ""], ["暗色模式", "9/27", "oc", ""], ["图片懒加载", "9/26", "codex", ""], ["替换图标库", "9/25", "pi", ""], ["修复移动端菜单", "9/24", "cc", ""]] },
+    ] },
   ];
-  folded = new Set(); all = new Set(); badge = 0;
+  folded = new Set(); all = new Set(); badge = 0; query = new URLSearchParams(location.search).has("find") ? "终端" : "";
   p1draw();
+}
+let query = "";
+const hl = (text, q) => {
+  const i = text.toLowerCase().indexOf(q);
+  return i < 0 ? esc(text) : `${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}`;
+};
+/** Searching: folders by name, sessions by title and by what was said; only what matches, the match marked. */
+function p1search(q) {
+  let out = "", folders = 0, titles = 0, texts = 0;
+  for (const node of tree) for (const g of node.groups) {
+    const name = node.parent ? `${node.parent}/${g.path}` : g.path;
+    const nameHit = name.toLowerCase().includes(q);
+    const rows = [...g.terms.map((t) => ({ t, how: t.name.toLowerCase().includes(q) ? "title" : null })),
+      ...g.sessions.map(([title, when, agent, text]) => ({ s: { title, when, agent, text }, how: title.toLowerCase().includes(q) ? "title" : text && text.toLowerCase().includes(q) ? "text" : null }))]
+      .filter((r) => nameHit || r.how);
+    if (!nameHit && !rows.length) continue;
+    if (nameHit) folders++;
+    out += `<div class="dir">▾ ${hl(name, q)}/${g.git ? ` <span class="git">${esc(g.git)}</span>` : ""}</div>`;
+    rows.forEach((r, i) => {
+      const tr = `<span class="tree">${i === rows.length - 1 ? "└─" : "├─"}</span>`;
+      if (r.how === "title") titles++;
+      if (r.how === "text") texts++;
+      if (r.t) { out += `<div class="row tm">${tr}${mark(r.t.st)}<span class="nm">${r.how ? hl(r.t.name, q) : esc(r.t.name)}</span><span class="chev">›</span></div>`; return; }
+      out += `<div class="row sess">${tr}<span class="nm">${r.how === "title" ? hl(r.s.title, q) : esc(r.s.title)}</span><span class="faint">${P.sprite(P.AGENT_PX[r.s.agent], { px: 2 })}</span><span class="when">${r.s.when}</span></div>`;
+      if (r.how === "text") {
+        const at = r.s.text.toLowerCase().indexOf(q), from = Math.max(0, at - 8), to = Math.min(r.s.text.length, at + q.length + 16);
+        out += `<div class="row hit"><span class="tree">${i === rows.length - 1 ? "  " : "│ "}└─</span><span class="nm">${from > 0 ? "…" : ""}${hl(r.s.text.slice(from, to), q)}${to < r.s.text.length ? "…" : ""}</span></div>`;
+      }
+    });
+  }
+  const n = (k, one, many) => k && `${k} ${k === 1 ? one : many}`;
+  const said = [n(folders, "folder", "folders"), n(titles, "title", "titles"), n(texts, "in text", "in text")].filter(Boolean).join(" · ");
+  return out ? `<div class="found">// ${said}</div>${out}` : `<div class="none">没有找到与“${esc(q)}”相关的文件夹或会话。</div>`;
 }
 const count = (groups) => {
   const t = groups.reduce((n, g) => n + g.terms.length, 0), s = groups.reduce((n, g) => n + g.sessions.length, 0);
@@ -371,7 +422,15 @@ const count = (groups) => {
 };
 /** The list; `reveal` names the folder just opened, whose rows are drawn one after another. */
 function p1draw(reveal = null) {
-  let html = `${statusBar()}<div class="navb"><span class="l"></span><span class="t">terminals</span><span class="r"><button type="button" class="cap">new</button></span></div><div class="dots"></div><div class="list" id="p1list">`;
+  let html = `${statusBar()}<div class="navb"><span class="l"></span><span class="t">terminals</span><span class="r"><button type="button" class="cap">new</button></span></div><div class="dots"></div>`
+    + `<label class="find"><span class="slash">/</span><input id="p1find" placeholder="search" value="${esc(query)}" spellcheck="false" autocomplete="off"></label><div class="list" id="p1list">`;
+  if (query.trim()) {
+    html += p1search(query.trim().toLowerCase()) + `</div>${tabbar("terminals", badge)}`;
+    p1.innerHTML = html;
+    const input = document.getElementById("p1find");
+    input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+    return;
+  }
   let n = 0;
   const anim = (key) => (reveal === key ? ` in" style="animation-delay:${(n++) * 22}ms` : "");
   for (const node of tree) {
@@ -386,13 +445,19 @@ function p1draw(reveal = null) {
       const shown = showAll ? g.sessions : g.sessions.slice(0, 3), more = g.sessions.length - shown.length;
       const foot = more > 0 || (showAll && g.sessions.length > 3);
       const pad = nested ? "  " : "";
-      html += `<div class="dir" data-fold="${key}">${pad}${f ? "▸" : "▾"} ${g.path}/${f ? ` <span class="n">${count([g])}</span>` : ""}</div>`;
+      html += `<div class="dir" data-fold="${key}">${pad}${f ? "▸" : "▾"} ${g.path}/${g.git ? ` <span class="git">${esc(g.git)}</span>` : ""}${f ? ` <span class="n">${count([g])}</span>` : ""}</div>`;
       if (f) continue;
       const rows = g.terms.length + shown.length + (foot ? 1 : 0);
       let i = 0;
       const line = () => `<span class="tree">${pad}${++i === rows ? "└─" : "├─"}</span>`;
       for (const t of g.terms) {
-        html += `<div class="row tm${anim(key)}" data-term="${t.id}">${line()}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
+        const twig = line();
+        html += `<div class="row tm${anim(key)}" data-term="${t.id}">${twig}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
+        // Its sub-agents: one level deeper, what each is doing now (tapping one opens the terminal).
+        (t.subs ?? []).forEach((sb, k) => {
+          const stem = twig.includes("└─") ? "  " : "│ ";
+          html += `<div class="row sub${anim(key)}" data-term="${t.id}"><span class="tree">${pad}${stem}${k === t.subs.length - 1 ? "└─" : "├─"}</span><span class="spin">⠙</span><span class="nm">${esc(sb.name)}<i>${esc(sb.doing)}</i></span><span class="when">${esc(sb.type)}</span></div>`;
+        });
       }
       // Which agent wrote it, before its time (as on the Mac): the same mark a running terminal has.
       for (const [title, when, agent] of shown) {
@@ -406,6 +471,7 @@ function p1draw(reveal = null) {
   p1.innerHTML = html;
   document.getElementById("p1list").scrollTop = scroll;
 }
+p1.addEventListener("input", (e) => { if (e.target.id === "p1find") { query = e.target.value; p1draw(); } });
 p1.addEventListener("click", (e) => {
   if (e.target.closest(".box, .veil")) return;
   const f = e.target.closest("[data-fold]");

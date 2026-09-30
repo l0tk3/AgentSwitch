@@ -119,6 +119,25 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 .v-tree .row .tr { min-width: 3ch; }
 .v-ls .row { grid-template-columns: 3ch max-content 2.6ch 5ch minmax(0, 1fr); }
 .v-ls .row .st { min-width: 2.4ch; }
+/* search (2026-09-30): a prompt line at the top of the list, "/" as less and vim search; ⌘F */
+.find { flex: none; display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; align-items: center; gap: 2px; margin: 8px 10px 4px; padding: 3px 6px 3px 6px; border: 1px solid var(--ink4); font-size: 12.5px; }
+.find:focus-within { border-color: var(--ink2); }
+.find .slash { color: var(--signal); font-weight: 700; }
+.find input { font: inherit; color: var(--ink); background: none; border: 0; outline: 0; padding: 0; min-width: 0; caret-color: var(--signal); }
+.find input::placeholder { color: var(--ink3); }
+.find kbd { font: 11px var(--mono); color: var(--ink3); }
+.found { color: var(--ink3); font-size: 11px; padding: 2px 12px 4px 12px; }
+.none { color: var(--ink3); font: 12.5px/1.6 var(--ui, -apple-system, sans-serif); padding: 16px 14px; }
+mark { background: var(--signal); color: #000; padding: 0 1px; }
+/* where the text matched: one quiet line under the session, the match marked */
+.row.hit .nm { color: var(--ink3); font-size: 11.5px; }
+/* git, after the folder's name: branch, ±changed files, ↑ahead ↓behind; nothing when not a repository */
+.dir .name .git { font-size: 11px; margin-left: 1ch; }
+/* sub-agents under their terminal: one level deeper, what each is doing */
+.row.sub .nm { color: var(--ink2); }
+.row.sub .mt { color: var(--ink3); }
+.row.sub .nm i { font-style: normal; color: var(--ink3); margin-left: 1ch; }
+.row.sub .spin { color: var(--cyan, #3de0ff); }
 /* a parent folder holding several projects: one level up, quieter */
 .dir.parent .name { color: var(--ink2); }
 .dir.parent + .dir { margin-top: 2px; }
@@ -251,6 +270,7 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
     <div class="end"><button class="tb" data-do="create" title="new terminal ⌘T"><span id="icoNew"></span></button><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
   </div>
   <aside class="side">
+    <label class="find"><span class="slash">/</span><input id="find" placeholder="search" spellcheck="false" autocomplete="off"><kbd>⌘F</kbd></label>
     <div class="list v-tree" id="list"></div>
     <div class="grip" id="grip" title="drag · double-click resets · ⌘B hides"></div>
   </aside>
@@ -341,30 +361,32 @@ function renderEyes() {
 // ---------- data (shaped like GET /terminals + /sessions), by project folder ----------
 const now = Date.now(), m = 60e3, hr = 3600e3, d = 86400e3;
 const folders = [
-  { path: "Projects/AgentSwitch", items: [
-    { kind: "term", id: "b89e", st: "working", name: "本地构建应用和手机连接", ag: "cc", screen: "claude" },
+  { path: "Projects/AgentSwitch", git: { branch: "main", changed: 5, ahead: 2 }, items: [
+    { kind: "term", id: "b89e", st: "working", name: "本地构建应用和手机连接", ag: "cc", screen: "claude",
+      subs: [{ name: "审查改动", type: "code-reviewer", doing: "运行 git diff" }, { name: "查终端代码", type: "Explore", doing: "读 host.ts" }],
+      text: "加密发送要留一个入口；然后能不能像 codex 的 cli 和图形页面的关系一样" },
     { kind: "term", id: "ba82", st: "idle", name: "发布前检查", ag: "cc", screen: "release" },
     { kind: "term", id: "233a", st: "idle", name: "Claude-hud 安装", ag: "cc", screen: "hud" },
-    { kind: "session", name: "终端服务 demo 与窗口", ag: "cc", at: now - 3 * hr },
-    { kind: "session", name: "本地模型前台设计", ag: "cc", at: now - 1 * d },
+    { kind: "session", name: "终端服务 demo 与窗口", ag: "cc", at: now - 3 * hr, text: "SwiftTerm 原生视图垫在网页下面，画面区域透明" },
+    { kind: "session", name: "本地模型前台设计", ag: "cc", at: now - 1 * d, text: "脱敏以后再交给调度模型，本地模型只看明文" },
     { kind: "session", name: "iPhone 多台 Mac 支持", ag: "cc", at: now - 2 * d },
     { kind: "session", name: "Playwright 用的是哪个 Chrome", ag: "cc", at: now - 3 * d },
     { kind: "session", name: "截图打码演示", ag: "cc", at: now - 3 * d },
   ] },
-  { path: "Projects/blog", collapsed: true, items: [
+  { path: "Projects/blog", collapsed: true, git: { branch: "theme-v2" }, items: [
     { kind: "session", name: "换主题后的构建报错", ag: "oc", at: now - 4 * d },
   ] },
   { path: "Worktop/Codex", items: [
     { kind: "term", id: "2ecb", st: "exited", name: "orca是什么", ag: "codex", screen: "codex" },
-    { kind: "session", name: "给脚本加上重试", ag: "codex", at: now - 20 * hr },
+    { kind: "session", name: "给脚本加上重试", ag: "codex", at: now - 20 * hr, text: "下载失败时指数退避重试三次，超时 30 秒" },
     { kind: "session", name: "整理下载文件夹", ag: "codex", at: now - 2 * d },
   ] },
-  { path: "Worktop/Claude", items: [
+  { path: "Worktop/Claude", git: { branch: "main", changed: 1 }, items: [
     { kind: "session", name: "给 iTerm 配 MesloLGS 字体", ag: "cc", at: now - 25 * m },
-    { kind: "session", name: "statusline 显示 git 分支", ag: "cc", at: now - 5 * hr },
+    { kind: "session", name: "statusline 显示 git 分支", ag: "cc", at: now - 5 * hr, text: "git branch --show-current 放进 statusline，脏了加星号" },
   ] },
-  { path: "Work/api", items: [
-    { kind: "session", name: "给健康检查加缓存", ag: "oc", at: now - 21 * hr },
+  { path: "Work/api", git: { branch: "feat/health-cache", changed: 3, behind: 4 }, items: [
+    { kind: "session", name: "给健康检查加缓存", ag: "oc", at: now - 21 * hr, text: "健康检查结果缓存 5 秒，终端服务重启时清掉" },
   ] },
 ];
 const all = () => folders.flatMap((f) => f.items);
@@ -393,9 +415,49 @@ const counts = (items) => {
   return `${live ? `<b>▪${live}</b>` : ""}${n}`;
 };
 
+const git = (g) => g ? `<i class="git">${esc(g.branch)}${g.changed ? ` ±${g.changed}` : ""}${g.ahead ? ` ↑${g.ahead}` : ""}${g.behind ? ` ↓${g.behind}` : ""}</i>` : "";
+const mark = (text, q) => {
+  const i = text.toLowerCase().indexOf(q);
+  return i < 0 ? esc(text) : `${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + q.length))}</mark>${esc(text.slice(i + q.length))}`;
+};
+/** Where the text matched: a few words either side. */
+const snippet = (text, q) => {
+  const i = text.toLowerCase().indexOf(q), from = Math.max(0, i - 10), to = Math.min(text.length, i + q.length + 22);
+  return (from > 0 ? "…" : "") + mark(text.slice(from, to), q) + (to < text.length ? "…" : "");
+};
+
+/** Searching (2026-09-30): folders by name, sessions by title and by what was said in them; the tree keeps its shape,
+ *  only what matches is left, the match marked; a match in the text shows a line of it under the session. */
+function renderSearch(q) {
+  const out = [];
+  let folderHits = 0, titleHits = 0, textHits = 0;
+  for (const f of folders) {
+    const nameHit = f.path.toLowerCase().includes(q);
+    const rows = f.items.map((r) => ({ r, how: r.name.toLowerCase().includes(q) ? "title" : (r.text ?? "").toLowerCase().includes(q) ? "text" : null }))
+      .filter((x) => nameHit || x.how);
+    if (!nameHit && !rows.length) continue;
+    if (nameHit) folderHits++;
+    out.push(`<div class="dir" data-dir="${f.path}"><span class="chev">▾</span><span class="name">${mark(f.path.split("/").slice(-2).join("/"), q)}/${git(f.git)}</span><span class="count">${counts(f.items)}</span></div>`);
+    rows.forEach(({ r, how }, i) => {
+      const tr = i === rows.length - 1 ? "└─" : "├─";
+      const isTerm = r.kind === "term";
+      if (how === "title") titleHits++;
+      if (how === "text") textHits++;
+      const meta = isTerm ? agentPx(r.ag) : `${agentPx(r.ag)}<span>${age(r.at)}</span>`;
+      out.push(`<div class="row ${r.kind} ${r.st ?? ""}" ${isTerm ? `data-id="${r.id}"` : ""}><span class="ix"></span><span class="tr">${tr}</span><span class="st">${isTerm ? statusMark(r.st) : ""}</span><span class="nm">${how === "title" ? mark(r.name, q) : esc(r.name)}</span><span class="mt">${meta}</span><span class="ac"></span></div>`);
+      if (how === "text") out.push(`<div class="row hit"><span class="ix"></span><span class="tr">${tr === "└─" ? "\u00a0\u00a0" : "│\u00a0"}└─</span><span class="st"></span><span class="nm">${snippet(r.text, q)}</span><span class="mt"></span><span class="ac"></span></div>`);
+    });
+  }
+  const n = (k, one, many) => k && `${k} ${k === 1 ? one : many}`;
+  const said = [n(folderHits, "folder", "folders"), n(titleHits, "title", "titles"), n(textHits, "in text", "in text")].filter(Boolean).join(" · ");
+  return out.length ? `<div class="found">// ${said}</div>` + out.join("") : `<div class="none">没有找到与“${esc(q)}”相关的文件夹或会话。</div>`;
+}
+
 function render() {
   const list = document.getElementById("list");
   list.className = `list v-${variant}`;
+  const q = (document.getElementById("find")?.value ?? "").trim().toLowerCase();
+  if (q) { list.innerHTML = renderSearch(q); renderEyes(); return; }
   const out = [];
   let ix = 0;
   for (const node of tree()) {
@@ -413,7 +475,7 @@ function render() {
       const open = expanded.has(f.path);
       const shown = open ? sessions : sessions.slice(0, SHOWN);
       const hidden = sessions.length - shown.length;
-      out.push(`<div class="dir" data-dir="${f.path}" style="padding-left:calc(10px + ${depth * 2}ch)"><span class="chev">${f.collapsed ? "▸" : "▾"}</span><span class="name">${esc(leaf(f))}/</span><span class="count">${counts(f.items)}</span><span class="add">+</span></div>`);
+      out.push(`<div class="dir" data-dir="${f.path}" style="padding-left:calc(10px + ${depth * 2}ch)"><span class="chev">${f.collapsed ? "▸" : "▾"}</span><span class="name">${esc(leaf(f))}/${git(f.git)}</span><span class="count">${counts(f.items)}</span><span class="add">+</span></div>`);
       if (f.collapsed) continue;
       const rows = [...terms, ...shown, ...(hidden > 0 || (open && sessions.length > SHOWN) ? [{ kind: "more", n: hidden, f: f.path, open }] : [])];
       rows.forEach((r, i) => {
@@ -430,6 +492,12 @@ function render() {
           const meta = isTerm ? (r.st === "waiting" ? `<span class="w">${L("waiting")}</span>` : r.st === "exited" ? L("exited") : agentPx(r.ag)) : `${agentPx(r.ag)}<span>${age(r.at)}</span>`;
           const acts = isTerm ? `<span title="${L("close")} ⌘W">×</span>` : `<span class="go">${L("resume")}</span><span class="del">${L("delete")}</span>`;
           out.push(`<div class="${cls}" ${data}><span class="ix">${n}</span><span class="tr" ${pad(depth)}>${tr}</span><span class="st">${isTerm ? statusMark(r.st) : ""}</span><span class="nm">${esc(r.name)}</span><span class="mt">${meta}</span><span class="ac">${acts}</span></div>`);
+          // Its sub-agents (Claude Code's SubagentStart … Stop): one level deeper, what each is doing now.
+          (r.subs ?? []).forEach((sub, k) => {
+            const stem = tr === "└─" ? "\u00a0\u00a0" : "│\u00a0";
+            const twig = k === r.subs.length - 1 ? "└─" : "├─";
+            out.push(`<div class="row sub"><span class="ix"></span><span class="tr" ${pad(depth)}>${stem}${twig}</span><span class="st"><span class="spin">${SPIN[0]}</span></span><span class="nm">${esc(sub.name)}<i>${esc(sub.doing)}</i></span><span class="mt">${esc(sub.type)}</span><span class="ac"></span></div>`);
+          });
         } else {
           const when = isTerm ? (r.st === "waiting" ? `<span class="w">${L("waiting")}</span>` : r.st === "exited" ? L("end") : L("live")) : age(r.at);
           out.push(`<div class="${cls}" ${data}><span class="ix">${n}</span><span class="st" ${pad(depth)}>${isTerm ? statusMark(r.st) : ""}</span><span class="ag">${agentPx(r.ag)}</span><span class="age">${when}</span><span class="nm">${esc(r.name)}</span></div>`);
@@ -798,7 +866,10 @@ document.getElementById("grip").addEventListener("pointerdown", (e) => {
   grip.addEventListener("pointerup", up, { once: true });
 });
 document.getElementById("grip").addEventListener("dblclick", () => { sideWidth = 300; win.style.setProperty("--side-open", "300px"); });
+document.getElementById("find").addEventListener("input", () => render());
 document.addEventListener("keydown", (e) => {
+  if (e.metaKey && e.key.toLowerCase() === "f") { e.preventDefault(); win.classList.remove("closed"); document.getElementById("find").focus(); return; }
+  if (e.key === "Escape" && document.activeElement === document.getElementById("find")) { document.getElementById("find").value = ""; render(); document.getElementById("find").blur(); return; }
   if (e.metaKey && e.key.toLowerCase() === "b") { e.preventDefault(); win.classList.toggle("closed"); sideIcon(); }
   if (e.metaKey && e.shiftKey && e.key.toLowerCase() === "v") { e.preventDefault(); seal(); }
   if (e.metaKey && e.key === "Enter" && document.querySelector(".toast")) { e.preventDefault(); answer(); }
@@ -820,6 +891,8 @@ if (hash.includes("perm")) { select("ba82"); setTimeout(simulatePermission, 350)
 if (hash.includes("seal")) setTimeout(seal, 50);
 if (hash.includes("create")) create();
 if (hash.includes("away")) setTimeout(phoneTook, 50);
+// #find: the list searched for "终端", as typed into the search line.
+if (hash.includes("find")) { document.getElementById("find").value = "终端"; render(); }
 </script>
 </body>
 </html>

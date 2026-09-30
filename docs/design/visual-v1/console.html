@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · console</title>
+<style id="gcss"></style>
+<style>
+/* The web console (2026-09-30, user: open console 打开的页面太割裂，跟着整体美学风格设计，可以和手机上调度页面的设计元素
+   保持统一，但元素比手机上多): the phone's tasks page, widened — the same status lines, progress blocks, approval cards,
+   composer — with what a desk has room for: a list of topics and usage at the side, the chosen task's steps beside. */
+:root {
+  --bg: #000; --panel: #0b0b0b; --raise: #151515; --hover: #121212;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  color-scheme: dark;
+}
+.light {
+  --bg: #f4f1ea; --panel: #ece8df; --raise: #e4dfd4; --hover: #e9e5dc;
+  --ink: #16140f; --ink2: #6b675f; --ink3: #a6a196; --ink4: #d6d1c6;
+  --signal: #e0106f; --cyan: #0096b3; --green: #3d8a00; --amber: #b87400; --red: #c9281b;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px var(--ui); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 16px 16px 6px; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+.note { max-width: 1060px; margin: 4px auto 14px; color: #8f8b84; font-size: 12.5px; line-height: 1.7; text-align: center; padding: 0 16px; }
+.stage { overflow-x: auto; padding: 0 16px 40px; }
+
+/* the page */
+.app { width: 1280px; height: 820px; margin: 0 auto; background: var(--bg); color: var(--ink); display: grid;
+  grid-template-columns: 236px minmax(0, 1fr) 372px; grid-template-rows: 40px minmax(0, 1fr); font: 13px var(--mono);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 30px 80px rgba(0,0,0,.55); }
+.app.wide { grid-template-columns: 236px minmax(0, 1fr); }
+.app.wide .detail { display: none; }
+.dots-h { height: 1px; background: repeating-linear-gradient(to right, var(--ink3) 0 2px, transparent 2px 4px); }
+.dots-v { width: 1px; background: repeating-linear-gradient(to bottom, var(--ink3) 0 2px, transparent 2px 4px); }
+.px { display: block; image-rendering: pixelated; }
+.sq { width: 8px; height: 8px; display: inline-block; flex: none; }
+.spin { color: var(--cyan); }
+.w { color: var(--amber); } .ok { color: var(--green); } .bad { color: var(--red); } .dim { color: var(--ink2); } .faint { color: var(--ink3); }
+.lbl { color: var(--ink3); font-size: 11px; letter-spacing: .04em; }
+
+/* the band: identity, the service's state, the way to the terminals */
+.band { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--ink4); }
+.band .who { display: flex; align-items: center; gap: 10px; }
+.band .who b { font-weight: 700; }
+.band .sp { flex: 1; }
+.band .st { display: flex; gap: 16px; color: var(--ink2); font-size: 12px; }
+.band .st span { display: flex; align-items: center; gap: 6px; }
+.band a { color: var(--ink2); text-decoration: none; font-size: 12px; }
+.band a:hover { color: var(--ink); }
+
+/* the side: where to go, the topics, the usage */
+.side { background: var(--panel); border-right: 1px solid var(--ink4); display: flex; flex-direction: column; min-height: 0;
+  background-image: repeating-linear-gradient(to bottom, color-mix(in srgb, var(--ink) 3%, transparent) 0 1px, transparent 1px 3px); }
+.side .sec { padding: 14px 16px 6px; }
+.nav button { width: 100%; display: grid; grid-template-columns: 2ch 1fr auto; align-items: center; padding: 5px 16px; text-align: left; }
+.nav button:hover { background: var(--hover); }
+.nav button.on { background: var(--raise); }
+.nav button.on .ar { color: var(--signal); }
+.nav .ar { color: transparent; }
+.nav .n { color: var(--ink2); font-size: 11.5px; display: flex; gap: 8px; }
+.topics { flex: 1; overflow: auto; }
+.topic { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 16px; cursor: pointer; }
+.topic:hover { background: var(--hover); }
+.topic .t { font-family: var(--ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+.topic.on .t { color: var(--ink); font-weight: 600; }
+.topic .age { color: var(--ink3); font-size: 11px; }
+.usage { padding: 4px 16px 14px; display: grid; gap: 7px; }
+.usage .u { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 11.5px; }
+.usage .bar { grid-column: 1 / -1; height: 6px; background: var(--ink4); position: relative; }
+.usage .bar i { position: absolute; inset: 0 auto 0 0; background: var(--ink2); }
+.usage .bar i.hi { background: var(--amber); }
+
+/* the feed */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.strip { display: flex; gap: 12px; padding: 14px 20px 12px; overflow-x: auto; flex: none; }
+.card { flex: none; width: 236px; border: 1px solid var(--ink4); padding: 9px 11px 10px; cursor: pointer; background: var(--panel); }
+.card:hover { border-color: var(--ink3); }
+.card.on { border-color: var(--ink2); }
+.card.wait { border-color: var(--amber); }
+.card .l1 { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink2); }
+.card .l1 .sp { flex: 1; }
+.card .t { font: 600 13.5px var(--ui); margin: 6px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .s { font-size: 11.5px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed { flex: 1; overflow-y: auto; padding: 6px 20px 18px; min-height: 0; }
+.day { text-align: center; color: var(--ink3); font-size: 11px; margin: 16px 0 6px; }
+.tag { display: inline-flex; align-items: center; gap: 7px; margin: 18px 0 8px; font-size: 11.5px; color: var(--ink2); }
+.me { display: flex; justify-content: flex-end; margin: 6px 0 12px; }
+.me div { max-width: 62%; border: 1px solid var(--ink3); padding: 9px 12px; font: 14px/1.55 var(--ui); background: var(--panel); }
+.task { margin: 4px 0 14px; padding: 2px 0 2px 0; cursor: pointer; }
+.task:hover .ti { text-decoration: underline; text-decoration-color: var(--ink3); text-underline-offset: 3px; }
+.task .l1 { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink2); }
+.task .ti { font: 600 15px/1.45 var(--ui); margin: 5px 0 6px; }
+.task.sel .ti { color: var(--ink); }
+.task .say { font: 14px/1.6 var(--ui); color: var(--ink); max-width: 72ch; }
+.task .step { font-size: 12px; color: var(--ink2); display: flex; gap: 6px; }
+.task .step .tr { color: var(--ink3); }
+.prog { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink2); margin: 2px 0 6px; }
+.prog .blocks { display: flex; gap: 2px; }
+.prog .blocks i { width: 12px; height: 8px; background: var(--ink4); }
+.prog .blocks i.on { background: var(--cyan); }
+.files { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 7px; font-size: 12px; color: var(--ink2); align-items: center; }
+.files span { display: inline-flex; align-items: center; gap: 6px; }
+.btn { font: 12.5px var(--mono); color: var(--ink); white-space: nowrap; }
+.btn:hover { background: var(--ink); color: var(--bg); }
+.btn.pri { background: var(--ink); color: var(--bg); padding: 0 2px; }
+.btn.pri:hover { background: var(--signal); color: #000; }
+.btn.warn:hover { background: var(--red); color: #000; }
+kbd { font: 11px var(--mono); color: var(--ink3); }
+
+/* floating things: a 1 px frame, square corners, a dithered hard shadow */
+.box { position: relative; background: var(--bg); border: 1px solid var(--ink); }
+.box::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1;
+  background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.boxes { isolation: isolate; }
+.box .hd { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 10px; font-size: 12px; }
+.box .hd .sp { flex: 1; }
+.box .bd { padding: 10px 12px 4px; }
+.box .ft { display: flex; justify-content: flex-end; align-items: center; gap: 14px; padding: 8px 12px 10px; font-size: 12px; color: var(--ink3); }
+.box .ft .hint { flex: 1; }
+.ask { margin: 8px 0 16px; max-width: 620px; border-color: var(--amber); }
+.ask .hd { background: var(--amber); color: #000; }
+.ask code { font: 13px var(--mono); color: var(--ink); }
+.ask .path { color: var(--ink3); font-size: 11.5px; margin-top: 3px; }
+.q .hd { background: var(--ink); color: var(--bg); }
+.q .bd { font: 14px/1.6 var(--ui); }
+
+/* the composer: the phone's, with the desk's options under it */
+.compose { flex: none; padding: 10px 20px 14px; border-top: 1px solid var(--ink4); }
+.compose .row { display: flex; gap: 8px; align-items: stretch; }
+.sqb { width: 38px; flex: none; display: grid; place-items: center; border: 1px solid var(--ink4); color: var(--ink2); font-size: 18px; }
+.sqb:hover { border-color: var(--ink2); color: var(--ink); }
+.sqb.lock { color: var(--signal); }
+.sqb.go { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+.field { flex: 1; min-height: 38px; border: 1px solid var(--ink4); padding: 9px 12px; font: 14px/1.5 var(--ui); color: var(--ink3); }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 9px; font-size: 11.5px; color: var(--ink2); align-items: center; }
+.opts button { display: inline-flex; gap: 7px; }
+.opts button b { font-weight: 400; color: var(--ink); }
+.opts button:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.opts .sp { flex: 1; }
+
+/* the chosen task, beside */
+.detail { border-left: 1px solid var(--ink4); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+.detail .head { padding: 14px 16px 10px; }
+.detail .head .l1 { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink2); }
+.detail .head h2 { font: 600 16px/1.4 var(--ui); margin: 6px 0 6px; }
+.detail .acts { display: flex; gap: 16px; font-size: 12.5px; padding: 0 16px 12px; }
+.detail .body { flex: 1; overflow-y: auto; padding: 4px 16px 20px; }
+.tl { display: grid; gap: 0; }
+.tl .e { display: grid; grid-template-columns: max-content 14px minmax(0, 1fr) auto; gap: 0 8px; align-items: baseline; padding: 3px 0; font-size: 12px; }
+.tl .e .tr { color: var(--ink3); white-space: pre; }
+.tl .e .x { font-family: var(--ui); font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.tl .e .x small { display: block; font: 11.5px var(--mono); color: var(--ink2); margin-top: 1px; }
+.tl .e .r { color: var(--ink3); font-size: 11px; }
+.tl .e.now .x { font-weight: 600; }
+.tl .e.todo .x { color: var(--ink3); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 12px; color: var(--ink2); }
+.kv b { font-weight: 400; color: var(--ink); }
+
+/* log, extensions, context */
+.view { flex: 1; overflow-y: auto; padding: 16px 24px 24px; min-height: 0; }
+.vh { display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px; }
+.vh h1 { font: 600 16px var(--mono); margin: 0; }
+.vh .sp { flex: 1; }
+.seg { display: inline-flex; gap: 14px; font-size: 12px; color: var(--ink2); }
+.seg .on { color: var(--ink); text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 4px; }
+.log .r { display: grid; grid-template-columns: 58px 64px 220px 220px minmax(0, 1fr) 16px; gap: 12px; padding: 6px 0; font-size: 12px; align-items: baseline; cursor: pointer; }
+.log .r:hover { background: var(--hover); }
+.log .r .t { font-family: var(--ui); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log .head { color: var(--ink3); font-size: 11px; cursor: default; }
+.log .head:hover { background: none; }
+.log pre { margin: 0 0 8px 70px; padding: 10px 12px; border-left: 1px solid var(--ink3); color: var(--ink2); font: 12px/1.55 var(--mono); white-space: pre-wrap; }
+.ext .r { display: grid; grid-template-columns: 14px 180px 70px 90px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; font-size: 12.5px; }
+.ext .r .d { font-family: var(--ui); color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext .r .a { display: flex; gap: 14px; }
+.form { margin: 18px 0 0; width: 640px; }
+.form .hd { background: var(--ink); color: var(--bg); }
+.form .f { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: baseline; padding: 6px 0; }
+.form .f .v { border-bottom: 1px solid var(--ink4); padding: 2px 0 4px; color: var(--ink); }
+.form .f .v.ph { color: var(--ink3); }
+.form .radios { display: flex; gap: 18px; color: var(--ink2); }
+.form .radios b { color: var(--ink); font-weight: 400; }
+.form .say { font: 12px/1.6 var(--ui); color: var(--ink3); padding: 6px 0 0; }
+.ctx { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.pane { border: 1px solid var(--ink4); display: flex; flex-direction: column; }
+.pane .hd { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--ink4); font-size: 12px; }
+.pane .hd .sp { flex: 1; }
+.pane .src { padding: 8px 0; font: 12.5px/1.65 var(--mono); height: 300px; overflow: auto; }
+.pane .src div { display: grid; grid-template-columns: 34px 1fr; white-space: pre-wrap; }
+.pane .src div i { font-style: normal; color: var(--ink3); text-align: right; padding-right: 10px; }
+.pane .say { padding: 8px 10px; border-top: 1px solid var(--ink4); font: 12px/1.6 var(--ui); color: var(--ink3); }
+.warnbox { border: 1px solid var(--red); padding: 8px 10px; margin: 0 0 14px; font: 12px/1.6 var(--ui); color: var(--ink2); }
+.warnbox b { color: var(--red); font-weight: 400; font-family: var(--mono); }
+button:focus { outline: none; }
+.exp .r { display: grid; grid-template-columns: 14px 64px minmax(0, 1fr) 200px auto; gap: 12px; align-items: baseline; padding: 7px 0; font-size: 12px; }
+.exp .r .t { font: 13px/1.5 var(--ui); }
+.exp .r.gone .t { color: var(--ink3); -webkit-mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+</style>
+</head>
+<body>
+<div class="ctl">
+  <button data-view="tasks" class="on">tasks</button><button data-view="log">log</button><button data-view="ext">extensions</button><button data-view="ctx">context</button>
+  <span style="width:18px"></span>
+  <button data-do="ask">模拟：权限请求</button><button data-do="done">模拟：任务完成</button><button data-do="theme">深 / 浅</button>
+</div>
+<div class="note">网页控制台的新样子：手机任务页的元素（状态行、进度块、审批卡、输入框）放大到桌面，多出的空间给话题、用量和所选任务的步骤。只在 Mac 本机打开；静态演示，不连服务。点任务看右边的步骤；上面切换四个页面。</div>
+<div class="stage"><div class="app" id="app"></div></div>
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+document.getElementById("gcss").textContent = P.GLITCH_CSS;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const sq = (color, hollow = false) => `<span class="sq" style="${hollow ? `box-shadow: inset 0 0 0 2px ${color}` : `background:${color}`}"></span>`;
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let frame = 0;
+const spin = () => `<span class="spin" data-spin>${SPIN[frame % SPIN.length]}</span>`;
+const agent = (a) => P.sprite(P.AGENT_PX[a] ?? P.AGENT_PX.pi, { px: 2 });
+const blocks = (n, of) => `<span class="blocks">${Array.from({ length: of }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("")}</span>`;
+const TOPIC = { a: "#9fb4ff", b: "#e8a0c8", c: "#8fd8c4", d: "#d8c28f" };   // one hue per topic: which it belongs to, not a status
+
+const S = { view: "tasks", selected: "t1", asked: false, done: false, light: false, logOpen: "l2" };
+
+const TASKS = {
+  t1: { topic: "a", st: "busy", agent: "cc", who: "Claude Code · Opus 5.5", title: "构建 AgentSwitch.app，装到手机上", step: "第 3 步：运行 xcodebuild -scheme AgentSwitch", n: 3, of: 5, clock: "2m 14s" },
+  t2: { topic: "b", st: "waiting", agent: "codex", who: "Codex · GPT-6 Luna", title: "清理旧构建", step: "问你：build/ 里有 3.2 GB 旧产物，要删掉吗？", clock: "40s" },
+  t3: { topic: "c", st: "done", agent: "oc", who: "OpenCode · DeepSeek Flash", title: "整理下载目录里的重复文件", say: "整理好了：一共 42 个文件，重复的 9 个放进了“重复”文件夹，清单在 report.md。", clock: "3m 10s" },
+  t4: { topic: "d", st: "failed", agent: "cc", who: "Claude Code · Sonnet 5.5", title: "登录财务平台下载本月对账单", say: "凭据网关的代理连不上（gate proxy unreachable），没有登录。", clock: "1m 02s" },
+};
+
+function statusLine(t) {
+  const mark = t.st === "busy" ? spin() : t.st === "waiting" ? sq("var(--amber)") : t.st === "done" ? sq("var(--green)") : sq("var(--red)");
+  const word = { busy: "busy", waiting: '<span class="w">waiting</span>', done: '<span class="ok">done</span>', failed: '<span class="bad">incomplete</span>' }[t.st];
+  return `${mark}<span>${word}</span>${agent(t.agent)}<span>${esc(t.who)}</span><span class="faint">${t.clock}</span>`;
+}
+
+function band() {
+  return `<div class="band"><div class="who">${P.mark({ px: 2, state: S.asked ? "waiting" : "busy" })}<b>agentswitch</b><span class="dim">· MacBook Pro</span></div><span class="sp"></span>
+    <div class="st"><span>${sq("var(--green)")}service</span><span>${sq("var(--green)")}gateway</span><span>${sq("var(--green)")}1 iPhone</span></div>
+    <a href="terminal.html">terminals ↗</a></div>`;
+}
+
+function side() {
+  const nav = [["tasks", S.done ? "⠙1" : "⠙1 · ▪1"], ["log", ""], ["ext", "3", "extensions"], ["ctx", "", "context"]];
+  return `<div class="side">
+    <div class="sec lbl">// console</div>
+    <div class="nav">${nav.map(([k, n, label]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}"><span class="ar">▸</span><span>${label ?? k}</span><span class="n">${n}</span></button>`).join("")}</div>
+    <div class="dots-h" style="margin:12px 16px 0"></div>
+    <div class="sec lbl">// topics</div>
+    <div class="topics">
+      ${[["a", "发布 AgentSwitch", "now", true], ["b", "清理磁盘", "now"], ["c", "整理下载", "1h"], ["d", "财务", "1d"]].map(([k, t, age, on]) =>
+        `<div class="topic ${on ? "on" : ""}">${sq(TOPIC[k])}<span class="t">${t}</span><span class="age">${age}</span></div>`).join("")}
+      <div class="topic"><span></span><span class="t faint">▸ 6 more</span><span></span></div>
+    </div>
+    <div class="dots-h" style="margin:0 16px"></div>
+    <div class="sec lbl">// usage</div>
+    <div class="usage">
+      <div class="u"><span>Claude Max · 5h</span><span>62%</span><span class="bar"><i style="width:62%"></i></span></div>
+      <div class="u"><span>Codex Pro · 7d</span><span>84%</span><span class="bar"><i class="hi" style="width:84%"></i></span></div>
+      <div class="u"><span>DeepSeek</span><span>¥ 41.20</span></div>
+    </div>
+  </div>`;
+}
+
+function strip() {
+  const cards = [["t1", TASKS.t1], ["t2", TASKS.t2]].filter(([, t]) => t.st === "busy" || t.st === "waiting");
+  return `<div class="strip">${cards.map(([id, t]) => `<div class="card ${t.st === "waiting" ? "wait" : ""} ${S.selected === id ? "on" : ""}" data-task="${id}">
+      <div class="l1">${t.st === "busy" ? spin() : sq("var(--amber)")}<span>${t.st === "busy" ? "busy" : '<span class="w">waiting</span>'}</span><span class="sp"></span>${agent(t.agent)}<span class="faint">${t.clock}</span></div>
+      <div class="t">${esc(t.title)}</div>
+      ${t.n ? `<div class="prog">${blocks(t.n, t.of)}<span>${t.n}/${t.of}</span></div>` : ""}
+      <div class="s">└─ ${esc(t.step)}</div></div>`).join("")}</div>`;
+}
+
+function taskEntry(id) {
+  const t = TASKS[id];
+  const sel = S.selected === id ? "sel" : "";
+  let body = "";
+  if (t.st === "busy") body = `<div class="prog">${blocks(t.n, t.of)}<span>${t.n}/${t.of}</span></div><div class="step"><span class="tr">└─</span>${esc(t.step)}</div>`;
+  if (t.st === "done") body = `<div class="say">${esc(t.say)}</div><div class="files"><span>${sq("var(--ink2)")}report.md</span><span>${sq("var(--ink2)")}dupes.txt</span><button class="btn">[ open ]</button></div>`;
+  if (t.st === "failed") body = `<div class="say">${esc(t.say)}</div><div class="files"><button class="btn">[ retry ]</button><button class="btn">[ hand to… ]</button></div>`;
+  return `<div class="task ${sel}" data-task="${id}"><div class="l1">${statusLine(t)}</div><div class="ti">${esc(t.title)}</div>${body}</div>`;
+}
+
+function feed() {
+  const tag = (k, t) => `<div class="tag">${sq(TOPIC[k])}<span>${t}</span></div>`;
+  return `<div class="feed boxes">
+    <div class="day">yesterday</div>
+    ${tag("d", "财务")}
+    <div class="me"><div>登录财务平台，把本月的对账单下载下来</div></div>
+    ${taskEntry("t4")}
+    <div class="day">today</div>
+    ${tag("c", "整理下载")}
+    <div class="me"><div>整理下载目录里的重复文件</div></div>
+    ${taskEntry("t3")}
+    ${tag("b", "清理磁盘")}
+    <div class="box q ask" style="border-color:var(--ink)"><div class="hd"><span>? question</span><span class="sp"></span><span>清理旧构建 · Codex</span></div>
+      <div class="bd">build/ 里有 3.2 GB 旧产物，要删掉吗？</div>
+      <div class="ft"><span class="hint">回答后任务继续</span><button class="btn">[ 保留 ]</button><button class="btn pri">[ 删掉 ]</button></div></div>
+    ${tag("a", "发布 AgentSwitch")}
+    <div class="me"><div>把 iOS 端打包装到手机上</div></div>
+    ${taskEntry("t1")}
+    ${S.asked ? `<div class="box ask" id="ask"><div class="hd"><span>[!] approval</span><span class="sp"></span><span>install app</span></div>
+      <div class="bd"><code>xcrun devicectl device install app --device 00008150-… AgentSwitch.app</code><div class="path">~/Projects/AgentSwitch/packages/ios-app</div></div>
+      <div class="ft"><span class="hint">构建 AgentSwitch.app · 第 4 步</span><button class="btn warn" data-do="deny">[ deny <kbd>⌘⌫</kbd> ]</button><button class="btn pri" data-do="allow">[ allow <kbd>⌘↩</kbd> ]</button></div></div>` : ""}
+  </div>`;
+}
+
+function compose() {
+  return `<div class="compose">
+    <div class="row"><button class="sqb">+</button><div class="field">向 Mac 发送任务或问题</div><button class="sqb lock">${P.sprite([".###.", "#...#", "#####", "##.##", "#####"], { px: 2 })}</button><button class="sqb go">↑</button></div>
+    <div class="opts"><button><span>// folder</span><b>~/Projects/AgentSwitch ▾</b></button><button><span>// model</span><b>auto ▾</b></button><button><span>// browser</span><b>auto ▾</b></button><button><span>// approval</span><b>default ▾</b></button><span class="sp"></span><kbd>⌘↩ send</kbd></div>
+  </div>`;
+}
+
+function detail() {
+  const t = TASKS[S.selected];
+  const steps = t === TASKS.t1 ? [
+    ["■", "var(--green)", "已接收", "加密 0.3 秒", "10:02"],
+    ["■", "var(--green)", "规划 · 5 步", "Opus 5.5 · 4.1 秒", "10:02"],
+    ["├─", "var(--green)", "1 · 读项目结构", "Read × 6", "12s"],
+    ["├─", "var(--green)", "2 · 运行 npm test", "1163 passed", "1m"],
+    ["├─", "busy", "3 · 运行 xcodebuild -scheme AgentSwitch", "Build › Compiling TerminalPage.swift", "48s"],
+    ["├─", S.asked ? "wait" : "todo", "4 · 安装到手机", S.asked ? "等你批准：install app" : "", ""],
+    ["└─", "todo", "5 · 汇报", "", ""],
+  ] : [
+    ["■", "var(--green)", "已接收", "", "10:40"],
+    ["■", t.st === "failed" ? "var(--red)" : "var(--green)", t.st === "failed" ? "没有做成" : "完成", t.say ?? t.step, t.clock],
+  ];
+  const row = ([tr, st, x, small, r]) => {
+    const mark = st === "busy" ? spin() : st === "todo" ? sq("var(--ink3)", true) : st === "wait" ? sq("var(--amber)") : sq(st);
+    const cls = st === "busy" ? "now" : st === "todo" ? "todo" : "";
+    return `<div class="e ${cls}"><span class="tr">${tr === "■" ? "" : tr}</span>${mark}<span class="x">${esc(x)}${small ? `<small>${esc(small)}</small>` : ""}</span><span class="r">${r}</span></div>`;
+  };
+  return `<div class="detail">
+    <div class="head"><div class="l1">${statusLine(t)}</div><h2>${esc(t.title)}</h2></div>
+    <div class="acts">${t.st === "busy" || t.st === "waiting" ? `<button class="btn warn">[ cancel ]</button><button class="btn">[ hand to ▾ ]</button>` : `<button class="btn">[ retry ]</button>`}<button class="btn">[ archive ]</button></div>
+    <div class="dots-h" style="margin:0 16px"></div>
+    <div class="body">
+      <div class="lbl" style="margin:12px 0 6px">// steps</div>
+      <div class="tl">${steps.map(row).join("")}</div>
+      <div class="lbl" style="margin:16px 0 6px">// files</div>
+      <div class="kv"><span>${sq("var(--ink2)")}</span><b>build.log <span class="faint">12 KB</span> <button class="btn">[ open ]</button></b></div>
+      <div class="lbl" style="margin:16px 0 6px">// task</div>
+      <div class="kv"><span>folder</span><b>~/Projects/AgentSwitch</b><span>browser</span><b>none</b><span>approval</span><b>default</b><span>id</span><b>1e04b10a</b></div>
+      <div class="lbl" style="margin:16px 0 6px">// events</div>
+      <button class="btn dim">▸ 38 events</button>
+    </div>
+  </div>`;
+}
+
+function logView() {
+  const rows = [
+    ["l1", "10:40", "phone", "opencode/deepseek-flash", "~/Downloads", "整理下载目录里的重复文件", "按项目偏好：下载整理交给便宜的模型"],
+    ["l2", "10:02", "mac", "claude-code/opus-5.5", "~/Projects/AgentSwitch", "构建 AgentSwitch.app，装到手机上", '{\n  "action": "dispatch",\n  "target": "claude-code/opus-5.5",\n  "why": "多步构建，要读 Xcode 输出",\n  "plan": 5\n}'],
+    ["l3", "09:51", "phone", "—", "—", "今天几号", "直接回答，不派发"],
+    ["l4", "yesterday", "phone", "claude-code/sonnet-5.5", "临时目录", "登录财务平台下载本月对账单", "需要浏览器与站点凭据：带 browser"],
+  ];
+  return `<div class="view log"><div class="vh"><h1>log</h1><span class="seg"><span class="on">all</span><span>dispatched</span><span>answered</span><span>refused</span></span><span class="sp"></span><span class="faint">调度模型每次的决定</span></div>
+    <div class="r head"><span>time</span><span>from</span><span>target</span><span>folder</span><span>task</span><span></span></div>
+    <div class="dots-h"></div>
+    ${rows.map(([id, time, from, target, dir, task, why]) => `<div class="r" data-log="${id}"><span class="faint">${time}</span><span class="dim">${from}</span><span>${esc(target)}</span><span class="dim">${esc(dir)}</span><span class="t">${esc(task)}</span><span class="faint">${S.logOpen === id ? "▾" : "▸"}</span></div>${S.logOpen === id ? `<pre>${esc(why)}</pre>` : ""}<div class="dots-h" style="opacity:.5"></div>`).join("")}
+  </div>`;
+}
+
+function extView() {
+  const rows = [
+    [true, "github", "stdio", "ask", "npx @modelcontextprotocol/server-github", "claude-code · codex"],
+    [true, "linear", "http", "allowed", "https://mcp.linear.app/sse", "claude-code"],
+    [false, "sqlite-local", "stdio", "ask", "uvx mcp-server-sqlite --db ~/data/app.db", "all"],
+  ];
+  return `<div class="view ext"><div class="vh"><h1>extensions</h1><span class="faint">执行器可用的 MCP 服务</span><span class="sp"></span><button class="btn">[ + add ]</button></div>
+    <div class="dots-h"></div>
+    ${rows.map(([on, name, kind, appr, cmd, who]) => `<div class="r">${on ? sq("var(--green)") : sq("var(--ink3)", true)}<span style="${on ? "" : "color:var(--ink3)"}">${name}</span><span class="dim">${kind}</span><span class="${appr === "ask" ? "dim" : ""}">${appr}</span><span class="d">${esc(cmd)} <span class="faint">· ${who}</span></span><span class="a"><button class="btn">[ edit ]</button><button class="btn">[ ${on ? "off" : "on"} ]</button><button class="btn warn">[ delete ]</button></span></div><div class="dots-h" style="opacity:.5"></div>`).join("")}
+    <div class="boxes"><div class="box form"><div class="hd"><span>edit · github</span><span class="sp"></span><span>×</span></div>
+      <div class="bd">
+        <div class="f"><span class="lbl">// name</span><span class="v">github</span></div>
+        <div class="f"><span class="lbl">// kind</span><span class="radios"><span>&lt;<b>x</b>&gt; stdio</span><span>&lt; &gt; http</span></span></div>
+        <div class="f"><span class="lbl">// command</span><span class="v">npx @modelcontextprotocol/server-github</span></div>
+        <div class="f"><span class="lbl">// env</span><span class="v">GITHUB_TOKEN=enc:v1:Qm9vbXN0YWxs…</span></div>
+        <div class="f"><span class="lbl">// approval</span><span class="radios"><span>&lt;<b>x</b>&gt; ask</span><span>&lt; &gt; allowed</span></span></div>
+        <div class="f"><span class="lbl">// executors</span><span class="radios"><span>[<b>x</b>] claude-code</span><span>[<b>x</b>] codex</span><span>[ ] opencode</span></span></div>
+        <div class="say">密钥只填 enc:v1 密文：stdio 服务继承凭据网关的代理环境，出网请求里的密文在网络层替换。</div>
+      </div>
+      <div class="ft"><span class="hint">esc cancel</span><button class="btn">[ cancel ]</button><button class="btn pri">[ save <kbd>⌘S</kbd> ]</button></div></div></div>
+  </div>`;
+}
+
+function ctxView() {
+  const lines = (t) => t.split("\n").map((l, i) => `<div><i>${i + 1}</i><span>${esc(l)}</span></div>`).join("");
+  return `<div class="view"><div class="vh"><h1>context</h1><span class="faint">调度模型每次调度前读取，改了立即生效</span></div>
+    <div class="warnbox"><b>2 lines removed</b> · 加载时移除了疑似明文凭据的行，调度模型看不到：第 7 行“密码: hunter2”、第 12 行“token = ghp_…”。</div>
+    <div class="ctx">
+      <div class="pane"><div class="hd"><span>// context.md</span><span class="sp"></span><span class="faint">1.2 KB / 64 KB</span><button class="btn">[ save <kbd>⌘S</kbd> ]</button></div>
+        <div class="src">${lines("# 站点与账号\n- 财务平台 https://fin.example.com\n  账号 finance@me.com\n  密码 enc:v1:QWxhZGRpbjpvcGVu…\n\n# 环境\n- 内网只能从公司 Wi-Fi 访问\n- 代理：gate 已配置\n\n# 偏好\n- AgentSwitch 用 claude-code\n- 下载整理这类用便宜模型\n- 不用 Opus 做翻译")}</div>
+        <div class="say">站点、账号（密码只填 enc:v1 密文）、环境限制、各项目偏好的执行器。</div></div>
+      <div class="pane"><div class="hd"><span>// memory.md</span><span class="sp"></span><span class="faint">每次执行后追加</span><button class="btn">[ save ]</button></div>
+        <div class="src">${lines("- 手机装包用 install-device.sh（任务 1e04b10a）\n- Codex 在 ChatGPT.app 里（任务 9c21e0f3）\n- 财务平台登录要先连公司 Wi-Fi（任务 77aa0c1d）")}</div>
+        <div class="say">调度模型从执行结果里提取的长期事实，注明来源任务；错的行直接删。</div></div>
+    </div>
+    <div class="lbl" style="margin:22px 0 6px">// experience</div>
+    <div class="exp">
+      ${[["var(--green)", false, "verified", "装到手机前先确认手机已解锁、和 Mac 在同一网络", "任务 1e04b10a · 事件 #12", ""], ["var(--amber)", true, "pending", "财务平台的验证码走短信，要问用户", "任务 77aa0c1d · 事件 #5", ""], ["var(--ink3)", true, "expired", "gate 代理端口 4717（已改）", "任务 4b1e2c90 · 事件 #3", "gone"]].map(([c, hollow, word, t, src, cls]) =>
+        `<div class="r ${cls}">${sq(c, hollow)}<span class="dim">${word}</span><span class="t">${esc(t)}</span><span class="faint">${src}</span><button class="btn warn">[ delete ]</button></div><div class="dots-h" style="opacity:.5"></div>`).join("")}
+    </div>
+  </div>`;
+}
+
+function draw() {
+  const app = document.getElementById("app");
+  app.className = `app ${S.light ? "light" : ""} ${S.view === "tasks" ? "" : "wide"}`;
+  const main = S.view === "tasks" ? `<div class="main">${strip()}<div class="dots-h" style="margin:0 20px"></div>${feed()}${compose()}</div>${detail()}`
+    : `<div class="main">${S.view === "log" ? logView() : S.view === "ext" ? extView() : ctxView()}</div>`;
+  app.innerHTML = band() + side() + main;
+  for (const b of document.querySelectorAll(".ctl [data-view]")) b.classList.toggle("on", b.dataset.view === S.view);
+}
+
+document.addEventListener("click", (e) => {
+  const v = e.target.closest("[data-view]");
+  if (v) { S.view = v.dataset.view; draw(); return; }
+  const t = e.target.closest("[data-task]");
+  if (t && !e.target.closest("button")) { S.selected = t.dataset.task; draw(); return; }
+  const l = e.target.closest("[data-log]");
+  if (l) { S.logOpen = S.logOpen === l.dataset.log ? null : l.dataset.log; draw(); return; }
+  const d = e.target.closest("[data-do]")?.dataset.do;
+  if (d === "ask") { S.view = "tasks"; S.asked = true; S.selected = "t1"; draw(); P.glitch(document.getElementById("ask")); document.getElementById("ask").scrollIntoView({ block: "nearest" }); }
+  if (d === "allow" || d === "deny") { S.asked = false; if (d === "allow") { TASKS.t1.n = 4; TASKS.t1.step = "第 4 步：安装到手机"; } draw(); }
+  if (d === "done") { S.done = true; TASKS.t1.st = "done"; TASKS.t1.say = "装好了：AgentSwitch 已装到 iPhone 17 Pro，启动正常。"; TASKS.t1.clock = "4m 02s"; draw(); P.glitch(document.querySelector('.task[data-task="t1"]')); }
+  if (d === "theme") { S.light = !S.light; draw(); }
+});
+setInterval(() => { frame++; for (const s of document.querySelectorAll("[data-spin]")) s.textContent = SPIN[frame % SPIN.length]; }, 90);
+const hash = location.hash.slice(1);
+if (["log", "ext", "ctx"].includes(hash)) S.view = hash;
+if (location.search.includes("light")) S.light = true;
+draw();
+</script>
+</body>
+</html>
