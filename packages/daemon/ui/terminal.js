@@ -739,6 +739,19 @@ function terminalRow(t, tr, depth) {
     h("span", { class: "ac" }, h("button", { title: "close ⌘W", onclick: (e) => { e.stopPropagation(); closeTerminal(t); } }, "×")));
 }
 
+/** A terminal's sub-agents at work, one level under it (docs/terminal-v0.md §1): what each was sent to do, its kind and
+ *  what it is doing now. A click opens the terminal. */
+function subagentRows(t, tr, depth) {
+  const subs = t.status === "exited" ? [] : t.subagents ?? [];
+  const stem = tr === "└─" ? "\u00a0\u00a0" : "│\u00a0";
+  return subs.map((a, k) => h("div", { class: "row sub", title: [a.type, a.doing].filter(Boolean).join(" · "), onclick: () => select(t.id) },
+    h("span", { class: "ix" }),
+    h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, `${stem}${k === subs.length - 1 ? "└─" : "├─"}`),
+    h("span", { class: "st" }, h("span", { class: "spin" }, SPIN[spinFrame])),
+    h("span", { class: "nm" }, a.name, a.doing ? h("i", {}, a.doing) : null),
+    h("span", { class: "mt" }, a.type)));
+}
+
 function sessionRow(s, tr, depth) {
   const canResume = RESUMABLE.has(s.harness);
   const meta = opening === s.id ? "opening" : s.active ? "busy" : ago(s.updatedAt);
@@ -826,7 +839,10 @@ function renderSidebar() {
     const n = g.terminals.length + list.length + (more ? 1 : 0);
     let i = 0;
     const tr = () => (++i === n ? "└─" : "├─");
-    for (const t of g.terminals) out.push(terminalRow(t, tr(), depth));
+    for (const t of g.terminals) {
+      const twig = tr();
+      out.push(terminalRow(t, twig, depth), ...subagentRows(t, twig, depth));
+    }
     for (const s of list) out.push(sessionRow(s, tr(), depth));
     if (more) {
       out.push(h("div", { class: "row more", onclick: () => { if (all) expanded.delete(g.cwd); else expanded.add(g.cwd); renderSidebar(); } },

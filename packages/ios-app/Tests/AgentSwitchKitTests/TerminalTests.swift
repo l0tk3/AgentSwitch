@@ -26,6 +26,20 @@ final class TerminalTests: XCTestCase {
         XCTAssertFalse(list.models["claude-code"]?.first?.older ?? true)
     }
 
+    /// Sub-agents under their terminal (2026-09-30); a Mac that predates them says none.
+    func testATerminalListsItsSubagents() throws {
+        let list = try JSONDecoder().decode(TerminalList.self, from: json([
+            "terminals": [["id": "a1", "status": "working", "subagents": [
+                ["id": "s1", "type": "code-reviewer", "name": "审查改动", "doing": "运行 git diff", "since": 1],
+                ["id": "s2", "type": "Explore"]]],
+                          ["id": "a2", "status": "idle"]],
+            "agents": [], "models": [:],
+        ]))
+        XCTAssertEqual(list.terminals[0].subagents, [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
+                                                     TerminalSubagent(id: "s2", type: "Explore", name: "Explore")])
+        XCTAssertEqual(list.terminals[1].subagents, [])
+    }
+
     func testModelsAsTheAgentListsThem() throws {
         let list = try JSONDecoder().decode(TerminalList.self, from: json([
             "terminals": [], "agents": ["claude-code"],

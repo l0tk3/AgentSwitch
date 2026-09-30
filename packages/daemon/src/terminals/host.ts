@@ -58,9 +58,23 @@ export type TerminalInfo = {
   /** The tool it is using now (the last one it reported before use, PreToolUse / pi's tool_call) and what on, until
    *  it is idle again; null when it has reported none (the Live Activity's step, assistant-v0 §4). */
   readonly activity: { readonly tool: string; readonly target: string } | null;
+  /** Its sub-agents at work (Claude Code's SubagentStart … SubagentStop), in the order they started: the tree shows
+   *  them under the terminal (docs/terminal-v0.md §1). */
+  readonly subagents: readonly Subagent[];
   /** When the status last changed (the Live Activity's clock: working since, waiting since). */
   readonly statusSince: number;
   readonly seq: number;
+};
+
+export type Subagent = {
+  readonly id: string;
+  /** Its kind: Claude Code's `subagent_type` (Explore, code-reviewer, general-purpose…). */
+  readonly type: string;
+  /** What it was sent to do (the Agent tool's `description`), else its kind. */
+  readonly name: string;
+  /** The tool it uses now and what on, as the terminal's own `activity`; null before its first. */
+  readonly activity: { readonly tool: string; readonly target: string } | null;
+  readonly since: number;
 };
 
 export type TerminalEvent =
@@ -167,6 +181,9 @@ const HOLD_MS = 50;
 const REDRAW_MS = 60;
 const HOLD_LIMIT = 4096;
 const MAX_NAME = 80;
+/** An Agent tool call starts its sub-agent at once; one not started by then was refused. */
+const LAUNCH_MS = 60_000;
+const MAX_LAUNCHES = 8;
 /** Agents put status glyphs in front of the title (Claude Code: ✳ idle, ✶ ✻ ✽ ✢ · while working; braille spinners). */
 const TITLE_GLYPHS = /^[\s✳✶✷✸✹✺✻✼✽✢✣✤✥*·•●○◐◑◒◓⏺⏵▶►⠀-⣿]+/u;
 /** Codex puts this in front of its title while something waits for you (`!` and `.` alternating): left out of the name,
@@ -273,6 +290,9 @@ class Session {
   status: TerminalStatus = "idle";
   statusSince: number;
   activity: { tool: string; target: string } | null = null;
+  /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
+  readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string } | null; since: number }>();
+  launches: { type: string; name: string; at: number }[] = [];
   /** How the last turn ended (assistant-v0 §4 "结果要提示"): the agent said it ended, or it failed (an API error the
    *  agent reported, the program exiting with an error). `line`: what to read — kept in memory only. */
   lastTurn: TurnEnd | null = null;
@@ -536,18 +556,23 @@ export class TerminalHost {
     if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
     const p = call.payload;
     if (typeof p.session_id === "string" && p.session_id) this.reported(s, p.session_id);
+    // Claude Code says in every hook call made inside a sub-agent which one it is.
+    const agentId = typeof p.agent_id === "string" && p.agent_id ? p.agent_id : null;
     // The agent goes on: what waited for you on its screen was answered.
     if (call.event !== "SessionStart" && s.attention) { s.attention = false; if (s.status === "waiting" && !s.pending.size) this.setStatus(s, "working"); }
     switch (call.event) {
       // A request answered in the terminal itself leaves its hook waiting here (Claude Code does not end it): what the
       // agent does next tells us — the tool ran (PostToolUse), the turn ended (Stop), or the user typed on (UserPromptSubmit).
-      case "SessionStart": this.setStatus(s, "idle"); return null;
+      case "SessionStart": this.noSubagents(s); this.setStatus(s, "idle"); return null;
       case "UserPromptSubmit": this.settleAll(s, "working"); this.setStatus(s, "working"); return null;
-      case "Stop": this.settleAll(s, "idle"); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); return null;
+      case "Stop": this.settleAll(s, "idle"); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); return null;
+      case "SubagentStart": if (agentId) this.subagentStarted(s, agentId, String(p.agent_type ?? "")); return null;
+      case "SubagentStop": if (agentId) s.subagents.delete(agentId); return null;
       // Claude Code: the turn ended on an API error (a rate limit, overload, authentication…), which Stop does not say.
       case "StopFailure": {
         const error = [p.error, p.error_details].filter((x) => typeof x === "string" && x.trim()).join(": ");
         this.settleAll(s, "idle");
+        this.noSubagents(s);
         this.turnEnded(s, false, error || "这一轮出错结束", true);
         this.setStatus(s, "idle");
         return null;
@@ -555,6 +580,7 @@ export class TerminalHost {
       case "PreToolUse": {
         const input = (p.tool_input && typeof p.tool_input === "object" ? p.tool_input : {}) as Record<string, unknown>;
         this.using(s, String(p.tool_name ?? ""), input);
+        this.subagentUsing(s, agentId, String(p.agent_type ?? ""), String(p.tool_name ?? ""), input);
         this.setStatus(s, "working");
         const refused = this.opts.floor?.(String(p.tool_name ?? ""), input, s.cwd) ?? null;
         return refused ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: refused } } : null;
@@ -719,6 +745,7 @@ export class TerminalHost {
     if (code !== 0 && !s.killTimer) this.turnEnded(s, false, `进程退出（代码 ${code}）`, true);
     s.companion?.stop();
     for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
+    this.noSubagents(s);
     this.setStatus(s, "exited");
     s.emit({ type: "exit", code });
   }
@@ -794,6 +821,38 @@ export class TerminalHost {
     s.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target };
   }
 
+  /** A sub-agent at work: named by what the Agent tool call that started it was sent to do (the oldest waiting one of
+   *  its kind, else the oldest), else by its kind. */
+  private subagentStarted(s: Session, id: string, type: string): void {
+    const now = this.o.now();
+    s.launches = s.launches.filter((l) => now - l.at < LAUNCH_MS);
+    const i = Math.max(s.launches.findIndex((l) => l.type === type), s.launches.length ? 0 : -1);
+    const [launch] = i >= 0 ? s.launches.splice(i, 1) : [];
+    s.subagents.set(id, { id, type: type || launch?.type || "agent", name: launch?.name || type || "agent", activity: null, since: now });
+  }
+
+  /** A tool call: a sub-agent's own (what it is doing now; one not seen starting is taken in by its kind), or the
+   *  agent sending one off (what it is to do, for its name). */
+  private subagentUsing(s: Session, agentId: string | null, agentType: string, tool: string, input: Record<string, unknown>): void {
+    if (agentId) {
+      if (!s.subagents.has(agentId)) this.subagentStarted(s, agentId, agentType);
+      const target = permissionTarget(tool, input).replace(/\s+/g, " ").trim();
+      s.subagents.get(agentId)!.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target };
+      return;
+    }
+    if (tool !== "Agent" && tool !== "Task") return;
+    const name = typeof input.description === "string" ? input.description.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) : "";
+    const type = typeof input.subagent_type === "string" && input.subagent_type ? input.subagent_type : "general-purpose";
+    s.launches = [...s.launches, { type, name, at: this.o.now() }].slice(-MAX_LAUNCHES);
+  }
+
+  /** The turn ended (or a new session began): its sub-agents with it. One still at work in the background comes back
+   *  with its next tool call. */
+  private noSubagents(s: Session): void {
+    s.subagents.clear();
+    s.launches = [];
+  }
+
   /** The screen as a newly attached one needs it. The serializer restores mouse tracking but not how it reports:
    *  SGR (1006, which Claude Code turns on) is added back, or a desktop screen would send the wheel and clicks in the
    *  old byte form, which the page does not forward and the program does not read. */
@@ -826,7 +885,7 @@ export class TerminalHost {
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),
-      activity: s.activity, statusSince: s.statusSince, seq: s.seq,
+      activity: s.activity, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, seq: s.seq,
     };
   }
 }

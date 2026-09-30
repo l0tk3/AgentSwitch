@@ -119,11 +119,14 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let activity: TerminalActivity?
     /// When its status last changed, in milliseconds (older services: nil).
     public let statusSince: Int64?
+    /// Its sub-agents at work, in the order they started (docs/terminal-v0.md §1; older services: none).
+    public let subagents: [TerminalSubagent]
 
     public init(id: String, harness: String, cwd: String, model: String? = nil, mode: String = "manual", name: String,
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
-                forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil) {
+                forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
+                subagents: [TerminalSubagent] = []) {
         self.id = id
         self.harness = harness
         self.cwd = cwd
@@ -143,11 +146,12 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         self.permissions = permissions
         self.activity = activity
         self.statusSince = statusSince
+        self.subagents = subagents
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, model, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
-             agentSessionId, resumedFrom, forked, permissions, activity, statusSince
+             agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents
     }
 
     public init(from decoder: Decoder) throws {
@@ -171,6 +175,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         permissions = (try? c.decodeIfPresent([TerminalPermission].self, forKey: .permissions)) ?? []
         activity = try? c.decodeIfPresent(TerminalActivity.self, forKey: .activity)
         statusSince = try? c.decodeIfPresent(Int64.self, forKey: .statusSince)
+        subagents = (try? c.decodeIfPresent([TerminalSubagent].self, forKey: .subagents)) ?? []
     }
 
     public var created: Date { Date(milliseconds: createdAt) }
@@ -443,5 +448,33 @@ public struct GitSummary: Codable, Sendable, Equatable {
 
 struct FolderGitList: Decodable {
     let folders: [String: GitSummary]
+}
+
+/// A terminal's sub-agent at work (Claude Code's SubagentStart … SubagentStop): under its terminal in the tree.
+public struct TerminalSubagent: Decodable, Sendable, Hashable, Identifiable {
+    public let id: String
+    /// Its kind (Explore, code-reviewer, general-purpose…).
+    public let type: String
+    /// What it was sent to do, else its kind.
+    public let name: String
+    /// What it is doing now, in words (`运行 git diff`); "" before its first tool call.
+    public let doing: String
+
+    public init(id: String, type: String, name: String, doing: String = "") {
+        self.id = id
+        self.type = type
+        self.name = name
+        self.doing = doing
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, type, name, doing }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? ""
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? type
+        doing = (try? c.decodeIfPresent(String.self, forKey: .doing)) ?? ""
+    }
 }
 

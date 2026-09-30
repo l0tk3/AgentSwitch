@@ -186,6 +186,31 @@ describe("terminal host", () => {
     expect(events.some((e) => e.type === "permission_resolved" && e.decision === null)).toBe(true);
   });
 
+  it("follows Claude Code's sub-agents: named by what each was sent to do, what it does now, gone when it stops (2026-09-30)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown>) => host.hook(info.id, token, { event, payload });
+    await hook("PreToolUse", { tool_name: "Agent", tool_input: { description: "查连接池", subagent_type: "Explore", prompt: "…" } });
+    await hook("PreToolUse", { tool_name: "Agent", tool_input: { description: "审查改动", subagent_type: "code-reviewer", prompt: "…" } });
+    // They start in any order: each takes the call of its kind.
+    await hook("SubagentStart", { agent_id: "a1", agent_type: "code-reviewer" });
+    await hook("SubagentStart", { agent_id: "a2", agent_type: "Explore" });
+    await hook("PreToolUse", { agent_id: "a1", agent_type: "code-reviewer", tool_name: "Bash", tool_input: { command: "git diff" } });
+    expect(host.get(info.id)!.subagents).toMatchObject([
+      { id: "a1", type: "code-reviewer", name: "审查改动", activity: { tool: "Bash", target: "git diff" } },
+      { id: "a2", type: "Explore", name: "查连接池", activity: null },
+    ]);
+    await hook("SubagentStop", { agent_id: "a1", agent_type: "code-reviewer" });
+    // One not seen starting (the service came up after) is taken in by its kind at its first tool call.
+    await hook("PreToolUse", { agent_id: "a3", agent_type: "general-purpose", tool_name: "Read", tool_input: { file_path: "/w/pool.ts" } });
+    expect(host.get(info.id)!.subagents.map((a) => [a.id, a.name])).toEqual([["a2", "查连接池"], ["a3", "general-purpose"]]);
+    await hook("Stop", { last_assistant_message: "好了" });
+    expect(host.get(info.id)!.subagents).toEqual([]);
+    expect(claudeHookSettings("hook").hooks).toMatchObject({ SubagentStart: expect.any(Array), SubagentStop: expect.any(Array) });
+  });
+
   it("a screen that (re)connects gets every request waiting, whole: one answered while it was away is gone", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());

@@ -19,6 +19,8 @@ import { slashCommands } from "../terminals/commands.js";
 import { CLICK, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { GitStatus } from "../terminals/gitStatus.js";
+import type { TerminalInfo } from "../terminals/host.js";
+import { subagentDoing } from "./live.js";
 import { modelSettings } from "../router/modelOverlay.js";
 import { modelName } from "../util/modelName.js";
 import { checkTerminalCwd } from "./cwdPolicy.js";
@@ -42,6 +44,11 @@ export type Terminals = {
   /** The tree's git status (default: `git status` itself, gitStatus.ts). */
   readonly git?: GitStatus;
 };
+
+/** A terminal as the screens list it: each sub-agent with what it is doing in words (`doing`, as the Live Activity). */
+function shown(t: TerminalInfo) {
+  return { ...t, subagents: t.subagents.map((a) => ({ ...a, doing: subagentDoing(a.activity, t.cwd) })) };
+}
 
 const MAX_INPUT = 20_000;
 /** The sessions whose folders get a git status: as many as the tree lists. */
@@ -137,7 +144,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const models = Object.fromEntries(agents.map((a) => [a, offers[a as keyof Offers]?.models
       ?? (catalog[a]?.models ?? []).map((id) => ({ id, name: modelName(id) }))]));
     const defaults = Object.fromEntries(Object.entries(offers).flatMap(([a, o]) => (o?.defaultName ? [[a, o.defaultName]] : [])));
-    return c.json({ terminals: host.list(), agents, models, defaults });
+    return c.json({ terminals: host.list().map(shown), agents, models, defaults });
   });
   app.get("/terminals/style", (c) => c.json(t.style()));
 
@@ -185,7 +192,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
 
   app.get("/terminals/:id", (c) => {
     const info = host.get(c.req.param("id"));
-    return info ? c.json({ terminal: info }) : c.json({ error: "not found" }, 404);
+    return info ? c.json({ terminal: shown(info) }) : c.json({ error: "not found" }, 404);
   });
 
   // The user's own name for a terminal; null or "" goes back to the derived one.

@@ -153,6 +153,11 @@ body.side-dragging .screen { pointer-events: none; }
 .row .ac .del:hover { background: var(--red); color: #000; }
 .row.term .nm { color: var(--ink); }
 .row.session .nm { color: var(--ink2); }
+/* sub-agents under their terminal: one level deeper, what each is doing (docs/terminal-v0.md §1) */
+.row.sub .nm { color: var(--ink2); }
+.row.sub .nm i { font-style: normal; color: var(--ink3); margin-left: 1ch; }
+.row.sub .mt { color: var(--ink3); }
+.row.sub .spin { color: var(--cyan); }
 .row.waiting .nm { font-weight: 700; }
 .row.exited .nm { color: var(--ink2); }
 .row.sel { background: var(--sel); }

@@ -85,6 +85,9 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
       PreToolUse: hook(QUICK_HOOK_TIMEOUT_S),
       // Tells the service a permission request was answered in the terminal (the tool ran).
       PostToolUse: hook(QUICK_HOOK_TIMEOUT_S),
+      // Sub-agents at work, for the tree (docs/terminal-v0.md §1).
+      SubagentStart: hook(QUICK_HOOK_TIMEOUT_S),
+      SubagentStop: hook(QUICK_HOOK_TIMEOUT_S),
       PermissionRequest: hook(PERMISSION_HOOK_TIMEOUT_S),
     },
   };

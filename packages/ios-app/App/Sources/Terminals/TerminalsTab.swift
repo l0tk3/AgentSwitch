@@ -223,6 +223,16 @@ struct TerminalsTab: View {
                     Button { path.append(TerminalRoute.terminal(t)) } label: { terminalRow(t, last: i == rows - 1, nested: nested) }
                         .buttonStyle(.plain)
                         .modifier(stepIn(base + 1 + i, under: group.cwd, parent))
+                    // Its sub-agents, one level under it; a tap opens the terminal.
+                    if t.isRunning {
+                        ForEach(Array(t.subagents.enumerated()), id: \.element.id) { k, agent in
+                            Button { path.append(TerminalRoute.terminal(t)) } label: {
+                                SubagentRow(agent: agent, underLast: i == rows - 1, last: k == t.subagents.count - 1, nested: nested)
+                            }
+                            .buttonStyle(.plain)
+                            .modifier(stepIn(base + 1 + i, under: group.cwd, parent))
+                        }
+                    }
                 }
                 ForEach(Array(sessions.enumerated()), id: \.element.id) { i, s in
                     let index = group.terminals.count + i
@@ -405,6 +415,31 @@ private struct TreeLine: View {
 
     var body: some View {
         Text("\(nested ? "  " : "")\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+    }
+}
+
+/// A terminal's sub-agent at work, one level under it (docs/terminal-v0.md §1): what it was sent to do and what it is
+/// doing now, its kind at the end; the spinner while it works.
+private struct SubagentRow: View {
+    let agent: TerminalSubagent
+    /// Its terminal is the folder's last row: no line runs on under it.
+    let underLast: Bool
+    let last: Bool
+    let nested: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("\(nested ? "  " : "")\(underLast ? "  " : "│ ")\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+            BrailleSpinner()
+            (Text(agent.name).foregroundStyle(.secondary) + Text(agent.doing.isEmpty ? "" : "  \(agent.doing)").foregroundStyle(.tertiary))
+                .font(.footnote).lineLimit(1)
+            Spacer(minLength: 6)
+            Text(agent.type).mono(10).foregroundStyle(.tertiary).lineLimit(1)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("子代理 \(agent.name)，\(agent.type)\(agent.doing.isEmpty ? "" : "，\(agent.doing)")")
     }
 }
 

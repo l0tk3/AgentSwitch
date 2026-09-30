@@ -89,6 +89,15 @@ export function liveSnapshot(store: Store, terminals: TerminalHost | undefined, 
   return { rows, running: rows.length - waiting, waiting, ended: ends, open, now };
 }
 
+/** What a terminal's sub-agent is doing, as the Live Activity says a step (`运行 git diff`); its kind before its first
+ *  tool call. */
+export function subagentDoing(activity: { readonly tool: string; readonly target: string } | null, cwd: string): string {
+  if (!activity) return "";
+  // A file in the terminal's folder by its path from there: the row is short.
+  const target = activity.target.startsWith(`${cwd}/`) ? activity.target.slice(cwd.length + 1) : activity.target;
+  return clip(readable(toolPhrase(activity.tool, tilde(target))), STEP_CHARS);
+}
+
 export function waitsForYou(t: TerminalInfo): boolean {
   return t.status !== "exited" && (t.status === "waiting" || t.permissions.length > 0);
 }
