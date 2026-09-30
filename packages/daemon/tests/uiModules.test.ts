@@ -24,7 +24,7 @@ describe("ui modules evaluate", () => {
   });
 
   it("every view exports render and bindings", async () => {
-    for (const f of files.filter((f) => f.startsWith("views/") && !f.endsWith("quota.js"))) {   // quota.js is a panel helper, not a view
+    for (const f of files.filter((f) => f.startsWith("views/"))) {
       const mod = (await import(join(UI, f))) as { render?: unknown; bindings?: unknown };
       expect(typeof mod.render, f).toBe("function");
       expect(Array.isArray(mod.bindings), f).toBe(true);
