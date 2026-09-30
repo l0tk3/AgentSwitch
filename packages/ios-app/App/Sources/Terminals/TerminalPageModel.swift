@@ -183,6 +183,26 @@ final class TerminalPageModel {
         }
     }
 
+    /// Pictures for the agent (the photo button): made small and upright on the phone (no location leaves it), sent to
+    /// the Mac, their paths pasted into the prompt; the reply is still to write and send.
+    func attach(_ files: [UploadFile]) async -> Bool {
+        let prepared = files.compactMap(ImagePrep.prepare)
+        guard let api, !prepared.isEmpty else { return false }
+        sending = true
+        defer { sending = false }
+        claimSize()
+        do {
+            let staged = try await api.upload(prepared)
+            let attached = try await api.attachToTerminal(id, uploads: staged.map(\.id))
+            sealedNote = attached.count == 1 ? "1 image attached" : "\(attached.count) images attached"
+            error = nil
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
     /// Notches from a drag, sent together every 50 ms (at most 20 at a time) instead of one request each.
     func wheel(up: Bool, count: Int) {
         guard api != nil, status != .exited else { return }

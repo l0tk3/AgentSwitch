@@ -46,6 +46,19 @@ export class Uploads {
     return { name, size: statSync(join(dir, name)).size };
   }
 
+  /** Move staged uploads into `dir` under names without spaces (a path typed into a terminal stays one word); every
+   *  id must exist (checked before anything moves). The paths returned are absolute. */
+  moveToDir(ids: readonly string[], dir: string): Attachment[] {
+    const found = ids.map((id) => ({ id, ...this.staged(id) }));
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    return found.map(({ id, name, size }) => {
+      const target = freeName(dir, name.replace(/\s+/g, "-"));
+      renameSync(join(this.dir, id, name), join(dir, target));
+      rmSync(join(this.dir, id), { recursive: true, force: true });
+      return { name: target, path: join(dir, target), size, type: contentType(target) };
+    });
+  }
+
   /** Move staged uploads into <cwd>/in/; every id must exist (checked before anything moves). */
   moveInto(ids: readonly string[], cwd: string): Attachment[] {
     const found = ids.map((id) => ({ id, ...this.staged(id) }));

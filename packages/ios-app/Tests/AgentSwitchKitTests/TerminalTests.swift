@@ -97,6 +97,22 @@ final class TerminalTests: XCTestCase {
         XCTAssertFalse(transport.paths.contains { $0.hasSuffix("/write") })
     }
 
+    /// 2026-09-30, user: 手机上不能直接发图.
+    func testPicturesAreStagedThenPutInTheTerminal() async throws {
+        let transport = FakeTransport { req, _ in
+            let reply = req.url?.path == "/uploads" ? #"{"files":[{"id":"abc123def456","name":"photo-1.jpg","size":4,"type":"image/jpeg"}]}"#
+                : #"{"files":[{"name":"photo-1.jpg","path":"/var/folders/x/T/agentswitch-attach/t1/photo-1.jpg","size":4,"type":"image/jpeg"}]}"#
+            return (Data(reply.utf8), httpResponse(req.url))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let staged = try await api.upload([UploadFile(name: "photo-1.jpg", type: "image/jpeg", data: Data([1, 2, 3, 4]))])
+        let files = try await api.attachToTerminal("t1", uploads: staged.map(\.id))
+        XCTAssertEqual(files, [AttachedFile(name: "photo-1.jpg", path: "/var/folders/x/T/agentswitch-attach/t1/photo-1.jpg")])
+        XCTAssertEqual(transport.paths, ["/uploads", "/terminals/t1/attach"])
+        let body = try XCTUnwrap(transport.requests[1].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: [String]] })
+        XCTAssertEqual(body["uploads"], ["abc123def456"])
+    }
+
     func testStreamResumesAfterTheLastSeqAndEndsWhenRemoved() async throws {
         let frames = [
             "event: snapshot\ndata: {\"type\":\"snapshot\",\"seq\":5,\"cols\":40,\"rows\":10,\"data\":\"a\"}\n\n",

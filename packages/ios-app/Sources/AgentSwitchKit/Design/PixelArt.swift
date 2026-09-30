@@ -46,6 +46,8 @@ public enum PixelArt {
     public static let square = ["####", "####", "####", "####"]
     public static let hollow = ["####", "#..#", "#..#", "####"]
     public static let lock = [".###.", "#...#", "#####", "##.##", "#####"]
+    /// A picture (a frame, a hill, the sun): the terminal reply box's photo button.
+    public static let picture = ["#######", "#....##", "#.....#", "#..#..#", "#.###.#", "#######"]
     /// Each agent's mark, from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π.
     public static let agents: [String: [String]] = LiveArt.agents
     /// The terminals tab and window: a framed terminal (">_" alone means Codex).

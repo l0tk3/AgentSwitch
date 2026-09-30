@@ -14,6 +14,19 @@ private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int }
 private struct DecisionBody: Encodable { let decision: String }
 private struct RenameBody: Encodable { let name: String? }
+private struct AttachBody: Encodable { let uploads: [String] }
+private struct AttachReply: Decodable { let files: [AttachedFile] }
+
+/// A file put in a terminal (`POST /terminals/:id/attach`): where it went on the Mac.
+public struct AttachedFile: Decodable, Sendable, Equatable {
+    public let name: String
+    public let path: String
+
+    public init(name: String, path: String) {
+        self.name = name
+        self.path = path
+    }
+}
 
 extension AgentSwitchAPI {
     public func terminals() async throws -> TerminalList { try await get(["terminals"]) }
@@ -47,6 +60,13 @@ extension AgentSwitchAPI {
     public func sendTerminalInput(_ id: String, text: String, submit: Bool = true, sealed: Bool = true) async throws -> TerminalInputResult {
         try await send("POST", ["terminals", id, "input"], body: InputBody(text: text, submit: submit, seal: sealed),
                        timeout: sealed ? Self.createTaskTimeout : requestTimeout)
+    }
+
+    /// Files staged with `upload` into the terminal: their paths are pasted into the agent's prompt, nothing is sent
+    /// (Claude Code shows an image's as [Image #n]; the user writes on and sends).
+    public func attachToTerminal(_ id: String, uploads: [String]) async throws -> [AttachedFile] {
+        let reply: AttachReply = try await send("POST", ["terminals", id, "attach"], body: AttachBody(uploads: uploads), timeout: requestTimeout)
+        return reply.files
     }
 
     /// The slash commands this terminal's agent takes in its folder; nil from a Mac too old to say (404).

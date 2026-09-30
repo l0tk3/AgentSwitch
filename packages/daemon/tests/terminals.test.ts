@@ -372,6 +372,29 @@ describe("terminals over HTTP", () => {
     expect((await call("GET", `/terminals/${id}`)).status).toBe(404);
   });
 
+  it("attaches a file: staged, moved out of the project, its path pasted into the prompt without sending; gone with the terminal", async () => {
+    const { base, token, call } = await start();
+    const created = await call("POST", "/terminals", { harness: "claude-code", cwd: tmpdir() });
+    const id = created.json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    await until(() => screen().includes("fake agent ready"));
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }), "my shot.png");
+    const staged = await (await fetch(`${base}/uploads`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form })).json() as { files: { id: string }[] };
+    expect((await call("POST", `/terminals/${id}/attach`, { uploads: ["nope-nope-nop"] })).status).toBe(400);
+    const attached = await call("POST", `/terminals/${id}/attach`, { uploads: [staged.files[0]!.id] });
+    expect(attached.status).toBe(200);
+    const file = attached.json.files[0] as { name: string; path: string };
+    expect(file.name).toBe("my-shot.png");
+    expect(file.path).toBe(join(tmpdir(), "agentswitch-attach", id, "my-shot.png"));
+    expect(existsSync(file.path)).toBe(true);
+    await until(() => screen().includes("my-shot.png"));
+    expect(screen()).not.toContain("got: ");   // pasted, not sent
+    expect((await call("DELETE", `/terminals/${id}`)).status).toBe(200);
+    expect(existsSync(join(tmpdir(), "agentswitch-attach", id))).toBe(false);
+  });
+
   it("a terminal opens in any folder, the home folder too, and reads the local token; tasks keep their rules (2026-09-30)", async () => {
     const { home, call, daemon } = await start();
     const created = await call("POST", "/terminals", { harness: "claude-code", cwd: "~" });

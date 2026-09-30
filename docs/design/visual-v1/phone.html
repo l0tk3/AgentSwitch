@@ -188,6 +188,7 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .composer .hd, .composer .ft { display: none; }
 .composer .rowc { display: flex; gap: 8px; align-items: flex-end; }
 .sqbtn { flex: none; width: 44px; height: 42px; display: grid; place-items: center; background: none; border: 1px solid var(--ink4); cursor: pointer; color: var(--signal); }
+.sqbtn.pic { color: var(--ink2); }
 .sqbtn.go { background: var(--ink); color: var(--bg); border-color: var(--ink); font: 700 18px var(--mono); }
 .sqbtn.go:disabled { background: none; color: var(--ink3); border-color: var(--ink4); cursor: default; }
 .sqbtn:active { background: var(--signal); }
@@ -302,6 +303,8 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 const glitch = (el) => P.glitch(el);
 const TERM_WIN = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"];
 const LOCK = [".###.", "#...#", "#####", "##.##", "#####"];
+/** A picture (a frame, a hill, the sun): the reply box's photo button (2026-09-30). */
+const PIC = ["#######", "#....##", "#.....#", "#..#..#", "#.###.#", "#######"];
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 document.getElementById("brand").innerHTML = P.mark({ px: 2, state: "idle", depth: true });
 
@@ -665,7 +668,7 @@ function p3controls() {
     <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="hide keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key">${k}</button>`).join("")}</div>
     <div class="composer ${sealed ? "sealed" : ""}" id="p3comp">
       <div class="hd">${P.sprite(LOCK, { px: 2 })}<span>sealed → ${esc(tname)}</span><span class="sp"></span><button type="button" data-x="unseal" aria-label="cancel">×</button></div>
-      <div class="rowc"><button type="button" class="sqbtn lock" data-x="seal" aria-label="sealed reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="send">↑</button></div>
+      <div class="rowc">${sealed ? "" : `<button type="button" class="sqbtn pic" data-x="pic" aria-label="picture">${P.sprite(PIC, { px: 3 })}</button>`}<button type="button" class="sqbtn lock" data-x="seal" aria-label="sealed reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="send">↑</button></div>
       <div class="ft"><span>凭据在 Mac 上换成密文后再交给 agent</span><button type="button" class="btn pri" data-x="send" ${canSend ? "" : "disabled"}>[ send ]</button></div>
     </div>
     ${note ? `<div class="mono" style="padding:0 16px 8px;font-size:11px;color:var(--ink2)">${note}</div>` : ""}`;
@@ -684,11 +687,13 @@ function type(k) {
   else { text += shift ? k.toUpperCase() : k; shift = false; }
   p3controls();
 }
+let pictures = 0;
 function send(asTyped = false) {
   if (exited || !text.trim()) return;
   if (!sealed && !asTyped && secretish(text)) { askSecret(); return; }
   const sealedCount = sealed && secretish(text) ? 1 : 0;
-  const shown = sealedCount ? text.replace(/(\S+)$/, "🔒") : text;
+  const shown = (pictures ? `[Image #1] ` : "") + (sealedCount ? text.replace(/(\S+)$/, "🔒") : text);
+  pictures = 0;
   lines.push(`<span class="c-dim">&gt; ${esc(shown)}</span>`, ``, `<span class="c-grn">●</span> 好的。`, ``);
   offset = 0; text = "";
   note = sealed ? (sealedCount ? "1 secret sealed" : null) : null;
@@ -725,6 +730,8 @@ p3.addEventListener("click", (e) => {
   if (x === "hide") { kbUp = false; typing = false; p3controls(); return; }
   if (x === "seal" || x === "unseal") { toggleSeal(); return; }
   if (x === "send") { send(); return; }
+  // The photo button: the picture goes to the Mac and its path into the agent's prompt ([Image #1] in Claude Code).
+  if (x === "pic") { pictures = 1; note = "1 image attached"; p3controls(); return; }
   if (e.target.closest("#p3field")) { typing = true; kbUp = true; p3controls(); }
 });
 // A typing keyboard on a computer works too, while the reply box has the focus.

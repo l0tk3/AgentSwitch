@@ -4,7 +4,8 @@
 
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { homedir } from "node:os";
+import { rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { remoteCaller } from "../core/caller.js";
@@ -33,11 +34,14 @@ export type Terminals = {
   readonly elsewhere: ElsewhereCheck;
   /** What each agent offers today for the model menu (its own list); the catalog stands in for an agent not asked. */
   readonly offers?: () => Offers;
+  /** Where a terminal's attached files go (`<dir>/<id>/`); default the system's temporary folder (no spaces). */
+  readonly attachDir?: string;
   /** Before an agent starts (Codex: its hooks trusted, codexHooks.ts); whatever happens, the start goes on. */
   readonly prepare?: (harness: TerminalHarness) => Promise<unknown>;
 };
 
 const MAX_INPUT = 20_000;
+const Attach = z.object({ uploads: z.array(z.string().min(1).max(64)).min(1).max(10) });
 const Size = { cols: z.number().int().min(20).max(500), rows: z.number().int().min(5).max(300) };
 /** A model id goes to the agent as `--model <id>`: never one that could read as a flag. */
 const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not a model id");
@@ -83,6 +87,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   if (!t) return;
   const { host, audit, agents } = t;
   const via = (c: Context): string => remoteCaller(c.env)?.deviceId ?? "local";
+  const attachDir = (id: string): string => join(t.attachDir ?? join(tmpdir(), "agentswitch-attach"), id);
   const failed = (c: Context, err: unknown) => {
     if (err instanceof TerminalError) return c.json({ error: err.message }, STATUS[err.code]);
     throw err;
@@ -230,6 +235,26 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     return c.json({ ok: true, sealed });
   });
 
+  // Files for the agent (docs/terminal-v0.md §4; the phone's picture button): staged with POST /uploads, moved out of the
+  // project into a folder of this terminal's own, their paths pasted into the agent's prompt as a file dragged into a
+  // Mac terminal is (Claude Code turns an image's into [Image #n]). Nothing is sent: the user writes on and sends.
+  app.post("/terminals/:id/attach", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseBody(c, Attach);
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    const info = host.get(id);
+    if (!info) return c.json({ error: "not found" }, 404);
+    if (info.status === "exited") return c.json({ error: `terminal ${id} has ended` }, 409);
+    let files;
+    try { files = deps.uploads.moveToDir(body.data.uploads, attachDir(id)); }
+    catch (err) { return c.json({ error: (err as Error).message }, 400); }
+    try {
+      host.write(id, replyBytes(`${files.map((f) => f.path).join(" ")} `, host.bracketedPaste(id), false));
+    } catch (err) { return failed(c, err); }
+    audit.record({ terminal: id, action: "attach", via: via(c), detail: { count: files.length, bytes: files.reduce((n, f) => n + f.size, 0) } });
+    return c.json({ files });
+  });
+
   // What `/` offers on the phone: the agent's slash commands in the terminal's folder (read afresh: a command file
   // written a moment ago is there).
   app.get("/terminals/:id/commands", (c) => {
@@ -315,6 +340,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       const own = transcript && before ? host.ownSession(id) : null;
       if (own) await host.stopped(id);
       const info = host.remove(id);
+      rmSync(attachDir(id), { recursive: true, force: true });
       const removed = own ? deleteTranscript(info.harness, own) : [];
       audit.record({ terminal: id, action: "delete", via: via(c), detail: { transcript: removed.length } });
       return c.json({ ok: true, transcriptFiles: removed.length });

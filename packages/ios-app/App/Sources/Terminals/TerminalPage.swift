@@ -1,4 +1,5 @@
 import AgentSwitchKit
+import PhotosUI
 import SwiftUI
 
 /// One terminal on the phone (docs/terminal-v0.md §1): the live screen (drag to scroll — the wheel notches sent show at
@@ -18,6 +19,8 @@ struct TerminalPage: View {
     @State private var confirmClose = false
     /// The sealed box is open (the lock): the reply goes through the sealer.
     @State private var sealing = false
+    /// Photos picked for the agent (the photo button), sent as soon as they are chosen.
+    @State private var photoItems: [PhotosPickerItem] = []
     /// A direct reply that looks like it holds a secret, asked about before it goes.
     @State private var secretCheck: String?
     @FocusState private var replying: Bool
@@ -243,6 +246,18 @@ struct TerminalPage: View {
             }
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 if !sealing {
+                    // Pictures for the agent: their paths go into its prompt (Claude Code: [Image #n]); write on and send.
+                    PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) {
+                        PixelSprite(rows: PixelArt.picture, pixel: 3, color: Theme.ink.opacity(0.72))
+                    }
+                    .buttonStyle(SquareIconButtonStyle(active: false))
+                    .disabled(page.sending || page.status == .exited)
+                    .accessibilityLabel("picture")
+                    .onChange(of: photoItems) { _, items in
+                        guard !items.isEmpty else { return }
+                        photoItems = []
+                        Task { _ = await page.attach(await Self.load(items)) }
+                    }
                     Button { toggleSealing() } label: { PixelSprite(rows: PixelArt.lock, pixel: 3, color: Theme.signal) }
                         .buttonStyle(SquareIconButtonStyle(active: false))
                         .accessibilityLabel("sealed reply")
@@ -287,6 +302,17 @@ struct TerminalPage: View {
         .padding(.leading, sealing ? Theme.Space.l : 0)
         .padding(.trailing, sealing ? Theme.Space.l + 6 : 0)
         .padding(.bottom, sealing ? Theme.Space.m + 6 : Theme.Space.s)
+    }
+
+    /// Photos as their original bytes (HEIC or JPEG); the model shrinks and re-encodes them (ImagePrep).
+    private static func load(_ items: [PhotosPickerItem]) async -> [UploadFile] {
+        var files: [UploadFile] = []
+        for (i, item) in items.enumerated() {
+            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+            let type = item.supportedContentTypes.first { $0.conforms(to: .image) } ?? .jpeg
+            files.append(UploadFile(name: "photo-\(i + 1).\(type.preferredFilenameExtension ?? "jpg")", type: type.preferredMIMEType ?? "image/jpeg", data: data))
+        }
+        return files
     }
 
     /// Between the two ways; the keyboard stays as it was.

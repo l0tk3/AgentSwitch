@@ -46,6 +46,9 @@ enum TerminalProbe {
             try? await Task.sleep(for: .milliseconds(300))
             key("d", 2); key("e", 14); key("f", 3)
             try? await Task.sleep(for: .seconds(2))
+            // Wide characters beside ASCII (the phone drew them far apart, 2026-09-30).
+            screen.note("接口确认齐全。跟随其他屏幕尺寸变化时 resize abc 你好")
+            try? await Task.sleep(for: .milliseconds(300))
             say("first responder \(window.firstResponder.map { String(describing: type(of: $0)) } ?? "-")")
             let t = screen.view.getTerminal()
             var lines: [String] = []
