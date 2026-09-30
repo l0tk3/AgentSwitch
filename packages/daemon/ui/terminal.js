@@ -395,16 +395,19 @@ function fitAndTell() {
   }
 }
 new ResizeObserver(() => { clearTimeout(fitAndTell.t); fitAndTell.t = setTimeout(fitAndTell, 80); }).observe($("stage"));
-// One size for one terminal (terminal-v0 §1 "尺寸有主"): the service keeps whose it is. This page takes it when the user
-// acts here — opens the terminal, comes back to the tab, types, clicks —, and only the owner sends its size as its
-// layout changes; another screen's size shows the placeholder. In the Mac window the native screen is the one that
-// draws and owns: it tells the page where the terminal is in use, and the page draws the placeholder over it.
+// One size for one terminal (terminal-v0 §1 "尺寸有主"): the service keeps whose it is. Typing, clicking, the
+// placeholder's [ take over ] take it here; opening the terminal or coming back to the tab only when nobody has it (in use
+// elsewhere, the placeholder says where). Only the owner sends its size as its layout changes. In the Mac window the
+// native screen is the one that draws and owns: it tells the page where the terminal is in use, and the page draws the
+// placeholder over it.
 const SCREEN = `web-${Math.random().toString(36).slice(2, 10)}`;
 let sizeOwner = null;      // who has the current terminal's size (its stream says)
+let claimOnConnect = false;   // just opened here in use: taken once the stream says nobody has it
 const mine = () => sizeOwner === SCREEN;
 let nativeActive = null;   // the Mac window says when it is the key window (window.agentswitch.active)
 function inUse() { return (nativeActive ?? document.hasFocus()) && !document.hidden; }
-const reclaim = () => { if (NATIVE || !inUse()) return; if (mine()) fitAndTell(); else claim(); };
+/** `active`: the user acts here (a key, a click) and takes it; else only a size nobody has. */
+const reclaim = (active) => () => { if (NATIVE || !inUse()) return; if (mine()) fitAndTell(); else if (active || !sizeOwner) claim(); };
 function claim() {
   if (!current || creating || current.status === "exited") return;
   if (NATIVE) { native.postMessage({ type: "claim" }); return; }
@@ -417,19 +420,21 @@ function claim() {
 }
 const WHERE = { mac: ["on mac", "这个终端正在 Mac 上使用。"], iphone: ["on iphone", "这个终端正在 iPhone 上使用。"], web: ["on web", "这个终端正在浏览器中使用。"] };
 const placeOf = (by) => (by.startsWith("phone") ? "iphone" : by.startsWith("mac") ? "mac" : "web");
-/** The placeholder: glitches in; going (this screen took the size back), glitches once more and the screen is drawn in. */
+/** The placeholder: glitches in; going (this screen took the size back), glitches once more and the screen is drawn in.
+ *  Said again while going (the service confirming the claim), it goes on going. */
 function showAway(place) {
   const el = $("away");
-  clearTimeout(showAway.leaving);
   if (!place) {
     if (el.hidden || !el.dataset.place) return;
     delete el.dataset.place;
     // Not seen (a window behind the others, whose timers WebKit slows): gone at once.
     if (reducedMotion.matches || document.hidden) { el.hidden = true; return; }
     glitch(el.querySelector(".away-box"));
-    showAway.leaving = setTimeout(() => { el.hidden = true; refreshWipe(); }, 450);
+    clearTimeout(showAway.leaving);
+    showAway.leaving = setTimeout(() => { if (!el.dataset.place) { el.hidden = true; refreshWipe(); } }, 450);
     return;
   }
+  clearTimeout(showAway.leaving);
   const [head, line] = WHERE[place] ?? WHERE.web;
   const same = !el.hidden && el.dataset.place === place;
   el.dataset.place = place;
@@ -439,10 +444,10 @@ function showAway(place) {
   if (!same) glitch(el.querySelector(".away-box"));
 }
 $("away").addEventListener("mousedown", (e) => { e.preventDefault(); claim(); focusScreen(); });
-addEventListener("focus", reclaim);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) reclaim(); });
-term.textarea?.addEventListener("keydown", reclaim, true);
-$("screen").addEventListener("mousedown", reclaim, true);
+addEventListener("focus", reclaim(false));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) reclaim(false)(); });
+term.textarea?.addEventListener("keydown", reclaim(true), true);
+$("screen").addEventListener("mousedown", reclaim(true), true);
 
 // ---------- feedback: loading, notices, confirmations ----------
 let loadingTimer = null;
@@ -520,10 +525,10 @@ function select(id, { loading = null } = {}) {
   } else {
     term.reset();
     fit.fit();
-    // Opened here while in use: the size is this page's; else it follows (the snapshot and the stream say whose).
-    const claiming = inUse();
-    if (claiming) sizeOwner = SCREEN;
-    (claiming ? api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows, screen: SCREEN }).catch(() => undefined) : Promise.resolve()).finally(() => follow(id));
+    // Opened here while in use: the size is this page's once the stream says nobody else has it; else it follows and
+    // the placeholder says where it is in use.
+    claimOnConnect = inUse();
+    follow(id);
   }
   render();
   focusScreen();
@@ -565,6 +570,10 @@ function follow(id) {
   });
   on("resize", (ev) => {
     if (NATIVE) return;   // the native screen follows, and says where the terminal is in use
+    if (claimOnConnect) {
+      claimOnConnect = false;
+      if (!ev.by || ev.by === SCREEN) { sizeOwner = ev.by ?? null; return claim(); }
+    }
     sizeOwner = ev.by ?? null;
     if (mine()) return showAway(null);
     // Its owner left (or an older screen that says no name): the screen in use takes it back.

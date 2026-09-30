@@ -43,7 +43,7 @@ struct TerminalPage: View {
                 .screenRefresh(on: page.snapshots, ground: page.ground)
                 .overlay(alignment: .trailing) { if wheeled != 0 { wheelChip } }
                 .overlay { if let place = page.away { awayCover(place) } }
-            if !page.drawn {
+            if !page.drawn && page.away == nil {
                 HStack(spacing: 6) {
                     BrailleSpinner(color: .secondary)
                     Text("connecting").mono(12).foregroundStyle(.secondary)
@@ -178,7 +178,7 @@ struct TerminalPage: View {
                     .padding(.horizontal, 12).padding(.top, 12)
                 HStack {
                     Spacer()
-                    Button("[ continue here ]") { page.claim() }.buttonStyle(SquareButtonStyle(prominent: true))
+                    Button("[ take over ]") { page.claim() }.buttonStyle(SquareButtonStyle(prominent: true))
                 }
                 .padding(12)
             }

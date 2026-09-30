@@ -70,7 +70,7 @@ final class TerminalScreenController: NSObject {
     private var owner: String?
     /// The terminal's size as the service has it: what this screen draws at while another has it.
     private var service: (cols: Int, rows: Int)?
-    /// The terminal was just opened here: the size is taken once its screen is drawn.
+    /// The terminal was just opened here: the size is taken once the stream says nobody else has it.
     private var claimOnConnect = false
     /// A claim on its way: the stream may still say the size is another screen's (what it replays on connecting).
     private var claiming = false
@@ -169,8 +169,12 @@ final class TerminalScreenController: NSObject {
     /// A line of the page's own under the program's output ("1 secret sealed").
     func note(_ text: String) { view.feed(text: "\r\n\u{1b}[2m[\(text)]\u{1b}[0m\r\n") }
 
-    /// The window became the one in use, or the user typed or clicked here: the size is this window's again.
+    /// The user typed or clicked here (the placeholder's [ take over ] too): the size is this window's.
     func userActed() { if !mine { claim() } }
+
+    /// The window came to the front: the size is this window's only when nobody else has it (in use on the phone, the
+    /// placeholder stays until the user takes it over).
+    func windowBecameKey() { if owner == nil, !claimOnConnect { claim() } }
 
     /// Takes the size: the grid this view fits, told to the service with this screen's id (also when it is the same
     /// size: the owner changes); the placeholder goes.
@@ -255,14 +259,9 @@ final class TerminalScreenController: NSObject {
             follow(cols: cols, rows: rows)
             view.feed(text: data)
             lastSeq = seq
-            // Drawn at the size it had. Just opened here: this window's size from now on. Either way the agent draws
-            // again (a snapshot drops what it drew as links): a new size makes it, else it is asked.
-            let before = (terminal.cols, terminal.rows)
-            if claimOnConnect {
-                claimOnConnect = false
-                claim()
-            }
-            if let id, (terminal.cols, terminal.rows) == before {
+            // Drawn at the size it had. Just opened here, the size is decided when the stream says whose it is (next);
+            // else the agent draws again (a snapshot drops what it drew as links).
+            if !claimOnConnect, let id {
                 let c = client()
                 Task { try? await c.redrawTerminal(id: id) }
             }
@@ -272,6 +271,19 @@ final class TerminalScreenController: NSObject {
             lastSeq = seq
         case .resize(let cols, let rows, let by):
             service = (cols, rows)
+            if claimOnConnect {
+                // Just opened here: this window's size unless another screen is in use (then the placeholder says where).
+                claimOnConnect = false
+                if by == nil || by == screenId {
+                    let before = (terminal.cols, terminal.rows)
+                    claim()
+                    if let id, (terminal.cols, terminal.rows) == before {
+                        let c = client()
+                        Task { try? await c.redrawTerminal(id: id) }
+                    }
+                    return
+                }
+            }
             if claiming, by != screenId { return }
             owner = by
             if let by, by != screenId {

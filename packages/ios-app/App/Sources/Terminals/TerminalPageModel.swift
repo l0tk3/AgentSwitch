@@ -5,9 +5,10 @@ import SwiftUI
 
 /// One terminal on the phone (docs/terminal-v0.md §1): its stream drawn into the screen, its status and name, the
 /// permission requests waiting, and what the phone sends — a sealed reply, named keys, a decision. One terminal has one
-/// size ("尺寸有主"): the phone takes it when the user acts here (opens the page, comes back to the app, taps the screen
-/// or the reply box, sends, presses a key), and while it has it the text size and the space set the grid. Another
-/// screen's size shows the placeholder over the frame as it was; taking it back draws the screen afresh.
+/// size ("尺寸有主"): the phone takes it when the user acts here (taps the screen or the reply box, sends, presses a key,
+/// [ take over ]); opening the page or coming back to the app takes it only when no other screen is in use. While it
+/// has it, the text size and the space set the grid. Another screen's size shows the placeholder over the frame as it
+/// was; taking it over draws the screen afresh.
 @MainActor
 @Observable
 final class TerminalPageModel {
@@ -50,8 +51,10 @@ final class TerminalPageModel {
     private(set) var away: String?
     /// Who has the size, as the stream last said (nil: nobody, or not heard yet).
     @ObservationIgnored private var owner: String?
-    /// Just opened or back in front: the size is taken once the screen is drawn.
+    /// Just opened or back in front: the size is taken when the stream says no other screen has it.
     @ObservationIgnored private var claimOnConnect = false
+    /// While that is not known yet, what the stream draws is held (drawn for another screen's width it comes apart here).
+    @ObservationIgnored private var held: [TerminalEvent] = []
     /// A claim on its way: the stream may still say the size is another screen's (what it replays on connecting).
     @ObservationIgnored private var claiming = false
     /// The claim's own request (a layout change's resize does not cancel it).
@@ -151,23 +154,22 @@ final class TerminalPageModel {
     func handle(_ event: TerminalEvent) {
         switch event {
         case .snapshot(_, let cols, let rows, let data):
+            if claimOnConnect { held = [event]; return }
             // Another screen has the size: the frame stays as it was under the placeholder (drawn for that screen's
             // width it would come apart here).
-            if away != nil && !claimOnConnect { return }
+            if away != nil { return }
             screen.snapshot(data)
             drawn = true
             snapshots += 1
             // Drawn at the size it had; at this phone's when it takes or has the size, and the agent draws again (its
             // links and status line are not in a snapshot).
             told = (cols, rows)
-            if claimOnConnect {
-                claimOnConnect = false
-                claim()
-            } else if mine {
+            if mine {
                 let grid = screen.grid
                 tellSize(cols: grid.cols, rows: grid.rows, redraw: true)
             }
         case .output(_, let data):
+            if claimOnConnect { held.append(event); return }
             if away != nil { return }
             screen.output(data)
             drawn = true
@@ -176,6 +178,22 @@ final class TerminalPageModel {
         case .name(let n):
             name = n
         case .resize(_, _, let by):
+            if claimOnConnect {
+                // Opened or back in front: this phone's size unless another screen is in use (the placeholder says where).
+                claimOnConnect = false
+                let drawing = held
+                held = []
+                if by == nil || by == screenId {
+                    owner = by
+                    away = nil
+                    for e in drawing { handle(e) }
+                    claim()
+                } else {
+                    owner = by
+                    away = Self.place(of: by!)
+                }
+                break
+            }
             if claiming, by != screenId { break }
             owner = by
             if let by, by != screenId {

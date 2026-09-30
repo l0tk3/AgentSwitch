@@ -151,8 +151,8 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             keyObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak web, weak screen] _ in
                 MainActor.assumeIsolated {
                     web?.evaluateJavaScript("window.agentswitch?.active(\(on))", completionHandler: nil)
-                    // Brought to the front: the size is this window's (another screen may have had it).
-                    if on { screen?.userActed() }
+                    // Brought to the front: the size is this window's when nobody else has it.
+                    if on { screen?.windowBecameKey() }
                 }
             })
         }

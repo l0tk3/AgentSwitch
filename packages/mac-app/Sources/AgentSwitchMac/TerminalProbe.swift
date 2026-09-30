@@ -91,6 +91,18 @@ enum TerminalProbe {
                 try? await client.resizeTerminal(id: id, cols: 50, rows: 30, screen: "phone-probe")
                 try? await Task.sleep(for: .milliseconds(800))
                 say("phone again: owner \(screen.probeOwner ?? "-") page \(await page())")
+                if let other = UserDefaults.standard.string(forKey: "probeTerminal2") {
+                    // Opening a terminal the phone is using does not take it: the placeholder says where it is in use.
+                    terminals.show(terminal: other)
+                    try? await Task.sleep(for: .milliseconds(2500))
+                    say("other opened: shown \(screen.probeShown ?? "-") owner \(screen.probeOwner ?? "-") page \(await page())")
+                    terminals.show(terminal: id)
+                    try? await Task.sleep(for: .milliseconds(2500))
+                    say("back to the phone's: shown \(screen.probeShown ?? "-") owner \(screen.probeOwner ?? "-") page \(await page())")
+                    terminals.probeWeb?.evaluateJavaScript("document.getElementById('away').dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}))", completionHandler: nil)
+                    try? await Task.sleep(for: .milliseconds(1500))
+                    say("taken over: owner \(screen.probeOwner ?? "-") page \(await page())")
+                }
                 follow.cancel()
                 phone.invalidateAndCancel()
                 try? await Task.sleep(for: .seconds(4.5))
