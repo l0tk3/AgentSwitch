@@ -202,3 +202,35 @@ final class TerminalTreeTests: XCTestCase {
         XCTAssertEqual(nodes.map { $0.groups[0].name }, ["x/app", "y/app"])
     }
 }
+
+/// Pictures and files in a terminal reply (2026-09-30, user: 图片只能插到消息开头……要和 cc 一样给占位符).
+final class TerminalDraftTests: XCTestCase {
+    private let lan = APIEndpoint(host: "192.168.1.5", port: 4713, kind: .lan)
+
+    func testPlaceholdersGoWhereTheCaretIsSpacedAsTyped() {
+        XCTAssertEqual(TerminalDraft.token(image: true, number: 1), "[Image #1]")
+        XCTAssertEqual(TerminalDraft.token(image: false, number: 2), "[File #2]")
+        var r = TerminalDraft.insert(["[Image #1]"], into: "看这张哪里不对", at: 3)
+        XCTAssertEqual(r.text, "看这张 [Image #1] 哪里不对")
+        XCTAssertEqual(r.caret, 15)
+        r = TerminalDraft.insert(["[Image #1]", "[File #2]"], into: "", at: nil)
+        XCTAssertEqual(r.text, "[Image #1] [File #2] ")
+        r = TerminalDraft.insert(["[Image #3]"], into: "a b", at: 1)
+        XCTAssertEqual(r.text, "a [Image #3] b", "the space already there is not doubled")
+        XCTAssertEqual(TerminalDraft.remove("[Image #1]", from: "看这张 [Image #1] 哪里不对"), "看这张 哪里不对")
+    }
+
+    func testTheReplyCarriesWhereEachFileGoes() async throws {
+        let transport = FakeTransport { req, _ in (Data(#"{"ok":true,"sealed":0,"attached":1}"#.utf8), httpResponse(req.url)) }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let result = try await api.sendTerminalInput("t1", text: "看 [Image #1] 这里", sealed: false,
+                                                     attachments: [TerminalAttachmentRef(token: "[Image #1]", upload: "abc123def456")])
+        XCTAssertEqual(result.attached, 1)
+        let body = try XCTUnwrap(transport.requests.first?.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual((body["attachments"] as? [[String: String]])?.first, ["token": "[Image #1]", "upload": "abc123def456"])
+        // Without files the body is as before (an older Mac is not asked for what it does not know).
+        _ = try await api.sendTerminalInput("t1", text: "hi", sealed: false)
+        let plain = try XCTUnwrap(transport.requests.last?.httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertNil(plain["attachments"])
+    }
+}

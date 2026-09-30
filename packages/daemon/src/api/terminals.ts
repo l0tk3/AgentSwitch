@@ -49,7 +49,14 @@ const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not
 const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a session id");
 const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), model: ModelId.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
-const Input = z.object({ text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true), seal: z.boolean().default(true) });
+/** `attachments`: files staged with POST /uploads, each where its placeholder stands in `text` (terminal-v0 §4). */
+const Input = z.object({
+  text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true), seal: z.boolean().default(true),
+  attachments: z.array(z.object({ token: z.string().regex(/^\[(Image|File) #\d{1,3}\]$/), upload: z.string().min(1).max(64) })).max(10).default([]),
+});
+/** Between the pastes of one reply: the agent takes each (Claude Code reads an image's path) before the next. */
+const PASTE_GAP_MS = 150;
+const SUBMIT_AFTER_FILES_MS = 400;
 const Keys = z.object({ keys: z.array(z.union([z.enum(KEY_NAMES), z.string().regex(CLICK).transform((k) => k as KeyName)])).min(1).max(20) });
 /** `screen`: the asking screen's own id, which then owns the size (terminal-v0 §1). */
 const SCREEN_ID = /^[\w-]{1,64}$/;
@@ -233,11 +240,35 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       text = r.text;
       sealed = r.sealed.length;
     }
+    // The placeholders in the text that have a file, in order: the text is pasted between them, each file's path on its
+    // own (as a file dragged into a Mac terminal), then Enter.
+    const byToken = new Map(body.data.attachments.map((a) => [a.token, a.upload]));
+    const pieces = byToken.size ? text.split(/(\[(?:Image|File) #\d{1,3}\])/) : [text];
+    const used = [...new Set(pieces.filter((p) => byToken.has(p)))];
+    let files: { name: string; path: string; size: number }[] = [];
+    if (used.length) {
+      try { files = deps.uploads.moveToDir(used.map((t) => byToken.get(t)!), attachDir(id)); }
+      catch (err) { return c.json({ error: (err as Error).message }, 400); }
+    }
+    const path = new Map(used.map((t, i) => [t, files[i]!.path]));
     try {
-      host.write(id, replyBytes(text, host.bracketedPaste(id), body.data.submit));
+      const bracketed = host.bracketedPaste(id);
+      if (!files.length) {
+        host.write(id, replyBytes(text, bracketed, body.data.submit));
+      } else {
+        for (const piece of pieces) {
+          if (!piece) continue;
+          host.write(id, replyBytes(path.get(piece) ?? piece, bracketed, false));
+          await new Promise((r) => setTimeout(r, PASTE_GAP_MS));
+        }
+        if (body.data.submit) {
+          await new Promise((r) => setTimeout(r, SUBMIT_AFTER_FILES_MS));
+          host.write(id, "\r");
+        }
+      }
     } catch (err) { return failed(c, err); }
-    audit.record({ terminal: id, action: "input", via: via(c), detail: { length: body.data.text.length, sealed, direct: !body.data.seal } });
-    return c.json({ ok: true, sealed });
+    audit.record({ terminal: id, action: "input", via: via(c), detail: { length: body.data.text.length, sealed, direct: !body.data.seal, files: files.length, bytes: files.reduce((n, f) => n + f.size, 0) } });
+    return c.json({ ok: true, sealed, attached: files.length });
   });
 
   // Files for the agent (docs/terminal-v0.md §4; the phone's picture button): staged with POST /uploads, moved out of the

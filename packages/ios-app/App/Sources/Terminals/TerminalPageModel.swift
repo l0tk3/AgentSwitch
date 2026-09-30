@@ -296,16 +296,27 @@ final class TerminalPageModel {
 
     // MARK: sending
 
-    /// A reply, pasted in and entered: as typed, or sealed on the Mac first (credentials become ciphertext).
+    /// A reply, pasted in and entered: as typed, or sealed on the Mac first (credentials become ciphertext). Its files go
+    /// where their placeholders stand: sent to the Mac first, then the reply says where each goes.
     func send(_ text: String, sealed: Bool) async -> Bool {
         guard let api, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         sending = true
         defer { sending = false }
         userActed()
+        let files = draftFiles.filter { text.contains($0.token) }
         do {
-            let result = try await api.sendTerminalInput(id, text: text, sealed: sealed)
-            sealedNote = result.sealed == 0 ? nil : result.sealed == 1 ? "1 secret sealed" : "\(result.sealed) secrets sealed"
-            error = nil
+            var refs: [TerminalAttachmentRef] = []
+            if !files.isEmpty {
+                let staged = try await api.upload(files.map(\.file))
+                refs = zip(files, staged).map { TerminalAttachmentRef(token: $0.token, upload: $1.id) }
+            }
+            let result = try await api.sendTerminalInput(id, text: text, sealed: sealed, attachments: refs)
+            draftFiles = []
+            var notes: [String] = []
+            if result.sealed > 0 { notes.append(result.sealed == 1 ? "1 secret sealed" : "\(result.sealed) secrets sealed") }
+            if let attached = result.attached, attached > 0 { notes.append(attached == 1 ? "1 file attached" : "\(attached) files attached") }
+            sealedNote = notes.isEmpty ? nil : notes.joined(separator: " · ")
+            error = refs.isEmpty || result.attached != nil ? nil : "此 Mac 上的 AgentSwitch 版本不支持在回复里带图片和文件（占位符按文字发出了），请先更新。"
             return true
         } catch {
             self.error = error.localizedDescription
@@ -313,26 +324,43 @@ final class TerminalPageModel {
         }
     }
 
-    /// Pictures for the agent (the photo button): made small and upright on the phone (no location leaves it), sent to
-    /// the Mac, their paths pasted into the prompt; the reply is still to write and send.
-    func attach(_ files: [UploadFile]) async -> Bool {
-        let prepared = files.compactMap(ImagePrep.prepare)
-        guard let api, !prepared.isEmpty else { return false }
-        sending = true
-        defer { sending = false }
-        userActed()
-        do {
-            let staged = try await api.upload(prepared)
-            let attached = try await api.attachToTerminal(id, uploads: staged.map(\.id))
-            let word = prepared.allSatisfy(ImagePrep.isImage) ? "image" : "file"
-            sealedNote = attached.count == 1 ? "1 \(word) attached" : "\(attached.count) \(word)s attached"
-            error = nil
-            return true
-        } catch {
-            self.error = error.localizedDescription
-            return false
-        }
+    // MARK: files in the reply
+
+    /// A picture or file for the next reply (docs/terminal-v0.md §4): it stands in the reply box as its placeholder,
+    /// where the user put it, and goes there when the reply is sent — as Claude Code shows `[Image #1]`.
+    struct DraftFile: Identifiable, Equatable {
+        let id = UUID()
+        let token: String
+        let number: Int
+        let isImage: Bool
+        let name: String
+        let thumbnail: UIImage?
+        let file: UploadFile
     }
+
+    /// The files of the reply being written, in the order they were added.
+    private(set) var draftFiles: [DraftFile] = []
+
+    /// Pictures and files picked (made small and upright on the phone, no location leaves it): kept for the reply;
+    /// their placeholders, to put in the box.
+    func addDraftFiles(_ files: [UploadFile]) -> [String] {
+        var tokens: [String] = []
+        for file in files {
+            guard let prepared = ImagePrep.prepare(file) else { continue }
+            let image = ImagePrep.isImage(prepared)
+            let number = (draftFiles.map(\.number).max() ?? 0) + 1
+            let token = TerminalDraft.token(image: image, number: number)
+            let thumbnail = image ? UIImage(data: prepared.data)?.preparingThumbnail(of: CGSize(width: 96, height: 96)) : nil
+            draftFiles.append(DraftFile(token: token, number: number, isImage: image, name: prepared.name, thumbnail: thumbnail, file: prepared))
+            tokens.append(token)
+        }
+        return tokens
+    }
+
+    func removeDraftFile(_ file: DraftFile) { draftFiles.removeAll { $0.id == file.id } }
+
+    /// A placeholder deleted from the box: its file goes too.
+    func keepDraftFiles(in text: String) { draftFiles.removeAll { !text.contains($0.token) } }
 
     /// Notches from a drag, sent together every 50 ms (at most 20 at a time) instead of one request each.
     func wheel(up: Bool, count: Int) {

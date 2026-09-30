@@ -171,6 +171,12 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .wheel { position: absolute; right: 8px; top: 40%; background: #000; border: 1px solid #e9e6df; color: #e9e6df; font: 11px var(--mono); padding: 2px 6px; z-index: 5; opacity: 0; }
 .wheel.on { opacity: 1; }
 .perm { left: 12px; right: 18px; top: 10px; }
+/* the reply's files, above the box: the picture, its number as its placeholder says, × to take it out */
+.drafts { display: flex; gap: 10px; padding: 10px 16px 2px; }
+.draft { position: relative; display: flex; flex-direction: column; gap: 2px; font: 10px var(--mono); color: var(--ink3); }
+.draft i { width: 44px; height: 44px; border: 1px solid var(--line, #3a3a3a); background: linear-gradient(135deg, #c9d7b4, #7f9b6a); }
+.draft em { font-style: normal; }
+.draft b { position: absolute; top: -6px; left: 36px; width: 16px; height: 16px; display: grid; place-items: center; background: var(--ink); color: var(--bg); font-weight: 400; cursor: pointer; }
 /* in use on the Mac: the last frame under the 50% dither (not available here), a box saying where it is */
 .term.away .lines, .term.away .fixed { opacity: .5; -webkit-mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
 .awaybox { left: 28px; right: 34px; top: 38%; cursor: default; }
@@ -671,6 +677,7 @@ function p3controls() {
     <div class="dots"></div>
     ${err ? `<div class="err" id="p3err"><span>${esc(err)}</span><button type="button" data-x="err" aria-label="dismiss">×</button></div>` : ""}
     <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="hide keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key">${k}</button>`).join("")}</div>
+    ${drafts.length ? `<div class="drafts">${drafts.map((n) => `<span class="draft"><i></i><em>#${n}</em><b data-draft="${n}" aria-label="remove">×</b></span>`).join("")}</div>` : ""}
     <div class="composer ${sealed ? "sealed" : ""}" id="p3comp">
       <div class="hd">${P.sprite(LOCK, { px: 2 })}<span>sealed → ${esc(tname)}</span><span class="sp"></span><button type="button" data-x="unseal" aria-label="cancel">×</button></div>
       <div class="rowc">${sealed ? "" : `<button type="button" class="sqbtn pic" data-x="pic" aria-label="attach">+</button>`}<button type="button" class="sqbtn lock" data-x="seal" aria-label="sealed reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="send">↑</button></div>
@@ -693,15 +700,18 @@ function type(k) {
   p3controls();
 }
 let pictures = 0;
+let drafts = [];
 function send(asTyped = false) {
   if (exited || !text.trim()) return;
   if (!sealed && !asTyped && secretish(text)) { askSecret(); return; }
   const sealedCount = sealed && secretish(text) ? 1 : 0;
-  const shown = (pictures ? `[Image #1] ` : "") + (sealedCount ? text.replace(/(\S+)$/, "🔒") : text);
-  pictures = 0;
+  // The placeholders go as typed: each file where it stands (the agent shows its own [Image #n]).
+  const shown = sealedCount ? text.replace(/(\S+)$/, "🔒") : text;
+  note = drafts.length ? (drafts.length === 1 ? "1 file attached" : `${drafts.length} files attached`) : null;
+  pictures = 0; drafts = [];
   lines.push(`<span class="c-dim">&gt; ${esc(shown)}</span>`, ``, `<span class="c-grn">●</span> 好的。`, ``);
   offset = 0; text = "";
-  note = sealed ? (sealedCount ? "1 secret sealed" : null) : null;
+  if (sealed && sealedCount) note = "1 secret sealed";
   if (sealed) sealed = false;
   p3controls();
 }
@@ -736,8 +746,11 @@ p3.addEventListener("click", (e) => {
   if (x === "seal" || x === "unseal") { toggleSeal(); return; }
   if (x === "send") { send(); return; }
   // The photo button: the picture goes to the Mac and its path into the agent's prompt ([Image #1] in Claude Code).
-  // "+": camera / photos / files / paste image, as the task composer's; here a picture is picked at once.
-  if (x === "pic") { pictures = 1; note = "1 image attached"; p3controls(); return; }
+  // "+": camera / photos / files / paste image, as the task composer's; here a picture is picked at once. Nothing is sent:
+  // its placeholder goes where the caret is (here: the end), as Claude Code shows [Image #1]; the strip above has it.
+  if (x === "pic") { pictures += 1; text += (text && !text.endsWith(" ") ? " " : "") + `[Image #${pictures}] `; drafts.push(pictures); typing = true; kbUp = true; p3controls(); return; }
+  const out = e.target.closest("[data-draft]");
+  if (out) { const n = Number(out.dataset.draft); drafts = drafts.filter((d) => d !== n); text = text.replace(`[Image #${n}] `, "").replace(`[Image #${n}]`, ""); p3controls(); return; }
   if (e.target.closest("#p3field")) { if (away) here(); typing = true; kbUp = true; p3controls(); }
 });
 // A typing keyboard on a computer works too, while the reply box has the focus.
@@ -889,6 +902,7 @@ p1reset();
 p2open();
 p3open();
 </script>
+<script>if (new URLSearchParams(location.search).has("draft")) setTimeout(() => { for (let i = 0; i < 2; i++) document.querySelector('[data-x="pic"]').click(); }, 600);</script>
 <script>if (new URLSearchParams(location.search).has("away")) setTimeout(() => document.querySelector('[data-do="p3mac"]').click(), 600);</script>
 <script>if (new URLSearchParams(location.search).has("dark")) document.querySelector('#theme [data-t="dark"]')?.click();</script>
 </body>

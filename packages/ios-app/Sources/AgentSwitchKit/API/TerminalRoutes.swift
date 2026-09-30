@@ -8,7 +8,14 @@ private struct ElsewhereReply: Decodable {
     struct Place: Decodable { let app: String?; let pid: Int? }
     let elsewhere: Place?
 }
-private struct InputBody: Encodable { let text: String; let submit: Bool; let seal: Bool }
+private struct InputBody: Encodable { let text: String; let submit: Bool; let seal: Bool; let attachments: [TerminalAttachmentRef]? }
+
+/// A staged file (`upload`) and the placeholder that says where it goes in the reply (docs/terminal-v0.md §4).
+public struct TerminalAttachmentRef: Encodable, Sendable, Equatable {
+    public let token: String
+    public let upload: String
+    public init(token: String, upload: String) { self.token = token; self.upload = upload }
+}
 private struct CommandList: Decodable { let commands: [SlashCommand] }
 private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int; let screen: String? }
@@ -58,8 +65,10 @@ extension AgentSwitchAPI {
 
     /// A reply, sealed on the Mac first (credentials reach the agent as ciphertext); `submit` presses return after it.
     /// A reply: sealed on the Mac first (the sealer may take a while), or `sealed: false` typed as it is.
-    public func sendTerminalInput(_ id: String, text: String, submit: Bool = true, sealed: Bool = true) async throws -> TerminalInputResult {
-        try await send("POST", ["terminals", id, "input"], body: InputBody(text: text, submit: submit, seal: sealed),
+    /// `attachments`: files staged with `upload`, each where its placeholder stands in `text`.
+    public func sendTerminalInput(_ id: String, text: String, submit: Bool = true, sealed: Bool = true,
+                                  attachments: [TerminalAttachmentRef] = []) async throws -> TerminalInputResult {
+        try await send("POST", ["terminals", id, "input"], body: InputBody(text: text, submit: submit, seal: sealed, attachments: attachments.isEmpty ? nil : attachments),
                        timeout: sealed ? Self.createTaskTimeout : requestTimeout)
     }
 

@@ -25,6 +25,8 @@ struct TerminalPage: View {
     @State private var pickingPhotos = false
     @State private var pickingFiles = false
     @State private var takingPhoto = false
+    /// Placeholders to put into the reply box where the caret is (the field puts them there: it knows the caret).
+    @State private var pendingTokens: [String] = []
     /// A direct reply that looks like it holds a secret, asked about before it goes.
     @State private var secretCheck: String?
     @FocusState private var replying: Bool
@@ -127,7 +129,7 @@ struct TerminalPage: View {
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
-            Task { _ = await page.attach(await PickedFiles.photos(items)) }
+            Task { addFiles(await PickedFiles.photos(items)) }
         }
         .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
@@ -135,7 +137,7 @@ struct TerminalPage: View {
                 Task {
                     let (files, skipped) = await Task.detached(priority: .userInitiated) { PickedFiles.read(urls) }.value
                     if !skipped.isEmpty { page.error = "未发送：\(skipped.joined(separator: "、"))（超过 50 MB 或无法读取）" }
-                    if !files.isEmpty { _ = await page.attach(files) }
+                    if !files.isEmpty { addFiles(files) }
                 }
             case .failure(let failure): page.error = failure.localizedDescription
             }
@@ -143,12 +145,14 @@ struct TerminalPage: View {
         .fullScreenCover(isPresented: $takingPhoto) {
             CameraPicker { data in
                 takingPhoto = false
-                if let data { Task { _ = await page.attach([UploadFile(name: "photo.jpg", type: "image/jpeg", data: data)]) } }
+                if let data { addFiles([UploadFile(name: "photo.jpg", type: "image/jpeg", data: data)]) }
             }
             .ignoresSafeArea()
         }
         // The reply box is for this phone: the size is its own.
         .onChange(of: replying) { if replying { page.userActed() } }
+        // A placeholder deleted from the box takes its file out.
+        .onChange(of: reply) { page.keepDraftFiles(in: reply) }
         // In the background the stream ends and the size goes back to the Mac; in front again, it is this phone's.
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -322,6 +326,7 @@ struct TerminalPage: View {
     /// opens; the reply then goes through the sealer and the box closes.
     private var composer: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if !page.draftFiles.isEmpty { draftStrip }
             if sealing {
                 HStack(spacing: 8) {
                     PixelSprite(rows: PixelArt.lock, pixel: 2, color: .black)
@@ -358,7 +363,7 @@ struct TerminalPage: View {
                         .buttonStyle(SquareIconButtonStyle(active: false))
                         .accessibilityLabel("sealed reply")
                 }
-                TextField(sealing ? "message" : "回复", text: $reply, axis: .vertical)
+                ReplyField(prompt: sealing ? "message" : "回复", text: $reply, pending: $pendingTokens)
                     .font(sealing ? .system(size: 14, design: .monospaced) : .body)
                     .lineLimit(sealing ? 2...6 : 1...5)
                     .focused($replying)
@@ -403,7 +408,54 @@ struct TerminalPage: View {
     private func pasteImages() {
         let images = PickedFiles.pastedImages()
         guard !images.isEmpty else { page.error = "剪贴板中无图片"; return }
-        Task { _ = await page.attach(images) }
+        addFiles(images)
+    }
+
+    /// Picked files: kept for the reply, their placeholders put where the caret is; nothing is sent yet.
+    private func addFiles(_ files: [UploadFile]) {
+        let tokens = page.addDraftFiles(files)
+        guard !tokens.isEmpty else { return }
+        pendingTokens += tokens
+        replying = true
+    }
+
+    /// The reply's files above the box: the picture (or the file's name), its number as the placeholder says, × to take
+    /// it out (its placeholder goes too).
+    private var draftStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(page.draftFiles) { d in
+                    ZStack(alignment: .topTrailing) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Group {
+                                if let thumbnail = d.thumbnail {
+                                    Image(uiImage: thumbnail).resizable().scaledToFill()
+                                } else {
+                                    Image(systemName: "doc").font(.system(size: 18)).foregroundStyle(Theme.ink.opacity(0.7))
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                }
+                            }
+                            .frame(width: 48, height: 48)
+                            .clipped()
+                            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                            Text(d.isImage ? "#\(d.number)" : "#\(d.number) \(d.name)").mono(10).foregroundStyle(.secondary).lineLimit(1).frame(maxWidth: 96, alignment: .leading)
+                        }
+                        Button {
+                            reply = TerminalDraft.remove(d.token, from: reply)
+                            page.removeDraftFile(d)
+                        } label: {
+                            Text("×").mono(12).foregroundStyle(Theme.base).frame(width: 18, height: 18).background(Theme.ink)
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 6, y: -6)
+                        .accessibilityLabel("remove \(d.token)")
+                    }
+                }
+            }
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.top, 10)
+            .padding(.bottom, 8)
+        }
     }
 
     /// Between the two ways; the keyboard stays as it was.
@@ -509,5 +561,50 @@ private struct CheckerTile: View {
             context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
             context.fill(CGRect(x: 1, y: 1, width: 1, height: 1))
         }
+    }
+}
+
+/// The reply box: a multi-line field that puts placeholders (`[Image #1]`) where the caret is — on iOS 18 and later,
+/// where the field says where its caret is; at the end before that.
+private struct ReplyField: View {
+    let prompt: String
+    @Binding var text: String
+    @Binding var pending: [String]
+
+    var body: some View {
+        if #available(iOS 18.0, *) {
+            CaretField(prompt: prompt, text: $text, pending: $pending)
+        } else {
+            TextField(prompt, text: $text, axis: .vertical)
+                .onChange(of: pending) {
+                    guard !pending.isEmpty else { return }
+                    text = TerminalDraft.insert(pending, into: text, at: nil).text
+                    pending = []
+                }
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private struct CaretField: View {
+    let prompt: String
+    @Binding var text: String
+    @Binding var pending: [String]
+    @State private var selection: TextSelection?
+
+    var body: some View {
+        TextField(prompt, text: $text, selection: $selection, axis: .vertical)
+            .onChange(of: pending) {
+                guard !pending.isEmpty else { return }
+                var at: Int?
+                if case .selection(let range)? = selection?.indices, range.lowerBound <= text.endIndex {
+                    at = text.distance(from: text.startIndex, to: range.lowerBound)
+                }
+                let result = TerminalDraft.insert(pending, into: text, at: at)
+                text = result.text
+                pending = []
+                let caret = text.index(text.startIndex, offsetBy: min(result.caret, text.count))
+                selection = TextSelection(insertionPoint: caret)
+            }
     }
 }

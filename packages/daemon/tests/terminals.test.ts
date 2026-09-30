@@ -507,6 +507,32 @@ describe("terminals over HTTP", () => {
     expect(existsSync(join(tmpdir(), "agentswitch-attach", id))).toBe(false);
   });
 
+  // 2026-09-30, user: 图片只能插入到消息开头，选了直接发送……要和 cc 一样，给占位符，发送时按我输入的预期发过去.
+  it("a reply with files where the user put them: text and each file's path pasted in order, then Enter", async () => {
+    const { base, token, call } = await start();
+    const created = await call("POST", "/terminals", { harness: "claude-code", cwd: tmpdir() });
+    const id = created.json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    await until(() => screen().includes("fake agent ready"));
+    const stage = async (name: string) => {
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }), name);
+      return ((await (await fetch(`${base}/uploads`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form })).json()) as { files: { id: string }[] }).files[0]!.id;
+    };
+    const shot = await stage("shot.png"), dropped = await stage("dropped.png");
+    const sent = await call("POST", `/terminals/${id}/input`, {
+      text: "看这张 [Image #1] 哪里不对 [File #9]", seal: false,
+      attachments: [{ token: "[Image #1]", upload: shot }, { token: "[Image #2]", upload: dropped }],
+    });
+    expect(sent.json).toMatchObject({ ok: true, attached: 1 });
+    const path = join(tmpdir(), "agentswitch-attach", id, "shot.png");
+    await until(() => screen().includes(`got: 看这张 ${path} 哪里不对 [File #9]`));
+    expect(existsSync(join(tmpdir(), "agentswitch-attach", id, "dropped.png"))).toBe(false);   // its placeholder was deleted
+    expect((await call("POST", `/terminals/${id}/input`, { text: "x", attachments: [{ token: "[Image #1] rm", upload: shot }] })).status).toBe(400);
+    expect((await call("DELETE", `/terminals/${id}`)).status).toBe(200);
+  });
+
   it("a terminal opens in any folder, the home folder too, and reads the local token; tasks keep their rules (2026-09-30)", async () => {
     const { home, call, daemon } = await start();
     const created = await call("POST", "/terminals", { harness: "claude-code", cwd: "~" });
@@ -552,9 +578,9 @@ describe("terminals over HTTP", () => {
     const events: TerminalEvent[] = [];
     daemon.terminals!.subscribe(id, null, (e) => events.push(e));
     await until(() => text(events).includes("fake agent ready"));
-    expect(await (await req(`/terminals/${id}/input`, { text: "pw hunter2" })).json()).toEqual({ ok: true, sealed: 1 });
+    expect(await (await req(`/terminals/${id}/input`, { text: "pw hunter2" })).json()).toEqual({ ok: true, sealed: 1, attached: 0 });
     await until(() => text(events).includes(`got: pw ${TOKEN}`));
-    expect(await (await req(`/terminals/${id}/input`, { text: "ls -la", seal: false })).json()).toEqual({ ok: true, sealed: 0 });
+    expect(await (await req(`/terminals/${id}/input`, { text: "ls -la", seal: false })).json()).toEqual({ ok: true, sealed: 0, attached: 0 });
     await until(() => text(events).includes("got: ls -la"));
   });
 

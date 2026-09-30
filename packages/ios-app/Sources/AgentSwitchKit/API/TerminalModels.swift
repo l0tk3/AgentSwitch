@@ -295,13 +295,17 @@ public enum TerminalKey: String, Sendable, CaseIterable, Codable {
 /// The reply's result: how many credentials the sealer turned into ciphertext on the way in.
 public struct TerminalInputResult: Decodable, Sendable, Equatable {
     public let sealed: Int
+    /// Files sent with it; nil from a Mac that predates attachments (it sent the placeholders as text).
+    public let attached: Int?
 
-    public init(sealed: Int) { self.sealed = sealed }
+    public init(sealed: Int, attached: Int? = nil) { self.sealed = sealed; self.attached = attached }
 
-    private enum CodingKeys: String, CodingKey { case sealed }
+    private enum CodingKeys: String, CodingKey { case sealed, attached }
 
     public init(from decoder: Decoder) throws {
-        sealed = (try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(Int.self, forKey: .sealed)) ?? 0
+        let c = try? decoder.container(keyedBy: CodingKeys.self)
+        sealed = (try? c?.decodeIfPresent(Int.self, forKey: .sealed)) ?? 0
+        attached = (try? c?.decodeIfPresent(Int.self, forKey: .attached)) ?? nil
     }
 }
 
