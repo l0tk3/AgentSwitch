@@ -284,7 +284,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// Marked (uncommitted) text from an input source (IME, dictation, etc.).
     private var markedTextStorage: NSAttributedString?
     private var markedSelectedRange: NSRange = NSRange(location: NSNotFound, length: 0)
-    private var markedTextOverlay: NSTextField?
+    // AgentSwitch patch (PATCHES.md): the marked text on the cell grid, and the block caret's state before it came.
+    private var markedTextOverlay: MarkedTextView?
+    private var caretHiddenBeforeMarkedText: Bool?
     private var progressBarView: TerminalProgressBarView?
     private var progressReportTimer: Timer?
     private var lastProgressValue: UInt8?
@@ -1699,48 +1701,47 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         updateMarkedTextOverlay()
     }
 
-    /// Shows or hides a floating overlay that previews in-progress marked text
-    /// (e.g. dictation hypotheses or IME composition) at the current cursor position.
+    /// AgentSwitch patch (PATCHES.md): an input method's marked text drawn inline on the cell grid at the cursor (a wide
+    /// character over two cells, underlined, a thin caret at the input method's insertion point), the block caret hidden
+    /// while it composes — as Terminal and iTerm do. Upstream floated a padded text field beside the block caret.
     private func updateMarkedTextOverlay() {
         guard let markedTextStorage, markedTextStorage.length > 0 else {
             markedTextOverlay?.removeFromSuperview()
             markedTextOverlay = nil
+            if let wasHidden = caretHiddenBeforeMarkedText {
+                caretView?.isHidden = wasHidden
+                caretHiddenBeforeMarkedText = nil
+            }
             return
         }
 
-        let overlay: NSTextField
+        let overlay: MarkedTextView
         if let existing = markedTextOverlay {
             overlay = existing
         } else {
-            overlay = NSTextField(labelWithString: "")
-            overlay.isBezeled = false
-            overlay.isEditable = false
-            overlay.drawsBackground = true
-            overlay.backgroundColor = nativeBackgroundColor.withAlphaComponent(0.9)
-            overlay.wantsLayer = true
-            overlay.layer?.cornerRadius = 3
-            addSubview(overlay, positioned: .above, relativeTo: nil)
+            overlay = MarkedTextView(frame: .zero)
             markedTextOverlay = overlay
         }
-
-        // Style the text to match the terminal font/colors with an underline.
-        let displayString = NSMutableAttributedString(attributedString: markedTextStorage)
-        let fullRange = NSRange(location: 0, length: displayString.length)
-        displayString.addAttributes([
-            .font: font,
-            .foregroundColor: nativeForegroundColor,
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
-        ], range: fullRange)
-        overlay.attributedStringValue = displayString
-
-        // Position at the caret.
-        overlay.sizeToFit()
-        overlay.frame.origin = caretView.frame.origin
-
-        // Clamp to view bounds so the overlay doesn't extend off-screen.
-        if overlay.frame.maxX > bounds.maxX {
-            overlay.frame.origin.x = max(0, bounds.maxX - overlay.frame.width)
+        if caretHiddenBeforeMarkedText == nil {
+            caretHiddenBeforeMarkedText = caretView.isHidden
+            caretView.isHidden = true
         }
+        overlay.text = markedTextStorage
+        overlay.selection = markedSelectedRange
+        overlay.font = font
+        overlay.foreground = nativeForegroundColor
+        overlay.background = nativeBackgroundColor
+        overlay.caretColor = caretColor
+        overlay.cellWidth = cellDimension.width
+        overlay.baseline = ceil(CTFontGetDescent(fontSet.normal) + CTFontGetLeading(fontSet.normal))
+
+        // On the cursor's cell, one row high; pulled left when it would run past the right edge.
+        let caret = caretView.frame
+        var frame = NSRect(x: caret.minX, y: caret.minY, width: overlay.fittingWidth, height: cellDimension.height)
+        if frame.maxX > bounds.maxX { frame.origin.x = max(0, bounds.maxX - frame.width) }
+        overlay.frame = frame
+        if overlay.superview !== self { addSubview(overlay, positioned: .above, relativeTo: nil) }
+        overlay.needsDisplay = true
     }
 
     private func kittyEncoder() -> KittyKeyboardEncoder {
@@ -2122,6 +2123,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     // NSTextInputClient protocol implementation
     open func selectedRange() -> NSRange {
+        // AgentSwitch patch: while composing, the selection is the input method's own, inside the marked text.
+        if let marked = markedTextStorage {
+            return markedSelectedRange.location == NSNotFound ? NSRange(location: marked.length, length: 0) : markedSelectedRange
+        }
         if let selection = self.selection, selection.active {
             let displayBuffer = terminal.displayBuffer
             var startLocation = (selection.start.row * displayBuffer.rows) + selection.start.col
@@ -2175,11 +2180,16 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     // NSTextInputClient protocol implementation
     open func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         actualRange?.pointee = range
-        
-        if let r = window?.convertToScreen(convert(caretView!.frame, to: nil)) {
+        // AgentSwitch patch: the character the input method asks about, inside the marked text where it is drawn (the
+        // candidate window sits under it), else the cursor's cell.
+        var rect = markedTextOverlay?.frame ?? caretView.frame
+        rect.size = CGSize(width: cellDimension.width, height: cellDimension.height)
+        if let marked = markedTextStorage, range.location != NSNotFound, range.location <= marked.length {
+            rect.origin.x += CGFloat(MarkedTextView.columns(of: marked.string, before: range.location)) * cellDimension.width
+        }
+        if let r = window?.convertToScreen(convert(rect, to: nil)) {
             return r
         }
-        
         return .zero
     }
     

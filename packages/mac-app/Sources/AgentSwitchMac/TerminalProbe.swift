@@ -150,9 +150,26 @@ enum TerminalProbe {
                 LinkOpener.probeOpened = nil
             }
             if UserDefaults.standard.bool(forKey: "probeCompose") {
-                screen.view.setMarkedText("zhong", selectedRange: NSRange(location: 5, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+                // An input method composing (Pinyin): its marked text inline at the cursor, the candidate window's anchor.
+                @MainActor func capture(_ name: String) {
+                    if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
+                        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name))
+                    }
+                }
+                let none = NSRange(location: NSNotFound, length: 0)
+                let v = screen.view
+                say("caret \(NSStringFromRect(window.convertToScreen(v.convert(NSRect(x: 0, y: 0, width: 1, height: 1), to: nil))))")
+                v.setMarkedText("zhong", selectedRange: NSRange(location: 5, length: 0), replacementRange: none)
                 try? await Task.sleep(for: .milliseconds(400))
-                say("marked rect \(NSStringFromRect(screen.view.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)))")
+                say("zhong: at 0 \(NSStringFromRect(v.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil))) at 5 \(NSStringFromRect(v.firstRect(forCharacterRange: NSRange(location: 5, length: 0), actualRange: nil))) selected \(v.selectedRange())")
+                capture("compose.png")
+                v.setMarkedText("中文", selectedRange: NSRange(location: 1, length: 0), replacementRange: none)
+                try? await Task.sleep(for: .milliseconds(400))
+                say("中文: at 0 \(NSStringFromRect(v.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil))) at 1 \(NSStringFromRect(v.firstRect(forCharacterRange: NSRange(location: 1, length: 0), actualRange: nil))) selected \(v.selectedRange())")
+                capture("compose-cjk.png")
+                v.unmarkText()
+                try? await Task.sleep(for: .milliseconds(200))
+                say("unmarked: marked \(v.hasMarkedText()) selected \(v.selectedRange())")
             }
             let t = screen.view.getTerminal()
             var lines: [String] = []
