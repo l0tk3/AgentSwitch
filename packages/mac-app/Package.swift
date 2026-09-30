@@ -10,7 +10,8 @@ let package = Package(
     ],
     dependencies: [
         // The terminal window's screen (docs/terminal-v0.md §1 Mac); 1.18.x as the iPhone app and project.yml.
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", .upToNextMinor(from: "1.18.0")),
+        // SwiftTerm 1.18.0, vendored with the input method's marked text patched (Vendor/SwiftTerm/PATCHES.md).
+        .package(path: "Vendor/SwiftTerm"),
     ],
     targets: [
         // Pure logic: supervision state machine, paths, env, probes, daemon API client, parsers. Unit-tested.

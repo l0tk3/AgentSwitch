@@ -14,11 +14,11 @@ settings:
 packages:
   AgentSwitchMacCore:
     path: .
-  # The terminal window's screen (docs/terminal-v0.md §0, §1 Mac): SwiftTerm, the same 1.18.x as the iPhone app (from
-  # 1.19 it runs a build-tool plugin of its own that every build would have to trust).
+  # The terminal window's screen (docs/terminal-v0.md §0, §1 Mac): SwiftTerm 1.18.0 as the iPhone app has it (from 1.19 it
+  # runs a build-tool plugin of its own that every build would have to trust), vendored with the input method's marked
+  # text patched (Vendor/SwiftTerm/PATCHES.md).
   SwiftTerm:
-    url: https://github.com/migueldeicaza/SwiftTerm
-    minorVersion: 1.18.0
+    path: Vendor/SwiftTerm
 targets:
   AgentSwitch:
     type: application
