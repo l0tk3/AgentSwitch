@@ -717,7 +717,9 @@ export class TerminalHost {
    *  SGR (1006, which Claude Code turns on) is added back, or a desktop screen would send the wheel and clicks in the
    *  old byte form, which the page does not forward and the program does not read. */
   private snapshot(s: Session): TerminalEvent {
-    const data = s.ser.serialize({ scrollback: this.o.snapshotScrollback }) + (s.sgrMouse ? "\x1b[?1006h" : "");
+    // With the kitty keyboard protocol's flags too (a native screen encodes its keys by them; others ignore it).
+    const kitty = s.kitty.at(-1) ?? 0;
+    const data = s.ser.serialize({ scrollback: this.o.snapshotScrollback }) + (s.sgrMouse ? "\x1b[?1006h" : "") + (kitty ? `\x1b[>${kitty}u` : "");
     return { type: "snapshot", seq: s.parsedSeq, cols: s.cols, rows: s.rows, data };
   }
 

@@ -18,6 +18,7 @@ struct GeneralView: View {
     @AppStorage(AppDelegate.quitWithoutAskingKey) private var quitWithoutAsking = false
     @AppStorage(LiveActivity.enabledKey) private var liveActivity = true
     @AppStorage(LiveActivity.soundKey) private var liveSound = true
+    @AppStorage(SleepGuard.enabledKey) private var keepAwake = true
 
     private var draft: PortSettings? {
         guard let l = Int(local), let r = Int(remote), let g = Int(gate), let o = Int(opencode) else { return nil }
@@ -68,6 +69,14 @@ struct GeneralView: View {
                 SectionLabel("live activity")
             } footer: {
                 Footer("任务进行、等你处理或刚结束时，菜单栏显示一个小胶囊，点开可直接批准或拒绝。")
+            }
+
+            Section {
+                Toggle("stay awake while working", isOn: $keepAwake)
+            } header: {
+                SectionLabel("power")
+            } footer: {
+                Footer("有任务或终端在工作、等你处理，或手机连着时，Mac 不会闲置睡眠（屏幕照常熄灭），手机和远程控制不会断。合盖且未接外接显示器时仍会睡眠。")
             }
 
             Section {

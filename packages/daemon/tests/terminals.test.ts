@@ -84,6 +84,10 @@ describe("terminal host", () => {
     await until(() => text(events).includes("kitty on"));
     expect(host.keyContext(info.id).kittyKeys).toBe(true);
     expect(keySequence("shift-enter", host.keyContext(info.id))).toBe("\x1b[13;2u");
+    // A screen attaching now learns it from the snapshot (the Mac's native screen encodes its keys by it).
+    const late: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => late.push(e));
+    expect(text(late)).toContain("\x1b[>7u");
     host.write(info.id, "nokitty\r");
     await until(() => text(events).includes("kitty off"));
     expect(keySequence("shift-enter", host.keyContext(info.id))).toBe("\n");

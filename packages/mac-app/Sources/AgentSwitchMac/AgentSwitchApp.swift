@@ -8,7 +8,7 @@ struct AgentSwitchApp: App {
 
     var body: some Scene {
         // Hidden while this copy only waits on a newly installed one (AppModel.installUpdate).
-        MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating && !AppDelegate.previewOnly && !AppDelegate.liveDemoOnly }, set: { _ in })) {
+        MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating && !AppDelegate.previewOnly && !AppDelegate.liveDemoOnly && !AppDelegate.probeOnly }, set: { _ in })) {
             MenuContentView()
                 .environment(delegate.model)
                 .environment(\.showSettings, ShowSettingsAction { [delegate] tab in delegate.settings.show(tab) })
@@ -51,6 +51,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
+    /// `-terminalProbe <dir>`: the terminal window alone against a running service (TerminalProbe.swift).
+    static var probeOnly: Bool {
+        #if DEBUG
+        return TerminalProbe.directory != nil
+        #else
+        return false
+        #endif
+    }
+
     /// `-liveDemo YES`: the menu bar's Live Activity alone, from made-up work (LiveDemo.swift); nothing else starts.
     static var liveDemoOnly: Bool {
         #if DEBUG
@@ -69,6 +78,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Self.liveDemoOnly {
             NSApp.setActivationPolicy(.accessory)
             live.startDemo()
+            return
+        }
+        if let dir = TerminalProbe.directory {
+            NSApp.setActivationPolicy(.accessory)
+            TerminalProbe.run(terminals, into: dir)
             return
         }
         #endif

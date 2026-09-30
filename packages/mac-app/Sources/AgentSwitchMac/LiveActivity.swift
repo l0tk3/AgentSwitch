@@ -34,6 +34,7 @@ final class LiveActivity {
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var drawn: String?
     @ObservationIgnored private let tones = NSSound(data: Tones.wav(Tones.needsYou))
+    @ObservationIgnored private let sleepGuard = SleepGuard()
 
     init(model: AppModel, openTerminal: @escaping (String) -> Void) {
         self.model = model
@@ -111,9 +112,16 @@ final class LiveActivity {
 
     private func poll() async {
         var next: LiveSnapshot?
-        if enabled, ready {
+        if ready {
             do { next = try await client.live() } catch { liveLog.debug("live: \(error.localizedDescription, privacy: .public)") }
         }
+        // Work under way, or a phone connected: the Mac stays awake (SleepGuard), whether the capsule shows or not.
+        #if DEBUG
+        if demo == nil { sleepGuard.update(busy: !(next?.rows.isEmpty ?? true) || (model.remote?.onlineDevices ?? 0) > 0) }
+        #else
+        sleepGuard.update(busy: !(next?.rows.isEmpty ?? true) || (model.remote?.onlineDevices ?? 0) > 0)
+        #endif
+        if !enabled { next = nil }
         let now = Date()
         if presenter.receive(next, at: now), UserDefaults.standard.bool(forKey: Self.soundKey) {
             tones?.stop()

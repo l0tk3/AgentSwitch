@@ -166,14 +166,20 @@ public struct DaemonClient: Sendable {
 
     // MARK: plumbing
 
-    private func call(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
-        guard let url = URL(string: baseURL.absoluteString + path) else { throw DaemonError.unreachable("无效路径 \(path)") }
-        var request = URLRequest(url: url)
+    /// A request to `path` with the local token (read afresh: the daemon may have written it since).
+    func request(_ method: String, _ path: String) -> URLRequest {
+        var request = URLRequest(url: URL(string: baseURL.absoluteString + path) ?? baseURL)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let tokenFile, let token = try? String(contentsOf: tokenFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        return request
+    }
+
+    func call(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+        guard URL(string: baseURL.absoluteString + path) != nil else { throw DaemonError.unreachable("无效路径 \(path)") }
+        var request = request(method, path)
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -207,7 +213,7 @@ public struct DaemonClient: Sendable {
         return text.isEmpty ? "（无内容）" : text
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: data) } catch {
             throw DaemonError.decoding(String(describing: error))
         }

@@ -177,6 +177,8 @@ body.side-dragging .screen { pointer-events: none; }
 .main { grid-column: 2; grid-row: 2; position: relative; isolation: isolate; display: grid; grid-template-rows: minmax(0, 1fr) auto auto auto; min-width: 0; min-height: 0; background: var(--term); }
 /* In the Mac window the page starts under the window's own toolbar: no band of its own. */
 .mac-app { --band: 0px; }
+/* The Mac window's native screen lies under the page: the screen's area stays clear down to it. */
+.native-screen body, .native-screen .main, .native-screen .stage { background: transparent; }
 
 .stage { position: relative; isolation: isolate; min-height: 0; overflow: hidden; background: var(--term); }
 .screen { position: absolute; inset: 4px 4px 4px 16px; overflow: hidden; }

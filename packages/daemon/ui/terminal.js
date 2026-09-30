@@ -25,6 +25,12 @@ const tellWindow = (() => {
   };
 })();
 if (IN_MAC_APP) document.documentElement.classList.add("mac-app");
+// The Mac window draws the terminal itself (a native SwiftTerm view under this page, docs/terminal-v0.md §1 Mac): the
+// page leaves the screen's area clear, says where it is and what floats over it, and draws no terminal of its own.
+const NATIVE = IN_MAC_APP && window.agentswitchNativeScreen === true;
+if (NATIVE) document.documentElement.classList.add("native-screen");
+/** The grid the native screen fits (it tells us), for a terminal started or continued here. */
+let nativeGrid = { cols: 100, rows: 30 };
 const narrow = matchMedia("(max-width: 760px), (pointer: coarse)");
 
 const AGENTS = [
@@ -254,7 +260,23 @@ term.loadAddon(new WebLinksAddon(openLink, { hover: (_e, uri) => showLinkTarget(
 term.unicode.activeVersion = "11";
 // The DOM renderer on purpose: macOS draws the glyphs with its own text rendering, as in iTerm (WebGL drew them at
 // twice the size on a Retina screen in testing).
-term.open($("screen"));
+if (!NATIVE) term.open($("screen"));
+/** This screen's grid, for a terminal started or continued here. */
+function gridHere() {
+  if (NATIVE) return nativeGrid;
+  fit.fit();
+  return { cols: term.cols, rows: term.rows };
+}
+/** The keyboard to the terminal on screen. */
+function focusScreen() {
+  if (NATIVE) tellWindow("focus", { at: Date.now() });
+  else term.focus();
+}
+/** A line of our own under the program's output (not the program's: a note such as "1 secret sealed"). */
+function screenNote(text) {
+  if (NATIVE) native.postMessage({ type: "note", text });
+  else term.write(`\r\n\x1b[2m[${text}]\x1b[0m\r\n`);
+}
 
 // Keystrokes go straight in, a few at a time, one request after another: typed text and named keys (Shift+Enter)
 // reach the program in the order they were pressed.
@@ -348,7 +370,7 @@ term.attachCustomKeyEventHandler((e) => {
 /** This window's size for terminal `id`: fit the screen and tell the service when it differs. True when it did (the
  *  size change makes the agent draw again). */
 function fitTo(id) {
-  if (current?.id !== id || creating) return false;
+  if (NATIVE || current?.id !== id || creating) return false;
   const before = [term.cols, term.rows];
   fit.fit();
   if (term.cols !== before[0] || term.rows !== before[1] || term.cols !== current.cols || term.rows !== current.rows) {
@@ -361,7 +383,7 @@ function fitTo(id) {
 }
 
 function fitAndTell() {
-  if (!current || creating || !inUse()) return;
+  if (NATIVE || !current || creating || !inUse()) return;
   fit.fit();
   if (term.cols !== current.cols || term.rows !== current.rows) {
     api("POST", `/terminals/${current.id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined);
@@ -378,7 +400,7 @@ function inUse() { return (nativeActive ?? document.hasFocus()) && !document.hid
 const reclaim = () => fitAndTell();
 addEventListener("focus", reclaim);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) reclaim(); });
-term.textarea.addEventListener("keydown", reclaim, true);
+term.textarea?.addEventListener("keydown", reclaim, true);
 $("screen").addEventListener("mousedown", reclaim, true);
 
 // ---------- feedback: loading, notices, confirmations ----------
@@ -421,7 +443,7 @@ function ask({ title, body, confirm, destructive = false, check = null }) {
       $("sheetConfirm").onclick = $("sheetCancel").onclick = null;
       sheetDone = null;
       resolve({ ok, checked: $("sheetCheckbox").checked });
-      if (current && !creating) term.focus();
+      if (current && !creating) focusScreen();
     };
     sheetDone = done;
     $("sheetConfirm").onclick = () => done(true);
@@ -447,12 +469,17 @@ function select(id, { loading = null } = {}) {
   document.body.classList.remove("list-open");
   renderSideBtn();
   if (loading) showLoading(loading); else hideLoading();
-  term.reset();
-  fit.fit();
-  // Only the screen in use changes the size; another follows it (the snapshot brings it).
-  (inUse() ? api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined) : Promise.resolve()).finally(() => follow(id));
+  if (NATIVE) {
+    // The native screen follows this terminal and sizes it; the page only takes its events.
+    follow(id);
+  } else {
+    term.reset();
+    fit.fit();
+    // Only the screen in use changes the size; another follows it (the snapshot brings it).
+    (inUse() ? api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined) : Promise.resolve()).finally(() => follow(id));
+  }
   render();
-  term.focus();
+  focusScreen();
   remember("terminal.last", id);
 }
 
@@ -470,6 +497,7 @@ function follow(id) {
   source = new EventSource(`/terminals/${id}/stream`);
   const on = (type, fn) => source.addEventListener(type, (e) => { if (current?.id === id) fn(JSON.parse(e.data)); });
   on("snapshot", (ev) => {
+    if (NATIVE) { if (paints(ev.data)) hideLoading(); return; }
     term.reset();
     if (ev.cols !== term.cols || ev.rows !== term.rows) term.resize(ev.cols, ev.rows);
     term.write(ev.data);
@@ -481,15 +509,16 @@ function follow(id) {
     setTimeout(() => { if (!(inUse() && fitTo(id)) && current?.id === id && current.status !== "exited") api("POST", `/terminals/${id}/redraw`).catch(() => undefined); }, 0);
   });
   on("output", (ev) => {
+    if (NATIVE) { if (!$("loading").hidden && paints(ev.data)) setTimeout(hideLoading, 120); return; }
     if (ev.seq <= lastSeq) return;
     term.write(ev.data);
     lastSeq = ev.seq;
     if (!$("loading").hidden && paints(ev.data)) setTimeout(hideLoading, 120);
   });
-  on("resize", (ev) => { if (ev.cols !== term.cols || ev.rows !== term.rows) term.resize(ev.cols, ev.rows); });
+  on("resize", (ev) => { if (!NATIVE && (ev.cols !== term.cols || ev.rows !== term.rows)) term.resize(ev.cols, ev.rows); });
   on("status", (ev) => patch(id, { status: ev.status }));
   on("name", (ev) => patch(id, { name: ev.name }));
-  on("exit", (ev) => { hideLoading(); patch(id, { status: "exited", exitCode: ev.code }); term.write(`\r\n\x1b[2m[exited · code ${ev.code ?? "?"}]\x1b[0m\r\n`); });
+  on("exit", (ev) => { hideLoading(); patch(id, { status: "exited", exitCode: ev.code }); if (!NATIVE) term.write(`\r\n\x1b[2m[exited · code ${ev.code ?? "?"}]\x1b[0m\r\n`); });
   on("permission", (ev) => addToast(id, ev.request, true));
   on("permission_resolved", (ev) => { document.getElementById(`perm-${ev.id}`)?.remove(); });
   on("removed", () => { closeStream(); current = null; refresh().then(afterRemoval); });
@@ -525,7 +554,7 @@ function afterRemoval() {
 // ---------- permission requests ----------
 function addToast(id, request, fresh = false) {
   if (document.getElementById(`perm-${request.id}`)) return;
-  const decide = (decision) => api("POST", `/terminals/${id}/permissions/${request.id}`, { decision }).catch((e) => notify(e.message)).finally(() => term.focus());
+  const decide = (decision) => api("POST", `/terminals/${id}/permissions/${request.id}`, { decision }).catch((e) => notify(e.message)).finally(() => focusScreen());
   const raw_ = request.summary.startsWith(`${request.tool}: `) ? request.summary.slice(request.tool.length + 2) : request.summary;
   const cwd = terminals.find((t) => t.id === id)?.cwd;
   const detail = cwd && raw_.startsWith(cwd + "/") ? raw_.slice(cwd.length + 1) : tilde(raw_);
@@ -766,8 +795,18 @@ function renderHead() {
 }
 function tellScreen() {
   const r = $("screen").getBoundingClientRect();
+  const area = [r.x, r.y, r.width, r.height].map(Math.round);
   const cell = $("screen").querySelector(".xterm-rows > div")?.getBoundingClientRect().height || 16;
-  tellWindow("screen", !current || creating ? { rect: null } : { rect: [r.x, r.y, r.width, r.height].map(Math.round), cell: Math.round(cell * 10) / 10 });
+  // The native screen shows `id` in `rect` (none while a terminal is being made); `area` is where it would be.
+  tellWindow("screen", !current || creating ? { rect: null, area, id: null } : { rect: area, area, id: current.id, cell: Math.round(cell * 10) / 10 });
+}
+/** What floats over the screen (permission requests, the composer, the loading line, a sheet): the native screen under
+ *  the page leaves clicks there to the page. */
+function tellOverlays() {
+  if (!NATIVE) return;
+  const shown = (el) => el && !el.hidden && el.getClientRects().length > 0;
+  const els = [...document.querySelectorAll("#toasts .toast"), $("composer"), $("loading"), $("sheet")].filter(shown);
+  tellWindow("overlays", { rects: els.map((el) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }) });
 }
 
 function render() {
@@ -831,9 +870,9 @@ async function start() {
   if (!cwd) { $("createError").textContent = "请填写文件夹。"; return; }
   $("createStart").disabled = true;
   try {
-    fit.fit();
+    const grid = gridHere();
     const model = $("model").value;
-    const { terminal } = await api("POST", "/terminals", { harness: pickedAgent, cwd, mode: pickedMode, ...(model ? { model } : {}), cols: term.cols, rows: term.rows });
+    const { terminal } = await api("POST", "/terminals", { harness: pickedAgent, cwd, mode: pickedMode, ...(model ? { model } : {}), ...grid });
     remember("terminal.agent", pickedAgent);
     remember("terminal.cwd", cwd);
     unfold(terminal.cwd);
@@ -867,10 +906,10 @@ async function resume(s) {
   showLoading(`opening 「${name}」`);
   const body = { harness: s.harness, cwd: s.cwd, agentSessionId: s.id, ...(s.title ? { title: s.title } : {}), mode: s.mode ?? pickedMode };
   try {
-    fit.fit();
+    const grid = gridHere();
     let r;
     try {
-      r = await api("POST", "/terminals/resume", { ...body, cols: term.cols, rows: term.rows });
+      r = await api("POST", "/terminals/resume", { ...body, ...grid });
     } catch (err) {
       // Open in another program (iTerm, Codex's app): one writer at a time, else the two records part ways.
       const where = err.body?.elsewhere;
@@ -913,7 +952,7 @@ function startRename(id) {
       if (r?.terminal) patch(id, { name: r.terminal.name });
     }
     render();
-    term.focus();
+    focusScreen();
   };
   input.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
   input.addEventListener("blur", () => finish(true));
@@ -952,7 +991,7 @@ function closeComposer() {
   if (narrow.matches) return;
   $("composer").hidden = true;
   $("composerText").value = "";
-  term.focus();
+  focusScreen();
 }
 async function sendComposer() {
   const text = $("composerText").value;
@@ -961,7 +1000,7 @@ async function sendComposer() {
   try {
     const r = await api("POST", `/terminals/${current.id}/input`, { text });
     $("composerText").value = "";
-    if (r.sealed) term.write(`\r\n\x1b[2m[${r.sealed} ${r.sealed === 1 ? "secret" : "secrets"} sealed]\x1b[0m\r\n`);
+    if (r.sealed) screenNote(`${r.sealed} ${r.sealed === 1 ? "secret" : "secrets"} sealed`);
     closeComposer();
   } catch (err) { notify(err.message); }
   $("composerSend").disabled = false;
@@ -1027,10 +1066,16 @@ if (native) {
   new ResizeObserver(tellScreen).observe($("screen"));
   $("chooseFolder").hidden = false;
   $("chooseFolder").addEventListener("click", () => native.postMessage({ type: "chooseFolder", path: $("cwd").value }));
+  if (NATIVE) {
+    new MutationObserver(tellOverlays).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "class", "style"] });
+    addEventListener("resize", tellOverlays);
+  }
   window.agentswitch = {
     folderChosen: (path) => { $("cwd").value = tilde(path); $("createStart").focus(); },
-    // ⌘W, ⌘T, ⌘B, ⌘1–9 as the window hands them over (a menu would take them first otherwise).
-    shortcut: (key) => shortcut({ metaKey: true, shiftKey: false, key })?.(),
+    // ⌘W, ⌘T, ⌘B, ⌘1–9, ⌘⇧V, ⌘↩ / ⌘⌫ on a request, as the window hands them over (a menu would take them first).
+    shortcut: (key, shift = false) => { const run = shortcut({ metaKey: true, shiftKey: shift, key }); run?.(); return !!run; },
+    // The grid the native screen fits at its size.
+    grid: (cols, rows) => { nativeGrid = { cols, rows }; },
     // ⌘A: the terminal's own selection when it has the keyboard, else the field in focus.
     selectAll: () => (document.activeElement === term.textarea ? term.selectAll() : document.execCommand("selectAll")),
     // The window became the key window, or stopped being it (the screen in use sets the size).

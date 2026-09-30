@@ -33,6 +33,14 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
     /// What the toolbar shows, as the page reports it.
     let head = TerminalHead()
     private weak var webView: TerminalWebView?
+    /// The native screen under the page (docs/terminal-v0.md §1 Mac).
+    private var screen: TerminalScreenController?
+    #if DEBUG
+    /// TerminalProbe: the window opens behind the others and the app is not made active.
+    static var probing = false
+    var probeScreen: TerminalScreenController? { screen }
+    var probeWeb: TerminalWebView? { webView }
+    #endif
 
     static let page = "/ui/terminal.html"
     /// This window's own website data: the page remembers the agent, folder and permission mode chosen last.
@@ -103,6 +111,8 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         config.websiteDataStore = WKWebsiteDataStore(forIdentifier: Self.storeID)
         config.applicationNameForUserAgent = "AgentSwitchMac/1"   // the page hides what only a browser needs
         config.userContentController.add(ScriptBridge(self), name: "agentswitch")
+        // The page leaves the screen to the native view (terminal.js NATIVE).
+        config.userContentController.addUserScript(WKUserScript(source: "window.agentswitchNativeScreen = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let web = TerminalWebView(frame: NSRect(origin: .zero, size: Self.contentSize), configuration: config)
         web.navigationDelegate = self
         web.setValue(false, forKey: "drawsBackground")
@@ -110,7 +120,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
 
         // No toolbar (2026-09-30, user: 顶栏太宽了，像 iTerm 一样紧凑): the content runs under the title bar and the
         // bar's items sit in its one row beside the traffic lights, 32 pt instead of the unified toolbar's 66.
-        let window = TerminalNSWindow(contentRect: NSRect(origin: .zero, size: Self.contentSize),
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.contentSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "terminal"
@@ -119,7 +129,12 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         window.titlebarSeparatorStyle = .none
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = Self.background
-        let host = NSHostingController(rootView: TerminalWindowRoot(web: web, head: head,
+        let model = self.model
+        let screen = TerminalScreenController(client: { model.client })
+        screen.evaluate = { [weak web] js in web?.evaluateJavaScript(js, completionHandler: nil) }
+        self.screen = screen
+        let stage = TerminalStage(web: web, screen: screen.view)
+        let host = NSHostingController(rootView: TerminalWindowRoot(stage: stage, head: head,
                                                                     toggleList: { [weak web] in web?.evaluateJavaScript("window.agentswitch?.toggleList()", completionHandler: nil) },
                                                                     newTerminal: { [weak web] in web?.evaluateJavaScript("window.agentswitch?.newTerminal()", completionHandler: nil) }))
         host.sizingOptions = []
@@ -130,8 +145,12 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         head.lightsEnd = window.standardWindowButton(.zoomButton)?.frame.maxX ?? 70
         webView = web
         for (name, on) in [(NSWindow.didBecomeKeyNotification, true), (NSWindow.didResignKeyNotification, false)] {
-            keyObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak web] _ in
-                MainActor.assumeIsolated { web?.evaluateJavaScript("window.agentswitch?.active(\(on))", completionHandler: nil) }
+            keyObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak web, weak screen] _ in
+                MainActor.assumeIsolated {
+                    web?.evaluateJavaScript("window.agentswitch?.active(\(on))", completionHandler: nil)
+                    // The window in use sets the size (another screen may have had it).
+                    if on { screen?.reclaim() }
+                }
             })
         }
         // Wider than the page's narrow layout (760 pt, terminal.css): the sidebar stays on screen at the smallest size.
@@ -151,13 +170,17 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         self.window = window
         web.load(URLRequest(url: link))
         onVisibilityChange(true)
+        #if DEBUG
+        if Self.probing { window.orderBack(nil); return }
+        #endif
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 
     // MARK: toolbar
 
-    /// The page's report: the terminal on screen, all the terminals' mark, where its screen is (for the wheel).
+    /// The page's report: the terminal on screen, all the terminals' mark, where its screen is and what floats over it
+    /// (the native screen), a line to show under the output, the keyboard to the screen.
     fileprivate func pageSaid(_ body: [String: Any]) {
         switch body["type"] as? String {
         case "head":
@@ -167,13 +190,26 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             head.mark = PixelArt.MarkState(page: body["state"] as? String)
             head.tag = body["tag"] as? String ?? ""
         case "screen":
-            let r = body["rect"] as? [Double]
-            webView?.screenRect = r.flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
-            if let cell = body["cell"] as? Double, cell > 0 { webView?.cellHeight = cell }
-            windowLog.debug("screen \(String(describing: self.webView?.screenRect), privacy: .public) cell \(String(describing: body["cell"]), privacy: .public)")
+            let rect = Self.rect(body["rect"])
+            webView?.screenRect = rect
+            screen?.place(Self.rect(body["area"]))
+            screen?.show(rect == nil ? nil : body["id"] as? String)
+            windowLog.debug("screen \(String(describing: rect), privacy: .public) id \(String(describing: body["id"]), privacy: .public)")
+        case "overlays":
+            webView?.overlays = (body["rects"] as? [Any] ?? []).compactMap(Self.rect)
+        case "focus":
+            screen?.focus()
+        case "note":
+            if let text = body["text"] as? String { screen?.note(text) }
         default:
             break
         }
+    }
+
+    /// `[x, y, width, height]` from the page.
+    private static func rect(_ value: Any?) -> CGRect? {
+        guard let r = value as? [Double], r.count == 4 else { return nil }
+        return CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
     }
 
     /// Next time the window signs in afresh (the daemon may have restarted and forgotten the session).
@@ -187,6 +223,8 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             web.navigationDelegate = nil
             web.configuration.userContentController.removeScriptMessageHandler(forName: "agentswitch")
         }
+        screen?.stop()
+        screen = nil
         window = nil
         onVisibilityChange(false)
     }
@@ -225,13 +263,13 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         head.tag = "busy"
         let web = TerminalWebView(frame: NSRect(origin: .zero, size: contentSize), configuration: WKWebViewConfiguration())
         web.setValue(false, forKey: "drawsBackground")
-        let window = TerminalNSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 160),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 160),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = background
-        let host = NSHostingController(rootView: TerminalWindowRoot(web: web, head: head, toggleList: {}, newTerminal: {}))
+        let host = NSHostingController(rootView: TerminalWindowRoot(stage: TerminalStage(web: web, screen: nil), head: head, toggleList: {}, newTerminal: {}))
         host.sizingOptions = []
         window.contentViewController = host
         window.setContentSize(NSSize(width: 1000, height: 160))
@@ -286,10 +324,10 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
             let path = body["path"] as? String
             MainActor.assumeIsolated { owner?.chooseFolder(startingAt: path) }
         case "openURL":
-            if let text = body["url"] as? String, let url = URL(string: text) { MainActor.assumeIsolated { Self.open(url) } }
+            if let text = body["url"] as? String, let url = URL(string: text) { MainActor.assumeIsolated { LinkOpener.open(url) } }
         case "signIn":
             MainActor.assumeIsolated { owner?.signIn() }
-        case "head", "mark", "screen":
+        case "head", "mark", "screen", "overlays", "focus", "note":
             MainActor.assumeIsolated { owner?.pageSaid(body) }
         case "log":
             windowLog.notice("page: \(body["text"] as? String ?? "", privacy: .public)")
@@ -298,9 +336,12 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
-    /// A link ⌘-clicked in a terminal: web links open in the browser; a folder link opens in Finder; a file link is only
-    /// shown in Finder, never opened (the link comes from an agent's output, and opening a file can run it). Other
-    /// schemes are ignored.
+}
+
+/// A link ⌘-clicked in a terminal: web links open in the browser; a folder link opens in Finder; a file link is only
+/// shown in Finder, never opened (the link comes from an agent's output, and opening a file can run it). Other schemes
+/// are ignored.
+enum LinkOpener {
     @MainActor static func open(_ url: URL) {
         switch url.scheme?.lowercased() {
         case "http", "https": NSWorkspace.shared.open(url)
@@ -320,49 +361,47 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// The terminal window: it sees every scroll event first and lets the web view take the ones over the terminal screen
-/// (WebKit's own subviews would otherwise get them and give the page nothing).
-final class TerminalNSWindow: NSWindow {
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .scrollWheel, let web = contentView.flatMap(Self.web(in:)), web.takeWheel(event) { return }
-        super.sendEvent(event)
+/// The page over the native screen: its own parts (the list, the panels, the bars, what floats over the screen) take
+/// the mouse; the screen's area, where the page draws nothing, lets it through to the native view below.
+final class TerminalStage: NSView {
+    let web: TerminalWebView
+    let screen: NSView?
+
+    init(web: TerminalWebView, screen: NSView?) {
+        self.web = web
+        self.screen = screen
+        super.init(frame: NSRect(origin: .zero, size: web.frame.size))
+        if let screen { addSubview(screen) }
+        addSubview(web)
     }
 
-    private static func web(in view: NSView) -> TerminalWebView? {
-        if let web = view as? TerminalWebView { return web }
-        for sub in view.subviews { if let web = web(in: sub) { return web } }
-        return nil
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    /// Top left origin, as the page's coordinates.
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        web.frame = bounds
     }
 }
 
 /// A menu bar app has no Edit menu, so ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z never reach the page on their own: send them here.
 final class TerminalWebView: WKWebView {
-    /// The terminal's screen in the page (its coordinates, top left origin), while one is shown; its line height.
+    /// The terminal's screen in the page (its coordinates, top left origin), while one is shown.
     var screenRect: CGRect?
-    var cellHeight: CGFloat = 16
-    private var notches = WheelNotches()
+    /// What floats over it (permission requests, the composer, the loading line, a sheet).
+    var overlays: [CGRect] = []
 
-    /// WebKit gives the page no scroll events in this window (a titled one; a borderless one does get them), so over
-    /// the terminal the window hands the wheel here (TerminalNSWindow, before any of WebKit's own views sees it) and it
-    /// goes to the page as notches — the page sends them to a program that scrolls itself or scrolls its own history
-    /// (docs/terminal-v0.md). Elsewhere (the list) it scrolls as usual. True when taken.
-    func takeWheel(_ event: NSEvent) -> Bool {
-        let local = convert(event.locationInWindow, from: nil)
-        guard bounds.contains(local) else { return false }
-        let point = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
-        guard let screen = screenRect, screen.contains(point) else {
-            windowLog.debug("wheel at \(point.x, privacy: .public),\(point.y, privacy: .public) outside the screen \(String(describing: self.screenRect), privacy: .public)")
-            return false
+    /// Over the screen and nothing of the page's there: the native screen below takes it (nil lets the stage look
+    /// further down).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let screen = screenRect, let superview {
+            let local = convert(point, from: superview)
+            let p = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
+            if screen.contains(p), !overlays.contains(where: { $0.contains(p) }) { return nil }
         }
-        let n = notches.add(deltaY: Double(event.scrollingDeltaY), precise: event.hasPreciseScrollingDeltas,
-                            began: event.phase == .began, lineHeight: Double(cellHeight))
-        windowLog.debug("wheel \(event.scrollingDeltaY, privacy: .public) precise \(event.hasPreciseScrollingDeltas, privacy: .public) → \(n, privacy: .public) notches")
-        if n != 0 {
-            evaluateJavaScript("window.agentswitch?.wheel(\(n))") { result, error in
-                if let error { windowLog.error("wheel to the page failed: \(error.localizedDescription, privacy: .public)") }
-            }
-        }
-        return true
+        return super.hitTest(point)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -396,7 +435,7 @@ final class TerminalWebView: WKWebView {
 /// compact tabs: the list's button beside the traffic lights, the terminal on screen centred, new terminal and all the
 /// terminals' mark at the end; its empty part moves the window and a double click zooms, as a title bar does.
 private struct TerminalWindowRoot: View {
-    let web: TerminalWebView
+    let stage: TerminalStage
     let head: TerminalHead
     let toggleList: () -> Void
     let newTerminal: () -> Void
@@ -416,7 +455,7 @@ private struct TerminalWindowRoot: View {
                 TerminalTitleView(head: head).allowsHitTesting(false)
             }
             .frame(height: head.barHeight)
-            WebViewHost(web: web)
+            StageHost(stage: stage)
         }
         .background(Color.black)
         .ignoresSafeArea(.container, edges: .top)
@@ -441,11 +480,11 @@ private struct WindowDragArea: NSViewRepresentable {
     }
 }
 
-/// The page's web view, as it is (the window keeps it; SwiftUI only places it).
-private struct WebViewHost: NSViewRepresentable {
-    let web: TerminalWebView
-    func makeNSView(context: Context) -> TerminalWebView { web }
-    func updateNSView(_ view: TerminalWebView, context: Context) {}
+/// The page and the native screen under it, as they are (the window keeps them; SwiftUI only places them).
+private struct StageHost: NSViewRepresentable {
+    let stage: TerminalStage
+    func makeNSView(context: Context) -> TerminalStage { stage }
+    func updateNSView(_ view: TerminalStage, context: Context) {}
 }
 
 /// A toolbar button as a pixel icon (1 pt cells) on the black: secondary ink, brighter with a faint square behind it
