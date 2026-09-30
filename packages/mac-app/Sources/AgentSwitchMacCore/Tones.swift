@@ -5,6 +5,10 @@ import Foundation
 public enum Tones {
     /// (frequency in Hz — 0 is a pause, milliseconds): something needs you.
     public static let needsYou: [(Double, Double)] = [(880, 110), (0, 60), (880, 110), (0, 60), (1175, 170)]
+    /// A result: rising.
+    public static let done: [(Double, Double)] = [(523, 90), (659, 90), (784, 170)]
+    /// A failure: falling.
+    public static let failed: [(Double, Double)] = [(440, 150), (330, 230)]
 
     public static func wav(_ tones: [(Double, Double)], rate: Double = 44_100) -> Data {
         var samples: [Int16] = []

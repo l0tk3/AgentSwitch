@@ -63,12 +63,12 @@ struct GeneralView: View {
 
             Section {
                 Toggle("show in menu bar", isOn: $liveActivity)
-                Toggle("sound when waiting", isOn: $liveSound)
+                Toggle("sounds", isOn: $liveSound)
                     .disabled(!liveActivity)
             } header: {
                 SectionLabel("live activity")
             } footer: {
-                Footer("任务进行、等你处理或刚结束时，菜单栏显示一个小胶囊，点开可直接批准或拒绝。")
+                Footer("任务或终端在进行、等你处理或刚有结果时，菜单栏显示一个小胶囊，点开可直接批准或拒绝。等你、完成、失败各有一段提示音；失败的结果会一直留着，直到你点开看过。")
             }
 
             Section {

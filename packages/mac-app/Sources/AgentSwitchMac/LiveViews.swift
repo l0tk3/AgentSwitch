@@ -153,8 +153,13 @@ struct LiveCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 header(frame: frame)
                 DottedRule().padding(.top, 11).padding(.bottom, 9)
-                if let end = presenter.shownEnd {
-                    endRow(end)
+                if !presenter.cardEnds.isEmpty {
+                    VStack(alignment: .leading, spacing: 11) {
+                        ForEach(presenter.cardEnds, id: \.key) { end in endRow(end) }
+                    }
+                    if presenter.moreEnds > 0 {
+                        Text("+\(presenter.moreEnds) more").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
+                    }
                 } else {
                     VStack(alignment: .leading, spacing: 11) {
                         ForEach(presenter.cardRows) { row in rowView(row, frame: frame, now: timeline.date) }

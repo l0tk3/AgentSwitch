@@ -79,6 +79,8 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
       UserPromptSubmit: hook(QUICK_HOOK_TIMEOUT_S),
       Notification: hook(QUICK_HOOK_TIMEOUT_S),
       Stop: hook(QUICK_HOOK_TIMEOUT_S),
+      // The turn ended on an API error: the Mac's Live Activity says so (assistant-v0 §4).
+      StopFailure: hook(QUICK_HOOK_TIMEOUT_S),
       // The protected-path floor, in every permission mode (bypass included): the service answers deny or nothing.
       PreToolUse: hook(QUICK_HOOK_TIMEOUT_S),
       // Tells the service a permission request was answered in the terminal (the tool ran).

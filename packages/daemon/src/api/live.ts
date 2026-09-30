@@ -40,7 +40,11 @@ export type LiveRow = {
   readonly ask: LiveAsk | null;
 };
 
-export type LiveEnd = { readonly taskId: string; readonly title: string; readonly line: string; readonly ok: boolean; readonly at: number };
+/** A result: a task that ended, or a terminal's turn (assistant-v0 §4 "结果要提示"). `taskId` for a task, as before. */
+export type LiveEnd = {
+  readonly kind: "task" | "terminal"; readonly id: string; readonly taskId?: string;
+  readonly title: string; readonly line: string; readonly ok: boolean; readonly at: number;
+};
 
 export type LiveSnapshot = {
   /** All of them, ordered; the card shows the first three. */
@@ -49,7 +53,7 @@ export type LiveSnapshot = {
   readonly running: number;
   /** Tasks and terminals waiting for you. */
   readonly waiting: number;
-  /** Tasks that ended in the last ENDED_MS, the latest first (a cancelled one is not: you did it). */
+  /** Tasks and terminal turns that ended in the last ENDED_MS, the latest first (a cancelled task is not: you did it). */
   readonly ended: readonly LiveEnd[];
   readonly now: number;
 };
@@ -77,7 +81,8 @@ export function liveSnapshot(store: Store, terminals: TerminalHost | undefined, 
   const busy = (terminals?.list() ?? []).filter((t) => waitsForYou(t) || t.status === "working").map(terminalRow);
   const rows = [...tasks, ...busy].sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.startedAt - a.startedAt);
   const waiting = rows.filter((r) => r.needsYou).length;
-  return { rows, running: rows.length - waiting, waiting, ended: ended(store, now), now };
+  const ends = [...ended(store, now), ...terminalEnds(terminals, now)].sort((a, b) => b.at - a.at).slice(0, 10);
+  return { rows, running: rows.length - waiting, waiting, ended: ends, now };
 }
 
 export function waitsForYou(t: TerminalInfo): boolean {
@@ -286,9 +291,22 @@ function ended(store: Store, now: number): LiveEnd[] {
     if (!end || end.ts < now - ENDED_MS) continue;
     const said = [task.spoken, task.speech, task.status === "done" ? task.result : task.error ?? task.result]
       .map((t) => (t ? speakable(readable(t)) : "")).find((t) => t);
-    out.push({ taskId: task.id, title: liveTitle(store, task), line: clip(said ?? (task.status === "done" ? "已完成" : "未完成"), ENDED_CHARS), ok: task.status === "done", at: end.ts });
+    out.push({ kind: "task", id: task.id, taskId: task.id, title: liveTitle(store, task), line: clip(said ?? (task.status === "done" ? "已完成" : "未完成"), ENDED_CHARS), ok: task.status === "done", at: end.ts });
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+/** Terminals whose turn ended in the last ENDED_MS: the agent's last answer, or what went wrong. */
+function terminalEnds(terminals: TerminalHost | undefined, now: number): LiveEnd[] {
+  const out: LiveEnd[] = [];
+  for (const t of terminals?.list() ?? []) {
+    const turn = terminals?.lastTurn(t.id);
+    if (!turn || turn.at < now - ENDED_MS) continue;
+    const said = turn.line ? (turn.ok ? speakable(readable(turn.line)) : readable(turn.line)) : "";
+    const title = clip(t.name || (HARNESS[t.harness] ?? t.harness), TITLE_CHARS);
+    out.push({ kind: "terminal", id: t.id, title, line: clip(said || (turn.ok ? "这一轮已完成" : "这一轮出错结束"), ENDED_CHARS), ok: turn.ok, at: turn.at });
+  }
+  return out;
 }
 
 // ---- text ----

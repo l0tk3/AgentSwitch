@@ -35,6 +35,9 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
     private weak var webView: TerminalWebView?
     /// The native screen under the page (docs/terminal-v0.md §1 Mac).
     private var screen: TerminalScreenController?
+    /// The terminal on screen in this window while it is the one in use: its turns need no telling (the Live Activity).
+    var watching: String? { window?.isKeyWindow == true && window?.isVisible == true ? screen?.shown : nil }
+
     #if DEBUG
     /// TerminalProbe: the window opens behind the others and the app is not made active.
     static var probing = false

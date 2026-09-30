@@ -27,7 +27,8 @@ final class LiveActivityTests: XCTestCase {
           {"id":"t2","kind":"task","title":"清理旧构建","step":"要删掉吗？","model":null,"agent":null,"startedAt":1790000000000,"needsYou":true,
            "ask":{"kind":"question","id":"a2","questionId":"q0","text":"要删掉吗？","options":["删掉","保留"],"answerable":true}},
           {"id":"t3","kind":"task","title":"整理下载目录","step":"交给 DeepSeek Flash","model":"DeepSeek Flash","agent":null,"startedAt":1789999990000,"needsYou":false,"ask":null}],
-         "running":1,"waiting":2,"ended":[{"taskId":"t9","title":"总结","line":"好了","ok":true,"at":1789999999000}],"now":1790000010000}
+         "running":1,"waiting":2,"ended":[{"kind":"task","id":"t9","taskId":"t9","title":"总结","line":"好了","ok":true,"at":1789999999000},
+           {"kind":"terminal","id":"k1","title":"fix-login","line":"rate_limit: You have hit your limit","ok":false,"at":1789999998000}],"now":1790000010000}
         """
         let s = try JSONDecoder().decode(LiveSnapshot.self, from: Data(json.utf8))
         XCTAssertEqual(s.rows.map(\.id), ["k1", "t2", "t3"])
@@ -36,14 +37,15 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(s.rows[0].startedAt, t0.addingTimeInterval(2))
         XCTAssertEqual(s.rows[1].ask, .question(id: "a2", questionId: "q0", text: "要删掉吗？", options: ["删掉", "保留"], answerable: true))
         XCTAssertNil(s.rows[2].ask)
-        XCTAssertEqual(s.ended, [LiveSnapshot.End(taskId: "t9", title: "总结", line: "好了", ok: true, at: t0.addingTimeInterval(-1))])
+        XCTAssertEqual(s.ended, [LiveSnapshot.End(taskId: "t9", title: "总结", line: "好了", ok: true, at: t0.addingTimeInterval(-1)),
+                                 LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix-login", line: "rate_limit: You have hit your limit", ok: false, at: t0.addingTimeInterval(-2))])
         XCTAssertEqual(s.now, t0.addingTimeInterval(10))
         XCTAssertEqual([s.running, s.waiting], [1, 2])
     }
 
     func testWhatWaitsWhenTheAppStartsIsKnownAlready() {
         var p = LivePresenter()
-        XCTAssertFalse(p.receive(snap([row("k1", waiting: true, ask: perm)], ended: [end("t9", at: 0)], at: 1), at: t0))
+        XCTAssertNil(p.receive(snap([row("k1", waiting: true, ask: perm)], ended: [end("t9", at: 0)], at: 1), at: t0))
         XCTAssertFalse(p.isOpen)
         XCTAssertTrue(p.visible)
         XCTAssertEqual(p.look, .waiting)
@@ -55,10 +57,10 @@ final class LiveActivityTests: XCTestCase {
         p.receive(snap([row("t1")], at: 0), at: t0)
         XCTAssertFalse(p.isOpen)
         XCTAssertEqual(p.look, .busy)
-        XCTAssertTrue(p.receive(snap([row("k1", waiting: true, ask: perm, at: 5), row("t1")], at: 5), at: t0))
+        XCTAssertEqual(p.receive(snap([row("k1", waiting: true, ask: perm, at: 5), row("t1")], at: 5), at: t0), .needsYou)
         XCTAssertEqual(p.opener, .request)
         XCTAssertEqual(p.trail, .tally(waiting: 1, running: 1))
-        XCTAssertFalse(p.receive(snap([row("k1", waiting: true, ask: perm, at: 5), row("t1")], at: 6), at: t0), "the same request: no second sound")
+        XCTAssertNil(p.receive(snap([row("k1", waiting: true, ask: perm, at: 5), row("t1")], at: 6), at: t0), "the same request: no second sound")
         p.receive(snap([row("t1")], at: 7), at: t0)
         XCTAssertFalse(p.isOpen, "answered: the card it opened closes")
     }
@@ -80,19 +82,63 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(p.look, .waiting)
     }
 
-    func testAResultShowsForAFewSecondsThenTheCapsuleKeepsItsColour() {
+    func testAResultShowsForAFewSecondsWithItsToneThenTheCapsuleKeepsItsColourForTheMinute() {
         var p = LivePresenter()
         p.receive(snap([row("t1")], at: 0), at: t0)
-        p.receive(snap([], ended: [end("t1", ok: false, at: 9)], at: 10), at: t0)
+        XCTAssertEqual(p.receive(snap([], ended: [end("t1", at: 9)], at: 10), at: t0), .done)
         XCTAssertEqual(p.opener, .result)
-        XCTAssertEqual(p.shownEnd?.taskId, "t1")
-        XCTAssertEqual(p.look, .incomplete)
+        XCTAssertEqual(p.shownEnd?.id, "t1")
+        XCTAssertEqual(p.look, .done)
+        p.tick(t0.addingTimeInterval(LivePresenter.resultShown))
+        XCTAssertFalse(p.isOpen)
+        XCTAssertEqual(p.look, .done, "nothing runs: the last end colours the capsule for the rest of the minute")
+        p.receive(snap([], at: 80), at: t0.addingTimeInterval(70))
+        XCTAssertFalse(p.visible)
+    }
+
+    // 2026-09-30, user: 遇到报错、任务完成之类的也要提示；不然报错静默消失都不知道.
+    func testAFailureStaysUntilItIsLookedAt() {
+        var p = LivePresenter()
+        p.receive(snap([row("t1"), row("t2")], at: 0), at: t0)
+        XCTAssertEqual(p.receive(snap([row("t2")], ended: [end("t1", ok: false, at: 9)], at: 10), at: t0), .failed)
         XCTAssertEqual(p.trail, .result(ok: false))
         p.tick(t0.addingTimeInterval(LivePresenter.resultShown))
         XCTAssertFalse(p.isOpen)
-        XCTAssertEqual(p.look, .incomplete, "nothing runs: the last end colours the capsule for the rest of the minute")
-        p.receive(snap([], at: 80), at: t0.addingTimeInterval(70))
-        XCTAssertFalse(p.visible)
+        XCTAssertEqual(p.look, .incomplete, "still red while t2 runs")
+        p.close()   // a click in another app closed nothing it had not opened
+        p.receive(snap([], at: 200), at: t0.addingTimeInterval(200))
+        XCTAssertTrue(p.visible, "past the minute's window: still there")
+        XCTAssertEqual(p.cardEnds.map(\.id), ["t1"])
+        p.toggle()
+        XCTAssertEqual(p.opener, .user)
+        p.toggle()
+        XCTAssertFalse(p.visible, "looked at: gone")
+    }
+
+    func testFailuresListTheNewestFirstAndARequestComesFirst() {
+        var p = LivePresenter()
+        p.receive(snap([row("t1"), row("t2"), row("t3")], at: 0), at: t0)
+        p.receive(snap([row("t3")], ended: [end("t2", ok: false, at: 9), end("t1", ok: false, at: 8)], at: 10), at: t0)
+        p.tick(t0.addingTimeInterval(20))
+        XCTAssertEqual(p.cardEnds.map(\.id), ["t2", "t1"])
+        p.receive(snap([row("k1", waiting: true, ask: perm), row("t3")], ended: [end("t2", ok: false, at: 9), end("t1", ok: false, at: 8)], at: 30), at: t0)
+        XCTAssertNil(p.shownEnd, "a request is never covered")
+        XCTAssertEqual(p.look, .waiting)
+        p.opened(LiveSnapshot.End(taskId: "t2", title: "", line: "", ok: false, at: t0))
+        XCTAssertEqual(p.unseenFailures.map(\.id), ["t1"])
+    }
+
+    func testTheTerminalOnScreenSaysNothingOfItsOwnTurns() {
+        var p = LivePresenter()
+        p.receive(snap([row("k1", kind: .terminal)], at: 0), at: t0)
+        let failed = LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(9))
+        XCTAssertNil(p.receive(snap([], ended: [failed], at: 10), at: t0, watching: "k1"))
+        XCTAssertFalse(p.isOpen)
+        XCTAssertTrue(p.unseenFailures.isEmpty)
+        let again = LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(19))
+        XCTAssertEqual(p.receive(snap([], ended: [again, failed], at: 20), at: t0, watching: nil), .failed, "another turn, not looked at")
+        p.receive(snap([], ended: [again, failed], at: 21), at: t0, watching: "k1")
+        XCTAssertTrue(p.unseenFailures.isEmpty, "opened in the window: seen")
     }
 
     func testAResultNeverCoversARequest() {

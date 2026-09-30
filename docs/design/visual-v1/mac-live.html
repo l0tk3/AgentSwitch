@@ -111,7 +111,7 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 <body class="wall-dark">
 <div class="page">
   <h1>菜单栏实时活动 · Mac</h1>
-  <p class="lede">照 macOS 26 把 iPhone 实时活动放进菜单栏的样子：菜单栏里一个小胶囊，点开是和手机锁屏同一张卡。有请求时卡片自己落下，在卡上批准或拒绝；任务结束时落下几秒显示结论。</p>
+  <p class="lede">照 macOS 26 把 iPhone 实时活动放进菜单栏的样子：菜单栏里一个小胶囊，点开是和手机锁屏同一张卡。有请求时卡片自己落下，在卡上批准或拒绝；任务结束、终端的一轮做完或出错时落下几秒显示结论并响一声；失败的结果一直留着（胶囊红色），直到你点开看过。</p>
   <div class="tools">
     <span>壁纸 <span class="seg" id="wall"><button type="button" class="on" data-v="dark">深</button><button type="button" data-v="light">浅</button></span></span>
     <span>大小 <span class="seg" id="zoom"><button type="button" class="on" data-z="1">1×</button><button type="button" data-z="1.5">1.5×</button><button type="button" data-z="2">2×</button></span></span>
@@ -127,10 +127,12 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
     <button type="button" data-sim="question">提问</button>
     <button type="button" data-sim="done">完成</button>
     <button type="button" data-sim="fail">失败</button>
+    <button type="button" data-sim="turn">终端一轮完成</button>
+    <button type="button" data-sim="turnfail">终端一轮出错</button>
     <button type="button" data-sim="clear">清空</button>
   </div>
   <div class="log" id="log"></div>
-  <p class="note">点胶囊展开或收起，双击打开；点别处收起。演示里结果 10 秒后消失（应用里 1 分钟）。</p>
+  <p class="note">点胶囊展开或收起，双击打开；点别处收起。演示里完成的结果 10 秒后消失（应用里 1 分钟）；失败的留到你点开卡片看过、或打开了那个任务 / 终端，几条失败按新到旧列在卡上。终端窗口正显示那个终端时，它的结果不提示。</p>
 
   <div class="sec">// menu bar · 菜单栏</div>
   <div class="fit"><div class="grid zoom static" id="bar"></div></div>
@@ -196,10 +198,13 @@ function sum(m) {
   return { w, r, n: w + r, st: w ? "waiting" : r ? "busy" : m.ended ? m.ended.st : "idle" };
 }
 /** A result is shown (in the capsule and the card) while nothing waits: a request is never covered. */
-const showsEnded = (m) => { const s = sum(m); return (m.flash && !s.w) || (!s.n && m.ended); };
+const fails = (m) => m.fails ?? [];
+const showsEnded = (m) => { const s = sum(m); return (m.flash && !s.w) || (!s.w && fails(m).length) || (!s.n && m.ended); };
+/** The results on the card: the one on show, then the other failures not looked at. */
+const endsShown = (m) => { const e = m.flash || fails(m)[0] || m.ended; return e ? [e, ...fails(m).filter((f) => f.key !== e.key)] : []; };
 
 function capsule(m, live, { min = false, on = false } = {}) {
-  const s = sum(m), e = showsEnded(m) ? m.flash || m.ended : null;
+  const s = sum(m), e = showsEnded(m) ? m.flash || fails(m)[0] || m.ended : null;
   const st = e ? e.st : s.st;
   let right = "";
   // The menu bar never moves (ui-v0 §7): the mark is one frame, the spinner its first; only the clock counts.
@@ -210,10 +215,11 @@ function capsule(m, live, { min = false, on = false } = {}) {
 function card(m, live) {
   const s = sum(m);
   if (showsEnded(m)) {
-    const e = m.flash || m.ended;
-    return head(e.st, word(e.st), live) + `<div class="item ended" data-id="${e.id}">
-      <div class="row1"><span class="st">${sq(TINT[e.st])}</span><button type="button" class="title" data-do="open">${esc(e.title)}</button><span class="clock">${e.took}</span></div>
-      <div class="step"><span class="tr">└─</span><span class="tx">${esc(e.line)}</span></div></div>`;
+    const ends = endsShown(m), e = ends[0];
+    return head(e.st, word(e.st), live) + ends.slice(0, 3).map((x) => `<div class="item ended" data-id="${x.id}">
+      <div class="row1"><span class="st">${sq(TINT[x.st])}</span><button type="button" class="title" data-do="open">${esc(x.title)}</button>${x.agent ? `<span class="agent">${P.sprite(P.AGENT_PX[x.agent], { px: 2 })}</span>` : ""}<span class="clock">${x.took}</span></div>
+      <div class="step"><span class="tr">└─</span><span class="tx">${esc(x.line)}</span></div></div>`).join("")
+      + (ends.length > 3 ? `<div class="more">+${ends.length - 3} more</div>` : "");
   }
   const all = ordered(m);
   return head(s.st, s.n > 1 ? tally(s.w, s.r, live) : word(s.st), live)
@@ -302,7 +308,7 @@ const S = {
     { id: "a1", title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", since: later(640) },
     { id: "a2", title: "整理下载目录", step: "交给 DeepSeek Flash", since: later(40) },
   ],
-  ended: null, endedUntil: 0, flash: null,
+  ended: null, endedUntil: 0, flash: null, fails: [],
   open: true, openedBy: "user", closing: false, fresh: false, burst: null,
 };
 let seq = 0;
@@ -328,7 +334,7 @@ const pick = { task: 0, perm: 0, approve: 0, options: 0, question: 0 };
 const say = (text) => { logEl.textContent = text; };
 
 function draw() {
-  const vis = S.items.length || S.ended;
+  const vis = S.items.length || S.ended || S.fails.length;
   const showCard = vis && (S.open || S.closing);
   stage.innerHTML = `<div class="screen" style="width:${W}px;height:${H}px">${menubar(vis ? capsule(S, true, { on: S.open }) : "", { menus: true })}${showCard ? `<div class="panel${S.closing ? " out" : S.fresh ? " in" : ""}">${card(S, true)}</div>` : ""}</div>`;
   S.fresh = false;
@@ -344,8 +350,10 @@ function open(by) {
   S.open = true; S.openedBy = by; S.closing = false;
   draw();
 }
-function close() {
+function close({ seen = S.openedBy === "user" } = {}) {
   if (!S.open) return;
+  // A card you opened was looked at: its failures go. One that dropped by itself may not have been.
+  if (seen) S.fails = [];
   S.open = false; S.closing = true;
   draw();
   setTimeout(() => { S.closing = false; draw(); }, 140);
@@ -373,11 +381,24 @@ function finish(st) {
   if (!i) return say("没有进行中的任务");
   S.items = S.items.filter((x) => x !== i);
   const r = RESULTS[i.id] ?? { done: "做完了。", fail: "没做成。" };
-  S.ended = { id: i.id, st, title: i.title, line: st === "done" ? r.done : r.fail, took: fmt(nowS() - i.since) };
+  ended({ id: i.id, st, title: i.title, line: st === "done" ? r.done : r.fail, took: fmt(nowS() - i.since) });
+  say(`${st} · ${i.title}`);
+  if (S.items.some((x) => x.ask)) return draw();   // a request stays in front
+  if (S.open) draw(); else open("flash");
+}
+
+function ended(e) {
+  S.ended = { ...e, key: `${e.id}:${++seq}` };
   S.endedUntil = nowS() + 10;
   S.flash = { ...S.ended, until: nowS() + 4 };
-  if (st === "incomplete") S.burst = i.id;
-  say(`${st} · ${i.title}`);
+  if (e.st === "incomplete") { S.fails.unshift(S.ended); S.burst = e.id; }
+}
+
+/* A terminal's turn: the agent's last answer, or the API error it reported. */
+const TURNS = { done: "改好了：连接池上限从 2 调到 20，测试全部通过。", fail: "rate_limit: You have hit your limit" };
+function turn(st) {
+  ended({ id: "k9", agent: "cc", st, title: "修登录超时", line: st === "done" ? TURNS.done : TURNS.fail, took: "" });
+  say(`${st} · 终端 修登录超时`);
   if (S.items.some((x) => x.ask)) return draw();   // a request stays in front
   if (S.open) draw(); else open("flash");
 }
@@ -393,8 +414,10 @@ function resolve(id, how, value) {
 }
 
 function openThing(id) {
-  const i = S.items.find((x) => x.id === id) ?? (S.ended?.id === id ? S.ended : null) ?? ordered(S)[0] ?? S.ended;
+  const i = S.items.find((x) => x.id === id) ?? S.fails.find((x) => x.id === id) ?? (S.ended?.id === id ? S.ended : null) ?? ordered(S)[0] ?? S.fails[0] ?? S.ended;
   if (!i) return;
+  S.fails = S.fails.filter((x) => x.id !== i.id);   // opened: seen
+  draw();
   say(`→ 打开${i.agent ? "终端窗口" : "任务页"} · ${i.title}`);
 }
 
@@ -403,7 +426,7 @@ stage.addEventListener("click", (e) => {
   if (!el) { if (!e.target.closest(".panel")) close(); return; }
   const id = el.closest(".item")?.dataset.id;
   switch (el.dataset.do) {
-    case "capsule": if (e.detail > 1) return; S.open ? close() : open("user"); break;
+    case "capsule": if (e.detail > 1) return; S.open ? close({ seen: true }) : open("user"); break;
     case "open": openThing(id); break;
     case "allow": case "deny": resolve(id, el.dataset.do); break;
     case "pick": resolve(id, "pick", el.dataset.v); break;
@@ -416,7 +439,9 @@ document.getElementById("sim").addEventListener("click", (e) => {
   const k = b.dataset.sim;
   if (k === "done") finish("done");
   else if (k === "fail") finish("incomplete");
-  else if (k === "clear") { S.items = []; S.ended = null; S.flash = null; S.open = false; S.closing = false; say(""); draw(); }
+  else if (k === "turn") turn("done");
+  else if (k === "turnfail") turn("incomplete");
+  else if (k === "clear") { S.items = []; S.ended = null; S.flash = null; S.fails = []; S.open = false; S.closing = false; say(""); draw(); }
   else add(k);
 });
 
@@ -431,7 +456,7 @@ setInterval(() => {
     S.flash = null;
     if (S.open && S.openedBy === "flash") close(); else draw();
   }
-  if (S.ended && !S.items.length && nowS() > S.endedUntil) { S.ended = null; S.open = false; draw(); }
+  if (S.ended && !S.items.length && nowS() > S.endedUntil) { S.ended = null; if (!S.fails.length) S.open = false; draw(); }
 }, 140);
 
 // ---------- tools ----------
@@ -447,6 +472,12 @@ for (const b of document.querySelectorAll("#wall button")) b.addEventListener("c
 
 draw();
 fitStatic();
+// ?fails: a task fails, then a terminal's turn does; past the few seconds the card is opened on both.
+if (location.search.includes("fails")) {
+  setTimeout(() => finish("incomplete"), 200);
+  setTimeout(() => turn("incomplete"), 400);
+  setTimeout(() => { if (S.open) { S.open = false; } open("user"); }, 4800);
+}
 </script>
 </body>
 </html>

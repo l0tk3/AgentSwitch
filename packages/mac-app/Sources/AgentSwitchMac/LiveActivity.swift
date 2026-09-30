@@ -33,12 +33,18 @@ final class LiveActivity {
     @ObservationIgnored private var monitors: [Any] = []
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private var drawn: String?
-    @ObservationIgnored private let tones = NSSound(data: Tones.wav(Tones.needsYou))
+    /// The phone's tones: something needs you, a result, a failure (assistant-v0 §4).
+    @ObservationIgnored private let tones: [LivePresenter.Cue: NSSound] = [
+        .needsYou: NSSound(data: Tones.wav(Tones.needsYou)), .done: NSSound(data: Tones.wav(Tones.done)), .failed: NSSound(data: Tones.wav(Tones.failed)),
+    ].compactMapValues { $0 }
+    /// The terminal on screen in the terminal window in use.
+    @ObservationIgnored private let watching: () -> String?
     @ObservationIgnored private let sleepGuard = SleepGuard()
 
-    init(model: AppModel, openTerminal: @escaping (String) -> Void) {
+    init(model: AppModel, openTerminal: @escaping (String) -> Void, watching: @escaping () -> String? = { nil }) {
         self.model = model
         self.openTerminal = openTerminal
+        self.watching = watching
         UserDefaults.standard.register(defaults: [Self.enabledKey: true, Self.soundKey: true])
     }
 
@@ -70,7 +76,7 @@ final class LiveActivity {
     private func shoot() {
         guard let shots, let button = item?.button else { return }
         let open = panel?.isVisible == true && presenter.isOpen
-        let key = "\(drawn ?? "")|\(open)|\(presenter.cardRows.map(\.id))|\(presenter.shownEnd?.taskId ?? "")|\(pending)"
+        let key = "\(drawn ?? "")|\(open)|\(presenter.cardRows.map(\.id))|\(presenter.cardEnds.map(\.key))|\(pending)"
         guard key != lastShot else { return }
         lastShot = key
         shotCount += 1
@@ -79,7 +85,7 @@ final class LiveActivity {
            let png = rep.representation(using: .png, properties: [:]) {
             try? png.write(to: shots.appendingPathComponent("\(name)-capsule.png"))
         }
-        var line = "\(name) t=\(Int(Date().timeIntervalSince(started))) open=\(open) opener=\(String(describing: presenter.opener)) look=\(presenter.look) rows=\(presenter.cardRows.map(\.id)) end=\(presenter.shownEnd?.taskId ?? "-") item=\(NSStringFromRect(button.window?.frame ?? .zero))"
+        var line = "\(name) t=\(Int(Date().timeIntervalSince(started))) open=\(open) opener=\(String(describing: presenter.opener)) look=\(presenter.look) rows=\(presenter.cardRows.map(\.id)) end=\(presenter.shownEnd?.key ?? "-") item=\(NSStringFromRect(button.window?.frame ?? .zero))"
         if open, let panel, let host {
             line += " card=\(NSStringFromRect(panel.frame)) alpha=\(panel.alphaValue)"
             if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
@@ -123,9 +129,9 @@ final class LiveActivity {
         #endif
         if !enabled { next = nil }
         let now = Date()
-        if presenter.receive(next, at: now), UserDefaults.standard.bool(forKey: Self.soundKey) {
-            tones?.stop()
-            tones?.play()
+        if let cue = presenter.receive(next, at: now, watching: watching()), UserDefaults.standard.bool(forKey: Self.soundKey) {
+            for tone in tones.values { tone.stop() }
+            tones[cue]?.play()
         }
         sync()
     }
@@ -165,7 +171,19 @@ final class LiveActivity {
 
     /// Double click: the first thing the card shows.
     private func openFirst() {
-        if let end = presenter.shownEnd { openTask(end.taskId) } else if let row = presenter.cardRows.first { open(row) }
+        if let end = presenter.shownEnd { openEnd(end) } else if let row = presenter.cardRows.first { open(row) }
+    }
+
+    /// A result's task or terminal; a failure opened is a failure seen.
+    private func openEnd(_ end: LiveSnapshot.End) {
+        presenter.opened(end)
+        switch end.kind {
+        case .terminal:
+            close()
+            openTerminal(end.id)
+            sync()
+        case .task: openTask(end.id)
+        }
     }
 
     private func answer(_ row: LiveSnapshot.Row, _ send: @escaping @Sendable (DaemonClient) async throws -> Void) {
@@ -183,7 +201,7 @@ final class LiveActivity {
     private var actions: LiveCardActions {
         LiveCardActions(
             open: { [weak self] row in self?.open(row) },
-            openEnd: { [weak self] end in self?.openTask(end.taskId) },
+            openEnd: { [weak self] end in self?.openEnd(end) },
             decide: { [weak self] row, allow in self?.answer(row) { try await $0.decide(row, allow: allow) } },
             pick: { [weak self] row, option in self?.answer(row) { try await $0.answer(row, option: option) } })
     }

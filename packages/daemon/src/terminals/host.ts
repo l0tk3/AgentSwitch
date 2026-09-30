@@ -150,6 +150,8 @@ export class TerminalError extends Error {
 }
 
 type Listener = (ev: TerminalEvent) => void;
+/** How a terminal's turn ended: `line` is the agent's last answer (its start), the error, or the exit. */
+export type TurnEnd = { readonly at: number; readonly ok: boolean; readonly line: string };
 type Pending = { readonly ask: PermissionAsk; readonly resolve: (d: PermissionDecision | null) => void; readonly timer: NodeJS.Timeout };
 type Chunk = { readonly seq: number; readonly data: string };
 
@@ -270,6 +272,9 @@ class Session {
   status: TerminalStatus = "idle";
   statusSince: number;
   activity: { tool: string; target: string } | null = null;
+  /** How the last turn ended (assistant-v0 §4 "结果要提示"): the agent said it ended, or it failed (an API error the
+   *  agent reported, the program exiting with an error). `line`: what to read — kept in memory only. */
+  lastTurn: TurnEnd | null = null;
   /** The screen whose size the terminal has (the last one a user acted on); null: none said, or it left. */
   sizedBy: string | null = null;
   /** Screens following the stream, by their id: the size goes back when its owner's last stream ends. */
@@ -408,7 +413,10 @@ export class TerminalHost {
     s.proc = proc;
     proc.onData((data) => this.receive(s, data));
     proc.onExit(({ exitCode }) => this.exited(s, exitCode));
-    s.companion?.attach({ status: (status) => this.setStatus(s, status), ask: (tool, input, signal) => this.ask(s, tool, input, signal) });
+    s.companion?.attach({
+      status: (status) => { if (status === "idle") this.turnEnded(s, true, null); this.setStatus(s, status); },
+      ask: (tool, input, signal) => this.ask(s, tool, input, signal),
+    });
     return this.info(s);
   }
 
@@ -532,7 +540,15 @@ export class TerminalHost {
       // agent does next tells us — the tool ran (PostToolUse), the turn ended (Stop), or the user typed on (UserPromptSubmit).
       case "SessionStart": this.setStatus(s, "idle"); return null;
       case "UserPromptSubmit": this.settleAll(s, "working"); this.setStatus(s, "working"); return null;
-      case "Stop": this.settleAll(s, "idle"); this.setStatus(s, "idle"); return null;
+      case "Stop": this.settleAll(s, "idle"); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); return null;
+      // Claude Code: the turn ended on an API error (a rate limit, overload, authentication…), which Stop does not say.
+      case "StopFailure": {
+        const error = [p.error, p.error_details].filter((x) => typeof x === "string" && x.trim()).join(": ");
+        this.settleAll(s, "idle");
+        this.turnEnded(s, false, error || "这一轮出错结束", true);
+        this.setStatus(s, "idle");
+        return null;
+      }
       case "PreToolUse": {
         const input = (p.tool_input && typeof p.tool_input === "object" ? p.tool_input : {}) as Record<string, unknown>;
         this.using(s, String(p.tool_name ?? ""), input);
@@ -563,12 +579,12 @@ export class TerminalHost {
         return refused ? { block: true, reason: refused } : null;
       }
       case "PiAgentStart": this.setStatus(s, "working"); return null;
-      case "PiAgentEnd": this.setStatus(s, "idle"); return null;
+      case "PiAgentEnd": this.turnEnded(s, true, null); this.setStatus(s, "idle"); return null;
       // pi blocks on a question of its own (a confirm or a choice in its screen): the terminal waits for you.
       case "PiWaiting": this.setStatus(s, "waiting"); return null;
       case "CodexNotify": {
         if (typeof p["thread-id"] === "string" && p["thread-id"]) this.reported(s, p["thread-id"]);
-        if (p.type === "agent-turn-complete") this.setStatus(s, "idle");
+        if (p.type === "agent-turn-complete") { this.turnEnded(s, true, p["last-assistant-message"]); this.setStatus(s, "idle"); }
         return null;
       }
       case "PermissionRequest": {
@@ -695,10 +711,24 @@ export class TerminalHost {
     if (s.killTimer) clearTimeout(s.killTimer);
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.exitCode = code;
+    // Ending on an error by itself is a failed turn; one the service ended (close, quit) is not.
+    if (code !== 0 && !s.killTimer) this.turnEnded(s, false, `进程退出（代码 ${code}）`, true);
     s.companion?.stop();
     for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
     this.setStatus(s, "exited");
     s.emit({ type: "exit", code });
+  }
+
+  /** A turn ended: from work (a repeated Stop, a start-up idle is none), or `always` (the program exited on an error). */
+  private turnEnded(s: Session, ok: boolean, said: unknown, always = false): void {
+    if (!always && s.status !== "working" && s.status !== "waiting") return;
+    const text = typeof said === "string" ? said.replace(/\s+/g, " ").trim() : "";
+    s.lastTurn = { at: this.o.now(), ok, line: text.slice(0, 400) };
+  }
+
+  /** How terminal `id`'s last turn ended (local only: the Mac's Live Activity). */
+  lastTurn(id: string): TurnEnd | null {
+    return this.sessions.get(id)?.lastTurn ?? null;
   }
 
   private ask(s: Session, tool: string, input: unknown, signal?: AbortSignal): Promise<PermissionDecision | null> {

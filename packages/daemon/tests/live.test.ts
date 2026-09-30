@@ -10,7 +10,7 @@ import { encodeEvidence } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
 import { LEGEND_HEADER } from "../src/secrets/sealer.js";
-import type { TerminalHost, TerminalInfo } from "../src/terminals/host.js";
+import type { TerminalHost, TerminalInfo, TurnEnd } from "../src/terminals/host.js";
 
 const open: Store[] = [];
 afterEach(() => { for (const s of open.splice(0)) s.close(); });
@@ -29,7 +29,8 @@ function terminal(over: Partial<TerminalInfo>): TerminalInfo {
     resumedFrom: null, forked: false, hooks: true, permissions: [], activity: null, statusSince: 0, seq: 0, ...over,
   };
 }
-const host = (list: TerminalInfo[]) => ({ list: () => list }) as unknown as TerminalHost;
+const host = (list: TerminalInfo[], turns: Record<string, TurnEnd> = {}) =>
+  ({ list: () => list, lastTurn: (id: string) => turns[id] ?? null }) as unknown as TerminalHost;
 const event = (type: TaskEvent["type"], payload: Record<string, unknown>): TaskEvent => ({ taskId: "x", seq: 1, ts: 0, type, payload });
 
 describe("live snapshot", () => {
@@ -148,10 +149,28 @@ describe("live snapshot", () => {
     const snap = liveSnapshot(f.store, undefined, t0 + 70_000);
     expect(snap.rows).toEqual([]);
     expect(snap.ended).toEqual([
-      { taskId: failed, title: "登录财务平台", line: "gate proxy unreachable", ok: false, at: t0 + 40_000 },
-      { taskId: done, title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件。", ok: true, at: t0 + 30_000 },
+      { kind: "task", id: failed, taskId: failed, title: "登录财务平台", line: "gate proxy unreachable", ok: false, at: t0 + 40_000 },
+      { kind: "task", id: done, taskId: done, title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件。", ok: true, at: t0 + 30_000 },
     ]);
     expect(liveSnapshot(f.store, undefined, t0 + 95_000).ended.map((e) => e.taskId)).toEqual([failed]);
+  });
+
+  // 2026-09-30, user: 遇到报错、任务完成之类的也要提示；不然报错静默消失都不知道.
+  it("a terminal's turn is a result too: its last answer when done, what went wrong when not", () => {
+    const f = build();
+    const t0 = Date.parse("2026-09-30T10:00:00Z");
+    const term = (id: string, name: string): TerminalInfo => ({ id, name, harness: "claude-code", cwd: "/w", status: "idle", permissions: [] }) as unknown as TerminalInfo;
+    const terminals = host([term("a1", "修登录超时"), term("b2", "整理日志"), term("c3", "旧的")], {
+      a1: { at: t0 + 20_000, ok: true, line: "改好了：连接池上限从 2 调到 20，测试全部通过。" },
+      b2: { at: t0 + 30_000, ok: false, line: "rate_limit: You have hit your limit" },
+      c3: { at: t0 - 90_000, ok: false, line: "进程退出（代码 1）" },
+    });
+    const snap = liveSnapshot(f.store, terminals, t0 + 40_000);
+    expect(snap.rows).toEqual([]);
+    expect(snap.ended).toEqual([
+      { kind: "terminal", id: "b2", title: "整理日志", line: "rate_limit: You have hit your limit", ok: false, at: t0 + 30_000 },
+      { kind: "terminal", id: "a1", title: "修登录超时", line: "改好了：连接池上限从 2 调到 20，测试全部通过。", ok: true, at: t0 + 20_000 },
+    ]);
   });
 });
 

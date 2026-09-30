@@ -28,7 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var settings = SettingsWindowController(model: model)
     lazy var terminals = TerminalWindowController(model: model)
     /// The menu bar's Live Activity (assistant-v0 §4): its own status item, left of the app's.
-    lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id in self?.terminals.show(terminal: id) })
+    lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id in self?.terminals.show(terminal: id) },
+                                 watching: { [weak self] in self?.terminals.watching })
     /// Which of our windows are open: the Dock icon shows while any is.
     private var openWindows: Set<String> = []
     private var signalSources: [DispatchSourceSignal] = []

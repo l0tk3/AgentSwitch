@@ -46,7 +46,7 @@ enum LivePreview {
     /// A task seen running, then ended a second ago: the result on show.
     private static func ended(_ end: LiveSnapshot.End, now: Date) -> LivePresenter {
         var p = LivePresenter()
-        p.receive(LiveSnapshot(rows: [LiveSnapshot.Row(id: end.taskId, kind: .task, title: end.title, step: "", startedAt: now)], now: now), at: now)
+        p.receive(LiveSnapshot(rows: [LiveSnapshot.Row(id: end.id, kind: end.kind, title: end.title, step: "", startedAt: now)], now: now), at: now)
         p.receive(LiveSnapshot(rows: [], ended: [end], now: now), at: now)
         return p
     }

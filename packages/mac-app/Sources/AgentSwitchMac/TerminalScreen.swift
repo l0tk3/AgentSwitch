@@ -120,6 +120,9 @@ final class TerminalScreenController: NSObject {
         return true
     }
 
+    /// The terminal it shows.
+    var shown: String? { id }
+
     #if DEBUG
     var probeOwner: String? { owner }
     var probeShown: String? { id }

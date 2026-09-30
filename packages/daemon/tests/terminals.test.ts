@@ -262,6 +262,39 @@ describe("terminal host", () => {
     expect(mac.filter((e) => e.type === "resize").at(-1)).toMatchObject({ by: null });
   });
 
+  it("remembers how the last turn ended: Stop is done, StopFailure is not, a start-up idle or a repeated Stop is no turn", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown> = {}) => host.hook(info.id, token, { event, payload });
+    await hook("SessionStart");
+    await hook("Stop");
+    expect(host.lastTurn(info.id)).toBeNull();
+    await hook("UserPromptSubmit");
+    await hook("Stop", { last_assistant_message: "改好了，\n测试都通过。" });
+    expect(host.lastTurn(info.id)).toMatchObject({ ok: true, line: "改好了， 测试都通过。" });
+    await hook("UserPromptSubmit");
+    await hook("StopFailure", { error: "rate_limit", error_details: "You have hit your limit" });
+    expect(host.lastTurn(info.id)).toMatchObject({ ok: false, line: "rate_limit: You have hit your limit" });
+    await hook("Stop");   // after the failure: no turn was running
+    expect(host.lastTurn(info.id)).toMatchObject({ ok: false });
+    expect(host.get(info.id)!.status).toBe("idle");
+  });
+
+  it("a program that ends on an error by itself is a failed turn; one the service ended is not", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), killGraceMs: 200 });
+    closers.push(() => host.closeAll());
+    const crashed = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    host.write(crashed.id, "exit\r");   // the fake agent exits with code 3
+    await until(() => host.get(crashed.id)!.status === "exited");
+    expect(host.lastTurn(crashed.id)).toMatchObject({ ok: false, line: "进程退出（代码 3）" });
+    const closed = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    await host.stopped(closed.id);
+    expect(host.get(closed.id)!.status).toBe("exited");
+    expect(host.lastTurn(closed.id)).toBeNull();
+  });
+
   it("a permission request answered in the terminal leaves the screens once the tool runs or the turn ends", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());

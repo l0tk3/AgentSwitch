@@ -82,28 +82,38 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         }
     }
 
-    /// A task that ended in the last minute, and what it came to.
+    /// A result in the last minute: a task that ended, or a terminal's turn (assistant-v0 §4 "结果要提示"), and what it
+    /// came to.
     public struct End: Decodable, Equatable, Sendable, Identifiable {
-        public let taskId: String
+        public let kind: Kind
+        /// The task's or the terminal's id.
+        public let id: String
         public let title: String
         public let line: String
         public let ok: Bool
         public let at: Date
-        public var id: String { taskId }
+        /// One result: a terminal has one per turn.
+        public var key: String { "\(kind.rawValue):\(id):\(Int(at.timeIntervalSince1970 * 1000))" }
 
-        public init(taskId: String, title: String, line: String, ok: Bool, at: Date) {
-            self.taskId = taskId
+        public init(kind: Kind = .task, id: String, title: String, line: String, ok: Bool, at: Date) {
+            self.kind = kind
+            self.id = id
             self.title = title
             self.line = line
             self.ok = ok
             self.at = at
         }
 
-        private enum CodingKeys: String, CodingKey { case taskId, title, line, ok, at }
+        public init(taskId: String, title: String, line: String, ok: Bool, at: Date) {
+            self.init(kind: .task, id: taskId, title: title, line: line, ok: ok, at: at)
+        }
+
+        private enum CodingKeys: String, CodingKey { case kind, id, taskId, title, line, ok, at }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            taskId = try c.decode(String.self, forKey: .taskId)
+            kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .task
+            id = try c.decodeIfPresent(String.self, forKey: .id) ?? c.decode(String.self, forKey: .taskId)
             title = try c.decode(String.self, forKey: .title)
             line = try c.decodeIfPresent(String.self, forKey: .line) ?? ""
             ok = try c.decode(Bool.self, forKey: .ok)
@@ -143,12 +153,17 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
 }
 
 /// When the capsule shows, what it says, and when the card under it opens and closes by itself: a new request drops it
-/// (and sounds) and it stays until every request is answered; a task that just ended drops it for a few seconds unless
-/// a request waits (a request is never covered); a click on the capsule opens or closes it, a click elsewhere closes
-/// it. What waits or has ended when the app starts is taken as known, as the phone does.
+/// (and sounds) and it stays until every request is answered; a result (a task that ended, a terminal's turn) drops it
+/// for a few seconds unless a request waits (a request is never covered), with a tone; a failure stays — the capsule red —
+/// until it has been looked at (assistant-v0 §4 "失败留到你看过"). A click on the capsule opens or closes it, a click
+/// elsewhere closes it. What waits or has ended when the app starts is taken as known, as the phone does; the terminal
+/// on screen in the terminal window says nothing of its own turns (you saw them).
 public struct LivePresenter: Equatable, Sendable {
     /// Who opened the card: a card the user opened stays open when its requests are answered.
     public enum Opener: Equatable, Sendable { case user, request, result }
+
+    /// The tone for what just came: something needs you, a result, a failure.
+    public enum Cue: Equatable, Sendable { case needsYou, done, failed }
 
     /// The app mark's look (busy, waiting, done, incomplete).
     public enum Look: Equatable, Sendable { case busy, waiting, done, incomplete }
@@ -170,6 +185,8 @@ public struct LivePresenter: Equatable, Sendable {
     /// The result on show by itself, until `flashUntil`.
     public private(set) var flash: LiveSnapshot.End?
     private var flashUntil: Date?
+    /// Failures not looked at yet, the newest first: no minute's window takes them away.
+    public private(set) var unseenFailures: [LiveSnapshot.End] = []
     private var seenAsks: Set<String> = []
     private var seenEnds: Set<String> = []
     private var started = false
@@ -178,18 +195,27 @@ public struct LivePresenter: Equatable, Sendable {
 
     public var isOpen: Bool { opener != nil }
 
-    /// Something to show: work, a request, or an end in the last minute.
+    /// Something to show: work, a request, a result in the last minute, or a failure not looked at.
     public var visible: Bool {
         guard let s = snapshot else { return false }
-        return !s.rows.isEmpty || !s.ended.isEmpty
+        return !s.rows.isEmpty || !s.ended.isEmpty || !unseenFailures.isEmpty
     }
 
-    /// The outcome the capsule and the card show: the result on show (not over a request), else the last end once
-    /// nothing runs.
+    /// The outcome the capsule and the card show: the result on show, else the latest failure not looked at (neither over
+    /// a request), else the last end once nothing runs.
     public var shownEnd: LiveSnapshot.End? {
         guard let s = snapshot else { return nil }
         if let flash, s.waiting == 0 { return flash }
+        if s.waiting == 0, let failure = unseenFailures.first { return failure }
         return s.rows.isEmpty ? s.ended.first : nil
+    }
+
+    /// The results on the card: the one on show, then the other failures not looked at; the first few, and how many more.
+    public var cardEnds: [LiveSnapshot.End] { Array(allEnds.prefix(LiveSnapshot.cardRows)) }
+    public var moreEnds: Int { max(0, allEnds.count - LiveSnapshot.cardRows) }
+    private var allEnds: [LiveSnapshot.End] {
+        guard let first = shownEnd else { return [] }
+        return [first] + unseenFailures.filter { $0.key != first.key }
     }
 
     public var look: Look {
@@ -207,35 +233,42 @@ public struct LivePresenter: Equatable, Sendable {
     public var cardRows: [LiveSnapshot.Row] { Array((snapshot?.rows ?? []).prefix(LiveSnapshot.cardRows)) }
     public var moreRows: Int { max(0, (snapshot?.rows.count ?? 0) - LiveSnapshot.cardRows) }
 
-    /// A new answer from `GET /live` (nil: the service is not answering; everything goes). True when a new request
-    /// came: the caller sounds.
+    /// A new answer from `GET /live` (nil: the service is not answering; everything goes). `watching`: the terminal on
+    /// screen in the terminal window in use. Returns the tone for what came (a request before a failure before a result).
     @discardableResult
-    public mutating func receive(_ next: LiveSnapshot?, at now: Date) -> Bool {
+    public mutating func receive(_ next: LiveSnapshot?, at now: Date, watching: String? = nil) -> Cue? {
         snapshot = next
         guard let next else {
             opener = nil
             flash = nil
             flashUntil = nil
-            return false
+            return nil
         }
         let asks = Set(next.rows.filter(\.needsYou).map(Self.askKey))
-        let ends = next.ended.filter { !seenEnds.contains($0.taskId) }
+        let ends = next.ended.filter { !seenEnds.contains($0.key) }
         let fresh = asks.subtracting(seenAsks)
         seenAsks = asks
-        seenEnds = Set(next.ended.map(\.taskId))
+        seenEnds = Set(next.ended.map(\.key))
+        let watched = { (end: LiveSnapshot.End) in end.kind == .terminal && end.id == watching }
+        // Looking at the terminal is looking at its failures.
+        unseenFailures.removeAll(where: watched)
         guard started else {
             started = true
-            return false
+            return nil
         }
         if !fresh.isEmpty, opener != .user { opener = .request }
-        if let end = ends.first, next.now.timeIntervalSince(end.at) < Self.freshEnd {
+        let news = ends.filter { next.now.timeIntervalSince($0.at) < Self.freshEnd && !watched($0) }
+        for end in news.reversed() where !end.ok { unseenFailures.insert(end, at: 0) }
+        if let end = news.first {
             flash = end
             flashUntil = now.addingTimeInterval(Self.resultShown)
             if opener == nil, next.waiting == 0 { opener = .result }
         }
         if next.waiting == 0, opener == .request { opener = nil }
         tick(now)
-        return !fresh.isEmpty
+        if !fresh.isEmpty { return .needsYou }
+        if news.contains(where: { !$0.ok }) { return .failed }
+        return news.isEmpty ? nil : .done
     }
 
     /// Time passes: a result's few seconds end (and the card it opened closes).
@@ -248,13 +281,27 @@ public struct LivePresenter: Equatable, Sendable {
         if !visible { opener = nil }
     }
 
-    /// A click on the capsule.
+    /// A click on the capsule: closing the card is having seen its failures.
     public mutating func toggle() {
-        opener = opener == nil && visible ? .user : nil
+        if opener != nil {
+            unseenFailures = []
+            opener = nil
+        } else if visible {
+            opener = .user
+        }
     }
 
-    /// A click elsewhere, or the thing it pointed at opened.
-    public mutating func close() { opener = nil }
+    /// A click elsewhere, or the thing it pointed at opened. A card the user opened was looked at; one that dropped by
+    /// itself may not have been (a click in another app closes it too).
+    public mutating func close() {
+        if opener == .user { unseenFailures = [] }
+        opener = nil
+    }
+
+    /// A result's task or terminal was opened: that failure has been seen.
+    public mutating func opened(_ end: LiveSnapshot.End) {
+        unseenFailures.removeAll { $0.kind == end.kind && $0.id == end.id }
+    }
 
     /// One request per key: its id, or the waiting terminal (a form on its screen has no request id).
     static func askKey(_ row: LiveSnapshot.Row) -> String { row.ask?.id ?? "waiting:\(row.id)" }
