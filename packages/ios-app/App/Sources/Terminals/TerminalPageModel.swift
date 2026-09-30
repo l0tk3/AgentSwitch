@@ -307,7 +307,8 @@ final class TerminalPageModel {
         do {
             let staged = try await api.upload(prepared)
             let attached = try await api.attachToTerminal(id, uploads: staged.map(\.id))
-            sealedNote = attached.count == 1 ? "1 image attached" : "\(attached.count) images attached"
+            let word = prepared.allSatisfy(ImagePrep.isImage) ? "image" : "file"
+            sealedNote = attached.count == 1 ? "1 \(word) attached" : "\(attached.count) \(word)s attached"
             error = nil
             return true
         } catch {

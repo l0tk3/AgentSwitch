@@ -109,6 +109,19 @@ enum TerminalProbe {
                 let t3 = screen.view.getTerminal()
                 say("phone left: owner \(screen.probeOwner ?? "-") buffer \(t3.cols)x\(t3.rows) page \(await page()) visible \(window.isVisible) occlusion \(window.occlusionState.contains(.visible))")
             }
+            if let picture = UserDefaults.standard.string(forKey: "probeDrop") {
+                // A picture dropped on the screen as Finder drops one: its path typed, escaped; Claude Code makes it [Image #n].
+                let board = NSPasteboard(name: NSPasteboard.Name("agentswitch-probe-\(UUID().uuidString)"))
+                board.clearContents()
+                board.writeObjects([URL(fileURLWithPath: picture) as NSURL])
+                let took = screen.drop(board)
+                try? await Task.sleep(for: .seconds(2))
+                let dt = screen.view.getTerminal()
+                var shown: [String] = []
+                for row in 0..<dt.rows { if let line = dt.getLine(row: row) { shown.append(line.translateToString(trimRight: true)) } }
+                say("dropped \(took): " + (shown.filter { $0.contains("Image") || $0.contains("probe") }.joined(separator: " | ")))
+                board.releaseGlobally()
+            }
             if UserDefaults.standard.bool(forKey: "probeLink") {
                 // A link as Claude Code writes one (OSC 8), ⌘-clicked through the window as a person would.
                 var opened: [String] = []

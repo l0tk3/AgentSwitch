@@ -135,6 +135,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         let model = self.model
         let screen = TerminalScreenController(client: { model.client })
         screen.evaluate = { [weak web] js in web?.evaluateJavaScript(js, completionHandler: nil) }
+        web.dropOnScreen = { [weak screen] pasteboard in screen?.drop(pasteboard) ?? false }
         self.screen = screen
         let stage = TerminalStage(web: web, screen: screen.view)
         let host = NSHostingController(rootView: TerminalWindowRoot(stage: stage, head: head,
@@ -395,6 +396,54 @@ final class TerminalWebView: WKWebView {
     var screenRect: CGRect?
     /// What floats over it (permission requests, the composer, the loading line, a sheet).
     var overlays: [CGRect] = []
+    /// A drop on the screen's area (files, text): the terminal's, as in iTerm; anywhere else the page's (WebKit's).
+    var dropOnScreen: ((NSPasteboard) -> Bool)?
+    /// The drag is over the screen's area now (WebKit is not told of it there).
+    private var dragOnScreen = false
+    private var droppedOnScreen = false
+
+    private func onScreen(_ info: NSDraggingInfo) -> Bool {
+        guard let screen = screenRect, dropOnScreen != nil else { return false }
+        let local = convert(info.draggingLocation, from: nil)
+        let p = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
+        return screen.contains(p) && !overlays.contains(where: { $0.contains(p) })
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        dragOnScreen = onScreen(sender)
+        return dragOnScreen ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let now = onScreen(sender)
+        if now != dragOnScreen {
+            // Across the screen's edge: WebKit hears the drag leave, or come in.
+            if now { super.draggingExited(sender) } else { _ = super.draggingEntered(sender) }
+            dragOnScreen = now
+        }
+        return now ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        if !dragOnScreen { super.draggingExited(sender) }
+        dragOnScreen = false
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        dragOnScreen ? true : super.prepareForDragOperation(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard dragOnScreen else { return super.performDragOperation(sender) }
+        dragOnScreen = false
+        droppedOnScreen = true
+        return dropOnScreen?(sender.draggingPasteboard) ?? false
+    }
+
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) {
+        if droppedOnScreen { droppedOnScreen = false; return }
+        super.concludeDragOperation(sender)
+    }
 
     /// Over the screen and nothing of the page's there: the native screen below takes it (nil lets the stage look
     /// further down).

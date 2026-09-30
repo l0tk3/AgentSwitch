@@ -33,7 +33,7 @@ public enum ImagePrep {
     }
 
     /// A still raster image this can shrink; a GIF (animation) and vector images pass as they are.
-    static func isImage(_ file: UploadFile) -> Bool {
+    public static func isImage(_ file: UploadFile) -> Bool {
         let ext = (file.name as NSString).pathExtension
         let type = UTType(mimeType: file.type) ?? UTType(filenameExtension: ext)
         guard let type, type.conforms(to: .image) else { return false }

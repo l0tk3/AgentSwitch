@@ -166,6 +166,27 @@ final class TerminalScreenController: NSObject {
         window.makeFirstResponder(view)
     }
 
+    /// Something dropped on the screen (docs/terminal-v0.md §1 Mac): files' paths (escaped, as iTerm types them), else the
+    /// text or the web address, pasted into the program; the size is this window's, the keyboard too.
+    func drop(_ pasteboard: NSPasteboard) -> Bool {
+        guard id != nil else { return false }
+        let files = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let text: String
+        if !files.isEmpty {
+            text = TerminalDrop.paths(files.map(\.path))
+        } else if let string = pasteboard.string(forType: .string), !string.isEmpty {
+            text = string
+        } else if let links = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL], !links.isEmpty {
+            text = links.map(\.absoluteString).joined(separator: " ")
+        } else {
+            return false
+        }
+        userActed()
+        typed(ArraySlice(Array(TerminalDrop.pasted(text, bracketed: view.getTerminal().bracketedPasteMode).utf8)))
+        view.window?.makeFirstResponder(view)
+        return true
+    }
+
     /// A line of the page's own under the program's output ("1 secret sealed").
     func note(_ text: String) { view.feed(text: "\r\n\u{1b}[2m[\(text)]\u{1b}[0m\r\n") }
 

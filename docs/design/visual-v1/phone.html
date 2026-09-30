@@ -673,7 +673,7 @@ function p3controls() {
     <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="hide keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key">${k}</button>`).join("")}</div>
     <div class="composer ${sealed ? "sealed" : ""}" id="p3comp">
       <div class="hd">${P.sprite(LOCK, { px: 2 })}<span>sealed → ${esc(tname)}</span><span class="sp"></span><button type="button" data-x="unseal" aria-label="cancel">×</button></div>
-      <div class="rowc">${sealed ? "" : `<button type="button" class="sqbtn pic" data-x="pic" aria-label="picture">${P.sprite(PIC, { px: 3 })}</button>`}<button type="button" class="sqbtn lock" data-x="seal" aria-label="sealed reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="send">↑</button></div>
+      <div class="rowc">${sealed ? "" : `<button type="button" class="sqbtn pic" data-x="pic" aria-label="attach">+</button>`}<button type="button" class="sqbtn lock" data-x="seal" aria-label="sealed reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="send">↑</button></div>
       <div class="ft"><span>凭据在 Mac 上换成密文后再交给 agent</span><button type="button" class="btn pri" data-x="send" ${canSend ? "" : "disabled"}>[ send ]</button></div>
     </div>
     ${note ? `<div class="mono" style="padding:0 16px 8px;font-size:11px;color:var(--ink2)">${note}</div>` : ""}`;
@@ -736,6 +736,7 @@ p3.addEventListener("click", (e) => {
   if (x === "seal" || x === "unseal") { toggleSeal(); return; }
   if (x === "send") { send(); return; }
   // The photo button: the picture goes to the Mac and its path into the agent's prompt ([Image #1] in Claude Code).
+  // "+": camera / photos / files / paste image, as the task composer's; here a picture is picked at once.
   if (x === "pic") { pictures = 1; note = "1 image attached"; p3controls(); return; }
   if (e.target.closest("#p3field")) { if (away) here(); typing = true; kbUp = true; p3controls(); }
 });

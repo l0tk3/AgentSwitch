@@ -20,8 +20,11 @@ struct TerminalPage: View {
     @State private var confirmClose = false
     /// The sealed box is open (the lock): the reply goes through the sealer.
     @State private var sealing = false
-    /// Photos picked for the agent (the photo button), sent as soon as they are chosen.
+    /// The "+" menu, as the task composer's: camera, photos, files, a pasted image — sent as soon as they are chosen.
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var pickingPhotos = false
+    @State private var pickingFiles = false
+    @State private var takingPhoto = false
     /// A direct reply that looks like it holds a secret, asked about before it goes.
     @State private var secretCheck: String?
     @FocusState private var replying: Bool
@@ -120,6 +123,30 @@ struct TerminalPage: View {
             #endif
         }
         .onDisappear { page.stop() }
+        .photosPicker(isPresented: $pickingPhotos, selection: $photoItems, maxSelectionCount: 5, matching: .images)
+        .onChange(of: photoItems) { _, items in
+            guard !items.isEmpty else { return }
+            photoItems = []
+            Task { _ = await page.attach(await PickedFiles.photos(items)) }
+        }
+        .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                Task {
+                    let (files, skipped) = await Task.detached(priority: .userInitiated) { PickedFiles.read(urls) }.value
+                    if !skipped.isEmpty { page.error = "未发送：\(skipped.joined(separator: "、"))（超过 50 MB 或无法读取）" }
+                    if !files.isEmpty { _ = await page.attach(files) }
+                }
+            case .failure(let failure): page.error = failure.localizedDescription
+            }
+        }
+        .fullScreenCover(isPresented: $takingPhoto) {
+            CameraPicker { data in
+                takingPhoto = false
+                if let data { Task { _ = await page.attach([UploadFile(name: "photo.jpg", type: "image/jpeg", data: data)]) } }
+            }
+            .ignoresSafeArea()
+        }
         // The reply box is for this phone: the size is its own.
         .onChange(of: replying) { if replying { page.userActed() } }
         // In the background the stream ends and the size goes back to the Mac; in front again, it is this phone's.
@@ -300,18 +327,22 @@ struct TerminalPage: View {
             }
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 if !sealing {
-                    // Pictures for the agent: their paths go into its prompt (Claude Code: [Image #n]); write on and send.
-                    PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .images) {
-                        PixelSprite(rows: PixelArt.picture, pixel: 3, color: Theme.ink.opacity(0.72))
+                    // Pictures and files for the agent: their paths go into its prompt (Claude Code: [Image #n]); write on
+                    // and send. The same words as the task composer's "+".
+                    Menu {
+                        Button("camera") { replying = false; takingPhoto = true }
+                            .disabled(!CameraPicker.isAvailable)
+                        Button("photos") { replying = false; pickingPhotos = true }
+                        Button("files") { replying = false; pickingFiles = true }
+                        Button("paste image") { pasteImages() }
+                    } label: {
+                        Text("+").font(.system(size: 20, weight: .regular, design: .monospaced)).foregroundStyle(Theme.ink.opacity(0.72))
+                            .frame(width: 38, height: 38)
+                            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
                     }
-                    .buttonStyle(SquareIconButtonStyle(active: false))
+                    .tint(Theme.ink)
                     .disabled(page.sending || page.status == .exited)
-                    .accessibilityLabel("picture")
-                    .onChange(of: photoItems) { _, items in
-                        guard !items.isEmpty else { return }
-                        photoItems = []
-                        Task { _ = await page.attach(await Self.load(items)) }
-                    }
+                    .accessibilityLabel("attach")
                     Button { toggleSealing() } label: { PixelSprite(rows: PixelArt.lock, pixel: 3, color: Theme.signal) }
                         .buttonStyle(SquareIconButtonStyle(active: false))
                         .accessibilityLabel("sealed reply")
@@ -358,15 +389,10 @@ struct TerminalPage: View {
         .padding(.bottom, sealing ? Theme.Space.m + 6 : Theme.Space.s)
     }
 
-    /// Photos as their original bytes (HEIC or JPEG); the model shrinks and re-encodes them (ImagePrep).
-    private static func load(_ items: [PhotosPickerItem]) async -> [UploadFile] {
-        var files: [UploadFile] = []
-        for (i, item) in items.enumerated() {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            let type = item.supportedContentTypes.first { $0.conforms(to: .image) } ?? .jpeg
-            files.append(UploadFile(name: "photo-\(i + 1).\(type.preferredFilenameExtension ?? "jpg")", type: type.preferredMIMEType ?? "image/jpeg", data: data))
-        }
-        return files
+    private func pasteImages() {
+        let images = PickedFiles.pastedImages()
+        guard !images.isEmpty else { page.error = "剪贴板中无图片"; return }
+        Task { _ = await page.attach(images) }
     }
 
     /// Between the two ways; the keyboard stays as it was.

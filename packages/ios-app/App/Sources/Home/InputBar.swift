@@ -74,13 +74,13 @@ struct InputBar: View {
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
-            Task { add(await Self.load(items), prepare: true) }
+            Task { add(await PickedFiles.photos(items), prepare: true) }
         }
         .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
                 Task {
-                    let (files, skipped) = await Task.detached(priority: .userInitiated) { Self.read(urls) }.value
+                    let (files, skipped) = await Task.detached(priority: .userInitiated) { PickedFiles.read(urls) }.value
                     if !skipped.isEmpty { error = "未添加：\(skipped.joined(separator: "、"))（超过 50 MB 或无法读取）" }
                     add(files, prepare: false)
                 }
@@ -95,41 +95,9 @@ struct InputBar: View {
     }
 
     private func pasteImages() {
-        let images = UIPasteboard.general.images ?? []
+        let images = PickedFiles.pastedImages()
         guard !images.isEmpty else { error = "剪贴板中无图片"; return }
-        // JPEG: a pasted photo as PNG would be many times larger; ImagePrep then shrinks it and turns it upright.
-        add(images.enumerated().compactMap { i, image in
-            image.jpegData(compressionQuality: 0.9).map { UploadFile(name: images.count == 1 ? "pasted.jpg" : "pasted-\(i + 1).jpg", type: "image/jpeg", data: $0) }
-        }, prepare: true)
-    }
-
-    /// Photos as their original bytes (HEIC or JPEG); ImagePrep shrinks and re-encodes them.
-    private static func load(_ items: [PhotosPickerItem]) async -> [UploadFile] {
-        var files: [UploadFile] = []
-        for (i, item) in items.enumerated() {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            let type = item.supportedContentTypes.first { $0.conforms(to: .image) } ?? .jpeg
-            files.append(UploadFile(name: "photo-\(i + 1).\(type.preferredFilenameExtension ?? "jpg")", type: type.preferredMIMEType ?? "image/jpeg", data: data))
-        }
-        return files
-    }
-
-    /// Files picked in the Files app: read inside their security scope; a file over the limit is not read at all.
-    nonisolated private static func read(_ urls: [URL]) -> (files: [UploadFile], skipped: [String]) {
-        var files: [UploadFile] = []
-        var skipped: [String] = []
-        for url in urls {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            guard size <= PendingAttachment.maxFileBytes, let data = try? Data(contentsOf: url) else {
-                skipped.append(url.lastPathComponent)
-                continue
-            }
-            let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-            files.append(UploadFile(name: url.lastPathComponent, type: type, data: data))
-        }
-        return (files, skipped)
+        add(images, prepare: true)
     }
 
     private var canSend: Bool {
