@@ -108,17 +108,17 @@ struct InputBar: View {
     private var extras: some View {
         Menu {
             Section {
-                // Words only, as the Mac's menus (§7.2.5: every row an icon, or none).
-                Button("camera") { Keyboard.dismiss(); takingPhoto = true }
+                // Every row an icon (§7.2.5, 2026-09-30: the system's own, as other apps' menus have them).
+                Button("camera", systemImage: "camera") { Keyboard.dismiss(); takingPhoto = true }
                     .disabled(!CameraPicker.isAvailable)
-                Button("photos") { Keyboard.dismiss(); pickingPhotos = true }
-                Button("files") { Keyboard.dismiss(); pickingFiles = true }
-                Button("paste image") { pasteImages() }
+                Button("photos", systemImage: "photo.on.rectangle") { Keyboard.dismiss(); pickingPhotos = true }
+                Button("files", systemImage: "folder") { Keyboard.dismiss(); pickingFiles = true }
+                Button("paste image", systemImage: "doc.on.clipboard") { pasteImages() }
             }
-            Button("insert ciphertext") { Keyboard.dismiss(); model.sheet = .pickCiphertext }
+            Button("insert ciphertext", systemImage: "lock") { Keyboard.dismiss(); model.sheet = .pickCiphertext }
                 .disabled(model.ciphertexts.isEmpty)
-            Button("new ciphertext") { Keyboard.dismiss(); model.sheet = .makeCiphertext }
-            Menu("pin model") {
+            Button("new ciphertext", systemImage: "plus") { Keyboard.dismiss(); model.sheet = .makeCiphertext }
+            Menu("pin model", systemImage: "pin") {
                 Button("auto") { model.pin = nil }
                 ForEach(model.targets?.pinOptions ?? [], id: \.self) { ref in
                     Button(ref.displayName) { model.pin = ref }

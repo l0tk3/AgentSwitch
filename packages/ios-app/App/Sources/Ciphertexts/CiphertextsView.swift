@@ -90,11 +90,11 @@ struct CiphertextsView: View {
                     Text(item.shortToken).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 .swipeActions(edge: .leading) {
-                    Button("insert") { model.insertIntoCompose(item.token) }.tint(.accentColor)
+                    Button("insert", systemImage: "text.insert") { model.insertIntoCompose(item.token) }.tint(.accentColor)
                 }
                 .contextMenu {
-                    Button("copy") { Clipboard.copyToken(item.token) }
-                    Button("insert") { model.insertIntoCompose(item.token) }
+                    Button("copy", systemImage: "doc.on.doc") { Clipboard.copyToken(item.token) }
+                    Button("insert", systemImage: "text.insert") { model.insertIntoCompose(item.token) }
                 }
             }
             .onDelete { offsets in model.deleteCiphertexts(Set(offsets.map { model.ciphertexts[$0].id })) }

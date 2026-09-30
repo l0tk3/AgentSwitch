@@ -196,9 +196,9 @@ struct TaskDetailView: View {
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 if detail.task?.status.isActive == true {
-                    Button("cancel task", role: .destructive) { confirmCancel = true }
+                    Button("cancel task", systemImage: "xmark.circle", role: .destructive) { confirmCancel = true }
                 }
-                Menu("hand to another model") {
+                Menu("hand to another model", systemImage: "arrow.right.arrow.left") {
                     Button("auto") { Task { await detail.handoff(to: nil, model) } }
                     ForEach(targets?.pinOptions ?? [], id: \.self) { ref in
                         Button(ref.displayName) { Task { await detail.handoff(to: ref, model) } }
@@ -206,7 +206,7 @@ struct TaskDetailView: View {
                 }
                 if let task = detail.task {
                     Section {
-                        Button("delete task", role: .destructive) { deleting = .task(task) }
+                        Button("delete task", systemImage: "trash", role: .destructive) { deleting = .task(task) }
                             .disabled(task.status.isActive)
                     }
                 }

@@ -42,7 +42,7 @@ struct MacSwitcher: View {
                 }
             }
             Divider()
-            Button("add Mac") { model.sheet = .addMac }
+            Button("add Mac", systemImage: "plus") { model.sheet = .addMac }
         } label: {
             HStack(spacing: 4) {
                 Text(model.profile?.name ?? "AgentSwitch").font(.headline)

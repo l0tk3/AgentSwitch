@@ -81,8 +81,8 @@ struct TerminalPage: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("rename") { newName = page.name; renaming = true }
-                    Button("close", role: .destructive) { if page.status == .exited && !canDeleteRecord { Task { await close() } } else { confirmClose = true } }
+                    Button("rename", systemImage: "pencil") { newName = page.name; renaming = true }
+                    Button("close", systemImage: "xmark", role: .destructive) { if page.status == .exited && !canDeleteRecord { Task { await close() } } else { confirmClose = true } }
                 } label: { Text("⋯").mono(17) }
                 .tint(Theme.ink)
             }
@@ -341,11 +341,11 @@ struct TerminalPage: View {
                     // Pictures and files for the agent: their paths go into its prompt (Claude Code: [Image #n]); write on
                     // and send. The same words as the task composer's "+".
                     Menu {
-                        Button("camera") { replying = false; takingPhoto = true }
+                        Button("camera", systemImage: "camera") { replying = false; takingPhoto = true }
                             .disabled(!CameraPicker.isAvailable)
-                        Button("photos") { replying = false; pickingPhotos = true }
-                        Button("files") { replying = false; pickingFiles = true }
-                        Button("paste image") { pasteImages() }
+                        Button("photos", systemImage: "photo.on.rectangle") { replying = false; pickingPhotos = true }
+                        Button("files", systemImage: "folder") { replying = false; pickingFiles = true }
+                        Button("paste image", systemImage: "doc.on.clipboard") { pasteImages() }
                     } label: {
                         Text("+").font(.system(size: 20, weight: .regular, design: .monospaced)).foregroundStyle(Theme.ink.opacity(0.72))
                             .frame(width: 38, height: 38)

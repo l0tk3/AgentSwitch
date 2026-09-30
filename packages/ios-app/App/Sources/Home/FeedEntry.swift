@@ -126,16 +126,16 @@ struct FeedEntry: View {
 
     @ViewBuilder
     private var menu: some View {
-        Button("open") { open() }
+        Button("open", systemImage: "arrow.up.right.square") { open() }
         if let threadId = task.threadId, let openThread {
-            Button("topic") { openThread(threadId) }
+            Button("topic", systemImage: "bubble.left.and.bubble.right") { openThread(threadId) }
         }
         if task.status.isTerminal {
             let speaking = model.speaker.speakingTaskId == task.id
-            Button(speaking ? "stop" : "read aloud") { model.speaker.toggle(task) }
+            Button(speaking ? "stop" : "read aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2") { model.speaker.toggle(task) }
         }
         Divider()
-        Button("delete", role: .destructive) { delete(.task(task)) }
+        Button("delete", systemImage: "trash", role: .destructive) { delete(.task(task)) }
             .disabled(task.status.isActive)
     }
 }

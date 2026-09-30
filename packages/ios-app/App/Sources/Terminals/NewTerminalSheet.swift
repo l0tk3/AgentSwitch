@@ -47,7 +47,7 @@ struct NewTerminalSheet: View {
                             ForEach(models.filter { !$0.older }) { m in Button(m.name) { modelId = m.id } }
                             let older = models.filter(\.older)
                             if !older.isEmpty {
-                                Menu("older") { ForEach(older) { m in Button(m.name) { modelId = m.id } } }
+                                Menu("older", systemImage: "clock") { ForEach(older) { m in Button(m.name) { modelId = m.id } } }
                             }
                         } label: {
                             HStack {

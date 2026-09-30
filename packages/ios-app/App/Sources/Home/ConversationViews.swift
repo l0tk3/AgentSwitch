@@ -122,10 +122,10 @@ struct AssistantBubble: View {
     @ViewBuilder
     private var readAloud: some View {
         let speaking = model.speaker.speakingTaskId == speakKey
-        Button(speaking ? "stop" : "read aloud", action: toggleSpeech)
-        Button("copy") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
+        Button(speaking ? "stop" : "read aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2", action: toggleSpeech)
+        Button("copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
         Divider()
-        Button("delete", role: .destructive) { delete(.entry(model.conversation.entry(of: message))) }
+        Button("delete", systemImage: "trash", role: .destructive) { delete(.entry(model.conversation.entry(of: message))) }
     }
 }
 

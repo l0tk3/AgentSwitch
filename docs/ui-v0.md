@@ -113,7 +113,7 @@
 2. **读的字不加工**：正文、对话、终端输出、按钮文字不抖、不加扫描线、不加阴影。
 3. **一个信号色**：粉 `#FF2E88`（浅色 `#E0106E`）只用在选中（行左侧 3px 竖条 + 序号）、品牌标记、主按钮悬停、glitch 的第二通道。状态色只表状态：青 = busy，琥珀 = waiting，绿 = ok / idle，红 = failed；从不单独表意，总配形状或文字（色弱也分得清）。
 4. **一个图标一个意思**（tonsky / HIG “icons should differentiate”，同一图标不能表示两件事）：`×` 只表示关闭（可恢复）；删除记录写 `delete`（不可恢复，悬停变红）。`>_` 只表示 Codex；终端标签页用带框的终端窗口。进行中处处是同一个盲文转圈 `⠋⠙⠹…`，静态场合（小组件、实时活动）用第一帧。找不到好隐喻就只写字。
-5. **图标要区分，不要铺满**：只有在跑的终端带状态标记（■ idle/waiting，□ exited，转圈 busy）；会话记录不带。有无图标的行共用同一列，文字起点对齐；菜单里每行都留图标列，或者都不留。
+5. **图标要区分，不要铺满**：只有在跑的终端带状态标记（■ idle/waiting，□ exited，转圈 busy）；会话记录不带。有无图标的行共用同一列，文字起点对齐；菜单里每行都留图标列，或者都不留。iPhone 的系统菜单（`+`、`⋯`、长按）每一项都带 SF Symbols 图标（2026-09-30，用户：手机上这个选项应该加图标，其他 app 都有，这个 app 的选项上都没用几个图标，都加上）：系统画的菜单用系统的图标最协调；一个意思一个图标——copy `doc.on.doc`、delete 一律 `trash`、open `arrow.up.right.square`、rename `pencil`、close `xmark`、camera `camera`、photos `photo.on.rectangle`、files `folder`、paste image `doc.on.clipboard`、ciphertext `lock`、new `plus`、pin model `pin`、handoff `arrow.right.arrow.left`、read aloud `speaker.wave.2`（stop `stop.fill`）、topic `bubble.left.and.bubble.right`、revert `arrow.uturn.backward`、older `clock`；在一串同类选项里挑一个的（模型名、auto）不带图标。Mac 菜单栏面板的操作行仍只有字（像素图标的方案见 `menu-icons.html`，待定）。
 6. **系统符号按系统的意思用**：`▸ ▾` 只表示展开/收起（“▸ 2 more”，不用 “… 还有 2 个”）；`…` 只表示“还需要输入”（`settings…`）；`⌘ ⇧` 只写快捷键；单选是 `< > <x>`（尖括号，2026-09-28 用户觉得 `( ) (•)` 不好看），复选才是 `[ ] [x]`——两者不能混用。
 7. **短词英文，整句中文**：短词用小写等宽英文——状态、按钮、标签页与导航标题、分组标签（`// status`）、快捷键提示、单位（`3h` `62%`）。成句的用正式中文（§4.1）——说明、确认、报错、空状态、占位提示。用户内容原样。一个词只有一个意思：
    | 场合 | 用词 |

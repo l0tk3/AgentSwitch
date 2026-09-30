@@ -43,11 +43,11 @@ struct ContextEditorView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
-                    Button("insert ciphertext") { picking = true }
+                    Button("insert ciphertext", systemImage: "lock") { picking = true }
                         .disabled(model.ciphertexts.isEmpty)
-                    Button("load example") { Task { await loadExample() } }
+                    Button("load example", systemImage: "doc.text") { Task { await loadExample() } }
                         .disabled(!text.isEmpty)
-                    Button("revert") { text = stored ?? "" }
+                    Button("revert", systemImage: "arrow.uturn.backward") { text = stored ?? "" }
                         .disabled(!dirty)
                 } label: { Text("⋯").mono(17) }
                 Button(saving ? "保存中" : "保存") { Task { await save() } }

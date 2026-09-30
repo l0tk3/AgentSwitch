@@ -132,9 +132,9 @@ struct HomeView: View {
             // Long press: delete what you said with its answers (and the tasks they created).
             UserBubble(text: message.text)
                 .contextMenu {
-                    Button("copy") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
+                    Button("copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
                     Divider()
-                    Button("delete", role: .destructive) { deleting = .entry(model.conversation.entry(of: message)) }
+                    Button("delete", systemImage: "trash", role: .destructive) { deleting = .entry(model.conversation.entry(of: message)) }
                 }
         case .assistant(let message, let created):
             AssistantBubble(message: message, created: created, entry: { entry($0, showsRequest: false) }, open: open,
