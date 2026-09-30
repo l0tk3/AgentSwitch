@@ -657,8 +657,10 @@ function sendDecision(id, requestId, decision) {
 }
 
 // ---------- the sidebar: a directory tree ----------
-/** Folders with their running terminals and their earlier sessions, nested under a shared parent; folders with a
- *  terminal first, in the order they were opened (so ⌘1–9 stay put while agents write), then the others by activity. */
+/** Folders with their running terminals and their earlier sessions, nested under a shared parent. The order is fixed
+ *  (2026-09-30, user: 目录树顺序应该是固定的，现在会根据活跃状态顺序乱跳): folders by path, as a directory tree; in a
+ *  folder its terminals in the order they were opened, then its sessions newest-begun first. Work going on moves nothing;
+ *  a new terminal or session only comes in at its place. */
 function folderTree() {
   const byCwd = new Map();
   const group = (cwd) => {
@@ -681,8 +683,12 @@ function folderTree() {
     g.sessions.push(s);
     g.latest = Math.max(g.latest, s.updatedAt);
   }
-  const busyFirst = (a, b) => (b.terminals.length > 0) - (a.terminals.length > 0) || (a.terminals.length ? a.opened - b.opened : b.latest - a.latest);
-  const groups = [...byCwd.values()].sort(busyFirst);
+  const byPath = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+  for (const g of byCwd.values()) {
+    g.terminals.sort((a, b) => a.createdAt - b.createdAt);
+    g.sessions.sort((a, b) => (b.startedAt ?? b.updatedAt) - (a.startedAt ?? a.updatedAt) || byPath(a.id, b.id));
+  }
+  const groups = [...byCwd.values()].sort((a, b) => byPath(a.cwd, b.cwd));
   // Projects in the same parent folder sit under it (Worktop/ › Codex/, Claude/); a project alone in its parent stands
   // by its own name.
   const byParent = new Map();
@@ -694,7 +700,7 @@ function folderTree() {
   const nodes = [...byParent].map(([parent, gs]) => gs.length > 1
     ? { parent, groups: gs, terminals: gs.flatMap((g) => g.terminals), latest: Math.max(...gs.map((g) => g.latest)), opened: Math.min(...gs.map((g) => g.opened)) }
     : { parent: null, groups: gs, terminals: gs[0].terminals, latest: gs[0].latest, opened: gs[0].opened });
-  nodes.sort(busyFirst);
+  nodes.sort((a, b) => byPath(a.parent ?? a.groups[0].cwd, b.parent ?? b.groups[0].cwd));
   // Names at the top level that repeat are told apart by their parent.
   const top = nodes.map((n) => ({ n, name: folderOf(tilde(n.parent ?? n.groups[0].cwd)), path: n.parent ?? n.groups[0].cwd }));
   const counts = new Map();
@@ -706,7 +712,8 @@ function folderTree() {
   return nodes;
 }
 
-/** Terminals in the order the sidebar shows them: ⌘1–9 follow it. */
+/** Terminals in the order they were opened: ⌘1–9 follow it, wherever the tree puts them (a new terminal in an earlier
+ *  folder does not renumber the others). */
 let terminalOrder = [];
 
 /** A terminal's status mark: the spinner while busy, a square while idle or waiting, hollow once ended. */
@@ -717,8 +724,8 @@ function statusMark(t) {
 }
 const agentMark = (harness) => raw(sprite(AGENT_PX[harness] ?? AGENT_PX.pi, { px: 2 }), "agent-mark");
 
-function terminalRow(t, index, tr, depth) {
-  terminalOrder.push(t.id);
+function terminalRow(t, tr, depth) {
+  const index = terminalOrder.indexOf(t.id);
   const meta = t.status === "waiting" ? h("span", { class: "w" }, "waiting")
     : t.status === "exited" ? (t.exitCode ? h("span", { class: "x" }, `exit ${t.exitCode}`) : "exited")
     : agentMark(t.harness);
@@ -786,8 +793,7 @@ function counts(ts, ss) {
 
 function renderSidebar() {
   if (renaming) return;
-  let index = 0;
-  terminalOrder = [];
+  terminalOrder = [...terminals].sort((a, b) => a.createdAt - b.createdAt).map((t) => t.id);
   const toggle = (key) => {
     if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
     remember("terminal.collapsed", JSON.stringify([...collapsed]));
@@ -796,7 +802,6 @@ function renderSidebar() {
   // Any folder folds, the one with the terminal on screen too (its line is marked instead); folded terminals keep
   // their ⌘1–9.
   const holds = (ts) => (ts.some((t) => t.id === current?.id && !creating) ? "holds" : "");
-  const skip = (ts) => { for (const t of ts) { terminalOrder.push(t.id); index++; } };
   const out = [];
   const renderGroup = (g, depth) => {
     const closed = collapsed.has(g.cwd);
@@ -805,7 +810,7 @@ function renderSidebar() {
       h("span", { class: "name" }, `${g.label}/`),
       counts(g.terminals, g.sessions),
       h("button", { class: "add", title: "new terminal here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, "+")));
-    if (closed) { skip(g.terminals); return; }
+    if (closed) return;
     const all = expanded.has(g.cwd);
     const list = all ? g.sessions : g.sessions.slice(0, SESSIONS_SHOWN);
     const hidden = g.sessions.length - list.length;
@@ -813,7 +818,7 @@ function renderSidebar() {
     const n = g.terminals.length + list.length + (more ? 1 : 0);
     let i = 0;
     const tr = () => (++i === n ? "└─" : "├─");
-    for (const t of g.terminals) out.push(terminalRow(t, index++, tr(), depth));
+    for (const t of g.terminals) out.push(terminalRow(t, tr(), depth));
     for (const s of list) out.push(sessionRow(s, tr(), depth));
     if (more) {
       out.push(h("div", { class: "row more", onclick: () => { if (all) expanded.delete(g.cwd); else expanded.add(g.cwd); renderSidebar(); } },
@@ -829,7 +834,7 @@ function renderSidebar() {
       h("span", { class: "chev" }, closed ? "▸" : "▾"),
       h("span", { class: "name" }, `${node.label}/`),
       counts(node.terminals, node.groups.flatMap((g) => g.sessions))));
-    if (closed) skip(node.terminals); else for (const g of node.groups) renderGroup(g, 1);
+    if (!closed) for (const g of node.groups) renderGroup(g, 1);
   }
   $("groups").replaceChildren(...(out.length ? out : [h("div", { class: "empty-note" }, "暂无会话。")]));
 }

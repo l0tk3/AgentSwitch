@@ -16,6 +16,8 @@ export type SessionSummary = {
   /** The latest assistant text (one line, clipped). */
   readonly lastText: string;
   readonly updatedAt: number;
+  /** When it began (its record was made): the tree's order, which activity does not move (terminal-v0 §1). */
+  readonly startedAt: number;
   /** Updated within `ACTIVE_MS`. */
   readonly active: boolean;
   /** Codex: desktop / cli / vscode. */

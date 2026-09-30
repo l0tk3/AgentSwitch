@@ -2,8 +2,9 @@ import Foundation
 
 /// The terminals tab as a directory tree (docs/terminal-v0.md §1, docs/ui-v0.md §7.2 "list = directory tree"), as the
 /// web page builds it: one group per project folder — its running terminals, then its earlier sessions; projects under
-/// one parent with two or more of them sit under that parent. Folders with a terminal come first, in the order they were
-/// opened (so the list stays put while agents write), the others by latest activity.
+/// one parent with two or more of them sit under that parent. The order is fixed (2026-09-30, user: 目录树顺序应该是固定的，
+/// 现在会根据活跃状态顺序乱跳): folders by path; in a folder its terminals in the order they were opened, then its sessions
+/// newest-begun first. Work going on moves nothing; something new only comes in at its place.
 public enum TerminalTree {
     public struct Group: Sendable, Equatable, Identifiable {
         public let cwd: String
@@ -44,17 +45,7 @@ public enum TerminalTree {
             b.latest = max(b.latest, s.updatedAt)
             byCwd[s.cwd] = b
         }
-        func before(_ a: (terminals: Int, opened: Int64, latest: Int64), _ b: (terminals: Int, opened: Int64, latest: Int64)) -> Bool {
-            if (a.terminals > 0) != (b.terminals > 0) { return a.terminals > 0 }
-            if a.terminals > 0, a.opened != b.opened { return a.opened < b.opened }
-            return a.latest > b.latest
-        }
-        let groups = byCwd.map { cwd, b in (cwd: cwd, bucket: b) }.sorted { a, b in
-            let ka = (a.bucket.terminals.count, a.bucket.opened, a.bucket.latest), kb = (b.bucket.terminals.count, b.bucket.opened, b.bucket.latest)
-            if before(ka, kb) { return true }
-            if before(kb, ka) { return false }
-            return a.cwd < b.cwd
-        }
+        let groups = byCwd.map { cwd, b in (cwd: cwd, bucket: b) }.sorted { byPath($0.cwd, $1.cwd) }
         var byParent: [String: [(cwd: String, bucket: Bucket)]] = [:]
         var parentOrder: [String] = []
         for g in groups {
@@ -67,15 +58,7 @@ public enum TerminalTree {
             let gs = byParent[parent] ?? []
             return (gs.count > 1 ? parent : nil, gs)
         }
-        func key(_ d: Draft) -> (terminals: Int, opened: Int64, latest: Int64) {
-            (d.groups.reduce(0) { $0 + $1.bucket.terminals.count }, d.groups.map(\.bucket.opened).min() ?? .max, d.groups.map(\.bucket.latest).max() ?? 0)
-        }
-        let ordered = drafts.enumerated().sorted { a, b in
-            let ka = key(a.element), kb = key(b.element)
-            if before(ka, kb) { return true }
-            if before(kb, ka) { return false }
-            return a.offset < b.offset
-        }.map(\.element)
+        let ordered = drafts.sorted { byPath($0.parent ?? $0.groups[0].cwd, $1.parent ?? $1.groups[0].cwd) }
         // Names at the top level that repeat are told apart by their parent.
         let topNames = ordered.map { $0.parent.map(lastComponent) ?? lastComponent($0.groups[0].cwd) }
         return ordered.map { draft in
@@ -84,8 +67,8 @@ public enum TerminalTree {
             let groups = draft.groups.map { g in
                 let own = lastComponent(g.cwd)
                 let name = draft.parent == nil && repeated ? "\(lastComponent(parentOf(g.cwd)))/\(own)" : own
-                return Group(cwd: g.cwd, name: name, terminals: g.bucket.terminals.sorted { $0.createdAt > $1.createdAt },
-                             sessions: g.bucket.sessions.sorted { $0.updatedAt > $1.updatedAt })
+                return Group(cwd: g.cwd, name: name, terminals: g.bucket.terminals.sorted { $0.createdAt < $1.createdAt },
+                             sessions: g.bucket.sessions.sorted { ($0.startedAt ?? $0.updatedAt, $1.sessionId) > ($1.startedAt ?? $1.updatedAt, $0.sessionId) })
             }
             let shownParent = draft.parent.map { parent in repeated ? "\(lastComponent(parentOf(parent)))/\(lastComponent(parent))" : lastComponent(parent) }
             return Node(parent: draft.parent, parentName: shownParent, groups: groups)
@@ -94,6 +77,11 @@ public enum TerminalTree {
 
     /// The running terminals in the order the tree shows them.
     public static func order(_ nodes: [Node]) -> [TerminalInfo] { nodes.flatMap(\.terminals) }
+
+    /// Paths as a directory tree sorts them: case aside, numbers by value.
+    static func byPath(_ a: String, _ b: String) -> Bool {
+        a.compare(b, options: [.caseInsensitive, .numeric]) == .orderedAscending
+    }
 
     static func parentOf(_ path: String) -> String {
         guard let slash = path.lastIndex(of: "/"), slash != path.startIndex else { return "/" }

@@ -146,7 +146,7 @@ describe("the Mac's coding sessions", () => {
 
 describe("what the models see of the sessions", () => {
   const s = (harness: SessionSummary["harness"], id: string, cwd: string, title: string, minutesAgo: number): SessionSummary =>
-    ({ harness, id, cwd, title, lastText: "", updatedAt: NOW - minutesAgo * 60_000, active: minutesAgo < 1 });
+    ({ harness, id, cwd, title, lastText: "", updatedAt: NOW - minutesAgo * 60_000, startedAt: NOW - minutesAgo * 60_000, active: minutesAgo < 1 });
   const sessions = [
     s("claude-code", "c1", "/Users/u/code/site", "修一下登录页 key=sk-ant-abcdefghijklmnop", 0),
     s("codex", "x1", "/Users/u/code/site", "跑一下测试", 1320),

@@ -40,7 +40,8 @@ export function defaultSessionSources(dataHome: string, env: NodeJS.ProcessEnv =
 const SCAN_FILES = 400;
 const MAX_AGE_MS = 90 * 24 * 3600_000;
 
-type FileRef = { readonly path: string; readonly mtime: number; readonly size: number };
+/** `born`: when the file was made (the session began). */
+type FileRef = { readonly path: string; readonly mtime: number; readonly size: number; readonly born: number };
 type Cached = { readonly mtime: number; readonly size: number; readonly summary: SessionSummary | null };
 
 export class SessionMonitor {
@@ -80,7 +81,7 @@ export class SessionMonitor {
       let summary: SessionSummary | null = null;
       try {
         const facts = harness === "claude-code" ? claudeFacts(ref.path, ref.mtime) : codexFacts(ref.path, ref.mtime);
-        summary = facts ? this.summary(harness, facts, now) : null;
+        summary = facts ? this.summary(harness, { ...facts, startedAt: ref.born }, now) : null;
       } catch { summary = null; }
       this.cache.set(ref.path, { mtime: ref.mtime, size: ref.size, summary });
       if (summary) this.files.set(`${harness}:${summary.id}`, ref.path);
@@ -88,11 +89,12 @@ export class SessionMonitor {
     });
   }
 
-  private summary(harness: SessionHarness, f: { id: string; cwd: string; title: string; lastText: string; updatedAt: number; origin?: string; branch?: string; model?: string; mode?: SessionMode; forkedFrom?: string }, now: number): SessionSummary {
+  private summary(harness: SessionHarness, f: { id: string; cwd: string; title: string; lastText: string; updatedAt: number; startedAt?: number; origin?: string; branch?: string; model?: string; mode?: SessionMode; forkedFrom?: string }, now: number): SessionSummary {
     return {
       harness, id: f.id, cwd: f.cwd, title: oneLine(f.title, TITLE_CHARS), lastText: oneLine(f.lastText, TITLE_CHARS),
       // Whole milliseconds: a file's mtime has a fraction, which a client reading an integer may refuse.
       updatedAt: Math.round(f.updatedAt),
+      startedAt: Math.round(Math.min(f.startedAt || f.updatedAt, f.updatedAt)),
       active: now - f.updatedAt < ACTIVE_MS, ...(f.origin ? { origin: f.origin } : {}), ...(f.branch ? { branch: f.branch } : {}), ...(f.model ? { model: f.model } : {}),
       ...(f.mode ? { mode: f.mode } : {}), ...(f.forkedFrom ? { forkedFrom: f.forkedFrom } : {}),
     };
@@ -177,7 +179,7 @@ function jsonlFiles(root: string, depth: number, now: number, limit: number, ski
       if (!name.endsWith(".jsonl")) continue;
       try {
         const st = statSync(path);
-        if (st.isFile() && now - st.mtimeMs < MAX_AGE_MS) found.push({ path, mtime: st.mtimeMs, size: st.size });
+        if (st.isFile() && now - st.mtimeMs < MAX_AGE_MS) found.push({ path, mtime: st.mtimeMs, size: st.size, born: st.birthtimeMs || st.ctimeMs });
       } catch { /* gone meanwhile */ }
     }
   };

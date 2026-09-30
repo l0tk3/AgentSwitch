@@ -164,20 +164,26 @@ final class TerminalTreeTests: XCTestCase {
         TerminalInfo(id: id, harness: "claude-code", cwd: cwd, name: id, status: status, createdAt: created, lastOutputAt: created + 100,
                      agentSessionId: session, resumedFrom: resumedFrom)
     }
-    private func session(_ id: String, _ cwd: String, at: Int64) -> SessionSummary {
-        SessionSummary(harness: "claude-code", id: id, cwd: cwd, title: id, updatedAt: at)
+    private func session(_ id: String, _ cwd: String, at: Int64, started: Int64? = nil) -> SessionSummary {
+        SessionSummary(harness: "claude-code", id: id, cwd: cwd, title: id, updatedAt: at, startedAt: started)
     }
 
-    func testFoldersWithTerminalsFirstInOpenedOrderAndSiblingsMerged() {
-        let nodes = TerminalTree.build(
-            terminals: [term("t2", "/Users/u/Work/api", created: 20), term("t1", "/Users/u/Code/AgentSwitch", created: 10)],
-            sessions: [session("s1", "/Users/u/Work/web", at: 999), session("s2", "/Users/u/Docs/Notes", at: 500), session("s3", "/Users/u/Code/AgentSwitch", at: 50)])
-        // AgentSwitch (opened first) before Work (api opened later, web merged under the same parent), then Notes
-        XCTAssertEqual(nodes.map(\.id), ["/Users/u/Code/AgentSwitch", "/Users/u/Work", "/Users/u/Docs/Notes"])
-        XCTAssertEqual(nodes[1].parentName, "Work")
-        XCTAssertEqual(nodes[1].groups.map(\.name), ["api", "web"])
-        XCTAssertEqual(nodes[0].groups[0].sessions.map(\.sessionId), ["s3"])
-        XCTAssertEqual(TerminalTree.order(nodes).map(\.id), ["t1", "t2"])
+    // 2026-09-30, user: 目录树顺序应该是固定的，现在会根据活跃状态顺序乱跳.
+    func testTheOrderIsFixedFoldersByPathTerminalsAsOpenedSessionsAsBegun() {
+        let terminals = [term("t2", "/Users/u/Work/api", created: 20), term("t1", "/Users/u/Code/AgentSwitch", created: 10),
+                         term("t3", "/Users/u/Work/api", created: 30)]
+        let sessions = [session("s1", "/Users/u/Work/web", at: 999, started: 100), session("s2", "/Users/u/Docs/Notes", at: 500, started: 400),
+                        session("s3", "/Users/u/Code/AgentSwitch", at: 50, started: 40), session("s4", "/Users/u/Code/AgentSwitch", at: 9_999, started: 30)]
+        let nodes = TerminalTree.build(terminals: terminals, sessions: sessions)
+        XCTAssertEqual(nodes.map(\.id), ["/Users/u/Code/AgentSwitch", "/Users/u/Docs/Notes", "/Users/u/Work"])
+        XCTAssertEqual(nodes[2].parentName, "Work")
+        XCTAssertEqual(nodes[2].groups.map(\.name), ["api", "web"])
+        XCTAssertEqual(nodes[0].groups[0].sessions.map(\.sessionId), ["s3", "s4"], "s4 is busy now; it began earlier and stays below")
+        XCTAssertEqual(TerminalTree.order(nodes).map(\.id), ["t1", "t2", "t3"])
+        // Work going on anywhere moves nothing.
+        let later = TerminalTree.build(terminals: terminals, sessions: sessions.map { SessionSummary(harness: $0.harness, id: $0.sessionId, cwd: $0.cwd, title: $0.title, updatedAt: $0.updatedAt + 50_000, startedAt: $0.startedAt) })
+        XCTAssertEqual(later.map(\.id), nodes.map(\.id))
+        XCTAssertEqual(later.flatMap { $0.groups.flatMap { $0.sessions.map(\.sessionId) } }, nodes.flatMap { $0.groups.flatMap { $0.sessions.map(\.sessionId) } })
     }
 
     func testASessionARunningTerminalWritesIsNotListedTwice() {

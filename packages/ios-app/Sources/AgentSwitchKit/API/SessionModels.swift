@@ -10,6 +10,8 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
     public let title: String
     public let lastText: String
     public let updatedAt: Int64
+    /// When it began (its record was made; an older Mac does not say): the tree's fixed order.
+    public let startedAt: Int64?
     /// Updated within the last 90 seconds (the daemon decides).
     public let active: Bool
     /// Codex's originator: desktop, command line, editor.
@@ -21,14 +23,15 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
     /// The session this one was forked from.
     public let forkedFrom: String?
 
-    public init(harness: String, id: String, cwd: String, title: String, lastText: String = "", updatedAt: Int64, active: Bool = false,
-                origin: String? = nil, branch: String? = nil, model: String? = nil, mode: String? = nil, forkedFrom: String? = nil) {
+    public init(harness: String, id: String, cwd: String, title: String, lastText: String = "", updatedAt: Int64, startedAt: Int64? = nil,
+                active: Bool = false, origin: String? = nil, branch: String? = nil, model: String? = nil, mode: String? = nil, forkedFrom: String? = nil) {
         self.harness = harness
         self.sessionId = id
         self.cwd = cwd
         self.title = title
         self.lastText = lastText
         self.updatedAt = updatedAt
+        self.startedAt = startedAt
         self.active = active
         self.origin = origin
         self.branch = branch
@@ -50,7 +53,7 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         return last.isEmpty ? "未命名会话" : last
     }
 
-    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, active, origin, branch, model, mode, forkedFrom }
+    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, startedAt, active, origin, branch, model, mode, forkedFrom }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -61,6 +64,7 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         lastText = (try? c.decodeIfPresent(String.self, forKey: .lastText)) ?? ""
         // A file's mtime in milliseconds may carry a fraction (older Macs send it as is).
         updatedAt = (try? c.decodeIfPresent(Int64.self, forKey: .updatedAt)) ?? (try? c.decodeIfPresent(Double.self, forKey: .updatedAt)).map { Int64($0.rounded()) } ?? 0
+        startedAt = (try? c.decodeIfPresent(Int64.self, forKey: .startedAt)) ?? nil
         active = (try? c.decodeIfPresent(Bool.self, forKey: .active)) ?? false
         origin = try? c.decodeIfPresent(String.self, forKey: .origin)
         branch = try? c.decodeIfPresent(String.self, forKey: .branch)

@@ -9,7 +9,7 @@ import { OWN_OPENCODE_AGENTS } from "../core/probes.js";
 import { obj, str } from "./jsonl.js";
 import { clipText, type SessionMessage } from "./types.js";
 
-export type OpenCodeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly model?: string };
+export type OpenCodeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly startedAt?: number; readonly model?: string };
 
 function withDb<T>(path: string, fallback: T, read: (db: DatabaseSync) => T): T {
   if (!existsSync(path)) return fallback;
@@ -36,15 +36,18 @@ function parse(json: string): unknown {
 export function openCodeSessions(path: string, limit: number): OpenCodeFacts[] {
   return withDb(path, [] as OpenCodeFacts[], (db) => {
     // Older OpenCode builds have no `agent` column: then nothing tells our model calls apart here.
-    const hasAgent = (db.prepare("PRAGMA table_info(session_v2)").all() as { name: string }[]).some((c) => c.name === "agent");
+    const columns = (db.prepare("PRAGMA table_info(session_v2)").all() as { name: string }[]).map((c) => c.name);
+    const hasAgent = columns.includes("agent");
+    // When it began (the tree's fixed order); a build without the column says only when it was last touched.
+    const created = columns.includes("time_created") ? "time_created" : "NULL AS time_created";
     const notOurs = hasAgent ? ` AND (agent IS NULL OR agent NOT IN (${OWN_OPENCODE_AGENTS.map(() => "?").join(", ")}))` : "";
-    const rows = db.prepare(`SELECT id, directory, title, model, time_updated FROM session_v2 WHERE parent_id IS NULL${notOurs} ORDER BY time_updated DESC LIMIT ?`)
+    const rows = db.prepare(`SELECT id, directory, title, model, ${created}, time_updated FROM session_v2 WHERE parent_id IS NULL${notOurs} ORDER BY time_updated DESC LIMIT ?`)
       .all(...(hasAgent ? OWN_OPENCODE_AGENTS : []), limit) as Record<string, unknown>[];
     const last = db.prepare("SELECT data FROM session_message WHERE session_id = ? AND type = 'assistant' ORDER BY seq DESC LIMIT 5");
     return rows.map((r) => {
       const replies = (last.all(String(r.id)) as { data: string }[]).map((m) => replyText(parse(m.data))).filter(Boolean);
       const model = str(obj(parse(str(r.model))).id);
-      return { id: String(r.id), cwd: str(r.directory), title: str(r.title), lastText: replies[0] ?? "", updatedAt: Number(r.time_updated) || 0, ...(model ? { model } : {}) };
+      return { id: String(r.id), cwd: str(r.directory), title: str(r.title), lastText: replies[0] ?? "", updatedAt: Number(r.time_updated) || 0, ...(Number(r.time_created) ? { startedAt: Number(r.time_created) } : {}), ...(model ? { model } : {}) };
     });
   });
 }

@@ -11,6 +11,7 @@ struct MenuContentView: View {
     @Environment(\.showSettings) private var showSettings
     @Environment(\.showTerminals) private var showTerminals
     @Environment(\.quitApp) private var quitApp
+    @AppStorage(DockPresence.alwaysShowKey) private var alwaysShowInDock = true
 
     static let width: CGFloat = 320
 
@@ -163,7 +164,11 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             // words only: an icon on every item differentiates nothing (docs/ui-v0.md §7.2.5)
             MenuAction(title: "pair device…") { showSettings(.pairing) }
-            MenuAction(title: "open terminal", enabled: model.daemonReady) { showTerminals() }
+            // The Dock icon opens the terminal window (2026-09-30, user: dock 栏直接点图标就可以打开 terminal，就不用状态栏里的
+            // open terminal 了); without a Dock icon this is the way in.
+            if !alwaysShowInDock {
+                MenuAction(title: "open terminal", enabled: model.daemonReady) { showTerminals() }
+            }
             MenuAction(title: "open console", enabled: model.daemonReady) { openConsole() }
             MenuAction(title: "restart service") { model.restartAll() }
             MenuAction(title: "settings…") { showSettings(nil) }
