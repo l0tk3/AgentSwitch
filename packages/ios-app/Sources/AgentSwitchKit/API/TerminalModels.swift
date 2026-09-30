@@ -355,9 +355,14 @@ public enum TerminalEvent: Sendable, Equatable {
     case output(seq: Int64, data: String)
     case status(TerminalStatus)
     case name(String)
-    case resize(cols: Int, rows: Int)
+    /// The size, and the screen that owns it (this phone's, another's, or nil when none does: its owner left). Sent on
+    /// every connect too.
+    case resize(cols: Int, rows: Int, by: String?)
     case permission(TerminalPermission)
     case permissionResolved(id: String)
+    /// Every request waiting, sent on each (re)connect: the screen's list becomes this (one answered elsewhere while
+    /// the phone was away goes).
+    case permissions([TerminalPermission])
     case exit(code: Int?)
     /// The terminal was closed: screens leave it.
     case removed
@@ -380,13 +385,17 @@ public enum TerminalEvent: Sendable, Equatable {
             return (obj["name"] as? String).map { .name($0) }
         case "resize":
             guard let cols = int("cols"), let rows = int("rows") else { return nil }
-            return .resize(cols: cols, rows: rows)
+            return .resize(cols: cols, rows: rows, by: obj["by"] as? String)
         case "permission":
             guard let request = obj["request"], let raw = try? JSONSerialization.data(withJSONObject: request),
                   let p = try? JSONDecoder().decode(TerminalPermission.self, from: raw) else { return nil }
             return .permission(p)
         case "permission_resolved":
             return (obj["id"] as? String).map { .permissionResolved(id: $0) }
+        case "permissions":
+            guard let requests = obj["requests"], let raw = try? JSONSerialization.data(withJSONObject: requests),
+                  let all = try? JSONDecoder().decode([TerminalPermission].self, from: raw) else { return nil }
+            return .permissions(all)
         case "exit":
             return .exit(code: int("code"))
         case "removed":

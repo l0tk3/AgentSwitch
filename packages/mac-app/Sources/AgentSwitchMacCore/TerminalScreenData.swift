@@ -8,8 +8,9 @@ public enum TerminalStreamEvent: Equatable, Sendable {
     /// The screen as the service has it (serialized, with its scrollback), at the size it had.
     case snapshot(seq: Int, cols: Int, rows: Int, data: String)
     case output(seq: Int, data: String)
-    /// Another screen (or this one) changed the size.
-    case resize(cols: Int, rows: Int)
+    /// The size, and the screen that owns it (docs/terminal-v0.md §1 "尺寸有主"): this one, another, or nil when none
+    /// does (its owner left). Sent on every connect too.
+    case resize(cols: Int, rows: Int, by: String?)
     case status(String)
     case exit(code: Int?)
     /// The terminal was deleted.
@@ -29,7 +30,7 @@ public enum TerminalStreamEvent: Equatable, Sendable {
             return .output(seq: seq, data: text)
         case "resize":
             guard let cols = int("cols"), let rows = int("rows") else { return nil }
-            return .resize(cols: cols, rows: rows)
+            return .resize(cols: cols, rows: rows, by: object["by"] as? String)
         case "status":
             return (object["status"] as? String).map(TerminalStreamEvent.status)
         case "exit":
@@ -144,9 +145,11 @@ public struct TerminalStyle: Decodable, Equatable, Sendable {
 }
 
 extension DaemonClient {
-    /// `GET /terminals/:id/stream` (from `after`: only the output missed since then), with the local token.
-    public func terminalStreamRequest(id: String, after: Int? = nil) -> URLRequest {
-        var request = request("GET", "/terminals/\(Self.segment(id))/stream" + (after.map { "?after=\($0)" } ?? ""))
+    /// `GET /terminals/:id/stream` (from `after`: only the output missed since then), with the local token. `screen`:
+    /// this screen's id — the size it owns goes back when this stream ends.
+    public func terminalStreamRequest(id: String, after: Int? = nil, screen: String? = nil) -> URLRequest {
+        let query = [after.map { "after=\($0)" }, screen.map { "screen=\(Self.segment($0))" }].compactMap { $0 }
+        var request = request("GET", "/terminals/\(Self.segment(id))/stream" + (query.isEmpty ? "" : "?" + query.joined(separator: "&")))
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 60 * 60 * 24
         return request
@@ -166,8 +169,10 @@ extension DaemonClient {
         _ = try await call("POST", "/terminals/\(Self.segment(id))/keys", body: try JSONEncoder().encode(["keys": keys]))
     }
 
-    public func resizeTerminal(id: String, cols: Int, rows: Int) async throws {
-        _ = try await call("POST", "/terminals/\(Self.segment(id))/resize", body: try JSONEncoder().encode(["cols": cols, "rows": rows]))
+    /// `screen`: the screen that takes the size (it owns it from now on).
+    public func resizeTerminal(id: String, cols: Int, rows: Int, screen: String? = nil) async throws {
+        struct Body: Encodable { let cols: Int; let rows: Int; let screen: String? }
+        _ = try await call("POST", "/terminals/\(Self.segment(id))/resize", body: try JSONEncoder().encode(Body(cols: cols, rows: rows, screen: screen)))
     }
 
     /// A screen that just attached asks the agent to draw again (what a snapshot cannot carry, such as links).

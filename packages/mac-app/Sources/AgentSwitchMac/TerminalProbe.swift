@@ -50,6 +50,85 @@ enum TerminalProbe {
             screen.note("接口确认齐全。跟随其他屏幕尺寸变化时 resize abc 你好")
             try? await Task.sleep(for: .milliseconds(300))
             say("first responder \(window.firstResponder.map { String(describing: type(of: $0)) } ?? "-")")
+            // Where the program's cursor is, and a composition in progress drawn there (an input method's marked text).
+            let tt = screen.view.getTerminal()
+            let cursor = tt.getCursorLocation()
+            var inverse: [Int] = []
+            if let line = tt.getLine(row: cursor.y) {
+                for col in 0..<tt.cols where line[col].attribute.style.contains(.inverse) { inverse.append(col) }
+            }
+            say("cursor col \(cursor.x) row \(cursor.y); inverse cells on that row \(inverse)")
+            if UserDefaults.standard.bool(forKey: "probeAway") {
+                // One size for one terminal: a phone takes it while it follows; the window shows where it is in use,
+                // a click on the placeholder takes it back, and it comes back by itself when the phone leaves.
+                let home = ProcessInfo.processInfo.environment["AGENTSWITCH_HOME"].map { URL(fileURLWithPath: $0) }
+                let client = DaemonClient(port: UserDefaults.standard.integer(forKey: "localPort"), tokenFile: home?.appendingPathComponent(DaemonClient.tokenFileName))
+                @MainActor func page() async -> String {
+                    guard let web = terminals.probeWeb else { return "-" }
+                    let js = "JSON.stringify({hidden: document.getElementById('away').hidden, place: document.getElementById('away').dataset.place || null, head: document.getElementById('awayHead').textContent})"
+                    return (try? await web.evaluateJavaScript(js)) as? String ?? "-"
+                }
+                @MainActor func shot(_ name: String) {
+                    if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
+                        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name))
+                    }
+                }
+                let t0 = screen.view.getTerminal()
+                say("away: owner \(screen.probeOwner ?? "-") grid \(t0.cols)x\(t0.rows) page \(await page())")
+                let phone = URLSession(configuration: .ephemeral)
+                let follow = phone.dataTask(with: client.terminalStreamRequest(id: id, screen: "phone-probe"))
+                follow.resume()
+                try? await Task.sleep(for: .milliseconds(500))
+                try? await client.resizeTerminal(id: id, cols: 50, rows: 30, screen: "phone-probe")
+                try? await Task.sleep(for: .milliseconds(1200))
+                let t1 = screen.view.getTerminal()
+                say("phone took it: owner \(screen.probeOwner ?? "-") buffer \(t1.cols)x\(t1.rows) page \(await page())")
+                shot("away.png")
+                terminals.probeWeb?.evaluateJavaScript("document.getElementById('away').dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}))", completionHandler: nil)
+                try? await Task.sleep(for: .milliseconds(1500))
+                let t2 = screen.view.getTerminal()
+                say("clicked here: owner \(screen.probeOwner ?? "-") buffer \(t2.cols)x\(t2.rows) page \(await page())")
+                try? await client.resizeTerminal(id: id, cols: 50, rows: 30, screen: "phone-probe")
+                try? await Task.sleep(for: .milliseconds(800))
+                say("phone again: owner \(screen.probeOwner ?? "-") page \(await page())")
+                follow.cancel()
+                phone.invalidateAndCancel()
+                try? await Task.sleep(for: .seconds(4.5))
+                let t3 = screen.view.getTerminal()
+                say("phone left: owner \(screen.probeOwner ?? "-") buffer \(t3.cols)x\(t3.rows) page \(await page()) visible \(window.isVisible) occlusion \(window.occlusionState.contains(.visible))")
+            }
+            if UserDefaults.standard.bool(forKey: "probeLink") {
+                // A link as Claude Code writes one (OSC 8), ⌘-clicked through the window as a person would.
+                var opened: [String] = []
+                LinkOpener.probeOpened = { opened.append($0.absoluteString) }
+                screen.view.feed(text: "\r\n\u{1b}]8;;file:///tmp/probe-link.png\u{1b}\\probe-link.png\u{1b}]8;;\u{1b}\\ and \u{1b}]8;;https://example.com/\u{1b}\\example\u{1b}]8;;\u{1b}\\")
+                let lt = screen.view.getTerminal()
+                let row = lt.getCursorLocation().y
+                let optimal = screen.view.getOptimalFrameSize().size
+                let cw = optimal.width / CGFloat(lt.cols), ch = optimal.height / CGFloat(lt.rows)
+                @MainActor func click(col: Int) {
+                    let inView = NSPoint(x: (CGFloat(col) + 0.5) * cw, y: screen.view.isFlipped ? (CGFloat(row) + 0.5) * ch : screen.view.bounds.height - (CGFloat(row) + 0.5) * ch)
+                    let at = screen.view.convert(inView, to: nil)
+                    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                        guard let e = NSEvent.mouseEvent(with: type, location: at, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { continue }
+                        if type == .leftMouseDown { screen.view.mouseDown(with: e) } else { screen.view.mouseUp(with: e) }
+                    }
+                    say("clicked col \(col) row \(row) at \(NSStringFromPoint(at)); hit view \(window.contentView?.hitTest(at).map { String(describing: type(of: $0)) } ?? "-")")
+                }
+                say("link at (3,\(row)) \(lt.link(at: .screen(Position(col: 3, row: row)), mode: .explicitOnly) ?? "none"); at (21,\(row)) \(lt.link(at: .screen(Position(col: 21, row: row)), mode: .explicitAndImplicit) ?? "none"); highlight \(screen.view.linkHighlightMode) reporting \(screen.view.linkReporting); cell \(NSStringFromSize(NSSize(width: cw, height: ch))) flipped \(screen.view.isFlipped)")
+                click(col: 3)
+                try? await Task.sleep(for: .milliseconds(300))
+                click(col: 21)
+                try? await Task.sleep(for: .milliseconds(300))
+                say("mouse mode \(lt.mouseMode); opened \(opened)")
+                LinkOpener.probeOpened = nil
+            }
+            if UserDefaults.standard.bool(forKey: "probeCompose") {
+                screen.view.setMarkedText("zhong", selectedRange: NSRange(location: 5, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+                try? await Task.sleep(for: .milliseconds(400))
+                say("marked rect \(NSStringFromRect(screen.view.firstRect(forCharacterRange: NSRange(location: 0, length: 0), actualRange: nil)))")
+            }
             let t = screen.view.getTerminal()
             var lines: [String] = []
             for row in 0..<t.rows {

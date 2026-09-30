@@ -15,17 +15,13 @@
   <span class="band-status" id="bandStatus"></span>
   <span class="grow"></span>
   <a class="console-link" href="/ui" id="consoleLink">console</a>
+  <button class="band-new" id="newBtn" aria-label="new terminal" title="new terminal ⌘T"></button>
   <span class="band-tag" id="markTag"></span>
   <span class="band-mark" id="mark"></span>
 </header>
 
 <aside class="side" id="side">
   <div class="side-scroll"><div id="groups" class="groups"></div></div>
-  <div class="keybar">
-    <button id="newBtn"><b>⌘T</b>new</button>
-    <button id="closeBtn"><b>⌘W</b>close</button>
-    <button id="hideBtn"><b>⌘B</b>hide</button>
-  </div>
   <div class="side-grip" id="sideGrip" title="drag · double-click resets"></div>
 </aside>
 
@@ -34,6 +30,13 @@
     <div class="screen" id="screen"></div>
     <div class="scan" id="scan"></div>
     <div class="link-hint" id="linkHint" hidden></div>
+    <div class="away" id="away" hidden>
+      <div class="away-box box">
+        <div class="hd" id="awayHead"></div>
+        <div class="bd" id="awayLine"></div>
+        <div class="ft"><span class="hint">any key</span><button class="btn pri" id="awayGo" type="button">[ continue here ]</button></div>
+      </div>
+    </div>
     <div class="toasts" id="toasts"></div>
     <div class="notice box" id="notice" hidden></div>
     <div class="loading" id="loading" hidden><span class="spin" aria-hidden="true">⠋</span><span id="loadingText"></span></div>

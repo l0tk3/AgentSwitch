@@ -46,6 +46,11 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(TerminalEvent.parse(event: "permission", data: #"{"request":{"id":"p1","tool":"Write","summary":"Write: a.txt","input":{}}}"#),
                        .permission(TerminalPermission(id: "p1", tool: "Write", summary: "Write: a.txt")))
         XCTAssertEqual(TerminalEvent.parse(event: "permission_resolved", data: #"{"id":"p1","decision":null}"#), .permissionResolved(id: "p1"))
+        XCTAssertEqual(TerminalEvent.parse(event: "permissions", data: #"{"type":"permissions","requests":[{"id":"p2","tool":"Bash","summary":"Bash: ls","input":{}}]}"#),
+                       .permissions([TerminalPermission(id: "p2", tool: "Bash", summary: "Bash: ls")]))
+        XCTAssertEqual(TerminalEvent.parse(event: "permissions", data: #"{"requests":[]}"#), .permissions([]))
+        XCTAssertEqual(TerminalEvent.parse(event: "resize", data: #"{"type":"resize","cols":149,"rows":52,"by":"mac-3f"}"#), .resize(cols: 149, rows: 52, by: "mac-3f"))
+        XCTAssertEqual(TerminalEvent.parse(event: "resize", data: #"{"cols":50,"rows":30,"by":null}"#), .resize(cols: 50, rows: 30, by: nil))
         XCTAssertEqual(TerminalEvent.parse(event: "exit", data: #"{"code":null}"#), .exit(code: nil))
         XCTAssertEqual(TerminalEvent.parse(event: "removed", data: "{}"), .removed)
         XCTAssertNil(TerminalEvent.parse(event: "future", data: "{}"))
@@ -93,6 +98,11 @@ final class TerminalTests: XCTestCase {
         XCTAssertEqual(keys["keys"], ["esc", "shift-tab", "ctrl-c", "1"])
         let decision = try XCTUnwrap(transport.requests[2].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: String] })
         XCTAssertEqual(decision["decision"], "allow")
+        // Answered on the Mac while the phone was away (2026-09-30, user: 手机上再次确认会显示 no such request).
+        let answered = FakeTransport { req, _ in (Data(#"{"error":"no such request (answered already?)"}"#.utf8), httpResponse(req.url, status: 404)) }
+        let late = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: answered, token: "tok")
+        let decided = try await late.decideTerminalPermission("t1", permissionId: "p1", allow: false)
+        XCTAssertFalse(decided)
         // never the raw keystroke route
         XCTAssertFalse(transport.paths.contains { $0.hasSuffix("/write") })
     }
@@ -125,11 +135,13 @@ final class TerminalTests: XCTestCase {
         })
         let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
         var got: [TerminalEvent] = []
-        for try await event in api.terminalEvents("t1", policy: ReconnectPolicy(initial: .milliseconds(1), maximum: .milliseconds(2))) {
+        for try await event in api.terminalEvents("t1", screen: "phone-7c", policy: ReconnectPolicy(initial: .milliseconds(1), maximum: .milliseconds(2))) {
             got.append(event)
         }
         XCTAssertEqual(got, [.snapshot(seq: 5, cols: 40, rows: 10, data: "a"), .output(seq: 6, data: "b"), .removed])
-        XCTAssertEqual(transport.requests.last?.url?.query, "after=6")
+        // Each connection says which screen follows: the size this phone owns goes back when it stops.
+        XCTAssertEqual(transport.requests.first?.url?.query, "screen=phone-7c")
+        XCTAssertEqual(transport.requests.last?.url?.query, "after=6&screen=phone-7c")
     }
 
     func testStyleColours() throws {

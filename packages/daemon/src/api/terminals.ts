@@ -51,7 +51,9 @@ const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.strin
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
 const Input = z.object({ text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true), seal: z.boolean().default(true) });
 const Keys = z.object({ keys: z.array(z.enum(KEY_NAMES)).min(1).max(20) });
-const Resize = z.object(Size);
+/** `screen`: the asking screen's own id, which then owns the size (terminal-v0 §1). */
+const SCREEN_ID = /^[\w-]{1,64}$/;
+const Resize = z.object({ ...Size, screen: z.string().regex(SCREEN_ID).optional() });
 const Decide = z.object({ decision: z.enum(["allow", "deny"]) });
 const Rename = z.object({ name: z.string().max(200).nullable() });
 const HookBody = z.object({ event: z.string().min(1).max(64), payload: z.record(z.string(), z.unknown()) });
@@ -183,6 +185,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!host.get(id)) return c.json({ error: "not found" }, 404);
     const raw = c.req.query("after");
     const after = raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : null;
+    // The drawing screen's id (terminal-v0 §1 "尺寸有主"); the page beside a native screen follows without one.
+    const screen = c.req.query("screen");
+    const by = screen && SCREEN_ID.test(screen) ? screen : null;
     return streamSSE(c, async (stream) => {
       const queue: TerminalEvent[] = [];
       let wake: (() => void) | null = null;
@@ -191,7 +196,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         queue.push(ev);
         if (queue.length > MAX_QUEUED) open = false;
         wake?.();
-      });
+      }, by);
       stream.onAbort(() => { open = false; wake?.(); });
       const heartbeat = setInterval(() => { void stream.write(": ping\n\n").catch(() => undefined); }, deps.sseHeartbeatMs ?? SSE_HEARTBEAT_MS);
       try {
@@ -301,7 +306,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const body = await parseBody(c, Resize);
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
-      host.resize(c.req.param("id"), body.data.cols, body.data.rows);
+      host.resize(c.req.param("id"), body.data.cols, body.data.rows, body.data.screen ?? null);
     } catch (err) { return failed(c, err); }
     return c.json({ ok: true });
   });

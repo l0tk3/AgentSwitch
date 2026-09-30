@@ -18,7 +18,8 @@ final class TerminalScreenDataTests: XCTestCase {
     }
 
     func testTheEventsTheScreenActsOn() {
-        XCTAssertEqual(TerminalStreamEvent.decode(event: "resize", data: #"{"type":"resize","cols":120,"rows":40}"#), .resize(cols: 120, rows: 40))
+        XCTAssertEqual(TerminalStreamEvent.decode(event: "resize", data: #"{"type":"resize","cols":120,"rows":40,"by":"phone-1a"}"#), .resize(cols: 120, rows: 40, by: "phone-1a"))
+        XCTAssertEqual(TerminalStreamEvent.decode(event: "resize", data: #"{"type":"resize","cols":120,"rows":40,"by":null}"#), .resize(cols: 120, rows: 40, by: nil))
         XCTAssertEqual(TerminalStreamEvent.decode(event: "status", data: #"{"type":"status","status":"waiting"}"#), .status("waiting"))
         XCTAssertEqual(TerminalStreamEvent.decode(event: "exit", data: #"{"type":"exit","code":null}"#), .exit(code: nil))
         XCTAssertEqual(TerminalStreamEvent.decode(event: "removed", data: #"{"type":"removed"}"#), .removed)
@@ -51,13 +52,14 @@ final class TerminalScreenDataTests: XCTestCase {
         let client = DaemonClient(port: 4811, transport: stub, tokenFile: tokenFile)
         let stream = client.terminalStreamRequest(id: "ab 1", after: 42)
         XCTAssertEqual(stream.url?.absoluteString, "http://127.0.0.1:4811/terminals/ab%201/stream?after=42")
+        XCTAssertEqual(client.terminalStreamRequest(id: "ab1", screen: "mac-3f").url?.absoluteString, "http://127.0.0.1:4811/terminals/ab1/stream?screen=mac-3f")
         XCTAssertEqual(stream.value(forHTTPHeaderField: "Authorization"), "Bearer tok-9")
         try await client.writeTerminal(id: "ab1", data: "\u{1b}[A")
         try await client.terminalKeys(id: "ab1", ["shift-enter"])
-        try await client.resizeTerminal(id: "ab1", cols: 120, rows: 40)
+        try await client.resizeTerminal(id: "ab1", cols: 120, rows: 40, screen: "mac-3f")
         let sent = stub.requests.map { "\($0.url?.path ?? "") \(String(decoding: $0.httpBody ?? Data(), as: UTF8.self))" }
         XCTAssertEqual(sent[0], #"/terminals/ab1/write {"data":"\u001b[A"}"#)
         XCTAssertEqual(sent[1], #"/terminals/ab1/keys {"keys":["shift-enter"]}"#)
-        XCTAssertTrue(sent[2].hasPrefix("/terminals/ab1/resize ") && sent[2].contains(#""cols":120"#) && sent[2].contains(#""rows":40"#))
+        XCTAssertTrue(sent[2].hasPrefix("/terminals/ab1/resize ") && sent[2].contains(#""cols":120"#) && sent[2].contains(#""rows":40"#) && sent[2].contains(#""screen":"mac-3f""#))
     }
 }

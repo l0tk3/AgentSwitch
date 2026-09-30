@@ -148,8 +148,8 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             keyObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak web, weak screen] _ in
                 MainActor.assumeIsolated {
                     web?.evaluateJavaScript("window.agentswitch?.active(\(on))", completionHandler: nil)
-                    // The window in use sets the size (another screen may have had it).
-                    if on { screen?.reclaim() }
+                    // Brought to the front: the size is this window's (another screen may have had it).
+                    if on { screen?.userActed() }
                 }
             })
         }
@@ -201,6 +201,9 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             screen?.focus()
         case "note":
             if let text = body["text"] as? String { screen?.note(text) }
+        case "claim":
+            // The placeholder clicked: the size is this window's again.
+            screen?.claim()
         default:
             break
         }
@@ -327,7 +330,7 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
             if let text = body["url"] as? String, let url = URL(string: text) { MainActor.assumeIsolated { LinkOpener.open(url) } }
         case "signIn":
             MainActor.assumeIsolated { owner?.signIn() }
-        case "head", "mark", "screen", "overlays", "focus", "note":
+        case "head", "mark", "screen", "overlays", "focus", "note", "claim":
             MainActor.assumeIsolated { owner?.pageSaid(body) }
         case "log":
             windowLog.notice("page: \(body["text"] as? String ?? "", privacy: .public)")
@@ -338,25 +341,22 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
 
 }
 
-/// A link ⌘-clicked in a terminal: web links open in the browser; a folder link opens in Finder; a file link is only
-/// shown in Finder, never opened (the link comes from an agent's output, and opening a file can run it). Other schemes
-/// are ignored.
+/// A link ⌘-clicked in a terminal, by `LinkPolicy`: a web page in the browser, a folder in Finder, a document in its
+/// app (as in iTerm); an app, a script or anything else that could run is only shown in Finder. Other schemes are ignored.
 enum LinkOpener {
+    #if DEBUG
+    /// The probe sees what a click would open, instead of it opening.
+    @MainActor static var probeOpened: ((URL) -> Void)?
+    #endif
+
     @MainActor static func open(_ url: URL) {
-        switch url.scheme?.lowercased() {
-        case "http", "https": NSWorkspace.shared.open(url)
-        case "file":
-            // A plain folder opens in Finder (nothing runs). A package is a folder too, but opening an app launches it:
-            // it, a file, and anything a link points through are only shown there.
-            let real = url.resolvingSymlinksInPath()
-            var isFolder: ObjCBool = false
-            if FileManager.default.fileExists(atPath: real.path, isDirectory: &isFolder), isFolder.boolValue,
-               !NSWorkspace.shared.isFilePackage(atPath: real.path) {
-                NSWorkspace.shared.open(real)
-            } else {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
-        default: break
+        #if DEBUG
+        if let probeOpened { probeOpened(url); return }
+        #endif
+        switch LinkPolicy.action(for: url) {
+        case .browse(let target), .open(let target): NSWorkspace.shared.open(target)
+        case .reveal(let target): NSWorkspace.shared.activateFileViewerSelecting([target])
+        case .ignore: break
         }
     }
 }

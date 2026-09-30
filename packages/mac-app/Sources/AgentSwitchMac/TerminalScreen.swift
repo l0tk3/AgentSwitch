@@ -42,6 +42,7 @@ final class NativeTerminalView: TerminalView {
         owner?.userActed()
         super.mouseDown(with: event)
     }
+
 }
 
 /// Owns the native screen: which terminal it shows, its stream, what it sends, its size and look.
@@ -62,6 +63,18 @@ final class TerminalScreenController: NSObject {
     private var flushScheduled = false
     private var sending: Task<Void, Never>?
     private var resizeWork: DispatchWorkItem?
+    /// This screen, to the service: the size it takes is this one's until another screen takes it or this stream ends
+    /// (docs/terminal-v0.md §1 "尺寸有主").
+    let screenId = "mac-" + UUID().uuidString.prefix(8).lowercased()
+    /// Who has the shown terminal's size, as its stream last said (nil: nobody, or not heard yet).
+    private var owner: String?
+    /// The terminal's size as the service has it: what this screen draws at while another has it.
+    private var service: (cols: Int, rows: Int)?
+    /// The terminal was just opened here: the size is taken once its screen is drawn.
+    private var claimOnConnect = false
+    /// A claim on its way: the stream may still say the size is another screen's (what it replays on connecting).
+    private var claiming = false
+    private var mine: Bool { owner == screenId }
     /// The user's look, put back after every reset (a reset takes the terminal's colours back to its defaults).
     private var style: TerminalStyle = .fallback
     private var keyMonitor: Any?
@@ -108,6 +121,7 @@ final class TerminalScreenController: NSObject {
     }
 
     #if DEBUG
+    var probeOwner: String? { owner }
     var probeShown: String? { id }
     var probeSeq: Int { lastSeq }
     #endif
@@ -132,9 +146,14 @@ final class TerminalScreenController: NSObject {
         disconnect()
         self.id = id
         view.isHidden = id == nil
+        owner = nil
+        service = nil
+        claiming = false
+        tellAway(nil)
         guard let id else { return }
         clear()
         lastSeq = 0
+        claimOnConnect = true
         connect(id, after: nil)
         focus()
     }
@@ -147,14 +166,38 @@ final class TerminalScreenController: NSObject {
     /// A line of the page's own under the program's output ("1 secret sealed").
     func note(_ text: String) { view.feed(text: "\r\n\u{1b}[2m[\(text)]\u{1b}[0m\r\n") }
 
-    /// The window became the one in use, or the user typed or clicked here: this window sets the size again.
-    func userActed() { reclaim() }
+    /// The window became the one in use, or the user typed or clicked here: the size is this window's again.
+    func userActed() { if !mine { claim() } }
 
-    func reclaim() {
-        guard id != nil, view.window?.isKeyWindow == true else { return }
-        // SwiftTerm fits its grid to the frame when the frame is set: after following another screen's size, setting the
-        // same frame brings the grid back to this one (and sizeChanged tells the service).
-        view.setFrameSize(view.frame.size)
+    /// Takes the size: the grid this view fits, told to the service with this screen's id (also when it is the same
+    /// size: the owner changes); the placeholder goes.
+    func claim() {
+        guard let id else { return }
+        owner = screenId
+        claiming = true
+        tellAway(nil)
+        refit()
+        let t = view.getTerminal()
+        scheduleResize(id: id, cols: t.cols, rows: t.rows)
+    }
+
+    /// SwiftTerm fits its grid to the frame when the frame is set: after following another screen's size, setting the
+    /// same frame brings the grid back to this view's (and sizeChanged says so).
+    private func refit() { view.setFrameSize(view.frame.size) }
+
+    /// The page draws the placeholder over this screen: where the terminal is in use ("mac", "iphone", "web"), or none.
+    private func tellAway(_ place: String?) {
+        evaluate("window.agentswitch?.away(\(place.map { "\"\($0)\"" } ?? "null"))")
+    }
+
+    private static func place(of screen: String) -> String {
+        screen.hasPrefix("phone") ? "iphone" : screen.hasPrefix("mac") ? "mac" : "web"
+    }
+
+    /// Nobody has the size (its owner left): a window someone can see takes it back.
+    private var visible: Bool {
+        guard let window = view.window else { return false }
+        return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
     }
 
     // MARK: the stream
@@ -166,7 +209,7 @@ final class TerminalScreenController: NSObject {
         let session = URLSession(configuration: config, delegate: StreamDelegate(self), delegateQueue: .main)
         self.session = session
         parser = SSEParser()
-        let task = session.dataTask(with: client().terminalStreamRequest(id: id, after: after))
+        let task = session.dataTask(with: client().terminalStreamRequest(id: id, after: after, screen: screenId))
         self.task = task
         task.resume()
     }
@@ -205,13 +248,17 @@ final class TerminalScreenController: NSObject {
         switch event {
         case .snapshot(let seq, let cols, let rows, let data):
             clear()
+            service = (cols, rows)
             follow(cols: cols, rows: rows)
             view.feed(text: data)
             lastSeq = seq
-            // Drawn at the size it had; now this window's size when it is the one in use, else a fresh drawing (a
-            // snapshot drops what the agent drew as links).
+            // Drawn at the size it had. Just opened here: this window's size from now on. Either way the agent draws
+            // again (a snapshot drops what it drew as links): a new size makes it, else it is asked.
             let before = (terminal.cols, terminal.rows)
-            reclaim()
+            if claimOnConnect {
+                claimOnConnect = false
+                claim()
+            }
             if let id, (terminal.cols, terminal.rows) == before {
                 let c = client()
                 Task { try? await c.redrawTerminal(id: id) }
@@ -220,8 +267,19 @@ final class TerminalScreenController: NSObject {
             guard seq > lastSeq else { return }
             view.feed(text: data)
             lastSeq = seq
-        case .resize(let cols, let rows):
-            follow(cols: cols, rows: rows)
+        case .resize(let cols, let rows, let by):
+            service = (cols, rows)
+            if claiming, by != screenId { return }
+            owner = by
+            if let by, by != screenId {
+                follow(cols: cols, rows: rows)
+                tellAway(Self.place(of: by))
+            } else if by == nil, visible, !claimOnConnect {
+                claim()
+            } else {
+                if by == nil { follow(cols: cols, rows: rows) }
+                tellAway(nil)
+            }
         case .exit(let code):
             view.feed(text: "\r\n\u{1b}[2m[exited · code \(code.map(String.init) ?? "?")]\u{1b}[0m\r\n")
         case .removed:
@@ -278,12 +336,32 @@ final class TerminalScreenController: NSObject {
         evaluate("window.agentswitch?.shortcut(\(arg), \(shift))")
     }
 
+    /// The view's grid changed (the window, the font, the page's layout): the owner tells the service; another screen's
+    /// size stays in the buffer, whatever this view's is.
     fileprivate func sized(cols: Int, rows: Int) {
         evaluate("window.agentswitch?.grid(\(cols), \(rows))")
-        guard let id, view.window?.isKeyWindow == true else { return }
+        guard let id else { return }
+        if mine {
+            scheduleResize(id: id, cols: cols, rows: rows)
+        } else if let service, (cols, rows) != service {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.mine, self.id == id, let size = self.service else { return }
+                self.follow(cols: size.cols, rows: size.rows)
+            }
+        }
+    }
+
+    /// One request for a burst of changes (a window being dragged larger).
+    private func scheduleResize(id: String, cols: Int, rows: Int) {
         resizeWork?.cancel()
         let c = client()
-        let work = DispatchWorkItem { Task { try? await c.resizeTerminal(id: id, cols: cols, rows: rows) } }
+        let screen = screenId
+        let work = DispatchWorkItem {
+            Task { @MainActor [weak self] in
+                try? await c.resizeTerminal(id: id, cols: cols, rows: rows, screen: screen)
+                self?.claiming = false
+            }
+        }
         resizeWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
@@ -303,7 +381,7 @@ final class TerminalScreenController: NSObject {
         self.style = style
         view.font = Self.font(style.families, size: CGFloat(style.fontSize))
         colors()
-        reclaim()
+        refit()
     }
 
     /// Empty, in the user's colours.
@@ -346,8 +424,7 @@ extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
     /// What the screen types, reports or answers: to the program.
     func send(source: TerminalView, data: ArraySlice<UInt8>) { typed(data) }
     func scrolled(source: TerminalView, position: Double) {}
-    /// Web links open in the browser; a folder link opens in Finder, a file link is only shown there (it comes from an
-    /// agent's output, and opening a file can run it); nothing else.
+    /// ⌘-click: web links in the browser, folders in Finder, documents in their app; what could run only shown in Finder.
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
         guard let url = URL(string: link) else { return }
         LinkOpener.open(url)

@@ -4,9 +4,10 @@ import Observation
 import SwiftUI
 
 /// One terminal on the phone (docs/terminal-v0.md §1): its stream drawn into the screen, its status and name, the
-/// permission requests waiting, and what the phone sends — a sealed reply, named keys, a decision. While it is open the
-/// phone's grid wins (the last screen to interact sets the size): after the snapshot and whenever the text size or the
-/// space changes, the service hears the new size and the agent draws again.
+/// permission requests waiting, and what the phone sends — a sealed reply, named keys, a decision. One terminal has one
+/// size ("尺寸有主"): the phone takes it when the user acts here (opens the page, comes back to the app, taps the screen
+/// or the reply box, sends, presses a key), and while it has it the text size and the space set the grid. Another
+/// screen's size shows the placeholder over the frame as it was; taking it back draws the screen afresh.
 @MainActor
 @Observable
 final class TerminalPageModel {
@@ -42,6 +43,22 @@ final class TerminalPageModel {
     /// Wheel notches not sent yet (up positive), and the send under way.
     @ObservationIgnored private var wheelPending = 0
     @ObservationIgnored private var wheeling: Task<Void, Never>?
+    /// This phone as a screen: the size it takes is its own until another takes it or this page's stream ends (the
+    /// page closed, the app in the background).
+    let screenId = "phone-" + UUID().uuidString.prefix(8).lowercased()
+    /// Where the terminal is in use instead ("mac", "web", "iphone"): the placeholder over the frame as it was.
+    private(set) var away: String?
+    /// Who has the size, as the stream last said (nil: nobody, or not heard yet).
+    @ObservationIgnored private var owner: String?
+    /// Just opened or back in front: the size is taken once the screen is drawn.
+    @ObservationIgnored private var claimOnConnect = false
+    /// A claim on its way: the stream may still say the size is another screen's (what it replays on connecting).
+    @ObservationIgnored private var claiming = false
+    /// The claim's own request (a layout change's resize does not cancel it).
+    @ObservationIgnored private var claimTask: Task<Void, Never>?
+    /// The app is in front.
+    @ObservationIgnored private var active = true
+    private var mine: Bool { owner == screenId }
 
     init(terminal: TerminalInfo, fontSize: CGFloat) {
         id = terminal.id
@@ -77,16 +94,46 @@ final class TerminalPageModel {
                 self?.commandsUnavailable = true
             }
         }
+        claimOnConnect = true
+        startStream(api)
+    }
+
+    private func startStream(_ api: AgentSwitchAPI) {
+        let id = id, screen = screenId
         follow = Task { [weak self] in
             do {
-                for try await event in api.terminalEvents(id) {
-                    guard let self else { return }
+                for try await event in api.terminalEvents(id, screen: screen) {
+                    guard let self, !Task.isCancelled else { return }
                     self.handle(event)
                 }
             } catch {
                 self?.error = error.localizedDescription
             }
         }
+    }
+
+    /// Again from a fresh snapshot (the service's screen at the size it has now).
+    private func restartStream() {
+        follow?.cancel()
+        follow = nil
+        if let api { startStream(api) }
+    }
+
+    /// The app went to the background: the stream ends, and a few seconds later this phone's hold on the size (the Mac
+    /// takes it back).
+    func suspend() {
+        active = false
+        follow?.cancel()
+        follow = nil
+        resizing?.cancel()
+    }
+
+    /// Back in front: the stream again, and the size (the user is looking here).
+    func resume() {
+        active = true
+        guard follow == nil, let api, !removed else { return }
+        claimOnConnect = status != .exited
+        startStream(api)
     }
 
     /// The screen's own background (the Mac's terminal colours): what covers it before it is drawn.
@@ -104,30 +151,53 @@ final class TerminalPageModel {
     func handle(_ event: TerminalEvent) {
         switch event {
         case .snapshot(_, let cols, let rows, let data):
+            // Another screen has the size: the frame stays as it was under the placeholder (drawn for that screen's
+            // width it would come apart here).
+            if away != nil && !claimOnConnect { return }
             screen.snapshot(data)
             drawn = true
             snapshots += 1
-            // Drawn at the size it had (the Mac, another phone); now at this phone's, and the agent draws again (its
+            // Drawn at the size it had; at this phone's when it takes or has the size, and the agent draws again (its
             // links and status line are not in a snapshot).
             told = (cols, rows)
-            let grid = screen.grid
-            tellSize(cols: grid.cols, rows: grid.rows, redraw: true)
+            if claimOnConnect {
+                claimOnConnect = false
+                claim()
+            } else if mine {
+                let grid = screen.grid
+                tellSize(cols: grid.cols, rows: grid.rows, redraw: true)
+            }
         case .output(_, let data):
+            if away != nil { return }
             screen.output(data)
             drawn = true
         case .status(let s):
             status = s
         case .name(let n):
             name = n
-        case .resize:
-            break   // another screen's size; this one takes it back when used
+        case .resize(_, _, let by):
+            if claiming, by != screenId { break }
+            owner = by
+            if let by, by != screenId {
+                away = Self.place(of: by)
+            } else if by == nil, active, drawn, !claimOnConnect, status != .exited {
+                claim()   // its owner left: this phone, in front, takes it back
+            }
         case .permission(let p):
             if !permissions.contains(where: { $0.id == p.id }) { permissions.append(p) }
         case .permissionResolved(let pid):
             permissions.removeAll { $0.id == pid }
+        case .permissions(let all):
+            permissions = all
         case .exit(let code):
             status = .exited
             permissions = []
+            if away != nil {
+                // Nothing to take any more: the last screen, as the service has it.
+                away = nil
+                restartStream()
+                return
+            }
             screen.write("\r\n\u{1b}[2m[exited · code \(code.map(String.init) ?? "?")]\u{1b}[0m\r\n")
         case .removed:
             removed = true
@@ -136,8 +206,9 @@ final class TerminalPageModel {
 
     // MARK: size
 
+    /// The text size or the space changed: the service hears it while the size is this phone's.
     private func sizeChanged(cols: Int, rows: Int) {
-        guard drawn else { return }
+        guard drawn, mine else { return }
         tellSize(cols: cols, rows: rows, redraw: false)
     }
 
@@ -150,18 +221,42 @@ final class TerminalPageModel {
         resizing = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            if !same { try? await api.resizeTerminal(id, cols: min(cols, 500), rows: min(rows, 300)) }
+            if !same { try? await api.resizeTerminal(id, cols: min(cols, 500), rows: min(rows, 300), screen: self?.screenId) }
             self?.told = (cols, rows)
             // The same size makes no redraw on its own: ask for one.
             if redraw && same { try? await api.redrawTerminal(id) }
         }
     }
 
-    /// This phone takes the size back (the user is about to act here).
-    func claimSize() {
+    /// The user acts here: the size is this phone's (nothing is sent when it already is).
+    func userActed() { if !mine { claim() } }
+
+    /// Takes the size: this phone's grid, told with its id (also at the same size: the owner changes). After the
+    /// placeholder the screen is drawn afresh at it — what came meanwhile was for another width, and was not drawn.
+    func claim() {
+        guard let api, status != .exited else { return }
+        let wasAway = away != nil
+        owner = screenId
+        away = nil
+        claiming = true
         let grid = screen.grid
-        told = nil
-        tellSize(cols: grid.cols, rows: grid.rows, redraw: false)
+        let cols = min(max(grid.cols, 20), 500), rows = min(max(grid.rows, 5), 300)
+        let same = told.map { $0.cols == cols && $0.rows == rows } ?? false
+        told = (cols, rows)
+        let id = id, me = screenId
+        claimTask?.cancel()
+        claimTask = Task { [weak self] in
+            try? await api.resizeTerminal(id, cols: cols, rows: rows, screen: me)
+            guard let self else { return }
+            self.claiming = false
+            if wasAway { self.restartStream() }
+            // The same size makes no redraw on its own: ask for one.
+            else if same { try? await api.redrawTerminal(id) }
+        }
+    }
+
+    static func place(of screen: String) -> String {
+        screen.hasPrefix("phone") ? "iphone" : screen.hasPrefix("mac") ? "mac" : "web"
     }
 
     // MARK: sending
@@ -171,7 +266,7 @@ final class TerminalPageModel {
         guard let api, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         sending = true
         defer { sending = false }
-        claimSize()
+        userActed()
         do {
             let result = try await api.sendTerminalInput(id, text: text, sealed: sealed)
             sealedNote = result.sealed == 0 ? nil : result.sealed == 1 ? "1 secret sealed" : "\(result.sealed) secrets sealed"
@@ -190,7 +285,7 @@ final class TerminalPageModel {
         guard let api, !prepared.isEmpty else { return false }
         sending = true
         defer { sending = false }
-        claimSize()
+        userActed()
         do {
             let staged = try await api.upload(prepared)
             let attached = try await api.attachToTerminal(id, uploads: staged.map(\.id))
@@ -233,12 +328,14 @@ final class TerminalPageModel {
 
     func press(_ key: TerminalKey) async {
         guard let api else { return }
+        userActed()
         do { try await api.sendTerminalKeys(id, [key]) } catch { self.error = error.localizedDescription }
     }
 
     func decide(_ permission: TerminalPermission, allow: Bool) async {
         guard let api else { permissions.removeAll { $0.id == permission.id }; return }
         do {
+            // Answered or already answered elsewhere: either way the card goes.
             try await api.decideTerminalPermission(id, permissionId: permission.id, allow: allow)
             permissions.removeAll { $0.id == permission.id }
         } catch {

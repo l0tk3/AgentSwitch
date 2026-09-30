@@ -171,6 +171,11 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .wheel { position: absolute; right: 8px; top: 40%; background: #000; border: 1px solid #e9e6df; color: #e9e6df; font: 11px var(--mono); padding: 2px 6px; z-index: 5; opacity: 0; }
 .wheel.on { opacity: 1; }
 .perm { left: 12px; right: 18px; top: 10px; }
+/* in use on the Mac: the last frame under the 50% dither (not available here), a box saying where it is */
+.term.away .lines, .term.away .fixed { opacity: .5; -webkit-mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.awaybox { left: 28px; right: 34px; top: 38%; cursor: default; }
+.awaybox > * { position: relative; background: var(--bg); }
+.awaybox .hd { background: var(--ink); color: var(--bg); }
 .controls { flex: none; background: var(--bg); position: relative; }
 .err { display: flex; gap: 8px; align-items: flex-start; padding: 6px 16px 0; font: 12px/1.5 var(--ui); color: var(--red); }
 .err span { flex: 1; } .err button { background: none; border: 0; color: var(--ink2); font: 14px var(--mono); cursor: pointer; padding: 0 2px; }
@@ -268,8 +273,8 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
       <div class="phone"><div class="scr light" id="p3"></div></div>
       <figcaption>
         <b>terminal · 终端页</b>
-        <p>打开时画面自上而下 13 步刷出，扫描线在前。在画面上下拖动：每拖一行高发一格滚轮，右边显示发出的格数，快速一划会继续滚几格。点锁：同一个输入框被加密框围住，键盘保持原样。输入 <span class="mono">/</span> 出命令补全。直接发送像密码的文字会先问一句。</p>
-        <div class="tr"><button type="button" data-do="p3open">打开终端</button><button type="button" data-do="p3perm">权限请求到达</button><button type="button" data-do="p3err">滚动被拒（旧版 Mac）</button><button type="button" data-do="p3exit">终端退出</button></div>
+        <p>打开时画面自上而下 13 步刷出，扫描线在前。同一个终端只有一个尺寸：Mac 上接着用时，这里的画面盖上抖动遮罩，中间写 <span class="mono">on mac</span>；点屏幕、点输入框或 <span class="mono">[ continue here ]</span> 就在手机上接着用，画面按手机尺寸重画。Mac 关掉窗口时自动回到手机。权限卡片不受影响，照常出现、照常批准。在画面上下拖动：每拖一行高发一格滚轮，右边显示发出的格数，快速一划会继续滚几格。点锁：同一个输入框被加密框围住，键盘保持原样。输入 <span class="mono">/</span> 出命令补全。直接发送像密码的文字会先问一句。</p>
+        <div class="tr"><button type="button" data-do="p3open">打开终端</button><button type="button" data-do="p3perm">权限请求到达</button><button type="button" data-do="p3err">滚动被拒（旧版 Mac）</button><button type="button" data-do="p3exit">终端退出</button><button type="button" data-do="p3mac">Mac 上接着用</button><button type="button" data-do="p3free">Mac 关掉窗口</button></div>
       </figcaption>
     </figure>
   </div>
@@ -608,11 +613,11 @@ const TURNS = [
   [`<span class="c-grn">●</span> Bash(npm run lint)`, `  <span class="c-dim">⎿  0 problems</span>`,
    `<span class="c-grn">●</span> 登录超过 800 ms 会写一条慢日志，`, `  带用户 id 和耗时。`, ``],
 ];
-let lines, offset, tstatus, tname, sealed, kbUp, typing, text, err, oldMac, note, shift, exited;
+let lines, offset, tstatus, tname, sealed, kbUp, typing, text, err, oldMac, note, shift, exited, away;
 function p3reset() {
   lines = [...HEAD, ...TURNS.flat(), ...TURNS.slice(0, 3).flat()];
   offset = 0; tstatus = "busy"; tname = "修复登录超时"; sealed = false; kbUp = false; typing = false;
-  text = ""; err = null; oldMac = false; note = null; shift = false; exited = false;
+  text = ""; err = null; oldMac = false; note = null; shift = false; exited = false; away = false;
 }
 function p3build() {
   p3.innerHTML = `<div class="dark" style="background:#000">
@@ -732,7 +737,7 @@ p3.addEventListener("click", (e) => {
   if (x === "send") { send(); return; }
   // The photo button: the picture goes to the Mac and its path into the agent's prompt ([Image #1] in Claude Code).
   if (x === "pic") { pictures = 1; note = "1 image attached"; p3controls(); return; }
-  if (e.target.closest("#p3field")) { typing = true; kbUp = true; p3controls(); }
+  if (e.target.closest("#p3field")) { if (away) here(); typing = true; kbUp = true; p3controls(); }
 });
 // A typing keyboard on a computer works too, while the reply box has the focus.
 document.addEventListener("keydown", (e) => {
@@ -778,7 +783,7 @@ p3.addEventListener("pointerup", () => {
   if (!drag) return;
   const d = drag;
   drag = null;
-  if (!d.moved) { if (kbUp || typing) { kbUp = false; typing = false; p3controls(); } return; }
+  if (!d.moved) { if (away) { here(); return; } if (kbUp || typing) { kbUp = false; typing = false; p3controls(); } return; }
   // a flick carries on, slowing: fewer notches each step
   let left = Math.min(24, Math.floor(Math.abs(d.v) * 1000 / 220));
   const up = d.v > 0;
@@ -832,10 +837,43 @@ function p3exit() {
   p3title(); p3controls();
   glitch(document.getElementById("p3title"));
 }
+/* One size for one terminal: the Mac took it (someone typed there); the phone shows where it is in use. */
+function p3mac() {
+  if (exited || away) return;
+  away = true;
+  kbUp = false; typing = false; p3controls();
+  const term = document.getElementById("p3term");
+  term.classList.add("away");
+  const box = document.createElement("div");
+  box.className = "box awaybox";
+  box.innerHTML = `<div class="hd">${P.sprite(P.SQUARE, { px: 2 })}<span>on mac</span></div>
+    <div class="bd"><p>这个终端正在 Mac 上使用。</p></div>
+    <div class="ft"><button type="button" class="btn pri">[ continue here ]</button></div>`;
+  box.onclick = () => here();
+  term.append(box);
+  glitch(box);
+}
+/* The phone takes the size back (a tap, the reply box, the button; or the Mac let it go): the agent draws for it. */
+function here() {
+  if (!away) return;
+  away = false;
+  const term = document.getElementById("p3term");
+  const box = term.querySelector(".awaybox");
+  glitch(box);
+  setTimeout(() => {
+    box?.remove();
+    term.classList.remove("away");
+    if (reduce) return;
+    const scan = document.getElementById("p3scan");
+    for (const el of [term, scan]) { el.classList.remove("screen-wipe", "run"); void el.offsetWidth; }
+    term.classList.add("screen-wipe");
+    scan.classList.add("run");
+  }, reduce ? 0 : 450);
+}
 function p3err() { if (exited) return; oldMac = true; setErr("此 Mac 上的 AgentSwitch 版本不支持滑动翻页，请先更新。"); }
 
 /* ================= wiring ================= */
-const actions = { p1perm, p1exit, p1reset: () => { closeOver(p1); p1reset(); }, p2open: () => { closeOver(p2); p2open(); }, p3open, p3perm, p3err, p3exit };
+const actions = { p1perm, p1exit, p1reset: () => { closeOver(p1); p1reset(); }, p2open: () => { closeOver(p2); p2open(); }, p3open, p3perm, p3err, p3exit, p3mac, p3free: here };
 document.querySelector(".phones").addEventListener("click", (e) => {
   const b = e.target.closest("figcaption [data-do]");
   if (b) actions[b.dataset.do]?.();
@@ -850,6 +888,7 @@ p1reset();
 p2open();
 p3open();
 </script>
+<script>if (new URLSearchParams(location.search).has("away")) setTimeout(() => document.querySelector('[data-do="p3mac"]').click(), 600);</script>
 <script>if (new URLSearchParams(location.search).has("dark")) document.querySelector('#theme [data-t="dark"]')?.click();</script>
 </body>
 </html>

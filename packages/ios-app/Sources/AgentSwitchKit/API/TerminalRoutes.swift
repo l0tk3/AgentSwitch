@@ -11,7 +11,7 @@ private struct ElsewhereReply: Decodable {
 private struct InputBody: Encodable { let text: String; let submit: Bool; let seal: Bool }
 private struct CommandList: Decodable { let commands: [SlashCommand] }
 private struct KeysBody: Encodable { let keys: [TerminalKey] }
-private struct SizeBody: Encodable { let cols: Int; let rows: Int }
+private struct SizeBody: Encodable { let cols: Int; let rows: Int; let screen: String? }
 private struct DecisionBody: Encodable { let decision: String }
 private struct RenameBody: Encodable { let name: String? }
 private struct AttachBody: Encodable { let uploads: [String] }
@@ -82,8 +82,9 @@ extension AgentSwitchAPI {
         let _: OKReply = try await post(["terminals", id, "keys"], body: KeysBody(keys: keys))
     }
 
-    public func resizeTerminal(_ id: String, cols: Int, rows: Int) async throws {
-        let _: OKReply = try await post(["terminals", id, "resize"], body: SizeBody(cols: cols, rows: rows))
+    /// `screen`: this phone's screen, which owns the size from now on (docs/terminal-v0.md §1 "尺寸有主").
+    public func resizeTerminal(_ id: String, cols: Int, rows: Int, screen: String? = nil) async throws {
+        let _: OKReply = try await post(["terminals", id, "resize"], body: SizeBody(cols: cols, rows: rows, screen: screen))
     }
 
     /// Has the agent draw its screen again (its links and status line are not in a snapshot).
@@ -91,8 +92,15 @@ extension AgentSwitchAPI {
         let _: OKReply = try await post(["terminals", id, "redraw"], body: EmptyBody())
     }
 
-    public func decideTerminalPermission(_ id: String, permissionId: String, allow: Bool) async throws {
-        let _: OKReply = try await post(["terminals", id, "permissions", permissionId], body: DecisionBody(decision: allow ? "allow" : "deny"))
+    /// False: it was answered already, on the Mac or in the terminal itself (404) — the card just goes, no error.
+    @discardableResult
+    public func decideTerminalPermission(_ id: String, permissionId: String, allow: Bool) async throws -> Bool {
+        do {
+            let _: OKReply = try await post(["terminals", id, "permissions", permissionId], body: DecisionBody(decision: allow ? "allow" : "deny"))
+            return true
+        } catch APIError.http(status: 404, message: _) {
+            return false
+        }
     }
 
     /// The user's own name; nil or "" goes back to the derived one.
@@ -110,14 +118,16 @@ extension AgentSwitchAPI {
     /// A terminal's screen and what happens to it: the snapshot, then output, status, name, permission requests. On a
     /// dropped connection it reconnects after the last seq it delivered (the daemon replays what was missed, or sends a
     /// new snapshot when that is gone). Ends when the terminal is removed or no longer exists.
-    public func terminalEvents(_ id: String, policy: ReconnectPolicy = .standard) -> AsyncThrowingStream<TerminalEvent, Error> {
+    /// `screen`: the drawing screen's id; the size it owns goes back when this stream ends (the page closed, the app
+    /// went to the background).
+    public func terminalEvents(_ id: String, screen: String? = nil, policy: ReconnectPolicy = .standard) -> AsyncThrowingStream<TerminalEvent, Error> {
         let (stream, sink) = AsyncThrowingStream<TerminalEvent, Error>.makeStream()
         let worker = Task {
             var last: Int64?
             var failures = 0
             while !Task.isCancelled {
                 do {
-                    let (ended, seq, delivered) = try await followTerminalOnce(id, after: last, policy: policy) { sink.yield($0) }
+                    let (ended, seq, delivered) = try await followTerminalOnce(id, after: last, screen: screen, policy: policy) { sink.yield($0) }
                     if ended { break }
                     last = seq ?? last
                     failures = delivered ? 0 : failures + 1
@@ -141,10 +151,10 @@ extension AgentSwitchAPI {
     }
 
     /// One connection: (removed, last seq delivered, anything delivered).
-    private func followTerminalOnce(_ id: String, after: Int64?, policy: ReconnectPolicy,
+    private func followTerminalOnce(_ id: String, after: Int64?, screen: String?, policy: ReconnectPolicy,
                                     deliver: (TerminalEvent) -> Void) async throws -> (Bool, Int64?, Bool) {
         let endpoint = try await endpoints.endpoint()
-        let query = after.map { [URLQueryItem(name: "after", value: String($0))] } ?? []
+        let query = [after.map { URLQueryItem(name: "after", value: String($0)) }, screen.map { URLQueryItem(name: "screen", value: $0) }].compactMap { $0 }
         let req = request("GET", endpoint, ["terminals", id, "stream"], query: query, body: nil, accept: "text/event-stream",
                           timeout: policy.idleTimeout)
         var last = after

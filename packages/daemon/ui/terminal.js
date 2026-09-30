@@ -165,6 +165,9 @@ const sideWidth = (x) => Math.round(Math.max(SIDE.min, Math.min(x, 560, innerWid
 const LIST_ICON = [".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#",
   "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#",
   "#.....#..........#", ".################."];
+const NEW_ICON = ["......#......", "......#......", "......#......", "......#......", "......#......", "......#......", "#############",
+  "......#......", "......#......", "......#......", "......#......", "......#......", "......#......"];
+$("newBtn").innerHTML = sprite(NEW_ICON, { px: 1 });
 function renderSideBtn() {
   const shown = narrow.matches ? document.body.classList.contains("list-open") : !side.closed;
   if (!$("sideBtn").firstChild) $("sideBtn").innerHTML = sprite(LIST_ICON, { px: 1 });
@@ -370,11 +373,11 @@ term.attachCustomKeyEventHandler((e) => {
 /** This window's size for terminal `id`: fit the screen and tell the service when it differs. True when it did (the
  *  size change makes the agent draw again). */
 function fitTo(id) {
-  if (NATIVE || current?.id !== id || creating) return false;
+  if (NATIVE || current?.id !== id || creating || !mine()) return false;
   const before = [term.cols, term.rows];
   fit.fit();
   if (term.cols !== before[0] || term.rows !== before[1] || term.cols !== current.cols || term.rows !== current.rows) {
-    api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined);
+    api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows, screen: SCREEN }).catch(() => undefined);
     current.cols = term.cols;
     current.rows = term.rows;
     return true;
@@ -383,21 +386,59 @@ function fitTo(id) {
 }
 
 function fitAndTell() {
-  if (NATIVE || !current || creating || !inUse()) return;
+  if (NATIVE || !current || creating || !mine()) return;
   fit.fit();
   if (term.cols !== current.cols || term.rows !== current.rows) {
-    api("POST", `/terminals/${current.id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined);
+    api("POST", `/terminals/${current.id}/resize`, { cols: term.cols, rows: term.rows, screen: SCREEN }).catch(() => undefined);
     current.cols = term.cols;
     current.rows = term.rows;
   }
 }
 new ResizeObserver(() => { clearTimeout(fitAndTell.t); fitAndTell.t = setTimeout(fitAndTell, 80); }).observe($("stage"));
-// The screen in use sets a terminal's size (2026-09-30): one nobody is looking at (a browser tab in the background,
-// a window behind) follows the size and never changes it; coming back to this one, typing or clicking in it fits the
-// terminal here again, after the phone or another window had it.
+// One size for one terminal (terminal-v0 §1 "尺寸有主"): the service keeps whose it is. This page takes it when the user
+// acts here — opens the terminal, comes back to the tab, types, clicks —, and only the owner sends its size as its
+// layout changes; another screen's size shows the placeholder. In the Mac window the native screen is the one that
+// draws and owns: it tells the page where the terminal is in use, and the page draws the placeholder over it.
+const SCREEN = `web-${Math.random().toString(36).slice(2, 10)}`;
+let sizeOwner = null;      // who has the current terminal's size (its stream says)
+const mine = () => sizeOwner === SCREEN;
 let nativeActive = null;   // the Mac window says when it is the key window (window.agentswitch.active)
 function inUse() { return (nativeActive ?? document.hasFocus()) && !document.hidden; }
-const reclaim = () => fitAndTell();
+const reclaim = () => { if (NATIVE || !inUse()) return; if (mine()) fitAndTell(); else claim(); };
+function claim() {
+  if (!current || creating || current.status === "exited") return;
+  if (NATIVE) { native.postMessage({ type: "claim" }); return; }
+  fit.fit();
+  sizeOwner = SCREEN;
+  showAway(null);
+  current.cols = term.cols;
+  current.rows = term.rows;
+  api("POST", `/terminals/${current.id}/resize`, { cols: term.cols, rows: term.rows, screen: SCREEN }).catch(() => undefined);
+}
+const WHERE = { mac: ["on mac", "这个终端正在 Mac 上使用。"], iphone: ["on iphone", "这个终端正在 iPhone 上使用。"], web: ["on web", "这个终端正在浏览器中使用。"] };
+const placeOf = (by) => (by.startsWith("phone") ? "iphone" : by.startsWith("mac") ? "mac" : "web");
+/** The placeholder: glitches in; going (this screen took the size back), glitches once more and the screen is drawn in. */
+function showAway(place) {
+  const el = $("away");
+  clearTimeout(showAway.leaving);
+  if (!place) {
+    if (el.hidden || !el.dataset.place) return;
+    delete el.dataset.place;
+    // Not seen (a window behind the others, whose timers WebKit slows): gone at once.
+    if (reducedMotion.matches || document.hidden) { el.hidden = true; return; }
+    glitch(el.querySelector(".away-box"));
+    showAway.leaving = setTimeout(() => { el.hidden = true; refreshWipe(); }, 450);
+    return;
+  }
+  const [head, line] = WHERE[place] ?? WHERE.web;
+  const same = !el.hidden && el.dataset.place === place;
+  el.dataset.place = place;
+  $("awayHead").textContent = head;
+  $("awayLine").textContent = line;
+  el.hidden = false;
+  if (!same) glitch(el.querySelector(".away-box"));
+}
+$("away").addEventListener("mousedown", (e) => { e.preventDefault(); claim(); focusScreen(); });
 addEventListener("focus", reclaim);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) reclaim(); });
 term.textarea?.addEventListener("keydown", reclaim, true);
@@ -469,14 +510,20 @@ function select(id, { loading = null } = {}) {
   document.body.classList.remove("list-open");
   renderSideBtn();
   if (loading) showLoading(loading); else hideLoading();
+  sizeOwner = null;
+  clearTimeout(showAway.leaving);
+  $("away").hidden = true;
+  delete $("away").dataset.place;
   if (NATIVE) {
     // The native screen follows this terminal and sizes it; the page only takes its events.
     follow(id);
   } else {
     term.reset();
     fit.fit();
-    // Only the screen in use changes the size; another follows it (the snapshot brings it).
-    (inUse() ? api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows }).catch(() => undefined) : Promise.resolve()).finally(() => follow(id));
+    // Opened here while in use: the size is this page's; else it follows (the snapshot and the stream say whose).
+    const claiming = inUse();
+    if (claiming) sizeOwner = SCREEN;
+    (claiming ? api("POST", `/terminals/${id}/resize`, { cols: term.cols, rows: term.rows, screen: SCREEN }).catch(() => undefined) : Promise.resolve()).finally(() => follow(id));
   }
   render();
   focusScreen();
@@ -494,7 +541,8 @@ const paints = (data) => data.replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]|\x1b\][^\x0
 function follow(id) {
   if (current?.id !== id || creating) return;   // switched again before the resize came back
   closeStream();
-  source = new EventSource(`/terminals/${id}/stream`);
+  // A native screen reads the stream itself, with its own id; this page then only takes the events.
+  source = new EventSource(NATIVE ? `/terminals/${id}/stream` : `/terminals/${id}/stream?screen=${SCREEN}`);
   const on = (type, fn) => source.addEventListener(type, (e) => { if (current?.id === id) fn(JSON.parse(e.data)); });
   on("snapshot", (ev) => {
     if (NATIVE) { if (paints(ev.data)) hideLoading(); return; }
@@ -506,7 +554,7 @@ function follow(id) {
     if (paints(ev.data)) hideLoading();
     // Drawn at the size it had (another window, the phone); now fit this window and have the agent redraw to it —
     // also when the size is the same, since a snapshot drops what the agent drew as links (its status line).
-    setTimeout(() => { if (!(inUse() && fitTo(id)) && current?.id === id && current.status !== "exited") api("POST", `/terminals/${id}/redraw`).catch(() => undefined); }, 0);
+    setTimeout(() => { if (!fitTo(id) && current?.id === id && current.status !== "exited") api("POST", `/terminals/${id}/redraw`).catch(() => undefined); }, 0);
   });
   on("output", (ev) => {
     if (NATIVE) { if (!$("loading").hidden && paints(ev.data)) setTimeout(hideLoading, 120); return; }
@@ -515,12 +563,26 @@ function follow(id) {
     lastSeq = ev.seq;
     if (!$("loading").hidden && paints(ev.data)) setTimeout(hideLoading, 120);
   });
-  on("resize", (ev) => { if (!NATIVE && (ev.cols !== term.cols || ev.rows !== term.rows)) term.resize(ev.cols, ev.rows); });
+  on("resize", (ev) => {
+    if (NATIVE) return;   // the native screen follows, and says where the terminal is in use
+    sizeOwner = ev.by ?? null;
+    if (mine()) return showAway(null);
+    // Its owner left (or an older screen that says no name): the screen in use takes it back.
+    if (!ev.by && inUse()) return claim();
+    if (ev.cols !== term.cols || ev.rows !== term.rows) term.resize(ev.cols, ev.rows);
+    showAway(ev.by ? placeOf(ev.by) : null);
+  });
   on("status", (ev) => patch(id, { status: ev.status }));
   on("name", (ev) => patch(id, { name: ev.name }));
   on("exit", (ev) => { hideLoading(); patch(id, { status: "exited", exitCode: ev.code }); if (!NATIVE) term.write(`\r\n\x1b[2m[exited · code ${ev.code ?? "?"}]\x1b[0m\r\n`); });
   on("permission", (ev) => addToast(id, ev.request, true));
   on("permission_resolved", (ev) => { document.getElementById(`perm-${ev.id}`)?.remove(); });
+  // On each (re)connect, every request waiting: one answered elsewhere while this page was away goes.
+  on("permissions", (ev) => {
+    const waiting = new Set(ev.requests.map((r) => r.id));
+    for (const el of $("toasts").querySelectorAll(`.toast[data-terminal="${id}"]`)) if (!waiting.has(el.dataset.id)) el.remove();
+    for (const r of ev.requests) addToast(id, r);
+  });
   on("removed", () => { closeStream(); current = null; refresh().then(afterRemoval); });
 }
 
@@ -554,11 +616,11 @@ function afterRemoval() {
 // ---------- permission requests ----------
 function addToast(id, request, fresh = false) {
   if (document.getElementById(`perm-${request.id}`)) return;
-  const decide = (decision) => api("POST", `/terminals/${id}/permissions/${request.id}`, { decision }).catch((e) => notify(e.message)).finally(() => focusScreen());
+  const decide = (decision) => sendDecision(id, request.id, decision).finally(() => focusScreen());
   const raw_ = request.summary.startsWith(`${request.tool}: `) ? request.summary.slice(request.tool.length + 2) : request.summary;
   const cwd = terminals.find((t) => t.id === id)?.cwd;
   const detail = cwd && raw_.startsWith(cwd + "/") ? raw_.slice(cwd.length + 1) : tilde(raw_);
-  const toast = h("div", { class: "toast box", id: `perm-${request.id}`, "data-id": request.id },
+  const toast = h("div", { class: "toast box", id: `perm-${request.id}`, "data-id": request.id, "data-terminal": id },
     h("div", { class: "hd" }, h("span", {}, "[!] approval"), h("span", { class: "grow" }), h("span", {}, TOOL_WORDS[request.tool] ?? request.tool)),
     h("code", {}, detail),
     cwd ? h("div", { class: "path" }, tilde(cwd)) : null,
@@ -573,8 +635,16 @@ function addToast(id, request, fresh = false) {
 function decideFirst(decision) {
   const first = $("toasts").firstElementChild;
   if (!first || !current) return false;
-  api("POST", `/terminals/${current.id}/permissions/${first.dataset.id}`, { decision }).catch((e) => notify(e.message));
+  void sendDecision(current.id, first.dataset.id, decision);
   return true;
+}
+
+/** Answered already (on the phone, in the terminal itself) is no error: the card just goes. */
+function sendDecision(id, requestId, decision) {
+  return api("POST", `/terminals/${id}/permissions/${requestId}`, { decision }).catch((e) => {
+    if (e.status === 404) document.getElementById(`perm-${requestId}`)?.remove();
+    else notify(e.message);
+  });
 }
 
 // ---------- the sidebar: a directory tree ----------
@@ -786,7 +856,6 @@ function renderHead() {
   const word = create ? "" : t.status === "working" ? "busy" : t.status;
   $("bandStatus").className = `band-status ${create ? "" : t.status}`;
   $("bandStatus").textContent = word;
-  $("closeBtn").disabled = create;
   document.title = create ? "new terminal" : t.name;
   // The Mac window's toolbar: the terminal on screen as its title (none while one is being made), and where the screen
   // is, so the window can hand the wheel over it to the page.
@@ -805,7 +874,7 @@ function tellScreen() {
 function tellOverlays() {
   if (!NATIVE) return;
   const shown = (el) => el && !el.hidden && el.getClientRects().length > 0;
-  const els = [...document.querySelectorAll("#toasts .toast"), $("composer"), $("loading"), $("sheet")].filter(shown);
+  const els = [$("away"), ...document.querySelectorAll("#toasts .toast"), $("composer"), $("loading"), $("sheet")].filter(shown);
   tellWindow("overlays", { rects: els.map((el) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }) });
 }
 
@@ -1043,8 +1112,6 @@ document.addEventListener("keydown", (e) => {
 $("sealLock").innerHTML = sprite(LOCK, { px: 2 });
 $("composerLock").innerHTML = sprite(LOCK, { px: 2 });
 $("newBtn").addEventListener("click", () => showCreate());
-$("closeBtn").addEventListener("click", () => current && !creating && closeTerminal(current));
-$("hideBtn").addEventListener("click", toggleList);
 $("sealBar").addEventListener("click", () => ($("composer").hidden ? openComposer() : closeComposer()));
 $("sideBtn").addEventListener("click", toggleList);
 $("createStart").addEventListener("click", start);
@@ -1079,7 +1146,9 @@ if (native) {
     // ⌘A: the terminal's own selection when it has the keyboard, else the field in focus.
     selectAll: () => (document.activeElement === term.textarea ? term.selectAll() : document.execCommand("selectAll")),
     // The window became the key window, or stopped being it (the screen in use sets the size).
-    active: (on) => { nativeActive = on; if (on) reclaim(); },
+    active: (on) => { nativeActive = on; },
+    // Where the terminal is in use when not here ("mac", "iphone", "web"), or null: the placeholder over the screen.
+    away: (place) => showAway(place),
     // The toolbar's buttons.
     toggleList: () => toggleList(),
     newTerminal: () => showCreate(),

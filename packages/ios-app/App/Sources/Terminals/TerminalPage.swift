@@ -11,6 +11,7 @@ import SwiftUI
 struct TerminalPage: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("terminal.fontSize") private var fontSize: Double = 10
     @State private var page: TerminalPageModel
     @State private var reply = ""
@@ -36,11 +37,12 @@ struct TerminalPage: View {
     var body: some View {
         ZStack(alignment: .top) {
             TerminalScreen(controller: page.screen, onPinchEnded: { size in fontSize = Double(size) },
-                           onWheel: { up, count in wheel(up: up, count: count) }, onTap: { replying = false })
+                           onWheel: { up, count in wheel(up: up, count: count) }, onTap: { replying = false; page.userActed() })
                 .padding(.horizontal, 6)
                 .background(page.ground)
                 .screenRefresh(on: page.snapshots, ground: page.ground)
                 .overlay(alignment: .trailing) { if wheeled != 0 { wheelChip } }
+                .overlay { if let place = page.away { awayCover(place) } }
             if !page.drawn {
                 HStack(spacing: 6) {
                     BrailleSpinner(color: .secondary)
@@ -118,6 +120,16 @@ struct TerminalPage: View {
             #endif
         }
         .onDisappear { page.stop() }
+        // The reply box is for this phone: the size is its own.
+        .onChange(of: replying) { if replying { page.userActed() } }
+        // In the background the stream ends and the size goes back to the Mac; in front again, it is this phone's.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: page.suspend()
+            case .active: page.resume()
+            default: break
+            }
+        }
         .onChange(of: page.removed) { if page.removed { model.terminals.remove(page.id); dismiss() } }
         .onChange(of: fontSize) { page.screen.setFontSize(CGFloat(fontSize)) }
     }
@@ -143,6 +155,48 @@ struct TerminalPage: View {
         .background(DitherShadow().offset(x: 6, y: 6))
         .glitch(on: p.id, onAppear: true)
     }
+
+    // MARK: in use elsewhere
+
+    /// The terminal is in use on another screen (terminal-v0 §1 "不在用的一端显示占位", phone.html?away): the frame as it
+    /// was behind a 50 % dither, a box saying where, glitching in; a tap anywhere takes the size back here.
+    private func awayCover(_ place: String) -> some View {
+        let (head, line) = Self.awayCopy[place] ?? ("on web", "这个终端正在浏览器中使用。")
+        return ZStack {
+            page.ground.opacity(0.45)
+            CheckerTile(color: page.screen.view.nativeBackgroundColor)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.base)
+                    Text(head).mono(12, weight: .semibold)
+                }
+                .foregroundStyle(Theme.base)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                .background(Theme.ink)
+                Text(line).font(.callout).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, 12).padding(.top, 12)
+                HStack {
+                    Spacer()
+                    Button("[ continue here ]") { page.claim() }.buttonStyle(SquareButtonStyle(prominent: true))
+                }
+                .padding(12)
+            }
+            .background(Theme.base)
+            .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
+            .background(DitherShadow().offset(x: 6, y: 6))
+            .padding(.horizontal, 28)
+            .glitch(on: place, onAppear: true)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { page.claim() }
+    }
+
+    private static let awayCopy: [String: (String, String)] = [
+        "mac": ("on mac", "这个终端正在 Mac 上使用。"),
+        "iphone": ("on iphone", "这个终端正在另一台 iPhone 上使用。"),
+        "web": ("on web", "这个终端正在浏览器中使用。"),
+    ]
 
     /// `wheel ↑ 3`: what this drag has sent, gone 0.7 s after the last notch.
     private var wheelChip: some View {
@@ -401,5 +455,22 @@ private struct KeyCapStyle: ButtonStyle {
             .overlay(alignment: .bottom) { Theme.inkDim.frame(height: pressed ? 1 : 3) }
             .offset(y: pressed ? 2 : 0)
             .padding(.bottom, pressed ? 2 : 0)
+    }
+}
+
+/// A 1 pt checker in `color`, tiled from one small image (a Canvas over the whole screen would draw a cell at a time).
+private struct CheckerTile: View {
+    let color: UIColor
+
+    var body: some View {
+        Image(uiImage: Self.tile(color)).resizable(resizingMode: .tile).allowsHitTesting(false).accessibilityHidden(true)
+    }
+
+    static func tile(_ color: UIColor) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+            context.fill(CGRect(x: 1, y: 1, width: 1, height: 1))
+        }
     }
 }

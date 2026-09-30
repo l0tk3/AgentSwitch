@@ -185,6 +185,83 @@ describe("terminal host", () => {
     expect(events.some((e) => e.type === "permission_resolved" && e.decision === null)).toBe(true);
   });
 
+  it("a screen that (re)connects gets every request waiting, whole: one answered while it was away is gone", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const ask = (file: string) => host.hook(info.id, token, { event: "PermissionRequest", payload: { tool_name: "Write", tool_input: { file_path: file } } });
+    void ask("/tmp/a");
+    void ask("/tmp/b");
+    const [first, second] = host.get(info.id)!.permissions;
+    // The phone saw both, went to the background; the Mac answered the first.
+    expect(host.decide(info.id, first!.id, "allow")).toBe(true);
+    const back: TerminalEvent[] = [];
+    host.subscribe(info.id, host.get(info.id)!.seq, (e) => back.push(e))();
+    const whole = back.find((e) => e.type === "permissions");
+    expect(whole).toEqual({ type: "permissions", requests: [second] });
+    expect(host.decide(info.id, first!.id, "deny")).toBe(false);   // what the phone's stale card would get: 404
+  });
+
+  it("the size belongs to the screen that set it last; a claim at the same size changes only the owner", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    const resizes = () => events.filter((e) => e.type === "resize");
+    expect(resizes().at(-1)).toMatchObject({ by: null });   // each connection says who has it
+    host.resize(info.id, 120, 40, "mac-1");
+    host.resize(info.id, 120, 40, "mac-1");                 // nothing new
+    host.resize(info.id, 120, 40, "phone-1");               // the phone takes it at the same size
+    host.resize(info.id, 50, 30, "phone-1");
+    expect(resizes().slice(1)).toEqual([
+      { type: "resize", cols: 120, rows: 40, by: "mac-1" },
+      { type: "resize", cols: 120, rows: 40, by: "phone-1" },
+      { type: "resize", cols: 50, rows: 30, by: "phone-1" },
+    ]);
+    const late: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => late.push(e))();
+    expect(late.find((e) => e.type === "resize")).toEqual({ type: "resize", cols: 50, rows: 30, by: "phone-1" });
+  });
+
+  it("the size goes back when its owner stops following (the phone went to the background)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), sizeReleaseMs: 0 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const mac: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => mac.push(e), "mac-1");
+    const phoneA = host.subscribe(info.id, null, () => undefined, "phone-1");
+    const phoneB = host.subscribe(info.id, null, () => undefined, "phone-1");   // a reconnect overlapping the old stream
+    host.resize(info.id, 50, 30, "phone-1");
+    phoneA();
+    expect(host.get(info.id)).toMatchObject({ cols: 50, rows: 30 });
+    expect(mac.filter((e) => e.type === "resize").at(-1)).toMatchObject({ by: "phone-1" });
+    phoneB();
+    expect(mac.filter((e) => e.type === "resize").at(-1)).toEqual({ type: "resize", cols: 50, rows: 30, by: null });
+    // A screen that never owned it leaves quietly.
+    const count = mac.length;
+    host.subscribe(info.id, null, () => undefined, "web-1")();
+    expect(mac.length).toBe(count);
+  });
+
+  it("a screen that comes back within the grace keeps the size (a reconnect is not leaving)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), sizeReleaseMs: 60 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const mac: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => mac.push(e), "mac-1");
+    host.subscribe(info.id, null, () => undefined, "phone-1")();
+    host.resize(info.id, 50, 30, "phone-1");
+    host.subscribe(info.id, null, () => undefined, "phone-1")();   // dropped at once
+    const back = host.subscribe(info.id, null, () => undefined, "phone-1");
+    await new Promise((r) => setTimeout(r, 120));
+    expect(mac.filter((e) => e.type === "resize").at(-1)).toMatchObject({ by: "phone-1" });
+    back();
+    await new Promise((r) => setTimeout(r, 120));
+    expect(mac.filter((e) => e.type === "resize").at(-1)).toMatchObject({ by: null });
+  });
+
   it("a permission request answered in the terminal leaves the screens once the tool runs or the turn ends", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());

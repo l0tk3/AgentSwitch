@@ -67,9 +67,13 @@ export type TerminalEvent =
   | { readonly type: "output"; readonly seq: number; readonly data: string }
   | { readonly type: "status"; readonly status: TerminalStatus }
   | { readonly type: "name"; readonly name: string }
-  | { readonly type: "resize"; readonly cols: number; readonly rows: number }
+  /** `by`: the screen that owns the size now (docs/terminal-v0.md §1 "尺寸有主"); null when none said who it is. */
+  | { readonly type: "resize"; readonly cols: number; readonly rows: number; readonly by: string | null }
   | { readonly type: "permission"; readonly request: PermissionAsk }
   | { readonly type: "permission_resolved"; readonly id: string; readonly decision: PermissionDecision | null }
+  /** Every request waiting now, sent on each (re)connect: a screen replaces what it holds (one answered elsewhere
+   *  while it was away goes). */
+  | { readonly type: "permissions"; readonly requests: readonly PermissionAsk[] }
   | { readonly type: "exit"; readonly code: number | null }
   /** The terminal was deleted: screens close. */
   | { readonly type: "removed" };
@@ -133,6 +137,8 @@ export type TerminalHostOptions = {
   readonly permissionTimeoutMs?: number;
   /** After SIGHUP, how long before SIGKILL (default 3 s). */
   readonly killGraceMs?: number;
+  /** How long the size stays with a screen whose stream ended, for it to come back (a reconnect; default 3 s). */
+  readonly sizeReleaseMs?: number;
   /** The protected-path floor for a tool call (PreToolUse): the reason to refuse it, or null to let the agent's own
    *  permission mode decide. */
   readonly floor?: (tool: string, input: Record<string, unknown>, cwd: string) => string | null;
@@ -150,7 +156,7 @@ type Chunk = { readonly seq: number; readonly data: string };
 const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
 /** How long output counts as the program answering what was just sent (echo, a mouse move, a resize), not work. */
 const ECHO_MS = 600;
-const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000 };
+const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
 const MAX_TITLE = 200;
 /** A split escape sequence is held this long at most, and never more than this much of it. */
 const HOLD_MS = 50;
@@ -264,6 +270,10 @@ class Session {
   status: TerminalStatus = "idle";
   statusSince: number;
   activity: { tool: string; target: string } | null = null;
+  /** The screen whose size the terminal has (the last one a user acted on); null: none said, or it left. */
+  sizedBy: string | null = null;
+  /** Screens following the stream, by their id: the size goes back when its owner's last stream ends. */
+  readonly screens = new Map<string, number>();
   title: string;
   lastOutputAt: number;
   /** The user's own name for it; null = derived. */
@@ -340,6 +350,7 @@ export class TerminalHost {
       snapshotScrollback: opts.snapshotScrollback ?? DEFAULTS.snapshotScrollback,
       idleAfterMs: opts.idleAfterMs ?? DEFAULTS.idleAfterMs,
       permissionTimeoutMs: opts.permissionTimeoutMs ?? DEFAULTS.permissionTimeoutMs,
+      sizeReleaseMs: opts.sizeReleaseMs ?? DEFAULTS.sizeReleaseMs,
       killGraceMs: opts.killGraceMs ?? DEFAULTS.killGraceMs,
       now: opts.now ?? Date.now,
     };
@@ -444,15 +455,20 @@ export class TerminalHost {
       alternate: s.term.buffer.active.type === "alternate", cols: s.cols, rows: s.rows, kittyKeys: (s.kitty.at(-1) ?? 0) > 0 };
   }
 
-  resize(id: string, cols: number, rows: number): void {
+  /** `by`: the screen asking, which owns the size from now on (a claim at the same size still changes the owner). */
+  resize(id: string, cols: number, rows: number, by: string | null = null): void {
     const s = this.live(id);
-    if (cols === s.cols && rows === s.rows) return;
-    s.cols = cols;
-    s.rows = rows;
-    s.quietUntil = this.o.now() + ECHO_MS;
-    s.proc!.resize(cols, rows);
-    s.term.resize(cols, rows);
-    s.emit({ type: "resize", cols, rows });
+    const same = cols === s.cols && rows === s.rows;
+    if (same && by === s.sizedBy) return;
+    s.sizedBy = by;
+    if (!same) {
+      s.cols = cols;
+      s.rows = rows;
+      s.quietUntil = this.o.now() + ECHO_MS;
+      s.proc!.resize(cols, rows);
+      s.term.resize(cols, rows);
+    }
+    s.emit({ type: "resize", cols, rows, by });
   }
 
   /** Has the program draw its screen again: a size change it notices (one row less, then back), as tmux does when a
@@ -466,8 +482,10 @@ export class TerminalHost {
     setTimeout(() => { if (s.proc && s.status !== "exited") try { s.proc.resize(s.cols, s.rows); } catch { /* ended meanwhile */ } }, REDRAW_MS).unref();
   }
 
-  /** Every event from `after` on: the output a screen missed when the buffer still has it, else a snapshot first. */
-  subscribe(id: string, after: number | null, listener: Listener): () => void {
+  /** Every event from `after` on: the output a screen missed when the buffer still has it, else a snapshot first.
+   *  `screen`: the drawing screen's id; when the owner of the size stops following (the phone went to the background,
+   *  the window closed), nobody owns it and the screens still there take it back (terminal-v0 §1 "离开就交还"). */
+  subscribe(id: string, after: number | null, listener: Listener, screen: string | null = null): () => void {
     const s = this.need(id);
     const first = s.chunks[0]?.seq ?? s.seq + 1;
     if (after !== null && after >= first - 1 && after <= s.seq) {
@@ -476,11 +494,28 @@ export class TerminalHost {
       listener(this.snapshot(s));
       for (const c of s.chunks) if (c.seq > s.parsedSeq) listener({ type: "output", seq: c.seq, data: c.data });
     }
+    listener({ type: "resize", cols: s.cols, rows: s.rows, by: s.sizedBy });
     listener({ type: "status", status: s.status });
     for (const p of s.pending.values()) listener({ type: "permission", request: p.ask });
+    listener({ type: "permissions", requests: [...s.pending.values()].map((p) => p.ask) });
     if (s.status === "exited") listener({ type: "exit", code: s.exitCode });
     s.listeners.add(listener);
-    return () => { s.listeners.delete(listener); };
+    if (screen) s.screens.set(screen, (s.screens.get(screen) ?? 0) + 1);
+    return () => {
+      s.listeners.delete(listener);
+      if (!screen) return;
+      const left = (s.screens.get(screen) ?? 1) - 1;
+      if (left > 0) { s.screens.set(screen, left); return; }
+      s.screens.delete(screen);
+      // A little while first: the same screen reconnecting (a network blip, the phone fetching a fresh screen) keeps it.
+      const release = () => {
+        if (s.screens.has(screen) || s.sizedBy !== screen || s.status === "exited") return;
+        s.sizedBy = null;
+        s.emit({ type: "resize", cols: s.cols, rows: s.rows, by: null });
+      };
+      if (this.o.sizeReleaseMs > 0) setTimeout(release, this.o.sizeReleaseMs).unref();
+      else release();
+    };
   }
 
   /** A hook call from the agent in terminal `id`, proven by its hook token. Permission requests wait for a screen, or
