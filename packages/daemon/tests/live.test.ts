@@ -55,7 +55,8 @@ describe("live snapshot", () => {
     const snap = liveSnapshot(f.store, host([waiting, terminal({ id: "k2", status: "idle" }), terminal({ id: "k3", status: "exited", permissions: waiting.permissions })]), t0 + 10_000);
 
     expect(snap.rows.map((r) => r.id)).toEqual([asks.id, "k1", fresh.id, old.id]);
-    expect(snap).toMatchObject({ running: 2, waiting: 2 });
+    // Two terminals open (waiting, idle); the exited one is not: the Mac stays awake while one is open.
+    expect(snap).toMatchObject({ running: 2, waiting: 2, open: 2 });
     expect(snap.rows[0]).toMatchObject({
       kind: "task", title: "登录财务平台", step: "Bash: rm -rf build", model: "Sonnet 4.6", needsYou: true,
       ask: { kind: "approval", id: approval.id, tool: "Bash", target: "rm -rf build", where: "~/work" },

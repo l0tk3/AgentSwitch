@@ -55,6 +55,8 @@ export type LiveSnapshot = {
   readonly waiting: number;
   /** Tasks and terminal turns that ended in the last ENDED_MS, the latest first (a cancelled task is not: you did it). */
   readonly ended: readonly LiveEnd[];
+  /** Terminals not exited, idle or not: the Mac stays awake while one is open (app-v0 §4). */
+  readonly open: number;
   readonly now: number;
 };
 
@@ -78,11 +80,13 @@ export function liveSnapshot(store: Store, terminals: TerminalHost | undefined, 
   for (const a of store.pendingApprovals()) if (!pending.has(a.taskId)) pending.set(a.taskId, a);
   const tasks = store.unfinishedTasks().filter((t) => ACTIVE.has(t.status)).map((t) => taskRow(store, t, pending.get(t.id)));
   // A terminal at work counts as a task in progress does (2026-09-30); an idle or ended one does not.
-  const busy = (terminals?.list() ?? []).filter((t) => waitsForYou(t) || t.status === "working").map(terminalRow);
+  const all = terminals?.list() ?? [];
+  const busy = all.filter((t) => waitsForYou(t) || t.status === "working").map(terminalRow);
   const rows = [...tasks, ...busy].sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.startedAt - a.startedAt);
   const waiting = rows.filter((r) => r.needsYou).length;
   const ends = [...ended(store, now), ...terminalEnds(terminals, now)].sort((a, b) => b.at - a.at).slice(0, 10);
-  return { rows, running: rows.length - waiting, waiting, ended: ends, now };
+  const open = all.filter((t) => t.status !== "exited").length;
+  return { rows, running: rows.length - waiting, waiting, ended: ends, open, now };
 }
 
 export function waitsForYou(t: TerminalInfo): boolean {

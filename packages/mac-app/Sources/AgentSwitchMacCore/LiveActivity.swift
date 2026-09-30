@@ -127,20 +127,23 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
     public let waiting: Int
     /// The latest first.
     public let ended: [End]
+    /// Terminals not exited, idle or not (the Mac stays awake while one is open); 0 from a service that does not say.
+    public let open: Int
     /// The daemon's clock when it answered.
     public let now: Date
 
     public static let cardRows = 3
 
-    public init(rows: [Row], ended: [End] = [], now: Date) {
+    public init(rows: [Row], ended: [End] = [], open: Int = 0, now: Date) {
         self.rows = rows
         waiting = rows.filter(\.needsYou).count
         running = rows.count - waiting
         self.ended = ended
+        self.open = open
         self.now = now
     }
 
-    private enum CodingKeys: String, CodingKey { case rows, running, waiting, ended, now }
+    private enum CodingKeys: String, CodingKey { case rows, running, waiting, ended, open, now }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -148,6 +151,7 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         running = try c.decodeIfPresent(Int.self, forKey: .running) ?? rows.filter { !$0.needsYou }.count
         waiting = try c.decodeIfPresent(Int.self, forKey: .waiting) ?? rows.filter(\.needsYou).count
         ended = try c.decodeIfPresent([End].self, forKey: .ended) ?? []
+        open = try c.decodeIfPresent(Int.self, forKey: .open) ?? 0
         now = try c.decodeIfPresent(Double.self, forKey: .now).map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
     }
 }

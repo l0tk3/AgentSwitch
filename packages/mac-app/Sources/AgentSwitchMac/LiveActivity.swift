@@ -121,11 +121,12 @@ final class LiveActivity {
         if ready {
             do { next = try await client.live() } catch { liveLog.debug("live: \(error.localizedDescription, privacy: .public)") }
         }
-        // Work under way, or a phone connected: the Mac stays awake (SleepGuard), whether the capsule shows or not.
+        // Work under way, a phone connected or a terminal open: the Mac stays awake (SleepGuard), whether the capsule
+        // shows or not.
         #if DEBUG
-        if demo == nil { sleepGuard.update(busy: !(next?.rows.isEmpty ?? true) || (model.remote?.onlineDevices ?? 0) > 0) }
+        if demo == nil { sleepGuard.update(next, phoneOnline: (model.remote?.onlineDevices ?? 0) > 0) }
         #else
-        sleepGuard.update(busy: !(next?.rows.isEmpty ?? true) || (model.remote?.onlineDevices ?? 0) > 0)
+        sleepGuard.update(next, phoneOnline: (model.remote?.onlineDevices ?? 0) > 0)
         #endif
         if !enabled { next = nil }
         let now = Date()
