@@ -47,7 +47,17 @@ final class TerminalPageModel {
     @ObservationIgnored private var clickRefused = false
     /// This phone as a screen: the size it takes is its own until another takes it or this page's stream ends (the
     /// page closed, the app in the background).
-    let screenId = "phone-" + UUID().uuidString.prefix(8).lowercased()
+    let screenId = TerminalPageModel.phoneScreen
+
+    /// One id for this phone, kept across pages and launches (2026-09-30, user: 返回重新进入提示我另一个 iPhone 在使用 —
+    /// a new id per page made the page just left, still holding the size for a few seconds, "another iPhone").
+    static let phoneScreen: String = {
+        let key = "terminal.screenId"
+        if let saved = UserDefaults.standard.string(forKey: key), saved.hasPrefix("phone-") { return saved }
+        let made = "phone-" + UUID().uuidString.prefix(8).lowercased()
+        UserDefaults.standard.set(made, forKey: key)
+        return made
+    }()
     /// Where the terminal is in use instead ("mac", "web", "iphone"): the placeholder over the frame as it was.
     private(set) var away: String?
     /// Who has the size, as the stream last said (nil: nobody, or not heard yet).
@@ -187,8 +197,14 @@ final class TerminalPageModel {
                 if by == nil || by == screenId {
                     owner = by
                     away = nil
-                    for e in drawing { handle(e) }
-                    claim()
+                    // A screen drawn for another width comes apart at this one: then a fresh one once the size is ours.
+                    let grid = screen.grid
+                    if case .snapshot(_, let cols, let rows, _)? = drawing.first, (cols, rows) != (grid.cols, grid.rows) {
+                        claim(fresh: true)
+                    } else {
+                        for e in drawing { handle(e) }
+                        claim()
+                    }
                 } else {
                     owner = by
                     away = Self.place(of: by!)
@@ -252,9 +268,9 @@ final class TerminalPageModel {
 
     /// Takes the size: this phone's grid, told with its id (also at the same size: the owner changes). After the
     /// placeholder the screen is drawn afresh at it — what came meanwhile was for another width, and was not drawn.
-    func claim() {
+    func claim(fresh: Bool = false) {
         guard let api, status != .exited else { return }
-        let wasAway = away != nil
+        let wasAway = away != nil || fresh
         owner = screenId
         away = nil
         claiming = true

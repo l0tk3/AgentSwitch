@@ -12,6 +12,7 @@ import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
 import type { KeyContext } from "./keys.js";
+import { screenView } from "./screenView.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
 export type TerminalHarness = (typeof TERMINAL_HARNESSES)[number];
@@ -312,7 +313,8 @@ class Session {
     readonly createdAt: number, public cols: number, public rows: number, scrollback: number) {
     this.term = new headless.Terminal({ cols, rows, scrollback, allowProposedApi: true });
     this.ser = new serialize.SerializeAddon();
-    this.term.loadAddon(this.ser);
+    // It reads the screen as shown: lines cut at the screen's width (screenView.ts: a narrowed screen keeps wider lines).
+    this.ser.activate(screenView(this.term) as unknown as Parameters<typeof this.ser.activate>[0]);
     // xterm's modes do not say how mouse reports are encoded: watch the program set and reset SGR form (1006).
     const sgr = (on: boolean) => (params: (number | number[])[]) => {
       if (params.some((p) => p === 1006 || (Array.isArray(p) && p.includes(1006)))) this.sgrMouse = on;
