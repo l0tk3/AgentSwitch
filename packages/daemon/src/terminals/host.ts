@@ -347,6 +347,7 @@ class Session {
 
 export class TerminalHost {
   private readonly sessions = new Map<string, Session>();
+  private readonly workListeners = new Set<(cwd: string) => void>();
   private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor">> & { now: () => number };
   private helperChecked = false;
 
@@ -559,6 +560,7 @@ export class TerminalHost {
         return refused ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: refused } } : null;
       }
       case "PostToolUse": {
+        this.workDone(s);
         const tool = String(p.tool_name ?? "");
         const input = JSON.stringify(p.tool_input ?? null);
         const same = [...s.pending.values()].filter((x) => x.ask.tool === tool);
@@ -723,9 +725,21 @@ export class TerminalHost {
 
   /** A turn ended: from work (a repeated Stop, a start-up idle is none), or `always` (the program exited on an error). */
   private turnEnded(s: Session, ok: boolean, said: unknown, always = false): void {
+    this.workDone(s);
     if (!always && s.status !== "working" && s.status !== "waiting") return;
     const text = typeof said === "string" ? said.replace(/\s+/g, " ").trim() : "";
     s.lastTurn = { at: this.o.now(), ok, line: text.slice(0, 400) };
+  }
+
+  /** `listener` hears a terminal's folder when its agent finished a tool call or a turn there: something in it may have
+   *  changed (the tree's git status looks again). Returns the way to stop listening. */
+  onWorkDone(listener: (cwd: string) => void): () => void {
+    this.workListeners.add(listener);
+    return () => this.workListeners.delete(listener);
+  }
+
+  private workDone(s: Session): void {
+    for (const listener of this.workListeners) listener(s.cwd);
   }
 
   /** How terminal `id`'s last turn ended (local only: the Mac's Live Activity). */

@@ -18,6 +18,7 @@ import type { Offers } from "../router/modelOffers.js";
 import { slashCommands } from "../terminals/commands.js";
 import { CLICK, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
+import { GitStatus } from "../terminals/gitStatus.js";
 import { modelSettings } from "../router/modelOverlay.js";
 import { modelName } from "../util/modelName.js";
 import { checkTerminalCwd } from "./cwdPolicy.js";
@@ -38,9 +39,13 @@ export type Terminals = {
   readonly attachDir?: string;
   /** Before an agent starts (Codex: its hooks trusted, codexHooks.ts); whatever happens, the start goes on. */
   readonly prepare?: (harness: TerminalHarness) => Promise<unknown>;
+  /** The tree's git status (default: `git status` itself, gitStatus.ts). */
+  readonly git?: GitStatus;
 };
 
 const MAX_INPUT = 20_000;
+/** The sessions whose folders get a git status: as many as the tree lists. */
+const GIT_SESSIONS = 80;
 const Attach = z.object({ uploads: z.array(z.string().min(1).max(64)).min(1).max(10) });
 const Size = { cols: z.number().int().min(20).max(500), rows: z.number().int().min(5).max(300) };
 /** A model id goes to the agent as `--model <id>`: never one that could read as a flag. */
@@ -101,6 +106,15 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (err instanceof TerminalError) return c.json({ error: err.message }, STATUS[err.code]);
     throw err;
   };
+
+  // Git at a glance for the tree's folders (docs/terminal-v0.md §5): the folders of the terminals and of the sessions
+  // the tree lists, never a path a caller names. Folders not in a repository are left out.
+  const git = t.git ?? new GitStatus();
+  host.onWorkDone((cwd) => git.invalidate(cwd));
+  app.get("/folders/git", async (c) => {
+    const folders = [...host.list().map((x) => x.cwd), ...(deps.sessions?.list(GIT_SESSIONS) ?? []).map((x) => x.cwd)];
+    return c.json({ folders: await git.summaries(folders.filter((f) => isAbsolute(f))) });
+  });
 
   // The agents' hook command (terminals/hookClient.ts). Not on the remote allowlist; the local token check lets it
   // through (api/localAuth.ts) because the terminal's own hook token is checked here.

@@ -201,6 +201,16 @@ final class TerminalTreeTests: XCTestCase {
         let nodes = TerminalTree.build(terminals: [], sessions: [session("a", "/Users/u/x/app", at: 2), session("b", "/Users/u/y/app", at: 1)])
         XCTAssertEqual(nodes.map { $0.groups[0].name }, ["x/app", "y/app"])
     }
+
+    /// Git after a folder's name (2026-09-30): what is 0 is left out; a folder outside a repository says nothing.
+    func testAFolderCarriesItsGit() throws {
+        let git = ["/Users/u/x/app": GitSummary(branch: "main", changed: 5, ahead: 2)]
+        let nodes = TerminalTree.build(terminals: [], sessions: [session("a", "/Users/u/x/app", at: 2), session("b", "/Users/u/y/app", at: 1)], git: git)
+        XCTAssertEqual(nodes.map { $0.groups[0].git?.said }, ["main ±5 ↑2", nil])
+        XCTAssertEqual(GitSummary(branch: "feat/x", behind: 4).said, "feat/x ↓4")
+        let json = #"{"folders":{"/w":{"branch":"main","changed":1,"ahead":0,"behind":3}}}"#
+        XCTAssertEqual(try JSONDecoder().decode(FolderGitList.self, from: Data(json.utf8)).folders["/w"], GitSummary(branch: "main", changed: 1, behind: 3))
+    }
 }
 
 /// Pictures and files in a terminal reply (2026-09-30, user: 图片只能插到消息开头……要和 cc 一样给占位符).

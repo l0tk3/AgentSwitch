@@ -12,6 +12,8 @@ import SwiftUI
 final class TerminalsStore {
     private(set) var list: TerminalList?
     private(set) var sessions: [SessionSummary] = []
+    /// The folders' git, after their names in the tree.
+    private(set) var git: [String: GitSummary] = [:]
     private(set) var style: TerminalStyle?
     /// The last read failed (kept list shown); cleared by the next good one.
     var error: String?
@@ -19,7 +21,7 @@ final class TerminalsStore {
     @ObservationIgnored private var generation = 0
 
     var terminals: [TerminalInfo] { list?.terminals ?? [] }
-    var nodes: [TerminalTree.Node] { TerminalTree.build(terminals: terminals, sessions: sessions) }
+    var nodes: [TerminalTree.Node] { TerminalTree.build(terminals: terminals, sessions: sessions, git: git) }
     /// Terminals waiting for an answer: the tab's badge.
     var waiting: Int { terminals.filter(\.waitsForYou).count }
 
@@ -51,11 +53,19 @@ final class TerminalsStore {
         if let fresh = try? await api.sessions(limit: 80), asked == generation { sessions = fresh }
     }
 
+    /// The folders' git; a failed read keeps the last.
+    func refreshGit(_ api: AgentSwitchAPI?) async {
+        guard let api else { return }
+        let asked = generation
+        if let fresh = try? await api.folderGit(), asked == generation, fresh != git { git = fresh }
+    }
+
     /// Another Mac (or none): nothing of this one's stays.
     func reset() {
         generation += 1
         list = nil
         sessions = []
+        git = [:]
         style = nil
         error = nil
     }

@@ -785,6 +785,14 @@ function unfold(cwd) {
   if (collapsed.delete(cwd) | collapsed.delete(`parent:${parent}`)) remember("terminal.collapsed", JSON.stringify([...collapsed]));
 }
 
+/** After a folder's name: its branch, files changed, commits ahead and behind its upstream (docs/terminal-v0.md §1). */
+let gits = {};
+function gitMark(g) {
+  if (!g) return null;
+  const said = [g.branch, g.changed ? `±${g.changed}` : "", g.ahead ? `↑${g.ahead}` : "", g.behind ? `↓${g.behind}` : ""].filter(Boolean).join(" ");
+  return h("i", { class: "git", title: `git: ${g.branch}${g.changed ? ` · ${g.changed} changed` : ""}${g.ahead ? ` · ${g.ahead} ahead` : ""}${g.behind ? ` · ${g.behind} behind` : ""}` }, said);
+}
+
 function counts(ts, ss) {
   const live = ts.filter((t) => t.status !== "exited").length;
   const waiting = ts.some((t) => t.status === "waiting");
@@ -807,7 +815,7 @@ function renderSidebar() {
     const closed = collapsed.has(g.cwd);
     out.push(h("div", { class: `dir ${closed ? holds(g.terminals) : ""}`, title: tilde(g.cwd), style: `padding-left:calc(10px + ${depth * 2}ch)`, onclick: () => toggle(g.cwd) },
       h("span", { class: "chev" }, closed ? "▸" : "▾"),
-      h("span", { class: "name" }, `${g.label}/`),
+      h("span", { class: "name" }, `${g.label}/`, gitMark(gits[g.cwd])),
       counts(g.terminals, g.sessions),
       h("button", { class: "add", title: "new terminal here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, "+")));
     if (closed) return;
@@ -1203,6 +1211,13 @@ async function refresh() {
   if (current) for (const p of current.permissions) addToast(current.id, p);
 }
 
+async function refreshGit() {
+  const r = await api("GET", "/folders/git").catch(() => null);
+  if (!r || JSON.stringify(r.folders) === JSON.stringify(gits)) return;
+  gits = r.folders;
+  renderSidebar();
+}
+
 async function refreshSessions() {
   const r = await api("GET", "/sessions?limit=80").catch(() => null);
   sessions = r?.sessions ?? [];
@@ -1219,9 +1234,11 @@ if (!MODES.some((m) => m.id === pickedMode)) {
 $("cwd").value = recall("terminal.cwd") || (workdir?.path ? tilde(workdir.path) : "~");
 await refresh();
 await refreshSessions();
+void refreshGit();
 const wanted = new URLSearchParams(location.search).get("id") || recall("terminal.last");
 if (wanted && terminals.some((t) => t.id === wanted)) select(wanted);
 else if (terminalOrder[0]) select(terminalOrder[0]);
 else showCreate();
 setInterval(refresh, 3000);
 setInterval(refreshSessions, 20000);
+setInterval(refreshGit, 5000);

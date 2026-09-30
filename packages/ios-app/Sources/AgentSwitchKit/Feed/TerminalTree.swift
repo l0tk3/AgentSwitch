@@ -12,6 +12,8 @@ public enum TerminalTree {
         public let name: String
         public let terminals: [TerminalInfo]
         public let sessions: [SessionSummary]
+        /// Its git after its name; nil outside a repository (or not known yet).
+        public var git: GitSummary? = nil
         public var id: String { cwd }
     }
 
@@ -24,7 +26,7 @@ public enum TerminalTree {
         public var terminals: [TerminalInfo] { groups.flatMap(\.terminals) }
     }
 
-    public static func build(terminals: [TerminalInfo], sessions: [SessionSummary]) -> [Node] {
+    public static func build(terminals: [TerminalInfo], sessions: [SessionSummary], git: [String: GitSummary] = [:]) -> [Node] {
         struct Bucket { var terminals: [TerminalInfo] = []; var sessions: [SessionSummary] = []; var latest: Int64 = 0; var opened = Int64.max }
         var byCwd: [String: Bucket] = [:]
         for t in terminals {
@@ -68,7 +70,8 @@ public enum TerminalTree {
                 let own = lastComponent(g.cwd)
                 let name = draft.parent == nil && repeated ? "\(lastComponent(parentOf(g.cwd)))/\(own)" : own
                 return Group(cwd: g.cwd, name: name, terminals: g.bucket.terminals.sorted { $0.createdAt < $1.createdAt },
-                             sessions: g.bucket.sessions.sorted { ($0.startedAt ?? $0.updatedAt, $1.sessionId) > ($1.startedAt ?? $1.updatedAt, $0.sessionId) })
+                             sessions: g.bucket.sessions.sorted { ($0.startedAt ?? $0.updatedAt, $1.sessionId) > ($1.startedAt ?? $1.updatedAt, $0.sessionId) },
+                             git: git[g.cwd])
             }
             let shownParent = draft.parent.map { parent in repeated ? "\(lastComponent(parentOf(parent)))/\(lastComponent(parent))" : lastComponent(parent) }
             return Node(parent: draft.parent, parentName: shownParent, groups: groups)

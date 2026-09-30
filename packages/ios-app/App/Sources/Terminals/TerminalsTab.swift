@@ -92,10 +92,12 @@ struct TerminalsTab: View {
             .onChange(of: model.openTerminalRequest) { openRequested() }
             // A cold start from the Live Activity: the request is there before the list.
             .onChange(of: store.list == nil) { openRequested() }
-            // The list itself is followed from every tab (MainTabs); the sessions while this tab is on screen.
+            // The list itself is followed from every tab (MainTabs); the sessions and the folders' git while this tab
+            // is on screen.
             .task(id: model.connection.endpoint) {
                 while !Task.isCancelled {
                     await store.refreshSessions(model.api)
+                    await store.refreshGit(model.api)
                     try? await Task.sleep(for: Self.pollInterval)
                 }
             }
@@ -202,6 +204,10 @@ struct TerminalsTab: View {
             Button { toggleFold(group.cwd) } label: {
                 HStack(spacing: 6) {
                     Text("\(nested ? "  " : "")\(isFolded ? "▸" : "▾") \(group.name)/").mono(13, weight: .semibold)
+                    if let git = group.git {
+                        Text(git.said).mono(11).foregroundStyle(.tertiary).lineLimit(1)
+                            .accessibilityLabel("git \(git.said)")
+                    }
                     if isFolded { Text(count([group])).mono(11).foregroundStyle(.tertiary) }
                     Spacer(minLength: 0)
                 }

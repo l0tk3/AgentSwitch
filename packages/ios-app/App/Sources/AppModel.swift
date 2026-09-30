@@ -376,7 +376,10 @@ final class AppModel {
         guard let api else { return }
         let asked = session
         await terminals.refreshList(api)
-        if sessions { await terminals.refreshSessions(api) }
+        if sessions {
+            await terminals.refreshSessions(api)
+            await terminals.refreshGit(api)
+        }
         guard asked == session else { return }
         let fresh = terminalCues.newlyWaiting(terminals.terminals)
         if !fresh.isEmpty {

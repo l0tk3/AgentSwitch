@@ -2,6 +2,7 @@
  *  and the whole path over real HTTP — start, stream, reply, a permission request through the real hook command
  *  answered from the API, audit, delete. No model is called. */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -548,6 +549,29 @@ describe("terminals over HTTP", () => {
     expect(await pre("Read", { file_path: join(home, "browser-profiles", "slot-1", "Cookies") })).toBeNull();
     const gate = process.env.SECRET_GATE_HOME ?? join(homedir(), ".secret-gate");
     expect(await pre("Read", { file_path: join(gate, "keys", "default.key") })).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
+  });
+
+  it("git status for the tree's folders only, looked at again after the agent's tool call there (2026-09-30)", async () => {
+    const { cwd, call, daemon } = await start();
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd });
+    writeFileSync(join(cwd, "a.txt"), "a");
+    const created = await call("POST", "/terminals", { harness: "claude-code", cwd });
+    const at = created.json.terminal.cwd as string;
+    const first = await call("GET", "/folders/git");
+    expect(first.json.folders).toEqual({ [at]: { branch: "main", changed: 1, ahead: 0, behind: 0 } });
+    // A path the caller names is not looked at: the route takes none.
+    expect(Object.keys((await call("GET", `/folders/git?path=${encodeURIComponent(tmpdir())}`)).json.folders)).toEqual([at]);
+    writeFileSync(join(cwd, "b.txt"), "b");
+    const host = daemon.terminals!;
+    const id = created.json.terminal.id as string;
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(id)!.hookToken;
+    await host.hook(id, token, { event: "PostToolUse", payload: { tool_name: "Write", tool_input: { file_path: join(cwd, "b.txt") } } });
+    let changed = 0;
+    for (let i = 0; i < 50 && changed !== 2; i++) {
+      changed = (await call("GET", "/folders/git")).json.folders[at]?.changed;
+      if (changed !== 2) await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(changed).toBe(2);
   });
 
   it("bypass can be chosen from a paired device too (the phone asks first); every terminal may switch to it later", async () => {

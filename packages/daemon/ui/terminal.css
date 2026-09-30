@@ -120,6 +120,7 @@ body.side-dragging .screen { pointer-events: none; }
 .dir .chev { color: var(--ink3); }
 .dir .name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dir.parent .name { color: var(--ink2); font-weight: 500; }
+.dir .name .git { font-style: normal; font-weight: 400; color: var(--ink3); font-size: 11px; margin-left: 1ch; }
 .dir.parent + .dir { margin-top: 2px; }
 .dir .count { color: var(--ink3); font-size: 11px; display: flex; gap: 6px; }
 .dir .count b { color: var(--green); font-weight: 400; }

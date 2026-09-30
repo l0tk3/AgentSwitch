@@ -417,3 +417,31 @@ public enum TerminalEvent: Sendable, Equatable {
         }
     }
 }
+
+/// A folder's git at a glance (docs/terminal-v0.md §1 文件夹行的 git 状态): after its name in the tree, `main ±5 ↑2 ↓4`.
+public struct GitSummary: Codable, Sendable, Equatable {
+    /// The branch, or the commit's short id when detached.
+    public let branch: String
+    /// Files changed, staged or not, untracked included.
+    public let changed: Int
+    public let ahead: Int
+    public let behind: Int
+
+    public init(branch: String, changed: Int = 0, ahead: Int = 0, behind: Int = 0) {
+        self.branch = branch
+        self.changed = changed
+        self.ahead = ahead
+        self.behind = behind
+    }
+
+    /// As the tree shows it; what is 0 is left out.
+    public var said: String {
+        [branch, changed > 0 ? "±\(changed)" : "", ahead > 0 ? "↑\(ahead)" : "", behind > 0 ? "↓\(behind)" : ""]
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+}
+
+struct FolderGitList: Decodable {
+    let folders: [String: GitSummary]
+}
+

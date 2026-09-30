@@ -40,6 +40,15 @@ extension AgentSwitchAPI {
     public func terminals() async throws -> TerminalList { try await get(["terminals"]) }
     public func terminalStyle() async throws -> TerminalStyle { try await get(["terminals", "style"]) }
 
+    /// The tree's folders' git (`GET /folders/git`); none from a Mac that does not say.
+    public func folderGit() async throws -> [String: GitSummary] {
+        do {
+            return (try await get(["folders", "git"]) as FolderGitList).folders
+        } catch APIError.http(let status, _) where status == 404 {
+            return [:]
+        }
+    }
+
     public func createTerminal(_ body: NewTerminalRequest) async throws -> TerminalInfo {
         (try await send("POST", ["terminals"], body: body) as TerminalEnvelope).terminal
     }
