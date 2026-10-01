@@ -487,10 +487,8 @@ final class TerminalWebView: WKWebView {
 }
 
 /// The window's content: the bar in the title bar's row, then the page. The bar, flat on the window's black as iTerm's
-/// compact tabs: the list's button beside the traffic lights, then who this is — the app's mark (all the terminals'
-/// state) and its name, as the console's band (2026-10-01, user: 顶栏缺少明显的标识); the terminal on screen centred;
-/// the state in words and new terminal at the end. Its empty part moves the window and a double click zooms, as a title
-/// bar does.
+/// compact tabs: the list's button beside the traffic lights, the terminal on screen centred, new terminal and all the
+/// terminals' mark at the end; its empty part moves the window and a double click zooms, as a title bar does.
 private struct TerminalWindowRoot: View {
     let stage: TerminalStage
     let head: TerminalHead
@@ -503,10 +501,9 @@ private struct TerminalWindowRoot: View {
                 WindowDragArea()
                 HStack(spacing: 4) {
                     ToolbarPixelButton(rows: PixelArt.toolbarList, help: "list ⌘B", action: toggleList)
-                    TerminalMarkView(head: head).allowsHitTesting(false)
                     Spacer(minLength: 0)
-                    if !head.tag.isEmpty { Text(head.tag).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).padding(.trailing, 4) }
                     ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "new terminal ⌘T", action: newTerminal)
+                    TerminalMarkView(head: head)
                 }
                 .padding(.leading, head.lightsEnd + 10)
                 .padding(.trailing, 8)
@@ -594,7 +591,7 @@ extension PixelArt.MarkState {
 }
 
 /// The window's title: the terminal on screen with its status mark (the spinner while busy, amber while it waits,
-/// hollow once ended); "new terminal" while one is being made.
+/// hollow once ended).
 private struct TerminalTitleView: View {
     let head: TerminalHead
 
@@ -608,8 +605,6 @@ private struct TerminalTitleView: View {
                 default: PixelSprite(rows: PixelArt.square, pixel: 2, color: .ok)
                 }
                 Text(head.name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
-            } else {
-                Text("new terminal").font(.system(size: 13)).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 12)
@@ -617,16 +612,15 @@ private struct TerminalTitleView: View {
     }
 }
 
-/// Who this is, beside the list's button: the app's mark, which is all the terminals' state too, and its name.
+/// All the terminals' state at the toolbar's end: the word (`1 waiting`, `busy`) and the app's mark.
 private struct TerminalMarkView: View {
     let head: TerminalHead
 
     var body: some View {
         HStack(spacing: 8) {
+            if !head.tag.isEmpty { Text(head.tag).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary) }
             PixelMarkView(state: head.mark, pixel: 1.5, depth: true)
-            Text("agentswitch").font(.system(size: 12.5, weight: .bold, design: .monospaced))
         }
-        .padding(.horizontal, 6)
-        .help("agentswitch · 所有终端的状态")
+        .padding(.horizontal, 4)
     }
 }

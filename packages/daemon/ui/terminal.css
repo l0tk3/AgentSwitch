@@ -109,8 +109,6 @@ body.side-dragging .screen { pointer-events: none; }
 .mac-app .console-link { display: none; }
 .band-tag { color: var(--ink3); font-size: 11px; }
 .band-mark { display: flex; }
-/* who this is (2026-10-01): the app's mark (all the terminals' state) and its name, as the console's band */
-.band-who { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-right: 10px; }
 .side-scroll { flex: 1; overflow-y: auto; padding: 2px 0 12px; }
 .side-scroll::-webkit-scrollbar { width: 0; }
 .empty-note { color: var(--ink3); padding: 8px 12px; }
