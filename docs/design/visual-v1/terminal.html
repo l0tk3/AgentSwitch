@@ -271,18 +271,18 @@ mark { background: var(--signal); color: #000; padding: 0 1px; }
   <a href="app.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">整体方向 →</a>
   <a href="depth.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">层次 →</a>
 </div>
-<div class="note">静态演示，不连服务。同一父目录下的项目合并成一层（Projects/、Worktop/）；点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，红绿灯旁的按钮或 ⌘B 展开 / 收起。顶上是标题栏的一行（32pt，像 iTerm 的紧凑标签栏）：红绿灯旁是列表按钮，标题居中写当前终端，右侧 + 新建和总体状态。同一个终端只有一个尺寸：手机上接着用时，这里的画面盖上抖动遮罩，中间写 on iphone；点画面、按任意键或 [ take over ] 就在这里接着用，画面按窗口尺寸重画；手机退到后台时自动回到这里。权限卡片照常出现、照常批准。</div>
+<div class="note">静态演示，不连服务。同一父目录下的项目合并成一层（Projects/、Worktop/）；点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，红绿灯旁的按钮或 ⌘B 展开 / 收起。顶上是标题栏的一行（32pt，像 iTerm 的紧凑标签栏）：红绿灯旁是列表按钮，标题居中写当前终端，右侧 + 新建和总体状态。同一个终端只有一个尺寸：手机上接着用时，这里的画面盖上抖动遮罩，中间写 On iPhone；点画面、按任意键或 [ Take Over ] 就在这里接着用，画面按窗口尺寸重画；手机退到后台时自动回到这里。权限卡片照常出现、照常批准。</div>
 
 <div class="win" id="win">
   <div class="bar"><div class="lights"><i></i><i></i><i></i></div>
-    <button class="tb" id="sidebtn" data-do="hide" title="list ⌘B"><span id="icoSide"></span></button>
+    <button class="tb" id="sidebtn" data-do="hide" title="List ⌘B"><span id="icoSide"></span></button>
     <div class="title" id="title"></div>
-    <div class="end"><button class="tb" data-do="create" title="new terminal ⌘T"><span id="icoNew"></span></button><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
+    <div class="end"><button class="tb" data-do="create" title="New Terminal ⌘T"><span id="icoNew"></span></button><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
   </div>
   <aside class="side">
-    <label class="find"><span class="slash">/</span><input id="find" placeholder="search" spellcheck="false" autocomplete="off"><kbd>⌘F</kbd></label>
+    <label class="find"><span class="slash">/</span><input id="find" placeholder="Search" spellcheck="false" autocomplete="off"><kbd>⌘F</kbd></label>
     <div class="list v-tree" id="list"></div>
-    <div class="grip" id="grip" title="drag · double-click resets · ⌘B hides"></div>
+    <div class="grip" id="grip" title="Drag · double-click resets · ⌘B hides"></div>
   </aside>
   <section class="main" id="main">
     <div class="screen" id="screen"></div>
@@ -327,12 +327,12 @@ function statusMark(st) {
 
 // copy: terse English for the chrome (the agents' own status lines are English), or formal Chinese — to compare
 const COPY = {
-  en: { waiting: "waiting", exited: "exited", resume: "resume", del: "delete record", delete: "delete", close: "close", more: (n) => `${n} more`, less: "less",
-    kNew: "new", kClose: "close", kHide: "hide", seal: "encrypt & send", sealTip: "Passwords and tokens are encrypted before they reach the agent.",
-    perm: "[!] approval", tool: "run command", deny: "deny", allow: "allow", ph: "message", cancel: "esc cancel", send: "send",
-    newT: "// new terminal", model: "// model", folder: "// folder", mode: "// permissions", modes: ["ask each", "auto", "bypass"], start: "start",
-    missing: "not installed", markWaiting: (n) => `${n} waiting`, busy: "busy", idle: "idle", dflt: "default", live: "live", end: "exit",
-    awayHd: "on iphone", awayLine: "这个终端正在 iPhone 上使用。", awayGo: "take over", awayKey: "any key" },
+  en: { waiting: "Waiting", exited: "Exited", resume: "Resume", del: "Delete Record", delete: "Delete", close: "Close", more: (n) => `${n} More`, less: "Less",
+    kNew: "New", kClose: "Close", kHide: "Hide", seal: "Encrypt & Send", sealTip: "Passwords and tokens are encrypted before they reach the agent.",
+    perm: "[!] Approval", tool: "Run Command", deny: "Deny", allow: "Allow", ph: "Message", cancel: "esc Cancel", send: "Send",
+    newT: "// New Terminal", model: "// Model", folder: "// Folder", mode: "// Permissions", modes: ["Ask Each", "Auto", "Bypass"], start: "Start",
+    missing: "Not Installed", markWaiting: (n) => `${n} Waiting`, busy: "Busy", idle: "Idle", dflt: "Default", live: "Live", end: "Exit",
+    awayHd: "On iPhone", awayLine: "这个终端正在 iPhone 上使用。", awayGo: "Take Over", awayKey: "any key" },
   zh: { waiting: "待处理", exited: "已退出", resume: "恢复", del: "删除记录", delete: "删除", close: "关闭", more: (n) => `另有 ${n} 项`, less: "收起",
     kNew: "新建", kClose: "关闭", kHide: "隐藏", seal: "加密发送", sealTip: "密码与令牌在发送前加密，agent 仅接收密文。",
     perm: "[!] 待确认", tool: "运行命令", deny: "拒绝", allow: "允许", ph: "输入内容", cancel: "esc 取消", send: "发送",
@@ -405,7 +405,7 @@ let variant = "tree";
 const expanded = new Set();
 const parentsClosed = new Set();
 const SHOWN = 3;
-const age = (t) => { const s = (now - t) / 1000; return s < 60 ? "now" : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`; };
+const age = (t) => { const s = (now - t) / 1000; return s < 60 ? "Now" : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`; };
 const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
 
 /** Folders under one parent are nested under it when there are two or more; a lone one stands by its own name. */

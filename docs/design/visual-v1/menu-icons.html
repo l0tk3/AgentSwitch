@@ -74,17 +74,17 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 </head>
 <body>
 <div class="page">
-  <h1>menu icons · 菜单操作的像素图标</h1>
-  <p class="lede">Mac 菜单栏面板里六个操作各配一个 5×5 像素图标，每格 2pt，放在状态方块、agent 小图已经占用的那一列，文字起点不变。颜色用次要色（和用量里的 agent 小图相同），文字保持主色；悬停时整行反色，图标跟着反色。下面两个面板按实际尺寸画，浅色和深色各一个，鼠标移上去可看悬停效果。<b>待定一处</b>：设置用开关、滑块还是齿轮，点下方带虚线框的格子可以换到面板里看。右下角 <span style="font-family:var(--mono)">now</span> 切回现在只有文字的样子对比。</p>
+  <h1>Menu Icons · 菜单操作的像素图标</h1>
+  <p class="lede">Mac 菜单栏面板里六个操作各配一个 5×5 像素图标，每格 2pt，放在状态方块、agent 小图已经占用的那一列，文字起点不变。颜色用次要色（和用量里的 agent 小图相同），文字保持主色；悬停时整行反色，图标跟着反色。下面两个面板按实际尺寸画，浅色和深色各一个，鼠标移上去可看悬停效果。<b>待定一处</b>：设置用开关、滑块还是齿轮，点下方带虚线框的格子可以换到面板里看。右下角 <span style="font-family:var(--mono)">Now</span> 切回现在只有文字的样子对比。</p>
 
   <div class="menus">
     <div>
       <div class="desk light"><div class="panel" id="panelLight"></div></div>
-      <div class="cap">light</div>
+      <div class="cap">Light</div>
     </div>
     <div>
       <div class="desk dark"><div class="panel" id="panelDark"></div></div>
-      <div class="cap">dark · <span class="seg" id="compare"><button type="button" class="on" data-c="icons">icons</button><button type="button" data-c="bare">now</button></span></div>
+      <div class="cap">Dark · <span class="seg" id="compare"><button type="button" class="on" data-c="icons">Icons</button><button type="button" data-c="bare">Now</button></span></div>
     </div>
   </div>
 
@@ -108,14 +108,14 @@ const sprite = (rows, px = 2, grid = false) => {
 
 // The six (settings has two alternatives; click one to try it in the panels).
 const ICONS = {
-  phone:    { rows: [".###.", ".#.#.", ".#.#.", ".###.", ".###."], name: "pair device…", say: "手机：竖着的机身，下面一截实心。配对的就是这台 iPhone。（二维码试过：它的方块和 console 的四格撞了。）" },
-  terminal: { rows: ["#####", "#####", "##..#", "#...#", "#####"], name: "open terminal", say: "带标题栏的窗口，第一行左边一格光标：终端窗口（手机 terminals 标签页也是带框的终端窗口）。不用 >_，那是 Codex。" },
-  console:  { rows: ["##.##", "##.##", ".....", "##.##", "##.##"], name: "open console", say: "四格面板：浏览器里的网页控制台（任务、用量、设置分块排着）。和终端的窗口形状分开。" },
-  restart:  { rows: [".##.#", "#..##", "#...#", "#...#", ".###."], name: "restart service", say: "转一圈的箭头 ↻：重启服务。" },
-  toggle:   { rows: [".....", ".###.", "#.###", ".###.", "....."], name: "settings…", say: "开关：设置。实际尺寸下最清楚。" },
-  sliders:  { rows: [".#...", "#####", ".#.#.", "#####", "...#."], name: "settings…", say: "两根滑块：实际尺寸下像“井”或 #。", alt: true },
-  gear:     { rows: [".#.#.", "#####", "##.##", "#####", ".#.#."], name: "settings…", say: "齿轮：最常见，但 5×5 里成了一团，和 Claude Code 的星芒也近（见下方）。", alt: true },
-  power:    { rows: ["..#..", "#.#.#", "#...#", "#...#", ".###."], name: "quit AgentSwitch", say: "电源符号 ⏻：退出。" },
+  phone:    { rows: [".###.", ".#.#.", ".#.#.", ".###.", ".###."], name: "Pair Device…", say: "手机：竖着的机身，下面一截实心。配对的就是这台 iPhone。（二维码试过：它的方块和 console 的四格撞了。）" },
+  terminal: { rows: ["#####", "#####", "##..#", "#...#", "#####"], name: "Open Terminal", say: "带标题栏的窗口，第一行左边一格光标：终端窗口（手机 Terminals 标签页也是带框的终端窗口）。不用 >_，那是 Codex。" },
+  console:  { rows: ["##.##", "##.##", ".....", "##.##", "##.##"], name: "Open Console", say: "四格面板：浏览器里的网页控制台（任务、用量、设置分块排着）。和终端的窗口形状分开。" },
+  restart:  { rows: [".##.#", "#..##", "#...#", "#...#", ".###."], name: "Restart Service", say: "转一圈的箭头 ↻：重启服务。" },
+  toggle:   { rows: [".....", ".###.", "#.###", ".###.", "....."], name: "Settings…", say: "开关：设置。实际尺寸下最清楚。" },
+  sliders:  { rows: [".#...", "#####", ".#.#.", "#####", "...#."], name: "Settings…", say: "两根滑块：实际尺寸下像“井”或 #。", alt: true },
+  gear:     { rows: [".#.#.", "#####", "##.##", "#####", ".#.#."], name: "Settings…", say: "齿轮：最常见，但 5×5 里成了一团，和 Claude Code 的星芒也近（见下方）。", alt: true },
+  power:    { rows: ["..#..", "#.#.#", "#...#", "#...#", ".###."], name: "Quit AgentSwitch", say: "电源符号 ⏻：退出。" },
 };
 let choice = { pair: "phone", settings: "toggle" };
 let bare = false;
@@ -134,23 +134,23 @@ function panel(el) {
   const act = (key, label) => `<div class="act"><span class="ic">${sprite(ICONS[key].rows)}</span><span>${label}</span></div>`;
   el.classList.toggle("bare", bare);
   el.innerHTML = `
-    <div class="hd">${sprite(MARK, 2)}<b>AgentSwitch</b><span>ok</span></div>
-    <div class="lab">// status</div>
-    ${[["service", "ok"], ["gateway", "ok"], ["iPhone", "1 paired"], ["Tailscale", "100.77.168.100"]].map(([n, v]) =>
+    <div class="hd">${sprite(MARK, 2)}<b>AgentSwitch</b><span>OK</span></div>
+    <div class="lab">// Status</div>
+    ${[["Service", "OK"], ["Gateway", "OK"], ["iPhone", "1 Paired"], ["Tailscale", "100.77.168.100"]].map(([n, v]) =>
       `<div class="st"><span class="sq">${sprite(SQUARE)}</span><span>${n}</span><span class="v">${v}</span></div>`).join("")}
-    <div class="lab" style="padding-top:10px">// usage</div>
+    <div class="lab" style="padding-top:10px">// Usage</div>
     <div class="us"><div class="top"><span style="color:var(--sec)">${sprite(AGENTS.cc)}</span><span>Claude Code</span></div><div class="bot">5h — 7d ▮▮ 22%</div></div>
     <div class="us"><div class="top"><span style="color:var(--sec)">${sprite(AGENTS.codex)}</span><span>Codex · Pro</span></div><div class="bot">5h — 7d ▮▮▮▮ 46%</div></div>
-    <div class="us"><div class="top"><span style="color:var(--sec)">${sprite(AGENTS.oc)}</span><span>OpenCode</span></div><div class="bot">balance ¥79.97</div></div>
+    <div class="us"><div class="top"><span style="color:var(--sec)">${sprite(AGENTS.oc)}</span><span>OpenCode</span></div><div class="bot">Balance ¥79.97</div></div>
     <div class="rule"></div>
     <div class="acts">
-      ${act(choice.pair, "pair device…")}
-      ${act("terminal", "open terminal")}
-      ${act("console", "open console")}
-      ${act("restart", "restart service")}
-      ${act(choice.settings, "settings…")}
+      ${act(choice.pair, "Pair Device…")}
+      ${act("terminal", "Open Terminal")}
+      ${act("console", "Open Console")}
+      ${act("restart", "Restart Service")}
+      ${act(choice.settings, "Settings…")}
       <div class="rule short"></div>
-      ${act("power", "quit AgentSwitch")}
+      ${act("power", "Quit AgentSwitch")}
     </div>`;
 }
 function renderIcons() {
@@ -181,7 +181,7 @@ document.getElementById("compare").addEventListener("click", (e) => {
   renderAll();
 });
 document.getElementById("near").innerHTML = [
-  ["status", SQUARE], ["Claude Code", AGENTS.cc], ["Codex", AGENTS.codex], ["OpenCode", AGENTS.oc], ["open terminal", ICONS.terminal.rows], ["open console", ICONS.console.rows], ["gear（备选）", ICONS.gear.rows],
+  ["Status", SQUARE], ["Claude Code", AGENTS.cc], ["Codex", AGENTS.codex], ["OpenCode", AGENTS.oc], ["Open Terminal", ICONS.terminal.rows], ["Open Console", ICONS.console.rows], ["Gear（备选）", ICONS.gear.rows],
 ].map(([n, rows]) => `<figure><div class="big">${sprite(rows, 12, true)}</div>${n}</figure>`).join("");
 renderAll();
 </script>

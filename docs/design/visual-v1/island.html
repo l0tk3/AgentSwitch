@@ -6,7 +6,7 @@
 <title>AgentSwitch · 灵动岛</title>
 <style>
 /* The Live Activity in the app's own language (ui-v0 §7): the pixel mark as the identity and the state, status squares
-   and the spinner's first frame, tree lines and dotted rules, lowercase mono words, a bracket button. Drawn at 1 CSS
+   and the spinner's first frame, tree lines and dotted rules, short mono words, a bracket button. Drawn at 1 CSS
    px = 1 pt on an iPhone 17's measures (393 pt wide; the island 126 × 37 pt, its expanded form 371 pt with 44 pt
    corners). Always dark: the island is black, the lock screen card dark over any wallpaper. */
 :root {
@@ -99,23 +99,23 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 <body>
 <div class="page">
   <h1>灵动岛 · 实时活动</h1>
-  <p class="lede">同一套视觉语言放进灵动岛：应用标记既是身份也是状态（进行中时青色小块在上线，等你时末端琥珀，完成绿、未完成红），状态方块与转圈第一帧，树形连线和点线分隔，小写等宽短词，方括号按钮。标题统一靠左；模型只写短名；计时用等宽数字。</p>
+  <p class="lede">同一套视觉语言放进灵动岛：应用标记既是身份也是状态（进行中时青色小块在上线，等你时末端琥珀，完成绿、未完成红），状态方块与转圈第一帧，树形连线和点线分隔，等宽短词，方括号按钮。标题统一靠左；模型只写短名；计时用等宽数字。</p>
   <div class="tools">大小 <span class="seg" id="zoom"><button type="button" data-z="1">1×</button><button type="button" class="on" data-z="1.5">1.5×</button><button type="button" data-z="2">2×</button></span></div>
 
   <!--NOW-->
 
-  <div class="sec">// compact · 紧凑态</div>
+  <div class="sec">// Compact · 紧凑态</div>
   <div class="grid zoom" id="compact"></div>
   <p class="note">左：应用标记（状态在标记上）。右：一个任务时是它的计时，几个时是计数（■ 等你的、⠋ 进行中的），结束时是结果的颜色方块。</p>
 
-  <div class="sec">// minimal · 最小态（和别的实时活动同时出现时）</div>
+  <div class="sec">// Minimal · 最小态（和别的实时活动同时出现时）</div>
   <div class="grid zoom" id="minimal"></div>
 
-  <div class="sec">// expanded · 展开态</div>
+  <div class="sec">// Expanded · 展开态</div>
   <div class="grid zoom" id="expanded"></div>
-  <p class="note">上排：标记 + 状态词 | 计时。下面：标题、树形连线接当前一步（等你的时候是琥珀色的问题），点线下是模型短名、还有几个，以及等你时的 [ open ]。终端的一行用 agent 像素图代替模型名。</p>
+  <p class="note">上排：标记 + 状态词 | 计时。下面：标题、树形连线接当前一步（等你的时候是琥珀色的问题），点线下是模型短名、还有几个，以及等你时的 [ Open ]。终端的一行用 agent 像素图代替模型名。</p>
 
-  <div class="sec">// lock screen · 锁屏</div>
+  <div class="sec">// Lock Screen · 锁屏</div>
   <div class="grid zoom" id="lock"></div>
 </div>
 <script src="pixel.js"></script>
@@ -123,6 +123,7 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 const P = window.Pixel;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const TINT = { busy: "var(--busy)", waiting: "var(--amber)", done: "var(--green)", incomplete: "var(--red)" };
+const WORD = { busy: "Busy", waiting: "Waiting", done: "Done", incomplete: "Incomplete" };
 
 /** The mark in a state, drawn as the app icon (hard shadow, half-lit steps, the icon's inks; 2026-10-01, user: 和 App
  *  图标不一致); done and incomplete colour the lit end (as waiting does). The compact and minimal island take 4/3 pt
@@ -142,15 +143,15 @@ const agent = (a) => `<span class="agent">${P.sprite(P.AGENT_PX[a], { px: 2 })}<
 const S = {
   busy1: { st: "busy", rows: [{ title: "总结一下 AgentSwitch 最近的改动", step: "选择模型", model: null, clock: "0:08", doing: "Route" }], w: 0, r: 1 },
   busy3: { st: "busy", rows: [
-    { title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "opus 5.5", clock: "10:40" },
-    { title: "整理下载目录", step: "交给 DeepSeek Flash", model: "deepseek flash", clock: "0:40" },
-    { title: "登录 x.com 看通知", step: "在用工具 browser_navigate", model: "sonnet 4.6", clock: "0:15" }], w: 0, r: 3 },
+    { title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "Opus 5.5", clock: "10:40" },
+    { title: "整理下载目录", step: "交给 DeepSeek Flash", model: "DeepSeek Flash", clock: "0:40" },
+    { title: "登录 x.com 看通知", step: "在用工具 browser_navigate", model: "Sonnet 4.6", clock: "0:15" }], w: 0, r: 3 },
   waiting: { st: "waiting", rows: [
-    { title: "登录财务平台", step: "短信验证码是多少？", model: "sonnet 4.6", clock: "1:35", ask: true },
-    { title: "修 AgentSwitch 的 bug", step: "第 2 步：交给 Opus 5.5", model: "opus 5.5", clock: "10:40" }], w: 1, r: 1 },
+    { title: "登录财务平台", step: "短信验证码是多少？", model: "Sonnet 4.6", clock: "1:35", ask: true },
+    { title: "修 AgentSwitch 的 bug", step: "第 2 步：交给 Opus 5.5", model: "Opus 5.5", clock: "10:40" }], w: 1, r: 1 },
   terminal: { st: "waiting", rows: [
     { title: "fix-login", step: "Bash: npm test -- --watch=false", agent: "cc", clock: "0:42", ask: true },
-    { title: "整理下载目录", step: "交给 DeepSeek Flash", model: "deepseek flash", clock: "0:40" }], w: 1, r: 1 },
+    { title: "整理下载目录", step: "交给 DeepSeek Flash", model: "DeepSeek Flash", clock: "0:40" }], w: 1, r: 1 },
   done: { st: "done", ended: { title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。" } },
   incomplete: { st: "incomplete", ended: { title: "登录财务平台", line: "登录页一直打不开，gate 代理连不上。" } },
 };
@@ -168,24 +169,24 @@ function expanded(s) {
   const lead = s.rows?.[0];
   const n = (s.w ?? 0) + (s.r ?? 0);
   // Left of the camera only the mark (a word would run under it); the state's word and the clock on the right.
-  const top = `<div class="top"><span class="l">${mark(s.st)}</span><span class="r"><span class="word" style="color:${TINT[s.st]}">${s.st}</span>${lead ? `<span class="clock">${lead.clock}</span>` : ""}</span></div>`;
+  const top = `<div class="top"><span class="l">${mark(s.st)}</span><span class="r"><span class="word" style="color:${TINT[s.st]}">${WORD[s.st]}</span>${lead ? `<span class="clock">${lead.clock}</span>` : ""}</span></div>`;
   if (s.ended) {
     return `<div class="island"><div class="cam"><span class="lens"></span></div>${top}
       <div class="title">${esc(s.ended.title)}</div>
       <div class="step"><span class="tr">└─</span><span class="tx">${esc(s.ended.line)}</span></div></div>`;
   }
-  const who = lead.agent ? `${agent(lead.agent)}<span>${P.AGENT_NAME[lead.agent].toLowerCase()}</span>` : lead.model ? `<span>${esc(lead.model)}</span>` : `<span>routing</span>`;
+  const who = lead.agent ? `${agent(lead.agent)}<span>${P.AGENT_NAME[lead.agent]}</span>` : lead.model ? `<span>${esc(lead.model)}</span>` : `<span>Routing</span>`;
   return `<div class="island"><div class="cam"><span class="lens"></span></div>${top}
     <div class="title">${esc(lead.title)}</div>
     <div class="step ${lead.ask ? "ask" : ""}"><span class="tr">└─</span><span class="tx">${esc(lead.step)}</span></div>
     <div class="dots"></div>
-    <div class="foot">${who}${n > 1 ? `<span>· +${n - 1} more</span>` : ""}<span class="sp"></span>${lead.ask ? `<span class="btn">[ open ]</span>` : ""}</div></div>`;
+    <div class="foot">${who}${n > 1 ? `<span>· +${n - 1} More</span>` : ""}<span class="sp"></span>${lead.ask ? `<span class="btn">[ Open ]</span>` : ""}</div></div>`;
 }
 
 function lock(s, mac = "Studio Mac") {
   const n = (s.w ?? 0) + (s.r ?? 0);
-  const right = s.ended ? `<span class="word" style="color:${TINT[s.st]}">${s.st}</span>` : n > 1 ? tally(s.w, s.r) : `<span class="word" style="color:${TINT[s.st]}">${s.st}</span>`;
-  const head = `<div class="hd">${mark(s.st, 2)}<span class="name">agentswitch</span><span class="mac">· ${esc(mac)}</span><span class="sp"></span>${right}</div><div class="dots"></div>`;
+  const right = s.ended ? `<span class="word" style="color:${TINT[s.st]}">${WORD[s.st]}</span>` : n > 1 ? tally(s.w, s.r) : `<span class="word" style="color:${TINT[s.st]}">${WORD[s.st]}</span>`;
+  const head = `<div class="hd">${mark(s.st, 2)}<span class="name">AgentSwitch</span><span class="mac">· ${esc(mac)}</span><span class="sp"></span>${right}</div><div class="dots"></div>`;
   if (s.ended) {
     return `<div class="wall"><div class="card">${head}<div class="item ended">
       <div class="row1"><span class="st">${sq(TINT[s.st])}</span><span class="title">${esc(s.ended.title)}</span></div>
@@ -199,15 +200,15 @@ function lock(s, mac = "Studio Mac") {
 
 const cell = (cap, html) => `<div class="cell"><div class="cap">${cap}</div>${html}</div>`;
 document.getElementById("compact").innerHTML = [
-  ["busy · 一个任务", S.busy1], ["busy · 三个", S.busy3], ["waiting", S.waiting], ["done", S.done], ["incomplete", S.incomplete],
+  ["Busy · 一个任务", S.busy1], ["Busy · 三个", S.busy3], ["Waiting", S.waiting], ["Done", S.done], ["Incomplete", S.incomplete],
 ].map(([c, s]) => cell(c, compact(s))).join("");
 document.getElementById("minimal").innerHTML = ["busy", "waiting", "done", "incomplete"].map((st) =>
-  cell(st, `<div class="edge" style="width:200px"><span class="time">9:41</span><div class="pill" style="width:126px;left:40%"><span class="lens"></span></div><div class="minimal">${mark(st, ISLAND_PX)}</div></div>`)).join("");
+  cell(WORD[st], `<div class="edge" style="width:200px"><span class="time">9:41</span><div class="pill" style="width:126px;left:40%"><span class="lens"></span></div><div class="minimal">${mark(st, ISLAND_PX)}</div></div>`)).join("");
 document.getElementById("expanded").innerHTML = [
-  ["busy · 三个任务", S.busy3], ["waiting · 问你", S.waiting], ["waiting · 终端", S.terminal], ["done", S.done], ["incomplete", S.incomplete],
+  ["Busy · 三个任务", S.busy3], ["Waiting · 问你", S.waiting], ["Waiting · 终端", S.terminal], ["Done", S.done], ["Incomplete", S.incomplete],
 ].map(([c, s]) => cell(c, expanded(s))).join("");
 document.getElementById("lock").innerHTML = [
-  ["busy · 三个任务", S.busy3], ["waiting", S.waiting], ["done", S.done],
+  ["Busy · 三个任务", S.busy3], ["Waiting", S.waiting], ["Done", S.done],
 ].map(([c, s]) => cell(c, lock(s))).join("");
 
 for (const b of document.querySelectorAll("#zoom button")) b.addEventListener("click", () => {

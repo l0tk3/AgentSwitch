@@ -117,7 +117,7 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
     <span>大小 <span class="seg" id="zoom"><button type="button" class="on" data-z="1">1×</button><button type="button" data-z="1.5">1.5×</button><button type="button" data-z="2">2×</button></span></span>
   </div>
 
-  <div class="sec">// live · 动态</div>
+  <div class="sec">// Live · 动态</div>
   <div class="fit"><div class="zoom" id="stage"></div></div>
   <div class="sim" id="sim">
     <button type="button" data-sim="task">新任务</button>
@@ -134,17 +134,17 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
   <div class="log" id="log"></div>
   <p class="note">点胶囊展开或收起，双击打开；点别处收起。演示里完成的结果 10 秒后消失（应用里 1 分钟）；失败的留到你点开卡片看过、或打开了那个任务 / 终端，几条失败按新到旧列在卡上。终端窗口正显示那个终端时，它的结果不提示。</p>
 
-  <div class="sec">// menu bar · 菜单栏</div>
+  <div class="sec">// Menu Bar · 菜单栏</div>
   <div class="fit"><div class="grid zoom static" id="bar"></div></div>
   <p class="note">只在有任务或请求时出现，在 AgentSwitch 图标左边。胶囊不动，只有计时在走。</p>
 
-  <div class="sec">// card · 卡片</div>
+  <div class="sec">// Card · 卡片</div>
   <div class="fit"><div class="grid zoom static" id="card"></div></div>
-  <p class="note">能用按钮答的在卡上答；要打字的点 [ open ]，打开任务页。点标题打开终端窗口或任务页。</p>
+  <p class="note">能用按钮答的在卡上答；要打字的点 [ Open ]，打开任务页。点标题打开终端窗口或任务页。</p>
 
-  <div class="sec">// other · 其他</div>
+  <div class="sec">// Other · 其他</div>
   <ul class="others">
-    <li>不抢焦点：在卡上点 allow，当前窗口不会被切走。</li>
+    <li>不抢焦点：在卡上点 Allow，当前窗口不会被切走。</li>
     <li>等你时响一声，和手机同一个提示音。</li>
     <li>全屏应用里菜单栏藏起来，请求的卡片照样落下。</li>
     <li>设置 › 通用 可关。AgentSwitch 自己的菜单栏图标不变。</li>
@@ -156,6 +156,7 @@ const P = window.Pixel;
 document.head.insertAdjacentHTML("beforeend", `<style>${P.GLITCH_CSS}</style>`);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const TINT = { busy: "var(--busy)", waiting: "var(--amber)", done: "var(--green)", incomplete: "var(--red)" };
+const WORD = { busy: "Busy", waiting: "Waiting", done: "Done", incomplete: "Incomplete" };
 const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 const nowS = () => Date.now() / 1000;
 const pad = (n) => String(n).padStart(2, "0");
@@ -176,7 +177,7 @@ const markEl = (st, live) => `<span class="mk"${live ? ` data-mark="${st}"` : ""
 const sq = (color) => `<i class="sq" style="background:${color}"></i>`;
 const spin = (live) => `<span class="spin"${live ? " data-spin" : ""}>⠋</span>`;
 const tally = (w, r, live) => `<span class="tally">${w ? `<span>${sq(TINT.waiting)}${w}</span>` : ""}${r ? `<span>${spin(live)}${r}</span>` : ""}</span>`;
-const word = (st) => `<span class="word" style="color:${TINT[st]}">${st}</span>`;
+const word = (st) => `<span class="word" style="color:${TINT[st]}">${WORD[st]}</span>`;
 const clock = (i, live, amber) => `<span class="clock"${amber ? ' style="color:var(--amber)"' : ""}${live ? ` data-since="${i.since}"` : ""}>${live ? fmt(nowS() - i.since) : i.clock}</span>`;
 
 // The other status items, as generic shapes.
@@ -219,14 +220,14 @@ function card(m, live) {
     return head(e.st, word(e.st), live) + ends.slice(0, 3).map((x) => `<div class="item ended" data-id="${x.id}">
       <div class="row1"><span class="st">${sq(TINT[x.st])}</span><button type="button" class="title" data-do="open">${esc(x.title)}</button>${x.agent ? `<span class="agent">${P.sprite(P.AGENT_PX[x.agent], { px: 2 })}</span>` : ""}<span class="clock">${x.took}</span></div>
       <div class="step"><span class="tr">└─</span><span class="tx">${esc(x.line)}</span></div></div>`).join("")
-      + (ends.length > 3 ? `<div class="more">+${ends.length - 3} more</div>` : "");
+      + (ends.length > 3 ? `<div class="more">+${ends.length - 3} More</div>` : "");
   }
   const all = ordered(m);
   return head(s.st, s.n > 1 ? tally(s.w, s.r, live) : word(s.st), live)
     + all.slice(0, 3).map((i) => item(i, live)).join("")
-    + (all.length > 3 ? `<div class="more">+${all.length - 3} more</div>` : "");
+    + (all.length > 3 ? `<div class="more">+${all.length - 3} More</div>` : "");
 }
-const head = (st, right, live) => `<div class="hd">${markEl(st, live)}<span class="name">agentswitch</span><span class="sp"></span>${right}</div><div class="dots"></div>`;
+const head = (st, right, live) => `<div class="hd">${markEl(st, live)}<span class="name">AgentSwitch</span><span class="sp"></span>${right}</div><div class="dots"></div>`;
 
 function item(i, live) {
   const a = i.ask;
@@ -237,9 +238,9 @@ function item(i, live) {
     ${a?.where ? `<div class="where">${esc(a.where)}</div>` : ""}${a ? `<div class="acts">${acts(a)}</div>` : ""}</div>`;
 }
 function acts(a) {
-  if (a.type === "perm" || a.type === "approve") return `<button type="button" class="b" data-do="deny">[ deny ]</button><button type="button" class="b pri" data-do="allow">[ allow ]</button>`;
+  if (a.type === "perm" || a.type === "approve") return `<button type="button" class="b" data-do="deny">[ Deny ]</button><button type="button" class="b pri" data-do="allow">[ Allow ]</button>`;
   if (a.type === "options") return a.options.map((o) => `<button type="button" class="b" data-do="pick" data-v="${esc(o)}">[ ${esc(o)} ]</button>`).join("");
-  return `<button type="button" class="b pri" data-do="open">[ open ]</button>`;
+  return `<button type="button" class="b pri" data-do="open">[ Open ]</button>`;
 }
 
 /** Centre the card under the capsule, kept on the screen. */
@@ -272,22 +273,22 @@ const strip = (m, opts) => `<div class="screen strip" style="width:460px;height:
 const withCard = (m) => `<div class="screen" style="width:460px;height:420px">${menubar(capsule(m, false, { on: true }))}<div class="panel">${card(m, false)}</div></div>`;
 
 document.getElementById("bar").innerHTML = [
-  ["busy · 一个任务", { items: [I.sum] }],
-  ["busy · 三个", { items: [I.bug, I.dl, I.x] }],
-  ["waiting", { items: [I.term] }],
-  ["waiting 2 · busy 1", { items: [I.term, I.sms, I.bug] }],
-  ["done", { items: [], ended: END.done }],
-  ["incomplete", { items: [], ended: END.incomplete }],
+  ["Busy · 一个任务", { items: [I.sum] }],
+  ["Busy · 三个", { items: [I.bug, I.dl, I.x] }],
+  ["Waiting", { items: [I.term] }],
+  ["Waiting 2 · Busy 1", { items: [I.term, I.sms, I.bug] }],
+  ["Done", { items: [], ended: END.done }],
+  ["Incomplete", { items: [], ended: END.incomplete }],
 ].map(([c, m, o]) => cell(c, strip(m, o))).join("");
 
 document.getElementById("card").innerHTML = [
-  ["busy · 三个", { items: [I.bug, I.dl, I.x] }],
+  ["Busy · 三个", { items: [I.bug, I.dl, I.x] }],
   ["终端请求", { items: [I.term, I.bug] }],
   ["任务确认", { items: [I.xok] }],
   ["选项", { items: [I.clean, I.dl] }],
   ["提问", { items: [I.sms] }],
-  ["done", { items: [], ended: END.done }],
-  ["incomplete", { items: [], ended: END.incomplete }],
+  ["Done", { items: [], ended: END.done }],
+  ["Incomplete", { items: [], ended: END.incomplete }],
 ].map(([c, m]) => cell(c, withCard(m))).join("");
 
 function fitStatic() {
@@ -382,7 +383,7 @@ function finish(st) {
   S.items = S.items.filter((x) => x !== i);
   const r = RESULTS[i.id] ?? { done: "做完了。", fail: "没做成。" };
   ended({ id: i.id, st, title: i.title, line: st === "done" ? r.done : r.fail, took: fmt(nowS() - i.since) });
-  say(`${st} · ${i.title}`);
+  say(`${WORD[st]} · ${i.title}`);
   if (S.items.some((x) => x.ask)) return draw();   // a request stays in front
   if (S.open) draw(); else open("flash");
 }
@@ -398,7 +399,7 @@ function ended(e) {
 const TURNS = { done: "改好了：连接池上限从 2 调到 20，测试全部通过。", fail: "rate_limit: You have hit your limit" };
 function turn(st) {
   ended({ id: "k9", agent: "cc", st, title: "修登录超时", line: st === "done" ? TURNS.done : TURNS.fail, took: "" });
-  say(`${st} · 终端 修登录超时`);
+  say(`${WORD[st]} · 终端 修登录超时`);
   if (S.items.some((x) => x.ask)) return draw();   // a request stays in front
   if (S.open) draw(); else open("flash");
 }
@@ -409,7 +410,7 @@ function resolve(id, how, value) {
   const a = i.ask;
   i.ask = null;
   i.step = how === "deny" ? "已拒绝" : a.type === "perm" ? `${a.tool}: ${a.target}` : a.type === "approve" ? "在用工具 browser_click" : `选了“${value}”，继续`;
-  say(`${how === "pick" ? value : how} → ${i.title}`);
+  say(`${how === "pick" ? value : how === "allow" ? "Allow" : "Deny"} → ${i.title}`);
   if (!S.items.some((x) => x.ask) && S.openedBy === "ask") close(); else draw();
 }
 

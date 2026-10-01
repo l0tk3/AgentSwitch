@@ -272,8 +272,8 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 <style>.bare .top, .bare .lede, .bare figcaption p, .bare .sec, .bare .fxwrap { display: none !important; }</style>
 <div class="page">
   <div class="top">
-    <h1><span id="brand"></span>iPhone · terminals</h1>
-    <nav>手机界面 <span class="seg" id="theme"><button type="button" class="on" data-t="light">light</button><button type="button" data-t="dark">dark</button></span></nav>
+    <h1><span id="brand"></span>iPhone · Terminals</h1>
+    <nav>手机界面 <span class="seg" id="theme"><button type="button" class="on" data-t="light">Light</button><button type="button" data-t="dark">Dark</button></span></nav>
   </div>
   <p class="lede">桌面终端窗口（terminal.html）的特效搬到手机上的样子。三台手机都能直接操作：点、长按、在终端画面上拖动、用手机里的键盘打字（不会弹出你设备的键盘）。每台下面的按钮模拟 Mac 那边发生的事。系统开了“减少动态效果”时，闪烁、刷新和 glitch 都不播放。</p>
 
@@ -281,24 +281,24 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
     <figure>
       <div class="phone"><div class="scr light scan-bg" id="p1"></div></div>
       <figcaption>
-        <b>terminals · 列表</b>
-        <p>文件夹和父目录点一下折叠 / 展开，展开时逐行画出；<span class="mono">▸ N more</span> 展开全部。按住会话行出菜单（硬阴影框，出现时 glitch），删除先确认，确认后这一行自上而下擦掉。终端等你时那一行 glitch，方块琥珀色闪烁，标签页角标加一。</p>
+        <b>Terminals · 列表</b>
+        <p>文件夹和父目录点一下折叠 / 展开，展开时逐行画出；<span class="mono">▸ N More</span> 展开全部。按住会话行出菜单（硬阴影框，出现时 glitch），删除先确认，确认后这一行自上而下擦掉。终端等你时那一行 glitch，方块琥珀色闪烁，标签页角标加一。</p>
         <div class="tr"><button type="button" data-do="p1perm">权限请求到达</button><button type="button" data-do="p1exit">终端退出</button><button type="button" data-do="p1reset">重置</button></div>
       </figcaption>
     </figure>
     <figure>
       <div class="phone"><div class="scr light" id="p2"></div></div>
       <figcaption>
-        <b>new terminal · 新建</b>
-        <p>打开时文字标从字符噪声里显形，最后一帧是近看的 LCD 次像素，然后定格。选 agent 按下立刻有反馈，选中的格子 glitch；未安装的 agent 用棋盘抖动遮罩。文件夹提示符是闪烁的方块光标。选 bypass 先弹确认框。</p>
+        <b>New Terminal · 新建</b>
+        <p>打开时文字标从字符噪声里显形，最后一帧是近看的 LCD 次像素，然后定格。选 agent 按下立刻有反馈，选中的格子 glitch；未安装的 agent 用棋盘抖动遮罩。文件夹提示符是闪烁的方块光标。选 Bypass 先弹确认框。</p>
         <div class="tr"><button type="button" data-do="p2open">重新打开</button></div>
       </figcaption>
     </figure>
     <figure>
       <div class="phone"><div class="scr light" id="p3"></div></div>
       <figcaption>
-        <b>terminal · 终端页</b>
-        <p>打开时画面自上而下 13 步刷出，扫描线在前。同一个终端只有一个尺寸：Mac 上接着用时，这里的画面盖上抖动遮罩，中间写 <span class="mono">on mac</span>；点屏幕、点输入框或 <span class="mono">[ take over ]</span> 就接管到手机上，画面按手机尺寸重画。Mac 关掉窗口时自动回到手机。权限卡片不受影响，照常出现、照常批准。在画面上下拖动：每拖一行高发一格滚轮，右边显示发出的格数，快速一划会继续滚几格。点锁：同一个输入框被加密框围住，键盘保持原样。输入 <span class="mono">/</span> 出命令补全。直接发送像密码的文字会先问一句。</p>
+        <b>Terminal · 终端页</b>
+        <p>打开时画面自上而下 13 步刷出，扫描线在前。同一个终端只有一个尺寸：Mac 上接着用时，这里的画面盖上抖动遮罩，中间写 <span class="mono">On Mac</span>；点屏幕、点输入框或 <span class="mono">[ Take Over ]</span> 就接管到手机上，画面按手机尺寸重画。Mac 关掉窗口时自动回到手机。权限卡片不受影响，照常出现、照常批准。在画面上下拖动：每拖一行高发一格滚轮，右边显示发出的格数，快速一划会继续滚几格。点锁：同一个输入框被加密框围住，键盘保持原样。输入 <span class="mono">/</span> 出命令补全。直接发送像密码的文字会先问一句。</p>
         <div class="tr"><button type="button" data-do="p3open">打开终端</button><button type="button" data-do="p3perm">权限请求到达</button><button type="button" data-do="p3err">滚动被拒（旧版 Mac）</button><button type="button" data-do="p3exit">终端退出</button><button type="button" data-do="p3mac">Mac 上接着用</button><button type="button" data-do="p3free">Mac 关掉窗口</button></div>
       </figcaption>
     </figure>
@@ -349,8 +349,8 @@ const mark = (st) => st === "busy" ? spin()
   : st === "exited" ? `<span class="sq hollow"></span>`
   : `<span class="sq" style="background:var(--green)"></span>`;
 const statusBar = () => `<div class="island"></div><div class="status"><span>09:48</span><i>▮▮▮▯ ◠ ▭</i></div>`;
-const tabbar = (on, badge) => `<div class="tabbar"><span class="${on === "tasks" ? "on" : ""}">${P.mark({ px: 2, mono: true })}tasks</span>
-  <span class="${on === "terminals" ? "on" : ""}">${P.sprite(TERM_WIN, { px: 3 })}terminals${badge ? `<em class="badge">${badge}</em>` : ""}</span></div>`;
+const tabbar = (on, badge) => `<div class="tabbar"><span class="${on === "tasks" ? "on" : ""}">${P.mark({ px: 2, mono: true })}Tasks</span>
+  <span class="${on === "terminals" ? "on" : ""}">${P.sprite(TERM_WIN, { px: 3 })}Terminals${badge ? `<em class="badge">${badge}</em>` : ""}</span></div>`;
 function closeOver(scr) { for (const x of scr.querySelectorAll(".box, .veil")) x.remove(); }
 /** A framed box over a phone's screen, glitching in; `veil` dims what is under it. */
 function overlay(scr, box, { veil = true, clear = false } = {}) {
@@ -374,13 +374,13 @@ function p1reset() {
   tree = [
     { parent: null, groups: [
       { path: "AgentSwitch", git: "main ±5 ↑2", terms: [{ id: "c", name: "iPhone 终端标签页", st: "idle", agent: "cc" }],
-        sessions: [["读取 Codex 的会话记录", "25m ago", "cc", "Codex 的记录在 ~/.codex/sessions 下按日期分目录"], ["未读标记", "yesterday 09:10", "codex", "终端有新输出而你没看时，列表那一行加粗"]] },
+        sessions: [["读取 Codex 的会话记录", "25m ago", "cc", "Codex 的记录在 ~/.codex/sessions 下按日期分目录"], ["未读标记", "Yesterday 09:10", "codex", "终端有新输出而你没看时，列表那一行加粗"]] },
     ] },
-    { parent: null, groups: [{ path: "Blog", git: "theme-v2", terms: [], sessions: [["换主题后的构建报错", "today 06:35", "oc", "hugo 升级后模板函数改名"], ["加一个 RSS", "9/20", "cc", ""]] }] },
+    { parent: null, groups: [{ path: "Blog", git: "theme-v2", terms: [], sessions: [["换主题后的构建报错", "Today 06:35", "oc", "hugo 升级后模板函数改名"], ["加一个 RSS", "9/20", "cc", ""]] }] },
     { parent: "Work", groups: [
       { path: "api", git: "feat/health ±3 ↓4", terms: [{ id: "a", name: "修复登录超时", st: "busy", agent: "cc",
           subs: [{ name: "审查改动", type: "code-reviewer", doing: "运行 git diff" }, { name: "查连接池", type: "Explore", doing: "读 pool.ts" }] }],
-        sessions: [["给健康检查加缓存", "51m ago", "cc", "健康检查结果缓存 5 秒，终端服务重启时清掉"], ["升级到 Node 22", "today 16:50", "codex", ""], ["统一日志格式", "yesterday 22:04", "cc", ""]] },
+        sessions: [["给健康检查加缓存", "51m ago", "cc", "健康检查结果缓存 5 秒，终端服务重启时清掉"], ["升级到 Node 22", "Today 16:50", "codex", ""], ["统一日志格式", "Yesterday 22:04", "cc", ""]] },
       { path: "web", git: "main", terms: [{ id: "b", name: "首页改版", st: "idle", agent: "codex" }],
         sessions: [["表单校验", "9/27", "codex", ""], ["暗色模式", "9/27", "oc", ""], ["图片懒加载", "9/26", "codex", ""], ["替换图标库", "9/25", "pi", ""], ["修复移动端菜单", "9/24", "cc", ""]] },
     ] },
@@ -427,8 +427,8 @@ const count = (groups) => {
 };
 /** The list; `reveal` names the folder just opened, whose rows are drawn one after another. */
 function p1draw(reveal = null) {
-  let html = `${statusBar()}<div class="navb"><span class="l"></span><span class="t">terminals</span><span class="r"><button type="button" class="cap">new</button></span></div><div class="dots"></div>`
-    + `<label class="find"><span class="slash">/</span><input id="p1find" placeholder="search" value="${esc(query)}" spellcheck="false" autocomplete="off"></label><div class="list" id="p1list">`;
+  let html = `${statusBar()}<div class="navb"><span class="l"></span><span class="t">Terminals</span><span class="r"><button type="button" class="cap">New</button></span></div><div class="dots"></div>`
+    + `<label class="find"><span class="slash">/</span><input id="p1find" placeholder="Search" value="${esc(query)}" spellcheck="false" autocomplete="off"></label><div class="list" id="p1list">`;
   if (query.trim()) {
     html += p1search(query.trim().toLowerCase()) + `</div>${tabbar("terminals", badge)}`;
     p1.innerHTML = html;
@@ -466,9 +466,9 @@ function p1draw(reveal = null) {
       }
       // Which agent wrote it, before its time (as on the Mac): the same mark a running terminal has.
       for (const [title, when, agent] of shown) {
-        html += `<div class="row sess${anim(key)}" data-sess="${esc(key + "|" + title)}">${line()}<span class="nm">${esc(title)}</span><span class="faint">${P.sprite(P.AGENT_PX[agent], { px: 2 })}</span><span class="when">${when}</span><span class="act">resume</span></div>`;
+        html += `<div class="row sess${anim(key)}" data-sess="${esc(key + "|" + title)}">${line()}<span class="nm">${esc(title)}</span><span class="faint">${P.sprite(P.AGENT_PX[agent], { px: 2 })}</span><span class="when">${when}</span><span class="act">Resume</span></div>`;
       }
-      if (foot) html += `<div class="row more${anim(key)}" data-more="${key}">${line()}<span>${showAll ? "▾ less" : `▸ ${more} more`}</span></div>`;
+      if (foot) html += `<div class="row more${anim(key)}" data-more="${key}">${line()}<span>${showAll ? "▾ Less" : `▸ ${more} More`}</span></div>`;
     }
   }
   html += `</div>${tabbar("terminals", badge)}`;
@@ -501,7 +501,7 @@ function p1menu(row) {
   const box = document.createElement("div");
   box.className = "box menu";
   box.style.cssText = `right:28px;top:${Math.min(top, 560)}px`;
-  box.innerHTML = `<button type="button" data-a="resume">resume <span class="faint">↩</span></button><button type="button" class="bad" data-a="delete">delete</button>`;
+  box.innerHTML = `<button type="button" data-a="resume">Resume <span class="faint">↩</span></button><button type="button" class="bad" data-a="delete">Delete</button>`;
   box.onclick = (e) => { const a = e.target.closest("[data-a]")?.dataset.a; if (a === "delete") p1confirm(row); else if (a) closeOver(p1); };
   overlay(p1, box, { clear: true });
 }
@@ -510,8 +510,8 @@ function p1confirm(row) {
   const box = document.createElement("div");
   box.className = "box";
   box.style.cssText = "left:22px;right:28px;top:250px";
-  box.innerHTML = `<div class="hd red"><span>delete record</span></div><div class="bd"><p>删除会话记录「${esc(title)}」？Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。</p></div>
-    <div class="ft"><button type="button" class="btn" data-a="no">[ cancel ]</button><button type="button" class="btn pri" data-a="yes">[ delete ]</button></div>`;
+  box.innerHTML = `<div class="hd red"><span>Delete Record</span></div><div class="bd"><p>删除会话记录「${esc(title)}」？Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。</p></div>
+    <div class="ft"><button type="button" class="btn" data-a="no">[ Cancel ]</button><button type="button" class="btn pri" data-a="yes">[ Delete ]</button></div>`;
   box.onclick = (e) => {
     const a = e.target.closest("[data-a]")?.dataset.a;
     if (!a) return;
@@ -545,7 +545,7 @@ function p1exit() {
 const p2 = document.getElementById("p2");
 const MODELS = { cc: ["Opus 5.5", "Sonnet 5", "Haiku 4.5"], codex: ["GPT-6 Astra", "GPT-6 Sol", "GPT-5.5"], oc: ["DeepSeek Flash", "Kimi K3"] };
 const FOLDERS = ["~/Work/api", "~/Work/web", "~/Desktop/WorkSpace/Projects/AgentSwitch", "~/Blog"];
-const MODES = ["ask each", "auto", "bypass"];
+const MODES = ["Ask Each", "Auto", "Bypass"];
 let agent = "cc", model = "", folder = FOLDERS[0], mode = 0, bannerTimer = null;
 // The wordmark's letters, 5×7 (pixel.js keeps its own copy for the settled mark).
 const FONT = {
@@ -586,20 +586,20 @@ function reveal(el, word) {
 }
 function p2draw() {
   const models = MODELS[agent] ?? [];
-  p2.innerHTML = `${statusBar()}<div class="sheet"><div class="navb"><span class="l"><button type="button" class="cap">cancel</button></span><span class="t">new terminal</span><span class="r"></span></div>
+  p2.innerHTML = `${statusBar()}<div class="sheet"><div class="navb"><span class="l"><button type="button" class="cap">Cancel</button></span><span class="t">New Terminal</span><span class="r"></span></div>
     <div class="body">
       <div class="banner" id="banner"></div>
-      <div class="label">// agent</div>
-      <div class="agents">${["cc", "codex", "oc", "pi"].map((a) => `<button type="button" class="agent ${a === agent ? "on" : ""} ${a === "pi" ? "off" : ""}" data-agent="${a}">${P.sprite(P.AGENT_PX[a], { px: 4 })}<span>${P.AGENT_NAME[a]}</span>${a === "pi" ? "<small>not installed</small>" : ""}</button>`).join("")}</div>
-      <div class="label">// model</div>
-      <div class="select"><select id="p2model" aria-label="model">${[`<option value="">default</option>`, ...models.map((m) => `<option ${m === model ? "selected" : ""}>${m}</option>`)].join("")}</select></div>
-      <div class="label">// folder</div>
+      <div class="label">// Agent</div>
+      <div class="agents">${["cc", "codex", "oc", "pi"].map((a) => `<button type="button" class="agent ${a === agent ? "on" : ""} ${a === "pi" ? "off" : ""}" data-agent="${a}">${P.sprite(P.AGENT_PX[a], { px: 4 })}<span>${P.AGENT_NAME[a]}</span>${a === "pi" ? "<small>Not Installed</small>" : ""}</button>`).join("")}</div>
+      <div class="label">// Model</div>
+      <div class="select"><select id="p2model" aria-label="Model">${[`<option value="">Default</option>`, ...models.map((m) => `<option ${m === model ? "selected" : ""}>${m}</option>`)].join("")}</select></div>
+      <div class="label">// Folder</div>
       <div class="prompt"><span class="p">❯</span><span>${esc(folder)}</span><span class="caret"> </span></div>
       <div class="recent">${FOLDERS.map((f) => `<span class="${f === folder ? "on" : ""}" data-folder="${esc(f)}">${esc(f)}</span>`).join("")}</div>
-      <div class="label">// permissions</div>
+      <div class="label">// Permissions</div>
       <div class="radios">${MODES.map((m, i) => `<span class="${i === mode ? "on" : ""}" data-mode="${i}">${i === mode ? "&lt;x&gt;" : "&lt; &gt;"} ${m}</span>`).join("")}</div>
       ${mode === 2 ? `<div class="warn">agent 的任何操作都不再询问你；禁区和凭据网关仍然生效。</div>` : ""}
-      <button type="button" class="start" id="p2start">[ start ]</button>
+      <button type="button" class="start" id="p2start">[ Start ]</button>
     </div></div>`;
 }
 function p2open() {
@@ -638,8 +638,8 @@ function p2bypass() {
   const box = document.createElement("div");
   box.className = "box";
   box.style.cssText = "left:22px;right:28px;top:300px";
-  box.innerHTML = `<div class="hd amber"><span>bypass</span></div><div class="bd"><p>跳过全部权限确认？agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：凭据网关（密钥不可读）。</p></div>
-    <div class="ft"><button type="button" class="btn" data-a="no">[ cancel ]</button><button type="button" class="btn pri" data-a="yes">[ use bypass ]</button></div>`;
+  box.innerHTML = `<div class="hd amber"><span>Bypass</span></div><div class="bd"><p>跳过全部权限确认？agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：凭据网关（密钥不可读）。</p></div>
+    <div class="ft"><button type="button" class="btn" data-a="no">[ Cancel ]</button><button type="button" class="btn pri" data-a="yes">[ Use Bypass ]</button></div>`;
   box.onclick = (e) => {
     const a = e.target.closest("[data-a]")?.dataset.a;
     if (!a) return;
@@ -650,8 +650,8 @@ function p2bypass() {
 }
 function p2start() {
   const b = document.getElementById("p2start");
-  b.innerHTML = `[ starting ${spin()} ]`;
-  setTimeout(() => { p3open(); b.textContent = "[ start ]"; }, 700);
+  b.innerHTML = `[ Starting ${spin()} ]`;
+  setTimeout(() => { p3open(); b.textContent = "[ Start ]"; }, 700);
 }
 
 /* ================= phone 3: one terminal ================= */
@@ -664,7 +664,7 @@ const COMMANDS = [
   ["context", "Show how the context window is used"], ["clear", "Start a new session with empty context"],
   ["code-review", "Review the current diff for bugs and cleanups"], ["init", "Write a CLAUDE.md for this project"],
   ["model", "Choose the model"], ["resume", "Continue an earlier session"], ["status", "Show version, model and account"],
-  ["usage", "Show plan usage and limits"], ["commit", "Stage and commit the current changes", "user"], ["deploy", "Build and deploy to staging", "project"],
+  ["usage", "Show plan usage and limits"], ["commit", "Stage and commit the current changes", "User"], ["deploy", "Build and deploy to staging", "Project"],
 ];
 const HEAD = [
   `<span class="c-org">▟█▙</span>  Claude Code <span class="c-dim">v2.1.284</span>`,
@@ -712,7 +712,7 @@ function p3build() {
   p3title(); p3lines(); p3controls();
 }
 function p3title() {
-  const word = exited ? "exited" : tstatus === "waiting" ? "waiting" : tstatus;
+  const word = { busy: "Busy", waiting: "Waiting", exited: "Exited" }[exited ? "exited" : tstatus];
   // The folder the agent works in and its git, as the Mac window's title (terminal-v0 §1, 2026-10-01); the name stays on
   // its row in the list.
   document.getElementById("p3title").innerHTML = `<span>api <i class="git">main ±3</i></span><small>${mark(exited ? "exited" : tstatus)} ${word}</small>`;
@@ -746,17 +746,17 @@ function matches(t) {
 function p3controls() {
   const sugs = sealed ? [] : matches(text);
   const canSend = !exited && text.trim().length > 0;
-  const field = `<div class="field ${typing ? "focus" : ""}" id="p3field">${text ? esc(text) : ""}<span class="cur"></span>${text ? "" : `<span class="ph">${sealed ? "message" : "回复"}</span>`}</div>`;
+  const field = `<div class="field ${typing ? "focus" : ""}" id="p3field">${text ? esc(text) : ""}<span class="cur"></span>${text ? "" : `<span class="ph">${sealed ? "Message" : "回复"}</span>`}</div>`;
   document.getElementById("p3ctl").innerHTML = `
     ${sugs.length ? `<div class="sugs">${sugs.map(([n, d, src]) => `<div data-cmd="${n}"><b>/${n}</b><span>${esc(d)}</span>${src ? `<i>${src}</i>` : ""}</div>`).join("")}</div>` : ""}
     <div class="dots"></div>
-    ${err ? `<div class="err" id="p3err"><span>${esc(err)}</span><button type="button" data-x="err" aria-label="dismiss">×</button></div>` : ""}
-    <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="hide keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key ${k === "⏎" ? "solid" : ""}">${k}</button>`).join("")}</div>
-    ${drafts.length ? `<div class="drafts">${drafts.map((n) => `<span class="draft"><i></i><em>#${n}</em><b data-draft="${n}" aria-label="remove">×</b></span>`).join("")}</div>` : ""}
+    ${err ? `<div class="err" id="p3err"><span>${esc(err)}</span><button type="button" data-x="err" aria-label="Dismiss">×</button></div>` : ""}
+    <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="Hide Keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key ${k === "⏎" ? "solid" : ""}">${k}</button>`).join("")}</div>
+    ${drafts.length ? `<div class="drafts">${drafts.map((n) => `<span class="draft"><i></i><em>#${n}</em><b data-draft="${n}" aria-label="Remove">×</b></span>`).join("")}</div>` : ""}
     <div class="composer ${sealed ? "sealed" : ""}" id="p3comp">
-      <div class="hd">${P.sprite(LOCK, { px: 2 })}<span>sealed → ${esc(tname)}</span><span class="sp"></span><button type="button" data-x="unseal" aria-label="cancel">×</button></div>
-      <div class="rowc">${sealed ? "" : `<button type="button" class="sqbtn pic" data-x="pic" aria-label="attach">+</button>`}<button type="button" class="sqbtn lock" data-x="seal" aria-label="sealed reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="send">↑</button></div>
-      <div class="ft"><span>凭据在 Mac 上换成密文后再交给 agent</span><button type="button" class="btn pri" data-x="send" ${canSend ? "" : "disabled"}>[ send ]</button></div>
+      <div class="hd">${P.sprite(LOCK, { px: 2 })}<span>Sealed → ${esc(tname)}</span><span class="sp"></span><button type="button" data-x="unseal" aria-label="Cancel">×</button></div>
+      <div class="rowc">${sealed ? "" : `<button type="button" class="sqbtn pic" data-x="pic" aria-label="Attach">+</button>`}<button type="button" class="sqbtn lock" data-x="seal" aria-label="Sealed Reply">${P.sprite(LOCK, { px: 3 })}</button>${field}<button type="button" class="sqbtn go" data-x="send" ${canSend ? "" : "disabled"} aria-label="Send">↑</button></div>
+      <div class="ft"><span>凭据在 Mac 上换成密文后再交给 agent</span><button type="button" class="btn pri" data-x="send" ${canSend ? "" : "disabled"}>[ Send ]</button></div>
     </div>
     ${note ? `<div class="mono" style="padding:0 16px 8px;font-size:11px;color:var(--ink2)">${note}</div>` : ""}`;
   document.getElementById("p3kb").hidden = !kbUp;
@@ -795,7 +795,7 @@ function askSecret() {
   box.className = "box";
   box.style.cssText = "left:22px;right:28px;top:220px";
   box.innerHTML = `<div class="hd amber"><span>这段文字可能包含密码或令牌</span></div><div class="bd"><p>加密发送时，Mac 会先把其中的凭据换成密文，再交给 agent。</p></div>
-    <div class="ft"><button type="button" class="btn" data-a="plain">[ send as typed ]</button><button type="button" class="btn pri" data-a="seal">[ sealed ]</button></div>`;
+    <div class="ft"><button type="button" class="btn" data-a="plain">[ Send as Typed ]</button><button type="button" class="btn pri" data-a="seal">[ Sealed ]</button></div>`;
   box.onclick = (e) => {
     const a = e.target.closest("[data-a]")?.dataset.a;
     if (!a) return;
@@ -847,7 +847,7 @@ function wheel(up, n) {
   const chip = document.getElementById("p3wheel");
   drag && (drag.sent += up ? n : -n);
   const total = drag ? drag.sent : (up ? n : -n);
-  chip.textContent = `wheel ${total >= 0 ? "↑" : "↓"} ${Math.abs(total)}`;
+  chip.textContent = `Wheel ${total >= 0 ? "↑" : "↓"} ${Math.abs(total)}`;
   chip.classList.add("on");
   clearTimeout(chipTimer);
   chipTimer = setTimeout(() => chip.classList.remove("on"), 700);
@@ -903,9 +903,9 @@ function p3perm() {
   offset = 0; p3lines();
   const box = document.createElement("div");
   box.className = "box perm";
-  box.innerHTML = `<div class="hd amber">${P.sprite(P.SQUARE, { px: 2 })}<span>permission · Bash</span></div>
+  box.innerHTML = `<div class="hd amber">${P.sprite(P.SQUARE, { px: 2 })}<span>Permission · Bash</span></div>
     <div class="bd"><div>npm run build</div><div class="faint" style="font-size:11px">~/Work/api</div></div>
-    <div class="ft"><button type="button" class="btn" data-do="deny">[ deny ]</button><button type="button" class="btn pri" data-do="allow">[ allow ]</button></div>`;
+    <div class="ft"><button type="button" class="btn" data-do="deny">[ Deny ]</button><button type="button" class="btn pri" data-do="allow">[ Allow ]</button></div>`;
   box.onclick = (e) => { const d = e.target.closest("[data-do]")?.dataset.do; if (d) answer(d); };
   document.getElementById("p3term").append(box);
   glitch(box);
@@ -935,9 +935,9 @@ function p3mac() {
   term.classList.add("away");
   const box = document.createElement("div");
   box.className = "box awaybox";
-  box.innerHTML = `<div class="hd">${P.sprite(P.SQUARE, { px: 2 })}<span>on mac</span></div>
+  box.innerHTML = `<div class="hd">${P.sprite(P.SQUARE, { px: 2 })}<span>On Mac</span></div>
     <div class="bd"><p>这个终端正在 Mac 上使用。</p></div>
-    <div class="ft"><button type="button" class="btn pri">[ take over ]</button></div>`;
+    <div class="ft"><button type="button" class="btn pri">[ Take Over ]</button></div>`;
   box.onclick = () => here();
   term.append(box);
   glitch(box);

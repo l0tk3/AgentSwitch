@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgentSwitch · console</title>
+<title>AgentSwitch · Console</title>
 <style id="gcss"></style>
 <style>
 /* The web console (2026-09-30, user: open console 打开的页面太割裂，跟着整体美学风格设计，可以和手机上调度页面的设计元素
@@ -206,7 +206,7 @@ button:focus { outline: none; }
 </head>
 <body>
 <div class="ctl">
-  <button data-view="tasks" class="on">tasks</button><button data-view="log">log</button><button data-view="ext">extensions</button><button data-view="ctx">context</button>
+  <button data-view="tasks" class="on">Tasks</button><button data-view="log">Log</button><button data-view="ext">Extensions</button><button data-view="ctx">Context</button>
   <span style="width:18px"></span>
   <button data-do="ask">模拟：权限请求</button><button data-do="done">模拟：任务完成</button><button data-do="theme">深 / 浅</button>
 </div>
@@ -236,30 +236,30 @@ const TASKS = {
 
 function statusLine(t) {
   const mark = t.st === "busy" ? spin() : t.st === "waiting" ? sq("var(--amber)") : t.st === "done" ? sq("var(--green)") : sq("var(--red)");
-  const word = { busy: "busy", waiting: '<span class="w">waiting</span>', done: '<span class="ok">done</span>', failed: '<span class="bad">incomplete</span>' }[t.st];
+  const word = { busy: "Busy", waiting: '<span class="w">Waiting</span>', done: '<span class="ok">Done</span>', failed: '<span class="bad">Incomplete</span>' }[t.st];
   return `${mark}<span>${word}</span>${agent(t.agent)}<span>${esc(t.who)}</span><span class="faint">${t.clock}</span>`;
 }
 
 function band() {
-  return `<div class="band"><div class="who">${P.mark({ px: 2, state: S.asked ? "waiting" : "busy" })}<b>agentswitch</b><span class="dim">· MacBook Pro</span></div><span class="sp"></span>
-    <div class="st"><span>${sq("var(--green)")}service</span><span>${sq("var(--green)")}gateway</span><span>${sq("var(--green)")}1 iPhone</span></div>
-    <a href="terminal.html">terminals ↗</a></div>`;
+  return `<div class="band"><div class="who">${P.mark({ px: 2, state: S.asked ? "waiting" : "busy" })}<b>AgentSwitch</b><span class="dim">· MacBook Pro</span></div><span class="sp"></span>
+    <div class="st"><span>${sq("var(--green)")}Service</span><span>${sq("var(--green)")}Gateway</span><span>${sq("var(--green)")}1 iPhone</span></div>
+    <a href="terminal.html">Terminals ↗</a></div>`;
 }
 
 function side() {
-  const nav = [["tasks", S.done ? "⠙1" : "⠙1 · ▪1"], ["log", ""], ["ext", "3", "extensions"], ["ctx", "", "context"]];
+  const nav = [["tasks", S.done ? "⠙1" : "⠙1 · ▪1", "Tasks"], ["log", "", "Log"], ["ext", "3", "Extensions"], ["ctx", "", "Context"]];
   return `<div class="side">
-    <div class="sec lbl">// console</div>
-    <div class="nav">${nav.map(([k, n, label]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}"><span class="ar">▸</span><span>${label ?? k}</span><span class="n">${n}</span></button>`).join("")}</div>
+    <div class="sec lbl">// Console</div>
+    <div class="nav">${nav.map(([k, n, label]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}"><span class="ar">▸</span><span>${label}</span><span class="n">${n}</span></button>`).join("")}</div>
     <div class="dots-h" style="margin:12px 16px 0"></div>
-    <div class="sec lbl">// topics</div>
+    <div class="sec lbl">// Topics</div>
     <div class="topics">
-      ${[["a", "发布 AgentSwitch", "now", true], ["b", "清理磁盘", "now"], ["c", "整理下载", "1h"], ["d", "财务", "1d"]].map(([k, t, age, on]) =>
+      ${[["a", "发布 AgentSwitch", "Now", true], ["b", "清理磁盘", "Now"], ["c", "整理下载", "1h"], ["d", "财务", "1d"]].map(([k, t, age, on]) =>
         `<div class="topic ${on ? "on" : ""}">${sq(TOPIC[k])}<span class="t">${t}</span><span class="age">${age}</span></div>`).join("")}
-      <div class="topic"><span></span><span class="t faint">▸ 6 more</span><span></span></div>
+      <div class="topic"><span></span><span class="t faint">▸ 6 More</span><span></span></div>
     </div>
     <div class="dots-h" style="margin:0 16px"></div>
-    <div class="sec lbl">// usage</div>
+    <div class="sec lbl">// Usage</div>
     <div class="usage">
       <div class="u"><span>Claude Max · 5h</span><span>62%</span><span class="bar"><i style="width:62%"></i></span></div>
       <div class="u"><span>Codex Pro · 7d</span><span>84%</span><span class="bar"><i class="hi" style="width:84%"></i></span></div>
@@ -271,7 +271,7 @@ function side() {
 function strip() {
   const cards = [["t1", TASKS.t1], ["t2", TASKS.t2]].filter(([, t]) => t.st === "busy" || t.st === "waiting");
   return `<div class="strip">${cards.map(([id, t]) => `<div class="card ${t.st === "waiting" ? "wait" : ""} ${S.selected === id ? "on" : ""}" data-task="${id}">
-      <div class="l1">${t.st === "busy" ? spin() : sq("var(--amber)")}<span>${t.st === "busy" ? "busy" : '<span class="w">waiting</span>'}</span><span class="sp"></span>${agent(t.agent)}<span class="faint">${t.clock}</span></div>
+      <div class="l1">${t.st === "busy" ? spin() : sq("var(--amber)")}<span>${t.st === "busy" ? "Busy" : '<span class="w">Waiting</span>'}</span><span class="sp"></span>${agent(t.agent)}<span class="faint">${t.clock}</span></div>
       <div class="t">${esc(t.title)}</div>
       ${t.n ? `<div class="prog">${blocks(t.n, t.of)}<span>${t.n}/${t.of}</span></div>` : ""}
       <div class="s">└─ ${esc(t.step)}</div></div>`).join("")}</div>`;
@@ -282,39 +282,39 @@ function taskEntry(id) {
   const sel = S.selected === id ? "sel" : "";
   let body = "";
   if (t.st === "busy") body = `<div class="prog">${blocks(t.n, t.of)}<span>${t.n}/${t.of}</span></div><div class="step"><span class="tr">└─</span>${esc(t.step)}</div>`;
-  if (t.st === "done") body = `<div class="say">${esc(t.say)}</div><div class="files"><span>${sq("var(--ink2)")}report.md</span><span>${sq("var(--ink2)")}dupes.txt</span><button class="btn">[ open ]</button></div>`;
-  if (t.st === "failed") body = `<div class="say">${esc(t.say)}</div><div class="files"><button class="btn">[ retry ]</button><button class="btn">[ hand to… ]</button></div>`;
+  if (t.st === "done") body = `<div class="say">${esc(t.say)}</div><div class="files"><span>${sq("var(--ink2)")}report.md</span><span>${sq("var(--ink2)")}dupes.txt</span><button class="btn">[ Open ]</button></div>`;
+  if (t.st === "failed") body = `<div class="say">${esc(t.say)}</div><div class="files"><button class="btn">[ Retry ]</button><button class="btn">[ Hand to… ]</button></div>`;
   return `<div class="task ${sel}" data-task="${id}"><div class="l1">${statusLine(t)}</div><div class="ti">${esc(t.title)}</div>${body}</div>`;
 }
 
 function feed() {
   const tag = (k, t) => `<div class="tag">${sq(TOPIC[k])}<span>${t}</span></div>`;
   return `<div class="feed boxes">
-    <div class="day">yesterday</div>
+    <div class="day">Yesterday</div>
     ${tag("d", "财务")}
     <div class="me"><div>登录财务平台，把本月的对账单下载下来</div></div>
     ${taskEntry("t4")}
-    <div class="day">today</div>
+    <div class="day">Today</div>
     ${tag("c", "整理下载")}
     <div class="me"><div>整理下载目录里的重复文件</div></div>
     ${taskEntry("t3")}
     ${tag("b", "清理磁盘")}
-    <div class="box q ask" style="border-color:var(--ink)"><div class="hd"><span>? question</span><span class="sp"></span><span>清理旧构建 · Codex</span></div>
+    <div class="box q ask" style="border-color:var(--ink)"><div class="hd"><span>? Question</span><span class="sp"></span><span>清理旧构建 · Codex</span></div>
       <div class="bd">build/ 里有 3.2 GB 旧产物，要删掉吗？</div>
       <div class="ft"><span class="hint">回答后任务继续</span><button class="btn">[ 保留 ]</button><button class="btn pri">[ 删掉 ]</button></div></div>
     ${tag("a", "发布 AgentSwitch")}
     <div class="me"><div>把 iOS 端打包装到手机上</div></div>
     ${taskEntry("t1")}
-    ${S.asked ? `<div class="box ask" id="ask"><div class="hd"><span>[!] approval</span><span class="sp"></span><span>install app</span></div>
+    ${S.asked ? `<div class="box ask" id="ask"><div class="hd"><span>[!] Approval</span><span class="sp"></span><span>Install App</span></div>
       <div class="bd"><code>xcrun devicectl device install app --device 00008150-… AgentSwitch.app</code><div class="path">~/Projects/AgentSwitch/packages/ios-app</div></div>
-      <div class="ft"><span class="hint">构建 AgentSwitch.app · 第 4 步</span><button class="btn warn" data-do="deny">[ deny <kbd>⌘⌫</kbd> ]</button><button class="btn pri" data-do="allow">[ allow <kbd>⌘↩</kbd> ]</button></div></div>` : ""}
+      <div class="ft"><span class="hint">构建 AgentSwitch.app · 第 4 步</span><button class="btn warn" data-do="deny">[ Deny <kbd>⌘⌫</kbd> ]</button><button class="btn pri" data-do="allow">[ Allow <kbd>⌘↩</kbd> ]</button></div></div>` : ""}
   </div>`;
 }
 
 function compose() {
   return `<div class="compose">
     <div class="row"><button class="sqb">+</button><div class="field">向 Mac 发送任务或问题</div><button class="sqb lock">${P.sprite([".###.", "#...#", "#####", "##.##", "#####"], { px: 2 })}</button><button class="sqb go">↑</button></div>
-    <div class="opts"><button><span>// folder</span><b>~/Projects/AgentSwitch ▾</b></button><button><span>// model</span><b>auto ▾</b></button><button><span>// browser</span><b>auto ▾</b></button><button><span>// approval</span><b>default ▾</b></button><span class="sp"></span><kbd>⌘↩ send</kbd></div>
+    <div class="opts"><button><span>// Folder</span><b>~/Projects/AgentSwitch ▾</b></button><button><span>// Model</span><b>Auto ▾</b></button><button><span>// Browser</span><b>Auto ▾</b></button><button><span>// Approval</span><b>Default ▾</b></button><span class="sp"></span><kbd>⌘↩ Send</kbd></div>
   </div>`;
 }
 
@@ -326,7 +326,7 @@ function detail() {
     ["├─", "var(--green)", "1 · 读项目结构", "Read × 6", "12s"],
     ["├─", "var(--green)", "2 · 运行 npm test", "1163 passed", "1m"],
     ["├─", "busy", "3 · 运行 xcodebuild -scheme AgentSwitch", "Build › Compiling TerminalPage.swift", "48s"],
-    ["├─", S.asked ? "wait" : "todo", "4 · 安装到手机", S.asked ? "等你批准：install app" : "", ""],
+    ["├─", S.asked ? "wait" : "todo", "4 · 安装到手机", S.asked ? "等你批准：Install App" : "", ""],
     ["└─", "todo", "5 · 汇报", "", ""],
   ] : [
     ["■", "var(--green)", "已接收", "", "10:40"],
@@ -339,30 +339,30 @@ function detail() {
   };
   return `<div class="detail">
     <div class="head"><div class="l1">${statusLine(t)}</div><h2>${esc(t.title)}</h2></div>
-    <div class="acts">${t.st === "busy" || t.st === "waiting" ? `<button class="btn warn">[ cancel ]</button><button class="btn">[ hand to ▾ ]</button>` : `<button class="btn">[ retry ]</button>`}<button class="btn">[ archive ]</button></div>
+    <div class="acts">${t.st === "busy" || t.st === "waiting" ? `<button class="btn warn">[ Cancel ]</button><button class="btn">[ Hand to ▾ ]</button>` : `<button class="btn">[ Retry ]</button>`}<button class="btn">[ Archive ]</button></div>
     <div class="dots-h" style="margin:0 16px"></div>
     <div class="body">
-      <div class="lbl" style="margin:12px 0 6px">// steps</div>
+      <div class="lbl" style="margin:12px 0 6px">// Steps</div>
       <div class="tl">${steps.map(row).join("")}</div>
-      <div class="lbl" style="margin:16px 0 6px">// files</div>
-      <div class="kv"><span>${sq("var(--ink2)")}</span><b>build.log <span class="faint">12 KB</span> <button class="btn">[ open ]</button></b></div>
-      <div class="lbl" style="margin:16px 0 6px">// task</div>
-      <div class="kv"><span>folder</span><b>~/Projects/AgentSwitch</b><span>browser</span><b>none</b><span>approval</span><b>default</b><span>id</span><b>1e04b10a</b></div>
-      <div class="lbl" style="margin:16px 0 6px">// events</div>
-      <button class="btn dim">▸ 38 events</button>
+      <div class="lbl" style="margin:16px 0 6px">// Files</div>
+      <div class="kv"><span>${sq("var(--ink2)")}</span><b>build.log <span class="faint">12 KB</span> <button class="btn">[ Open ]</button></b></div>
+      <div class="lbl" style="margin:16px 0 6px">// Task</div>
+      <div class="kv"><span>Folder</span><b>~/Projects/AgentSwitch</b><span>Browser</span><b>None</b><span>Approval</span><b>Default</b><span>ID</span><b>1e04b10a</b></div>
+      <div class="lbl" style="margin:16px 0 6px">// Events</div>
+      <button class="btn dim">▸ 38 Events</button>
     </div>
   </div>`;
 }
 
 function logView() {
   const rows = [
-    ["l1", "10:40", "phone", "opencode/deepseek-flash", "~/Downloads", "整理下载目录里的重复文件", "按项目偏好：下载整理交给便宜的模型"],
-    ["l2", "10:02", "mac", "claude-code/opus-5.5", "~/Projects/AgentSwitch", "构建 AgentSwitch.app，装到手机上", '{\n  "action": "dispatch",\n  "target": "claude-code/opus-5.5",\n  "why": "多步构建，要读 Xcode 输出",\n  "plan": 5\n}'],
-    ["l3", "09:51", "phone", "—", "—", "今天几号", "直接回答，不派发"],
-    ["l4", "yesterday", "phone", "claude-code/sonnet-5.5", "临时目录", "登录财务平台下载本月对账单", "需要浏览器与站点凭据：带 browser"],
+    ["l1", "10:40", "Phone", "opencode/deepseek-flash", "~/Downloads", "整理下载目录里的重复文件", "按项目偏好：下载整理交给便宜的模型"],
+    ["l2", "10:02", "Mac", "claude-code/opus-5.5", "~/Projects/AgentSwitch", "构建 AgentSwitch.app，装到手机上", '{\n  "action": "dispatch",\n  "target": "claude-code/opus-5.5",\n  "why": "多步构建，要读 Xcode 输出",\n  "plan": 5\n}'],
+    ["l3", "09:51", "Phone", "—", "—", "今天几号", "直接回答，不派发"],
+    ["l4", "Yesterday", "Phone", "claude-code/sonnet-5.5", "临时目录", "登录财务平台下载本月对账单", "需要浏览器与站点凭据：带 browser"],
   ];
-  return `<div class="view log"><div class="vh"><h1>log</h1><span class="seg"><span class="on">all</span><span>dispatched</span><span>answered</span><span>refused</span></span><span class="sp"></span><span class="faint">调度模型每次的决定</span></div>
-    <div class="r head"><span>time</span><span>from</span><span>target</span><span>folder</span><span>task</span><span></span></div>
+  return `<div class="view log"><div class="vh"><h1>Log</h1><span class="seg"><span class="on">All</span><span>Dispatched</span><span>Answered</span><span>Refused</span></span><span class="sp"></span><span class="faint">调度模型每次的决定</span></div>
+    <div class="r head"><span>Time</span><span>From</span><span>Target</span><span>Folder</span><span>Task</span><span></span></div>
     <div class="dots-h"></div>
     ${rows.map(([id, time, from, target, dir, task, why]) => `<div class="r" data-log="${id}"><span class="faint">${time}</span><span class="dim">${from}</span><span>${esc(target)}</span><span class="dim">${esc(dir)}</span><span class="t">${esc(task)}</span><span class="faint">${S.logOpen === id ? "▾" : "▸"}</span></div>${S.logOpen === id ? `<pre>${esc(why)}</pre>` : ""}<div class="dots-h" style="opacity:.5"></div>`).join("")}
   </div>`;
@@ -370,43 +370,43 @@ function logView() {
 
 function extView() {
   const rows = [
-    [true, "github", "stdio", "ask", "npx @modelcontextprotocol/server-github", "claude-code · codex"],
-    [true, "linear", "http", "allowed", "https://mcp.linear.app/sse", "claude-code"],
-    [false, "sqlite-local", "stdio", "ask", "uvx mcp-server-sqlite --db ~/data/app.db", "all"],
+    [true, "github", "stdio", "Ask", "npx @modelcontextprotocol/server-github", "Claude Code · Codex"],
+    [true, "linear", "HTTP", "Allowed", "https://mcp.linear.app/sse", "Claude Code"],
+    [false, "sqlite-local", "stdio", "Ask", "uvx mcp-server-sqlite --db ~/data/app.db", "All"],
   ];
-  return `<div class="view ext"><div class="vh"><h1>extensions</h1><span class="faint">执行器可用的 MCP 服务</span><span class="sp"></span><button class="btn">[ + add ]</button></div>
+  return `<div class="view ext"><div class="vh"><h1>Extensions</h1><span class="faint">执行器可用的 MCP 服务</span><span class="sp"></span><button class="btn">[ + Add ]</button></div>
     <div class="dots-h"></div>
-    ${rows.map(([on, name, kind, appr, cmd, who]) => `<div class="r">${on ? sq("var(--green)") : sq("var(--ink3)", true)}<span style="${on ? "" : "color:var(--ink3)"}">${name}</span><span class="dim">${kind}</span><span class="${appr === "ask" ? "dim" : ""}">${appr}</span><span class="d">${esc(cmd)} <span class="faint">· ${who}</span></span><span class="a"><button class="btn">[ edit ]</button><button class="btn">[ ${on ? "off" : "on"} ]</button><button class="btn warn">[ delete ]</button></span></div><div class="dots-h" style="opacity:.5"></div>`).join("")}
-    <div class="boxes"><div class="box form"><div class="hd"><span>edit · github</span><span class="sp"></span><span>×</span></div>
+    ${rows.map(([on, name, kind, appr, cmd, who]) => `<div class="r">${on ? sq("var(--green)") : sq("var(--ink3)", true)}<span style="${on ? "" : "color:var(--ink3)"}">${name}</span><span class="dim">${kind}</span><span class="${appr === "Ask" ? "dim" : ""}">${appr}</span><span class="d">${esc(cmd)} <span class="faint">· ${who}</span></span><span class="a"><button class="btn">[ Edit ]</button><button class="btn">[ ${on ? "Off" : "On"} ]</button><button class="btn warn">[ Delete ]</button></span></div><div class="dots-h" style="opacity:.5"></div>`).join("")}
+    <div class="boxes"><div class="box form"><div class="hd"><span>Edit · github</span><span class="sp"></span><span>×</span></div>
       <div class="bd">
-        <div class="f"><span class="lbl">// name</span><span class="v">github</span></div>
-        <div class="f"><span class="lbl">// kind</span><span class="radios"><span>&lt;<b>x</b>&gt; stdio</span><span>&lt; &gt; http</span></span></div>
-        <div class="f"><span class="lbl">// command</span><span class="v">npx @modelcontextprotocol/server-github</span></div>
-        <div class="f"><span class="lbl">// env</span><span class="v">GITHUB_TOKEN=enc:v1:Qm9vbXN0YWxs…</span></div>
-        <div class="f"><span class="lbl">// approval</span><span class="radios"><span>&lt;<b>x</b>&gt; ask</span><span>&lt; &gt; allowed</span></span></div>
-        <div class="f"><span class="lbl">// executors</span><span class="radios"><span>[<b>x</b>] claude-code</span><span>[<b>x</b>] codex</span><span>[ ] opencode</span></span></div>
+        <div class="f"><span class="lbl">// Name</span><span class="v">github</span></div>
+        <div class="f"><span class="lbl">// Kind</span><span class="radios"><span>&lt;<b>x</b>&gt; stdio</span><span>&lt; &gt; HTTP</span></span></div>
+        <div class="f"><span class="lbl">// Command</span><span class="v">npx @modelcontextprotocol/server-github</span></div>
+        <div class="f"><span class="lbl">// Env</span><span class="v">GITHUB_TOKEN=enc:v1:Qm9vbXN0YWxs…</span></div>
+        <div class="f"><span class="lbl">// Approval</span><span class="radios"><span>&lt;<b>x</b>&gt; Ask</span><span>&lt; &gt; Allowed</span></span></div>
+        <div class="f"><span class="lbl">// Executors</span><span class="radios"><span>[<b>x</b>] Claude Code</span><span>[<b>x</b>] Codex</span><span>[ ] OpenCode</span></span></div>
         <div class="say">密钥只填 enc:v1 密文：stdio 服务继承凭据网关的代理环境，出网请求里的密文在网络层替换。</div>
       </div>
-      <div class="ft"><span class="hint">esc cancel</span><button class="btn">[ cancel ]</button><button class="btn pri">[ save <kbd>⌘S</kbd> ]</button></div></div></div>
+      <div class="ft"><span class="hint">esc Cancel</span><button class="btn">[ Cancel ]</button><button class="btn pri">[ Save <kbd>⌘S</kbd> ]</button></div></div></div>
   </div>`;
 }
 
 function ctxView() {
   const lines = (t) => t.split("\n").map((l, i) => `<div><i>${i + 1}</i><span>${esc(l)}</span></div>`).join("");
-  return `<div class="view"><div class="vh"><h1>context</h1><span class="faint">调度模型每次调度前读取，改了立即生效</span></div>
+  return `<div class="view"><div class="vh"><h1>Context</h1><span class="faint">调度模型每次调度前读取，改了立即生效</span></div>
     <div class="warnbox"><b>2 lines removed</b> · 加载时移除了疑似明文凭据的行，调度模型看不到：第 7 行“密码: hunter2”、第 12 行“token = ghp_…”。</div>
     <div class="ctx">
-      <div class="pane"><div class="hd"><span>// context.md</span><span class="sp"></span><span class="faint">1.2 KB / 64 KB</span><button class="btn">[ save <kbd>⌘S</kbd> ]</button></div>
+      <div class="pane"><div class="hd"><span>// context.md</span><span class="sp"></span><span class="faint">1.2 KB / 64 KB</span><button class="btn">[ Save <kbd>⌘S</kbd> ]</button></div>
         <div class="src">${lines("# 站点与账号\n- 财务平台 https://fin.example.com\n  账号 finance@me.com\n  密码 enc:v1:QWxhZGRpbjpvcGVu…\n\n# 环境\n- 内网只能从公司 Wi-Fi 访问\n- 代理：gate 已配置\n\n# 偏好\n- AgentSwitch 用 claude-code\n- 下载整理这类用便宜模型\n- 不用 Opus 做翻译")}</div>
         <div class="say">站点、账号（密码只填 enc:v1 密文）、环境限制、各项目偏好的执行器。</div></div>
-      <div class="pane"><div class="hd"><span>// memory.md</span><span class="sp"></span><span class="faint">每次执行后追加</span><button class="btn">[ save ]</button></div>
+      <div class="pane"><div class="hd"><span>// memory.md</span><span class="sp"></span><span class="faint">每次执行后追加</span><button class="btn">[ Save ]</button></div>
         <div class="src">${lines("- 手机装包用 install-device.sh（任务 1e04b10a）\n- Codex 在 ChatGPT.app 里（任务 9c21e0f3）\n- 财务平台登录要先连公司 Wi-Fi（任务 77aa0c1d）")}</div>
         <div class="say">调度模型从执行结果里提取的长期事实，注明来源任务；错的行直接删。</div></div>
     </div>
-    <div class="lbl" style="margin:22px 0 6px">// experience</div>
+    <div class="lbl" style="margin:22px 0 6px">// Experience</div>
     <div class="exp">
-      ${[["var(--green)", false, "verified", "装到手机前先确认手机已解锁、和 Mac 在同一网络", "任务 1e04b10a · 事件 #12", ""], ["var(--amber)", true, "pending", "财务平台的验证码走短信，要问用户", "任务 77aa0c1d · 事件 #5", ""], ["var(--ink3)", true, "expired", "gate 代理端口 4717（已改）", "任务 4b1e2c90 · 事件 #3", "gone"]].map(([c, hollow, word, t, src, cls]) =>
-        `<div class="r ${cls}">${sq(c, hollow)}<span class="dim">${word}</span><span class="t">${esc(t)}</span><span class="faint">${src}</span><button class="btn warn">[ delete ]</button></div><div class="dots-h" style="opacity:.5"></div>`).join("")}
+      ${[["var(--green)", false, "Verified", "装到手机前先确认手机已解锁、和 Mac 在同一网络", "任务 1e04b10a · 事件 #12", ""], ["var(--amber)", true, "Pending", "财务平台的验证码走短信，要问用户", "任务 77aa0c1d · 事件 #5", ""], ["var(--ink3)", true, "Expired", "gate 代理端口 4717（已改）", "任务 4b1e2c90 · 事件 #3", "gone"]].map(([c, hollow, word, t, src, cls]) =>
+        `<div class="r ${cls}">${sq(c, hollow)}<span class="dim">${word}</span><span class="t">${esc(t)}</span><span class="faint">${src}</span><button class="btn warn">[ Delete ]</button></div><div class="dots-h" style="opacity:.5"></div>`).join("")}
     </div>
   </div>`;
 }
