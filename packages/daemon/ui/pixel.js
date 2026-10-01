@@ -162,6 +162,16 @@ export function revealWordmark(el, word = "AGENTSWITCH", { px = 6 } = {}) {
 
 /** One burst when something changes state (a permission request, a failure, an unexpected exit). Never on a loop;
  *  nothing with Reduce Motion. */
+/** While something runs, a light burst now and then (ui-v0 §7.2.9, 2026-10-01, user: 正在运行中的都改成这个效果):
+ *  the bands and the split, no inversion, so the full glitch stays the sign that something happened. */
+export function flicker(el) {
+  if (!el || reducedMotion.matches || el.classList.contains("glitch")) return;
+  el.classList.remove("flicker");
+  void el.offsetWidth;
+  el.classList.add("flicker");
+  el.addEventListener("animationend", () => el.classList.remove("flicker"), { once: true });
+}
+
 export function glitch(el) {
   if (!el || reducedMotion.matches) return;
   el.classList.remove("glitch");

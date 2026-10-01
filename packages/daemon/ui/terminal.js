@@ -8,7 +8,7 @@ import { Terminal } from "/ui/vendor/xterm.mjs";
 import { FitAddon } from "/ui/vendor/addon-fit.mjs";
 import { Unicode11Addon } from "/ui/vendor/addon-unicode11.mjs";
 import { WebLinksAddon } from "/ui/vendor/addon-web-links.mjs";
-import { AGENT_PX, glitch, HOLLOW, LOCK, mark, reducedMotion, revealWordmark, SPIN, sprite, SQUARE } from "/ui/pixel.js";
+import { AGENT_PX, flicker, glitch, HOLLOW, LOCK, mark, reducedMotion, revealWordmark, SPIN, sprite, SQUARE } from "/ui/pixel.js";
 
 const $ = (id) => document.getElementById(id);
 const IN_MAC_APP = /AgentSwitchMac/.test(navigator.userAgent);
@@ -1308,6 +1308,11 @@ setInterval(() => {
   spinFrame = (spinFrame + 1) % SPIN.length;
   for (const el of document.querySelectorAll(".spin")) el.textContent = SPIN[spinFrame];
 }, 90);
+// Busy rows flicker now and then, each on its own beat: every second one in five does, about every 3–7 s (ui-v0
+// §7.2.9, 2026-10-01, user: 正在运行中的都改成这个效果).
+setInterval(() => {
+  for (const el of document.querySelectorAll(".row.term.working")) if (Math.random() < 0.2) flicker(el);
+}, 1000);
 setInterval(() => {
   if (reducedMotion.matches || ["idle", "off"].includes(markState()[0])) return;
   markFrame++;
