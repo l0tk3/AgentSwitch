@@ -53,6 +53,8 @@ final class TerminalScreenController: NSObject {
     var evaluate: (String) -> Void = { _ in }
     private let client: () -> DaemonClient
     private var id: String?
+    /// Where the terminal's agent works now (the page says it): a relative path ⌘-clicked on the screen starts there.
+    var workdir: String?
     private var lastSeq = 0
     private var session: URLSession?
     private var task: URLSessionDataTask?
@@ -461,9 +463,10 @@ extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
     func send(source: TerminalView, data: ArraySlice<UInt8>) { typed(data) }
     func scrolled(source: TerminalView, position: Double) {}
     /// ⌘-click: web links in the browser, folders in Finder, documents in their app; what could run only shown in Finder.
+    /// A plain path counts as a file link, a relative one from where the agent works now.
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-        guard let url = URL(string: link) else { return }
-        LinkOpener.open(url)
+        guard let url = LinkPolicy.url(fromLink: link, workdir: workdir), let target = LinkPolicy.existingFile(url) else { return }
+        LinkOpener.open(target)
     }
     func bell(source: TerminalView) {}
     func clipboardCopy(source: TerminalView, content: Data) {

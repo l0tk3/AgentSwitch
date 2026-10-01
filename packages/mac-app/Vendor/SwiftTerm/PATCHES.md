@@ -22,5 +22,15 @@ the text. The state involved (`markedTextStorage`, `markedSelectedRange`, `marke
     (the cursor's cell when there is none);
   - `selectedRange()` answers the input method's own selection while it composes.
 
+## Implicit links across unwrapped rows (2026-10-01)
+
+docs/terminal-v0.md §1 链接. Upstream joins a row with the next one for implicit link detection (a path an app broke
+across rows itself) when the upper row reaches within a fifth of the width of the right edge. A plain long line did:
+a path printed on a 97-column line in a 106-column screen became `…/crt.htmlsee docs/ui-v0.` with the next line, and
+⌘-click found no such file.
+
+- `Terminal.swift`, `canJoinImplicitRows`: the upper row must reach within a twentieth of the edge (at least 2 columns),
+  as a row an app filled by breaking a long path does.
+
 To take a newer SwiftTerm: replace `Sources/SwiftTerm` with its library sources, then apply the changes above again (or
-drop them once upstream draws marked text inline).
+drop them once upstream draws marked text inline and joins rows more strictly).

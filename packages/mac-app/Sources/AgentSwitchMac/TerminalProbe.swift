@@ -146,6 +146,24 @@ enum TerminalProbe {
                 try? await Task.sleep(for: .milliseconds(300))
                 click(col: 21)
                 try? await Task.sleep(for: .milliseconds(300))
+                // Plain paths as agents print them (2026-10-01): absolute, and relative to where the agent works.
+                screen.view.feed(text: "\r\n  /Users/l0tk3/Desktop/WorkSpace/Projects/AgentSwitch/docs/design/icon-explorations-2026-10-01/crt.html\r\n\r\n  see docs/ui-v0.md:12 for it")
+                try? await Task.sleep(for: .milliseconds(200))
+                let pathRow = lt.getCursorLocation().y - 2
+                @MainActor func clickAt(col: Int, row r: Int) {
+                    let inView = NSPoint(x: (CGFloat(col) + 0.5) * cw, y: screen.view.isFlipped ? (CGFloat(r) + 0.5) * ch : screen.view.bounds.height - (CGFloat(r) + 0.5) * ch)
+                    let at = screen.view.convert(inView, to: nil)
+                    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                        guard let e = NSEvent.mouseEvent(with: type, location: at, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+                                                         windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { continue }
+                        if type == .leftMouseDown { screen.view.mouseDown(with: e) } else { screen.view.mouseUp(with: e) }
+                    }
+                }
+                say("workdir \(screen.workdir ?? "-"); path link \(lt.link(at: .screen(Position(col: 20, row: pathRow)), mode: .explicitAndImplicit) ?? "none"); relative \(lt.link(at: .screen(Position(col: 10, row: pathRow + 2)), mode: .explicitAndImplicit) ?? "none")")
+                clickAt(col: 20, row: pathRow)
+                try? await Task.sleep(for: .milliseconds(300))
+                clickAt(col: 10, row: pathRow + 2)
+                try? await Task.sleep(for: .milliseconds(300))
                 say("mouse mode \(lt.mouseMode); opened \(opened)")
                 LinkOpener.probeOpened = nil
             }

@@ -200,6 +200,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
             webView?.screenRect = rect
             screen?.place(Self.rect(body["area"]))
             screen?.show(rect == nil ? nil : body["id"] as? String)
+            screen?.workdir = body["cwd"] as? String
             windowLog.debug("screen \(String(describing: rect), privacy: .public) id \(String(describing: body["id"]), privacy: .public)")
         case "overlays":
             webView?.overlays = (body["rects"] as? [Any] ?? []).compactMap(Self.rect)

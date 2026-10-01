@@ -1001,7 +1001,7 @@ function tellScreen() {
   const area = [r.x, r.y, r.width, r.height].map(Math.round);
   const cell = $("screen").querySelector(".xterm-rows > div")?.getBoundingClientRect().height || 16;
   // The native screen shows `id` in `rect` (none while a terminal is being made); `area` is where it would be.
-  tellWindow("screen", !current || creating ? { rect: null, area, id: null } : { rect: area, area, id: current.id, cell: Math.round(cell * 10) / 10 });
+  tellWindow("screen", !current || creating ? { rect: null, area, id: null } : { rect: area, area, id: current.id, cwd: current.workdir || current.cwd, cell: Math.round(cell * 10) / 10 });
 }
 /** What floats over the screen (permission requests, the composer, the loading line, a sheet): the native screen under
  *  the page leaves clicks there to the page. */

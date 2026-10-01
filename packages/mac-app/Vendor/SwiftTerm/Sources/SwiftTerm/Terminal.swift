@@ -7549,7 +7549,9 @@ open class Terminal {
 
         // Heuristic for editor-rendered wraps: the upper segment should reach
         // near the visual right edge and the seam should form a valid link.
-        let continuationThreshold = max(0, cols - max(2, cols / 5))
+        // AgentSwitch: within a twentieth of the edge, not a fifth — an app breaking a long path fills the row, while a
+        // line that merely ran long (80 % of the width) was joined with the next line's first word.
+        let continuationThreshold = max(0, cols - max(2, cols / 20))
         guard upperInfo.lastCol >= continuationThreshold else {
             return false
         }

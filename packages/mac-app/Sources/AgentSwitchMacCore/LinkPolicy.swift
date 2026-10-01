@@ -15,6 +15,52 @@ public enum LinkAction: Equatable, Sendable {
 }
 
 public enum LinkPolicy {
+    /// A link as the screen found it, as a URL (2026-10-01, user: 这种路径我用 cmd+鼠标点击没反应): web and file URLs as
+    /// they are; a path — `/…`, `~/…`, or relative to `workdir` (`./…`, `../…`, `src/a.ts`) — as a file, with a
+    /// `:line` or `:line:column` suffix (as agents cite code) dropped. Nil when a relative path has nothing to go from.
+    public static func url(fromLink link: String, workdir: String?, home: String = NSHomeDirectory()) -> URL? {
+        let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if let url = URL(string: text), let scheme = url.scheme, scheme.count > 1 { return url }
+        var path = text
+        if let suffix = path.range(of: #":\d+(:\d+)?$"#, options: .regularExpression) { path.removeSubrange(suffix) }
+        if path == "~" || path.hasPrefix("~/") {
+            path = home + path.dropFirst()
+        } else if !path.hasPrefix("/") {
+            guard let workdir, workdir.hasPrefix("/") else { return nil }
+            path = (workdir as NSString).appendingPathComponent(path)
+        }
+        return URL(fileURLWithPath: (path as NSString).standardizingPath)
+    }
+
+    /// The file a path link means, checked on disk as iTerm's semantic history does: the link itself when it exists,
+    /// else the longest part of it from its start that does — a link the screen took too far (the next line's words
+    /// glued on) still opens the file the click was on. Never shorter than the folder its name is in; nil if nothing
+    /// there exists.
+    public static func existingFile(_ url: URL, fileManager: FileManager = .default) -> URL? {
+        guard url.isFileURL else { return url }
+        let path = url.path
+        if fileManager.fileExists(atPath: path) { return url }
+        // The deepest existing folder along the path bounds how far back the name may be cut.
+        var folder = ""
+        var at = path.startIndex
+        while let slash = path[at...].firstIndex(of: "/") {
+            let candidate = String(path[...slash])
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: candidate, isDirectory: &isDir), isDir.boolValue else { break }
+            folder = candidate
+            at = path.index(after: slash)
+        }
+        guard !folder.isEmpty else { return nil }
+        var end = path.endIndex
+        while end > path.index(path.startIndex, offsetBy: folder.count + 1) {
+            end = path.index(before: end)
+            let candidate = String(path[..<end])
+            if fileManager.fileExists(atPath: candidate) { return URL(fileURLWithPath: candidate) }
+        }
+        return nil
+    }
+
     public static func action(for url: URL) -> LinkAction {
         switch url.scheme?.lowercased() {
         case "http", "https":
