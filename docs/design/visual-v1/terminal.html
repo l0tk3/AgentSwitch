@@ -56,7 +56,11 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
 .bar .title { position: absolute; left: 50%; transform: translateX(-50%); max-width: 42%; display: flex; align-items: center; gap: 8px; font: 600 13px var(--ui); color: var(--ink); white-space: nowrap; }
 .bar .title span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .bar .end { margin-left: auto; display: flex; align-items: center; gap: 4px; }
-.bar .eyes { padding-left: 8px; }
+.bar .eyes { padding-right: 6px; }
+/* who this is (2026-10-01, user: 顶栏缺少明显的标识): the app's mark (all the terminals' state) and its name, as the
+   console's band; the title stays the terminal on screen */
+.bar .who { display: flex; align-items: center; gap: 8px; margin-left: 6px; color: var(--ink); font: 700 12.5px var(--mono); }
+.bar .title.making { color: var(--ink3); font-weight: 400; }
 .bar .eyes .tag { font-family: var(--mono); }
 .grip { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; z-index: 2; cursor: col-resize; }
 .grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; }
@@ -266,8 +270,9 @@ mark { background: var(--signal); color: #000; padding: 0 1px; }
 <div class="win" id="win">
   <div class="bar"><div class="lights"><i></i><i></i><i></i></div>
     <button class="tb" id="sidebtn" data-do="hide" title="list ⌘B"><span id="icoSide"></span></button>
+    <div class="who" id="who" title="所有终端的状态"></div>
     <div class="title" id="title"></div>
-    <div class="end"><button class="tb" data-do="create" title="new terminal ⌘T"><span id="icoNew"></span></button><div class="eyes" id="eyes" title="所有终端的状态"></div></div>
+    <div class="end"><div class="eyes" id="eyes" title="所有终端的状态"></div><button class="tb" data-do="create" title="new terminal ⌘T"><span id="icoNew"></span></button></div>
   </div>
   <aside class="side">
     <label class="find"><span class="slash">/</span><input id="find" placeholder="search" spellcheck="false" autocomplete="off"><kbd>⌘F</kbd></label>
@@ -345,16 +350,18 @@ function renderEyes() {
   const waiting = terms.filter((t) => t.st === "waiting").length;
   const state = waiting ? "waiting" : terms.some((t) => t.st === "working") ? "busy" : terms.length ? "idle" : "off";
   const label = { waiting: L("markWaiting", waiting), busy: L("busy"), idle: L("idle"), off: "" }[state];
-  document.getElementById("eyes").innerHTML = `<span class="tag">${label}</span><span style="color:var(--ink)">${Pixel.mark({ px: 2, state, t: lookFrame, depth: true })}</span>`;
+  document.getElementById("eyes").innerHTML = `<span class="tag">${label}</span>`;
+  document.getElementById("who").innerHTML = `${Pixel.mark({ px: 2, state, t: lookFrame, depth: true })}<span>agentswitch</span>`;
   document.getElementById("win").classList.toggle("waiting", state === "waiting");
   const t = terms.find((x) => x.id === selected);
-  // The window's title: the terminal on screen with its mark; nothing while a new one is being made.
+  // The window's title: the terminal on screen with its mark; "new terminal" while one is being made.
   const making = document.querySelector(".create");
   const title = document.getElementById("title");
-  const key = t && !making ? `${t.id}:${t.st}:${t.name}` : "";
+  const key = t && !making ? `${t.id}:${t.st}:${t.name}` : "making";
   if (title.dataset.key !== key) {
     title.dataset.key = key;
-    title.innerHTML = key ? `${statusMark(t.st)}<span>${esc(t.name)}</span>` : "";
+    title.classList.toggle("making", key === "making");
+    title.innerHTML = key !== "making" ? `${statusMark(t.st)}<span>${esc(t.name)}</span>` : "<span>new terminal</span>";
   }
 }
 
