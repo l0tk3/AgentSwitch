@@ -6,13 +6,14 @@ public enum ApprovalMode: String, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
-    /// The interface words (control-v0 §1; docs/ui-v0.md §7.2.7: lowercase English).
+    /// The interface words (control-v0 §1; docs/ui-v0.md §7.2.7: English in title case). Display only: the daemon gets
+    /// `rawValue`.
     public var title: String {
         switch self {
-        case .manual: return "ask each"
-        case .scoped: return "auto"
-        case .auto: return "all auto"
-        case .skip: return "bypass"
+        case .manual: return "Ask Each"
+        case .scoped: return "Auto"
+        case .auto: return "All Auto"
+        case .skip: return "Bypass"
         }
     }
 

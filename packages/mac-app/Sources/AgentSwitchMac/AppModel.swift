@@ -36,7 +36,7 @@ final class AppModel {
     private(set) var caCopy: GateCA.CopyResult?
     private(set) var caTrusted = false
     private(set) var keys: [Keypair] = []
-    private(set) var bonjourStatus = StatusLine("off", .off)
+    private(set) var bonjourStatus = StatusLine("Off", .off)
     private(set) var detecting = false
     /// First-run facts worth telling once (keypair created, CA copied).
     private(set) var notices: [String] = []
@@ -690,7 +690,7 @@ final class AppModel {
         caTrusted = false
         keys = DemoData.keys
         loadDemoGate(demoGate ?? (fresh ? .notInstalled : .installed))
-        bonjourStatus = StatusLine("published · port 4713", .ok)
+        bonjourStatus = StatusLine("Published · Port 4713", .ok)
         // The user-process gate makes `default` on first run; the service makes `main` at install (no notice).
         notices = fresh || (demoGate ?? .installed).installed ? [] : ["已新建网关密钥对 default"]
         stagedUpdate = fresh ? nil : DemoData.stagedBuild

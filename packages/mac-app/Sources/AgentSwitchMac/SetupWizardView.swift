@@ -43,28 +43,21 @@ struct SetupWizardView: View {
         .interactiveDismissDisabled()
         .gateServiceSheet(model, active: true)
         .confirmationDialog("跳过引导？", isPresented: $confirmSkip) {
-            Button("skip") { navigation.closeWizard(.skipped, at: step) }
+            Button("Skip") { navigation.closeWizard(.skipped, at: step) }
         } message: {
-            Text("之后可在「general」中重新运行。")
+            Text("之后可在「General」中重新运行。")
         }
     }
 
     // MARK: text
 
-    private var heading: String {
-        switch step {
-        case .executors: return "executors"
-        case .pairing: return "pair iPhone"
-        case .permissions: return "permissions & launch"
-        case .done: return "done"
-        }
-    }
+    private var heading: String { step.title }
 
     private var intro: String {
         switch step {
         case .executors: return "任务由这台 Mac 上的 Claude Code、Codex 或 OpenCode 执行，至少需要一个可用。"
         case .pairing: return "在 iPhone 上打开 AgentSwitch，扫描此二维码。"
-        case .permissions: return "选择执行器进行有风险的操作时由谁批准。推荐「auto」，之后可在「permissions」中更改。"
+        case .permissions: return "选择执行器进行有风险的操作时由谁批准。推荐「Auto」，之后可在「Permissions」中更改。"
         case .done: return "在 iPhone 上打开 AgentSwitch 并发送任务。"
         }
     }
@@ -95,12 +88,12 @@ struct SetupWizardView: View {
     private var buttons: some View {
         HStack(spacing: 8) {
             if step != .done {
-                Button("skip guide") { confirmSkip = true }
+                Button("Skip Guide") { confirmSkip = true }
                     .keyboardShortcut(.cancelAction)
             }
             Spacer()
             if step.previous != nil {
-                Button("back") { navigation.backWizard(from: step) }
+                Button("Back") { navigation.backWizard(from: step) }
             }
             forward
         }
@@ -109,15 +102,15 @@ struct SetupWizardView: View {
     @ViewBuilder
     private var forward: some View {
         if step == .done {
-            Button("done") { navigation.closeWizard(.completed, at: step) }
+            Button("Done") { navigation.closeWizard(.completed, at: step) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
         } else if stepMet {
-            Button("continue") { navigation.advanceWizard(from: step) }
+            Button("Continue") { navigation.advanceWizard(from: step) }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
         } else {
-            Button("skip step") { navigation.advanceWizard(from: step) }
+            Button("Skip Step") { navigation.advanceWizard(from: step) }
                 .keyboardShortcut(.defaultAction)
         }
     }
@@ -174,7 +167,7 @@ private struct ExecutorsStep: View {
             } footer: {
                 HStack(alignment: .top, spacing: 8) {
                     Footer("登录在“终端”中完成，返回此窗口后自动重新检测。")
-                    Button("check again") { model.detectEnvironment() }.disabled(model.detecting)
+                    Button("Check Again") { model.detectEnvironment() }.disabled(model.detecting)
                 }
             }
         }
@@ -189,11 +182,11 @@ private struct PairingStep: View {
 
     var body: some View {
         if !model.remoteEnabled {
-            EmptyPage(title: "iPhone off", symbol: "iphone.slash", message: "配对和使用 iPhone 需要打开此连接。") {
-                Button("turn on") { model.setRemoteAccess(true) }
+            EmptyPage(title: "iPhone Off", symbol: "iphone.slash", message: "配对和使用 iPhone 需要打开此连接。") {
+                Button("Turn On") { model.setRemoteAccess(true) }
             }
         } else if !model.daemonReady {
-            EmptyPage(title: "service not ready", symbol: "hourglass", message: model.daemonLine.text)
+            EmptyPage(title: "Service Not Ready", symbol: "hourglass", message: model.daemonLine.text)
         } else {
             Form {
                 Section {
@@ -203,7 +196,7 @@ private struct PairingStep: View {
                 }
                 if !model.activeDevices.isEmpty {
                     Section {
-                        Label("paired · \(model.activeDevices.map(\.name).joined(separator: ", "))", systemImage: "checkmark.circle.fill")
+                        Label("Paired · \(model.activeDevices.map(\.name).joined(separator: ", "))", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     }
                 }
@@ -234,7 +227,7 @@ private struct PermissionsStep: View {
                 if let policy = model.control.policy {
                     ApprovalModePicker(policy: policy, compact: true)
                 } else if !model.daemonReady {
-                    Text("服务未就绪。之后可在「permissions」中选择。").foregroundStyle(.secondary)
+                    Text("服务未就绪。之后可在「Permissions」中选择。").foregroundStyle(.secondary)
                 } else if let problem = model.control.policyLoadProblem {
                     Text(problem).foregroundStyle(.secondary)
                 } else {
@@ -276,7 +269,7 @@ private struct DoneStep: View {
                     Text("“\(example)”")
                 }
             } header: {
-                SectionLabel("examples")
+                SectionLabel("Examples")
             } footer: {
                 Footer("需要你批准或回答时，iPhone 上会显示卡片。")
             }
@@ -284,15 +277,15 @@ private struct DoneStep: View {
                 Section {
                     HStack(spacing: 8) {
                         StatusDot(level: .warning)
-                        Text("setup: \(model.setupUnmet) left")
+                        Text("Setup: \(model.setupUnmet) Left")
                         Spacer(minLength: 8)
-                        Button("view") {
+                        Button("View") {
                             navigation.closeWizard(.completed, at: .done)
                             navigation.tab = .environment
                         }
                     }
                 } footer: {
-                    Footer("可在「environment」中继续完成。")
+                    Footer("可在「Environment」中继续完成。")
                 }
             }
         }

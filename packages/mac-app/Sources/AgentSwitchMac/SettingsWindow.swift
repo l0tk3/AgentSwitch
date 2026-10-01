@@ -9,13 +9,13 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .pairing: return "pairing"
-        case .devices: return "devices"
-        case .models: return "models"
-        case .permissions: return "permissions"
-        case .keys: return "keys"
-        case .environment: return "environment"
-        case .general: return "general"
+        case .pairing: return "Pairing"
+        case .devices: return "Devices"
+        case .models: return "Models"
+        case .permissions: return "Permissions"
+        case .keys: return "Keys"
+        case .environment: return "Environment"
+        case .general: return "General"
         }
     }
 
@@ -132,7 +132,7 @@ final class SettingsWindowController {
         controller.sceneBridgingOptions = [.title, .toolbars]
         window.toolbar = NSToolbar(identifier: "settings")
         window.contentViewController = controller
-        window.title = "AgentSwitch settings"
+        window.title = "AgentSwitch Settings"
         window.toolbarStyle = .unified
         window.setContentSize(contentSize)
         window.isReleasedWhenClosed = false
@@ -226,7 +226,7 @@ struct ErrorBanner: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.attention)
                     Text(message).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    Button("close") { model.errorMessage = nil }.controlSize(.small)
+                    Button("Close") { model.errorMessage = nil }.controlSize(.small)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)

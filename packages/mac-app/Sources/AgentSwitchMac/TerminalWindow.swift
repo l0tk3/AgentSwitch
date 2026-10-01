@@ -126,7 +126,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.contentSize),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.title = "terminal"
+        window.title = "Terminal"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
@@ -250,7 +250,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "choose"
+        panel.prompt = "Choose"
         if let path, !path.isEmpty {
             panel.directoryURL = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
         }
@@ -274,7 +274,7 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         head.git = "main ±5 ↑2"
         head.status = "working"
         head.mark = .busy
-        head.tag = "busy"
+        head.tag = "Busy"
         let web = TerminalWebView(frame: NSRect(origin: .zero, size: contentSize), configuration: WKWebViewConfiguration())
         web.setValue(false, forKey: "drawsBackground")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 160),
@@ -506,9 +506,9 @@ private struct TerminalWindowRoot: View {
             ZStack {
                 WindowDragArea()
                 HStack(spacing: 4) {
-                    ToolbarPixelButton(rows: PixelArt.toolbarList, help: "list ⌘B", action: toggleList)
+                    ToolbarPixelButton(rows: PixelArt.toolbarList, help: "List ⌘B", action: toggleList)
                     Spacer(minLength: 0)
-                    ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "new terminal ⌘T", action: newTerminal)
+                    ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: newTerminal)
                     TerminalMarkView(head: head)
                 }
                 .padding(.leading, head.lightsEnd + 10)
@@ -629,7 +629,7 @@ private struct TerminalTitleView: View {
     }
 }
 
-/// All the terminals' state at the toolbar's end: the word (`1 waiting`, `busy`) and the app's mark.
+/// All the terminals' state at the toolbar's end: the page's word (`1 Waiting`, `Busy`) and the app's mark.
 private struct TerminalMarkView: View {
     let head: TerminalHead
 

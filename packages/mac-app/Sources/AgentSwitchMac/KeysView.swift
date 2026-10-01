@@ -18,18 +18,18 @@ struct KeysView: View {
                             .textSelection(.enabled)
                             .lineLimit(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("copy") { Clipboard.copy(current.public) }
-                            .help("copy public key")
+                        Button("Copy") { Clipboard.copy(current.public) }
+                            .help("Copy Public Key")
                     }
                 } header: {
-                    SectionLabel("current public key")
+                    SectionLabel("Current Public Key")
                 } footer: {
                     Footer("iPhone 使用此公钥在本地加密密码。公钥可公开。")
                 }
             }
             Section {
                 if model.keys.isEmpty {
-                    Text("no key pairs").foregroundStyle(.secondary)
+                    Text("No Key Pairs").foregroundStyle(.secondary)
                 }
                 ForEach(model.keys) { key in
                     HStack(spacing: 12) {
@@ -40,18 +40,18 @@ struct KeysView: View {
                         }
                         Spacer(minLength: 12)
                         if key.current {
-                            KeyTag(text: "current", color: .brand)
+                            KeyTag(text: "Current", color: .brand)
                         } else if key.legacy {
-                            KeyTag(text: "retired · decrypt only", color: .secondary)
-                            Button("delete") { retiring = key }
+                            KeyTag(text: "Retired · Decrypt Only", color: .secondary)
+                            Button("Delete") { retiring = key }
                         } else {
-                            Button("make current") { model.useKey(key) }
+                            Button("Make Current") { model.useKey(key) }
                         }
                     }
                     .padding(.vertical, 2)
                 }
             } header: {
-                SectionLabel("key pairs")
+                SectionLabel("Key Pairs")
             } footer: {
                 if model.gateMode.isService {
                     Footer("私钥由凭据网关服务保管，当前用户无法读取。已停用的密钥仅用于解密旧密文，删除后用其加密的密文无法解密。")
@@ -64,16 +64,16 @@ struct KeysView: View {
         .formStyle(.grouped)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { model.refreshKeys() } label: { Label("refresh", systemImage: "arrow.clockwise") }
-                    .help("refresh")
-                Button { showingNew = true } label: { Label("new key pair", systemImage: "plus") }
-                    .help("new key pair")
+                Button { model.refreshKeys() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                    .help("Refresh")
+                Button { showingNew = true } label: { Label("New Key Pair", systemImage: "plus") }
+                    .help("New Key Pair")
             }
         }
         .onAppear { model.refreshKeys() }
         .confirmationDialog("删除密钥 \(retiring?.name ?? "")？", isPresented: Binding(get: { retiring != nil }, set: { if !$0 { retiring = nil } }),
                             presenting: retiring) { key in
-            Button("delete", role: .destructive) { model.retireKey(key) }
+            Button("Delete", role: .destructive) { model.retireKey(key) }
         } message: { _ in
             Text("用此密钥加密的密文将无法再解密，此操作无法撤销。")
         }
@@ -81,7 +81,7 @@ struct KeysView: View {
     }
 }
 
-/// `当前` in the accent, `已停用（仅解密）` in grey: a capsule tag.
+/// `Current` in the accent, `Retired · Decrypt Only` in grey: a capsule tag.
 private struct KeyTag: View {
     let text: String
     let color: Color
@@ -106,10 +106,10 @@ private struct NewKeySheet: View {
     var body: some View {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         VStack(alignment: .leading, spacing: 16) {
-            Text("new key pair").font(.headline)
+            Text("New Key Pair").font(.headline)
             Form {
-                TextField("name", text: $name, prompt: Text("e.g. work"))
-                Toggle("make current", isOn: $makeCurrent)
+                TextField("Name", text: $name, prompt: Text("e.g. work"))
+                Toggle("Make Current", isOn: $makeCurrent)
             }
             .formStyle(.columns)
             Text(!trimmed.isEmpty && !GateCLI.isValidName(trimmed) ? "仅可使用字母、数字和 . _ -，最多 32 个字符。" : "设为当前后，之后生成的密文均使用此密钥对加密。")
@@ -117,8 +117,8 @@ private struct NewKeySheet: View {
                 .foregroundStyle(!trimmed.isEmpty && !GateCLI.isValidName(trimmed) ? Color.attention : Color.secondary)
             HStack {
                 Spacer()
-                Button("cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("create") {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Create") {
                     create(trimmed, makeCurrent)
                     dismiss()
                 }

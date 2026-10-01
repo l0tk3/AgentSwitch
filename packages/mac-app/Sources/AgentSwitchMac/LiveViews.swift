@@ -30,10 +30,10 @@ enum LiveLook {
 
     static func word(_ look: LivePresenter.Look) -> String {
         switch look {
-        case .busy: return "busy"
-        case .waiting: return "waiting"
-        case .done: return "done"
-        case .incomplete: return "incomplete"
+        case .busy: return "Busy"
+        case .waiting: return "Waiting"
+        case .done: return "Done"
+        case .incomplete: return "Incomplete"
         }
     }
 
@@ -138,7 +138,7 @@ struct LiveCardActions {
     var pick: (LiveSnapshot.Row, String) -> Void = { _, _ in }
 }
 
-/// The card under the capsule: the lock screen card of the phone — the mark, `agentswitch` and the tally over a dotted
+/// The card under the capsule: the lock screen card of the phone — the mark, `AgentSwitch` and the tally over a dotted
 /// rule; then up to three rows (the waiting first), each a title, `└─` its step, and what answers it; or the result.
 struct LiveCard: View {
     let presenter: LivePresenter
@@ -158,14 +158,14 @@ struct LiveCard: View {
                         ForEach(presenter.cardEnds, id: \.key) { end in endRow(end) }
                     }
                     if presenter.moreEnds > 0 {
-                        Text("+\(presenter.moreEnds) more").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
+                        Text("+\(presenter.moreEnds) More").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 11) {
                         ForEach(presenter.cardRows) { row in rowView(row, frame: frame, now: timeline.date) }
                     }
                     if presenter.moreRows > 0 {
-                        Text("+\(presenter.moreRows) more").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
+                        Text("+\(presenter.moreRows) More").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
                     }
                 }
             }
@@ -180,7 +180,7 @@ struct LiveCard: View {
     private func header(frame: Int) -> some View {
         HStack(spacing: 8) {
             LiveMark(look: presenter.look, frame: presenter.look == .busy ? frame : 3)
-            Text("agentswitch").mono(12, weight: .semibold).foregroundStyle(LiveLook.ink)
+            Text("AgentSwitch").mono(12, weight: .semibold).foregroundStyle(LiveLook.ink)
             Spacer(minLength: 8)
             if presenter.shownEnd == nil, let s = presenter.snapshot, s.rows.count > 1 {
                 LiveTally(waiting: s.waiting, running: s.running, spin: frame)
@@ -244,12 +244,12 @@ struct LiveCard: View {
     @ViewBuilder private func buttons(_ row: LiveSnapshot.Row) -> some View {
         switch row.ask {
         case .decide?:
-            LiveButton(title: "deny") { actions.decide(row, false) }
-            LiveButton(title: "allow", primary: true) { actions.decide(row, true) }
+            LiveButton(title: "Deny") { actions.decide(row, false) }
+            LiveButton(title: "Allow", primary: true) { actions.decide(row, true) }
         case .question(_, _, _, let options, true)?:
             ForEach(options, id: \.self) { option in LiveButton(title: option) { actions.pick(row, option) } }
         default:
-            LiveButton(title: "open", primary: true) { actions.open(row) }
+            LiveButton(title: "Open", primary: true) { actions.open(row) }
         }
     }
 
@@ -285,7 +285,7 @@ private struct LiveTitle: View {
     }
 }
 
-/// `[ allow ]`: a bracketed word; the primary one amber with a key's lower edge, the others ink that inverts under the
+/// `[ Allow ]`: a bracketed word; the primary one amber with a key's lower edge, the others ink that inverts under the
 /// pointer (terminal.html, island.html).
 struct LiveButton: View {
     let title: String

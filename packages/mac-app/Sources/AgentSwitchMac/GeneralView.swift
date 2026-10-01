@@ -28,7 +28,7 @@ struct GeneralView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("allow iPhone", isOn: Binding(get: { model.remoteEnabled }, set: { model.setRemoteAccess($0) }))
+                Toggle("Allow iPhone", isOn: Binding(get: { model.remoteEnabled }, set: { model.setRemoteAccess($0) }))
             } header: {
                 SectionLabel("iPhone")
             } footer: {
@@ -38,9 +38,9 @@ struct GeneralView: View {
             WorkDirSection()
 
             Section {
-                portField("local", $local, help: "供网页控制台和本应用使用")
-                portField("remote", $remote, help: "供已配对的 iPhone 使用（HTTPS）")
-                portField("gateway", $gate, help: model.gateMode.isService ? "凭据网关服务的代理端口，更改时需要管理员授权"
+                portField("Local", $local, help: "供网页控制台和本应用使用")
+                portField("Remote", $remote, help: "供已配对的 iPhone 使用（HTTPS）")
+                portField("Gateway", $gate, help: model.gateMode.isService ? "凭据网关服务的代理端口，更改时需要管理员授权"
                                                                             : "端口上已运行 secret-gate 时直接复用")
                 portField("OpenCode", $opencode, help: "服务常驻使用的 OpenCode 实例")
                 ForEach(portProblems, id: \.self) { problem in
@@ -50,69 +50,69 @@ struct GeneralView: View {
                     }
                 }
             } header: {
-                SectionLabel("ports")
+                SectionLabel("Ports")
             } footer: {
                 HStack(alignment: .top, spacing: 8) {
                     Footer("更改远程端口后，局域网内的 iPhone 自动发现新端口；在局域网外使用的 iPhone 需重新扫码。")
-                    Button("reset") { fill(.defaults) }
-                    Button("save & restart") { if let draft { save(draft) } }
+                    Button("Reset") { fill(.defaults) }
+                    Button("Save & Restart") { if let draft { save(draft) } }
                         .buttonStyle(.borderedProminent)
                         .disabled(!portProblems.isEmpty || draft == model.ports)
                 }
             }
 
             Section {
-                Toggle("show in menu bar", isOn: $liveActivity)
-                Toggle("sounds", isOn: $liveSound)
+                Toggle("Show in Menu Bar", isOn: $liveActivity)
+                Toggle("Sounds", isOn: $liveSound)
                     .disabled(!liveActivity)
             } header: {
-                SectionLabel("live activity")
+                SectionLabel("Live Activity")
             } footer: {
                 Footer("任务或终端在进行、等你处理或刚有结果时，菜单栏显示一个小胶囊，点开可直接批准或拒绝。等你、完成、失败各有一段提示音；失败的结果会一直留着，直到你点开看过。")
             }
 
             Section {
-                Toggle("stay awake while working", isOn: $keepAwake)
+                Toggle("Stay Awake While Working", isOn: $keepAwake)
             } header: {
-                SectionLabel("power")
+                SectionLabel("Power")
             } footer: {
                 Footer("有任务在进行、手机连着，或（接着电源时）有终端开着，Mac 不会闲置睡眠，这些都结束后再保持 15 分钟；屏幕照常熄灭，手机和远程控制不会断。合盖且未接外接显示器时仍会睡眠。")
             }
 
             Section {
                 LoginItemRows()
-                Toggle("show in Dock", isOn: $alwaysShowInDock)
+                Toggle("Show in Dock", isOn: $alwaysShowInDock)
                     // This window is open while the toggle is used, so the icon stays until the window closes.
                     .onChange(of: alwaysShowInDock) { _, always in
                         NSApp.setActivationPolicy(DockPresence.showsInDock(alwaysShow: always, settingsWindowOpen: true) ? .regular : .accessory)
                     }
                 // ⌘Q stops the service with the app: asked first unless the user said not to.
-                Toggle("confirm quit", isOn: Binding(get: { !quitWithoutAsking }, set: { quitWithoutAsking = !$0 }))
-                LabeledContent("setup guide") {
-                    Button("run again") { navigation.openWizard() }
+                Toggle("Confirm Quit", isOn: Binding(get: { !quitWithoutAsking }, set: { quitWithoutAsking = !$0 }))
+                LabeledContent("Setup Guide") {
+                    Button("Run Again") { navigation.openWizard() }
                 }
             } header: {
-                SectionLabel("launch")
+                SectionLabel("Launch")
             } footer: {
                 Footer("关闭时仅显示在菜单栏；打开设置窗口时临时显示在程序坞。")
             }
 
             Section {
-                LabeledContent("logs") {
+                LabeledContent("Logs") {
                     HStack(spacing: 8) {
                         Button("daemon.log") { open(model.paths.daemonLog) }
                         Button("gate.log") {
                             if model.gateMode.isService { showingGateLog = true } else { open(model.paths.gateLog) }
                         }
                         .help(model.gateMode.isService ? "凭据网关服务的日志" : model.shortPath(model.paths.gateLog))
-                        Button("open folder") { open(model.paths.logsDir) }
+                        Button("Open Folder") { open(model.paths.logsDir) }
                     }
                 }
-                LabeledContent("data") {
-                    Button("open folder") { open(model.paths.agentswitchHome) }
+                LabeledContent("Data") {
+                    Button("Open Folder") { open(model.paths.agentswitchHome) }
                 }
             } header: {
-                SectionLabel("logs & data")
+                SectionLabel("Logs & Data")
             } footer: {
                 Footer("日志位于 \(model.shortPath(model.paths.logsDir))，数据位于 \(model.shortPath(model.paths.agentswitchHome))。")
                     .textSelection(.enabled)
@@ -121,10 +121,10 @@ struct GeneralView: View {
             Section {
                 let versions = model.runtimeVersions
                 if versions.isEmpty {
-                    Text(RuntimePlan.missingRuntime(model.paths.runtime.missing()) ?? "no version info").foregroundStyle(.secondary)
+                    Text(RuntimePlan.missingRuntime(model.paths.runtime.missing()) ?? "No Version Info").foregroundStyle(.secondary)
                 } else {
                     if let built = versions["built"] {
-                        LabeledContent("built", value: TimeText.build(built)).help(built)
+                        LabeledContent("Built", value: TimeText.build(built)).help(built)
                     }
                     ForEach(VersionRow.order(versions.keys.filter { $0 != "built" }), id: \.self) { key in
                         LabeledContent(VersionRow.label(key), value: versions[key] ?? "").textSelection(.enabled)
@@ -133,11 +133,11 @@ struct GeneralView: View {
                 if model.options != .standard {
                     HStack(spacing: 6) {
                         StatusDot(level: .warning)
-                        Text("dev mode · executors=\(model.options.executors) router=\(model.options.router ?? "default")").foregroundStyle(.secondary)
+                        Text("Dev Mode · executors=\(model.options.executors) router=\(model.options.router ?? "default")").foregroundStyle(.secondary)
                     }
                 }
             } header: {
-                SectionLabel("version")
+                SectionLabel("Version")
             } footer: {
                 Footer("内置运行时位于 \(model.shortPath(model.paths.runtime.root))。")
                     .textSelection(.enabled)
@@ -193,12 +193,12 @@ private struct WorkDirSection: View {
     var body: some View {
         let settings = control.workDir.settings
         Section {
-            LabeledContent("location") {
+            LabeledContent("Location") {
                 HStack(spacing: 8) {
                     if control.savingWorkDir { ProgressView().controlSize(.small) }
                     Text(location).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         .help(settings?.path ?? "")
-                    Button("choose…") { model.chooseWorkDir() }.disabled(settings == nil || control.savingWorkDir)
+                    Button("Choose…") { model.chooseWorkDir() }.disabled(settings == nil || control.savingWorkDir)
                 }
             }
             if let problem = settings?.problem {
@@ -211,11 +211,11 @@ private struct WorkDirSection: View {
                 Text(refused).foregroundStyle(.red).textSelection(.enabled)
             }
         } header: {
-            SectionLabel("work folder")
+            SectionLabel("Work Folder")
         } footer: {
             HStack(alignment: .top, spacing: 8) {
                 Footer("未指定文件夹的任务在此创建子文件夹，结果保留在其中。")
-                Button("reset") {
+                Button("Reset") {
                     if let settings { Task { await control.setWorkDir(settings.defaultToRestore(home: model.paths.userHome.path), model.client) } }
                 }
                 .disabled(settings == nil || settings?.isDefault == true || control.savingWorkDir)
@@ -227,7 +227,7 @@ private struct WorkDirSection: View {
         switch control.workDir {
         case .known(let s): return model.shortPath(s.path)
         case .unsupported: return "内置服务版本较旧，不支持此设置"
-        case .unknown: return model.daemonReady ? "loading" : "service not ready"
+        case .unknown: return model.daemonReady ? "Loading" : "Service Not Ready"
         }
     }
 }
@@ -239,10 +239,10 @@ struct LoginItemRows: View {
 
     var body: some View {
         Group {
-            Toggle("open at login", isOn: Binding(get: { state == .enabled }, set: { set($0) }))
+            Toggle("Open at Login", isOn: Binding(get: { state == .enabled }, set: { set($0) }))
             if state == .requiresApproval {
                 LabeledContent {
-                    Button("open System Settings") { SMAppService.openSystemSettingsLoginItems() }
+                    Button("Open System Settings") { SMAppService.openSystemSettingsLoginItems() }
                 } label: {
                     HStack(spacing: 6) {
                         StatusDot(level: .warning)
@@ -298,7 +298,7 @@ enum VersionRow {
 
     static func label(_ key: String) -> String {
         switch key {
-        case "daemon": return "service"
+        case "daemon": return "Service"
         case "secret-gate": return "secret-gate"
         case "mitmproxy": return "mitmproxy"
         case "node": return "Node.js"

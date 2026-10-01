@@ -53,7 +53,7 @@ struct StatusDot: View {
     var body: some View { StatusMark(level: level) }
 }
 
-/// `■ ok`: the mark and one word, the word monospaced in secondary text.
+/// `■ OK`: the mark and one word, the word monospaced in secondary text.
 struct StatusBadge: View {
     let line: StatusLine
 
@@ -156,7 +156,7 @@ enum FolderPanel {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "choose"
+        panel.prompt = "Choose"
         panel.message = message
         if let path { panel.directoryURL = URL(fileURLWithPath: path, isDirectory: true) }
         return panel.runModal() == .OK ? panel.url : nil

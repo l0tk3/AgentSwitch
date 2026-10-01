@@ -93,38 +93,39 @@ public enum DisplayPath {
     }
 }
 
-/// Times as units (docs/ui-v0.md §7.2.7): now, 3m ago, today 14:20, yesterday 09:05, 9/20, 2025/9/20.
+/// Times as units (docs/ui-v0.md §7.2.7): Now, 3m ago, Today 14:20, Yesterday 09:05, 9/20, 2025/9/20. The words are
+/// capitalised (a lone time word is a short word); the durations and dates that start with a digit stay as they are.
 public enum TimeText {
     /// A moment: relative within the hour, then the day and the time.
     public static func moment(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let seconds = now.timeIntervalSince(date)
-        if seconds < 60 && seconds > -60 { return "now" }
+        if seconds < 60 && seconds > -60 { return "Now" }
         if seconds > 0 && seconds < 3600 { return "\(Int(seconds / 60))m ago" }
         let time = clock(date, calendar: calendar)
-        if calendar.isDate(date, inSameDayAs: now) { return "today \(time)" }
+        if calendar.isDate(date, inSameDayAs: now) { return "Today \(time)" }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            return "yesterday \(time)"
+            return "Yesterday \(time)"
         }
         return "\(day(date, now: now, calendar: calendar)) \(time)"
     }
 
-    /// A day: today, yesterday, 9/20, or with the year when it is not this year.
+    /// A day: Today, Yesterday, 9/20, or with the year when it is not this year.
     public static func day(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return "today" }
+        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            return "yesterday"
+            return "Yesterday"
         }
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         let monthDay = "\(parts.month ?? 0)/\(parts.day ?? 0)"
         return calendar.component(.year, from: now) == parts.year ? monthDay : "\(parts.year ?? 0)/\(monthDay)"
     }
 
-    /// A clock time, with the day when it is not today: 12:30, tomorrow 09:00, yesterday 18:05, 9/30 12:30.
+    /// A clock time, with the day when it is not today: 12:30, Tomorrow 09:00, Yesterday 18:05, 9/30 12:30.
     public static func at(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let time = clock(date, calendar: calendar)
         if calendar.isDate(date, inSameDayAs: now) { return time }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) {
-            return "tomorrow \(time)"
+            return "Tomorrow \(time)"
         }
         return "\(day(date, now: now, calendar: calendar)) \(time)"
     }

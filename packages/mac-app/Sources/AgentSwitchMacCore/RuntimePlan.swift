@@ -68,7 +68,7 @@ public enum RuntimePlan {
     public static func gateDecision(port: Int, probe: GateProbe.Result?) -> Preflight? {
         guard let probe, probe.verdict != .unreachable else { return nil }
         if probe.isGate { return .adopt("复用 127.0.0.1:\(port) 上已运行的 secret-gate") }
-        return .fail("端口 \(port) 已被占用，占用程序不是 secret-gate（\(probe.detail)）。请在「general」中更换网关端口，或退出占用该端口的程序。")
+        return .fail("端口 \(port) 已被占用，占用程序不是 secret-gate（\(probe.detail)）。请在「General」中更换网关端口，或退出占用该端口的程序。")
     }
 
     /// Ports the daemon will bind, checked before launch: the remote one only while remote access is on.
@@ -80,7 +80,7 @@ public enum RuntimePlan {
     public static func daemonPortProblem(busy: [(label: String, port: Int)]) -> String? {
         guard !busy.isEmpty else { return nil }
         let list = busy.map { "\($0.label) \($0.port)" }.joined(separator: "、")
-        return "端口已被占用：\(list)。占用程序可能是另一个 AgentSwitch 服务。请在「general」中更换端口后重启服务。"
+        return "端口已被占用：\(list)。占用程序可能是另一个 AgentSwitch 服务。请在「General」中更换端口后重启服务。"
     }
 
     /// No `secret-gate proxy` as this user while the system service is there, whatever asked for one (a lost adopted
@@ -92,7 +92,7 @@ public enum RuntimePlan {
     }
 
     public static let serviceNotResponding =
-        "凭据网关服务无响应。系统服务由 launchd 自动重启；持续无响应时，可在「environment」中修复（需要管理员授权）。"
+        "凭据网关服务无响应。系统服务由 launchd 自动重启；持续无响应时，可在「Environment」中修复（需要管理员授权）。"
 
     public static func missingRuntime(_ missing: [String]) -> String? {
         missing.isEmpty ? nil : "内置运行时不完整，缺少：\(missing.joined(separator: "、"))。请重新构建应用（scripts/build-app.sh）后重试。"

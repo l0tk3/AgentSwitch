@@ -101,7 +101,7 @@ public struct UsageSlot: Equatable, Sendable {
     /// Nil when there is no reading, or the window has reset since it was read.
     public let percent: Int?
     public let resetsAt: Date?
-    /// The hover text: `resets 12:30`, `reset`, `no reading`; empty when a reading has no reset time.
+    /// The hover text: `Resets 12:30`, `Reset`, `No Reading`; empty when a reading has no reset time.
     public let note: String
 
     public init(label: String, percent: Int?, resetsAt: Date?, note: String) {
@@ -132,8 +132,8 @@ public struct UsageRow: Equatable, Sendable, Identifiable {
     public var id: String { harness.rawValue }
     /// OpenCode is prepaid: a balance instead of windows.
     public var showsBalance: Bool { harness == .opencode }
-    /// `balance ¥96.23`, or `balance —`.
-    public var balanceText: String { "balance " + (balance ?? Usage.none) }
+    /// `Balance ¥96.23`, or `Balance —`.
+    public var balanceText: String { "Balance " + (balance ?? Usage.none) }
 
     public init(harness: Harness, title: String, slots: [UsageSlot], balance: String?) {
         self.harness = harness
@@ -180,10 +180,10 @@ public enum Usage {
     /// A window by its label; one whose reset time has passed has reset and shows no reading.
     public static func slot(_ label: String, windows: [QuotaWindow], now: Date, calendar: Calendar = .current) -> UsageSlot {
         guard let window = windows.first(where: { $0.label.trimmingCharacters(in: .whitespaces).lowercased() == label }) else {
-            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "no reading")
+            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "No Reading")
         }
         if let reset = window.resetsAt, reset <= now {
-            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "reset")
+            return UsageSlot(label: label, percent: nil, resetsAt: nil, note: "Reset")
         }
         let percent = min(100, max(0, Int(window.usedPercent.rounded())))
         let note = window.resetsAt.map { resetText($0, now: now, calendar: calendar) } ?? ""
@@ -227,8 +227,8 @@ public enum Usage {
         readings.compactMap(\.fetchedAt).max()
     }
 
-    /// `resets 12:30`, `resets tomorrow 09:00`, `resets 9/30 12:30`.
+    /// `Resets 12:30`, `Resets Tomorrow 09:00`, `Resets 9/30 12:30`.
     public static func resetText(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-        "resets " + TimeText.at(date, now: now, calendar: calendar)
+        "Resets " + TimeText.at(date, now: now, calendar: calendar)
     }
 }

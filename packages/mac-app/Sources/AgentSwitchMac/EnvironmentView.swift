@@ -15,25 +15,25 @@ struct EnvironmentView: View {
 
             Section {
                 if model.harnesses.isEmpty {
-                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("checking").foregroundStyle(.secondary) }
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Checking").foregroundStyle(.secondary) }
                 }
                 ForEach(model.harnesses) { HarnessRow(report: $0, path: model.shortPath($0.binary ?? "")) }
             } header: {
-                SectionLabel("executors")
+                SectionLabel("Executors")
             } footer: {
                 Footer("执行器需自行安装并登录。此处仅检查命令和登录凭据，不调用模型。")
             }
 
             Section {
-                StatusRow(label: "service", line: model.daemonLine)
-                StatusRow(label: "gateway", line: model.gateLine)
-                StatusRow(label: "remote", line: model.remoteLine)
+                StatusRow(label: "Service", line: model.daemonLine)
+                StatusRow(label: "Gateway", line: model.gateLine)
+                StatusRow(label: "Remote", line: model.remoteLine)
                 StatusRow(label: "Bonjour", line: model.bonjourLine)
-                StatusRow(label: "LAN", line: model.lanAddresses.isEmpty ? StatusLine("no private address", .warning)
+                StatusRow(label: "LAN", line: model.lanAddresses.isEmpty ? StatusLine("No Private Address", .warning)
                                                                         : StatusLine(model.lanAddresses.joined(separator: ", "), .ok))
                 StatusRow(label: "Tailscale", line: tailscaleLine)
             } header: {
-                SectionLabel("service & network")
+                SectionLabel("Service & Network")
             } footer: {
                 if let note = networkFooter { Footer(note) }
             }
@@ -41,19 +41,19 @@ struct EnvironmentView: View {
             GateServiceSection()
 
             Section {
-                StatusRow(label: "cert file", line: model.caFilePresent ? StatusLine(model.shortPath(model.gateCA), .ok)
-                                                                   : StatusLine("created on first gateway start", .busy))
-                LabeledContent("login keychain") {
+                StatusRow(label: "Cert File", line: model.caFilePresent ? StatusLine(model.shortPath(model.gateCA), .ok)
+                                                                   : StatusLine("Created on First Gateway Start", .busy))
+                LabeledContent("Login Keychain") {
                     HStack(spacing: 8) {
                         if trusting { ProgressView().controlSize(.small) }
-                        Text(trustResult ?? (model.caTrusted ? "trusted" : "not trusted")).foregroundStyle(.secondary)
+                        Text(trustResult ?? (model.caTrusted ? "Trusted" : "Not Trusted")).foregroundStyle(.secondary)
                         if !model.caTrusted {
-                            Button("trust…") { confirmTrust = true }.disabled(!model.caFilePresent || trusting)
+                            Button("Trust…") { confirmTrust = true }.disabled(!model.caFilePresent || trusting)
                         }
                     }
                 }
             } header: {
-                SectionLabel("gateway cert")
+                SectionLabel("Gateway Cert")
             } footer: {
                 Footer("执行器通过环境变量单独信任此证书，通常无需加入钥匙串。")
             }
@@ -66,20 +66,20 @@ struct EnvironmentView: View {
                     }
                 }
             } header: {
-                SectionLabel("file access")
+                SectionLabel("File Access")
             } footer: {
                 Footer("项目位于桌面、文稿或下载文件夹时，需要为 AgentSwitch 授权，否则任务无法读取文件。建议将 AgentSwitch 放在“应用程序”文件夹中。")
             }
 
             Section {
                 if let lp = model.loginPath {
-                    LabeledContent("source") {
+                    LabeledContent("Source") {
                         if lp.source == .loginShell {
-                            Text("login shell").foregroundStyle(.secondary)
+                            Text("Login Shell").foregroundStyle(.secondary)
                         } else {
                             HStack(spacing: 6) {
                                 StatusDot(level: .warning)
-                                Text("common folders").foregroundStyle(.secondary)
+                                Text("Common Folders").foregroundStyle(.secondary)
                             }
                             .help(lp.note ?? "")
                         }
@@ -89,7 +89,7 @@ struct EnvironmentView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 } else {
-                    Text("loading").foregroundStyle(.secondary)
+                    Text("Loading").foregroundStyle(.secondary)
                 }
             } header: {
                 SectionLabel("PATH")
@@ -100,23 +100,23 @@ struct EnvironmentView: View {
         .formStyle(.grouped)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.detectEnvironment() } label: { Label("check again", systemImage: "arrow.clockwise") }
-                    .help("check again")
+                Button { model.detectEnvironment() } label: { Label("Check Again", systemImage: "arrow.clockwise") }
+                    .help("Check Again")
                     .disabled(model.detecting)
             }
         }
         .confirmationDialog("将网关证书加入登录钥匙串？", isPresented: $confirmTrust) {
-            Button("trust") { Task { await trust() } }
+            Button("Trust") { Task { await trust() } }
         } message: {
             Text(GateCATrustText.confirmation(service: model.gateMode.isService))
         }
     }
 
     private var tailscaleLine: StatusLine {
-        guard let ts = model.tailscale else { return StatusLine("checking", .busy) }
+        guard let ts = model.tailscale else { return StatusLine("Checking", .busy) }
         switch ts.state {
-        case .notInstalled: return StatusLine("not installed", .off)
-        case .stopped: return StatusLine("disconnected · \(ts.backendState ?? "unknown")", .warning)
+        case .notInstalled: return StatusLine("Not Installed", .off)
+        case .stopped: return StatusLine("Disconnected · \(ts.backendState ?? "Unknown")", .warning)
         case .running: return StatusLine((ts.ipv4 + [ts.dnsName].compactMap { $0 }).joined(separator: " · "), .ok)
         }
     }
@@ -137,7 +137,7 @@ struct EnvironmentView: View {
     }
 }
 
-/// `● Claude Code  2.1.278                         可用`
+/// `■ Claude Code  2.1.278                         OK`
 ///   `~/.local/bin/claude`, then install or login steps when there are any.
 private struct HarnessRow: View {
     let report: HarnessReport
@@ -154,7 +154,7 @@ private struct HarnessRow: View {
                 }
                 if report.binary != nil {
                     Text(path).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .help(report.evidence.map { "credentials · \($0)" } ?? "no credentials found")
+                        .help(report.evidence.map { "Credentials · \($0)" } ?? "No Credentials Found")
                 }
                 ForEach(report.guidance, id: \.self) { line in
                     Text(line).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)

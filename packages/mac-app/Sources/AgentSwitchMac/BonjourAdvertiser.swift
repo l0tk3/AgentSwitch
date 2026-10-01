@@ -22,7 +22,7 @@ final class BonjourAdvertiser: NSObject, NetServiceDelegate {
         published = false
         current = next
         guard let next else {
-            onStatus?(StatusLine("off", .off))
+            onStatus?(StatusLine("Off", .off))
             return
         }
         let s = NetService(domain: BonjourRecord.domain, type: BonjourRecord.serviceType, name: next.name, port: Int32(next.port))
@@ -30,11 +30,11 @@ final class BonjourAdvertiser: NSObject, NetServiceDelegate {
         s.setTXTRecord(NetService.data(fromTXTRecord: next.txt))
         s.publish()
         service = s
-        onStatus?(StatusLine("publishing", .busy))
+        onStatus?(StatusLine("Publishing", .busy))
         watchdog = Task { [weak self] in
             try? await Task.sleep(for: BonjourAdvertiser.publishTimeout)
             guard let self, !Task.isCancelled, !self.published, self.service === s else { return }
-            self.onStatus?(StatusLine("blocked：请在“系统设置 › 隐私与安全性 › 本地网络”中允许 AgentSwitch。", .warning))
+            self.onStatus?(StatusLine("Blocked：请在“系统设置 › 隐私与安全性 › 本地网络”中允许 AgentSwitch。", .warning))
         }
     }
 
@@ -42,7 +42,7 @@ final class BonjourAdvertiser: NSObject, NetServiceDelegate {
         let port = sender.port
         MainActor.assumeIsolated {
             published = true
-            onStatus?(StatusLine("published · port \(port)", .ok))
+            onStatus?(StatusLine("Published · Port \(port)", .ok))
         }
     }
 

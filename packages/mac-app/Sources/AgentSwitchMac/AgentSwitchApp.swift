@@ -278,8 +278,8 @@ extension AppDelegate {
         let alert = NSAlert()
         alert.messageText = "退出 AgentSwitch？"
         alert.informativeText = "退出后服务停止：正在运行的终端和任务将中断，手机也无法连接。只关闭窗口时，请点窗口左上角的关闭按钮。"
-        alert.addButton(withTitle: "quit")
-        alert.addButton(withTitle: "cancel")
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = "不再询问"
         NSApp.activate(ignoringOtherApps: true)

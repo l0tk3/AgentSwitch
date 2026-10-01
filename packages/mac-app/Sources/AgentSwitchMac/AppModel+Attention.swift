@@ -6,8 +6,10 @@ struct AttentionItem: Identifiable {
     let text: String
     /// How many things the row stands for (the setup row counts each missing piece).
     var count = 1
-    /// The button's title; fix opens settings › environment.
-    var action = "fix"
+    /// The button's title; Fix opens Settings › Environment.
+    var action = "Fix"
+    /// The gate service's update: the button asks for it before Environment opens.
+    var offersUpdate = false
     /// An error rather than something to do (the gate service not answering).
     var level = StatusLevel.warning
 }
@@ -21,16 +23,16 @@ extension AppModel {
         let gate = GateServiceText.attention(facts)
         if let gate {
             let update = facts.updateAvailable && facts.health == .responding && !facts.ownedByAnotherUser
-            out.append(AttentionItem(id: "gate", text: gate, action: update ? "update…" : "fix",
+            out.append(AttentionItem(id: "gate", text: gate, action: update ? "Update…" : "Fix", offersUpdate: update,
                                      level: facts.health == .notResponding || facts.ownedByAnotherUser ? .error : .warning))
         }
         let unmet = setupItems.filter { $0.state == .todo && (gate == nil || $0.id != SetupChecklist.gateServiceID) }.count
-        if unmet > 0 { out.append(AttentionItem(id: "setup", text: "setup: \(unmet) left", count: unmet)) }
+        if unmet > 0 { out.append(AttentionItem(id: "setup", text: "Setup: \(unmet) Left", count: unmet)) }
         if remoteEnabled && daemonReady && remoteLine.level >= .warning {
-            out.append(AttentionItem(id: "remote", text: "iPhone: unavailable"))
+            out.append(AttentionItem(id: "remote", text: "iPhone: Unavailable"))
         }
         if bonjourLine.level >= .warning {
-            out.append(AttentionItem(id: "bonjour", text: "LAN discovery: unavailable"))
+            out.append(AttentionItem(id: "bonjour", text: "LAN Discovery: Unavailable"))
         }
         return out
     }

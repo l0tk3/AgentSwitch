@@ -101,11 +101,11 @@ struct BrailleSpinner: View {
             Text(Self.frames[i]).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.busy)
         }
         .frame(width: 8)
-        .accessibilityLabel("busy")
+        .accessibilityLabel("Busy")
     }
 }
 
-/// `// status`: a group's label, lowercase, monospaced, spaced out.
+/// `// Status`: a group's label in title case (docs/ui-v0.md §7.2.7), monospaced, spaced out.
 struct SectionLabel: View {
     let text: String
 

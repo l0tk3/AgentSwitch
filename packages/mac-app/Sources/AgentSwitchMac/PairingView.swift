@@ -9,11 +9,11 @@ struct PairingView: View {
 
     var body: some View {
         if !model.remoteEnabled {
-            EmptyPage(title: "iPhone off", symbol: "iphone.slash", message: "配对和使用 iPhone 需要打开此连接。") {
-                Button("turn on") { model.setRemoteAccess(true) }
+            EmptyPage(title: "iPhone Off", symbol: "iphone.slash", message: "配对和使用 iPhone 需要打开此连接。") {
+                Button("Turn On") { model.setRemoteAccess(true) }
             }
         } else if !model.daemonReady {
-            EmptyPage(title: "service not ready", symbol: "hourglass", message: model.daemonLine.text)
+            EmptyPage(title: "Service Not Ready", symbol: "hourglass", message: model.daemonLine.text)
         } else {
             Form {
                 Section {
@@ -23,10 +23,10 @@ struct PairingView: View {
                 }
                 if let paired = session.paired {
                     Section {
-                        Label("paired \(paired.name) (\(platformName(paired.platform)))", systemImage: "checkmark.circle.fill")
+                        Label("Paired \(paired.name) (\(platformName(paired.platform)))", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     } footer: {
-                        Footer("如非本人设备，请在「devices」中吊销。")
+                        Footer("如非本人设备，请在「Devices」中吊销。")
                     }
                 }
                 if let problem = session.problem {
@@ -36,14 +36,14 @@ struct PairingView: View {
                 }
                 if let payload = session.pairing?.payload {
                     Section {
-                        LabeledContent("name", value: payload.name)
-                        LabeledContent("port", value: String(payload.port))
-                        LabeledContent("LAN", value: payload.lan.isEmpty ? "none" : payload.lan.joined(separator: ", "))
-                        LabeledContent("Tailscale", value: payload.tailnet.isEmpty ? "none · same LAN only" : payload.tailnet.joined(separator: ", "))
-                        LabeledContent("cert fingerprint", value: String(payload.fp.prefix(16)) + "…")
-                        LabeledContent("gateway key", value: payload.gate.map { "\($0.keypair) · \($0.publicKey.prefix(12))…" } ?? "none")
+                        LabeledContent("Name", value: payload.name)
+                        LabeledContent("Port", value: String(payload.port))
+                        LabeledContent("LAN", value: payload.lan.isEmpty ? "None" : payload.lan.joined(separator: ", "))
+                        LabeledContent("Tailscale", value: payload.tailnet.isEmpty ? "None · Same LAN Only" : payload.tailnet.joined(separator: ", "))
+                        LabeledContent("Cert Fingerprint", value: String(payload.fp.prefix(16)) + "…")
+                        LabeledContent("Gateway Key", value: payload.gate.map { "\($0.keypair) · \($0.publicKey.prefix(12))…" } ?? "None")
                     } header: {
-                        SectionLabel("QR contents")
+                        SectionLabel("QR Contents")
                     } footer: {
                         Footer("仅包含地址、证书指纹和公钥，不含密码。")
                     }
@@ -84,24 +84,24 @@ struct PairingCodeView: View {
                                 .font(.system(size: 28, weight: .semibold, design: .monospaced))
                                 .textSelection(.enabled)
                                 .foregroundStyle(left > 0 ? .primary : .tertiary)
-                            Text(left > 0 ? "expires in \(Countdown.format(left))" : "expired")
+                            Text(left > 0 ? "Expires in \(Countdown.format(left))" : "Expired")
                                 .monospacedDigit()
                                 .foregroundStyle(left > 60 ? Color.secondary : Color.attention)
                         }
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("no pairing code").font(.title3.weight(.semibold))
+                        Text("No Pairing Code").font(.title3.weight(.semibold))
                         Text("生成后使用 iPhone 扫描。").foregroundStyle(.secondary)
                     }
                 }
                 HStack(spacing: 8) {
-                    Button(session.pairing == nil ? "generate" : "regenerate") { Task { await session.start(model: model) } }
+                    Button(session.pairing == nil ? "Generate" : "Regenerate") { Task { await session.start(model: model) } }
                         .buttonStyle(.borderedProminent)
                         .keyboardShortcut(returnGenerates ? .defaultAction : nil)
                         .disabled(session.busy)
                     if session.pairing != nil {
-                        Button("copy link") { session.copyLink() }
+                        Button("Copy Link") { session.copyLink() }
                             .help("仅复制到这台 Mac，不同步到其他设备；配对码过期时自动清除")
                     }
                     if session.busy { ProgressView().controlSize(.small) }

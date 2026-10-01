@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 /// The menu-bar panel (docs/ui-v0.md §7): the mark and one status word, the four services, usage, what needs the
-/// user, a new version, the actions. Short words monospaced in lowercase English, sentences formal Chinese; every row
+/// user, a new version, the actions. Short words monospaced in title-case English, sentences formal Chinese; every row
 /// keeps the same mark column so the words start in one line. Details (ports, pids, addresses) are in settings ›
 /// environment; hovering a row shows its full line.
 struct MenuContentView: View {
@@ -21,20 +21,20 @@ struct MenuContentView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
-            SectionLabel("status").padding(.horizontal, 16).padding(.top, 4)
+            SectionLabel("Status").padding(.horizontal, 16).padding(.top, 4)
             services
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
                 .padding(.bottom, 10)
             if !model.usageRows.isEmpty {
-                SectionLabel("usage").padding(.horizontal, 16).padding(.top, 4)
+                SectionLabel("Usage").padding(.horizontal, 16).padding(.top, 4)
                 usage
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
                     .padding(.bottom, 12)
             }
             if !attention.isEmpty || !model.notices.isEmpty {
-                SectionLabel("waiting").padding(.horizontal, 16).padding(.top, 4)
+                SectionLabel("Waiting").padding(.horizontal, 16).padding(.top, 4)
                 attentionList
                     .padding(.horizontal, 16)
                     .padding(.top, 6)
@@ -61,7 +61,7 @@ struct MenuContentView: View {
 
     // MARK: header
 
-    /// The mark (with depth: an identity mark of 20+ pt) in the app's state, the name, and one word: `ok`, or how
+    /// The mark (with depth: an identity mark of 20+ pt) in the app's state, the name, and one word: `OK`, or how
     /// many things wait for the user once the services are fine.
     private var header: some View {
         HStack(spacing: 10) {
@@ -79,7 +79,7 @@ struct MenuContentView: View {
 
     private var headline: StatusLine {
         let level = model.overallLevel
-        if level == .ok && waitingCount > 0 { return StatusLine("\(waitingCount) waiting", .warning) }
+        if level == .ok && waitingCount > 0 { return StatusLine("\(waitingCount) Waiting", .warning) }
         return StatusLine(StatusText.headline(level), level)
     }
 
@@ -87,13 +87,13 @@ struct MenuContentView: View {
 
     private var services: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ServiceRow(label: "service", line: StatusText.service(model.daemonState, ready: model.daemonReady), detail: model.daemonLine.text)
-            ServiceRow(label: "gateway", line: model.gateShortLine, detail: model.gateLine.text)
+            ServiceRow(label: "Service", line: StatusText.service(model.daemonState, ready: model.daemonReady), detail: model.daemonLine.text)
+            ServiceRow(label: "Gateway", line: model.gateShortLine, detail: model.gateLine.text)
             ServiceRow(label: "iPhone", line: StatusText.phone(remote: model.remoteLine, enabled: model.remoteEnabled,
                                                                 devices: model.devices, online: model.remote?.onlineDevices),
                        detail: model.remoteLine.text)
             ServiceRow(label: "Tailscale", line: StatusText.tailscale(model.tailscale, tailnet: model.tailnetAddresses),
-                       detail: model.tailscale?.summary ?? "checking")
+                       detail: model.tailscale?.summary ?? "Checking")
         }
     }
 
@@ -116,8 +116,8 @@ struct MenuContentView: View {
                     Text(item.text).mono(12)
                     Spacer(minLength: 8)
                     Button(item.action) {
-                        // update…: the confirmation sheet, in environment where the outcome stays readable.
-                        if item.id == "gate" && item.action != "fix" { model.requestGateService(.update) }
+                        // Update…: the confirmation sheet, in Environment where the outcome stays readable.
+                        if item.id == "gate" && item.offersUpdate { model.requestGateService(.update) }
                         showSettings(.environment)
                     }
                     .controlSize(.small)
@@ -140,9 +140,9 @@ struct MenuContentView: View {
     private func update(_ built: String) -> some View {
         HStack(spacing: 8) {
             Color.clear.frame(width: 10, height: 1)
-            Text("new build · \(TimeText.build(built))").mono(11).foregroundStyle(.secondary).lineLimit(1)
+            Text("New Build · \(TimeText.build(built))").mono(11).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 8)
-            Button("install…") { confirmUpdate(built) }
+            Button("Install…") { confirmUpdate(built) }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .font(.system(size: 11, design: .monospaced))
@@ -153,8 +153,8 @@ struct MenuContentView: View {
         let alert = NSAlert()
         alert.messageText = "安装新版本？"
         alert.informativeText = "AgentSwitch 将退出并替换为构建于 \(TimeText.build(built)) 的版本，正在运行的任务将中断。新版本 \(AppUpdate.healthWait) 秒内未启动时，自动恢复当前版本。macOS 请求文件夹访问权限时，请选择允许。"
-        alert.addButton(withTitle: "install & restart")
-        alert.addButton(withTitle: "cancel")
+        alert.addButton(withTitle: "Install & Restart")
+        alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { Task { await model.installUpdate() } }
     }
 
@@ -163,17 +163,17 @@ struct MenuContentView: View {
     private var actions: some View {
         VStack(alignment: .leading, spacing: 0) {
             // words only: an icon on every item differentiates nothing (docs/ui-v0.md §7.2.5)
-            MenuAction(title: "pair device…") { showSettings(.pairing) }
+            MenuAction(title: "Pair Device…") { showSettings(.pairing) }
             // The Dock icon opens the terminal window (2026-09-30, user: dock 栏直接点图标就可以打开 terminal，就不用状态栏里的
             // open terminal 了); without a Dock icon this is the way in.
             if !alwaysShowInDock {
-                MenuAction(title: "open terminal", enabled: model.daemonReady) { showTerminals() }
+                MenuAction(title: "Open Terminal", enabled: model.daemonReady) { showTerminals() }
             }
-            MenuAction(title: "open console", enabled: model.daemonReady) { openConsole() }
-            MenuAction(title: "restart service") { model.restartAll() }
-            MenuAction(title: "settings…") { showSettings(nil) }
+            MenuAction(title: "Open Console", enabled: model.daemonReady) { openConsole() }
+            MenuAction(title: "Restart Service") { model.restartAll() }
+            MenuAction(title: "Settings…") { showSettings(nil) }
             DottedRule().padding(.horizontal, 6).padding(.vertical, 5)
-            MenuAction(title: "quit AgentSwitch") { quitApp() }
+            MenuAction(title: "Quit AgentSwitch") { quitApp() }
         }
     }
 
@@ -186,7 +186,7 @@ struct MenuContentView: View {
     }
 }
 
-/// `■ service        ok`; the full status line on hover.
+/// `■ Service        OK`; the full status line on hover.
 private struct ServiceRow: View {
     let label: String
     let line: StatusLine

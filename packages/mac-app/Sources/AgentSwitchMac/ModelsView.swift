@@ -16,12 +16,12 @@ struct ModelsView: View {
     var body: some View {
         Group {
             if !model.daemonReady {
-                EmptyPage(title: "service not ready", symbol: "hourglass", message: model.daemonLine.text)
+                EmptyPage(title: "Service Not Ready", symbol: "hourglass", message: model.daemonLine.text)
             } else if let settings {
                 form(settings)
             } else if let problem {
-                EmptyPage(title: "models: unavailable", symbol: "exclamationmark.triangle", message: problem) {
-                    Button("retry") { Task { await load() } }
+                EmptyPage(title: "Models: Unavailable", symbol: "exclamationmark.triangle", message: problem) {
+                    Button("Retry") { Task { await load() } }
                 }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -29,8 +29,8 @@ struct ModelsView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { Task { await load() } } label: { Label("reload", systemImage: "arrow.clockwise") }
-                    .help("reload")
+                Button { Task { await load() } } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                    .help("Reload")
                     .disabled(!model.daemonReady)
             }
         }
@@ -45,23 +45,23 @@ struct ModelsView: View {
         return Form {
             UsageSection()
             Section {
-                Picker("dispatch model", selection: $routerModel) {
+                Picker("Dispatch Model", selection: $routerModel) {
                     ForEach(options(s.router.options, current: s.router.model), id: \.self) { Text(ModelName.display($0)).tag($0) }
                 }
             } header: {
-                SectionLabel("dispatch")
+                SectionLabel("Dispatch")
             } footer: {
                 Footer("根据消息内容选择执行器和模型。")
             }
             Section {
-                Picker("executor", selection: $harness) {
+                Picker("Executor", selection: $harness) {
                     ForEach(s.harnessNames, id: \.self) { Text(HarnessName.display($0)).tag($0) }
                 }
-                Picker("model", selection: $targetModel) {
+                Picker("Model", selection: $targetModel) {
                     ForEach(options(s.models(for: harness), current: targetModel), id: \.self) { Text(ModelName.display($0)).tag($0) }
                 }
             } header: {
-                SectionLabel("default")
+                SectionLabel("Default")
             } footer: {
                 Footer("调度模型无法判断、所选模型均不可用或调度出错时，任务交由此模型执行。")
             }
@@ -71,7 +71,7 @@ struct ModelsView: View {
                     status(s, unsaved: !changes.isEmpty)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if busy { ProgressView().controlSize(.small) }
-                    Button("save & restart") { Task { await save(s) } }
+                    Button("Save & Restart") { Task { await save(s) } }
                         .buttonStyle(.borderedProminent)
                         .disabled(busy || changes.isEmpty)
                         .help("保存到 \(model.shortPath(model.paths.modelsOverride))，覆盖 targets.yaml 中的对应设置")
@@ -95,7 +95,7 @@ struct ModelsView: View {
         } else if s.restartPending && !unsaved {
             HStack(spacing: 6) {
                 StatusDot(level: .warning)
-                Text("saved · applies after restart").foregroundStyle(.secondary)
+                Text("Saved · Applies After Restart").foregroundStyle(.secondary)
             }
         } else {
             Footer("保存后服务将重启，正在运行的任务将中断。")
@@ -130,10 +130,10 @@ struct ModelsView: View {
             let result = try await model.client.saveModelSettings(update)
             problem = nil
             if result.restartRequired {
-                saved = "saved · restarting"
+                saved = "Saved · Restarting"
                 model.restartDaemon()
             } else {
-                saved = "saved"
+                saved = "Saved"
             }
         } catch {
             problem = error.localizedDescription
@@ -152,12 +152,12 @@ private struct UsageSection: View {
             Section {
                 ForEach(rows) { UsageRowView(row: $0) }
             } header: {
-                SectionLabel("usage")
+                SectionLabel("Usage")
             } footer: {
                 HStack(alignment: .center, spacing: 8) {
-                    Footer(model.usageReadAt.map { "read \(TimeText.at($0))" } ?? "no reading")
+                    Footer(model.usageReadAt.map { "Read \(TimeText.at($0))" } ?? "No Reading")
                     if model.usageRefreshing { ProgressView().controlSize(.small) }
-                    Button("refresh") { Task { await model.refreshUsage(force: true) } }
+                    Button("Refresh") { Task { await model.refreshUsage(force: true) } }
                         .disabled(model.usageRefreshing)
                 }
             }

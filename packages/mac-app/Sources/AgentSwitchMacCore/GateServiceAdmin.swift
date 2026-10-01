@@ -13,9 +13,9 @@ public enum GateServiceOperation: Sendable, Equatable {
     /// What the row says while it runs.
     public var progressText: String {
         switch self {
-        case .install: return "installing"
-        case .update, .repair, .changePort: return "updating"
-        case .uninstall: return "uninstalling"
+        case .install: return "Installing"
+        case .update, .repair, .changePort: return "Updating"
+        case .uninstall: return "Uninstalling"
         }
     }
 
@@ -41,9 +41,9 @@ public enum GateServiceOperation: Sendable, Equatable {
 
     public var failedText: String {
         switch self {
-        case .install: return "install failed"
-        case .update, .repair, .changePort: return "update failed"
-        case .uninstall: return "uninstall failed"
+        case .install: return "Install Failed"
+        case .update, .repair, .changePort: return "Update Failed"
+        case .uninstall: return "Uninstall Failed"
         }
     }
 }

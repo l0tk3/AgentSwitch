@@ -17,20 +17,20 @@ public enum SetupAction: Equatable, Sendable {
     /// The pre-install CA out of the login keychain (its key was readable by this user).
     case removePreviousGateCA
 
-    /// Verb first, two to four characters (docs/ui-v0.md §4) where the product name allows.
+    /// Verb first, in title case (docs/ui-v0.md §4, §7.2.7) where the product name allows.
     public var title: String {
         switch self {
-        case .login: return "sign in"
-        case .copyInstall: return "copy command"
-        case .pair: return "pair"
-        case .openTailscale: return "open Tailscale"
-        case .installTailscale: return "get Tailscale"
-        case .chooseWorkDir: return "choose…"
-        case .installGateService: return "install…"
-        case .updateGateService: return "update…"
-        case .repairGateService: return "repair…"
-        case .trustGateCA: return "trust…"
-        case .removePreviousGateCA: return "remove…"
+        case .login: return "Sign In"
+        case .copyInstall: return "Copy Command"
+        case .pair: return "Pair"
+        case .openTailscale: return "Open Tailscale"
+        case .installTailscale: return "Get Tailscale"
+        case .chooseWorkDir: return "Choose…"
+        case .installGateService: return "Install…"
+        case .updateGateService: return "Update…"
+        case .repairGateService: return "Repair…"
+        case .trustGateCA: return "Trust…"
+        case .removePreviousGateCA: return "Remove…"
         }
     }
 }
@@ -43,7 +43,7 @@ public struct SetupItem: Equatable, Sendable, Identifiable {
     public let id: String
     public let title: String
     public let state: State
-    /// One or two words: 可用, 未登录, 已配对 1 台, ~/AgentSwitch.
+    /// One or two words: OK, Signed Out, 1 Paired, ~/AgentSwitch.
     public let status: String
     /// A second line when the row needs one: the install command, the folder's problem.
     public let detail: String?
@@ -101,7 +101,7 @@ public enum SetupChecklist {
     public static func harnessItems(_ reports: [HarnessReport]) -> [SetupItem] {
         Harness.allCases.map { harness in
             guard let report = reports.first(where: { $0.harness == harness }) else {
-                return SetupItem(id: harness.rawValue, title: harness.title, state: .checking, status: "checking")
+                return SetupItem(id: harness.rawValue, title: harness.title, state: .checking, status: "Checking")
             }
             let status = StatusText.harness(report.state).text
             switch report.state {
@@ -117,25 +117,25 @@ public enum SetupChecklist {
     }
 
     static func phone(_ devices: [Device]?) -> SetupItem {
-        guard let devices else { return SetupItem(id: "phone", title: "iPhone", state: .checking, status: "loading") }
+        guard let devices else { return SetupItem(id: "phone", title: "iPhone", state: .checking, status: "Loading") }
         let active = devices.filter { !$0.isRevoked }.count
         return active > 0
-            ? SetupItem(id: "phone", title: "iPhone", state: .done, status: "\(active) paired")
-            : SetupItem(id: "phone", title: "iPhone", state: .todo, status: "not paired", action: .pair)
+            ? SetupItem(id: "phone", title: "iPhone", state: .done, status: "\(active) Paired")
+            : SetupItem(id: "phone", title: "iPhone", state: .todo, status: "Not Paired", action: .pair)
     }
 
     static func tailscale(_ status: TailscaleStatus?, tailnet: [String]) -> SetupItem {
-        if !tailnet.isEmpty { return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "connected") }
+        if !tailnet.isEmpty { return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "Connected") }
         switch status?.state {
         case .none:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .checking, status: "checking")
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .checking, status: "Checking")
         case .running:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "connected")
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .done, status: "Connected")
         case .stopped:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "disconnected",
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "Disconnected",
                              detail: "打开并登录 Tailscale 后，iPhone 可在局域网外连接", action: .openTailscale)
         case .notInstalled:
-            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "not installed",
+            return SetupItem(id: "tailscale", title: "Tailscale", state: .todo, status: "Not Installed",
                              detail: "iPhone 仅可在同一局域网内连接", action: .installTailscale)
         }
     }
@@ -147,16 +147,16 @@ public enum SetupChecklist {
     }
 
     static func workDir(_ fact: WorkDirFact, home: String) -> SetupItem? {
-        let title = "work folder"
+        let title = "Work Folder"
         switch fact {
         case .unsupported:
             return nil
         case .unknown:
-            return SetupItem(id: "workdir", title: title, state: .checking, status: "loading")
+            return SetupItem(id: "workdir", title: title, state: .checking, status: "Loading")
         case .known(let s):
             let path = DisplayPath.short(s.path, home: home)
             guard let problem = s.problem else { return SetupItem(id: "workdir", title: title, state: .done, status: path) }
-            return SetupItem(id: "workdir", title: title, state: .todo, status: "unavailable", detail: "\(path)：\(problem)",
+            return SetupItem(id: "workdir", title: title, state: .todo, status: "Unavailable", detail: "\(path)：\(problem)",
                              action: .chooseWorkDir)
         }
     }

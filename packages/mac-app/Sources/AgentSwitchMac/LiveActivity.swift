@@ -230,7 +230,7 @@ final class LiveActivity {
         item.button?.action = #selector(LiveActivityTarget.clicked(_:))
         item.button?.sendAction(on: [.leftMouseUp])
         item.button?.imagePosition = .imageOnly
-        item.button?.setAccessibilityLabel("AgentSwitch live activity")
+        item.button?.setAccessibilityLabel("AgentSwitch Live Activity")
         self.target = target
         self.item = item
         // The bar lays the capsule out again after its image changes (a wider clock, the tally): the card follows.

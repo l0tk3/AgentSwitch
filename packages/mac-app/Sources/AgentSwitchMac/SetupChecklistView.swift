@@ -16,16 +16,16 @@ struct SetupChecklistSection: View {
         Section {
             ForEach(working + todo) { SetupItemRow(item: $0) }
             if !checking.isEmpty {
-                SetupSummaryRow(level: .busy, label: "checking", names: checking.map(\.title))
+                SetupSummaryRow(level: .busy, label: "Checking", names: checking.map(\.title))
             }
             if !done.isEmpty {
-                SetupSummaryRow(level: .ok, label: todo.isEmpty && checking.isEmpty ? "all set" : "done", names: done.map(\.title))
+                SetupSummaryRow(level: .ok, label: todo.isEmpty && checking.isEmpty ? "All Set" : "Done", names: done.map(\.title))
             }
         } header: {
             HStack {
-                SectionLabel("setup")
+                SectionLabel("Setup")
                 Spacer()
-                if !todo.isEmpty { Text("\(todo.count) left").font(.callout).foregroundStyle(.secondary) }
+                if !todo.isEmpty { Text("\(todo.count) Left").font(.callout).foregroundStyle(.secondary) }
             }
         } footer: {
             if todo.contains(where: { if case .login = $0.action { return true } else { return false } }) {
@@ -35,7 +35,7 @@ struct SetupChecklistSection: View {
     }
 }
 
-/// `● 已完成   Claude Code、Codex、iPhone`
+/// `■ Done   Claude Code, Codex, iPhone`
 private struct SetupSummaryRow: View {
     let level: StatusLevel
     let label: String
@@ -52,7 +52,7 @@ private struct SetupSummaryRow: View {
     }
 }
 
-/// `● OpenCode                                    未登录  [登录]`
+/// `■ OpenCode                                    Signed Out  [Sign In]`
 ///   `在“终端”里运行 opencode auth login`
 struct SetupItemRow: View {
     @Environment(AppModel.self) private var model
@@ -78,12 +78,12 @@ struct SetupItemRow: View {
             if item.state == .working || busy { ProgressView().controlSize(.small) }
             Text(item.status).mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             if let action = item.action {
-                Button(copied ? "copied" : action.title) { perform(action) }.disabled(busy)
+                Button(copied ? "Copied" : action.title) { perform(action) }.disabled(busy)
             }
         }
         .padding(.vertical, 2)
         .confirmationDialog("将网关证书加入登录钥匙串？", isPresented: $confirmTrust) {
-            Button("trust") { run { _ = await model.trustGateCA() } }
+            Button("Trust") { run { _ = await model.trustGateCA() } }
         } message: {
             Text(GateCATrustText.confirmation(service: model.gateMode.isService))
         }

@@ -52,7 +52,7 @@ final class ApprovalPolicyTests: XCTestCase {
     }
 
     func testModeWordsFollowTheContract() {
-        XCTAssertEqual(ApprovalMode.allCases.map(\.title), ["ask each", "auto", "all auto", "bypass"])
+        XCTAssertEqual(ApprovalMode.allCases.map(\.title), ["Ask Each", "Auto", "All Auto", "Bypass"])
         XCTAssertEqual(ApprovalMode.recommended, .scoped)
         let warning = ApprovalMode.skipWarning
         for phrase in ["禁区不可访问", "本机令牌", "浏览器会话", "只读步骤", "由你回答", "Codex 在沙箱中运行"] {

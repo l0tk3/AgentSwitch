@@ -58,7 +58,7 @@ struct GateServiceSheet: View {
         .tint(.brand)
         .interactiveDismissDisabled(running)
         .confirmationDialog("删除全部密钥？", isPresented: $confirmDelete) {
-            Button("delete keys & uninstall", role: .destructive) { start() }
+            Button("Delete Keys & Uninstall", role: .destructive) { start() }
         } message: {
             Text("用这些密钥加密的密文将全部无法解密，此操作无法撤销。")
         }
@@ -106,11 +106,11 @@ struct GateServiceSheet: View {
 
     private var confirmTitle: String {
         switch operation {
-        case .install: return "install"
-        case .update: return "update"
-        case .repair: return "repair"
-        case .changePort: return "change"
-        case .uninstall: return "uninstall"
+        case .install: return "Install"
+        case .update: return "Update"
+        case .repair: return "Repair"
+        case .changePort: return "Change"
+        case .uninstall: return "Uninstall"
         }
     }
 
@@ -128,13 +128,13 @@ struct GateServiceSheet: View {
             }
             if case .update = operation, let installed = model.gateService.runtimeVersion {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("installed · \(GateVersionText.label(installed))")
-                    Text("bundled · \(model.bundledGateVersion.map(GateVersionText.label) ?? "unknown")")
+                    Text("Installed · \(GateVersionText.label(installed))")
+                    Text("Bundled · \(model.bundledGateVersion.map(GateVersionText.label) ?? "Unknown")")
                 }
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             if case .uninstall = operation {
-                Toggle("delete keys too", isOn: $deleteKeys)
+                Toggle("Delete Keys Too", isOn: $deleteKeys)
                 if deleteKeys {
                     Label("密钥删除后无法恢复，用这些密钥加密的所有密文将永久无法解密。", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
@@ -143,7 +143,7 @@ struct GateServiceSheet: View {
             }
             Text(footnote).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if model.gateServiceResult?.outcome == .cancelled {
-                Text("cancelled").font(.callout).foregroundStyle(.secondary)
+                Text("Cancelled").font(.callout).foregroundStyle(.secondary)
             }
         }
     }
@@ -188,12 +188,12 @@ struct GateServiceSheet: View {
             if running {
                 EmptyView()   // nothing to press until macOS and the command are done
             } else if let result, result != .cancelled {
-                Button(result.succeeded ? "done" : "close") { model.dismissGateServiceRequest() }
+                Button(result.succeeded ? "Done" : "Close") { model.dismissGateServiceRequest() }
                     .keyboardShortcut(.defaultAction)
             } else {
-                Button("cancel") { model.dismissGateServiceRequest() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { model.dismissGateServiceRequest() }.keyboardShortcut(.cancelAction)
                 if case .uninstall = operation {
-                    Button(deleteKeys ? "uninstall & delete keys" : confirmTitle, role: .destructive) {
+                    Button(deleteKeys ? "Uninstall & Delete Keys" : confirmTitle, role: .destructive) {
                         if deleteKeys { confirmDelete = true } else { start() }
                     }
                     .keyboardShortcut(.defaultAction)
@@ -244,9 +244,9 @@ struct GateLogSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("gateway log").font(.headline)
+                Text("Gateway Log").font(.headline)
                 Spacer()
-                Picker("log", selection: $name) {
+                Picker("Log", selection: $name) {
                     ForEach(GateLogName.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -254,7 +254,7 @@ struct GateLogSheet: View {
                 .fixedSize()
             }
             ScrollView {
-                Text(problem ?? (text.isEmpty ? (loading ? "loading" : "no log") : text))
+                Text(problem ?? (text.isEmpty ? (loading ? "Loading" : "No Log") : text))
                     .font(.caption.monospaced())
                     .foregroundStyle(problem == nil ? .primary : .secondary)
                     .textSelection(.enabled)
@@ -266,8 +266,8 @@ struct GateLogSheet: View {
             Text("最近 300 行，由凭据网关服务提供。").font(.callout).foregroundStyle(.secondary)
             HStack {
                 Spacer()
-                Button("refresh") { Task { await load() } }.disabled(loading)
-                Button("close") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Refresh") { Task { await load() } }.disabled(loading)
+                Button("Close") { dismiss() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
@@ -297,15 +297,15 @@ struct GateServiceSection: View {
         let state = facts.state
         Section {
             // The full line is under 服务与网络 › 凭据网关.
-            StatusRow(label: "status", line: GateServiceText.short(facts))
+            StatusRow(label: "Status", line: GateServiceText.short(facts))
             if state.isInstalled {
-                LabeledContent("account", value: GateServicePaths.account)
-                LabeledContent("version") {
+                LabeledContent("Account", value: GateServicePaths.account)
+                LabeledContent("Version") {
                     HStack(spacing: 6) {
                         if facts.updateAvailable { StatusDot(level: .warning) }
-                        Text(state.runtimeVersion.map(GateVersionText.label) ?? "unknown").foregroundStyle(.secondary).monospacedDigit()
+                        Text(state.runtimeVersion.map(GateVersionText.label) ?? "Unknown").foregroundStyle(.secondary).monospacedDigit()
                     }
-                    .help(facts.updateAvailable ? "bundled · \(model.bundledGateVersion ?? "unknown")" : (state.runtimeVersion ?? ""))
+                    .help(facts.updateAvailable ? "Bundled · \(model.bundledGateVersion ?? "Unknown")" : (state.runtimeVersion ?? ""))
                 }
             }
             if let problem = state.problem {
@@ -315,10 +315,10 @@ struct GateServiceSection: View {
                 }
             }
             if state.availability != .unsupported {
-                LabeledContent("actions") { actions(facts) }
+                LabeledContent("Actions") { actions(facts) }
             }
         } header: {
-            SectionLabel("gateway service")
+            SectionLabel("Gateway Service")
         } footer: {
             Footer(footer(state))
         }
@@ -331,13 +331,13 @@ struct GateServiceSection: View {
             if busy { ProgressView().controlSize(.small) }
             if facts.state.isInstalled {
                 if facts.health == .notResponding {
-                    Button("repair…") { model.requestGateService(.repair) }.disabled(busy)
+                    Button("Repair…") { model.requestGateService(.repair) }.disabled(busy)
                 } else if facts.updateAvailable {
-                    Button("update…") { model.requestGateService(.update) }.disabled(busy)
+                    Button("Update…") { model.requestGateService(.update) }.disabled(busy)
                 }
-                Button("uninstall…") { model.requestGateService(.uninstall(deleteKeys: false)) }.disabled(busy)
+                Button("Uninstall…") { model.requestGateService(.uninstall(deleteKeys: false)) }.disabled(busy)
             } else {
-                Button("install…") { model.requestGateService(.install) }.disabled(busy || facts.state.availability == .unknown)
+                Button("Install…") { model.requestGateService(.install) }.disabled(busy || facts.state.availability == .unknown)
             }
         }
     }
@@ -354,13 +354,13 @@ struct GateServiceSection: View {
     }
 }
 
-/// A gate program version, `<secret-gate>+<built>`: 0.1.0 · 构建于 9月20日 11:41; anything else as it is.
+/// A gate program version, `<secret-gate>+<built>`: 0.1.0 · Built 9/20 11:41; anything else as it is.
 enum GateVersionText {
     static func label(_ version: String) -> String {
         let parts = version.split(separator: "+", maxSplits: 1).map(String.init)
         let built = parts.last ?? version
         guard built.contains("T"), FlexibleDate.parse(built) != nil else { return version }
-        let when = "built \(TimeText.build(built))"
+        let when = "Built \(TimeText.build(built))"
         return parts.count == 2 ? "\(parts[0]) · \(when)" : when
     }
 }

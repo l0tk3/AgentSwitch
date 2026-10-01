@@ -8,10 +8,10 @@ public enum SetupStep: Int, CaseIterable, Sendable, Identifiable {
 
     public var title: String {
         switch self {
-        case .executors: return "executors"
-        case .pairing: return "pair iPhone"
-        case .permissions: return "permissions & launch"
-        case .done: return "done"
+        case .executors: return "Executors"
+        case .pairing: return "Pair iPhone"
+        case .permissions: return "Permissions & Launch"
+        case .done: return "Done"
         }
     }
 
