@@ -13,22 +13,22 @@ struct ApprovalCard: View {
             if let evidence = approval.questionEvidence {
                 QuestionForm(evidence: evidence, busy: busy) { answers in await run { await onAnswer(answers) } }
             } else if approval.kind == .question {
-                Heading(text: "answer")
+                Heading(text: "Answer")
                 Text(approval.action)
                 Text("此问题的格式暂不支持在 iPhone 上回答，请在 Mac 上回答。").font(.footnote).foregroundStyle(.secondary)
             } else {
-                Heading(text: "approve")
+                Heading(text: "Approve")
                 Text(approval.action).font(.callout.monospaced()).textSelection(.enabled)
                 if !approval.evidence.isEmpty {
-                    DisclosureGroup("details") {
+                    DisclosureGroup("Details") {
                         Text(approval.evidence).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                     .font(.footnote)
                 }
                 HStack(spacing: Theme.Space.m) {
-                    Button { Task { await run { await onDecide(.deny) } } } label: { Text("[ deny ]") }
+                    Button { Task { await run { await onDecide(.deny) } } } label: { Text("[ Deny ]") }
                         .buttonStyle(SquareButtonStyle(destructive: true))
-                    Button { Task { await run { await onDecide(.allow) } } } label: { Text("[ allow ]") }
+                    Button { Task { await run { await onDecide(.allow) } } } label: { Text("[ Allow ]") }
                         .buttonStyle(SquareButtonStyle(prominent: true))
                 }
                 .disabled(busy)
@@ -57,13 +57,13 @@ struct QuestionForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Heading(text: "answer")
+            Heading(text: "Answer")
             ForEach(evidence.questions) { q in question(q) }
             if let problem { Text(problem).font(.footnote).foregroundStyle(Theme.failed) }
             Button {
                 Task { await submit() }
             } label: {
-                Text(busy ? "[ submitting ]" : "[ submit ]")
+                Text(busy ? "[ Submitting ]" : "[ Submit ]")
             }
             .buttonStyle(SquareButtonStyle(prominent: true))
             .disabled(busy)
@@ -95,7 +95,7 @@ struct QuestionForm: View {
                 SecureField("直接输入，由 Mac 加密", text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }))
                     .answerField()
                 if !model.ciphertexts.isEmpty {
-                    Button("use saved ciphertext") { pickingFor = q.id }.mono(12)
+                    Button("Use Saved Ciphertext") { pickingFor = q.id }.mono(12)
                 }
             } else {
                 TextField(q.options.isEmpty ? "回答" : "其他回答（可选）", text: Binding(get: { typed[q.id] ?? "" }, set: { typed[q.id] = $0 }), axis: .vertical)
@@ -138,7 +138,7 @@ private struct QuestionID: Identifiable {
     let id: String
 }
 
-/// `approve` / `answer`: the one line in the waiting colour, with its square.
+/// `Approve` / `Answer`: the one line in the waiting colour, with its square.
 private struct Heading: View {
     let text: String
     var body: some View {

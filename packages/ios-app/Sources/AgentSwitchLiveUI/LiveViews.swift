@@ -4,7 +4,7 @@ import SwiftUI
 /// The Live Activity's views (assistant-v0 §4), in a package so the Mac can render them in tests (LiveRenderTests);
 /// the widget extension places them in the Dynamic Island's regions and on the lock screen. Drawn in the app's own
 /// language (ui-v0 §7, docs/design/visual-v1/island.html): the pixel mark as the identity and the state, status squares
-/// and the spinner's first frame, tree lines and dotted rules, lowercase mono words, a bracket button. Everything is
+/// and the spinner's first frame, tree lines and dotted rules, short mono words in title case (§7.2.7), a bracket button. Everything is
 /// drawn for a black background: the island is always black and the lock screen card gets a dark tint, so white text
 /// reads on any wallpaper. The corners of the island clip, so nothing sits in them.
 public enum LiveLook {
@@ -43,9 +43,9 @@ public enum LiveLook {
     /// The status word (§7.2.7, the same as in the app).
     public static func word(_ state: LiveState) -> String {
         switch state.phase {
-        case .needsYou: return "waiting"
-        case .running: return "busy"
-        case .ended: return state.ended?.ok == true ? "done" : "incomplete"
+        case .needsYou: return "Waiting"
+        case .running: return "Busy"
+        case .ended: return state.ended?.ok == true ? "Done" : "Incomplete"
         }
     }
 
@@ -54,10 +54,10 @@ public enum LiveLook {
         state.lead?.link ?? state.ended.map { LiveLink.task($0.taskId) }
     }
 
-    /// "+2 more" when the island shows one of several.
+    /// "+2 More" when the island shows one of several.
     public static func others(_ state: LiveState) -> String? {
         let more = state.running + state.waiting - 1
-        return more > 0 ? "+\(more) more" : nil
+        return more > 0 ? "+\(more) More" : nil
     }
 
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
@@ -227,7 +227,8 @@ struct DottedRule: View {
     }
 }
 
-/// Who works on the lead row: a terminal's agent by its mark and name, a task's model by its short name, lowercase.
+/// Who works on the lead row: a terminal's agent by its mark and name, a task's model by its short name, as its maker
+/// writes it (Sonnet 4.6, DeepSeek Flash); `Routing` before the router has picked one.
 struct Worker: View {
     let row: LiveState.Row
 
@@ -236,7 +237,7 @@ struct Worker: View {
             if row.kind == .terminal, let model = row.model, let harness = LiveArt.harness(named: model), let rows = LiveArt.agents[harness] {
                 LiveSprite(rows: rows)
             }
-            Text((row.model ?? "routing").lowercased()).lineLimit(1)
+            Text(row.model ?? "Routing").lineLimit(1)
         }
     }
 }
@@ -255,7 +256,7 @@ struct OpenButton: View {
     }
 
     private var face: some View {
-        Text("[ open ]").font(LiveLook.mono(13, .semibold)).foregroundStyle(.black)
+        Text("[ Open ]").font(LiveLook.mono(13, .semibold)).foregroundStyle(.black)
             .padding(.horizontal, 10).padding(.vertical, 5)
             // Square (§7: hard edges), drawn as rectangles: a plain colour background comes out rounded here.
             .background {
@@ -338,7 +339,7 @@ public struct IslandTrailing: View {
 }
 
 /// Expanded island, the wide bottom, aligned left: the title, `└─` what it is doing or asks, then under a dotted rule
-/// who works on it, how many more, and `[ open ]` when it waits for you; or how it ended.
+/// who works on it, how many more, and `[ Open ]` when it waits for you; or how it ended.
 public struct IslandBottom: View {
     let state: LiveState
     let linked: Bool
@@ -376,7 +377,7 @@ public struct IslandBottom: View {
 
 // MARK: - the lock screen
 
-/// The lock screen: the mark, `agentswitch · <Mac>` and the counts (or the word); a dotted rule; then up to three
+/// The lock screen: the mark, `AgentSwitch · <Mac>` and the counts (or the word); a dotted rule; then up to three
 /// rows — tasks and terminals waiting for you first, their question in amber, then tasks in progress — or the last
 /// conclusion.
 public struct LockScreenCard: View {
@@ -394,7 +395,7 @@ public struct LockScreenCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 LiveMark(state: state)
-                Text("agentswitch").font(LiveLook.mono(12, .semibold)).foregroundStyle(LiveLook.text)
+                Text("AgentSwitch").font(LiveLook.mono(12, .semibold)).foregroundStyle(LiveLook.text)
                 Text("· \(mac)").font(LiveLook.mono(12)).foregroundStyle(LiveLook.faint).lineLimit(1)
                 Spacer(minLength: 4)
                 if state.running + state.waiting > 1 {

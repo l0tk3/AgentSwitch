@@ -14,13 +14,13 @@ struct MacAppSection: View {
         Section {
             if let staged = update?.staged, !requested {
                 Button { confirming = true } label: {
-                    LabeledContent("install new version") { Text(staged).mono(13) }
+                    LabeledContent("Install New Version") { Text(staged).mono(13) }
                 }
             } else if requested {
                 Text("正在安装。Mac 上的 AgentSwitch 将重启，结果将显示在对话中。")
                     .foregroundStyle(.secondary)
             } else {
-                LabeledContent("version") { Text(update?.running ?? "—").mono(13) }
+                LabeledContent("Version") { Text(update?.running ?? "—").mono(13) }
             }
             if let last = update?.last, !last.ok {
                 Text(last.reverted ? "上次更新失败，已恢复至上一版本：\(last.reason)" : "上次更新未安装：\(last.reason)")
@@ -28,13 +28,13 @@ struct MacAppSection: View {
             }
             if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
         } header: {
-            SectionLabel("Mac app")
+            SectionLabel("Mac App")
         } footer: {
             Text("安装时正在进行的任务将中断；新版本无法启动时将自动恢复至上一版本。")
         }
         .task { await load() }
         .confirmationDialog("安装新版本？", isPresented: $confirming, titleVisibility: .visible) {
-            Button("install and restart") { Task { await install() } }
+            Button("Install and Restart") { Task { await install() } }
         } message: {
             Text("正在进行的任务将中断。")
         }

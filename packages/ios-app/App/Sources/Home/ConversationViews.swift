@@ -112,7 +112,7 @@ struct AssistantBubble: View {
     private var playButton: some View {
         let speaking = model.speaker.speakingTaskId == speakKey
         return Button(action: toggleSpeech) {
-            Label(speaking ? "stop" : "read aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2")
+            Label(speaking ? "Stop" : "Read Aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2")
                 .mono(12)
                 .foregroundStyle(speaking ? Color.accentColor : .secondary)
         }
@@ -122,10 +122,10 @@ struct AssistantBubble: View {
     @ViewBuilder
     private var readAloud: some View {
         let speaking = model.speaker.speakingTaskId == speakKey
-        Button(speaking ? "stop" : "read aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2", action: toggleSpeech)
-        Button("copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
+        Button(speaking ? "Stop" : "Read Aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2", action: toggleSpeech)
+        Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
         Divider()
-        Button("delete", systemImage: "trash", role: .destructive) { delete(.entry(model.conversation.entry(of: message))) }
+        Button("Delete", systemImage: "trash", role: .destructive) { delete(.entry(model.conversation.entry(of: message))) }
     }
 }
 
@@ -169,14 +169,14 @@ struct OutgoingBubble: View {
             if let failure = message.failure {
                 Text(failure).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.trailing)
                 HStack(spacing: Theme.Space.m) {
-                    Button("[ edit ]") { model.editOutgoing() }.buttonStyle(SquareButtonStyle(expand: false))
-                    Button("[ resend ]") { Task { await model.resend() } }.buttonStyle(SquareButtonStyle(prominent: true, expand: false))
+                    Button("[ Edit ]") { model.editOutgoing() }.buttonStyle(SquareButtonStyle(expand: false))
+                    Button("[ Resend ]") { Task { await model.resend() } }.buttonStyle(SquareButtonStyle(prominent: true, expand: false))
                 }
                 .disabled(model.sending)
             } else {
                 HStack(spacing: 6) {
                     BrailleSpinner(color: .secondary)
-                    Text(message.staged == nil && !message.attachments.isEmpty ? "uploading" : "sending")
+                    Text(message.staged == nil && !message.attachments.isEmpty ? "Uploading" : "Sending")
                 }
                 .mono(11)
                 .foregroundStyle(.secondary)

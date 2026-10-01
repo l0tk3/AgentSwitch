@@ -43,7 +43,7 @@ struct SessionTranscriptView: View {
         .safeAreaInset(edge: .bottom) {
             if let resume, TerminalsTab.resumable.contains(session.harness) {
                 Button(action: resume) {
-                    if resuming { BrailleSpinner(color: Theme.base) } else { Text("[ resume ]") }
+                    if resuming { BrailleSpinner(color: Theme.base) } else { Text("[ Resume ]") }
                 }
                     .buttonStyle(SquareButtonStyle(prominent: true))
                     .disabled(resuming)
@@ -73,7 +73,7 @@ struct SessionTranscriptView: View {
             HStack(spacing: 6) {
                 if s.active {
                     BrailleSpinner()
-                    Text("busy").foregroundStyle(Theme.busy).fontWeight(.medium)
+                    Text("Busy").foregroundStyle(Theme.busy).fontWeight(.medium)
                     Text("·").foregroundStyle(.tertiary)
                 }
                 Text(meta(s)).foregroundStyle(.secondary).lineLimit(1)
@@ -173,7 +173,7 @@ private struct SessionItemRow: View {
     static func summary(_ run: [SessionMessage]) -> String {
         var names: [(String, Int)] = []
         for m in run {
-            let name = m.tool.map(ToolDisplay.label) ?? "tool"
+            let name = m.tool.map(ToolDisplay.label) ?? "Tool"
             if let i = names.firstIndex(where: { $0.0 == name }) { names[i].1 += 1 } else { names.append((name, 1)) }
         }
         return names.map { $0.1 > 1 ? "\($0.0) ×\($0.1)" : $0.0 }.joined(separator: " · ")

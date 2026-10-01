@@ -7,7 +7,7 @@ private struct DeleteButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) { Text("delete").mono(12) }
+        Button(action: action) { Text("Delete").mono(12) }
             .buttonStyle(.borderless)
             .foregroundStyle(disabled ? Color.secondary : Theme.failed)
             .disabled(disabled)
@@ -50,14 +50,14 @@ struct TasksManageView: View {
                         DeleteButton(disabled: task.status.isActive) { deleting = .task(task) }
                     }
                     .swipeActions(allowsFullSwipe: false) {
-                        Button("delete") { deleting = .task(task) }
+                        Button("Delete") { deleting = .task(task) }
                             .tint(.red)
                             .disabled(task.status.isActive)
                     }
                 }
             }
         }
-        .navigationTitle("history")
+        .navigationTitle("History")
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索任务和结果")
         .task(id: query) { await search.run(query, model) }
         .deleteConfirmation($deleting, error: $error)

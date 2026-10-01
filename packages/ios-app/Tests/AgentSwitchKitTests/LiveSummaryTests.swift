@@ -52,7 +52,7 @@ final class LiveSummaryTests: XCTestCase {
         XCTAssertEqual(state.running, 3)
         XCTAssertEqual(state.phase, .needsYou)
         XCTAssertEqual(state.lead?.step, "部署到哪个环境？", "the question, not the approval's label (the status says it waits)")
-        XCTAssertEqual(state.rows[1].step, "queued")
+        XCTAssertEqual(state.rows[1].step, "Queued")
         let all = try XCTUnwrap(LiveSummary.state(tasks: tasks, approvals: [], threadTitles: ["th1": "日报汇总"]))
         XCTAssertEqual(all.phase, .running)
         XCTAssertEqual(all.rows.map(\.id), ["newer", "new", "t_x"])

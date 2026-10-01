@@ -22,9 +22,9 @@ struct OnboardingView: View {
                 if let banner = model.banner {
                     Text(banner).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.center)
                 }
-                Button { scanning = true } label: { Text("[ scan QR code ]") }
+                Button { scanning = true } label: { Text("[ Scan QR Code ]") }
                     .buttonStyle(SquareButtonStyle(prominent: true))
-                Button("paste pairing link") { paste() }
+                Button("Paste Pairing Link") { paste() }
                     .controlSize(.large)
                 Text("iPhone 与 Mac 需在同一局域网，或登录同一 Tailscale 网络。")
                     .font(.footnote).foregroundStyle(.tertiary)
@@ -65,16 +65,16 @@ struct ScannerSheet: View {
                     VStack(spacing: 12) {
                         Image(systemName: "camera.fill").font(.largeTitle).foregroundStyle(.secondary)
                         Text(problem).multilineTextAlignment(.center)
-                        Text("可改用「粘贴配对链接」。").font(.footnote).foregroundStyle(.secondary)
+                        Text("可改用「Paste Pairing Link」。").font(.footnote).foregroundStyle(.secondary)
                     }
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.background)
                 }
             }
-            .navigationTitle("scan QR code")
+            .navigationTitle("Scan QR Code")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("close") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         }
     }
 }

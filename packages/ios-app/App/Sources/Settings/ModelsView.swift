@@ -14,10 +14,10 @@ struct ModelsView: View {
             if let targets {
                 if let router = targets.router {
                     Section {
-                        LabeledContent("model", value: ModelName.display(router.model))
-                        if let fallback = router.defaultTarget { LabeledContent("default model", value: fallback.displayName) }
+                        LabeledContent("Model", value: ModelName.display(router.model))
+                        if let fallback = router.defaultTarget { LabeledContent("Default Model", value: fallback.displayName) }
                     } header: {
-                        SectionLabel("router")
+                        SectionLabel("Router")
                     } footer: {
                         Text("调度模型根据消息内容选择执行的模型；无法判断时交由默认模型执行。")
                     }
@@ -27,7 +27,7 @@ struct ModelsView: View {
                 }
             }
         }
-        .navigationTitle("models")
+        .navigationTitle("Models")
         .task { await load() }
         .refreshable { await load() }
     }
@@ -59,8 +59,8 @@ private struct HarnessSection: View {
                     Text(m?.unavailable == true ? "不可用" : (m?.cost ?? "")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            LabeledContent("max at once") { Text("\(spec.maxConcurrent)").mono(13) }
-            LabeledContent("browser") { Text(spec.browser ? "yes" : "no").mono(13) }
+            LabeledContent("Max at Once") { Text("\(spec.maxConcurrent)").mono(13) }
+            LabeledContent("Browser") { Text(spec.browser ? "Yes" : "No").mono(13) }
         }
     }
 }

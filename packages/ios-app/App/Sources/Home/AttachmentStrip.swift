@@ -8,7 +8,7 @@ struct AttachmentStrip: View {
 
     var body: some View {
         if model.preparingAttachments > 0 {
-            HStack(spacing: 6) { BrailleSpinner(color: .secondary); Text("preparing").mono(11).foregroundStyle(.secondary) }
+            HStack(spacing: 6) { BrailleSpinner(color: .secondary); Text("Preparing").mono(11).foregroundStyle(.secondary) }
         }
         if !model.attachments.isEmpty {
             VStack(alignment: .leading, spacing: 4) {

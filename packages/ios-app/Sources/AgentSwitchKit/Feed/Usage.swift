@@ -45,7 +45,7 @@ public enum Usage {
 
         public var id: String { harness }
         public var showsBalance: Bool { slots.isEmpty }
-        public var balanceText: String { "balance " + (balance ?? Usage.missing) }
+        public var balanceText: String { "Balance " + (balance ?? Usage.missing) }
     }
 
     public static func rows(_ readings: [QuotaReading], now: Date = Date()) -> [Row] {

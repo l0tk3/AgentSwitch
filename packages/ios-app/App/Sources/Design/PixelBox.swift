@@ -18,8 +18,8 @@ struct PixelBox {
     var head: String?
     var tone: Tone = .plain
     var message = ""
-    /// The way out first (`[ cancel ]`); nil for a box that only informs, or where a tap outside is the way out.
-    var cancel: String? = "cancel"
+    /// The way out first (`[ Cancel ]`); nil for a box that only informs, or where a tap outside is the way out.
+    var cancel: String? = "Cancel"
     var actions: [Action]
     /// A menu: its actions as rows, placed under (or over) this rect on the screen.
     var anchor: CGRect?

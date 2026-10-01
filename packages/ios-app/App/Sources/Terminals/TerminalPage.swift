@@ -55,7 +55,7 @@ struct TerminalPage: View {
             if !page.drawn && page.away == nil {
                 HStack(spacing: 6) {
                     BrailleSpinner(color: .secondary)
-                    Text("connecting").mono(12).foregroundStyle(.secondary)
+                    Text("Connecting").mono(12).foregroundStyle(.secondary)
                 }
                 .padding(.top, 60)
             }
@@ -87,29 +87,29 @@ struct TerminalPage: View {
                     .accessibilityHint(page.name)
                     HStack(spacing: 5) {
                         TerminalStatusMark(status: status)
-                        Text(page.permissions.isEmpty ? page.status.label : "waiting").mono(11).foregroundStyle(.secondary)
+                        Text(page.permissions.isEmpty ? page.status.label : "Waiting").mono(11).foregroundStyle(.secondary)
                     }
                 }
                 .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("rename", systemImage: "pencil") { newName = page.name; renaming = true }
-                    Button("close", systemImage: "xmark", role: .destructive) { if page.status == .exited && !canDeleteRecord { Task { await close() } } else { confirmClose = true } }
+                    Button("Rename", systemImage: "pencil") { newName = page.name; renaming = true }
+                    Button("Close", systemImage: "xmark", role: .destructive) { if page.status == .exited && !canDeleteRecord { Task { await close() } } else { confirmClose = true } }
                 } label: { Text("⋯").mono(17) }
                 .tint(Theme.ink)
             }
         }
-        .alert("rename", isPresented: $renaming) {
+        .alert("Rename", isPresented: $renaming) {
             TextField("名称（留空恢复自动命名）", text: $newName)
-            Button("save") { Task { await page.rename(newName) } }
-            Button("cancel", role: .cancel) {}
+            Button("Save") { Task { await page.rename(newName) } }
+            Button("Cancel", role: .cancel) {}
         }
         .pixelBox(isPresented: $confirmClose) {
             var actions: [PixelBox.Action] = []
-            if canDeleteRecord { actions.append(.init(label: "delete record", role: .destructive) { Task { await close(deleteRecord: true) } }) }
-            actions.append(.init(label: "close", role: .primary) { Task { await close() } })
-            return PixelBox(head: "close", tone: .red,
+            if canDeleteRecord { actions.append(.init(label: "Delete Record", role: .destructive) { Task { await close(deleteRecord: true) } }) }
+            actions.append(.init(label: "Close", role: .primary) { Task { await close() } })
+            return PixelBox(head: "Close", tone: .red,
                             message: "关闭「\(page.name)」？" + (canDeleteRecord ? "程序将结束并从列表移除。会话记录默认保留，之后可继续；删除记录后无法恢复。"
                                                                                : "程序将结束并从列表移除；会话记录保留，之后可继续。"),
                             actions: actions)
@@ -117,8 +117,8 @@ struct TerminalPage: View {
         // Either way is an answer; a tap outside keeps the reply in the box.
         .pixelBox(item: $secretCheck) { text in
             PixelBox(head: "这段文字可能包含密码或令牌", tone: .amber, message: "加密发送时，Mac 会先把其中的凭据换成密文，再交给 agent。", cancel: nil,
-                     actions: [.init(label: "send as typed") { Task { await send(text, sealed: false) } },
-                               .init(label: "sealed", role: .primary) { Task { await send(text, sealed: true) } }])
+                     actions: [.init(label: "Send as Typed") { Task { await send(text, sealed: false) } },
+                               .init(label: "Sealed", role: .primary) { Task { await send(text, sealed: true) } }])
         }
         .onAppear {
             page.start(model.api, style: model.terminals.style)
@@ -193,12 +193,12 @@ struct TerminalPage: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
-                Text("permission · \(p.tool)").mono(12, weight: .semibold).foregroundStyle(Theme.waiting)
+                Text("Permission · \(p.tool)").mono(12, weight: .semibold).foregroundStyle(Theme.waiting)
             }
             Text(p.detail).font(.callout.monospaced()).foregroundStyle(Theme.ink).lineLimit(6).textSelection(.enabled)
             HStack(spacing: Theme.Space.m) {
-                Button("[ deny ]") { Task { await page.decide(p, allow: false) } }.buttonStyle(SquareButtonStyle(destructive: true))
-                Button("[ allow ]") { Task { await page.decide(p, allow: true) } }.buttonStyle(SquareButtonStyle(prominent: true))
+                Button("[ Deny ]") { Task { await page.decide(p, allow: false) } }.buttonStyle(SquareButtonStyle(destructive: true))
+                Button("[ Allow ]") { Task { await page.decide(p, allow: true) } }.buttonStyle(SquareButtonStyle(prominent: true))
             }
         }
         .padding(14)
@@ -225,7 +225,7 @@ struct TerminalPage: View {
     /// The terminal is in use on another screen (terminal-v0 §1 "不在用的一端显示占位", phone.html?away): the frame as it
     /// was behind a 50 % dither, a box saying where, glitching in; a tap anywhere takes the size back here.
     private func awayCover(_ place: String) -> some View {
-        let (head, line) = Self.awayCopy[place] ?? ("on web", "这个终端正在浏览器中使用。")
+        let (head, line) = Self.awayCopy[place] ?? ("On Web", "这个终端正在浏览器中使用。")
         return ZStack {
             page.ground.opacity(0.45)
             CheckerTile(color: page.screen.view.nativeBackgroundColor)
@@ -242,7 +242,7 @@ struct TerminalPage: View {
                     .padding(.horizontal, 12).padding(.top, 12)
                 HStack {
                     Spacer()
-                    Button("[ take over ]") { page.claim() }.buttonStyle(SquareButtonStyle(prominent: true))
+                    Button("[ Take Over ]") { page.claim() }.buttonStyle(SquareButtonStyle(prominent: true))
                 }
                 .padding(12)
             }
@@ -257,14 +257,14 @@ struct TerminalPage: View {
     }
 
     private static let awayCopy: [String: (String, String)] = [
-        "mac": ("on mac", "这个终端正在 Mac 上使用。"),
-        "iphone": ("on iphone", "这个终端正在另一台 iPhone 上使用。"),
-        "web": ("on web", "这个终端正在浏览器中使用。"),
+        "mac": ("On Mac", "这个终端正在 Mac 上使用。"),
+        "iphone": ("On iPhone", "这个终端正在另一台 iPhone 上使用。"),
+        "web": ("On Web", "这个终端正在浏览器中使用。"),
     ]
 
-    /// `wheel ↑ 3`: what this drag has sent, gone 0.7 s after the last notch.
+    /// `Wheel ↑ 3`: what this drag has sent, gone 0.7 s after the last notch.
     private var wheelChip: some View {
-        Text("wheel \(wheeled > 0 ? "↑" : "↓") \(abs(wheeled))")
+        Text("Wheel \(wheeled > 0 ? "↑" : "↓") \(abs(wheeled))")
             .mono(11)
             .foregroundStyle(Color(white: 0.91))
             .padding(.horizontal, 6).padding(.vertical, 2)
@@ -354,7 +354,7 @@ struct TerminalPage: View {
             if sealing {
                 HStack(spacing: 8) {
                     PixelSprite(rows: PixelArt.lock, pixel: 2, color: .black)
-                    Text("sealed → \(page.name)").mono(12).lineLimit(1)
+                    Text("Sealed → \(page.name)").mono(12).lineLimit(1)
                     Spacer(minLength: 4)
                     Button { toggleSealing() } label: { Text("×").mono(15).frame(width: 28, height: 26) }
                         .buttonStyle(.plain)
@@ -370,11 +370,11 @@ struct TerminalPage: View {
                     // Pictures and files for the agent: their paths go into its prompt (Claude Code: [Image #n]); write on
                     // and send. The same words as the task composer's "+".
                     Menu {
-                        Button("camera", systemImage: "camera") { replying = false; takingPhoto = true }
+                        Button("Camera", systemImage: "camera") { replying = false; takingPhoto = true }
                             .disabled(!CameraPicker.isAvailable)
-                        Button("photos", systemImage: "photo.on.rectangle") { replying = false; pickingPhotos = true }
-                        Button("files", systemImage: "folder") { replying = false; pickingFiles = true }
-                        Button("paste image", systemImage: "doc.on.clipboard") { pasteImages() }
+                        Button("Photos", systemImage: "photo.on.rectangle") { replying = false; pickingPhotos = true }
+                        Button("Files", systemImage: "folder") { replying = false; pickingFiles = true }
+                        Button("Paste Image", systemImage: "doc.on.clipboard") { pasteImages() }
                     } label: {
                         Text("+").font(.system(size: 20, weight: .regular, design: .monospaced)).foregroundStyle(Theme.ink.opacity(0.72))
                             .frame(width: 38, height: 38)
@@ -387,7 +387,7 @@ struct TerminalPage: View {
                         .buttonStyle(SquareIconButtonStyle(active: false))
                         .accessibilityLabel("sealed reply")
                 }
-                ReplyField(prompt: sealing ? "message" : "回复", text: $reply, pending: $pendingTokens)
+                ReplyField(prompt: sealing ? "Message" : "回复", text: $reply, pending: $pendingTokens)
                     .font(sealing ? .system(size: 14, design: .monospaced) : .body)
                     .lineLimit(sealing ? 2...6 : 1...5)
                     .focused($replying)
@@ -410,7 +410,7 @@ struct TerminalPage: View {
                     Text("凭据在 Mac 上换成密文后再交给 agent").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 4)
                     Button { Task { await send(reply, sealed: true) } } label: {
-                        if page.sending { BrailleSpinner(color: Theme.base) } else { Text("[ send ]") }
+                        if page.sending { BrailleSpinner(color: Theme.base) } else { Text("[ Send ]") }
                     }
                     .buttonStyle(SquareButtonStyle(prominent: true))
                     .fixedSize()

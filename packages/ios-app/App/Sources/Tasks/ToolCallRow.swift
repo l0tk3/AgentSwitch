@@ -65,7 +65,7 @@ struct ToolCallRow: View {
     private var fields: [(name: String, value: String)] {
         let input = ToolDisplay.fields(event.payload["input"])
         if !input.isEmpty { return input }
-        return event.payload["command"]?.string.map { [("command", EventDescriber.unwrapShell($0))] } ?? []
+        return event.payload["command"]?.string.map { [("Command", EventDescriber.unwrapShell($0))] } ?? []
     }
 
     private var failed: Bool {
@@ -73,10 +73,10 @@ struct ToolCallRow: View {
     }
 
     private var outcome: (title: String, text: String, faint: Bool) {
-        if let error = event.payload["error"]?.string { return ("error", MessageDisplay.readable(error), false) }
+        if let error = event.payload["error"]?.string { return ("Error", MessageDisplay.readable(error), false) }
         let output = result?.payload["output"]?.string ?? event.payload["output"]?.string
-        if let output { return (failed ? "result · failed" : "result", output.isEmpty ? "no output" : MessageDisplay.readable(output), output.isEmpty) }
-        return ("result", active ? "busy" : "none", true)
+        if let output { return (failed ? "Result · Failed" : "Result", output.isEmpty ? "No Output" : MessageDisplay.readable(output), output.isEmpty) }
+        return ("Result", active ? "Busy" : "None", true)
     }
 
     /// Input keys as words; unknown ones stay as the tool named them.
@@ -86,11 +86,11 @@ struct ToolCallRow: View {
 
     private static let names = [
         // Short words in English (docs/ui-v0.md §7.2.7), the tools' own names where they read well.
-        "command": "command", "description": "about", "file_path": "file", "filePath": "file", "notebook_path": "file", "path": "path",
-        "url": "url", "pattern": "pattern", "query": "query", "element": "element", "ref": "ref", "text": "text", "timeout": "timeout",
-        "content": "content", "old_string": "old", "new_string": "new", "replace_all": "replace all", "offset": "from line",
-        "limit": "lines", "glob": "files", "output_mode": "output", "prompt": "prompt", "subagent_type": "agent type",
-        "files": "files", "key": "key", "values": "values", "time": "time", "filename": "file", "skill": "skill",
+        "command": "Command", "description": "About", "file_path": "File", "filePath": "File", "notebook_path": "File", "path": "Path",
+        "url": "URL", "pattern": "Pattern", "query": "Query", "element": "Element", "ref": "Ref", "text": "Text", "timeout": "Timeout",
+        "content": "Content", "old_string": "Old", "new_string": "New", "replace_all": "Replace All", "offset": "From Line",
+        "limit": "Lines", "glob": "Files", "output_mode": "Output", "prompt": "Prompt", "subagent_type": "Agent Type",
+        "files": "Files", "key": "Key", "values": "Values", "time": "Time", "filename": "File", "skill": "Skill",
     ]
 }
 

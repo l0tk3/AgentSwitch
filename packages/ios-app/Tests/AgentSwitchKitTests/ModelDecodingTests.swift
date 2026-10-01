@@ -16,7 +16,7 @@ final class ModelDecodingTests: XCTestCase {
     func testTaskDetailWithApprovals() throws {
         let d = try Fixture.decode(TaskDetail.self, "task_detail.json")
         XCTAssertEqual(d.task.status, .waitingApproval)
-        XCTAssertEqual(d.task.statusLabel, "waiting")
+        XCTAssertEqual(d.task.statusLabel, "Waiting")
         XCTAssertEqual(d.task.spokenStatus, "等你处理")
         XCTAssertEqual(d.task.targetLabel, "opencode/deepseek-flash", "pin shows when nothing ran yet")
         XCTAssertEqual(d.approvals.count, 2)
@@ -61,6 +61,15 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(TaskStatus(rawValue: "brand_new").rawValue, "brand_new")
         XCTAssertEqual(["done", "partial", "blocked", "failed", "cancelled"].map { TaskStatus(rawValue: $0).isTerminal }, [true, true, true, true, true])
         XCTAssertFalse(TaskStatus.running.isTerminal)
+    }
+
+    /// The words on screen in Apple's title case (docs/ui-v0.md §7.2.7, 2026-10-01); read aloud in Chinese.
+    func testStatusWordsInTitleCase() {
+        let all: [TaskStatus] = [.queued, .routing, .running, .waitingApproval, .done, .partial, .blocked, .failed, .cancelled]
+        XCTAssertEqual(all.map(\.label), ["Queued", "Busy", "Busy", "Waiting", "Done", "Incomplete", "Incomplete", "Failed", "Cancelled"])
+        XCTAssertEqual(TaskStatus.done.spokenLabel, "已完成")
+        XCTAssertEqual([TerminalStatus.working, .waiting, .idle, .exited].map(\.label), ["Busy", "Waiting", "Idle", "Exited"])
+        XCTAssertEqual([PermissionMode.manual, .scoped, .auto, .skip].map(\.label), ["Ask Each", "Auto", "All Auto", "Bypass"])
     }
 
     func testMeAcceptsIdOrDeviceId() throws {

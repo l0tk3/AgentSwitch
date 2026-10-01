@@ -111,7 +111,7 @@ struct FeedEntry: View {
                 .disabled(opener?.downloading != nil)
             }
             if files.count > Self.filesShown {
-                Button(action: open) { Text("+\(files.count - Self.filesShown) files").mono(11).foregroundStyle(.secondary) }
+                Button(action: open) { Text("+\(files.count - Self.filesShown) Files").mono(11).foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
                     .padding(.vertical, 4)
             }
@@ -126,16 +126,16 @@ struct FeedEntry: View {
 
     @ViewBuilder
     private var menu: some View {
-        Button("open", systemImage: "arrow.up.right.square") { open() }
+        Button("Open", systemImage: "arrow.up.right.square") { open() }
         if let threadId = task.threadId, let openThread {
-            Button("topic", systemImage: "bubble.left.and.bubble.right") { openThread(threadId) }
+            Button("Topic", systemImage: "bubble.left.and.bubble.right") { openThread(threadId) }
         }
         if task.status.isTerminal {
             let speaking = model.speaker.speakingTaskId == task.id
-            Button(speaking ? "stop" : "read aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2") { model.speaker.toggle(task) }
+            Button(speaking ? "Stop" : "Read Aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2") { model.speaker.toggle(task) }
         }
         Divider()
-        Button("delete", systemImage: "trash", role: .destructive) { delete(.task(task)) }
+        Button("Delete", systemImage: "trash", role: .destructive) { delete(.task(task)) }
             .disabled(task.status.isActive)
     }
 }

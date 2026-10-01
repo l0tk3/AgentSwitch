@@ -27,7 +27,7 @@ struct ContextEditorView: View {
                 Text("记录站点、账号、环境和偏好。密码可直接填写，保存时由 Mac 加密。")
             }
             if !warnings.isEmpty {
-                Section(label: "save notes") {
+                Section(label: "Save Notes") {
                     ForEach(warnings, id: \.self) { Text($0).font(.footnote).foregroundStyle(Theme.waiting) }
                 }
             }
@@ -38,16 +38,16 @@ struct ContextEditorView: View {
                 Section { Label(Self.savedLine(saved), systemImage: "checkmark.circle").foregroundStyle(Theme.done) }
             }
         }
-        .navigationTitle("context")
+        .navigationTitle("Context")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Menu {
-                    Button("insert ciphertext", systemImage: "lock") { picking = true }
+                    Button("Insert Ciphertext", systemImage: "lock") { picking = true }
                         .disabled(model.ciphertexts.isEmpty)
-                    Button("load example", systemImage: "doc.text") { Task { await loadExample() } }
+                    Button("Load Example", systemImage: "doc.text") { Task { await loadExample() } }
                         .disabled(!text.isEmpty)
-                    Button("revert", systemImage: "arrow.uturn.backward") { text = stored ?? "" }
+                    Button("Revert", systemImage: "arrow.uturn.backward") { text = stored ?? "" }
                         .disabled(!dirty)
                 } label: { Text("⋯").mono(17) }
                 Button(saving ? "保存中" : "保存") { Task { await save() } }

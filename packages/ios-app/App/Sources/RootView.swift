@@ -51,10 +51,10 @@ struct MainTabs: View {
         @Bindable var model = model
         TabView(selection: $model.tab) {
             HomeView()
-                .tabItem { Label { Text("tasks") } icon: { Image(uiImage: TabIcons.tasks) } }
+                .tabItem { Label { Text("Tasks") } icon: { Image(uiImage: TabIcons.tasks) } }
                 .tag(MainTab.tasks)
             TerminalsTab()
-                .tabItem { Label { Text("terminals") } icon: { Image(uiImage: TabIcons.terminals) } }
+                .tabItem { Label { Text("Terminals") } icon: { Image(uiImage: TabIcons.terminals) } }
                 .badge(model.terminals.waiting)
                 .tag(MainTab.terminals)
         }
@@ -105,7 +105,7 @@ struct LockView: View {
         VStack(spacing: 20) {
             PixelSprite(rows: PixelArt.lock, pixel: 6, color: .secondary)
             Text("AgentSwitch 已锁定").font(.title3.bold())
-            Button("[ unlock with \(lock.biometryName) ]") { Task { await lock.unlock() } }
+            Button("[ Unlock with \(lock.biometryName) ]") { Task { await lock.unlock() } }
                 .buttonStyle(SquareButtonStyle(prominent: true, expand: false))
             if let error = lock.lastError {
                 Text(error).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.center)

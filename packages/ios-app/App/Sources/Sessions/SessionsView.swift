@@ -29,7 +29,7 @@ struct SessionsView: View {
                         NavigationLink(value: SettingsRoute.session(session)) { SessionRow(session: session) }
                     }
                 } header: {
-                    SectionLabel(group.folder.isEmpty ? "unknown folder" : PathDisplay.short(group.folder))
+                    SectionLabel(group.folder.isEmpty ? "Unknown Folder" : PathDisplay.short(group.folder))
                         .textCase(nil)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -37,7 +37,7 @@ struct SessionsView: View {
             }
         }
         .overlay { if !loaded { BrailleSpinner(color: .secondary) } }
-        .navigationTitle("coding sessions")
+        .navigationTitle("Coding Sessions")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task {
@@ -83,7 +83,7 @@ private struct SessionRow: View {
             HStack(spacing: 6) {
                 if session.active {
                     BrailleSpinner()
-                    Text("busy").foregroundStyle(Theme.busy).fontWeight(.medium)
+                    Text("Busy").foregroundStyle(Theme.busy).fontWeight(.medium)
                     Text("·").foregroundStyle(.tertiary)
                 }
                 Text(meta).foregroundStyle(.secondary).lineLimit(1)

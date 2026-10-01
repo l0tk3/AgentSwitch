@@ -35,13 +35,13 @@ public enum TerminalStatus: Sendable, Hashable, Codable {
         }
     }
 
-    /// The word on screen (docs/ui-v0.md §7.2.7: busy · waiting · idle · exited).
+    /// The word on screen (docs/ui-v0.md §7.2.7: Busy · Waiting · Idle · Exited).
     public var label: String {
         switch self {
-        case .working: return "busy"
-        case .waiting: return "waiting"
-        case .idle: return "idle"
-        case .exited: return "exited"
+        case .working: return "Busy"
+        case .waiting: return "Waiting"
+        case .idle: return "Idle"
+        case .exited: return "Exited"
         case .other(let s): return s
         }
     }

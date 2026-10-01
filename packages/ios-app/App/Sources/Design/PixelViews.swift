@@ -107,7 +107,7 @@ struct BrailleSpinner: View {
     }
 }
 
-/// `// status`: a group's label, lowercase, monospaced, spaced out.
+/// `// Status`: a group's label in title case (§7.2.7), monospaced, spaced out.
 struct SectionLabel: View {
     let text: String
 

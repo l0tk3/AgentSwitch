@@ -17,11 +17,11 @@ final class TerminalTests: XCTestCase {
         ]))
         XCTAssertEqual(list.terminals.count, 2)
         XCTAssertEqual(list.terminals[0].status, .waiting)
-        XCTAssertEqual(list.terminals[0].status.label, "waiting")
+        XCTAssertEqual(list.terminals[0].status.label, "Waiting")
         XCTAssertEqual(list.terminals[0].permissions.first?.detail, "rm -rf build")
         XCTAssertEqual(list.terminals[1].status, .other("something-new"))
         XCTAssertEqual(list.models["claude-code"]?.first?.name, "Opus 5.5")
-        XCTAssertEqual(TerminalStatus.working.label, "busy")
+        XCTAssertEqual(TerminalStatus.working.label, "Busy")
         XCTAssertEqual(list.defaults, [:], "a Mac that predates it")
         XCTAssertFalse(list.models["claude-code"]?.first?.older ?? true)
     }

@@ -20,9 +20,9 @@ struct CiphertextPicker: View {
                     }
                 }
             }
-            .navigationTitle("insert ciphertext")
+            .navigationTitle("Insert Ciphertext")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("cancel") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
     }
 }

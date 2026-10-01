@@ -1,10 +1,10 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// `new` in the terminals tab (docs/terminal-v0.md §1): the wordmark resolving out of glyph noise as it opens, then an
+/// `New` in the Terminals tab (docs/terminal-v0.md §1): the wordmark resolving out of glyph noise as it opens, then an
 /// agent (its pixel mark and name; one not installed on the Mac is dithered and cannot be picked; the one picked
 /// glitches once), its model (default = the agent's own), the folder (a prompt with a block caret: typed, or one used
-/// before), and how it asks (`< > ask each` `<x> auto` `< > bypass`, bypass confirmed first in a pixel box). The page
+/// before), and how it asks (`< > Ask Each` `<x> Auto` `< > Bypass`, bypass confirmed first in a pixel box). The page
 /// it opens takes the size.
 struct NewTerminalSheet: View {
     let started: (TerminalInfo) -> Void
@@ -21,7 +21,7 @@ struct NewTerminalSheet: View {
 
     static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi")]
     /// `< >` is one of several (§7.2.6).
-    static let modes: [(id: String, name: String)] = [("manual", "ask each"), ("auto", "auto"), ("bypass", "bypass")]
+    static let modes: [(id: String, name: String)] = [("manual", "Ask Each"), ("auto", "Auto"), ("bypass", "Bypass")]
 
     var body: some View {
         let store = model.terminals
@@ -32,7 +32,7 @@ struct NewTerminalSheet: View {
                 VStack(alignment: .leading, spacing: Theme.Space.xl) {
                     Wordmark(reveal: true)
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        SectionLabel("agent")
+                        SectionLabel("Agent")
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                             ForEach(Self.agents, id: \.id) { a in
                                 agentTile(a.id, a.name, installed: installed.contains(a.id))
@@ -40,14 +40,14 @@ struct NewTerminalSheet: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        SectionLabel("model")
-                        // The agent's own list: its current models, then those a newer one superseded under `older`.
+                        SectionLabel("Model")
+                        // The agent's own list: its current models, then those a newer one superseded under `Older`.
                         Menu {
                             Button(defaultLabel) { modelId = "" }
                             ForEach(models.filter { !$0.older }) { m in Button(m.name) { modelId = m.id } }
                             let older = models.filter(\.older)
                             if !older.isEmpty {
-                                Menu("older", systemImage: "clock") { ForEach(older) { m in Button(m.name) { modelId = m.id } } }
+                                Menu("Older", systemImage: "clock") { ForEach(older) { m in Button(m.name) { modelId = m.id } } }
                             }
                         } label: {
                             HStack {
@@ -62,7 +62,7 @@ struct NewTerminalSheet: View {
                         .disabled(models.isEmpty)
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        SectionLabel("folder")
+                        SectionLabel("Folder")
                         HStack(spacing: 8) {
                             Text("❯").mono(14).foregroundStyle(Theme.signal)
                             TextField("~/project", text: $folder)
@@ -93,7 +93,7 @@ struct NewTerminalSheet: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        SectionLabel("permissions")
+                        SectionLabel("Permissions")
                         HStack(spacing: Theme.Space.l) {
                             ForEach(Self.modes, id: \.id) { m in
                                 Button { if m.id == "bypass" && mode != "bypass" { confirmBypass = true } else { mode = m.id } } label: {
@@ -110,9 +110,9 @@ struct NewTerminalSheet: View {
                     if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
                     Button { Task { await start() } } label: {
                         if starting {
-                            HStack(spacing: 6) { Text("[ starting"); BrailleSpinner(color: Theme.base); Text("]") }
+                            HStack(spacing: 6) { Text("[ Starting"); BrailleSpinner(color: Theme.base); Text("]") }
                         } else {
-                            Text("[ start ]")
+                            Text("[ Start ]")
                         }
                     }
                         .buttonStyle(SquareButtonStyle(prominent: true))
@@ -121,9 +121,9 @@ struct NewTerminalSheet: View {
                 .padding(Theme.Space.l)
             }
             .background(Theme.base)
-            .navigationTitle("new terminal")
+            .navigationTitle("New Terminal")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("cancel") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .onAppear {
                 if folder.isEmpty, let first = store.recentFolders.first { folder = MacPath.tilde(first) }
                 if !installed.contains(agent), let first = Self.agents.first(where: { installed.contains($0.id) }) { agent = first.id }
@@ -136,15 +136,15 @@ struct NewTerminalSheet: View {
             }
             .onChange(of: agent) { modelId = "" }
             .pixelBox(isPresented: $confirmBypass) {
-                PixelBox(head: "bypass", tone: .amber, message: "跳过全部权限确认？\(Self.bypassNote)",
-                         actions: [.init(label: "use bypass", role: .primary) { mode = "bypass" }])
+                PixelBox(head: "Bypass", tone: .amber, message: "跳过全部权限确认？\(Self.bypassNote)",
+                         actions: [.init(label: "Use Bypass", role: .primary) { mode = "bypass" }])
             }
         }
     }
 
-    /// `default`, and what it is today when the Mac knows (`default · Opus 5.5`).
+    /// `Default`, and what it is today when the Mac knows (`Default · Opus 5.5`).
     private var defaultLabel: String {
-        model.terminals.list?.defaults[agent].map { "default · \($0)" } ?? "default"
+        model.terminals.list?.defaults[agent].map { "Default · \($0)" } ?? "Default"
     }
 
     /// What bypass leaves in force, said before it is chosen (here and when a bypass session is continued).
@@ -160,7 +160,7 @@ struct NewTerminalSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.square, pixel: 4, color: on ? Theme.signal : installed ? Theme.ink : Theme.inkDim)
                 Text(name).mono(13).foregroundStyle(installed ? Theme.ink : Theme.inkDim)
-                if !installed { Text("not installed").mono(10).foregroundStyle(.tertiary) }
+                if !installed { Text("Not Installed").mono(10).foregroundStyle(.tertiary) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)

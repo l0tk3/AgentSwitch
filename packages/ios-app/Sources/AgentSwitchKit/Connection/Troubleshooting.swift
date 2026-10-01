@@ -43,7 +43,7 @@ public enum Troubleshooting {
             if !hasAddresses { return Check(title: title, ok: false, detail: missing) }
             return Check(title: title, ok: nil, detail: "未尝试")
         }
-        if mine.contains(where: { $0.outcome == .ok }) { return Check(title: title, ok: true, detail: "ok") }
+        if mine.contains(where: { $0.outcome == .ok }) { return Check(title: title, ok: true, detail: "OK") }
         let reasons = mine.compactMap { report -> String? in
             switch report.outcome {
             case .unreachable(let reason)?: return reason
@@ -52,7 +52,7 @@ public enum Troubleshooting {
             case .ok?, nil: return nil
             }
         }
-        guard let reason = reasons.first else { return Check(title: title, ok: nil, detail: "unused · 已通过其他线路连接") }
+        guard let reason = reasons.first else { return Check(title: title, ok: nil, detail: "Unused · 已通过其他线路连接") }
         return Check(title: title, ok: false, detail: "无法连接：\(reason)")
     }
 

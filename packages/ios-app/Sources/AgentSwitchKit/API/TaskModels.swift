@@ -58,13 +58,13 @@ public enum TaskStatus: Sendable, Hashable, Codable {
     /// The fixed status words on screen, one meaning each (docs/ui-v0.md §7.2.7).
     public var label: String {
         switch self {
-        case .queued: return "queued"
-        case .routing, .running: return "busy"
-        case .waitingApproval: return "waiting"
-        case .done: return "done"
-        case .partial, .blocked: return "incomplete"
-        case .failed: return "failed"
-        case .cancelled: return "cancelled"
+        case .queued: return "Queued"
+        case .routing, .running: return "Busy"
+        case .waitingApproval: return "Waiting"
+        case .done: return "Done"
+        case .partial, .blocked: return "Incomplete"
+        case .failed: return "Failed"
+        case .cancelled: return "Cancelled"
         case .other(let s): return s
         }
     }

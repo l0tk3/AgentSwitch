@@ -13,7 +13,7 @@ struct AddMacSheet: View {
         } else {
             ScannerSheet { code in link = code }
                 .safeAreaInset(edge: .bottom) {
-                    Button("paste pairing link") { paste() }
+                    Button("Paste Pairing Link") { paste() }
                         .controlSize(.large)
                         .padding(.bottom, Theme.Space.l)
                 }
@@ -42,7 +42,7 @@ struct MacSwitcher: View {
                 }
             }
             Divider()
-            Button("add Mac", systemImage: "plus") { model.sheet = .addMac }
+            Button("Add Mac", systemImage: "plus") { model.sheet = .addMac }
         } label: {
             HStack(spacing: 4) {
                 Text(model.profile?.name ?? "AgentSwitch").font(.headline)

@@ -57,7 +57,7 @@ struct TerminalsTab: View {
                         Text(error).font(.footnote).foregroundStyle(Theme.failed).padding(.bottom, Theme.Space.m)
                     }
                     if store.list != nil && store.nodes.isEmpty && query.isEmpty {
-                        Text("尚无终端。点 new 在 Mac 上启动 agent。").font(.footnote).foregroundStyle(.secondary).padding(.top, 40)
+                        Text("尚无终端。点 New 在 Mac 上启动 agent。").font(.footnote).foregroundStyle(.secondary).padding(.top, 40)
                     }
                     if store.list != nil && !(store.nodes.isEmpty && query.isEmpty) { searchLine }
                     if query.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -71,11 +71,11 @@ struct TerminalsTab: View {
             }
             .background { ZStack { Theme.base; Scanlines() }.ignoresSafeArea() }
             .safeAreaInset(edge: .top, spacing: 0) { DottedRule() }
-            .navigationTitle("terminals")
+            .navigationTitle("Terminals")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("new") { creating = true }.mono(15, weight: .medium)
+                    Button("New") { creating = true }.mono(15, weight: .medium)
                         .disabled(store.list == nil)
                 }
             }
@@ -129,27 +129,27 @@ struct TerminalsTab: View {
             }
             .pixelBox(item: $menuFor) { m in
                 var items: [PixelBox.Action] = []
-                if TerminalsTab.resumable.contains(m.session.harness) { items.append(.init(label: "resume") { Task { await resume(m.session) } }) }
-                if TerminalsTab.deletable.contains(m.session.harness) { items.append(.init(label: "delete", role: .destructive) { deletingSession = m.session }) }
+                if TerminalsTab.resumable.contains(m.session.harness) { items.append(.init(label: "Resume") { Task { await resume(m.session) } }) }
+                if TerminalsTab.deletable.contains(m.session.harness) { items.append(.init(label: "Delete", role: .destructive) { deletingSession = m.session }) }
                 return PixelBox(cancel: nil, actions: items, anchor: m.anchor)
             }
             .pixelBox(item: $bypassResume) { s in
-                PixelBox(head: "bypass", tone: .amber, message: "「\(s.displayTitle)」上次以 bypass 运行。\(NewTerminalSheet.bypassNote)",
-                         actions: [.init(label: "auto") { Task { await resume(s, mode: "auto") } },
-                                   .init(label: "bypass", role: .primary) { Task { await resume(s, mode: "bypass") } }])
+                PixelBox(head: "Bypass", tone: .amber, message: "「\(s.displayTitle)」上次以 Bypass 运行。\(NewTerminalSheet.bypassNote)",
+                         actions: [.init(label: "Auto") { Task { await resume(s, mode: "auto") } },
+                                   .init(label: "Bypass", role: .primary) { Task { await resume(s, mode: "bypass") } }])
             }
             .pixelBox(item: $deletingSession) { s in
-                PixelBox(head: "delete record", tone: .red, message: "删除会话记录「\(s.displayTitle)」？Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。",
-                         actions: [.init(label: "delete", role: .primary) { Task { await deleteSession(s) } }])
+                PixelBox(head: "Delete Record", tone: .red, message: "删除会话记录「\(s.displayTitle)」？Mac 上这段会话的记录将被删除，无法恢复，也无法再继续。",
+                         actions: [.init(label: "Delete", role: .primary) { Task { await deleteSession(s) } }])
             }
             .pixelBox(item: $elsewhere) { e in
-                PixelBox(head: "in use", tone: .amber,
+                PixelBox(head: "In Use", tone: .amber,
                          message: "「\(e.session.displayTitle)」正在 \(e.app) 中运行。同一会话同时只能由一个程序写入。请先在 \(e.app) 中退出，或创建分支：新会话包含全部历史，原会话保持不变。",
-                         actions: [.init(label: "fork", role: .primary) { Task { await resume(e.session, fork: true, mode: e.mode) } }])
+                         actions: [.init(label: "Fork", role: .primary) { Task { await resume(e.session, fork: true, mode: e.mode) } }])
             }
         }
         .pixelBox(item: $failure) { message in
-            PixelBox(head: "error", tone: .red, message: message, cancel: nil, actions: [.init(label: "ok", role: .primary) {}])
+            PixelBox(head: "Error", tone: .red, message: message, cancel: nil, actions: [.init(label: "OK", role: .primary) {}])
         }
     }
 
@@ -271,7 +271,7 @@ struct TerminalsTab: View {
                     } label: {
                         HStack(spacing: 6) {
                             TreeLine(last: true, nested: nested)
-                            Text(all ? "▾ less" : "▸ \(more) more").mono(12).foregroundStyle(.secondary)
+                            Text(all ? "▾ Less" : "▸ \(more) More").mono(12).foregroundStyle(.secondary)
                             Spacer(minLength: 0)
                         }
                         .padding(.vertical, 6)
@@ -308,7 +308,7 @@ struct TerminalsTab: View {
     private var searchLine: some View {
         HStack(spacing: 6) {
             Text("/").mono(14, weight: .bold).foregroundStyle(Theme.signal)
-            TextField("", text: $query, prompt: Text("search").foregroundStyle(Theme.inkDim))
+            TextField("", text: $query, prompt: Text("Search").foregroundStyle(Theme.inkDim))
                 .font(.system(size: 14, design: .monospaced))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -507,7 +507,7 @@ private struct SessionRow: View {
             .accessibilityAction(named: "delete") { if deletable { delete() } }
             if resumable {
                 Button(action: resume) {
-                    if opening == session.id { BrailleSpinner(color: .secondary) } else { Text("resume").mono(12) }
+                    if opening == session.id { BrailleSpinner(color: .secondary) } else { Text("Resume").mono(12) }
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.ink)

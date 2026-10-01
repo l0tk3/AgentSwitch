@@ -1,7 +1,7 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// settings › usage (docs/ui-v0.md §4.2, §7.3), right under the Mac: one row per executor — its 5 × 5 pixel mark, the
+/// Settings › Usage (docs/ui-v0.md §4.2, §7.3), right under the Mac: one row per executor — its 5 × 5 pixel mark, the
 /// name, then the 5h and 7d windows as character meters (OpenCode: its balance). Hidden until the Mac has answered once;
 /// a failed re-read keeps the last numbers, and the footer says when they were read.
 struct UsageSection: View {
@@ -13,7 +13,7 @@ struct UsageSection: View {
             Section {
                 ForEach(rows) { UsageRowView(row: $0) }
             } header: {
-                SectionLabel("usage")
+                SectionLabel("Usage")
             } footer: {
                 if let at = Usage.readAt(readings) { Text("读数更新于 \(Self.time(at))") }
             }

@@ -42,21 +42,21 @@ struct SettingsView: View {
                         NavigationLink(value: SettingsRoute.mac) { MacHeader() }
                         ForEach(model.macs.servers.filter { $0.fingerprint != current.fingerprint }, id: \.fingerprint) { mac in
                             Button { model.switchTo(mac.fingerprint) } label: {
-                                LabeledContent(mac.name) { Text("switch").mono(13).foregroundStyle(.secondary) }
+                                LabeledContent(mac.name) { Text("Switch").mono(13).foregroundStyle(.secondary) }
                             }
                             .foregroundStyle(.primary)
                         }
-                        Button("add Mac") { addingMac = true }
+                        Button("Add Mac") { addingMac = true }
                     } footer: {
                         if model.macs.servers.count > 1 { Text("同一时间只连接一台 Mac。") }
                     }
                     if let quota = model.quota { UsageSection(readings: quota) }
                 }
                 Section {
-                    NavigationLink("context") { ContextEditorView() }
-                    NavigationLink("ciphertexts") { CiphertextsView() }
+                    NavigationLink("Context") { ContextEditorView() }
+                    NavigationLink("Ciphertexts") { CiphertextsView() }
                 } header: {
-                    SectionLabel("tasks")
+                    SectionLabel("Tasks")
                 } footer: {
                     Text("环境说明记录站点、账号和偏好，供每个任务参考。")
                 }
@@ -64,48 +64,48 @@ struct SettingsView: View {
                 FeedbackSection()
                 if connected { MacAppSection() }
                 Section {
-                    NavigationLink("history", value: SettingsRoute.tasks)
-                    NavigationLink("models") { ModelsView() }
-                    Button("clear history", role: .destructive) { cleared = false; clearing = .history }
+                    NavigationLink("History", value: SettingsRoute.tasks)
+                    NavigationLink("Models") { ModelsView() }
+                    Button("Clear History", role: .destructive) { cleared = false; clearing = .history }
                     if let clearError { Text(clearError).font(.footnote).foregroundStyle(Theme.failed) }
                     if cleared { Text("记录已清空。").font(.footnote).foregroundStyle(.secondary) }
                 } header: {
-                    SectionLabel("manage")
+                    SectionLabel("Manage")
                 } footer: {
-                    Text("Mac 上 Claude Code、Codex 和 OpenCode 的会话在 terminals 中，可查看和继续。")
+                    Text("Mac 上 Claude Code、Codex 和 OpenCode 的会话在 Terminals 中，可查看和继续。")
                 }
                 .disabled(!connected)
                 if let policy {
                     Section {
-                        LabeledContent("permissions") { Text(policy.policy.mode.label).mono(13) }
+                        LabeledContent("Permissions") { Text(policy.policy.mode.label).mono(13) }
                     } footer: {
                         Text(policy.policy.mode.explanation + "。在 Mac 上修改。")
                     }
                 }
                 Section {
-                    Toggle("unlock with \(lock.biometryName)", isOn: Binding(get: { lock.enabled },
+                    Toggle("Unlock with \(lock.biometryName)", isOn: Binding(get: { lock.enabled },
                                                                         set: { on in Task { await lock.setEnabled(on) } }))
                     if let error = lock.lastError { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
                 } header: {
-                    SectionLabel("security")
+                    SectionLabel("Security")
                 } footer: {
                     Text("设备丢失时，可在 Mac 上移除此设备。")
                 }
                 Section {
-                    Button("remove this Mac", role: .destructive) { confirmForget = true }
+                    Button("Remove This Mac", role: .destructive) { confirmForget = true }
                 } footer: {
                     Text("删除此 iPhone 与这台 Mac 的配对，已保存的密文不受影响。")
                 }
             }
             .tint(.accentColor)
-            .navigationTitle("settings")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             // Task pages opened from 任务记录 link on to other tasks (a hand-off) by id.
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: SettingsRoute.self) { route in destination(route) }
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .confirmationDialog("移除「\(model.profile?.name ?? "Mac")」？", isPresented: $confirmForget, titleVisibility: .visible) {
-                Button("remove", role: .destructive) { model.forget() }
+                Button("Remove", role: .destructive) { model.forget() }
             } message: {
                 Text(model.macs.servers.count > 1 ? "将切换到其他已配对的 Mac。" : "之后需要重新扫码配对。")
             }
@@ -191,12 +191,12 @@ private struct FeedbackSection: View {
     var body: some View {
         @Bindable var settings = model.feedback.settings
         Section {
-            Toggle("sound", isOn: $settings.sound)
-            Toggle("haptics", isOn: $settings.haptics)
-            Toggle("sound in silent mode", isOn: $settings.audibleInSilent).disabled(!settings.sound)
-            Toggle("read aloud", isOn: $settings.voiceMode)
-            NavigationLink("voice") { SpeechVoiceView() }
-            Toggle("live activity", isOn: Binding(get: { liveOn }, set: { on in
+            Toggle("Sound", isOn: $settings.sound)
+            Toggle("Haptics", isOn: $settings.haptics)
+            Toggle("Sound in Silent Mode", isOn: $settings.audibleInSilent).disabled(!settings.sound)
+            Toggle("Read Aloud", isOn: $settings.voiceMode)
+            NavigationLink("Voice") { SpeechVoiceView() }
+            Toggle("Live Activity", isOn: Binding(get: { liveOn }, set: { on in
                 liveOn = on
                 model.live.enabled = on
                 if on { model.syncLive() }
@@ -205,9 +205,9 @@ private struct FeedbackSection: View {
                 Text("已在系统设置中关闭：设置 › AgentSwitch › 实时活动").font(.footnote).foregroundStyle(Theme.waiting)
             }
         } header: {
-            SectionLabel("alerts & voice")
+            SectionLabel("Alerts & Voice")
         } footer: {
-            Text("read aloud 开启时自动朗读回复和任务通知；live activity 显示在锁定屏幕和灵动岛上。")
+            Text("Read Aloud 开启时自动朗读回复和任务通知；Live Activity 显示在锁定屏幕和灵动岛上。")
         }
         .onAppear { liveOn = model.live.enabled }
     }

@@ -132,9 +132,9 @@ struct HomeView: View {
             // Long press: delete what you said with its answers (and the tasks they created).
             UserBubble(text: message.text)
                 .contextMenu {
-                    Button("copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
+                    Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
                     Divider()
-                    Button("delete", systemImage: "trash", role: .destructive) { deleting = .entry(model.conversation.entry(of: message)) }
+                    Button("Delete", systemImage: "trash", role: .destructive) { deleting = .entry(model.conversation.entry(of: message)) }
                 }
         case .assistant(let message, let created):
             AssistantBubble(message: message, created: created, entry: { entry($0, showsRequest: false) }, open: open,
@@ -195,7 +195,7 @@ struct HomeView: View {
         case .makeCiphertext:
             NavigationStack {
                 CiphertextsView()
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("done") { model.sheet = nil } } }
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { model.sheet = nil } } }
             }
         case .approvals:
             ApprovalsView()
@@ -215,7 +215,7 @@ private struct LooseApprovalsButton: View {
             Button { Keyboard.dismiss(); model.sheet = .approvals } label: {
                 HStack(spacing: 6) {
                     PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
-                    Text("\(count) more waiting")
+                    Text("\(count) More Waiting")
                     Text("›")
                 }
                 .mono(12, weight: .medium)

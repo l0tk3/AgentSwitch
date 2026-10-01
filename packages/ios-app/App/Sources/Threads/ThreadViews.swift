@@ -120,7 +120,7 @@ struct ThreadView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("delete topic", systemImage: "trash", role: .destructive) {
+                    Button("Delete Topic", systemImage: "trash", role: .destructive) {
                         deleting = .topic(id: threadId, title: detail?.thread.title)
                     }
                 } label: { Text("⋯").mono(17) }

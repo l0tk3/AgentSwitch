@@ -34,10 +34,10 @@ struct ConnectionBanner: View {
                     PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
                     Text(phase.text).mono(12).foregroundStyle(Theme.waiting)
                     Spacer()
-                    Button("retry") { model.reconnect() }.mono(12)
+                    Button("Retry") { model.reconnect() }.mono(12)
                 }
                 if phase == .lost {
-                    Text("Mac 可能处于睡眠状态或已离线。请查看 settings › Mac › troubleshooting。").font(.footnote).foregroundStyle(.secondary)
+                    Text("Mac 可能处于睡眠状态或已离线。请查看 Settings › Mac › Troubleshooting。").font(.footnote).foregroundStyle(.secondary)
                 }
             }
         case .unpaired:
@@ -45,7 +45,7 @@ struct ConnectionBanner: View {
                 PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.failed)
                 Text(phase.text).mono(12).foregroundStyle(Theme.failed)
                 Spacer()
-                Button("pair again") { model.pairAgain() }.mono(12)
+                Button("Pair Again") { model.pairAgain() }.mono(12)
             }
         case .certificateChanged:
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -95,15 +95,15 @@ enum Clipboard {
 }
 
 extension Date {
-    /// now · 3m ago · today 14:20 · yesterday 14:20 · 9/24 (docs/ui-v0.md §7.2.7, as on the Mac).
+    /// Now · 3m ago · Today 14:20 · Yesterday 14:20 · 9/24 (docs/ui-v0.md §7.2.7, as on the Mac).
     var relative: String {
         let seconds = Date().timeIntervalSince(self)
-        if seconds < 60 { return "now" }
+        if seconds < 60 { return "Now" }
         if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
         let calendar = Calendar.current
         let time = formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
-        if calendar.isDateInToday(self) { return "today \(time)" }
-        if calendar.isDateInYesterday(self) { return "yesterday \(time)" }
+        if calendar.isDateInToday(self) { return "Today \(time)" }
+        if calendar.isDateInYesterday(self) { return "Yesterday \(time)" }
         let parts = calendar.dateComponents([.month, .day], from: self)
         return "\(parts.month ?? 0)/\(parts.day ?? 0)"
     }

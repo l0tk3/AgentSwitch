@@ -51,6 +51,14 @@ final class LiveRenderTests: XCTestCase {
         try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: dir.appendingPathComponent("\(name).png"))
     }
 
+    /// The status word and the count in Apple's title case (ui-v0 §7.2.7), as in the app; no rendering needed.
+    func testTheWordsAreInTitleCase() {
+        let state = { (name: String) in Self.states.first { $0.0 == name }!.1 }
+        XCTAssertEqual(["running3", "needsYou", "endedOK", "endedFail"].map { LiveLook.word(state($0)) }, ["Busy", "Waiting", "Done", "Incomplete"])
+        XCTAssertEqual(LiveLook.others(state("running3")), "+2 More")
+        XCTAssertNil(LiveLook.others(state("routing")))
+    }
+
     func testRenderEveryStateForALook() throws {
         let dir = try renderDir()
         for (name, state) in Self.states {

@@ -69,7 +69,7 @@ struct TaskFilesSection: View {
     var body: some View {
         @Bindable var opener = opener
         if !files.isEmpty {
-            Block("files") {
+            Block("Files") {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
                         if index > 0 { Theme.line.frame(height: 1).padding(.leading, 34) }
@@ -166,7 +166,7 @@ struct SourceFileView: View {
             .navigationTitle(file.url.lastPathComponent)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("done") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) { ShareLink(item: file.url) }
             }
         }

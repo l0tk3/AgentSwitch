@@ -66,7 +66,7 @@ struct SpeechVoiceView: View {
                         }
                         .buttonStyle(.plain)
                         Spacer()
-                        Button { model.speaker.sample(voice) } label: { Text("play").mono(12) }
+                        Button { model.speaker.sample(voice) } label: { Text("Play").mono(12) }
                             .buttonStyle(.borderless)
                             .accessibilityLabel("试听 \(voice.name)")
                     }
@@ -81,10 +81,10 @@ struct SpeechVoiceView: View {
                 Text("前往 设置 › 辅助功能 › 朗读内容 › 声音 › 中文（中国大陆），下载标有「增强」或「高音质」的声音。")
                     .font(.footnote)
             } header: {
-                SectionLabel("more voices")
+                SectionLabel("More Voices")
             }
         }
-        .navigationTitle("voice")
+        .navigationTitle("Voice")
         .onAppear { voices = SpeechVoices.installed() }   // a voice downloaded meanwhile shows up
         .onDisappear { model.speaker.stop() }
     }

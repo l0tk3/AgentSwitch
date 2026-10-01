@@ -19,11 +19,11 @@ struct MacDetailsView: View {
 
     private var form: some View {
         Form {
-            Section(label: "connection") {
+            Section(label: "Connection") {
                 switch model.connection {
                 case .connected(let endpoint):
-                    LabeledContent("route", value: endpoint.kind.title)
-                    LabeledContent("address") { Text(endpoint.authority).mono(13) }
+                    LabeledContent("Route", value: endpoint.kind.title)
+                    LabeledContent("Address") { Text(endpoint.authority).mono(13) }
                 case .idle, .selecting:
                     HStack { Text(model.connectionPhase.text).mono(13); Spacer(); BrailleSpinner(color: .secondary) }
                 case .unreachable:
@@ -36,32 +36,32 @@ struct MacDetailsView: View {
                         if let seen { Text(ServerProfile.grouped(seen)).font(.caption2.monospaced()).foregroundStyle(.secondary) }
                     }
                 }
-                Button("choose route again") { model.reconnect() }
+                Button("Choose Route Again") { model.reconnect() }
             }
             if let report = model.routeReport {
                 Section {
                     ForEach(Array(report.reports.enumerated()), id: \.offset) { _, probe in RouteProbeRow(probe: probe) }
                 } header: {
-                    SectionLabel("last route choice")
+                    SectionLabel("Last Route Choice")
                 } footer: {
                     Text("\(report.at.formatted(date: .omitted, time: .standard)) · 同时探测所有地址，按顺序选用第一个可用地址。")
                 }
             }
             TroubleshootingSection(profile: profile)
             Section("Mac") {
-                LabeledContent("name", value: profile.name)
-                LabeledContent("port") { Text(String(profile.port)).mono(13) }
+                LabeledContent("Name", value: profile.name)
+                LabeledContent("Port") { Text(String(profile.port)).mono(13) }
                 if !profile.lan.isEmpty { LabeledContent("LAN") { Text(profile.lan.joined(separator: ", ")).mono(13) } }
                 if !profile.tailnet.isEmpty { LabeledContent("Tailscale", value: profile.tailnet.joined(separator: ", ")) }
-                LabeledContent("keypair") { Text(profile.gate?.keypair ?? "—").mono(13) }
-                LabeledContent("this device", value: model.me?.name ?? profile.deviceId)
-                LabeledContent("paired", value: profile.pairedAt.formatted(date: .abbreviated, time: .shortened))
+                LabeledContent("Keypair") { Text(profile.gate?.keypair ?? "—").mono(13) }
+                LabeledContent("This Device", value: model.me?.name ?? profile.deviceId)
+                LabeledContent("Paired", value: profile.pairedAt.formatted(date: .abbreviated, time: .shortened))
             }
             if let workdir { WorkdirSection(workdir: workdir) }
             Section {
                 Text(ServerProfile.grouped(profile.fingerprint)).font(.caption.monospaced()).textSelection(.enabled)
             } header: {
-                SectionLabel("certificate fingerprint")
+                SectionLabel("Certificate Fingerprint")
             } footer: {
                 Text("与 Mac 上「配对」页显示的指纹一致，即为同一台 Mac。")
             }
@@ -97,7 +97,7 @@ private struct WorkdirSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("default folder") {
+            LabeledContent("Default Folder") {
                 Text(PathDisplay.short(workdir.path)).monospaced().lineLimit(1).truncationMode(.middle)
             }
             if let problem = workdir.problem {
@@ -142,7 +142,7 @@ private struct TroubleshootingSection: View {
                 }
             }
         } header: {
-            SectionLabel("troubleshooting")
+            SectionLabel("Troubleshooting")
         } footer: {
             Text("连接中断时会自动重试，无需停留在此页面。")
         }
@@ -192,11 +192,11 @@ struct RouteProbeRow: View {
 
     private var verdict: String {
         switch probe.outcome {
-        case .ok?: return "ok · \(seconds)"
-        case nil: return "unused"
-        case .unauthorized?: return "unpaired"
-        case .pinMismatch?: return "certificate changed"
-        case .unreachable?: return "no response · \(seconds)"
+        case .ok?: return "OK · \(seconds)"
+        case nil: return "Unused"
+        case .unauthorized?: return "Unpaired"
+        case .pinMismatch?: return "Certificate Changed"
+        case .unreachable?: return "No Response · \(seconds)"
         }
     }
 

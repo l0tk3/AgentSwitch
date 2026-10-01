@@ -40,7 +40,7 @@ final class UsageTests: XCTestCase {
         XCTAssertTrue(opencode.slots.isEmpty)
         XCTAssertTrue(opencode.showsBalance)
         XCTAssertEqual(opencode.balance, "¥96.23")
-        XCTAssertEqual(opencode.balanceText, "balance ¥96.23")
+        XCTAssertEqual(opencode.balanceText, "Balance ¥96.23")
     }
 
     func testWindowWhoseResetHasPassedHasNoReading() throws {
@@ -62,7 +62,7 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(rows[0].slots.map(\.percentText), ["—", "—"])
         XCTAssertEqual(rows[1].slots.map(\.percentText), ["—", "—"])
         XCTAssertNil(rows[2].balance)
-        XCTAssertEqual(rows[2].balanceText, "balance —")
+        XCTAssertEqual(rows[2].balanceText, "Balance —")
     }
 
     func testOnlyKnownExecutorsThatAnswered() throws {

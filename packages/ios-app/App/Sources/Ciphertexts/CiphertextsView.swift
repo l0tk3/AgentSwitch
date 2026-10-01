@@ -17,7 +17,7 @@ struct CiphertextsView: View {
             if let minted { resultSection(minted) }
             savedSection
         }
-        .navigationTitle("ciphertexts")
+        .navigationTitle("Ciphertexts")
         .task { if !model.canMint { await model.refreshGateKey() } }
         .onDisappear { draft.value = "" }
     }
@@ -26,11 +26,11 @@ struct CiphertextsView: View {
     private var keySection: some View {
         Section {
             if let gate = model.profile?.gate, model.canMint {
-                LabeledContent("keypair") { Text(gate.keypair).mono(13) }
+                LabeledContent("Keypair") { Text(gate.keypair).mono(13) }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(unavailableText).font(.footnote)
-                    Button("fetch key again") { Task { await model.refreshGateKey() } }.disabled(model.api == nil)
+                    Button("Fetch Key Again") { Task { await model.refreshGateKey() } }.disabled(model.api == nil)
                 }
             }
         } footer: {
@@ -44,7 +44,7 @@ struct CiphertextsView: View {
     }
 
     private var mintSection: some View {
-        Section(label: "new") {
+        Section(label: "New") {
             TextField("名称，例如 corp-vpn/pass", text: $draft.label)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
             TextField("站点，例如 *.example.com；多个用逗号分隔", text: $draft.sites, axis: .vertical)
@@ -63,24 +63,24 @@ struct CiphertextsView: View {
                 Text(problem).font(.footnote).foregroundStyle(Theme.waiting)
             }
             if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
-            Button("make ciphertext") { mint() }.disabled(draft.problem != nil)
+            Button("Make Ciphertext") { mint() }.disabled(draft.problem != nil)
         }
     }
 
     private func resultSection(_ item: SavedCiphertext) -> some View {
-        Section(label: "just made") {
+        Section(label: "Just Made") {
             Text(item.token).font(.caption.monospaced()).lineLimit(3).textSelection(.enabled)
             HStack {
-                Button("copy") { Clipboard.copyToken(item.token) }
+                Button("Copy") { Clipboard.copyToken(item.token) }
                 Spacer()
-                Button("insert") { model.insertIntoCompose(item.token) }
+                Button("Insert") { model.insertIntoCompose(item.token) }
             }
             .buttonStyle(.borderless)
         }
     }
 
     private var savedSection: some View {
-        Section(label: "saved") {
+        Section(label: "Saved") {
             if model.ciphertexts.isEmpty {
                 Text("无已保存的密文").foregroundStyle(.secondary)
             }
@@ -90,11 +90,11 @@ struct CiphertextsView: View {
                     Text(item.shortToken).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 .swipeActions(edge: .leading) {
-                    Button("insert", systemImage: "text.insert") { model.insertIntoCompose(item.token) }.tint(.accentColor)
+                    Button("Insert", systemImage: "text.insert") { model.insertIntoCompose(item.token) }.tint(.accentColor)
                 }
                 .contextMenu {
-                    Button("copy", systemImage: "doc.on.doc") { Clipboard.copyToken(item.token) }
-                    Button("insert", systemImage: "text.insert") { model.insertIntoCompose(item.token) }
+                    Button("Copy", systemImage: "doc.on.doc") { Clipboard.copyToken(item.token) }
+                    Button("Insert", systemImage: "text.insert") { model.insertIntoCompose(item.token) }
                 }
             }
             .onDelete { offsets in model.deleteCiphertexts(Set(offsets.map { model.ciphertexts[$0].id })) }
