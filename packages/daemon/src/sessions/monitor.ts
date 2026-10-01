@@ -1,4 +1,4 @@
-/** Watching the Mac's coding sessions (docs/control-v0.md §3): newest first across Claude Code, Codex and OpenCode,
+/** Watching the Mac's coding sessions (docs/control-v0.md §3): newest first across Claude Code, Codex, OpenCode and pi,
  *  each file parsed again only when it changed. Sessions that ran in a temporary folder or in AgentSwitch's own data
  *  directory are left out (probes, tests, AgentSwitch's executors). Read-only, except `remove`: the user deleting a
  *  session's record (docs/terminal-v0.md §5). */
@@ -9,13 +9,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeFacts, claudeMessages } from "./claude.js";
 import { codexFacts, codexMessages } from "./codex.js";
-import { openCodeMessages, openCodeSessions } from "./opencode.js";
+import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
+import { piFacts, piMessages } from "./pi.js";
 import { ACTIVE_MS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
   readonly claudeProjects: string;   // ~/.claude/projects
   readonly codexSessions: string;    // ~/.codex/sessions
   readonly opencodeDb: string;       // ~/.local/share/opencode/opencode.db
+  /** ~/.pi/agent/sessions; absent: pi's sessions are not read. */
+  readonly piSessions?: string;
+  /** Deleting an OpenCode session (its own command); absent: OpenCode's sessions cannot be deleted here. */
+  readonly openCodeDelete?: OpenCodeDelete;
   /** Folders whose sessions are not the user's own (prefix match). */
   readonly excluded: readonly string[];
   /** Newest files looked at per harness, after our own and temporary folders are left out (tests set it low). */
@@ -32,6 +37,7 @@ export function defaultSessionSources(dataHome: string, env: NodeJS.ProcessEnv =
     claudeProjects: join(home, ".claude", "projects"),
     codexSessions: join(home, ".codex", "sessions"),
     opencodeDb: join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "opencode", "opencode.db"),
+    piSessions: join(piAgentDir(env), "sessions"),
     excluded: [tmpdir(), "/tmp/", "/private/tmp/", "/private/var/folders/", "/var/folders/", dataHome],
   };
 }
@@ -56,6 +62,7 @@ export class SessionMonitor {
     const fromFiles = [
       ...this.scan(jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir)), "claude-code", now),
       ...this.scan(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), "codex", now),
+      ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
     ];
     const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", s, now));
     const own = this.sources.ownIds?.() ?? new Set<string>();
@@ -65,7 +72,7 @@ export class SessionMonitor {
       .slice(0, limit);
   }
 
-  /** Where a listed session is kept: its file (Claude Code, Codex) or OpenCode's database; null for one not listed. */
+  /** Where a listed session is kept: its file (Claude Code, Codex, pi) or OpenCode's database; null for one not listed. */
   source(harness: SessionHarness, id: string): string | null {
     return harness === "opencode" ? this.sources.opencodeDb : this.files.get(`${harness}:${id}`) ?? null;
   }
@@ -76,17 +83,18 @@ export class SessionMonitor {
     if (harness === "opencode") return { session, messages: openCodeMessages(this.sources.opencodeDb, id, limit) };
     const path = this.files.get(`${harness}:${id}`);
     if (!path) return null;
-    return { session, messages: harness === "claude-code" ? claudeMessages(path, limit) : codexMessages(path, limit) };
+    return { session, messages: harness === "claude-code" ? claudeMessages(path, limit) : harness === "pi" ? piMessages(path, limit) : codexMessages(path, limit) };
   }
 
-  private scan(refs: FileRef[], harness: "claude-code" | "codex", now: number): (SessionSummary | null)[] {
+  private scan(refs: FileRef[], harness: "claude-code" | "codex" | "pi", now: number): (SessionSummary | null)[] {
     return refs.map((ref) => {
       const hit = this.cache.get(ref.path);
       if (hit && hit.mtime === ref.mtime && hit.size === ref.size) return hit.summary && { ...hit.summary, active: now - hit.summary.updatedAt < ACTIVE_MS };
       let summary: SessionSummary | null = null;
       try {
-        const facts = harness === "claude-code" ? claudeFacts(ref.path, ref.mtime) : codexFacts(ref.path, ref.mtime);
-        summary = facts ? this.summary(harness, { ...facts, startedAt: ref.born }, now) : null;
+        const facts = harness === "claude-code" ? claudeFacts(ref.path, ref.mtime) : harness === "pi" ? piFacts(ref.path, ref.mtime) : codexFacts(ref.path, ref.mtime);
+        // When it began: what the record says (pi), else when its file was made.
+        summary = facts ? this.summary(harness, { startedAt: ref.born, ...facts }, now) : null;
       } catch { summary = null; }
       this.cache.set(ref.path, { mtime: ref.mtime, size: ref.size, summary });
       if (summary) this.files.set(`${harness}:${summary.id}`, ref.path);
@@ -108,12 +116,19 @@ export class SessionMonitor {
   private get scanFiles(): number { return this.sources.scanFiles ?? SCAN_FILES; }
 
   /** Deletes the agent's own record of a session (docs/terminal-v0.md §5, the user's own management): Claude Code's
-   *  `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`; nothing else is touched. OpenCode keeps sessions in its
-   *  database and is not supported. The file the list read comes first (it may sit where the id alone does not say);
-   *  one that cannot be removed is reported, not thrown, so what did go is still known. */
-  remove(harness: SessionHarness, id: string): { removed: string[]; failed: string[] } {
+   *  `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`, pi's `<time>_<id>.jsonl`; OpenCode's through its own
+   *  command (its database, the session's children with it). Nothing else is touched. The file the list read comes
+   *  first (it may sit where the id alone does not say); one that cannot be removed is reported, not thrown, so what did
+   *  go is still known. */
+  async remove(harness: SessionHarness, id: string): Promise<{ removed: string[]; failed: string[] }> {
     const removed: string[] = [], failed: string[] = [];
     if (!SESSION_ID.test(id)) return { removed, failed };
+    if (harness === "opencode") {
+      const record = `${this.sources.opencodeDb}#${id}`;
+      if (!this.sources.openCodeDelete) return { removed, failed: [record] };
+      try { if (await this.sources.openCodeDelete(id)) removed.push(record); } catch { failed.push(record); }
+      return { removed, failed };
+    }
     const drop = (file: string) => {
       if (removed.includes(file) || failed.includes(file) || !existsSync(file)) return;
       try { rmSync(file); removed.push(file); } catch { failed.push(file); }
@@ -134,6 +149,12 @@ export class SessionMonitor {
         }
       };
       walk(this.sources.codexSessions, 3);
+    } else if (harness === "pi" && this.sources.piSessions) {
+      for (const dir of safeDirs(this.sources.piSessions)) {
+        for (const name of safeDirs(join(this.sources.piSessions, dir), true)) {
+          if (name.endsWith(`_${id}.jsonl`)) drop(join(this.sources.piSessions, dir, name));
+        }
+      }
     }
     if (removed.length) this.files.delete(`${harness}:${id}`);
     return { removed, failed };
@@ -155,8 +176,15 @@ export class SessionMonitor {
   }
 }
 
-/** Session ids as the agents write them (uuids, short ids): never a path. */
-const SESSION_ID = /^[A-Za-z0-9-]{1,80}$/;
+/** Session ids as the agents write them (uuids, short ids, OpenCode's `ses_…`): never a path. */
+const SESSION_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+/** pi's agent directory: `PI_CODING_AGENT_DIR` (a leading `~` is the home), else `~/.pi/agent`. */
+function piAgentDir(env: NodeJS.ProcessEnv): string {
+  const home = env.HOME ?? ".";
+  const set = env.PI_CODING_AGENT_DIR?.trim();
+  return set ? set.replace(/^~(?=$|\/)/, home) : join(home, ".pi", "agent");
+}
 
 /** Entry names in `dir` (directories only unless `all`); none when it cannot be read. */
 function safeDirs(dir: string, all = false): string[] {

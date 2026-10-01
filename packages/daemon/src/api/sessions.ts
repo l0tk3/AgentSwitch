@@ -10,7 +10,10 @@ import { remoteCaller } from "../core/caller.js";
 import { TerminalAudit } from "../terminals/audit.js";
 import { limitParam, type ApiDeps } from "./shared.js";
 
-const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode"]);
+const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode", "pi"]);
+/** Agents that keep no register of a running session and no writer lock (docs/terminal-v0.md §5): a session written in
+ *  the last 90 seconds may be open in another program. */
+const UNSEEN: ReadonlySet<string> = new Set<SessionHarness>(["opencode", "pi"]);
 const LIST_LIMIT = 60;
 const MESSAGE_LIMIT = 80;
 const MAX_MESSAGES = 300;
@@ -42,19 +45,23 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
     const harness = c.req.param("harness");
     const id = c.req.param("id");
     if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
-    if (harness === "opencode") return c.json({ error: "OpenCode 的会话还不能在这里删除" }, 400);
     const session = monitor.list(LIST_LIMIT * 4).find((s) => s.harness === harness && s.id === id);
     if (!session) return c.json({ error: "no such session" }, 404);
     // What writes a session is a terminal here that still runs, or another program (Claude's session registry, Codex's
     // writer lock). Recent activity is not: a terminal just closed writes its last line on the way out. Only without
     // those checks (terminals off) does recent activity stand in for them.
     if (session.active && !deps.terminals) return c.json({ error: "会话正在使用中" }, 409);
+    // OpenCode and pi say nothing of who has a session open: written just now is taken as in use, unless it was one of
+    // our own terminals (closed now; a running one is refused below).
+    if (session.active && UNSEEN.has(harness) && !deps.terminals?.host.list().some((t) => t.agentSessionId === id)) {
+      return c.json({ error: "会话刚刚还在写入，可能正在别处使用；请稍后再删。" }, 409);
+    }
     if (deps.terminals?.host.list().some((t) => t.status !== "exited" && t.agentSessionId === id)) return c.json({ error: "会话正在终端中打开，请先关闭终端。" }, 409);
     const other = await deps.terminals?.elsewhere(harness as SessionHarness, id, []).catch(() => null);
     if (other) return c.json({ error: `会话正在${other.app ?? "其他程序"}中打开，请先在那里退出。` }, 409);
-    const { removed, failed } = monitor.remove(harness as SessionHarness, id);
+    const { removed, failed } = await monitor.remove(harness as SessionHarness, id);
     audit?.record({ terminal: "-", action: "session-delete", via: remoteCaller(c.env)?.deviceId ?? "local", detail: { harness, session: id, files: removed.length, failed: failed.length } });
-    if (failed.length) return c.json({ error: `有 ${failed.length} 个记录文件未能删除。`, files: removed.length }, 500);
+    if (failed.length) return c.json({ error: harness === "opencode" ? "OpenCode 未能删除这段会话。" : `有 ${failed.length} 个记录文件未能删除。`, files: removed.length }, 500);
     if (!removed.length) return c.json({ error: "未找到该会话的记录文件，未删除任何内容。" }, 404);
     return c.json({ ok: true, files: removed.length });
   });

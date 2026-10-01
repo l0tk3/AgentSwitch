@@ -16,6 +16,7 @@ import { SessionSearch } from "../src/sessions/search.js";
 import { maskSecrets, type SessionSummary } from "../src/sessions/types.js";
 import { claudeFacts, claudeMode } from "../src/sessions/claude.js";
 import { codexMode } from "../src/sessions/codex.js";
+import { existsSync } from "node:fs";
 
 const NOW = Date.parse("2026-09-27T10:00:00Z");
 const line = (o: unknown) => JSON.stringify(o);
@@ -247,17 +248,18 @@ describe("a session's permission mode", () => {
 });
 
 describe("deleting a session's record", () => {
-  it("removes only the agent's own file for that session; OpenCode and path-like ids are refused", () => {
+  it("removes only the agent's own file for that session; path-like ids are refused; OpenCode only with its command", async () => {
     const { sources } = fixture();
     const monitor = new SessionMonitor(sources);
     const none = { removed: [], failed: [] };
-    expect(monitor.remove("claude-code", "../c1")).toEqual(none);
-    expect(monitor.remove("opencode", "o1")).toEqual(none);
-    const claude = monitor.remove("claude-code", "c1").removed;
+    expect(await monitor.remove("claude-code", "../c1")).toEqual(none);
+    // No opencode on this Mac: reported as not deleted, never claimed.
+    expect(await monitor.remove("opencode", "o1")).toEqual({ removed: [], failed: [`${sources.opencodeDb}#o1`] });
+    const claude = (await monitor.remove("claude-code", "c1")).removed;
     expect(claude).toHaveLength(1);
     expect(claude[0]!.endsWith("/-Users-u-code-site/c1.jsonl")).toBe(true);
-    expect(monitor.remove("codex", "x1").removed[0]!.endsWith("rollout-2026-09-26T20-00-00-x1.jsonl")).toBe(true);
-    expect(monitor.remove("codex", "x1")).toEqual(none);   // gone already: nothing claimed
+    expect((await monitor.remove("codex", "x1")).removed[0]!.endsWith("rollout-2026-09-26T20-00-00-x1.jsonl")).toBe(true);
+    expect(await monitor.remove("codex", "x1")).toEqual(none);   // gone already: nothing claimed
     expect(monitor.list(10).map((s) => s.id)).toEqual(["o1"]);
   });
 
@@ -275,7 +277,8 @@ describe("deleting a session's record", () => {
     open = [];
     expect((await del("/sessions/codex/x1")).status).toBe(200);
     expect((await del("/sessions/codex/x1")).status).toBe(404);
-    expect((await del("/sessions/opencode/o1")).status).toBe(400);
+    // OpenCode without its command here: not deleted, said so.
+    expect(await (await del("/sessions/opencode/o1")).json()).toMatchObject({ error: "OpenCode 未能删除这段会话。" });
     // Held by another program (Claude's session registry, Codex's writer lock): not while it may still write.
     expect((await del("/sessions/claude-code/c1")).status).toBe(409);
     heldElsewhere = false;
@@ -316,5 +319,78 @@ describe("Codex threads", () => {
     expect(codex.map((s) => s.id).sort()).toEqual(["fork1", "x1"]);
     expect(codex.find((s) => s.id === "fork1")?.forkedFrom).toBe("x1");
     expect(codex.find((s) => s.id === "x1")?.forkedFrom).toBeUndefined();
+  });
+});
+
+describe("pi sessions and deleting OpenCode's and pi's (2026-10-01, user: opencode、pi 都加上删除支持)", () => {
+  /** A pi session as pi 0.87 writes it: the session line, a model change, a named session, a prompt, a reply with a
+   *  tool call, its result. */
+  function withPi(written = "2026-09-27T09:00:20Z") {
+    const f = fixture();
+    const piSessions = join(dirname(f.sources.claudeProjects), "pi", "sessions");
+    const dir = join(piSessions, "--Users-u-code-pi--");
+    mkdirSync(dir, { recursive: true });
+    const id = "01a0e355-51f3-7130-bbf8-2091e4ea94a7";
+    const file = join(dir, `2026-09-27T09-00-00-000Z_${id}.jsonl`);
+    writeFileSync(file, [
+      line({ type: "session", version: 3, id, timestamp: "2026-09-27T09:00:00.000Z", cwd: "/Users/u/code/pi" }),
+      line({ type: "model_change", id: "a", parentId: null, timestamp: "2026-09-27T09:00:00.100Z", provider: "anthropic", modelId: "claude-sonnet-5-5" }),
+      line({ type: "message", id: "b", parentId: "a", timestamp: "2026-09-27T09:00:01Z", message: { role: "user", content: [{ type: "text", text: "风扇控制在断网后会回退吗" }], timestamp: 1 } }),
+      line({ type: "message", id: "c", parentId: "b", timestamp: "2026-09-27T09:00:10Z", message: { role: "assistant", model: "claude-sonnet-5-5", content: [{ type: "thinking", thinking: "…" }, { type: "text", text: "先看一下 fanctl 的配置。" }, { type: "toolCall", id: "t1", name: "bash", arguments: { command: "cat fanctl.toml" } }] } }),
+      line({ type: "message", id: "d", parentId: "c", timestamp: "2026-09-27T09:00:11Z", message: { role: "toolResult", toolCallId: "t1", toolName: "bash", content: [{ type: "text", text: "offline_fallback = true" }], isError: false } }),
+      line({ type: "session_info", id: "e", parentId: "d", timestamp: written, name: "fanctl 断网回退" }),
+    ].join("\n") + "\n");
+    utimesSync(file, new Date(written), new Date(written));
+    return { ...f, sources: { ...f.sources, piSessions } as SessionSources, file, id };
+  }
+
+  it("lists pi's sessions by their name, reads their messages, and searches what was said (not tool results)", async () => {
+    const { sources, id } = withPi();
+    const monitor = new SessionMonitor(sources, () => NOW);
+    const pi = monitor.list().find((s) => s.harness === "pi");
+    expect(pi).toMatchObject({ id, cwd: "/Users/u/code/pi", title: "fanctl 断网回退", lastText: "先看一下 fanctl 的配置。", model: "claude-sonnet-5-5",
+      startedAt: Date.parse("2026-09-27T09:00:00.000Z"), active: false });
+    expect(monitor.read("pi", id)?.messages.map((m) => [m.role, m.tool ?? "", m.text])).toEqual([
+      ["user", "", "风扇控制在断网后会回退吗"], ["assistant", "", "先看一下 fanctl 的配置。"], ["tool", "bash", "cat fanctl.toml"],
+    ]);
+    const search = new SessionSearch(monitor);
+    expect((await search.search("断网后")).map((h) => h.id)).toEqual([id]);
+    expect(await search.search("offline_fallback")).toEqual([]);
+  });
+
+  it("deletes a pi session's file over the API; one just written is refused unless our own terminal had it", async () => {
+    const recent = withPi("2026-09-27T09:59:40Z");   // 20 s before NOW
+    const monitor = new SessionMonitor(recent.sources, () => NOW);
+    let terminals: { agentSessionId: string; status: string }[] = [];
+    const deps = { sessions: monitor, terminals: { host: { list: () => terminals }, audit: { record: () => undefined }, elsewhere: async () => null } };
+    const app = new Hono();
+    mountSessions(app, deps as unknown as ApiDeps);
+    const del = () => app.request(`/sessions/pi/${recent.id}`, { method: "DELETE" });
+    expect((await del()).status).toBe(409);
+    expect(existsSync(recent.file)).toBe(true);
+    terminals = [{ agentSessionId: recent.id, status: "exited" }];
+    expect(await (await del()).json()).toEqual({ ok: true, files: 1 });
+    expect(existsSync(recent.file)).toBe(false);
+    expect((await del()).status).toBe(404);
+  });
+
+  it("deletes an OpenCode session through its command: deleted, not there, or failed", async () => {
+    const { sources } = fixture();
+    const asked: string[] = [];
+    let answer: () => Promise<boolean> = async () => true;
+    const monitor = new SessionMonitor({ ...sources, openCodeDelete: (id) => { asked.push(id); return answer(); } });
+    const app = new Hono();
+    mountSessions(app, { sessions: monitor } as unknown as ApiDeps);
+    const del = () => app.request("/sessions/opencode/o1", { method: "DELETE" });
+    expect(await (await del()).json()).toEqual({ ok: true, files: 1 });
+    answer = async () => false;
+    expect((await del()).status).toBe(404);
+    answer = async () => { throw new Error("database is locked"); };
+    expect((await del()).status).toBe(500);
+    expect(asked).toEqual(["o1", "o1", "o1"]);
+    // OpenCode's own ids (`ses_…`) pass; a path never reaches the command.
+    expect((await monitor.remove("opencode", "ses_f1f27d40effel9xrMP9YYWs2sa")).failed).toHaveLength(1);
+    expect(await monitor.remove("opencode", "../x")).toEqual({ removed: [], failed: [] });
+    expect(asked.at(-1)).toBe("ses_f1f27d40effel9xrMP9YYWs2sa");
   });
 });

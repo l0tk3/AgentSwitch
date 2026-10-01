@@ -1,7 +1,7 @@
-/** The Mac's own coding sessions (docs/control-v0.md §3): what Claude Code, Codex and OpenCode keep of the sessions the
+/** The Mac's own coding sessions (docs/control-v0.md §3): what Claude Code, Codex, OpenCode and pi keep of the sessions the
  *  user ran, read-only, so the phone can watch them and the assistant knows where the user is working. */
 
-export type SessionHarness = "claude-code" | "codex" | "opencode";
+export type SessionHarness = "claude-code" | "codex" | "opencode" | "pi";
 
 /** How the session last asked before acting, in the terminals' three words (docs/terminal-v0.md §3): every time, the
  *  agent's automatic mode, or not at all. Continuing the session keeps it. */

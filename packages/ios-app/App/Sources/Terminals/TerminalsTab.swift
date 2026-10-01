@@ -391,8 +391,9 @@ struct TerminalsTab: View {
         return Text(attributed)
     }
 
-    /// Sessions whose record the Mac can delete (OpenCode keeps its own database).
-    static let deletable: Set<String> = ["claude-code", "codex"]
+    /// Sessions whose record the Mac can delete: every agent's (docs/terminal-v0.md §5; OpenCode, through its own command,
+    /// and pi since 2026-10-01, user: opencode、pi 都加上删除支持).
+    static let deletable: Set<String> = ["claude-code", "codex", "opencode", "pi"]
 
     /// The row is wiped out while the Mac deletes the record; it comes back if that fails.
     private func deleteSession(_ s: SessionSummary) async {

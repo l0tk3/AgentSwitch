@@ -42,7 +42,8 @@ const AGENTS = [
 const AGENT = Object.fromEntries(AGENTS.map((a) => [a.id, a.name]));
 const RESUMABLE = new Set(["claude-code", "codex", "opencode"]);
 /** Sessions whose record can be deleted here (OpenCode keeps them in its database). */
-const DELETABLE = new Set(["claude-code", "codex"]);
+// Every agent's sessions can be deleted (docs/terminal-v0.md §5; OpenCode and pi since 2026-10-01).
+const DELETABLE = new Set(["claude-code", "codex", "opencode", "pi"]);
 /** "Continue" goes on in the same session, one program at a time; the service sees where Claude Code and Codex
  *  sessions are open (terminal-v0 §5), not OpenCode's. */
 const CHECKED = new Set(["claude-code", "codex"]);

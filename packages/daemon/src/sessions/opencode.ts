@@ -3,8 +3,11 @@
  *  left out, and so are AgentSwitch's own model calls (`OWN_OPENCODE_AGENTS`). OpenCode writes the file while it runs:
  *  every read opens and closes it. */
 
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { dirname } from "node:path";
+import { promisify } from "node:util";
 import { OWN_OPENCODE_AGENTS } from "../core/probes.js";
 import { obj, str } from "./jsonl.js";
 import { clipText, type SessionMessage } from "./types.js";
@@ -73,4 +76,27 @@ export function openCodeMessages(path: string, id: string, limit: number): Sessi
     }
     return out.slice(-limit);
   });
+}
+
+/** Deleting one of the user's OpenCode sessions (docs/terminal-v0.md §5, 2026-10-01): through OpenCode's own command,
+ *  `opencode session delete --standalone <id>` — the session and its child sessions, on a private server so the
+ *  background service is not involved; the database is the one the list reads (`XDG_DATA_HOME` set to match). true:
+ *  deleted; false: OpenCode has no such session; throws when the command fails otherwise. */
+export type OpenCodeDelete = (id: string) => Promise<boolean>;
+
+const runFile = promisify(execFile);
+
+export function openCodeDeleter(binary: string, db: string, env: NodeJS.ProcessEnv = process.env): OpenCodeDelete {
+  return async (id) => {
+    try {
+      await runFile(binary, ["session", "delete", "--standalone", id], {
+        timeout: 30_000, cwd: env.HOME ?? "/", env: { ...env, XDG_DATA_HOME: dirname(dirname(db)) },
+      });
+      return true;
+    } catch (err) {
+      const e = err as { stderr?: string; stdout?: string; message?: string };
+      if (/session not found/i.test(`${e.stderr ?? ""}${e.stdout ?? ""}`)) return false;
+      throw new Error((e.stderr || e.message || "opencode session delete failed").trim().split("\n").slice(-1)[0]);
+    }
+  };
 }

@@ -77,6 +77,7 @@ import { codexTextRouter } from "./router/routers/codex.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS, QUOTA_TTL_MS } from "./core/limits.js";
 import { loadWorkdir } from "./files/workdir.js";
 import { defaultSessionSources, SessionMonitor } from "./sessions/monitor.js";
+import { openCodeDeleter } from "./sessions/opencode.js";
 import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
 import { TerminalAudit } from "./terminals/audit.js";
 import { TerminalHost, type Launcher, type TerminalHarness } from "./terminals/host.js";
@@ -317,7 +318,13 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure({ fresh: true }), 8000); } } : {}),
     ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current() } : {}),
   } : undefined;
-  const sessions = cfg.watchSessions ? new SessionMonitor({ ...defaultSessionSources(cfg.home), ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []) }) : undefined;
+  // Deleting an OpenCode session goes through the user's own opencode (docs/terminal-v0.md §5); none with a fake launcher.
+  const sessionSources = defaultSessionSources(cfg.home);
+  const opencodeBin = overrides.terminalLauncher ? undefined : agentBinaries.opencode ?? terminalBinaries(targets, cfg.opencodeBinary).opencode;
+  const sessions = cfg.watchSessions ? new SessionMonitor({
+    ...sessionSources, ...(opencodeBin ? { openCodeDelete: openCodeDeleter(opencodeBin, sessionSources.opencodeDb) } : {}),
+    ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
+  }) : undefined;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
   const conversation = new AssistantLog(join(cfg.home, "assistant.db"));
   const engine = new Engine({ conversation, ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(nearSessions ? { sessionsNear: nearSessions } : {}), store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });

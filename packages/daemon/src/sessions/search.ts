@@ -7,6 +7,7 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { claudeSaid } from "./claude.js";
 import { codexSaid } from "./codex.js";
+import { piSaid } from "./pi.js";
 import { obj } from "./jsonl.js";
 import type { SessionMonitor } from "./monitor.js";
 import { openCodeMessages } from "./opencode.js";
@@ -68,7 +69,7 @@ export class SessionSearch {
       // Grown: only what was added. Shorter than read before: rewritten (compacted, restored), read again.
       const grown = had !== undefined && had.offset < size;
       const from = grown ? had.offset : Math.max(0, size - FIRST_READ_BYTES);
-      const said = s.harness === "claude-code" ? claudeSaid : codexSaid;
+      const said = s.harness === "claude-code" ? claudeSaid : s.harness === "pi" ? piSaid : codexSaid;
       const { lines, end } = readLines(source, from, size, !grown && from > 0);
       const added = lines.map((line) => lineSaid(line, s.harness, said)).filter((t): t is string => !!t).join("\n");
       const base = grown ? had.text : "";
@@ -85,13 +86,14 @@ export class SessionSearch {
   }
 }
 
-/** A line's words, parsed only when it can hold them: Claude Code's tool results (often whole files) and Codex's
- *  non-message lines are passed over without parsing. */
+/** A line's words, parsed only when it can hold them: Claude Code's tool results (often whole files), Codex's
+ *  non-message lines and pi's tool results are passed over without parsing. */
 function lineSaid(line: string, harness: SessionHarness, said: (l: Record<string, unknown>) => string | null): string | null {
   if (harness === "claude-code") {
     if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"')) return null;
     if (line.includes('"type":"tool_result"') && !line.includes('"type":"text"')) return null;
   } else if (!line.includes('"type":"message"')) return null;
+  else if (harness === "pi" && line.includes('"role":"toolResult"')) return null;
   try { return said(obj(JSON.parse(line))); } catch { return null; }
 }
 

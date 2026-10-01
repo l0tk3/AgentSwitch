@@ -19,17 +19,18 @@
 
 ## 3. 会话监视
 
-daemon 读三家本地记录（只读，不改；唯一例外是用户在会话列表里删除一段记录，见 terminal-v0 §5）：
+daemon 读四家本地记录（只读，不改；唯一例外是用户在会话列表里删除一段记录，见 terminal-v0 §5）：
 
 | 执行器 | 位置 | 取什么 |
 |---|---|---|
 | Claude Code | `~/.claude/projects/<目录>/<id>.jsonl` | `cwd`、`gitBranch`、第一条用户消息、最后一条助手文字、时间 |
 | Codex | `~/.codex/sessions/<年>/<月>/<日>/rollout-*.jsonl` | `session_meta.cwd`、`originator`（桌面 / 命令行 / 编辑器）、首条用户消息、最后一条回复、时间 |
 | OpenCode | `~/.local/share/opencode/opencode.db` 表 `session_v2` | `directory`、`title`、`time_updated`、模型 |
+| pi（2026-10-01 加，用户：opencode、pi 都加上删除支持——pi 的会话原来不列） | `~/.pi/agent/sessions/--<目录>--/<时间>_<id>.jsonl`（`PI_CODING_AGENT_DIR` 可改 `~/.pi/agent`） | 第一行 `session` 的 `id`、`cwd`、`timestamp`；名字取最后一条 `session_info.name`，没有时取第一条用户消息；最后一条助手文字、模型、时间 |
 
 - 只列用户自己的会话：目录在临时目录（`/tmp`、`/private/tmp`、`/private/var/folders`）或 AgentSwitch 数据目录下的不列（那是探测、测试和 AgentSwitch 自己的执行器）。
 - 进行中 = 最近 90 秒内有更新。
-- `GET /sessions?limit=60` → `{sessions: SessionSummary[]}`，新到旧；`SessionSummary = {harness: "claude-code"|"codex"|"opencode", id, cwd, title, lastText, updatedAt, active, origin?, branch?, model?}`。
+- `GET /sessions?limit=60` → `{sessions: SessionSummary[]}`，新到旧；`SessionSummary = {harness: "claude-code"|"codex"|"opencode"|"pi", id, cwd, title, lastText, updatedAt, active, origin?, branch?, model?}`。
 - `GET /sessions/:harness/:id?limit=80` → `{session: SessionSummary, messages: [{role: "user"|"assistant"|"tool", text, ts, tool?}]}`，最近的 N 条，每条截 2000 字。
 - 两条都远程可读（只读）。会话内容是用户自己的，只经钉证书的通道给自己的手机，不入库、不进日志。
 - **调度模型看得到**（2026-09-27 审查后改为按目录）：

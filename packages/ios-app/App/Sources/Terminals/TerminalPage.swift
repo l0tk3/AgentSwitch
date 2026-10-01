@@ -628,7 +628,9 @@ struct TerminalPage: View {
     }
 
     /// It wrote a session of its own that the Mac can delete (one continued in place stays: the Mac refuses).
-    private var canDeleteRecord: Bool { page.ownsRecord && TerminalsTab.deletable.contains(page.harness) }
+    /// Closing deletes the record with it only for Claude Code (the record it reported starting; the service deletes no
+    /// other agent's on close), as the web page offers it; other sessions are deleted from the list.
+    private var canDeleteRecord: Bool { page.ownsRecord && page.harness == "claude-code" }
 
     private func close(deleteRecord: Bool = false) async {
         if await page.close(deleteRecord: deleteRecord) {
