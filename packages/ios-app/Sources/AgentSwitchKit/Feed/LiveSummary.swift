@@ -22,7 +22,8 @@ public enum LiveSummary {
             let waitingOn = pending[task.id]?.first
             let needsYou = waitingOn != nil || task.status == .waitingApproval
             return LiveState.Row(id: task.id, title: title(task, threadTitles, tasks), step: step(task, waitingOn, tails[task.id] ?? []),
-                                 model: task.model.map(ModelName.display), startedAt: task.created, needsYou: needsYou)
+                                 model: task.model.map(ModelName.display), startedAt: task.created, needsYou: needsYou,
+                                 doing: doing(task, needsYou: needsYou, waitingOn, tails[task.id] ?? []))
         } + asking.map(row)
         let ordered = rows.sorted { ($0.needsYou ? 0 : 1, $1.startedAt) < ($1.needsYou ? 0 : 1, $0.startedAt) }
         let waiting = rows.filter(\.needsYou).count
@@ -36,13 +37,44 @@ public enum LiveSummary {
         guard terminal.waitsForYou else {
             return LiveState.Row(id: terminal.id, title: clip(terminal.name.isEmpty ? agent : terminal.name, titleChars),
                                  step: clip(terminal.activity.map { MessageDisplay.readable($0.phrase) } ?? "进行中", stepChars), model: agent,
-                                 startedAt: Date(milliseconds: terminal.statusSince ?? terminal.lastOutputAt), needsYou: false, kind: .terminal)
+                                 startedAt: Date(milliseconds: terminal.statusSince ?? terminal.lastOutputAt), needsYou: false, kind: .terminal,
+                                 doing: terminal.activity.map { ToolDisplay.word($0.tool) } ?? "Think")
         }
         let ask = terminal.permissions.first
         let since = ask.map(\.at).flatMap { $0 > 0 ? $0 : nil } ?? terminal.statusSince ?? terminal.lastOutputAt
         return LiveState.Row(id: terminal.id, title: clip(terminal.name.isEmpty ? agent : terminal.name, titleChars),
                              step: clip(ask.map { MessageDisplay.readable($0.summary) } ?? "等你处理", stepChars), model: agent,
-                             startedAt: Date(milliseconds: since), needsYou: true, kind: .terminal)
+                             startedAt: Date(milliseconds: since), needsYou: true, kind: .terminal,
+                             doing: ask?.tool == "AskUserQuestion" ? "Answer" : "Allow?")
+    }
+
+    /// What a task is doing now in one word (the compact island): waiting on a question or an approval, else the latest
+    /// event that says something — a tool by its word, the model writing, planning, choosing a model — else its state.
+    static func doing(_ task: AgentTask, needsYou: Bool, _ waitingOn: Approval?, _ tail: [TaskEvent]) -> String {
+        if needsYou { return waitingOn?.questionEvidence?.questions.isEmpty == false ? "Answer" : "Allow?" }
+        for event in tail.reversed() {
+            let p = event.payload
+            switch event.type {
+            case "tool_call" where p["denied"] == nil: return ToolDisplay.word(p["tool"]?.string ?? "")
+            case "text": return "Reply"
+            case "routed": return p["clarify"]?.string?.isEmpty == false ? "Answer" : "Start"
+            case "dispatched", "redispatch": return "Start"
+            case "step":
+                switch p["action"]?.string {
+                case "plan": return "Plan"
+                case "ask_user": return "Answer"
+                case "finish": return "Check"
+                case "dispatch": return "Start"
+                default: continue
+                }
+            default: continue
+            }
+        }
+        switch task.status {
+        case .queued: return "Queued"
+        case .routing: return "Route"
+        default: return "Busy"
+        }
     }
 
     /// The conclusion to show once nothing runs: the task that ended last (a cancelled one too, said as such).

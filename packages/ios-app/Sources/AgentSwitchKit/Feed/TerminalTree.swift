@@ -91,7 +91,8 @@ public enum TerminalTree {
         return String(path[..<slash])
     }
 
-    static func lastComponent(_ path: String) -> String {
+    /// A folder as the tree and the terminal page's title name it: its last component.
+    public static func lastComponent(_ path: String) -> String {
         path == "/" ? "/" : String(path.split(separator: "/").last ?? Substring(path))
     }
 }

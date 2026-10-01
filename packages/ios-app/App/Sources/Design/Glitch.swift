@@ -36,20 +36,16 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        let f = frame
         content
-            .background {
-                if let f, f.split != 0 {
-                    content.colorMultiply(Theme.busy).offset(x: f.split).opacity(0.9)
-                    content.colorMultiply(Theme.signal).offset(x: -f.split).opacity(0.9)
-                }
-            }
-            .offset(x: f?.dx ?? 0, y: f?.dy ?? 0)
-            .modifier(Band(frame: f))
-            .modifier(Inverted(on: f?.invert == true))
+            .modifier(Drawn(frame: frame))
             .onChange(of: trigger) { _, new in if when?(new) ?? true { play() } }
             .onAppear { if onAppear { play() } }
-            .onDisappear { run?.cancel() }
+            // A burst cut short (the row scrolled away, the page left) must not keep its last frame: the state outlives
+            // the disappearance, and the row came back half cut away (2026-10-01, user: 正在工作的 session 怎么只显示了半截).
+            .onDisappear {
+                run?.cancel()
+                frame = nil
+            }
     }
 
     private func play() {
@@ -63,6 +59,24 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
                 elapsed = at
                 frame = next
             }
+        }
+    }
+
+    /// One frame on the view: the split copies behind it, the jolt, the band that stays, the inversion.
+    struct Drawn: ViewModifier {
+        let frame: Frame?
+        func body(content: Content) -> some View {
+            let f = frame
+            content
+                .background {
+                    if let f, f.split != 0 {
+                        content.colorMultiply(Theme.busy).offset(x: f.split).opacity(0.9)
+                        content.colorMultiply(Theme.signal).offset(x: -f.split).opacity(0.9)
+                    }
+                }
+                .offset(x: f?.dx ?? 0, y: f?.dy ?? 0)
+                .modifier(Band(frame: f))
+                .modifier(Inverted(on: f?.invert == true))
         }
     }
 
@@ -92,7 +106,47 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
     }
 }
 
+/// While something runs, a short burst now and then (2026-10-01, user: 正在运行中的都改成这个效果（glitch 动效）; ui-v0
+/// §7.2.9): the bands and the split copies, no inverted frame, 0.14 s every 3 to 7 seconds, so the full burst stays the
+/// sign that something happened (it waits for you, it ended). Nothing under Reduce Motion.
+struct RunningGlitch: ViewModifier {
+    let running: Bool
+    @State private var frame: Glitch<Bool>.Frame?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static var frames: [(Double, Glitch<Bool>.Frame?)] {
+        [(0, .init(dx: -3, top: 0.14, bottom: 0.46, split: 3)),
+         (0.05, .init(dx: 3, top: 0.56, bottom: 0.1, split: -2)),
+         (0.1, .init(split: 1)),
+         (0.14, nil)]
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(Glitch<Bool>.Drawn(frame: frame))
+            .task(id: running && !reduceMotion) {
+                guard running, !reduceMotion else { frame = nil; return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(Int.random(in: 3000...7000)))
+                    var elapsed = 0.0
+                    for (at, next) in Self.frames where !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(Int((at - elapsed) * 1000)))
+                        elapsed = at
+                        frame = next
+                    }
+                }
+                // Cut short (it stopped running, the row went away): never left on a frame.
+                frame = nil
+            }
+    }
+}
+
 extension View {
+    /// Short bursts now and then while `running`.
+    func runningGlitch(_ running: Bool) -> some View {
+        modifier(RunningGlitch(running: running))
+    }
+
     /// A glitch burst each time `trigger` changes (to a value `when` accepts, if given; and as the view appears, with
     /// `onAppear`).
     func glitch<T: Equatable>(on trigger: T, onAppear: Bool = false, when: ((T) -> Bool)? = nil) -> some View {

@@ -143,6 +143,21 @@ function glitch(el) {
   el.addEventListener("animationend", () => el.classList.remove("glitch"), { once: true });
 }
 
+/** While something runs, a light burst now and then (ui-v0 §7.2.9, 2026-10-01, user: 正在运行中的都改成这个效果):
+ *  the bands and the split, no inversion, so the full glitch stays the sign that something happened. */
+function flicker(el) {
+  if (!el || el.classList.contains("glitch") || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  el.classList.remove("flicker");
+  void el.offsetWidth;
+  el.classList.add("flicker");
+  el.addEventListener("animationend", () => el.classList.remove("flicker"), { once: true });
+}
+
+/** Every row matching `selector` flickers on its own beat: each second one in five does, about every 3–7 s. */
+function flickerRunning(selector) {
+  return setInterval(() => document.querySelectorAll(selector).forEach((el) => { if (Math.random() < 0.2) flicker(el); }), 1000);
+}
+
 const GLITCH_CSS = `
 .glitch { animation: glitch .45s steps(1) 1; }
 @keyframes glitch {
@@ -154,8 +169,15 @@ const GLITCH_CSS = `
   40%  { filter: none; text-shadow: 1px 0 var(--cyan), -1px 0 var(--signal); }
   56%  { transform: translate(2px, 0); clip-path: inset(70% 0 0 0); }
   64%, 100% { transform: translate(0); clip-path: none; text-shadow: none; filter: none; }
+}
+.flicker { animation: flicker .14s steps(1) 1; }
+@keyframes flicker {
+  0%   { transform: translate(-3px, 0); clip-path: inset(14% 0 46% 0); text-shadow: 3px 0 var(--cyan), -3px 0 var(--signal); }
+  36%  { transform: translate(3px, 0); clip-path: inset(56% 0 10% 0); text-shadow: -2px 0 var(--cyan), 2px 0 var(--signal); }
+  72%  { transform: translate(0); clip-path: none; text-shadow: 1px 0 var(--cyan), -1px 0 var(--signal); }
+  100% { transform: none; clip-path: none; text-shadow: none; }
 }`;
 
 // A classic script (the pages open from file://, where modules are blocked).
-window.Pixel = { sprite, AGENT_PX, AGENT_NAME, SQUARE, HOLLOW, mark, wordmark, glitch, GLITCH_CSS };
+window.Pixel = { sprite, AGENT_PX, AGENT_NAME, SQUARE, HOLLOW, mark, wordmark, glitch, flicker, flickerRunning, GLITCH_CSS };
 })();

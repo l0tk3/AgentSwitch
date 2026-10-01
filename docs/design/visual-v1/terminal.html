@@ -221,6 +221,14 @@ mark { background: var(--signal); color: #000; padding: 0 1px; }
 .go-row .btn { padding: 2px 10px; font-size: 13px; }
 @keyframes blink { 50% { opacity: 0; } }
 
+/* ---------- flicker: a busy row now and then (ui-v0 §7.2.9, 2026-10-01; bands and split, no inversion) ---------- */
+.flicker { animation: flicker .14s steps(1) 1; }
+@keyframes flicker {
+  0%   { transform: translate(-3px, 0); clip-path: inset(14% 0 46% 0); text-shadow: 3px 0 var(--cyan), -3px 0 var(--signal); }
+  36%  { transform: translate(3px, 0); clip-path: inset(56% 0 10% 0); text-shadow: -2px 0 var(--cyan), 2px 0 var(--signal); }
+  72%  { transform: translate(0); clip-path: none; text-shadow: 1px 0 var(--cyan), -1px 0 var(--signal); }
+  100% { transform: none; clip-path: none; text-shadow: none; }
+}
 /* ---------- glitch: only when something changes ---------- */
 .glitch { animation: glitch .5s steps(1) 1; }
 @keyframes glitch {
@@ -615,6 +623,11 @@ function select(id) {
   render();
   showScreen(id);
 }
+
+// ---------- busy rows flicker now and then (ui-v0 §7.2.9, 2026-10-01) ----------
+setInterval(() => document.querySelectorAll(".row.term.working").forEach((el) => {
+  if (Math.random() < 0.2) Pixel.flicker(el);
+}), 1000);
 
 // ---------- events that glitch ----------
 function glitch(el) {

@@ -124,11 +124,15 @@ const P = window.Pixel;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const TINT = { busy: "var(--busy)", waiting: "var(--amber)", done: "var(--green)", incomplete: "var(--red)" };
 
-/** The mark in a state; done and incomplete colour the lit end (as waiting does). */
+/** The mark in a state, drawn as the app icon (hard shadow, half-lit steps, the icon's inks; 2026-10-01, user: 和 App
+ *  图标不一致); done and incomplete colour the lit end (as waiting does). The compact and minimal island take 4/3 pt
+ *  cells (4 device pixels at 3x), clear of the circle's edge (user: 太大、被圆圈裁切). */
+const ISLAND_PX = 4 / 3;
 function mark(state, px = 2) {
-  if (state === "done") return P.mark({ px, state: "error", colors: { error: "var(--green)", dim: "rgba(255,255,255,.45)", ink: "#fff" } });
-  if (state === "incomplete") return P.mark({ px, state: "error", colors: { dim: "rgba(255,255,255,.45)", ink: "#fff" } });
-  return P.mark({ px, state, t: 3, colors: { dim: "rgba(255,255,255,.45)", ink: "#fff" } });
+  const colors = { dim: "#5B5955", ink: "#E9E6DF", shadow: "#2C2A28" };
+  if (state === "done") return P.mark({ px, depth: true, state: "error", colors: { ...colors, error: "var(--green)" } });
+  if (state === "incomplete") return P.mark({ px, depth: true, state: "error", colors });
+  return P.mark({ px, depth: true, state, t: 3, colors });
 }
 const sq = (color) => `<i class="sq" style="background:${color}"></i>`;
 const glyph = (st) => (st === "busy" ? `<span class="spin">⠋</span>` : sq(TINT[st]));
@@ -136,7 +140,7 @@ const tally = (w, r) => `<span class="tally">${w ? `<span>${sq(TINT.waiting)}${w
 const agent = (a) => `<span class="agent">${P.sprite(P.AGENT_PX[a], { px: 2 })}</span>`;
 
 const S = {
-  busy1: { st: "busy", rows: [{ title: "总结一下 AgentSwitch 最近的改动", step: "选择模型", model: null, clock: "0:08" }], w: 0, r: 1 },
+  busy1: { st: "busy", rows: [{ title: "总结一下 AgentSwitch 最近的改动", step: "选择模型", model: null, clock: "0:08", doing: "Route" }], w: 0, r: 1 },
   busy3: { st: "busy", rows: [
     { title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "opus 5.5", clock: "10:40" },
     { title: "整理下载目录", step: "交给 DeepSeek Flash", model: "deepseek flash", clock: "0:40" },
@@ -153,9 +157,11 @@ const S = {
 
 function compact(s) {
   const n = (s.w ?? 0) + (s.r ?? 0);
-  const trail = s.ended ? sq(TINT[s.st]) : n > 1 ? tally(s.w, s.r) : `<span class="clock" style="color:${s.st === "waiting" ? "var(--amber)" : "var(--ink2)"}">${s.rows[0].clock}</span>`;
+  // One at work: what it is doing in a word (amber while it waits for you; 2026-10-01, user: 这个计时有点没用) — the
+  // clock stays in the expanded island.
+  const trail = s.ended ? sq(TINT[s.st]) : n > 1 ? tally(s.w, s.r) : `<span class="clock" style="color:${s.st === "waiting" ? "var(--amber)" : "var(--ink2)"}">${s.rows[0].doing}</span>`;
   return `<div class="edge"><span class="time">9:41</span><span class="bat"></span>
-    <div class="pill" style="width:${n > 1 ? 232 : 214}px"><span class="lead">${mark(s.st)}</span><span class="lens"></span><span class="trail">${trail}</span></div></div>`;
+    <div class="pill" style="width:${n > 1 ? 232 : 214}px"><span class="lead">${mark(s.st, ISLAND_PX)}</span><span class="lens"></span><span class="trail">${trail}</span></div></div>`;
 }
 
 function expanded(s) {
@@ -196,7 +202,7 @@ document.getElementById("compact").innerHTML = [
   ["busy · 一个任务", S.busy1], ["busy · 三个", S.busy3], ["waiting", S.waiting], ["done", S.done], ["incomplete", S.incomplete],
 ].map(([c, s]) => cell(c, compact(s))).join("");
 document.getElementById("minimal").innerHTML = ["busy", "waiting", "done", "incomplete"].map((st) =>
-  cell(st, `<div class="edge" style="width:200px"><span class="time">9:41</span><div class="pill" style="width:126px;left:40%"><span class="lens"></span></div><div class="minimal">${mark(st, 2)}</div></div>`)).join("");
+  cell(st, `<div class="edge" style="width:200px"><span class="time">9:41</span><div class="pill" style="width:126px;left:40%"><span class="lens"></span></div><div class="minimal">${mark(st, ISLAND_PX)}</div></div>`)).join("");
 document.getElementById("expanded").innerHTML = [
   ["busy · 三个任务", S.busy3], ["waiting · 问你", S.waiting], ["waiting · 终端", S.terminal], ["done", S.done], ["incomplete", S.incomplete],
 ].map(([c, s]) => cell(c, expanded(s))).join("");

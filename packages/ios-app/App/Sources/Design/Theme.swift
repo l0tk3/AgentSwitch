@@ -31,6 +31,8 @@ enum Theme {
     static let base = Color(light: 0xF3F1EA, dark: 0x000000)
     static let ink = Color(light: 0x151413, dark: 0xE9E6DF)
     static let inkDim = Color(light: 0xA29D93, dark: 0x4D4B48)
+    /// §7.3's 次 (second ink): the lower edge of a solid key cap, and the cap while it is pressed.
+    static let secondaryInk = Color(light: 0x5F5B54, dark: 0x8D8A84)
     /// 1 px lines: card frames, rules.
     static let line = Color(light: 0xD3CEC3, dark: 0x262524)
     /// What you said: a raised box, not a coloured bubble (the signal colour is not for text backgrounds).

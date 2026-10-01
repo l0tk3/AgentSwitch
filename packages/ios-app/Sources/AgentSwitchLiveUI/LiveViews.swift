@@ -11,8 +11,14 @@ public enum LiveLook {
     public static let text = Color.white
     public static let secondary = Color.white.opacity(0.72)
     public static let faint = Color.white.opacity(0.5)
-    /// The mark's unlit lanes.
-    static let dim = Color.white.opacity(0.45)
+    /// The mark in the app icon's inks (`make-icons.swift`; 2026-10-01, user: 和 App 图标不一致): the lit lane, the
+    /// others, the hard shadow one cell down and right.
+    static let markInk = Color(red: 0xE9 / 255, green: 0xE6 / 255, blue: 0xDF / 255)
+    static let markDim = Color(red: 0x5B / 255, green: 0x59 / 255, blue: 0x55 / 255)
+    static let markShadow = Color(red: 0x2C / 255, green: 0x2A / 255, blue: 0x28 / 255)
+    /// The compact and minimal island's cell: 4 device pixels (every phone with a Dynamic Island draws at 3x), the mark
+    /// with its shadow 20 × 16 pt, clear of the 37 pt circle's edge (2026-10-01, user: 太大、被圆圈裁切).
+    public static let islandPixel: CGFloat = 4.0 / 3.0
     /// Dotted rules.
     static let rule = Color.white.opacity(0.28)
     public static let background = Color.black.opacity(0.82)
@@ -59,10 +65,11 @@ public enum LiveLook {
     }
 }
 
-/// The app's mark as the activity's identity and its state (ui-v0 §7.3): the lit lane white, the others dim; busy puts
-/// a cyan block on the lit lane (a still frame: the island does not animate), waiting turns its end amber, and once all
-/// is over the end shows how it went (green done, red not). The compact and minimal island, the expanded island's
-/// leading corner, the lock screen's header.
+/// The app's mark as the activity's identity and its state (ui-v0 §7.3), drawn as the app icon draws it (§7.2.10): the
+/// lit lane ink, the others dim, the steps' inside corners half lit, a hard shadow a cell down and right. Busy puts a
+/// cyan block on the lit lane (a still frame: the island does not animate), waiting turns its end amber, and once all is
+/// over the end shows how it went (green done, red not). The compact and minimal island, the expanded island's leading
+/// corner, the lock screen's header.
 public struct LiveMark: View {
     let state: LiveState
     let pixel: CGFloat
@@ -81,18 +88,25 @@ public struct LiveMark: View {
         // The block two cells long, where the web mark's frame 3 has it (pixel.js).
         let block = state.phase == .running ? Set(LiveArt.laneA[3...4].map { "\($0.x),\($0.y)" }) : []
         let pixel = pixel
+        let cells = LiveArt.markRows.enumerated().flatMap { y, row in
+            row.enumerated().compactMap { x, ch in ch == "." ? nil : (x: x, y: y, ch: ch) }
+        }
+        let lane: (Character) -> Color = { "aAS".contains($0) ? LiveLook.markInk : LiveLook.markDim }
         Canvas { context, _ in
-            for (y, row) in LiveArt.markRows.enumerated() {
-                for (x, ch) in row.enumerated() where ch != "." {
-                    let color: Color = if block.contains("\(x),\(y)") { LiveLook.busy }
-                        else if ch == "A", let end { end }
-                        else if "aAS".contains(ch) { LiveLook.text }
-                        else { LiveLook.dim }
-                    context.fill(Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel, width: pixel, height: pixel)), with: .color(color))
-                }
+            func fill(_ x: Int, _ y: Int, _ color: Color) {
+                context.fill(Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel, width: pixel, height: pixel)), with: .color(color))
+            }
+            for c in cells { fill(c.x + 1, c.y + 1, LiveLook.markShadow) }
+            for h in LiveArt.halfLit { fill(h.x, h.y, lane(h.lane).opacity(0.42)) }
+            for c in cells {
+                let color: Color = if block.contains("\(c.x),\(c.y)") { LiveLook.busy }
+                    else if c.ch == "A", let end { end }
+                    else { lane(c.ch) }
+                fill(c.x, c.y, color)
             }
         }
-        .frame(width: CGFloat(LiveArt.markRows[0].count) * pixel, height: CGFloat(LiveArt.markRows.count) * pixel)
+        // One more column and row: the shadow.
+        .frame(width: CGFloat(LiveArt.markRows[0].count + 1) * pixel, height: CGFloat(LiveArt.markRows.count + 1) * pixel)
         .accessibilityElement()
         .accessibilityLabel("AgentSwitch · \(LiveLook.word(state))")
     }
@@ -261,11 +275,23 @@ public struct IslandCompactLeading: View {
     public init(state: LiveState) { self.state = state }
 
     public var body: some View {
-        LiveMark(state: state).padding(.leading, 4)
+        LiveMark(state: state, pixel: LiveLook.islandPixel).padding(.leading, 4)
     }
 }
 
-/// Compact island, right of the camera: the one task's clock, the counts when several run, or how it ended.
+/// Minimal island (beside another app's activity): the mark alone, small enough to sit clear of the circle's edge.
+public struct IslandMinimal: View {
+    let state: LiveState
+    public init(state: LiveState) { self.state = state }
+
+    public var body: some View {
+        LiveMark(state: state, pixel: LiveLook.islandPixel)
+    }
+}
+
+/// Compact island, right of the camera: what the one task or terminal is doing in a word (amber while it waits for you;
+/// 2026-10-01, user: 这个计时有点没用，换成更实用点的信息 — the clock stays in the expanded island), the counts when
+/// several run, or how it ended.
 public struct IslandCompactTrailing: View {
     let state: LiveState
     public init(state: LiveState) { self.state = state }
@@ -277,7 +303,7 @@ public struct IslandCompactTrailing: View {
             } else if state.running + state.waiting > 1 {
                 Tally(state: state)
             } else if let lead = state.lead {
-                LiveClock(since: lead.startedAt, width: 44).font(LiveLook.mono(13, .medium))
+                Text(lead.doing ?? (lead.needsYou ? "Waiting" : "Busy")).font(LiveLook.mono(13, .medium)).lineLimit(1).fixedSize()
                     .foregroundStyle(lead.needsYou ? LiveLook.waiting : LiveLook.secondary)
             }
         }

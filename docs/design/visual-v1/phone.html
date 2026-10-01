@@ -65,6 +65,7 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .navb { flex: none; height: 46px; display: grid; grid-template-columns: 60px 1fr 60px; align-items: center; padding: 0 14px; }
 .navb .t { text-align: center; font: 600 16px var(--ui); display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
 .navb .t small { font: 11px var(--mono); color: var(--ink2); display: flex; gap: 5px; align-items: center; }
+.navb .t .git { font: 400 12px var(--mono); font-style: normal; color: var(--ink2); margin-left: 4px; }
 .navb .l { justify-self: start; } .navb .r { justify-self: end; }
 .cap { background: none; border: 1px solid var(--ink4); padding: 4px 12px; font: 14px var(--mono); cursor: pointer; }
 .cap:active { background: var(--ink); color: var(--bg); }
@@ -205,6 +206,8 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .keys::-webkit-scrollbar { display: none; }
 .key { flex: none; min-width: 36px; padding: 6px 7px 5px; font: 13px var(--mono); text-align: center; background: var(--raise); border: 1px solid var(--ink4); border-bottom: 3px solid var(--ink3); cursor: pointer; }
 .key:active { transform: translateY(2px); border-bottom-width: 1px; margin-bottom: 2px; background: var(--ink4); }
+.key.solid { background: var(--ink); color: var(--bg); border-color: var(--ink); border-bottom-color: var(--ink2); font-weight: 600; min-width: 48px; }
+.key.solid:active { background: var(--ink2); }
 .sugs { background: var(--raise); border-top: 1px solid var(--ink4); }
 .sugs div { display: flex; gap: 10px; align-items: baseline; padding: 7px 16px; cursor: pointer; font-size: 12px; }
 .sugs div:active { background: var(--ink4); }
@@ -255,7 +258,7 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 .fx .new { color: #ff2e88; font: 11px var(--mono); }
 :focus-visible { outline: 2px solid #ff2e88; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
-  .blinker, .caret, .field.focus .cur, .screen-wipe, .scanline.run, .in, .gone, .glitch { animation: none !important; }
+  .blinker, .caret, .field.focus .cur, .screen-wipe, .scanline.run, .in, .gone, .glitch, .flicker { animation: none !important; }
 }
 </style>
 <style id="gcss"></style>
@@ -328,6 +331,8 @@ document.getElementById("gcss").textContent = P.GLITCH_CSS;
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const glitch = (el) => P.glitch(el);
+// Busy terminal rows flicker now and then (ui-v0 §7.2.9, 2026-10-01).
+P.flickerRunning('.row.tm[data-st="busy"]');
 const TERM_WIN = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"];
 const LOCK = [".###.", "#...#", "#####", "##.##", "#####"];
 /** A picture (a frame, a hill, the sun): the reply box's photo button (2026-09-30). */
@@ -452,7 +457,7 @@ function p1draw(reveal = null) {
       const line = () => `<span class="tree">${pad}${++i === rows ? "└─" : "├─"}</span>`;
       for (const t of g.terms) {
         const twig = line();
-        html += `<div class="row tm${anim(key)}" data-term="${t.id}">${twig}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
+        html += `<div class="row tm${anim(key)}" data-term="${t.id}" data-st="${t.st}">${twig}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
         // Its sub-agents: one level deeper, what each is doing now (tapping one opens the terminal).
         (t.subs ?? []).forEach((sb, k) => {
           const stem = twig.includes("└─") ? "  " : "│ ";
@@ -651,7 +656,9 @@ function p2start() {
 
 /* ================= phone 3: one terminal ================= */
 const p3 = document.getElementById("p3");
-const KEYS = ["esc", "tab", "⇧tab", "↑", "↓", "←", "→", "pgup", "pgdn", "^C", "⏎", "y", "n", "1", "2", "3"];
+// What an option needs first, within one screen: ⏎ (the only solid cap) and ⌫, the arrows, the numbers (terminal-v0 §1,
+// 2026-10-01, user: 回车应该更靠前更显眼；要加一个退格).
+const KEYS = ["⏎", "⌫", "↑", "↓", "1", "2", "3", "y", "n", "esc", "tab", "⇧tab", "←", "→", "pgup", "pgdn", "^C"];
 const COMMANDS = [
   ["compact", "Free up context by summarizing the conversation so far"], ["config", "Open settings"],
   ["context", "Show how the context window is used"], ["clear", "Start a new session with empty context"],
@@ -706,7 +713,9 @@ function p3build() {
 }
 function p3title() {
   const word = exited ? "exited" : tstatus === "waiting" ? "waiting" : tstatus;
-  document.getElementById("p3title").innerHTML = `<span>${esc(tname)}</span><small>${mark(exited ? "exited" : tstatus)} ${word}</small>`;
+  // The folder the agent works in and its git, as the Mac window's title (terminal-v0 §1, 2026-10-01); the name stays on
+  // its row in the list.
+  document.getElementById("p3title").innerHTML = `<span>api <i class="git">main ±3</i></span><small>${mark(exited ? "exited" : tstatus)} ${word}</small>`;
 }
 const fixedLines = () => [
   `<span class="c-dim">────────────────────────────────────────────────────</span>`,
@@ -742,7 +751,7 @@ function p3controls() {
     ${sugs.length ? `<div class="sugs">${sugs.map(([n, d, src]) => `<div data-cmd="${n}"><b>/${n}</b><span>${esc(d)}</span>${src ? `<i>${src}</i>` : ""}</div>`).join("")}</div>` : ""}
     <div class="dots"></div>
     ${err ? `<div class="err" id="p3err"><span>${esc(err)}</span><button type="button" data-x="err" aria-label="dismiss">×</button></div>` : ""}
-    <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="hide keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key">${k}</button>`).join("")}</div>
+    <div class="keys" style="${exited ? "opacity:.4;pointer-events:none" : ""}">${kbUp ? `<button type="button" class="key" data-x="hide" aria-label="hide keyboard">⌨↓</button>` : ""}${KEYS.map((k) => `<button type="button" class="key ${k === "⏎" ? "solid" : ""}">${k}</button>`).join("")}</div>
     ${drafts.length ? `<div class="drafts">${drafts.map((n) => `<span class="draft"><i></i><em>#${n}</em><b data-draft="${n}" aria-label="remove">×</b></span>`).join("")}</div>` : ""}
     <div class="composer ${sealed ? "sealed" : ""}" id="p3comp">
       <div class="hd">${P.sprite(LOCK, { px: 2 })}<span>sealed → ${esc(tname)}</span><span class="sp"></span><button type="button" data-x="unseal" aria-label="cancel">×</button></div>

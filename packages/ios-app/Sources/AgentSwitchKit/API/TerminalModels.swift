@@ -100,6 +100,9 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let harness: String
     public let cwd: String
+    /// Where the agent is now: the `cwd` its hook calls carry, which follows a `cd` (Claude Code, Codex); the starting
+    /// folder for the others and from services before 2026-10-01.
+    public let workdir: String
     public let model: String?
     /// manual · auto · bypass
     public let mode: String
@@ -122,7 +125,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     /// Its sub-agents at work, in the order they started (docs/terminal-v0.md §1; older services: none).
     public let subagents: [TerminalSubagent]
 
-    public init(id: String, harness: String, cwd: String, model: String? = nil, mode: String = "manual", name: String,
+    public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String = "manual", name: String,
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
@@ -130,6 +133,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         self.id = id
         self.harness = harness
         self.cwd = cwd
+        self.workdir = workdir ?? cwd
         self.model = model
         self.mode = mode
         self.name = name
@@ -150,7 +154,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, model, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
+        case id, harness, cwd, workdir, model, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
              agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents
     }
 
@@ -159,6 +163,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         id = try c.decode(String.self, forKey: .id)
         harness = (try? c.decodeIfPresent(String.self, forKey: .harness)) ?? ""
         cwd = (try? c.decodeIfPresent(String.self, forKey: .cwd)) ?? ""
+        workdir = (try? c.decodeIfPresent(String.self, forKey: .workdir)).flatMap { $0 } ?? cwd
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         mode = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? "manual"
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""

@@ -34,7 +34,11 @@ struct TerminalPage: View {
     @State private var wheeled = 0
     @State private var wheelChipHides: Task<Void, Never>?
 
+    /// The terminal as it was opened: where its agent worked until the list says otherwise.
+    private let opened: TerminalInfo
+
     init(terminal: TerminalInfo) {
+        opened = terminal
         let size = UserDefaults.standard.object(forKey: "terminal.fontSize") as? Double ?? 10
         _page = State(initialValue: TerminalPageModel(terminal: terminal, fontSize: CGFloat(size)))
     }
@@ -73,7 +77,14 @@ struct TerminalPage: View {
             ToolbarItem(placement: .principal) {
                 let status = page.permissions.isEmpty ? page.status : .waiting
                 VStack(spacing: 1) {
-                    Text(page.name).font(.headline).lineLimit(1)
+                    // The folder the agent works in now and its git, as the Mac window's title (terminal-v0 §1,
+                    // 2026-10-01, user: 手机上的标题栏没变); the terminal's name stays on its row in the list.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(TerminalTree.lastComponent(workdir)).font(.headline).lineLimit(1)
+                        if let git = model.terminals.git[workdir]?.said { Text(git).mono(12).foregroundStyle(.secondary).lineLimit(1) }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint(page.name)
                     HStack(spacing: 5) {
                         TerminalStatusMark(status: status)
                         Text(page.permissions.isEmpty ? page.status.label : "waiting").mono(11).foregroundStyle(.secondary)
@@ -125,6 +136,14 @@ struct TerminalPage: View {
             #endif
         }
         .onDisappear { page.stop() }
+        // The title's git: the list (read from every tab) follows a `cd`; the folders' git is otherwise read only on the
+        // terminals tab.
+        .task {
+            while !Task.isCancelled {
+                await model.terminals.refreshGit(model.api)
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
         .photosPicker(isPresented: $pickingPhotos, selection: $photoItems, maxSelectionCount: 5, matching: .images)
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
@@ -164,6 +183,9 @@ struct TerminalPage: View {
         .onChange(of: page.removed) { if page.removed { model.terminals.remove(page.id); dismiss() } }
         .onChange(of: fontSize) { page.screen.setFontSize(CGFloat(fontSize)) }
     }
+
+    /// Where the agent is now, from the list as last read (it follows a `cd`).
+    private var workdir: String { model.terminals.terminals.first { $0.id == page.id }?.workdir ?? opened.workdir }
 
     // MARK: permission requests
 
@@ -267,9 +289,11 @@ struct TerminalPage: View {
 
     // MARK: keys and reply
 
-    static let keys: [(TerminalKey, String)] = [(.esc, "esc"), (.tab, "tab"), (.shiftTab, "⇧tab"), (.up, "↑"), (.down, "↓"),
-                                                (.left, "←"), (.right, "→"), (.pageUp, "pgup"), (.pageDown, "pgdn"), (.ctrlC, "^C"),
-                                                (.enter, "⏎"), (.y, "y"), (.n, "n"), (.one, "1"), (.two, "2"), (.three, "3")]
+    /// What an option needs first, within one screen: ⏎ (the one solid cap) and ⌫, the arrows, the numbers (terminal-v0 §1,
+    /// 2026-10-01, user: 回车应该更靠前更显眼，有选项时需要用它选；要加一个退格，不然按上去的 1 2 3 删不掉).
+    static let keys: [(TerminalKey, String)] = [(.enter, "⏎"), (.backspace, "⌫"), (.up, "↑"), (.down, "↓"), (.one, "1"), (.two, "2"),
+                                                (.three, "3"), (.y, "y"), (.n, "n"), (.esc, "esc"), (.tab, "tab"), (.shiftTab, "⇧tab"),
+                                                (.left, "←"), (.right, "→"), (.pageUp, "pgup"), (.pageDown, "pgdn"), (.ctrlC, "^C")]
 
     private var controls: some View {
         VStack(spacing: 0) {
@@ -298,8 +322,8 @@ struct TerminalPage: View {
                             .accessibilityLabel("hide keyboard")
                     }
                     ForEach(Self.keys, id: \.0) { key, label in
-                        Button { Task { await page.press(key) } } label: { Text(label).mono(13) }
-                            .buttonStyle(KeyCapStyle())
+                        Button { Task { await page.press(key) } } label: { Text(label).mono(13, weight: key == .enter ? .semibold : .regular) }
+                            .buttonStyle(KeyCapStyle(solid: key == .enter))
                             .disabled(page.status == .exited)
                     }
                 }
@@ -531,17 +555,20 @@ struct TerminalPage: View {
 /// A key on the bar: a small square cap with a 3 pt base; pressed, it sinks 2 pt onto a 1 pt base (the demo page's
 /// key caps).
 private struct KeyCapStyle: ButtonStyle {
+    /// The one key that stands out (⏎): ink ground, the base colour's letters, a wider cap.
+    var solid = false
+
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
         configuration.label
-            .foregroundStyle(Theme.ink)
-            .frame(minWidth: 34)
+            .foregroundStyle(solid ? Theme.base : Theme.ink)
+            .frame(minWidth: solid ? 46 : 34)
             .padding(.horizontal, 6)
             .padding(.top, 6)
             .padding(.bottom, pressed ? 6 : 8)
-            .background(pressed ? Theme.line : Theme.raised)
-            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
-            .overlay(alignment: .bottom) { Theme.inkDim.frame(height: pressed ? 1 : 3) }
+            .background(solid ? (pressed ? Theme.secondaryInk : Theme.ink) : (pressed ? Theme.line : Theme.raised))
+            .overlay(Rectangle().strokeBorder(solid ? Theme.ink : Theme.line, lineWidth: 1))
+            .overlay(alignment: .bottom) { (solid ? Theme.secondaryInk : Theme.inkDim).frame(height: pressed ? 1 : 3) }
             .offset(y: pressed ? 2 : 0)
             .padding(.bottom, pressed ? 2 : 0)
     }

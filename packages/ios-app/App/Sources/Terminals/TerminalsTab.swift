@@ -296,7 +296,9 @@ struct TerminalsTab: View {
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
-        // Once, as it comes to need you or exits.
+        // Now and then while it works (2026-10-01, user: 正在运行中的都改成这个效果); the full burst once, as it comes to
+        // need you or exits.
+        .runningGlitch(status == .working)
         .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
     }
 

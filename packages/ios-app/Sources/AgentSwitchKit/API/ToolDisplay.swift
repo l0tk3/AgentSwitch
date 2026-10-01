@@ -24,6 +24,26 @@ public enum ToolDisplay {
         return "\(server) · \(name)"
     }
 
+    /// The tool in one short word, for the compact island (assistant-v0 §4, 2026-10-01: what it is doing instead of a
+    /// clock); title case as ui-v0 §7.2.7.
+    public static func word(_ tool: String) -> String {
+        if let word = words[tool] ?? words[tool.lowercased()] { return word }
+        let (server, name) = split(tool)
+        if server == "playwright" || name.hasPrefix("browser_") { return "Web" }
+        if server?.contains("secret") == true { return "Sealed" }
+        return "Tool"
+    }
+
+    private static let words: [String: String] = [
+        "bash": "Run", "shell": "Run", "commandexecution": "Run", "exec_command": "Run", "local_shell": "Run",
+        "read": "Read", "view": "Read", "notebookread": "Read",
+        "write": "Edit", "edit": "Edit", "multiedit": "Edit", "filechange": "Edit", "apply_patch": "Edit", "patch": "Edit", "notebookedit": "Edit",
+        "grep": "Search", "glob": "Search", "list": "Search", "ls": "Search",
+        "webfetch": "Web", "websearch": "Web", "web_search": "Web",
+        "task": "Agents", "agent": "Agents", "subagent": "Agents",
+        "todowrite": "Plan", "update_plan": "Plan", "skill": "Skill", "askuserquestion": "Answer",
+    ]
+
     /// The one thing a call works on: its command (without Codex's shell wrapper), page, file, pattern or query.
     public static func target(_ payload: JSONValue) -> String? {
         if let command = payload["command"]?.string ?? payload["input"]?["command"]?.string {

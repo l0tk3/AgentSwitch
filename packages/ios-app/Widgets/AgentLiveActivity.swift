@@ -34,7 +34,7 @@ struct AgentLiveActivity: Widget {
             } compactTrailing: {
                 IslandCompactTrailing(state: state)
             } minimal: {
-                LiveMark(state: state)
+                IslandMinimal(state: state)
             }
             .widgetURL(LiveLook.link(state))
             .keylineTint(LiveLook.tint(state))

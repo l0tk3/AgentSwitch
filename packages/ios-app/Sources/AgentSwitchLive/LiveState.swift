@@ -24,8 +24,12 @@ public struct LiveState: Codable, Hashable, Sendable {
         public let startedAt: Date
         public let needsYou: Bool
         public let kind: Kind
+        /// What it is doing now in one short word, for the compact island (`Run`, `Edit`, `Read`, `Search`, `Web`,
+        /// `Agents`…; `Allow?` or `Answer` while it waits for you). Nil from an activity saved before 2026-10-01.
+        public let doing: String?
 
-        public init(id: String, title: String, step: String, model: String?, startedAt: Date, needsYou: Bool, kind: Kind = .task) {
+        public init(id: String, title: String, step: String, model: String?, startedAt: Date, needsYou: Bool, kind: Kind = .task,
+                    doing: String? = nil) {
             self.id = id
             self.title = title
             self.step = step
@@ -33,9 +37,10 @@ public struct LiveState: Codable, Hashable, Sendable {
             self.startedAt = startedAt
             self.needsYou = needsYou
             self.kind = kind
+            self.doing = doing
         }
 
-        private enum CodingKeys: String, CodingKey { case id, title, step, model, startedAt, needsYou, kind }
+        private enum CodingKeys: String, CodingKey { case id, title, step, model, startedAt, needsYou, kind, doing }
 
         /// A state saved before rows had a kind (an activity left from an earlier version) reads as tasks.
         public init(from decoder: Decoder) throws {
@@ -47,6 +52,7 @@ public struct LiveState: Codable, Hashable, Sendable {
             startedAt = try c.decode(Date.self, forKey: .startedAt)
             needsYou = try c.decode(Bool.self, forKey: .needsYou)
             kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .task
+            doing = try c.decodeIfPresent(String.self, forKey: .doing)
         }
 
         /// Where a tap on it goes: the task's card, or the terminal.
