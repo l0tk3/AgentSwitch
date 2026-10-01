@@ -2,7 +2,7 @@
  *  (seen 2026-09-22: `LOADERS` referenced `loadPolicy` before its `const`). Minimal browser globals are stubbed. */
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const UI = resolve(import.meta.dirname, "..", "ui");
 
@@ -29,5 +29,34 @@ describe("ui modules evaluate", () => {
       expect(typeof mod.render, f).toBe("function");
       expect(Array.isArray(mod.bindings), f).toBe(true);
     }
+  });
+});
+
+/** docs/ui-v0.md §7.2 第 7 条 (2026-10-01): short words in title case; what starts with a number stays a unit, and the
+ *  API's status values (the tone is a CSS class) stay as they are. */
+describe("short words", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("status words in title case, their tones unchanged", async () => {
+    const { statusTone, statusWord } = await import(join(UI, "lib/api.js"));
+    const statuses = ["queued", "routing", "running", "waiting_approval", "done", "partial", "blocked", "failed", "cancelled"];
+    expect(statuses.map((status) => statusWord({ status }))).toEqual(["Queued", "Busy", "Busy", "Waiting", "Done", "Incomplete", "Incomplete", "Failed", "Cancelled"]);
+    expect(statusWord({ status: "blocked", blockCause: "question" })).toBe("Waiting");
+    expect(statuses.map((status) => statusTone({ status }))).toEqual(["busy", "busy", "busy", "waiting", "ok", "waiting", "waiting", "bad", "off"]);
+    expect(statusTone({ status: "blocked", blockCause: "question" })).toBe("waiting");
+  });
+
+  it("a lone time word capitalized, a number first as it is", async () => {
+    const now = new Date(2026, 9, 1, 18, 0);
+    vi.useFakeTimers({ now });
+    const { agoShort, dayOf } = await import(join(UI, "lib/api.js"));
+    const at = (...parts: number[]) => new Date(...(parts as [number, number, number, number, number])).getTime();
+    expect(agoShort(now.getTime() - 20_000)).toBe("Now");
+    expect(agoShort(now.getTime() - 3 * 60_000)).toBe("3m ago");
+    expect(agoShort(now.getTime() - 2 * 3_600_000)).toBe("2h ago");
+    expect(agoShort(at(2026, 9, 1, 9, 5))).toBe("Today 09:05");
+    expect(agoShort(at(2026, 8, 30, 6, 57))).toBe("Yesterday 06:57");
+    expect(agoShort(at(2026, 8, 28, 12, 0))).toBe("9/28");
+    expect([dayOf(at(2026, 9, 1, 9, 5)), dayOf(at(2026, 8, 30, 6, 57)), dayOf(at(2026, 8, 28, 12, 0))]).toEqual(["Today", "Yesterday", "9/28"]);
   });
 });

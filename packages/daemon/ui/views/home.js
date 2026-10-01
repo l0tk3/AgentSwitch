@@ -23,13 +23,13 @@ function composer(s) {
   const disabled = sub.locked ? "disabled" : "";
   return `<section class="compose" data-dropzone data-composer-key="home" aria-busy="${sub.busy}">
     ${s.pendingFor === "home" ? pendingList(s.pending, sub.locked) : ""}
-    <div class="crow"><button class="sqb" data-attach ${disabled} title="添加附件（也可拖入文件或粘贴截图）" aria-label="attach">+</button><textarea id="c-task" data-keep ${disabled} rows="1" placeholder="向 Mac 发送任务或问题"></textarea><button class="sqb go" id="c-send" ${disabled} title="${esc(sub.label)} ⌘↩" aria-label="${esc(sub.label)}">${sub.busy ? spinner() : "↑"}</button></div>
+    <div class="crow"><button class="sqb" data-attach ${disabled} title="添加附件（也可拖入文件或粘贴截图）" aria-label="Attach">+</button><textarea id="c-task" data-keep ${disabled} rows="1" placeholder="向 Mac 发送任务或问题"></textarea><button class="sqb go" id="c-send" ${disabled} title="${esc(sub.label)} ⌘↩" aria-label="${esc(sub.label)}">${sub.busy ? spinner() : "↑"}</button></div>
     <div class="opts">
-      <label><span>// folder</span><input id="c-cwd" data-keep ${disabled} placeholder="临时目录" title="工作目录；留空则使用临时目录，任务结束后删除"></label>
-      <label><span>// model</span><input id="c-pin" data-keep ${disabled} class="pin" placeholder="auto" title="指定执行器/模型，如 codex/gpt-5.5；留空由调度模型决定"></label>
-      <label><span>// browser</span><select id="c-browser" data-keep ${disabled}><option value="">auto</option><option value="1">yes</option></select></label>
-      <label><span>// approval</span><select id="c-approval" data-keep ${disabled} title="本任务的审批方式；默认使用「context」页的审批策略"><option value="">default</option><option value="manual">ask each</option><option value="scoped">auto</option><option value="auto">auto · all</option></select></label>
-      <span class="sp"></span><kbd>${esc(sub.busy || sub.status === "uncertain" ? sub.label : "⌘↩ send")}</kbd>
+      <label><span>// Folder</span><input id="c-cwd" data-keep ${disabled} placeholder="临时目录" title="工作目录；留空则使用临时目录，任务结束后删除"></label>
+      <label><span>// Model</span><input id="c-pin" data-keep ${disabled} class="pin" placeholder="Auto" title="指定执行器/模型，如 codex/gpt-5.5；留空由调度模型决定"></label>
+      <label><span>// Browser</span><select id="c-browser" data-keep ${disabled}><option value="">Auto</option><option value="1">Yes</option></select></label>
+      <label><span>// Approval</span><select id="c-approval" data-keep ${disabled} title="本任务的审批方式；默认使用「Context」页的审批策略"><option value="">Default</option><option value="manual">Ask Each</option><option value="scoped">Auto</option><option value="auto">Auto · All</option></select></label>
+      <span class="sp"></span><kbd>${esc(sub.busy || sub.status === "uncertain" ? sub.label : "⌘↩ Send")}</kbd>
     </div>
     ${sendFeedback(s, "home")}
     ${hint ? `<div class="hint error">${esc(hint)}</div>` : ""}
@@ -41,7 +41,7 @@ export function statusLine(t) {
   const tone = statusTone(t);
   const mark = tone === "busy" ? spinner() : square(tone, t.status === "cancelled");
   const clock = ACTIVE.has(t.status) ? span(Date.now() - t.createdAt) : span((t.updatedAt || t.createdAt) - t.createdAt);
-  return `${mark}<span class="word ${tone}">${esc(statusWord(t))}</span>${t.harness ? agentMark(t.harness) : ""}<span class="who" title="${esc(target(t))}">${esc(target(t) || (t.status === "routing" ? "routing" : ""))}</span><span class="faint">${clock}</span>`;
+  return `${mark}<span class="word ${tone}">${esc(statusWord(t))}</span>${t.harness ? agentMark(t.harness) : ""}<span class="who" title="${esc(target(t))}">${esc(target(t) || (t.status === "routing" ? "Routing" : ""))}</span><span class="faint">${clock}</span>`;
 }
 
 /** A task as the record says it: its outcome, or where it is now. */
@@ -120,7 +120,7 @@ function feed(s) {
 
 function archived(s) {
   const list = s.archivedThreads || [];
-  return `<details id="archived-threads" data-keep-open class="archived"><summary>// archived topics ${list.length}</summary>
+  return `<details id="archived-threads" data-keep-open class="archived"><summary>// Archived Topics ${list.length}</summary>
     ${list.length ? list.map((th) => `<div class="arow">${topicSquare(th.id)}<span class="t">${esc(th.title || "（未命名）")}</span><span class="faint">${esc(agoShort(th.lastActivity || th.updatedAt))}</span>${deleteButton("thread", th.id, s, s.tasks.some((t) => t.threadId === th.id && ACTIVE.has(t.status)))}${deleteNotice("thread", th.id, s)}</div>`).join("") : '<div class="faint arow">暂无已归档的话题。</div>'}
   </details>`;
 }
@@ -152,7 +152,7 @@ export function approvalCard(a, task, submission = {}) {
     const locked = ["sending", "sent", "uncertain", "resolved"].includes(submission.status);
     const label = { sending: "提交中…", sent: "已提交", uncertain: "结果待确认", resolved: "问题已结束", error: "重新提交" }[submission.status] || "提交";
     return `<div class="box q" id="ask-${esc(a.id)}" aria-busy="${submission.status === "sending"}">
-      <div class="hd"><span>? question</span><span class="sp"></span><span>${fromExecutor ? "执行器提问（答复直接交给执行器）" : "调度模型提问"}</span></div>
+      <div class="hd"><span>? Question</span><span class="sp"></span><span>${fromExecutor ? "执行器提问（答复直接交给执行器）" : "调度模型提问"}</span></div>
       <div class="bd"><div class="faint about">${about}</div>
       ${["sent", "resolved"].includes(submission.status) ? "" : questions.map((q, i) => questionBlock(a, q, i, locked)).join("")}
       ${submission.message ? `<div class="hint ${submission.status === "error" ? "error" : ""}" role="${submission.status === "error" ? "alert" : "status"}" aria-live="polite">${esc(submission.message)}</div>` : ""}</div>
@@ -160,9 +160,9 @@ export function approvalCard(a, task, submission = {}) {
     </div>`;
   }
   return `<div class="box ask" id="ask-${esc(a.id)}">
-    <div class="hd"><span>[!] approval</span><span class="sp"></span><span>${about}</span></div>
+    <div class="hd"><span>[!] Approval</span><span class="sp"></span><span>${about}</span></div>
     <div class="bd"><code>${esc(a.action)}</code>${a.evidence ? `<div class="path pre">${esc(a.evidence)}</div>` : ""}</div>
-    <div class="ft"><span class="hint-l"></span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">deny</button><button class="primary" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">allow</button></div>
+    <div class="ft"><span class="hint-l"></span><button class="warn" data-approve="${a.id}" data-task="${a.taskId}" data-decision="deny">Deny</button><button class="primary" data-approve="${a.id}" data-task="${a.taskId}" data-decision="allow">Allow</button></div>
   </div>`;
 }
 

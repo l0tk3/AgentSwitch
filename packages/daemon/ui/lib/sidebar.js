@@ -4,7 +4,7 @@
 import { ACTIVE, HARNESS_NAMES, agoShort, esc } from "./api.js";
 import { AGENT_PX, SPIN, mark, sprite } from "../pixel.js";
 
-const NAV = [["home", "tasks"], ["log", "log"], ["ext", "extensions"], ["ctx", "context"]];
+const NAV = [["home", "Tasks"], ["log", "Log"], ["ext", "Extensions"], ["ctx", "Context"]];
 const TOPICS_SHOWN = 8;
 
 /** A square in a status colour (hollow: ended or off). */
@@ -24,10 +24,10 @@ export const topicSquare = (id) => `<span class="sq" style="background:${topicHu
 export function band(s) {
   const active = s.tasks.filter((t) => ACTIVE.has(t.status)).length;
   const state = !s.health ? "off" : s.approvals.length ? "waiting" : active ? "busy" : "idle";
-  return `<div class="who"><span id="bandMark">${mark({ px: 2, state })}</span><b>agentswitch</b>${s.version ? `<span class="faint" id="version">v${esc(s.version)}</span>` : '<span class="faint" id="version"></span>'}</div>
+  return `<div class="who"><span id="bandMark">${mark({ px: 2, state })}</span><b>AgentSwitch</b>${s.version ? `<span class="faint" id="version">v${esc(s.version)}</span>` : '<span class="faint" id="version"></span>'}</div>
   <span class="sp"></span>
-  <div class="st"><span title="${s.health ? "服务运行中" : "服务未连接"}"><span class="dot${s.health ? " on" : ""}" id="dot"></span>service</span>${s.approvals.length ? `<span class="w">${square("waiting")}${s.approvals.length} waiting</span>` : ""}</div>
-  <a href="/ui/terminal.html" class="out">terminals ↗</a>`;
+  <div class="st"><span title="${s.health ? "服务运行中" : "服务未连接"}"><span class="dot${s.health ? " on" : ""}" id="dot"></span>Service</span>${s.approvals.length ? `<span class="w">${square("waiting")}${s.approvals.length} Waiting</span>` : ""}</div>
+  <a href="/ui/terminal.html" class="out">Terminals ↗</a>`;
 }
 
 /** `⠙1 ▪1`: tasks in progress, tasks waiting for you. */
@@ -48,7 +48,7 @@ function topics(s) {
     // A topic not yet named (its summary comes after a run) goes by what was asked last.
     const name = th.title || (task?.task || "").split("\n")[0].slice(0, 60) || "（未命名）";
     return `<div class="topic${open === th.id ? " on" : ""}" id="topic-${esc(th.id)}" ${task ? `data-open="${task.id}"` : ""} title="${esc(name)}">${topicSquare(th.id)}<span class="t">${esc(name)}</span><span class="age">${running ? spinner() : esc(agoShort(th.lastActivity || th.updatedAt))}</span></div>`;
-  }).join("") + (threads.length > TOPICS_SHOWN ? `<div class="topic more" id="topics-more"><span></span><span class="t faint">${s.allTopics ? "▾ less" : `▸ ${threads.length - TOPICS_SHOWN} more`}</span><span></span></div>` : "");
+  }).join("") + (threads.length > TOPICS_SHOWN ? `<div class="topic more" id="topics-more"><span></span><span class="t faint">${s.allTopics ? "▾ Less" : `▸ ${threads.length - TOPICS_SHOWN} More`}</span><span></span></div>` : "");
 }
 
 /** A character meter: `████░░░░`. */
@@ -67,7 +67,7 @@ function usage(quota) {
     if (q.harness === "opencode" && d.balances?.length) return `<div class="u">${head}${d.balances.map((b) => `<div class="ul"><span>余额</span><span>${esc(b.total)} ${esc(b.currency || "")}</span></div>`).join("")}</div>`;
     const windows = (d.windows || []).filter((w) => !(w.resetsAt && w.resetsAt * 1000 < Date.now()));
     const lines = windows.length ? windows.map((w) => `<div class="ul"><span>${esc(w.label)}</span>${meter(w.usedPercent)}<span>${Math.round(w.usedPercent)}%</span></div>`).join("")
-      : q.remaining !== null && q.remaining !== undefined ? `<div class="ul"><span>left</span>${meter(100 - q.remaining * 100)}<span>${Math.round(q.remaining * 100)}% left</span></div>`
+      : q.remaining !== null && q.remaining !== undefined ? `<div class="ul"><span>Left</span>${meter(100 - q.remaining * 100)}<span>${Math.round(q.remaining * 100)}% left</span></div>`
       : '<div class="ul faint"><span>—</span></div>';
     // A failed read says so in a line; the whole error is in its tooltip.
     return `<div class="u">${head}${lines}${q.error ? `<div class="ul err" title="${esc(q.error)}">${esc(q.error.split("\n")[0])}</div>` : ""}</div>`;
@@ -78,15 +78,15 @@ export function sidebar(s) {
   const active = s.view === "task" ? "home" : s.view;   // a task opens beside the tasks
   // The id keys each link for the patcher, so moving `active` patches the links instead of reshuffling them.
   const links = NAV.map(([view, label]) => `<a id="nav-${view}" data-nav="${view}"${view === active ? ' class="on"' : ""}><span class="ar">▸</span><span>${label}</span><span class="n">${view === "home" ? counts(s) : ""}</span></a>`);
-  return `<div class="sec lbl">// console</div>
+  return `<div class="sec lbl">// Console</div>
   <nav>
     ${links.join("\n    ")}
   </nav>
   <div class="rule"></div>
-  <div class="sec lbl">// topics</div>
+  <div class="sec lbl">// Topics</div>
   <div class="topics">${topics(s)}</div>
   <div class="rule"></div>
-  <div class="sec lbl usage-h"><span>// usage</span><button class="link" id="q-refresh" title="强制刷新用量">refresh</button></div>
+  <div class="sec lbl usage-h"><span>// Usage</span><button class="link" id="q-refresh" title="强制刷新用量">Refresh</button></div>
   <div class="usage">${usage(s.quota || [])}</div>
-  <div class="side-foot"><button class="link" id="refresh">reload</button></div>`;
+  <div class="side-foot"><button class="link" id="refresh">Reload</button></div>`;
 }

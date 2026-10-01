@@ -3,27 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>terminals — AgentSwitch</title>
+<title>Terminals — AgentSwitch</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/ui/vendor/xterm.css">
 <link rel="stylesheet" href="/ui/terminal.css">
 </head>
 <body>
 <header class="top" id="band">
-  <button class="side-btn" id="sideBtn" aria-label="terminals list" title="list ⌘B"></button>
+  <button class="side-btn" id="sideBtn" aria-label="Terminals List" title="List ⌘B"></button>
   <span class="band-name" id="bandName"></span>
   <span class="band-status" id="bandStatus"></span>
   <span class="grow"></span>
-  <a class="console-link" href="/ui" id="consoleLink">console</a>
-  <button class="band-new" id="newBtn" aria-label="new terminal" title="new terminal ⌘T"></button>
+  <a class="console-link" href="/ui" id="consoleLink">Console</a>
+  <button class="band-new" id="newBtn" aria-label="New Terminal" title="New Terminal ⌘T"></button>
   <span class="band-tag" id="markTag"></span>
   <span class="band-mark" id="mark"></span>
 </header>
 
 <aside class="side" id="side">
-  <label class="find"><span class="slash">/</span><input id="find" placeholder="search" spellcheck="false" autocomplete="off" aria-label="search folders and sessions"><kbd>⌘F</kbd></label>
+  <label class="find"><span class="slash">/</span><input id="find" placeholder="Search" spellcheck="false" autocomplete="off" aria-label="Search Folders and Sessions"><kbd>⌘F</kbd></label>
   <div class="side-scroll"><div id="groups" class="groups"></div></div>
-  <div class="side-grip" id="sideGrip" title="drag · double-click resets"></div>
+  <div class="side-grip" id="sideGrip" title="Drag · Double-Click Resets"></div>
 </aside>
 
 <main class="main">
@@ -35,7 +35,7 @@
       <div class="away-box box">
         <div class="hd" id="awayHead"></div>
         <div class="bd" id="awayLine"></div>
-        <div class="ft"><span class="hint">any key</span><button class="btn pri" id="awayGo" type="button">[ take over ]</button></div>
+        <div class="ft"><span class="hint">Any Key</span><button class="btn pri" id="awayGo" type="button">[ Take Over ]</button></div>
       </div>
     </div>
     <div class="toasts" id="toasts"></div>
@@ -45,43 +45,43 @@
     <div class="create" id="create" hidden>
       <div class="create-card">
         <div class="wordmark" id="wordmark"></div>
-        <div class="label">// new terminal</div>
+        <div class="label">// New Terminal</div>
         <div class="agents" id="agents"></div>
         <label class="field">
-          <span class="label">// model</span>
+          <span class="label">// Model</span>
           <span class="select"><select id="model"></select></span>
         </label>
         <label class="field">
-          <span class="label">// folder</span>
+          <span class="label">// Folder</span>
           <span class="folder">
             <span class="prompt" aria-hidden="true">❯</span>
             <input id="cwd" list="folders" spellcheck="false" autocomplete="off">
-            <button class="btn line" id="chooseFolder" type="button" hidden>choose…</button>
+            <button class="btn line" id="chooseFolder" type="button" hidden>Choose…</button>
           </span>
           <datalist id="folders"></datalist>
         </label>
         <div class="field">
-          <span class="label">// permissions</span>
+          <span class="label">// Permissions</span>
           <div class="radios" id="modes"></div>
         </div>
         <div class="create-foot">
           <span class="error" id="createError"></span>
-          <button class="btn" id="createCancel" hidden>cancel <kbd>esc</kbd></button>
-          <button class="btn pri" id="createStart">[ start <kbd>↩</kbd> ]</button>
+          <button class="btn" id="createCancel" hidden>Cancel <kbd>esc</kbd></button>
+          <button class="btn pri" id="createStart">[ Start <kbd>↩</kbd> ]</button>
         </div>
       </div>
     </div>
   </section>
 
-  <button class="sealbar" id="sealBar" title="密码与令牌在发送前加密，agent 仅接收密文。" hidden><span class="lock" id="sealLock"></span><span class="word">encrypt &amp; send</span><span class="grow"></span><kbd>⌘⇧V</kbd></button>
+  <button class="sealbar" id="sealBar" title="密码与令牌在发送前加密，agent 仅接收密文。" hidden><span class="lock" id="sealLock"></span><span class="word">Encrypt &amp; Send</span><span class="grow"></span><kbd>⌘⇧V</kbd></button>
 
   <div class="composer-layer">
   <div class="composer box" id="composer" hidden>
-    <div class="composer-head"><span class="lock" id="composerLock"></span><span>encrypt &amp; send</span><span class="grow"></span><span class="to" id="composerTo"></span></div>
-    <textarea id="composerText" rows="3" spellcheck="false" placeholder="message"></textarea>
+    <div class="composer-head"><span class="lock" id="composerLock"></span><span>Encrypt &amp; Send</span><span class="grow"></span><span class="to" id="composerTo"></span></div>
+    <textarea id="composerText" rows="3" spellcheck="false" placeholder="Message"></textarea>
     <div class="composer-foot">
-      <span class="hint" id="composerHint">esc cancel</span>
-      <button class="btn pri" id="composerSend">[ send <kbd>↩</kbd> ]</button>
+      <span class="hint" id="composerHint">esc Cancel</span>
+      <button class="btn pri" id="composerSend">[ Send <kbd>↩</kbd> ]</button>
     </div>
   </div>
   </div>
@@ -102,7 +102,7 @@
     <p id="sheetBody"></p>
     <label class="check" id="sheetCheck" hidden><input type="checkbox" id="sheetCheckbox"> <span id="sheetCheckText"></span></label>
     <div class="sheet-foot">
-      <button class="btn line" id="sheetCancel">cancel</button>
+      <button class="btn line" id="sheetCancel">Cancel</button>
       <button class="btn pri" id="sheetConfirm"></button>
     </div>
   </div>

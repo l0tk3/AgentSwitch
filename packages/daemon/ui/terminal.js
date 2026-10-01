@@ -48,13 +48,15 @@ const DELETABLE = new Set(["claude-code", "codex"]);
 const CHECKED = new Set(["claude-code", "codex"]);
 /** How the agent asks before acting (terminal-v0 §3); the protected paths stay closed in all three. */
 const MODES = [
-  { id: "manual", name: "ask each" },
-  { id: "auto", name: "auto" },
-  { id: "bypass", name: "bypass" },
+  { id: "manual", name: "Ask Each" },
+  { id: "auto", name: "Auto" },
+  { id: "bypass", name: "Bypass" },
 ];
 /** The first time, the Mac's approval policy (control-v0 §1) picks the mode; after that, the last one chosen. */
 const MODE_FROM_POLICY = { manual: "manual", scoped: "auto", auto: "auto", skip: "bypass" };
-const TOOL_WORDS = { Write: "write file", Edit: "edit file", MultiEdit: "edit file", NotebookEdit: "edit notebook", Bash: "run command", WebFetch: "fetch page", WebSearch: "search web" };
+const TOOL_WORDS = { Write: "Write File", Edit: "Edit File", MultiEdit: "Edit File", NotebookEdit: "Edit Notebook", Bash: "Run Command", WebFetch: "Fetch Page", WebSearch: "Search Web" };
+/** A terminal's status as it is shown (docs/ui-v0.md §7.2 第 7 条); the value from the service stays as it is. */
+const STATUS_WORDS = { working: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited" };
 const SESSIONS_SHOWN = 3;
 
 // ---------- helpers ----------
@@ -97,10 +99,10 @@ function uuidTime(id) {
   return /^[0-9a-f]{32}$/i.test(hex) && hex[12] === "7" ? parseInt(hex.slice(0, 12), 16) : null;
 }
 const folderOf = (p) => p.split("/").filter(Boolean).pop() || p;
-/** Age as a unit: now, 5m, 3h, 2d, then the date. */
+/** Age as a unit: Now, 5m, 3h, 2d, then the date. */
 function ago(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (s < 45) return "now";
+  if (s < 45) return "Now";
   if (s < 3600) return `${Math.round(s / 60)}m`;
   if (s < 86400) return `${Math.round(s / 3600)}h`;
   if (s < 7 * 86400) return `${Math.round(s / 86400)}d`;
@@ -237,7 +239,7 @@ function openLink(event, uri) {
 function showLinkTarget(uri) {
   let shown = uri;
   if (/^file:\/\//i.test(uri)) { try { shown = tilde(decodeURIComponent(new URL(uri).pathname)); } catch { /* as it is */ } }
-  $("linkHint").textContent = narrow.matches ? shown : `⌘ click · ${shown}`;
+  $("linkHint").textContent = narrow.matches ? shown : `⌘ Click · ${shown}`;
   $("linkHint").hidden = false;
 }
 const hideLinkTarget = () => { $("linkHint").hidden = true; };
@@ -418,7 +420,7 @@ function claim() {
   current.rows = term.rows;
   api("POST", `/terminals/${current.id}/resize`, { cols: term.cols, rows: term.rows, screen: SCREEN }).catch(() => undefined);
 }
-const WHERE = { mac: ["on mac", "这个终端正在 Mac 上使用。"], iphone: ["on iphone", "这个终端正在 iPhone 上使用。"], web: ["on web", "这个终端正在浏览器中使用。"] };
+const WHERE = { mac: ["On Mac", "这个终端正在 Mac 上使用。"], iphone: ["On iPhone", "这个终端正在 iPhone 上使用。"], web: ["On Web", "这个终端正在浏览器中使用。"] };
 const placeOf = (by) => (by.startsWith("phone") ? "iphone" : by.startsWith("mac") ? "mac" : "web");
 /** The placeholder: glitches in; going (this screen took the size back), glitches once more and the screen is drawn in.
  *  Said again while going (the service confirming the claim), it goes on going. */
@@ -583,7 +585,7 @@ function follow(id) {
   });
   on("status", (ev) => patch(id, { status: ev.status }));
   on("name", (ev) => patch(id, { name: ev.name }));
-  on("exit", (ev) => { hideLoading(); patch(id, { status: "exited", exitCode: ev.code }); if (!NATIVE) term.write(`\r\n\x1b[2m[exited · code ${ev.code ?? "?"}]\x1b[0m\r\n`); });
+  on("exit", (ev) => { hideLoading(); patch(id, { status: "exited", exitCode: ev.code }); if (!NATIVE) term.write(`\r\n\x1b[2m[Exited · code ${ev.code ?? "?"}]\x1b[0m\r\n`); });
   on("permission", (ev) => addToast(id, ev.request, true));
   on("permission_resolved", (ev) => { document.getElementById(`perm-${ev.id}`)?.remove(); });
   // On each (re)connect, every request waiting: one answered elsewhere while this page was away goes.
@@ -630,13 +632,13 @@ function addToast(id, request, fresh = false) {
   const cwd = terminals.find((t) => t.id === id)?.cwd;
   const detail = cwd && raw_.startsWith(cwd + "/") ? raw_.slice(cwd.length + 1) : tilde(raw_);
   const toast = h("div", { class: "toast box", id: `perm-${request.id}`, "data-id": request.id, "data-terminal": id },
-    h("div", { class: "hd" }, h("span", {}, "[!] approval"), h("span", { class: "grow" }), h("span", {}, TOOL_WORDS[request.tool] ?? request.tool)),
+    h("div", { class: "hd" }, h("span", {}, "[!] Approval"), h("span", { class: "grow" }), h("span", {}, TOOL_WORDS[request.tool] ?? request.tool)),
     h("code", {}, detail),
     cwd ? h("div", { class: "path" }, tilde(cwd)) : null,
     h("div", { class: "ft" },
       h("span", { class: "hint" }, terminals.find((t) => t.id === id)?.name ?? ""),
-      h("button", { class: "btn", onclick: () => decide("deny") }, "[ deny ", h("kbd", {}, "⌘⌫"), " ]"),
-      h("button", { class: "btn pri", onclick: () => decide("allow") }, "[ allow ", h("kbd", {}, "⌘↩"), " ]")));
+      h("button", { class: "btn", onclick: () => decide("deny") }, "[ Deny ", h("kbd", {}, "⌘⌫"), " ]"),
+      h("button", { class: "btn pri", onclick: () => decide("allow") }, "[ Allow ", h("kbd", {}, "⌘↩"), " ]")));
   $("toasts").append(toast);
   if (fresh) glitch(toast);
 }
@@ -726,8 +728,8 @@ const agentMark = (harness) => raw(sprite(AGENT_PX[harness] ?? AGENT_PX.pi, { px
 
 function terminalRow(t, tr, depth, name = t.name) {
   const index = terminalOrder.indexOf(t.id);
-  const meta = t.status === "waiting" ? h("span", { class: "w" }, "waiting")
-    : t.status === "exited" ? (t.exitCode ? h("span", { class: "x" }, `exit ${t.exitCode}`) : "exited")
+  const meta = t.status === "waiting" ? h("span", { class: "w" }, "Waiting")
+    : t.status === "exited" ? (t.exitCode ? h("span", { class: "x" }, `Exit ${t.exitCode}`) : "Exited")
     : agentMark(t.harness);
   return h("div", { class: `row term ${t.status} ${current?.id === t.id && !creating ? "sel" : ""}`, "data-id": t.id, title: `${AGENT[t.harness]}${index < 9 ? ` · ⌘${index + 1}` : ""}`,
     onclick: () => select(t.id), ondblclick: () => startRename(t.id), oncontextmenu: (e) => { e.preventDefault(); showMenu(e, t); } },
@@ -736,7 +738,7 @@ function terminalRow(t, tr, depth, name = t.name) {
     h("span", { class: "st" }, statusMark(t)),
     h("span", { class: `nm ${t.status === "exited" ? "dither" : ""}`, "data-rename": t.id }, name),
     h("span", { class: "mt" }, meta),
-    h("span", { class: "ac" }, h("button", { title: "close ⌘W", onclick: (e) => { e.stopPropagation(); closeTerminal(t); } }, "×")));
+    h("span", { class: "ac" }, h("button", { title: "Close ⌘W", onclick: (e) => { e.stopPropagation(); closeTerminal(t); } }, "×")));
 }
 
 /** A terminal's sub-agents at work, one level under it (docs/terminal-v0.md §1): what each was sent to do, its kind and
@@ -752,9 +754,9 @@ function subagentRows(t, tr, depth) {
     h("span", { class: "mt" }, a.type)));
 }
 
-function sessionRow(s, tr, depth, name = s.title || "(untitled)") {
+function sessionRow(s, tr, depth, name = s.title || "(Untitled)") {
   const canResume = RESUMABLE.has(s.harness);
-  const meta = opening === s.id ? "opening" : s.active ? "busy" : ago(s.updatedAt);
+  const meta = opening === s.id ? "Opening" : s.active ? "Busy" : ago(s.updatedAt);
   return h("div", { class: `row session ${opening === s.id ? "opening" : ""}`, title: `${AGENT[s.harness] ?? s.harness} · ${tilde(s.cwd)}`, onclick: canResume ? () => resume(s) : null },
     h("span", { class: "ix" }),
     h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr),
@@ -762,9 +764,9 @@ function sessionRow(s, tr, depth, name = s.title || "(untitled)") {
     h("span", { class: "nm" }, name),
     h("span", { class: "mt" }, agentMark(s.harness), h("span", {}, meta)),
     h("span", { class: "ac" },
-      canResume ? h("button", { class: "go", onclick: (e) => { e.stopPropagation(); resume(s); } }, "resume") : null,
+      canResume ? h("button", { class: "go", onclick: (e) => { e.stopPropagation(); resume(s); } }, "Resume") : null,
       // The service says whether a program still holds it (a session just written is not held by that alone).
-      DELETABLE.has(s.harness) ? h("button", { class: "del", onclick: (e) => { e.stopPropagation(); deleteSession(s); } }, "delete") : null));
+      DELETABLE.has(s.harness) ? h("button", { class: "del", onclick: (e) => { e.stopPropagation(); deleteSession(s); } }, "Delete") : null));
 }
 
 /** Right-click on a terminal, with the shortcuts that do the same. */
@@ -772,9 +774,9 @@ function showMenu(e, t) {
   const item = (label, key, run, opts = {}) => h("button", { class: opts.danger ? "danger" : "", disabled: opts.disabled, onclick: () => { $("menu").hidden = true; run(); } },
     h("span", {}, label), key ? h("kbd", {}, key) : null);
   $("menu").replaceChildren(
-    item("rename", null, () => startRename(t.id)),
-    item("encrypt & send…", "⌘⇧V", () => { select(t.id); openComposer(); }, { disabled: t.status === "exited" }),
-    item("close", "⌘W", () => closeTerminal(t), { danger: true }));
+    item("Rename", null, () => startRename(t.id)),
+    item("Encrypt & Send…", "⌘⇧V", () => { select(t.id); openComposer(); }, { disabled: t.status === "exited" }),
+    item("Close", "⌘W", () => closeTerminal(t), { danger: true }));
   $("menu").hidden = false;
   const r = $("menu").getBoundingClientRect();
   $("menu").style.left = `${Math.min(e.clientX, innerWidth - r.width - 8)}px`;
@@ -783,7 +785,7 @@ function showMenu(e, t) {
 
 /** Deletes the agent's own record of a session (not one in use): it leaves the list and cannot be continued again. */
 async function deleteSession(s) {
-  const r = await ask({ title: `删除会话「${s.title || "无标题"}」？`, body: `将删除 ${AGENT[s.harness]} 保存的会话记录，此操作无法撤销。`, confirm: "delete", destructive: true });
+  const r = await ask({ title: `删除会话「${s.title || "无标题"}」？`, body: `将删除 ${AGENT[s.harness]} 保存的会话记录，此操作无法撤销。`, confirm: "Delete", destructive: true });
   if (!r.ok) return;
   try {
     await api("DELETE", `/sessions/${s.harness}/${encodeURIComponent(s.id)}`);
@@ -855,7 +857,7 @@ function renderSearch(q) {
         if (r.title) titleHits++;
         else if (r.said) textCount++;
         if (r.t) out.push(terminalRow(r.t, tr, 0, r.title ? marked(r.t.name, q) : r.t.name), ...subagentRows(r.t, tr, 0));
-        else out.push(sessionRow(r.s, tr, 0, r.title ? marked(r.s.title, q) : r.s.title || "(untitled)"));
+        else out.push(sessionRow(r.s, tr, 0, r.title ? marked(r.s.title, q) : r.s.title || "(Untitled)"));
         if (r.said && !r.title) {
           out.push(h("div", { class: "row hit", onclick: () => (r.t ? select(r.t.id) : RESUMABLE.has(r.s.harness) && resume(r.s)) },
             h("span", { class: "ix" }),
@@ -920,7 +922,7 @@ function renderSidebar() {
       h("span", { class: "chev" }, closed ? "▸" : "▾"),
       h("span", { class: "name" }, `${g.label}/`, gitMark(gits[g.cwd])),
       counts(g.terminals, g.sessions),
-      h("button", { class: "add", title: "new terminal here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, "+")));
+      h("button", { class: "add", title: "New Terminal Here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, "+")));
     if (closed) return;
     const all = expanded.has(g.cwd);
     const list = all ? g.sessions : g.sessions.slice(0, SESSIONS_SHOWN);
@@ -937,7 +939,7 @@ function renderSidebar() {
     if (more) {
       out.push(h("div", { class: "row more", onclick: () => { if (all) expanded.delete(g.cwd); else expanded.add(g.cwd); renderSidebar(); } },
         h("span", { class: "ix" }), h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr()), h("span", { class: "st" }),
-        h("span", { class: "nm" }, all ? "▾ less" : `▸ ${hidden} more`)));
+        h("span", { class: "nm" }, all ? "▾ Less" : `▸ ${hidden} More`)));
     }
   };
   for (const node of folderTree()) {
@@ -958,9 +960,9 @@ let markFrame = 0;
 function markState() {
   const live = terminals.filter((t) => t.status !== "exited");
   const waiting = live.filter((t) => t.status === "waiting").length;
-  if (waiting) return ["waiting", `${waiting} waiting`];
-  if (live.some((t) => t.status === "working")) return ["busy", "busy"];
-  return live.length ? ["idle", "idle"] : ["off", ""];
+  if (waiting) return ["waiting", `${waiting} Waiting`];
+  if (live.some((t) => t.status === "working")) return ["busy", "Busy"];
+  return live.length ? ["idle", "Idle"] : ["off", ""];
 }
 function renderMark() {
   const [state, tag] = markState();
@@ -985,12 +987,12 @@ function renderHead() {
   const where = create ? "" : folderOf(t.workdir || t.cwd);
   const g = create ? null : gits[t.workdir || t.cwd];
   const git = g ? [g.branch, g.changed ? `±${g.changed}` : "", g.ahead ? `↑${g.ahead}` : "", g.behind ? `↓${g.behind}` : ""].filter(Boolean).join(" ") : "";
-  $("bandName").replaceChildren(create ? "new terminal" : where, git ? h("i", { class: "git" }, git) : "");
+  $("bandName").replaceChildren(create ? "New Terminal" : where, git ? h("i", { class: "git" }, git) : "");
   $("bandName").title = create ? "" : `${t.name} · ${tilde(t.workdir || t.cwd)}`;
-  const word = create ? "" : t.status === "working" ? "busy" : t.status;
+  const word = create ? "" : STATUS_WORDS[t.status] ?? t.status;
   $("bandStatus").className = `band-status ${create ? "" : t.status}`;
   $("bandStatus").textContent = word;
-  document.title = create ? "new terminal" : `${where} — ${t.name}`;
+  document.title = create ? "New Terminal" : `${where} — ${t.name}`;
   // The Mac window's toolbar: the same title (none while one is being made), and where the screen is, so the window
   // can hand the wheel over it to the page.
   tellWindow("head", { name: where, git, path: create ? "" : tilde(t.workdir || t.cwd), terminal: create ? "" : t.name, status: create ? null : t.status });
@@ -1043,7 +1045,7 @@ function showCreate(folder = null) {
     const installed = agents.includes(a.id);
     return h("button", { class: `agent ${pickedAgent === a.id ? "on" : ""}`, "data-agent": a.id, disabled: !installed,
       onclick: () => { if (pickedAgent !== a.id) flashAgent = a.id; pickedAgent = a.id; showCreate($("cwd").value); } },
-      raw(sprite(AGENT_PX[a.id], { px: 4 })), h("span", {}, a.name), installed ? null : h("small", {}, "not installed"));
+      raw(sprite(AGENT_PX[a.id], { px: 4 })), h("span", {}, a.name), installed ? null : h("small", {}, "Not Installed"));
   }));
   if (flashAgent) { glitch($("agents").querySelector(`[data-agent="${flashAgent}"]`)); flashAgent = null; }
   const list = models[pickedAgent] ?? [];
@@ -1051,8 +1053,8 @@ function showCreate(folder = null) {
   // The current models, then the ones a newer model superseded folded under `older` (as the agent's own picker).
   const option = (m) => h("option", { value: m.id, title: m.description ?? "" }, list.filter((x) => x.name === m.name).length > 1 ? `${m.name} · ${m.id}` : m.name);
   const older = list.filter((m) => m.older);
-  $("model").replaceChildren(h("option", { value: "" }, modelDefaults[pickedAgent] ? `default · ${modelDefaults[pickedAgent]}` : "default"),
-    ...list.filter((m) => !m.older).map(option), ...(older.length ? [h("optgroup", { label: "older" }, ...older.map(option))] : []));
+  $("model").replaceChildren(h("option", { value: "" }, modelDefaults[pickedAgent] ? `Default · ${modelDefaults[pickedAgent]}` : "Default"),
+    ...list.filter((m) => !m.older).map(option), ...(older.length ? [h("optgroup", { label: "Older" }, ...older.map(option))] : []));
   $("model").value = chosen;
   $("model").disabled = list.length === 0;
   // one of three: angle-bracket marks (< > / <x>), not checkboxes ([ ] / [x] are for picking several)
@@ -1080,7 +1082,7 @@ async function start() {
     remember("terminal.cwd", cwd);
     unfold(terminal.cwd);
     await refresh();
-    select(terminal.id, { loading: `starting ${AGENT[pickedAgent]}` });
+    select(terminal.id, { loading: `Starting ${AGENT[pickedAgent]}` });
   } catch (err) {
     $("createError").textContent = err.message;
     glitch($("createError"));
@@ -1096,7 +1098,7 @@ async function resume(s) {
   if (open) { select(open.id); return; }
   const name = s.title || "会话";
   if (!CHECKED.has(s.harness) && s.active) {
-    const r = await ask({ title: `继续「${name}」？`, body: "此会话可能正在其他终端中运行。OpenCode 不支持分叉，继续将写入同一会话。", confirm: "resume" });
+    const r = await ask({ title: `继续「${name}」？`, body: "此会话可能正在其他终端中运行。OpenCode 不支持分叉，继续将写入同一会话。", confirm: "Resume" });
     if (!r.ok) return;
   }
   opening = s.id;
@@ -1106,7 +1108,7 @@ async function resume(s) {
   render();
   $("bandName").textContent = name;
   term.reset();
-  showLoading(`opening 「${name}」`);
+  showLoading(`Opening 「${name}」`);
   const body = { harness: s.harness, cwd: s.cwd, agentSessionId: s.id, ...(s.title ? { title: s.title } : {}), mode: s.mode ?? pickedMode };
   try {
     const grid = gridHere();
@@ -1121,15 +1123,15 @@ async function resume(s) {
       const app = where.app ?? "其他程序";
       const answer = await ask({ title: `「${name}」正在 ${app} 中运行`,
         body: `同一会话同时只能由一个程序写入，否则记录会分叉。请先在 ${app} 中退出该会话后再继续，或创建分支：新会话包含全部历史，原会话保持不变。`,
-        confirm: "fork" });
+        confirm: "Fork" });
       if (!answer.ok) throw Object.assign(new Error(""), { cancelled: true });
-      showLoading(`opening 「${name}」`);
+      showLoading(`Opening 「${name}」`);
       r = await api("POST", "/terminals/resume", { ...body, fork: true, cols: term.cols, rows: term.rows });
     }
     unfold(r.terminal.cwd);
     await refresh();
     opening = null;
-    select(r.terminal.id, r.existing ? {} : { loading: `opening 「${name}」` });
+    select(r.terminal.id, r.existing ? {} : { loading: `Opening 「${name}」` });
   } catch (err) {
     opening = null;
     hideLoading();
@@ -1173,7 +1175,7 @@ async function closeTerminal(t) {
   if (t.status !== "exited") {
     // Only a record this terminal started can go with it; one it went on writing is the user's original session.
     const own = t.agentSessionId && t.harness === "claude-code" && (!t.resumedFrom || t.forked);
-    const r = await ask({ title: `关闭「${t.name}」？`, body: `将结束 ${AGENT[t.harness]} 进程。会话记录保留，可稍后继续。`, confirm: "close", destructive: true,
+    const r = await ask({ title: `关闭「${t.name}」？`, body: `将结束 ${AGENT[t.harness]} 进程。会话记录保留，可稍后继续。`, confirm: "Close", destructive: true,
       check: own ? "同时删除会话记录（无法恢复）" : null });
     if (!r.ok) return;
     transcript = r.checked;

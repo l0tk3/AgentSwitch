@@ -102,12 +102,12 @@ function meta(t, events) {
   const d = t.decision || {};
   const attempts = (t.attempts || []).map((a, i) => `<div class="faint">${i + 1}. ${esc(a.harness)}/${esc(a.model)} → ${esc(a.kind)}${a.excerpt ? `：${esc(a.excerpt.slice(0, 120))}` : ""}</div>`).join("");
   return `<div class="kv">
-      <span>id</span><b class="mono">${esc(t.id)}</b>
-      <span>status</span><b><span class="badge ${t.status}">${esc(statusWord(t))}</span> <span class="faint">${esc(taskStatusLabel(t))}</span></b>
-      <span>target</span><b>${esc(target(t) || "—")}${t.effort ? ` · effort ${esc(t.effort)}` : ""}</b>
-      <span>folder</span><b class="mono">${esc(t.cwd)}${t.ephemeral ? " <span class=\"faint\">（临时）</span>" : ""}</b>
-      <span>created</span><b>${stamp(t.createdAt)}</b>
-      ${t.pin ? `<span>pinned</span><b>${esc(t.pin.harness)}/${esc(t.pin.model)}</b>` : ""}
+      <span>ID</span><b class="mono">${esc(t.id)}</b>
+      <span>Status</span><b><span class="badge ${t.status}">${esc(statusWord(t))}</span> <span class="faint">${esc(taskStatusLabel(t))}</span></b>
+      <span>Target</span><b>${esc(target(t) || "—")}${t.effort ? ` · effort ${esc(t.effort)}` : ""}</b>
+      <span>Folder</span><b class="mono">${esc(t.cwd)}${t.ephemeral ? " <span class=\"faint\">（临时）</span>" : ""}</b>
+      <span>Created</span><b>${stamp(t.createdAt)}</b>
+      ${t.pin ? `<span>Pinned</span><b>${esc(t.pin.harness)}/${esc(t.pin.model)}</b>` : ""}
     </div>
     ${overrideNote(t, events)}
     ${d.reason ? `<div class="note"><div class="faint">调度理由</div><div>${mdInline(d.reason)}</div>${d.confidence !== undefined ? `<div class="faint">置信度 ${d.confidence}${d.expected_size ? " · " + esc(d.expected_size) : ""}${d.needs_browser ? " · 需要浏览器" : ""}</div>` : ""}</div>` : ""}
@@ -122,28 +122,28 @@ function filesCards(t, files) {
   const where = files.root === "artifacts" ? "任务目录已清理，产物保留 7 天" : files.root === "cwd" ? "工作目录中的文件" : "目录已清理，无 out/ 产物";
   const out = outputs.length || files.root ? `<div class="files-l"><div class="faint">产物 · ${where}</div>${fileList(t.id, outputs, "暂无产物。模型交付的文件会放在 out/ 中。")}</div>` : "";
   const att = (t.attachments || []).length ? `<div class="files-l"><div class="faint">上传的附件</div>${fileList(t.id, inputs.length ? inputs : t.attachments.map((a) => ({ path: a.path, size: a.size })), "")}</div>` : "";
-  return out || att ? `<div class="lbl">// files</div>${out}${att}` : "";
+  return out || att ? `<div class="lbl">// Files</div>${out}${att}` : "";
 }
 
 /** The topic this task belongs to: title, last summary, every run in it, and archive. */
 function threadCard(t, th, s) {
-  if (!th) return t.threadId ? `<div class="lbl">// topic</div><div class="faint">话题 <span class="mono">${esc(t.threadId)}</span> 加载中…</div>` : "";
+  if (!th) return t.threadId ? `<div class="lbl">// Topic</div><div class="faint">话题 <span class="mono">${esc(t.threadId)}</span> 加载中…</div>` : "";
   const sm = th.state && th.state.summary;
   const list = (label, items) => (items && items.length ? `<div class="faint">${label}</div>${items.map((i) => `<div>· ${mdInline(i)}</div>`).join("")}` : "");
   const tasks = (th.tasks || []).map((x, i, all) => `<div class="trow ${x.id === t.id ? "on" : ""}" ${x.id === t.id ? "" : `data-open="${x.id}"`}><span class="tr">${i === all.length - 1 ? "└─" : "├─"}</span><span class="badge ${x.status}">${esc(statusWord(x))}</span><span>${esc(target(x) || "—")}${x.handoffFrom ? " ↤ " + esc(x.handoffFrom.harness) : ""}</span><span class="faint mono">${esc(x.id)}</span></div>`).join("");
-  return `<div class="lbl">// topic</div>
+  return `<div class="lbl">// Topic</div>
     <div class="topic-card">
-      <div class="th">${topicSquare(th.id)}<b>${esc(th.title || "（未命名）")}</b><span class="sp"></span><span class="faint">${th.status === "archived" ? "archived" : "open"}</span></div>
+      <div class="th">${topicSquare(th.id)}<b>${esc(th.title || "（未命名）")}</b><span class="sp"></span><span class="faint">${th.status === "archived" ? "Archived" : "Open"}</span></div>
       <div class="faint mono small">${esc(th.id)} · ${(th.tasks || []).length} 次执行 · ${th.handoffs || 0} 次交接${th.expiresAt ? " · 将于 " + stamp(th.expiresAt) + " 删除" : ""}</div>
       ${sm ? `<div class="sum"><div class="faint">目标</div><div>${mdInline(sm.goal)}</div><div class="faint">进展</div><div>${mdInline(sm.progress || "—")}</div>${list("文件", sm.files)}${list("未解决", sm.unresolved)}${list("决定", sm.decisions)}</div>` : `<div class="faint">暂无摘要（每次执行结束后由调度模型生成）</div>`}
       <div class="trows">${tasks}</div>
-      ${th.status === "open" && !(th.tasks || []).some((x) => ACTIVE.has(x.status)) ? `<div class="acts"><button id="t-archive" title="归档后 7 天删除">archive</button></div>` : ""}
+      ${th.status === "open" && !(th.tasks || []).some((x) => ACTIVE.has(x.status)) ? `<div class="acts"><button id="t-archive" title="归档后 7 天删除">Archive</button></div>` : ""}
       ${th.status === "archived" ? `<div class="acts">${deleteButton("thread", th.id, s, (th.tasks || []).some((x) => ACTIVE.has(x.status)))}${deleteNotice("thread", th.id, s)}</div>` : ""}
     </div>`;
 }
 
 function handoffBar(t) {
-  return `<div class="handoff"><span class="lbl">// hand to</span><input id="t-handoff-pin" data-keep class="pin" placeholder="auto，或 codex/gpt-5.5" title="交接：在同一话题中改由其他执行器继续，排除当前执行器；填写执行器/模型可直接指定"><button id="t-handoff">hand off</button></div>`;
+  return `<div class="handoff"><span class="lbl">// Hand To</span><input id="t-handoff-pin" data-keep class="pin" placeholder="Auto，或 codex/gpt-5.5" title="交接：在同一话题中改由其他执行器继续，排除当前执行器；填写执行器/模型可直接指定"><button id="t-handoff">Hand Off</button></div>`;
 }
 
 function followUp(s) {
@@ -152,7 +152,7 @@ function followUp(s) {
   const disabled = sub.locked ? "disabled" : "";
   return `<div class="compose small-c" data-dropzone data-composer-key="${esc(key)}" aria-busy="${sub.busy}">
     ${s.pendingFor === key ? pendingList(s.pending, sub.locked) : ""}
-    <div class="crow"><button class="sqb" data-attach ${disabled} title="添加附件" aria-label="attach">+</button><textarea id="f-task" data-keep ${disabled} rows="2" placeholder="追问（附带本任务的上下文）"></textarea><button class="sqb go" id="f-send" ${disabled} title="${esc(sub.status ? sub.label : "追问")} ⌘↩" aria-label="${esc(sub.status ? sub.label : "追问")}">${sub.busy ? spinner() : "↑"}</button></div>
+    <div class="crow"><button class="sqb" data-attach ${disabled} title="添加附件" aria-label="Attach">+</button><textarea id="f-task" data-keep ${disabled} rows="2" placeholder="追问（附带本任务的上下文）"></textarea><button class="sqb go" id="f-send" ${disabled} title="${esc(sub.status ? sub.label : "追问")} ⌘↩" aria-label="${esc(sub.status ? sub.label : "追问")}">${sub.busy ? spinner() : "↑"}</button></div>
     ${sub.status ? `<div class="opts"><span class="sp"></span><kbd>${esc(sub.label)}</kbd></div>` : ""}
     ${sendFeedback(s, key)}
   </div>`;
@@ -190,16 +190,16 @@ function steps(t, events) {
 
 export function render(s) {
   const t = s.task;
-  if (!t) return `<div class="head"><div class="l1"><span class="faint">task</span><span class="sp"></span><button class="x" data-nav="home" title="close · esc" aria-label="close">×</button></div></div><div class="body"><div class="empty">${esc(s.hint || "加载中…")}</div></div>`;
+  if (!t) return `<div class="head"><div class="l1"><span class="faint">Task</span><span class="sp"></span><button class="x" data-nav="home" title="Close · esc" aria-label="Close">×</button></div></div><div class="body"><div class="empty">${esc(s.hint || "加载中…")}</div></div>`;
   const pending = s.approvals.filter((a) => a.taskId === t.id);
   const parent = t.parentId ? s.tasks.find((x) => x.id === t.parentId) : null;
   // A tool's result belongs to its call (the phone opens a call to show it); the list shows the calls only.
   const events = s.events.filter((e) => e.type !== "tool_result").map((e) => `<div class="ev ${e.type}"><span class="ts">${when(e.ts)}</span>${esc(eventLine(e))}</div>`).join("");
   const incomplete = ["partial", "blocked"].includes(t.status);
-  const acts = ACTIVE.has(t.status) ? `<button class="warn" id="t-cancel">cancel</button>`
-    : `<button class="${t.rating === 1 ? "on" : ""}" data-rate="1" title="结果有用，调度模型后续会参考">useful</button><button class="${t.rating === -1 ? "on" : ""}" data-rate="-1" title="结果无用">not useful</button>${deleteButton("task", t.id, s, (s.thread?.tasks || []).some((x) => ACTIVE.has(x.status)))}`;
+  const acts = ACTIVE.has(t.status) ? `<button class="warn" id="t-cancel">Cancel</button>`
+    : `<button class="${t.rating === 1 ? "on" : ""}" data-rate="1" title="结果有用，调度模型后续会参考">Useful</button><button class="${t.rating === -1 ? "on" : ""}" data-rate="-1" title="结果无用">Not Useful</button>${deleteButton("task", t.id, s, (s.thread?.tasks || []).some((x) => ACTIVE.has(x.status)))}`;
   return `<div class="head">
-      <div class="l1">${statusLine(t)}<span class="sp"></span><button class="x" data-nav="home" title="close · esc" aria-label="close">×</button></div>
+      <div class="l1">${statusLine(t)}<span class="sp"></span><button class="x" data-nav="home" title="Close · esc" aria-label="Close">×</button></div>
       <h2>${esc(firstLine(t.task).slice(0, 120) || t.task.slice(0, 120))}</h2>
     </div>
     <div class="acts">${acts}</div>
@@ -208,21 +208,21 @@ export function render(s) {
     <div class="body">
       ${parent ? `<div class="parent" data-open="${parent.id}">↩ 追问自：${esc(parent.task.slice(0, 120))}</div>` : ""}
       ${feedbackStrip(t, s.events)}
-      <div class="lbl">// asked</div>
+      <div class="lbl">// Asked</div>
       <div class="asked">${esc(t.task)}</div>
-      ${t.result ? `<div class="lbl">// ${incomplete ? "saved" : "result"}</div><div class="result ${incomplete ? "is-warn" : t.status === "done" ? "is-ok" : ""}"><div class="faint">${incomplete ? "已保存的进展" : "结果"}</div><div class="md">${md(t.result)}</div></div>` : ""}
+      ${t.result ? `<div class="lbl">// ${incomplete ? "Saved" : "Result"}</div><div class="result ${incomplete ? "is-warn" : t.status === "done" ? "is-ok" : ""}"><div class="faint">${incomplete ? "已保存的进展" : "结果"}</div><div class="md">${md(t.result)}</div></div>` : ""}
       ${t.error ? `<div class="result ${incomplete ? "is-warn" : "is-bad"}"><div class="faint">${incomplete ? "未完成原因" : "错误"}</div><div class="md">${md(t.error)}</div></div>` : ""}
       ${pending.map((a) => approvalCard(a, null, s.answerSubmissions?.[a.id])).join("")}
       ${answerNotices(s, t.id)}
-      <div class="lbl">// steps</div>
+      <div class="lbl">// Steps</div>
       ${steps(t, s.events)}
       ${filesCards(t, s.files)}
-      <div class="lbl">// task</div>
+      <div class="lbl">// Task</div>
       ${meta(t, s.events)}
-      <details class="evs" id="events-box" data-keep-open ${ACTIVE.has(t.status) ? "open" : ""}><summary>// events ${s.events.length}</summary>
+      <details class="evs" id="events-box" data-keep-open ${ACTIVE.has(t.status) ? "open" : ""}><summary>// Events ${s.events.length}</summary>
         <div class="events" id="events">${events || '<span class="faint">等待事件…</span>'}</div>
       </details>
-      <div class="lbl">// follow up</div>
+      <div class="lbl">// Follow Up</div>
       ${followUp(s)}
       ${t.harness ? handoffBar(t) : ""}
       ${threadCard(t, s.thread, s)}

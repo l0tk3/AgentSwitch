@@ -14,16 +14,17 @@ export function taskStatusLabel(task) {
   return BLOCK_LABELS[task.blockCause] ?? "未完成";
 }
 
-/** A status line's word (docs/ui-v0.md §7.4 网页控制台): the phone's short English words. */
-const STATUS_WORDS = { queued: "queued", routing: "busy", running: "busy", waiting_approval: "waiting", done: "done", partial: "incomplete", blocked: "incomplete", failed: "failed", cancelled: "cancelled" };
+/** A status line's word (docs/ui-v0.md §7.4 网页控制台): the phone's short English words, in title case (§7.2 第 7 条).
+ *  Only the word shown; the status value from the API stays as it is. */
+const STATUS_WORDS = { queued: "Queued", routing: "Busy", running: "Busy", waiting_approval: "Waiting", done: "Done", partial: "Incomplete", blocked: "Incomplete", failed: "Failed", cancelled: "Cancelled" };
 export function statusWord(task) {
-  if (task.status === "blocked" && task.blockCause === "question") return "waiting";
+  if (task.status === "blocked" && task.blockCause === "question") return "Waiting";
   return STATUS_WORDS[task.status] || task.status;
 }
-/** The status's tone: busy, waiting, ok, bad or off (its square's colour). */
+/** The status's tone: busy, waiting, ok, bad or off (its square's colour, a CSS class). */
+const TONES = { Queued: "busy", Busy: "busy", Waiting: "waiting", Done: "ok", Incomplete: "waiting", Failed: "bad" };
 export function statusTone(task) {
-  const word = statusWord(task);
-  return word === "busy" || word === "queued" ? "busy" : word === "waiting" ? "waiting" : word === "done" ? "ok" : word === "incomplete" ? "waiting" : word === "failed" ? "bad" : "off";
+  return TONES[statusWord(task)] || "off";
 }
 
 export async function api(method, path, body, { timeoutMs = 15_000 } = {}) {
@@ -56,25 +57,26 @@ export function ago(ts) {
   return `${Math.floor(s / 86400)} 天前`;
 }
 
-/** Short English times, as the phone and the Mac say them: now, 3m ago, 2h ago, today 21:06, yesterday, 9/20. */
+/** Short English times, as the phone and the Mac say them: Now, 3m ago, 2h ago, Today 21:06, Yesterday 06:57, 9/20.
+ *  A lone time word is capitalized; one that starts with a number stays a unit (docs/ui-v0.md §7.2 第 7 条). */
 export function agoShort(ts) {
   const s = Math.max(0, (Date.now() - ts) / 1000);
-  if (s < 60) return "now";
+  if (s < 60) return "Now";
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   const d = new Date(ts), today = new Date();
   const hm = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-  if (d.toDateString() === today.toDateString()) return s < 6 * 3600 ? `${Math.floor(s / 3600)}h ago` : `today ${hm}`;
+  if (d.toDateString() === today.toDateString()) return s < 6 * 3600 ? `${Math.floor(s / 3600)}h ago` : `Today ${hm}`;
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return `yesterday ${hm}`;
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${hm}`;
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-/** A day's heading in the record: today, yesterday, else the date. */
+/** A day's heading in the record: Today, Yesterday, else the date. */
 export function dayOf(ts) {
   const d = new Date(ts), today = new Date();
-  if (d.toDateString() === today.toDateString()) return "today";
+  if (d.toDateString() === today.toDateString()) return "Today";
   const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return "yesterday";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 

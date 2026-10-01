@@ -63,7 +63,17 @@ describe("sidebar", () => {
     expect(sidebar(base)).toContain('id="apCount"></span>');   // nothing waiting: nothing said
     expect(sidebar({ ...base, approvals: [{}, {}] })).toContain('id="apCount">▪2</span>');
     expect(sidebar({ ...base, view: "task" })).toContain('data-nav="home" class="on">');   // a task opens beside the tasks
-    expect(sidebar({ ...base, view: "ctx" })).toMatch(/data-nav="home">.*tasks.*data-nav="ctx" class="on">.*context/s);
+    expect(sidebar({ ...base, view: "ctx" })).toMatch(/data-nav="home">.*Tasks.*data-nav="ctx" class="on">.*Context/s);
+  });
+
+  it("says its short words in title case (docs/ui-v0.md §7.2 第 7 条), the name as AgentSwitch writes it", async () => {
+    const { band, sidebar } = await import(join(UI, "lib/sidebar.js"));
+    const base = { health: true, version: "", approvals: [{}, {}], tasks: [], threads: [], quota: [], view: "home" };
+    const top = band(base);
+    for (const word of ["<b>AgentSwitch</b>", "Service</span>", "2 Waiting</span>", "Terminals ↗</a>"]) expect(top).toContain(word);
+    const side = sidebar(base);
+    for (const word of ["// Console", "// Topics", "// Usage", ">Tasks<", ">Log<", ">Extensions<", ">Context<", ">Refresh<", ">Reload<"]) expect(side).toContain(word);
+    expect(`${top}${side}`).not.toMatch(/agentswitch<|>(tasks|log|extensions|context|service|refresh|reload)<|\/\/ (console|topics|usage)/);
   });
 
   it("is patched in place as state changes: dot, version, count, tabs and the refresh button keep their elements", () => {

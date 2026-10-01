@@ -19,17 +19,17 @@ export function render(s) {
   const warnings = c.warnings.length
     ? `<div class="warnbox"><b>${c.warnings.length} lines removed</b> · 加载时移除了疑似明文凭据的行，调度模型看不到：<div class="warn-list">${c.warnings.map(esc).join("\n")}</div></div>`
     : "";
-  return `<div class="page-title"><h1>context</h1><span class="faint">调度模型每次调度前读取，改了立即生效</span></div>
+  return `<div class="page-title"><h1>Context</h1><span class="faint">调度模型每次调度前读取，改了立即生效</span></div>
     ${warnings}
     <div class="panes">
       <section class="pane">
-        <div class="hd"><span>// context.md</span><span class="sp"></span><span class="faint">${size(text)} / 64 KB</span>${text.trim() ? "" : `<button id="ctx-example">载入示例模板</button>`}<button class="primary" id="ctx-save" ${c.draft === null ? "disabled" : ""}>${c.saved ? "已保存" : "保存"}</button></div>
+        <div class="hd"><span>// CONTEXT.md</span><span class="sp"></span><span class="faint">${size(text)} / 64 KB</span>${text.trim() ? "" : `<button id="ctx-example">载入示例模板</button>`}<button class="primary" id="ctx-save" ${c.draft === null ? "disabled" : ""}>${c.saved ? "已保存" : "保存"}</button></div>
         ${c.hint ? `<div class="note warn">${esc(c.hint)}</div>` : ""}
         <textarea id="ctx-text" data-keep class="src" spellcheck="false" placeholder="站点与账号（密码仅填写 enc:v1: 密文）、环境限制、各项目偏好的执行器…">${esc(text)}</textarea>
         <div class="say">站点、账号（密码只填 enc:v1: 密文）、环境限制、各项目偏好的执行器。列表项里「密码 / token / api key」之后不是密文的，整行会被移除。<span class="mono faint">${esc(c.path)}</span> · ⌘S 保存</div>
       </section>
       <section class="pane">
-        <div class="hd"><span>// memory.md</span><span class="sp"></span><span class="faint">每次执行后追加</span><button class="primary" id="mem-save" ${m.draft === null ? "disabled" : ""}>${m.saved ? "已保存" : "保存"}</button></div>
+        <div class="hd"><span>// MEMORY.md</span><span class="sp"></span><span class="faint">每次执行后追加</span><button class="primary" id="mem-save" ${m.draft === null ? "disabled" : ""}>${m.saved ? "已保存" : "保存"}</button></div>
         ${m.hint ? `<div class="note warn">${esc(m.hint)}</div>` : ""}
         <textarea id="mem-text" data-keep class="src" spellcheck="false" placeholder="每次执行结束后，调度模型提取的长期事实会追加到此处，并注明来源任务。有误的行可直接删除。">${esc(memText)}</textarea>
         <div class="say">调度模型从执行结果里提取的长期事实，注明来源任务；错的行直接删。${m.warnings.length ? `<span class="error"> 已移除 ${m.warnings.length} 行疑似明文凭据。</span>` : ""}</div>
@@ -56,7 +56,7 @@ function platformMemory(mem = { records: [], loading: false, loaded: false, dele
     </article>`;
   }).join("");
   return `<section class="xsec">
-    <div class="sh"><span class="lbl">// experience</span><span class="what">执行器在具体网站上学到的做法，附来源与有效期；过期的不再用于后续任务，也不代表操作授权</span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></div>
+    <div class="sh"><span class="lbl">// Experience</span><span class="what">执行器在具体网站上学到的做法，附来源与有效期；过期的不再用于后续任务，也不代表操作授权</span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></div>
     ${mem.hint ? `<div class="card bad error" role="alert">${esc(mem.hint)}</div>` : ""}
     <div class="stack">${records || `<div class="empty">${mem.loading ? "正在加载平台经验…" : mem.loaded ? "暂无平台经验" : "平台经验尚未加载"}</div>`}</div></section>`;
 }
@@ -70,7 +70,7 @@ function policyCard(p) {
   const opt = (v, label, desc, extra = "") => `<div class="way"><label class="opt"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}><span><b>${label}</b><span class="d">${desc}</span></span></label>${extra}</div>`;
   const cats = p.categories.map((c) => `<label class="opt cat"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
   return `<section class="policy">
-    <div class="sh"><span class="lbl">// approval</span><span class="what">路由器派出的任务要做需要批准的事（删文件、推送、付款……）时，由谁决定</span></div>
+    <div class="sh"><span class="lbl">// Approval</span><span class="what">路由器派出的任务要做需要批准的事（删文件、推送、付款……）时，由谁决定</span></div>
     ${opt("manual", "逐项确认", "每一次都问你，调度模型不介入。")}
     ${opt("scoped", "自动", "调度模型代你批准，但下面勾选的几类仍然问你：", `<div class="cats${mode === "scoped" ? "" : " off"}">${cats}</div>`)}
     ${opt("auto", "全部自动", "调度模型代你批准所有请求，包括删除、推送、支付这类不可逆操作；它判断不了的仍然问你。")}

@@ -6,7 +6,7 @@ function decisionCell(r) {
   if (!r.decision) return "";
   let pretty = r.decision;
   try { pretty = JSON.stringify(JSON.parse(r.decision), null, 1); } catch { /* keep raw */ }
-  return `<details><summary>decision</summary><pre class="mono pre" style="margin:6px 0 0">${esc(pretty)}</pre></details>`;
+  return `<details><summary>Decision</summary><pre class="mono pre" style="margin:6px 0 0">${esc(pretty)}</pre></details>`;
 }
 
 function row(r) {
@@ -20,9 +20,9 @@ function row(r) {
 }
 
 export function render(s) {
-  return `<div class="page-title"><h1>log</h1><span class="faint">调度模型每次的决定，新的在上</span></div>
+  return `<div class="page-title"><h1>Log</h1><span class="faint">调度模型每次的决定，新的在上</span></div>
     ${s.log.length
-      ? `<table class="list"><thead><tr><th>time</th><th>from</th><th>target</th><th>folder</th><th>notes</th></tr></thead><tbody>${s.log.map(row).join("")}</tbody></table>`
+      ? `<table class="list"><thead><tr><th>Time</th><th>From</th><th>Target</th><th>Folder</th><th>Notes</th></tr></thead><tbody>${s.log.map(row).join("")}</tbody></table>`
       : `<div class="empty">暂无调度记录</div>`}`;
 }
 
