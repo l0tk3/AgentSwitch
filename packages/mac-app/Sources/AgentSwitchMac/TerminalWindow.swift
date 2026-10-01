@@ -494,6 +494,8 @@ private struct TerminalWindowRoot: View {
     let head: TerminalHead
     let toggleList: () -> Void
     let newTerminal: () -> Void
+    /// The page's `--ink4`, the list's dotted edge.
+    static let edge = Color(red: 0x26 / 255, green: 0x25 / 255, blue: 0x24 / 255)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -510,6 +512,8 @@ private struct TerminalWindowRoot: View {
                 TerminalTitleView(head: head).allowsHitTesting(false)
             }
             .frame(height: head.barHeight)
+            // The bar's edge (2026-10-01, user: 顶栏没有分界线): dotted, as the list's edge it meets.
+            DottedRule(color: Self.edge)
             StageHost(stage: stage)
         }
         .background(Color.black)

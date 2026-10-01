@@ -138,11 +138,13 @@ struct CharMeter: View {
 
 /// A 1 px dotted rule (2 on, 2 off), where a system divider would be.
 struct DottedRule: View {
+    var color: Color = .inkDim
+
     var body: some View {
         Canvas { context, size in
             var x: CGFloat = 0
             while x < size.width {
-                context.fill(Path(CGRect(x: x, y: 0, width: 2, height: 1)), with: .color(.inkDim))
+                context.fill(Path(CGRect(x: x, y: 0, width: 2, height: 1)), with: .color(color))
                 x += 4
             }
         }

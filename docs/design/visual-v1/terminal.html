@@ -49,6 +49,8 @@ body { background: #1b1b1d; color: var(--ink); font: 13px/1.5 var(--ui); display
    toolbar): 32 pt, the traffic lights centred in it; the list's button beside the lights; the terminal on screen as the window's title, centred, with its status mark (nothing while one is being
    made: the panel says so); actions at the right — new terminal, then all the terminals' mark — with room for more. */
 .bar { position: relative; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; font-family: var(--ui); }
+/* the bar's edge (2026-10-01, user: 顶栏没有分界线): dotted, as the list's edge it meets */
+.bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); pointer-events: none; }
 .bar .lights { margin-right: 18px; }
 .tb { display: grid; place-items: center; width: 28px; height: 24px; border-radius: 6px; color: var(--ink2); background: none; border: 0; padding: 0; cursor: default; }
 .tb:hover { color: var(--ink); background: rgba(255,255,255,.08); }

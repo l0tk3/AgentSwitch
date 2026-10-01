@@ -73,7 +73,9 @@ button:focus-visible, select:focus-visible { outline: 1px solid var(--signal); o
 /* ---------- the top bar, across the window: in the Mac window the traffic lights sit at its left (the page runs under
    a transparent titlebar), then the list's button; the name and state of the terminal on screen while the list is
    closed; all the terminals' mark at the right. The rest of the bar moves the window. ---------- */
-.top { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 14px 0 8px; background: var(--term); }
+.top { position: relative; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 14px 0 8px; background: var(--term); }
+/* the bar's edge (2026-10-01, user: 顶栏没有分界线): dotted, as the list's edge it meets */
+.top::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); pointer-events: none; }
 /* The Mac window has a native toolbar in its place (the traffic lights, the list's button, the title, the mark). */
 .mac-app .top { display: none; }
 .side-btn { flex: none; display: grid; place-items: center; width: 28px; height: 22px; color: var(--ink2); }
