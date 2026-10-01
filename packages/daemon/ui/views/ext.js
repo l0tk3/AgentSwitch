@@ -68,18 +68,18 @@ export function render(s) {
     ${s.extHint ? `<div class="card bad error" style="margin-bottom:14px">${esc(s.extHint)}</div>` : ""}
     <div class="ext-cols">
       <div class="stack">
-        <h2>// mcp ${s.mcp.length}<span class="spacer"></span>${s.edit.mcp === null ? `<button class="small" id="mcp-new">＋ 添加</button>` : ""}</h2>
+        <h2>// mcp ${s.mcp.length}<span class="spacer"></span>${s.edit.mcp === null ? `<button class="small" id="mcp-new">add</button>` : ""}</h2>
         ${s.edit.mcp !== null ? mcpForm(s.edit.mcp, picked(s.edit, "mcp")) : ""}
         ${s.mcp.map(mcpCard).join("") || `<div class="empty">暂无 MCP 服务。凭据网关自带的 secret-gate / playwright 不在此处管理。</div>`}
       </div>
       <div class="stack">
-        <h2>// skills ${s.skills.length}<span class="spacer"></span>${s.edit.skill === null ? `<button class="small" id="skill-new">＋ 新建</button>` : ""}</h2>
+        <h2>// skills ${s.skills.length}<span class="spacer"></span>${s.edit.skill === null ? `<button class="small" id="skill-new">new</button>` : ""}</h2>
         ${s.edit.skill !== null ? skillForm(s.edit.skill, picked(s.edit, "skill")) : ""}
         ${s.skills.map(skillCard).join("") || `<div class="empty">暂无 skill</div>`}
         ${discovered(found)}
       </div>
     </div>
-    <p class="dim">MCP 与 skill 在每次任务运行时注入执行器的私有配置，不修改你的 ~/.claude、~/.codex 与 OpenCode 配置。</p>`;
+    <p class="say">MCP 与 skill 在每次任务运行时注入执行器的私有配置，不修改你的 <code>~/.claude</code>、<code>~/.codex</code> 与 OpenCode 配置。</p>`;
 }
 
 /** Open (undefined = new, object = existing) or close (null) a form; its chip toggles start over. */

@@ -1,7 +1,8 @@
 /** The three-stage feedback a task gives back (received → handed to X → outcome), derived from the task row and
  *  its events. Shown as a strip on the task page; the one-sentence outcome doubles as the push/voice text later. */
 
-import { ACTIVE, esc, target, taskStatusLabel } from "./api.js";
+import { ACTIVE, target, taskStatusLabel } from "./api.js";
+import { mdInline } from "./markdown.js";
 
 const WAIT_LABEL = (p) => p.for === "parent" ? "等待父任务结束" : p.for === "thread" ? "等待同一会话的任务" : p.for === "cwd" ? "等待同一目录的任务" : p.for === "global" ? "等待并发槽位" : String(p.for).startsWith("harness:") ? "等待 " + String(p.for).slice(8) + " 空闲" : "等待";
 
@@ -42,5 +43,6 @@ export function feedbackStrip(t, events) {
   const f = feedback(t, events);
   const dots = [1, 2, 3].map((n) => `<span class="fb-dot ${n < f.stage ? "past" : n === f.stage ? "now " + f.tone : ""}"></span>`).join("");
   const spin = ACTIVE.has(t.status) ? '<span class="fb-spin"></span>' : "";
-  return `<div class="card fb ${f.tone}"><div class="fb-dots">${dots}</div><div class="grow"><div class="fb-label">${spin}${esc(f.label)}</div>${f.detail ? `<div class="dim">${esc(f.detail)}</div>` : ""}</div></div>`;
+  // The outcome is often the agent's own line: its Markdown drawn.
+  return `<div class="card fb ${f.tone}"><div class="fb-dots">${dots}</div><div class="grow"><div class="fb-label">${spin}<span>${mdInline(f.label)}</span></div>${f.detail ? `<div class="dim">${mdInline(f.detail)}</div>` : ""}</div></div>`;
 }

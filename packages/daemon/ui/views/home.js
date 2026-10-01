@@ -10,6 +10,7 @@ import { feedback, firstLine } from "../lib/feedback.js";
 import { deleteBindings, deleteButton, deleteNotice } from "../lib/deletions.js";
 import { sendBindings, sendFeedback, sendState } from "../lib/sending.js";
 import { agentMark, spinner, square, topicSquare } from "../lib/sidebar.js";
+import { mdInline } from "../lib/markdown.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -46,9 +47,10 @@ export function statusLine(t) {
 /** A task as the record says it: its outcome, or where it is now. */
 function outcome(t, s) {
   const f = feedback(t, []);
-  if (t.status === "done") return `<div class="say">${esc(t.spoken || firstLine(t.result) || "已完成")}</div>`;
-  if (t.status === "failed") return `<div class="say bad">${esc(t.spoken || firstLine(t.error) || "失败")}</div>`;
-  if (t.status === "partial" || t.status === "blocked") return `<div class="say"><span class="w">${esc(f.label)}</span> · ${esc(f.detail)}</div>`;
+  // One line of what came of it, its Markdown drawn (an agent's line often has `code` or **bold** in it).
+  if (t.status === "done") return `<div class="say">${mdInline(t.spoken || firstLine(t.result) || "已完成")}</div>`;
+  if (t.status === "failed") return `<div class="say">${mdInline(t.spoken || firstLine(t.error) || "失败")}</div>`;
+  if (t.status === "partial" || t.status === "blocked") return `<div class="say"><span class="w">${esc(f.label)}</span> · ${mdInline(f.detail)}</div>`;
   if (t.status === "cancelled") return "";
   const waiting = s.approvals.some((a) => a.taskId === t.id);
   return waiting ? "" : `<div class="step"><span class="tr">└─</span>${esc(f.label)}${f.detail ? ` <span class="faint">${esc(f.detail)}</span>` : ""}</div>`;
@@ -136,7 +138,7 @@ export function afterRender() {
 function questionBlock(a, q, i, disabled) {
   const box = `q-${a.id}-${i}`;
   const options = (q.options || []).length ? `<div class="chips">${q.options.map((o) => `<button class="chip" data-opt="${esc(o.label)}" data-for="${box}" data-multi="${!!q.multi}" title="${esc(o.description || "")}" ${disabled ? "disabled" : ""}>${esc(o.label)}</button>`).join("")}</div>` : "";
-  return `<div class="qb">${q.header ? `<span class="lbl">// ${esc(q.header)}</span> ` : ""}<div class="qt">${esc(q.text)}</div>
+  return `<div class="qb">${q.header ? `<span class="lbl">// ${esc(q.header)}</span> ` : ""}<div class="qt">${mdInline(q.text)}</div>
     ${q.secret ? '<div class="hint error">敏感信息：请填写凭据网关密文（enc:v1:…），勿填明文</div>' : ""}${options}
     <textarea id="${box}" data-keep rows="2" ${disabled ? "disabled" : ""} placeholder="${(q.options || []).length ? "选择上方选项，或直接输入" : "输入答复"}${q.multi ? "，多项用逗号分隔" : ""}"></textarea></div>`;
 }

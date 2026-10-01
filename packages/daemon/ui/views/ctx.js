@@ -7,50 +7,36 @@ import { get, patch, set } from "../lib/state.js";
 
 const $ = (s) => document.querySelector(s);
 
+/** Bytes as the pane's header says them. */
+const size = (text) => { const n = new TextEncoder().encode(text || "").length; return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`; };
+
+/** Two files side by side as on the demo page (console.html #ctx): what you write, what the summarizer learned. */
 export function render(s) {
   const c = s.ctx;
   const text = c.draft ?? c.text;
-  const warnings = c.warnings.length
-    ? `<div class="card warn"><div class="dim">加载时已移除的行（疑似明文凭据，调度模型不可见）</div><div class="warn-list" style="margin-top:6px">${c.warnings.map(esc).join("\n")}</div></div>`
-    : "";
   const m = s.mem;
   const memText = m.draft ?? m.text;
+  const warnings = c.warnings.length
+    ? `<div class="warnbox"><b>${c.warnings.length} lines removed</b> · 加载时移除了疑似明文凭据的行，调度模型看不到：<div class="warn-list">${c.warnings.map(esc).join("\n")}</div></div>`
+    : "";
   return `<div class="page-title"><h1>context</h1><span class="faint">调度模型每次调度前读取，改了立即生效</span></div>
-    <div class="cols">
-      <div class="stack">
-        ${c.hint ? `<div class="card bad error">${esc(c.hint)}</div>` : ""}
-        <textarea id="ctx-text" data-keep class="doc" spellcheck="false" placeholder="站点与账号（密码仅填写 enc:v1: 密文）、环境限制、各项目偏好的执行器…">${esc(text)}</textarea>
-        <div class="row">
-          <button class="primary" id="ctx-save" ${c.draft === null ? "disabled" : ""}>${c.saved ? "已保存" : "保存"}</button>
-          ${text.trim() ? "" : `<button id="ctx-example">载入示例模板</button>`}
-          <span class="hint">⌘S 保存</span>
-        </div>
-        <h2 style="margin-top:14px">记忆 MEMORY.md</h2>
-        ${m.hint ? `<div class="card bad error">${esc(m.hint)}</div>` : ""}
-        <textarea id="mem-text" data-keep class="doc" spellcheck="false" style="min-height:160px" placeholder="每次执行结束后，调度模型提取的长期事实会追加到此处，并注明来源任务。有误的行可直接删除。">${esc(memText)}</textarea>
-        <div class="row">
-          <button class="primary" id="mem-save" ${m.draft === null ? "disabled" : ""}>${m.saved ? "已保存" : "保存"}</button>
-          ${m.warnings.length ? `<span class="hint error">已移除 ${m.warnings.length} 行疑似明文凭据</span>` : ""}
-        </div>
-        ${platformMemory(s.platformMem)}
-      </div>
-      <aside class="stack">
-        ${policyCard(s.policy)}
-        ${warnings}
-        <div class="card">
-          <div class="dim">文件</div><div class="mono" style="margin-top:4px">${esc(c.path)}</div>
-          <div class="dim" style="margin-top:10px">调度模型每次调度时重新读取，修改后立即生效。上限 64 KB。</div>
-          <div class="dim" style="margin-top:6px">此处显示经过检查的内容，即调度模型实际读取的内容。列表项中「密码 / token / api key」之后若不是 enc:v1: 密文，整行会被移除并列在上方。</div>
-        </div>
-        <div class="card"><div class="dim">适合填写的内容</div>
-          <ul class="dim" style="margin:6px 0 0;padding-left:18px">
-            <li>站点 URL、账号、对应的 enc:v1: 密文</li>
-            <li>环境限制：内网访问条件、代理、应避免的版本</li>
-            <li>偏好：各项目优先使用的执行器、哪类任务不使用 Opus</li>
-          </ul>
-        </div>
-      </aside>
-    </div>`;
+    ${warnings}
+    <div class="panes">
+      <section class="pane">
+        <div class="hd"><span>// context.md</span><span class="sp"></span><span class="faint">${size(text)} / 64 KB</span>${text.trim() ? "" : `<button id="ctx-example">载入示例模板</button>`}<button class="primary" id="ctx-save" ${c.draft === null ? "disabled" : ""}>${c.saved ? "已保存" : "保存"}</button></div>
+        ${c.hint ? `<div class="note warn">${esc(c.hint)}</div>` : ""}
+        <textarea id="ctx-text" data-keep class="src" spellcheck="false" placeholder="站点与账号（密码仅填写 enc:v1: 密文）、环境限制、各项目偏好的执行器…">${esc(text)}</textarea>
+        <div class="say">站点、账号（密码只填 enc:v1: 密文）、环境限制、各项目偏好的执行器。列表项里「密码 / token / api key」之后不是密文的，整行会被移除。<span class="mono faint">${esc(c.path)}</span> · ⌘S 保存</div>
+      </section>
+      <section class="pane">
+        <div class="hd"><span>// memory.md</span><span class="sp"></span><span class="faint">每次执行后追加</span><button class="primary" id="mem-save" ${m.draft === null ? "disabled" : ""}>${m.saved ? "已保存" : "保存"}</button></div>
+        ${m.hint ? `<div class="note warn">${esc(m.hint)}</div>` : ""}
+        <textarea id="mem-text" data-keep class="src" spellcheck="false" placeholder="每次执行结束后，调度模型提取的长期事实会追加到此处，并注明来源任务。有误的行可直接删除。">${esc(memText)}</textarea>
+        <div class="say">调度模型从执行结果里提取的长期事实，注明来源任务；错的行直接删。${m.warnings.length ? `<span class="error"> 已移除 ${m.warnings.length} 行疑似明文凭据。</span>` : ""}</div>
+      </section>
+    </div>
+    ${policyCard(s.policy)}
+    ${platformMemory(s.platformMem)}`;
 }
 
 function platformMemory(mem = { records: [], loading: false, loaded: false, deletions: {} }) {
@@ -79,17 +65,17 @@ function platformMemory(mem = { records: [], loading: false, loaded: false, dele
 function policyCard(p) {
   if (!p) return "";
   const mode = p.policy.mode;
-  const opt = (v, label, desc) => `<label class="row" style="gap:8px;align-items:flex-start"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}><span><b>${label}</b><div class="dim">${desc}</div></span></label>`;
-  const cats = p.categories.map((c) => `<label class="row" style="gap:8px"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
-  return `<div class="card"><div class="dim">审批策略</div>
-    <div class="stack" style="margin-top:8px">
+  const opt = (v, label, desc) => `<label class="opt"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}><span><b>${label}</b><span class="d">${desc}</span></span></label>`;
+  const cats = p.categories.map((c) => `<label class="opt cat"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
+  return `<section class="policy"><h2>// approval<span class="spacer"></span><button class="primary" id="pol-save">保存策略</button></h2>
+    <div class="opts3">
       ${opt("manual", "逐项确认", "每个审批都交由你决定，调度模型不介入。")}
-      ${opt("auto", "全部自动", "调度模型代批所有审批，包括删除、推送、支付等不可逆操作；无法判断时仍交由你决定。")}
       ${opt("scoped", "自动", "下方勾选的类别交由你决定，其余由调度模型代批。")}
+      ${opt("auto", "全部自动", "调度模型代批所有审批，包括删除、推送、支付等不可逆操作；无法判断时仍交由你决定。")}
     </div>
-    <div class="stack" style="margin:8px 0 0 24px;font-size:13px">${cats}</div>
-    <div class="row" style="margin-top:8px"><span class="grow dim">服务自身的文件始终禁止修改，不在此列。调度时如缺少信息，调度模型会直接向你提问。</span><button class="small" id="pol-save">保存策略</button></div>
-  </div>`;
+    <div class="cats${mode === "scoped" ? "" : " off"}">${cats}</div>
+    <div class="say">服务自身的文件始终禁止修改，不在此列。调度时如缺少信息，调度模型会直接向你提问。</div>
+  </section>`;
 }
 
 /** What a draft shows outside its own textarea: the save button (enabled, 已保存) and the example button. */
