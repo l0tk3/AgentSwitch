@@ -281,6 +281,24 @@ describe("deleting a session's record", () => {
     heldElsewhere = false;
     expect(await (await del("/sessions/claude-code/c1")).json()).toEqual({ ok: true, files: 1 });
   });
+
+  it("a session just written but held by nothing can go; an ended terminal holds nothing (2026-10-01)", async () => {
+    const { sources } = fixture();
+    // At NOW the Claude session was written 20 s ago: "active".
+    const monitor = new SessionMonitor(sources, () => NOW);
+    expect(monitor.list().find((s) => s.id === "c1")?.active).toBe(true);
+    const terminals = { host: { list: () => [{ agentSessionId: "x1", status: "exited" }] }, audit: { record: () => undefined }, elsewhere: async () => null };
+    const app = new Hono();
+    mountSessions(app, { sessions: monitor, terminals } as unknown as ApiDeps);
+    const del = (path: string) => app.request(path, { method: "DELETE" });
+    expect((await del("/sessions/claude-code/c1")).status).toBe(200);
+    expect((await del("/sessions/codex/x1")).status).toBe(200);
+    // Without the terminals' checks, recent activity is all there is to go on.
+    const { sources: again } = fixture();
+    const bare = new Hono();
+    mountSessions(bare, { sessions: new SessionMonitor(again, () => NOW) } as unknown as ApiDeps);
+    expect((await bare.request("/sessions/claude-code/c1", { method: "DELETE" })).status).toBe(409);
+  });
 });
 
 describe("Codex threads", () => {

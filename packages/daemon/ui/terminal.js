@@ -763,7 +763,8 @@ function sessionRow(s, tr, depth, name = s.title || "(untitled)") {
     h("span", { class: "mt" }, agentMark(s.harness), h("span", {}, meta)),
     h("span", { class: "ac" },
       canResume ? h("button", { class: "go", onclick: (e) => { e.stopPropagation(); resume(s); } }, "resume") : null,
-      DELETABLE.has(s.harness) && !s.active ? h("button", { class: "del", onclick: (e) => { e.stopPropagation(); deleteSession(s); } }, "delete") : null));
+      // The service says whether a program still holds it (a session just written is not held by that alone).
+      DELETABLE.has(s.harness) ? h("button", { class: "del", onclick: (e) => { e.stopPropagation(); deleteSession(s); } }, "delete") : null));
 }
 
 /** Right-click on a terminal, with the shortcuts that do the same. */
