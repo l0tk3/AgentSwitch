@@ -194,6 +194,21 @@ mark { background: var(--signal); color: #000; padding: 0 1px; }
 .toast code { font: 13px var(--mono); color: var(--ink); }
 .toast .path { color: var(--ink3); font-size: 11.5px; }
 .composer { left: 20px; right: 26px; bottom: 44px; }
+/* a question the agent asks (Claude Code's AskUserQuestion, terminal-v0 §3 "选择题"): no allow / deny — its options
+   to pick (< > / <x> one, [ ] / [x] several), Other to write in, Submit once every question has an answer */
+.ask:focus { outline: none; }
+.ask .q { padding: 10px 12px 2px; }
+.ask .q + .q { padding-top: 12px; }
+.ask .qh { color: var(--ink3); font-size: 11.5px; }
+.ask .qt { color: var(--ink); margin-bottom: 4px; }
+.ask .opt { display: grid; grid-template-columns: 2ch 3ch minmax(0, 1fr); column-gap: 6px; align-items: baseline; width: calc(100% + 8px); margin: 0 -4px; padding: 1px 4px; font: 13px/20px var(--mono); color: var(--ink2); background: none; border: 0; text-align: left; cursor: default; }
+.ask .opt:hover { background: #ffffff14; }
+.ask .opt.on { color: var(--ink); }
+.ask .opt kbd { font: 11.5px var(--mono); color: var(--ink3); }
+.ask .opt small { grid-column: 3; color: var(--ink3); font-size: 11.5px; line-height: 16px; }
+.ask .opt input { font: inherit; color: var(--ink); background: none; border: 0; border-bottom: 1px dotted var(--ink3); outline: none; padding: 0; min-width: 0; caret-color: var(--signal); }
+.ask .opt input::placeholder { color: var(--ink3); }
+.ask .btn:disabled { opacity: .4; background: none; color: var(--ink); }
 .composer .hd { background: var(--signal); color: #000; }
 .composer textarea { width: 100%; height: 58px; background: none; border: 0; outline: none; color: var(--ink); font: 13px/1.5 var(--mono); resize: none; padding: 0; }
 .composer textarea::placeholder { color: var(--ink3); }
@@ -262,6 +277,7 @@ mark { background: var(--signal); color: #000; padding: 0 1px; }
   <div class="seg" id="lang"><button data-l="en" class="on">English</button><button data-l="zh">正式中文</button></div>
   <div class="seg" id="iconWeight"><button data-w="fine" class="on">工具栏图标：细像素</button><button data-w="coarse">粗像素</button></div>
   <button data-do="perm">模拟：权限请求</button>
+  <button data-do="ask">模拟：选择题</button>
   <button data-do="switch">切换终端</button>
   <button data-do="seal">加密发送 ⌘⇧V</button>
   <button data-do="exit">模拟：进程结束</button>
@@ -330,12 +346,14 @@ const COPY = {
   en: { waiting: "Waiting", exited: "Exited", resume: "Resume", del: "Delete Record", delete: "Delete", close: "Close", more: (n) => `${n} More`, less: "Less",
     kNew: "New", kClose: "Close", kHide: "Hide", seal: "Encrypt & Send", sealTip: "Passwords and tokens are encrypted before they reach the agent.",
     perm: "[!] Approval", tool: "Run Command", deny: "Deny", allow: "Allow", ph: "Message", cancel: "esc Cancel", send: "Send",
+    ask: "[?] Question", other: "Other", otherPh: "输入你的答案", submit: "Submit", askHint: "1–4 选择 · ↩ 提交 · esc 回到终端",
     newT: "// New Terminal", model: "// Model", folder: "// Folder", mode: "// Permissions", modes: ["Ask Each", "Auto", "Bypass"], start: "Start",
     missing: "Not Installed", markWaiting: (n) => `${n} Waiting`, busy: "Busy", idle: "Idle", dflt: "Default", live: "Live", end: "Exit",
     awayHd: "On iPhone", awayLine: "这个终端正在 iPhone 上使用。", awayGo: "Take Over", awayKey: "any key" },
   zh: { waiting: "待处理", exited: "已退出", resume: "恢复", del: "删除记录", delete: "删除", close: "关闭", more: (n) => `另有 ${n} 项`, less: "收起",
     kNew: "新建", kClose: "关闭", kHide: "隐藏", seal: "加密发送", sealTip: "密码与令牌在发送前加密，agent 仅接收密文。",
     perm: "[!] 待确认", tool: "运行命令", deny: "拒绝", allow: "允许", ph: "输入内容", cancel: "esc 取消", send: "发送",
+    ask: "[?] 提问", other: "其他", otherPh: "输入你的答案", submit: "提交", askHint: "1–4 选择 · ↩ 提交 · esc 回到终端",
     newT: "// 新建终端", model: "// 模型", folder: "// 文件夹", mode: "// 权限", modes: ["逐项确认", "自动", "跳过权限"], start: "开始",
     missing: "未安装", markWaiting: (n) => `${n} 待处理`, busy: "运行中", idle: "空闲", dflt: "默认", live: "运行", end: "退出",
     awayHd: "iPhone 使用中", awayLine: "这个终端正在 iPhone 上使用。", awayGo: "在这里继续", awayKey: "任意键" },
@@ -576,7 +594,7 @@ function showScreen(id, animate = true) {
   const screen = document.getElementById("screen");
   screen.innerHTML = `<div class="text">${SCREENS[t.screen]}</div>` + (t.st === "exited" ? "" : footer(t.screen === "hud" ? "⏵⏵ auto mode on" : "⏵⏵ bypass permissions on"));
   for (const b of document.querySelectorAll(".main .box")) b.remove();
-  if (t.st === "waiting") permissionBox(false);
+  if (t.st === "waiting") t.asking ? questionBox(false) : permissionBox(false);
   if (animate) {
     screen.classList.remove("wipe"); void screen.offsetWidth; screen.classList.add("wipe");
     const scan = document.getElementById("scan");
@@ -658,6 +676,90 @@ function answer() {
   document.querySelector(".toast")?.remove();
   render();
   if (selected === "ba82") document.getElementById("screen").querySelector(".c-yel")?.replaceWith(Object.assign(document.createElement("span"), { className: "c-grn", textContent: "Allowed · 清理完成，开始打包…" }));
+}
+// A question the agent asks (AskUserQuestion): the card the hook's request becomes; what is picked goes back as Claude
+// Code's own dialog would answer, and its dialog in the terminal closes (terminal-v0 §3 "选择题").
+const ASK = [
+  { header: "Library", question: "日期格式化用哪个库？", multiSelect: false, options: [
+    { label: "date-fns", description: "体积小，按需引入" }, { label: "Luxon", description: "自带时区处理" }, { label: "Day.js", description: "与 Moment 相同的 API，2 kB" }] },
+  { header: "Checks", question: "发布前跑哪些检查？", multiSelect: true, options: [
+    { label: "单元测试", description: "vitest，约 40 秒" }, { label: "类型检查", description: "tsc --noEmit" }, { label: "Lint", description: "" }] },
+];
+const asked = ASK.map(() => ({ picked: [], other: "" }));
+function questionBox(animate = true) {
+  if (document.querySelector(".toast")) return;
+  const box = document.createElement("div");
+  box.className = "box toast ask";
+  box.tabIndex = -1;
+  const mark = (q, on) => (q.multiSelect ? (on ? "[x]" : "[ ]") : (on ? "&lt;x&gt;" : "&lt; &gt;"));
+  const draw = () => {
+    box.innerHTML = `<div class="hd"><span>${L("ask")}</span></div>` +
+      ASK.map((q, i) => `<div class="q" data-q="${i}"><div class="qh">// ${esc(q.header)}</div><div class="qt">${esc(q.question)}</div>` +
+        q.options.map((o, n) => `<button class="opt${asked[i].picked.includes(o.label) ? " on" : ""}" data-q="${i}" data-o="${n}"><kbd>${n + 1}</kbd><span class="mk">${mark(q, asked[i].picked.includes(o.label))}</span><span>${esc(o.label)}</span>${o.description ? `<small>${esc(o.description)}</small>` : ""}</button>`).join("") +
+        `<label class="opt${asked[i].other ? " on" : ""}"><kbd>${q.options.length + 1}</kbd><span class="mk">${mark(q, !!asked[i].other)}</span><input data-q="${i}" placeholder="${L("other")} · ${L("otherPh")}" value="${esc(asked[i].other)}"></label></div>`).join("") +
+      `<div class="ft"><span class="hint">${L("askHint")}</span><button class="btn pri" data-do="submit"${complete() ? "" : " disabled"}>[ ${L("submit")} <kbd>⌘↩</kbd> ]</button></div>`;
+  };
+  const complete = () => asked.every((a) => a.picked.length > 0 || a.other.trim());
+  // The marks of question i as its answer stands (redrawn in place: the Other field keeps its caret).
+  const marks = (i) => {
+    const q = ASK[i], a = asked[i];
+    for (const b of box.querySelectorAll(`.q[data-q="${i}"] .opt`)) {
+      const on = b.dataset.o !== undefined ? a.picked.includes(q.options[+b.dataset.o].label) : !!a.other.trim();
+      b.classList.toggle("on", on);
+      b.querySelector(".mk").innerHTML = mark(q, on);
+    }
+    box.querySelector("[data-do=submit]").disabled = !complete();
+  };
+  const pick = (i, n) => {
+    const q = ASK[i], a = asked[i], label = q.options[n].label;
+    if (q.multiSelect) a.picked = a.picked.includes(label) ? a.picked.filter((x) => x !== label) : [...a.picked, label];
+    else { a.picked = [label]; a.other = ""; box.querySelector(`input[data-q="${i}"]`).value = ""; }
+    marks(i);
+    box.querySelector(`.opt[data-q="${i}"][data-o="${n}"]`)?.focus();
+  };
+  box.addEventListener("click", (e) => { const o = e.target.closest(".opt[data-o]"); if (o) pick(+o.dataset.q, +o.dataset.o); });
+  // Writing in Other picks it: in place of the option picked (one), or beside them (several).
+  box.addEventListener("input", (e) => {
+    const i = +e.target.dataset.q;
+    asked[i].other = e.target.value;
+    if (!ASK[i].multiSelect && e.target.value.trim()) asked[i].picked = [];
+    marks(i);
+  });
+  // Numbers pick in the question in focus (the first one not answered, else the first); its last number is Other.
+  box.addEventListener("keydown", (e) => {
+    const inOther = e.target.tagName === "INPUT";
+    if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); if (complete()) submitQuestion(); return; }
+    if (e.key === "Escape") { e.preventDefault(); inOther ? box.focus() : box.blur(); return; }
+    if (inOther || !/^[1-9]$/.test(e.key)) return;
+    const here = e.target.closest(".q")?.dataset.q;
+    const i = here !== undefined ? +here : Math.max(0, asked.findIndex((a) => !a.picked.length && !a.other.trim()));
+    const n = Number(e.key) - 1;
+    if (n < ASK[i].options.length) pick(i, n);
+    else if (n === ASK[i].options.length) box.querySelector(`input[data-q="${i}"]`).focus();
+  });
+  draw();
+  document.getElementById("main").append(box);
+  if (animate) glitch(box);
+}
+function simulateQuestion() {
+  const t = all().find((i) => i.id === "ba82");
+  t.st = "waiting";
+  t.asking = true;
+  render();
+  glitch(document.querySelector('.row[data-id="ba82"]'));
+  if (selected !== "ba82") return;
+  document.getElementById("screen").querySelector(".c-yel")?.replaceWith(Object.assign(document.createElement("span"), { className: "c-yel", textContent: "AskUserQuestion · 等你作答…" }));
+  questionBox();
+}
+function submitQuestion() {
+  const t = all().find((i) => i.id === "ba82");
+  t.st = "working";
+  t.asking = false;
+  document.querySelector(".toast")?.remove();
+  render();
+  const said = ASK.map((q, i) => `   · ${q.question} → ${[...asked[i].picked, ...(asked[i].other.trim() ? [asked[i].other.trim()] : [])].join(", ")}`).join("\n");
+  if (selected === "ba82") document.getElementById("screen").querySelector(".c-yel")?.replaceWith(Object.assign(document.createElement("span"), { className: "c-grn", textContent: `User answered Claude's questions:\n${said}` }));
+  for (const a of asked) { a.picked = []; a.other = ""; }
 }
 function simulateExit() {
   const t = all().find((i) => i.id === selected) ?? all().find((i) => i.kind === "term" && i.st !== "exited");
@@ -799,7 +901,8 @@ document.getElementById("lang").addEventListener("click", (e) => {
   const c = document.querySelector(".create");
   if (c) c.redraw();
   for (const box of document.querySelectorAll(".main .box")) box.remove();
-  if (all().find((i) => i.id === selected)?.st === "waiting") permissionBox(false);
+  const shown = all().find((i) => i.id === selected);
+  if (shown?.st === "waiting") shown.asking ? questionBox(false) : permissionBox(false);
 });
 document.getElementById("variant").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-v]");
@@ -812,6 +915,8 @@ document.addEventListener("click", (e) => {
   const act = e.target.closest("[data-do]")?.dataset.do;
   if (!act) return;
   if (act === "perm") { if (selected !== "ba82") select("ba82"); setTimeout(simulatePermission, selected === "ba82" ? 320 : 0); }
+  if (act === "ask") { if (selected !== "ba82") select("ba82"); setTimeout(simulateQuestion, selected === "ba82" ? 320 : 0); }
+  if (act === "submit") submitQuestion();
   if (act === "switch") { const ts = all().filter((i) => i.kind === "term"); const k = ts.findIndex((t) => t.id === selected); select(ts[(k + 1) % ts.length].id); }
   if (act === "seal") seal();
   if (act === "exit") simulateExit();
@@ -887,7 +992,10 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && document.activeElement === document.getElementById("find")) { document.getElementById("find").value = ""; render(); document.getElementById("find").blur(); return; }
   if (e.metaKey && e.key.toLowerCase() === "b") { e.preventDefault(); win.classList.toggle("closed"); sideIcon(); }
   if (e.metaKey && e.shiftKey && e.key.toLowerCase() === "v") { e.preventDefault(); seal(); }
-  if (e.metaKey && e.key === "Enter" && document.querySelector(".toast")) { e.preventDefault(); answer(); }
+  // ⌘↩ on a question: submit once every question has an answer, else the card takes the keyboard (numbers pick).
+  const ask = document.querySelector(".toast.ask");
+  if (e.metaKey && e.key === "Enter" && ask) { e.preventDefault(); ask.querySelector("[data-do=submit]").disabled ? (ask.querySelector(".opt") ?? ask).focus() : submitQuestion(); }
+  else if (e.metaKey && e.key === "Enter" && document.querySelector(".toast")) { e.preventDefault(); answer(); }
   else if (away && !e.metaKey && !document.querySelector(".composer")) here();
 });
 
@@ -903,6 +1011,7 @@ document.getElementById("sealLock").innerHTML = sprite([".###.", "#...#", "#####
 render();
 showScreen(selected, false);
 if (hash.includes("perm")) { select("ba82"); setTimeout(simulatePermission, 350); }
+if (hash.includes("ask")) { select("ba82"); setTimeout(simulateQuestion, 350); }
 if (hash.includes("seal")) setTimeout(seal, 50);
 if (hash.includes("create")) create();
 if (hash.includes("away")) setTimeout(phoneTook, 50);

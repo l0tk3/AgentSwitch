@@ -47,22 +47,67 @@ public enum TerminalStatus: Sendable, Hashable, Codable {
     }
 }
 
+/// One question the agent asks (Claude Code's AskUserQuestion, docs/terminal-v0.md §3 "选择题"): its chip, the question,
+/// its options; one to pick or several. One without options takes words only.
+public struct TerminalQuestion: Decodable, Sendable, Hashable {
+    public struct Option: Decodable, Sendable, Hashable {
+        public let label: String
+        public let description: String
+
+        public init(label: String, description: String = "") { self.label = label; self.description = description }
+
+        private enum CodingKeys: String, CodingKey { case label, description }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            label = try c.decode(String.self, forKey: .label)
+            description = (try? c.decodeIfPresent(String.self, forKey: .description)) ?? ""
+        }
+    }
+
+    public let question: String
+    public let header: String
+    public let multiSelect: Bool
+    public let options: [Option]
+
+    public init(question: String, header: String = "", multiSelect: Bool = false, options: [Option]) {
+        self.question = question
+        self.header = header
+        self.multiSelect = multiSelect
+        self.options = options
+    }
+
+    private enum CodingKeys: String, CodingKey { case question, header, multiSelect, options }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        question = try c.decode(String.self, forKey: .question)
+        header = (try? c.decodeIfPresent(String.self, forKey: .header)) ?? ""
+        multiSelect = (try? c.decodeIfPresent(Bool.self, forKey: .multiSelect)) ?? false
+        options = (try? c.decodeIfPresent([Option].self, forKey: .options)) ?? []
+    }
+}
+
 /// A permission request from the agent's hook, waiting for a screen's answer.
 public struct TerminalPermission: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let tool: String
-    /// "Bash: rm -rf build", as the Mac shows it.
+    /// "Bash: rm -rf build", as the Mac shows it; a question's own words for a question.
     public let summary: String
     public let at: Int64
+    /// The agent asks these (AskUserQuestion): answered with picks, not allow / deny. Empty for any other request, and
+    /// from a Mac that predates question cards (it shows as a permission then).
+    public let questions: [TerminalQuestion]
 
-    public init(id: String, tool: String, summary: String, at: Int64 = 0) {
+    public init(id: String, tool: String, summary: String, at: Int64 = 0, questions: [TerminalQuestion] = []) {
         self.id = id
         self.tool = tool
         self.summary = summary
         self.at = at
+        self.questions = questions
     }
 
-    private enum CodingKeys: String, CodingKey { case id, tool, summary, at }
+    private enum CodingKeys: String, CodingKey { case id, tool, summary, at, questions }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -70,7 +115,11 @@ public struct TerminalPermission: Decodable, Sendable, Hashable, Identifiable {
         tool = (try? c.decodeIfPresent(String.self, forKey: .tool)) ?? ""
         summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? ""
         at = (try? c.decodeIfPresent(Int64.self, forKey: .at)) ?? 0
+        questions = (try? c.decodeIfPresent([TerminalQuestion].self, forKey: .questions)) ?? []
     }
+
+    /// The agent asks (a question card), rather than asks leave (allow / deny).
+    public var isQuestion: Bool { !questions.isEmpty }
 
     /// What it asks, without the tool's name in front ("rm -rf build").
     public var detail: String {

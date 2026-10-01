@@ -627,6 +627,7 @@ function afterRemoval() {
 // ---------- permission requests ----------
 function addToast(id, request, fresh = false) {
   if (document.getElementById(`perm-${request.id}`)) return;
+  if (request.questions?.length) return addQuestion(id, request, fresh);
   const decide = (decision) => sendDecision(id, request.id, decision).finally(() => focusScreen());
   const raw_ = request.summary.startsWith(`${request.tool}: `) ? request.summary.slice(request.tool.length + 2) : request.summary;
   const cwd = terminals.find((t) => t.id === id)?.cwd;
@@ -639,6 +640,100 @@ function addToast(id, request, fresh = false) {
       h("span", { class: "hint" }, terminals.find((t) => t.id === id)?.name ?? ""),
       h("button", { class: "btn", onclick: () => decide("deny") }, "[ Deny ", h("kbd", {}, "⌘⌫"), " ]"),
       h("button", { class: "btn pri", onclick: () => decide("allow") }, "[ Allow ", h("kbd", {}, "⌘↩"), " ]")));
+  $("toasts").append(toast);
+  if (fresh) glitch(toast);
+}
+
+// A question the agent asks (Claude Code's AskUserQuestion; terminal-v0 §3 "选择题", 2026-10-01, user: 能不能hook的更
+// 精细，直接用这个框来选agent给的选项): each question with its options to pick — one (< > / <x>) or several ([ ] / [x]) —
+// and Other to write in; [ Submit ] once each has an answer, which goes back to the agent as its own dialog would give
+// it (that dialog closes). No allow / deny. Click into the card: numbers pick in the question in focus (its last number
+// is Other), ↩ submits, esc gives the keyboard back to the screen. From the screen ⌘↩ submits, or hands the card the
+// keyboard while an answer is missing.
+function addQuestion(id, request, fresh) {
+  const questions = request.questions;
+  const picks = questions.map(() => ({ labels: [], other: "" }));
+  const answered = (i) => picks[i].labels.length > 0 || picks[i].other.trim() !== "";
+  const complete = () => questions.every((_, i) => answered(i));
+  const markOf = (q, on) => (q.multiSelect ? (on ? "[x]" : "[ ]") : (on ? "<x>" : "< >"));
+  const rows = questions.map(() => []);
+  const fields = [];
+  const submit = h("button", { class: "btn pri", disabled: true, onclick: () => submitAnswers() }, "[ Submit ", h("kbd", {}, "⌘↩"), " ]");
+  const redraw = (i) => {
+    for (const r of rows[i]) { const on = r.on(); r.el.classList.toggle("on", on); r.mk.textContent = markOf(questions[i], on); }
+    submit.disabled = !complete();
+  };
+  const pick = (i, label) => {
+    const p = picks[i];
+    if (questions[i].multiSelect) p.labels = p.labels.includes(label) ? p.labels.filter((l) => l !== label) : [...p.labels, label];
+    else { p.labels = [label]; p.other = ""; fields[i].value = ""; }
+    redraw(i);
+  };
+  const blocks = questions.map((q, i) => {
+    const options = q.options.map((o, n) => {
+      const mk = h("span", { class: "mk" }, markOf(q, false));
+      const el = h("button", { class: "opt", onclick: () => pick(i, o.label) },
+        h("kbd", {}, String(n + 1)), mk, h("span", { class: "lb" }, o.label), o.description ? h("small", {}, o.description) : null);
+      rows[i].push({ el, mk, on: () => picks[i].labels.includes(o.label) });
+      return el;
+    });
+    // Writing in Other picks it: in place of the option picked (one), or beside them (several).
+    const field = h("input", { placeholder: q.options.length ? "Other" : "Answer", spellcheck: "false", autocomplete: "off", oninput: () => {
+      picks[i].other = field.value;
+      if (!q.multiSelect && field.value.trim()) picks[i].labels = [];
+      redraw(i);
+    } });
+    fields[i] = field;
+    const mk = h("span", { class: "mk" }, markOf(q, false));
+    const other = h("label", { class: "opt" }, h("kbd", {}, String(q.options.length + 1)), mk, field);
+    rows[i].push({ el: other, mk, on: () => picks[i].other.trim() !== "" });
+    return h("div", { class: "q", "data-q": String(i) }, q.header ? h("div", { class: "qh" }, `// ${q.header}`) : null, h("div", { class: "qt" }, q.question), options, other);
+  });
+  const toast = h("div", { class: "toast box ask", id: `perm-${request.id}`, "data-id": request.id, "data-terminal": id, tabindex: "-1" },
+    h("div", { class: "hd" }, h("span", {}, "[?] Question")),
+    h("div", { class: "qs" }, blocks),
+    h("div", { class: "ft" }, h("span", { class: "hint" }, terminals.find((t) => t.id === id)?.name ?? ""), submit));
+  let busy = false;
+  async function submitAnswers() {
+    if (busy || !complete()) return;
+    busy = true;
+    submit.disabled = true;
+    const answers = Object.fromEntries(questions.map((q, i) => [q.question, { labels: picks[i].labels, ...(picks[i].other.trim() ? { other: picks[i].other.trim() } : {}) }]));
+    try {
+      const r = await api("POST", `/terminals/${id}/permissions/${request.id}`, { decision: "allow", answers });
+      toast.remove();
+      if (r.sealed) screenNote(`${r.sealed} ${r.sealed === 1 ? "secret" : "secrets"} sealed`);
+      focusScreen();
+    } catch (e) {
+      // Answered already (in the terminal, on the phone) is no error: the card just goes.
+      if (e.status === 404) { toast.remove(); focusScreen(); } else notify(e.message);
+    }
+    busy = false;
+    submit.disabled = !complete();
+  }
+  // Where the keyboard goes in question i: its first option, else (words only) its field.
+  const entry = (i) => (questions[i].options.length ? rows[i][0].el : fields[i]);
+  const unanswered = () => Math.max(0, questions.findIndex((_, k) => !answered(k)));
+  // ⌘↩ from the screen (shortcut()): submit, or the keyboard to the card while an answer is missing.
+  toast.answer = () => (complete() ? submitAnswers() : entry(unanswered()).focus());
+  toast.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+    const inField = e.target.tagName === "INPUT";
+    if (e.key === "Enter") { e.preventDefault(); void submitAnswers(); return; }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      const i = Number(e.target.closest(".q")?.dataset.q);
+      if (inField && questions[i]?.options.length) entry(i).focus(); else focusScreen();
+      return;
+    }
+    if (inField || !/^[1-9]$/.test(e.key)) return;
+    e.preventDefault();
+    const at = e.target.closest?.(".q");
+    const i = at ? Number(at.dataset.q) : unanswered();
+    const n = Number(e.key);
+    if (n <= questions[i].options.length) { pick(i, questions[i].options[n - 1].label); rows[i][n - 1].el.focus(); }
+    else if (n === questions[i].options.length + 1) fields[i].focus();
+  });
   $("toasts").append(toast);
   if (fresh) glitch(toast);
 }
@@ -1217,13 +1312,16 @@ function shortcut(e) {
   if (!e.metaKey) return null;
   const key = e.key.toLowerCase();
   const asking = $("toasts").childElementCount > 0 && current;
+  // A question is answered, not allowed or denied (addQuestion): ⌘↩ submits it, ⌘⌫ does nothing to it.
+  const first = $("toasts").firstElementChild;
+  const question = asking && first?.classList.contains("ask");
   if (key === "t" && !e.shiftKey) return () => showCreate();
   if (key === "b" && !e.shiftKey) return toggleList;
   if (key === "f" && !e.shiftKey) return focusSearch;
   if (key === "w" && !e.shiftKey && current && !creating) return () => closeTerminal(current);
   if (key === "v" && e.shiftKey) return () => openComposer();
-  if (e.key === "Enter" && asking) return () => decideFirst("allow");
-  if (e.key === "Backspace" && asking) return () => decideFirst("deny");
+  if (e.key === "Enter" && asking) return question ? () => first.answer() : () => decideFirst("allow");
+  if (e.key === "Backspace" && asking && !question) return () => decideFirst("deny");
   const n = /^[1-9]$/.test(e.key) ? terminalOrder[Number(e.key) - 1] : null;
   if (n) return () => select(n);
   return null;

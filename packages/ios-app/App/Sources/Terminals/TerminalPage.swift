@@ -60,7 +60,9 @@ struct TerminalPage: View {
                 .padding(.top, 60)
             }
             VStack(spacing: 10) {
-                ForEach(page.permissions) { p in permissionCard(p) }
+                ForEach(page.permissions) { p in
+                    if p.isQuestion { questionCard(p) } else { permissionCard(p) }
+                }
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
@@ -207,6 +209,90 @@ struct TerminalPage: View {
         // The floating layer's hard, dithered shadow (§7.3), not a blur.
         .background(DitherShadow().offset(x: 6, y: 6))
         .glitch(on: p.id, onAppear: true)
+    }
+
+    /// A question the agent asks (Claude Code's AskUserQuestion; docs/terminal-v0.md §3 "选择题", phone.html?ask;
+    /// 2026-10-01, user: 能不能hook的更精细，直接用这个框来选agent给的选项): no allow / deny — each question with its options
+    /// to tap, one (`< >` / `<x>`) or several (`[ ]` / `[x]`), and Other to write in; `[ Submit ]` once every question
+    /// has an answer. The agent gets them as its own dialog would give them, and that dialog closes.
+    private func questionCard(_ p: TerminalPermission) -> some View {
+        let picks = page.picks(p)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                PixelSprite(rows: PixelArt.square, pixel: 2, color: .black)
+                Text("Question").mono(12, weight: .semibold)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 8)
+            .frame(minHeight: 24)
+            .background(Theme.waiting)
+            // Four questions of four options each may not fit over the screen: then they scroll.
+            ViewThatFits(in: .vertical) {
+                questions(p, picks)
+                ScrollView { questions(p, picks) }.frame(maxHeight: 420)
+            }
+            HStack {
+                Spacer()
+                Button("[ Submit ]") { Task { await page.answer(p) } }
+                    .buttonStyle(SquareButtonStyle(prominent: true, expand: false))
+                    .disabled(!picks.isComplete || page.answering.contains(p.id))
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+        }
+        .background(Theme.base)
+        .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
+        .background(DitherShadow().offset(x: 6, y: 6))
+        .glitch(on: p.id, onAppear: true)
+    }
+
+    private func questions(_ p: TerminalPermission, _ picks: QuestionPicks) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(Array(p.questions.enumerated()), id: \.offset) { i, q in
+                VStack(alignment: .leading, spacing: 0) {
+                    if !q.header.isEmpty { Text("// \(q.header)").mono(11).foregroundStyle(.secondary) }
+                    Text(q.question).font(.callout).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2).padding(.bottom, 4)
+                    ForEach(q.options, id: \.label) { o in
+                        let on = picks.isPicked(o.label, in: i)
+                        Button { page.updatePicks(p) { $0.pick(o.label, in: i) } } label: {
+                            choice(q, on: on) {
+                                Text(o.label).mono(13)
+                                if !o.description.isEmpty { Text(o.description).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    // Writing in Other picks it: in place of the option picked (one), or beside them (several).
+                    choice(q, on: picks.hasOther(in: i)) {
+                        TextField(q.options.isEmpty ? "Answer" : "Other",
+                                  text: Binding(get: { page.picks(p).other(in: i) }, set: { text in page.updatePicks(p) { $0.write(text, in: i) } }))
+                            .mono(13)
+                            .foregroundStyle(Theme.ink)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        DottedRule()
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+    }
+
+    /// One option's row: its mark — `< >` / `<x>` for one, `[ ]` / `[x]` for several (ui-v0 §7.2.6) — and what it says,
+    /// in ink once picked.
+    private func choice<Content: View>(_ q: TerminalQuestion, on: Bool, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(q.multiSelect ? (on ? "[x]" : "[ ]") : (on ? "<x>" : "< >")).mono(13)
+            VStack(alignment: .leading, spacing: 2) { content() }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(on ? Theme.ink : Color.secondary)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 
     /// A tap on the screen: a click there when the program tracks the mouse (Claude Code's full screen: its options,

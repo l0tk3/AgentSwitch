@@ -165,7 +165,8 @@ enum DemoData {
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
                          status: .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
-                         permissions: [TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
+                         permissions: [UserDefaults.standard.string(forKey: "uiDemoScreen") == "terminalquestion" ? question
+                                       : TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
                          subagents: [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
                                      TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
@@ -179,6 +180,14 @@ enum DemoData {
             "opencode": [TerminalModelOption(id: "deepseek/deepseek-flash", name: "DeepSeek Flash")],
         ])
     }
+
+    /// The agent asking (AskUserQuestion, terminal-v0 §3 "选择题"): `-uiDemoScreen terminalquestion`.
+    static let question = TerminalPermission(id: "p2", tool: "AskUserQuestion", summary: "会话存在哪里？ · 慢日志记哪些字段？", questions: [
+        TerminalQuestion(question: "会话存在哪里？", header: "Store", options: [.init(label: "Redis", description: "多台实例共享，重启不丢"),
+                                                                        .init(label: "内存", description: "最快，但重启后全部失效")]),
+        TerminalQuestion(question: "慢日志记哪些字段？", header: "Logs", multiSelect: true,
+                         options: [.init(label: "用户 id"), .init(label: "耗时"), .init(label: "请求路径", description: "带查询参数时去掉参数")]),
+    ])
 
     /// A Claude Code screen as a snapshot draws it (escape sequences, CR LF).
     static let terminalScreen: String = {

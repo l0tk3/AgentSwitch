@@ -12,7 +12,7 @@ import { remoteCaller } from "../core/caller.js";
 import { SSE_HEARTBEAT_MS } from "../core/limits.js";
 import type { TerminalAudit } from "../terminals/audit.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
-import { PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type TerminalEvent, type TerminalHarness, type TerminalHost } from "../terminals/host.js";
+import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
 import type { Offers } from "../router/modelOffers.js";
 import { slashCommands } from "../terminals/commands.js";
@@ -73,12 +73,18 @@ const Keys = z.object({ keys: z.array(z.union([z.enum(KEY_NAMES), z.string().reg
 /** `screen`: the asking screen's own id, which then owns the size (terminal-v0 §1). */
 const SCREEN_ID = /^[\w-]{1,64}$/;
 const Resize = z.object({ ...Size, screen: z.string().regex(SCREEN_ID).optional() });
-const Decide = z.object({ decision: z.enum(["allow", "deny"]) });
+/** `answers`: a question's (AskUserQuestion, terminal-v0 §3 "选择题"), by its text: the options picked, Other's words.
+ *  `seal`: Other's words go through the sealer first (default, as a reply does). */
+const Decide = z.object({
+  decision: z.enum(["allow", "deny"]),
+  answers: z.record(z.string().max(2000), z.object({ labels: z.array(z.string().max(2000)).max(16).optional(), other: z.string().max(MAX_OTHER).optional() })).optional(),
+  seal: z.boolean().default(true),
+});
 const Rename = z.object({ name: z.string().max(200).nullable() });
 const HookBody = z.object({ event: z.string().min(1).max(64), payload: z.record(z.string(), z.unknown()) });
 const Raw = z.object({ data: z.string().min(1).max(MAX_INPUT) });
 
-const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403 };
+const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403, invalid: 400 };
 /** Agents that can go on with a session, and those that can fork one (docs/terminal-v0.md §5). */
 const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode"]);
 const FORKS: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex"]);
@@ -367,15 +373,35 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     return c.json({ ok: true });
   });
 
+  // Allow or deny; a question is answered instead (terminal-v0 §3 "选择题"): checked against the request, Other's words
+  // through the sealer as a reply's are. The audit says what it said before: the decision and the tool, never answers.
   app.post("/terminals/:id/permissions/:pid", async (c) => {
     const id = c.req.param("id");
+    const pid = c.req.param("pid");
     const body = await parseBody(c, Decide);
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
-      const request = host.get(id)?.permissions.find((p) => p.id === c.req.param("pid"));
-      if (!host.decide(id, c.req.param("pid"), body.data.decision)) return c.json({ error: "no such request (answered already?)" }, 404);
+      const request = host.get(id)?.permissions.find((p) => p.id === pid);
+      let picks: Record<string, QuestionPick> | undefined = body.data.answers;
+      let sealed = 0;
+      if (picks && request?.questions && body.data.decision === "allow") {
+        const wrong = checkPicks(request.questions, picks);
+        if (wrong) return c.json({ error: wrong }, 400);
+        if (deps.sealer && body.data.seal) {
+          const out: Record<string, QuestionPick> = {};
+          for (const [question, pick] of Object.entries(picks)) {
+            if (!pick.other?.trim()) { out[question] = pick; continue; }
+            const r = await deps.sealer(pick.other);
+            if (!r.ok) return c.json({ error: r.error }, r.code === "unroutable" ? 400 : 503);
+            out[question] = { ...pick, other: r.text };
+            sealed += r.sealed.length;
+          }
+          picks = out;
+        }
+      }
+      if (!host.decide(id, pid, body.data.decision, picks)) return c.json({ error: "no such request (answered already?)" }, 404);
       audit.record({ terminal: id, action: "permission", via: via(c), detail: { decision: body.data.decision, tool: request?.tool ?? null } });
-      return c.json({ ok: true });
+      return c.json(picks ? { ok: true, sealed } : { ok: true });
     } catch (err) { return failed(c, err); }
   });
 

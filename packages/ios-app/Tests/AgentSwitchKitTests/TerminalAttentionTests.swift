@@ -39,6 +39,11 @@ final class TerminalAttentionTests: XCTestCase {
         XCTAssertEqual(terminal("a", asks: ["p1"]).spokenWait, "终端「修复登录」等你批准：Bash")
         XCTAssertEqual(terminal("a", .waiting, name: "").spokenWait, "终端「Claude Code」等你处理")
         XCTAssertEqual(terminal("a", .waiting, name: "", harness: "pi").spokenWait, "终端「pi」等你处理")
+        // A question is said as one, not as AskUserQuestion to approve (2026-10-01).
+        let asking = TerminalInfo(id: "q", harness: "claude-code", cwd: "/p", name: "修复登录", status: .waiting, createdAt: 1, lastOutputAt: 1,
+                                  permissions: [TerminalPermission(id: "p1", tool: "AskUserQuestion", summary: "会话存在哪里？",
+                                                                   questions: [TerminalQuestion(question: "会话存在哪里？", options: [.init(label: "Redis")])])])
+        XCTAssertEqual(asking.spokenWait, "终端「修复登录」问你：会话存在哪里？")
     }
 
     func testAWaitingTerminalIsARowAndStartsTheSummaryOnItsOwn() throws {

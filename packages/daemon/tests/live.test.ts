@@ -129,6 +129,15 @@ describe("live snapshot", () => {
     expect(snap.rows).toMatchObject([{ kind: "terminal", step: "等你处理", startedAt: 42, ask: null, needsYou: true }]);
   });
 
+  it("a terminal's question (AskUserQuestion) is said as the question, and opens the terminal: no allow / deny (2026-10-01)", () => {
+    const f = build();
+    const questions = [{ question: "日期格式化用哪个库？", header: "Library", multiSelect: false, options: [{ label: "date-fns", description: "" }, { label: "Luxon", description: "" }] }];
+    const ask = { id: "p1", tool: "AskUserQuestion", summary: "日期格式化用哪个库？", input: { questions }, at: 7, questions };
+    const snap = liveSnapshot(f.store, host([terminal({ status: "waiting", permissions: [ask] })]), f.now());
+    expect(snap.rows).toMatchObject([{ kind: "terminal", step: "日期格式化用哪个库？", needsYou: true,
+      ask: { kind: "question", id: "p1", questionId: "", text: "日期格式化用哪个库？", options: ["date-fns", "Luxon"], answerable: false } }]);
+  });
+
   it("tasks that ended in the last minute, the latest first, with what they came to; not a cancelled one, not an old one opened again", () => {
     const f = build();
     const t0 = f.now();

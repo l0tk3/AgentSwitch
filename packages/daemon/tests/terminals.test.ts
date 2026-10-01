@@ -13,7 +13,7 @@ import { ensureLocalToken, LocalAuth } from "../src/api/localAuth.js";
 import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
-import { cleanTitle, meaningfulTitle, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -235,6 +235,76 @@ describe("terminal host", () => {
     expect(host.decide(info.id, first!.id, "deny")).toBe(false);   // what the phone's stale card would get: 404
   });
 
+  // 2026-10-01, user: 如果agent给一个选择题也会出这个allow deny，这样不太对吧？能不能hook的更精细，直接用这个框来选agent给的选项.
+  it("an AskUserQuestion is a question to answer, not allow / deny: its answers go back in updatedInput as Claude Code's dialog gives them", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const input = { questions: [
+      { question: "日期格式化用哪个库？", header: "Library", multiSelect: false, options: [{ label: "date-fns", description: "体积小" }, { label: "Luxon", description: "自带时区" }] },
+      { question: "发布前跑哪些检查？", header: "Checks", multiSelect: true, options: [{ label: "单元测试", description: "" }, { label: "Lint, 格式", description: "" }] },
+    ], metadata: { source: "x" } };
+    const ask = () => host.hook(info.id, token, { event: "PermissionRequest", payload: { tool_name: "AskUserQuestion", tool_input: input } });
+    const first = ask();
+    const [request] = host.get(info.id)!.permissions;
+    expect(request).toMatchObject({ tool: "AskUserQuestion", summary: "日期格式化用哪个库？ · 发布前跑哪些检查？", questions: [
+      { question: "日期格式化用哪个库？", header: "Library", multiSelect: false, options: [{ label: "date-fns", description: "体积小" }, { label: "Luxon", description: "自带时区" }] },
+      { question: "发布前跑哪些检查？", header: "Checks", multiSelect: true },
+    ] });
+    // An allow alone answers nothing (Claude Code drops it and its dialog waits): refused, the request stays.
+    expect(() => host.decide(info.id, request!.id, "allow")).toThrow(/提问/);
+    expect(() => host.decide(info.id, request!.id, "allow", { "日期格式化用哪个库？": { labels: ["Moment"] } })).toThrow(/not an option/);
+    expect(() => host.decide(info.id, request!.id, "allow", { "日期格式化用哪个库？": { labels: ["date-fns"], other: "都行" } })).toThrow(/one answer only/);
+    expect(() => host.decide(info.id, request!.id, "allow", { "用什么数据库？": { labels: ["date-fns"] } })).toThrow(/not a question/);
+    expect(() => host.decide(info.id, request!.id, "deny", { "日期格式化用哪个库？": { labels: ["date-fns"] } })).toThrow(/go with allow/);
+    expect(host.get(info.id)!.permissions).toHaveLength(1);
+    expect(host.decide(info.id, request!.id, "allow", {
+      "日期格式化用哪个库？": { labels: ["date-fns"] },
+      "发布前跑哪些检查？": { labels: ["单元测试", "Lint, 格式"], other: "跑一遍 e2e" },
+    })).toBe(true);
+    expect(await first).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow", updatedInput: {
+      ...input, answers: { "日期格式化用哪个库？": "date-fns", "发布前跑哪些检查？": '单元测试, "Lint, 格式", 跑一遍 e2e' },
+    } } } });
+    // Other's words alone for one that takes one; deny stays open to a question (esc in the terminal).
+    const second = ask();
+    const again = host.get(info.id)!.permissions[0]!;
+    host.decide(info.id, again.id, "allow", { "日期格式化用哪个库？": { other: "  先用原生 Intl  " } });
+    expect(((await second) as any).hookSpecificOutput.decision.updatedInput.answers).toEqual({ "日期格式化用哪个库？": "先用原生 Intl" });
+    const third = ask();
+    host.decide(info.id, host.get(info.id)!.permissions[0]!.id, "deny");
+    expect(((await third) as any).hookSpecificOutput.decision).toEqual({ behavior: "deny", message: "在 AgentSwitch 上被拒绝。" });
+    // Answers go to a question only; any other request is allow / deny as before.
+    const write = host.hook(info.id, token, { event: "PermissionRequest", payload: { tool_name: "Write", tool_input: { file_path: "/tmp/x" } } });
+    const plain = host.get(info.id)!.permissions[0]!;
+    expect(plain.questions).toBeUndefined();
+    expect(() => host.decide(info.id, plain.id, "allow", { x: { labels: ["y"] } })).toThrow(/not a question/);
+    host.decide(info.id, plain.id, "allow");
+    expect(await write).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
+  });
+
+  it("reads an AskUserQuestion's questions only when it can draw them, and writes answers as Claude Code does", () => {
+    const q = (over: Record<string, unknown> = {}) => ({ question: "哪个？", header: "H", options: [{ label: "a", description: "" }, { label: "b" }], ...over });
+    expect(askQuestions("AskUserQuestion", { questions: [q()] })).toEqual([{ question: "哪个？", header: "H", multiSelect: false, options: [{ label: "a", description: "" }, { label: "b", description: "" }] }]);
+    expect(askQuestions("Bash", { questions: [q()] })).toBeNull();
+    expect(askQuestions("AskUserQuestion", { questions: [] })).toBeNull();
+    expect(askQuestions("AskUserQuestion", { questions: [q({ question: "" })] })).toBeNull();
+    expect(askQuestions("AskUserQuestion", { questions: [q({ options: [{ label: "a" }, { label: "a" }] })] })).toBeNull();
+    expect(askQuestions("AskUserQuestion", { questions: [q(), q()] })).toBeNull();                       // the same question twice
+    expect(askQuestions("AskUserQuestion", { questions: [q({ options: [{ description: "no label" }] })] })).toBeNull();
+    // One that takes words only (no options): Other alone answers it.
+    const words = askQuestions("AskUserQuestion", { questions: [q({ options: undefined })] })!;
+    expect(words[0]!.options).toEqual([]);
+    expect(checkPicks(words, { "哪个？": { labels: ["a"] } })).toMatch(/not an option/);
+    expect(checkPicks(words, { "哪个？": { other: "随便" } })).toBeNull();
+    expect(checkPicks(words, {})).toBe("no answers");
+    expect(checkPicks(words, { "哪个？": { other: "   " } })).toMatch(/no answer/);
+    expect(checkPicks(askQuestions("AskUserQuestion", { questions: [q({ multiSelect: true })] })!, { "哪个？": { labels: ["a", "a"] } })).toMatch(/twice/);
+    expect(answerText({ labels: ["a"] })).toBe("a");
+    expect(answerText({ labels: ["a", 'say "hi"'], other: "c" })).toBe('a, "say \\"hi\\"", c');
+    expect(permissionSummary("AskUserQuestion", { questions: [q({ question: "第一\n行" })] })).toBe("第一 行");
+  });
+
   it("the size belongs to the screen that set it last; a claim at the same size changes only the owner", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());
@@ -405,12 +475,12 @@ describe("terminal host", () => {
 });
 
 describe("terminals over HTTP", () => {
-  async function start(elsewhere?: ElsewhereCheck) {
+  async function start(elsewhere?: ElsewhereCheck, sealer?: Sealer) {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
     let base = "";
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
-    const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => base, true), ...(elsewhere ? { terminalElsewhere: elsewhere } : {}) });
+    const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => base, true), ...(elsewhere ? { terminalElsewhere: elsewhere } : {}), ...(sealer ? { sealer } : {}) });
     const token = ensureLocalToken(home);
     const port = await new Promise<number>((done) => {
       const server = listenLocal(daemon, 0, (info: AddressInfo) => done(info.port), new LocalAuth(token));
@@ -514,6 +584,40 @@ describe("terminals over HTTP", () => {
     expect((await call("DELETE", `/terminals/${id}`)).status).toBe(200);
     await until(() => events.find((e) => e.event === "removed"));
     expect((await call("GET", `/terminals/${id}`)).status).toBe(404);
+  });
+
+  it("a question through the real hook command: answered from the API, checked, Other's words sealed, never in the audit", async () => {
+    const TOKEN = "enc:v1:" + "Q".repeat(40);
+    const sealer: Sealer = async (t) => ({ ok: true, text: t.split("hunter2").join(TOKEN), sealed: t.includes("hunter2") ? [{ label: "db/pw", field: "password", kind: "secret", hosts: ["db"], uses: ["exec"], token: TOKEN }] : [], ms: 1 });
+    const { home, cwd, base, token, call } = await start(undefined, sealer);
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    await until(() => screen().includes("fake agent ready"));
+    await call("POST", `/terminals/${id}/input`, { text: "ask" });
+    const asked = await until(() => events.find((e) => e.event === "permission"));
+    expect(asked.data.request).toMatchObject({ tool: "AskUserQuestion", summary: "日期格式化用哪个库？ · 发布前跑哪些检查？" });
+    expect(asked.data.request.questions.map((q: { header: string }) => q.header)).toEqual(["Library", "Checks"]);
+    const pid = asked.data.request.id as string;
+    const answer = (body: unknown) => call("POST", `/terminals/${id}/permissions/${pid}`, body);
+    // What an older screen's [ allow ] sends: refused with a reason (it would answer nothing), the request stays.
+    expect(await answer({ decision: "allow" })).toMatchObject({ status: 400, json: { error: expect.stringContaining("提问") } });
+    expect((await answer({ decision: "allow", answers: { "日期格式化用哪个库？": { labels: ["Moment"] } } })).status).toBe(400);
+    expect((await answer({ decision: "allow", answers: { "别的问题？": { labels: ["Luxon"] } } })).status).toBe(400);
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.permissions).toHaveLength(1);
+    const ok = await answer({ decision: "allow", answers: { "日期格式化用哪个库？": { labels: ["Luxon"] }, "发布前跑哪些检查？": { labels: ["单元测试"], other: "先连 db（密码 hunter2）跑迁移" } } });
+    expect(ok).toEqual({ status: 200, json: { ok: true, sealed: 1 } });
+    await until(() => screen().includes("answer: "));
+    const said = JSON.parse(screen().split("answer: ")[1]!.split("\r\n")[0]!.replace(/\r?\n/g, ""));
+    expect(said.hookSpecificOutput.decision).toMatchObject({ behavior: "allow", updatedInput: {
+      questions: [expect.objectContaining({ question: "日期格式化用哪个库？" }), expect.objectContaining({ question: "发布前跑哪些检查？" })],
+      answers: { "日期格式化用哪个库？": "Luxon", "发布前跑哪些检查？": `单元测试, 先连 db（密码 ${TOKEN}）跑迁移` },
+    } });
+    expect(screen()).not.toContain("hunter2");
+    expect((await answer({ decision: "deny" })).status).toBe(404);
+    const audit = readFileSync(join(home, "terminals", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.filter((a) => a.action === "permission")).toEqual([expect.objectContaining({ detail: { decision: "allow", tool: "AskUserQuestion" } })]);
+    expect(JSON.stringify(audit)).not.toMatch(/Luxon|单元测试|hunter2/);
   });
 
   it("attaches a file: staged, moved out of the project, its path pasted into the prompt without sending; gone with the terminal", async () => {

@@ -6,9 +6,11 @@ extension TerminalInfo {
         status != .exited && (status == .waiting || !permissions.isEmpty)
     }
 
-    /// What voice mode reads when it starts to wait: 终端「修复登录」等你批准：Bash.
+    /// What voice mode reads when it starts to wait: 终端「修复登录」等你批准：Bash; a question is said as one
+    /// (终端「修复登录」问你：会话存在哪里？, 2026-10-01), not as a tool to approve.
     public var spokenWait: String {
         let name = name.isEmpty ? ModelName.harness(harness) : name
+        if let ask = permissions.first, let question = ask.questions.first { return "终端「\(name)」问你：\(question.question)" }
         if let ask = permissions.first, !ask.tool.isEmpty { return "终端「\(name)」等你批准：\(ask.tool)" }
         return "终端「\(name)」等你处理"
     }

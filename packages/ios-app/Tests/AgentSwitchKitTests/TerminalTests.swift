@@ -26,6 +26,74 @@ final class TerminalTests: XCTestCase {
         XCTAssertFalse(list.models["claude-code"]?.first?.older ?? true)
     }
 
+    /// A question the agent asks (AskUserQuestion, 2026-10-01): its questions come with the request; any other request
+    /// and a Mac that predates question cards have none (the permission card then).
+    func testAQuestionDecodesWithItsOptions() throws {
+        let p = try JSONDecoder().decode(TerminalPermission.self, from: json([
+            "id": "p1", "tool": "AskUserQuestion", "summary": "会话存在哪里？", "at": 3, "input": ["questions": []],
+            "questions": [["question": "会话存在哪里？", "header": "Store", "multiSelect": false,
+                           "options": [["label": "Redis", "description": "多台实例共享"], ["label": "内存"]]],
+                          ["question": "记哪些字段？", "options": [["label": "耗时"]], "multiSelect": true]],
+        ]))
+        XCTAssertTrue(p.isQuestion)
+        XCTAssertEqual(p.questions[0], TerminalQuestion(question: "会话存在哪里？", header: "Store",
+                                                        options: [.init(label: "Redis", description: "多台实例共享"), .init(label: "内存")]))
+        XCTAssertEqual(p.questions[1].header, "")
+        XCTAssertTrue(p.questions[1].multiSelect)
+        let plain = try JSONDecoder().decode(TerminalPermission.self, from: json(["id": "p2", "tool": "Bash", "summary": "Bash: ls"]))
+        XCTAssertFalse(plain.isQuestion)
+        let broken = try JSONDecoder().decode(TerminalPermission.self, from: json(["id": "p3", "tool": "AskUserQuestion", "questions": "?"]))
+        XCTAssertFalse(broken.isQuestion, "what it cannot read is a permission card, not a failure")
+    }
+
+    /// What is picked on a question card: one replaces one, several toggle, Other's words pick it; Submit once all have one.
+    func testPicksOnAQuestionCard() {
+        var picks = QuestionPicks([
+            TerminalQuestion(question: "存哪？", options: [.init(label: "Redis"), .init(label: "内存")]),
+            TerminalQuestion(question: "记哪些？", multiSelect: true, options: [.init(label: "id"), .init(label: "耗时"), .init(label: "路径")]),
+        ])
+        XCTAssertFalse(picks.isComplete)
+        picks.pick("Redis", in: 0)
+        picks.pick("内存", in: 0)
+        XCTAssertFalse(picks.isPicked("Redis", in: 0))
+        picks.write("先放文件里", in: 0)
+        XCTAssertFalse(picks.isPicked("内存", in: 0), "writing in Other takes the place of the option (one)")
+        XCTAssertFalse(picks.isComplete)
+        picks.pick("路径", in: 1)
+        picks.pick("id", in: 1)
+        picks.pick("耗时", in: 1)
+        picks.pick("耗时", in: 1)
+        picks.write("  trace id ", in: 1)
+        XCTAssertTrue(picks.isPicked("路径", in: 1), "beside them (several)")
+        XCTAssertTrue(picks.isComplete)
+        XCTAssertEqual(picks.answers, ["存哪？": .init(labels: [], other: "先放文件里"),
+                                       "记哪些？": .init(labels: ["id", "路径"], other: "trace id")])
+        picks.pick("Redis", in: 0)
+        XCTAssertEqual(picks.other(in: 0), "", "an option picked (one) clears Other")
+        picks.write("   ", in: 1)
+        XCTAssertEqual(picks.answers["记哪些？"], .init(labels: ["id", "路径"], other: nil))
+    }
+
+    func testAnsweringAQuestionSendsWhatWasPickedByQuestion() async throws {
+        let transport = FakeTransport { req, n in
+            n == 0 ? (Data(#"{"ok":true,"sealed":1}"#.utf8), httpResponse(req.url))
+                   : (Data(#"{"error":"no such request (answered already?)"}"#.utf8), httpResponse(req.url, status: 404))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let sealed = try await api.answerTerminalQuestion("t1", permissionId: "p1", answers: ["存哪？": .init(labels: ["Redis"], other: nil),
+                                                                                               "记哪些？": .init(labels: ["id"], other: "密码 hunter2")])
+        XCTAssertEqual(sealed, 1)
+        XCTAssertEqual(transport.paths, ["/terminals/t1/permissions/p1"])
+        let body = try XCTUnwrap(transport.requests[0].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(body["decision"] as? String, "allow")
+        let answers = try XCTUnwrap(body["answers"] as? [String: [String: Any]])
+        XCTAssertEqual(answers["存哪？"]?["labels"] as? [String], ["Redis"])
+        XCTAssertNil(answers["存哪？"]?["other"])
+        XCTAssertEqual(answers["记哪些？"]?["other"] as? String, "密码 hunter2")
+        let late = try await api.answerTerminalQuestion("t1", permissionId: "p1", answers: ["存哪？": .init(labels: ["Redis"], other: nil)])
+        XCTAssertNil(late, "answered in the terminal meanwhile: the card just goes")
+    }
+
     /// Sub-agents under their terminal (2026-09-30); a Mac that predates them says none.
     func testATerminalListsItsSubagents() throws {
         let list = try JSONDecoder().decode(TerminalList.self, from: json([

@@ -18,7 +18,8 @@ import type { ApiDeps } from "./shared.js";
 
 /** A thing to answer on the card. A terminal's permission request and a task's approval: allow or deny. A task's
  *  question: one of its options when that is a whole answer (one question, one choice, nothing secret), else it is
- *  answered on the task's page. */
+ *  answered on the task's page. A terminal's question (AskUserQuestion, terminal-v0 §3 "选择题"): never answerable
+ *  here — the card's options answer a task — so the card opens the terminal, whose question card answers it. */
 export type LiveAsk =
   | { readonly kind: "permission" | "approval"; readonly id: string; readonly tool: string; readonly target: string; readonly where: string }
   | { readonly kind: "question"; readonly id: string; readonly questionId: string; readonly text: string; readonly options: readonly string[]; readonly answerable: boolean };
@@ -120,11 +121,14 @@ function terminalRow(t: TerminalInfo): LiveRow {
   }
   const ask = t.permissions[0];
   const target = ask ? clip(readable(permissionTarget(ask.tool, ask.input)), TARGET_CHARS) : "";
+  const asked = ask?.questions?.[0];
   return {
     id: t.id, kind: "terminal", title: clip(t.name || agent, TITLE_CHARS),
     step: ask ? clip(readable(ask.summary), STEP_CHARS) : "等你处理", model: agent, agent: t.harness,
     startedAt: ask && ask.at > 0 ? ask.at : t.statusSince || t.lastOutputAt, needsYou: true,
-    ask: ask ? { kind: "permission", id: ask.id, tool: ask.tool, target, where: tilde(t.cwd) } : null,
+    ask: !ask ? null
+      : asked ? { kind: "question", id: ask.id, questionId: "", text: clip(readable(asked.question), STEP_CHARS * 2), options: asked.options.map((o) => o.label), answerable: false }
+      : { kind: "permission", id: ask.id, tool: ask.tool, target, where: tilde(t.cwd) },
   };
 }
 

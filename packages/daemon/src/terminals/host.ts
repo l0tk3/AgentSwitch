@@ -23,8 +23,24 @@ export type PermissionMode = (typeof PERMISSION_MODES)[number];
 export type TerminalStatus = "working" | "waiting" | "idle" | "exited";
 export type PermissionDecision = "allow" | "deny";
 
-/** A permission request as the screens show it: the tool, one line to read, and the input as the agent gave it. */
-export type PermissionAsk = { readonly id: string; readonly tool: string; readonly summary: string; readonly input: unknown; readonly at: number };
+/** One question of a Claude Code `AskUserQuestion` call, as the screens draw it (docs/terminal-v0.md §3 "选择题"): its
+ *  chip, the question, its options; one to pick or several. A question without options takes only words. */
+export type AskQuestion = {
+  readonly question: string; readonly header: string; readonly multiSelect: boolean;
+  readonly options: readonly { readonly label: string; readonly description: string }[];
+};
+/** What a screen picked for one question: options by their label, and the words written in Other. */
+export type QuestionPick = { readonly labels?: readonly string[] | undefined; readonly other?: string | undefined };
+
+/** A permission request as the screens show it: the tool, one line to read, and the input as the agent gave it.
+ *  `questions`: the request is the agent asking (AskUserQuestion), answered with picks instead of allow / deny. */
+export type PermissionAsk = {
+  readonly id: string; readonly tool: string; readonly summary: string; readonly input: unknown; readonly at: number;
+  readonly questions?: readonly AskQuestion[];
+};
+/** A screen's answer to a request: allow or deny, and a question's answers as Claude Code takes them (question text →
+ *  the answer), which go with allow. */
+export type PermissionReply = { readonly decision: PermissionDecision; readonly answers?: Readonly<Record<string, string>> };
 
 export type TerminalInfo = {
   readonly id: string;
@@ -163,13 +179,13 @@ export type TerminalHostOptions = {
 };
 
 export class TerminalError extends Error {
-  constructor(readonly code: "not_found" | "exited" | "unavailable" | "forbidden", message: string) { super(message); }
+  constructor(readonly code: "not_found" | "exited" | "unavailable" | "forbidden" | "invalid", message: string) { super(message); }
 }
 
 type Listener = (ev: TerminalEvent) => void;
 /** How a terminal's turn ended: `line` is the agent's last answer (its start), the error, or the exit. */
 export type TurnEnd = { readonly at: number; readonly ok: boolean; readonly line: string };
-type Pending = { readonly ask: PermissionAsk; readonly resolve: (d: PermissionDecision | null) => void; readonly timer: NodeJS.Timeout };
+type Pending = { readonly ask: PermissionAsk; readonly resolve: (r: PermissionReply | null) => void; readonly timer: NodeJS.Timeout };
 type Chunk = { readonly seq: number; readonly data: string };
 
 const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
@@ -272,10 +288,74 @@ export function permissionTarget(tool: string, input: unknown): string {
   return pick("file_path") ?? pick("notebook_path") ?? pick("url") ?? pick("pattern") ?? pick("path") ?? JSON.stringify(input ?? {});
 }
 
-/** One line a person can read for a permission request. */
+/** One line a person can read for a permission request; for a question, the question itself (several joined by " · "). */
 export function permissionSummary(tool: string, input: unknown): string {
-  const line = `${tool}: ${permissionTarget(tool, input)}`.replace(/\s+/g, " ").trim();
+  const questions = askQuestions(tool, input);
+  const said = questions ? questions.map((q) => q.question).join(" · ") : `${tool}: ${permissionTarget(tool, input)}`;
+  const line = said.replace(/\s+/g, " ").trim();
   return line.length > MAX_SUMMARY ? `${line.slice(0, MAX_SUMMARY - 1)}…` : line;
+}
+
+/** The tool by which Claude Code asks the user: its own dialog in the terminal, and a PermissionRequest (2.1.286). */
+export const ASK_TOOL = "AskUserQuestion";
+const MAX_QUESTIONS = 8;
+const MAX_OPTIONS = 16;
+/** Other's words, at most (Claude Code takes 8192 characters an answer). */
+export const MAX_OTHER = 8000;
+
+/** The questions of an AskUserQuestion call, or null when `tool` is another or its input is not one we can draw (then
+ *  it is shown as any permission request). Each needs its text, unique in the call, and options with unique labels. */
+export function askQuestions(tool: string, input: unknown): AskQuestion[] | null {
+  if (tool !== ASK_TOOL || !input || typeof input !== "object") return null;
+  const raw = (input as Record<string, unknown>).questions;
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_QUESTIONS) return null;
+  const questions: AskQuestion[] = [];
+  for (const q of raw) {
+    if (!q || typeof q !== "object") return null;
+    const { question, header, multiSelect, options = [] } = q as Record<string, unknown>;
+    if (typeof question !== "string" || !question.trim() || !Array.isArray(options) || options.length > MAX_OPTIONS) return null;
+    const opts: { label: string; description: string }[] = [];
+    for (const o of options) {
+      const { label, description } = (o && typeof o === "object" ? o : {}) as Record<string, unknown>;
+      if (typeof label !== "string" || !label) return null;
+      opts.push({ label, description: typeof description === "string" ? description : "" });
+    }
+    if (new Set(opts.map((o) => o.label)).size !== opts.length) return null;
+    questions.push({ question, header: typeof header === "string" ? header : "", multiSelect: multiSelect === true, options: opts });
+  }
+  return new Set(questions.map((q) => q.question)).size === questions.length ? questions : null;
+}
+
+/** What is wrong with `picks` as answers to `questions`, or null: each must be one of the questions; its labels among
+ *  its options, each once; one answer (an option or Other's words) when it takes one, at least one when several; a
+ *  question without options takes words only. Questions left out go unanswered, as in Claude Code's own dialog. */
+export function checkPicks(questions: readonly AskQuestion[], picks: Readonly<Record<string, QuestionPick>>): string | null {
+  const keys = Object.keys(picks);
+  if (!keys.length) return "no answers";
+  for (const key of keys) {
+    const q = questions.find((x) => x.question === key);
+    const short = key.slice(0, 80);
+    if (!q) return `not a question of this request: ${short}`;
+    const labels = picks[key]!.labels ?? [];
+    const other = picks[key]!.other?.trim() ?? "";
+    if (new Set(labels).size !== labels.length) return `an option picked twice for "${short}"`;
+    const unknown = labels.find((l) => !q.options.some((o) => o.label === l));
+    if (unknown !== undefined) return `not an option of "${short}": ${unknown.slice(0, 80)}`;
+    const count = labels.length + (other ? 1 : 0);
+    if (count === 0) return `no answer for "${short}"`;
+    if (!q.multiSelect && count > 1) return `one answer only for "${short}"`;
+    if (other.length > MAX_OTHER) return `the answer to "${short}" is too long`;
+  }
+  return null;
+}
+
+/** An answer as Claude Code's own dialog gives it (2.1.286): the option's label; several joined by ", ", a label that
+ *  holds ", " or a quote written as a JSON string (its `Brt`); Other's words as they are, after the options picked. */
+export function answerText(pick: QuestionPick): string {
+  const other = pick.other?.trim() ?? "";
+  const parts = [...(pick.labels ?? []), ...(other ? [other] : [])];
+  if (parts.length === 1) return parts[0]!;
+  return parts.map((p) => (p.includes(", ") || p.includes('"') ? JSON.stringify(p) : p)).join(", ");
 }
 
 class Session {
@@ -442,7 +522,7 @@ export class TerminalHost {
     proc.onExit(({ exitCode }) => this.exited(s, exitCode));
     s.companion?.attach({
       status: (status) => { if (status === "idle") this.turnEnded(s, true, null); this.setStatus(s, status); },
-      ask: (tool, input, signal) => this.ask(s, tool, input, signal),
+      ask: async (tool, input, signal) => (await this.ask(s, tool, input, signal))?.decision ?? null,
     });
     return this.info(s);
   }
@@ -625,9 +705,14 @@ export class TerminalHost {
       }
       case "PermissionRequest": {
         const tool = String(p.tool_name ?? "tool");
-        const decision = await this.ask(s, tool, p.tool_input ?? null, signal);
-        if (!decision) return null;   // nobody answered: the agent asks in the terminal
-        return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: decision === "allow" ? { behavior: "allow" } : { behavior: "deny", message: "在 AgentSwitch 上被拒绝。" } } };
+        const input = p.tool_input ?? null;
+        const reply = await this.ask(s, tool, input, signal);
+        if (!reply) return null;   // nobody answered: the agent asks in the terminal
+        if (reply.decision === "deny") return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "在 AgentSwitch 上被拒绝。" } } };
+        // A question's answers go back in the call's own input, as Claude Code's dialog puts them: an allow without
+        // `updatedInput` it drops for a tool that asks the user itself, and its dialog would wait on (terminal-v0 §3).
+        const updatedInput = reply.answers ? { ...(input as Record<string, unknown>), answers: reply.answers } : undefined;
+        return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: updatedInput ? { behavior: "allow", updatedInput } : { behavior: "allow" } } };
       }
       default: return null;
     }
@@ -645,12 +730,22 @@ export class TerminalHost {
     return this.need(id).ownSessionId;
   }
 
-  /** A screen's answer to a permission request; false when there is no such request (answered already). */
-  decide(id: string, permissionId: string, decision: PermissionDecision): boolean {
+  /** A screen's answer to a permission request; false when there is no such request (answered already). A question
+   *  (AskUserQuestion) is allowed only with `picks`, its answers (checkPicks), and only a question takes them: else
+   *  TerminalError "invalid". Deny stays open to a question, as esc in the terminal. */
+  decide(id: string, permissionId: string, decision: PermissionDecision, picks?: Readonly<Record<string, QuestionPick>>): boolean {
     const s = this.need(id);
     const p = s.pending.get(permissionId);
     if (!p) return false;
-    this.settle(s, permissionId, decision);
+    const { questions } = p.ask;
+    if (picks && (decision !== "allow" || !questions)) throw new TerminalError("invalid", questions ? "answers go with allow" : "this request is not a question");
+    if (!questions || decision === "deny") { this.settle(s, permissionId, { decision }); return true; }
+    // An allow alone answers nothing (Claude Code drops it, its dialog waits): an older screen's [ allow ] says so.
+    if (!picks) throw new TerminalError("invalid", "这个请求是 agent 的提问，需要选好答案再提交；请在终端里作答，或更新 AgentSwitch 应用。");
+    const wrong = checkPicks(questions, picks);
+    if (wrong) throw new TerminalError("invalid", wrong);
+    const answers = Object.fromEntries(Object.entries(picks).map(([q, pick]) => [q, answerText(pick)]));
+    this.settle(s, permissionId, { decision, answers });
     return true;
   }
 
@@ -780,10 +875,11 @@ export class TerminalHost {
     return this.sessions.get(id)?.lastTurn ?? null;
   }
 
-  private ask(s: Session, tool: string, input: unknown, signal?: AbortSignal): Promise<PermissionDecision | null> {
+  private ask(s: Session, tool: string, input: unknown, signal?: AbortSignal): Promise<PermissionReply | null> {
     if (s.status === "exited" || signal?.aborted) return Promise.resolve(null);
     const id = randomUUID().slice(0, 8);
-    const ask: PermissionAsk = { id, tool, summary: permissionSummary(tool, input), input, at: this.o.now() };
+    const questions = askQuestions(tool, input);
+    const ask: PermissionAsk = { id, tool, summary: permissionSummary(tool, input), input, at: this.o.now(), ...(questions ? { questions } : {}) };
     return new Promise((resolve) => {
       const timer = setTimeout(() => this.settle(s, id, null), this.o.permissionTimeoutMs);
       timer.unref();
@@ -797,12 +893,13 @@ export class TerminalHost {
 
   /** `after`: the status once no request is left (default: working after an answer, waiting when none came, since
    *  the agent then asks in the terminal). */
-  private settle(s: Session, id: string, decision: PermissionDecision | null, after?: TerminalStatus): void {
+  private settle(s: Session, id: string, reply: PermissionReply | null, after?: TerminalStatus): void {
     const p = s.pending.get(id);
     if (!p) return;
     s.pending.delete(id);
     clearTimeout(p.timer);
-    p.resolve(decision);
+    p.resolve(reply);
+    const decision = reply?.decision ?? null;
     s.emit({ type: "permission_resolved", id, decision });
     if (decision) s.attention = false;   // answered from a screen: the agent's own prompt for it is gone too
     if (s.status === "waiting" && !s.pending.size && !s.attention) this.setStatus(s, after ?? (decision ? "working" : "waiting"));

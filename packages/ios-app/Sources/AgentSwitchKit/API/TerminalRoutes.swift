@@ -21,6 +21,8 @@ private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int; let screen: String? }
 private struct ClickBody: Encodable { let keys: [String] }
 private struct DecisionBody: Encodable { let decision: String }
+private struct AnswerBody: Encodable { let decision = "allow"; let answers: [String: QuestionPicks.Answer] }
+private struct AnswerReply: Decodable { let sealed: Int? }
 private struct RenameBody: Encodable { let name: String? }
 private struct AttachBody: Encodable { let uploads: [String] }
 private struct AttachReply: Decodable { let files: [AttachedFile] }
@@ -125,6 +127,20 @@ extension AgentSwitchAPI {
             return true
         } catch APIError.http(status: 404, message: _) {
             return false
+        }
+    }
+
+    /// A question's answers (docs/terminal-v0.md §3 "选择题"): what was picked for each, Other's words sealed on the Mac
+    /// first. nil: answered already, on the Mac or in the terminal (404) — the card just goes; else how many secrets
+    /// the sealer put in its place.
+    @discardableResult
+    public func answerTerminalQuestion(_ id: String, permissionId: String, answers: [String: QuestionPicks.Answer]) async throws -> Int? {
+        do {
+            let reply: AnswerReply = try await send("POST", ["terminals", id, "permissions", permissionId], body: AnswerBody(answers: answers),
+                                                    timeout: Self.createTaskTimeout)
+            return reply.sealed ?? 0
+        } catch APIError.http(status: 404, message: _) {
+            return nil
         }
     }
 

@@ -222,8 +222,10 @@ final class TerminalPageModel {
             if !permissions.contains(where: { $0.id == p.id }) { permissions.append(p) }
         case .permissionResolved(let pid):
             permissions.removeAll { $0.id == pid }
+            questionPicks[pid] = nil
         case .permissions(let all):
             permissions = all
+            questionPicks = questionPicks.filter { pid, _ in all.contains { $0.id == pid } }
         case .exit(let code):
             status = .exited
             permissions = []
@@ -415,6 +417,38 @@ final class TerminalPageModel {
             // Answered or already answered elsewhere: either way the card goes.
             try await api.decideTerminalPermission(id, permissionId: permission.id, allow: allow)
             permissions.removeAll { $0.id == permission.id }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// What is picked on each question card (docs/terminal-v0.md §3 "选择题"), by its request.
+    private(set) var questionPicks: [String: QuestionPicks] = [:]
+    /// The question cards being sent (Other's words go through the Mac's sealer first, which may take a while).
+    private(set) var answering: Set<String> = []
+
+    func picks(_ question: TerminalPermission) -> QuestionPicks { questionPicks[question.id] ?? QuestionPicks(question.questions) }
+
+    func updatePicks(_ question: TerminalPermission, _ change: (inout QuestionPicks) -> Void) {
+        var picks = picks(question)
+        change(&picks)
+        questionPicks[question.id] = picks
+    }
+
+    /// A question card's answers, once every question has one: the card goes when they are in, or when it was answered
+    /// already (in the terminal, on the Mac).
+    func answer(_ question: TerminalPermission) async {
+        let picks = picks(question)
+        guard picks.isComplete, !answering.contains(question.id) else { return }
+        guard let api else { permissions.removeAll { $0.id == question.id }; return }
+        answering.insert(question.id)
+        defer { answering.remove(question.id) }
+        userActed()
+        do {
+            let sealed = try await api.answerTerminalQuestion(id, permissionId: question.id, answers: picks.answers)
+            if let sealed, sealed > 0 { sealedNote = sealed == 1 ? "1 secret sealed" : "\(sealed) secrets sealed" }
+            permissions.removeAll { $0.id == question.id }
+            questionPicks[question.id] = nil
         } catch {
             self.error = error.localizedDescription
         }

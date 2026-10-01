@@ -30,6 +30,15 @@ async function handle(line) {
     process.stdout.write(`answer: ${out || "(none)"}\r\n`);
     return;
   }
+  // Claude Code's AskUserQuestion: a PermissionRequest too (2.1.286); the answers come back in updatedInput.
+  if (line === "ask") {
+    const out = await hook({ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion", tool_input: { questions: [
+      { question: "日期格式化用哪个库？", header: "Library", multiSelect: false, options: [{ label: "date-fns", description: "体积小" }, { label: "Luxon", description: "自带时区" }] },
+      { question: "发布前跑哪些检查？", header: "Checks", multiSelect: true, options: [{ label: "单元测试", description: "" }, { label: "类型检查", description: "" }] },
+    ] } });
+    process.stdout.write(`answer: ${out || "(none)"}\r\n`);
+    return;
+  }
   // Busy a while, as an agent at work: a spinner frame every 150 ms for 1.2 s.
   if (line === "work") {
     for (let i = 0; i < 8; i++) { process.stdout.write(`\rworking ${"|/-\\"[i % 4]}`); await new Promise((r) => setTimeout(r, 150)); }
