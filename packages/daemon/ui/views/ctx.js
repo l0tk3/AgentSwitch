@@ -55,26 +55,27 @@ function platformMemory(mem = { records: [], loading: false, loaded: false, dele
       ${removal.message ? `<div class="hint ${removal.status === "error" ? "error" : ""}" role="${removal.status === "error" ? "alert" : "status"}" aria-live="polite" style="margin-top:8px">${esc(removal.message)}</div>` : ""}
     </article>`;
   }).join("");
-  return `<section><h2>// experience <span class="spacer"></span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></h2>
-    <p class="dim">按具体平台保存的观察记录，附来源与有效期。过期记录不会用于后续任务；记录不代表操作授权。</p>
+  return `<section class="xsec">
+    <div class="sh"><span class="lbl">// experience</span><span class="what">执行器在具体网站上学到的做法，附来源与有效期；过期的不再用于后续任务，也不代表操作授权</span><button class="small" id="platform-memory-refresh" ${mem.loading ? "disabled" : ""}>${mem.loading ? "加载中…" : "刷新"}</button></div>
     ${mem.hint ? `<div class="card bad error" role="alert">${esc(mem.hint)}</div>` : ""}
     <div class="stack">${records || `<div class="empty">${mem.loading ? "正在加载平台经验…" : mem.loaded ? "暂无平台经验" : "平台经验尚未加载"}</div>`}</div></section>`;
 }
 
-/** Who answers approvals (docs/supervisor-v0.md §1b): manual / auto / scoped with reserved categories. */
+/** Who answers approvals (docs/supervisor-v0.md §1b; 2026-10-01, user: 这个选项也不知道是给谁选的): a section that
+ *  says what it decides, the three ways one under another, the categories that still ask you under the way they
+ *  belong to, and its button under them naming what it saves. */
 function policyCard(p) {
   if (!p) return "";
   const mode = p.policy.mode;
-  const opt = (v, label, desc) => `<label class="opt"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}><span><b>${label}</b><span class="d">${desc}</span></span></label>`;
+  const opt = (v, label, desc, extra = "") => `<div class="way"><label class="opt"><input type="radio" name="pol-mode" value="${v}" ${mode === v ? "checked" : ""}><span><b>${label}</b><span class="d">${desc}</span></span></label>${extra}</div>`;
   const cats = p.categories.map((c) => `<label class="opt cat"><input type="checkbox" class="pol-cat" value="${c.id}" ${p.policy.human.includes(c.id) ? "checked" : ""} ${mode === "scoped" ? "" : "disabled"}><span>${esc(c.title)}</span></label>`).join("");
-  return `<section class="policy"><h2>// approval<span class="spacer"></span><button class="primary" id="pol-save">保存策略</button></h2>
-    <div class="opts3">
-      ${opt("manual", "逐项确认", "每个审批都交由你决定，调度模型不介入。")}
-      ${opt("scoped", "自动", "下方勾选的类别交由你决定，其余由调度模型代批。")}
-      ${opt("auto", "全部自动", "调度模型代批所有审批，包括删除、推送、支付等不可逆操作；无法判断时仍交由你决定。")}
-    </div>
-    <div class="cats${mode === "scoped" ? "" : " off"}">${cats}</div>
-    <div class="say">服务自身的文件始终禁止修改，不在此列。调度时如缺少信息，调度模型会直接向你提问。</div>
+  return `<section class="policy">
+    <div class="sh"><span class="lbl">// approval</span><span class="what">路由器派出的任务要做需要批准的事（删文件、推送、付款……）时，由谁决定</span></div>
+    ${opt("manual", "逐项确认", "每一次都问你，调度模型不介入。")}
+    ${opt("scoped", "自动", "调度模型代你批准，但下面勾选的几类仍然问你：", `<div class="cats${mode === "scoped" ? "" : " off"}">${cats}</div>`)}
+    ${opt("auto", "全部自动", "调度模型代你批准所有请求，包括删除、推送、支付这类不可逆操作；它判断不了的仍然问你。")}
+    <div class="say">AgentSwitch 自身的文件始终禁止修改，不在此列；调度时缺少信息，调度模型会直接问你。终端里的 agent 不受这里影响，按各自终端的权限模式。</div>
+    <div class="sacts"><button class="primary" id="pol-save">保存审批方式</button></div>
   </section>`;
 }
 

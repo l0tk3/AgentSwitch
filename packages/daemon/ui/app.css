@@ -120,6 +120,8 @@ details[open] > summary::before { content: "▾ "; }
 .chip::before { content: "< > "; color: var(--ink3); }
 .chip.on { color: var(--ink); }
 .chip.on::before { content: "<x> "; color: var(--signal); }
+.chip[data-h]::before, .chip[data-multi="true"]::before { content: "[ ] "; }
+.chip.on[data-h]::before { content: "[x] "; }
 .chip:hover { background: none; color: var(--ink); }
 
 /* the band: the mark as the whole state, the service, what waits, the way to the terminals */
@@ -303,13 +305,31 @@ main.page p, main.page .say { font: 12.5px/1.6 var(--ui); color: var(--ink2); ma
 .pane textarea.src { border: 0; min-height: 300px; height: 42vh; resize: vertical; padding: 10px 12px; font: 12.5px/1.65 var(--mono); background: none; }
 .pane .say { margin: 0; padding: 8px 10px; border-top: 1px solid var(--ink4); font: 12px/1.6 var(--ui); color: var(--ink3); }
 .pane .note { margin: 8px 10px 0; }
-.policy { margin-top: 22px; }
+/* a section: its label and what it is for on one line, then its content, then its own buttons under it */
+.xsec, .policy { margin-top: 26px; max-width: 980px; }
+.sh { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 8px; }
+.sh .lbl { margin: 0; color: var(--ink2); font-size: 12px; }
+.sh .what { font: 12.5px/1.5 var(--ui); color: var(--ink3); }
+.sacts { display: flex; gap: 16px; margin: 10px 0 0; }
+.way { margin: 8px 0; }
 .opts3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+/* list rows (extensions): on/off, name, kind, approval, what it runs and for whom, actions */
+.xrow { display: grid; grid-template-columns: 12px minmax(8ch, 16ch) 6ch 9ch minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 7px 0; font-size: 12.5px;
+  background-image: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
+.xrow .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xrow .k { color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
+.xrow .d { font: 12.5px/1.5 var(--ui); color: var(--ink2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xrow .a { display: flex; gap: 12px; }
+.xrow.off .n, .xrow.off .d { color: var(--ink3); }
+.xform { max-width: 760px; margin: 14px 7px 8px 0; }
+.xform .bd { padding-bottom: 8px; }
+.imp { margin-top: 14px; }
+.imp .empty { padding-left: 14px; }
 label.opt { display: flex; align-items: flex-start; gap: 8px; margin: 0; font: 13px/1.5 var(--ui); color: var(--ink); letter-spacing: 0; cursor: pointer; }
 label.opt input { margin-top: 3px; }
 label.opt b { font-weight: 600; display: block; }
 label.opt .d { display: block; color: var(--ink2); font-size: 12px; }
-.cats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 12px 0 0 24px; }
+.cats { display: grid; gap: 4px; margin: 6px 0 0 24px; padding-left: 12px; border-left: 1px solid var(--ink4); }
 .cats.off { opacity: .5; }
 label.opt.cat { font-size: 12.5px; }
 .page-title { display: flex; align-items: baseline; gap: 16px; margin-bottom: 14px; }

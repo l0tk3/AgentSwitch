@@ -1,4 +1,5 @@
-/** Extensions: MCP servers (left) and skills (right), each with inline add/edit forms. */
+/** Extensions (docs/ui-v0.md §7.4; 2026-10-01, user: add 和 new 都不知道是给谁的): one column — what they are for,
+ *  then MCP servers and skills, each a list of rows with its own named button under it and its form in a box. */
 
 import { HARNESSES, api, esc, lines, parseLines } from "../lib/api.js";
 import { extAction } from "../lib/actions.js";
@@ -11,75 +12,86 @@ const chips = (sel, attr, form) => HARNESSES.map((h) => `<span class="chip ${sel
 const picked = (edit, form) => edit.harnesses[form] ?? edit[form]?.harnesses ?? HARNESSES;
 const sel = (v, cur) => (v === cur ? "selected" : "");
 
-function mcpCard(s) {
-  const target = s.kind === "stdio" ? [s.command, ...(s.args || [])].join(" ") : s.url;
-  return `<div class="card ${s.enabled ? "" : "off"}">
-    <div class="row"><b class="grow ellipsis">${esc(s.name)}</b><span class="badge">${s.kind}</span><span class="badge">${s.approval === "allow" ? "免审批" : "需审批"}</span></div>
-    <div class="mono dim" style="margin-top:4px">${esc(target)}</div>${s.note ? `<div class="dim">${esc(s.note)}</div>` : ""}
-    <div class="chips" style="margin-top:6px">${chips(s.harnesses, "x")}</div>
-    <div class="actions"><button class="small" data-mcp-toggle="${esc(s.name)}">${s.enabled ? "停用" : "启用"}</button><button class="small" data-mcp-edit="${esc(s.name)}">编辑</button><button class="small bad" data-mcp-del="${esc(s.name)}">删除</button></div>
+/** Which agents an entry is given to, in words. */
+const given = (list) => (list.length === HARNESSES.length ? "all agents" : list.length ? list.join(" · ") : "no agent");
+
+/** One MCP server as a row (demo console.html #ext): on or off, its name, how it runs, whether its calls are asked
+ *  about, what it starts or calls and for whom, then its actions. */
+function mcpRow(m) {
+  const target = m.kind === "stdio" ? [m.command, ...(m.args || [])].join(" ") : m.url;
+  return `<div class="xrow ${m.enabled ? "" : "off"}">
+    <span class="sq ${m.enabled ? "ok" : "off hollow"}" title="${m.enabled ? "on" : "off"}"></span>
+    <b class="n">${esc(m.name)}</b>
+    <span class="k">${esc(m.kind)}</span>
+    <span class="k" title="Claude Code 调用它的工具时">${m.approval === "allow" ? "no asking" : "ask"}</span>
+    <span class="d"><code>${esc(target)}</code><span class="faint"> · ${esc(given(m.harnesses || []))}</span>${m.note ? `<span class="faint"> · ${esc(m.note)}</span>` : ""}</span>
+    <span class="a"><button class="small" data-mcp-edit="${esc(m.name)}">编辑</button><button class="small" data-mcp-toggle="${esc(m.name)}">${m.enabled ? "停用" : "启用"}</button><button class="small bad" data-mcp-del="${esc(m.name)}">删除</button></span>
   </div>`;
 }
 
+/** A floating form (a box with a dithered shadow) for one MCP server, new or being edited. */
 function mcpForm(s, harnesses) {
   const e = s || { name: "", kind: "stdio", command: "", args: [], env: {}, url: "", headers: {}, approval: "ask", note: "" };
-  return `<div class="card" id="mcp-form"><div class="form">
-    <div><label>名称</label><input id="m-name" value="${esc(e.name)}" ${s ? "readonly" : ""} placeholder="github"></div>
-    <div><label>类型</label><select id="m-kind"><option value="stdio" ${sel("stdio", e.kind)}>stdio（本地进程）</option><option value="http" ${sel("http", e.kind)}>http（远程）</option></select></div>
-    <div class="full"><label>命令（stdio）</label><input id="m-command" value="${esc(e.command || "")}" placeholder="npx"></div>
-    <div><label>参数，每行一个（stdio）</label><textarea id="m-args" class="code" style="min-height:70px">${esc((e.args || []).join("\n"))}</textarea></div>
-    <div><label>环境变量 KEY=VALUE，每行一个（stdio）</label><textarea id="m-env" class="code" style="min-height:70px">${esc(lines(e.env, "="))}</textarea></div>
-    <div class="full"><label>URL（http）</label><input id="m-url" value="${esc(e.url || "")}" placeholder="https://…"></div>
-    <div class="full"><label>请求头 Key: Value，每行一个（http）</label><textarea id="m-headers" class="code" style="min-height:60px">${esc(lines(e.headers, ": "))}</textarea></div>
-    <div><label>Claude Code 调用时</label><select id="m-approval"><option value="ask" ${sel("ask", e.approval)}>需要审批</option><option value="allow" ${sel("allow", e.approval)}>免审批</option></select></div>
-    <div><label>备注</label><input id="m-note" value="${esc(e.note || "")}"></div>
-    <div class="full"><label>适用的执行器</label><div class="chips" id="m-harness">${chips(harnesses, "h", "mcp")}</div></div>
-  </div>
-  <div class="hint" style="margin-top:8px">密钥仅填写 enc:v1 密文：stdio 服务继承凭据网关的代理环境，出网请求中的密文在网络层替换。</div>
-  <div class="actions"><button class="primary" id="m-save">保存</button><button id="m-cancel">取消</button></div></div>`;
+  return `<div class="box xform" id="mcp-form"><div class="hd"><span>${s ? `edit mcp server · ${esc(s.name)}` : "new mcp server"}</span></div>
+    <div class="bd"><div class="form">
+    <div><label>// name</label><input id="m-name" value="${esc(e.name)}" ${s ? "readonly" : ""} placeholder="github"></div>
+    <div><label>// kind</label><select id="m-kind"><option value="stdio" ${sel("stdio", e.kind)}>stdio（本地进程）</option><option value="http" ${sel("http", e.kind)}>http（远程）</option></select></div>
+    <div class="full"><label>// command（stdio）</label><input id="m-command" value="${esc(e.command || "")}" placeholder="npx"></div>
+    <div><label>// args，每行一个（stdio）</label><textarea id="m-args" class="code" style="min-height:70px">${esc((e.args || []).join("\n"))}</textarea></div>
+    <div><label>// env，KEY=VALUE 每行一个（stdio）</label><textarea id="m-env" class="code" style="min-height:70px">${esc(lines(e.env, "="))}</textarea></div>
+    <div class="full"><label>// url（http）</label><input id="m-url" value="${esc(e.url || "")}" placeholder="https://…"></div>
+    <div class="full"><label>// headers，Key: Value 每行一个（http）</label><textarea id="m-headers" class="code" style="min-height:60px">${esc(lines(e.headers, ": "))}</textarea></div>
+    <div><label>// Claude Code 调用它时</label><select id="m-approval"><option value="ask" ${sel("ask", e.approval)}>需要审批</option><option value="allow" ${sel("allow", e.approval)}>免审批</option></select></div>
+    <div><label>// note</label><input id="m-note" value="${esc(e.note || "")}"></div>
+    <div class="full"><label>// given to</label><div class="chips" id="m-harness">${chips(harnesses, "h", "mcp")}</div></div>
+    </div>
+    <div class="hint">密钥仅填写 enc:v1 密文：stdio 服务继承凭据网关的代理环境，出网请求中的密文在网络层替换。</div></div>
+    <div class="ft"><button id="m-cancel">取消</button><button class="primary" id="m-save">保存</button></div></div>`;
 }
 
-function skillCard(s) {
-  return `<div class="card ${s.enabled ? "" : "off"}">
-    <div class="row"><b class="grow ellipsis">${esc(s.name)}</b>${s.files ? `<span class="badge">+${s.files} 个文件</span>` : ""}</div>
-    <div class="dim" style="margin-top:4px">${esc(s.description || "（无描述）")}</div>
-    <div class="chips" style="margin-top:6px">${chips(s.harnesses, "x")}</div>
-    <div class="actions"><button class="small" data-skill-toggle="${esc(s.name)}">${s.enabled ? "停用" : "启用"}</button><button class="small" data-skill-edit="${esc(s.name)}">编辑</button><button class="small bad" data-skill-del="${esc(s.name)}">删除</button></div>
+function skillRow(k) {
+  return `<div class="xrow ${k.enabled ? "" : "off"}">
+    <span class="sq ${k.enabled ? "ok" : "off hollow"}" title="${k.enabled ? "on" : "off"}"></span>
+    <b class="n">${esc(k.name)}</b>
+    <span class="k">${k.files ? `+${k.files} files` : ""}</span>
+    <span class="k"></span>
+    <span class="d">${esc(k.description || "（无描述）")}<span class="faint"> · ${esc(given(k.harnesses || []))}</span></span>
+    <span class="a"><button class="small" data-skill-edit="${esc(k.name)}">编辑</button><button class="small" data-skill-toggle="${esc(k.name)}">${k.enabled ? "停用" : "启用"}</button><button class="small bad" data-skill-del="${esc(k.name)}">删除</button></span>
   </div>`;
 }
 
 function skillForm(s, harnesses) {
   const e = s || { name: "", content: "" };
-  return `<div class="card" id="skill-form"><div class="form">
-    <div class="full"><label>名称（目录名）</label><input id="s-name" value="${esc(e.name)}" ${s ? "readonly" : ""} placeholder="deploy-checklist"></div>
-    <div class="full"><label>SKILL.md（未写 frontmatter 时自动补充 name/description）</label><textarea id="s-content" class="code">${esc(e.content || "")}</textarea></div>
-    <div class="full"><label>适用的执行器</label><div class="chips" id="s-harness">${chips(harnesses, "h", "skill")}</div></div>
-  </div><div class="actions"><button class="primary" id="s-save">保存</button><button id="s-cancel">取消</button></div></div>`;
+  return `<div class="box xform" id="skill-form"><div class="hd"><span>${s ? `edit skill · ${esc(s.name)}` : "new skill"}</span></div>
+    <div class="bd"><div class="form">
+    <div class="full"><label>// name（目录名）</label><input id="s-name" value="${esc(e.name)}" ${s ? "readonly" : ""} placeholder="deploy-checklist"></div>
+    <div class="full"><label>// SKILL.md（未写 frontmatter 时自动补充 name / description）</label><textarea id="s-content" class="code">${esc(e.content || "")}</textarea></div>
+    <div class="full"><label>// given to</label><div class="chips" id="s-harness">${chips(harnesses, "h", "skill")}</div></div>
+    </div></div>
+    <div class="ft"><button id="s-cancel">取消</button><button class="primary" id="s-save">保存</button></div></div>`;
 }
 
 function discovered(found) {
-  const rows = found.map((d) => `<div class="row" style="margin-top:8px"><div class="grow"><b>${esc(d.name)}</b> <span class="dim">${esc(d.source)}</span><div class="dim ellipsis">${esc(d.description)}</div></div><button class="small" data-skill-import="${esc(d.path)}">导入</button></div>`).join("");
-  return `<details class="card" id="skill-discover" data-keep-open><summary>从本机导入（~/.claude/skills、~/.codex/skills…）${found.length ? " · " + found.length : ""}</summary>${rows || `<div class="dim" style="margin-top:6px">无可导入的 skill（已导入的不再列出）</div>`}</details>`;
+  const rows = found.map((d) => `<div class="xrow"><span></span><b class="n">${esc(d.name)}</b><span class="k">${esc(d.source)}</span><span class="k"></span><span class="d">${esc(d.description)}</span><span class="a"><button class="small" data-skill-import="${esc(d.path)}">导入</button></span></div>`).join("");
+  return `<details class="imp" id="skill-discover" data-keep-open><summary>从本机已有的 skill 导入（~/.claude/skills、~/.codex/skills…）${found.length ? ` · ${found.length}` : ""}</summary>${rows || `<div class="empty">没有可导入的 skill（已导入的不再列出）。</div>`}</details>`;
 }
 
 export function render(s) {
   const found = s.discovered.filter((d) => !d.installed);
   return `<div class="page-title"><h1>extensions</h1><span class="faint">执行器可用的 MCP 服务与 skills</span></div>
-    ${s.extHint ? `<div class="card bad error" style="margin-bottom:14px">${esc(s.extHint)}</div>` : ""}
-    <div class="ext-cols">
-      <div class="stack">
-        <h2>// mcp ${s.mcp.length}<span class="spacer"></span>${s.edit.mcp === null ? `<button class="small" id="mcp-new">add</button>` : ""}</h2>
-        ${s.edit.mcp !== null ? mcpForm(s.edit.mcp, picked(s.edit, "mcp")) : ""}
-        ${s.mcp.map(mcpCard).join("") || `<div class="empty">暂无 MCP 服务。凭据网关自带的 secret-gate / playwright 不在此处管理。</div>`}
-      </div>
-      <div class="stack">
-        <h2>// skills ${s.skills.length}<span class="spacer"></span>${s.edit.skill === null ? `<button class="small" id="skill-new">new</button>` : ""}</h2>
-        ${s.edit.skill !== null ? skillForm(s.edit.skill, picked(s.edit, "skill")) : ""}
-        ${s.skills.map(skillCard).join("") || `<div class="empty">暂无 skill</div>`}
-        ${discovered(found)}
-      </div>
-    </div>
-    <p class="say">MCP 与 skill 在每次任务运行时注入执行器的私有配置，不修改你的 <code>~/.claude</code>、<code>~/.codex</code> 与 OpenCode 配置。</p>`;
+    <p class="say">路由器派出的任务每次运行时，这里的 MCP 服务与 skill 会注入执行器的私有配置；不修改你的 <code>~/.claude</code>、<code>~/.codex</code> 与 OpenCode 配置，也不影响终端里的 agent。</p>
+    ${s.extHint ? `<div class="note warn">${esc(s.extHint)}</div>` : ""}
+    <section class="xsec">
+      <div class="sh"><span class="lbl">// mcp servers · ${s.mcp.length}</span><span class="what">执行器可调用的工具服务</span></div>
+      ${s.mcp.map(mcpRow).join("") || `<div class="empty">还没有 MCP 服务。凭据网关自带的 secret-gate / playwright 不在这里管理。</div>`}
+      ${s.edit.mcp !== null ? mcpForm(s.edit.mcp, picked(s.edit, "mcp")) : `<div class="sacts"><button id="mcp-new">+ add mcp server</button></div>`}
+    </section>
+    <section class="xsec">
+      <div class="sh"><span class="lbl">// skills · ${s.skills.length}</span><span class="what">执行器可用的操作说明（SKILL.md）</span></div>
+      ${s.skills.map(skillRow).join("") || `<div class="empty">还没有 skill。</div>`}
+      ${s.edit.skill !== null ? skillForm(s.edit.skill, picked(s.edit, "skill")) : `<div class="sacts"><button id="skill-new">+ new skill</button></div>`}
+      ${discovered(found)}
+    </section>`;
 }
 
 /** Open (undefined = new, object = existing) or close (null) a form; its chip toggles start over. */

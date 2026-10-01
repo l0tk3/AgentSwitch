@@ -155,7 +155,8 @@ describe("extension harness chips", () => {
     expect(chipsOn("#m-harness")).toEqual(["codex"]);
     $<HTMLElement>('#m-harness [data-h="opencode"]')!.click();
     expect(chipsOn("#m-harness")).toEqual(["codex", "opencode"]);
-    $<HTMLElement>('.chip[data-x="claude-code"]')!.click();   // card chips only display
+    // The row names whom the server is given to in words; only the form's chips toggle.
+    expect($('[data-mcp-edit="gh"]')!.closest(".xrow")!.textContent).toContain("codex");
     expect(state.get().edit.harnesses.mcp).toEqual(["codex", "opencode"]);
     $<HTMLElement>("#m-cancel")!.click();
     expect(state.get().edit.harnesses.mcp).toBeNull();
