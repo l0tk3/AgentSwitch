@@ -77,7 +77,7 @@ import { codexTextRouter } from "./router/routers/codex.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS, QUOTA_TTL_MS } from "./core/limits.js";
 import { loadWorkdir } from "./files/workdir.js";
 import { defaultSessionSources, SessionMonitor } from "./sessions/monitor.js";
-import { openCodeDeleter } from "./sessions/opencode.js";
+import { openCodeDeleter, type OpenCodeDelete } from "./sessions/opencode.js";
 import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
 import { TerminalAudit } from "./terminals/audit.js";
 import { TerminalHost, type Launcher, type TerminalHarness } from "./terminals/host.js";
@@ -202,6 +202,8 @@ export type BuildOverrides = {
   readonly terminalLauncher?: Launcher;
   /** Tests: whether a session is open in another program (default: this Mac's agents; none with a fake launcher). */
   readonly terminalElsewhere?: ElsewhereCheck;
+  /** Tests: how an OpenCode session is deleted (default: the user's opencode; none with a fake launcher). */
+  readonly openCodeDelete?: OpenCodeDelete;
 };
 
 /** The agent CLIs a terminal can start, as absolute paths; a missing one is left out (docs/terminal-v0.md §2). The user's
@@ -318,16 +320,19 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure({ fresh: true }), 8000); } } : {}),
     ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current() } : {}),
   } : undefined;
-  // Deleting an OpenCode session goes through the user's own opencode (docs/terminal-v0.md §5); none with a fake launcher.
+  // Deleting an OpenCode session goes through the user's own opencode (docs/terminal-v0.md §5, threads-v0 删除): the
+  // user's from the session list, the executors' with their tasks. None with a fake launcher, nor when no opencode is
+  // configured (tests): a test never reaches the user's OpenCode.
   const sessionSources = defaultSessionSources(cfg.home);
-  const opencodeBin = overrides.terminalLauncher ? undefined : agentBinaries.opencode ?? terminalBinaries(targets, cfg.opencodeBinary).opencode;
+  const opencodeBin = overrides.terminalLauncher || !cfg.opencodeBinary ? undefined : agentBinaries.opencode ?? terminalBinaries(targets, cfg.opencodeBinary).opencode;
+  const openCodeDelete = overrides.openCodeDelete ?? (opencodeBin ? openCodeDeleter(opencodeBin, sessionSources.opencodeDb) : undefined);
   const sessions = cfg.watchSessions ? new SessionMonitor({
-    ...sessionSources, ...(opencodeBin ? { openCodeDelete: openCodeDeleter(opencodeBin, sessionSources.opencodeDb) } : {}),
+    ...sessionSources, ...(openCodeDelete ? { openCodeDelete } : {}),
     ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
   }) : undefined;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
   const conversation = new AssistantLog(join(cfg.home, "assistant.db"));
-  const engine = new Engine({ conversation, ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(nearSessions ? { sessionsNear: nearSessions } : {}), store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
+  const engine = new Engine({ conversation, ...(openCodeDelete ? { deleteSessions: executorSessionsDeleter(openCodeDelete) } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(nearSessions ? { sessionsNear: nearSessions } : {}), store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
   // Tasks the last run left unfinished cannot be confirmed either way (docs/control-v0.md §4).
   engine.interruptLeftovers();
   sweepThreads(store, Date.now(), engine);
@@ -404,6 +409,21 @@ export function forgetDeletedTasks(conversation: AssistantLog, store: Pick<Store
   const lines = conversation.forgetTasks(gone);
   if (lines) console.error(`conversation: ${lines} lines about ${gone.length} deleted tasks removed`);
   return lines;
+}
+
+/** The executors' sessions of deleted tasks (threads-v0 删除): OpenCode's live in the user's own database and are deleted
+ *  there, one after another in the background (each a short opencode run); Claude Code's and Codex's live in the
+ *  thread's home, already gone with it. A failure is logged and does not hold the deletion up. */
+export function executorSessionsDeleter(openCodeDelete: OpenCodeDelete, log: (line: string) => void = console.error): (sessions: readonly { harness: string; sessionId: string }[]) => void {
+  let queue: Promise<unknown> = Promise.resolve();
+  return (sessions) => {
+    for (const s of sessions) {
+      if (s.harness !== "opencode") continue;
+      queue = queue.then(() => openCodeDelete(s.sessionId)).then(
+        (deleted) => { if (deleted) log(`executor session deleted with its task: opencode ${s.sessionId}`); },
+        (err: unknown) => log(`executor session opencode ${s.sessionId} could not be deleted: ${(err as Error).message}`));
+    }
+  };
 }
 
 /** Archived threads past their expiry lose their row, log and private home. Runs at start and hourly. */

@@ -46,6 +46,9 @@ export type EngineDeps = ComposeDeps & {
   readonly routingLog?: RoutingLog;
   /** The assistant's conversation: the lines about a deleted task go with it (threads-v0 手动删除). */
   readonly conversation?: { forgetTasks(ids: readonly string[]): unknown };
+  /** The executors' native sessions of deleted threads and tasks, no longer recorded anywhere (threads-v0 删除): the
+   *  ones kept outside the thread's home (OpenCode's, in the user's own database) are deleted there. */
+  readonly deleteSessions?: (sessions: readonly { harness: string; sessionId: string }[]) => void;
   /** Where <cwd>/out is copied before an ephemeral working directory is deleted. */
   readonly artifactsDir?: string;
   /** Rewrites the thread summary after every execution (threads-v0 §3); absent in tests. */
@@ -175,8 +178,11 @@ export class Engine {
     const related = new Map(tasks.flatMap((task) => (task.threadId ? this.ctx.store.tasksInThread(task.threadId) : [task])).map((task) => [task.id, task]));
     const blocked = this.deletionBlocker([...related.values()]);
     if (blocked) return blocked;
+    // Deleting a task drops its thread's native sessions whole (they blend every task's turns).
+    const sessions = this.sessionsOf(tasks);
     for (const task of tasks) this.ctx.store.deleteTask(task.id);
     this.forgetTasks(tasks);
+    this.forgetSessions(sessions);
     return { ok: true };
   }
 
@@ -185,12 +191,14 @@ export class Engine {
     const tasks = this.ctx.store.listTasks(Number.MAX_SAFE_INTEGER);
     const blocked = this.deletionBlocker(tasks);
     if (blocked) return blocked;
+    const sessions = this.sessionsOf(tasks);
     for (const thread of this.ctx.store.listThreads({ limit: Number.MAX_SAFE_INTEGER })) {
       this.ctx.store.deleteThread(thread.id);
       this.deps.browserSlots?.forgetThread(thread.id);
     }
     for (const task of this.ctx.store.listTasks(Number.MAX_SAFE_INTEGER)) this.ctx.store.deleteTask(task.id);
     this.forgetTasks(tasks);
+    this.forgetSessions(sessions);
     return { ok: true };
   }
 
@@ -199,8 +207,10 @@ export class Engine {
     const tasks = this.ctx.store.tasksInThread(id);
     const blocked = this.deletionBlocker(tasks);
     if (blocked) return blocked;
+    const sessions = this.ctx.store.threadSessions([id]);
     this.ctx.store.deleteThread(id);
     this.forgetTasks(tasks);
+    this.forgetSessions(sessions);
     this.deps.browserSlots?.forgetThread(id);   // the thread's logins go with it
     return { ok: true };
   }
@@ -212,6 +222,19 @@ export class Engine {
     return busy ? { ok: false, code: "busy", error: this.inFlight.has(busy.id) && TERMINAL.has(busy.status)
       ? `task ${busy.id} is still finishing; retry shortly`
       : `task ${busy.id} is still ${busy.status}; cancel it first` } : null;
+  }
+
+  /** The native sessions the threads of these tasks recorded. */
+  private sessionsOf(tasks: readonly Task[]): { harness: string; sessionId: string }[] {
+    return this.ctx.store.threadSessions(tasks.map((task) => task.threadId).filter((id): id is string => id !== null && id !== undefined));
+  }
+
+  /** Those of `sessions` no thread records any more go to `deleteSessions`. */
+  private forgetSessions(sessions: readonly { harness: string; sessionId: string }[]): void {
+    if (!sessions.length || !this.deps.deleteSessions) return;
+    const kept = this.ctx.store.harnessSessionIds();
+    const gone = sessions.filter((s) => !kept.has(s.sessionId));
+    if (gone.length) this.deps.deleteSessions(gone);
   }
 
   private forgetTasks(tasks: readonly Task[]): void {

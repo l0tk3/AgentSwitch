@@ -88,6 +88,8 @@ const runFile = promisify(execFile);
 
 export function openCodeDeleter(binary: string, db: string, env: NodeJS.ProcessEnv = process.env): OpenCodeDelete {
   return async (id) => {
+    // An id is a word of OpenCode's (`ses_…`): never a path, never read as an option.
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_-]{0,79}$/.test(id)) return false;
     try {
       await runFile(binary, ["session", "delete", "--standalone", id], {
         timeout: 30_000, cwd: env.HOME ?? "/", env: { ...env, XDG_DATA_HOME: dirname(dirname(db)) },

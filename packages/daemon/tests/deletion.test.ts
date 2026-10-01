@@ -338,3 +338,62 @@ describe("the conversation goes with the task (threads-v0 手动删除)", () => 
     expect(forgetDeletedTasks(log, f.store)).toBe(0);
   });
 });
+
+describe("the executors' sessions go with their tasks (threads-v0 删除, 2026-10-01: 会不会无限堆满)", () => {
+  it("deleting a thread, a task, or an expired thread deletes the OpenCode sessions no thread records any more", async () => {
+    const asked: string[] = [];
+    const f = fixture({ openCodeDelete: async (id) => { asked.push(id); return true; } });
+    const settle = () => new Promise((r) => setTimeout(r, 20));
+    // A thread with two tasks: an OpenCode session, one dropped after a safety refusal, and Claude Code's (in the
+    // thread's home, gone with it: never handed to OpenCode).
+    const thread = f.store.createThread(f.cwd, "two tasks");
+    const a = f.create(thread.id), b = f.create(thread.id);
+    f.store.appendThreadEvent(thread.id, "session", { taskId: a.id, harness: "opencode", sessionId: "ses_first" });
+    f.store.appendThreadEvent(thread.id, "session", { taskId: b.id, harness: "opencode", sessionId: "ses_second" });
+    f.store.appendThreadEvent(thread.id, "session", { harness: "opencode", dropped: true, reason: "provider_safety", taskId: b.id });
+    f.store.appendThreadEvent(thread.id, "session", { taskId: b.id, harness: "claude-code", sessionId: "claude-1" });
+    // Another thread still records ses_second (a session both went on in): it stays.
+    const other = f.store.createThread(f.cwd, "other"), c = f.create(other.id);
+    f.store.appendThreadEvent(other.id, "session", { taskId: c.id, harness: "opencode", sessionId: "ses_second" });
+    // One task of two: the thread's native sessions are dropped whole, so its OpenCode sessions go.
+    expect((await f.app.request(`/tasks/${a.id}`, { method: "DELETE" })).status).toBe(200);
+    await settle();
+    expect(asked).toEqual(["ses_first"]);
+    expect(f.store.harnessSessionIds()).toEqual(new Set(["ses_second"]));
+    // The other thread, by itself: its session is no longer recorded anywhere.
+    expect((await f.app.request(`/threads/${other.id}`, { method: "DELETE" })).status).toBe(200);
+    await settle();
+    expect(asked).toEqual(["ses_first", "ses_second"]);
+    // An archived thread past its expiry, swept: the same.
+    const old = f.store.createThread(f.cwd, "archived"), d = f.create(old.id);
+    f.store.appendThreadEvent(old.id, "session", { taskId: d.id, harness: "opencode", sessionId: "ses_archived" });
+    f.store.updateThread(old.id, { status: "archived", expiresAt: 1 });
+    expect(sweepThreads(f.store, Date.now(), f.engine)).toEqual([old.id]);
+    await settle();
+    expect(asked).toEqual(["ses_first", "ses_second", "ses_archived"]);
+  });
+
+  it("runs the deletions one after another and logs a failure without holding anything up", async () => {
+    const { executorSessionsDeleter } = await import("../src/daemon.js");
+    const order: string[] = [], lines: string[] = [];
+    let running = 0;
+    const del = executorSessionsDeleter(async (id) => {
+      running++;
+      expect(running).toBe(1);
+      await new Promise((r) => setTimeout(r, 5));
+      running--;
+      order.push(id);
+      if (id === "ses_bad") throw new Error("database is locked");
+      return id !== "ses_gone";
+    }, (line) => lines.push(line));
+    del([{ harness: "opencode", sessionId: "ses_a" }, { harness: "codex", sessionId: "x" }, { harness: "opencode", sessionId: "ses_bad" }]);
+    del([{ harness: "opencode", sessionId: "ses_gone" }, { harness: "opencode", sessionId: "ses_b" }]);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(order).toEqual(["ses_a", "ses_bad", "ses_gone", "ses_b"]);
+    expect(lines).toEqual([
+      "executor session deleted with its task: opencode ses_a",
+      "executor session opencode ses_bad could not be deleted: database is locked",
+      "executor session deleted with its task: opencode ses_b",
+    ]);
+  });
+});

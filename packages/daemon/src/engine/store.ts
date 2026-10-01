@@ -345,6 +345,21 @@ export class Store {
     return new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0));
   }
 
+  /** The executors' native sessions threads recorded (threads-v0 删除): each `session` event's harness and id, the ones
+   *  dropped later included, each once. */
+  threadSessions(threadIds: readonly string[]): { harness: string; sessionId: string }[] {
+    const seen = new Map<string, { harness: string; sessionId: string }>();
+    const query = this.db.prepare("SELECT payload FROM thread_events WHERE thread_id = ? AND type = 'session' ORDER BY seq");
+    for (const id of new Set(threadIds)) {
+      for (const row of query.all(id) as { payload: string }[]) {
+        let p: { harness?: unknown; sessionId?: unknown } = {};
+        try { p = JSON.parse(row.payload) as typeof p; } catch { continue; }
+        if (typeof p.harness === "string" && typeof p.sessionId === "string" && p.sessionId) seen.set(`${p.harness}:${p.sessionId}`, { harness: p.harness, sessionId: p.sessionId });
+      }
+    }
+    return [...seen.values()];
+  }
+
   threadEvents(threadId: string): ThreadEvent[] {
     const rows = this.db.prepare("SELECT * FROM thread_events WHERE thread_id = ? ORDER BY seq").all(threadId) as Row[];
     return rows.map((r) => ({ threadId: String(r.thread_id), seq: Number(r.seq), ts: Number(r.ts), type: String(r.type) as ThreadEventType, payload: JSON.parse(String(r.payload)) }));
