@@ -507,7 +507,7 @@ function select(id, { loading = null } = {}) {
   // The composer belongs to the terminal it was opened for: what was typed there (it may be a secret) never goes on
   // to another one.
   if (moved) { $("composerText").value = ""; if (!narrow.matches) $("composer").hidden = true; }
-  $("composerTo").textContent = `→ ${t.name}`;
+  $("composerTo").textContent = `→ ${folderOf(t.workdir || t.cwd)}`;
   current = t;
   leaveCreate();
   lastSeq = 0;
@@ -980,14 +980,20 @@ function renderSeal() {
 function renderHead() {
   const t = current;
   const create = !t || creating;
-  $("bandName").textContent = create ? "new terminal" : t.name;
+  // The title: the folder the agent works in now and its git (docs/terminal-v0.md §1, 2026-10-01), as its own status
+  // line says it; the terminal's name stays on its row in the list and in the tooltip.
+  const where = create ? "" : folderOf(t.workdir || t.cwd);
+  const g = create ? null : gits[t.workdir || t.cwd];
+  const git = g ? [g.branch, g.changed ? `±${g.changed}` : "", g.ahead ? `↑${g.ahead}` : "", g.behind ? `↓${g.behind}` : ""].filter(Boolean).join(" ") : "";
+  $("bandName").replaceChildren(create ? "new terminal" : where, git ? h("i", { class: "git" }, git) : "");
+  $("bandName").title = create ? "" : `${t.name} · ${tilde(t.workdir || t.cwd)}`;
   const word = create ? "" : t.status === "working" ? "busy" : t.status;
   $("bandStatus").className = `band-status ${create ? "" : t.status}`;
   $("bandStatus").textContent = word;
-  document.title = create ? "new terminal" : t.name;
-  // The Mac window's toolbar: the terminal on screen as its title (none while one is being made), and where the screen
-  // is, so the window can hand the wheel over it to the page.
-  tellWindow("head", { name: create ? "" : t.name, status: create ? null : t.status });
+  document.title = create ? "new terminal" : `${where} — ${t.name}`;
+  // The Mac window's toolbar: the same title (none while one is being made), and where the screen is, so the window
+  // can hand the wheel over it to the page.
+  tellWindow("head", { name: where, git, path: create ? "" : tilde(t.workdir || t.cwd), terminal: create ? "" : t.name, status: create ? null : t.status });
   tellScreen();
 }
 function tellScreen() {
@@ -1180,7 +1186,7 @@ async function closeTerminal(t) {
 /** The composer opens as a box over the terminal's foot (flashing once: the user opened it) and closes on esc or send. */
 function openComposer() {
   if (!current || current.status === "exited" || creating) return;
-  $("composerTo").textContent = `→ ${current.name}`;
+  $("composerTo").textContent = `→ ${folderOf(current.workdir || current.cwd)}`;
   if ($("composer").hidden) { $("composer").hidden = false; if (!narrow.matches) glitch($("composer")); }
   $("composerText").focus();
 }
@@ -1328,6 +1334,7 @@ async function refreshGit() {
   if (!r || JSON.stringify(r.folders) === JSON.stringify(gits)) return;
   gits = r.folders;
   renderSidebar();
+  renderHead();
 }
 
 async function refreshSessions() {

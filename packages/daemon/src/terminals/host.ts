@@ -30,6 +30,8 @@ export type TerminalInfo = {
   readonly id: string;
   readonly harness: TerminalHarness;
   readonly cwd: string;
+  /** Where the agent works now: the `cwd` its hook calls carry (it changes as the agent `cd`s), else `cwd`. */
+  readonly workdir: string;
   readonly model: string | null;
   readonly mode: PermissionMode;
   /** What the screens call it: the user's own name for it, else a meaningful title the agent set (its current task),
@@ -290,6 +292,8 @@ class Session {
   status: TerminalStatus = "idle";
   statusSince: number;
   activity: { tool: string; target: string } | null = null;
+  /** The folder the agent last said it works in (a hook call's `cwd`); null before it says. */
+  agentCwd: string | null = null;
   /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
   readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string } | null; since: number }>();
   launches: { type: string; name: string; at: number }[] = [];
@@ -556,6 +560,8 @@ export class TerminalHost {
     if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
     const p = call.payload;
     if (typeof p.session_id === "string" && p.session_id) this.reported(s, p.session_id);
+    // Where it works now (the window's title says it): Claude Code and Codex send it with every call.
+    if (typeof p.cwd === "string" && p.cwd.startsWith("/") && p.cwd.length < 4096) s.agentCwd = p.cwd;
     // Claude Code says in every hook call made inside a sub-agent which one it is.
     const agentId = typeof p.agent_id === "string" && p.agent_id ? p.agent_id : null;
     // The agent goes on: what waited for you on its screen was answered.
@@ -881,7 +887,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, model: s.model, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

@@ -208,6 +208,12 @@ describe("terminal host", () => {
     expect(host.get(info.id)!.subagents.map((a) => [a.id, a.name])).toEqual([["a2", "查连接池"], ["a3", "general-purpose"]]);
     await hook("Stop", { last_assistant_message: "好了" });
     expect(host.get(info.id)!.subagents).toEqual([]);
+    // Where the agent works now comes with its hook calls (the window's title): it follows a `cd`.
+    expect(host.get(info.id)!.workdir).toBe(info.cwd);
+    await hook("PostToolUse", { tool_name: "Bash", tool_input: { command: "cd docs" }, cwd: "/w/AgentSwitch/docs" });
+    expect(host.get(info.id)!.workdir).toBe("/w/AgentSwitch/docs");
+    await hook("PostToolUse", { tool_name: "Bash", tool_input: {}, cwd: "relative/not/taken" });
+    expect(host.get(info.id)!.workdir).toBe("/w/AgentSwitch/docs");
     expect(claudeHookSettings("hook").hooks).toMatchObject({ SubagentStart: expect.any(Array), SubagentStop: expect.any(Array) });
   });
 

@@ -119,7 +119,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   const git = t.git ?? new GitStatus();
   host.onWorkDone((cwd) => git.invalidate(cwd));
   app.get("/folders/git", async (c) => {
-    const folders = [...host.list().map((x) => x.cwd), ...(deps.sessions?.list(GIT_SESSIONS) ?? []).map((x) => x.cwd)];
+    // The terminals' folders, where their agents work now (the window's title), the sessions' folders.
+    const folders = [...host.list().flatMap((x) => [x.cwd, x.workdir]), ...(deps.sessions?.list(GIT_SESSIONS) ?? []).map((x) => x.cwd)];
     return c.json({ folders: await git.summaries(folders.filter((f) => isAbsolute(f))) });
   });
 

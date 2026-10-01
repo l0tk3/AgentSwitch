@@ -189,6 +189,8 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
         switch body["type"] as? String {
         case "head":
             head.name = body["name"] as? String ?? ""
+            head.git = body["git"] as? String ?? ""
+            head.help = [body["terminal"] as? String, body["path"] as? String].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             head.status = body["status"] as? String
         case "mark":
             head.mark = PixelArt.MarkState(page: body["state"] as? String)
@@ -263,11 +265,12 @@ final class TerminalWindowController: NSObject, WKNavigationDelegate {
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { signIn() }
 
     #if DEBUG
-    /// `-designPreview`: the window's top as it opens — the bar in the title bar's row over a blank page, with a
-    /// terminal named and busy — drawn to `file` without going on screen.
+    /// `-designPreview`: the window's top as it opens — the bar in the title bar's row over a blank page, with a busy
+    /// terminal's folder and git as its title — drawn to `file` without going on screen.
     static func previewBar(to file: URL) throws {
         let head = TerminalHead()
-        head.name = "本地构建应用和手机连接"
+        head.name = "AgentSwitch"
+        head.git = "main ±5 ↑2"
         head.status = "working"
         head.mark = .busy
         head.tag = "busy"
@@ -573,7 +576,11 @@ private struct ToolbarPixelButton: View {
 @MainActor
 @Observable
 final class TerminalHead {
+    /// The folder the agent works in now (its name), and that folder's git (`main ±5 ↑2`).
     var name = ""
+    var git = ""
+    /// The terminal's own name and the folder's path, under the pointer.
+    var help = ""
     var status: String?
     var mark: PixelArt.MarkState = .off
     var tag = ""
@@ -594,8 +601,9 @@ extension PixelArt.MarkState {
     }
 }
 
-/// The window's title: the terminal on screen with its status mark (the spinner while busy, amber while it waits,
-/// hollow once ended).
+/// The window's title: the folder the terminal's agent works in now and its git, as the agent's own status line says it
+/// (2026-10-01, user: 应该和当前 agent 的工作目录保持一致，并显示 git 状态), with the status mark (the spinner while busy,
+/// amber while it waits, hollow once ended).
 private struct TerminalTitleView: View {
     let head: TerminalHead
 
@@ -608,9 +616,13 @@ private struct TerminalTitleView: View {
                 case "exited": PixelSprite(rows: PixelArt.hollow, pixel: 2, color: .inkDim)
                 default: PixelSprite(rows: PixelArt.square, pixel: 2, color: .ok)
                 }
-                Text(head.name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+                Text(head.name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                if !head.git.isEmpty {
+                    Text(head.git).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
         }
+        .help(head.help)
         .padding(.horizontal, 12)
         .frame(maxWidth: 460)
     }
