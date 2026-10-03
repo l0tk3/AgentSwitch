@@ -1,8 +1,8 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// What you said, on the right, in a raised square box (the signal colour is not for text backgrounds). Ciphertexts
-/// show as a lock mark; the Mac's legend is not shown.
+/// What you said, on the right, in a raised square box (the signal colour is not for text backgrounds), as you typed it
+/// with its code drawn as code (TypedText). Ciphertexts show as a lock mark; the Mac's legend is not shown.
 struct UserBubble: View {
     let text: String
     var attachments: Int = 0
@@ -12,7 +12,7 @@ struct UserBubble: View {
         HStack {
             Spacer(minLength: 56)
             VStack(alignment: .trailing, spacing: Theme.Space.xs) {
-                Text(MessageDisplay.readable(text))
+                TypedText(text: MessageDisplay.readable(text))
                     .foregroundStyle(Theme.ink)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -51,7 +51,8 @@ struct AssistantBubble: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 if let dot { Rectangle().fill(dot).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
-                Text(MessageDisplay.readable(message.text))
+                // Model output: Markdown, as on the Mac (its code as code).
+                MarkdownView(text: message.text)
                     .foregroundStyle(message.unprompted ? .secondary : .primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -72,7 +73,7 @@ struct AssistantBubble: View {
         Button { open(task.id) } label: {
             HStack(spacing: Theme.Space.s) {
                 StatusMark(status: task.status)
-                Text(model.title(of: task))
+                Text(Markdown.codeSpans(model.title(of: task)).codeWashed())
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Text(task.status.label).mono(11).foregroundStyle(Theme.color(task.status))
                 Spacer(minLength: 0)
@@ -140,7 +141,7 @@ struct TaskLink: View {
         Button(action: open) {
             HStack(spacing: Theme.Space.s) {
                 StatusLabel(task: task, waiting: waiting)
-                Text(title).font(.subheadline).foregroundStyle(.primary).lineLimit(1)
+                Text(Markdown.codeSpans(title).codeWashed()).font(.subheadline).foregroundStyle(.primary).lineLimit(1)
                 Spacer(minLength: 0)
                 if model.isUnread(task) { UnreadDot() }
                 Text("›").mono(13).foregroundStyle(.tertiary)

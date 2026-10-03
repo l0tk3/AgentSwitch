@@ -168,14 +168,14 @@ struct ThreadView: View {
     }
 }
 
-/// "目标  …" — a small grey label and its text.
+/// "目标  …" — a small grey label and its text (the topic's summary, model output: Markdown, its code on the wash).
 struct LabeledLine: View {
     let label: String
     let text: String
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             Text(label).font(.footnote.weight(.medium)).foregroundStyle(.secondary).frame(width: 30, alignment: .leading)
-            Text(text).font(.subheadline)
+            Text(Markdown.inline(text).codeWashed()).font(.subheadline)
         }
     }
 }

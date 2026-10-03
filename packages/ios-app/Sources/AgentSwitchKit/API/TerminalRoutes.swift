@@ -8,6 +8,11 @@ private struct ElsewhereReply: Decodable {
     struct Place: Decodable { let app: String?; let pid: Int? }
     let elsewhere: Place?
 }
+private struct GoneReply: Decodable {
+    let folderGone: String?
+    let alike: [String]?
+    let near: String?
+}
 private struct InputBody: Encodable { let text: String; let submit: Bool; let seal: Bool; let attachments: [TerminalAttachmentRef]? }
 
 /// A staged file (`upload`) and the placeholder that says where it goes in the reply (docs/terminal-v0.md §4).
@@ -69,6 +74,9 @@ extension AgentSwitchAPI {
         }
         if response.statusCode == 409, let place = (try? JSONDecoder().decode(ElsewhereReply.self, from: reply))?.elsewhere {
             return .elsewhere(app: place.app, pid: place.pid)
+        }
+        if response.statusCode == 422, let gone = try? JSONDecoder().decode(GoneReply.self, from: reply), let cwd = gone.folderGone {
+            return .folderGone(cwd: cwd, alike: gone.alike ?? [], near: gone.near)
         }
         let envelope: TerminalEnvelope = try Self.decode(reply, response)
         return envelope.existing == true ? .existing(envelope.terminal) : .started(envelope.terminal)

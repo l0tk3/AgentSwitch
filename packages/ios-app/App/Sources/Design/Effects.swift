@@ -5,14 +5,20 @@ import SwiftUI
 // table): the waiting blink, the block caret, rows drawn line by line and wiped out, a screen's refresh, scanlines,
 // the dither, and the wordmark's reveal. All in steps, never eased; still under Reduce Motion.
 
-/// What waits for you blinks: 1.1 s a cycle in two steps (under three times a second), every blinker on one clock.
+/// What waits for you blinks: 1.1 s a cycle in two steps (under three times a second), every blinker on one clock. It
+/// ticks only while it blinks and the app is in front (ui-v0 §7.4, 2026-10-03).
 struct WaitingBlink: ViewModifier {
     var on = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
-        TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: 0.55)) { t in
-            content.opacity(on && !reduceMotion && Int(t.date.timeIntervalSinceReferenceDate / 0.55) % 2 == 1 ? 0.25 : 1)
+        if on && !reduceMotion && scenePhase == .active {
+            TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { t in
+                content.opacity(Motion.step(at: t.date, every: Motion.blink) % 2 == 1 ? 0.25 : 1)
+            }
+        } else {
+            content
         }
     }
 }
@@ -21,20 +27,29 @@ extension View {
     func waitingBlink(_ on: Bool = true) -> some View { modifier(WaitingBlink(on: on)) }
 }
 
-/// A prompt's block caret: 1 s a cycle, in two steps.
+/// A prompt's block caret: 1 s a cycle, in two steps; still (shown) under Reduce Motion and while the app is not in
+/// front (ui-v0 §7.4, 2026-10-03).
 struct BlockCaret: View {
     var width: CGFloat = 8
     var height: CGFloat = 17
     var color: Color = Theme.ink
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimelineView(.periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: 0.5)) { t in
-            Rectangle().fill(color).frame(width: width, height: height)
-                .opacity(!reduceMotion && Int(t.date.timeIntervalSinceReferenceDate / 0.5) % 2 == 1 ? 0 : 1)
+        Group {
+            if !reduceMotion && scenePhase == .active {
+                TimelineView(.periodic(from: Motion.epoch, by: Motion.caret)) { t in
+                    block.opacity(Motion.step(at: t.date, every: Motion.caret) % 2 == 1 ? 0 : 1)
+                }
+            } else {
+                block
+            }
         }
         .accessibilityHidden(true)
     }
+
+    private var block: some View { Rectangle().fill(color).frame(width: width, height: height) }
 }
 
 /// Drawn line by line: a row that arrives with an unfold shows at its turn (22 ms a line), in one step.
@@ -202,6 +217,7 @@ struct Wordmark: View {
     @State private var start: Date?
     @State private var settleAt: [Double] = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     static let ramp = Array(" .:-=+*#%@█")
     static let noiseEnds = 1.1
@@ -212,7 +228,8 @@ struct Wordmark: View {
         let cols = rows.first?.count ?? 0
         Group {
             if let start {
-                TimelineView(.animation(minimumInterval: 0.045)) { t in
+                // The reveal lasts 1.38 s; it does not run on while the app is not in front.
+                TimelineView(.animation(minimumInterval: 0.045, paused: scenePhase != .active)) { t in
                     let seconds = t.date.timeIntervalSince(start)
                     Canvas { context, _ in
                         if seconds < Self.noiseEnds { noise(&context, rows: rows, seconds: seconds) } else { lcd(&context, rows: rows) }

@@ -26,7 +26,7 @@ public enum TerminalSearch {
 
     public struct Folder: Sendable, Equatable, Identifiable {
         public let cwd: String
-        /// As the tree names it, under its parent's name when it sits under one ("Worktop/Codex").
+        /// As the tree names it, under the names of the folders it sits in ("Worktop/Codex", "Worktop/培训/靶场").
         public let name: String
         public let git: GitSummary?
         public let nameHit: Bool
@@ -48,33 +48,32 @@ public enum TerminalSearch {
         }
     }
 
-    /// `said`: a session's words around the match, by `harness:id` (a terminal by the session it writes).
-    public static func run(_ nodes: [TerminalTree.Node], query: String, said: [String: String] = [:]) -> Result {
+    /// `said`: a session's words around the match, by `harness:id` (a terminal by the session it writes). Each folder
+    /// with terminals or sessions of its own, named by the folders it sits in ("Worktop/培训/靶场"): a match on a
+    /// folder's name keeps every folder under it as well.
+    public static func run(_ tree: [TerminalTree.Folder], query: String, said: [String: String] = [:]) -> Result {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return Result(folders: [], folderHits: 0, titleHits: 0, textHits: 0) }
         var folders: [Folder] = []
         var folderHits = 0, titleHits = 0, textHits = 0
-        for node in nodes {
-            for group in node.groups {
-                let name = node.parentName.map { "\($0)/\(group.name)" } ?? group.name
-                let nameHit = name.lowercased().contains(q) || tilde(group.cwd).lowercased().contains(q)
-                var rows: [Row] = []
-                for t in group.terminals {
-                    let title = t.name.lowercased().contains(q)
-                    let words = t.agentSessionId.flatMap { said["\(t.harness):\($0)"] }
-                    if nameHit || title || words != nil { rows.append(Row(item: .terminal(t), titleHit: title, said: title ? nil : words)) }
-                }
-                for s in group.sessions {
-                    let title = s.displayTitle.lowercased().contains(q)
-                    let words = said["\(s.harness):\(s.sessionId)"]
-                    if nameHit || title || words != nil { rows.append(Row(item: .session(s), titleHit: title, said: title ? nil : words)) }
-                }
-                guard nameHit || !rows.isEmpty else { continue }
-                if nameHit { folderHits += 1 }
-                titleHits += rows.filter(\.titleHit).count
-                textHits += rows.filter { $0.said != nil }.count
-                folders.append(Folder(cwd: group.cwd, name: name, git: group.git, nameHit: nameHit, rows: rows))
+        for (group, name) in TerminalTree.flatten(tree) where group.holdsOwn {
+            let nameHit = name.lowercased().contains(q) || tilde(group.cwd).lowercased().contains(q)
+            var rows: [Row] = []
+            for t in group.terminals {
+                let title = t.name.lowercased().contains(q)
+                let words = t.agentSessionId.flatMap { said["\(t.harness):\($0)"] }
+                if nameHit || title || words != nil { rows.append(Row(item: .terminal(t), titleHit: title, said: title ? nil : words)) }
             }
+            for s in group.sessions {
+                let title = s.displayTitle.lowercased().contains(q)
+                let words = said["\(s.harness):\(s.sessionId)"]
+                if nameHit || title || words != nil { rows.append(Row(item: .session(s), titleHit: title, said: title ? nil : words)) }
+            }
+            guard nameHit || !rows.isEmpty else { continue }
+            if nameHit { folderHits += 1 }
+            titleHits += rows.filter(\.titleHit).count
+            textHits += rows.filter { $0.said != nil }.count
+            folders.append(Folder(cwd: group.cwd, name: name, git: group.git, nameHit: nameHit, rows: rows))
         }
         return Result(folders: folders, folderHits: folderHits, titleHits: titleHits, textHits: textHits)
     }
@@ -96,12 +95,7 @@ public enum TerminalSearch {
     }
 
     /// `/Users/<name>/x` as `~/x`, as the web page shows paths.
-    static func tilde(_ path: String) -> String {
-        guard path.hasPrefix("/Users/") else { return path }
-        let rest = path.dropFirst(7)
-        guard let slash = rest.firstIndex(of: "/") else { return "~" }
-        return "~" + String(path[slash...])
-    }
+    static func tilde(_ path: String) -> String { TerminalTree.tilde(path) }
 }
 
 /// A session whose words matched a search (`GET /sessions/search`).

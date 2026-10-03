@@ -113,6 +113,8 @@ struct RunningGlitch: ViewModifier {
     let running: Bool
     @State private var frame: Glitch<Bool>.Frame?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Not while the app is not in front (ui-v0 §7.4, 2026-10-03).
+    @Environment(\.scenePhase) private var scenePhase
 
     static var frames: [(Double, Glitch<Bool>.Frame?)] {
         [(0, .init(dx: -3, top: 0.14, bottom: 0.46, split: 3)),
@@ -124,8 +126,8 @@ struct RunningGlitch: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(Glitch<Bool>.Drawn(frame: frame))
-            .task(id: running && !reduceMotion) {
-                guard running, !reduceMotion else { frame = nil; return }
+            .task(id: running && !reduceMotion && scenePhase == .active) {
+                guard running, !reduceMotion, scenePhase == .active else { frame = nil; return }
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(Int.random(in: 3000...7000)))
                     var elapsed = 0.0

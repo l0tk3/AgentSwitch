@@ -72,8 +72,8 @@ struct TaskDetailView: View {
     /// What was asked, then one line of state: status, model, harness, when; the thread it belongs to under it.
     private func header(_ task: AgentTask) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(MessageDisplay.readable(task.task))
-                .font(.title3.weight(.semibold))
+            // As typed, its code drawn as code (TypedText).
+            TypedText(text: MessageDisplay.readable(task.task), font: .title3.weight(.semibold))
                 .textSelection(.enabled)
             HStack(spacing: 6) {
                 StatusLabel(task: task, waiting: !detail.pending.isEmpty)
@@ -273,7 +273,7 @@ struct EventRow: View {
 
     static func formatted(_ event: TaskEvent) -> AttributedString {
         let line = EventDescriber.line(event)
-        return markdownTypes.contains(event.type) ? Markdown.flattened(line) : AttributedString(line)
+        return markdownTypes.contains(event.type) ? Markdown.flattened(line).codeWashed() : AttributedString(line)
     }
 
     /// The time column, one width for every row so an opened tool call lines up under its text.

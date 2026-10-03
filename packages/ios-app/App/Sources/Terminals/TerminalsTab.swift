@@ -8,8 +8,8 @@ enum TerminalRoute: Hashable {
 }
 
 /// The terminals tab (docs/terminal-v0.md §1): a directory tree of the Mac's terminals and its earlier sessions, as the
-/// web page's sidebar — each project folder with its running terminals (status mark, name, agent) and then its sessions
-/// (resume); projects under one parent merged under it. A folder or parent row folds and unfolds (remembered); `▸ N
+/// web page's sidebar — each project folder with its running terminals (status mark, name, agent), then its sessions
+/// (resume), then the folders under it (TerminalTree has the rules). A folder's line folds and unfolds (remembered); `▸ N
 /// more` lists all of a folder's sessions, the rows drawn line by line; a long press on a session opens its menu
 /// (resume, delete — a deleted row is wiped out). A terminal that needs you or exits glitches once. Menus and confirm
 /// boxes are the desktop's pixel boxes; the list has its scanlines and a dotted rule under the bar. `new` starts one.
@@ -35,6 +35,8 @@ struct TerminalsTab: View {
     @State private var bypassResume: SessionSummary?
     /// Why continuing or deleting a session failed: a box over whatever page is open.
     @State private var failure: String?
+    /// A session to continue whose folder is gone: a folder is picked for it (docs/terminal-v0.md §5).
+    @State private var movedFolder: MovedFolder?
     /// The search line (docs/terminal-v0.md §1 搜索); the Mac's answer for the words said in sessions, and what it was
     /// asked.
     @State private var query = ""
@@ -42,11 +44,14 @@ struct TerminalsTab: View {
     @State private var saidFor = ""
 
     static let pollInterval: Duration = .seconds(4)
+    /// The sessions are read every this many rounds (20 s, as the web page).
+    static let sessionsEvery = 5
     /// Sessions shown per folder before `▸ N more`.
     static let sessionsShown = 3
 
     var body: some View {
         let store = model.terminals
+        let folders = store.folders
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -56,14 +61,14 @@ struct TerminalsTab: View {
                     if let error = store.error {
                         Text(error).font(.footnote).foregroundStyle(Theme.failed).padding(.bottom, Theme.Space.m)
                     }
-                    if store.list != nil && store.nodes.isEmpty && query.isEmpty {
+                    if store.list != nil && folders.isEmpty && query.isEmpty {
                         Text("尚无终端。点 New 在 Mac 上启动 agent。").font(.footnote).foregroundStyle(.secondary).padding(.top, 40)
                     }
-                    if store.list != nil && !(store.nodes.isEmpty && query.isEmpty) { searchLine }
+                    if store.list != nil && !(folders.isEmpty && query.isEmpty) { searchLine }
                     if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                        ForEach(store.nodes) { node in nodeView(node) }
+                        ForEach(folders) { f in folderView(f, depth: 0, at: 0, above: []) }
                     } else {
-                        searchResults(TerminalSearch.run(store.nodes, query: query, said: saidFor == query ? said : [:]))
+                        searchResults(TerminalSearch.run(folders, query: query, said: saidFor == query ? said : [:]))
                     }
                 }
                 .padding(.horizontal, Theme.Space.l)
@@ -99,7 +104,7 @@ struct TerminalsTab: View {
                 openRequested()
                 #if DEBUG
                 // The session menu and the delete box, as a long press and its delete would open them.
-                if let first = store.nodes.first?.groups.first?.sessions.first {
+                if let first = folders.flatMap(\.allSessions).first {
                     switch UserDefaults.standard.string(forKey: "uiDemoScreen") {
                     case "terminalmenu": menuFor = SessionMenu(session: first, anchor: CGRect(x: 16, y: 210, width: 360, height: 36))
                     case "terminalsearch": query = "终端"
@@ -112,20 +117,27 @@ struct TerminalsTab: View {
             .onChange(of: model.openTerminalRequest) { openRequested() }
             // A cold start from the Live Activity: the request is there before the list.
             .onChange(of: store.list == nil) { openRequested() }
-            // The list itself is followed from every tab (MainTabs); the sessions and the folders' git while this tab
-            // is on screen.
+            // The list itself is followed from every tab (MainTabs); the folders' git and the sessions while this tab
+            // is on screen — the sessions, all of them now (docs/terminal-v0.md §4), every fifth time: they change
+            // slowly, and the whole list is the larger read (pull to refresh reads them at once).
             .task(id: model.connection.endpoint) {
+                var round = 0
                 while !Task.isCancelled {
-                    await store.refreshSessions(model.api)
+                    if round % Self.sessionsEvery == 0 { await store.refreshSessions(model.api) }
                     await store.refreshGit(model.api)
+                    round += 1
                     try? await Task.sleep(for: Self.pollInterval)
                 }
             }
             .sheet(isPresented: $creating) {
                 NewTerminalSheet { terminal in
                     store.add(terminal)
+                    unfold(terminal.cwd)
                     path.append(TerminalRoute.terminal(terminal))
                 }
+            }
+            .sheet(item: $movedFolder) { m in
+                MovedFolderSheet(gone: m) { folder in Task { await resume(m.session, fork: m.fork, mode: m.mode, in: folder, after: m) } }
             }
             .pixelBox(item: $menuFor) { m in
                 var items: [PixelBox.Action] = []
@@ -145,7 +157,7 @@ struct TerminalsTab: View {
             .pixelBox(item: $elsewhere) { e in
                 PixelBox(head: "In Use", tone: .amber,
                          message: "「\(e.session.displayTitle)」正在 \(e.app) 中运行。同一会话同时只能由一个程序写入。请先在 \(e.app) 中退出，或创建分支：新会话包含全部历史，原会话保持不变。",
-                         actions: [.init(label: "Fork", role: .primary) { Task { await resume(e.session, fork: true, mode: e.mode) } }])
+                         actions: [.init(label: "Fork", role: .primary) { Task { await resume(e.session, fork: true, mode: e.mode, in: e.folder) } }])
             }
         }
         .pixelBox(item: $failure) { message in
@@ -155,139 +167,147 @@ struct TerminalsTab: View {
 
     private var folded: Set<String> { Set(foldedRaw.split(separator: "\n").map(String.init)) }
 
+    /// A terminal just started or continued shows in the list: its folder and every folder above it open
+    /// (docs/terminal-v0.md §1, as the web page).
+    private func unfold(_ cwd: String) {
+        let set = folded.subtracting(TerminalTree.foldersAbove(cwd))
+        if set.count != folded.count { foldedRaw = set.sorted().joined(separator: "\n") }
+    }
+
     private func toggleFold(_ key: String) {
         var set = folded
         if set.remove(key) == nil { set.insert(key) } else { revealed = Reveal(key: key) }
         foldedRaw = set.sorted().joined(separator: "\n")
     }
 
-    /// A row that came with the unfold of `keys` just now (either its folder or its parent) draws at its turn.
-    private func stepIn(_ index: Int, under keys: String?...) -> StepIn {
-        let active = revealed.map { r in keys.contains(r.key) && Date.now.timeIntervalSince(r.at) < 0.4 } ?? false
-        return StepIn(index: index, active: active)
+    /// A folder a line sits in, and where that folder's own line falls.
+    private struct Within {
+        let key: String
+        let at: Int
     }
 
-    @ViewBuilder
-    private func nodeView(_ node: TerminalTree.Node) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if let parent = node.parent, let name = node.parentName {
-                let isFolded = folded.contains(parent)
-                Button { toggleFold(parent) } label: {
-                    HStack(spacing: 6) {
-                        Text("\(isFolded ? "▸" : "▾") \(name)/").mono(12).foregroundStyle(Theme.inkDim)
-                        if isFolded { Text(count(node.groups)).mono(11).foregroundStyle(.tertiary) }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.top, Theme.Space.m).padding(.bottom, 2)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if !isFolded {
-                    ForEach(Array(node.groups.enumerated()), id: \.element.id) { i, group in
-                        folder(group, nested: true, parent: parent, base: node.groups.prefix(i).reduce(0) { $0 + 1 + rowCount($1) })
-                    }
-                }
-            } else {
-                ForEach(node.groups) { group in folder(group, nested: false) }
-            }
+    /// A line that came with the unfold of one of the folders it sits in just now draws at its turn after that
+    /// folder's line.
+    private func stepIn(_ at: Int, within: [Within]) -> StepIn {
+        guard let r = revealed, Date.now.timeIntervalSince(r.at) < 0.4, let w = within.first(where: { $0.key == r.key }) else {
+            return StepIn(index: 0, active: false)
         }
+        return StepIn(index: max(0, at - w.at), active: true)
     }
 
-    /// "2 · 5": running terminals · sessions, for a folded row.
-    private func count(_ groups: [TerminalTree.Group]) -> String {
-        let terminals = groups.reduce(0) { $0 + $1.terminals.count }, sessions = groups.reduce(0) { $0 + $1.sessions.count }
+    /// "2 · 5": terminals · sessions in the folder and the folders under it, for a folded line.
+    private func count(_ f: TerminalTree.Folder) -> String {
+        let terminals = f.allTerminals.count, sessions = f.allSessions.count
         return terminals > 0 ? "\(terminals) · \(sessions)" : "\(sessions)"
     }
 
     /// The sessions a folder lists: those not deleted just now, the first few unless all are asked for.
-    private func listed(_ group: TerminalTree.Group) -> (sessions: [SessionSummary], more: Int, foot: Bool) {
-        let kept = group.sessions.filter { !gone.contains($0.id) }
-        let all = showingAll.contains(group.cwd)
+    private func listed(_ f: TerminalTree.Folder) -> (sessions: [SessionSummary], more: Int, foot: Bool) {
+        let kept = f.sessions.filter { !gone.contains($0.id) }
+        let all = showingAll.contains(f.cwd)
         let sessions = all ? kept : Array(kept.prefix(Self.sessionsShown))
         return (sessions, kept.count - sessions.count, kept.count > Self.sessionsShown)
     }
 
-    /// The rows under a folder's line while it is open (the folder's own line not counted).
-    private func rowCount(_ group: TerminalTree.Group) -> Int {
-        guard !folded.contains(group.cwd) else { return 0 }
-        let l = listed(group)
-        return group.terminals.count + l.sessions.count + (l.foot ? 1 : 0)
+    /// A folder's own rows while it is open: its terminals, its sessions, `▸ N More`.
+    private func ownRows(_ f: TerminalTree.Folder) -> Int {
+        let l = listed(f)
+        return f.terminals.count + l.sessions.count + (l.foot ? 1 : 0)
     }
 
-    /// A folder and its rows; `base` is where its line falls among the rows an unfolded parent draws.
-    private func folder(_ group: TerminalTree.Group, nested: Bool, parent: String? = nil, base: Int = 0) -> some View {
-        let isFolded = folded.contains(group.cwd)
-        let all = showingAll.contains(group.cwd)
-        let (sessions, more, foot) = listed(group)
-        let rows = rowCount(group)
-        return VStack(alignment: .leading, spacing: 0) {
-            Button { toggleFold(group.cwd) } label: {
+    /// The lines under a folder's own line while it is open: its rows, then the folders under it with theirs.
+    private func drawn(_ f: TerminalTree.Folder) -> Int {
+        guard !folded.contains(f.cwd) else { return 0 }
+        return ownRows(f) + f.children.reduce(0) { $0 + 1 + drawn($1) }
+    }
+
+    /// A folder's line, its own terminals and sessions, then the folders under it one step further in. `at` is where
+    /// its line falls among the lines its top folder draws; `above`, the folders it sits in. A folder that only gathers
+    /// others has the quieter line.
+    private func folderView(_ f: TerminalTree.Folder, depth: Int, at: Int, above: [Within]) -> AnyView {
+        let isFolded = folded.contains(f.cwd)
+        let all = showingAll.contains(f.cwd)
+        let (sessions, more, foot) = listed(f)
+        let rows = isFolded ? 0 : ownRows(f)
+        let within = [Within(key: f.cwd, at: at)] + above
+        let line = "\(String(repeating: "  ", count: depth))\(isFolded ? "▸" : "▾") \(TerminalTree.slashed(f.name))"
+        return AnyView(VStack(alignment: .leading, spacing: 0) {
+            Button { toggleFold(f.cwd) } label: {
                 HStack(spacing: 6) {
-                    Text("\(nested ? "  " : "")\(isFolded ? "▸" : "▾") \(group.name)/").mono(13, weight: .semibold)
-                    if let git = group.git {
+                    if f.holdsOwn {
+                        Text(line).mono(13, weight: .semibold)
+                    } else {
+                        Text(line).mono(12).foregroundStyle(Theme.inkDim)
+                    }
+                    if let git = f.git {
                         Text(git.said).mono(11).foregroundStyle(.tertiary).lineLimit(1)
                             .accessibilityLabel("git \(git.said)")
                     }
-                    if isFolded { Text(count([group])).mono(11).foregroundStyle(.tertiary) }
+                    if isFolded { Text(count(f)).mono(11).foregroundStyle(.tertiary) }
                     Spacer(minLength: 0)
                 }
-                .padding(.top, nested ? Theme.Space.s : Theme.Space.m)
-                .padding(.bottom, 4)
+                .padding(.top, depth == 0 ? Theme.Space.m : Theme.Space.s)
+                .padding(.bottom, f.holdsOwn ? 4 : 2)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityHint(isFolded ? "展开" : "收起")
-            .modifier(stepIn(base, under: parent))
+            .modifier(stepIn(at, within: above))
             if !isFolded {
-                ForEach(Array(group.terminals.enumerated()), id: \.element.id) { i, t in
-                    Button { path.append(TerminalRoute.terminal(t)) } label: { terminalRow(t, last: i == rows - 1, nested: nested) }
+                ForEach(Array(f.terminals.enumerated()), id: \.element.id) { i, t in
+                    Button { path.append(TerminalRoute.terminal(t)) } label: { terminalRow(t, last: i == rows - 1, depth: depth) }
                         .buttonStyle(.plain)
-                        .modifier(stepIn(base + 1 + i, under: group.cwd, parent))
+                        .modifier(stepIn(at + 1 + i, within: within))
                     // Its sub-agents, one level under it; a tap opens the terminal.
                     if t.isRunning {
                         ForEach(Array(t.subagents.enumerated()), id: \.element.id) { k, agent in
                             Button { path.append(TerminalRoute.terminal(t)) } label: {
-                                SubagentRow(agent: agent, underLast: i == rows - 1, last: k == t.subagents.count - 1, nested: nested)
+                                SubagentRow(agent: agent, underLast: i == rows - 1, last: k == t.subagents.count - 1, depth: depth)
                             }
                             .buttonStyle(.plain)
-                            .modifier(stepIn(base + 1 + i, under: group.cwd, parent))
+                            .modifier(stepIn(at + 1 + i, within: within))
                         }
                     }
                 }
                 ForEach(Array(sessions.enumerated()), id: \.element.id) { i, s in
-                    let index = group.terminals.count + i
-                    SessionRow(session: s, last: index == rows - 1, nested: nested, opening: opening,
+                    let index = f.terminals.count + i
+                    SessionRow(session: s, last: index == rows - 1, depth: depth, opening: opening,
                                open: { path.append(TerminalRoute.session(s)) },
                                resume: { Task { await resume(s) } },
                                menu: { anchor in menuFor = SessionMenu(session: s, anchor: anchor) },
                                delete: { deletingSession = s })
                         .modifier(WipeOut(on: wiping.contains(s.id)))
                         // Those "more" brings are drawn from the first of them.
-                        .modifier(stepIn(base + 1 + (all && i >= Self.sessionsShown ? index - Self.sessionsShown : index), under: group.cwd, parent))
+                        .modifier(stepIn(at + 1 + (all && i >= Self.sessionsShown ? index - Self.sessionsShown : index), within: within))
                 }
+                // ▸ opens the rest under it; ▴ folds them back up (2026-10-03, user: 这个图标也有问题吧，有点误导人 — ▾ under
+                // the list read as a folder still to open).
                 if foot {
                     Button {
-                        if all { showingAll.remove(group.cwd) } else { showingAll.insert(group.cwd); revealed = Reveal(key: group.cwd) }
+                        if all { showingAll.remove(f.cwd) } else { showingAll.insert(f.cwd); revealed = Reveal(key: f.cwd) }
                     } label: {
                         HStack(spacing: 6) {
-                            TreeLine(last: true, nested: nested)
-                            Text(all ? "▾ Less" : "▸ \(more) More").mono(12).foregroundStyle(.secondary)
+                            TreeLine(last: true, depth: depth)
+                            Text(all ? "▴ Less" : "▸ \(more) More").mono(12).foregroundStyle(.secondary)
                             Spacer(minLength: 0)
                         }
                         .padding(.vertical, 6)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .modifier(stepIn(base + rows, under: group.cwd, parent))
+                    .modifier(stepIn(at + rows, within: within))
+                }
+                ForEach(Array(f.children.enumerated()), id: \.element.id) { i, child in
+                    folderView(child, depth: depth + 1, at: at + 1 + rows + f.children.prefix(i).reduce(0) { $0 + 1 + drawn($1) }, above: within)
                 }
             }
-        }
+        })
     }
 
-    private func terminalRow(_ t: TerminalInfo, last: Bool, nested: Bool, title: Text? = nil) -> some View {
+    private func terminalRow(_ t: TerminalInfo, last: Bool, depth: Int, title: Text? = nil) -> some View {
         let status = t.permissions.isEmpty ? t.status : .waiting
         return HStack(spacing: 8) {
-            TreeLine(last: last, nested: nested)
+            TreeLine(last: last, depth: depth)
             TerminalStatusMark(status: status)
             (title ?? Text(t.name)).font(.subheadline).foregroundStyle(t.isRunning ? Theme.ink : .secondary).lineLimit(1)
             Spacer(minLength: 6)
@@ -338,7 +358,7 @@ struct TerminalsTab: View {
             Text(result.summary).mono(11).foregroundStyle(.tertiary).padding(.top, 8)
             ForEach(result.folders) { folder in
                 HStack(spacing: 6) {
-                    (Text("▾ ") + marked(folder.name) + Text("/")).mono(13, weight: .semibold)
+                    (Text("▾ ") + marked(folder.name) + Text(folder.name.hasSuffix("/") ? "" : "/")).mono(13, weight: .semibold)
                     if let git = folder.git { Text(git.said).mono(11).foregroundStyle(.tertiary).lineLimit(1) }
                     Spacer(minLength: 0)
                 }
@@ -349,12 +369,12 @@ struct TerminalsTab: View {
                     switch row.item {
                     case .terminal(let t):
                         Button { path.append(TerminalRoute.terminal(t)) } label: {
-                            terminalRow(t, last: last, nested: false, title: row.titleHit ? marked(t.name) : nil)
+                            terminalRow(t, last: last, depth: 0, title: row.titleHit ? marked(t.name) : nil)
                         }
                         .buttonStyle(.plain)
                         if let words = row.said { hitLine(words, last: last) { path.append(TerminalRoute.terminal(t)) } }
                     case .session(let s):
-                        SessionRow(session: s, last: last, nested: false, opening: opening, title: row.titleHit ? marked(s.displayTitle) : nil,
+                        SessionRow(session: s, last: last, depth: 0, opening: opening, title: row.titleHit ? marked(s.displayTitle) : nil,
                                    open: { path.append(TerminalRoute.session(s)) },
                                    resume: { Task { await resume(s) } },
                                    menu: { anchor in menuFor = SessionMenu(session: s, anchor: anchor) },
@@ -427,24 +447,32 @@ struct TerminalsTab: View {
         let session: SessionSummary
         let app: String
         let mode: String?
+        /// The folder picked for it, its own being gone.
+        let folder: String?
     }
 
     /// Continue a session in place (one record, one writer): the terminal that has it already, a new one, or — open in
-    /// another program — the choice to fork. It goes on in the mode it last had; bypass is asked about first.
-    private func resume(_ s: SessionSummary, fork: Bool = false, mode chosen: String? = nil) async {
+    /// another program — the choice to fork. It goes on in the mode it last had; bypass is asked about first. Its folder
+    /// gone, a folder is picked and it goes on `in` that one (`after` the box it was picked in).
+    private func resume(_ s: SessionSummary, fork: Bool = false, mode chosen: String? = nil, in folder: String? = nil, after picking: MovedFolder? = nil) async {
         guard let api = model.api else { return }
         if s.mode == "bypass" && chosen == nil { bypassResume = s; return }
         opening = s.id
         defer { opening = nil }
         let mode = chosen ?? s.mode
+        let request = ResumeTerminalRequest(harness: s.harness, cwd: s.cwd, agentSessionId: s.sessionId,
+                                            title: s.title.isEmpty ? nil : s.title, mode: mode, fork: fork ? true : nil)
         do {
-            switch try await api.resumeTerminal(ResumeTerminalRequest(harness: s.harness, cwd: s.cwd, agentSessionId: s.sessionId,
-                                                                      title: s.title.isEmpty ? nil : s.title, mode: mode, fork: fork ? true : nil)) {
+            switch try await api.resumeTerminal(folder.map(request.continuing) ?? request) {
             case .started(let t), .existing(let t):
                 model.terminals.add(t)
+                unfold(t.cwd)
                 path.append(TerminalRoute.terminal(t))
             case .elsewhere(let app, _):
-                elsewhere = Elsewhere(session: s, app: app ?? "其他程序", mode: mode)
+                elsewhere = Elsewhere(session: s, app: app ?? "其他程序", mode: mode, folder: folder)
+            case .folderGone(let cwd, let alike, let near):
+                if let picking, let folder { movedFolder = picking.picked(folder) }
+                else { movedFolder = MovedFolder(session: s, cwd: cwd, alike: alike, near: near, fork: fork, mode: mode) }
             }
         } catch {
             failure = error.localizedDescription
@@ -472,7 +500,8 @@ private final class FrameRef {
 private struct SessionRow: View {
     let session: SessionSummary
     let last: Bool
-    let nested: Bool
+    /// How many folders it sits in under the top one.
+    let depth: Int
     let opening: String?
     /// Its title as a search marks it; else as it is.
     var title: Text? = nil
@@ -487,7 +516,7 @@ private struct SessionRow: View {
         let resumable = TerminalsTab.resumable.contains(session.harness)
         let deletable = TerminalsTab.deletable.contains(session.harness)
         HStack(spacing: 8) {
-            TreeLine(last: last, nested: nested)
+            TreeLine(last: last, depth: depth)
             HStack(spacing: 8) {
                 (title ?? Text(session.displayTitle)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
@@ -522,13 +551,13 @@ private struct SessionRow: View {
     }
 }
 
-/// `├─` / `└─` in front of a row (indented once more under a merged parent).
+/// `├─` / `└─` in front of a row, indented once more for each folder it sits in under the top one.
 private struct TreeLine: View {
     let last: Bool
-    var nested = false
+    var depth = 0
 
     var body: some View {
-        Text("\(nested ? "  " : "")\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+        Text("\(String(repeating: "  ", count: depth))\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
     }
 }
 
@@ -539,11 +568,11 @@ private struct SubagentRow: View {
     /// Its terminal is the folder's last row: no line runs on under it.
     let underLast: Bool
     let last: Bool
-    let nested: Bool
+    let depth: Int
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("\(nested ? "  " : "")\(underLast ? "  " : "│ ")\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+            Text("\(String(repeating: "  ", count: depth))\(underLast ? "  " : "│ ")\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
             BrailleSpinner()
             (Text(agent.name).foregroundStyle(.secondary) + Text(agent.doing.isEmpty ? "" : "  \(agent.doing)").foregroundStyle(.tertiary))
                 .font(.footnote).lineLimit(1)

@@ -21,7 +21,7 @@ final class TerminalsStore {
     @ObservationIgnored private var generation = 0
 
     var terminals: [TerminalInfo] { list?.terminals ?? [] }
-    var nodes: [TerminalTree.Node] { TerminalTree.build(terminals: terminals, sessions: sessions, git: git) }
+    var folders: [TerminalTree.Folder] { TerminalTree.build(terminals: terminals, sessions: sessions, git: git) }
     /// Terminals waiting for an answer: the tab's badge.
     var waiting: Int { terminals.filter(\.waitsForYou).count }
 
@@ -46,11 +46,15 @@ final class TerminalsStore {
         if style == nil, let fresh = try? await api.terminalStyle(), asked == generation { style = fresh }
     }
 
+    /// More sessions than any Mac lists (each agent's newest 400 records): every one, so each folder shows whole
+    /// (2026-10-03, user: 有的目录下面的session显示不完全); an older Mac stops at its own maximum, 500.
+    static let everySession = 100_000
+
     /// The Mac's other sessions; a failed read keeps the last ones.
     func refreshSessions(_ api: AgentSwitchAPI?) async {
         guard let api else { return }
         let asked = generation
-        if let fresh = try? await api.sessions(limit: 80), asked == generation { sessions = fresh }
+        if let fresh = try? await api.sessions(limit: Self.everySession), asked == generation { sessions = fresh }
     }
 
     /// The folders' git; a failed read keeps the last.
@@ -93,7 +97,8 @@ final class TerminalsStore {
 /// `~/x` for a path under the user's home on the Mac (the Mac's home, as the paths carry it).
 enum MacPath {
     static func tilde(_ path: String) -> String {
-        guard path.hasPrefix("/Users/") else { return path }
+        // `/Users/Shared` is no one's home.
+        guard path.hasPrefix("/Users/"), path != "/Users/Shared", !path.hasPrefix("/Users/Shared/") else { return path }
         let rest = path.dropFirst("/Users/".count)
         guard let slash = rest.firstIndex(of: "/") else { return "~" }
         return "~" + rest[slash...]

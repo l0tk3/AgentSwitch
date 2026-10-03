@@ -51,7 +51,7 @@ struct FeedEntry: View {
     private var summary: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(Markdown.codeSpans(title).codeWashed()).font(.subheadline.weight(.semibold)).lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
                 Text(task.updated.relative).mono(11).foregroundStyle(.tertiary)
                 if model.isUnread(task) { UnreadDot() }
@@ -84,11 +84,11 @@ struct FeedEntry: View {
                 Text(script).font(.subheadline).lineLimit(Self.scriptLines)
                     .foregroundStyle(model.speaker.speakingTaskId == task.id ? Color.accentColor : .primary)
             } else if let result = task.result, !result.isEmpty {
-                Text(Markdown.flattened(result)).font(.subheadline).lineLimit(Self.resultLines)
+                Text(Markdown.flattened(result).codeWashed()).font(.subheadline).lineLimit(Self.resultLines)
             }
             // A restart of the Mac's service is not the task failing: said plainly, not in red.
             if let error = task.error, !error.isEmpty, task.status != .done {
-                Text(Markdown.flattened(error)).font(.footnote).foregroundStyle(task.isInterrupted ? Color.secondary : Theme.failed).lineLimit(3)
+                Text(Markdown.flattened(error).codeWashed()).font(.footnote).foregroundStyle(task.isInterrupted ? Color.secondary : Theme.failed).lineLimit(3)
             }
         }
     }

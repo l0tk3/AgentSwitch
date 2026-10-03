@@ -37,6 +37,9 @@ enum Theme {
     static let line = Color(light: 0xD3CEC3, dark: 0x262524)
     /// What you said: a raised box, not a coloured bubble (the signal colour is not for text backgrounds).
     static let raised = Color(light: 0xE6E2D8, dark: 0x161514)
+    /// Code's ground (2026-10-03): a wash of ink, so a block or a span stands out on the page and in your raised box
+    /// alike.
+    static let code = ink.opacity(0.07)
     static let pixelShadow = Color(light: 0xCFC9BC, dark: 0x2C2A28)
     /// The primary button's fill: ink, with the page's colour on it; the signal colour only while pressed (§7.2.3, as
     /// the web page's hover).

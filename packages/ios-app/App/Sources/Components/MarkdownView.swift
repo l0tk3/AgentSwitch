@@ -1,8 +1,8 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// Model output rendered by blocks (AgentSwitchKit `Markdown`): headings, lists, quotes, code and tables, with inline
-/// Markdown inside each. Links open in the browser when tapped; images are never loaded, only their alt text shows.
+/// Model output rendered by blocks (AgentSwitchKit `Markdown`): headings, lists, quotes, code (CodeBlock) and tables,
+/// with inline Markdown inside each (its code on the code wash). Links open in the browser when tapped; images are never loaded, only their alt text shows.
 struct MarkdownView: View {
     let text: String
 
@@ -22,37 +22,33 @@ private struct BlockView: View {
     var body: some View {
         switch block {
         case .heading(let level, let text):
-            Text(Markdown.inline(text)).font(Self.headingFont(level)).padding(.top, 2)
+            Text(inline(text)).font(Self.headingFont(level)).padding(.top, 2)
         case .paragraph(let text):
-            Text(Markdown.inline(text))
+            Text(inline(text))
         case .listItem(let depth, let ordinal, let text):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(ordinal.map { "\($0)." } ?? "•").monospacedDigit().foregroundStyle(.secondary)
-                Text(Markdown.inline(text))
+                Text(inline(text))
             }
             .padding(.leading, CGFloat(depth) * 16)
         case .quote(let text):
             HStack(alignment: .top, spacing: 8) {
                 Rectangle().fill(.tertiary).frame(width: 3)
-                Text(Markdown.inline(text)).foregroundStyle(.secondary)
+                Text(inline(text)).foregroundStyle(.secondary)
             }
             .fixedSize(horizontal: false, vertical: true)
-        case .code(_, let text):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(text).font(.caption.monospaced()).padding(10)
-            }
-            .background(Theme.raised)
-            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+        case .code(let language, let text):
+            CodeBlock(code: text, language: language)
         case .table(let header, let rows):
             ScrollView(.horizontal, showsIndicators: false) {
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                     GridRow {
-                        ForEach(header.indices, id: \.self) { c in Text(Markdown.inline(header[c])).bold() }
+                        ForEach(header.indices, id: \.self) { c in Text(inline(header[c])).bold() }
                     }
                     Divider()
                     ForEach(rows.indices, id: \.self) { r in
                         GridRow {
-                            ForEach(rows[r].indices, id: \.self) { c in Text(Markdown.inline(rows[r][c])) }
+                            ForEach(rows[r].indices, id: \.self) { c in Text(inline(rows[r][c])) }
                         }
                     }
                 }
@@ -64,6 +60,11 @@ private struct BlockView: View {
         case .rule:
             Divider()
         }
+    }
+
+    /// Inline Markdown with its code on the code wash.
+    private func inline(_ text: String) -> AttributedString {
+        Markdown.inline(text).codeWashed()
     }
 
     private static func headingFont(_ level: Int) -> Font {

@@ -139,6 +139,16 @@ enum DemoData {
                            lastText: "hexo-renderer-marked 升级到 7.0 后构建成功。", updatedAt: ago(3 * 3600), model: "deepseek/deepseek-flash"),
             SessionSummary(harness: "claude-code", id: "c2", cwd: "/Users/me/Work/api", title: "给健康检查加缓存",
                            lastText: "缓存 30 秒，命中率 92%。", updatedAt: ago(26 * 3600)),
+            // Folders inside folders the list shows (docs/terminal-v0.md §1 目录树的层级, 2026-10-03): one in the
+            // project, and Worktop with a session of its own over the folders in it.
+            SessionSummary(harness: "claude-code", id: "c3", cwd: repo + "/packages/secret-gate", title: "fill-value 的探针模板",
+                           lastText: "探针模板固定在包里。", updatedAt: ago(5 * 3600)),
+            SessionSummary(harness: "claude-code", id: "c4", cwd: "/Users/me/Desktop/WorkSpace/Worktop", title: "整理工作目录",
+                           lastText: "做完的项目搬到 Archived。", updatedAt: ago(30 * 3600)),
+            SessionSummary(harness: "codex", id: "x2", cwd: "/Users/me/Desktop/WorkSpace/Worktop/Codex", title: "给脚本加上重试",
+                           lastText: "下载失败时指数退避重试三次。", updatedAt: ago(40 * 3600)),
+            SessionSummary(harness: "codex", id: "x3", cwd: "/Users/me/Desktop/WorkSpace/Worktop/培训/靶场", title: "靶场环境搭建",
+                           lastText: "docker compose 起三台靶机。", updatedAt: ago(50 * 3600)),
         ]
     }
 

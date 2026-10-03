@@ -121,7 +121,7 @@ private struct BlockParser {
         while i < lines.count {
             let line = lines[i]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { fence(trimmed); continue }
+            if let open = MarkdownFence(opening: line) { fence(open); continue }
             if trimmed.isEmpty { flush(); i += 1; continue }
             if let heading = Self.heading(trimmed) { endList(); out.append(heading); i += 1; continue }
             if Self.isRule(trimmed) { endList(); out.append(.rule); i += 1; continue }
@@ -157,19 +157,18 @@ private struct BlockParser {
         item = (depth: listIndents.count - 1, ordinal: marker.ordinal, lines: [marker.text], indent: marker.indent)
     }
 
-    private mutating func fence(_ opening: String) {
+    /// A fenced block (MarkdownFence): to a bare fence of the same mark and at least its length, or to the end.
+    private mutating func fence(_ open: MarkdownFence) {
         endList()
-        let mark = String(opening.prefix(3))
-        let language = opening.drop(while: { $0 == "`" || $0 == "~" }).trimmingCharacters(in: .whitespaces)
         var body: [String] = []
         i += 1
-        while i < lines.count, !lines[i].trimmingCharacters(in: .whitespaces).hasPrefix(mark) {
-            body.append(lines[i])
+        while i < lines.count, !open.closes(lines[i]) {
+            body.append(open.body(lines[i]))
             i += 1
         }
         i += 1   // the closing fence, or past the end
         while body.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { body.removeLast() }
-        out.append(.code(language: language.isEmpty ? nil : language, text: body.joined(separator: "\n")))
+        out.append(.code(language: open.language, text: body.joined(separator: "\n")))
     }
 
     private mutating func table() {

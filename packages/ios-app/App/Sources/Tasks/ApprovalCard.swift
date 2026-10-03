@@ -76,7 +76,7 @@ struct QuestionForm: View {
     @ViewBuilder
     private func question(_ q: UserQuestion) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text(Markdown.inline(q.text)).font(.body)
+            Text(Markdown.inline(q.text).codeWashed()).font(.body)
             ForEach(q.options, id: \.label) { option in
                 Button { toggle(q, option.label) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {

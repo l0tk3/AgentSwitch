@@ -332,14 +332,22 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
         self.cols = cols
         self.rows = rows
     }
+
+    /// The same, going on in `folder` (the session's own folder is gone).
+    public func continuing(in folder: String) -> ResumeTerminalRequest {
+        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows)
+    }
 }
 
-/// What resuming gave: a new terminal, the one already open here, or the program that has the session open (only one
-/// may write it; the caller may fork instead).
+/// What resuming gave: a new terminal, the one already open here, the program that has the session open (only one
+/// may write it; the caller may fork instead), or the session's folder gone — moved, renamed or deleted — with folders
+/// of the same name the Mac knows and the nearest folder above it still there (the caller picks one and asks again,
+/// docs/terminal-v0.md §5).
 public enum ResumeOutcome: Sendable, Equatable {
     case started(TerminalInfo)
     case existing(TerminalInfo)
     case elsewhere(app: String?, pid: Int?)
+    case folderGone(cwd: String, alike: [String], near: String?)
 }
 
 /// The named keys `POST /terminals/:id/keys` takes (daemon terminals/keys.ts).
