@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Browser</title>
+<style id="gcss"></style>
+<style>
+/* The browser the service holds (docs/browser-v0.md, 2026-10-02, user: 就做一个浏览器，然后顺便给 codex 接入上，然后他调用
+   起来和在 app 里一样): one Chrome on the Mac, its screen in the app on the phone and the Mac, and the same tabs driven by
+   the agents through the gate's browser tool. A demo for review: the phone's list, watching Codex, taking over, a file of the
+   Mac's opened; the Mac's third page; what Codex itself sees. */
+:root {
+  --bg: #000; --panel: #0b0b0b; --raise: #151515; --hover: #121212;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  /* the web pages inside the screen: other people's sites, in their own colours */
+  --site-bg: #ffffff; --site-ink: #1f2328; --site-ink2: #59636e; --site-line: #d1d9e0; --site-green: #1f883d; --site-blue: #0969da;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px var(--ui); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus { outline: none; }
+.top { max-width: 1320px; margin: 0 auto; padding: 18px 16px 4px; }
+h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
+.lede { color: #a9a6a0; font-size: 12.5px; line-height: 1.75; margin: 0 0 10px; max-width: 112ch; }
+.sec { max-width: 1320px; margin: 30px auto 12px; padding: 0 16px; font: 11px var(--mono); letter-spacing: .14em; color: #77746e; }
+.row { max-width: 1320px; margin: 0 auto; padding: 0 16px; display: flex; flex-wrap: wrap; gap: 26px 26px; align-items: flex-start; }
+.cell { display: flex; flex-direction: column; gap: 8px; width: 300px; }
+.cp { font: 11.5px/1.65 var(--ui); color: #8f8b84; }
+.cp b { color: #d8d4cc; font-weight: 600; }
+.ctl { display: flex; gap: 6px; flex-wrap: wrap; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 11.5px var(--mono); padding: 2px 8px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+
+.px { display: block; image-rendering: pixelated; }
+.sq { width: 8px; height: 8px; display: inline-block; flex: none; }
+.spin { color: var(--cyan); }
+.w { color: var(--amber); } .dim { color: var(--ink2); } .faint { color: var(--ink3); }
+.lbl { color: var(--ink3); font: 11px var(--mono); letter-spacing: .04em; }
+@keyframes blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: .25 } }
+.blink { animation: blink 1.1s steps(1) infinite; }
+@media (prefers-reduced-motion: reduce) { .blink { animation: none; } }
+
+/* ---------- the phone ---------- */
+.phone { width: 300px; height: 620px; border-radius: 44px; background: #111; padding: 11px; box-shadow: 0 0 0 2px #2a2a2c, 0 24px 60px rgba(0,0,0,.6); }
+.scr { width: 100%; height: 100%; border-radius: 34px; background: var(--bg); color: var(--ink); overflow: hidden; display: grid; grid-template-rows: 40px auto minmax(0, 1fr) auto 50px; position: relative; }
+.sb { display: flex; justify-content: space-between; align-items: end; padding: 0 26px 4px; font: 600 13px var(--ui); }
+.tabs { display: flex; justify-content: space-around; align-items: center; font: 10.5px var(--mono); color: var(--ink2); border-top: 1px solid #1a1a1a; }
+.tabs span { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.tabs .on { color: var(--ink); }
+/* list */
+.nav { display: flex; align-items: center; padding: 6px 16px 8px; gap: 8px; font: 600 16px var(--ui); }
+.nav .sp { flex: 1; }
+.nav .ic { color: var(--ink2); font: 18px var(--mono); }
+.list { overflow: hidden; padding: 0 0 8px; }
+.grp { font: 11px var(--mono); color: var(--ink3); letter-spacing: .04em; padding: 10px 16px 4px; display: flex; gap: 8px; }
+.tr { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 10px; padding: 7px 16px; align-items: center; }
+.tr.on { background: var(--raise); box-shadow: inset 3px 0 0 var(--signal); }
+.tr b { font: 600 13px var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr small { grid-column: 2; font: 11px var(--mono); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.srv { margin: 6px 16px 0; border-top: 1px dotted var(--ink4); padding-top: 8px; font: 11px var(--mono); color: var(--ink2); display: grid; gap: 5px; }
+/* page */
+.addr { display: flex; align-items: center; gap: 8px; padding: 4px 12px 7px; border-bottom: 1px dotted var(--ink4); }
+.addr .x { font: 16px var(--mono); color: var(--ink2); }
+.addr .u { flex: 1; min-width: 0; border: 1px solid var(--ink4); padding: 4px 8px; font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
+.addr .u i { font-style: normal; color: var(--ink3); }
+.holder { display: flex; align-items: center; gap: 7px; padding: 5px 12px; font: 11px var(--mono); color: var(--ink2); }
+.holder .sp { flex: 1; }
+.holder.mine { color: var(--signal); }
+.stream { position: relative; overflow: hidden; background: var(--site-bg); }
+.bbar { display: grid; grid-template-columns: repeat(5, 1fr); align-items: center; justify-items: center; border-top: 1px solid var(--ink4); font: 15px var(--mono); color: var(--ink2); padding: 0 6px; }
+.bbar .act { grid-column: span 2; font: 600 11.5px var(--mono); color: var(--ink); white-space: nowrap; }
+.bbar .act:hover { background: var(--ink); color: var(--bg); }
+.keys { display: flex; gap: 5px; padding: 6px 8px; background: #0b0b0b; border-top: 1px solid var(--ink4); overflow: hidden; }
+.keys span { border: 1px solid #3a3a3a; border-bottom-width: 3px; padding: 1px 6px; font: 10.5px var(--mono); color: #b5b1aa; white-space: nowrap; }
+.keys .fill { border-color: var(--signal); color: var(--signal); }
+.kb { height: 150px; background: #1c1c1e; display: grid; grid-template-rows: repeat(4, 1fr); gap: 6px; padding: 8px 4px; }
+.kb div { display: flex; gap: 5px; justify-content: center; }
+.kb i { flex: 0 0 24px; height: 100%; border-radius: 5px; background: #3a3a3c; }
+.kb i.w2 { flex-basis: 40px; } .kb i.sp { flex-basis: 150px; }
+/* what an agent just did, drawn over the screen */
+.hit { position: relative; outline: 2px solid var(--cyan); outline-offset: 3px; }
+.hit::after { content: attr(data-say); position: absolute; left: -5px; top: -27px; background: var(--cyan); color: #000; font: 600 10.5px var(--mono); padding: 1px 6px; white-space: nowrap; }
+.banner { position: absolute; left: 0; right: 0; top: 0; padding: 5px 10px; font: 11px var(--mono); background: #000; color: var(--amber); display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--amber); z-index: 2; }
+.banner .sp { flex: 1; }
+.banner b { color: var(--ink); font-weight: 600; }
+
+/* ---------- mock sites (inside the screen) ---------- */
+.site { font: 12px/1.45 -apple-system, "Helvetica Neue", sans-serif; color: var(--site-ink); }
+.gh-top { background: #1f2328; color: #fff; padding: 7px 10px; font: 600 11px -apple-system, sans-serif; display: flex; gap: 8px; align-items: center; }
+.gh-body { padding: 10px; }
+.gh-title { font: 600 15px/1.3 -apple-system, sans-serif; margin: 2px 0 6px; }
+.gh-state { display: inline-flex; gap: 5px; align-items: center; background: var(--site-green); color: #fff; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 600; }
+.gh-meta { color: var(--site-ink2); font-size: 11px; margin: 6px 0 10px; }
+.gh-tabs { display: flex; gap: 12px; border-bottom: 1px solid var(--site-line); font-size: 11px; color: var(--site-ink2); padding-bottom: 6px; margin-bottom: 10px; }
+.gh-tabs b { color: var(--site-ink); border-bottom: 2px solid #fd8c73; padding-bottom: 5px; }
+.gh-box { border: 1px solid var(--site-line); border-radius: 6px; padding: 10px; }
+.gh-check { display: flex; gap: 6px; align-items: center; font-size: 11px; margin-bottom: 4px; }
+.gh-check i { width: 10px; height: 10px; border-radius: 50%; background: var(--site-green); flex: none; }
+.gh-merge { margin-top: 10px; display: inline-block; background: var(--site-green); color: #fff; border-radius: 6px; padding: 6px 12px; font-weight: 600; font-size: 12px; }
+.login { padding: 26px 22px; display: grid; gap: 10px; }
+.login h2 { margin: 0 0 6px; font: 600 18px -apple-system, sans-serif; text-align: center; }
+.login label { font-size: 11px; font-weight: 600; }
+.login .in { border: 1px solid var(--site-line); border-radius: 6px; padding: 7px 9px; font-size: 12px; color: var(--site-ink); background: #fff; }
+.login .in.focus { border-color: var(--site-blue); box-shadow: 0 0 0 3px rgba(9,105,218,.25); }
+.login .go { background: var(--site-green); color: #fff; border-radius: 6px; padding: 8px; text-align: center; font-weight: 600; }
+.file { background: #000; color: #e9e6df; height: 100%; padding: 12px; font: 11px var(--mono); }
+.file h3 { margin: 0 0 8px; font: 700 12px var(--mono); }
+.file .nd { border: 1px solid #4d4b48; padding: 5px 7px; margin: 6px 0; display: inline-block; font-size: 10.5px; }
+.denied { height: 100%; background: #000; color: var(--ink); display: grid; place-items: center; padding: 20px; text-align: center; }
+.denied .box { border: 1px solid var(--ink); padding: 14px 14px 12px; position: relative; }
+.denied .box::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.denied h4 { margin: 0 0 8px; font: 600 12px var(--mono); color: var(--amber); }
+.denied p { margin: 0; font: 12.5px/1.6 var(--ui); color: var(--ink2); }
+.dev { padding: 0; height: 100%; background: #0d1117; color: #e6edf3; font: 12px -apple-system, sans-serif; }
+.dev .h { padding: 14px; font: 700 16px -apple-system, sans-serif; background: linear-gradient(90deg, #6d28d9, #db2777); }
+.dev .c { padding: 12px 14px; display: grid; gap: 8px; color: #9da7b3; }
+
+/* ---------- the Mac's main window, Browser page ---------- */
+.win { width: 1180px; height: 560px; background: var(--bg); color: var(--ink); display: grid; grid-template-rows: 32px minmax(0, 1fr); font: 13px var(--mono);
+  border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); }
+.bar { position: relative; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; font-family: var(--ui); }
+.bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); }
+.lights { display: flex; gap: 8px; margin-right: 18px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.pg { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; font: 12.5px var(--mono); color: var(--ink2); }
+.pg.on { color: var(--ink); text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 6px; }
+.bar .title { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; font: 600 13px var(--ui); white-space: nowrap; }
+.bar .end { margin-left: auto; display: flex; gap: 10px; align-items: center; font: 11.5px var(--mono); color: var(--ink2); }
+.body { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 0; }
+.side { position: relative; padding: 4px 0; }
+.side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink4) 0 2px, transparent 2px 4px); }
+.side .tr { cursor: pointer; }
+.main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
+.main .addr { padding: 8px 14px; }
+.main .stream { margin: 0; }
+.main .foot { display: flex; gap: 14px; align-items: center; padding: 6px 14px; border-top: 1px solid var(--ink4); font: 11.5px var(--mono); color: var(--ink2); }
+.main .foot .sp { flex: 1; }
+.btn { font: 12px var(--mono); color: var(--ink); white-space: nowrap; }
+.btn:hover { background: var(--ink); color: var(--bg); }
+.btn.pri { background: var(--ink); color: var(--bg); padding: 0 2px; }
+.btn.pri:hover { background: var(--signal); color: #000; }
+
+/* ---------- what Codex sees ---------- */
+.term { width: 560px; height: 360px; background: #000; color: #d8d8d8; border-radius: 10px; padding: 14px 16px; font: 12px/1.6 var(--mono); white-space: pre; overflow: hidden;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 20px 50px rgba(0,0,0,.5); }
+.term .c { color: #8d8a84; } .term .t { color: #2ee6ff; } .term .g { color: #9be22d; } .term .p { color: #ff2e88; }
+.arrow { align-self: center; font: 12px/1.7 var(--mono); color: #8f8b84; max-width: 300px; }
+.arrow b { color: #e9e6df; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Browser · 浏览器（演示）</h1>
+  <p class="lede">Mac 上一个由服务持有的浏览器（同终端）：App 是它的屏幕，手机和 Mac 都能看、能点、能打字；Codex、Claude Code、OpenCode 经凭据网关的浏览器工具操作的是同一个——你看到的就是它正在操作的那一页，随时接手、交还。登录态共用，密码用密文填。你在 App 里还能打开 Mac 上的本地网页和 localhost，手机拿到的只是画面。静态演示，不连服务。</p>
+</div>
+
+<div class="sec">IPHONE</div>
+<div class="row">
+  <div class="cell"><div class="phone" id="pA"></div><div class="cp"><b>Browser 标签页</b>：按持有者分组——你开的、终端里的 agent、调度的任务；agent 正在操作的转圈，等你的琥珀。右上 + 开新标签：网址、Mac 上的路径或 localhost；底下列出 Mac 上正在监听的本地服务。</div></div>
+  <div class="cell"><div class="phone" id="pB"></div><div class="ctl" id="ctlB"><button data-b="watch" class="on">Watching</button><button data-b="took">Taken Over</button></div><div class="cp" id="cpB"></div></div>
+  <div class="cell"><div class="phone" id="pC"></div><div class="ctl" id="ctlC"><button data-c="file" class="on">Local File</button><button data-c="localhost">localhost</button><button data-c="denied">Blocked</button><button data-c="external">External Link</button></div><div class="cp" id="cpC"></div></div>
+</div>
+
+<div class="sec">MAC · MAIN WINDOW, THIRD PAGE</div>
+<div class="row"><div style="overflow-x:auto;max-width:100%"><div class="win" id="win"></div></div></div>
+<div class="row"><div class="cp" style="max-width:1180px;margin-top:10px">主窗口多出第三页 <b>Browser</b>（Dispatch · Terminals · Browser，⌘0 / ⌃⇥ 之外加 ⌘⇧B），左栏标签列表同手机，右边是画面，键盘鼠标直接转发。点左栏切换标签；Codex 的标签上标出它刚操作的元素。待定：也可以不画画面，而是一个真正的 Chrome 窗口。</div></div>
+
+<div class="sec">WHAT CODEX SEES — 同一个标签</div>
+<div class="row">
+  <div class="term" id="term"></div>
+  <div class="arrow">← Codex 在终端里（或调度的任务里）调用的浏览器工具，经凭据网关、连到宿主里它自己的标签：<b>就是上面手机和 Mac 正在显示的那一页</b>。<br><br>它看到的是脱敏后的页面快照，截图里密码框和受保护的值被遮住；密文只按允许的站点填入。你接手时它的调用排队等待；交还后接着做。<br><br>浏览器没有调试端口，Codex 的 shell 连不到它，只能经这个工具。</div>
+</div>
+<div style="height:60px"></div>
+
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+document.getElementById("gcss").textContent = P.GLITCH_CSS;
+const sq = (c, { blink = false, hollow = false } = {}) => `<span class="sq ${blink ? "blink" : ""}" style="${hollow ? `box-shadow: inset 0 0 0 2px ${c}` : `background:${c}`}"></span>`;
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let frame = 0;
+const spin = () => `<span class="spin" data-spin>${SPIN[frame % SPIN.length]}</span>`;
+const agent = (a) => P.sprite(P.AGENT_PX[a], { px: 2 });
+// the tab icon: a globe, 2 pt cells (one icon, one meaning: the Browser tab)
+const GLOBE = [".###.", "#.#.#", "#####", "#.#.#", ".###."];
+const S = { b: "watch", c: "file", sel: "pr" };
+
+const TABS = [
+  { id: "pr", group: "codex", st: "busy", title: "Add native Dispatch page · Pull Request #128", host: "github.com" },
+  { id: "issue", group: "codex", st: "idle", title: "Issues · acme/app", host: "github.com" },
+  { id: "portal", group: "task", st: "wait", title: "登录 · 财务平台", host: "portal.example.com", ask: "等你：短信验证码" },
+  { id: "mesh", group: "you", st: "idle", title: "mesh.html", host: "~/Projects/AgentSwitch/docs/design" },
+  { id: "vite", group: "you", st: "idle", title: "Acme · Dev", host: "localhost:5173" },
+];
+const GROUPS = { you: "// You", codex: "// codex · AgentSwitch", task: "// 登录财务平台下载对账单" };
+const mark = (st) => st === "busy" ? spin() : st === "wait" ? sq("var(--amber)", { blink: true }) : sq("var(--ink3)", { hollow: true });
+
+function tabList(selectable) {
+  let out = "";
+  for (const g of ["codex", "task", "you"]) {
+    out += `<div class="grp">${g === "codex" ? agent("codex") : ""}${GROUPS[g]}</div>`;
+    for (const t of TABS.filter((x) => x.group === g)) {
+      out += `<div class="tr ${selectable && S.sel === t.id ? "on" : ""}" ${selectable ? `data-sel="${t.id}"` : ""}>${mark(t.st)}<b>${t.title}</b><small>${t.ask ? `<span class="w">${t.ask}</span> · ` : ""}${t.host}</small></div>`;
+    }
+  }
+  return out;
+}
+
+const tabbar = () => `<div class="tabs"><span>${P.mark({ px: 1.5, mono: true })}Dispatch</span><span>▣<br></span><span class="on">${P.sprite(GLOBE, { px: 2 })}Browser</span></div>`
+  .replace("<span>▣<br></span>", `<span>${P.sprite(["#####", "#####", "##..#", "#...#", "#####"], { px: 2 })}Terminals</span>`);
+
+// ---------- mock sites ----------
+const prPage = (hit) => `<div class="site"><div class="gh-top">● acme / app</div><div class="gh-body">
+  <div class="gh-title">Add native Dispatch page <span style="color:var(--site-ink2);font-weight:400">#128</span></div>
+  <span class="gh-state">⟟ Open</span><div class="gh-meta">codex-bot wants to merge 14 commits into main</div>
+  <div class="gh-tabs"><b>Conversation</b><span>Commits 14</span><span>Checks 3</span><span>Files 38</span></div>
+  <div class="gh-box"><div class="gh-check"><i></i>All checks have passed</div><div class="gh-check"><i></i>No conflicts with base branch</div>
+  <div style="margin-top:34px"><span class="gh-merge ${hit ? "hit" : ""}" style="margin-top:0" data-say='codex · click "Merge pull request"'>Merge pull request</span></div></div></div></div>`;
+const loginPage = () => `<div class="site login"><h2>财务平台</h2><label>邮箱</label><div class="in">finance@me.com</div><label>密码</label><div class="in focus">••••••••••</div><div class="go">登录</div></div>`;
+const filePage = () => `<div class="file"><h3>Mesh · 网状连接（演示）</h3><div style="color:#8d8a84;margin-bottom:8px">每台 Mac 本来就是服务端……</div>
+  <span class="nd">MacBook Pro</span> ── <span class="nd">Mac mini</span><br><span class="nd">iPad</span> ┈┈ <span class="nd">iPhone 17 Pro</span>
+  <div style="margin-top:10px;color:#4d4b48">（mesh.html 在 Mac 上渲染，这里是它的画面）</div></div>`;
+const devPage = () => `<div class="dev"><div class="h">Acme · Dev</div><div class="c"><div>vite v6 · HMR connected</div><div style="background:#161b22;padding:10px;border-radius:6px">Dashboard<br><span style="color:#e6edf3;font-size:20px;font-weight:700">$12,480</span></div><div style="background:#161b22;padding:10px;border-radius:6px">改了 src/App.tsx，热更新后这里立即变。</div></div></div>`;
+const deniedPage = () => `<div class="denied"><div class="box"><h4>[!] Not Viewable</h4><p>~/Projects/app/.env 在凭据名单里，不在浏览器中打开。<br>看不了的：AgentSwitch 自己的数据、网关、SSH 与云服务凭据、.env、证书私钥。</p></div></div>`;
+
+// ---------- phones ----------
+function phoneA() {
+  return `<div class="scr" style="grid-template-rows:40px auto minmax(0,1fr) 50px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
+    <div class="nav">${P.sprite(GLOBE, { px: 2 })}<span>Browser</span><span class="sp"></span><span class="ic">＋</span></div>
+    <div class="list">${tabList(false)}<div class="srv"><span class="lbl">// Local Servers on MacBook Pro</span><span>${sq("var(--green)")} localhost:5173 · vite · ~/Projects/site</span><span>${sq("var(--green)")} localhost:3000 · next dev · ~/Projects/web</span></div></div>
+    ${tabbar()}</div>`;
+}
+
+function phoneB() {
+  const took = S.b === "took";
+  const holder = took ? `<div class="holder mine">${sq("var(--signal)")}<span>You · Taken Over from Codex</span><span class="sp"></span><span>Phone Size</span></div>`
+    : `<div class="holder">${agent("codex")}<span>codex · AgentSwitch</span><span class="sp"></span>${spin()}<span>Clicking</span></div>`;
+  const addr = took ? "portal.example.com/login" : "github.com/acme/app/pull/128";
+  const stream = took ? loginPage() : prPage(true);
+  const bottom = took
+    ? `<div><div class="keys"><span>esc</span><span>tab</span><span>⏎</span><span>⌫</span><span>←</span><span>→</span></div><div class="kb"><div>${"<i></i>".repeat(10)}</div><div>${"<i></i>".repeat(9)}</div><div><i class="w2"></i>${"<i></i>".repeat(7)}<i class="w2"></i></div><div><i class="w2"></i><i class="sp"></i><i class="w2"></i></div></div></div>`
+    : "<div></div>";
+  const bar = `<div class="bbar"><span>‹</span><span>›</span><span>↻</span><button class="act" data-b="${took ? "watch" : "took"}">[ ${took ? "Hand Back" : "Take Over"} ]</button></div>`;
+  document.getElementById("cpB").innerHTML = took
+    ? "<b>接手</b>：标签换成手机的视口，codex 对它的操作排队等待；你打的字直接进页面，不经过模型，但交还后 codex 能在页面上看到（接手时说明一次）。<b>Fill Ciphertext</b> 只在你自己的标签上：从密文填入，网关按站点校验，明文不出现在手机和模型里。<b>Hand Back</b> 或 2 分钟不动就交还。"
+    : "<b>看 codex 操作</b>：地址栏下是持有者和它正在做的事；画面上框出它刚操作的元素。这是 Mac 上那个标签的实时画面（只看时按它的尺寸缩放到手机宽），点 <b>Take Over</b> 接手。";
+  return `<div class="scr" style="grid-template-rows:40px auto auto minmax(0,1fr) auto 44px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
+    <div class="addr"><span class="x">‹</span><span class="u"><i>🔒︎</i>${addr}</span><span class="x">⋯</span></div>${holder}
+    <div class="stream">${stream}</div>${bottom}${bar}</div>`;
+}
+
+function phoneC() {
+  const v = S.c;
+  const addr = { file: "file:///Users/me/…/concepts/mesh.html", localhost: "localhost:5173", denied: "file:///Users/me/Projects/app/.env", external: "file:///…/concepts/mesh.html" }[v];
+  const page = { file: filePage(), localhost: devPage(), denied: deniedPage(), external: filePage() }[v];
+  const banner = v === "file" ? `<div class="banner">${sq("var(--amber)")}<span>已拦截 2 个外部资源（cdn.jsdelivr.net）</span><span class="sp"></span><b>[ Load ]</b></div>` : "";
+  const sheet = v === "external" ? `<div style="position:absolute;left:12px;right:12px;bottom:58px;z-index:3;background:#000;border:1px solid var(--ink);padding:12px">
+      <div style="font:600 12px var(--mono);margin-bottom:6px">Open Link</div><div style="font:12.5px/1.6 var(--ui);color:var(--ink2)">将在 Mac 上的这个浏览器里打开 https://github.com/acme/app。</div>
+      <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:10px;font:600 11.5px var(--mono)"><span>[ Cancel ]</span><span style="background:var(--ink);color:#000">[ Open ]</span></div></div>` : "";
+  document.getElementById("cpC").innerHTML = {
+    file: "<b>Mac 上的本地网页</b>：在 Mac 上的浏览器里打开 file:// 路径，同目录的样式、脚本、图片都在；手机拿到的只是画面。本地页面默认不放行外部资源（发不出数据），被拦下时顶上一行，<b>[ Load ]</b> 放行这一页。",
+    localhost: "<b>本地开发服务</b>：Mac 上正在监听的端口直接打开（只在 Mac 上可达的，也能在手机上看），热更新照常。",
+    denied: "<b>看不了的</b>：AgentSwitch 自己的数据、网关、本机令牌、浏览器登录态目录，以及常见凭据文件，宿主在打开前按真实路径检查，页面写明原因。",
+    external: "<b>页面里的外部链接</b>：在同一个浏览器的新标签里打开（不跳到手机的 Safari），先确认一次。",
+  }[v];
+  return `<div class="scr" style="grid-template-rows:40px auto auto minmax(0,1fr) 44px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
+    <div class="addr"><span class="x">‹</span><span class="u">${addr}</span><span class="x">⋯</span></div>
+    <div class="holder">${sq("var(--ink3)", { hollow: true })}<span>You</span><span class="sp"></span><span>${v === "localhost" ? "vite · ~/Projects/site" : "Mac 上的文件"}</span></div>
+    <div class="stream" style="background:#000">${banner}${page}${sheet}</div>
+    <div class="bbar"><span>‹</span><span>›</span><span>↻</span><span>⌨</span><span>⋯</span></div></div>`;
+}
+
+// ---------- the Mac ----------
+function drawWin() {
+  const t = TABS.find((x) => x.id === S.sel);
+  const page = { pr: prPage(true), issue: `<div class="site"><div class="gh-top">● acme / app</div><div class="gh-body"><div class="gh-title">Issues</div><div class="gh-meta">12 Open · 48 Closed</div></div></div>`,
+    portal: loginPage(), mesh: filePage(), vite: devPage() }[t.id];
+  const owner = t.group === "codex" ? `${agent("codex")}<span>codex · AgentSwitch</span>` : t.group === "task" ? `<span>调度任务 · Claude Code</span>` : `<span>You</span>`;
+  const act = t.group === "you" ? "" : t.st === "wait" ? `<button class="btn pri">[ Take Over ]</button>` : `<button class="btn">[ Take Over ]</button>`;
+  document.getElementById("win").innerHTML = `<div class="bar"><div class="lights"><i></i><i></i><i></i></div>
+      <button class="pg">Dispatch</button><button class="pg">Terminals ${sq("var(--amber)", { blink: true })}</button><button class="pg on">Browser</button>
+      <div class="title">${mark(t.st)}<span>${t.title}</span></div><div class="end"><span>${spin()}1</span><span>${sq("var(--amber)", { blink: true })}1</span><span>＋</span></div></div>
+    <div class="body"><div class="side">${tabList(true)}</div>
+      <div class="main"><div class="addr"><span class="x">‹ ›</span><span class="u">${t.host.startsWith("localhost") || t.host.startsWith("~") ? "" : "<i>🔒︎</i>"}${t.id === "pr" ? "github.com/acme/app/pull/128" : t.id === "portal" ? "portal.example.com/login" : t.id === "mesh" ? "file:///Users/me/…/concepts/mesh.html" : t.host}</span><span class="x">↻</span></div>
+        <div class="stream" style="${t.id === "mesh" || t.id === "vite" ? "background:#000" : ""}">${page}</div>
+        <div class="foot">${owner}<span class="sp"></span>${t.ask ? `<span class="w">${t.ask}</span>` : ""}${act}</div></div></div>`;
+}
+
+function drawTerm() {
+  document.getElementById("term").innerHTML = [
+    `<span class="c">✻ Codex · GPT-6 Luna · ~/Projects/AgentSwitch</span>`, ``,
+    `<span class="p">›</span> 看一下 PR #128 的检查，都过了就合并`, ``,
+    `<span class="t">• browser_navigate</span>(https://github.com/acme/app/pull/128)`,
+    `  <span class="c">└ opened in tab "codex · AgentSwitch" (shown in AgentSwitch)</span>`,
+    `<span class="t">• browser_snapshot</span>`,
+    `  <span class="c">└ - heading "Add native Dispatch page #128"</span>`,
+    `  <span class="c">  - text "All checks have passed"</span>`,
+    `  <span class="c">  - button "Merge pull request" [ref=e42]</span>`,
+    `<span class="t">• browser_click</span>(ref=e42, element="Merge pull request")`,
+    `  <span class="c">└ waiting: the user is using this tab …</span>  <span class="c">(你接手时)</span>`,
+    `  <span class="g">└ clicked</span>  <span class="c">(交还后)</span>`,
+  ].join("\n");
+}
+
+function draw() {
+  document.getElementById("pA").innerHTML = phoneA();
+  document.getElementById("pB").innerHTML = phoneB();
+  document.getElementById("pC").innerHTML = phoneC();
+  for (const b of document.querySelectorAll("#ctlB button")) b.classList.toggle("on", b.dataset.b === S.b);
+  for (const b of document.querySelectorAll("#ctlC button")) b.classList.toggle("on", b.dataset.c === S.c);
+  drawWin(); drawTerm();
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-b]"); if (b) { S.b = b.dataset.b; draw(); return; }
+  const c = e.target.closest("[data-c]"); if (c) { S.c = c.dataset.c; draw(); return; }
+  const s = e.target.closest("[data-sel]"); if (s) { S.sel = s.dataset.sel; drawWin(); return; }
+});
+setInterval(() => { frame++; for (const s of document.querySelectorAll("[data-spin]")) s.textContent = SPIN[frame % SPIN.length]; }, 90);
+const q = new URLSearchParams(location.search);
+if (q.has("took")) S.b = "took";
+if (q.get("file")) S.c = q.get("file");
+draw();
+</script>
+</body>
+</html>

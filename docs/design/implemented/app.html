@@ -151,7 +151,7 @@ a { color: inherit; }
     <div><b>04 · 一个图标一个意思</b><p><code>×</code> 只表示关闭；删除记录写 <code>Delete</code>。<code>&gt;_</code> 只表示 Codex，终端标签页用带框的终端窗口。进行中处处是同一个转圈。找不到好隐喻就只写字。</p></div>
     <div><b>05 · 图标要区分，不要铺满</b><p>只有在跑的终端带状态标记；会话记录不带。有无图标的行共用同一列，文字起点对齐。菜单里要么都留图标列，要么都不留。</p></div>
     <div><b>06 · 系统符号按系统的意思用</b><p><code>▸ ▾</code> 只表示展开/收起（“▸ 2 More”）；<code>…</code> 只表示“还需要输入”（Settings…）；<code>⌘</code> 只写快捷键；单选是 <code>&lt; &gt; &lt;x&gt;</code>，复选才是 <code>[ ] [x]</code>。</p></div>
-    <div><b>07 · 短词英文，整句中文</b><p>短词用等宽英文，按苹果的标题式大写：状态、按钮、标签页与导航标题、分组标签（Busy · Waiting · Resume · Delete Record · Tasks · // Status）；键名、数字开头的单位照旧小写（esc · 3h · 62%）。成句的用正式中文：说明、确认、报错、空状态、占位提示。用户内容原样。一个词也只有一个意思：Busy = 正在干活，OK = 服务正常。</p></div>
+    <div><b>07 · 短词英文，整句中文</b><p>短词用等宽英文，按苹果的标题式大写：状态、按钮、标签页与导航标题、分组标签（Busy · Waiting · Resume · Delete Record · Dispatch · // Status）；键名、数字开头的单位照旧小写（esc · 3h · 62%）。成句的用正式中文：说明、确认、报错、空状态、占位提示。用户内容原样。一个词也只有一个意思：Busy = 正在干活，OK = 服务正常。</p></div>
     <div><b>08 · 抖动代替淡出，glitch 是事件</b><p>停止、已结束、未安装用 50% 抖动。glitch 在新的权限请求、失败、意外退出时闪一次，用户主动选择（选 agent、打开加密发送）时也闪一次（≤ 0.5 秒），不循环；“减少动态效果”打开时不出现；动画用 steps()。</p></div>
     <div><b>09 · 层次只给大的身份标记</b><p>图标、文字标、≥ 24pt 的标记：1 像素硬阴影 + 台阶补半亮；文字标加 1 像素信号色错位。状态方块、agent 小图、菜单栏图标保持平的。</p></div>
   </div>
@@ -233,9 +233,9 @@ a { color: inherit; }
           </div>
         </div>
         <div class="input"><span class="k">＋</span><span class="ph">向 Mac 发送任务或问题</span><span class="k" id="lockKey"></span></div>
-        <div class="tabs"><div class="on"><span id="tab1"></span>Tasks</div><div><span id="tab2"></span>Terminals</div></div>
+        <div class="tabs"><div class="on"><span id="tab1"></span>Dispatch</div><div><span id="tab2"></span>Terminals</div></div>
       </div></div>
-      <div class="cap">iPhone · Tasks（深色）：用户的话、任务正文是系统字体的中文；状态、模型、时间、按钮是等宽英文。进行中与 Mac 同一个转圈。新的权限请求到达时整张卡闪一次。</div>
+      <div class="cap">iPhone · Dispatch（深色）：用户的话、任务正文是系统字体的中文；状态、模型、时间、按钮是等宽英文。进行中与 Mac 同一个转圈。新的权限请求到达时整张卡闪一次。</div>
       <div class="ctl"><button id="askBtn">模拟：新的权限请求</button></div>
     </div>
 
@@ -244,7 +244,7 @@ a { color: inherit; }
         <div class="sb"><span>18:04</span><span>▮▮▮ 86%</span></div>
         <div class="nav"><span id="navMark2" style="color:var(--ink)"></span><span class="mac">Terminals <small>3 Running</small></span><span class="ic">＋</span></div>
         <div class="tlist" id="tlist"></div>
-        <div class="tabs"><div><span id="tab3"></span>Tasks</div><div class="on"><span id="tab4"></span>Terminals</div></div>
+        <div class="tabs"><div><span id="tab3"></span>Dispatch</div><div class="on"><span id="tab4"></span>Terminals</div></div>
       </div></div>
       <div class="cap">iPhone · Terminals（浅色）：和 Mac 终端窗口同一套目录树，同一父目录合并。终端标签页的图标是带框的终端窗口，和 Codex 的 &gt;_ 区分开。空状态用抖动底纹。</div>
     </div>

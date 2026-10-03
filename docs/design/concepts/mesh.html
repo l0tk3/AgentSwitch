@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Mesh</title>
+<style id="gcss"></style>
+<style>
+/* Macs and phones connected as a mesh (2026-10-02, user: 手机可以连接多个电脑，电脑和多个电脑之间可以互相连接成为网状，可以使用
+   对方的 terminal 和 dispatch; shelved until Dispatch was done, then: 抽空做点网状连接的 demo). A demo for review, not a spec:
+   the overview of who may use whom and by which path, the main window switching hosts, two Macs pairing, and what the
+   menu bar and the phone show with several Macs. The open choices are switches at the top. */
+:root {
+  --bg: #000; --panel: #0b0b0b; --raise: #151515; --hover: #121212;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  --sys-win: #1e1e1e; --sys-side: #262626; --sys-group: #2a2a2a; --sys-line: #3a3a3a; --sys-ink: #ececec; --sys-ink2: #9a9a9a; --sys-ctl: #4a4a4a;
+  --sys-menu: rgba(40,40,40,.94);
+  color-scheme: dark;
+}
+.light {
+  --bg: #f4f1ea; --panel: #ece8df; --raise: #e4dfd4; --hover: #e9e5dc;
+  --ink: #16140f; --ink2: #6b675f; --ink3: #a6a196; --ink4: #d6d1c6;
+  --signal: #e0106f; --cyan: #0096b3; --green: #3d8a00; --amber: #b87400; --red: #c9281b;
+  --sys-win: #ececec; --sys-side: #e3e3e3; --sys-group: #f7f7f7; --sys-line: #d6d6d6; --sys-ink: #1d1d1f; --sys-ink2: #6e6e73; --sys-ctl: #fff;
+  --sys-menu: rgba(246,246,246,.96);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px var(--ui); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus { outline: none; }
+.top { max-width: 1240px; margin: 0 auto; padding: 18px 16px 4px; }
+h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
+.lede { color: #a9a6a0; font-size: 12.5px; line-height: 1.75; margin: 0 0 10px; max-width: 110ch; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font: 12px var(--mono); color: #8f8b84; }
+.tools > span { display: inline-flex; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid #3a3a3e; }
+.seg button { color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; }
+.seg button.on { background: #e9e6df; color: #111; }
+.sec { max-width: 1240px; margin: 34px auto 12px; padding: 0 16px; font: 11px var(--mono); letter-spacing: .14em; color: #77746e; }
+.stage { max-width: 1240px; margin: 0 auto; padding: 0 16px; overflow-x: auto; }
+.cap { max-width: 1240px; margin: 10px auto 0; padding: 0 16px; color: #8f8b84; font-size: 12px; line-height: 1.75; }
+.cap b { color: #d8d4cc; font-weight: 600; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px var(--mono); padding: 3px 10px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+
+.px { display: block; image-rendering: pixelated; }
+.sq { width: 8px; height: 8px; display: inline-block; flex: none; }
+.spin { color: var(--cyan); }
+.w { color: var(--amber); } .ok { color: var(--green); } .bad { color: var(--red); } .dim { color: var(--ink2); } .faint { color: var(--ink3); }
+.lbl { color: var(--ink3); font: 11px var(--mono); letter-spacing: .04em; }
+@keyframes blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: .25 } }
+.blink { animation: blink 1.1s steps(1) infinite; }
+@media (prefers-reduced-motion: reduce) { .blink { animation: none; } }
+.btn { font: 12.5px var(--mono); color: var(--ink); white-space: nowrap; }
+.btn:hover { background: var(--ink); color: var(--bg); }
+.btn.pri { background: var(--ink); color: var(--bg); padding: 0 2px; }
+.btn.pri:hover { background: var(--signal); color: #000; }
+.btn.warn:hover { background: var(--red); color: #000; }
+
+/* ---------- 1. the overview ---------- */
+.topo { position: relative; width: 1200px; height: 470px; background: var(--bg); color: var(--ink); font: 12px var(--mono);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08); background-image: repeating-linear-gradient(to bottom, rgba(127,127,127,.035) 0 1px, transparent 1px 3px); }
+.topo svg.lines { position: absolute; inset: 0; width: 100%; height: 100%; }
+.node { position: absolute; width: 196px; transform: translate(-50%, -50%); border: 1px solid var(--ink3); background: var(--bg); padding: 10px 12px 10px; cursor: pointer; }
+.node:hover { border-color: var(--ink2); }
+.node.on { border-color: var(--ink); box-shadow: 6px 6px 0 -1px var(--bg), 6px 6px 0 0 var(--ink3); }
+.node.me::before { content: "This Mac"; position: absolute; top: -9px; left: 10px; background: var(--bg); padding: 0 5px; font-size: 10.5px; color: var(--signal); }
+.node .r1 { display: flex; align-items: center; gap: 10px; }
+.node b { font: 600 13px var(--ui); }
+.node .st { margin-top: 6px; display: flex; gap: 10px; color: var(--ink2); font-size: 11.5px; }
+.node .st span { display: inline-flex; align-items: center; gap: 5px; }
+.node.dim { opacity: .35; }
+.elabel { position: absolute; transform: translate(-50%, -50%); background: var(--bg); padding: 1px 6px; font-size: 11px; color: var(--ink2); white-space: nowrap; pointer-events: none; }
+.elabel b { font-weight: 400; color: var(--ink); }
+.elabel.hot { color: var(--ink); }
+.legend { position: absolute; left: 18px; bottom: 14px; display: flex; gap: 18px; color: var(--ink2); font-size: 11px; }
+.legend i { display: inline-block; width: 26px; height: 0; border-top: 1px solid var(--ink2); vertical-align: middle; margin-right: 6px; }
+.legend i.ts { border-top-color: var(--cyan); }
+.legend i.relay { border-top: 1px dashed var(--amber); }
+.detail { position: absolute; right: 18px; top: 18px; width: 300px; border: 1px solid var(--ink); background: var(--bg); }
+.detail::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.detail .hd { background: var(--ink); color: var(--bg); padding: 3px 10px; font-size: 12px; display: flex; }
+.detail .hd span:last-child { margin-left: auto; }
+.detail .bd { padding: 8px 12px 10px; }
+.detail .row { display: grid; grid-template-columns: 14px 1fr; gap: 2px 8px; padding: 5px 0; border-bottom: 1px dotted var(--ink4); }
+.detail .row:last-child { border-bottom: 0; }
+.detail .row .who { font: 600 12.5px var(--ui); }
+.detail .row .what { grid-column: 2; color: var(--ink2); font-size: 11.5px; }
+
+/* ---------- 2. the main window with a host switch ---------- */
+.win { width: 1200px; height: 600px; background: var(--bg); color: var(--ink); display: grid; grid-template-rows: 32px auto minmax(0, 1fr);
+  font: 13px var(--mono); border-radius: 10px; overflow: hidden; position: relative; box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); }
+.bar { position: relative; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; font-family: var(--ui); }
+.bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); }
+.lights { display: flex; gap: 8px; margin-right: 18px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.pg { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; font: 12.5px var(--mono); color: var(--ink2); }
+.pg.on { color: var(--ink); text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 6px; }
+.vr { width: 1px; height: 14px; margin: 0 8px; background: repeating-linear-gradient(to bottom, var(--ink3) 0 2px, transparent 2px 4px); }
+.host { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 8px; font: 12.5px var(--mono); color: var(--ink); border-radius: 6px; position: relative; }
+.host:hover, .host.open { background: rgba(127,127,127,.16); }
+.host.remote { color: var(--signal); }
+.host small { color: var(--ink3); font-size: 11px; }
+.bar .end { margin-left: auto; display: flex; align-items: center; gap: 10px; font: 11.5px var(--mono); color: var(--ink2); }
+.bar .end span { display: inline-flex; align-items: center; gap: 5px; }
+.via { display: flex; align-items: center; gap: 10px; padding: 5px 20px 6px; font: 11.5px var(--mono); color: var(--ink2); border-bottom: 1px solid var(--ink4);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--signal) 9%, transparent) 0 6px, transparent 6px 12px); }
+.via b { color: var(--signal); font-weight: 400; }
+.via .sp { flex: 1; }
+.content { position: relative; min-height: 0; overflow: hidden; display: grid; }
+.content > .box { min-height: 0; display: grid; }
+.noise { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 4; image-rendering: pixelated; pointer-events: none; }
+.osd { position: absolute; top: 14px; right: 18px; z-index: 6; font: 600 13px var(--mono); letter-spacing: .1em; color: #fff; background: #000; padding: 3px 8px;
+  text-shadow: 2px 0 var(--cyan), -2px 0 var(--signal); pointer-events: none; }
+.menu { position: absolute; top: 30px; left: 0; width: 290px; padding: 5px; border-radius: 10px; background: var(--sys-menu); z-index: 8;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.18), 0 10px 30px rgba(0,0,0,.45); font: 13px var(--ui); color: var(--sys-ink); }
+.menu .it { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 5px; }
+.menu .it:hover { background: #0a64d8; color: #fff; }
+.menu .it:hover .k { color: #fff; }
+.menu .it .k { color: var(--sys-ink2); font: 11.5px var(--mono); display: inline-flex; gap: 8px; align-items: center; }
+.menu hr { border: 0; height: 1px; background: rgba(127,127,127,.25); margin: 4px 8px; }
+.menu .hdr { font-size: 11px; color: var(--sys-ink2); padding: 4px 8px 2px; }
+/* the pages, sketched */
+.col { width: 100%; max-width: 720px; margin: 0 auto; padding: 14px 24px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.me { display: flex; justify-content: flex-end; }
+.me div { border: 1px solid var(--ink4); background: var(--raise); padding: 8px 12px; font: 14px/1.5 var(--ui); max-width: 72%; }
+.say { font: 14px/1.6 var(--ui); }
+.card { border: 1px solid var(--ink4); background: var(--panel); padding: 9px 12px 10px; }
+.card .l1 { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink2); }
+.card .l1 .sp { flex: 1; }
+.card .ti { font: 600 14px/1.45 var(--ui); margin: 5px 0 4px; }
+.card .stp { font-size: 12px; color: var(--ink2); }
+.compose { display: flex; gap: 8px; padding: 10px 24px 14px; max-width: 720px; width: 100%; margin: 0 auto; align-self: end; }
+.compose .f { flex: 1; border: 1px solid var(--ink4); padding: 9px 12px; color: var(--ink3); font: 14px var(--ui); }
+.compose .s { width: 38px; border: 1px solid var(--ink4); display: grid; place-items: center; color: var(--ink2); }
+.dz { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
+.terms { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 0; }
+.terms .side { position: relative; padding: 10px 0; font-size: 12.5px; line-height: 22px; }
+.terms .side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink4) 0 2px, transparent 2px 4px); }
+.terms .r { display: flex; gap: 8px; align-items: center; padding: 0 14px; white-space: nowrap; }
+.terms .r.on { background: var(--raise); box-shadow: inset 3px 0 0 var(--signal); }
+.terms .main { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; background: #000; }
+.terms .screen { color: #d8d8d8; padding: 14px 18px; font: 13px/1.5 var(--mono); white-space: pre; overflow: hidden; }
+.terms .reply { border-top: 1px solid #262524; padding: 8px 14px 10px; display: flex; gap: 8px; align-items: center; color: #8d8a84; font: 12px var(--mono); background: #000; }
+.terms .reply .f { flex: 1; border: 1px solid #262524; padding: 6px 10px; color: #4d4b48; font: 13px var(--ui); }
+.terms .reply kbd { border: 1px solid #3a3a3a; border-bottom-width: 3px; padding: 1px 6px; font: 11px var(--mono); color: #b5b1aa; }
+.terms .full { border-top: 1px solid #262524; padding: 7px 14px; color: #8d8a84; font: 11.5px var(--mono); background: #000; }
+
+/* ---------- 3. pairing: two Macs side by side ---------- */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; width: 1200px; }
+.mac { border-radius: 10px; overflow: hidden; background: var(--sys-win); color: var(--sys-ink); box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 20px 50px rgba(0,0,0,.5); font: 13px var(--ui); min-height: 470px; display: grid; grid-template-rows: 38px minmax(0, 1fr); }
+.mac .tb { display: flex; align-items: center; gap: 14px; padding: 0 14px; border-bottom: .5px solid var(--sys-line); font-weight: 600; }
+.mac .tb .lights { margin-right: 4px; }
+.mac .tb small { margin-left: auto; font: 11.5px var(--mono); color: var(--sys-ink2); font-weight: 400; }
+.mac .body { padding: 14px 20px 18px; position: relative; }
+.sl { font: 11px var(--mono); color: var(--sys-ink2); letter-spacing: .04em; margin: 14px 2px 6px; }
+.sl:first-child { margin-top: 2px; }
+.grp { background: var(--sys-group); border-radius: 10px; border: .5px solid var(--sys-line); }
+.grp .r { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 12px; border-top: .5px solid var(--sys-line); }
+.grp .r:first-child { border-top: 0; }
+.grp .r .m { font: 12.5px var(--mono); }
+.grp .r .d { font: 11.5px var(--mono); color: var(--sys-ink2); }
+.grp .r .sp { flex: 1; }
+.foot { font-size: 11.5px; color: var(--sys-ink2); margin: 6px 4px 0; line-height: 1.6; }
+.nbtn { font: 13px var(--ui); background: var(--sys-ctl); color: var(--sys-ink); border-radius: 6px; padding: 3px 11px; box-shadow: 0 0 0 .5px rgba(127,127,127,.35); }
+.nbtn.blue { background: var(--signal); color: #fff; }
+.nbtn.red { color: #ff453a; }
+.tgl { width: 30px; height: 18px; border-radius: 9px; background: var(--sys-ctl); position: relative; flex: none; box-shadow: inset 0 0 0 .5px rgba(127,127,127,.4); }
+.tgl::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+.tgl.on { background: var(--signal); }
+.tgl.on::after { left: 14px; }
+.sheet { position: absolute; left: 50%; top: 0; transform: translateX(-50%); width: 470px; background: var(--sys-win); border-radius: 0 0 12px 12px; padding: 16px 20px 16px;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 18px 40px rgba(0,0,0,.5); z-index: 3; }
+.sheet h3 { margin: 0 0 6px; font: 600 14px var(--ui); }
+.sheet p { margin: 0 0 10px; color: var(--sys-ink2); font-size: 12px; line-height: 1.6; }
+.code { display: flex; gap: 8px; justify-content: center; margin: 6px 0 4px; font: 600 26px var(--mono); letter-spacing: .12em; }
+.code span { border-bottom: 2px solid var(--sys-line); padding: 0 4px; }
+.fp { text-align: center; font: 600 17px var(--mono); letter-spacing: .14em; padding: 8px 0; border: 1px solid var(--sys-line); border-radius: 8px; margin: 6px 0; }
+.fp small { display: block; font: 400 11px var(--ui); letter-spacing: 0; color: var(--sys-ink2); margin-top: 2px; }
+.field { border-radius: 6px; background: var(--sys-ctl); padding: 6px 10px; font: 15px var(--mono); letter-spacing: .1em; box-shadow: 0 0 0 .5px rgba(127,127,127,.35); }
+.chk { display: grid; gap: 6px; margin: 8px 0; font-size: 12.5px; }
+.chk label { display: flex; gap: 8px; align-items: baseline; }
+.chk .mk { font: 12.5px var(--mono); color: var(--signal); }
+.chk small { color: var(--sys-ink2); font-size: 11.5px; }
+.acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.prompt { position: absolute; right: 16px; top: 12px; width: 380px; border-radius: 18px; padding: 14px 16px; background: rgba(8,8,10,.92); color: #e9e6df;
+  box-shadow: inset 0 0 0 .5px rgba(255,255,255,.16), 0 16px 48px rgba(0,0,0,.42); font: 13px var(--ui); z-index: 3; }
+.prompt .hd { display: flex; align-items: center; gap: 8px; font: 600 12px var(--mono); }
+.prompt .dots { height: 1px; margin: 10px 0 9px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 2px, transparent 2px 4px); }
+.prompt .b { font: 600 12.5px var(--mono); color: #e9e6df; padding: 3px 8px; }
+.prompt .b:hover { background: #e9e6df; color: #000; }
+
+/* ---------- 4. several Macs at once ---------- */
+.agg { display: flex; gap: 34px; align-items: flex-start; flex-wrap: wrap; width: 1200px; }
+.screen { position: relative; width: 470px; height: 420px; border-radius: 12px 12px 0 0; overflow: hidden; background: linear-gradient(160deg, #3b4b6e 0%, #222a44 45%, #121626 100%); }
+.mb { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 14px; color: #fff; font: 500 13px var(--ui); }
+.live { height: 22px; border-radius: 11px; background: #2a2a2d; display: inline-flex; align-items: center; gap: 8px; padding: 0 9px; font: 600 12px var(--mono); color: #e9e6df; }
+.panel { position: absolute; top: 36px; right: 70px; width: 372px; border-radius: 22px; padding: 14px 16px 15px; background: rgba(8,8,10,.9); color: #e9e6df;
+  box-shadow: inset 0 0 0 .5px rgba(255,255,255,.16), 0 16px 48px rgba(0,0,0,.42); --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; }
+.panel .hd { display: flex; align-items: center; gap: 8px; font: 600 12px var(--mono); }
+.panel .hd .sp { flex: 1; }
+.panel .dots { height: 1px; margin: 10px 0 8px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 2px, transparent 2px 4px); }
+.panel .grp2 + .grp2 { margin-top: 10px; }
+.panel .gh { font: 11px var(--mono); color: #8d8a84; letter-spacing: .06em; margin-bottom: 4px; display: flex; gap: 8px; }
+.panel .it { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; }
+.panel .it .t { font: 600 13.5px/1.3 var(--ui); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel .it .c { font: 12px var(--mono); color: #8d8a84; }
+.panel .ask { color: var(--amber); font-size: 12.5px; margin: 0 0 4px 22px; }
+.panel .ab { display: flex; justify-content: flex-end; gap: 8px; }
+.panel .ab button { font: 600 12px var(--mono); padding: 2px 8px; color: #e9e6df; }
+.panel .ab button:hover { background: #e9e6df; color: #000; }
+.phone { width: 300px; height: 620px; border-radius: 44px; background: #111; padding: 12px; box-shadow: 0 0 0 2px #2a2a2c, 0 26px 60px rgba(0,0,0,.6); }
+.phone .scr { width: 100%; height: 100%; border-radius: 34px; background: #000; color: #e9e6df; overflow: hidden; display: grid; grid-template-rows: 44px 40px auto minmax(0, 1fr) 50px 54px; font: 13px var(--ui);
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524; --panel: #0b0b0b; --raise: #151515; }
+.phone .sb { display: flex; justify-content: space-between; align-items: end; padding: 0 26px 4px; font: 600 13px var(--ui); }
+.phone .nav { display: flex; align-items: center; justify-content: center; gap: 8px; font: 600 15px var(--ui); position: relative; }
+.phone .nav .g { position: absolute; right: 16px; color: #8d8a84; }
+.macs { display: flex; gap: 6px; padding: 6px 12px 8px; overflow: hidden; border-bottom: 1px dotted #262524; }
+.macs .m { flex: none; border: 1px solid #262524; padding: 4px 8px; font: 11.5px var(--mono); color: #8d8a84; display: inline-flex; gap: 6px; align-items: center; }
+.macs .m.on { border-color: #e9e6df; color: #e9e6df; }
+.phone .feed { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.phone .card { padding: 8px 10px; }
+.phone .card .ti { font-size: 13px; }
+.phone .tag { font: 10.5px var(--mono); color: var(--signal); border: 1px solid color-mix(in srgb, var(--signal) 50%, transparent); padding: 0 4px; }
+.phone .in { margin: 6px 12px; border: 1px solid #262524; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: #4d4b48; }
+.phone .tabs { display: flex; justify-content: space-around; align-items: center; font: 11px var(--mono); color: #8d8a84; border-top: 1px solid #1a1a1a; }
+.phone .tabs .on { color: #e9e6df; }
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Mesh · 网状连接（演示）</h1>
+  <p class="lede">每台 Mac 本来就是服务端（远程接口、配对码、钉证书指纹、设备令牌、Bonjour），网状 = 每台 Mac 也能当客户端：手机同时连多台 Mac，Mac 之间互相使用对方的 Dispatch 与 Terminals。只做“使用对方”，不做“跨机调度”（一台的调度模型把任务派到另一台：密文绑在各自网关的公钥上，另一台解不开）。静态演示，不连服务；上面的开关是还没定的几件事。</p>
+  <div class="tools">
+    <span>Trust <span class="seg" data-opt="trust"><button data-v="pair" class="on">Per Pair</button><button data-v="group">Trust Group</button></span></span>
+    <span>Remote Keyboard <span class="seg" data-opt="keys"><button data-v="text" class="on">Text Only</button><button data-v="full">Full Keyboard</button></span></span>
+    <span>Phone <span class="seg" data-opt="phone"><button data-v="mac" class="on">Per Mac</button><button data-v="merged">Merged</button></span></span>
+    <span><span class="seg" data-opt="theme"><button data-v="dark" class="on">Dark</button><button data-v="light">Light</button></span></span>
+  </div>
+</div>
+
+<div class="sec">1 · OVERVIEW — 谁能用谁、走哪条路</div>
+<div class="stage"><div class="topo" id="topo"></div></div>
+<div class="cap" id="capTopo"></div>
+
+<div class="sec">2 · MAIN WINDOW — 切换主机</div>
+<div class="stage"><div class="ctl" id="ctlWin">
+  <button data-host="mbp" class="on">This Mac</button><button data-host="mini">Mac mini</button><span style="width:14px"></span>
+  <button data-page="dispatch" class="on">Dispatch</button><button data-page="terminals">Terminals</button><span style="width:14px"></span>
+  <button data-do="menu">Host Menu</button>
+</div><div class="win" id="win"></div></div>
+<div class="cap" id="capWin"></div>
+
+<div class="sec">3 · PAIRING — 两台 Mac 配对</div>
+<div class="stage"><div class="ctl" id="ctlPair">
+  <button data-step="1" class="on">1 · Nearby</button><button data-step="2">2 · Code</button><button data-step="3">3 · Fingerprint &amp; Access</button><button data-step="4">4 · Paired</button>
+</div><div class="pair" id="pair"></div></div>
+<div class="cap" id="capPair"></div>
+
+<div class="sec">4 · SEVERAL MACS — 菜单栏与手机</div>
+<div class="stage"><div class="agg" id="agg"></div></div>
+<div class="cap" id="capAgg"></div>
+<div style="height:60px"></div>
+
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+document.getElementById("gcss").textContent = P.GLITCH_CSS;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const sq = (c, { blink = false, hollow = false } = {}) => `<span class="sq ${blink ? "blink" : ""}" style="${hollow ? `box-shadow: inset 0 0 0 2px ${c}` : `background:${c}`}"></span>`;
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let frame = 0;
+const spin = () => `<span class="spin" data-spin>${SPIN[frame % SPIN.length]}</span>`;
+const agent = (a) => P.sprite(P.AGENT_PX[a], { px: 2 });
+// devices, 2 pt cells
+const DEV = {
+  laptop: [".#########.", ".#.......#.", ".#.......#.", ".#.......#.", ".#########.", "###########"],
+  mini:   ["...........", "###########", "#.........#", "#.......#.#", "###########"],
+  phone:  ["#####", "#...#", "#...#", "#...#", "#...#", "#...#", "##.##"],
+  pad:    ["#########", "#.......#", "#.......#", "#.......#", "#.......#", "####.####"],
+};
+const dev = (k) => P.sprite(DEV[k], { px: 2 });
+
+const S = { trust: "pair", keys: "text", phone: "mac", light: false, sel: "mbp", host: "mbp", page: "dispatch", menu: false, step: 1, phoneMac: "mbp" };
+
+// ---------- the devices and who may use whom ----------
+const NODES = {
+  mbp:   { name: "MacBook Pro", short: "MBP", kind: "laptop", me: true, x: 300, y: 120, busy: 1, wait: 1 },
+  mini:  { name: "Mac mini", short: "mini", kind: "mini", x: 720, y: 120, busy: 2, wait: 0 },
+  phone: { name: "iPhone 17 Pro", short: "iPhone", kind: "phone", x: 510, y: 380 },
+  pad:   { name: "iPad", short: "iPad", kind: "pad", x: 120, y: 380 },
+};
+// from → to: `from` uses `to`; a pair between Macs is two grants, each decided on the Mac that is used
+const GRANTS = [
+  { from: "phone", to: "mbp", what: ["Dispatch", "Terminals"], path: "lan", ms: 3 },
+  { from: "phone", to: "mini", what: ["Dispatch", "Terminals"], path: "ts", ms: 21 },
+  { from: "mbp", to: "mini", what: ["Dispatch", "Terminals"], path: "lan", ms: 2 },
+  { from: "mini", to: "mbp", what: ["Dispatch"], path: "lan", ms: 2 },
+  { from: "pad", to: "mbp", what: ["Dispatch"], path: "relay", ms: 130 },
+];
+const PATH = { lan: "LAN", ts: "Tailscale · Direct", relay: "Tailscale · Relay" };
+const isMac = (k) => NODES[k].kind === "laptop" || NODES[k].kind === "mini";
+
+function grants() {
+  if (S.trust === "pair") return GRANTS;
+  // a trust group: every device may use every Mac in it, everything
+  const out = [];
+  for (const from of Object.keys(NODES)) for (const to of Object.keys(NODES)) {
+    if (from === to || !isMac(to)) continue;
+    const g = GRANTS.find((x) => x.from === from && x.to === to) ?? GRANTS.find((x) => x.from === to && x.to === from) ?? { path: from === "pad" || to === "pad" ? "relay" : "ts", ms: 24 };
+    out.push({ from, to, what: ["Dispatch", "Terminals"], path: g.path, ms: g.ms });
+  }
+  return out;
+}
+
+function drawTopo() {
+  const el = document.getElementById("topo");
+  el.className = `topo ${S.light ? "light" : ""}`;
+  const gs = grants();
+  // one line per pair of devices; its label says both directions
+  const pairs = new Map();
+  for (const g of gs) {
+    const key = [g.from, g.to].sort().join("-");
+    pairs.set(key, [...(pairs.get(key) ?? []), g]);
+  }
+  const color = { lan: "var(--ink2)", ts: "var(--cyan)", relay: "var(--amber)" };
+  let lines = "", labels = "";
+  for (const [key, list] of pairs) {
+    const [a, b] = key.split("-"), A = NODES[a], B = NODES[b], g = list[0];
+    const hot = S.sel === a || S.sel === b;
+    lines += `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="${color[g.path]}" stroke-width="${hot ? 2 : 1}" ${g.path === "relay" ? 'stroke-dasharray="5 4"' : ""} opacity="${hot ? 1 : .55}"/>`;
+    const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+    const dirs = list.map((x) => `${NODES[x.from].short} → ${NODES[x.to].short}<br><b>${x.what.join(" · ")}</b>`).join("<br>");
+    labels += `<div class="elabel ${hot ? "hot" : ""}" style="left:${mx}px;top:${my}px;text-align:center">${PATH[g.path]} · ${g.ms} ms<br>${dirs}</div>`;
+  }
+  const nodes = Object.entries(NODES).map(([k, n]) => {
+    const st = isMac(k) ? `<div class="st">${n.busy ? `<span>${spin()}${n.busy} Busy</span>` : ""}${n.wait ? `<span>${sq("var(--amber)", { blink: true })}${n.wait} Waiting</span>` : ""}${!n.busy && !n.wait ? "<span>Idle</span>" : ""}</div>`
+      : `<div class="st"><span>${n.kind === "phone" ? "Phone" : "Tablet"}</span></div>`;
+    return `<div class="node ${n.me ? "me" : ""} ${S.sel === k ? "on" : ""}" data-node="${k}" style="left:${n.x}px;top:${n.y}px"><div class="r1">${dev(n.kind)}<b>${n.name}</b></div>${st}</div>`;
+  }).join("");
+  const n = NODES[S.sel];
+  const uses = gs.filter((g) => g.from === S.sel), usedBy = gs.filter((g) => g.to === S.sel);
+  const row = (k, what, path) => `<div class="row"><span>${dev(NODES[k].kind).replace('class="px"', 'class="px" style="transform:scale(.6);transform-origin:left center"')}</span><span class="who">${NODES[k].name}</span><span class="what">${what} · ${path}</span></div>`;
+  const detail = `<div class="detail"><div class="hd"><span>${esc(n.name)}</span><span>${S.trust === "pair" ? "Per Pair" : "Group: Home"}</span></div><div class="bd">
+    <div class="lbl" style="margin:2px 0 2px">// Uses</div>${uses.length ? uses.map((g) => row(g.to, g.what.join(" · ") + (g.what.includes("Terminals") && isMac(g.from) ? (S.keys === "text" ? " (Text Only)" : " (Full Keyboard)") : ""), PATH[g.path])).join("") : `<div class="faint" style="padding:4px 0">—</div>`}
+    ${isMac(S.sel) ? `<div class="lbl" style="margin:10px 0 2px">// Used By</div>${usedBy.length ? usedBy.map((g) => row(g.from, g.what.join(" · "), PATH[g.path])).join("") : `<div class="faint" style="padding:4px 0">—</div>`}` : ""}
+  </div></div>`;
+  el.innerHTML = `<svg class="lines">${lines}</svg>${labels}${nodes}${detail}<div class="legend"><span><i></i>LAN</span><span><i class="ts"></i>Tailscale · Direct</span><span><i class="relay"></i>Tailscale · Relay（经中转，慢）</span></div>`;
+  document.getElementById("capTopo").innerHTML = S.trust === "pair"
+    ? "<b>逐对授权（建议）</b>：每条连接是一份授权，在被使用的那台 Mac 上决定给什么——MacBook Pro 能用 Mac mini 的 Dispatch 和 Terminals，Mac mini 反过来只能用 MacBook Pro 的 Dispatch。不传递：iPad 能用 MacBook Pro，不等于能用 Mac mini。一台失守，波及的只是它被授权的那几条。点设备看它能用谁、被谁用。连接走哪条路照实写：同一网络里走局域网（Bonjour 找到的地址），否则走 Tailscale；Tailscale 打不通直连、经中转时标成琥珀虚线，延迟高、带宽小，终端会卡。"
+    : "<b>信任组</b>：加入“Home”组的设备互相都能用对方的一切，少了逐台配对，但任何一台失守，整组都失守；也没法让某台只开 Dispatch。不建议作默认，至多作为“把这台新 Mac 加进来时，一次授权给组里所有设备”的捷径。";
+}
+
+// ---------- the main window ----------
+const HOSTS = {
+  mbp: { name: "MacBook Pro", me: true, busy: 1, wait: 1 },
+  mini: { name: "Mac mini", busy: 2, wait: 0, path: "LAN · 2 ms" },
+  studio: { name: "Mac Studio", off: true },
+};
+const CHANNEL_FRAMES = [[0, { bands: 3, jitter: 6 }], [40, { bands: 7, jitter: -5 }], [80, { full: true, osd: true }], [120, { full: true, osd: true, swap: true }],
+  [160, { bands: 6, roll: -28, osd: true }], [200, { bands: 3, roll: -12, scan: .35, osd: true }], [240, { bands: 1, roll: -4, scan: .75, osd: true }], [280, { osd: true }], [440, {}]];
+let run = 0;
+
+function hostMenu() {
+  if (!S.menu) return "";
+  const it = (k) => {
+    const h = HOSTS[k];
+    const right = h.off ? "Offline" : `${h.busy ? `<span>${spin()}${h.busy}</span>` : ""}${h.wait ? `<span>${sq("var(--amber)")}${h.wait}</span>` : ""}${h.path ? `<span>${h.path}</span>` : ""}`;
+    return `<div class="it" data-host="${k}" style="${h.off ? "opacity:.45" : ""}"><span>${S.host === k ? "✓" : ""}</span><span>${h.name}${h.me ? " <small style=\"color:var(--sys-ink2)\">This Mac</small>" : ""}</span><span class="k">${right}</span></div>`;
+  };
+  return `<div class="menu"><div class="hdr">Use AgentSwitch On</div>${it("mbp")}${it("mini")}${it("studio")}<hr><div class="it"><span></span><span>Pair Another Mac…</span><span class="k"></span></div><div class="it"><span></span><span>Macs Settings…</span><span class="k">⌘,</span></div></div>`;
+}
+
+function bar() {
+  const h = HOSTS[S.target ?? S.host];
+  const pg = (p, l) => `<button class="pg ${S.page === p ? "on" : ""}" data-page="${p}">${l}</button>`;
+  return `<div class="bar"><div class="lights"><i></i><i></i><i></i></div>${pg("dispatch", "Dispatch")}${pg("terminals", "Terminals")}
+    <span class="vr"></span><button class="host ${h.me ? "" : "remote"} ${S.menu ? "open" : ""}" data-do="menu">${h.me ? "" : "@ "}${h.name} <small>▾</small>${hostMenu()}</button>
+    <div class="end">${h.busy ? `<span>${spin()}${h.busy}</span>` : ""}${h.wait ? `<span>${sq("var(--amber)", { blink: true })}${h.wait}</span>` : ""}<span style="color:var(--ink2)">${P.sprite(["..##.........", "#############", "..##.........", ".............", "........##...", "#############", "........##...", ".............", ".....##......", "#############", ".....##......"], { px: 1 })}</span></div></div>`;
+}
+
+function via() {
+  const h = HOSTS[S.host];
+  if (h.me) return "<div></div>";
+  const term = S.keys === "text" ? "Terminals (Text Only)" : "Terminals (Full Keyboard)";
+  return `<div class="via">${sq("var(--signal)")}<span>正在使用 <b>${h.name}</b> · ${h.path} · Dispatch · ${term}</span><span class="sp"></span><button class="btn" data-host="mbp">[ Back to This Mac ]</button></div>`;
+}
+
+function dispatchPage() {
+  const remote = S.host === "mini";
+  const items = remote ? `
+    <div class="me"><div>给 release 分支打包，跑完整测试</div></div>
+    <div class="say">交给 Codex，在 ~/Projects/AgentSwitch 里。</div>
+    <div class="card"><div class="l1">${spin()}<span>Busy</span>${agent("codex")}<span>Codex · GPT-6 Luna</span><span class="sp"></span><span class="faint">4m 10s</span></div><div class="ti">打包 release 并跑完整测试</div><div class="stp">└─ 运行 npm test（1196 个）</div></div>
+    <div class="card"><div class="l1">${spin()}<span>Busy</span>${agent("cc")}<span>Claude Code · Opus 5.5</span><span class="sp"></span><span class="faint">52s</span></div><div class="ti">整理 Mac mini 上的照片备份</div><div class="stp">└─ 读取 ~/Pictures/Backup</div></div>`
+    : `
+    <div class="me"><div>build 目录太大了，清理一下旧构建</div></div>
+    <div class="say">交给 Codex 清理。</div>
+    <div class="card"><div class="l1">${sq("var(--amber)", { blink: true })}<span class="w">Waiting</span>${agent("codex")}<span>Codex · GPT-6 Luna</span><span class="sp"></span><span class="faint">40s</span></div><div class="ti">清理旧构建</div><div class="stp">└─ 问你：build/ 里有 3.2 GB 旧产物，要删掉吗？</div></div>
+    <div class="me"><div>把 iOS 端打包装到手机上</div></div>
+    <div class="card"><div class="l1">${spin()}<span>Busy</span>${agent("cc")}<span>Claude Code · Opus 5.5</span><span class="sp"></span><span class="faint">2m 14s</span></div><div class="ti">构建 AgentSwitch.app，装到手机上</div><div class="stp">└─ 运行 xcodebuild -scheme AgentSwitch</div></div>`;
+  return `<div class="dz"><div class="col">${items}</div><div class="compose"><div class="s">+</div><div class="f">${remote ? "输入任务或问题（在 Mac mini 上执行）" : "输入任务或问题"}</div><div class="s">↑</div></div></div>`;
+}
+
+function termsPage() {
+  const remote = S.host === "mini";
+  const rows = remote
+    ? [["▾ Projects/", ""], ["  ▾ AgentSwitch  main ↑2", ""], [`  └─ ${spin()} codex · release`, "on"], ["▸ Backup/", ""]]
+    : [["▾ Projects/", ""], ["  ▾ AgentSwitch  main ±3", ""], [`  ├─ ${sq("var(--amber)", { blink: true })} claude · AgentSwitch`, "on"], [`  └─ ${spin()} codex · 打包脚本`, ""]];
+  const screen = remote ? "✻ Codex · GPT-6 Luna · ~/Projects/AgentSwitch (Mac mini)\n\n› npm test\n  ✓ 1196 passed\n› npm run build:release\n  building packages/daemon …" : "✻ Claude Code · Opus 5.5 · ~/Projects/AgentSwitch\n\n> 把 TerminalWindow 里的工具栏换成主窗口的顶栏\n\n⏺ Read(packages/mac-app/…/TerminalWindow.swift)\n  ⎿  Read 643 lines";
+  const foot = !remote ? "" : S.keys === "text"
+    ? `<div class="reply"><span class="f">回复 Mac mini 上的 codex…</span><kbd>esc</kbd><kbd>tab</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>^C</kbd><kbd>⏎</kbd></div>`
+    : `<div class="full">完整键盘：按键直接发给 Mac mini 上的这个终端（含 ^C、方向键、粘贴）。</div>`;
+  return `<div class="terms"><div class="side">${rows.map(([t, c]) => `<div class="r ${c}">${t}</div>`).join("")}</div><div class="main"><div class="screen">${esc(screen).replace(/data-spin/g, "")}</div>${foot}</div></div>`;
+}
+
+function drawWin() {
+  const win = document.getElementById("win");
+  win.className = `win ${S.light ? "light" : ""}`;
+  win.innerHTML = bar() + via() + `<div class="content" id="content"><div class="box">${S.page === "dispatch" ? dispatchPage() : termsPage()}</div><canvas class="noise" id="noise" width="400" height="190" hidden></canvas><div class="osd" id="osd" hidden></div></div>`;
+  for (const b of document.querySelectorAll("#ctlWin [data-host]")) b.classList.toggle("on", b.dataset.host === S.host);
+  for (const b of document.querySelectorAll("#ctlWin [data-page]")) b.classList.toggle("on", b.dataset.page === S.page);
+  document.getElementById("capWin").innerHTML = S.host === "mbp"
+    ? "顶栏在页切换后面多一个主机选择（<b>MacBook Pro ▾</b>，系统菜单：每台 Mac 的在跑 / 等你计数和连接路径，离线的抖暗，最后是“Pair Another Mac…”）。切到别的 Mac 时 Dispatch 和 Terminals 一起换过去，放一次换台（频道名带上主机名）。只配对了本机时不显示这个选择。"
+    : `正在使用别的 Mac 时，主机名前加 <b>@</b>、用信号色，顶栏下多一条斜纹提示条（用的是谁、走哪条路、开放了什么、[ Back to This Mac ]），让人不会把 Mac mini 上的任务当成本机的。输入框的占位也写明“在 Mac mini 上执行”。Terminals：${S.keys === "text" ? "<b>Text Only（建议）</b>——同手机，只能发文字和指定按键（esc tab ↑ ↓ ^C ⏎），每次都记审计；完整键盘要 Mac mini 那边单独打开" : "<b>Full Keyboard</b>——按键原样发过去，体验同本机；但这等于在 Mac mini 上直接操作 agent（包括它的 shell 模式），授权时要明确提示"}。`;
+}
+
+function switchHost(k) {
+  if (k === S.host || HOSTS[k].off) { S.menu = false; drawWin(); return; }
+  const id = ++run;
+  S.menu = false; S.target = k;
+  drawWin();
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { S.host = k; S.target = null; drawWin(); return; }
+  for (const [t, f] of CHANNEL_FRAMES) setTimeout(() => {
+    if (id !== run) return;
+    if (f.swap) { S.host = k; S.target = null; drawWin(); }
+    const box = document.querySelector("#content .box"), cv = document.getElementById("noise"), osd = document.getElementById("osd");
+    if (!box) return;
+    box.style.transform = f.jitter || f.roll ? `translate(${f.jitter ?? 0}px, ${f.roll ?? 0}px)` : "";
+    paintStatic(cv, f);
+    osd.textContent = `${HOSTS[k].name} · ${S.page === "dispatch" ? "Dispatch" : "Terminals"}`;
+    osd.hidden = !f.osd;
+  }, t);
+}
+
+function paintStatic(cv, f) {
+  const ctx = cv.getContext("2d"), w = cv.width, h = cv.height;
+  ctx.clearRect(0, 0, w, h);
+  if (!f.full && !f.bands && f.scan == null) { cv.hidden = true; return; }
+  cv.hidden = false;
+  const img = ctx.createImageData(w, h), d = img.data, tint = new Array(h).fill(null);
+  if (f.full) tint.fill([1, 1, 1]);
+  else for (let b = 0; b < (f.bands ?? 0); b++) {
+    const y = Math.floor(Math.random() * h), bh = 1 + Math.floor(Math.random() * 6);
+    const c = [[1, 1, 1], [1, 1, 1], [.18, .9, 1], [1, .18, .53]][Math.floor(Math.random() * 4)];
+    for (let i = y; i < Math.min(h, y + bh); i++) tint[i] = c;
+  }
+  for (let y = 0; y < h; y++) { const c = tint[y]; if (!c) continue; for (let x = 0; x < w; x++) { const v = Math.random() * 235, i = (y * w + x) * 4; d[i] = v * c[0]; d[i + 1] = v * c[1]; d[i + 2] = v * c[2]; d[i + 3] = 255; } }
+  if (f.scan != null) { const y0 = Math.floor(f.scan * h); for (let y = y0; y < Math.min(h, y0 + 2); y++) for (let x = 0; x < w; x++) { const i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = 110; } }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---------- pairing ----------
+function drawPair() {
+  const el = document.getElementById("pair");
+  el.className = `pair ${S.light ? "light" : ""}`;
+  const st = S.step;
+  const fp = `<div class="fp">7F3A 19C2 · E804 55B1<small>两台 Mac 上应是同一串</small></div>`;
+  const leftBase = `<div class="sl">// This Mac</div>
+    <div class="grp"><div class="r"><span>MacBook Pro</span><span class="sp"></span><span class="d">LAN 192.168.1.20 · Tailscale macbook-pro</span></div>
+      <div class="r"><span>允许其他 Mac 配对</span><span class="sp"></span><span class="tgl on"></span></div></div>
+    <div class="sl">// Paired Macs</div>
+    <div class="grp">${st < 4 ? `<div class="r"><span class="d">还没有配对的 Mac。</span></div>`
+      : `<div class="r">${dev("mini")}<span class="m">Mac mini</span><span class="sp"></span><span class="d">LAN · 2 ms</span></div>
+         <div class="r"><span class="d" style="width:110px">This Mac uses</span><span class="m">Dispatch · Terminals (${S.keys === "text" ? "Text Only" : "Full Keyboard"})</span></div>
+         <div class="r"><span class="d" style="width:110px">Uses This Mac</span><span class="m">Dispatch</span><span class="sp"></span><button class="nbtn">Change…</button><button class="nbtn red">Remove…</button></div>`}</div>
+    <div class="sl">// Nearby</div>
+    <div class="grp"><div class="r">${dev("mini")}<span class="m">Mac mini</span><span class="d">Same Network · AgentSwitch 0.1.0</span><span class="sp"></span>${st < 4 ? `<button class="nbtn ${st === 1 ? "blue" : ""}">Pair…</button>` : `<span class="d">Paired</span>`}</div>
+      <div class="r">${dev("mini")}<span class="m">Mac Studio</span><span class="d">Same Network</span><span class="sp"></span><button class="nbtn">Pair…</button></div></div>
+    <div class="foot">附近的 Mac 由 Bonjour 找到；不在同一网络的，在对方 Mac 上复制配对链接，粘贴到这里（同一 Apple ID 下可用通用剪贴板）。</div>`;
+  const leftSheet = st === 2 ? `<div class="sheet"><h3>与 Mac mini 配对</h3><p>Mac mini 上已显示配对码（5 分钟内有效，只能用一次）。输入：</p>
+      <div class="field">K7QD-2M9F</div><p style="margin-top:8px">或 <button class="nbtn">Paste Pairing Link</button></p><div class="acts"><button class="nbtn">Cancel</button><button class="nbtn blue">Continue</button></div></div>`
+    : st === 3 ? `<div class="sheet"><h3>核对并选择要用的</h3><p>先看两台 Mac 显示的是不是同一串；不一样就取消——可能有人在中间（只输配对码钉不住证书）。</p>${fp}
+      <div class="chk"><label><span class="mk">[x]</span>Dispatch <small>在 Mac mini 上发任务、看记录、答提问与审批</small></label>
+        <label><span class="mk">[x]</span>Terminals <small>使用 Mac mini 上的终端</small></label>
+        <label style="padding-left:22px"><span class="mk">${S.keys === "text" ? "&lt;x&gt;" : "&lt; &gt;"}</span>Text Only <small>文字与指定按键，同手机</small></label>
+        <label style="padding-left:22px"><span class="mk">${S.keys === "full" ? "&lt;x&gt;" : "&lt; &gt;"}</span>Full Keyboard <small>按键原样发送</small></label></div>
+      <p>这里只是请求；给不给、给多少，在 Mac mini 上定。跳过权限模式只能在 Mac mini 本机选。</p>
+      <div class="acts"><button class="nbtn">Cancel</button><button class="nbtn blue">Request</button></div></div>` : "";
+  const right = st === 1 ? `<div class="sl">// Devices</div><div class="grp"><div class="r">${dev("phone")}<span class="m">iPhone 17 Pro</span><span class="sp"></span><span class="d">Dispatch · Terminals</span></div></div>
+      <div class="foot">Mac mini 照常运行；有 Mac 请求配对时，菜单栏落下一张卡。</div>`
+    : st === 2 ? `<div class="prompt"><div class="hd">${P.mark({ px: 1.5 })}<span>Pairing</span></div><div class="dots"></div>
+        <div style="font:600 14px var(--ui)">MacBook Pro 想与这台 Mac 配对</div><div class="code"><span>K7QD</span><span>-</span><span>2M9F</span></div>
+        <div style="text-align:center;color:#8d8a84;font:11.5px var(--mono)">在 MacBook Pro 上输入 · 4:52</div><div class="dots"></div><div style="display:flex;justify-content:flex-end"><button class="b">[ Cancel ]</button></div></div>`
+    : st === 3 ? `<div class="prompt"><div class="hd">${P.mark({ px: 1.5 })}<span>Pairing</span><span style="margin-left:auto;color:#8d8a84">MacBook Pro · LAN</span></div><div class="dots"></div>
+        <div style="font:600 14px var(--ui);margin-bottom:6px">MacBook Pro 请求使用这台 Mac</div>
+        <div style="text-align:center;font:600 16px var(--mono);letter-spacing:.14em;padding:6px 0;border:1px solid #3a3a3a;border-radius:8px">7F3A 19C2 · E804 55B1</div>
+        <div style="color:#8d8a84;font-size:11.5px;margin:4px 0 8px;text-align:center">与 MacBook Pro 上显示的一致时才允许</div>
+        <div style="display:grid;gap:4px;font-size:12.5px"><span><b style="font:12.5px var(--mono);color:var(--signal)">[x]</b> Dispatch</span><span><b style="font:12.5px var(--mono);color:var(--signal)">[x]</b> Terminals · ${S.keys === "text" ? "Text Only" : "Full Keyboard"}</span><span style="color:#8d8a84"><b style="font:12.5px var(--mono)">[ ]</b> 同时使用 MacBook Pro 的 Dispatch（反向，需对方同意）</span></div>
+        <div class="dots"></div><div style="display:flex;justify-content:flex-end;gap:6px"><button class="b">[ Deny ]</button><button class="b" style="background:#e9e6df;color:#000">[ Allow ]</button></div></div>`
+    : `<div class="sl">// Devices</div><div class="grp"><div class="r">${dev("phone")}<span class="m">iPhone 17 Pro</span><span class="sp"></span><span class="d">Dispatch · Terminals</span></div>
+        <div class="r">${dev("laptop")}<span class="m">MacBook Pro</span><span class="d">Mac · LAN</span><span class="sp"></span><span class="d">Dispatch · Terminals (${S.keys === "text" ? "Text Only" : "Full Keyboard"})</span><button class="nbtn red">Revoke…</button></div></div>
+      <div class="foot">每台设备的每次远程操作照旧记审计；吊销立即生效（令牌作废，对方再请求一律 401）。</div>`;
+  el.innerHTML = `<div class="mac"><div class="tb"><div class="lights"><i></i><i></i><i></i></div>Macs<small>MacBook Pro · Settings</small></div><div class="body">${leftBase}${leftSheet}</div></div>
+    <div class="mac"><div class="tb"><div class="lights"><i></i><i></i><i></i></div>Devices<small>Mac mini · Settings</small></div><div class="body">${right}</div></div>`;
+  for (const b of document.querySelectorAll("#ctlPair [data-step]")) b.classList.toggle("on", +b.dataset.step === st);
+  document.getElementById("capPair").innerHTML = [
+    "",
+    "设置窗口新的一页 <b>Macs</b>：本机能否被配对（开关），已配对的 Mac（各自两个方向分开写），附近的 Mac（Bonjour）。左边是 MacBook Pro，右边是被请求的 Mac mini。",
+    "Mac mini 的菜单栏落下一张卡，显示一次性配对码；在 MacBook Pro 上输入（或粘贴 Mac mini 上复制的配对链接，链接里自带证书指纹，可跳过下一步的核对）。",
+    "两边显示同一串短指纹（证书指纹的前 64 位）——只凭配对码，局域网里的中间人可以截走码、冒充 Mac mini，所以要人眼核对一次。请求方勾选想用的，<b>被使用的一方决定给不给、给多少</b>；反方向（Mac mini 用 MacBook Pro）是另一份授权，要 MacBook Pro 那边同意。",
+    "配对完成：两边各记一条，两个方向分开写，可单独改、单独吊销。",
+  ][st];
+}
+
+// ---------- several Macs ----------
+function drawAgg() {
+  const el = document.getElementById("agg");
+  el.className = `agg ${S.light ? "light" : ""}`;
+  const panel = `<div class="panel"><div class="hd">${P.mark({ px: 1.5, state: "waiting" })}<span>AgentSwitch</span><span class="sp"></span><span style="display:inline-flex;gap:8px;color:#8d8a84">${sq("var(--amber)")} 1 ${spin()} 3</span></div><div class="dots"></div>
+    <div class="grp2"><div class="gh"><span>// MacBook Pro</span><span class="faint">This Mac</span></div>
+      <div class="it">${sq("var(--amber)", { blink: true })}<span class="t">清理旧构建</span><span class="c">40s</span></div><div class="ask">build/ 里有 3.2 GB 旧产物，要删掉吗？</div><div class="ab"><button>[ Keep ]</button><button>[ Delete ]</button></div>
+      <div class="it">${spin()}<span class="t">构建 AgentSwitch.app，装到手机上</span><span class="c">2m 14s</span></div></div>
+    <div class="grp2"><div class="gh"><span>// Mac mini</span><span class="faint">LAN</span></div>
+      <div class="it">${spin()}<span class="t">打包 release 并跑完整测试</span><span class="c">4m 10s</span></div>
+      <div class="it">${spin()}<span class="t">整理 Mac mini 上的照片备份</span><span class="c">52s</span></div></div></div>`;
+  const screen = `<div class="screen"><div class="mb"><span class="live">${P.mark({ px: 1.5, state: "waiting" })}<span style="display:inline-flex;gap:6px;align-items:center">${sq("var(--amber)")}1</span><span>${spin()}3</span></span><span>Fri 15:42</span></div>${panel}</div>`;
+  const merged = S.phone === "merged";
+  const card = (mac, st, t, s) => `<div class="card"><div class="l1">${st === "w" ? sq("var(--amber)", { blink: true }) : spin()}<span class="${st === "w" ? "w" : ""}">${st === "w" ? "Waiting" : "Busy"}</span>${merged ? `<span class="tag">${mac}</span>` : ""}</div><div class="ti">${t}</div><div class="stp">└─ ${s}</div></div>`;
+  const list = merged
+    ? card("MBP", "w", "清理旧构建", "问你：要删掉吗？") + card("mini", "b", "打包 release 并跑完整测试", "运行 npm test") + card("MBP", "b", "构建 AgentSwitch.app", "运行 xcodebuild") + card("mini", "b", "整理照片备份", "读取 ~/Pictures/Backup")
+    : S.phoneMac === "mbp" ? card("", "w", "清理旧构建", "问你：要删掉吗？") + card("", "b", "构建 AgentSwitch.app", "运行 xcodebuild")
+    : card("", "b", "打包 release 并跑完整测试", "运行 npm test") + card("", "b", "整理照片备份", "读取 ~/Pictures/Backup");
+  const chips = merged
+    ? `<span class="m on">All Macs</span><span class="m">MBP ${sq("var(--amber)")}1 ${spin()}1</span><span class="m">mini ${spin()}2</span>`
+    : `<span class="m ${S.phoneMac === "mbp" ? "on" : ""}" data-pm="mbp">MacBook Pro ${sq("var(--amber)")}1</span><span class="m ${S.phoneMac === "mini" ? "on" : ""}" data-pm="mini">Mac mini ${spin()}2</span>`;
+  const phone = `<div class="phone"><div class="scr"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
+    <div class="nav">${P.mark({ px: 1.5, state: "waiting" })}<span>${merged ? "All Macs" : S.phoneMac === "mbp" ? "MacBook Pro" : "Mac mini"}</span><span class="g">⚙</span></div>
+    <div class="macs">${chips}</div><div class="feed">${list}</div><div class="in">＋<span>${merged ? "发给…（先选 Mac）" : "输入任务或问题"}</span></div>
+    <div class="tabs"><span class="on">Dispatch</span><span>Terminals</span></div></div></div>`;
+  el.innerHTML = screen + phone;
+  document.getElementById("capAgg").innerHTML = `菜单栏的实时活动汇总所有在线的 Mac：胶囊里是总数，卡片按 Mac 分组（本机在前），等你的照常能在卡上直接答。手机：${merged
+    ? "<b>Merged</b>——所有 Mac 的任务合成一条记录，每张卡带 Mac 标签；但对话是和某一台 Mac 的助理说的，发消息前要先选 Mac，记录也就不再是一段对话。"
+    : "<b>Per Mac（建议）</b>——同时连着所有 Mac（不再“一次只连一台”），顶上一排 Mac 标签带各自的等你 / 在跑计数，点一下换台；记录与输入框仍是那一台 Mac 的对话。等你的提醒、实时活动汇总所有 Mac，不会因为看着别的 Mac 而漏掉。"}`;
+}
+
+// ---------- events ----------
+function drawAll() { drawTopo(); drawWin(); drawPair(); drawAgg(); document.body.classList.toggle("light-board", S.light); }
+document.addEventListener("click", (e) => {
+  const opt = e.target.closest(".seg[data-opt] button");
+  if (opt) {
+    const k = opt.closest(".seg").dataset.opt, v = opt.dataset.v;
+    for (const b of opt.parentElement.children) b.classList.toggle("on", b === opt);
+    if (k === "theme") S.light = v === "light"; else S[k] = v;
+    drawAll(); return;
+  }
+  const node = e.target.closest("[data-node]");
+  if (node) { S.sel = node.dataset.node; drawTopo(); return; }
+  const host = e.target.closest("[data-host]");
+  if (host) { e.stopPropagation(); switchHost(host.dataset.host); return; }
+  const page = e.target.closest("[data-page]");
+  if (page) { S.page = page.dataset.page; S.menu = false; drawWin(); return; }
+  const d = e.target.closest("[data-do]");
+  if (d && d.dataset.do === "menu") { S.menu = !S.menu; drawWin(); return; }
+  const step = e.target.closest("[data-step]");
+  if (step) { S.step = +step.dataset.step; drawPair(); return; }
+  const pm = e.target.closest("[data-pm]");
+  if (pm) { S.phoneMac = pm.dataset.pm; drawAgg(); return; }
+  if (S.menu && !e.target.closest(".menu")) { S.menu = false; drawWin(); }
+});
+setInterval(() => { frame++; for (const s of document.querySelectorAll("[data-spin]")) s.textContent = SPIN[frame % SPIN.length]; }, 90);
+const q = new URLSearchParams(location.search);
+if (q.has("light")) S.light = true;
+if (q.get("host")) S.host = q.get("host");
+if (q.has("terminals")) S.page = "terminals";
+if (q.has("menu")) S.menu = true;
+if (q.get("step")) S.step = +q.get("step");
+if (q.get("trust")) S.trust = q.get("trust");
+if (q.get("keys")) S.keys = q.get("keys");
+if (q.get("phone")) S.phone = q.get("phone");
+drawAll();
+</script>
+</body>
+</html>

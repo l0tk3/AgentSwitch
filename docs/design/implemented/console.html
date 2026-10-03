@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AgentSwitch · Console</title>
+<title>AgentSwitch · Dispatch</title>
 <style id="gcss"></style>
 <style>
 /* The web console (2026-09-30, user: open console 打开的页面太割裂，跟着整体美学风格设计，可以和手机上调度页面的设计元素
@@ -249,7 +249,7 @@ function band() {
 function side() {
   const nav = [["tasks", S.done ? "⠙1" : "⠙1 · ▪1", "Tasks"], ["log", "", "Log"], ["ext", "3", "Extensions"], ["ctx", "", "Context"]];
   return `<div class="side">
-    <div class="sec lbl">// Console</div>
+    <div class="sec lbl">// Dispatch</div>
     <div class="nav">${nav.map(([k, n, label]) => `<button data-view="${k}" class="${S.view === k ? "on" : ""}"><span class="ar">▸</span><span>${label}</span><span class="n">${n}</span></button>`).join("")}</div>
     <div class="dots-h" style="margin:12px 16px 0"></div>
     <div class="sec lbl">// Topics</div>

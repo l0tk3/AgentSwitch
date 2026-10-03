@@ -365,7 +365,7 @@ const mark = (st) => st === "busy" ? spin()
   : st === "exited" ? `<span class="sq hollow"></span>`
   : `<span class="sq" style="background:var(--green)"></span>`;
 const statusBar = () => `<div class="island"></div><div class="status"><span>09:48</span><i>▮▮▮▯ ◠ ▭</i></div>`;
-const tabbar = (on, badge) => `<div class="tabbar"><span class="${on === "tasks" ? "on" : ""}">${P.mark({ px: 2, mono: true })}Tasks</span>
+const tabbar = (on, badge) => `<div class="tabbar"><span class="${on === "tasks" ? "on" : ""}">${P.mark({ px: 2, mono: true })}Dispatch</span>
   <span class="${on === "terminals" ? "on" : ""}">${P.sprite(TERM_WIN, { px: 3 })}Terminals${badge ? `<em class="badge">${badge}</em>` : ""}</span></div>`;
 function closeOver(scr) { for (const x of scr.querySelectorAll(".box, .veil")) x.remove(); }
 /** A framed box over a phone's screen, glitching in; `veil` dims what is under it. */

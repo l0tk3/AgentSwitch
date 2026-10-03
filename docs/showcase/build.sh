@@ -75,10 +75,10 @@ capture_clips() {
   xcrun simctl status_bar "$SIM" clear
 }
 
-# The design pages the showcase embeds and links, and the pixel library they share (docs/design/visual-v1).
+# The design pages the showcase embeds and links, and the pixel library they share (docs/design/implemented).
 pages() {
   rm -rf "$HERE/demo"; mkdir -p "$HERE/demo"
-  for f in pixel.js terminal.html phone.html island.html app.html depth.html; do cp "$ROOT/docs/design/visual-v1/$f" "$HERE/demo/"; done
+  for f in pixel.js terminal.html phone.html island.html app.html depth.html; do cp "$ROOT/docs/design/implemented/$f" "$HERE/demo/"; done
 }
 
 media() {

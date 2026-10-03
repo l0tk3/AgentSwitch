@@ -1,6 +1,6 @@
 # 功能展示页
 
-`index.html`：Mac 与 iPhone 两端的全部界面、实时活动、动效录屏，以及可操作的演示（嵌入 `docs/design/visual-v1/` 的 `terminal.html?bare`、`phone.html?bare&dark`，构建时复制到 `demo/`：Safari 打开本地网页时只读得到它所在文件夹及子文件夹里的文件）。所有数据都是演示数据：截图来自 Mac 应用的 `-designPreview` 和 iPhone 应用的 `-uiDemo` 画面，录屏来自 iOS 模拟器。
+`index.html`：Mac 与 iPhone 两端的全部界面、实时活动、动效录屏，以及可操作的演示（嵌入 `docs/design/` 的 `terminal.html?bare`、`phone.html?bare&dark`，构建时复制到 `demo/`：Safari 打开本地网页时只读得到它所在文件夹及子文件夹里的文件）。所有数据都是演示数据：截图来自 Mac 应用的 `-designPreview` 和 iPhone 应用的 `-uiDemo` 画面，录屏来自 iOS 模拟器。
 
 素材不进 git，由 `build.sh` 生成到 `media/`：
 

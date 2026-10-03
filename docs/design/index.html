@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch Design</title>
+<style>
+/* The index of every design demo page (2026-10-02, user: 这些演示网页要弄一个主网页来点击查看所有的网页), grouped by
+   whether the apps already do what the page shows. Each card is the page itself, scaled down and live; a click opens it.
+   Open from Finder (file://) or `open docs/design/index.html`; no server, nothing loaded from the network. */
+:root {
+  --bg: #000; --panel: #0b0b0b; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f4f1ea; --panel: #ece8df; --ink: #16140f; --ink2: #6b675f; --ink3: #a6a196; --ink4: #d6d1c6;
+    --signal: #e0106f; --cyan: #0096b3; --green: #3d8a00; --amber: #b87400; color-scheme: light; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.6 var(--ui); }
+.page { max-width: 1240px; margin: 0 auto; padding: 28px 16px 64px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 6px; }
+h1 { margin: 0; font: 700 18px var(--mono); letter-spacing: .02em; }
+h1 b { color: var(--signal); font-weight: 700; }
+.lede { color: var(--ink2); max-width: 90ch; margin: 0 0 8px; font-size: 13px; }
+.how { color: var(--ink3); font: 11.5px var(--mono); margin: 0 0 10px; }
+.how code { color: var(--ink2); }
+section { margin-top: 30px; }
+.sh { display: flex; align-items: baseline; gap: 12px; padding-bottom: 8px; margin-bottom: 14px;
+  background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px) bottom / 100% 1px no-repeat; }
+.sh h2 { margin: 0; font: 600 12px var(--mono); letter-spacing: .08em; color: var(--ink2); }
+.sh span { color: var(--ink3); font-size: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+a.card { display: grid; grid-template-rows: auto auto; color: inherit; text-decoration: none; border: 1px solid var(--ink4); background: var(--panel); min-width: 0; }
+a.card:hover, a.card:focus-visible { border-color: var(--ink2); outline: none; }
+a.card:focus-visible { box-shadow: 0 0 0 2px var(--signal); }
+.thumb { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: #1b1b1d; border-bottom: 1px solid var(--ink4); }
+.thumb iframe { position: absolute; left: 0; top: 0; width: 1320px; height: 825px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.meta { padding: 10px 12px 12px; display: grid; gap: 4px; min-width: 0; }
+.r1 { display: flex; align-items: center; gap: 8px; }
+.r1 b { font: 600 13.5px var(--ui); }
+.st { margin-left: auto; font: 11px var(--mono); display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); white-space: nowrap; }
+.st i { width: 8px; height: 8px; display: inline-block; }
+.path { font: 11px var(--mono); color: var(--ink3); overflow-wrap: anywhere; }
+.say { color: var(--ink2); font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { .thumb iframe { visibility: hidden; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header><h1>AgentSwitch <b>Design</b></h1></header>
+  <p class="lede">所有设计演示页的目录。每张卡片就是那一页本身（缩小、实时），点开查看。按两端应用是否已经做到分组：已实现的是现在应用里的样子，概念设计是还没做或待定的。</p>
+  <p class="how">在访达里打开，或 <code>open docs/design/index.html</code>；不连服务、不加载网络资源。发到手机或给别人看：<code>python3 docs/design/export.py</code> 导出成单文件 HTML。</p>
+  <div id="groups"></div>
+</div>
+<script>
+/* One list, three groups. `path` is relative to this page; `when` is the day the page was settled. */
+const PAGES = [
+  { group: "built", file: "implemented/app.html", name: "视觉语言总览", when: "2026-09-28",
+    say: "规则、深浅两套颜色、标记与抖动、字，Mac 菜单栏下拉与 iPhone 的 Dispatch / Terminals 两个标签页。" },
+  { group: "built", file: "implemented/mac-window.html", name: "Mac 主窗口", when: "2026-10-02",
+    say: "Dispatch 与 Terminals 两页、换页的扫描线刷新、Dispatch 页（对话与输入框）、任务页、+ 菜单，设置窗口的 Dispatch 组。" },
+  { group: "built", file: "implemented/terminal.html", name: "终端窗口", when: "2026-09-30",
+    say: "目录树侧栏、新建面板、权限请求、加密发送、搜索、git、子代理；Mac 终端页与网页终端页。" },
+  { group: "built", file: "implemented/phone.html", name: "iPhone 终端", when: "2026-09-30",
+    say: "终端列表、新建、终端页、权限卡与特效，和桌面对照的特效清单。" },
+  { group: "built", file: "implemented/island.html", name: "iPhone 实时活动", when: "2026-09-29",
+    say: "灵动岛紧凑态、最小态、展开态与锁屏卡片，应用标记兼作状态。" },
+  { group: "built", file: "implemented/mac-live.html", name: "Mac 菜单栏实时活动", when: "2026-09-30",
+    say: "菜单栏里的黑胶囊与锁屏同款卡片：allow / deny、选项、open，结果落下。" },
+  { group: "built", file: "implemented/console.html", name: "网页控制台", when: "2026-09-30",
+    say: "浏览器里的三栏控制台：任务、Log、Extensions、Context；菜单栏 Open in Browser 打开。" },
+  { group: "built", file: "implemented/depth.html", name: "像素的层次", when: "2026-09-29",
+    say: "硬阴影、台阶补半亮、挤出、LCD 次像素：各用在哪、不用在哪；应用图标由此而来。" },
+  { group: "built", file: "implemented/browser.html", name: "浏览器", when: "2026-10-02",
+    say: "Mac 上服务持有的浏览器：手机与 Mac 实时查看、接手，Codex 等 agent 经凭据网关操作同一个标签；本地网页与 localhost。代码已做，待安装。" },
+  { group: "concept", file: "concepts/mesh.html", name: "网状连接", when: "2026-10-02",
+    say: "手机同时连多台 Mac、Mac 之间互用 Dispatch 与 Terminals：授权、主机切换（换台效果）、配对、汇总。已搁置。" },
+  { group: "concept", file: "concepts/menu-icons.html", name: "菜单栏像素图标", when: "2026-09-29",
+    say: "Mac 菜单栏面板六个操作的 5×5 像素图标，与现在只有文字的样子对比。待定。" },
+];
+const GROUPS = [
+  ["built", "// Built", "两端应用里已经是这个样子", ["var(--green)", "Built"]],
+  ["building", "// In Progress", "已定设计，正在实现", ["var(--cyan)", "Building"]],
+  ["concept", "// Concepts", "还没做、搁置或待定", ["var(--amber)", "Concept"]],
+];
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+document.getElementById("groups").innerHTML = GROUPS.map(([key, title, say, [color, word]]) => {
+  const pages = PAGES.filter((p) => p.group === key);
+  if (!pages.length) return "";
+  return `<section><div class="sh"><h2>${title}</h2><span>${say} · ${pages.length}</span></div><div class="grid">${pages.map((p) => `
+    <a class="card" href="${p.file}"><div class="thumb"><iframe src="${p.file}" loading="lazy" tabindex="-1" aria-hidden="true" title="${esc(p.name)}"></iframe></div>
+      <div class="meta"><div class="r1"><b>${esc(p.name)}</b><span class="st"><i style="background:${color}"></i>${word}</span></div>
+      <div class="say">${esc(p.say)}</div><div class="path">${esc(p.file)} · ${p.when}</div></div></a>`).join("")}</div></section>`;
+}).join("") + `<section><div class="sh"><h2>// Showcase</h2><span>给别人看的功能展示页（截图与录屏由 build.sh 生成）</span></div>
+  <div class="grid"><a class="card" href="../showcase/index.html"><div class="meta"><div class="r1"><b>功能展示页</b><span class="st"><i style="background:var(--ink2)"></i>Showcase</span></div>
+  <div class="say">两端的全部界面、实时活动、动效录屏与可操作的演示。素材不在 git 里：docs/showcase/build.sh capture / media 生成。</div><div class="path">../showcase/index.html</div></div></a></div></section>`;
+/* Each thumbnail shows the page at 1320 px wide, scaled to its card. */
+function scaleThumbs() {
+  for (const box of document.querySelectorAll(".thumb")) {
+    const f = box.querySelector("iframe");
+    f.style.transform = `scale(${box.clientWidth / 1320})`;
+  }
+}
+addEventListener("resize", scaleThumbs);
+scaleThumbs();
+</script>
+</body>
+</html>
