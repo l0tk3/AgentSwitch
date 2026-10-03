@@ -4,7 +4,7 @@
 
 import { detectRefusal, NO_SIDE_EFFECTS, type ExecutionOutcome } from "../core/outcome.js";
 import { opencodeGateConfig, type GateOptions, type GateRun } from "./gate.js";
-import { NO_PROTECTED, type ProtectedPaths } from "./protected.js";
+import { NO_PROTECTED, rootSpellings, type ProtectedPaths } from "./protected.js";
 import type { CredentialRepair } from "./types.js";
 
 export type OpenCodeExtras = { readonly mcp?: Record<string, unknown>; readonly skillsDir?: string | null; readonly protected?: ProtectedPaths };
@@ -23,13 +23,16 @@ export function protectedDeny(prot: ProtectedPaths, env: NodeJS.ProcessEnv = pro
   const bash: Record<string, string> = {};
   const read: Record<string, string> = {};
   const external: Record<string, string> = { "*": "allow" };
-  for (const r of prot.roots) {
-    edit[`${r}/*`] = "deny";
-    for (const form of [...shellForms(r, home), ...appDataTails(r, home)]) bash[`*${form}*`] = "deny";
-    external[r] = "deny";
-    external[`${r}/*`] = "deny";
+  // Each root also as the data volume spells it (`/System/Volumes/Data/Users/…`): OpenCode matches paths as text.
+  for (const root of prot.roots) {
+    for (const r of rootSpellings(root)) {
+      edit[`${r}/*`] = "deny";
+      external[r] = "deny";
+      external[`${r}/*`] = "deny";
+    }
+    for (const form of [...shellForms(root, home), ...appDataTails(root, home)]) bash[`*${form}*`] = "deny";
   }
-  for (const r of prot.readDenied ?? []) { read[r] = "deny"; read[`${r}/*`] = "deny"; }
+  for (const r of (prot.readDenied ?? []).flatMap(rootSpellings)) { read[r] = "deny"; read[`${r}/*`] = "deny"; }
   for (const d of [...prot.exempt, ...askUnder]) { external[d] = "allow"; external[`${d}/*`] = "allow"; }
   return { edit, bash, read, external };
 }

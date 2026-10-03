@@ -4,16 +4,20 @@
  *  through static deny patterns, and every harness through the engine's snapshot/restore backstop. */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { canonicalPath, dataVolumeSpellings, isWithin, lineage } from "../core/paths.js";
+
+export { canonicalPath } from "../core/paths.js";
 
 export type ProtectedPaths = {
   readonly roots: readonly string[];    // canonical absolute paths
   readonly exempt: readonly string[];   // subtrees inside a root that executors may use (work dirs, uploads, artifacts)
   /** Credentials at rest that no executor may even read (2026-09-24): the gate home (its private keys), the browser
-   *  session profiles (cookies) and the remote listener's TLS key. Claude checks its read tools, OpenCode gets read
-   *  denies; Codex has no per-path read rule (a known gap, BOUNDARY.md). */
+   *  session profiles (cookies), the shared browser's agent tokens and Playwright MCP's unredacted files, and the remote
+   *  listener's TLS key. Claude checks its read tools, OpenCode gets read denies; Codex has no per-path read rule (a
+   *  known gap, BOUNDARY.md). */
   readonly readDenied?: readonly string[];
 };
 
@@ -25,12 +29,6 @@ export const NO_PROTECTED: ProtectedPaths = { roots: [], exempt: [] };
 
 /** What an executor is told when it reaches for a protected path (Claude's tools, Codex's escalated commands). */
 export const PROTECTED_DENIAL = "denied by AgentSwitch: this path holds the daemon's own configuration or credentials; the model cannot change its own constraints";
-
-/** Canonical form used for every comparison: resolved, without a trailing separator. */
-export function canonicalPath(p: string): string {
-  const r = resolve(p);
-  try { return realpathSync(r); } catch { return r; }
-}
 
 /** The daemon's home, the gate's home and the gate service's socket, as `env` places them. */
 function places(env: NodeJS.ProcessEnv): { home: string; gate: string; socket: string } {
@@ -58,7 +56,7 @@ export function defaultProtected(env: NodeJS.ProcessEnv = process.env): Protecte
     roots: [home, gate, DAEMON_CONFIG_DIR, socket].map(canonicalPath),
     exempt: EXEMPT_UNDER_HOME.map((d) => canonicalPath(join(home, d))),
     // The local API's token too: an executor that read it could call the API to loosen its own approval policy.
-    readDenied: [gate, socket, join(home, BROWSER_PROFILES_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME)].map(canonicalPath),
+    readDenied: [gate, socket, join(home, BROWSER_PROFILES_DIR), join(home, BROWSER_STATE_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME)].map(canonicalPath),
   };
 }
 
@@ -71,25 +69,39 @@ export const GATE_PUBLIC_DIR = "/Library/Application Support/AgentSwitch/gate-pu
 /** Under `$AGENTSWITCH_HOME`: the browser session slots (browserSlots.ts). */
 export const BROWSER_PROFILES_DIR = "browser-profiles";
 
+/** Under `$AGENTSWITCH_HOME`: the shared browser's audit, its agents' token files and Playwright MCP's folders
+ *  (browser/setup.ts). */
+export const BROWSER_STATE_DIR = "browser";
+
+/* Paths are compared by canonical spelling and by identity (core/paths.ts): `..`, symlinks, letter case and the data
+ * volume's firmlinks (`/System/Volumes/Data/Users/…`, which got past these checks before 2026-10-02) all land on the
+ * root they are inside. */
+
 /** True when `path` (absolute or relative to cwd) lands inside a read-denied root. */
 export function isReadDenied(path: string, cwd: string, prot: ProtectedPaths): boolean {
   const p = canonicalPath(resolve(cwd, path));
-  return (prot.readDenied ?? []).some((r) => under(p, r));
+  const chain = lineage(p);
+  return (prot.readDenied ?? []).some((r) => isWithin(p, r, chain));
 }
 
 /** True when a search rooted at `path` would reach into a read-denied root (`Grep` over `~` finds the gate's keys). */
 export function containsReadDenied(path: string, cwd: string, prot: ProtectedPaths): boolean {
   const p = canonicalPath(resolve(cwd, path));
-  return (prot.readDenied ?? []).some((r) => under(r, p));
+  return (prot.readDenied ?? []).some((r) => isWithin(r, p));
 }
-
-const under = (p: string, root: string): boolean => p === root || p.startsWith(root + sep);
 
 /** True when `path` (absolute or relative to cwd) lands inside a protected root and not in an exempt subtree. */
 export function isProtected(path: string, cwd: string, prot: ProtectedPaths): boolean {
   const p = canonicalPath(resolve(cwd, path));
-  if (prot.exempt.some((e) => under(p, e))) return false;
-  return prot.roots.some((r) => under(p, r));
+  const chain = lineage(p);
+  if (prot.exempt.some((e) => isWithin(p, e, chain))) return false;
+  return prot.roots.some((r) => isWithin(p, r, chain));
+}
+
+/** The spellings a static rule (OpenCode's, Claude Code's, Codex's: matched as text) needs for `root`: as it is and on
+ *  the data volume (`/System/Volumes/Data/Users/…`), which the file system takes for the same place. */
+export function rootSpellings(root: string): string[] {
+  return dataVolumeSpellings(root);
 }
 
 /** A shell command's words as the shell would read them: quotes and backslash escapes resolved, so
@@ -164,7 +176,7 @@ export function commandTouchesProtected(command: string, cwd: string, prot: Prot
 /** Protected subtrees that lie inside cwd (e.g. cwd = this repo → packages/daemon/config). */
 export function protectedInside(cwd: string, prot: ProtectedPaths): string[] {
   const c = canonicalPath(cwd);
-  return prot.roots.filter((r) => under(r, c) && !prot.exempt.some((e) => under(r, e)));
+  return prot.roots.filter((r) => isWithin(r, c) && !prot.exempt.some((e) => isWithin(r, e)));
 }
 
 export type Snapshot = Readonly<Record<string, { readonly hash: string; readonly content: Buffer } | null>>;

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, exis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { commandTouchesProtected, defaultProtected, terminalProtected, isProtected, isReadDenied, protectedInside, restoreProtected, snapshotProtected, type ProtectedPaths } from "../src/executors/protected.js";
+import { commandTouchesProtected, defaultProtected, terminalProtected, isProtected, isReadDenied, protectedInside, restoreProtected, rootSpellings, snapshotProtected, type ProtectedPaths } from "../src/executors/protected.js";
 import { decideTool } from "../src/executors/claude.js";
 
 function setup() {
@@ -87,9 +87,12 @@ describe("protected paths", () => {
 describe("read-denied paths (2026-09-24)", () => {
   // The gate's private key, the browser session profiles and the remote TLS key are credentials: an executor may not even
   // read them. Before this, Claude's Read/Glob/Grep/LS were allowed everywhere.
-  it("defaultProtected read-denies the gate home, the browser profiles and the remote listener's key", () => {
+  it("defaultProtected read-denies the gate home, the browser profiles, the shared browser's agent files and the remote listener's key", () => {
     const p = defaultProtected({ HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg" });
-    expect(p.readDenied).toEqual(["/h/.sg", "/Library/Application Support/AgentSwitch/gate-public/gate.sock", "/h/.as/browser-profiles", "/h/.as/remote", "/h/.as/local-token"]);
+    expect(p.readDenied).toEqual(["/h/.sg", "/Library/Application Support/AgentSwitch/gate-public/gate.sock", "/h/.as/browser-profiles", "/h/.as/browser", "/h/.as/remote", "/h/.as/local-token"]);
+    // The agents' session tokens and Playwright MCP's unredacted snapshots (docs/browser-v0.md §5 step 3).
+    expect(decideTool("Read", { file_path: "/h/.as/browser/sessions/ab12.token" }, "/w", new Set(), p).kind).toBe("deny");
+    expect(decideTool("Bash", { command: "cat /h/.as/browser/agents/ab12-cd34/page.yml" }, "/w", new Set(), p).kind).toBe("deny");
   });
 
   it("AgentSwitch's own terminals keep only the gate's keys and socket closed (2026-09-30)", () => {
@@ -263,5 +266,67 @@ describe("a Claude search above a credential store (review, 2026-09-24)", () => 
     expect(decideTool("Grep", { pattern: "PRIVATE KEY", path: base, output_mode: "content" }, repo, new Set(), prot)).toMatchObject({ kind: "deny", reason: expect.stringContaining("narrower") });
     expect(decideTool("Glob", { pattern: "*", path: base }, repo, new Set(), prot)).toEqual({ kind: "allow" });
     expect(decideTool("Grep", { pattern: "x", path: repo }, repo, new Set(), prot)).toEqual({ kind: "allow" });
+  });
+});
+
+describe("the data volume's spelling and letter case (review, 2026-10-02)", () => {
+  // `realpath` keeps `/System/Volumes/Data/Users/…` as it is asked and node's JS realpath keeps the letter case, so a
+  // path tool (Claude's Read, Edit, Grep; the terminals' floor) named a read-denied or protected root that way and got
+  // past these checks. Real files on this Mac: the temp dir is under /private, which the data volume firmlinks.
+  function real() {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-prot-dv-")));
+    const asHome = join(base, ".agentswitch");
+    const gate = join(base, ".secret-gate");
+    mkdirSync(join(gate, "keys"), { recursive: true });
+    mkdirSync(join(asHome, "work", "t1"), { recursive: true });
+    writeFileSync(join(gate, "keys", "default.priv"), "k");
+    writeFileSync(join(asHome, "local-token"), "t");
+    writeFileSync(join(asHome, "CONTEXT.md"), "c");
+    const env = { HOME: base, AGENTSWITCH_HOME: asHome, SECRET_GATE_HOME: gate, SECRET_GATE_PUBLIC: join(base, "pub") };
+    return { base, asHome, gate, env, full: defaultProtected(env), term: terminalProtected(env) };
+  }
+  const data = (p: string) => `/System/Volumes/Data${p}`;
+
+  it("read-denied and protected roots are found however the path is spelled", () => {
+    const { base, asHome, gate, full, term } = real();
+    expect(existsSync(data(join(gate, "keys", "default.priv")))).toBe(true);
+    for (const p of [data(join(gate, "keys", "default.priv")), join(gate, "KEYS", "default.priv").toUpperCase(), data(join(asHome, "local-token"))]) {
+      expect(isReadDenied(p, "/", full), p).toBe(true);
+    }
+    expect(isReadDenied(data(join(gate, "keys", "default.priv")), "/", term)).toBe(true);
+    expect(isProtected(data(join(asHome, "CONTEXT.md")), "/", full)).toBe(true);
+    expect(isProtected(data(join(asHome, "new-file.md")), "/", full)).toBe(true);   // not there yet: an Edit creating it
+    expect(isProtected(data(join(asHome, "work", "t1", "out.txt")), "/", full)).toBe(false);   // exempt stays exempt
+    expect(isReadDenied(data(join(base, "elsewhere.txt")), "/", full)).toBe(false);
+  });
+
+  it("Claude's tools and the terminals' floor refuse them", () => {
+    const { base, asHome, gate, full, term } = real();
+    for (const prot of [full, term]) {
+      for (const [tool, input] of [
+        ["Read", { file_path: data(join(gate, "keys", "default.priv")) }],
+        ["Read", { file_path: join(gate, "keys", "default.priv").toUpperCase() }],
+        ["Edit", { file_path: data(join(gate, "keys", "default.priv")) }],
+        ["Grep", { pattern: "x", path: data(gate) }],
+        ["Grep", { pattern: "x", path: data(base) }],
+        ["Bash", { command: `cat ${data(join(gate, "keys", "default.priv"))}` }],
+      ] as const) {
+        expect(decideTool(tool, input as Record<string, unknown>, "/", new Set(), prot).kind, `${tool} ${JSON.stringify(input)}`).toBe("deny");
+      }
+    }
+    expect(decideTool("Read", { file_path: data(join(asHome, "local-token")) }, "/", new Set(), full).kind).toBe("deny");
+    expect(decideTool("Read", { file_path: data(join(asHome, "local-token")) }, "/", new Set(), term).kind).not.toBe("deny");   // open in terminals
+  });
+
+  it("the rules other programs match as text also name the data volume's spelling", async () => {
+    const { gate, asHome, full } = real();
+    const { protectedDeny } = await import("../src/executors/opencodeShared.js");
+    const deny = protectedDeny(full, {});
+    expect(deny.read[data(gate)]).toBe("deny");
+    expect(deny.read[`${data(gate)}/*`]).toBe("deny");
+    expect(deny.edit[`${data(asHome)}/*`]).toBe("deny");
+    expect(deny.external[data(asHome)]).toBe("deny");
+    expect(rootSpellings("/h/.sg")).toEqual(["/h/.sg"]);   // not under a firmlinked folder: one spelling
+    expect(rootSpellings("/Users/u/.sg")).toEqual(["/Users/u/.sg", "/System/Volumes/Data/Users/u/.sg"]);
   });
 });

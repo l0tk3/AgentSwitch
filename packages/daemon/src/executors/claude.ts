@@ -4,9 +4,9 @@
 
 import { RATE_LIMIT_PROBE_PROMPT } from "../core/probes.js";
 import { query, type CanUseTool, type EffortLevel, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { type Extensions, NO_EXTENSIONS } from "../extensions/index.js";
 import { detectRefusal, NO_AGENTS, NO_SIDE_EFFECTS, type AgentCounts, type ExecutionOutcome, type RefusalSignal } from "../core/outcome.js";
 import type { RateLimitCache, RateLimitInfo } from "../quota/windows.js";
@@ -15,7 +15,7 @@ import { claudeMcpServers, gateEnv, gateRun, mcpServerEnv, reportTransfer, witho
 import type { TransferGrant } from "../core/transfer.js";
 import { composePrompt, executorInstructions } from "./instructions.js";
 import { interruptedOutcome, watchRunStop } from "./lifecycle.js";
-import { commandTouchesProtected, containsReadDenied, isProtected, isReadDenied, NO_PROTECTED, PROTECTED_DENIAL, type ProtectedPaths } from "./protected.js";
+import { canonicalPath, commandTouchesProtected, containsReadDenied, isProtected, isReadDenied, NO_PROTECTED, PROTECTED_DENIAL, type ProtectedPaths } from "./protected.js";
 import { clipInput, clipOutput } from "./toolEvents.js";
 import { repairInValue, shortToken } from "./tokens.js";
 import { NO_ANSWER_MESSAGE, type UserAnswers, type UserQuestion } from "../core/questions.js";
@@ -58,19 +58,11 @@ function readTargets(toolName: string, input: Record<string, unknown>): string[]
   return out;
 }
 
-/** Real path of `p` even when it does not exist yet: realpath of the nearest existing ancestor + the rest.
- *  macOS reports the temp dir as /var/... and /private/var/... interchangeably. */
+/** Real path of `p` even when it does not exist yet: realpath of the nearest existing ancestor + the rest, in the
+ *  disk's own case and without the data volume's prefix (core/paths.ts). macOS reports the temp dir as /var/... and
+ *  /private/var/... interchangeably. */
 export function canonical(p: string): string {
-  let head = p;
-  const tail: string[] = [];
-  while (!existsSync(head)) {
-    const parent = dirname(head);
-    if (parent === head) return p;
-    tail.unshift(basename(head));
-    head = parent;
-  }
-  try { head = realpathSync(head); } catch { return p; }
-  return tail.length ? join(head, ...tail) : head;
+  return canonicalPath(p);
 }
 
 /** Policy: what needs a human. `cwd` should already be canonical; `allowedMcp` = registry servers marked approval=allow. */
