@@ -213,6 +213,21 @@ mark { background: var(--signal); color: #000; padding: 0 1px; }
 .composer textarea { width: 100%; height: 58px; background: none; border: 0; outline: none; color: var(--ink); font: 13px/1.5 var(--mono); resize: none; padding: 0; }
 .composer textarea::placeholder { color: var(--ink3); }
 
+/* ---------- a box that asks, over the whole window (the page's own; the Mac window shows no native one) ----------
+   2026-10-03: a session whose folder is gone goes on in a folder picked here (docs/terminal-v0.md §5). */
+.asksheet { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .55); z-index: 8; }
+.asksheet .box { position: relative; width: min(440px, calc(100% - 40px)); padding: 16px 18px 14px; font-family: var(--ui, -apple-system, sans-serif); }
+.asksheet h2 { font: 700 14px/1.5 var(--ui, -apple-system, sans-serif); margin: 0 0 6px; }
+.asksheet p { font-size: 12.5px; line-height: 1.6; color: var(--ink2); margin: 0 0 12px; }
+.asksheet .folder { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--ink4); padding: 4px 0; font: 13px var(--mono); }
+.asksheet .folder:focus-within { border-color: var(--ink2); }
+.asksheet .folder .prompt { color: var(--signal); }
+.asksheet .folder input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--ink); font: inherit; caret-color: var(--signal); }
+.asksheet .offers { display: grid; justify-items: start; gap: 1px; margin-top: 4px; }
+.asksheet .offer { font: 12px/1.6 var(--mono); color: var(--ink3); padding: 0 0 0 2.2ch; background: none; border: 0; cursor: pointer; }
+.asksheet .offer:hover, .asksheet .offer.on { color: var(--ink); }
+.asksheet .foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+
 /* ---------- new terminal: the empty state ---------- */
 .create { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; }
 .create .inner { width: 560px; }
@@ -281,13 +296,14 @@ mark { background: var(--signal); color: #000; padding: 0 1px; }
   <button data-do="switch">切换终端</button>
   <button data-do="seal">加密发送 ⌘⇧V</button>
   <button data-do="exit">模拟：进程结束</button>
+  <button data-do="gone">模拟：会话的文件夹不在了</button>
   <button data-do="create">新建（空状态）</button>
   <button data-do="phone">模拟：手机接着用</button>
   <button data-do="phoneoff">模拟：手机退到后台</button>
   <a href="app.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">整体方向 →</a>
   <a href="depth.html" style="color:#b5b5b8;font-size:12px;margin-left:8px">层次 →</a>
 </div>
-<div class="note">静态演示，不连服务。同一父目录下的项目合并成一层（Projects/、Worktop/）；点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，红绿灯旁的按钮或 ⌘B 展开 / 收起。顶上是标题栏的一行（32pt，像 iTerm 的紧凑标签栏）：红绿灯旁是列表按钮，标题居中写当前终端，右侧 + 新建和总体状态。同一个终端只有一个尺寸：手机上接着用时，这里的画面盖上抖动遮罩，中间写 On iPhone；点画面、按任意键或 [ Take Over ] 就在这里接着用，画面按窗口尺寸重画；手机退到后台时自动回到这里。权限卡片照常出现、照常批准。</div>
+<div class="note">静态演示，不连服务。目录树：有终端或会话的文件夹，加上两个以上这样的文件夹直接所在的文件夹（Projects/）；每个文件夹挂在上方最近的那个下面，名字写从那里起的路径（Worktop/ 下的 培训/靶场/）；自己有会话又装着别的文件夹的（Worktop/）只占一行。点侧栏的终端行可切换，文件夹可折叠（含正在看的终端的也可以，折起后那一行标出）。拖侧栏右边的点线改宽度、双击复原；拖到最左收起，红绿灯旁的按钮或 ⌘B 展开 / 收起。顶上是标题栏的一行（32pt，像 iTerm 的紧凑标签栏）：红绿灯旁是列表按钮，标题居中写当前终端，右侧 + 新建和总体状态。同一个终端只有一个尺寸：手机上接着用时，这里的画面盖上抖动遮罩，中间写 On iPhone；点画面、按任意键或 [ Take Over ] 就在这里接着用，画面按窗口尺寸重画；手机退到后台时自动回到这里。权限卡片照常出现、照常批准。</div>
 
 <div class="win" id="win">
   <div class="bar"><div class="lights"><i></i><i></i><i></i></div>
@@ -401,8 +417,14 @@ const folders = [
     { kind: "session", name: "Playwright 用的是哪个 Chrome", ag: "cc", at: now - 3 * d },
     { kind: "session", name: "截图打码演示", ag: "cc", at: now - 3 * d },
   ] },
-  { path: "Projects/blog", collapsed: true, git: { branch: "theme-v2" }, items: [
+  { path: "Projects/AgentSwitch/packages/secret-gate", items: [
+    { kind: "session", name: "fill-value 的探针模板", ag: "cc", at: now - 6 * hr, text: "探针模板固定在包里，升级时一起换" },
+  ] },
+  { path: "Projects/blog", git: { branch: "theme-v2" }, items: [
     { kind: "session", name: "换主题后的构建报错", ag: "oc", at: now - 4 * d },
+  ] },
+  { path: "Worktop", items: [
+    { kind: "session", name: "整理工作目录", ag: "cc", at: now - 2 * d },
   ] },
   { path: "Worktop/Codex", items: [
     { kind: "term", id: "2ecb", st: "exited", name: "orca是什么", ag: "codex", screen: "codex" },
@@ -413,6 +435,9 @@ const folders = [
     { kind: "session", name: "给 iTerm 配 MesloLGS 字体", ag: "cc", at: now - 25 * m },
     { kind: "session", name: "statusline 显示 git 分支", ag: "cc", at: now - 5 * hr, text: "git branch --show-current 放进 statusline，脏了加星号" },
   ] },
+  { path: "Worktop/培训/靶场", items: [
+    { kind: "session", name: "靶场环境搭建", ag: "codex", at: now - 4 * d, text: "docker compose 起三台靶机，网段 10.10.0.0/24" },
+  ] },
   { path: "Work/api", git: { branch: "feat/health-cache", changed: 3, behind: 4 }, items: [
     { kind: "session", name: "给健康检查加缓存", ag: "oc", at: now - 21 * hr, text: "健康检查结果缓存 5 秒，终端服务重启时清掉" },
   ] },
@@ -421,22 +446,33 @@ const all = () => folders.flatMap((f) => f.items);
 let selected = "b89e";
 let variant = "tree";
 const expanded = new Set();
-const parentsClosed = new Set();
+const closed = new Set(["Projects/blog"]);
 const SHOWN = 3;
 const age = (t) => { const s = (now - t) / 1000; return s < 60 ? "Now" : s < 3600 ? `${Math.round(s / 60)}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`; };
 const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
 
-/** Folders under one parent are nested under it when there are two or more; a lone one stands by its own name. */
+/** The list as a directory tree (2026-10-03, user: 怎么分别显示了两个worktop；有共同的祖父节点时并没能正确显示): every
+ *  folder with terminals or sessions, and every folder two or more of them sit directly in. Each sits in the nearest of
+ *  these above it, named by the path from there (培训/靶场); Worktop, with a session of its own and folders under it, is
+ *  one line. (The apps also keep your home folder and those above it from holding deeper ones: packages/daemon/ui/lib/tree.js.) */
+const byPath = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+const parentOf = (p) => p.split("/").slice(0, -1).join("/");
 function tree() {
-  const byParent = new Map();
-  for (const f of folders) {
-    const parent = f.path.split("/").slice(0, -1).join("/");
-    if (!byParent.has(parent)) byParent.set(parent, []);
-    byParent.get(parent).push(f);
-  }
-  return [...byParent].map(([parent, fs]) => ({ parent: fs.length > 1 ? parent : null, folders: fs }));
+  const own = new Map(folders.map((f) => [f.path, f]));
+  const direct = new Map();
+  for (const p of own.keys()) direct.set(parentOf(p), (direct.get(parentOf(p)) ?? 0) + 1);
+  const shown = [...new Set([...own.keys(), ...[...direct].filter(([p, n]) => p && n > 1).map(([p]) => p)])].sort(byPath);
+  const holder = (p) => { for (let q = parentOf(p); q; q = parentOf(q)) if (shown.includes(q)) return q; return null; };
+  const make = (path, label) => ({ path, label, own: own.get(path),
+    children: shown.filter((c) => holder(c) === path).map((c) => make(c, c.slice(path.length + 1))) });
+  return shown.filter((p) => holder(p) === null).map((p) => make(p, p.split("/").pop()));
 }
-const leaf = (f) => f.path.split("/").pop();
+const everyItem = (node) => [...(node.own?.items ?? []), ...node.children.flatMap(everyItem)];
+/** Every folder, depth first, named under the folders it sits in (Worktop/培训/靶场), for the search. */
+const everyFolder = (nodes, above = "") => nodes.flatMap((n) => {
+  const name = above ? `${above}/${n.label}` : n.label;
+  return [{ n, name }, ...everyFolder(n.children, name)];
+});
 const counts = (items) => {
   const live = items.filter((i) => i.kind === "term" && i.st !== "exited").length;
   const n = items.filter((i) => i.kind === "session").length;
@@ -459,13 +495,15 @@ const snippet = (text, q) => {
 function renderSearch(q) {
   const out = [];
   let folderHits = 0, titleHits = 0, textHits = 0;
-  for (const f of folders) {
-    const nameHit = f.path.toLowerCase().includes(q);
+  for (const { n: node, name } of everyFolder(tree())) {
+    const f = node.own;
+    if (!f) continue;
+    const nameHit = name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q);
     const rows = f.items.map((r) => ({ r, how: r.name.toLowerCase().includes(q) ? "title" : (r.text ?? "").toLowerCase().includes(q) ? "text" : null }))
       .filter((x) => nameHit || x.how);
     if (!nameHit && !rows.length) continue;
     if (nameHit) folderHits++;
-    out.push(`<div class="dir" data-dir="${f.path}"><span class="chev">▾</span><span class="name">${mark(f.path.split("/").slice(-2).join("/"), q)}/${git(f.git)}</span><span class="count">${counts(f.items)}</span></div>`);
+    out.push(`<div class="dir" data-dir="${f.path}"><span class="chev">▾</span><span class="name">${mark(name, q)}/${git(f.git)}</span><span class="count">${counts(f.items)}</span></div>`);
     rows.forEach(({ r, how }, i) => {
       const tr = i === rows.length - 1 ? "└─" : "├─";
       const isTerm = r.kind === "term";
@@ -488,51 +526,50 @@ function render() {
   if (q) { list.innerHTML = renderSearch(q); renderEyes(); return; }
   const out = [];
   let ix = 0;
-  for (const node of tree()) {
-    let depth = 0;
-    if (node.parent) {
-      const closed = parentsClosed.has(node.parent);
-      out.push(`<div class="dir parent" data-parent="${node.parent}"><span class="chev">${closed ? "▸" : "▾"}</span><span class="name">${esc(node.parent)}/</span><span class="count">${counts(node.folders.flatMap((f) => f.items))}</span></div>`);
-      if (closed) continue;
-      depth = 1;
-    }
-    const pad = (k) => `style="padding-left:${k * 2}ch"`;
-    for (const f of node.folders) {
-      const terms = f.items.filter((i) => i.kind === "term");
-      const sessions = f.items.filter((i) => i.kind === "session");
-      const open = expanded.has(f.path);
-      const shown = open ? sessions : sessions.slice(0, SHOWN);
-      const hidden = sessions.length - shown.length;
-      out.push(`<div class="dir" data-dir="${f.path}" style="padding-left:calc(10px + ${depth * 2}ch)"><span class="chev">${f.collapsed ? "▸" : "▾"}</span><span class="name">${esc(leaf(f))}/${git(f.git)}</span><span class="count">${counts(f.items)}</span><span class="add">+</span></div>`);
-      if (f.collapsed) continue;
-      const rows = [...terms, ...shown, ...(hidden > 0 || (open && sessions.length > SHOWN) ? [{ kind: "more", n: hidden, f: f.path, open }] : [])];
-      rows.forEach((r, i) => {
-        const tr = i === rows.length - 1 ? "└─" : "├─";
-        if (r.kind === "more") {
-          out.push(`<div class="row more" data-more="${r.f}"><span></span>${variant === "tree" ? `<span class="tr" ${pad(depth)}>${tr}</span><span></span>` : `<span ${pad(depth)}></span><span></span><span></span>`}<span class="nm">${r.open ? `▾ ${L("less")}` : `▸ ${L("more", r.n)}`}</span>${variant === "tree" ? "<span></span>" : ""}</div>`);
-          return;
-        }
-        const isTerm = r.kind === "term";
-        const n = isTerm ? String(++ix).padStart(2, "0") : "";
-        const cls = ["row", r.kind, r.st ?? "", isTerm && r.id === selected ? "sel" : ""].join(" ");
-        const data = isTerm ? `data-id="${r.id}"` : "";
-        if (variant === "tree") {
-          const meta = isTerm ? (r.st === "waiting" ? `<span class="w">${L("waiting")}</span>` : r.st === "exited" ? L("exited") : agentPx(r.ag)) : `${agentPx(r.ag)}<span>${age(r.at)}</span>`;
-          const acts = isTerm ? `<span title="${L("close")} ⌘W">×</span>` : `<span class="go">${L("resume")}</span><span class="del">${L("delete")}</span>`;
-          out.push(`<div class="${cls}" ${data}><span class="ix">${n}</span><span class="tr" ${pad(depth)}>${tr}</span><span class="st">${isTerm ? statusMark(r.st) : ""}</span><span class="nm">${esc(r.name)}</span><span class="mt">${meta}</span><span class="ac">${acts}</span></div>`);
-          // Its sub-agents (Claude Code's SubagentStart … Stop): one level deeper, what each is doing now.
-          (r.subs ?? []).forEach((sub, k) => {
-            const stem = tr === "└─" ? "\u00a0\u00a0" : "│\u00a0";
-            const twig = k === r.subs.length - 1 ? "└─" : "├─";
-            out.push(`<div class="row sub"><span class="ix"></span><span class="tr" ${pad(depth)}>${stem}${twig}</span><span class="st"><span class="spin">${SPIN[0]}</span></span><span class="nm">${esc(sub.name)}<i>${esc(sub.doing)}</i></span><span class="mt">${esc(sub.type)}</span><span class="ac"></span></div>`);
-          });
-        } else {
-          const when = isTerm ? (r.st === "waiting" ? `<span class="w">${L("waiting")}</span>` : r.st === "exited" ? L("end") : L("live")) : age(r.at);
-          out.push(`<div class="${cls}" ${data}><span class="ix">${n}</span><span class="st" ${pad(depth)}>${isTerm ? statusMark(r.st) : ""}</span><span class="ag">${agentPx(r.ag)}</span><span class="age">${when}</span><span class="nm">${esc(r.name)}</span></div>`);
-        }
-      });
-    }
-  }
+  const pad = (k) => `style="padding-left:${k * 2}ch"`;
+  // A folder's line, its own terminals and sessions, then the folders under it one step further in; a folder that only
+  // gathers others has the quieter line.
+  const renderFolder = (node, depth) => {
+    const f = node.own;
+    const shut = closed.has(node.path);
+    out.push(`<div class="dir ${f ? "" : "parent"}" data-dir="${node.path}" style="padding-left:calc(10px + ${depth * 2}ch)"><span class="chev">${shut ? "▸" : "▾"}</span><span class="name">${esc(node.label)}/${git(f?.git)}</span><span class="count">${counts(everyItem(node))}</span><span class="add">+</span></div>`);
+    if (shut) return;
+    const items = f?.items ?? [];
+    const terms = items.filter((i) => i.kind === "term");
+    const sessions = items.filter((i) => i.kind === "session");
+    const open = expanded.has(node.path);
+    const shown = open ? sessions : sessions.slice(0, SHOWN);
+    const hidden = sessions.length - shown.length;
+    const rows = [...terms, ...shown, ...(hidden > 0 || (open && sessions.length > SHOWN) ? [{ kind: "more", n: hidden, f: node.path, open }] : [])];
+    rows.forEach((r, i) => {
+      const tr = i === rows.length - 1 ? "└─" : "├─";
+      if (r.kind === "more") {
+        // ▸ opens the rest under it; ▴ folds them back up (2026-10-03, user: 这个图标也有问题吧，有点误导人).
+        out.push(`<div class="row more" data-more="${r.f}"><span></span>${variant === "tree" ? `<span class="tr" ${pad(depth)}>${tr}</span><span></span>` : `<span ${pad(depth)}></span><span></span><span></span>`}<span class="nm">${r.open ? `▴ ${L("less")}` : `▸ ${L("more", r.n)}`}</span>${variant === "tree" ? "<span></span>" : ""}</div>`);
+        return;
+      }
+      const isTerm = r.kind === "term";
+      const n = isTerm ? String(++ix).padStart(2, "0") : "";
+      const cls = ["row", r.kind, r.st ?? "", isTerm && r.id === selected ? "sel" : ""].join(" ");
+      const data = isTerm ? `data-id="${r.id}"` : "";
+      if (variant === "tree") {
+        const meta = isTerm ? (r.st === "waiting" ? `<span class="w">${L("waiting")}</span>` : r.st === "exited" ? L("exited") : agentPx(r.ag)) : `${agentPx(r.ag)}<span>${age(r.at)}</span>`;
+        const acts = isTerm ? `<span title="${L("close")} ⌘W">×</span>` : `<span class="go">${L("resume")}</span><span class="del">${L("delete")}</span>`;
+        out.push(`<div class="${cls}" ${data}><span class="ix">${n}</span><span class="tr" ${pad(depth)}>${tr}</span><span class="st">${isTerm ? statusMark(r.st) : ""}</span><span class="nm">${esc(r.name)}</span><span class="mt">${meta}</span><span class="ac">${acts}</span></div>`);
+        // Its sub-agents (Claude Code's SubagentStart … Stop): one level deeper, what each is doing now.
+        (r.subs ?? []).forEach((sub, k) => {
+          const stem = tr === "└─" ? "\u00a0\u00a0" : "│\u00a0";
+          const twig = k === r.subs.length - 1 ? "└─" : "├─";
+          out.push(`<div class="row sub"><span class="ix"></span><span class="tr" ${pad(depth)}>${stem}${twig}</span><span class="st"><span class="spin">${SPIN[0]}</span></span><span class="nm">${esc(sub.name)}<i>${esc(sub.doing)}</i></span><span class="mt">${esc(sub.type)}</span><span class="ac"></span></div>`);
+        });
+      } else {
+        const when = isTerm ? (r.st === "waiting" ? `<span class="w">${L("waiting")}</span>` : r.st === "exited" ? L("end") : L("live")) : age(r.at);
+        out.push(`<div class="${cls}" ${data}><span class="ix">${n}</span><span class="st" ${pad(depth)}>${isTerm ? statusMark(r.st) : ""}</span><span class="ag">${agentPx(r.ag)}</span><span class="age">${when}</span><span class="nm">${esc(r.name)}</span></div>`);
+      }
+    });
+    for (const c of node.children) renderFolder(c, depth + 1);
+  };
+  for (const node of tree()) renderFolder(node, 0);
   list.innerHTML = out.join("");
   renderEyes();
 }
@@ -761,6 +798,32 @@ function submitQuestion() {
   if (selected === "ba82") document.getElementById("screen").querySelector(".c-yel")?.replaceWith(Object.assign(document.createElement("span"), { className: "c-grn", textContent: `User answered Claude's questions:\n${said}` }));
   for (const a of asked) { a.picked = []; a.other = ""; }
 }
+/** Resume on a session whose folder was moved: the folder line (Choose… in the Mac window), the folders the Mac offers
+ *  under it — the same name elsewhere, then the nearest folder above the old one still there — and Resume. */
+function simulateGone() {
+  if (document.querySelector(".asksheet")) return;
+  const offers = ["~/Desktop/WorkSpace/Lab/Targets/靶场", "~/Desktop/WorkSpace/Worktop/培训"];
+  const sheet = document.createElement("div");
+  sheet.className = "asksheet";
+  sheet.innerHTML = `<div class="box"><h2>「靶场环境搭建」的文件夹已不存在</h2>
+    <p>这段会话原来在 ~/Desktop/WorkSpace/Worktop/培训/靶场，该文件夹可能已被移动、改名或删除。请选择一个文件夹，会话将在那里继续。</p>
+    <label class="folder"><span class="prompt">❯</span><input value="${offers[0]}" spellcheck="false"><button class="btn line" type="button">Choose…</button></label>
+    <div class="offers">${offers.map((f, i) => `<button class="offer${i === 0 ? " on" : ""}" type="button">${f}</button>`).join("")}</div>
+    <div class="foot"><button class="btn line" data-gone="no">Cancel</button><button class="btn pri" data-gone="yes">Resume</button></div></div>`;
+  win.append(sheet);
+  glitch(sheet.querySelector(".box"));
+  const input = sheet.querySelector("input");
+  const mark = () => { for (const b of sheet.querySelectorAll(".offer")) b.classList.toggle("on", b.textContent === input.value); };
+  input.addEventListener("input", mark);
+  input.focus();
+  input.select();
+  sheet.addEventListener("click", (e) => {
+    const offer = e.target.closest(".offer");
+    if (offer) { input.value = offer.textContent; mark(); input.focus(); return; }
+    if (e.target.closest("[data-gone]")) sheet.remove();
+  });
+  sheet.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); sheet.remove(); } });
+}
 function simulateExit() {
   const t = all().find((i) => i.id === selected) ?? all().find((i) => i.kind === "term" && i.st !== "exited");
   if (!t || t.st === "exited") return;
@@ -878,13 +941,13 @@ function create() {
 
 // ---------- wiring ----------
 document.getElementById("list").addEventListener("click", (e) => {
-  const parent = e.target.closest("[data-parent]");
-  if (parent) { const k = parent.dataset.parent; parentsClosed.has(k) ? parentsClosed.delete(k) : parentsClosed.add(k); render(); return; }
   const dir = e.target.closest("[data-dir]");
   if (dir) {
-    const f = folders.find((x) => x.path === dir.dataset.dir);
     if (e.target.classList.contains("add")) { create(); return; }
-    f.collapsed = !f.collapsed; render(); return;
+    const k = dir.dataset.dir;
+    closed.has(k) ? closed.delete(k) : closed.add(k);
+    render();
+    return;
   }
   const more = e.target.closest("[data-more]");
   if (more) { const k = more.dataset.more; expanded.has(k) ? expanded.delete(k) : expanded.add(k); render(); return; }
@@ -920,6 +983,7 @@ document.addEventListener("click", (e) => {
   if (act === "switch") { const ts = all().filter((i) => i.kind === "term"); const k = ts.findIndex((t) => t.id === selected); select(ts[(k + 1) % ts.length].id); }
   if (act === "seal") seal();
   if (act === "exit") simulateExit();
+  if (act === "gone") simulateGone();
   if (act === "create") create();
   if (act === "hide") { win.classList.toggle("closed"); sideIcon(); }
   if (act === "allow" || act === "deny") answer();
@@ -929,6 +993,8 @@ document.addEventListener("click", (e) => {
 });
 // A click on the screen takes it back here (not on a box: a permission request is answered without taking it).
 document.getElementById("main").addEventListener("pointerdown", (e) => { if (away && !e.target.closest(".box, .sealbar")) here(); });
+// ?gone opens the box a session whose folder is gone asks with (for a screenshot).
+if (new URLSearchParams(location.search).has("gone")) setTimeout(simulateGone, 0);
 // The list's edge: dragged, it follows the pointer; let go near the left and the list closes.
 const win = document.getElementById("win");
 const sideIcon = () => undefined;   // the toolbar's list button is one icon either way, as a Mac app's

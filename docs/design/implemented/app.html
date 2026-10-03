@@ -8,7 +8,7 @@
 /* One direction for the whole program: the medium shows (cells, pixels, dither), used sparingly. Content text is
    set for reading; the texture lives in marks, labels, meters, empty states and moments of change. */
 :root {
-  --bg: #000; --panel: #0b0b0b; --raise: #151515;
+  --bg: #000; --panel: #0b0b0b; --raise: #151515; --code: rgba(233,230,223,.07);
   --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
   --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
   --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
@@ -16,7 +16,7 @@
 }
 .light {
   --px-shadow: #cfc9bc;
-  --bg: #f3f1ea; --panel: #ebe8df; --raise: #e2ded3;
+  --bg: #f3f1ea; --panel: #ebe8df; --raise: #e2ded3; --code: rgba(21,20,19,.07);
   --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3;
   --signal: #e0106e; --cyan: #0086a8; --green: #3f8f00; --amber: #c27400; --red: #d7261b;
 }
@@ -99,6 +99,14 @@ a { color: inherit; }
 .attn span { flex: 1; }
 .feed { flex: 1; overflow: hidden; padding: 0 14px; display: flex; flex-direction: column; gap: 14px; }
 .me { align-self: flex-end; max-width: 80%; background: var(--raise); padding: 9px 12px; border-radius: 2px; font-size: 14.5px; }
+/* Code (2026-10-03, user: dispatch里加上代码块支持吧 …… 手机上也是): the Mac's (mac-window.html `.cb`) at the phone's
+   sizes. A long line scrolls sideways, not wrapped: on a narrow screen a wrapped command reads as two. */
+.typed { white-space: pre-wrap; }
+.cb { border: 1px solid var(--ink4); background: var(--code); margin-top: 7px; }
+.cb .h { display: flex; justify-content: space-between; font: 10.5px/1 var(--mono); color: var(--ink3); padding: 6px 9px 0; }
+.cb .h b { font-weight: 400; color: var(--ink2); }
+.cb pre { margin: 0; padding: 4px 9px 8px; font: 12px/1.55 var(--mono); color: var(--ink); white-space: pre; overflow-x: auto; }
+.ic { font: .88em var(--mono); background: var(--code); padding: 0 3px; }
 .entry .meta { font: 11px var(--mono); color: var(--ink3); display: flex; gap: 8px; align-items: center; margin-bottom: 5px; }
 .entry .meta .st { color: var(--ink2); display: flex; gap: 6px; align-items: center; }
 .entry .txt { font-size: 14.5px; }
@@ -226,16 +234,17 @@ a { color: inherit; }
             <div class="b">xcrun devicectl device install app --device 00008150-…<small>~/Projects/AgentSwitch/packages/ios-app</small></div>
             <div class="f"><button class="btn line">Deny</button><button class="btn pri">Allow</button></div>
           </div>
+          <div class="me"><span class="typed">跑一下这两条，把输出贴回来：</span><div class="cb"><div class="h"><span>bash</span><b>Copy</b></div><pre>git status --short
+npm test -- --reporter=dot</pre></div></div>
           <div class="entry">
             <div class="meta"><span class="st"><span class="sq" style="color:var(--green)" data-sq></span>Done</span><span>Codex · GPT-6 Luna</span><span>1d</span></div>
-            <div class="txt">已导出 12 个会话的聊天记录</div>
-            <div class="files"><span>▤ 2 files</span><button class="btn line">Open</button></div>
+            <div class="txt"><code class="ic">npm test</code> 31 项全部通过</div>
           </div>
         </div>
         <div class="input"><span class="k">＋</span><span class="ph">向 Mac 发送任务或问题</span><span class="k" id="lockKey"></span></div>
         <div class="tabs"><div class="on"><span id="tab1"></span>Dispatch</div><div><span id="tab2"></span>Terminals</div></div>
       </div></div>
-      <div class="cap">iPhone · Dispatch（深色）：用户的话、任务正文是系统字体的中文；状态、模型、时间、按钮是等宽英文。进行中与 Mac 同一个转圈。新的权限请求到达时整张卡闪一次。</div>
+      <div class="cap">iPhone · Dispatch（深色）：用户的话、任务正文是系统字体的中文；状态、模型、时间、按钮是等宽英文。进行中与 Mac 同一个转圈。新的权限请求到达时整张卡闪一次。代码用等宽字放在淡底方框里，过长的行左右滑动，右上角 Copy；行内代码同样淡底。用户的话只认代码，其余照原样显示。</div>
       <div class="ctl"><button id="askBtn">模拟：新的权限请求</button></div>
     </div>
 

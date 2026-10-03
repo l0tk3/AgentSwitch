@@ -11,7 +11,7 @@
    对话记录，其他都放在高级设置里): the conversation and one input box, in one column; the rest is in the settings
    window's Dispatch group, drawn below. */
 :root {
-  --bg: #000; --panel: #0b0b0b; --raise: #151515; --hover: #121212;
+  --bg: #000; --panel: #0b0b0b; --raise: #151515; --hover: #121212; --code: rgba(233,230,223,.07);
   --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
   --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
   --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
@@ -22,7 +22,7 @@
   color-scheme: dark;
 }
 .light {
-  --bg: #f4f1ea; --panel: #ece8df; --raise: #e4dfd4; --hover: #e9e5dc;
+  --bg: #f4f1ea; --panel: #ece8df; --raise: #e4dfd4; --hover: #e9e5dc; --code: rgba(21,20,19,.07);
   --ink: #16140f; --ink2: #6b675f; --ink3: #a6a196; --ink4: #d6d1c6;
   --signal: #e0106f; --cyan: #0096b3; --green: #3d8a00; --amber: #b87400; --red: #c9281b;
   --sys-win: #ececec; --sys-side: #e3e3e3; --sys-group: #f7f7f7; --sys-line: #d6d6d6; --sys-ink: #1d1d1f; --sys-ink2: #6e6e73;
@@ -117,9 +117,23 @@ button:focus { outline: none; }
 .feed { padding: 4px 0 20px; display: flex; flex-direction: column; gap: 14px; }
 .day { text-align: center; color: var(--ink3); font-size: 11px; margin: 10px 0 0; }
 .me { display: flex; flex-direction: column; align-items: flex-end; }
-.me div { max-width: 72%; border: 1px solid var(--ink4); background: var(--raise); padding: 9px 13px; font: 14px/1.55 var(--ui); }
+.me > div { max-width: 72%; border: 1px solid var(--ink4); background: var(--raise); padding: 9px 13px; font: 14px/1.55 var(--ui); }
 .me small { display: block; text-align: right; font: 11px var(--mono); color: var(--ink2); margin-top: 4px; }
 .say { font: 14px/1.65 var(--ui); max-width: 68ch; }
+/* Code (2026-10-03, user: dispatch里加上代码块支持吧，这样看着太难受了): a fenced block in the mono font on a wash of ink,
+   square, framed; one line per line — a long one scrolls sideways, so a command never reads as two — its language and
+   `Copy` above it. Inline code on the same wash. In what you typed only code is read (the rest stays as typed); answers,
+   results and questions are Markdown. Cards keep their few-line preview, inline code in it. */
+.typed { white-space: pre-wrap; }
+.cb { border: 1px solid var(--ink4); background: var(--code); margin: 8px 0 2px; min-width: 160px; }
+.me > div > .cb:first-child { margin-top: 0; }
+.cb .h { display: flex; gap: 8px; font: 10.5px/1 var(--mono); color: var(--ink3); padding: 7px 10px 0; }
+.cb .h .sp { flex: 1; }
+.cb .h button { font: inherit; color: var(--ink2); background: none; border: 0; padding: 0; cursor: pointer; }
+.cb .h button:hover { color: var(--ink); }
+.cb .h button.done { color: var(--signal); }
+.cb pre { margin: 0; padding: 5px 10px 9px; font: 12px/1.6 var(--mono); color: var(--ink); white-space: pre; overflow-x: auto; }
+.ic { font: .88em var(--mono); background: var(--code); padding: 0 3px; }
 .say.note-line { color: var(--ink2); display: flex; gap: 8px; align-items: baseline; }
 .say.note-line i { width: 6px; height: 6px; flex: none; transform: translateY(-1px); }
 .aloud { font: 11.5px var(--mono); color: var(--ink2); display: inline-flex; gap: 6px; align-items: center; margin-top: 6px; }
@@ -277,6 +291,26 @@ kbd { font: 11px var(--mono); color: var(--ink3); }
 const P = window.Pixel;
 document.getElementById("gcss").textContent = P.GLITCH_CSS;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+/** A line as a card previews it: its `code` on the wash. */
+const inl = (s) => esc(s).replace(/`([^`\n]+)`/g, '<code class="ic">$1</code>');
+const codeBlock = (code, lang) => `<div class="cb"><div class="h"><span>${esc(lang || "")}</span><span class="sp"></span><button data-copy>Copy</button></div><pre>${esc(code)}</pre></div>`;
+/** What you typed (and, in this sketch, a result), split only at fences; the text between as typed, its `code` on the
+ *  wash. */
+function typed(text) {
+  const out = [], lines = text.split("\n");
+  let words = [];
+  const end = () => { const t = words.join("\n").trim(); if (t) out.push(`<span class="typed">${inl(t)}</span>`); words = []; };
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^\s*(`{3,}|~{3,})\s*([\w+-]*)\s*$/.exec(lines[i]);
+    if (!open) { words.push(lines[i]); continue; }
+    end();
+    const body = [];
+    for (i++; i < lines.length && lines[i].trim() !== open[1]; i++) body.push(lines[i]);
+    out.push(codeBlock(body.join("\n"), open[2]));
+  }
+  end();
+  return out.join("");
+}
 const sq = (color, { hollow = false, blink = false } = {}) =>
   `<span class="sq ${blink ? "blink" : ""}" style="${hollow ? `box-shadow: inset 0 0 0 2px ${color}` : `background:${color}`}"></span>`;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -322,6 +356,10 @@ const TASKS = {
   t2: { st: "waiting", agent: "codex", who: "Codex · GPT-6 Luna", title: "清理旧构建", clock: "40s" },
   t3: { st: "done", agent: "oc", who: "OpenCode · DeepSeek Flash", title: "整理下载目录里的重复文件", res: "一共 42 个文件，重复的 9 个放进了“重复”文件夹，清单在 report.md。", clock: "3m 10s" },
   t4: { st: "failed", agent: "cc", who: "Claude Code · Sonnet 5.5", title: "登录财务平台下载本月对账单", res: "凭据网关的代理连不上（gate proxy unreachable），没有登录。", clock: "1m 02s" },
+  t5: { st: "done", agent: "codex", who: "Codex · GPT-6 Luna", title: "运行 git status 与测试", clock: "1m 05s", folder: "~/Projects/AgentSwitch",
+        req: "跑一下这两条，把输出贴回来：\n```\ngit status --short\nnpm test -- --reporter=dot --silent --run tests/markdownUi.test.ts tests/api.test.ts\n```",
+        res: "两条都已运行：`git status --short` 没有输出，`npm test` 两个文件 31 项全部通过。",
+        page: "两条都已运行，工作区干净，测试全部通过。\n```text\n Test Files  2 passed (2)\n      Tests  31 passed (31)\n   Duration  1.12s\n```\n`git status --short` 没有输出。" },
 };
 
 function stMark(st) {
@@ -373,9 +411,10 @@ function card(id, { inner = "" } = {}) {
   const t = TASKS[id];
   let body = "";
   if (t.st === "busy") body = `<div class="prog">${blocks(t.n, t.of)}<span>${t.n}/${t.of}</span></div><div class="step"><span class="tr">└─</span>${esc(t.step)}</div>`;
-  if (t.st === "done") body = `<div class="res">${esc(t.res)}</div><div class="files"><span>${sq("var(--ink2)")}report.md <span class="faint">4 KB</span></span><span>${sq("var(--ink2)", { hollow: true })}dupes.txt <span class="faint">↓</span></span></div>`;
-  if (t.st === "failed") body = `<div class="res">${esc(t.res)}</div><div class="btns"><button class="btn">[ Retry ]</button><button class="btn">[ Hand to ▾ ]</button></div>`;
-  return `<div class="card boxes" data-open="${id}"><div class="l1">${statusLine(t)}</div><div class="ti">${esc(t.title)}</div>${body}${inner}</div>`;
+  if (t.st === "done" && t.page) body = `<div class="res">${inl(t.res)}</div>`;
+  else if (t.st === "done") body = `<div class="res">${inl(t.res)}</div><div class="files"><span>${sq("var(--ink2)")}report.md <span class="faint">4 KB</span></span><span>${sq("var(--ink2)", { hollow: true })}dupes.txt <span class="faint">↓</span></span></div>`;
+  if (t.st === "failed") body = `<div class="res">${inl(t.res)}</div><div class="btns"><button class="btn">[ Retry ]</button><button class="btn">[ Hand to ▾ ]</button></div>`;
+  return `<div class="card boxes" data-open="${id}"><div class="l1">${statusLine(t)}</div><div class="ti">${inl(t.title)}</div>${body}${inner}</div>`;
 }
 
 const approvalBox = () => `<div class="box ask" id="ask"><div class="hd"><span>[!] Approval</span><span class="sp"></span><span>Install App</span></div>
@@ -393,6 +432,8 @@ function feed() {
     <div class="day">Today</div>
     <div class="me"><div>今天几号</div></div>
     <div class="answer"><div class="say">今天是 10 月 2 日，星期四。</div><button class="aloud">▸ Read Aloud</button></div>
+    <div class="me"><div>${typed(TASKS.t5.req)}</div></div>
+    <div class="answer"><div class="say">${inl("交给 Codex，在 `~/Projects/AgentSwitch` 里运行。")}</div>${card("t5")}</div>
     <div class="me"><div>整理下载目录里的重复文件</div></div>
     <div class="answer"><div class="say">交给 OpenCode，用 DeepSeek Flash。</div>${card("t3")}</div>
     <div class="me"><div>build 目录太大了，清理一下旧构建</div></div>
@@ -439,11 +480,11 @@ function taskPage() {
   ];
   const mark = (s) => s === "busy" ? spin() : sq("var(--green)");
   return `<div class="task-page boxes">
-    <div class="me"><div>${esc(t.req ?? t.title)}</div></div>
-    <div><div class="l1">${statusLine(t)}</div><h1>${esc(t.title)}</h1></div>
+    <div class="me"><div>${typed(t.req ?? t.title)}</div></div>
+    <div><div class="l1">${statusLine(t)}</div><h1>${inl(t.title)}</h1></div>
     ${t.st === "busy" ? `<div><div class="prog">${blocks(t.n, t.of)}<span>${t.n}/${t.of}</span></div><div class="card" style="cursor:default;padding:0;border:0;background:none"><div class="step"><span class="tr">└─</span>${esc(t.step)}</div></div></div>` : ""}
     ${S.asked && S.task === "t1" ? approvalBox() : ""}
-    ${t.res ? `<div class="say">${esc(t.res)}</div>` : ""}
+    ${t.page ? `<div class="say">${typed(t.page)}</div>` : t.res ? `<div class="say">${inl(t.res)}</div>` : ""}
     <div><div class="lbl" style="margin-bottom:6px">// Process</div><div class="tools">${tools.map(([id, s, x, time, out]) =>
       `<div class="r" data-tool="${id}">${mark(s)}<span class="x">${esc(x)}</span><span class="t">${time}</span><span class="faint">${out ? (S.toolOpen === id ? "▾" : "▸") : ""}</span></div>${S.toolOpen === id && out ? `<pre>${esc(out)}</pre>` : ""}`).join("")}</div></div>
     <div><div class="lbl" style="margin-bottom:6px">// Task</div><div class="kv"><span>Folder</span><b>${esc(t.folder ?? "临时目录")}</b><span>Browser</span><b>None</b><span>Approval</span><b>Default</b><span>ID</span><b>1e04b10a</b></div></div>
@@ -585,6 +626,15 @@ function refreshStep(n) {
 
 // ---------- interaction ----------
 document.addEventListener("click", (e) => {
+  // A code block's Copy: Copied for a moment.
+  const copy = e.target.closest("[data-copy]");
+  if (copy) {
+    try { navigator.clipboard?.writeText(copy.closest(".cb").querySelector("pre").textContent); } catch { /* file:// */ }
+    copy.textContent = "Copied";
+    copy.classList.add("done");
+    setTimeout(() => { copy.textContent = "Copy"; copy.classList.remove("done"); }, 1200);
+    return;
+  }
   const go = e.target.closest("[data-go]")?.dataset.go;
   if (go) {
     S.menu = false;

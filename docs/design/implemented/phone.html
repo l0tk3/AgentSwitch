@@ -386,20 +386,26 @@ function overlay(scr, box, { veil = true, clear = false } = {}) {
 const p1 = document.getElementById("p1");
 let tree, folded, all, badge;
 function p1reset() {
-  // In the fixed order (2026-09-30): folders by path, terminals as opened, sessions newest-begun first.
+  // In the fixed order (2026-09-30): folders by path, terminals as opened, sessions newest-begun first, then the
+  // folders under it. Each folder sits in the nearest one above it that the list shows, named by the path from there
+  // (2026-10-03, TerminalTree.swift): Work only gathers api and web; Worktop has a session of its own and holds the rest.
+  const leaf = (path, extra = {}) => ({ path, git: "", terms: [], sessions: [], children: [], ...extra });
   tree = [
-    { parent: null, groups: [
-      { path: "AgentSwitch", git: "main ±5 ↑2", terms: [{ id: "c", name: "iPhone 终端标签页", st: "idle", agent: "cc" }],
-        sessions: [["读取 Codex 的会话记录", "25m ago", "cc", "Codex 的记录在 ~/.codex/sessions 下按日期分目录"], ["未读标记", "Yesterday 09:10", "codex", "终端有新输出而你没看时，列表那一行加粗"]] },
-    ] },
-    { parent: null, groups: [{ path: "Blog", git: "theme-v2", terms: [], sessions: [["换主题后的构建报错", "Today 06:35", "oc", "hugo 升级后模板函数改名"], ["加一个 RSS", "9/20", "cc", ""]] }] },
-    { parent: "Work", groups: [
-      { path: "api", git: "feat/health ±3 ↓4", terms: [{ id: "a", name: "修复登录超时", st: "busy", agent: "cc",
+    leaf("AgentSwitch", { git: "main ±5 ↑2", terms: [{ id: "c", name: "iPhone 终端标签页", st: "idle", agent: "cc" }],
+      sessions: [["读取 Codex 的会话记录", "25m ago", "cc", "Codex 的记录在 ~/.codex/sessions 下按日期分目录"], ["未读标记", "Yesterday 09:10", "codex", "终端有新输出而你没看时，列表那一行加粗"]],
+      children: [leaf("packages/secret-gate", { sessions: [["fill-value 的探针模板", "Today 03:12", "cc", "探针模板固定在包里，升级时一起换"]] })] }),
+    leaf("Blog", { git: "theme-v2", sessions: [["换主题后的构建报错", "Today 06:35", "oc", "hugo 升级后模板函数改名"], ["加一个 RSS", "9/20", "cc", ""]] }),
+    leaf("Work", { children: [
+      leaf("api", { git: "feat/health ±3 ↓4", terms: [{ id: "a", name: "修复登录超时", st: "busy", agent: "cc",
           subs: [{ name: "审查改动", type: "code-reviewer", doing: "运行 git diff" }, { name: "查连接池", type: "Explore", doing: "读 pool.ts" }] }],
-        sessions: [["给健康检查加缓存", "51m ago", "cc", "健康检查结果缓存 5 秒，终端服务重启时清掉"], ["升级到 Node 22", "Today 16:50", "codex", ""], ["统一日志格式", "Yesterday 22:04", "cc", ""]] },
-      { path: "web", git: "main", terms: [{ id: "b", name: "首页改版", st: "idle", agent: "codex" }],
-        sessions: [["表单校验", "9/27", "codex", ""], ["暗色模式", "9/27", "oc", ""], ["图片懒加载", "9/26", "codex", ""], ["替换图标库", "9/25", "pi", ""], ["修复移动端菜单", "9/24", "cc", ""]] },
-    ] },
+        sessions: [["给健康检查加缓存", "51m ago", "cc", "健康检查结果缓存 5 秒，终端服务重启时清掉"], ["升级到 Node 22", "Today 16:50", "codex", ""], ["统一日志格式", "Yesterday 22:04", "cc", ""]] }),
+      leaf("web", { git: "main", terms: [{ id: "b", name: "首页改版", st: "idle", agent: "codex" }],
+        sessions: [["表单校验", "9/27", "codex", ""], ["暗色模式", "9/27", "oc", ""], ["图片懒加载", "9/26", "codex", ""], ["替换图标库", "9/25", "pi", ""], ["修复移动端菜单", "9/24", "cc", ""]] }),
+    ] }),
+    leaf("Worktop", { sessions: [["整理工作目录", "9/30", "cc", ""]], children: [
+      leaf("Codex", { sessions: [["给脚本加上重试", "Yesterday 20:10", "codex", "下载失败时指数退避重试三次"]] }),
+      leaf("培训/靶场", { sessions: [["靶场环境搭建", "9/29", "codex", "docker compose 起三台靶机"]] }),
+    ] }),
   ];
   folded = new Set(); all = new Set(); badge = 0; query = new URLSearchParams(location.search).has("find") ? "终端" : "";
   p1draw();
@@ -412,8 +418,8 @@ const hl = (text, q) => {
 /** Searching: folders by name, sessions by title and by what was said; only what matches, the match marked. */
 function p1search(q) {
   let out = "", folders = 0, titles = 0, texts = 0;
-  for (const node of tree) for (const g of node.groups) {
-    const name = node.parent ? `${node.parent}/${g.path}` : g.path;
+  for (const { g, key: name } of everyFolder(tree)) {
+    if (!g.terms.length && !g.sessions.length) continue;
     const nameHit = name.toLowerCase().includes(q);
     const rows = [...g.terms.map((t) => ({ t, how: t.name.toLowerCase().includes(q) ? "title" : null })),
       ...g.sessions.map(([title, when, agent, text]) => ({ s: { title, when, agent, text }, how: title.toLowerCase().includes(q) ? "title" : text && text.toLowerCase().includes(q) ? "text" : null }))]
@@ -437,8 +443,16 @@ function p1search(q) {
   const said = [n(folders, "folder", "folders"), n(titles, "title", "titles"), n(texts, "in text", "in text")].filter(Boolean).join(" · ");
   return out ? `<div class="found">// ${said}</div>${out}` : `<div class="none">没有找到与“${esc(q)}”相关的文件夹或会话。</div>`;
 }
-const count = (groups) => {
-  const t = groups.reduce((n, g) => n + g.terms.length, 0), s = groups.reduce((n, g) => n + g.sessions.length, 0);
+/** Every folder, depth first, with its name under the folders it sits in (Worktop/培训/靶场): its key and its name in
+ *  a search. */
+const everyFolder = (gs, above = "") => gs.flatMap((g) => {
+  const key = above ? `${above}/${g.path}` : g.path;
+  return [{ g, key }, ...everyFolder(g.children, key)];
+});
+/** "2 · 5": terminals · sessions in a folded folder and the folders under it. */
+const count = (g) => {
+  const gs = everyFolder([g]).map((x) => x.g);
+  const t = gs.reduce((n, x) => n + x.terms.length, 0), s = gs.reduce((n, x) => n + x.sessions.length, 0);
   return t ? `${t} · ${s}` : `${s}`;
 };
 /** The list; `reveal` names the folder just opened, whose rows are drawn one after another. */
@@ -453,40 +467,39 @@ function p1draw(reveal = null) {
     return;
   }
   let n = 0;
-  const anim = (key) => (reveal === key ? ` in" style="animation-delay:${(n++) * 22}ms` : "");
-  for (const node of tree) {
-    const nested = node.parent !== null;
-    if (nested) {
-      const f = folded.has(node.parent);
-      html += `<div class="dir parent" data-fold="${node.parent}">${f ? "▸" : "▾"} ${node.parent}/${f ? ` <span class="n">${count(node.groups)}</span>` : ""}</div>`;
-      if (f) continue;
+  // Lines that came with the unfold of their folder or one above it draw one after another.
+  const anim = (key) => (reveal && (key === reveal || key.startsWith(`${reveal}/`)) ? ` in" style="animation-delay:${(n++) * 22}ms` : "");
+  // A folder's line, its own terminals and sessions, then the folders under it one step further in; a folder that only
+  // gathers others has the quieter line.
+  const drawFolder = (g, depth, above) => {
+    const key = above ? `${above}/${g.path}` : g.path, f = folded.has(key), showAll = all.has(key);
+    const own = g.terms.length + g.sessions.length > 0;
+    const shown = showAll ? g.sessions : g.sessions.slice(0, 3), more = g.sessions.length - shown.length;
+    const foot = more > 0 || (showAll && g.sessions.length > 3);
+    const pad = "  ".repeat(depth);
+    html += `<div class="dir${own ? "" : " parent"}${above ? anim(above) : ""}" data-fold="${key}">${pad}${f ? "▸" : "▾"} ${g.path}/${g.git ? ` <span class="git">${esc(g.git)}</span>` : ""}${f ? ` <span class="n">${count(g)}</span>` : ""}</div>`;
+    if (f) return;
+    const rows = g.terms.length + shown.length + (foot ? 1 : 0);
+    let i = 0;
+    const line = () => `<span class="tree">${pad}${++i === rows ? "└─" : "├─"}</span>`;
+    for (const t of g.terms) {
+      const twig = line();
+      html += `<div class="row tm${anim(key)}" data-term="${t.id}" data-st="${t.st}">${twig}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
+      // Its sub-agents: one level deeper, what each is doing now (tapping one opens the terminal).
+      (t.subs ?? []).forEach((sb, k) => {
+        const stem = twig.includes("└─") ? "  " : "│ ";
+        html += `<div class="row sub${anim(key)}" data-term="${t.id}"><span class="tree">${pad}${stem}${k === t.subs.length - 1 ? "└─" : "├─"}</span><span class="spin">⠙</span><span class="nm">${esc(sb.name)}<i>${esc(sb.doing)}</i></span><span class="when">${esc(sb.type)}</span></div>`;
+      });
     }
-    for (const g of node.groups) {
-      const key = g.path, f = folded.has(key), showAll = all.has(key);
-      const shown = showAll ? g.sessions : g.sessions.slice(0, 3), more = g.sessions.length - shown.length;
-      const foot = more > 0 || (showAll && g.sessions.length > 3);
-      const pad = nested ? "  " : "";
-      html += `<div class="dir" data-fold="${key}">${pad}${f ? "▸" : "▾"} ${g.path}/${g.git ? ` <span class="git">${esc(g.git)}</span>` : ""}${f ? ` <span class="n">${count([g])}</span>` : ""}</div>`;
-      if (f) continue;
-      const rows = g.terms.length + shown.length + (foot ? 1 : 0);
-      let i = 0;
-      const line = () => `<span class="tree">${pad}${++i === rows ? "└─" : "├─"}</span>`;
-      for (const t of g.terms) {
-        const twig = line();
-        html += `<div class="row tm${anim(key)}" data-term="${t.id}" data-st="${t.st}">${twig}${mark(t.st)}<span class="nm" style="color:${t.st === "exited" ? "var(--ink3)" : "var(--ink)"}">${esc(t.name)}</span><span class="faint">${P.sprite(P.AGENT_PX[t.agent], { px: 2 })}</span><span class="chev">›</span></div>`;
-        // Its sub-agents: one level deeper, what each is doing now (tapping one opens the terminal).
-        (t.subs ?? []).forEach((sb, k) => {
-          const stem = twig.includes("└─") ? "  " : "│ ";
-          html += `<div class="row sub${anim(key)}" data-term="${t.id}"><span class="tree">${pad}${stem}${k === t.subs.length - 1 ? "└─" : "├─"}</span><span class="spin">⠙</span><span class="nm">${esc(sb.name)}<i>${esc(sb.doing)}</i></span><span class="when">${esc(sb.type)}</span></div>`;
-        });
-      }
-      // Which agent wrote it, before its time (as on the Mac): the same mark a running terminal has.
-      for (const [title, when, agent] of shown) {
-        html += `<div class="row sess${anim(key)}" data-sess="${esc(key + "|" + title)}">${line()}<span class="nm">${esc(title)}</span><span class="faint">${P.sprite(P.AGENT_PX[agent], { px: 2 })}</span><span class="when">${when}</span><span class="act">Resume</span></div>`;
-      }
-      if (foot) html += `<div class="row more${anim(key)}" data-more="${key}">${line()}<span>${showAll ? "▾ Less" : `▸ ${more} More`}</span></div>`;
+    // Which agent wrote it, before its time (as on the Mac): the same mark a running terminal has.
+    for (const [title, when, agent] of shown) {
+      html += `<div class="row sess${anim(key)}" data-sess="${esc(key + "|" + title)}">${line()}<span class="nm">${esc(title)}</span><span class="faint">${P.sprite(P.AGENT_PX[agent], { px: 2 })}</span><span class="when">${when}</span><span class="act">Resume</span></div>`;
     }
-  }
+    // ▸ opens the rest under it; ▴ folds them back up (2026-10-03, user: 这个图标也有问题吧，有点误导人).
+    if (foot) html += `<div class="row more${anim(key)}" data-more="${key}">${line()}<span>${showAll ? "▴ Less" : `▸ ${more} More`}</span></div>`;
+    for (const c of g.children) drawFolder(c, depth + 1, key);
+  };
+  for (const g of tree) drawFolder(g, 0, "");
   html += `</div>${tabbar("terminals", badge)}`;
   const scroll = document.getElementById("p1list")?.scrollTop ?? 0;
   p1.innerHTML = html;
@@ -535,22 +548,23 @@ function p1confirm(row) {
     if (a !== "yes") return;
     row.classList.add("gone");
     setTimeout(() => {
-      for (const node of tree) for (const g of node.groups) if (g.path === key) g.sessions = g.sessions.filter(([x]) => x !== title);
+      for (const { g, key: k } of everyFolder(tree)) if (k === key) g.sessions = g.sessions.filter(([x]) => x !== title);
       p1draw();
     }, reduce ? 0 : 210);
   };
   overlay(p1, box);
 }
+const termById = (id) => everyFolder(tree).flatMap((x) => x.g.terms).find((t) => t.id === id);
 function p1perm() {
-  const t = tree[0].groups[1].terms[0];
+  const t = termById("b");
   if (t.st === "waiting") return;
   t.st = "waiting"; badge++;
-  folded.delete("Work"); folded.delete("web");
+  folded.delete("Work"); folded.delete("Work/web");
   p1draw();
   glitch(p1.querySelector('[data-term="b"]'));
 }
 function p1exit() {
-  const t = tree[1].groups[0].terms[0];
+  const t = termById("c");
   if (t.st === "exited") return;
   t.st = "exited";
   p1draw();
