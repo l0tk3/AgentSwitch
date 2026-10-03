@@ -6,6 +6,7 @@ daemon and the Mac app parse today; only where the answer comes from changes:
 
 * `keys [--json]`, `pubkey`, `enc`: the public keys in `keys.json`;
 * `keys new|use|retire`, `refs register|release`, `credential-info|reissue`, `logs tail`: calls on `gate.sock`;
+* `fill-value`: `browser.resolve` on `gate.sock`, once per frame host;
 * `mcp`, `browser`: unchanged here; they pick their remote backend themselves (mcp_backend, browser_mcp);
 * `keygen`, `check`, `proxy`, `service`, `install-ca`, `rpc`: refused, the service owns them.
 """
@@ -23,6 +24,7 @@ from typing import Any
 from .credential_repair import read_credential_stdin
 from .enc_cli import run_enc
 from .errors import ValidationError
+from .fill_cli import fill_value_remote
 from .keystore import parse_public_key
 from .publish import KeyRow, current_public_key, parse_rows, read_rows
 from .refs_cli import check_tokens, print_register, read_request
@@ -115,6 +117,7 @@ def _bootstrap(args: argparse.Namespace, *, client: RpcClient, public: Path) -> 
 _ROUTES: dict[str, Callable[..., int]] = {
     "keys": _keys, "pubkey": _pubkey, "enc": _enc, "refs": _refs,
     "credential-info": _credential, "credential-reissue": _credential, "bootstrap": _bootstrap, "logs": _logs,
+    "fill-value": fill_value_remote,
 }
 
 

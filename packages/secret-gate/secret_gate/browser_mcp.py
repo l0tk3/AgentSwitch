@@ -9,6 +9,11 @@ Playwright MCP writes every page snapshot and console log, unredacted, to its ou
 downstream with cwd and --output-dir inside the gate home, which the harness deny rules already
 cover and which a separate gate user makes unreadable.
 
+The downstream may also be AgentSwitch's agent bridge (`node bridgeClient.js …`, docs/browser-v0.md §6): Playwright MCP
+then runs in the AgentSwitch daemon, on the shared browser, and writes its files in a private folder of the daemon's
+that the daemon empties after every call; the bridge takes the --output-dir given here and writes nothing. The gate's
+own masked screenshots are still written into the gate's directory (by Playwright, in the daemon) and read back here.
+
 The dispatcher configures one execution through the environment of this process only:
 SECRET_GATE_SCOPE (its enc:ref: scope) and SECRET_GATE_TRANSFER (an authorized field transfer,
 transfer.py). Neither reaches the downstream: it gets no scope, no grant, no repair bridge.

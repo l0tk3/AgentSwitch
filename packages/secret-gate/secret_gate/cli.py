@@ -21,6 +21,7 @@ from .credential_repair import credential_call, read_credential_stdin
 from .crypto import b64url_encode, generate_keypair
 from .enc_cli import run_enc
 from .errors import GateError
+from .fill_cli import add_fill_parser
 from .keyring import create_keypair, retire_keypair, set_current
 from .keystore import gate_home, load_private_key, load_public_key, parse_public_key, save_keypair
 from .publish import key_rows
@@ -246,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("browser", help="run a gated MCP server in front of a browser MCP (Playwright)")
     b.add_argument("command", nargs=argparse.REMAINDER, help="-- <downstream MCP command...>")
     b.set_defaults(fn=_cmd_browser)
+    add_fill_parser(sub)
     sub.add_parser("install-ca", help="copy mitmproxy CA and trust it").set_defaults(fn=_cmd_install_ca)
     add_service_parser(sub)
     add_bootstrap_parser(sub)

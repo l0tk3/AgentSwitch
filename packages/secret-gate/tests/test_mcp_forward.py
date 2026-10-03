@@ -107,7 +107,8 @@ def test_service_errors_reach_the_model_as_the_same_tool_errors():
 
 
 def test_default_backend_follows_the_socket(gate_home, monkeypatch):
-    assert isinstance(default_backend({}), LocalMcpBackend)
+    # The process environment, which no_real_gate_service points away from the machine's real socket.
+    assert isinstance(default_backend(), LocalMcpBackend)
     with running_service() as svc:
         monkeypatch.setattr("secret_gate.mcp_backend.client_socket", lambda env: svc.socket)
         backend = default_backend({"SECRET_GATE_SCOPE": SCOPE})
