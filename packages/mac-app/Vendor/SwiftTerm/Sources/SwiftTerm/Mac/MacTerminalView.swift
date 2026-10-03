@@ -2459,7 +2459,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         return terminal.encodeButton(button: event.buttonNumber, release: isReleaseEvent, shift: flags.contains(.shift), meta: flags.contains(.option), control: flags.contains(.control))
     }
     
-    func calculateMouseHit (with event: NSEvent) -> (grid: Position, pixels: Position)
+    // AgentSwitch: public, for the cell a ⌘-clicked link was in (Vendor/SwiftTerm/PATCHES.md).
+    public func calculateMouseHit (with event: NSEvent) -> (grid: Position, pixels: Position)
     {
         let point = convert(event.locationInWindow, from: nil)
         return calculateMouseHit(at: point)

@@ -185,6 +185,10 @@ that launch), `-snapshotDir <dir>`
 (renders the menu and every settings tab to PNG, then quits); `-runtimeRoot <dir>` in Debug builds only. A Release
 build runs only the runtime inside its own bundle: a user default persists and any process of the user can write it.
 
+Dispatch probe (Debug builds): `AGENTSWITCH_HOME=<home of a running service> .build/debug/AgentSwitchMac -dispatchProbe <dir> -localPort <port> [-probeTask <id>] [-probeCalls YES]` opens the main window's Dispatch page behind the other windows against that service, writes `record.png` (and `task.png`), and with `-probeCalls` runs every `DispatchService` call once (reads, a message sent, a question answered, an approval allowed) into `calls.txt`. Use a throw-away service: `AGENTSWITCH_ROUTER=echo AGENTSWITCH_EXECUTORS=echo` with its own `AGENTSWITCH_HOME` and port (clear inherited `AGENTSWITCH_*` variables first, e.g. with `env -i`).
+
+Browser probe (Debug builds, docs/browser-v0.md §1 Mac): `AGENTSWITCH_HOME=<home of a running service> .build/debug/AgentSwitchMac -browserProbe <dir> -localPort <port>` opens the main window's Browser page behind the other windows, writes a test page into `<dir>` and opens it in a new tab (`browser.png`), clicks its field and types into it through the screen (keys, Chinese committed as an input method commits, Return; `browser-typed.png`), takes the tab over (`browser-held.png`, the tab at the screen's size), hands it back, runs the remaining `BrowserService` calls (a refused path among them) into `probe.txt`, closes the tab and quits. The daemon's Chrome runs on that throw-away home's profile; `<dir>` must lie outside it.
+
 Design preview (Debug builds, docs/ui-v0.md §5): `swift build && .build/debug/AgentSwitchMac -designPreview <dir>`
 loads sample data (DemoData.swift; DemoTransport answers the daemon routes in-process, PUTs included), draws the menu
 panel and every settings page off-screen to PNG in light and dark, plus `settings-permissions-skip`,
@@ -192,8 +196,11 @@ panel and every settings page off-screen to PNG in light and dark, plus `setting
 (`wizard-1-executors` … `wizard-4-done`) and the gate service (`menu-gate-*` and `settings-environment-gate-*` for
 not-installed / installing / installed / not-responding / update, `settings-keys-user-process`, `sheet-gate-*` for
 install, installing, installed, install-failed, install-cancelled, update, port, uninstall, uninstall-delete-keys,
-log), then quits. The default sample runs the gate as the installed service (密钥 shows the legacy keys). It takes no lock, starts nothing and opens no socket, so it runs next to the installed app;
-`-designPreviewTall YES` adds each page at 1500 pt to see it whole. An off-screen window belongs to an inactive app, so
+log), the menu bar's Live Activity (`live-*`) and the main window (MainWindowPreview.swift: `main-dispatch`,
+`main-dispatch-task`, `main-terminals` in both looks, the terminal page replaced by a stand-in; `main-refresh-2/6/10`
+and `main-refresh-dispatch-2/6/10`, steps of the refresh that draws a page in; `main-browser*` from a made-up browser,
+BrowserDemo.swift, and `main-refresh-browser-6`), then quits. The default sample runs the gate as the installed service (密钥 shows the legacy keys). It takes no lock, starts nothing and opens no socket, so it runs next to the installed app;
+`-designPreviewTall YES` adds each page at 1500 pt to see it whole. `-designPreviewOnly dispatch` renders only the settings window's Dispatch group (about 20 s); `-designPreviewOnly browser` only the Browser page. An off-screen window belongs to an inactive app, so
 prominent buttons, toggles and the sidebar selection are drawn in their inactive grey there.
 
 ```bash
@@ -216,8 +223,8 @@ AGENTSWITCH_HOME=$W/as SECRET_GATE_HOME=$W/sg AGENTSWITCH_APP_LOGS=$W/logs \
 
 | path | what |
 |---|---|
-| `Sources/AgentSwitchMacCore` | pure logic: paths, ports, child env, login PATH, supervision machine + process supervisor, leftovers + instance lock, probes, daemon client + models, approval policy + work dir models, usage rows, pairing link + QR, sensitive clipboard, harness/Tailscale detection, login commands + shell quoting, setup checklist, first-run wizard state, gate CLI + CA, gate service (state, root commands, texts), Bonjour TXT, status text |
-| `Sources/AgentSwitchMac` | SwiftUI app: `AppModel` (+ `AppModel+GateService`) + `ControlSettings` (policy, work dir), menu panel, settings window (AppKit-hosted) and its pages, first-run wizard, Bonjour advertiser, snapshot runner, design preview |
+| `Sources/AgentSwitchMacCore` | pure logic: paths, ports, child env, login PATH, supervision machine + process supervisor, leftovers + instance lock, probes, daemon client + models, approval policy + work dir models, usage rows, pairing link + QR, sensitive clipboard, harness/Tailscale detection, login commands + shell quoting, setup checklist, first-run wizard state, gate CLI + CA, gate service (state, root commands, texts), Bonjour TXT, status text, main window (pages, shortcuts, refresh), Dispatch (`Dispatch/`), the shared browser's client, stream, geometry, input and keys (`Browser/`) |
+| `Sources/AgentSwitchMac` | SwiftUI app: `AppModel` (+ `AppModel+GateService`) + `ControlSettings` (policy, work dir), menu panel, settings window (AppKit-hosted) and its pages, first-run wizard, Bonjour advertiser, snapshot runner, design preview, main window (`MainWindow/`) with its Dispatch (`Dispatch/`), Terminals and Browser (`Browser/`) pages |
 | `Tests/AgentSwitchMacCoreTests` | `swift test` |
 | `project.yml` | xcodegen spec (bundle id `com.agentswitch.mac`); the generated `.xcodeproj` is git-ignored |
 | `scripts/` | `build-app.sh`, `runtime-pins.sh` (Node/Python pins), `lock-python.sh` + `python-constraints.txt` → `python-requirements.txt`, `python-build-requirements.txt`, `smoke.mjs`, `fake-daemon.mjs`, `make-icons.swift` |

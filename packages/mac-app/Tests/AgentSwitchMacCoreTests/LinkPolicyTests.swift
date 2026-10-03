@@ -20,7 +20,7 @@ final class LinkPolicyTests: XCTestCase {
     }
 
     func testDocumentsOpenInTheirApp() throws {
-        for name in ["shot.png", "report.pdf", "notes.txt", "data.json", "clip.mov"] {
+        for name in ["shot.png", "report.pdf", "notes.txt", "data.json", "clip.mov", "brief.docx", "sheet.xlsx"] {
             let url = try file(name)
             XCTAssertEqual(LinkPolicy.action(for: url), .open(url), name)
         }
@@ -30,7 +30,11 @@ final class LinkPolicyTests: XCTestCase {
     }
 
     func testWhatCouldRunIsOnlyShown() throws {
-        for (name, executable) in [("run.command", false), ("build.sh", false), ("tool.py", false), ("notes.txt", true), ("blob.bin", false)] {
+        let runnable = [("run.command", false), ("build.sh", false), ("tool.py", false), ("notes.txt", true), ("blob.bin", false),
+                        ("x.terminal", false), ("x.tool", false), ("x.jar", false), ("x.pkg", false), ("x.dmg", false),
+                        ("x.webloc", false), ("x.fileloc", false), ("x.mobileconfig", false), ("x.scpt", false),
+                        ("x.docm", false), ("x.shortcut", false), ("x.zip", false)]
+        for (name, executable) in runnable {
             let url = try file(name, executable: executable)
             XCTAssertEqual(LinkPolicy.action(for: url), .reveal(url), name)
         }
@@ -77,6 +81,30 @@ final class LinkPolicyTests: XCTestCase {
         XCTAssertNil(LinkPolicy.existingFile(dir.appendingPathComponent("missing.html")))
         let web = URL(string: "https://example.com")!
         XCTAssertEqual(LinkPolicy.existingFile(web), web)
+    }
+
+    /// 2026-10-02 review: `README.md:12` and `a.ts:3:1` read as URLs whose scheme is the file's name (a scheme may hold
+    /// dots); they are files in the agent's folder, opened without the line.
+    func testAFileNameWithALineIsAPathNotAScheme() throws {
+        let wd = "/Users/me/Projects/AgentSwitch"
+        func path(_ link: String) -> String? { LinkPolicy.url(fromLink: link, workdir: wd, home: "/Users/me")?.path }
+        XCTAssertEqual(path("README.md:12"), "/Users/me/Projects/AgentSwitch/README.md")
+        XCTAssertEqual(path("a.ts:3:1"), "/Users/me/Projects/AgentSwitch/a.ts")
+        XCTAssertEqual(path("Package.swift:7"), "/Users/me/Projects/AgentSwitch/Package.swift")
+        XCTAssertTrue(LinkPolicy.isPlainPath("README.md:12"))
+        XCTAssertTrue(LinkPolicy.isPlainPath("a.ts:3:1"))
+        XCTAssertFalse(LinkPolicy.isPlainPath("https://example.com/a.ts:3"))
+        XCTAssertFalse(LinkPolicy.isPlainPath("file:///tmp/a.ts"))
+        XCTAssertFalse(LinkPolicy.isPlainPath("x-man-page://ls"))
+        XCTAssertFalse(LinkPolicy.isFileLine("README.md"), "no line: as before")
+        XCTAssertFalse(LinkPolicy.isFileLine("mailto:me@example.com"))
+        // On disk, from where the agent works: the file opens.
+        let readme = try file("README.md")
+        let ts = try file("a.ts")
+        XCTAssertEqual(LinkPolicy.target(link: "README.md:12", workdir: dir.path)?.resolvingSymlinksInPath().path, readme.path)
+        XCTAssertEqual(LinkPolicy.target(link: "a.ts:3:1", workdir: dir.path)?.resolvingSymlinksInPath().path, ts.path)
+        XCTAssertEqual(LinkPolicy.action(for: try XCTUnwrap(LinkPolicy.target(link: "README.md:12", workdir: dir.path))), .open(readme))
+        XCTAssertNil(LinkPolicy.target(link: "missing.md:4", workdir: dir.path))
     }
 
     func testWebAndOtherSchemes() throws {

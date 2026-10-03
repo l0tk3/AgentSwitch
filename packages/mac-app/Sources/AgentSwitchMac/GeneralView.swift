@@ -13,7 +13,7 @@ struct GeneralView: View {
     @State private var gate = ""
     @State private var opencode = ""
     @State private var showingGateLog = false
-    /// On by default: the Dock icon opens the terminal window, the app's main one (AgentSwitchApp registers the default).
+    /// On by default: the Dock icon opens the main window, Dispatch and Terminals (AgentSwitchApp registers the default).
     @AppStorage(DockPresence.alwaysShowKey) private var alwaysShowInDock = true
     @AppStorage(AppDelegate.quitWithoutAskingKey) private var quitWithoutAsking = false
     @AppStorage(LiveActivity.enabledKey) private var liveActivity = true

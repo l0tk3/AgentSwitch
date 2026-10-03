@@ -1,7 +1,7 @@
 // Draws the AgentSwitch app icon for both apps with CoreGraphics: the pixel mark of docs/ui-v0.md §7 (one source
 // switched onto three lanes, the lit one on top) with the depth of an identity mark (§7.2.10: a 1-pixel hard shadow,
 // half-lit pixels in the diagonal steps, a faint glow on the lit lane), on the terminal's black with faint scanlines —
-// docs/design/visual-v1/depth.html, "应用图标". Every cell is a whole number of pixels at 1024.
+// docs/design/implemented/depth.html, "应用图标". Every cell is a whole number of pixels at 1024.
 //
 //   swift scripts/make-icons.swift
 //

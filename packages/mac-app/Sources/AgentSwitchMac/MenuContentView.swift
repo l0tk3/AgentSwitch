@@ -9,7 +9,7 @@ import SwiftUI
 struct MenuContentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.showSettings) private var showSettings
-    @Environment(\.showTerminals) private var showTerminals
+    @Environment(\.showMainWindow) private var showMainWindow
     @Environment(\.quitApp) private var quitApp
     @AppStorage(DockPresence.alwaysShowKey) private var alwaysShowInDock = true
 
@@ -164,12 +164,14 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             // words only: an icon on every item differentiates nothing (docs/ui-v0.md §7.2.5)
             MenuAction(title: "Pair Device…") { showSettings(.pairing) }
-            // The Dock icon opens the terminal window (2026-09-30, user: dock 栏直接点图标就可以打开 terminal，就不用状态栏里的
-            // open terminal 了); without a Dock icon this is the way in.
+            // The Dock icon opens the main window (2026-09-30, user: dock 栏直接点图标就可以打开 terminal，就不用状态栏里的
+            // open terminal 了; dispatch-v0 §1); without a Dock icon these are the way in, one per page.
             if !alwaysShowInDock {
-                MenuAction(title: "Open Terminal", enabled: model.daemonReady) { showTerminals() }
+                MenuAction(title: "Open Dispatch", enabled: model.daemonReady) { showMainWindow(.dispatch) }
+                MenuAction(title: "Open Terminals", enabled: model.daemonReady) { showMainWindow(.terminals) }
             }
-            MenuAction(title: "Open Console", enabled: model.daemonReady) { openConsole() }
+            // The web console, for a big screen or looking from elsewhere (dispatch-v0 §4).
+            MenuAction(title: "Open in Browser", enabled: model.daemonReady) { openConsole() }
             MenuAction(title: "Restart Service") { model.restartAll() }
             MenuAction(title: "Settings…") { showSettings(nil) }
             DottedRule().padding(.horizontal, 6).padding(.vertical, 5)

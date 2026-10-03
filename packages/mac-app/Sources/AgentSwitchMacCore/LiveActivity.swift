@@ -1,6 +1,6 @@
 import Foundation
 
-/// The Mac's Live Activity (assistant-v0 §4, docs/design/visual-v1/mac-live.html): `GET /live` as the daemon sends it —
+/// The Mac's Live Activity (assistant-v0 §4, docs/design/implemented/mac-live.html): `GET /live` as the daemon sends it —
 /// the tasks in progress and the terminals waiting for you, the waiting first, and the tasks that ended in the last
 /// minute. The daemon builds the titles and steps by the phone's rules; the Mac only draws them.
 public struct LiveSnapshot: Decodable, Equatable, Sendable {
@@ -161,7 +161,8 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
 /// for a few seconds unless a request waits (a request is never covered), with a tone; a failure stays — the capsule red —
 /// until it has been looked at (assistant-v0 §4 "失败留到你看过"). A click on the capsule opens or closes it, a click
 /// elsewhere closes it. What waits or has ended when the app starts is taken as known, as the phone does; the terminal
-/// on screen in the terminal window says nothing of its own turns (you saw them).
+/// on screen in the main window's Terminals page says nothing of its own turns (you saw them), nor the task whose page is
+/// open on its Dispatch page of its result (dispatch-v0 §1).
 public struct LivePresenter: Equatable, Sendable {
     /// Who opened the card: a card the user opened stays open when its requests are answered.
     public enum Opener: Equatable, Sendable { case user, request, result }
@@ -238,9 +239,10 @@ public struct LivePresenter: Equatable, Sendable {
     public var moreRows: Int { max(0, (snapshot?.rows.count ?? 0) - LiveSnapshot.cardRows) }
 
     /// A new answer from `GET /live` (nil: the service is not answering; everything goes). `watching`: the terminal on
-    /// screen in the terminal window in use. Returns the tone for what came (a request before a failure before a result).
+    /// screen in the main window in use; `watchingTask`: the task whose page is open there. Returns the tone for what came
+    /// (a request before a failure before a result).
     @discardableResult
-    public mutating func receive(_ next: LiveSnapshot?, at now: Date, watching: String? = nil) -> Cue? {
+    public mutating func receive(_ next: LiveSnapshot?, at now: Date, watching: String? = nil, watchingTask: String? = nil) -> Cue? {
         snapshot = next
         guard let next else {
             opener = nil
@@ -253,8 +255,10 @@ public struct LivePresenter: Equatable, Sendable {
         let fresh = asks.subtracting(seenAsks)
         seenAsks = asks
         seenEnds = Set(next.ended.map(\.key))
-        let watched = { (end: LiveSnapshot.End) in end.kind == .terminal && end.id == watching }
-        // Looking at the terminal is looking at its failures.
+        let watched = { (end: LiveSnapshot.End) in
+            (end.kind == .terminal && end.id == watching) || (end.kind == .task && end.id == watchingTask)
+        }
+        // Looking at the terminal (the task) is looking at its failures.
         unseenFailures.removeAll(where: watched)
         guard started else {
             started = true

@@ -3,10 +3,12 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-/// `-designPreview <dir>` (debug builds, docs/ui-v0.md §5): loads DemoData, draws the menu panel, every settings page,
-/// a few states of the control-v0 pages (skip mode, a folder problem, a fresh Mac), each first-run wizard step and the
-/// gate service's states and sheets (gate-service-v0) into PNG files in light and dark, and the menu bar's Live Activity
-/// (LivePreview), then exits. It runs before the single-instance lock and never calls `launch()`:
+/// `-designPreview <dir>` (debug builds, docs/ui-v0.md §5): loads DemoData, draws the menu panel, every settings page
+/// (the Dispatch group's from DispatchSettingsDemo, with a few states and its sheets; `-designPreviewOnly dispatch` draws
+/// only those; `-designPreviewOnly browser` only the main window's Browser page), a few states of the control-v0 pages (skip mode, a folder problem, a fresh Mac), each first-run wizard step and the
+/// gate service's states and sheets (gate-service-v0) into PNG files in light and dark, the menu bar's Live Activity
+/// (LivePreview) and the main window's bar over each page and through the refresh between pages (MainWindowPreview:
+/// `main-*.png`, `main-refresh-*.png`), then exits. It runs before the single-instance lock and never calls `launch()`:
 /// no gate, no daemon, no port, no poll. Nothing is put on screen: each view is hosted in a window that is never
 /// ordered in and drawn with `cacheDisplay`.
 @MainActor
@@ -23,6 +25,18 @@ enum DesignPreview {
         Task {
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "browser" {
+                    try await MainWindowPreview.renderBrowser(model: model, into: directory)
+                    FileHandle.standardError.write(Data("design preview (Browser) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
+                if onlyDispatchGroup {
+                    for (suffix, appearance) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
+                        try await renderDispatchGroup(model: model, appearance: NSAppearance(named: appearance), suffix: suffix, into: directory)
+                    }
+                    FileHandle.standardError.write(Data("design preview (Dispatch group) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 for (suffix, appearance) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
                     let look = NSAppearance(named: appearance)
                     model.loadDemo()
@@ -40,6 +54,7 @@ enum DesignPreview {
                     try await renderSettings(.devices, model: model, appearance: look,
                                              to: directory.appendingPathComponent("settings-error\(suffix).png"))
                     model.errorMessage = nil
+                    try await renderDispatchVariants(model: model, appearance: look, suffix: suffix, into: directory)
                     try await renderVariants(model: model, appearance: look, suffix: suffix, into: directory)
                     if tall {
                         for tab in SettingsTab.allCases {
@@ -49,13 +64,60 @@ enum DesignPreview {
                     }
                 }
                 try LivePreview.render(into: directory)
-                try TerminalWindowController.previewBar(to: directory.appendingPathComponent("terminal-bar.png"))
+                model.loadDemo()
+                try await MainWindowPreview.render(model: model, into: directory)
                 FileHandle.standardError.write(Data("design preview written to \(directory.path)\n".utf8))
                 exit(0)
             } catch {
                 FileHandle.standardError.write(Data("design preview failed: \(error.localizedDescription)\n".utf8))
                 exit(1)
             }
+        }
+    }
+
+    /// `-designPreviewOnly dispatch`: only the settings window's Dispatch group (its pages, states and sheets).
+    private static var onlyDispatchGroup: Bool { UserDefaults.standard.string(forKey: "designPreviewOnly") == "dispatch" }
+
+    /// The Dispatch group (docs/dispatch-v0.md §3) from DispatchSettingsDemo: each page, then the states the pages
+    /// start in otherwise (`settings-*.png`, as the loop over every page draws them too) and the sheets.
+    private static func renderDispatchGroup(model: AppModel, appearance: NSAppearance?, suffix: String, into directory: URL) async throws {
+        for tab in SettingsTab.dispatch {
+            try await renderSettings(tab, model: model, appearance: appearance,
+                                     to: directory.appendingPathComponent("settings-\(tab.rawValue)\(suffix).png"))
+            if tall {
+                try await renderSettings(tab, model: model, appearance: appearance, height: 1500,
+                                         to: directory.appendingPathComponent("tall-\(tab.rawValue)\(suffix).png"))
+            }
+        }
+        try await renderDispatchVariants(model: model, appearance: appearance, suffix: suffix, into: directory)
+    }
+
+    /// Context after a save (what was sealed, a line removed), Log with two decisions open, History searching, and the
+    /// Extensions sheets.
+    private static func renderDispatchVariants(model: AppModel, appearance: NSAppearance?, suffix: String, into directory: URL) async throws {
+        func file(_ name: String) -> URL { directory.appendingPathComponent("\(name)\(suffix).png") }
+        let demo = DispatchSettingsDemo.environment
+        try await renderSettings(.context, model: model, appearance: appearance, to: file("settings-context-saved")) { navigation in
+            let service = DispatchSettingsDemo()
+            await navigation.context.load(service)
+            navigation.context.contextText += "\n- 测试环境 token ghp_x8Q2"
+            await navigation.context.save(service)
+        }
+        var log = demo
+        log.preset.expandedLogRows = [3, 2]
+        try await renderSettings(.log, model: model, appearance: appearance, dispatch: log, to: file("settings-log-expanded"))
+        var searching = demo
+        searching.preset.historyQuery = "AgentSwitch"
+        try await renderSettings(.history, model: model, appearance: appearance, dispatch: searching, to: file("settings-history-search"))
+        let github = try await DispatchSettingsDemo().mcpServers()[0]
+        let sheets: [(String, AnyView)] = [
+            ("sheet-mcp-new", AnyView(MCPServerSheet(server: nil, existing: ["github"]) {})),
+            ("sheet-mcp-edit", AnyView(MCPServerSheet(server: github, existing: ["github"]) {})),
+            ("sheet-skill-edit", AnyView(SkillSheet(name: "release-notes", existing: ["release-notes"]) {})),
+            ("sheet-skill-import", AnyView(SkillImportSheet {})),
+        ]
+        for (name, sheet) in sheets {
+            try await renderSheet(sheet.environment(\.dispatchSettings, demo), model: model, appearance: appearance, to: file(name))
         }
     }
 
@@ -129,8 +191,8 @@ enum DesignPreview {
         try await renderSheet(GateLogSheet(), model: model, appearance: appearance, to: file("sheet-gate-log"))
     }
 
-    /// A sheet's content as it would sit on its window, at its own size.
-    private static func renderSheet<Content: View>(_ view: Content, model: AppModel, appearance: NSAppearance?, to file: URL) async throws {
+    /// A sheet's content as it would sit on its window, at its own size (the Browser page's Fill Ciphertext too).
+    static func renderSheet<Content: View>(_ view: Content, model: AppModel, appearance: NSAppearance?, to file: URL) async throws {
         let root = view
             .environment(model)
             .background(Color(nsColor: .windowBackgroundColor))
@@ -189,12 +251,16 @@ enum DesignPreview {
     /// `-designPreviewTall YES`: every page again, 1500 pt high, to see a whole page at once.
     private static var tall: Bool { UserDefaults.standard.bool(forKey: "designPreviewTall") }
 
+    /// One page in the settings window; the Dispatch group's pages read DispatchSettingsDemo (`dispatch`), after
+    /// `prepare` has set the window's state.
     private static func renderSettings(_ tab: SettingsTab, model: AppModel, appearance: NSAppearance?, pressGenerate: Bool = true,
-                                       height: CGFloat? = nil, to file: URL) async throws {
+                                       height: CGFloat? = nil, dispatch: DispatchSettingsEnvironment = DispatchSettingsDemo.environment,
+                                       to file: URL, prepare: (SettingsNavigation) async -> Void = { _ in }) async throws {
         let navigation = SettingsNavigation(wizardStore: SetupWizardStore(defaults: nil))
         navigation.tab = tab
+        await prepare(navigation)
         let window = SettingsWindowController.makeWindow(model: model, navigation: navigation, windowClass: PreviewWindow.self,
-                                                         appearance: appearance)
+                                                         appearance: appearance, dispatch: dispatch)
         if let height { window.setContentSize(NSSize(width: SettingsWindowController.contentSize.width, height: height)) }
         try await settle()
         if tab == .pairing && pressGenerate && model.pairingSession.pairing == nil {
@@ -207,14 +273,14 @@ enum DesignPreview {
     }
 
     /// Lets SwiftUI lay out and run the views' `.task`s (they answer from DemoTransport at once).
-    private static func settle() async throws {
+    static func settle() async throws {
         for _ in 0..<4 {
             try await Task.sleep(for: .milliseconds(150))
             NSApp.windows.forEach { $0.contentView?.layoutSubtreeIfNeeded() }
         }
     }
 
-    private static func write(_ view: NSView, to file: URL) throws {
+    static func write(_ view: NSView, to file: URL) throws {
         view.layoutSubtreeIfNeeded()
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { throw PreviewError("no bitmap for \(file.lastPathComponent)") }
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -224,7 +290,7 @@ enum DesignPreview {
 }
 
 /// Draws as the key window would (active controls, accent selection) without ever being ordered in.
-private final class PreviewWindow: NSWindow {
+final class PreviewWindow: NSWindow {
     override var isKeyWindow: Bool { true }
     override var isMainWindow: Bool { true }
     override var canBecomeKey: Bool { true }

@@ -1,7 +1,7 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-// The Live Activity's two faces (docs/design/visual-v1/mac-live.html): the capsule among the menu bar's status items —
+// The Live Activity's two faces (docs/design/implemented/mac-live.html): the capsule among the menu bar's status items —
 // the app mark in its state and, right of it, a clock, a count or the result — and the card under it, the phone's lock
 // screen card (island.html). Always dark, as the island is. The capsule is still (the menu bar never moves, ui-v0
 // §7); the card's spinners and mark move like the app's own.

@@ -4,19 +4,19 @@ import AppKit
 import SwiftTerm
 
 /// `-terminalProbe <dir> -probeTerminal <id>` (debug builds, with `-localPort` and AGENTSWITCH_HOME of a running
-/// service): opens the terminal window on that terminal behind every other window (the app is not made active), types
+/// service): opens the main window's Terminals page on that terminal behind every other window (the app is not made active), types
 /// into the native screen with events of its own (`abc`, Shift+Enter, `def`), then writes what the screen holds and a
 /// picture of the window to `<dir>` and quits. Nothing else of the app starts.
 @MainActor
 enum TerminalProbe {
     static var directory: URL? { UserDefaults.standard.string(forKey: "terminalProbe").map { URL(fileURLWithPath: $0) } }
 
-    static func run(_ terminals: TerminalWindowController, into dir: URL) {
+    static func run(_ terminals: MainWindowController, into dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var log: [String] = []
         func say(_ line: String) { log.append(line); try? log.joined(separator: "\n").write(to: dir.appendingPathComponent("probe.txt"), atomically: true, encoding: .utf8) }
         let id = UserDefaults.standard.string(forKey: "probeTerminal") ?? ""
-        TerminalWindowController.probing = true
+        MainWindowController.probing = true
         terminals.show(terminal: id)
         Task {
             var screen: TerminalScreenController?

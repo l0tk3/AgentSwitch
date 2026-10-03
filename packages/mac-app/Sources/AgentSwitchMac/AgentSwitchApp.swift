@@ -12,7 +12,7 @@ struct AgentSwitchApp: App {
             MenuContentView()
                 .environment(delegate.model)
                 .environment(\.showSettings, ShowSettingsAction { [delegate] tab in delegate.settings.show(tab) })
-                .environment(\.showTerminals, ShowTerminalsAction { [delegate] in delegate.terminals.show() })
+                .environment(\.showMainWindow, ShowMainWindowAction { [delegate] page in delegate.main.show(page) })
                 .environment(\.quitApp, QuitAction { [delegate] in delegate.quit() })
         } label: {
             MenuBarIcon(level: delegate.model.overallLevel, waiting: delegate.model.waitingCount)
@@ -26,10 +26,14 @@ struct AgentSwitchApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     lazy var settings = SettingsWindowController(model: model)
-    lazy var terminals = TerminalWindowController(model: model)
-    /// The menu bar's Live Activity (assistant-v0 §4): its own status item, left of the app's.
-    lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id in self?.terminals.show(terminal: id) },
-                                 watching: { [weak self] in self?.terminals.watching })
+    /// The main window, Dispatch and Terminals (docs/dispatch-v0.md §1).
+    lazy var main = MainWindowController(model: model)
+    /// The menu bar's Live Activity (assistant-v0 §4): its own status item, left of the app's. A task opens on the main
+    /// window's Dispatch page, a terminal on its Terminals page; what is open there in the window in use needs no telling.
+    lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id in self?.main.show(terminal: id) },
+                                 openTask: { [weak self] id in self?.main.show(task: id) },
+                                 watching: { [weak self] in self?.main.watchingTerminal },
+                                 watchingTask: { [weak self] in self?.main.watchingTask })
     /// Which of our windows are open: the Dock icon shows while any is.
     private var openWindows: Set<String> = []
     private var signalSources: [DispatchSourceSignal] = []
@@ -52,10 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    /// `-terminalProbe <dir>`: the terminal window alone against a running service (TerminalProbe.swift).
+    /// `-terminalProbe <dir>` / `-dispatchProbe <dir>` / `-browserProbe <dir>`: the main window on one page alone against
+    /// a running service (TerminalProbe.swift, DispatchProbe.swift, BrowserProbe.swift).
     static var probeOnly: Bool {
         #if DEBUG
-        return TerminalProbe.directory != nil
+        return TerminalProbe.directory != nil || DispatchProbe.directory != nil || BrowserProbe.directory != nil
         #else
         return false
         #endif
@@ -83,18 +88,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let dir = TerminalProbe.directory {
             NSApp.setActivationPolicy(.accessory)
-            TerminalProbe.run(terminals, into: dir)
+            TerminalProbe.run(main, into: dir)
+            return
+        }
+        if let dir = DispatchProbe.directory {
+            NSApp.setActivationPolicy(.accessory)
+            DispatchProbe.run(main, model: model, into: dir)
+            return
+        }
+        if let dir = BrowserProbe.directory {
+            NSApp.setActivationPolicy(.accessory)
+            BrowserProbe.run(main, model: model, into: dir)
             return
         }
         #endif
         guard claimInstance() else { return }
         running = true
-        // The terminal window is the app's main window: the Dock icon is there by default (settings can take it away).
+        // The app has a main window (Dispatch, Terminals): the Dock icon is there by default (settings can take it away).
         UserDefaults.standard.register(defaults: [DockPresence.alwaysShowKey: true])
         let atLogin = Self.launchedAtLogin
         // The bundle has LSUIElement; `swift run` has no bundle, so decide the Dock presence here in both cases.
         settings.onVisibilityChange = { [weak self] open in self?.windowVisibility("settings", open) }
-        terminals.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminals", open) }
+        main.onVisibilityChange = { [weak self] open in self?.windowVisibility("main", open) }
+        main.openSettings = { [weak self] in self?.settings.show(nil) }
+        settings.openTask = { [weak self] id in self?.main.show(task: id) }
+        live.onSnapshot = { [weak self] snapshot in self?.main.liveChanged(snapshot) }
         updateDockPresence(settingsWindowOpen: false)
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
@@ -122,11 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let dir = defaults.string(forKey: "snapshotDir") {
             SnapshotRunner(model: model, settings: settings, directory: URL(fileURLWithPath: dir), quit: { [weak self] in self?.quit() }).start()
         }
-        // Opened by the user, the app opens its terminal window; not at login, and not over a settings tab asked for,
+        // Opened by the user, the app opens its main window; not at login, and not over a settings tab asked for,
         // the first-run wizard (until it has been through) or a snapshot run.
         if !atLogin, defaults.string(forKey: "openSettings") == nil, defaults.string(forKey: "snapshotDir") == nil,
            settings.navigation.wizardStore.load()?.isClosed == true {
-            showTerminalsWhenReady()
+            showMainWhenReady()
         }
     }
 
@@ -136,12 +154,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem)
     }
 
-    /// The terminal window once the service answers (it signs in to it); a minute at most.
-    private func showTerminalsWhenReady() {
+    /// The main window once the service answers (its Terminals page signs in to it); a minute at most.
+    private func showMainWhenReady() {
         Task { [weak self] in
             for _ in 0..<120 {
                 guard let self else { return }
-                if self.model.daemonReady { self.terminals.show(); return }
+                if self.model.daemonReady { self.main.show(); return }
                 try? await Task.sleep(for: .milliseconds(500))
             }
         }
@@ -222,16 +240,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateDockPresence(settingsWindowOpen: !openWindows.isEmpty)
     }
 
-    /// Dock icon: while the settings or terminal window is open, or always when the user asked for it (DockPresence).
+    /// Dock icon: while the settings or main window is open, or always when the user asked for it (DockPresence).
     func updateDockPresence(settingsWindowOpen: Bool) {
         let always = UserDefaults.standard.bool(forKey: DockPresence.alwaysShowKey)
         NSApp.setActivationPolicy(DockPresence.showsInDock(alwaysShow: always, settingsWindowOpen: settingsWindowOpen) ? .regular : .accessory)
     }
 
-    /// Clicking the Dock icon (or opening the app again from Finder) brings up the terminal window, the app's main one;
-    /// the settings window while the service is not up.
+    /// Clicking the Dock icon (or opening the app again from Finder) brings up the main window on the page it showed
+    /// last (Dispatch the first time); the settings window while the service is not up.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if model.daemonReady { terminals.show() } else { settings.show(nil) }
+        if model.daemonReady { main.show() } else { settings.show(nil) }
         return true
     }
 

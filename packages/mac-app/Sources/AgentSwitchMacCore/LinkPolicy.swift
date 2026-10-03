@@ -16,12 +16,13 @@ public enum LinkAction: Equatable, Sendable {
 
 public enum LinkPolicy {
     /// A link as the screen found it, as a URL (2026-10-01, user: 这种路径我用 cmd+鼠标点击没反应): web and file URLs as
-    /// they are; a path — `/…`, `~/…`, or relative to `workdir` (`./…`, `../…`, `src/a.ts`) — as a file, with a
-    /// `:line` or `:line:column` suffix (as agents cite code) dropped. Nil when a relative path has nothing to go from.
+    /// they are; a path — `/…`, `~/…`, or relative to `workdir` (`./…`, `../…`, `src/a.ts`, `README.md:12`) — as a file,
+    /// with a `:line` or `:line:column` suffix (as agents cite code) dropped (the opener has no way to go to a line).
+    /// Nil when a relative path has nothing to go from.
     public static func url(fromLink link: String, workdir: String?, home: String = NSHomeDirectory()) -> URL? {
         let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
-        if let url = URL(string: text), let scheme = url.scheme, scheme.count > 1 { return url }
+        if !isFileLine(text), let url = URL(string: text), let scheme = url.scheme, scheme.count > 1 { return url }
         var path = text
         if let suffix = path.range(of: #":\d+(:\d+)?$"#, options: .regularExpression) { path.removeSubrange(suffix) }
         if path == "~" || path.hasPrefix("~/") {
@@ -61,6 +62,39 @@ public enum LinkPolicy {
         return nil
     }
 
+    /// What a ⌘-click on `link` opens: a URL as it is (a web page; a `file:` link's file as `existingFile` finds it); a
+    /// plain path, together with `wrapped` — the clicked word joined with the lines it may run on over (WrappedPath, a
+    /// path the agent's screen broke and indented) —, the longest of them that exists on disk, else the longest existing
+    /// part (`existingFile`) of the link itself or of a join with the lines below it. A join with a line above is never
+    /// cut back: what is left of it is the line above's path (`src/a.ts` over `src/b.ts`, `b.ts` deleted: nothing, not
+    /// `a.ts`). Nil when nothing there exists.
+    public static func target(link: String, wrapped: [WrappedPath.Join] = [], workdir: String?, home: String = NSHomeDirectory(),
+                              fileManager: FileManager = .default) -> URL? {
+        let first = url(fromLink: link, workdir: workdir, home: home)
+        if let first, !isPlainPath(link) { return existingFile(first, fileManager: fileManager) }
+        var seen = Set<String>()
+        let files = ([(first, false)] + wrapped.map { (url(fromLink: $0.text, workdir: workdir, home: home), $0.reachesUp) })
+            .compactMap { url, reachesUp in url.map { (url: $0, cutBack: !reachesUp) } }
+            .filter { $0.url.isFileURL && seen.insert($0.url.path).inserted }
+            .sorted { $0.url.path.count > $1.url.path.count }
+        if let found = files.first(where: { fileManager.fileExists(atPath: $0.url.path) }) { return found.url }
+        return files.lazy.filter(\.cutBack).compactMap { existingFile($0.url, fileManager: fileManager) }.first
+    }
+
+    /// A path as text, not a URL (`file:`, `https:`) or anything else a scheme names.
+    static func isPlainPath(_ link: String) -> Bool {
+        let text = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isFileLine(text) { return true }
+        guard let scheme = URL(string: text)?.scheme else { return true }
+        return scheme.count <= 1
+    }
+
+    /// `README.md:12`, `a.ts:3:1`: a file's name and where in it, which `URL(string:)` would read as the scheme
+    /// `readme.md` (a scheme may hold dots) — a file, not a URL.
+    static func isFileLine(_ text: String) -> Bool {
+        text.range(of: #"^[A-Za-z0-9_][^/:\s]*\.[A-Za-z0-9]+:\d+(:\d+)?$"#, options: .regularExpression) != nil
+    }
+
     public static func action(for url: URL) -> LinkAction {
         switch url.scheme?.lowercased() {
         case "http", "https":
@@ -82,11 +116,18 @@ public enum LinkPolicy {
         }
     }
 
-    /// Pictures, PDFs, text, audio and video, office documents; never a script (a `.command` is text, and Terminal runs it).
+    /// Pictures, PDFs, text, audio and video, office documents; never a script (a `.command` is text, and Terminal runs it)
+    /// nor a configuration profile (XML, and opening it starts installing it).
     static func isDocument(_ type: UTType) -> Bool {
-        let runs: [UTType] = [.script, .executable, .application, .package]
         if runs.contains(where: type.conforms(to:)) { return false }
-        let documents: [UTType] = [.image, .pdf, .text, .audiovisualContent, .spreadsheet, .presentation]
         return documents.contains(where: type.conforms(to:))
     }
+
+    private static let runs: [UTType] = [.script, .executable, .application, .package]
+        + ["com.apple.mobileconfig", "com.apple.configprofile"].compactMap { UTType($0) }
+    /// Word processing has no system type of its own: Word, Pages and OpenDocument text by name (a macro-enabled Word
+    /// file is also an executable, so it stays out).
+    private static let documents: [UTType] = [.image, .pdf, .text, .audiovisualContent, .spreadsheet, .presentation]
+        + ["org.openxmlformats.wordprocessingml.document", "com.microsoft.word.doc", "com.apple.iwork.pages.sffpages",
+           "com.apple.iwork.pages.pages", "org.oasis-open.opendocument.text"].compactMap { UTType($0) }
 }

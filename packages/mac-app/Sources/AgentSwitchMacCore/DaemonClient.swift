@@ -47,7 +47,8 @@ public enum DaemonError: LocalizedError, Equatable, Sendable {
 /// Client of the daemon's loopback listener: the management routes only the Mac app uses (app-v0 §2).
 public struct DaemonClient: Sendable {
     public let baseURL: URL
-    private let transport: HTTPTransport
+    /// Internal (not private) for the Dispatch routes' multipart, download and event-stream requests (Dispatch/).
+    let transport: HTTPTransport
     /// The local API's token (daemon api/localAuth.ts): `$AGENTSWITCH_HOME/local-token`, written by the daemon on
     /// start-up. Read on every call, so a client made before the daemon's first start still gets it.
     private let tokenFile: URL?
@@ -210,8 +211,11 @@ public struct DaemonClient: Sendable {
             if let json = try? JSONSerialization.data(withJSONObject: error), let text = String(data: json, encoding: .utf8) { return text }
         }
         let text = String(decoding: data.prefix(300), as: UTF8.self)
-        return text.isEmpty ? "（无内容）" : text
+        return text.isEmpty ? emptyErrorMessage : text
     }
+
+    /// `errorMessage` of an answer without a body.
+    static let emptyErrorMessage = "（无内容）"
 
     func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: data) } catch {

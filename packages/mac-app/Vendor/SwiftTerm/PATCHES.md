@@ -32,5 +32,13 @@ a path printed on a 97-column line in a 106-column screen became `…/crt.htmlse
 - `Terminal.swift`, `canJoinImplicitRows`: the upper row must reach within a twentieth of the edge (at least 2 columns),
   as a row an app filled by breaking a long path does.
 
+## The cell a link was clicked in (2026-10-02)
+
+docs/terminal-v0.md §1 链接, "折行的路径". `requestOpenLink` hands the delegate the link's text only, and an agent's screen
+breaks a long path over indented lines, so the app reads the lines around the click itself (`WrappedPath`). The view's
+mapping from a mouse event to a cell (columns, rows from the top of the scrollback, BiDi rows) is internal.
+
+- `Mac/MacTerminalView.swift`: `calculateMouseHit(with:)` is `public` (unchanged otherwise).
+
 To take a newer SwiftTerm: replace `Sources/SwiftTerm` with its library sources, then apply the changes above again (or
 drop them once upstream draws marked text inline and joins rows more strictly).

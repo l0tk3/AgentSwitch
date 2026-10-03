@@ -6,13 +6,14 @@ import SwiftUI
 /// `log show --predicate 'subsystem == "com.agentswitch.mac" && category == "live"'`
 private let liveLog = Logger(subsystem: "com.agentswitch.mac", category: "live")
 
-/// The Mac's Live Activity (assistant-v0 §4, docs/design/visual-v1/mac-live.html), in the form macOS 26 gives an
+/// The Mac's Live Activity (assistant-v0 §4, docs/design/implemented/mac-live.html), in the form macOS 26 gives an
 /// iPhone's: a capsule among the menu bar's status items while something runs, waits or has just ended, and under it
 /// the phone's lock screen card. A new request drops the card by itself (with the phone's "needs you" tones) and it
 /// stays until answered; a result drops it for a few seconds. The card is a panel that never takes the focus: allowing
 /// a command leaves you in the window you were typing in. A click on the capsule opens or closes the card, a double
-/// click opens what it shows (the terminal, the task's page), a click elsewhere closes it. Asks `GET /live` every second
-/// while the service answers; AgentSwitch's own menu bar item is left as it is.
+/// click opens what it shows (the terminal, the task's page: both in the main window), a click elsewhere closes it.
+/// Asks `GET /live` every second while the service answers (the main window's bar reads the same answer);
+/// AgentSwitch's own menu bar item is left as it is.
 @MainActor
 @Observable
 final class LiveActivity {
@@ -27,6 +28,9 @@ final class LiveActivity {
 
     @ObservationIgnored private let model: AppModel
     @ObservationIgnored private let openTerminal: (String) -> Void
+    @ObservationIgnored private let openTask: (String) -> Void
+    /// Every answer of `GET /live` (nil: none), shown or not: the main window's bar counts from it.
+    @ObservationIgnored var onSnapshot: (LiveSnapshot?) -> Void = { _ in }
     @ObservationIgnored private var item: NSStatusItem?
     @ObservationIgnored private var panel: LivePanel?
     @ObservationIgnored private var host: LiveHostingView<LiveCardRoot>?
@@ -37,14 +41,18 @@ final class LiveActivity {
     @ObservationIgnored private let tones: [LivePresenter.Cue: NSSound] = [
         .needsYou: NSSound(data: Tones.wav(Tones.needsYou)), .done: NSSound(data: Tones.wav(Tones.done)), .failed: NSSound(data: Tones.wav(Tones.failed)),
     ].compactMapValues { $0 }
-    /// The terminal on screen in the terminal window in use.
+    /// The terminal on screen, and the task whose page is open, in the main window in use.
     @ObservationIgnored private let watching: () -> String?
+    @ObservationIgnored private let watchingTask: () -> String?
     @ObservationIgnored private let sleepGuard = SleepGuard()
 
-    init(model: AppModel, openTerminal: @escaping (String) -> Void, watching: @escaping () -> String? = { nil }) {
+    init(model: AppModel, openTerminal: @escaping (String) -> Void, openTask: @escaping (String) -> Void,
+         watching: @escaping () -> String? = { nil }, watchingTask: @escaping () -> String? = { nil }) {
         self.model = model
         self.openTerminal = openTerminal
+        self.openTask = openTask
         self.watching = watching
+        self.watchingTask = watchingTask
         UserDefaults.standard.register(defaults: [Self.enabledKey: true, Self.soundKey: true])
     }
 
@@ -128,9 +136,11 @@ final class LiveActivity {
         #else
         sleepGuard.update(next, phoneOnline: (model.remote?.onlineDevices ?? 0) > 0)
         #endif
+        onSnapshot(next)
         if !enabled { next = nil }
         let now = Date()
-        if let cue = presenter.receive(next, at: now, watching: watching()), UserDefaults.standard.bool(forKey: Self.soundKey) {
+        if let cue = presenter.receive(next, at: now, watching: watching(), watchingTask: watchingTask()),
+           UserDefaults.standard.bool(forKey: Self.soundKey) {
             for tone in tones.values { tone.stop() }
             tones[cue]?.play()
         }
@@ -150,23 +160,12 @@ final class LiveActivity {
         sync()
     }
 
-    /// The thing a row names: its terminal in the terminal window, or its task on the web console's page.
+    /// The thing a row names, in the main window: its terminal on the Terminals page, its task's page on Dispatch.
     private func open(_ row: LiveSnapshot.Row) {
         close()
         switch row.kind {
         case .terminal: openTerminal(row.id)
         case .task: openTask(row.id)
-        }
-    }
-
-    private func openTask(_ id: String) {
-        close()
-        Task {
-            do {
-                NSWorkspace.shared.open(try await client.consoleLink(next: "/ui?task=\(id)"))
-            } catch {
-                model.errorMessage = "无法打开任务：\(error.localizedDescription)"
-            }
         }
     }
 
@@ -178,13 +177,12 @@ final class LiveActivity {
     /// A result's task or terminal; a failure opened is a failure seen.
     private func openEnd(_ end: LiveSnapshot.End) {
         presenter.opened(end)
+        close()
         switch end.kind {
-        case .terminal:
-            close()
-            openTerminal(end.id)
-            sync()
+        case .terminal: openTerminal(end.id)
         case .task: openTask(end.id)
         }
+        sync()
     }
 
     private func answer(_ row: LiveSnapshot.Row, _ send: @escaping @Sendable (DaemonClient) async throws -> Void) {

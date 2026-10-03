@@ -3,7 +3,7 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-/// The menu bar's Live Activity for `-designPreview` (docs/design/visual-v1/mac-live.html): the capsule in each state
+/// The menu bar's Live Activity for `-designPreview` (docs/design/implemented/mac-live.html): the capsule in each state
 /// on a strip of menu bar, and the card in each state, from made-up tasks. Always dark, so drawn once.
 @MainActor
 enum LivePreview {

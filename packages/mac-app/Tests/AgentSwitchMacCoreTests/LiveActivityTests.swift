@@ -141,6 +141,21 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertTrue(p.unseenFailures.isEmpty, "opened in the window: seen")
     }
 
+    /// The main window open on a task's page (dispatch-v0 §1): its result drops no card and rings nothing, its failure
+    /// is seen; another task's still does.
+    func testTheTaskOnScreenSaysNothingOfItsOwnResult() {
+        var p = LivePresenter()
+        p.receive(snap([row("t1"), row("t2")], at: 0), at: t0)
+        let failed = end("t1", ok: false, at: 9)
+        XCTAssertNil(p.receive(snap([row("t2")], ended: [failed], at: 10), at: t0, watchingTask: "t1"))
+        XCTAssertFalse(p.isOpen)
+        XCTAssertTrue(p.unseenFailures.isEmpty)
+        XCTAssertEqual(p.receive(snap([], ended: [end("t2", at: 19), failed], at: 20), at: t0, watchingTask: "t1"), .done, "another task")
+        XCTAssertEqual(p.opener, .result)
+        let terminal = LiveSnapshot.End(kind: .terminal, id: "t3", title: "t3", line: "", ok: false, at: t0.addingTimeInterval(29))
+        XCTAssertEqual(p.receive(snap([], ended: [terminal], at: 30), at: t0, watchingTask: "t3"), .failed, "a terminal of the same id is not the task")
+    }
+
     func testAResultNeverCoversARequest() {
         var p = LivePresenter()
         p.receive(snap([row("t1"), row("t2")], at: 0), at: t0)

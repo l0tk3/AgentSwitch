@@ -1,0 +1,381 @@
+import AgentSwitchMacCore
+import AppKit
+import SwiftUI
+
+/// The main window `AgentSwitch` (docs/dispatch-v0.md §1): one window, its pages — Dispatch (the phone's home on a desk,
+/// `DispatchPage`), Terminals (the terminal window as it was, `TerminalsPageController`) and Browser (the shared
+/// browser's screen, `BrowserPage`, docs/browser-v0.md §1 Mac) — under one row of bar (MainBar.swift). All pages are in
+/// the window at once and only one is shown: the terminal page keeps its sign-in and its stream under the others, and
+/// nothing of it takes the keyboard, draws or claims a terminal's size until it is shown; the Browser page follows its
+/// tab only while it is shown (and polls its list slowly for the bar's mark while the window is visible).
+/// A page change goes in at once; one the user makes is then drawn in from the top (PageContainer.swift, the refresh),
+/// one the user did not watch (the window was not in use) or under Reduce Motion is not.
+/// The window remembers its page and frame; it opens on the page shown last (Dispatch the first time). Closing it leaves
+/// the tasks and the terminals running: the daemon holds them. The next window signs in to the terminal page afresh.
+@MainActor
+final class MainWindowController: NSObject {
+    private let model: AppModel
+    /// Lives as long as the app; the window's content reads and writes it.
+    let state: MainWindowState
+    private(set) var window: NSWindow?
+    /// Told when the window opens (true) or closes (false), for the Dock icon.
+    var onVisibilityChange: (Bool) -> Void = { _ in }
+    /// The bar's settings button and ⌘,.
+    var openSettings: () -> Void = {}
+    private var terminals: TerminalsPageController?
+    private var browser: BrowserPageModel?
+    private var container: PageContainer?
+    private var dispatchHost: NSView?
+    private var observers: [NSObjectProtocol] = []
+    private var responderObservation: NSKeyValueObservation?
+    private var keyMonitor: Any?
+
+    #if DEBUG
+    /// TerminalProbe: the window opens behind the others and the app is not made active.
+    static var probing = false
+    var probeScreen: TerminalScreenController? { terminals?.screen }
+    var probeWeb: TerminalWebView? { terminals?.web }
+    var probeBrowser: BrowserPageModel? { browser }
+    #endif
+
+    static let contentSize = NSSize(width: 1280, height: 820)
+    /// Wider than the terminal page's narrow layout (760 pt, terminal.css): its list stays on screen at the smallest size.
+    static let minSize = NSSize(width: 800, height: 480)
+    static let frameName = "AgentSwitchMain"
+    /// Where the terminal window was before there was a main window: the main window opens there the first time.
+    static let terminalFrameName = "AgentSwitchTerminal"
+
+    init(model: AppModel) {
+        self.model = model
+        state = MainWindowState(page: MainPage.restored(UserDefaults.standard.string(forKey: MainPage.storeKey)))
+        super.init()
+    }
+
+    // MARK: opening
+
+    /// The window, on the page it shows (or showed last), or on `page` (the menu's `Open Dispatch` / `Open Terminals`,
+    /// ⌘⇧B).
+    func show(_ page: MainPage? = nil) {
+        let watched = inUse
+        open()
+        if let page { go(to: page, animated: watched) }
+        bringForward()
+    }
+
+    /// One terminal on screen (the Live Activity, the probe): the Terminals page switches to it, or opens on it.
+    func show(terminal id: String) {
+        let watched = inUse
+        if window == nil { open(terminal: id) } else { terminals?.show(terminal: id) }
+        go(to: .terminals, animated: watched)
+        bringForward()
+    }
+
+    /// One task's page on Dispatch (the Live Activity): the window asks the page to open it (`requestedTask`).
+    func show(task id: String) {
+        let watched = inUse
+        open()
+        state.request(task: id)
+        go(to: .dispatch, animated: watched)
+        bringForward()
+    }
+
+    /// The terminal on screen in the window in use: the Live Activity says nothing of its turns.
+    var watchingTerminal: String? { terminals?.watching }
+
+    /// The task whose page is open in the window in use: the Live Activity says nothing of its result.
+    var watchingTask: String? {
+        guard let window, window.isKeyWindow, window.isVisible, state.page == .dispatch else { return nil }
+        return state.openTask
+    }
+
+    /// What `GET /live` said (the Live Activity's poll): the pages' marks and Dispatch's counts.
+    func liveChanged(_ snapshot: LiveSnapshot?) { state.liveChanged(snapshot) }
+
+    /// The window is in front of the user: a page change there is one they see.
+    private var inUse: Bool {
+        guard let window else { return false }
+        return NSApp.isActive && window.isKeyWindow && window.isVisible && !window.isMiniaturized
+    }
+
+    private func bringForward() {
+        guard let window else { return }
+        // What the window's notifications will say anyway, at once (the Browser page starts following its tab).
+        defer { windowChanged() }
+        #if DEBUG
+        if Self.probing { window.orderBack(nil); return }
+        #endif
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: the window
+
+    private func open(terminal id: String? = nil) {
+        guard window == nil else { return }
+        // No toolbar (2026-09-30, user: 顶栏太宽了，像 iTerm 一样紧凑): the content runs under the title bar and the
+        // bar's items sit in its one row beside the traffic lights, 32 pt instead of the unified toolbar's 66.
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.contentSize),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.title = "AgentSwitch"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        let terminals = TerminalsPageController(model: model, size: Self.contentSize)
+        terminals.window = window
+        terminals.onTitle = { [weak self] in self?.updateTitle() }
+        let dispatch = NSHostingView(rootView: DispatchRoot(model: model, state: state))
+        let browser = BrowserPageModel(service: { [model] in model.client }, state: state,
+                                       sealer: { [model] request in try await model.gateCLI.seal(request) })
+        browser.onTitle = { [weak self] in self?.updateTitle() }
+        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.stage, .browser: BrowserPage.host(browser)])
+        let host = NSHostingController(rootView: MainWindowRoot(state: state, head: terminals.head, model: model,
+                                                                content: container, actions: barActions))
+        host.sizingOptions = []
+        window.contentViewController = host
+        window.setContentSize(Self.contentSize)
+        // The title bar's height and where the traffic lights end, for the bar drawn in that row.
+        state.barHeight = max(28, window.frame.height - window.contentLayoutRect.height)
+        state.lightsEnd = window.standardWindowButton(.zoomButton)?.frame.maxX ?? 70
+        window.minSize = Self.minSize
+        window.isReleasedWhenClosed = false
+        if !window.setFrameUsingName(Self.frameName), !window.setFrameUsingName(Self.terminalFrameName) { window.center() }
+        window.setFrameAutosaveName(Self.frameName)
+        self.window = window
+        self.terminals = terminals
+        self.browser = browser
+        self.container = container
+        dispatchHost = dispatch
+        // The terminal screen's own refresh (another terminal) gives way to the page's, drawn in over it.
+        terminals.screen.pageRefreshing = { [weak container] in container?.refresh.playing ?? false }
+        observe(window)
+        watchKeys()
+        // Signed in before it is shown: a window opened on Dispatch has its terminals ready behind it.
+        terminals.load(terminal: id)
+        swap(to: state.page)
+        onVisibilityChange(true)
+    }
+
+    private func observe(_ window: NSWindow) {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.closed() }
+        })
+        for (name, key) in [(NSWindow.didBecomeKeyNotification, true), (NSWindow.didResignKeyNotification, false)] {
+            observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.terminals?.windowKeyChanged(key)
+                    self?.windowChanged()
+                }
+            })
+        }
+        for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
+            observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.windowChanged() }
+            })
+        }
+        // Text being typed: an editable text view or a field's editor has the keyboard (a selectable text does not).
+        responderObservation = window.observe(\.firstResponder, options: [.initial, .new]) { [weak self] window, _ in
+            MainActor.assumeIsolated {
+                self?.state.editingChanged((window.firstResponder as? NSText)?.isEditable == true)
+            }
+        }
+    }
+
+    private func windowChanged() {
+        guard let window else { return state.windowChanged(key: false, visible: false) }
+        var visible = window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+        #if DEBUG
+        if Self.probing { visible = true }   // behind every other window on purpose
+        #endif
+        state.windowChanged(key: window.isKeyWindow, visible: visible)
+        browser?.setActive(shown: state.page == .browser, visible: state.windowVisible)
+    }
+
+    /// Mission Control and the Window menu: the terminal on screen on Terminals (the page names it), the tab on screen
+    /// on Browser, else the app.
+    private func updateTitle() {
+        let page: String? = switch state.page {
+        case .terminals: terminals?.title
+        case .browser: browser?.current.map(BrowserTabText.title)
+        case .dispatch: nil
+        }
+        window?.title = page.flatMap { $0.isEmpty ? nil : $0 } ?? "AgentSwitch"
+    }
+
+    /// Next time the window opens afresh (the daemon may have restarted and forgotten the terminal page's session).
+    private func closed() {
+        container?.refresh.cancel()
+        state.windowClosed()
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers = []
+        responderObservation = nil
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        terminals?.stop()
+        terminals = nil
+        browser?.stop()
+        browser = nil
+        container = nil
+        dispatchHost = nil
+        window = nil
+        onVisibilityChange(false)
+    }
+
+    // MARK: pages
+
+    /// The user changes pages (a page's word, ⌘0, ⌘⇧B, ⌃⇥, ⌘1–9 or ⌘T from Dispatch, ⌘N from another page): drawn in.
+    func switchPage(to page: MainPage) { go(to: page, animated: true) }
+
+    /// The bar's words: another page; the current `Dispatch` on a task's page goes back (as the demo).
+    private func clicked(_ page: MainPage) {
+        guard page != state.page else {
+            if page == .dispatch, state.showsBack { state.requestBack() }
+            return
+        }
+        switchPage(to: page)
+    }
+
+    /// The page goes in at once, then is drawn in from the top; a refresh under way gives way to it (nothing of it
+    /// left). The page already on screen: nothing (a refresh drawing it in plays on).
+    private func go(to page: MainPage, animated: Bool) {
+        guard page != state.page else { return }
+        container?.refresh.cancel()
+        swap(to: page)
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        container?.drawIn(page)
+        if page == .terminals { terminals?.screen.pageDrawsIn() }
+    }
+
+    /// The page goes in: shown, its look on the window, the keyboard to it, remembered.
+    private func swap(to page: MainPage) {
+        state.show(page)
+        UserDefaults.standard.set(page.rawValue, forKey: MainPage.storeKey)
+        guard let window, let container else { return }
+        Self.dress(window, for: page)
+        container.show(page)
+        terminals?.onScreen = page == .terminals
+        browser?.setActive(shown: page == .browser, visible: state.windowVisible)
+        // The keyboard off the hidden pages: to the Dispatch page (its input takes it on `focusRequests`), to the
+        // browser's screen.
+        switch page {
+        case .dispatch:
+            if let dispatchHost, !window.makeFirstResponder(dispatchHost) { window.makeFirstResponder(nil) }
+        case .browser:
+            if let browser, !window.makeFirstResponder(browser.screen) { window.makeFirstResponder(nil) }
+        case .terminals:
+            break
+        }
+        updateTitle()
+    }
+
+    /// Terminals is the terminal window's dark block (ui-v0 §3b), Browser the screen's dark ground; Dispatch takes the
+    /// system's light or dark (`system`: the design preview's choice instead).
+    static func dress(_ window: NSWindow, for page: MainPage, system: NSAppearance? = nil) {
+        window.appearance = page.alwaysDark ? NSAppearance(named: .darkAqua) : system
+        window.backgroundColor = page.ground
+    }
+
+    private var barActions: MainBarActions {
+        MainBarActions(
+            switchPage: { [weak self] page in self?.clicked(page) },
+            back: { [weak self] in self?.state.requestBack() },
+            toggleList: { [weak self] in self?.terminals?.toggleList() },
+            newTerminal: { [weak self] in self?.terminals?.newTerminal() },
+            newTab: { [weak self] in self?.browser?.composeNew() },
+            settings: { [weak self] in self?.openSettings() })
+    }
+
+    // MARK: keys
+
+    /// The window's own keys (MainShortcut), taken before the page in focus sees them; on Dispatch the edit keys too, and
+    /// on Browser while its address is edited (the screen itself sends ⌘V as typing, ⌘A ⌘Z to the page).
+    private func watchKeys() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            nonisolated(unsafe) let key = event
+            let taken = MainActor.assumeIsolated { self?.handle(key) ?? false }
+            return taken ? nil : event
+        }
+    }
+
+    private func handle(_ event: NSEvent) -> Bool {
+        guard let window, let target = event.window else { return false }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let press = MainShortcut.Press(key: event.charactersIgnoringModifiers?.lowercased() ?? "", keyCode: event.keyCode,
+                                       command: flags.contains(.command), control: flags.contains(.control),
+                                       option: flags.contains(.option), shift: flags.contains(.shift))
+        // A sheet on the window (New Ciphertext, a file's source, Rename Topic, a folder to choose): the edit keys only,
+        // as the settings window does.
+        if target !== window { return target.sheetParent === window && edit(press, in: target) }
+        guard window.attachedSheet == nil else { return false }
+        let composing = (window.firstResponder as? NSTextInputClient)?.hasMarkedText() ?? false
+        if let action = MainShortcut.action(for: press, on: state.page, canGoBack: state.showsBack, composing: composing) {
+            perform(action)
+            return true
+        }
+        return (state.dispatchShown || (state.page == .browser && state.editingText)) && edit(press, in: window)
+    }
+
+    private func perform(_ action: MainShortcut) {
+        switch action {
+        case .page(let page):
+            switchPage(to: page)
+        case .nextPage:
+            switchPage(to: state.page.next)
+        case .previousPage:
+            switchPage(to: state.page.previous)
+        case .terminal(let n):
+            switchPage(to: .terminals)
+            terminals?.shortcut(String(n))
+        case .newTask:
+            switchPage(to: .dispatch)
+            state.requestFocus()
+        case .newTerminal:
+            switchPage(to: .terminals)
+            terminals?.newTerminal()
+        case .back:
+            state.requestBack()
+        case .settings:
+            openSettings()
+        case .browser(let key):
+            guard let browser else { return }
+            switch key {
+            case .newTab: browser.composeNew()
+            case .address: browser.focusAddress()
+            case .reload: Task { await browser.history(.reload) }
+            case .back: Task { await browser.history(.back) }
+            case .forward: Task { await browser.history(.forward) }
+            }
+        }
+    }
+
+    /// ⌘C ⌘V ⌘X ⌘A ⌘Z ⇧⌘Z on Dispatch and in the window's sheets, to the field in focus: a menu bar app has no Edit
+    /// menu to send them (the terminal page has its own, TerminalWebView).
+    private func edit(_ press: MainShortcut.Press, in target: NSWindow) -> Bool {
+        guard press.command, !press.control, !press.option else { return false }
+        let action: Selector? = switch (press.key, press.shift) {
+        case ("c", false): #selector(NSText.copy(_:))
+        case ("v", false): #selector(NSText.paste(_:))
+        case ("x", false): #selector(NSText.cut(_:))
+        case ("a", false): #selector(NSText.selectAll(_:))
+        case ("z", false): Selector(("undo:"))
+        case ("z", true): Selector(("redo:"))
+        default: nil
+        }
+        guard let action else { return false }
+        return NSApp.sendAction(action, to: nil, from: target)
+    }
+}
+
+/// The Dispatch page with what it reads: the app's model and the window's state.
+struct DispatchRoot: View {
+    let model: AppModel
+    let state: MainWindowState
+
+    var body: some View {
+        DispatchPage()
+            .environment(model)
+            .environment(state)
+            .tint(.brand)
+    }
+}

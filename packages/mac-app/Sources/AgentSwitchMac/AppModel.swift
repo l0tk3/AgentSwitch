@@ -27,6 +27,10 @@ final class AppModel {
     private(set) var daemonState = SupervisorState.initial
     private(set) var gateHealthy = false
     private(set) var daemonReady = false
+    #if DEBUG
+    /// DispatchProbe: a service this app does not supervise is up (the probe's `-localPort`).
+    func probeServiceUp() { daemonReady = true }
+    #endif
     private(set) var remote: RemoteInfo?
     private(set) var remoteProblem: String?
     private(set) var devices: [Device] = []

@@ -6,7 +6,7 @@ import SwiftTerm
 /// `log show --predicate 'subsystem == "com.agentswitch.mac" && category == "terminal-screen"'`
 private let screenLog = Logger(subsystem: "com.agentswitch.mac", category: "terminal-screen")
 
-/// The terminal window's screen (docs/terminal-v0.md §1 Mac): SwiftTerm's own view, under the page, where the page
+/// The Terminals page's screen (docs/terminal-v0.md §1 Mac): SwiftTerm's own view, under the page, where the page
 /// leaves the screen's area clear. It takes the keyboard as a Mac terminal does — the input method (Pinyin's candidates,
 /// punctuation, Shift symbols), the kitty keyboard protocol, Option as Meta —, the mouse and the wheel (reported to a
 /// program that tracks them, else its own scrollback), selection and copy, links. It reads the terminal's stream
@@ -43,12 +43,44 @@ final class NativeTerminalView: TerminalView {
         super.mouseDown(with: event)
     }
 
+    /// The cell of the click SwiftTerm is handling, while it does (a ⌘-click's link opens inside `mouseUp`).
+    private(set) var click: Position?
+
+    override func mouseUp(with event: NSEvent) {
+        click = calculateMouseHit(with: event).grid
+        defer { click = nil }
+        super.mouseUp(with: event)
+    }
+
+    /// The screen's rows around the click, a character a cell, for a path broken over lines (`WrappedPath`):
+    /// `WrappedPath.reach` rows each way that are on screen, and the clicked row's index in them.
+    func rowsAroundClick() -> (rows: [[Character]], row: Int, column: Int)? {
+        guard let click else { return nil }
+        let terminal = getTerminal()
+        let row = click.row - terminal.getTopVisibleRow()
+        guard row >= 0, row < terminal.rows else { return nil }
+        let first = max(0, row - WrappedPath.reach), last = min(terminal.rows - 1, row + WrappedPath.reach)
+        let rows = (first...last).map { r -> [Character] in
+            guard let line = terminal.getLine(row: r) else { return [] }
+            return (0..<line.count).map { col in
+                col > 0 && line[col - 1].width == 2 ? WrappedPath.wideTail : terminal.getCharacter(for: line[col])
+            }
+        }
+        return (rows, row - first, click.col)
+    }
 }
 
 /// Owns the native screen: which terminal it shows, its stream, what it sends, its size and look.
 @MainActor
 final class TerminalScreenController: NSObject {
     let view: NativeTerminalView
+    /// Over the screen (the page puts it there, above the screen and under the web page): another terminal is drawn in
+    /// from the top, quickly (`ScanRefresh.terminal`; docs/terminal-v0.md §1 Mac).
+    let refresh = ScanRefreshView()
+    /// The window's page is being drawn in over this one (its own refresh, which this one gives way to).
+    var pageRefreshing: () -> Bool = { false }
+    /// The next snapshot is another terminal's first: drawn in.
+    private var refreshNext = false
     /// The page (its shortcuts, the grid it starts terminals with).
     var evaluate: (String) -> Void = { _ in }
     private let client: () -> DaemonClient
@@ -72,7 +104,8 @@ final class TerminalScreenController: NSObject {
     private var owner: String?
     /// The terminal's size as the service has it: what this screen draws at while another has it.
     private var service: (cols: Int, rows: Int)?
-    /// The terminal was just opened here: the size is taken once the stream says nobody else has it.
+    /// The terminal was just opened here while the page is in use: the size is taken once the stream says nobody else
+    /// has it.
     private var claimOnConnect = false
     /// A claim on its way: the stream may still say the size is another screen's (what it replays on connecting).
     private var claiming = false
@@ -138,6 +171,7 @@ final class TerminalScreenController: NSObject {
     func place(_ rect: CGRect?) {
         guard let rect, rect.width > 20, rect.height > 20 else { return }
         if view.frame != rect { view.frame = rect }
+        if refresh.frame != rect { refresh.frame = rect }
         let t = view.getTerminal()
         evaluate("window.agentswitch?.grid(\(t.cols), \(t.rows))")
     }
@@ -151,6 +185,10 @@ final class TerminalScreenController: NSObject {
         disconnect()
         self.id = id
         view.isHidden = id == nil
+        refresh.cancel()
+        // Shown by a page change (the window's own refresh draws the page in): the next snapshot is not drawn in again
+        // right after it.
+        refreshNext = id != nil && !pageRefreshing()
         owner = nil
         service = nil
         claiming = false
@@ -158,13 +196,16 @@ final class TerminalScreenController: NSObject {
         guard let id else { return }
         clear()
         lastSeq = 0
-        claimOnConnect = true
+        // Only a page in use takes the size on opening (the web page's `inUse()`): hidden under Dispatch or in a window
+        // in the background, it follows; brought forward, `windowBecameKey` takes the size if nobody has it.
+        claimOnConnect = inUse
         connect(id, after: nil)
         focus()
     }
 
+    /// The keyboard to the screen, while it is seen (not under the Dispatch page).
     func focus() {
-        guard id != nil, let window = view.window, window.isKeyWindow else { return }
+        guard id != nil, let window = view.window, window.isKeyWindow, !view.isHiddenOrHasHiddenAncestor else { return }
         window.makeFirstResponder(view)
     }
 
@@ -224,9 +265,15 @@ final class TerminalScreenController: NSObject {
         screen.hasPrefix("phone") ? "iphone" : screen.hasPrefix("mac") ? "mac" : "web"
     }
 
-    /// Nobody has the size (its owner left): a window someone can see takes it back.
+    /// The Terminals page is shown in the key window: the user is at this screen.
+    private var inUse: Bool {
+        guard let window = view.window, window.isKeyWindow else { return false }
+        return visible
+    }
+
+    /// Nobody has the size (its owner left): a window someone can see takes it back (not while Dispatch covers it).
     private var visible: Bool {
-        guard let window = view.window else { return false }
+        guard let window = view.window, !view.isHiddenOrHasHiddenAncestor else { return false }
         return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
     }
 
@@ -282,6 +329,10 @@ final class TerminalScreenController: NSObject {
             follow(cols: cols, rows: rows)
             view.feed(text: data)
             lastSeq = seq
+            if refreshNext {
+                refreshNext = false
+                drawIn()
+            }
             // Drawn at the size it had. Just opened here, the size is decided when the stream says whose it is (next);
             // else the agent draws again (a snapshot drops what it drew as links).
             if !claimOnConnect, let id {
@@ -404,6 +455,20 @@ final class TerminalScreenController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
+    /// The window draws the Terminals page in (a page change), this screen with it: the screen's own refresh, under way
+    /// or due with the next snapshot, does not play after it.
+    func pageDrawsIn() {
+        refreshNext = false
+        refresh.cancel()
+    }
+
+    /// Another terminal's first picture comes in from the top, a scan line ahead — while it is seen, not under the
+    /// page's own refresh, not under Reduce Motion.
+    private func drawIn() {
+        guard visible, !pageRefreshing(), !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        refresh.play(.terminal, ground: view.nativeBackgroundColor, line: view.nativeForegroundColor.withAlphaComponent(0.9))
+    }
+
     // MARK: the look
 
     /// The user's iTerm profile, as the page and the phone draw it (`GET /terminals/style`).
@@ -463,9 +528,12 @@ extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
     func send(source: TerminalView, data: ArraySlice<UInt8>) { typed(data) }
     func scrolled(source: TerminalView, position: Double) {}
     /// ⌘-click: web links in the browser, folders in Finder, documents in their app; what could run only shown in Finder.
-    /// A plain path counts as a file link, a relative one from where the agent works now.
+    /// A plain path counts as a file link, a relative one from where the agent works now; one the agent's screen broke
+    /// over indented lines is joined back from the rows around the click (WrappedPath).
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-        guard let url = LinkPolicy.url(fromLink: link, workdir: workdir), let target = LinkPolicy.existingFile(url) else { return }
+        let around = view.rowsAroundClick()
+        let wrapped = around.map { WrappedPath.joins(rows: $0.rows, row: $0.row, column: $0.column) } ?? []
+        guard let target = LinkPolicy.target(link: link, wrapped: wrapped, workdir: workdir) else { return }
         LinkOpener.open(target)
     }
     func bell(source: TerminalView) {}

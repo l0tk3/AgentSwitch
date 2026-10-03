@@ -71,8 +71,8 @@ public enum PixelArt {
     /// The terminals tab and window: a framed terminal (">_" alone means Codex).
     public static let terminalWindow = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"]
 
-    /// The terminal window's toolbar, in 1 pt cells (the weight of the system's icons beside the traffic lights; corners
-    /// stepped): the list (a window with its sidebar) and new terminal. docs/design/visual-v1/terminal.html, "细像素".
+    /// The main window's bar (once the terminal window's toolbar), in 1 pt cells (the weight of the system's icons beside the traffic lights; corners
+    /// stepped): the list (a window with its sidebar) and new terminal. docs/design/implemented/terminal.html, "细像素".
     public static let toolbarList = [
         ".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#",
         "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#",
@@ -81,6 +81,13 @@ public enum PixelArt {
     public static let toolbarNew = [
         "......#......", "......#......", "......#......", "......#......", "......#......", "......#......", "#############",
         "......#......", "......#......", "......#......", "......#......", "......#......", "......#......",
+    ]
+
+    /// The main window's settings (dispatch-v0 §1), at the toolbar's weight: three sliders (a gear at this size is a blob,
+    /// docs/design/concepts/menu-icons.html); docs/design/implemented/mac-window.html `ICON.sliders`.
+    public static let toolbarSettings = [
+        "..##.........", "#############", "..##.........", ".............", ".............", "........##...", "#############",
+        "........##...", ".............", ".............", ".....##......", "#############", ".....##......",
     ]
 
     /// The lit cells of a sprite.
