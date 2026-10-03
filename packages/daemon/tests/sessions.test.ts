@@ -98,6 +98,28 @@ describe("the Mac's coding sessions", () => {
     expect((await app.request("/sessions/vim/x1")).status).toBe(404);
   });
 
+  // 2026-10-03, user: 有的目录下面的session显示不完全，经常是有的时候我删除一个session之后又蹦出来几个.
+  it("lists every session without a limit, so each folder shows whole; an older one still opens", async () => {
+    const { sources } = fixture();
+    const many = join(sources.claudeProjects, "-Users-u-code-many");
+    mkdirSync(many, { recursive: true });
+    for (let i = 0; i < 90; i++) {
+      const file = join(many, `m${i}.jsonl`);
+      writeFileSync(file, line({ type: "user", cwd: "/Users/u/code/many", message: { role: "user", content: `第 ${i} 个任务` }, timestamp: "2026-09-20T08:00:00Z" }) + "\n");
+      const at = new Date(NOW - (i + 1) * 3600_000);
+      utimesSync(file, at, at);
+    }
+    const monitor = new SessionMonitor(sources, () => NOW);
+    const app = new Hono();
+    mountSessions(app, { sessions: monitor } as unknown as ApiDeps);
+    const listed = async (q: string) => ((await (await app.request(`/sessions${q}`)).json()) as { sessions: { id: string }[] }).sessions;
+    expect(await listed("")).toHaveLength(93);
+    expect(await listed("?limit=80")).toHaveLength(80);
+    // The oldest, far below where an 80-session list ends, still opens and is found to delete.
+    expect(monitor.find("claude-code", "m89")?.cwd).toBe("/Users/u/code/many");
+    expect((await app.request("/sessions/claude-code/m89")).status).toBe(200);
+  });
+
   it("searches what was said: prompts and replies of all three, not tool calls, their output or a sub-agent's lines (2026-09-30)", async () => {
     const { sources } = fixture();
     const monitor = new SessionMonitor(sources, () => NOW);

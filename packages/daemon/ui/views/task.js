@@ -9,7 +9,7 @@ import { questionBindings } from "../lib/questions.js";
 import { fileList, pendingList } from "../lib/files.js";
 import { feedback, feedbackStrip, firstLine } from "../lib/feedback.js";
 import { spinner, square, topicSquare } from "../lib/sidebar.js";
-import { md, mdInline } from "../lib/markdown.js";
+import { md, mdInline, mdTyped } from "../lib/markdown.js";
 import { deleteBindings, deleteButton, deleteNotice } from "../lib/deletions.js";
 import { sendBindings, sendFeedback, sendState } from "../lib/sending.js";
 
@@ -209,7 +209,7 @@ export function render(s) {
       ${parent ? `<div class="parent" data-open="${parent.id}">↩ 追问自：${esc(parent.task.slice(0, 120))}</div>` : ""}
       ${feedbackStrip(t, s.events)}
       <div class="lbl">// Asked</div>
-      <div class="asked">${esc(t.task)}</div>
+      <div class="asked">${mdTyped(t.task)}</div>
       ${t.result ? `<div class="lbl">// ${incomplete ? "Saved" : "Result"}</div><div class="result ${incomplete ? "is-warn" : t.status === "done" ? "is-ok" : ""}"><div class="faint">${incomplete ? "已保存的进展" : "结果"}</div><div class="md">${md(t.result)}</div></div>` : ""}
       ${t.error ? `<div class="result ${incomplete ? "is-warn" : "is-bad"}"><div class="faint">${incomplete ? "未完成原因" : "错误"}</div><div class="md">${md(t.error)}</div></div>` : ""}
       ${pending.map((a) => approvalCard(a, null, s.answerSubmissions?.[a.id])).join("")}

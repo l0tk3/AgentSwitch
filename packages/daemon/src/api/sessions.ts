@@ -14,23 +14,25 @@ const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "
 /** Agents that keep no register of a running session and no writer lock (docs/terminal-v0.md §5): a session written in
  *  the last 90 seconds may be open in another program. */
 const UNSEEN: ReadonlySet<string> = new Set<SessionHarness>(["opencode", "pi"]);
+/** What `limit` means when it is not a number (older phones ask for 80). */
 const LIST_LIMIT = 60;
 const MESSAGE_LIMIT = 80;
 const MAX_MESSAGES = 300;
 const MAX_QUERY = 200;
-/** As many sessions as the tree lists. */
-const SEARCH_WITHIN = 80;
 
 export function mountSessions(app: Hono, deps: ApiDeps): void {
   const monitor: SessionMonitor | undefined = deps.sessions;
   if (!monitor) return;
-  app.get("/sessions", (c) => c.json({ sessions: monitor.list(limitParam(c, LIST_LIMIT)) }));
+  // Without `limit`, every session the Mac lists, so the tree shows each folder whole: a list cut at the newest 80
+  // left older sessions out of their folders, and deleting one let the next one in (2026-10-03, user: 有的目录下面的
+  // session显示不完全，经常是有的时候我删除一个session之后又蹦出来几个).
+  app.get("/sessions", (c) => c.json({ sessions: monitor.list(c.req.query("limit") === undefined ? Infinity : limitParam(c, LIST_LIMIT, Infinity)) }));
   // What was said in them (docs/terminal-v0.md §1 搜索): the tree's search, for the words only the Mac has.
   const search = new SessionSearch(monitor);
   app.get("/sessions/search", async (c) => {
     const q = (c.req.query("q") ?? "").trim();
     if (!q || q.length > MAX_QUERY) return c.json({ error: `q: 1–${MAX_QUERY} characters` }, 400);
-    return c.json({ hits: await search.search(q, SEARCH_WITHIN) });
+    return c.json({ hits: await search.search(q) });
   });
   app.get("/sessions/:harness/:id", (c) => {
     const harness = c.req.param("harness");
@@ -45,7 +47,7 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
     const harness = c.req.param("harness");
     const id = c.req.param("id");
     if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
-    const session = monitor.list(LIST_LIMIT * 4).find((s) => s.harness === harness && s.id === id);
+    const session = monitor.find(harness as SessionHarness, id);
     if (!session) return c.json({ error: "no such session" }, 404);
     // What writes a session is a terminal here that still runs, or another program (Claude's session registry, Codex's
     // writer lock). Recent activity is not: a terminal just closed writes its last line on the way out. Only without

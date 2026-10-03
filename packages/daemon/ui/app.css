@@ -53,9 +53,11 @@ main.page .empty { text-align: left; padding: 6px 0 12px; font-size: 12.5px; }
 .md ul, .md ol { margin: 0 0 8px; padding-left: 20px; }
 .md li { margin: 2px 0; }
 .md li::marker { color: var(--ink3); }
-.md code, .say code, .qt code, .sum code, .entry code { font: 12px var(--mono); background: var(--raise); padding: 0 4px; overflow-wrap: anywhere; }
-.md pre { margin: 6px 0 10px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--ink4); overflow-x: auto; }
-.md pre code { background: none; padding: 0; white-space: pre; font-size: 12px; line-height: 1.55; }
+.md code, .say code, .qt code, .sum code, .entry code, .me code, .asked code { font: 12px var(--mono); background: var(--raise); padding: 0 4px; overflow-wrap: anywhere; }
+/* What you typed shows its code the same way (mdTyped, 2026-10-03). */
+.md pre, .me pre, .asked pre { margin: 6px 0 10px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--ink4); overflow-x: auto; }
+.md pre code, .me pre code, .asked pre code { background: none; padding: 0; white-space: pre; font-size: 12px; line-height: 1.55; }
+.me pre:first-child, .asked pre:first-child { margin-top: 2px; } .me pre:last-child, .asked pre:last-child { margin-bottom: 2px; }
 .md blockquote { margin: 6px 0; padding: 0 0 0 10px; border-left: 1px solid var(--ink3); color: var(--ink2); }
 .md hr { border: 0; height: 1px; margin: 10px 0; background: repeating-linear-gradient(to right, var(--ink3) 0 2px, transparent 2px 4px); }
 .md a { color: var(--ink); }

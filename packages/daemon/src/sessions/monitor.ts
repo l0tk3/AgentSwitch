@@ -57,7 +57,9 @@ export class SessionMonitor {
 
   constructor(private readonly sources: SessionSources, private readonly now: () => number = Date.now) {}
 
-  list(limit = 60): SessionSummary[] {
+  /** The Mac's sessions, newest first: each agent's newest `SCAN_FILES` records of the last 90 days, less those left
+   *  out (scratch folders, our own executors', untitled, probes); `limit` keeps the first so many. */
+  list(limit = Infinity): SessionSummary[] {
     const now = this.now();
     const fromFiles = [
       ...this.scan(jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir)), "claude-code", now),
@@ -77,8 +79,13 @@ export class SessionMonitor {
     return harness === "opencode" ? this.sources.opencodeDb : this.files.get(`${harness}:${id}`) ?? null;
   }
 
+  /** A listed session by its agent and id, wherever it falls in the list; null for one not listed. */
+  find(harness: SessionHarness, id: string): SessionSummary | null {
+    return this.list().find((s) => s.harness === harness && s.id === id) ?? null;
+  }
+
   read(harness: SessionHarness, id: string, limit = 80): { session: SessionSummary; messages: SessionMessage[] } | null {
-    const session = this.list(200).find((s) => s.harness === harness && s.id === id);
+    const session = this.find(harness, id);
     if (!session) return null;
     if (harness === "opencode") return { session, messages: openCodeMessages(this.sources.opencodeDb, id, limit) };
     const path = this.files.get(`${harness}:${id}`);

@@ -107,3 +107,68 @@ function list(items) {
   while (stack.length) html += `</li></${stack.pop().tag}>`;
   return html;
 }
+
+/** What a person typed, as typed (docs/ui-v0.md §7.4, 2026-10-03, user: dispatch里加上代码块支持吧，这样看着太难受了):
+ *  fenced blocks and `code` spans drawn as code, nothing else read — a `*` or `#` they typed stays. The apps' rules
+ *  (DispatchCode / MarkdownCode): a fence closes only on a bare fence of its mark at least as long, one left open runs
+ *  to the end, ```ls``` on a line is a span; a span stays on one line. Escaped like the rest; the text between keeps
+ *  its line breaks in the container (`pre-wrap`). */
+export function mdTyped(text) {
+  const lines = String(text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let words = [];
+  const endWords = () => {
+    while (words.length && !words[0].trim()) words.shift();
+    while (words.length && !words.at(-1).trim()) words.pop();
+    if (words.length) out.push(`<span class="typed">${words.map(codeSpans).join("\n")}</span>`);
+    words = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const open = OPEN_FENCE.exec(lines[i]);
+    if (!open || (open[2][0] === "`" && open[3].includes("`"))) { words.push(lines[i]); continue; }
+    endWords();
+    const [, lead, mark, info] = open;
+    const close = new RegExp(`^[ \\t]*${mark[0] === "`" ? "`" : "~"}{${mark.length},}[ \\t]*$`);
+    const indent = lead.replace(/\t/g, "").length;
+    const body = [];
+    for (i++; i < lines.length && !close.test(lines[i]); i++) body.push(lines[i].replace(new RegExp(`^ {0,${indent}}`), ""));
+    while (body.length && !body.at(-1).trim()) body.pop();
+    const lang = info.trim().split(/\s+/)[0];
+    out.push(`<pre><code${lang ? ` data-lang="${esc(lang)}"` : ""}>${esc(body.join("\n"))}</code></pre>`);
+  }
+  endWords();
+  return out.join("");
+}
+
+const OPEN_FENCE = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+
+/** One line with its code spans as <code>, the rest escaped as typed: a run of backticks closes on the next run as
+ *  long; one space comes off both ends (not from all spaces); a run with no partner stays. */
+function codeSpans(line) {
+  let out = "";
+  let i = 0;
+  const run = (at) => { let n = 0; while (line[at + n] === "`") n++; return n; };
+  while (i < line.length) {
+    if (line[i] !== "`") {
+      const next = line.indexOf("`", i);
+      const end = next < 0 ? line.length : next;
+      out += esc(line.slice(i, end));
+      i = end;
+      continue;
+    }
+    const n = run(i);
+    let close = -1;
+    for (let j = i + n; j < line.length;) {
+      if (line[j] !== "`") { j++; continue; }
+      const m = run(j);
+      if (m === n) { close = j; break; }
+      j += m;
+    }
+    if (close < 0) { out += esc(line.slice(i, i + n)); i += n; continue; }
+    let code = line.slice(i + n, close);
+    if (code.length >= 2 && code.startsWith(" ") && code.endsWith(" ") && code.trim()) code = code.slice(1, -1);
+    out += `<code>${esc(code)}</code>`;
+    i = close + n;
+  }
+  return out;
+}

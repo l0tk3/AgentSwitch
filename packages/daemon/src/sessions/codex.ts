@@ -4,6 +4,7 @@
 
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
 import { clipText, type SessionMessage, type SessionMode } from "./types.js";
+import { movedFolder } from "./moved.js";
 
 export type CodexFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly origin?: string; readonly model?: string; readonly mode?: SessionMode; readonly forkedFrom?: string };
 
@@ -53,9 +54,9 @@ function originOf(meta: Json): string | undefined {
 export function codexFacts(path: string, mtime: number): CodexFacts | null {
   const head = headLines(path).map(obj);
   const meta = obj(head.find((l) => l.type === "session_meta")?.payload);
-  const cwd = str(meta.cwd);
+  const began = str(meta.cwd);
   const id = str(meta.id) || str(meta.session_id);
-  if (!cwd || !id) return null;
+  if (!began || !id) return null;
   // Sub-agents Codex spawned inside a thread (thread_source "subagent"): each starts with a copy of the thread's first
   // message, so they read as duplicates of it; they are part of that thread, not sessions of the user's own.
   if (str(meta.thread_source) === "subagent" || obj(meta.source).subagent) return null;
@@ -63,6 +64,8 @@ export function codexFacts(path: string, mtime: number): CodexFacts | null {
   const tail = tailLines(path).map(obj);
   const title = head.map((l) => messageText(obj(l.payload), "user")).find((t) => t !== null) ?? "";
   const last = [...tail].reverse();
+  // Each turn says its folder: a session continued in another one (`codex resume -C`) is listed there while it is there.
+  const cwd = movedFolder(began, last.map((l) => (l.type === "turn_context" ? str(obj(l.payload).cwd) : "")).find(Boolean));
   const lastText = last.map((l) => messageText(obj(l.payload), "assistant")).find((t) => t !== null) ?? "";
   const model = last.map((l) => (l.type === "turn_context" ? str(obj(l.payload).model) : "")).find(Boolean);
   const context = last.find((l) => l.type === "turn_context");

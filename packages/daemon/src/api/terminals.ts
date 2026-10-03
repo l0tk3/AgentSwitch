@@ -25,6 +25,7 @@ import { modelSettings } from "../router/modelOverlay.js";
 import { modelName } from "../util/modelName.js";
 import { checkTerminalCwd } from "./cwdPolicy.js";
 import { parseBody, type ApiDeps } from "./shared.js";
+import { whereNow } from "../sessions/moved.js";
 
 export type Terminals = {
   readonly host: TerminalHost;
@@ -51,8 +52,8 @@ function shown(t: TerminalInfo) {
 }
 
 const MAX_INPUT = 20_000;
-/** The sessions whose folders get a git status: as many as the tree lists. */
-const GIT_SESSIONS = 80;
+/** Sessions' folders whose git is shown: the most recently used ones, at most this many (the terminals' always). */
+const GIT_FOLDERS = 60;
 const Attach = z.object({ uploads: z.array(z.string().min(1).max(64)).min(1).max(10) });
 const Size = { cols: z.number().int().min(20).max(500), rows: z.number().int().min(5).max(300) };
 /** A model id goes to the agent as `--model <id>`: never one that could read as a flag. */
@@ -126,7 +127,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   host.onWorkDone((cwd) => git.invalidate(cwd));
   app.get("/folders/git", async (c) => {
     // The terminals' folders, where their agents work now (the window's title), the sessions' folders.
-    const folders = [...host.list().flatMap((x) => [x.cwd, x.workdir]), ...(deps.sessions?.list(GIT_SESSIONS) ?? []).map((x) => x.cwd)];
+    const recent = [...new Set((deps.sessions?.list() ?? []).map((x) => x.cwd))].slice(0, GIT_FOLDERS);
+    const folders = [...host.list().flatMap((x) => [x.cwd, x.workdir]), ...recent];
     return c.json({ folders: await git.summaries(folders.filter((f) => isAbsolute(f))) });
   });
 
@@ -162,19 +164,32 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!isAbsolute(typed)) return c.json({ error: "cwd must be an absolute path" }, 400);
     const cwd = resolve(typed);   // `~/proj/` and `~/proj` are one folder
 
-    // Any folder, as in any terminal (docs/terminal-v0.md §2, 2026-09-30); tasks keep control-v0 §2's rules.
-    const problem = checkTerminalCwd(cwd);
-    if (problem) return c.json({ error: problem }, 400);
     const resumed = resume ? (body.data as z.infer<typeof ResumeTerminal>) : null;
     const agentSessionId = resumed?.agentSessionId;
     const fork = Boolean(resumed?.fork);
     if (resumed && !RESUMES.has(resumed.harness)) return c.json({ error: `${resumed.harness} cannot continue a session` }, 400);
     if (fork && !FORKS.has(body.data.harness)) return c.json({ error: `${body.data.harness} cannot fork a session` }, 400);
     const openHere = () => host.list().find((x) => x.status !== "exited" && x.harness === body.data.harness && x.agentSessionId === agentSessionId);
+    // One session, one writer (docs/terminal-v0.md §5): already open here → that terminal, wherever its folder is now.
+    const already = agentSessionId && !fork ? openHere() : undefined;
+    if (already) return c.json({ terminal: already, existing: true });
+
+    // Any folder, as in any terminal (docs/terminal-v0.md §2, 2026-09-30); tasks keep control-v0 §2's rules.
+    const problem = checkTerminalCwd(cwd);
+    if (problem && !resume) return c.json({ error: problem }, 400);
+    // A session whose folder is gone (moved, renamed, deleted) goes on in a folder the user picks (docs/terminal-v0.md
+    // §5, 2026-10-03, user: 如果会话没了选择新目录继续): said apart from other refusals, with where it may be now.
+    if (problem) {
+      const known = [...host.list().map((x) => x.cwd), ...(deps.sessions?.list() ?? []).map((x) => x.cwd)];
+      return c.json({ error: `会话所在的文件夹 ${cwd} 已不存在。`, folderGone: cwd, ...whereNow(cwd, known) }, 422);
+    }
+    // Continued somewhere other than where it is listed (the folder it ran in is gone; the user picked this one): said
+    // in the audit.
+    const listedAt = resumed ? deps.sessions?.find(resumed.harness, resumed.agentSessionId)?.cwd : undefined;
+    const movedFrom = listedAt && listedAt !== cwd ? listedAt : undefined;
     // The agent made ready (Codex: its hooks trusted, a few seconds at most); the start goes on whatever happens.
     await t.prepare?.(body.data.harness).catch(() => undefined);
-    // One session, one writer (docs/terminal-v0.md §5): already open here → that terminal; open in another program → say
-    // where, and the client may fork instead.
+    // Open in another program → say where, and the client may fork instead.
     if (agentSessionId && !fork) {
       const open = openHere();
       if (open) return c.json({ terminal: open, existing: true });
@@ -190,7 +205,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
-      audit.record({ terminal: info.id, action: resume ? "resume" : "create", via: via(c), detail: { harness: info.harness, cwd, model: info.model, mode: info.mode, ...(resume ? { fork } : {}) } });
+      audit.record({ terminal: info.id, action: resume ? "resume" : "create", via: via(c), detail: { harness: info.harness, cwd, model: info.model, mode: info.mode, ...(resume ? { fork } : {}), ...(movedFrom ? { movedFrom } : {}) } });
       return c.json({ terminal: info }, 201);
     } catch (err) { return failed(c, err); }
   };

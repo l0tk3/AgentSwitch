@@ -335,6 +335,10 @@ body.side-dragging .screen { pointer-events: none; }
 .sheet-card h2 { font: 700 14px/1.5 var(--ui); margin: 0 0 6px; }
 .sheet-card p { font: 12.5px/1.6 var(--ui); color: var(--ink2); margin: 0 0 12px; user-select: text; -webkit-user-select: text; }
 .check { display: flex; gap: 8px; align-items: center; color: var(--ink2); font: 12.5px var(--ui); }
+.sheet-field { margin: 0 0 4px; }
+.sheet-offers { display: grid; justify-items: start; gap: 1px; margin: 4px 0 0; }
+.sheet-offers .offer { max-width: 100%; font: 12px/1.6 var(--mono); color: var(--ink3); padding: 0 0 0 2.2ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-offers .offer:hover, .sheet-offers .offer.on { color: var(--ink); }
 .sheet-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .sheet-foot .btn { padding: 2px 10px; }
 

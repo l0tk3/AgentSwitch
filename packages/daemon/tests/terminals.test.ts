@@ -777,6 +777,30 @@ describe("terminals over HTTP", () => {
     expect((await call("DELETE", `/terminals/${first.json.terminal.id}`)).status).toBe(200);
   });
 
+  // 2026-10-03, user: 如果会话没了选择新目录继续.
+  it("says a session's folder is gone apart from other refusals, with where it may be now", async () => {
+    const { cwd, call } = await start(async () => null);
+    const there = join(cwd, "Projects", "proj");
+    mkdirSync(there, { recursive: true });
+    expect((await call("POST", "/terminals", { harness: "claude-code", cwd: there })).status).toBe(201);
+    const gone = join(cwd, "Worktop", "proj");
+    const res = await call("POST", "/terminals/resume", { harness: "claude-code", cwd: gone, agentSessionId: "s-9" });
+    expect(res.status).toBe(422);
+    expect(res.json).toMatchObject({ folderGone: gone, near: cwd, alike: [there] });
+    // A new terminal in a missing folder is the plain refusal it was.
+    expect((await call("POST", "/terminals", { harness: "claude-code", cwd: gone })).status).toBe(400);
+    // Picked a folder that is there: it goes on in it.
+    const moved = await call("POST", "/terminals/resume", { harness: "claude-code", cwd: there, agentSessionId: "s-9" });
+    expect(moved.status).toBe(201);
+    expect(moved.json.terminal).toMatchObject({ cwd: there, resumedFrom: "s-9" });
+    // Asked again from a list read before the move: the terminal it is open in, not the folder question.
+    const again = await call("POST", "/terminals/resume", { harness: "claude-code", cwd: gone, agentSessionId: "s-9" });
+    expect(again.status).toBe(200);
+    expect(again.json).toMatchObject({ existing: true, terminal: { id: moved.json.terminal.id } });
+    // What an agent cannot do is said first.
+    expect((await call("POST", "/terminals/resume", { harness: "pi", cwd: gone, agentSessionId: "p-1" })).status).toBe(400);
+  });
+
   it("a permission request nobody answers ends with no decision when the terminal goes", async () => {
     const { cwd, base, token, call } = await start();
     const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
@@ -879,8 +903,10 @@ describe("terminal pieces", () => {
     expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(1800);
     // "Continue" goes on in the same session; a fork only when asked for.
     const codex = launch({ id: "t2", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
-    expect(codex.args).toEqual(["resume", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
-    expect(launch({ id: "t9", harness: "codex", cwd: "/tmp", resume: "abc", fork: true, mode: "manual", hookToken: "tok" }).args.slice(0, 2)).toEqual(["fork", "abc"]);
+    expect(codex.args).toEqual(["resume", "-C", "/tmp", "abc", "-c", 'notify=["/n/node","/h/hook.js","codex"]', ...CODEX_ATTENTION, "-a", "on-request", "-c", 'default_permissions="agentswitch"', "-c", 'permissions.agentswitch={ extends = ":read-only", filesystem = {} }']);
+    // The terminal's folder is named (`-C`): Codex does not ask whether to use the one the session ran in, which may be
+    // gone (docs/terminal-v0.md §5).
+    expect(launch({ id: "t9", harness: "codex", cwd: "/tmp", resume: "abc", fork: true, mode: "manual", hookToken: "tok" }).args.slice(0, 4)).toEqual(["fork", "-C", "/tmp", "abc"]);
     expect(launch({ id: "t4", harness: "claude-code", cwd: "/tmp", resume: "s-1", mode: "manual", hookToken: "tok" }).args.slice(-2)).toEqual(["--resume", "s-1"]);
     expect(launch({ id: "t10", harness: "claude-code", cwd: "/tmp", resume: "s-1", fork: true, mode: "manual", hookToken: "tok" }).args.slice(-3)).toEqual(["--resume", "s-1", "--fork-session"]);
     expect(() => launch({ id: "t3", harness: "pi", cwd: "/tmp", mode: "manual", hookToken: "tok" })).toThrow(/not installed/);

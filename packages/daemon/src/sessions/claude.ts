@@ -3,6 +3,7 @@
 
 import { basename } from "node:path";
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
+import { currentFolder, movedFolder } from "./moved.js";
 import { clipText, type SessionMessage, type SessionMode } from "./types.js";
 
 export type ClaudeFacts = { readonly id: string; readonly cwd: string; readonly title: string; readonly lastText: string; readonly updatedAt: number; readonly branch?: string; readonly model?: string; readonly mode?: SessionMode };
@@ -39,15 +40,20 @@ export function claudeSaid(line: Json): string | null {
   return userText(line) ?? assistantText(line);
 }
 
-/** What the list shows: the first typed prompt from the head, the latest reply and where it ran from the tail. */
+/** What the list shows: the first typed prompt from the head, the latest reply and where it ran from the tail. Its
+ *  folder: where Claude Code last moved it, while that folder is there (resuming a session in another folder, it writes
+ *  `{type: "relocated", relocatedCwd}` and moves the record), else the one it began in, unless that is gone and the
+ *  lines since carry one that is there. */
 export function claudeFacts(path: string, mtime: number): ClaudeFacts | null {
   const head = headLines(path).map(obj);
   const tail = tailLines(path).map(obj);
   const all = [...head, ...tail];
-  const cwd = all.map((l) => str(l.cwd)).find(Boolean) ?? "";
-  if (!cwd) return null;
-  const title = str(tail.findLast((l) => l.type === "custom-title")?.customTitle) || (head.map(userText).find((t) => t !== null) ?? "");
+  const began = all.map((l) => str(l.cwd)).find(Boolean) ?? "";
+  if (!began) return null;
   const last = [...tail].reverse();
+  const relocated = movedFolder(began, str(last.find((l) => l.type === "relocated")?.relocatedCwd));
+  const cwd = relocated !== began ? relocated : currentFolder(began, last.map((l) => str(l.cwd)).find(Boolean));
+  const title = str(tail.findLast((l) => l.type === "custom-title")?.customTitle) || (head.map(userText).find((t) => t !== null) ?? "");
   const lastText = last.map(assistantText).find((t) => t !== null) ?? "";
   const stamped = last.find((l) => l.timestamp);
   const branch = last.map((l) => str(l.gitBranch)).find(Boolean);

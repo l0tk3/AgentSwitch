@@ -37,12 +37,17 @@ export class SessionSearch {
 
   constructor(private readonly monitor: SessionMonitor) {}
 
-  /** The sessions among the newest `within` whose words contain `query` (case aside), newest first, at most `max`. */
-  async search(query: string, within = 80, max = 30): Promise<SessionHit[]> {
+  /** The sessions among the newest `within` (all the tree lists) whose words contain `query` (case aside), newest
+   *  first, at most `max`. */
+  async search(query: string, within = Infinity, max = 30): Promise<SessionHit[]> {
     const q = query.trim().toLowerCase();
     if (!q) return [];
     const hits: SessionHit[] = [];
-    for (const s of this.monitor.list(within)) {
+    const listed = this.monitor.list(within);
+    // Words of sessions no longer listed (deleted, aged out) are let go.
+    const keys = new Set(listed.map((s) => `${s.harness}:${s.id}`));
+    for (const key of this.words.keys()) if (!keys.has(key)) this.words.delete(key);
+    for (const s of listed) {
       const w = this.read(s);
       await new Promise((r) => setImmediate(r));
       const at = w?.lower.indexOf(q) ?? -1;

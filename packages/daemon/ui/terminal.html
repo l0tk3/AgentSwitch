@@ -100,6 +100,14 @@
   <div class="sheet-card box">
     <h2 id="sheetTitle"></h2>
     <p id="sheetBody"></p>
+    <label class="field sheet-field" id="sheetField" hidden>
+      <span class="folder">
+        <span class="prompt" aria-hidden="true">❯</span>
+        <input id="sheetInput" spellcheck="false" autocomplete="off" aria-label="文件夹">
+        <button class="btn line" id="sheetChoose" type="button" hidden>Choose…</button>
+      </span>
+    </label>
+    <div class="sheet-offers" id="sheetOffers" hidden></div>
     <label class="check" id="sheetCheck" hidden><input type="checkbox" id="sheetCheckbox"> <span id="sheetCheckText"></span></label>
     <div class="sheet-foot">
       <button class="btn line" id="sheetCancel">Cancel</button>

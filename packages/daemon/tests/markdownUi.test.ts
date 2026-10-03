@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const UI = resolve(import.meta.dirname, "..", "ui");
-const { md, mdInline } = await import(join(UI, "lib/markdown.js"));
+const { md, mdInline, mdTyped } = await import(join(UI, "lib/markdown.js"));
 
 describe("console markdown", () => {
   it("escapes everything that is not Markdown: no raw HTML, no script links", () => {
@@ -49,5 +49,32 @@ describe("console markdown", () => {
     expect(md("> 原话\n> 第二行")).toBe("<blockquote><p>原话<br>第二行</p></blockquote>");
     expect(md("3. 第三\n4. 第四")).toBe('<ol start="3"><li>第三</li><li>第四</li></ol>');
     expect(md("第一行\n第二行")).toBe("<p>第一行<br>第二行</p>");
+  });
+});
+
+// What a person typed (2026-10-03, user: dispatch里加上代码块支持吧，这样看着太难受了): only its code is read, the rules the
+// apps use (DispatchCodeTests / MarkdownCodeTests, the same cases).
+describe("console typed text", () => {
+  it("splits only at fences; the rest is escaped as typed", () => {
+    expect(mdTyped("跑一下这两条：\n```bash\ngit status --short\n<b>x</b>\n```\n\n然后告诉我结果")).toBe(
+      '<span class="typed">跑一下这两条：</span><pre><code data-lang="bash">git status --short\n&lt;b&gt;x&lt;/b&gt;</code></pre><span class="typed">然后告诉我结果</span>');
+    const typed = "# 不是标题\n- 不是列表\n*星号* 和 _下划线_ 原样\n\n\n空行也在";
+    expect(mdTyped(typed)).toBe(`<span class="typed">${typed}</span>`);
+    expect(mdTyped("")).toBe("");
+  });
+
+  it("fences: open runs to the end, ```ls``` is a span, only a bare fence as long closes, indentation comes off", () => {
+    expect(mdTyped("看这个：\n~~~\nls -la")).toBe('<span class="typed">看这个：</span><pre><code>ls -la</code></pre>');
+    expect(mdTyped("```ls``` 是行内代码")).toBe('<span class="typed"><code>ls</code> 是行内代码</span>');
+    expect(mdTyped("````md\n```bash\nls\n```\n````")).toBe('<pre><code data-lang="md">```bash\nls\n```</code></pre>');
+    expect(mdTyped("- 步骤：\n  ```sh\n  make\n    make install\n done\n  ```")).toBe(
+      '<span class="typed">- 步骤：</span><pre><code data-lang="sh">make\n  make install\ndone</code></pre>');
+  });
+
+  it("code spans stay on one line; a run with no partner stays as typed", () => {
+    expect(mdTyped("运行 `npm test` 和 ``a`b``，*星号* 不变，`没闭合")).toBe(
+      '<span class="typed">运行 <code>npm test</code> 和 <code>a`b</code>，*星号* 不变，`没闭合</span>');
+    expect(mdTyped("` padded ` and `<i>`")).toBe('<span class="typed"><code>padded</code> and <code>&lt;i&gt;</code></span>');
+    expect(mdTyped("`a\nb`")).toBe('<span class="typed">`a\nb`</span>');
   });
 });

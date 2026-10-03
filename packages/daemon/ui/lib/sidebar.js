@@ -48,7 +48,7 @@ function topics(s) {
     // A topic not yet named (its summary comes after a run) goes by what was asked last.
     const name = th.title || (task?.task || "").split("\n")[0].slice(0, 60) || "（未命名）";
     return `<div class="topic${open === th.id ? " on" : ""}" id="topic-${esc(th.id)}" ${task ? `data-open="${task.id}"` : ""} title="${esc(name)}">${topicSquare(th.id)}<span class="t">${esc(name)}</span><span class="age">${running ? spinner() : esc(agoShort(th.lastActivity || th.updatedAt))}</span></div>`;
-  }).join("") + (threads.length > TOPICS_SHOWN ? `<div class="topic more" id="topics-more"><span></span><span class="t faint">${s.allTopics ? "▾ Less" : `▸ ${threads.length - TOPICS_SHOWN} More`}</span><span></span></div>` : "");
+  }).join("") + (threads.length > TOPICS_SHOWN ? `<div class="topic more" id="topics-more"><span></span><span class="t faint">${s.allTopics ? "▴ Less" : `▸ ${threads.length - TOPICS_SHOWN} More`}</span><span></span></div>` : "");
 }
 
 /** A character meter: `████░░░░`. */

@@ -89,7 +89,8 @@ export const ACCEPT_SYSTEM = `You check a coding agent's finished work against t
 acceptance criteria one by one. Something the brief asked for as a file that only appears in the reply text is not
 delivered. Files under out/ are delivered: the user downloads them from the task. A request to send, give or share a
 file with the user is met when that file is under out/, whatever the agent says about other channels it tried. Do not invent requirements the brief does not state; partial work the agent explained honestly is still
-not accepted if a criterion is unmet. Reply with exactly one JSON object:
+not accepted if a criterion is unmet. Put commands, paths and file names in \`backticks\`: the user's screens draw them as code.
+Reply with exactly one JSON object:
 {"accepted": true | false, "missing": ["<unmet criterion>"], "note": "<one sentence for the next agent or the user>"}`;
 
 export const ANSWER_SYSTEM = `An executor has paused to ask a question or report a conflict between a working assumption and its observations.

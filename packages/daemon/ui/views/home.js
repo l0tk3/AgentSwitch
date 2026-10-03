@@ -10,7 +10,7 @@ import { feedback, firstLine } from "../lib/feedback.js";
 import { deleteBindings, deleteButton, deleteNotice } from "../lib/deletions.js";
 import { sendBindings, sendFeedback, sendState } from "../lib/sending.js";
 import { agentMark, spinner, square, topicSquare } from "../lib/sidebar.js";
-import { mdInline } from "../lib/markdown.js";
+import { mdInline, mdTyped } from "../lib/markdown.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -106,7 +106,8 @@ function feed(s) {
       if (th?.title) out.push(`<div class="tag">${topicSquare(th.id)}<span>${esc(th.title)}</span></div>`);
       topic = t.threadId;
     }
-    out.push(`<div class="me"><div>${esc(t.task.length > 600 ? t.task.slice(0, 600) + "…" : t.task)}</div></div>`);
+    // What you typed, as typed, its code drawn as code (2026-10-03).
+    out.push(`<div class="me"><div>${mdTyped(t.task.length > 600 ? t.task.slice(0, 600) + "…" : t.task)}</div></div>`);
     out.push(entry(t, s));
     for (const a of s.approvals.filter((x) => x.taskId === t.id)) out.push(approvalCard(a, null, s.answerSubmissions?.[a.id]));
   }

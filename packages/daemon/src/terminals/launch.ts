@@ -181,7 +181,9 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // program (ps, top, sudo, ping) can start.
         else args.push("-a", "on-request", ...codexPermissions(req.mode === "auto" ? ":workspace" : ":read-only", opts.protected, { denyReads: !hooked }));
         // `resume` goes on in the same conversation (Codex locks it against a second writer); `fork` starts a new one.
-        if (req.resume) args.unshift(req.fork ? "fork" : "resume", req.resume);
+        // The folder is named (`-C`, the terminal's own): Codex does not ask whether to use the one the session ran in,
+        // which may be gone (docs/terminal-v0.md §5).
+        if (req.resume) args.unshift(req.fork ? "fork" : "resume", "-C", req.cwd, req.resume);
         return { file, args, env: own, hooks: hooked };
       }
       case "opencode": {

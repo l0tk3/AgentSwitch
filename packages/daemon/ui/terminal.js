@@ -1,14 +1,15 @@
 // The terminal window (docs/terminal-v0.md §1) in the visual language of docs/ui-v0.md §7. AgentSwitch's own
 // terminals, one live at a time, drawn with the user's terminal font and colors. The sidebar is a directory tree:
-// project folders (nested under a shared parent), their running terminals, then earlier sessions to continue. Keys go
-// straight in; a reply that may hold a password goes through the sealed composer under the terminal; a permission
-// request floats over the screen until someone answers it here or in the terminal. No native dialogs (the Mac window
-// has none). Short words are English, sentences formal Chinese.
+// project folders (each in the nearest folder above it that the list shows), their running terminals, then earlier
+// sessions to continue. Keys go straight in; a reply that may hold a password goes through the sealed composer under
+// the terminal; a permission request floats over the screen until someone answers it here or in the terminal. No
+// native dialogs (the Mac window has none). Short words are English, sentences formal Chinese.
 import { Terminal } from "/ui/vendor/xterm.mjs";
 import { FitAddon } from "/ui/vendor/addon-fit.mjs";
 import { Unicode11Addon } from "/ui/vendor/addon-unicode11.mjs";
 import { WebLinksAddon } from "/ui/vendor/addon-web-links.mjs";
 import { AGENT_PX, flicker, glitch, HOLLOW, LOCK, mark, reducedMotion, revealWordmark, SPIN, sprite, SQUARE } from "/ui/pixel.js";
+import { everyFolder, everySession, everyTerminal, folderOf, folderTree as buildTree, foldersAbove, slashed, tilde } from "/ui/lib/tree.js";
 
 const $ = (id) => document.getElementById(id);
 const IN_MAC_APP = /AgentSwitchMac/.test(navigator.userAgent);
@@ -93,13 +94,6 @@ function h(tag, attrs = {}, ...children) {
 /** A span holding markup this page made (a sprite). */
 const raw = (html, cls = "") => { const s = h("span", { class: cls }); s.innerHTML = html; return s; };
 
-const tilde = (p) => p.replace(/^\/Users\/[^/]+(?=\/|$)/, "~");
-/** When a UUIDv7 id (Codex's) was made, in ms; null for any other id. */
-function uuidTime(id) {
-  const hex = String(id).replace(/-/g, "");
-  return /^[0-9a-f]{32}$/i.test(hex) && hex[12] === "7" ? parseInt(hex.slice(0, 12), 16) : null;
-}
-const folderOf = (p) => p.split("/").filter(Boolean).pop() || p;
 /** Age as a unit: Now, 5m, 3h, 2d, then the date. */
 function ago(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -475,8 +469,10 @@ function notify(message) {
 }
 
 let sheetDone = null;
-/** An in-page confirmation (the Mac window shows no alert or confirm): a sentence, and the action as a word. */
-function ask({ title, body, confirm, destructive = false, check = null }) {
+/** An in-page confirmation (the Mac window shows no alert or confirm): a sentence, and the action as a word. `folder`
+ *  adds a folder line (`{value, options}`: full paths, the Mac's Choose… beside it; the action waits for a folder); its
+ *  text comes back as `value`. */
+function ask({ title, body, confirm, destructive = false, check = null, folder = null }) {
   $("sheetTitle").textContent = title;
   $("sheetBody").textContent = body;
   $("sheetConfirm").textContent = confirm;
@@ -484,14 +480,32 @@ function ask({ title, body, confirm, destructive = false, check = null }) {
   $("sheetCheck").hidden = !check;
   $("sheetCheckText").textContent = check ?? "";
   $("sheetCheckbox").checked = false;
+  $("sheetField").hidden = !folder;
+  $("sheetInput").value = folder?.value ?? "";
+  // The folders offered, a line each under the field (shown with ~, put in it whole): a click puts one in it.
+  const offers = [...new Set(folder?.options ?? [])];
+  const markOffer = () => {
+    for (const b of $("sheetOffers").children) b.classList.toggle("on", b.dataset.path === $("sheetInput").value.trim());
+    $("sheetConfirm").disabled = Boolean(folder) && !$("sheetInput").value.trim();
+  };
+  $("sheetOffers").hidden = !offers.length;
+  $("sheetOffers").replaceChildren(...offers.map((f) => h("button", { class: "offer", type: "button", title: f, "data-path": f,
+    onclick: () => { $("sheetInput").value = f; markOffer(); $("sheetInput").focus(); } }, tilde(f))));
+  $("sheetInput").oninput = markOffer;
+  markOffer();
   $("sheet").hidden = false;
-  $("sheetConfirm").focus();
+  if (folder) {
+    // The field takes the keys (in the Mac window the terminal screen may hold them).
+    native?.postMessage({ type: "focusPage" });
+    $("sheetInput").focus();
+    $("sheetInput").select();
+  } else $("sheetConfirm").focus();
   return new Promise((resolve) => {
     const done = (ok) => {
       $("sheet").hidden = true;
       $("sheetConfirm").onclick = $("sheetCancel").onclick = null;
       sheetDone = null;
-      resolve({ ok, checked: $("sheetCheckbox").checked });
+      resolve({ ok, checked: $("sheetCheckbox").checked, value: $("sheetInput").value.trim() });
       if (current && !creating) focusScreen();
     };
     sheetDone = done;
@@ -755,60 +769,11 @@ function sendDecision(id, requestId, decision) {
 }
 
 // ---------- the sidebar: a directory tree ----------
-/** Folders with their running terminals and their earlier sessions, nested under a shared parent. The order is fixed
- *  (2026-09-30, user: 目录树顺序应该是固定的，现在会根据活跃状态顺序乱跳): folders by path, as a directory tree; in a
- *  folder its terminals in the order they were opened, then its sessions newest-begun first. Work going on moves nothing;
- *  a new terminal or session only comes in at its place. */
-function folderTree() {
-  const byCwd = new Map();
-  const group = (cwd) => {
-    if (!byCwd.has(cwd)) byCwd.set(cwd, { cwd, terminals: [], sessions: [], latest: 0, opened: Infinity });
-    return byCwd.get(cwd);
-  };
-  for (const t of terminals) { const g = group(t.cwd); g.terminals.push(t); g.latest = Math.max(g.latest, t.lastOutputAt); g.opened = Math.min(g.opened, t.createdAt); }
-  // A session already open here (or the one a fork was made from, or the record a Codex terminal is writing) is not
-  // listed again. A new Codex terminal says its record's id only after its first turn: until then, a Codex record made
-  // in its folder since it started is taken to be its own (Codex ids are UUIDv7, with the time).
-  // An ended terminal no longer holds its session: the session is listed (and can be continued) again.
-  const running = terminals.filter((t) => t.status !== "exited");
-  const shown = new Set(running.flatMap((t) => [t.agentSessionId, t.resumedFrom]).filter(Boolean));
-  const openForks = new Set(running.filter((t) => t.forked).map((t) => t.resumedFrom));
-  const ownRecord = (s) => s.harness === "codex" && (openForks.has(s.forkedFrom) || terminals.some((t) =>
-    t.harness === "codex" && !t.agentSessionId && t.status !== "exited" && t.cwd === s.cwd && (uuidTime(s.id) ?? 0) >= t.createdAt - 3000));
-  for (const s of sessions) {
-    if (shown.has(s.id) || ownRecord(s)) continue;
-    const g = group(s.cwd);
-    g.sessions.push(s);
-    g.latest = Math.max(g.latest, s.updatedAt);
-  }
-  const byPath = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
-  for (const g of byCwd.values()) {
-    g.terminals.sort((a, b) => a.createdAt - b.createdAt);
-    g.sessions.sort((a, b) => (b.startedAt ?? b.updatedAt) - (a.startedAt ?? a.updatedAt) || byPath(a.id, b.id));
-  }
-  const groups = [...byCwd.values()].sort((a, b) => byPath(a.cwd, b.cwd));
-  // Projects in the same parent folder sit under it (Worktop/ › Codex/, Claude/); a project alone in its parent stands
-  // by its own name.
-  const byParent = new Map();
-  for (const g of groups) {
-    const parent = g.cwd.replace(/\/[^/]*$/, "") || "/";
-    if (!byParent.has(parent)) byParent.set(parent, []);
-    byParent.get(parent).push(g);
-  }
-  const nodes = [...byParent].map(([parent, gs]) => gs.length > 1
-    ? { parent, groups: gs, terminals: gs.flatMap((g) => g.terminals), latest: Math.max(...gs.map((g) => g.latest)), opened: Math.min(...gs.map((g) => g.opened)) }
-    : { parent: null, groups: gs, terminals: gs[0].terminals, latest: gs[0].latest, opened: gs[0].opened });
-  nodes.sort((a, b) => byPath(a.parent ?? a.groups[0].cwd, b.parent ?? b.groups[0].cwd));
-  // Names at the top level that repeat are told apart by their parent.
-  const top = nodes.map((n) => ({ n, name: folderOf(tilde(n.parent ?? n.groups[0].cwd)), path: n.parent ?? n.groups[0].cwd }));
-  const counts = new Map();
-  for (const t of top) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
-  for (const t of top) {
-    const label = counts.get(t.name) > 1 ? tilde(t.path).split("/").filter(Boolean).slice(-2).join("/") : t.name;
-    if (t.n.parent) { t.n.label = label; for (const g of t.n.groups) g.label = folderOf(g.cwd); } else t.n.groups[0].label = label;
-  }
-  return nodes;
-}
+/** The folders with their terminals and sessions (lib/tree.js has the rules: a fixed order, each folder in the nearest
+ *  folder above it that the list shows). */
+const folderTree = () => buildTree(terminals, sessions);
+/** A folder folded by its path; `parent:<path>` is how a folder that only gathered others was kept before 2026-10-03. */
+const folded = (cwd) => collapsed.has(cwd) || collapsed.has(`parent:${cwd}`);
 
 /** Terminals in the order they were opened: ⌘1–9 follow it, wherever the tree puts them (a new terminal in an earlier
  *  folder does not renumber the others). */
@@ -934,35 +899,35 @@ function renderSearch(q) {
   const out = [];
   let folderHits = 0, titleHits = 0, textCount = 0;
   const words = (key) => (textFor === q ? textHits.get(key) : undefined);
-  for (const node of folderTree()) {
-    for (const g of node.groups) {
-      const label = node.parent ? `${node.label}/${g.label}` : g.label;
-      const nameHit = label.toLowerCase().includes(q) || tilde(g.cwd).toLowerCase().includes(q);
-      const rows = [
-        ...g.terminals.map((t) => ({ t, title: t.name.toLowerCase().includes(q), said: t.agentSessionId ? words(`${t.harness}:${t.agentSessionId}`) : undefined })),
-        ...g.sessions.map((s) => ({ s, title: (s.title || "").toLowerCase().includes(q), said: words(`${s.harness}:${s.id}`) })),
-      ].filter((r) => nameHit || r.title || r.said);
-      if (!nameHit && !rows.length) continue;
-      if (nameHit) folderHits++;
-      out.push(h("div", { class: "dir", title: tilde(g.cwd) },
-        h("span", { class: "chev" }, "▾"),
-        h("span", { class: "name" }, ...marked(label, q), "/", gitMark(gits[g.cwd])),
-        counts(g.terminals, g.sessions)));
-      rows.forEach((r, i) => {
-        const tr = i === rows.length - 1 ? "└─" : "├─";
-        if (r.title) titleHits++;
-        else if (r.said) textCount++;
-        if (r.t) out.push(terminalRow(r.t, tr, 0, r.title ? marked(r.t.name, q) : r.t.name), ...subagentRows(r.t, tr, 0));
-        else out.push(sessionRow(r.s, tr, 0, r.title ? marked(r.s.title, q) : r.s.title || "(Untitled)"));
-        if (r.said && !r.title) {
-          out.push(h("div", { class: "row hit", onclick: () => (r.t ? select(r.t.id) : RESUMABLE.has(r.s.harness) && resume(r.s)) },
-            h("span", { class: "ix" }),
-            h("span", { class: "tr" }, `${tr === "└─" ? "\u00a0\u00a0" : "│\u00a0"}└─`),
-            h("span", { class: "st" }),
-            h("span", { class: "nm" }, ...marked(near(r.said, q), q))));
-        }
-      });
-    }
+  // Each folder with terminals or sessions of its own, named by the folders it sits in (Worktop/培训/靶场): a match on
+  // a folder's name keeps every folder under it as well.
+  for (const { folder: g, name: label } of everyFolder(folderTree())) {
+    if (!g.own) continue;
+    const nameHit = label.toLowerCase().includes(q) || tilde(g.cwd).toLowerCase().includes(q);
+    const rows = [
+      ...g.terminals.map((t) => ({ t, title: t.name.toLowerCase().includes(q), said: t.agentSessionId ? words(`${t.harness}:${t.agentSessionId}`) : undefined })),
+      ...g.sessions.map((s) => ({ s, title: (s.title || "").toLowerCase().includes(q), said: words(`${s.harness}:${s.id}`) })),
+    ].filter((r) => nameHit || r.title || r.said);
+    if (!nameHit && !rows.length) continue;
+    if (nameHit) folderHits++;
+    out.push(h("div", { class: "dir", title: tilde(g.cwd) },
+      h("span", { class: "chev" }, "▾"),
+      h("span", { class: "name" }, ...marked(label, q), label.endsWith("/") ? "" : "/", gitMark(gits[g.cwd])),
+      counts(g.terminals, g.sessions)));
+    rows.forEach((r, i) => {
+      const tr = i === rows.length - 1 ? "└─" : "├─";
+      if (r.title) titleHits++;
+      else if (r.said) textCount++;
+      if (r.t) out.push(terminalRow(r.t, tr, 0, r.title ? marked(r.t.name, q) : r.t.name), ...subagentRows(r.t, tr, 0));
+      else out.push(sessionRow(r.s, tr, 0, r.title ? marked(r.s.title, q) : r.s.title || "(Untitled)"));
+      if (r.said && !r.title) {
+        out.push(h("div", { class: "row hit", onclick: () => (r.t ? select(r.t.id) : RESUMABLE.has(r.s.harness) && resume(r.s)) },
+          h("span", { class: "ix" }),
+          h("span", { class: "tr" }, `${tr === "└─" ? "\u00a0\u00a0" : "│\u00a0"}└─`),
+          h("span", { class: "st" }),
+          h("span", { class: "nm" }, ...marked(near(r.said, q), q))));
+      }
+    });
   }
   if (!out.length) return [h("div", { class: "none" }, `没有找到与“${query.trim()}”相关的文件夹或会话。`)];
   const n = (k, one, many) => (k ? `${k} ${k === 1 ? one : many}` : "");
@@ -977,11 +942,12 @@ function focusSearch() {
   $("find").select();
 }
 
-/** "▪2 5": running terminals (amber, blinking, while one waits for you — it may be folded away) · sessions. */
-/** A terminal just started or continued shows in the list: its folder (and the parent it sits under) open. */
+/** A terminal just started or continued shows in the list: its folder and every folder above it open. */
 function unfold(cwd) {
-  const parent = cwd.replace(/\/[^/]*$/, "") || "/";
-  if (collapsed.delete(cwd) | collapsed.delete(`parent:${parent}`)) remember("terminal.collapsed", JSON.stringify([...collapsed]));
+  const keys = foldersAbove(cwd).flatMap((p) => [p, `parent:${p}`]).filter((k) => collapsed.has(k));
+  if (!keys.length) return;
+  for (const k of keys) collapsed.delete(k);
+  remember("terminal.collapsed", JSON.stringify([...collapsed]));
 }
 
 /** After a folder's name: its branch, files changed, commits ahead and behind its upstream (docs/terminal-v0.md §1). */
@@ -992,6 +958,8 @@ function gitMark(g) {
   return h("i", { class: "git", title: `git: ${g.branch}${g.changed ? ` · ${g.changed} changed` : ""}${g.ahead ? ` · ${g.ahead} ahead` : ""}${g.behind ? ` · ${g.behind} behind` : ""}` }, said);
 }
 
+/** "▪2 5": running terminals (amber, blinking, while one waits for you — it may be folded away) · sessions, in the
+ *  folder and the folders under it. */
 function counts(ts, ss) {
   const live = ts.filter((t) => t.status !== "exited").length;
   const waiting = ts.some((t) => t.status === "waiting");
@@ -1003,8 +971,8 @@ function renderSidebar() {
   terminalOrder = [...terminals].sort((a, b) => a.createdAt - b.createdAt).map((t) => t.id);
   const q = query.trim().toLowerCase();
   if (q) { $("groups").replaceChildren(...renderSearch(q)); return; }
-  const toggle = (key) => {
-    if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+  const toggle = (cwd) => {
+    if (folded(cwd)) { collapsed.delete(cwd); collapsed.delete(`parent:${cwd}`); } else collapsed.add(cwd);
     remember("terminal.collapsed", JSON.stringify([...collapsed]));
     renderSidebar();
   };
@@ -1012,12 +980,15 @@ function renderSidebar() {
   // their ⌘1–9.
   const holds = (ts) => (ts.some((t) => t.id === current?.id && !creating) ? "holds" : "");
   const out = [];
-  const renderGroup = (g, depth) => {
-    const closed = collapsed.has(g.cwd);
-    out.push(h("div", { class: `dir ${closed ? holds(g.terminals) : ""}`, title: tilde(g.cwd), style: `padding-left:calc(10px + ${depth * 2}ch)`, onclick: () => toggle(g.cwd) },
+  // A folder's line, its own terminals and sessions, then the folders under it one step further in. A folder that
+  // only gathers others has the quieter line.
+  const renderFolder = (g, depth) => {
+    const closed = folded(g.cwd);
+    const ts = everyTerminal(g);
+    out.push(h("div", { class: `dir ${g.own ? "" : "parent"} ${closed ? holds(ts) : ""}`, title: tilde(g.cwd), style: `padding-left:calc(10px + ${depth * 2}ch)`, onclick: () => toggle(g.cwd) },
       h("span", { class: "chev" }, closed ? "▸" : "▾"),
-      h("span", { class: "name" }, `${g.label}/`, gitMark(gits[g.cwd])),
-      counts(g.terminals, g.sessions),
+      h("span", { class: "name" }, slashed(g.label), gitMark(gits[g.cwd])),
+      counts(ts, everySession(g)),
       h("button", { class: "add", title: "New Terminal Here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, "+")));
     if (closed) return;
     const all = expanded.has(g.cwd);
@@ -1032,22 +1003,16 @@ function renderSidebar() {
       out.push(terminalRow(t, twig, depth), ...subagentRows(t, twig, depth));
     }
     for (const s of list) out.push(sessionRow(s, tr(), depth));
+    // ▸ opens the rest under it; ▴ folds them back up (2026-10-03, user: 这个图标也有问题吧，有点误导人 — ▾ under the
+    // list read as a folder still to open).
     if (more) {
       out.push(h("div", { class: "row more", onclick: () => { if (all) expanded.delete(g.cwd); else expanded.add(g.cwd); renderSidebar(); } },
         h("span", { class: "ix" }), h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr()), h("span", { class: "st" }),
-        h("span", { class: "nm" }, all ? "▾ Less" : `▸ ${hidden} More`)));
+        h("span", { class: "nm" }, all ? "▴ Less" : `▸ ${hidden} More`)));
     }
+    for (const c of g.children) renderFolder(c, depth + 1);
   };
-  for (const node of folderTree()) {
-    if (!node.parent) { renderGroup(node.groups[0], 0); continue; }
-    const key = `parent:${node.parent}`;
-    const closed = collapsed.has(key);
-    out.push(h("div", { class: `dir parent ${closed ? holds(node.terminals) : ""}`, title: tilde(node.parent), onclick: () => toggle(key) },
-      h("span", { class: "chev" }, closed ? "▸" : "▾"),
-      h("span", { class: "name" }, `${node.label}/`),
-      counts(node.terminals, node.groups.flatMap((g) => g.sessions))));
-    if (!closed) for (const g of node.groups) renderGroup(g, 1);
-  }
+  for (const g of folderTree()) renderFolder(g, 0);
   $("groups").replaceChildren(...(out.length ? out : [h("div", { class: "empty-note" }, "暂无会话。")]));
 }
 
@@ -1205,24 +1170,44 @@ async function resume(s) {
   $("bandName").textContent = name;
   term.reset();
   showLoading(`Opening 「${name}」`);
-  const body = { harness: s.harness, cwd: s.cwd, agentSessionId: s.id, ...(s.title ? { title: s.title } : {}), mode: s.mode ?? pickedMode };
+  const cancelled = () => Object.assign(new Error(""), { cancelled: true });
   try {
-    const grid = gridHere();
-    let r;
-    try {
-      r = await api("POST", "/terminals/resume", { ...body, ...grid });
-    } catch (err) {
-      // Open in another program (iTerm, Codex's app): one writer at a time, else the two records part ways.
-      const where = err.body?.elsewhere;
-      if (!where) throw err;
-      hideLoading();
-      const app = where.app ?? "其他程序";
-      const answer = await ask({ title: `「${name}」正在 ${app} 中运行`,
-        body: `同一会话同时只能由一个程序写入，否则记录会分叉。请先在 ${app} 中退出该会话后再继续，或创建分支：新会话包含全部历史，原会话保持不变。`,
-        confirm: "Fork" });
-      if (!answer.ok) throw Object.assign(new Error(""), { cancelled: true });
-      showLoading(`Opening 「${name}」`);
-      r = await api("POST", "/terminals/resume", { ...body, fork: true, cols: term.cols, rows: term.rows });
+    let body = { harness: s.harness, cwd: s.cwd, agentSessionId: s.id, ...(s.title ? { title: s.title } : {}), mode: s.mode ?? pickedMode, ...gridHere() };
+    let r = null;
+    let gone0 = null;   // the first answer that its folder is gone: the folder it ran in, and what the Mac offered
+    while (!r) {
+      try {
+        r = await api("POST", "/terminals/resume", body);
+      } catch (err) {
+        const where = err.body?.elsewhere;
+        const gone = err.body?.folderGone;
+        if (where && !body.fork) {
+          // Open in another program (iTerm, Codex's app): one writer at a time, else the two records part ways.
+          hideLoading();
+          const app = where.app ?? "其他程序";
+          const answer = await ask({ title: `「${name}」正在 ${app} 中运行`,
+            body: `同一会话同时只能由一个程序写入，否则记录会分叉。请先在 ${app} 中退出该会话后再继续，或创建分支：新会话包含全部历史，原会话保持不变。`,
+            confirm: "Fork" });
+          if (!answer.ok) throw cancelled();
+          body = { ...body, fork: true, cols: term.cols, rows: term.rows };
+        } else if (gone) {
+          // Its folder was moved, renamed or deleted: it goes on in a folder picked here (docs/terminal-v0.md §5,
+          // 2026-10-03, user: 如果会话没了选择新目录继续). Offered: folders of the same name the Mac knows (the first
+          // put in the field), then the nearest folder above the old one still there (only offered: one Enter away it
+          // would move the session into a folder too wide). A picked folder that is missing too is said, the field
+          // keeping it to mend.
+          hideLoading();
+          gone0 ??= err.body;
+          const again = gone !== gone0.folderGone;
+          const offered = [...(gone0.alike ?? []), ...(gone0.near ? [gone0.near] : [])];
+          const picked = await ask({ title: `「${name}」的文件夹已不存在`,
+            body: `这段会话原来在 ${tilde(gone0.folderGone)}，该文件夹可能已被移动、改名或删除。${again ? `所选的 ${tilde(gone)} 也不存在。` : ""}请选择一个文件夹，会话将在那里继续。`,
+            confirm: "Resume", folder: { value: again ? gone : (gone0.alike?.[0] ?? ""), options: offered } });
+          if (!picked.ok || !picked.value) throw cancelled();
+          body = { ...body, cwd: picked.value };
+        } else throw err;
+        showLoading(`Opening 「${name}」`);
+      }
     }
     unfold(r.terminal.cwd);
     await refresh();
@@ -1329,8 +1314,10 @@ function shortcut(e) {
 }
 document.addEventListener("keydown", (e) => {
   if (sheetDone) {
+    // Enter that ends a word in an input method (Pinyin) is the input method's.
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === "Escape") { e.preventDefault(); sheetDone(false); }
-    else if (e.key === "Enter") { e.preventDefault(); sheetDone(true); }
+    else if (e.key === "Enter") { e.preventDefault(); if (!$("sheetConfirm").disabled) sheetDone(true); }
     return;
   }
   if (e.target === $("find")) {
@@ -1374,12 +1361,24 @@ if (native) {
   new ResizeObserver(tellScreen).observe($("screen"));
   $("chooseFolder").hidden = false;
   $("chooseFolder").addEventListener("click", () => native.postMessage({ type: "chooseFolder", path: $("cwd").value }));
+  $("sheetChoose").hidden = false;
+  $("sheetChoose").addEventListener("click", () => native.postMessage({ type: "chooseFolder", path: $("sheetInput").value }));
   if (NATIVE) {
     new MutationObserver(tellOverlays).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "class", "style"] });
     addEventListener("resize", tellOverlays);
   }
   window.agentswitch = {
-    folderChosen: (path) => { $("cwd").value = tilde(path); $("createStart").focus(); },
+    folderChosen: (path) => {
+      // For the folder line of the box open now (a session whose folder is gone), else for the new terminal.
+      if (sheetDone && !$("sheetField").hidden) {
+        $("sheetInput").value = path;
+        $("sheetInput").dispatchEvent(new Event("input"));
+        $("sheetConfirm").focus();
+        return;
+      }
+      $("cwd").value = tilde(path);
+      $("createStart").focus();
+    },
     // ⌘W, ⌘T, ⌘B, ⌘1–9, ⌘⇧V, ⌘↩ / ⌘⌫ on a request, as the window hands them over (a menu would take them first).
     shortcut: (key, shift = false) => { const run = shortcut({ metaKey: true, shiftKey: shift, key }); run?.(); return !!run; },
     // The grid the native screen fits at its size.
@@ -1400,20 +1399,24 @@ if (native) {
   };
 }
 
-// The busy spinner and the mark move in steps; with Reduce Motion they hold still.
+// The busy spinner and the mark move in steps; with Reduce Motion they hold still, and nothing moves while the page is
+// out of sight: another page of the Mac window, a closed or hidden window, a background tab (2026-10-03, user: 是不是
+// 还得优化一下 cpu/gpu 占用).
+const still = () => reducedMotion.matches || document.hidden;
 let spinFrame = 0;
 setInterval(() => {
-  if (reducedMotion.matches) return;
+  if (still()) return;
   spinFrame = (spinFrame + 1) % SPIN.length;
   for (const el of document.querySelectorAll(".spin")) el.textContent = SPIN[spinFrame];
 }, 90);
 // Busy rows flicker now and then, each on its own beat: every second one in five does, about every 3–7 s (ui-v0
 // §7.2.9, 2026-10-01, user: 正在运行中的都改成这个效果).
 setInterval(() => {
+  if (document.hidden) return;
   for (const el of document.querySelectorAll(".row.term.working")) if (Math.random() < 0.2) flicker(el);
 }, 1000);
 setInterval(() => {
-  if (reducedMotion.matches || ["idle", "off"].includes(markState()[0])) return;
+  if (still() || ["idle", "off"].includes(markState()[0])) return;
   markFrame++;
   renderMark();
 }, 140);
@@ -1444,7 +1447,8 @@ async function refreshGit() {
 }
 
 async function refreshSessions() {
-  const r = await api("GET", "/sessions?limit=80").catch(() => null);
+  // Every session the Mac lists: each folder whole (docs/terminal-v0.md §4).
+  const r = await api("GET", "/sessions").catch(() => null);
   sessions = r?.sessions ?? [];
   renderSidebar();
 }
@@ -1464,6 +1468,13 @@ const wanted = new URLSearchParams(location.search).get("id") || recall("termina
 if (wanted && terminals.some((t) => t.id === wanted)) select(wanted);
 else if (terminalOrder[0]) select(terminalOrder[0]);
 else showCreate();
-setInterval(refresh, 3000);
-setInterval(refreshSessions, 20000);
-setInterval(refreshGit, 5000);
+// Out of sight the list is not asked for; it is read again as the page comes back.
+setInterval(() => { if (!document.hidden) void refresh(); }, 3000);
+setInterval(() => { if (!document.hidden) void refreshSessions(); }, 20000);
+setInterval(() => { if (!document.hidden) void refreshGit(); }, 5000);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  void refresh();
+  void refreshSessions();
+  void refreshGit();
+});
