@@ -175,6 +175,10 @@ export type TerminalHostOptions = {
   /** The protected-path floor for a tool call (PreToolUse): the reason to refuse it, or null to let the agent's own
    *  permission mode decide. */
   readonly floor?: (tool: string, input: Record<string, unknown>, cwd: string) => string | null;
+  /** The program ended (or never started): what was made for this terminal's agent ends too (its browser session). */
+  readonly onExit?: (id: string) => void;
+  /** The terminal is forgotten (deleted, or its start failed): what it left goes too (its browser tabs). */
+  readonly onRemove?: (id: string) => void;
   readonly now?: () => number;
 };
 
@@ -452,7 +456,7 @@ class Session {
 export class TerminalHost {
   private readonly sessions = new Map<string, Session>();
   private readonly workListeners = new Set<(cwd: string) => void>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -478,6 +482,7 @@ export class TerminalHost {
     try {
       plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
     } catch (err) {
+      this.ended(id, true);
       throw new TerminalError("unavailable", (err as Error).message);
     }
     const s = new Session(id, req.harness, req.cwd, req.model ?? null, req.mode ?? "manual", hookToken, this.o.now(), req.cols ?? 120, req.rows ?? 36, this.o.scrollback);
@@ -503,6 +508,7 @@ export class TerminalHost {
       const started = await plan.companion.start().catch(() => null);
       if (this.sessions.get(id) !== s) {   // deleted while it started
         plan.companion.stop();
+        this.ended(id, true);
         throw new TerminalError("not_found", `terminal ${id} was deleted while it started`);
       }
       if (started) { ({ args, env } = started); s.hooks = true; s.companion = plan.companion; }
@@ -515,6 +521,7 @@ export class TerminalHost {
       this.sessions.delete(id);
       s.companion?.stop();
       s.term.dispose();
+      this.ended(id, true);
       throw new TerminalError("unavailable", `could not start ${req.harness}: ${(err as Error).message}`);
     }
     s.proc = proc;
@@ -787,7 +794,16 @@ export class TerminalHost {
     this.sessions.delete(id);
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.term.dispose();
+    this.ended(id, true);
     return info;
+  }
+
+  /** Tells the owner of what was made for terminal `id` that its program ended, or (`removed`) that it is gone too. */
+  private ended(id: string, removed: boolean): void {
+    try {
+      this.opts.onExit?.(id);
+      if (removed) this.opts.onRemove?.(id);
+    } catch (err) { console.error(`terminals: ending ${id}: ${(err as Error).message}`); }
   }
 
   closeAll(): void {
@@ -849,6 +865,7 @@ export class TerminalHost {
     this.noSubagents(s);
     this.setStatus(s, "exited");
     s.emit({ type: "exit", code });
+    this.ended(s.id, false);
   }
 
   /** A turn ended: from work (a repeated Stop, a start-up idle is none), or `always` (the program exited on an error). */

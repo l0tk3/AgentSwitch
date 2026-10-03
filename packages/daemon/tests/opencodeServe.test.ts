@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { stdioServePorts } from "../src/harness/opencodeStdio.js";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -123,6 +124,8 @@ describe("OpenCodeServer client", () => {
     const s = new OpenCodeServer({ binary: bin, port: 4799, home: join(home, "router"), gateHome: "/h/.secret-gate", log: (l) => logs.push(l) });
     try { await s.start(); } finally { for (const k of ["HTTPS_PROXY", "OPENCODE_SERVER_PASSWORD", "OPENCODE_PASSWORD"]) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
     expect(s.running).toBe(true);
+    // One of AgentSwitch's own ports while it runs: never opened in the shared browser (docs/browser-v0.md §2).
+    expect(stdioServePorts()).toContain(fake.port());
     const seen = JSON.parse(readFileSync(out, "utf8")) as { argv: string[]; env: Record<string, string> };
     expect(seen.argv).toEqual(["serve", "--stdio", "--port", "4799", "--hostname", "127.0.0.1"]);
     expect(seen.env.OPENCODE_SERVER_PASSWORD).toBeUndefined();
@@ -137,6 +140,7 @@ describe("OpenCodeServer client", () => {
     expect(reply.text).toBe("echo:\n=====\n\nPING");   // the fake echoes the last 12 characters
     await s.stop();
     expect(s.running).toBe(false);
+    expect(stdioServePorts()).not.toContain(fake.port());
     expect(logs.some((l) => l.includes(`ready on http://127.0.0.1:${fake.port()}`))).toBe(true);
   });
 });

@@ -32,6 +32,19 @@ export type StdioServeOptions = {
   readonly startTimeoutMs?: number | undefined;
 };
 
+/** The ports of the servers running now, of either kind and the terminals' (docs/browser-v0.md §2 安全: AgentSwitch's
+ *  own ports, never opened in the shared browser). */
+const livePorts = new Set<number>();
+
+/** The loopback ports of every `opencode serve --stdio` this daemon runs now. */
+export function stdioServePorts(): number[] {
+  return [...livePorts];
+}
+
+const portOfUrl = (url: string): number | null => {
+  try { const port = Number(new URL(url).port); return Number.isInteger(port) && port > 0 ? port : null; } catch { return null; }
+};
+
 export type StdioServe = {
   readonly child: ChildProcess;
   readonly url: string;
@@ -66,6 +79,11 @@ export async function startStdioServe(opts: StdioServeOptions): Promise<StdioSer
     child.on("error", (e) => { clearTimeout(timer); fail(new Error(`opencode serve --stdio failed to start: ${e.message}`)); });
     child.on("exit", (code) => { clearTimeout(timer); fail(new Error(`opencode serve --stdio exited (${code}) before it was ready: ${stderrTail()}`)); });
   }).catch(async (err: Error) => { await terminateProcess(child, FAILED_START_GRACE_MS); throw err; });
+  const port = portOfUrl(url);
+  if (port !== null && child.exitCode === null && child.signalCode === null) {
+    livePorts.add(port);
+    child.once("exit", () => livePorts.delete(port));
+  }
   return { child, url, password, stderrTail };
 }
 

@@ -284,6 +284,30 @@ protected paths are refused each agent's own way (terminal-v0 §3): Claude Code'
 (控制台 › 终端, `ui/terminal.html`). `AGENTSWITCH_TERMINALS=0` turns it off; audit in `$AGENTSWITCH_HOME/terminals/audit.jsonl`.
 node-pty's spawn helper needs its execute bit (npm skips install scripts): the daemon sets it before the first spawn.
 
+## Shared browser
+
+`src/browser/` (docs/browser-v0.md §5): one Google Chrome the daemon holds, started on the first tab and stopped after
+10 minutes without one, new headless on the persistent profile `$AGENTSWITCH_HOME/browser-profiles/main`, launched by
+`playwright-core` (pinned to the version Playwright MCP 0.0.82 uses) over `--remote-debugging-pipe`: no debugging port.
+Screens list tabs (`GET /browser/tabs`), open a URL, a path of the Mac's or a local port (`POST /browser/tabs`), watch a
+tab as an SSE screencast (`/browser/tabs/:id/stream`), send input, navigate, take a tab over and hand it back, set the
+holder's size, fill a ciphertext into the focused password or one-time-code field of their own tab through the gate
+(`POST /browser/tabs/:id/fill`, `secret-gate fill-value`; the value goes into the page only; never on an agent's tab),
+and list the Mac's local servers (`GET /browser/servers`). `file:` is
+for people only, and never a credential, AgentSwitch's own data or its own ports (`src/browser/rules.ts`), checked again
+on every request inside the browser. `AGENTSWITCH_BROWSER_HOST=0` turns it off; audit in
+`$AGENTSWITCH_HOME/browser/audit.jsonl`.
+
+Agents use the same browser (step 3): a terminal's Codex, Claude Code or OpenCode gets an MCP server `browser` =
+`secret-gate browser -- node src/browser/bridgeClient.ts --url … --session <id> --token-file <file>` (also `agentswitch
+browser-mcp`). The bridge carries MCP over `GET /browser/agent/mcp` (SSE) and `POST /browser/agent/mcp/:connection`
+with the session's own token (local only, revoked when the terminal's program ends); Playwright MCP runs in the daemon
+(`src/browser/agentMcp.ts`, playwright-core's `createConnection`) on a context that holds only the agent's own tabs.
+Calls of a session run in order, wait while a person holds the tab (2 min), and set the tab's status and the overlay's
+action (`src/browser/agents.ts`); code runs only as the gate's own probes (`src/browser/probes.ts`), and what a person
+did in a tab while holding it stays out of the agent's network and console logs (`src/browser/heldTraffic.ts`). Tests use a fake browser and a fake MCP engine; `npx tsx scripts/browser_smoke.ts`
+runs the real Chrome in a temporary folder, the bridge through the repo's secret-gate included (not part of `npm test`).
+
 ## MCP servers and skills
 
 Managed in the UI's 扩展 tab (or `GET /mcp`, `GET /skills`), stored under `$AGENTSWITCH_HOME`:

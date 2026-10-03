@@ -149,7 +149,7 @@ describe("HTTP API", () => {
     const res = await d.app.request("/ui");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("<title>AgentSwitch</title>");
+    expect(html).toContain("<title>Dispatch — AgentSwitch</title>");
     expect(html).toContain('src="/ui/app.js"');
     // only its own scripts, never framed (the terminal page can reach the Mac app's bridge)
     for (const path of ["/ui", "/ui/terminal.html"]) {

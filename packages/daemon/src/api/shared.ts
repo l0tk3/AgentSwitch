@@ -19,6 +19,7 @@ import type { Targets } from "../router/targets.js";
 import { zodIssues } from "../util/zod.js";
 import type { CwdRules } from "./cwdPolicy.js";
 import type { SessionMonitor } from "../sessions/monitor.js";
+import type { SharedBrowser } from "../browser/setup.js";
 import type { Terminals } from "./terminals.js";
 
 /** The most rows a `?limit=` may ask for. */
@@ -45,6 +46,8 @@ export type ApiDeps = {
   readonly sessions?: SessionMonitor;
   /** AgentSwitch's own terminals, the manual entry (docs/terminal-v0.md); absent = off. */
   readonly terminals?: Terminals;
+  /** The shared browser (docs/browser-v0.md); absent = off. */
+  readonly browser?: SharedBrowser;
   readonly uploads: Uploads;
   readonly artifactsDir: string;
   readonly extensions: Extensions;

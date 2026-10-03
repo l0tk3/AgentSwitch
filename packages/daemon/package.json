@@ -29,6 +29,7 @@
     "@xterm/xterm": "^6.0.0",
     "hono": "^4.13.8",
     "node-pty": "^1.1.0",
+    "playwright-core": "1.64.0-alpha-1789764292000",
     "yaml": "^2.6.0",
     "zod": "^4.6.5"
   },

@@ -72,7 +72,7 @@ describe("sidebar", () => {
     const top = band(base);
     for (const word of ["<b>AgentSwitch</b>", "Service</span>", "2 Waiting</span>", "Terminals ↗</a>"]) expect(top).toContain(word);
     const side = sidebar(base);
-    for (const word of ["// Console", "// Topics", "// Usage", ">Tasks<", ">Log<", ">Extensions<", ">Context<", ">Refresh<", ">Reload<"]) expect(side).toContain(word);
+    for (const word of ["// Dispatch", "// Topics", "// Usage", ">Tasks<", ">Log<", ">Extensions<", ">Context<", ">Refresh<", ">Reload<"]) expect(side).toContain(word);
     expect(`${top}${side}`).not.toMatch(/agentswitch<|>(tasks|log|extensions|context|service|refresh|reload)<|\/\/ (console|topics|usage)/);
   });
 

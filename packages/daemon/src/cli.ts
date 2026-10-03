@@ -8,6 +8,8 @@
  *   threads [--archived] | thread <id> | archive <id> | reopen <id> | rmthread <id>
  *   approvals | quota [--refresh] | preview "<text>" [--cwd d] | log
  *   route "<text>" ... (local, no daemon) | reroute ... | context init
+ *   browser-mcp --session <id> --token-file <file>   the shared browser's agent bridge on stdio (docs/browser-v0.md §2),
+ *                               as `secret-gate browser -- agentswitch browser-mcp …` (the terminals run the same script)
  */
 
 import { readLocalToken } from "./api/localAuth.js";
@@ -60,6 +62,10 @@ const { values, positionals } = parseArgs({
     allow: { type: "boolean", default: false },
     deny: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
+    session: { type: "string" },
+    "token-file": { type: "string" },
+    // Added by `secret-gate browser` for a Playwright MCP of its own; the bridge has no files of its own to put there.
+    "output-dir": { type: "string" },
   },
 });
 const [cmd, a1, a2] = positionals;
@@ -123,14 +129,16 @@ async function watchInteractive(id: string): Promise<void> {
   }
 }
 
-const USAGE = "usage: serve | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute";
+const USAGE = "usage: serve | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp";
 
 async function main(): Promise<number> {
   if (values.help) { console.log(USAGE); return 0; }
   switch (cmd) {
     case "serve": {
       const handle = await serve(cfg);
-      const stop = () => { handle.close(); process.exit(0); };
+      // A second signal does not wait for the first to finish.
+      let stopping = false;
+      const stop = () => { if (stopping) process.exit(0); stopping = true; void handle.stop().finally(() => process.exit(0)); };
       process.on("SIGINT", stop);
       process.on("SIGTERM", stop);
       await new Promise(() => undefined);
@@ -203,6 +211,10 @@ async function main(): Promise<number> {
     case "route":
     case "reroute":
       return localRoute(cmd, a1);
+    case "browser-mcp": {
+      const { bridgeArgs, runBridge } = await import("./browser/bridgeClient.js");
+      return runBridge(bridgeArgs(["--url", values.server, ...(values.session ? ["--session", values.session] : []), ...(values["token-file"] ? ["--token-file", values["token-file"]] : [])]));
+    }
     default:
       console.error(USAGE);
       return 2;

@@ -14,7 +14,7 @@ import { serve as listen, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
 import { existsSync, mkdirSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
@@ -28,7 +28,7 @@ import { Store } from "./engine/store.js";
 import { canonical, claudeExecutor, decideTool, probeRateLimits } from "./executors/claude.js";
 import { codexExecutor } from "./executors/codex.js";
 import { echoExecutor } from "./executors/echo.js";
-import { defaultGate, gateHealth, gateNotFound, type GateOptions } from "./executors/gate.js";
+import { defaultGate, gateHealth, gateNotFound, proxyEndpoint, type GateOptions } from "./executors/gate.js";
 import { gateRefsExecutor } from "./executors/gateRefs.js";
 import { gateRefs } from "./secrets/refs.js";
 import { gateMinter } from "./secrets/minter.js";
@@ -85,6 +85,12 @@ import { agentLauncher, hookCommandOf, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIM
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
 import { TERMINAL_HARNESSES } from "./terminals/host.js";
+import { bridgeCommand, terminalOwner, type AgentEngine } from "./browser/agents.js";
+import type { BrowserDriver } from "./browser/driver.js";
+import { gateFill } from "./browser/fill.js";
+import type { BrowserHost } from "./browser/host.js";
+import { sharedBrowser } from "./browser/setup.js";
+import { stdioServePorts } from "./harness/opencodeStdio.js";
 
 export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
@@ -124,6 +130,9 @@ export type DaemonConfig = {
   /** AgentSwitch's own terminals, the manual entry (docs/terminal-v0.md). On unless AGENTSWITCH_TERMINALS=0; tests build
    *  configs without it. */
   readonly terminals?: boolean;
+  /** The shared browser (docs/browser-v0.md): one Chrome the daemon holds, for the screens and later the agents. On
+   *  unless AGENTSWITCH_BROWSER_HOST=0; tests build configs without it. */
+  readonly browserHost?: boolean;
 };
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
@@ -153,6 +162,7 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     taskFolders: env.AGENTSWITCH_TASK_FOLDERS !== "0",
     watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
     terminals: env.AGENTSWITCH_TERMINALS !== "0",
+    browserHost: env.AGENTSWITCH_BROWSER_HOST !== "0",
   };
 }
 
@@ -169,6 +179,10 @@ export type Daemon = {
   readonly targets: Targets;
   /** AgentSwitch's own terminals (docs/terminal-v0.md), or null when off. */
   readonly terminals: TerminalHost | null;
+  /** The shared browser (docs/browser-v0.md), or null when off. */
+  readonly browser: BrowserHost | null;
+  /** Closes the shared browser's Chrome (a few seconds at most); `close()` does not wait for it. */
+  stopBrowser(): Promise<void>;
   /** The port the 127.0.0.1 listener got: the terminals' hook command calls it. */
   setLocalPort(port: number): void;
   close(): void;
@@ -204,6 +218,10 @@ export type BuildOverrides = {
   readonly terminalElsewhere?: ElsewhereCheck;
   /** Tests: how an OpenCode session is deleted (default: the user's opencode; none with a fake launcher). */
   readonly openCodeDelete?: OpenCodeDelete;
+  /** Tests: a fake browser for the shared browser; also turns it on whatever cfg.browserHost says. */
+  readonly browserDriver?: BrowserDriver;
+  /** Tests: the agents' MCP engine in the shared browser (default: Playwright MCP in this process). */
+  readonly browserEngine?: AgentEngine;
 };
 
 /** The agent CLIs a terminal can start, as absolute paths; a missing one is left out (docs/terminal-v0.md §2). The user's
@@ -287,7 +305,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const wiredExecutors = gate && summarizer ? scoped.map((executor) => credentialRepairExecutor(executor, { gate: credentialGate(gate), router: oracle("credential-repair"), store })) : scoped;
   // Kept browser logins (threads-v0 §4b): real executors only; the directory is read-denied to them (prot.readDenied).
   const browserSlots = cfg.executors === "real" ? new BrowserSlots(join(cfg.home, BROWSER_PROFILES_DIR)) : undefined;
-  const cloneDir = cfg.executors === "real" ? cloneRoot() : null;
+  // The shared browser's Chrome is the user's own too, so its clones are swept the same way.
+  const realBrowser = Boolean(cfg.browserHost) && !overrides.browserDriver;
+  const cloneDir = cfg.executors === "real" || realBrowser ? cloneRoot() : null;
   const clones = cloneDir ? new CloneSweeper({ root: cloneDir }) : undefined;
   clones?.schedule();   // what earlier runs left behind
   const taskFolderRoot = cfg.taskFolders ? () => loadWorkdir(cfg.home) : undefined;
@@ -300,14 +320,31 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ? new CodexHookTrust({ binary: agentBinaries.codex, args: codexHookArgs(hookCommandOf({}), QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S) })
     : undefined;
   void codexTrust?.ensure();
+  // docs/browser-v0.md: the shared browser; AgentSwitch's own ports are never opened in it nor listed as local servers.
+  // People fill ciphertexts in through the gate; agents get it through the agent bridge (terminals below).
+  const gateProxyPort = proxyEndpoint(gate?.proxy ?? process.env.SECRET_GATE_PROXY ?? "http://127.0.0.1:8080")?.port;
+  // With every OpenCode server the daemon runs now: the executors' resident one and the terminals' companions (port 0).
+  const ownPorts = (): number[] => [localPort, cfg.port, cfg.remote?.port, cfg.opencodePort, gateProxyPort, ...stdioServePorts()].filter((p): p is number => typeof p === "number" && p > 0);
+  const browser = cfg.browserHost || overrides.browserDriver
+    ? sharedBrowser({ home: cfg.home, userHome: process.env.HOME ?? homedir(), protected: prot, ownPorts, ...(gate ? { gateHome: gate.home } : {}), ...(overrides.browserDriver ? { driver: overrides.browserDriver } : {}),
+      ...(overrides.browserEngine ? { engine: overrides.browserEngine } : {}), ...(gate ? { fill: gateFill(gate) } : {}),
+      ...(clones ? { afterExit: () => clones.schedule() } : {}) })
+    : undefined;
+  // The terminals' agents use it through the gate (docs/terminal-v0.md §3): a session of their own per terminal, ended
+  // with the program; the terminal's tabs close when the terminal is deleted.
+  const agents = browser?.agents;
+  const terminalBrowser = agents && gate
+    ? (req: { id: string; harness: string; cwd: string }) => bridgeCommand(agents.mint(terminalOwner(req.id, req.harness, req.cwd)), `http://127.0.0.1:${localPort}`)
+    : undefined;
   // Terminals are used like any terminal: only the credentials at rest stay closed there (docs/terminal-v0.md §3).
   const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
-        codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true }),
+        codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true, ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
+      ...(agents ? { onExit: (id: string) => agents.end({ kind: "terminal", id }), onRemove: (id: string) => agents.end({ kind: "terminal", id }, true) } : {}),
     })
     : null;
   let style: TerminalStyle | null = null;
@@ -338,7 +375,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   sweepThreads(store, Date.now(), engine);
   forgetDeletedTasks(conversation, store);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const apiDeps: ApiDeps = { ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { ...(browser ? { browser } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -351,8 +388,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const api = createApp({ ...apiDeps, assistant });
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
-  return { app, api, remote, engine, store, quota, targets, terminals: terminalHost, setLocalPort: (port) => { localPort = port; },
-    close: () => { terminalHost?.closeAll(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+  return { app, api, remote, engine, store, quota, targets, terminals: terminalHost, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
+    stopBrowser: async () => { await browser?.agents.shutdown(); await browser?.host.shutdown(); },
+    close: () => { terminalHost?.closeAll(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml
@@ -471,7 +509,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
 /** Start-up: discover models (real executors only: the catalog takes new ids, the terminals' model menus what each
  *  agent offers, kept fresh from then on), bring up the resident OpenCode servers (router: real router only; executors:
  *  real executors in serve mode), then listen. */
-export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close: () => void }> {
+export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close: () => void; stop: () => Promise<void> }> {
   if (cfg.executors === "real") await checkGateProxy(defaultGate());
   const yaml = loadTargets(cfg.targetsPath);
   const modelOffers = cfg.executors === "real" ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()) }) : undefined;
@@ -498,7 +536,9 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   void daemon.quota.refresh();
   const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), THREAD_SWEEP_INTERVAL_MS);
   sweeper.unref();
-  return { daemon, close: () => { clearInterval(sweeper); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); } };
+  const close = () => { clearInterval(sweeper); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); };
+  // A signal: Chrome is let quit on its own first (a killed one leaves its code-sign clone behind), then the rest.
+  return { daemon, close, stop: async () => { await daemon.stopBrowser().catch(() => undefined); close(); } };
 }
 
 /** The 127.0.0.1 listener (web UI, CLI, Mac app): the local app behind the browser guard (api/localGuard.ts: Host,

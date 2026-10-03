@@ -33,10 +33,12 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   assistant: [...UPPER, "router", "engine"],
   /** terminal-v0: AgentSwitch's own terminals (the manual entry); the executors' gate wiring, below the API. */
   terminals: [...UPPER, "executors"],
-  api: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals"],
+  /** browser-v0: the shared browser the daemon holds; the executors' protected table and browser profiles, below the API. */
+  browser: [...UPPER, "executors"],
+  api: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser"],
   /** app-v0 §2: the remote listener, device tokens and pairing; a peer of api, which it reaches only over fetch. */
   remote: [...UPPER, "threads", "router", "executors", "engine"],
-  [ROOT]: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "api", "remote"],
+  [ROOT]: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "api", "remote"],
 };
 
 const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)(["'])(\.{1,2}\/[^"']+)\1/gm;

@@ -11,7 +11,9 @@
  *  - no proof needed: `GET /healthz` (the Mac app's liveness probe) and the console's static files (`/`, `/ui`,
  *    `/ui/*`), which hold no data; their API calls carry the cookie;
  *  - the terminals' hook command (`POST /terminals/hook`) shows its own terminal's hook token instead, which the route
- *    checks (docs/terminal-v0.md §3): the agent in the terminal can read that token, so it must never be the local one.
+ *    checks (docs/terminal-v0.md §3): the agent in the terminal can read that token, so it must never be the local one;
+ *  - the shared browser's agent bridge (`GET /browser/agent/mcp`, `POST /browser/agent/mcp/<connection>`) shows its
+ *    agent session's own token, which those routes check (api/browserAgents.ts), for the same reason.
  *  The remote listener hands requests to the API in process and never comes through here (device tokens there). */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -69,6 +71,7 @@ export class LocalAuth {
     if (method === "GET" && path === "/ui/login") return this.login(url);
     if (method === "GET" && (path === "/healthz" || path === "/" || path === "/ui" || path.startsWith("/ui/"))) return null;
     if (method === "POST" && path === "/terminals/hook") return null;
+    if ((method === "GET" && path === "/browser/agent/mcp") || (method === "POST" && /^\/browser\/agent\/mcp\/[\w-]+$/.test(path))) return null;
     if (method === "POST" && path === "/local/console-link") {
       if (!this.bearer(request)) return this.refuse();
       const next = url.searchParams.get("next");

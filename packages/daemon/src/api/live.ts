@@ -1,4 +1,4 @@
-/** `GET /live`: what the Mac's menu bar Live Activity shows (assistant-v0 §4, docs/design/visual-v1/mac-live.html) — the
+/** `GET /live`: what the Mac's menu bar Live Activity shows (assistant-v0 §4, docs/design/implemented/mac-live.html) — the
  *  tasks in progress and the terminals at work or waiting for you, the waiting ones first, then the newest, each with what it waits
  *  for in a form the card can answer (allow / deny, one option), and the tasks that ended in the last minute. The phone's
  *  Live Activity follows the same rules (AgentSwitchKit LiveSummary): titles, steps and conclusions read the same on

@@ -4,8 +4,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { BROWSER_SLOTS, BrowserSlots, namedHosts } from "../src/executors/browserSlots.js";
+import { describe, expect, it, vi } from "vitest";
+import { BROWSER_SLOTS, BrowserSlots, closeBrowsersOf, namedHosts } from "../src/executors/browserSlots.js";
 
 function pool(now = { t: 1000 }) {
   const root = join(mkdtempSync(join(tmpdir(), "agentswitch-slots-")), "browser-profiles");
@@ -108,5 +108,65 @@ describe("browser session slots", () => {
     expect(namedHosts("登陆 x.com 搜索 kyc，再去 https://www.Example.org:8443/a?b 和 mail.internal.test 看看")).toEqual(["x.com", "example.org", "mail.internal.test"]);
     expect(namedHosts("改一下 src/app.ts 和 README.md，结果写到 out/a.png")).toEqual([]);
     expect(namedHosts("发邮件到 alice@corp.example.com")).toEqual(["corp.example.com"]);
+  });
+});
+
+describe("closeBrowsersOf (review, 2026-10-02)", () => {
+  /** Processes of a profile that quit after `quitAfter` polls once signalled (`ignoreTerm`: only SIGKILL works;
+   *  `never`: nothing does). Records what was sent, and whether the locks were still there while a process ran. */
+  function fakeProcesses(o: { running?: boolean; quitAfter?: number; ignoreTerm?: boolean; never?: boolean }, dir: string) {
+    const sent: string[] = [];
+    let alive = o.running ?? true;
+    let polls = 0;
+    let killed = false;
+    const locksWhileRunning: boolean[] = [];
+    return {
+      sent, locksWhileRunning,
+      ops: {
+        signal: (_pattern: string, signal: "TERM" | "KILL") => { sent.push(signal); if (signal === "KILL") killed = true; return alive; },
+        running: () => {
+          if (alive && !o.never && (!o.ignoreTerm || killed) && polls++ >= (o.quitAfter ?? 0)) alive = false;
+          if (alive) locksWhileRunning.push(existsSync(join(dir, "SingletonLock")));
+          return alive;
+        },
+        sleep: () => undefined,
+      },
+    };
+  }
+  const profile = () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-close-"));
+    for (const lock of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) writeFileSync(join(dir, lock), "x");
+    return dir;
+  };
+  const locks = (dir: string) => ["SingletonLock", "SingletonSocket", "SingletonCookie"].filter((l) => existsSync(join(dir, l)));
+
+  it("removes the locks only once the profile's Chrome has quit", () => {
+    const dir = profile();
+    const fake = fakeProcesses({ quitAfter: 3 }, dir);
+    expect(closeBrowsersOf(dir, fake.ops)).toBe(true);
+    expect(fake.sent).toEqual(["TERM"]);
+    expect(fake.locksWhileRunning).toEqual([true, true, true]);
+    expect(locks(dir)).toEqual([]);
+  });
+
+  it("no Chrome on the profile: the locks go at once", () => {
+    const dir = profile();
+    const fake = fakeProcesses({ running: false }, dir);
+    expect(closeBrowsersOf(dir, fake.ops)).toBe(true);
+    expect(locks(dir)).toEqual([]);
+  });
+
+  it("a Chrome that ignores SIGTERM gets SIGKILL; one that never quits keeps its locks", () => {
+    const stubborn = profile();
+    const fake = fakeProcesses({ ignoreTerm: true }, stubborn);
+    expect(closeBrowsersOf(stubborn, fake.ops)).toBe(true);
+    expect(fake.sent).toEqual(["TERM", "KILL"]);
+    expect(locks(stubborn)).toEqual([]);
+    const stuck = profile();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(closeBrowsersOf(stuck, fakeProcesses({ never: true }, stuck).ops)).toBe(false);
+    expect(locks(stuck)).toEqual(["SingletonLock", "SingletonSocket", "SingletonCookie"]);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 });

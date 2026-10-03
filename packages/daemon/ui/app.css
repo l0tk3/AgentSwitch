@@ -1,4 +1,4 @@
-/* The web console (docs/ui-v0.md §7.4 网页控制台; demo docs/design/visual-v1/console.html): pixels, characters, signal —
+/* The web console (docs/ui-v0.md §7.4 网页控制台; demo docs/design/implemented/console.html): pixels, characters, signal —
    the phone's tasks page on a desk. Square corners and 1 px lines; status is a pixel square or the braille spinner;
    labels are `// words`; floating things have a dithered hard shadow. Dark and light follow the system (§7.3). */
 :root {

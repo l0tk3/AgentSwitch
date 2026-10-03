@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeMcpServers, gateEnv, withoutCredentialRepair, type GateOptions } from "../executors/gate.js";
 import { protectedDeny } from "../executors/opencodeShared.js";
-import type { ProtectedPaths } from "../executors/protected.js";
+import { rootSpellings, type ProtectedPaths } from "../executors/protected.js";
 import type { LaunchPlan, LaunchRequest, Launcher, TerminalHarness } from "./host.js";
 
 /** The hook command's script next to this module: hookClient.js in dist/, hookClient.ts under tsx (node strips its types). */
@@ -45,7 +45,36 @@ export type LauncherOptions = {
    *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
    *  guessed. */
   readonly opencodeServer?: boolean;
+  /** The shared browser for the agent (docs/browser-v0.md §2 给 agent, terminal-v0 §3): the agent bridge's command for
+   *  terminal `id`, made when it starts (a session of its own); the gate wraps it as the `browser` MCP server. Codex,
+   *  Claude Code and OpenCode; only with the gate (no ungated browser for an agent); absent or null: no browser tool. */
+  readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string }) => readonly string[] | null;
 };
+
+/** The agents that take MCP servers, and so the browser tool. */
+export const BROWSER_HARNESSES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode"]);
+/** The MCP server's name in each agent's configuration: its tools show as `browser_navigate`, … under it. */
+export const BROWSER_SERVER = "browser";
+/** Codex gives an MCP tool call 60 s by default: a call waits up to two minutes while a person holds its tab. */
+const BROWSER_TOOL_TIMEOUT_S = 300;
+
+/** The browser tool as an MCP server: `secret-gate browser -- <the bridge>`, with the gate's home (its rules and keys). */
+export type BrowserServer = { readonly command: string; readonly args: readonly string[]; readonly env: Record<string, string> };
+
+export function browserServer(gate: GateOptions, bridge: readonly string[]): BrowserServer {
+  return { command: gate.bin, args: ["browser", "--", ...bridge], env: { SECRET_GATE_HOME: gate.home } };
+}
+
+/** Codex's `-c` overrides for the browser server (its session config, never the user's config.toml). */
+export function codexBrowserArgs(server: BrowserServer): string[] {
+  const key = `mcp_servers.${BROWSER_SERVER}`;
+  return [
+    "-c", `${key}.command=${JSON.stringify(server.command)}`,
+    "-c", `${key}.args=${JSON.stringify(server.args)}`,
+    "-c", `${key}.env=${tomlInline(server.env)}`,
+    "-c", `${key}.tool_timeout_sec=${BROWSER_TOOL_TIMEOUT_S}`,
+  ];
+}
 
 /** The hook command a terminal's agent runs (the service's node and hook client). */
 export const hookCommandOf = (opts: Pick<LauncherOptions, "node" | "hookScript">): string =>
@@ -71,7 +100,7 @@ const shq = (s: string): string => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
 export function claudeHookSettings(command: string, prot?: ProtectedPaths): Record<string, unknown> {
   const hook = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }] }];
   const rule = (tool: string, path: string) => [`${tool}(/${path})`, `${tool}(/${path}/**)`];
-  const deny = prot ? [...new Set([...(prot.readDenied ?? []).flatMap((p) => rule("Read", p)), ...prot.roots.flatMap((p) => rule("Edit", p))])] : [];
+  const deny = prot ? [...new Set([...(prot.readDenied ?? []).flatMap(rootSpellings).flatMap((p) => rule("Read", p)), ...prot.roots.flatMap(rootSpellings).flatMap((p) => rule("Edit", p))])] : [];
   return {
     ...(deny.length ? { permissions: { deny } } : {}),
     hooks: {
@@ -112,6 +141,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
       AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken,
     };
     const env = { ...own, ...gated };
+    const bridge = opts.gate && opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd }) : null;
+    const browser = opts.gate && bridge ? browserServer(opts.gate, bridge) : null;
     switch (req.harness) {
       case "claude-code": {
         const settings = join(dir, "settings.json");
@@ -119,7 +150,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         const args = ["--settings", settings];
         if (opts.gate) {
           const mcp = join(dir, "mcp.json");
-          writeFileSync(mcp, JSON.stringify({ mcpServers: claudeMcpServers(opts.gate, join(dir, "profile"), false) }, null, 2), { mode: 0o600 });
+          const servers = { ...claudeMcpServers(opts.gate, join(dir, "profile"), false), ...(browser ? { [BROWSER_SERVER]: { type: "stdio", ...browser } } : {}) };
+          writeFileSync(mcp, JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });
           args.push("--mcp-config", mcp);
         }
         if (req.model) args.push("--model", req.model);
@@ -140,6 +172,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         args.push(...CODEX_ATTENTION);
         // The gate's proxy and CA reach the commands Codex runs, never Codex's own traffic (as the managed executor).
         if (opts.gate) args.push("-c", `shell_environment_policy.set=${tomlInline(gated)}`);
+        if (browser) args.push(...codexBrowserArgs(browser));
         if (req.model) args.push("-m", req.model);
         if (req.mode === "bypass") args.push("--dangerously-bypass-approvals-and-sandbox");
         // Asking is stated, not left to config.toml (which may never ask): it asks before anything outside the sandbox.
@@ -159,9 +192,11 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (req.mode !== "manual") rest.push("--auto");   // OpenCode has one switch: approve what is not denied
         if (req.resume) rest.push("--session", req.resume);   // OpenCode cannot fork: always the same session
         let own = env;
-        if (opts.protected) {
+        if (opts.protected || browser) {
           const config = join(dir, "opencode.json");
-          writeFileSync(config, JSON.stringify(opencodeTerminalConfig(opts.protected, env), null, 2), { mode: 0o600 });
+          const mcp = browser ? { mcp: { [BROWSER_SERVER]: { type: "local", command: [browser.command, ...browser.args], enabled: true, environment: browser.env } } } : {};
+          const base = opts.protected ? opencodeTerminalConfig(opts.protected, env) : { $schema: "https://opencode.ai/config.json" };
+          writeFileSync(config, JSON.stringify({ ...base, ...mcp }, null, 2), { mode: 0o600 });
           own = { ...env, OPENCODE_CONFIG: config };
         }
         const companion = opts.opencodeServer ? new OpenCodeCompanion({ binary: file, cwd: req.cwd, env: own, args: rest, asks: req.mode === "manual" }) : undefined;
@@ -191,8 +226,8 @@ export const CODEX_ATTENTION = ["-c", 'tui.notifications=["approval-requested","
  *  sandbox: Codex then keeps it sandboxed. */
 export function codexPermissions(base: ":read-only" | ":workspace", prot?: ProtectedPaths, o: { denyReads?: boolean } = {}): string[] {
   const filesystem: Record<string, string> = {};
-  for (const p of prot?.roots ?? []) filesystem[p] = "read";
-  if (o.denyReads ?? true) for (const p of prot?.readDenied ?? []) filesystem[p] = "deny";
+  for (const p of (prot?.roots ?? []).flatMap(rootSpellings)) filesystem[p] = "read";
+  if (o.denyReads ?? true) for (const p of (prot?.readDenied ?? []).flatMap(rootSpellings)) filesystem[p] = "deny";
   const profile = `{ extends = ${JSON.stringify(base)}, filesystem = ${tomlInline(filesystem)} }`;
   return ["-c", 'default_permissions="agentswitch"', "-c", `permissions.agentswitch=${profile}`];
 }

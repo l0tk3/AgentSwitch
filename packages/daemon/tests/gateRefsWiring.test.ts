@@ -49,7 +49,7 @@ function start(proxyPort: number): { daemon: Daemon; seen: ExecutionInput[] } {
   process.env.SECRET_GATE_PROXY = `http://127.0.0.1:${proxyPort}`;
   const seen: ExecutionInput[] = [];
   const executor: Executor = { harness: "claude-code", async run(input) { seen.push(input); return { ok: true, exitCode: 0, lastText: `logged in with ${input.task.split(" ").at(-1)}` }; } };
-  const cfg = { ...defaultConfig({ AGENTSWITCH_HOME: join(dir, "home"), AGENTSWITCH_ROUTER: "echo", AGENTSWITCH_EXECUTORS: "real", AGENTSWITCH_TERMINALS: "0" }), port: 0 };
+  const cfg = { ...defaultConfig({ AGENTSWITCH_HOME: join(dir, "home"), AGENTSWITCH_ROUTER: "echo", AGENTSWITCH_EXECUTORS: "real", AGENTSWITCH_TERMINALS: "0", AGENTSWITCH_BROWSER_HOST: "0" }), port: 0 };
   daemon = buildDaemon(cfg, { executors: [executor], router: echoRouter([decisionJson({ harness: "claude-code", model: "claude-sonnet-4-6", effort: null })]), quota: new QuotaService([]) });
   return { daemon, seen };
 }
