@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// A floating box on the cell grid, as the desktop's confirm boxes and menus (docs/design/visual-v1/phone.html): a 1 pt
+/// A floating box on the cell grid, as the desktop's confirm boxes and menus (docs/design/implemented/phone.html): a 1 pt
 /// ink frame, square, a dithered hard shadow, a head bar in a status colour, the words in formal Chinese and the
 /// buttons as short English words in brackets; it glitches as it opens. A confirm box dims what is under it; a menu
 /// sits by the row it belongs to. A tap outside is cancel.

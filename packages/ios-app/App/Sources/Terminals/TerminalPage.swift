@@ -641,17 +641,19 @@ struct TerminalPage: View {
 }
 
 /// A key on the bar: a small square cap with a 3 pt base; pressed, it sinks 2 pt onto a 1 pt base (the demo page's
-/// key caps).
-private struct KeyCapStyle: ButtonStyle {
+/// key caps). The browser page's key bar uses the same caps.
+struct KeyCapStyle: ButtonStyle {
     /// The one key that stands out (⏎): ink ground, the base colour's letters, a wider cap.
     var solid = false
+    /// Narrower caps, for a bar that holds a long key too (the browser page's).
+    var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
         configuration.label
             .foregroundStyle(solid ? Theme.base : Theme.ink)
-            .frame(minWidth: solid ? 46 : 34)
-            .padding(.horizontal, 6)
+            .frame(minWidth: compact ? (solid ? 36 : 26) : (solid ? 46 : 34))
+            .padding(.horizontal, compact ? 5 : 6)
             .padding(.top, 6)
             .padding(.bottom, pressed ? 6 : 8)
             .background(solid ? (pressed ? Theme.secondaryInk : Theme.ink) : (pressed ? Theme.line : Theme.raised))

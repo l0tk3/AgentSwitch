@@ -1,7 +1,7 @@
 import AgentSwitchKit
 import SwiftUI
 
-// The rest of the desktop terminal window's motion, on the phone (docs/design/visual-v1/phone.html, the effects
+// The rest of the desktop terminal window's motion, on the phone (docs/design/implemented/phone.html, the effects
 // table): the waiting blink, the block caret, rows drawn line by line and wiped out, a screen's refresh, scanlines,
 // the dither, and the wordmark's reveal. All in steps, never eased; still under Reduce Motion.
 
@@ -113,7 +113,12 @@ struct ScreenRefresh<Trigger: Equatable>: ViewModifier {
                 }
             }
             .onChange(of: trigger) { play() }
-            .onDisappear { run?.cancel() }
+            // Cut short, the cover would stay over what comes back.
+            .onDisappear {
+                run?.cancel()
+                run = nil
+                step = nil
+            }
     }
 
     private func play() {

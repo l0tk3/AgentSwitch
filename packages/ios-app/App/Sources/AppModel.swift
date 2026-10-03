@@ -3,9 +3,10 @@ import SwiftUI
 import UIKit
 
 /// The one sheet the home screen shows at a time (app-v0 §5: one input box, everything else behind it).
-/// The two entries (docs/terminal-v0.md §1): tasks (managed, the conversation) and terminals (manual).
+/// The entries (docs/terminal-v0.md §1, browser-v0 §1): tasks (Dispatch, the conversation), terminals (manual), and
+/// the browser on the Mac.
 enum MainTab: Hashable {
-    case tasks, terminals
+    case tasks, terminals, browser
 }
 
 enum HomeSheet: String, Identifiable {
@@ -87,6 +88,10 @@ final class AppModel {
     let terminals = TerminalsStore()
     /// A terminal to open on the terminals tab (a demo screen); the tab takes it.
     var openTerminalRequest: String?
+    /// The Browser tab (the Mac's tabs, its local servers, the addresses typed here).
+    let browser = BrowserStore()
+    /// A browser tab to open (a demo screen), or "new"; the Browser tab takes it.
+    var openBrowserRequest: String?
     /// A pairing link from a tap or a scan, waiting for the user to confirm.
     var incomingPairingLink: String?
     var banner: String?
@@ -200,6 +205,7 @@ final class AppModel {
         cues = CueTracker()
         terminalCues = TerminalCueTracker()
         terminals.reset()
+        browser.reset()
         targets = nil
         quota = nil
         pin = nil
@@ -740,6 +746,7 @@ extension AppModel {
         model.hasAssistant = true
         model.quota = DemoData.quota
         model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git)
+        model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent)
         model.routeReport = (Date().addingTimeInterval(-40), DemoData.routeReport)
         model.connectionProgress = ConnectionProgress().after(model.connection)
         if offline {

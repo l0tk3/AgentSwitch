@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The Live Activity's views (assistant-v0 §4), in a package so the Mac can render them in tests (LiveRenderTests);
 /// the widget extension places them in the Dynamic Island's regions and on the lock screen. Drawn in the app's own
-/// language (ui-v0 §7, docs/design/visual-v1/island.html): the pixel mark as the identity and the state, status squares
+/// language (ui-v0 §7, docs/design/implemented/island.html): the pixel mark as the identity and the state, status squares
 /// and the spinner's first frame, tree lines and dotted rules, short mono words in title case (§7.2.7), a bracket button. Everything is
 /// drawn for a black background: the island is always black and the lock screen card gets a dark tint, so white text
 /// reads on any wallpaper. The corners of the island clip, so nothing sits in them.

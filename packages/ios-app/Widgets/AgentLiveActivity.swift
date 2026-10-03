@@ -24,7 +24,7 @@ struct AgentLiveActivity: Widget {
                 .widgetURL(LiveLook.link(context.state))
         } dynamicIsland: { context in
             let state = context.state
-            // docs/design/visual-v1/island.html: the mark beside the camera, everything else aligned left below it.
+            // docs/design/implemented/island.html: the mark beside the camera, everything else aligned left below it.
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { IslandLeading(state: state) }
                 DynamicIslandExpandedRegion(.trailing) { IslandTrailing(state: state) }

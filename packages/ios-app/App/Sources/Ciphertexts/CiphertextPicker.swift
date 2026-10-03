@@ -1,8 +1,9 @@
 import AgentSwitchKit
 import SwiftUI
 
-/// Pick one saved ciphertext (for the input box, a question, or CONTEXT.md).
+/// Pick one saved ciphertext (for the input box, a question, or CONTEXT.md; `Fill Ciphertext` on a browser page).
 struct CiphertextPicker: View {
+    var title = "Insert Ciphertext"
     let onPick: (String) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -20,7 +21,7 @@ struct CiphertextPicker: View {
                     }
                 }
             }
-            .navigationTitle("Insert Ciphertext")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }

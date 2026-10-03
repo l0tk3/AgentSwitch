@@ -169,7 +169,9 @@ Demo screens (Debug, `-uiDemo YES -uiDemoScreen <name>`): `terminals`, `terminal
 permission), `terminalsealed` (the sealed box opens 3 s in, with its glitch), `terminalslash` (`/co` and its
 suggestions), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
 `interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
-`transcript`; `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
+`transcript`; the Browser tab's `browser` (the list), `browserpage` (watching codex, its last action outlined),
+`browsertook` (taken over, the keyboard and key bar up), `browserfile`, `browserlocal`, `browserdenied`, `browsernew`,
+`browserclose` (mock pages drawn on the phone); `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
 `offlinemac`) opens the Mac page scrolled to the end of 排障 with 常见原因 open.
 
 ## Not in v0

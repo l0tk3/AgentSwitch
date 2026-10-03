@@ -52,6 +52,11 @@ public enum PixelArt {
     public static let agents: [String: [String]] = LiveArt.agents
     /// The terminals tab and window: a framed terminal (">_" alone means Codex).
     public static let terminalWindow = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"]
+    /// The Browser tab (browser-v0 §1, the demo page's globe): the outline, a meridian and the equator, 11 × 11 for the
+    /// tab bar; `globeSmall` (the demo's 5 × 5) beside a title.
+    public static let globe = ["...#####...", ".##..#..##.", ".#..#.#..#.", "#...#.#...#", "#..#...#..#", "###########",
+                               "#..#...#..#", "#...#.#...#", ".#..#.#..#.", ".##..#..##.", "...#####..."]
+    public static let globeSmall = [".###.", "#.#.#", "#####", "#.#.#", ".###."]
 
     /// The lit cells of a sprite.
     public static func sprite(_ rows: [String]) -> [(x: Int, y: Int)] {

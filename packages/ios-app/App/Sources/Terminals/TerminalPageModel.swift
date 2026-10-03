@@ -49,15 +49,8 @@ final class TerminalPageModel {
     /// page closed, the app in the background).
     let screenId = TerminalPageModel.phoneScreen
 
-    /// One id for this phone, kept across pages and launches (2026-09-30, user: 返回重新进入提示我另一个 iPhone 在使用 —
-    /// a new id per page made the page just left, still holding the size for a few seconds, "another iPhone").
-    static let phoneScreen: String = {
-        let key = "terminal.screenId"
-        if let saved = UserDefaults.standard.string(forKey: key), saved.hasPrefix("phone-") { return saved }
-        let made = "phone-" + UUID().uuidString.prefix(8).lowercased()
-        UserDefaults.standard.set(made, forKey: key)
-        return made
-    }()
+    /// One id for this phone, kept across pages and launches (PhoneScreen; the browser's tabs know it by the same id).
+    static var phoneScreen: String { PhoneScreen.id }
     /// Where the terminal is in use instead ("mac", "web", "iphone"): the placeholder over the frame as it was.
     private(set) var away: String?
     /// Who has the size, as the stream last said (nil: nobody, or not heard yet).

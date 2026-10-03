@@ -56,7 +56,7 @@ struct SettingsView: View {
                     NavigationLink("Context") { ContextEditorView() }
                     NavigationLink("Ciphertexts") { CiphertextsView() }
                 } header: {
-                    SectionLabel("Tasks")
+                    SectionLabel("Dispatch")
                 } footer: {
                     Text("环境说明记录站点、账号和偏好，供每个任务参考。")
                 }

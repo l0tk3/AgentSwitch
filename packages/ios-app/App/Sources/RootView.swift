@@ -34,11 +34,13 @@ struct RootView: View {
     }
 }
 
-/// The two entries side by side (docs/terminal-v0.md §1): `tasks` (the conversation) and `terminals`; their icons are
-/// pixel marks (§7.3: the app's mark for tasks, a framed terminal window for terminals — `>_` alone means Codex).
+/// The entries side by side (docs/terminal-v0.md §1, browser-v0 §1): `Dispatch` (the conversation), `Terminals` and
+/// `Browser`; their icons are pixel marks (§7.3: the app's mark for tasks, a framed terminal window for terminals — `>_`
+/// alone means Codex — and a globe for the browser).
 ///
 /// No push: while the app is open the terminals are followed from every tab and page (the badge, the waiting cue, the
-/// Live Activity), and the tasks from the terminals tab too (their cues); the home screen follows them itself.
+/// Live Activity), and the tasks from the terminals tab too (their cues); the home screen follows them itself. The
+/// browser's tabs are read from every tab too (the badge counts the agents waiting for you), more often on its own.
 struct MainTabs: View {
     @Environment(AppModel.self) private var model
 
@@ -51,18 +53,30 @@ struct MainTabs: View {
         @Bindable var model = model
         TabView(selection: $model.tab) {
             HomeView()
-                .tabItem { Label { Text("Tasks") } icon: { Image(uiImage: TabIcons.tasks) } }
+                .tabItem { Label { Text("Dispatch") } icon: { Image(uiImage: TabIcons.tasks) } }
                 .tag(MainTab.tasks)
             TerminalsTab()
                 .tabItem { Label { Text("Terminals") } icon: { Image(uiImage: TabIcons.terminals) } }
                 .badge(model.terminals.waiting)
                 .tag(MainTab.terminals)
+            BrowserTab()
+                .tabItem { Label { Text("Browser") } icon: { Image(uiImage: TabIcons.browser) } }
+                .badge(model.browser.waiting)
+                .tag(MainTab.browser)
         }
         .tint(Theme.ink)
         .task(id: model.connection.endpoint) {
             while !Task.isCancelled {
                 await model.refreshTerminals()
                 try? await Task.sleep(for: TerminalsTab.pollInterval)
+            }
+        }
+        .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
+            while !Task.isCancelled {
+                await model.browser.refreshList(model.api)
+                let every = model.browser.unsupported ? BrowserStore.unsupportedInterval
+                    : model.tab == .browser ? BrowserStore.pollInterval : BrowserStore.backgroundInterval
+                try? await Task.sleep(for: every)
             }
         }
         .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
@@ -80,6 +94,7 @@ struct MainTabs: View {
 enum TabIcons {
     static let tasks = image(PixelArt.markRows, pixel: 2)
     static let terminals = image(PixelArt.terminalWindow, pixel: 3)
+    static let browser = image(PixelArt.globe, pixel: 2)
 
     static func image(_ rows: [String], pixel: CGFloat) -> UIImage {
         let lit = PixelArt.sprite(rows.map { row in String(row.map { $0 == "." ? Character(".") : Character("#") }) })
