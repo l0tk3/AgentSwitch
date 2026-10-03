@@ -40,5 +40,18 @@ mapping from a mouse event to a cell (columns, rows from the top of the scrollba
 
 - `Mac/MacTerminalView.swift`: `calculateMouseHit(with:)` is `public` (unchanged otherwise).
 
+## Colours of drawn cells (2026-10-03)
+
+docs/app-v0.md §4 "省电". The CoreGraphics draw path keeps a cache of the CGColors it draws text and backgrounds with
+(`cachedCGColor`: on macOS 26 and later every NSColor → CGColor conversion evaluates the display's EDR headroom), but
+the cells it draws itself did not use it: each box-drawing cell copied its NSColor and converted it twice, each block
+element converted it for every shade, each Powerline glyph once. Agents' screens draw rules and boxes across the whole
+width (Claude Code's input box), so a redraw did hundreds of conversions.
+
+- `Apple/AppleTerminalView.swift`: `drawBlockElements`, `drawBoxDrawings` and `drawPowerlineGlyphs` take the cached
+  CGColor (a shade's alpha by `CGColor.copy(alpha:)`).
+- `Apple/BoxDrawingRenderer.swift`: `draw(… cgColor: …)` beside `draw(… color: …)`, which now calls it.
+
 To take a newer SwiftTerm: replace `Sources/SwiftTerm` with its library sources, then apply the changes above again (or
-drop them once upstream draws marked text inline and joins rows more strictly).
+drop them once upstream draws marked text inline and joins rows more strictly, and draws these cells from its colour
+cache).

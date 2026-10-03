@@ -14,6 +14,8 @@ struct AgentSwitchApp: App {
                 .environment(\.showSettings, ShowSettingsAction { [delegate] tab in delegate.settings.show(tab) })
                 .environment(\.showMainWindow, ShowMainWindowAction { [delegate] page in delegate.main.show(page) })
                 .environment(\.quitApp, QuitAction { [delegate] in delegate.quit() })
+                // The mark stops while the panel is closed (ui-v0 §7.4).
+                .followsWindow()
         } label: {
             MenuBarIcon(level: delegate.model.overallLevel, waiting: delegate.model.waitingCount)
         }
@@ -60,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// a running service (TerminalProbe.swift, DispatchProbe.swift, BrowserProbe.swift).
     static var probeOnly: Bool {
         #if DEBUG
-        return TerminalProbe.directory != nil || DispatchProbe.directory != nil || BrowserProbe.directory != nil
+        return TerminalProbe.directory != nil || DispatchProbe.directory != nil || BrowserProbe.directory != nil || PerfProbe.directory != nil
         #else
         return false
         #endif
@@ -99,6 +101,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let dir = BrowserProbe.directory {
             NSApp.setActivationPolicy(.accessory)
             BrowserProbe.run(main, model: model, into: dir)
+            return
+        }
+        if let dir = PerfProbe.directory {
+            NSApp.setActivationPolicy(.accessory)
+            PerfProbe.run(main, model: model, into: dir)
             return
         }
         #endif

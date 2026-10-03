@@ -32,6 +32,8 @@ struct MainWindowRoot: View {
         }
         .background(Color(nsColor: state.page.ground))
         .ignoresSafeArea(.container, edges: .top)
+        // The bar's spinners and marks stop while the window is not seen (ui-v0 §7.4).
+        .followsWindow()
     }
 }
 
@@ -188,17 +190,30 @@ private struct ActivityMark: View {
     }
 }
 
-/// Waiting for you, as everywhere: an amber square that blinks in two steps over 1.1 s; still under Reduce Motion.
+/// Waiting for you, as everywhere: an amber square that blinks in two steps over 1.1 s; still under Reduce Motion, and
+/// while not seen (ui-v0 §7.4, 2026-10-03).
 struct BlinkingSquare: View {
     var color: Color = .waiting
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.onScreen) private var onScreen
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.55)) { timeline in
-            let dim = !reduceMotion && Int(timeline.date.timeIntervalSinceReferenceDate / 0.55) % 2 == 1
-            PixelSprite(rows: PixelArt.square, pixel: 2, color: color).opacity(dim ? 0.25 : 1)
+        Group {
+            if reduceMotion {
+                square(dim: false)
+            } else if onScreen {
+                TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { timeline in
+                    square(dim: Motion.step(at: timeline.date, every: Motion.blink) % 2 == 1)
+                }
+            } else {
+                square(dim: Motion.step(at: Date(), every: Motion.blink) % 2 == 1)
+            }
         }
         .frame(width: 8, height: 8)
+    }
+
+    private func square(dim: Bool) -> some View {
+        PixelSprite(rows: PixelArt.square, pixel: 2, color: color).opacity(dim ? 0.25 : 1)
     }
 }
 
@@ -319,6 +334,7 @@ struct ToolbarPixelButton: View {
 private struct WindowDragArea: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { DragView() }
     func updateNSView(_ view: NSView, context: Context) {}
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? { proposal.replacingUnspecifiedDimensions() }
 
     final class DragView: NSView {
         override func mouseDown(with event: NSEvent) {
@@ -337,4 +353,7 @@ private struct ContentHost: NSViewRepresentable {
     let view: NSView
     func makeNSView(context: Context) -> NSView { view }
     func updateNSView(_ view: NSView, context: Context) {}
+    /// The space offered, as it is: asked for its fitting size, AppKit would walk every page's views through Auto Layout
+    /// on each layout of the bar — each step of its spinner (2026-10-03, ui-v0 §7.4).
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? { proposal.replacingUnspecifiedDimensions() }
 }

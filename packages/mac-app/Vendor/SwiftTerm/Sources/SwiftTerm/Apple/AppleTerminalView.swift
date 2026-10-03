@@ -1465,7 +1465,9 @@ extension TerminalView {
                                      y: lineOrigin.y)
             let xEighth = cellWidth / 8.0
             let yEighth = cellHeight / 8.0
-            let baseAlpha = element.foregroundColor.cgColor.alpha
+            // AgentSwitch patch (PATCHES.md): the cached CGColor, not an NSColor converted for every cell and shade.
+            let baseColor = cachedCGColor(element.foregroundColor)
+            let baseAlpha = baseColor.alpha
 
             for rect in element.rects {
                 var drawRect = rect.rect(in: cellOrigin, xEighth: xEighth, yEighth: yEighth, cellHeight: cellHeight)
@@ -1476,8 +1478,7 @@ extension TerminalView {
                     continue
                 }
                 let resolvedAlpha = max(0, min(1, baseAlpha * rect.alpha.rawValue))
-                let fillColor = element.foregroundColor.withAlphaComponent(resolvedAlpha)
-                context.setFillColor(fillColor.cgColor)
+                context.setFillColor(resolvedAlpha == baseAlpha ? baseColor : (baseColor.copy(alpha: resolvedAlpha) ?? baseColor))
                 context.fill(drawRect)
             }
         }
@@ -1508,15 +1509,14 @@ extension TerminalView {
             let cellWidth = CGFloat(cellWidthPx) / scale
             let cellOrigin = CGPoint(x: (lineOriginPxX + CGFloat(item.column * baseCellWidthPx)) / scale,
                                      y: lineOriginPxY / scale)
-            let baseAlpha = item.foregroundColor.cgColor.alpha
-            let resolvedAlpha = max(0, min(1, baseAlpha))
-            let color = item.foregroundColor.withAlphaComponent(resolvedAlpha)
+            // AgentSwitch patch (PATCHES.md): the cached CGColor (its alpha is already within 0...1), not an NSColor
+            // copied and converted twice for every cell.
             BoxDrawingRenderer.draw(codePoint: item.codePoint,
                                     in: context,
                                     cellOrigin: cellOrigin,
                                     cellSize: CGSize(width: cellWidth, height: cellHeight),
                                     scale: scale,
-                                    color: color,
+                                    cgColor: cachedCGColor(item.foregroundColor),
                                     baseThicknessPx: baseThicknessPx)
         }
 
@@ -1545,7 +1545,7 @@ extension TerminalView {
                                    cellRect: cellRect,
                                    scaleX: scaleX,
                                    scaleY: scaleY,
-                                   color: item.foregroundColor.cgColor)
+                                   color: cachedCGColor(item.foregroundColor))   // AgentSwitch patch (PATCHES.md)
         }
     }
 

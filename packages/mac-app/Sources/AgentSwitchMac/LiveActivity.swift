@@ -361,6 +361,7 @@ struct LiveCardRoot: View {
         if activity.presenter.isOpen {
             LiveCard(presenter: activity.presenter, actions: activity.cardActions, pending: activity.pending)
                 .fixedSize()
+                .followsWindow()
         }
     }
 }

@@ -43,6 +43,57 @@ final class NativeTerminalView: TerminalView {
         super.mouseDown(with: event)
     }
 
+    // MARK: seen or not (docs/app-v0.md §4, 2026-10-03)
+
+    /// The screen is seen: its window on screen (not covered entirely, not minimised, the app not hidden) and the
+    /// Terminals page shown. AppKit draws a window nobody sees all the same, so while the screen is not seen SwiftTerm's
+    /// redraws are held back, and it is drawn whole once it is seen again; its owner holds the output back too.
+    private(set) var seen = true
+    private var heldBack = false
+    private lazy var watcher = SeenWatcher(view: self) { [weak self] seen in self?.seenChanged(seen) }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        watcher.windowChanged()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        watcher.check()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        watcher.check()
+    }
+
+    private func seenChanged(_ seen: Bool) {
+        var seen = seen
+        #if DEBUG
+        if MainWindowController.probing { seen = true }   // TerminalProbe: behind every other window on purpose
+        #endif
+        guard seen != self.seen else { return }
+        self.seen = seen
+        if seen, heldBack {
+            heldBack = false
+            super.setNeedsDisplay(bounds)
+        }
+        owner?.screenSeen(seen)
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        guard seen else { heldBack = true; return }
+        super.setNeedsDisplay(invalidRect)
+    }
+
+    override var needsDisplay: Bool {
+        get { super.needsDisplay }
+        set {
+            guard seen || !newValue else { heldBack = true; return }
+            super.needsDisplay = newValue
+        }
+    }
+
     /// The cell of the click SwiftTerm is handling, while it does (a ⌘-click's link opens inside `mouseUp`).
     private(set) var click: Position?
 
@@ -113,6 +164,9 @@ final class TerminalScreenController: NSObject {
     /// The user's look, put back after every reset (a reset takes the terminal's colours back to its defaults).
     private var style: TerminalStyle = .fallback
     private var keyMonitor: Any?
+    /// Output on its way in: as it comes while the screen is seen, together (a few times a second) while it is not.
+    private var batcher = TerminalFeedBatcher()
+    private var flushWork: DispatchWorkItem?
 
     init(client: @escaping () -> DaemonClient) {
         self.client = client
@@ -183,6 +237,7 @@ final class TerminalScreenController: NSObject {
             return
         }
         disconnect()
+        dropHeld()
         self.id = id
         view.isHidden = id == nil
         refresh.cancel()
@@ -231,7 +286,10 @@ final class TerminalScreenController: NSObject {
     }
 
     /// A line of the page's own under the program's output ("1 secret sealed").
-    func note(_ text: String) { view.feed(text: "\r\n\u{1b}[2m[\(text)]\u{1b}[0m\r\n") }
+    func note(_ text: String) {
+        flushHeld()
+        view.feed(text: "\r\n\u{1b}[2m[\(text)]\u{1b}[0m\r\n")
+    }
 
     /// The user typed or clicked here (the placeholder's [ take over ] too): the size is this window's.
     func userActed() { if !mine { claim() } }
@@ -324,6 +382,8 @@ final class TerminalScreenController: NSObject {
         let terminal = view.getTerminal()
         switch event {
         case .snapshot(let seq, let cols, let rows, let data):
+            // The whole screen again: output still waiting is in it.
+            dropHeld()
             clear()
             service = (cols, rows)
             follow(cols: cols, rows: rows)
@@ -341,9 +401,11 @@ final class TerminalScreenController: NSObject {
             }
         case .output(let seq, let data):
             guard seq > lastSeq else { return }
-            view.feed(text: data)
             lastSeq = seq
+            take(data)
         case .resize(let cols, let rows, let by):
+            // A size, the end, the terminal gone: after the output before them.
+            flushHeld()
             service = (cols, rows)
             if claimOnConnect {
                 // Just opened here: this window's size unless another screen is in use (then the placeholder says where).
@@ -370,12 +432,49 @@ final class TerminalScreenController: NSObject {
                 tellAway(nil)
             }
         case .exit(let code):
+            flushHeld()
             view.feed(text: "\r\n\u{1b}[2m[exited · code \(code.map(String.init) ?? "?")]\u{1b}[0m\r\n")
         case .removed:
+            flushHeld()
             disconnect()
         case .status:
             break
         }
+    }
+
+    /// Output from the stream: into the screen now while it is seen, else held with the rest (TerminalFeedBatcher).
+    private func take(_ text: String) {
+        switch batcher.receive(text, seen: view.seen, at: .now) {
+        case .feed(let all):
+            flushWork?.cancel()
+            flushWork = nil
+            view.feed(text: all)
+        case .wait(let until):
+            let work = DispatchWorkItem { [weak self] in self?.flushHeld() }
+            flushWork = work
+            let delay = ContinuousClock.now.duration(to: until).components
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(delay.seconds) + Double(delay.attoseconds) / 1e18, execute: work)
+        case .waiting:
+            break
+        }
+    }
+
+    /// Whatever output waits, into the screen.
+    private func flushHeld() {
+        flushWork?.cancel()
+        flushWork = nil
+        if let text = batcher.flush() { view.feed(text: text) }
+    }
+
+    private func dropHeld() {
+        flushWork?.cancel()
+        flushWork = nil
+        batcher.drop()
+    }
+
+    /// The screen came into sight (what waited goes in, and it is drawn whole) or went out of it.
+    fileprivate func screenSeen(_ seen: Bool) {
+        if seen { flushHeld() }
     }
 
     /// Another screen's size (or the one the snapshot was drawn at): the buffer takes it, the view stays.

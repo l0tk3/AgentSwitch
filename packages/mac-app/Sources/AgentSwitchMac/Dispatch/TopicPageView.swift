@@ -92,7 +92,9 @@ struct TopicPageView: View {
     private func labelled(_ label: String, _ text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(label).font(.system(size: 12)).foregroundStyle(Look.ink2)
-            Text(text).font(.system(size: 13.5)).foregroundStyle(Look.ink).fixedSize(horizontal: false, vertical: true)
+            // The topic's summary is model output: Markdown, its code on the code wash.
+            Text(DispatchMarkdown.inline(text).codeWashed()).font(.system(size: 13.5)).foregroundStyle(Look.ink)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

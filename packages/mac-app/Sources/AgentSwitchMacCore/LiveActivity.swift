@@ -238,6 +238,19 @@ public struct LivePresenter: Equatable, Sendable {
     public var cardRows: [LiveSnapshot.Row] { Array((snapshot?.rows ?? []).prefix(LiveSnapshot.cardRows)) }
     public var moreRows: Int { max(0, (snapshot?.rows.count ?? 0) - LiveSnapshot.cardRows) }
 
+    /// Something on the card spins (ui-v0 §7.4, 2026-10-03): the mark's block while the look is busy, the tally's
+    /// spinner while something runs, a row's spinner while it works. A card of results, or of requests alone, is still
+    /// but for its rows' clocks (`cardClocks`).
+    public var cardSpins: Bool {
+        guard shownEnd == nil else { return false }
+        if look == .busy { return true }
+        if let s = snapshot, s.rows.count > 1, s.running > 0 { return true }
+        return cardRows.contains { !$0.needsYou }
+    }
+
+    /// Where the card's clocks count from (`0:42` on each row); none while it shows results.
+    public var cardClocks: [Date] { shownEnd == nil ? cardRows.map(\.startedAt) : [] }
+
     /// A new answer from `GET /live` (nil: the service is not answering; everything goes). `watching`: the terminal on
     /// screen in the main window in use; `watchingTask`: the task whose page is open there. Returns the tone for what came
     /// (a request before a failure before a result).

@@ -58,6 +58,7 @@ struct PairingView: View {
 /// The pairing code: QR on the left; code, countdown and the two buttons on the right. Also the wizard's 配对手机 step.
 struct PairingCodeView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.onScreen) private var onScreen
     /// Return presses 生成配对码; off inside the wizard, where Return is 继续.
     var returnGenerates = true
 
@@ -77,17 +78,15 @@ struct PairingCodeView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.08)))
             VStack(alignment: .leading, spacing: 12) {
                 if let pairing = session.pairing {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let left = Countdown.remaining(until: pairing.expiresAt, now: context.date)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(PairingLink.displayCode(pairing.code))
-                                .font(.system(size: 28, weight: .semibold, design: .monospaced))
-                                .textSelection(.enabled)
-                                .foregroundStyle(left > 0 ? .primary : .tertiary)
-                            Text(left > 0 ? "Expires in \(Countdown.format(left))" : "Expired")
-                                .monospacedDigit()
-                                .foregroundStyle(left > 60 ? Color.secondary : Color.attention)
+                    // Steps as the countdown's second turns, until it says Expired; still while the window is not seen
+                    // (ui-v0 §7.4, 2026-10-03).
+                    if onScreen {
+                        TimelineView(ClockSchedule(origins: [pairing.expiresAt], until: pairing.expiresAt)) { context in
+                            countdown(pairing, now: context.date)
                         }
+                        .id(pairing.expiresAt)   // a new code: a new schedule
+                    } else {
+                        countdown(pairing, now: Date())
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
@@ -110,5 +109,18 @@ struct PairingCodeView: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
+    }
+
+    private func countdown(_ pairing: Pairing, now: Date) -> some View {
+        let left = Countdown.remaining(until: pairing.expiresAt, now: now)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(PairingLink.displayCode(pairing.code))
+                .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                .textSelection(.enabled)
+                .foregroundStyle(left > 0 ? .primary : .tertiary)
+            Text(left > 0 ? "Expires in \(Countdown.format(left))" : "Expired")
+                .monospacedDigit()
+                .foregroundStyle(left > 60 ? Color.secondary : Color.attention)
+        }
     }
 }

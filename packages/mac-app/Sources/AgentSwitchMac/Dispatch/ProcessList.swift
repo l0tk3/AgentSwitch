@@ -172,7 +172,7 @@ struct ProcessEventRow: View {
         ProcessRowFrame {
             Text("")
         } line: {
-            Text(DispatchProcess.isMarkdown(event) ? DispatchMarkdown.flattened(DispatchEventDescriber.line(event))
+            Text(DispatchProcess.isMarkdown(event) ? DispatchMarkdown.flattened(DispatchEventDescriber.line(event)).codeWashed()
                  : AttributedString(DispatchEventDescriber.line(event)))
                 .font(.system(size: event.type == "text" ? 13 : 12.5))
                 .lineSpacing(3)

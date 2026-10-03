@@ -140,34 +140,32 @@ struct LiveCardActions {
 
 /// The card under the capsule: the lock screen card of the phone — the mark, `AgentSwitch` and the tally over a dotted
 /// rule; then up to three rows (the waiting first), each a title, `└─` its step, and what answers it; or the result.
+/// It steps every 0.14 s only while something on it spins, else once a second as a row's clock turns, else not at all;
+/// and not while it is not seen (ui-v0 §7.4, 2026-10-03).
 struct LiveCard: View {
     let presenter: LivePresenter
     var actions = LiveCardActions()
     /// Requests being answered: their buttons wait.
     var pending: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.onScreen) private var onScreen
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.14)) { timeline in
-            let frame = reduceMotion ? 3 : Int(timeline.date.timeIntervalSinceReferenceDate / 0.14)
-            VStack(alignment: .leading, spacing: 0) {
-                header(frame: frame)
-                DottedRule().padding(.top, 11).padding(.bottom, 9)
-                if !presenter.cardEnds.isEmpty {
-                    VStack(alignment: .leading, spacing: 11) {
-                        ForEach(presenter.cardEnds, id: \.key) { end in endRow(end) }
-                    }
-                    if presenter.moreEnds > 0 {
-                        Text("+\(presenter.moreEnds) More").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 11) {
-                        ForEach(presenter.cardRows) { row in rowView(row, frame: frame, now: timeline.date) }
-                    }
-                    if presenter.moreRows > 0 {
-                        Text("+\(presenter.moreRows) More").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
-                    }
+        let spins = presenter.cardSpins && !reduceMotion
+        let clocks = presenter.cardClocks
+        Group {
+            if spins && onScreen {
+                TimelineView(.periodic(from: Motion.epoch, by: Motion.run)) { timeline in
+                    content(frame: Motion.step(at: timeline.date, every: Motion.run), now: timeline.date)
                 }
+            } else if !clocks.isEmpty && onScreen {
+                TimelineView(ClockSchedule(origins: clocks)) { timeline in
+                    content(frame: spins ? Motion.step(at: timeline.date, every: Motion.run) : 3, now: timeline.date)
+                }
+                .id(clocks)
+            } else {
+                let now = Date()
+                content(frame: spins ? Motion.step(at: now, every: Motion.run) : 3, now: now)
             }
         }
         .padding(EdgeInsets(top: 14, leading: 16, bottom: 15, trailing: 16))
@@ -175,6 +173,28 @@ struct LiveCard: View {
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(LiveLook.card))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
         .environment(\.colorScheme, .dark)
+    }
+
+    private func content(frame: Int, now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header(frame: frame)
+            DottedRule().padding(.top, 11).padding(.bottom, 9)
+            if !presenter.cardEnds.isEmpty {
+                VStack(alignment: .leading, spacing: 11) {
+                    ForEach(presenter.cardEnds, id: \.key) { end in endRow(end) }
+                }
+                if presenter.moreEnds > 0 {
+                    Text("+\(presenter.moreEnds) More").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 11) {
+                    ForEach(presenter.cardRows) { row in rowView(row, frame: frame, now: now) }
+                }
+                if presenter.moreRows > 0 {
+                    Text("+\(presenter.moreRows) More").mono(12).foregroundStyle(LiveLook.ink3).padding(.top, 11)
+                }
+            }
+        }
     }
 
     private func header(frame: Int) -> some View {

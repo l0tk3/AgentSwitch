@@ -43,7 +43,7 @@ struct TaskCardView: View {
     private var summary: some View {
         VStack(alignment: .leading, spacing: 0) {
             TaskStatusLine(card: card)
-            Text(card.title)
+            Text(DispatchMarkdown.codeSpans(card.title).codeWashed())
                 .font(.system(size: 14.5, weight: .semibold))
                 .lineSpacing(3)
                 .foregroundStyle(Look.ink)
@@ -53,12 +53,12 @@ struct TaskCardView: View {
             if let progress = card.progress { ProgressBlocks(progress: progress).padding(.top, 2).padding(.bottom, 6) }
             if let step = card.step { StepLine(text: step) }
             if let summary = card.summary {
-                outcome(Text(summary), speaking: model.speaker.isSpeaking(task.id))
+                outcome(Text(DispatchMarkdown.codeSpans(summary).codeWashed()), speaking: model.speaker.isSpeaking(task.id))
             } else if let result = card.result {
-                outcome(Text(DispatchMarkdown.flattened(result)), speaking: false)
+                outcome(Text(DispatchMarkdown.flattened(result).codeWashed()), speaking: false)
             }
             if let error = card.error {
-                outcome(Text(DispatchMarkdown.flattened(error)), speaking: false, faint: !card.errorIsFailure)
+                outcome(Text(DispatchMarkdown.flattened(error).codeWashed()), speaking: false, faint: !card.errorIsFailure)
                     .padding(.top, card.summary != nil || card.result != nil ? 4 : 0)
             }
         }
@@ -66,7 +66,8 @@ struct TaskCardView: View {
         .contentShape(Rectangle())
     }
 
-    /// The outcome in the reading font; colour is left to the short words (ui-v0 §7.4, 2026-10-01).
+    /// The outcome in the reading font, its code on the code wash; colour is left to the short words (ui-v0 §7.4,
+    /// 2026-10-01).
     private func outcome(_ text: Text, speaking: Bool, faint: Bool = false) -> some View {
         text.font(.system(size: 13.5))
             .lineSpacing(4)
@@ -120,12 +121,13 @@ struct TaskStatusLine: View {
     }
 }
 
-/// How long it has run (ticking while active) or ran.
+/// How long it has run (ticking while active and seen, ui-v0 §7.4) or ran.
 struct TaskClock: View {
     let card: DispatchTaskCard
+    @Environment(\.onScreen) private var onScreen
 
     var body: some View {
-        if card.task.status.isActive {
+        if card.task.status.isActive && onScreen {
             TimelineView(.periodic(from: .now, by: 1)) { context in Text(card.clock(now: context.date)) }
                 .foregroundStyle(Look.faint)
         } else {

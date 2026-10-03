@@ -79,7 +79,7 @@ struct ApprovalBoxView: View {
                 ForEach(evidence.questions) { question in
                     VStack(alignment: .leading, spacing: 8) {
                         if evidence.questions.count > 1 && !question.header.isEmpty { PartLabel(question.header) }
-                        Text(DispatchMarkdown.inline(question.text))
+                        Text(DispatchMarkdown.inline(question.text).codeWashed())
                             .font(.system(size: 14)).lineSpacing(5).foregroundStyle(Look.ink)
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         if quick == nil { answerForm(question) }

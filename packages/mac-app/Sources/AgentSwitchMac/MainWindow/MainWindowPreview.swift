@@ -16,6 +16,8 @@ import SwiftUI
 /// - `main-dispatch-task`: a task's page — `‹` + mark + title, the approval, the process — with the gateway down
 ///   (`■ Gateway Down`);
 /// - `main-dispatch-topic`: a topic's page;
+/// - `main-dispatch-code`: a task's page with code (2026-10-03) — what you typed with a fenced block, the result's block
+///   and inline code;
 /// - `main-terminals`: the Terminals bar (list, title, `+`, all the terminals' mark), Dispatch waiting for you; the
 ///   page itself is always dark;
 /// - `main-refresh-2`, `-6`, `-10` (dark): steps of a change from Dispatch to Terminals held still (as the demo's
@@ -52,6 +54,7 @@ enum MainWindowPreview {
             try await shot(model: model, page: .dispatch, system: look, open: .task("t1"), to: file("main-dispatch-task"))
             model.loadDemo()
             try await shot(model: model, page: .dispatch, system: look, open: .topic("th1"), to: file("main-dispatch-topic"))
+            try await shot(model: model, page: .dispatch, system: look, open: .task("t5"), to: file("main-dispatch-code"))
             try await shot(model: model, page: .terminals, system: look, to: file("main-terminals"))
         }
         try await refresh(model: model, to: .terminals, system: NSAppearance(named: .darkAqua), name: "main-refresh", into: directory)
@@ -163,6 +166,14 @@ enum MainWindowPreview {
         container.refresh.cancel()
         browser.stop()
         window.close()
+    }
+
+    /// The same window to keep on screen (PerfProbe): its state, to change pages with.
+    static func liveWindow(model: AppModel, page: MainPage) -> (NSWindow, PageContainer, MainWindowState) {
+        let state = state(on: page)
+        let browser = BrowserPageModel(service: { BrowserDemoService() }, state: state, defaults: nil)
+        let (window, container) = makeWindow(model: model, state: state, page: page, system: nil, browser: browser)
+        return (window, container, state)
     }
 
     private static func makeWindow(model: AppModel, state: MainWindowState, page: MainPage, system: NSAppearance?,

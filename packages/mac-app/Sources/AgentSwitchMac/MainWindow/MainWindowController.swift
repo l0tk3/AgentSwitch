@@ -377,5 +377,7 @@ struct DispatchRoot: View {
             .environment(model)
             .environment(state)
             .tint(.brand)
+            // Its spinners and clocks stop while another page is shown or the window is not seen (ui-v0 §7.4).
+            .followsWindow()
     }
 }

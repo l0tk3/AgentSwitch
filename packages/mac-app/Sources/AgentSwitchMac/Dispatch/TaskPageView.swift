@@ -86,7 +86,7 @@ struct TaskPageView: View {
         UserBox(text: DispatchRecordLookup.request(of: task, messages: model.log.messages), attached: task.attachments.count)
         VStack(alignment: .leading, spacing: 2) {
             TaskStatusLine(card: card)
-            Text(card.title)
+            Text(DispatchMarkdown.codeSpans(card.title).codeWashed())
                 .font(.system(size: 20, weight: .semibold))
                 .lineSpacing(4)
                 .foregroundStyle(Look.ink)
@@ -128,7 +128,7 @@ struct TaskPageView: View {
     private func outcome(_ task: DispatchTask) -> some View {
         if let summary = DispatchTaskPage.summary(task) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(summary).font(.system(size: 14)).lineSpacing(6)
+                Text(DispatchMarkdown.codeSpans(summary).codeWashed()).font(.system(size: 14)).lineSpacing(6)
                     .foregroundStyle(model.speaker.isSpeaking(task.id) ? Color.signal : Look.ink)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)

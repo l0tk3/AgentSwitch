@@ -138,18 +138,22 @@ struct DispatchDemoData: Sendable {
         func answered(_ seq: Int, _ ts: Int64, _ text: String, kind: DispatchMessage.Kind = .task, tasks: [String] = []) -> DispatchMessage {
             DispatchMessage(seq: seq, ts: ts + 2_000, role: .assistant, text: text, kind: kind, taskIds: tasks, replyTo: seq - 1)
         }
-        let finance = yesterday, date1 = today(40 * 60), sort = today(32 * 60), clean = today(5 * 60 + 3), build = today(134 + 3)
+        let finance = yesterday, date1 = today(40 * 60), code = today(36 * 60), sort = today(32 * 60), clean = today(5 * 60 + 3)
+        let build = today(134 + 3)
         messages = [
             said(1, finance, "登录财务平台，把本月的对账单下载下来"),
             answered(2, finance, "交给 Claude Code，需要浏览器和财务平台的凭据。", tasks: ["t4"]),
             said(3, date1, "今天几号"),
             answered(4, date1, date, kind: .reply),
-            said(5, sort, "整理下载目录里的重复文件"),
-            answered(6, sort, "交给 OpenCode，用 DeepSeek Flash。", tasks: ["t3"]),
-            said(7, clean, "build 目录太大了，清理一下旧构建"),
-            answered(8, clean, "交给 Codex 清理。", tasks: ["t2"]),
-            said(9, build, "把 iOS 端打包装到手机上"),
-            answered(10, build, "交给 Claude Code，在 ~/Projects/AgentSwitch 里构建并安装。", tasks: ["t1"]),
+            // Code in what you typed and in the answer (2026-10-03, the demo's `跑一下这两条`).
+            said(5, code, "跑一下这两条，把输出贴回来：\n```\ngit status --short\nnpm test -- --reporter=dot --silent --run tests/markdownUi.test.ts tests/api.test.ts\n```"),
+            answered(6, code, "交给 Codex，在 `~/Projects/AgentSwitch` 里运行。", tasks: ["t5"]),
+            said(7, sort, "整理下载目录里的重复文件"),
+            answered(8, sort, "交给 OpenCode，用 DeepSeek Flash。", tasks: ["t3"]),
+            said(9, clean, "build 目录太大了，清理一下旧构建"),
+            answered(10, clean, "交给 Codex 清理。", tasks: ["t2"]),
+            said(11, build, "把 iOS 端打包装到手机上"),
+            answered(12, build, "交给 Claude Code，在 ~/Projects/AgentSwitch 里构建并安装。", tasks: ["t1"]),
         ]
 
         let screenshot = DispatchAttachment(name: "screenshot.png", path: "in/screenshot.png", size: 182_000, type: "image/png")
@@ -157,6 +161,10 @@ struct DispatchDemoData: Sendable {
             DispatchTask(id: "t4", createdAt: finance + 3_000, updatedAt: finance + 65_000, status: .failed, task: "登录财务平台下载本月对账单",
                          needsBrowser: true, ephemeral: true, harness: "claude-code", model: "claude-sonnet-5-5",
                          error: "凭据网关的代理连不上（gate proxy unreachable），没有登录。", acknowledgedAt: finance + 70_000),
+            DispatchTask(id: "t5", createdAt: code + 3_000, updatedAt: code + 68_000, status: .done, task: "运行 git status 与测试",
+                         cwd: home + "/Projects/AgentSwitch", harness: "codex", model: "gpt-6-luna",
+                         result: "两条都已运行，工作区干净，测试全部通过。\n```text\n Test Files  2 passed (2)\n      Tests  31 passed (31)\n   Duration  1.12s\n```\n`git status --short` 没有输出。",
+                         acknowledgedAt: code + 70_000),
             DispatchTask(id: "t3", createdAt: sort + 3_000, updatedAt: sort + 193_000, status: .done, task: "整理下载目录里的重复文件",
                          cwd: home + "/Downloads", harness: "opencode", model: "deepseek-flash",
                          result: "一共 42 个文件，重复的 9 个放进了“重复”文件夹，清单在 report.md。", acknowledgedAt: sort + 200_000),

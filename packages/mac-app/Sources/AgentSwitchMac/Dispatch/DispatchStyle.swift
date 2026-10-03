@@ -18,6 +18,9 @@ enum Look {
     /// What you said: a raised box (the signal colour is not for text backgrounds).
     static let raised = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, name: "AgentSwitchDispatchRaised"))
     static let hover = Color(nsColor: .dynamic(light: 0xE9E5DC, dark: 0x121212, name: "AgentSwitchDispatchHover"))
+    /// Code's ground (2026-10-03): a wash of ink, so a block or a span stands out on the page, a card and your raised
+    /// box alike.
+    static let code = ink.opacity(0.07)
 
     /// The reading column (docs/dispatch-v0.md §2): at most 760 pt with its 24 pt sides.
     static let column: CGFloat = 760

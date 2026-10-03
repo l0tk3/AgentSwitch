@@ -14,7 +14,7 @@ struct BrowserPage: View {
 
     /// The page as the window's container holds it: dark whatever the system's look.
     static func host(_ model: BrowserPageModel) -> NSView {
-        let host = NSHostingView(rootView: BrowserPage(model: model).environment(\.colorScheme, .dark).tint(.brand))
+        let host = NSHostingView(rootView: BrowserPage(model: model).environment(\.colorScheme, .dark).tint(.brand).followsWindow())
         host.appearance = NSAppearance(named: .darkAqua)
         return host
     }

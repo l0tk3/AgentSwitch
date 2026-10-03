@@ -25,18 +25,27 @@ struct PixelSprite: View {
 
 /// The app's mark: the icon's switch on a pixel grid, in a state. `depth` for marks of 20 pt and up (§7.2.10): a
 /// 1-pixel hard shadow and half-lit pixels in the diagonal steps; while busy a block runs along the lit lane with a
-/// fading trail (still under Reduce Motion).
+/// fading trail (still under Reduce Motion). Only a busy or waiting mark that is seen moves (ui-v0 §7.4, 2026-10-03):
+/// idle, off and error are one picture, and nothing ticks for them.
 struct PixelMarkView: View {
     let state: PixelArt.MarkState
     var pixel: CGFloat = 2
     var depth = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.onScreen) private var onScreen
 
     var body: some View {
-        let animated = (state == .busy || state == .waiting) && !reduceMotion
-        TimelineView(.periodic(from: .now, by: state == .busy ? 0.14 : 0.55)) { timeline in
-            let frame = animated ? Int(timeline.date.timeIntervalSinceReferenceDate / (state == .busy ? 0.14 : 0.55)) : 0
-            Canvas { context, _ in draw(&context, frame: frame) }
+        let interval = reduceMotion ? nil : state.motionInterval
+        Group {
+            if let interval, onScreen {
+                TimelineView(.periodic(from: Motion.epoch, by: interval)) { timeline in
+                    Canvas { context, _ in draw(&context, frame: Motion.step(at: timeline.date, every: interval)) }
+                }
+                .id(interval)   // busy ↔ waiting: the other beat
+            } else {
+                let frame = interval.map { Motion.step(at: Date(), every: $0) } ?? 0
+                Canvas { context, _ in draw(&context, frame: frame) }
+            }
         }
         .frame(width: CGFloat(PixelArt.markWidth + (depth ? 1 : 0)) * pixel, height: CGFloat(PixelArt.markHeight + (depth ? 1 : 0)) * pixel)
         .accessibilityLabel("AgentSwitch")
@@ -90,18 +99,31 @@ struct StatusMark: View {
     }
 }
 
-/// In progress, everywhere the same (web page, Mac, phone): ⠋⠙⠹…; a still first frame under Reduce Motion.
+/// In progress, everywhere the same (web page, Mac, phone): ⠋⠙⠹…; a still first frame under Reduce Motion. It turns
+/// only while seen, every spinner on the same beat (ui-v0 §7.4, 2026-10-03).
 struct BrailleSpinner: View {
     static let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.onScreen) private var onScreen
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.09)) { timeline in
-            let i = reduceMotion ? 0 : Int(timeline.date.timeIntervalSinceReferenceDate / 0.09) % Self.frames.count
-            Text(Self.frames[i]).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.busy)
+        Group {
+            if reduceMotion {
+                glyph(0)
+            } else if onScreen {
+                TimelineView(.periodic(from: Motion.epoch, by: Motion.spinner)) { timeline in
+                    glyph(Motion.step(at: timeline.date, every: Motion.spinner))
+                }
+            } else {
+                glyph(Motion.step(at: Date(), every: Motion.spinner))
+            }
         }
         .frame(width: 8)
         .accessibilityLabel("Busy")
+    }
+
+    private func glyph(_ step: Int) -> some View {
+        Text(Self.frames[step % Self.frames.count]).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.busy)
     }
 }
 

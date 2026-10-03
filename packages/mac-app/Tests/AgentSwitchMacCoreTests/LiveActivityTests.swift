@@ -199,6 +199,27 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(p.moreRows, 2)
     }
 
+    /// ui-v0 §7.4 (2026-10-03): the card steps fast only while something on it spins; requests alone only turn their
+    /// clocks; results are still.
+    func testTheCardMovesOnlyForWhatItShows() {
+        var p = LivePresenter()
+        p.receive(snap([row("t1", at: -3)], at: 0), at: t0)
+        XCTAssertTrue(p.cardSpins, "a task at work: its spinner and the mark's block")
+        XCTAssertEqual(p.cardClocks, [t0.addingTimeInterval(-3)])
+
+        p.receive(snap([row("k1", waiting: true, ask: perm, at: -8)], at: 1), at: t0)
+        XCTAssertFalse(p.cardSpins, "a request alone: a square, the mark's end amber")
+        XCTAssertEqual(p.cardClocks, [t0.addingTimeInterval(-8)])
+
+        p.receive(snap([row("k1", waiting: true, ask: perm, at: -8), row("t1", at: -3)], at: 2), at: t0)
+        XCTAssertTrue(p.cardSpins, "a request and a task at work: the task's row and the tally spin")
+
+        p.receive(snap([], ended: [end("t1", at: 3)], at: 3), at: t0.addingTimeInterval(3))
+        XCTAssertNotNil(p.shownEnd)
+        XCTAssertFalse(p.cardSpins, "a result: nothing moves")
+        XCTAssertEqual(p.cardClocks, [])
+    }
+
     func testAnswersGoToTheRightRoutes() async throws {
         let stub = StubTransport { _ in (200, #"{"ok":true}"#) }
         let client = DaemonClient(port: 4811, transport: stub)

@@ -165,7 +165,7 @@ final class SettingsWindowController {
     /// under a unified toolbar that carries the page title and the page's own actions (SwiftUI bridges both).
     static func makeWindow(model: AppModel, navigation: SettingsNavigation, windowClass: NSWindow.Type = NSWindow.self,
                            appearance: NSAppearance? = nil, dispatch: DispatchSettingsEnvironment = DispatchSettingsEnvironment()) -> NSWindow {
-        let root = SettingsView().environment(model).environment(navigation).environment(\.dispatchSettings, dispatch)
+        let root = SettingsView().environment(model).environment(navigation).environment(\.dispatchSettings, dispatch).followsWindow()
         let window = windowClass.init(contentRect: NSRect(origin: .zero, size: contentSize),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                                       backing: .buffered, defer: false)

@@ -84,6 +84,18 @@ struct BoxDrawingRenderer {
                      scale: CGFloat,
                      color: TTColor,
                      baseThicknessPx: Int) {
+        draw(codePoint: codePoint, in: context, cellOrigin: cellOrigin, cellSize: cellSize, scale: scale,
+             cgColor: color.cgColor, baseThicknessPx: baseThicknessPx)
+    }
+
+    /// AgentSwitch patch (PATCHES.md): the colour already as a CGColor (the view's draw passes its cached one).
+    static func draw(codePoint: UInt32,
+                     in context: CGContext,
+                     cellOrigin: CGPoint,
+                     cellSize: CGSize,
+                     scale: CGFloat,
+                     cgColor: CGColor,
+                     baseThicknessPx: Int) {
         let cellWidthPx = max(1, Int(round(cellSize.width * scale)))
         let cellHeightPx = max(1, Int(round(cellSize.height * scale)))
         let minStrokePx = max(1, Int(round(scale)))
@@ -98,8 +110,8 @@ struct BoxDrawingRenderer {
         let lightPx = max(1, max(baseThicknessPx, minStrokePx))
         let heavyPx = max(1, lightPx * 2)
 
-        context.setFillColor(color.cgColor)
-        context.setStrokeColor(color.cgColor)
+        context.setFillColor(cgColor)
+        context.setStrokeColor(cgColor)
 
         switch codePoint {
         case 0x2500: linesChar(lines: Lines(up: .none, right: .light, down: .none, left: .light), canvas: canvas, baseThicknessPx: baseThicknessPx)

@@ -12,7 +12,8 @@ enum DispatchRoute: Hashable {
     case topic(String)
 }
 
-/// What you said, right-aligned in a raised square box; `N attached` under it.
+/// What you said, right-aligned in a raised square box, as you typed it (its code drawn as code, TypedText); `N attached`
+/// under it.
 struct UserBox: View {
     let text: String
     var attached = 0
@@ -22,12 +23,8 @@ struct UserBox: View {
         HStack(spacing: 0) {
             Spacer(minLength: 140)
             VStack(alignment: .trailing, spacing: 4) {
-                Text(text)
-                    .font(.system(size: 14))
-                    .lineSpacing(5)
+                TypedText(text: text, size: 14, lineSpacing: 5)
                     .foregroundStyle(Look.ink)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 13)
                     .padding(.vertical, 9)
                     .background(Look.raised)
@@ -71,12 +68,8 @@ struct AssistantLineView: View {
                     Rectangle().fill(dot == .busy ? Color.busy : dot == .off ? Look.faint : dot.color).frame(width: 6, height: 6)
                         .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 }
-                if line.isSecondary {
-                    Text(line.text).font(.system(size: 14)).lineSpacing(6).foregroundStyle(Look.ink2).textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    MarkdownBlocks(text: line.message.text, size: 14, lineSpacing: 6)
-                }
+                // Reports in the secondary ink; both are model output, so Markdown (their code as code).
+                MarkdownBlocks(text: line.message.text, size: 14, color: line.isSecondary ? Look.ink2 : Look.ink, lineSpacing: 6)
             }
             .frame(maxWidth: 560, alignment: .leading)
             .contextMenu { menu }
@@ -134,7 +127,7 @@ struct EndLine: View {
         Button(action: open) {
             HStack(spacing: 8) {
                 StatusMark(level: task.status.level)
-                Text(title).font(.system(size: 13)).foregroundStyle(Look.ink2).lineLimit(1)
+                Text(DispatchMarkdown.codeSpans(title).codeWashed()).font(.system(size: 13)).foregroundStyle(Look.ink2).lineLimit(1)
                 Text(task.statusLabel).mono(12).foregroundStyle(task.status.level.wordColor)
                 Spacer(minLength: 0)
                 Text("›").mono(12).foregroundStyle(Look.faint)
@@ -159,7 +152,7 @@ struct TaskLinkRow: View {
                 TaskMark(level: waiting ? .warning : task.status.level, waiting: waiting || task.waitsForYou)
                 Text(waiting ? DispatchTaskStatus.waitingApproval.label : task.statusLabel).mono(12)
                     .foregroundStyle((waiting ? StatusLevel.warning : task.status.level).wordColor)
-                Text(title).font(.system(size: 13)).foregroundStyle(Look.ink).lineLimit(1)
+                Text(DispatchMarkdown.codeSpans(title).codeWashed()).font(.system(size: 13)).foregroundStyle(Look.ink).lineLimit(1)
                 Spacer(minLength: 0)
                 if unread { UnreadSquare() }
                 Text("›").mono(12).foregroundStyle(Look.faint)
