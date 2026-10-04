@@ -52,6 +52,13 @@ public struct ShadedSprite: Equatable, Sendable {
         "WWW##.......mmmd", "W##mmmmmmmmmmddk", "W##mddddddddmddk", "#mmdd.......dkkk", "....dd..........", ".....dd.........",
         "......dd....dddk", ".......ddd..dkks", ".........ddddkks", "............ksss",
     ])
+    /// The app's mark (docs/ui-v0.md §10): three windows one behind another, each further one a tone darker; the front
+    /// one has a raised title bar — where a state shows — a dark screen, a bright prompt and a cursor.
+    public static let stack = ShadedSprite([
+        ".....dddddddddd.", "....dkkkkkkkkkkk", "....kssssssssssk", "...mmmmmmmmmmssk", "..mddddddddddksk", "..dssssssssssdsk",
+        ".WWWWWWWWWWssdsk", "W##########msdk.", "#ssssssssssmsd..", "#sWWsssssssmsd..", "#sssWWsssssmd...", "#sWWssmmmssm....",
+        "#ssssssssssm....", ".mmmmmmmmmm.....",
+    ])
     /// A window: three dots on its title bar, a dark screen, a bright prompt, a cursor.
     public static let terminals = ShadedSprite([
         ".##############.", "#mkmkmkmmmmmmmm#", "################", "#ssssssssssssss#", "#sWWsssssssssss#", "#sssWWsssssssss#",
@@ -124,6 +131,7 @@ public struct ShadedSprite: Equatable, Sendable {
         ("dispatch", dispatch), ("terminals", terminals), ("browser", browser), ("settings", settings), ("list", list),
         ("splitRight", splitRight), ("splitDown", splitDown), ("new", new), ("lock", lock), ("lockSmall", lockSmall),
         ("claude-code", agents["claude-code"]!), ("codex", agents["codex"]!), ("opencode", agents["opencode"]!), ("pi", agents["pi"]!),
+        ("stack", stack),
     ]
 
     /// A number that changes when any picture does (FNV-1a over the names and rows): the three copies' tests hold the
@@ -135,19 +143,20 @@ public struct ShadedSprite: Equatable, Sendable {
     }
 }
 
-/// The app's mark as a shaded picture with a state (docs/ui-v0.md §9): `ShadedSprite.dispatch`, and where a state
-/// shows on it — a block running along the nearest lane while busy, that lane's end in amber (waiting) or red (error),
-/// every other cell gone when off.
+/// The app's mark as a shaded picture with a state (docs/ui-v0.md §10): `ShadedSprite.stack`, and where a state shows
+/// on it — the front window's title bar is the light: the state's colour (cyan busy, amber waiting, red error), a
+/// light block running along it while busy, every other cell gone when off.
 public enum ShadedMark {
-    public static let picture = ShadedSprite.dispatch
+    public static let picture = ShadedSprite.stack
 
-    /// The nearest lane from the source to its end, two cells a step: the way the busy block runs.
+    /// The front window's title bar from left to right, a block of two by two cells a step: the way the busy block runs.
     public static let lane: [[(x: Int, y: Int)]] = [
-        [(3, 6), (4, 6)], [(4, 5), (5, 5)], [(5, 4), (6, 4)], [(6, 3), (7, 3)], [(7, 2), (8, 2)], [(9, 2), (9, 1)], [(10, 1), (11, 1)],
+        [(1, 6), (2, 6), (1, 7), (2, 7)], [(3, 6), (4, 6), (3, 7), (4, 7)], [(5, 6), (6, 6), (5, 7), (6, 7)],
+        [(7, 6), (8, 6), (7, 7), (8, 7)], [(9, 6), (10, 6), (9, 7), (10, 7)],
     ]
 
-    /// The nearest lane's end: the raised block a state colours.
-    public static func isEnd(x: Int, y: Int) -> Bool { x >= 12 && y <= 3 }
+    /// The front window's title bar: the raised strip a state colours.
+    public static func isEnd(x: Int, y: Int) -> Bool { (y == 6 && (1...10).contains(x)) || (y == 7 && x <= 11) }
 
     /// How a cell of that block sits once it carries a state's colour: its light edge, its face, its dark edge.
     public enum Edge: Sendable, Equatable { case light, face, dark }

@@ -12,9 +12,11 @@ extension EnvironmentValues {
 }
 
 /// The root of a screen: the look kept in the settings handed down, the system's blue as the tint in the classic look
-/// (the user: 蓝色), and everything under it built again when the look changes.
+/// (the user: 蓝色), and everything under it built again when the look changes. The Home Screen icon is the look's too
+/// (HomeIcon): set when the app comes to the front and when the look changes.
 private struct FollowsLook: ViewModifier {
     @AppStorage(InterfaceLook.key) private var raw = InterfaceLook.pixel.rawValue
+    @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
         let look = InterfaceLook.load(raw)
@@ -22,6 +24,10 @@ private struct FollowsLook: ViewModifier {
             .environment(\.interfaceLook, look)
             .tint(look.isClassic ? Theme.signal : nil)
             .id(look)
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                if phase == .active { HomeIcon.follow(look) }
+            }
+            .onChange(of: look) { _, look in HomeIcon.follow(look) }
     }
 }
 

@@ -1,3 +1,4 @@
+import AgentSwitchLiveUI
 import AgentSwitchKit
 import SwiftUI
 
@@ -8,14 +9,14 @@ import SwiftUI
 /// What stands for a pixel sprite: a system symbol, the app's own mark, an agent's mark (the only ones drawn by hand).
 enum ClassicIcon {
     case symbol(String)
-    case mark
+    case lanes
     case agent(String)
 
     init?(rows: [String]) {
         if let name = PixelArt.symbol(for: rows) {
             self = .symbol(name)
         } else if rows == PixelArt.markRows {
-            self = .mark
+            self = .lanes
         } else if let agent = PixelArt.agents.first(where: { $0.value == rows })?.key {
             self = .agent(agent)
         } else {
@@ -34,17 +35,25 @@ enum ClassicIcon {
             Image(systemName: name)
                 .font(.system(size: dot ? side * 0.92 : max(side * 1.08, 10), weight: dot ? .regular : .medium))
                 .foregroundStyle(color)
-        case .mark:
-            Canvas { context, canvas in ClassicMark.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: color, dim: color.opacity(0.5)) }
+        case .lanes:
+            Canvas { context, canvas in ClassicLanes.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: color, dim: color.opacity(0.5)) }
         case .agent(let harness):
             Canvas { context, canvas in ClassicAgent.draw(harness, &context, in: CGRect(origin: .zero, size: canvas), color: color) }
         }
     }
 }
 
-/// The app's mark as lines: one source switched onto three lanes, the same picture as the pixel mark with the squares
-/// rounded and the steps curved; the top lane is the lit one.
+/// The app's mark as lines (docs/ui-v0.md §10): three windows one behind another, the front one's title bar in `end`
+/// — where a state shows. The Live Activity draws the same one (LiveLook).
 enum ClassicMark {
+    static func draw(_ context: inout GraphicsContext, in rect: CGRect, lit: Color, dim: Color, end: Color? = nil) {
+        LiveLook.drawClassicMark(&context, in: rect, lit: lit, dim: dim, end: end)
+    }
+}
+
+/// The Dispatch tab's icon as lines: one source switched onto three lanes, the pixel picture with the squares rounded
+/// and the steps curved; the top lane is the lit one.
+enum ClassicLanes {
     static func draw(_ context: inout GraphicsContext, in rect: CGRect, lit: Color, dim: Color, end: Color? = nil) {
         let u = min(rect.width / 14, rect.height / 11)   // the pixel mark's grid: 14 × 11 cells
         let origin = CGPoint(x: rect.midX - 7 * u, y: rect.midY - 5.5 * u)
@@ -68,7 +77,7 @@ enum ClassicMark {
         context.fill(block(11, 0), with: .color(end ?? lit))
     }
 
-    /// The mark as a template image (the tab bar tints it).
+    /// The lanes as a template image (the tab bar tints it).
     @MainActor
     static func image(height: CGFloat) -> UIImage {
         let size = CGSize(width: (height * 14 / 11).rounded(), height: height)
@@ -80,14 +89,15 @@ enum ClassicMark {
     }
 }
 
-/// The app's mark in a state (PixelMarkView's classic side): the lit lane's end amber while something waits for you,
-/// red on an error, the whole mark faint when off; while busy the system's spinner beside it.
+/// The app's mark in a state (PixelMarkView's classic side): the front window's title bar in the accent while busy,
+/// amber while something waits for you, red on an error, the whole mark faint when off; while busy the system's
+/// spinner beside it.
 struct ClassicMarkView: View {
     let state: PixelArt.MarkState
     let height: CGFloat
 
     var body: some View {
-        let end: Color? = state == .waiting ? Theme.waiting : state == .error ? Theme.failed : nil
+        let end: Color? = state == .waiting ? Theme.waiting : state == .error ? Theme.failed : state == .busy ? Theme.busy : nil
         HStack(spacing: height * 0.3) {
             Canvas { context, canvas in
                 ClassicMark.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: Theme.ink, dim: Theme.ink.opacity(0.45), end: end)

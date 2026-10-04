@@ -33,19 +33,19 @@ public enum ShadedPaint {
     }
 }
 
-/// What a state puts on the app's shaded mark (ShadedMark): the picture is tones of the one ink, the only colour the
-/// state's — the nearest lane's end as a raised block in the state's colour, a block on that lane while busy; off is
-/// the picture with every other cell gone.
+/// What a state puts on the app's shaded mark (ShadedMark, docs/ui-v0.md §10): the picture is tones of the one ink, the
+/// only colour the state's — the front window's title bar as a raised strip in the state's colour, a light block on it
+/// while busy; off is the picture with every other cell gone.
 public struct ShadedMarkPaint {
     public var dark: Bool
     /// The hard shadow, a cell down and right, and a little glow under the running block.
     public var depth: Bool
     public var glow: Bool
     public var off: Bool
-    /// The nearest lane's end in a state's colour, and how lit it is (a waiting end is faint every other beat).
+    /// The title bar in a state's colour, and how lit it is (a waiting one is faint every other beat).
     public var end: Color?
     public var endLit: Double
-    /// The running block: steps of the lane, each with how strongly it shows.
+    /// The running block: steps along the title bar, each with how strongly it shows, in `busy`.
     public var block: [(step: Int, alpha: Double)]
     public var busy: Color
 

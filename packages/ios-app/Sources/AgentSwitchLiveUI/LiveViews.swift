@@ -73,30 +73,50 @@ public enum LiveLook {
         .system(size: size, weight: weight, design: classic ? .default : .monospaced)
     }
 
-    /// The app's mark as lines (the classic look): one source switched onto three lanes, the squares rounded and the
-    /// steps curved, the lit lane's end in `end`.
-    static func drawClassicMark(_ context: inout GraphicsContext, in rect: CGRect, end: Color?) {
+    /// The app's mark as lines (the classic look, docs/ui-v0.md §10): three windows one behind another, each with its
+    /// title bar; the front one's — where a state shows — is in `end`, and it has its three dots, a prompt and a cursor.
+    public static func drawClassicMark(_ context: inout GraphicsContext, in rect: CGRect, lit: Color, dim: Color, end: Color?) {
+        // 14 × 11 cells: three windows one behind another, each with its title bar; the front one's is the lit part,
+        // and it has its three dots, a prompt and a cursor.
         let u = min(rect.width / 14, rect.height / 11)
         let origin = CGPoint(x: rect.midX - 7 * u, y: rect.midY - 5.5 * u)
-        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: origin.x + x * u, y: origin.y + y * u) }
-        func block(_ x: CGFloat, _ y: CGFloat) -> Path {
-            Path(roundedRect: CGRect(origin: point(x, y), size: CGSize(width: 3 * u, height: 3 * u)), cornerRadius: 0.85 * u, style: .continuous)
+        let line = max(1, 0.95 * u)
+        func window(_ x: CGFloat, _ y: CGFloat) -> CGRect { CGRect(x: origin.x + x * u, y: origin.y + y * u, width: 9 * u, height: 6.2 * u) }
+        func shape(_ r: CGRect, grow: CGFloat = 0) -> Path {
+            Path(roundedRect: r.insetBy(dx: -grow, dy: -grow), cornerRadius: 1.5 * u + grow, style: .continuous)
         }
-        let stroke = StrokeStyle(lineWidth: max(1, 0.95 * u), lineCap: .round)
-        func lane(to y: CGFloat) -> Path {
-            var path = Path()
-            path.move(to: point(3, 5.5))
-            path.addCurve(to: point(11, y), control1: point(7.4, 5.5), control2: point(6.6, y))
-            return path
+        func band(_ r: CGRect, _ height: CGFloat) -> Path { Path(CGRect(x: r.minX, y: r.minY, width: r.width, height: height)) }
+        let frames = [window(5, 0), window(2.5, 2.4), window(0, 4.8)]
+        // A window behind shows its title bar and its edge where the one before it leaves it clear, a gap between
+        // them; the furthest is the faintest.
+        for (i, strength) in [(0, 0.62), (1, 1.0)] {
+            var behind = context
+            behind.clip(to: shape(frames[i + 1], grow: 0.8 * u), options: .inverse)
+            behind.clip(to: shape(frames[i]))
+            behind.fill(band(frames[i], 1.5 * u), with: .color(dim.opacity(strength)))
+            behind.clip(to: band(frames[i], 1.5 * u), options: .inverse)
+            behind.stroke(shape(frames[i], grow: -line / 2), with: .color(dim.opacity(strength)), lineWidth: line)
         }
-        let dim = Color.white.opacity(0.45)
-        context.stroke(lane(to: 5.5), with: .color(dim), style: stroke)
-        context.stroke(lane(to: 9.5), with: .color(dim), style: stroke)
-        context.fill(block(11, 4), with: .color(dim))
-        context.fill(block(11, 8), with: .color(dim))
-        context.stroke(lane(to: 1.5), with: .color(text), style: stroke)
-        context.fill(block(0, 4), with: .color(text))
-        context.fill(block(11, 0), with: .color(end ?? text))
+        let front = frames[2]
+        func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: front.minX + x * u, y: front.minY + y * u) }
+        // Its edge below the title bar only: the bar's dots are holes, and nothing shows through them.
+        var edge = context
+        edge.clip(to: band(front, 2.2 * u), options: .inverse)
+        edge.stroke(shape(front, grow: -line / 2), with: .color(lit), lineWidth: line)
+        var prompt = Path()
+        prompt.move(to: at(1.9, 2.9))
+        prompt.addLine(to: at(2.95, 3.75))
+        prompt.addLine(to: at(1.9, 4.6))
+        prompt.move(to: at(4.0, 4.6))
+        prompt.addLine(to: at(5.7, 4.6))
+        context.stroke(prompt, with: .color(lit), style: StrokeStyle(lineWidth: 0.75 * u, lineCap: .round, lineJoin: .round))
+        var title = band(front, 2.2 * u)
+        for i in 0 ..< 3 {
+            title.addEllipse(in: CGRect(origin: at(1.19 + 1.2 * CGFloat(i), 0.79), size: CGSize(width: 0.72 * u, height: 0.72 * u)))
+        }
+        var bar = context
+        bar.clip(to: shape(front))
+        bar.fill(title, with: .color(end ?? lit), style: FillStyle(eoFill: true))
     }
 }
 
@@ -105,10 +125,10 @@ extension EnvironmentValues {
     @Entry var liveClassic = false
 }
 
-/// The app's mark as the activity's identity and its state (ui-v0 §7.3), drawn as the app draws it (§9): the shaded
-/// picture — tones of the one ink, a hard shadow a cell down and right — with the state on its nearest lane. Busy puts a
-/// cyan block on that lane (a still frame: the island does not animate), waiting turns its end amber, and once all is
-/// over the end shows how it went (green done, red not). The compact and minimal island, the expanded island's leading
+/// The app's mark as the activity's identity and its state (ui-v0 §10), drawn as the app draws it: the shaded picture —
+/// tones of the one ink, a hard shadow a cell down and right — with the state on the front window's title bar. Busy
+/// makes it cyan with a light block on it (a still frame: the island does not animate), waiting amber, and once all is
+/// over it shows how it went (green done, red not). The compact and minimal island, the expanded island's leading
 /// corner, the lock screen's header.
 public struct LiveMark: View {
     let state: LiveState
@@ -124,10 +144,12 @@ public struct LiveMark: View {
         if state.isClassic { classicMark } else { pixelMark }
     }
 
-    /// The classic look: the mark as lines, its lit end in the state's colour.
+    /// The classic look: the mark as lines, the front window's title bar in the state's colour.
     private var classicMark: some View {
         let end = LiveLook.tint(state)
-        return Canvas { context, size in LiveLook.drawClassicMark(&context, in: CGRect(origin: .zero, size: size), end: end) }
+        return Canvas { context, size in
+            LiveLook.drawClassicMark(&context, in: CGRect(origin: .zero, size: size), lit: LiveLook.text, dim: Color.white.opacity(0.45), end: end)
+        }
             .frame(width: CGFloat(LiveArt.markRows[0].count + 1) * pixel, height: CGFloat(LiveArt.markRows.count + 1) * pixel)
             .accessibilityElement()
             .accessibilityLabel("AgentSwitch · \(LiveLook.word(state))")
@@ -137,12 +159,12 @@ public struct LiveMark: View {
         let end: Color? = switch state.phase {
         case .needsYou: LiveLook.waiting
         case .ended: LiveLook.tint(state)
-        case .running: nil
+        case .running: LiveLook.busy
         }
         // A whole number of pixels a cell: 3 in the island (17 pt with the shadow, clear of the 37 pt circle's edge),
         // 4 on the lock screen. The block where the app's mark has it on its fourth beat.
         let cell = CGFloat(ShadedSprite.cell(scale: Double(displayScale), points: Double(pixel) * 0.75))
-        let paint = ShadedMarkPaint(depth: true, end: end, block: state.phase == .running ? [(step: LiveMark.stillStep, alpha: 1)] : [])
+        let paint = ShadedMarkPaint(depth: true, end: end, block: state.phase == .running ? [(step: LiveMark.stillStep, alpha: 1)] : [], busy: .white)
         let side = (CGFloat(ShadedMark.picture.width + 1) * cell).rounded(.up)
         return Canvas { context, _ in paint.draw(&context, cell: cell) }
             .frame(width: side, height: side, alignment: .topLeading)

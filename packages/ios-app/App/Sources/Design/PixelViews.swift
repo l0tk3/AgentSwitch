@@ -73,11 +73,11 @@ struct ShadedSpriteView: View {
     }
 }
 
-/// The app's mark in a state: its shaded picture (§9) with the state on its nearest lane — a cyan block running along it
-/// while busy (a fading trail and a little glow; still under Reduce Motion), its end amber while something waits (it
-/// blinks) and red on an error, every other cell gone when off. `depth`: the hard shadow. In the classic look the mark as
-/// lines. Only a busy or waiting mark moves, and only while the app is in front (ui-v0 §7.4, 2026-10-03): idle, off and
-/// error are one picture, and nothing ticks for them.
+/// The app's mark in a state: its shaded picture (§10) with the state on the front window's title bar — cyan with a
+/// light block running along it while busy (a fading trail and a little glow; still under Reduce Motion), amber while
+/// something waits (it blinks) and red on an error, every other cell gone when off. `depth`: the hard shadow. In the
+/// classic look the mark as lines. Only a busy or waiting mark moves, and only while the app is in front (ui-v0 §7.4,
+/// 2026-10-03): idle, off and error are one picture, and nothing ticks for them.
 struct PixelMarkView: View {
     let state: PixelArt.MarkState
     var pixel: CGFloat = 2
@@ -119,9 +119,9 @@ struct PixelMarkView: View {
     private func paint(frame: Int) -> ShadedMarkPaint {
         ShadedMarkPaint(
             dark: scheme == .dark, depth: depth, glow: depth, off: state == .off,
-            end: state == .waiting ? Theme.waiting : state == .error ? Theme.failed : nil,
+            end: state == .waiting ? Theme.waiting : state == .error ? Theme.failed : state == .busy ? Theme.busy : nil,
             endLit: state == .waiting && frame % 2 == 1 ? 0.25 : 1,
-            block: state == .busy ? ShadedMarkPaint.block(at: frame, trail: depth) : [], busy: Theme.busy)
+            block: state == .busy ? ShadedMarkPaint.block(at: frame, trail: depth) : [], busy: .white)
     }
 }
 

@@ -9,8 +9,8 @@ final class ShadedSpritesTests: XCTestCase {
     /// The same number as the Mac's ShadedSpritesTests and the daemon's uiShaded.test.ts: the three copies of the
     /// pictures are one set. A picture changed here changes it; change the other two copies with it.
     func testThePicturesAreTheOnesTheOtherCopiesHave() {
-        XCTAssertEqual(ShadedSprite.digest, 4_066_370_870)
-        XCTAssertEqual(all.count, 14)
+        XCTAssertEqual(ShadedSprite.digest, 3_771_827_503)
+        XCTAssertEqual(all.count, 15)
         XCTAssertEqual(Set(all.map(\.name)).count, all.count)
     }
 
@@ -79,26 +79,20 @@ final class ShadedSpritesTests: XCTestCase {
 
     func testTheMarksStatesSitOnItsPicture() {
         let rows = ShadedMark.picture.rows.map(Array.init)
-        XCTAssertEqual(ShadedMark.picture, .dispatch)
-        // The block runs along cells of the nearest lane, two a step, none twice, none of them the end's.
+        XCTAssertEqual(ShadedMark.picture, .stack)
+        // The title bar: the front window's two top rows, twenty-two cells, lit above, dark at its right end.
+        let bar = rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, c in c != "." && ShadedMark.isEnd(x: x, y: y) ? "\(x),\(y)" : nil } }
+        XCTAssertEqual(bar.count, 22)
+        XCTAssertFalse(ShadedMark.isEnd(x: 11, y: 6), "the window behind shows through the front one's clipped corner")
+        XCTAssertEqual(ShadedMark.edge(of: rows[6][1]), .light)
+        XCTAssertEqual(ShadedMark.edge(of: rows[7][5]), .face)
+        XCTAssertEqual(ShadedMark.edge(of: rows[7][11]), .dark)
+        // The block runs along the title bar, two by two cells a step, none twice, all of them the bar's.
         let lane = ShadedMark.lane.flatMap { $0 }
-        XCTAssertEqual(ShadedMark.lane.count, 7)
-        XCTAssertTrue(ShadedMark.lane.allSatisfy { $0.count == 2 })
+        XCTAssertEqual(ShadedMark.lane.count, 5)
+        XCTAssertTrue(ShadedMark.lane.allSatisfy { $0.count == 4 })
         XCTAssertEqual(Set(lane.map { "\($0.x),\($0.y)" }).count, lane.count)
-        for at in lane {
-            XCTAssertEqual(rows[at.y][at.x], "#", "\(at) is the lane's ink")
-            XCTAssertFalse(ShadedMark.isEnd(x: at.x, y: at.y))
-        }
-        // The whole lane: every ink cell left of the end, above the middle lane, is a step's.
-        let ink = rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, c in c == "#" && x >= 3 && x < 12 && y < 7 ? "\(x),\(y)" : nil } }
-        XCTAssertEqual(Set(ink), Set(lane.map { "\($0.x),\($0.y)" }))
-        // The end: the raised block at the top right, sixteen cells, lit above and left.
-        let end = rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, c in c != "." && ShadedMark.isEnd(x: x, y: y) ? c : nil } }
-        XCTAssertEqual(end.count, 16)
-        XCTAssertEqual(ShadedMark.edge(of: rows[0][12]), .light)
-        XCTAssertEqual(ShadedMark.edge(of: rows[1][13]), .face)
-        XCTAssertEqual(ShadedMark.edge(of: rows[3][15]), .dark)
-        XCTAssertEqual(ShadedMark.edge(of: rows[1][15]), .dark)
+        XCTAssertTrue(Set(lane.map { "\($0.x),\($0.y)" }).isSubset(of: Set(bar)))
         XCTAssertTrue(ShadedMark.dithered(x: 1, y: 0))
         XCTAssertFalse(ShadedMark.dithered(x: 1, y: 1))
     }

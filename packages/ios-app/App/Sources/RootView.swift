@@ -135,8 +135,8 @@ enum TabIcons {
     static let tasks = image(PixelArt.markRows, pixel: 2)
     static let terminals = image(PixelArt.terminalWindow, pixel: 3)
     static let browser = image(PixelArt.globe, pixel: 2)
-    /// The app's mark as lines, for the classic look's tab bar.
-    @MainActor static let classicTasks = ClassicMark.image(height: 22)
+    /// The Dispatch tab's lanes as lines, for the classic look's tab bar.
+    @MainActor static let classicTasks = ClassicLanes.image(height: 22)
 
     /// A shaded picture in its own tones (not tinted), for a dark or a light tab bar: each cell a whole number of
     /// pixels (5 on a 3× screen), fainter when its tab is not the one in use.
