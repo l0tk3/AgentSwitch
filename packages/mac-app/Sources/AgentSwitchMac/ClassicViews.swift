@@ -7,17 +7,18 @@ import SwiftUI
 // icons, dots, the system's spinner, thin bars. Nothing here is used by a page directly: the pages keep asking for the
 // shared parts, which decide.
 
-/// What stands for a pixel sprite: a system symbol, the app's own mark, an agent's mark (the only ones drawn by hand).
+/// What stands for a pixel sprite: a system symbol, the Dispatch page's lanes, an agent's mark (the only ones drawn by
+/// hand).
 enum ClassicIcon {
     case symbol(String)
-    case mark
+    case lanes
     case agent(String)
 
     init?(rows: [String]) {
         if let name = PixelArt.symbol(for: rows) {
             self = .symbol(name)
         } else if rows == PixelArt.markRows || rows == PixelArt.railDispatch {
-            self = .mark
+            self = .lanes
         } else if let agent = PixelArt.agents.first(where: { $0.value == rows })?.key {
             self = .agent(agent)
         } else {
@@ -37,19 +38,19 @@ enum ClassicIcon {
             Image(systemName: name)
                 .font(.system(size: dot ? side * 0.92 : max(side * 1.08, 10), weight: dot ? .regular : .medium))
                 .foregroundStyle(color)
-        case .mark:
-            Canvas { context, canvas in ClassicMark.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: color, dim: color.opacity(0.5)) }
+        case .lanes:
+            Canvas { context, canvas in ClassicLanes.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: color, dim: color.opacity(0.5)) }
         case .agent(let harness):
             Canvas { context, canvas in ClassicAgent.draw(harness, &context, in: CGRect(origin: .zero, size: canvas), color: color) }
         }
     }
 }
 
-/// The app's mark as lines: one source switched onto three lanes, the same picture as the pixel mark with the squares
-/// rounded and the steps curved; the top lane is the lit one.
-enum ClassicMark {
-    static func draw(_ context: inout GraphicsContext, in rect: CGRect, lit: Color, dim: Color, end: Color? = nil) {
-        // The pixel mark's grid: 14 × 11 cells.
+/// The Dispatch page's icon as lines: one source switched onto three lanes, the pixel picture with the squares rounded
+/// and the steps curved; the top lane is the lit one.
+enum ClassicLanes {
+    static func draw(_ context: inout GraphicsContext, in rect: CGRect, lit: Color, dim: Color) {
+        // The pixel picture's grid: 14 × 11 cells.
         let u = min(rect.width / 14, rect.height / 11)
         let origin = CGPoint(x: rect.midX - 7 * u, y: rect.midY - 5.5 * u)
         func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: origin.x + x * u, y: origin.y + y * u) }
@@ -69,18 +70,67 @@ enum ClassicMark {
         context.fill(block(11, 8), with: .color(dim))
         context.stroke(lane(to: 1.5), with: .color(lit), style: stroke)
         context.fill(block(0, 4), with: .color(lit))
-        context.fill(block(11, 0), with: .color(end ?? lit))
+        context.fill(block(11, 0), with: .color(lit))
     }
 }
 
-/// The app's mark in a state (PixelMarkView's classic side): the lit lane's end amber while something waits for you,
-/// red on an error, the whole mark faint when off; while busy the system's spinner beside it.
+/// The app's mark as lines (docs/ui-v0.md §10): three windows one behind another, the pixel mark's picture drawn
+/// smooth. `end` colours the front window's title bar, where a state shows.
+enum ClassicMark {
+    static func draw(_ context: inout GraphicsContext, in rect: CGRect, lit: Color, dim: Color, end: Color? = nil) {
+        // 14 × 11 cells: three windows one behind another, each with its title bar; the front one's is the lit part,
+        // and it has its three dots, a prompt and a cursor.
+        let u = min(rect.width / 14, rect.height / 11)
+        let origin = CGPoint(x: rect.midX - 7 * u, y: rect.midY - 5.5 * u)
+        let line = max(1, 0.95 * u)
+        func window(_ x: CGFloat, _ y: CGFloat) -> CGRect { CGRect(x: origin.x + x * u, y: origin.y + y * u, width: 9 * u, height: 6.2 * u) }
+        func shape(_ r: CGRect, grow: CGFloat = 0) -> Path {
+            Path(roundedRect: r.insetBy(dx: -grow, dy: -grow), cornerRadius: 1.5 * u + grow, style: .continuous)
+        }
+        func band(_ r: CGRect, _ height: CGFloat) -> Path { Path(CGRect(x: r.minX, y: r.minY, width: r.width, height: height)) }
+        let frames = [window(5, 0), window(2.5, 2.4), window(0, 4.8)]
+        // A window behind shows its title bar and its edge where the one before it leaves it clear, a gap between
+        // them; the furthest is the faintest.
+        for (i, strength) in [(0, 0.62), (1, 1.0)] {
+            var behind = context
+            behind.clip(to: shape(frames[i + 1], grow: 0.8 * u), options: .inverse)
+            behind.clip(to: shape(frames[i]))
+            behind.fill(band(frames[i], 1.5 * u), with: .color(dim.opacity(strength)))
+            behind.clip(to: band(frames[i], 1.5 * u), options: .inverse)
+            behind.stroke(shape(frames[i], grow: -line / 2), with: .color(dim.opacity(strength)), lineWidth: line)
+        }
+        let front = frames[2]
+        func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: front.minX + x * u, y: front.minY + y * u) }
+        // Its edge below the title bar only: the bar's dots are holes, and nothing shows through them.
+        var edge = context
+        edge.clip(to: band(front, 2.2 * u), options: .inverse)
+        edge.stroke(shape(front, grow: -line / 2), with: .color(lit), lineWidth: line)
+        var prompt = Path()
+        prompt.move(to: at(1.9, 2.9))
+        prompt.addLine(to: at(2.95, 3.75))
+        prompt.addLine(to: at(1.9, 4.6))
+        prompt.move(to: at(4.0, 4.6))
+        prompt.addLine(to: at(5.7, 4.6))
+        context.stroke(prompt, with: .color(lit), style: StrokeStyle(lineWidth: 0.75 * u, lineCap: .round, lineJoin: .round))
+        var title = band(front, 2.2 * u)
+        for i in 0 ..< 3 {
+            title.addEllipse(in: CGRect(origin: at(1.19 + 1.2 * CGFloat(i), 0.79), size: CGSize(width: 0.72 * u, height: 0.72 * u)))
+        }
+        var bar = context
+        bar.clip(to: shape(front))
+        bar.fill(title, with: .color(end ?? lit), style: FillStyle(eoFill: true))
+    }
+}
+
+/// The app's mark in a state (PixelMarkView's classic side): the front window's title bar in the accent while busy,
+/// amber while something waits for you, red on an error, the whole mark faint when off; while busy the system's
+/// spinner beside it.
 struct ClassicMarkView: View {
     let state: PixelArt.MarkState
     let height: CGFloat
 
     var body: some View {
-        let end: Color? = state == .waiting ? .waiting : state == .error ? .failed : nil
+        let end: Color? = state == .waiting ? .waiting : state == .error ? .failed : state == .busy ? .busy : nil
         HStack(spacing: height * 0.3) {
             Canvas { context, canvas in
                 ClassicMark.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: .primary, dim: Color.primary.opacity(0.45), end: end)

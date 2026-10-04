@@ -42,4 +42,27 @@ final class PixelArtTests: XCTestCase {
         // the terminals tab is not Codex's >_ (one icon, one meaning)
         XCTAssertNotEqual(PixelArt.terminalWindow, PixelArt.agents["codex"])
     }
+
+    /// The menu bar's one-colour mark (docs/ui-v0.md §10): three windows, the front one's title bar where a state shows.
+    func testTheMenuBarsMarkIsTheStack() {
+        XCTAssertEqual(PixelArt.stackRows.count, PixelArt.markHeight)
+        XCTAssertTrue(PixelArt.stackRows.allSatisfy { $0.count == PixelArt.markWidth })
+        let cells = PixelArt.stackCells
+        XCTAssertEqual(cells.count, PixelArt.stackRows.joined().filter { $0 != "." }.count, "every character is a part")
+        let title = cells.filter { $0.part == .title }
+        XCTAssertEqual(title.count, 18)
+        XCTAssertTrue(title.allSatisfy { $0.y == 4 || $0.y == 5 })
+        XCTAssertTrue(PixelArt.stackBlock.allSatisfy { at in title.contains { $0.x == at.x && $0.y == at.y } }, "the block sits on the title bar")
+        let full = { (state: PixelArt.MarkState) in cells.filter { PixelArt.stackShows($0, in: state) == true } }
+        // Idle: the front window in full. Busy: its frame and the block. Waiting or an error: its title bar alone.
+        XCTAssertEqual(full(.idle).count, cells.filter { $0.part != .behind }.count)
+        XCTAssertEqual(full(.busy).count, cells.filter { $0.part == .frame }.count + PixelArt.stackBlock.count)
+        XCTAssertEqual(full(.waiting), title)
+        XCTAssertEqual(full(.error), title)
+        // Nothing is gone but when off, and then every other cell.
+        for state in [PixelArt.MarkState.idle, .busy, .waiting, .error] { XCTAssertFalse(cells.contains { PixelArt.stackShows($0, in: state) == nil }) }
+        let gone = cells.filter { PixelArt.stackShows($0, in: .off) == nil }
+        XCTAssertTrue(!gone.isEmpty && gone.count < cells.count)
+        XCTAssertTrue(gone.allSatisfy { ($0.x + $0.y) % 2 == 1 })
+    }
 }

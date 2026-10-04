@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Which of our windows are open: the Dock icon shows while any is.
     private var openWindows: Set<String> = []
     private var signalSources: [DispatchSourceSignal] = []
+    private var lookObserver: NSObjectProtocol?
     private var shutdownDone = false
     private var quitting = false
     /// This copy holds the lock and started the runtime (a second copy that hands over never does).
@@ -121,6 +122,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.openTask = { [weak self] id in self?.main.show(task: id) }
         live.onSnapshot = { [weak self] snapshot in self?.main.liveChanged(snapshot) }
         updateDockPresence(settingsWindowOpen: false)
+        // The Dock's icon is the look's (DockIcon): now, and whenever the setting changes.
+        DockIcon.follow()
+        lookObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { DockIcon.follow() }
+        }
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)

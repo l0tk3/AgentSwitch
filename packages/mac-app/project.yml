@@ -25,7 +25,13 @@ targets:
     platform: macOS
     sources:
       - path: Sources/AgentSwitchMac
-      - path: Resources/AppIcon.icns
+      # The app icon (docs/ui-v0.md §10): a layered Icon Composer document the asset compiler turns into Assets.car
+      # (Liquid Glass, macOS 26 and later) and an AppIcon.icns for the systems before it. scripts/make-icons.swift
+      # writes it, and the pixel icon the Dock shows while the app runs in the pixel look (DockIcon.swift).
+      - path: Resources/AppIcon.icon
+        type: file
+        buildPhase: resources
+      - path: Resources/AppIconPixel.png
         buildPhase: resources
     dependencies:
       - package: AgentSwitchMacCore
@@ -41,6 +47,7 @@ targets:
         LSMinimumSystemVersion: "14.0"
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleIconFile: AppIcon
+        CFBundleIconName: AppIcon
         # Menu-bar app: no Dock icon by default. It appears while the settings window is open, or always when
         # 通用 › 始终在程序坞显示 is on (DockPresence).
         LSUIElement: true
@@ -58,6 +65,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.agentswitch.mac
         PRODUCT_NAME: AgentSwitch
         GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Ad-hoc signing, no team; build-app.sh re-signs the whole bundle after adding the runtime.
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"

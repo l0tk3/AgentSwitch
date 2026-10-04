@@ -50,8 +50,9 @@ enum LiveLook {
     }
 }
 
-/// The app mark as the Live Activity's identity and state: a block on the lit lane while busy, the lane's end amber
-/// while something waits, green or red once it has ended. `frame` moves the block (the card); the capsule keeps frame 3.
+/// The app mark as the Live Activity's identity and state (docs/ui-v0.md §10): the front window's title bar in the
+/// state's colour — busy with a light block on it, amber while something waits, green or red once it has ended.
+/// `frame` moves the block (the card); the capsule keeps frame 3.
 struct LiveMark: View {
     let look: LivePresenter.Look
     var frame = 3
@@ -59,17 +60,17 @@ struct LiveMark: View {
 
     var body: some View {
         if LiveLook.classic {
-            // The mark as lines; its lit end in the state's colour (the accent while busy).
+            // The mark as lines; the front window's title bar in the state's colour (the accent while busy).
             Canvas { context, size in
                 ClassicMark.draw(&context, in: CGRect(origin: .zero, size: size), lit: LiveLook.ink, dim: LiveLook.dim, end: LiveLook.color(look))
             }
             .frame(width: CGFloat(PixelArt.markWidth) * pixel, height: CGFloat(PixelArt.markHeight) * pixel)
             .accessibilityLabel("AgentSwitch \(LiveLook.word(look))")
         } else {
-            // The shaded picture (docs/ui-v0.md §9) on the panel's black: the nearest lane's end in the state's colour,
-            // a block on that lane while busy. 1 pt cells: the capsule is 22 pt high.
-            let paint = ShadedMarkPaint(dark: true, end: look == .busy ? nil : LiveLook.color(look),
-                                        block: look == .busy ? ShadedMarkPaint.block(at: frame, trail: false) : [], busy: LiveLook.busy)
+            // The shaded picture (docs/ui-v0.md §10) on the panel's black: the front window's title bar in the state's
+            // colour, a light block on it while busy. 1 pt cells: the capsule is 22 pt high.
+            let paint = ShadedMarkPaint(dark: true, end: LiveLook.color(look),
+                                        block: look == .busy ? ShadedMarkPaint.block(at: frame, trail: false) : [], busy: .white)
             Canvas { context, _ in paint.draw(&context, cell: Self.cell) }
                 .frame(width: CGFloat(ShadedMark.picture.width) * Self.cell, height: CGFloat(ShadedMark.picture.height) * Self.cell)
                 .accessibilityLabel("AgentSwitch \(LiveLook.word(look))")

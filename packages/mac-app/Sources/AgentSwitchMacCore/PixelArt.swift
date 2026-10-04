@@ -11,8 +11,9 @@ public enum PixelArt {
         public let end: Bool
     }
 
-    /// One source switched onto three lanes, as the app icon: S = source, a/b/c = lanes, A/B/C = their ends; the top
-    /// lane is the lit one. 14 × 11, y down.
+    /// One source switched onto three lanes — the Dispatch page's icon (the app's own mark until 2026-10-04, hence the
+    /// name; the app's mark is the stack below): S = source, a/b/c = lanes, A/B/C = their ends; the top lane is the lit
+    /// one. 14 × 11, y down.
     public static let markRows = [
         "...........AAA",
         "......aaaaaAAA",
@@ -38,8 +39,49 @@ public enum PixelArt {
     /// anti-aliasing, for marks of 20 pt and up). Each carries the lit/dim role of the cell it leans on.
     public static let markSmoothing: [Cell] = smoothing(markRows)
 
-    /// How the mark shows the whole app: the lit lane (idle), a block running along it (busy), its end in amber
-    /// (waiting) or red (error), or dithered to half (off).
+    /// The app's mark in one colour, for the menu bar (docs/ui-v0.md §10): three windows one behind another, 14 × 11.
+    /// T = the front window's title bar (where a state shows), F = its frame, b = the windows behind it.
+    public static let stackRows = [
+        ".....bbbbbbbb.", "....b........b", "...bbbbbbbb..b", "..b........b.b", ".TTTTTTTT..b.b", "TTTTTTTTTT.b.b",
+        "F........F.bb.", "F........F.b..", "F........Fb...", "F........F....", ".FFFFFFFF.....",
+    ]
+
+    /// A cell of that mark: its place and the part it belongs to.
+    public struct StackCell: Sendable, Equatable {
+        public enum Part: Sendable, Equatable { case title, frame, behind }
+        public let x: Int
+        public let y: Int
+        public let part: Part
+    }
+
+    public static let stackCells: [StackCell] = stackRows.enumerated().flatMap { y, row in
+        row.enumerated().compactMap { x, c in
+            switch c {
+            case "T": return StackCell(x: x, y: y, part: .title)
+            case "F": return StackCell(x: x, y: y, part: .frame)
+            case "b": return StackCell(x: x, y: y, part: .behind)
+            default: return nil
+            }
+        }
+    }
+
+    /// Where the block sits on the title bar while busy: the menu bar's mark is still (ui-v0 §7.4).
+    public static let stackBlock: [(x: Int, y: Int)] = [(5, 4), (6, 4), (5, 5), (6, 5)]
+
+    /// How a cell of the one-colour mark shows in a state: true in full, false faint, nil gone. Idle: the front window
+    /// in full, the ones behind faint. Busy: its frame and a block on its title bar. Waiting or an error: its title bar
+    /// alone. Off: every other cell gone.
+    public static func stackShows(_ cell: StackCell, in state: MarkState) -> Bool? {
+        switch state {
+        case .idle: return cell.part != .behind
+        case .busy: return cell.part == .frame || stackBlock.contains { $0.x == cell.x && $0.y == cell.y }
+        case .waiting, .error: return cell.part == .title
+        case .off: return (cell.x + cell.y) % 2 == 1 ? nil : cell.part != .behind
+        }
+    }
+
+    /// How the mark shows the whole app: at rest (idle), its title bar in the busy colour with a block running along
+    /// it (busy), in amber (waiting) or red (error), or dithered to half (off).
     public enum MarkState: Sendable, Equatable { case idle, busy, waiting, error, off }
 
     /// The app's state for the mark: the services first, then whether anything waits for the user.

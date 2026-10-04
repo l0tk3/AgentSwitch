@@ -1,18 +1,18 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// What a state puts on the app's shaded mark (docs/ui-v0.md §9, ShadedMark): the picture is tones of the one ink, the
-/// only colour the state's — the nearest lane's end as a raised block in the state's colour, a block running along that
-/// lane while busy; off is the picture with every other cell gone.
+/// What a state puts on the app's shaded mark (docs/ui-v0.md §10, ShadedMark): the picture is tones of the one ink, the
+/// only colour the state's — the front window's title bar as a raised strip in the state's colour, a light block running
+/// along it while busy; off is the picture with every other cell gone.
 struct ShadedMarkPaint {
     var dark = true
     /// The hard shadow, a cell down and right, and a little glow under the running block.
     var depth = false
     var off = false
-    /// The nearest lane's end in a state's colour, and how lit it is (a waiting end is faint every other beat).
+    /// The title bar in a state's colour, and how lit it is (a waiting one is faint every other beat).
     var end: Color? = nil
     var endLit = 1.0
-    /// The running block: steps of the lane, each with how strongly it shows.
+    /// The running block: steps along the title bar, each with how strongly it shows, in `busy`.
     var block: [(step: Int, alpha: Double)] = []
     var busy: Color = .busy
 
@@ -53,9 +53,9 @@ struct ShadedMarkPaint {
     }
 }
 
-/// The app's mark in a state: its shaded picture, a cyan block running along the nearest lane while busy (still under
-/// Reduce Motion), that lane's end amber while something waits (it blinks) and red on an error. `cell` in points, drawn
-/// as a whole number of pixels. It ticks only while busy or waiting, seen, and allowed to move (ui-v0 §7.4).
+/// The app's mark in a state: its shaded picture, the front window's title bar cyan with a light block running along it
+/// while busy (still under Reduce Motion), amber while something waits (it blinks) and red on an error. `cell` in
+/// points, drawn as a whole number of pixels. It ticks only while busy or waiting, seen, and allowed to move (ui-v0 §7.4).
 struct ShadedMarkView: View {
     let state: PixelArt.MarkState
     var cell: CGFloat = 1.5
@@ -86,8 +86,8 @@ struct ShadedMarkView: View {
     private func paint(frame: Int) -> ShadedMarkPaint {
         ShadedMarkPaint(
             dark: scheme == .dark, depth: depth, off: state == .off,
-            end: state == .waiting ? .waiting : state == .error ? .failed : nil,
+            end: state == .waiting ? .waiting : state == .error ? .failed : state == .busy ? .busy : nil,
             endLit: state == .waiting && frame % 2 == 1 ? 0.25 : 1,
-            block: state == .busy ? ShadedMarkPaint.block(at: frame, trail: depth) : [])
+            block: state == .busy ? ShadedMarkPaint.block(at: frame, trail: depth) : [], busy: .white)
     }
 }
