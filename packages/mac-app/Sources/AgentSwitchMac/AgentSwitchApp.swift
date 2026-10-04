@@ -324,8 +324,10 @@ struct MenuBarIcon: View {
     let level: StatusLevel
     /// Things waiting for the user: the mark shows it, as the menu's header does.
     var waiting = 0
+    /// The look kept in the settings: the mark is drawn smooth in the classic one, and again when the look changes.
+    @AppStorage(InterfaceLook.key) private var appearance = InterfaceLook.pixel.rawValue
 
     var body: some View {
-        Image(nsImage: MenuBarGlyph.image(level, waiting: waiting))
+        Image(nsImage: MenuBarGlyph.image(level, waiting: waiting, look: InterfaceLook.load(appearance)))
     }
 }

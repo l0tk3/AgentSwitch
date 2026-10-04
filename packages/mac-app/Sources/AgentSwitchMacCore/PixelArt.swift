@@ -39,16 +39,18 @@ public enum PixelArt {
     /// anti-aliasing, for marks of 20 pt and up). Each carries the lit/dim role of the cell it leans on.
     public static let markSmoothing: [Cell] = smoothing(markRows)
 
-    /// The app's mark in one colour, for the menu bar (docs/ui-v0.md §10): three windows one behind another, 14 × 11.
-    /// T = the front window's title bar (where a state shows), F = its frame, b = the windows behind it.
+    /// The app's mark in one colour, for the menu bar (docs/ui-v0.md §10): the front window as a solid panel with its
+    /// prompt cut out of it — the pixel app icon's front window, cell for cell — and the edge of one window behind it
+    /// (the first one drew three windows as outlines; the user: 可以简化一下突出主体). 14 × 11.
+    /// P = the panel, p = its prompt, b = the window behind.
     public static let stackRows = [
-        ".....bbbbbbbb.", "....b........b", "...bbbbbbbb..b", "..b........b.b", ".TTTTTTTT..b.b", "TTTTTTTTTT.b.b",
-        "F........F.bb.", "F........F.b..", "F........Fb...", "F........F....", ".FFFFFFFF.....",
+        "...bbbbbbbbbb.", ".............b", ".PPPPPPPPPP..b", "PPPPPPPPPPPP.b", "PPppPPPPPPPP.b", "PPPppPPPPPPP.b", "PPPPppPPPPPP.b",
+        "PPPppPPPPPPP.b", "PPppPPppppPP..", "PPPPPPPPPPPP..", ".PPPPPPPPPP...",
     ]
 
     /// A cell of that mark: its place and the part it belongs to.
     public struct StackCell: Sendable, Equatable {
-        public enum Part: Sendable, Equatable { case title, frame, behind }
+        public enum Part: Sendable, Equatable { case panel, prompt, behind }
         public let x: Int
         public let y: Int
         public let part: Part
@@ -57,27 +59,29 @@ public enum PixelArt {
     public static let stackCells: [StackCell] = stackRows.enumerated().flatMap { y, row in
         row.enumerated().compactMap { x, c in
             switch c {
-            case "T": return StackCell(x: x, y: y, part: .title)
-            case "F": return StackCell(x: x, y: y, part: .frame)
+            case "P": return StackCell(x: x, y: y, part: .panel)
+            case "p": return StackCell(x: x, y: y, part: .prompt)
             case "b": return StackCell(x: x, y: y, part: .behind)
             default: return nil
             }
         }
     }
 
-    /// Where the block sits on the title bar while busy: the menu bar's mark is still (ui-v0 §7.4).
-    public static let stackBlock: [(x: Int, y: Int)] = [(5, 4), (6, 4), (5, 5), (6, 5)]
-
-    /// How a cell of the one-colour mark shows in a state: true in full, false faint, nil gone. Idle: the front window
-    /// in full, the ones behind faint. Busy: its frame and a block on its title bar. Waiting or an error: its title bar
-    /// alone. Off: every other cell gone.
-    public static func stackShows(_ cell: StackCell, in state: MarkState) -> Bool? {
-        switch state {
-        case .idle: return cell.part != .behind
-        case .busy: return cell.part == .frame || stackBlock.contains { $0.x == cell.x && $0.y == cell.y }
-        case .waiting, .error: return cell.part == .title
-        case .off: return (cell.x + cell.y) % 2 == 1 ? nil : cell.part != .behind
+    /// How a part of the one-colour mark shows in a state: true in full, false faint, nil not at all. Idle: the panel
+    /// in full, its prompt a hole in it, the window behind faint. Busy: the window behind in full too. Waiting or an
+    /// error: the panel faint and the prompt lit. Off is the idle picture, made less of by whoever draws it: the
+    /// pixel look takes every other cell away, the classic look fades the whole mark.
+    public static func stackShows(_ part: StackCell.Part, in state: MarkState) -> Bool? {
+        switch (state, part) {
+        case (.idle, .panel), (.off, .panel), (.busy, .panel), (.busy, .behind), (.waiting, .prompt), (.error, .prompt): return true
+        case (.idle, .behind), (.off, .behind), (.waiting, _), (.error, _): return false
+        case (.idle, .prompt), (.off, .prompt), (.busy, .prompt): return nil
         }
+    }
+
+    /// The same for a cell of the pixel look's mark: off, every other cell is gone.
+    public static func stackShows(_ cell: StackCell, in state: MarkState) -> Bool? {
+        state == .off && (cell.x + cell.y) % 2 == 1 ? nil : stackShows(cell.part, in: state)
     }
 
     /// How the mark shows the whole app: at rest (idle), its title bar in the busy colour with a block running along
