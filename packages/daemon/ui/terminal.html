@@ -29,6 +29,7 @@
 <main class="main">
   <section class="stage" id="stage">
     <div class="screen" id="screen"></div>
+    <div class="panes" id="panes" hidden></div>
     <div class="scan" id="scan"></div>
     <div class="link-hint" id="linkHint" hidden></div>
     <div class="away" id="away" hidden>
@@ -45,14 +46,14 @@
     <div class="create" id="create" hidden>
       <div class="create-card">
         <div class="wordmark" id="wordmark"></div>
-        <div class="label">// New Terminal</div>
+        <div class="label" data-label="New Terminal">// New Terminal</div>
         <div class="agents" id="agents"></div>
         <label class="field">
-          <span class="label">// Model</span>
+          <span class="label" data-label="Model">// Model</span>
           <span class="select"><select id="model"></select></span>
         </label>
         <label class="field">
-          <span class="label">// Folder</span>
+          <span class="label" data-label="Folder">// Folder</span>
           <span class="folder">
             <span class="prompt" aria-hidden="true">❯</span>
             <input id="cwd" list="folders" spellcheck="false" autocomplete="off">
@@ -61,7 +62,7 @@
           <datalist id="folders"></datalist>
         </label>
         <div class="field">
-          <span class="label">// Permissions</span>
+          <span class="label" data-label="Permissions">// Permissions</span>
           <div class="radios" id="modes"></div>
         </div>
         <div class="create-foot">

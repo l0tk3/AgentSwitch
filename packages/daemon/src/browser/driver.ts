@@ -29,6 +29,9 @@ export type RawFrame = {
     readonly offsetTop: number;
     readonly scrollOffsetX: number;
     readonly scrollOffsetY: number;
+    /** When Chrome sent the frame, by its own clock: seconds since 1970 (before the JPEG is made and travels: a frame
+     *  came 27 to 67 ms after its stamp in the middle, 317 ms at most, with Chrome 154). Optional in the protocol. */
+    readonly timestamp?: number;
   };
 };
 
@@ -68,7 +71,10 @@ export interface DriverPage {
   navigate(url: string): Promise<void>;
   history(action: "back" | "forward" | "reload"): Promise<void>;
   close(): Promise<void>;
-  setViewport(viewport: Viewport): Promise<void>;
+  /** The page's size (CSS pixels, DPR, phone or not), its view drawn at `render` view pixels per CSS pixel (default 1:
+   *  the view is the CSS size, Chrome's own); answers the scale it was drawn at (1 where Chrome cannot draw it so).
+   *  The page never sees `render`: no resize, the same `innerWidth` and `devicePixelRatio` (browser-v0 §5). */
+  setViewport(viewport: Viewport, render?: number): Promise<number>;
   /** `Input.dispatchMouseEvent`, `Input.dispatchKeyEvent`, `Input.insertText` on the page's own CDP session. */
   input(method: InputMethod, params: Record<string, unknown>): Promise<void>;
   startScreencast(params: ScreencastParams): Promise<void>;

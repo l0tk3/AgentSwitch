@@ -1,7 +1,8 @@
 /** The agent bridge in the daemon (docs/browser-v0.md §2 给 agent, §5 step 3) on a fake Chrome and a fake MCP engine:
  *  session tokens (minted, checked, revoked), the private folder (workspace root, swept after every call), one call at
- *  a time, a held tab's calls waiting and timing out, the tab's status and the overlay's action and box, the bridge's
- *  own refusals, `browser_close`, and what the overlay never shows (the typed text). */
+ *  a time, a held tab's calls waiting and timing out, the tab's status and the overlay's action and box, the tabs at
+ *  the CSS size for a call that points at the page or takes its picture, the bridge's own refusals, `browser_close`,
+ *  and what the overlay never shows (the typed text). */
 
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +17,9 @@ import { FakeDriver } from "./fakeBrowser.js";
 
 const CODEX: TabOwner = { kind: "terminal", id: "t1", label: "codex · AgentSwitch" };
 const CLAUDE: TabOwner = { kind: "terminal", id: "t2", label: "claude · site" };
+/** One of the gate's own checks as it sends them (a field's state; the templates are in browserProbes.test.ts). */
+const GATE_PROBE = "async (page) => { const locate = (t) => page.locator(/^(?:f\\d+)?e\\d+$/.test(t) ? 'aria-ref=' + t : t); const field = locate(\"e12\"); "
+  + "try { if (await field.count() !== 1) return 'unknown'; const value = await field.inputValue({ timeout: 2000 }); return value.length ? 'nonempty' : 'empty'; } catch { return 'unknown'; } }";
 
 /** Playwright MCP as far as the bridge can tell: answers, a current tab it opens through the host on first use, files
  *  written into its output folder, and a call the test can hold open. */
@@ -68,16 +72,19 @@ class FakeConnection implements EngineConnection {
   exposed: string[] = [];
   settles = 0;
   async settle(): Promise<readonly string[]> { this.settles += 1; return this.exposed; }
+  /** The content type of the current tab's document when it has no body of its own (an SVG file). */
+  plain: string | null = null;
+  async bodiless(): Promise<string | null> { return this.plain; }
   async close(): Promise<void> { this.closed = true; }
 }
 
 const hosts: BrowserHost[] = [];
 afterEach(async () => { for (const h of hosts.splice(0)) await h.shutdown(); });
 
-function setup(holdWaitMs = 5_000) {
+function setup(holdWaitMs = 5_000, agentQuietMs = 2_000) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-agents-")));
   const driver = new FakeDriver();
-  const host = new BrowserHost({ driver, profileDir: join(root, "profile"), files: { protected: { roots: [], exempt: [] }, home: root }, ownPorts: () => [4711], log: () => undefined, mac: true });
+  const host = new BrowserHost({ driver, profileDir: join(root, "profile"), files: { protected: { roots: [], exempt: [] }, home: root }, ownPorts: () => [4711], log: () => undefined, mac: true, agentQuietMs });
   hosts.push(host);
   const audit = new BrowserAudit(join(root, "browser", "audit.jsonl"));
   const engines: FakeConnection[] = [];
@@ -110,6 +117,13 @@ async function connect(agents: BrowserAgents, session: { id: string; token: stri
 const text = (m: JsonRpcMessage): string => ((m.result as { content: { text: string }[] }).content.map((c) => c.text).join("\n"));
 const isError = (m: JsonRpcMessage): boolean => (m.result as { isError?: boolean }).isError === true;
 const tick = () => new Promise((r) => setTimeout(r, 0));
+async function waitUntil(ok: () => boolean, ms = 2_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!ok()) {
+    if (Date.now() > end) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
 
 describe("sessions", () => {
   it("a token is minted per session into a private file, checked against its own session only, and revoked with it", async () => {
@@ -224,6 +238,20 @@ describe("the MCP connection", () => {
     ]);
   });
 
+  it("a page that is not HTML (an SVG file) is said to be one where the answer is its snapshot (2026-10-03)", async () => {
+    const { agents, engines } = setup();
+    const c = await connect(agents, agents.mint(CODEX));
+    expect(text(await c.call("browser_navigate", { url: "https://example.com/" }))).not.toContain("not HTML");
+    engines[0]!.plain = "image/svg+xml";
+    const opened = text(await c.call("browser_navigate", { url: "http://127.0.0.1:5173/ride.svg" }));
+    expect(opened).toContain("did browser_navigate");
+    expect(opened).toContain("This page is a image/svg+xml document, not HTML: there is nothing to snapshot.");
+    expect(opened).toContain("browser_take_screenshot");
+    expect(text(await c.call("browser_snapshot"))).toContain("not HTML");
+    expect(text(await c.call("browser_take_screenshot"))).not.toContain("not HTML");
+    expect(text(await c.call("browser_click", { target: "e12", element: "Merge" }))).not.toContain("not HTML");
+  });
+
   it("a call runs with the tab busy and the overlay showing what and where; idle after", async () => {
     const { agents, host, engines } = setup();
     const c = await connect(agents, agents.mint(CODEX));
@@ -242,6 +270,79 @@ describe("the MCP connection", () => {
     engines[0]!.gate = null;
     await c.call("browser_evaluate", { function: "() => location.href" });
     expect(host.get(tab)!.action!.tool).toBe("browser_click");
+  });
+
+  it("a call that may point at the page runs on the CSS size of a tab a screen shows at 2, drawn at 2 again a moment after; reading it does not redraw", async () => {
+    const { agents, host, engines, driver } = setup(5_000, 40);
+    const c = await connect(agents, agents.mint(CODEX));
+    await c.call("browser_navigate", { url: "https://github.com/" });
+    const tab = engines[0]!.current!;
+    const page = driver.page(0);
+    host.subscribe(tab, { quality: 80, fps: 15, scale: 2 }, () => undefined);
+    await waitUntil(() => page.renders.at(-1) === 2);
+    let release: () => void = () => undefined;
+    engines[0]!.gate = new Promise((r) => { release = r; });
+    const clicking = c.call("browser_click", { target: "e12", element: "Merge pull request" });
+    await waitUntil(() => engines[0]!.calls().includes("browser_click"));
+    expect(page.renders.at(-1)).toBe(1);   // Playwright's click lands where it aims
+    release();
+    await clicking;
+    expect(page.renders.at(-1)).toBe(1);
+    await waitUntil(() => page.renders.at(-1) === 2);
+    engines[0]!.gate = null;
+    const asks = page.renders.length;
+    await c.call("browser_snapshot");
+    await c.call("browser_evaluate", { function: "() => location.href" });
+    await c.call("browser_wait_for", { time: 0 });
+    await c.call("browser_tabs", { action: "list" });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(page.renders).toHaveLength(asks);
+  });
+
+  // Review, 2026-10-03, Chrome 154: Playwright's screenshot of a tab whose view was drawn at 2 laid the page out at
+  // the view's 2560×1600 (a resize for the page, and what is anchored to its far edges not in the picture), and left
+  // it so, the screens showing it at half size. Through the gate a screenshot is its masked one, which comes as
+  // `browser_run_code_unsafe`.
+  it("a picture of the page is taken on the CSS size too: Playwright's screenshot, and the gate's own code, its masked screenshot among it", async () => {
+    const { agents, host, engines, driver } = setup(5_000, 40);
+    const c = await connect(agents, agents.mint(CODEX));
+    await c.call("browser_navigate", { url: "https://github.com/" });
+    const page = driver.page(0);
+    host.subscribe(engines[0]!.current!, { quality: 80, fps: 15, scale: 2 }, () => undefined);
+    for (const [tool, args] of [["browser_take_screenshot", {}], ["browser_run_code_unsafe", { code: GATE_PROBE }]] as const) {
+      await waitUntil(() => page.renders.at(-1) === 2);
+      let release: () => void = () => undefined;
+      engines[0]!.gate = new Promise((r) => { release = r; });
+      const calling = c.call(tool, args);
+      await waitUntil(() => engines[0]!.calls().includes(tool));
+      expect(page.renders.at(-1), tool).toBe(1);
+      release();
+      expect(isError(await calling), tool).toBe(false);
+    }
+    await waitUntil(() => page.renders.at(-1) === 2);
+  });
+
+  // The same review: Chrome sets the view of a tab that comes to the front of its window to the window's size, and a
+  // still page sends no frame to say so (host.ts `strayed`). Playwright MCP's `browser_tabs` select brings a tab to
+  // the front.
+  it("a tab the agent selects is drawn again where a screen watches it", async () => {
+    const { agents, host, engines, driver } = setup();
+    const c = await connect(agents, agents.mint(CODEX));
+    await c.call("browser_navigate", { url: "https://github.com/" });
+    const page = driver.page(0);
+    const unwatched = page.renders.length;
+    await c.call("browser_tabs", { action: "select", index: 0 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(page.renders).toHaveLength(unwatched);   // nobody watches: its first frame will say
+    host.subscribe(engines[0]!.current!, { quality: 80, fps: 15, scale: 2 }, () => undefined);
+    await waitUntil(() => page.renders.at(-1) === 2);
+    const drawn = page.renders.length;
+    await c.call("browser_tabs", { action: "select", index: 0 });
+    await waitUntil(() => page.renders.length === drawn + 1);
+    expect(page.renders.at(-1)).toBe(2);
+    await c.call("browser_tabs", { action: "list" });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(page.renders).toHaveLength(drawn + 1);
   });
 
   it("calls of one session run one at a time, in the order they came", async () => {

@@ -290,8 +290,11 @@ node-pty's spawn helper needs its execute bit (npm skips install scripts): the d
 10 minutes without one, new headless on the persistent profile `$AGENTSWITCH_HOME/browser-profiles/main`, launched by
 `playwright-core` (pinned to the version Playwright MCP 0.0.82 uses) over `--remote-debugging-pipe`: no debugging port.
 Screens list tabs (`GET /browser/tabs`), open a URL, a path of the Mac's or a local port (`POST /browser/tabs`), watch a
-tab as an SSE screencast (`/browser/tabs/:id/stream`), send input, navigate, take a tab over and hand it back, set the
-holder's size, fill a ciphertext into the focused password or one-time-code field of their own tab through the gate
+tab as an SSE screencast (`/browser/tabs/:id/stream`; `scale` asks for the screen's device pixels, up to 8 frame pixels
+per CSS pixel, and the view is drawn at what the screen holds of that, to a thousandth), send input, navigate, take a
+tab over and hand it back, set the holder's size (also how a screen zooms a
+page: a smaller size and a larger `scale`; the daemon knows no zoom, docs/browser-v0.md §1 页面缩放),
+fill a ciphertext into the focused password or one-time-code field of their own tab through the gate
 (`POST /browser/tabs/:id/fill`, `secret-gate fill-value`; the value goes into the page only; never on an agent's tab),
 and list the Mac's local servers (`GET /browser/servers`). `file:` is
 for people only, and never a credential, AgentSwitch's own data or its own ports (`src/browser/rules.ts`), checked again
@@ -305,8 +308,22 @@ with the session's own token (local only, revoked when the terminal's program en
 (`src/browser/agentMcp.ts`, playwright-core's `createConnection`) on a context that holds only the agent's own tabs.
 Calls of a session run in order, wait while a person holds the tab (2 min), and set the tab's status and the overlay's
 action (`src/browser/agents.ts`); code runs only as the gate's own probes (`src/browser/probes.ts`), and what a person
-did in a tab while holding it stays out of the agent's network and console logs (`src/browser/heldTraffic.ts`). Tests use a fake browser and a fake MCP engine; `npx tsx scripts/browser_smoke.ts`
-runs the real Chrome in a temporary folder, the bridge through the repo's secret-gate included (not part of `npm test`).
+did in a tab while holding it stays out of the agent's network and console logs (`src/browser/heldTraffic.ts`). A call
+that points at the page or takes its picture (a click, a screenshot, the gate's own code) runs with the agent's tabs
+drawn at the CSS size, whatever scale a screen watches them at. Chrome sets the view of a tab that becomes its
+window's front tab (a tab closed, the agent selected one) to the window's size: such a tab is drawn again
+(`src/browser/host.ts`). Tests use a fake browser and a fake MCP engine; `npx tsx scripts/browser_smoke.ts`
+runs the real Chrome in a temporary folder, the bridge through the repo's secret-gate included (not part of `npm test`);
+`npx tsx scripts/browser_zoom_probe.ts` does the same for the page zoom: the sizes and scales a phone and a Mac ask at
+each step (the phone's as its app asks them: the stream again at every step), through the screens' routes, with where
+taps and drags land (also while the view is being redrawn), what the frames of a page that repaints all the time say
+(the page that was set, and none sent by Chrome before the step that set it), and how sharp the frames are; and for
+the last picture of a burst
+(`scripts/browser_last_picture.ts`, run by the same script, `--last` for that part alone): the acks to Chrome are paced
+by the fastest stream, Chrome drops what it captures while three frames wait for theirs, so once a page is still again
+its screencast is run once more (`src/browser/screencast.ts`), and a stream ends on the page as it is after a
+navigation, an animation or a scroll, at no cost in frames where the page keeps changing or is still, and gets its
+frames from the first when it takes over from another.
 
 ## MCP servers and skills
 

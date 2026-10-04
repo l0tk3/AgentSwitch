@@ -6,11 +6,19 @@ import { createRenderer } from "./lib/rendering.js";
 import { band, sidebar } from "./lib/sidebar.js";
 import { addPending, goto, health, loadApprovals, loadArchivedThreads, loadPolicy, loadQuota, loadTasks, loadThreads, openTask, refresh, removePending } from "./lib/actions.js";
 import { SPIN, reducedMotion } from "./pixel.js";
+import { dress, lookOf } from "./lib/look.js";
 import * as home from "./views/home.js";
 import * as task from "./views/task.js";
 import * as log from "./views/log.js";
 import * as ext from "./views/ext.js";
 import * as ctx from "./views/ctx.js";
+
+// The look (docs/ui-v0.md §8): pixel, or classic — kept in this browser (`appearance`, as the terminal page reads it),
+// changed by the side's `Appearance` (the page is loaded again in the other look). The views write the pixel look's
+// markup; `dress` turns its labels and status words into the classic ones, the stylesheet does the rest.
+const LOOK = lookOf((() => { try { return localStorage.getItem("appearance"); } catch { return null; } })());
+document.documentElement.classList.toggle("classic", LOOK === "classic");
+const dressed = (html) => dress(html, LOOK);
 
 const VIEWS = { home, task, log, ext, ctx };
 const $ = (s) => document.querySelector(s);
@@ -26,21 +34,21 @@ let renderedScope, renderedDetail, renderedEvents;
 const middle = (s) => (s.view === "task" ? home : VIEWS[s.view] || home);
 
 function render(s) {
-  bandRenderer.render(band(s), "band");
-  sideRenderer.render(sidebar(s), "side");
+  bandRenderer.render(dressed(band(s)), "band");
+  sideRenderer.render(dressed(sidebar(s)), "side");
   const tasks = s.view === "home" || s.view === "task";
   main.className = tasks ? "tasks" : "page";
   document.body.classList.toggle("with-detail", s.view === "task");
   // Opening or closing the task beside keeps the tasks as they are (a draft, the scroll); another page starts afresh.
   const scope = tasks ? "home" : `${s.view}:${s.navigationId}`;
-  if (renderer.render(middle(s).render(s), scope) && scope !== renderedScope) middle(s).afterRender?.();
+  if (renderer.render(dressed(middle(s).render(s)), scope) && scope !== renderedScope) middle(s).afterRender?.();
   renderedScope = scope;
   detail.hidden = s.view !== "task";
   if (s.view === "task") {
     const scopeBeside = `task:${s.task?.id || "loading"}:${s.navigationId}`;
     const events = $("#events");
     const following = events && events.scrollHeight - events.scrollTop - events.clientHeight <= 4;
-    if (detailRenderer.render(task.render(s), scopeBeside) && (scopeBeside !== renderedDetail || (s.events !== renderedEvents && following))) task.afterRender?.();
+    if (detailRenderer.render(dressed(task.render(s)), scopeBeside) && (scopeBeside !== renderedDetail || (s.events !== renderedEvents && following))) task.afterRender?.();
     renderedDetail = scopeBeside; renderedEvents = s.events;
   } else {
     renderedDetail = undefined;
@@ -56,6 +64,12 @@ picker.addEventListener("change", () => { addPending(picker.files, pickFor); pic
 const composerKey = (el) => el?.closest?.("[data-composer-key]")?.dataset.composerKey || "home";
 
 document.addEventListener("click", async (e) => {
+  // The other look: kept, and the page loaded again in it.
+  if (e.target.closest("#look")) {
+    try { localStorage.setItem("appearance", LOOK === "classic" ? "pixel" : "classic"); } catch { /* a private window keeps the look it has */ }
+    location.reload();
+    return;
+  }
   const nav = e.target.closest("[data-nav]");
   if (nav) { e.preventDefault(); return goto(nav.dataset.nav); }
   if (e.target.closest("#refresh")) return refresh();
@@ -135,7 +149,8 @@ let frame = 0;
 setInterval(() => {
   if (reducedMotion.matches) return;
   frame = (frame + 1) % SPIN.length;
-  for (const el of document.querySelectorAll("[data-spin]")) el.textContent = SPIN[frame];
+  // The classic look's spinner is the stylesheet's ring: its glyph stays as it is.
+  if (LOOK !== "classic") for (const el of document.querySelectorAll("[data-spin]")) el.textContent = SPIN[frame];
 }, 90);
 
 render(get());

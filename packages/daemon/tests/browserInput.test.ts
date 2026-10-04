@@ -2,7 +2,7 @@
  *  wheel deltas, text, named keys with modifiers and the macOS editing commands (copy, cut and paste left out). */
 
 import { describe, expect, it } from "vitest";
-import { inputCalls, KEY_NAMES, NOTHING_PRESSED, toPage, type Geometry, type InputEvent } from "../src/browser/input.js";
+import { inputCalls, KEY_NAMES, NOTHING_PRESSED, toInput, toPage, type Geometry, type InputEvent } from "../src/browser/input.js";
 
 const G: Geometry = { scale: 2, width: 1280, height: 800 };
 const mouse = (action: "move" | "down" | "up" | "click", x: number, y: number, extra: Partial<InputEvent> = {}): InputEvent =>
@@ -14,6 +14,41 @@ describe("frame points on the page", () => {
     expect(toPage(-5, 99_999, G)).toEqual({ x: 0, y: 799 });
     expect(toPage(3, 3, { scale: 0, width: 10, height: 10 })).toEqual({ x: 3, y: 3 });
     expect(toPage(1, 1, { scale: 3, width: 100, height: 100 })).toEqual({ x: 0.33, y: 0.33 });
+  });
+
+  it("goes on to the view's pixels when the view is drawn at a scale (Chrome divides by it); a wheel's delta stays CSS", () => {
+    const view: Geometry = { scale: 2, width: 1280, height: 800, view: 2 };
+    expect(toInput(200, 120, view)).toEqual({ x: 200, y: 120 });
+    expect(toInput(200, 120, G)).toEqual({ x: 100, y: 60 });
+    // A frame made smaller than the view (maxWidth): one pixel is two of the view.
+    expect(toInput(100, 60, { scale: 1, width: 1280, height: 800, view: 2 })).toEqual({ x: 200, y: 120 });
+    const click = inputCalls(mouse("click", 200, 120), view, NOTHING_PRESSED, true);
+    expect(click.calls[1]!.params).toMatchObject({ type: "mousePressed", x: 200, y: 120 });
+    const wheel = inputCalls({ type: "wheel", x: 200, y: 120, deltaX: 0, deltaY: 240, modifiers: [] }, view, NOTHING_PRESSED, true);
+    expect(wheel.calls[0]!.params).toMatchObject({ x: 200, y: 120, deltaY: 120 });
+  });
+
+  // Page zoom (browser-v0 §1 页面缩放, 2026-10-03): a page its screen zoomed in is drawn at up to 8 (a 3x phone at 200%:
+  // 201×345 at 6; a 2x Mac at 400%: 320×200 at 8); zoomed out, at the CSS size with the frame made smaller.
+  it("at a zoomed page's scales a frame pixel is still the view's pixel under it, and a wheel's delta CSS pixels", () => {
+    const phone: Geometry = { scale: 6, width: 201, height: 345, view: 6 };
+    expect(toPage(603, 840, phone)).toEqual({ x: 100.5, y: 140 });
+    expect(toInput(603, 840, phone)).toEqual({ x: 603, y: 840 });
+    // CSS pixels are kept to a hundredth: at most a few hundredths of a view pixel off.
+    const off = toInput(601, 1033, phone);
+    expect(Math.abs(off.x - 601)).toBeLessThan(0.05);
+    expect(Math.abs(off.y - 1033)).toBeLessThan(0.05);
+    const drag = inputCalls({ type: "wheel", x: 603, y: 840, deltaX: 0, deltaY: 600, modifiers: [] }, phone, NOTHING_PRESSED, true);
+    expect(drag.calls[0]!.params).toMatchObject({ x: 603, y: 840, deltaY: 100 });
+    const mac: Geometry = { scale: 8, width: 320, height: 200, view: 8 };
+    expect(toInput(804, 1120, mac)).toEqual({ x: 804, y: 1120 });
+    expect(inputCalls(mouse("click", 2559, 1599), mac, NOTHING_PRESSED, true).calls[1]!.params).toMatchObject({ type: "mousePressed", x: 2552, y: 1592 });   // the last CSS pixel
+    // 25% on the phone: the page 1608×2760 at the CSS size, its frame 1206×2070 (0.75 of it).
+    const out: Geometry = { scale: 0.75, width: 1608, height: 2760, view: 1 };
+    expect(toInput(75, 105, out)).toEqual({ x: 100, y: 140 });
+    expect(inputCalls({ type: "wheel", x: 75, y: 105, deltaX: 0, deltaY: 300, modifiers: [] }, out, NOTHING_PRESSED, true).calls[0]!.params).toMatchObject({ x: 100, y: 140, deltaY: 400 });
+    // A frame from before the view was redrawn (3 then, 6 now): its own scale to the page, the view's as it is to Chrome.
+    expect(toInput(300, 420, { scale: 3, width: 201, height: 345, view: 6 })).toEqual({ x: 600, y: 840 });
   });
 });
 

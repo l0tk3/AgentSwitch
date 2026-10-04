@@ -3,12 +3,12 @@
  *  `-c mcp_servers.browser.*`, Claude Code in its `--mcp-config`, OpenCode in its `OPENCODE_CONFIG`; pi and an ungated
  *  terminal get none; the session made for the terminal ends with its program and its tabs close with the terminal. */
 
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TerminalHost, type Launcher } from "../src/terminals/host.js";
-import { agentLauncher, BROWSER_SERVER, HOOK_SCRIPT } from "../src/terminals/launch.js";
+import { agentLauncher, BROWSER_GUIDANCE, BROWSER_SERVER, HOOK_SCRIPT } from "../src/terminals/launch.js";
 
 const FAKE = resolve(import.meta.dirname, "fixtures", "fakeTerminalAgent.mjs");
 const GATE = { bin: "/g/bin/secret-gate", home: "/g/home", proxy: "http://127.0.0.1:8080", playwrightVersion: "0.0.82", allowedOrigins: [] };
@@ -39,6 +39,21 @@ describe("the browser tool in a terminal's session config", () => {
     expect(args).toContain("mcp_servers.browser.tool_timeout_sec=300");
     // The token file's path, never a token; nothing of it in Codex's own environment.
     expect(Object.keys(plan.env).some((k) => /BROWSER/.test(k))).toBe(false);
+    // Told which browser to use (2026-10-03): its own Chrome DevTools or computer use start a browser of their own.
+    expect(plan.args).toContain(`developer_instructions=${JSON.stringify(BROWSER_GUIDANCE)}`);
+  });
+
+  it("Codex: the user's own developer_instructions are not replaced", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-term-home-"));
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".codex", "config.toml"), 'model = "gpt-6-sol"\ndeveloper_instructions = "Answer in Chinese."\n\n[mcp_servers.chrome-devtools]\ncommand = "npx"\n');
+    const own = agentLauncher({ binaries: { codex: "/bin/codex" }, gate: GATE, hookUrl: () => "", stateDir: mkdtempSync(join(tmpdir(), "agentswitch-term-browser-")), env: { HOME: home }, browser: () => BRIDGE });
+    const args = own({ id: "x5", harness: "codex", cwd: "/tmp", mode: "auto", hookToken: "tok" }).args.join("\n");
+    expect(args).toContain("mcp_servers.browser.command");
+    expect(args).not.toContain("developer_instructions");
+    // One under a table is not the top level's.
+    writeFileSync(join(home, ".codex", "config.toml"), '[profiles.fast]\ndeveloper_instructions = "Be brief."\n');
+    expect(own({ id: "x6", harness: "codex", cwd: "/tmp", mode: "auto", hookToken: "tok" }).args.join("\n")).toContain("developer_instructions");
   });
 
   it("Claude Code: the browser server beside secret-gate's own in its --mcp-config", () => {
@@ -49,6 +64,7 @@ describe("the browser tool in a terminal's session config", () => {
     const servers = JSON.parse(readFileSync(config, "utf8")).mcpServers;
     expect(Object.keys(servers)).toEqual(["secret-gate", "browser"]);
     expect(servers.browser).toEqual({ type: "stdio", command: "/g/bin/secret-gate", args: ["browser", "--", ...BRIDGE], env: { SECRET_GATE_HOME: "/g/home" } });
+    expect(plan.args[plan.args.indexOf("--append-system-prompt") + 1]).toBe(BROWSER_GUIDANCE);
   });
 
   it("OpenCode: the browser server in its own OPENCODE_CONFIG, beside the refusals", () => {
@@ -56,6 +72,8 @@ describe("the browser tool in a terminal's session config", () => {
     const plan = launch({ id: "o1", harness: "opencode", cwd: "/tmp", mode: "auto", hookToken: "tok" });
     const config = JSON.parse(readFileSync(plan.env.OPENCODE_CONFIG!, "utf8"));
     expect(config.mcp.browser).toEqual({ type: "local", command: ["/g/bin/secret-gate", "browser", "--", ...BRIDGE], enabled: true, environment: { SECRET_GATE_HOME: "/g/home" } });
+    expect(config.instructions).toHaveLength(1);
+    expect(readFileSync(config.instructions[0], "utf8").trim()).toBe(BROWSER_GUIDANCE);
     const prot = { roots: ["/as/gate"], exempt: [], readDenied: ["/as/gate"] };
     const withRules = agentLauncher({ binaries: { opencode: "/bin/opencode" }, gate: GATE, protected: prot, hookUrl: () => "", stateDir: mkdtempSync(join(tmpdir(), "agentswitch-term-browser-")), env: {}, browser: () => BRIDGE });
     const both = JSON.parse(readFileSync(withRules({ id: "o2", harness: "opencode", cwd: "/tmp", mode: "auto", hookToken: "tok" }).env.OPENCODE_CONFIG!, "utf8"));
@@ -69,11 +87,14 @@ describe("the browser tool in a terminal's session config", () => {
     expect(pi.args.join(" ")).not.toContain("browser");
     expect(asked).toEqual([]);   // no session minted for it
     const ungated = launcher(() => BRIDGE, null);
-    expect(ungated.launch({ id: "x2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).not.toContain("mcp_servers.browser");
+    const ungatedCodex = ungated.launch({ id: "x2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ");
+    expect(ungatedCodex).not.toContain("mcp_servers.browser");
+    expect(ungatedCodex).not.toContain("developer_instructions");
     expect(ungated.asked).toEqual([]);
     const off = launcher(undefined);
     expect(off.launch({ id: "x3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).not.toContain("mcp_servers.browser");
     const claude = off.launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
+    expect(claude.args).not.toContain("--append-system-prompt");
     expect(Object.keys(JSON.parse(readFileSync(claude.args[claude.args.indexOf("--mcp-config") + 1]!, "utf8")).mcpServers)).toEqual(["secret-gate"]);
     const refused = launcher(() => null);
     expect(refused.launch({ id: "x4", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).not.toContain("mcp_servers.browser");

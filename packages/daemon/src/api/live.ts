@@ -31,6 +31,10 @@ export type LiveRow = {
   readonly title: string;
   /** What it waits for, else what it is doing in plain words, else its state. */
   readonly step: string;
+  /** The same in one word, for the menu bar's capsule (2026-10-03, user: 电脑上这个实时活动的设计还是老的计时器设计，改成
+   *  和手机上一样; the phone's compact island since 2026-10-01): `Run`, `Edit`, `Reply`, `Allow?` — the phone's
+   *  LiveSummary.doing and ToolDisplay.word, word for word. */
+  readonly doing: string;
   /** The model at work (as people say it), once one has the task; a terminal's agent. */
   readonly model: string | null;
   /** A terminal's agent id (its pixel mark). */
@@ -104,11 +108,36 @@ export function waitsForYou(t: TerminalInfo): boolean {
 }
 
 function taskRow(store: Store, task: Task, waitingOn: Approval | undefined): LiveRow {
+  const tail = store.lastEvents(task.id, TAIL);
+  const needsYou = waitingOn !== undefined || task.status === "waiting_approval";
   return {
-    id: task.id, kind: "task", title: liveTitle(store, task), step: step(task, waitingOn, store.lastEvents(task.id, TAIL)),
+    id: task.id, kind: "task", title: liveTitle(store, task), step: step(task, waitingOn, tail), doing: taskDoing(task, needsYou, waitingOn, tail),
     model: task.model ? modelName(task.model) : null, agent: null, startedAt: task.createdAt,
-    needsYou: waitingOn !== undefined || task.status === "waiting_approval", ask: waitingOn ? taskAsk(task, waitingOn) : null,
+    needsYou, ask: waitingOn ? taskAsk(task, waitingOn) : null,
   };
+}
+
+/** What a task is doing now in one word: waiting on a question or an approval, else the latest event that says
+ *  something — a tool by its word, the model writing, planning, choosing a model — else its state. */
+export function taskDoing(task: Task, needsYou: boolean, waitingOn: Approval | undefined, tail: readonly TaskEvent[]): string {
+  if (needsYou) return waitingOn?.kind === "question" && (parseEvidence(waitingOn.evidence)?.questions.length ?? 0) > 0 ? "Answer" : "Allow?";
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const e = tail[i]!, p = e.payload as Record<string, unknown>;
+    switch (e.type) {
+      case "tool_call": if (p.denied === undefined) return toolWord(typeof p.tool === "string" ? p.tool : ""); break;
+      case "text": return "Reply";
+      case "routed": return typeof p.clarify === "string" && p.clarify ? "Answer" : "Start";
+      case "dispatched": case "redispatch": return "Start";
+      case "step":
+        if (p.action === "plan") return "Plan";
+        if (p.action === "ask_user") return "Answer";
+        if (p.action === "finish") return "Check";
+        if (p.action === "dispatch") return "Start";
+        break;
+      default: break;
+    }
+  }
+  return task.status === "queued" ? "Queued" : task.status === "routing" ? "Route" : "Busy";
 }
 
 function terminalRow(t: TerminalInfo): LiveRow {
@@ -116,15 +145,15 @@ function terminalRow(t: TerminalInfo): LiveRow {
   if (!waitsForYou(t)) {
     // At work: the tool it reported last, said as people say it; the clock from when this turn began.
     const doing = t.activity ? clip(readable(toolPhrase(t.activity.tool, t.activity.target)), STEP_CHARS) : "进行中";
-    return { id: t.id, kind: "terminal", title: clip(t.name || agent, TITLE_CHARS), step: doing, model: agent, agent: t.harness,
-      startedAt: t.statusSince || t.lastOutputAt, needsYou: false, ask: null };
+    return { id: t.id, kind: "terminal", title: clip(t.name || agent, TITLE_CHARS), step: doing, doing: t.activity ? toolWord(t.activity.tool) : "Think",
+      model: agent, agent: t.harness, startedAt: t.statusSince || t.lastOutputAt, needsYou: false, ask: null };
   }
   const ask = t.permissions[0];
   const target = ask ? clip(readable(permissionTarget(ask.tool, ask.input)), TARGET_CHARS) : "";
   const asked = ask?.questions?.[0];
   return {
     id: t.id, kind: "terminal", title: clip(t.name || agent, TITLE_CHARS),
-    step: ask ? clip(readable(ask.summary), STEP_CHARS) : "等你处理", model: agent, agent: t.harness,
+    step: ask ? clip(readable(ask.summary), STEP_CHARS) : "等你处理", doing: ask?.tool === "AskUserQuestion" ? "Answer" : "Allow?", model: agent, agent: t.harness,
     startedAt: ask && ask.at > 0 ? ask.at : t.statusSince || t.lastOutputAt, needsYou: true,
     ask: !ask ? null
       : asked ? { kind: "question", id: ask.id, questionId: "", text: clip(readable(asked.question), STEP_CHARS * 2), options: asked.options.map((o) => o.label), answerable: false }
@@ -240,6 +269,26 @@ const BROWSER: Readonly<Record<string, string>> = {
 };
 const SECRET: Readonly<Record<string, string>> = { secret_fill: "填入密文", secret_type: "填入密文", secret_repair: "修复密文", credential_repair: "修复密文" };
 const TARGET_KEYS = ["url", "file_path", "filePath", "notebook_path", "path", "pattern", "query", "element", "description", "skill", "prompt"];
+
+const WORDS: Readonly<Record<string, string>> = {
+  bash: "Run", shell: "Run", commandexecution: "Run", exec_command: "Run", local_shell: "Run",
+  read: "Read", view: "Read", notebookread: "Read",
+  write: "Edit", edit: "Edit", multiedit: "Edit", filechange: "Edit", apply_patch: "Edit", patch: "Edit", notebookedit: "Edit",
+  grep: "Search", glob: "Search", list: "Search", ls: "Search",
+  webfetch: "Web", websearch: "Web", web_search: "Web",
+  task: "Agents", agent: "Agents", subagent: "Agents",
+  todowrite: "Plan", update_plan: "Plan", skill: "Skill", askuserquestion: "Answer",
+};
+
+/** The tool in one short word (the phone's ToolDisplay.word): title case as ui-v0 §7.2.7. */
+export function toolWord(tool: string): string {
+  const word = WORDS[tool] ?? WORDS[tool.toLowerCase()];
+  if (word) return word;
+  const [server, name] = splitTool(tool);
+  if (server === "playwright" || name.startsWith("browser_")) return "Web";
+  if (server?.includes("secret")) return "Sealed";
+  return "Tool";
+}
 
 /** A tool and what it works on, as people say it: `运行 npm test`, `修改 /w/a.ts`, `浏览器 · 点击 发布`. */
 export function toolPhrase(tool: string, target: string): string {

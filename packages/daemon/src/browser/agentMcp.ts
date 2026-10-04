@@ -29,6 +29,30 @@ import type { Box, TabOwner } from "./types.js";
 
 /** How long the box of the element a call acts on may take. */
 const BOX_TIMEOUT_MS = 500;
+/** How long asking a page what kind of document it holds may take. */
+const KIND_TIMEOUT_MS = 500;
+
+/** Runs in every document of an agent's tab before the page's own scripts. A document without a `body` — an SVG file
+ *  opened as a page — never gets a snapshot: Playwright's (`ariaSnapshotJSONForFrame`) looks for `body,frameset` and
+ *  tries again until the call's 30 s are up, so `browser_navigate` and `browser_snapshot` timed out on a page that had
+ *  opened fine (2026-10-03, user: 怎么还能超时的？… 但是确实成功打开浏览器了). Such a document is given an empty body to
+ *  find (an XHTML element under an SVG root is not drawn); the bridge then says what the page is. As text, not a
+ *  function: a function's source carries the helpers of whatever compiled it (tsx's `__name`), which no page has. */
+const STAND_IN_BODY = `(() => {
+  const ensure = () => {
+    const root = document.documentElement;
+    if (!root || document.querySelector("body,frameset")) return;
+    const body = document.createElementNS("http://www.w3.org/1999/xhtml", "body");
+    body.setAttribute("data-agentswitch-stand-in", "");
+    root.appendChild(body);
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", ensure, { once: true });
+  else ensure();
+})();`;
+/** The content type of a document that has the stand-in body, else null. */
+const BODILESS_TYPE = `document.querySelector("body[data-agentswitch-stand-in]") ? document.contentType : null`;
+/** Pages that have the stand-in script (one page may be in several connections' contexts). */
+const prepared = new WeakSet<object>();
 
 type McpLocator = { boundingBox(options: { timeout: number }): Promise<Box | null> };
 /** What is read of Playwright MCP's own tab and context objects (public members of `tools.Tab` and its `context`). */
@@ -160,6 +184,16 @@ export class AgentContext extends EventEmitter {
     return box ? { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) } : null;
   }
 
+  /** The content type of tab `id`'s document when it has no body of its own (`image/svg+xml`): its snapshot is empty.
+   *  Null for an HTML page, an unknown tab, or a page that does not answer in time. */
+  async bodiless(id: string): Promise<string | null> {
+    const page = this.byTab.get(id) as Page | undefined;
+    if (!page) return null;
+    if (typeof page.evaluate !== "function") return null;
+    const asked = page.evaluate<string | null>(BODILESS_TYPE).catch(() => null);
+    return Promise.race([asked, new Promise<null>((resolve) => setTimeout(() => resolve(null), KIND_TIMEOUT_MS))]);
+  }
+
   dispose(): void {
     this.stopWatching();
     this.removeAllListeners();
@@ -169,6 +203,14 @@ export class AgentContext extends EventEmitter {
     const page = (this.host.page(id)?.playwright?.() ?? null) as Page | null;
     if (!page || this.byTab.has(id)) return;
     this.byTab.set(id, page);
+    if (!prepared.has(page)) {
+      prepared.add(page);
+      // Every document from now on, and the one it holds already (a stand-in page in the tests takes no scripts).
+      try {
+        void page.addInitScript?.({ content: STAND_IN_BODY })?.catch(() => undefined);
+        void page.evaluate?.(STAND_IN_BODY)?.catch(() => undefined);
+      } catch { /* not a page that runs scripts */ }
+    }
     // A tab opened now (new, a popup, another connection of the same agent): Playwright MCP's listener makes a tab of
     // it at once, which tells this connection's context object.
     if (this.listenerCount("page") === 0) return;
@@ -289,6 +331,7 @@ export function playwrightEngine(host: AgentContextHost, log: (line: string) => 
       tabAt: (index) => context.tabIdAt(index),
       box: (target) => context.box(target),
       settle: () => context.settle(),
+      bodiless: (tab) => context.bodiless(tab),
       close: async () => {
         try { await server.close(); } finally { context.dispose(); release(); }
       },

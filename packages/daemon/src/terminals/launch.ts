@@ -5,7 +5,7 @@
 
 import { codexHookArgs } from "./codexHooks.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeMcpServers, gateEnv, withoutCredentialRepair, type GateOptions } from "../executors/gate.js";
@@ -55,6 +55,32 @@ export type LauncherOptions = {
 export const BROWSER_HARNESSES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode"]);
 /** The MCP server's name in each agent's configuration: its tools show as `browser_navigate`, … under it. */
 export const BROWSER_SERVER = "browser";
+/** What a terminal's agent is told about the `browser` tools it has (docs/browser-v0.md §6 告诉 agent 用哪个, 2026-10-03,
+ *  user: 怎么着么费劲呢，codex调用浏览器，我看他默认还是加载chrome): its own browser tools are there too — Chrome DevTools,
+ *  computer use, Playwright —, and without a word it picks any, starting a browser of its own. Theirs stay usable by name. */
+export const BROWSER_GUIDANCE =
+  "This terminal runs in AgentSwitch. To open, look at, check or operate anything in a web browser (a site, a local dev " +
+  "server, a page or picture you made), use the tools of the `browser` MCP server: browser_navigate, browser_snapshot, " +
+  "browser_take_screenshot, browser_click, browser_type and the rest (some agents list them as mcp__browser__browser_navigate " +
+  "and so on). They drive AgentSwitch's shared browser, which the user watches and can take over from the Mac and the " +
+  "iPhone, signed in as the user. It opens http(s) pages only: serve a local file from a local server (python3 -m " +
+  "http.server on 127.0.0.1) and open that. Do not use any other browser (Chrome DevTools, Safari or another app through " +
+  "computer use, an in-app browser, Playwright scripts) unless the user asks for that one by name.";
+
+/** The user's own `developer_instructions` at the top of Codex's config.toml: the terminal's `-c` would replace them, so
+ *  then it sets none (the browser tools keep their own descriptions). */
+export function codexHasOwnInstructions(env: NodeJS.ProcessEnv): boolean {
+  const home = env.CODEX_HOME || (env.HOME ? join(env.HOME, ".codex") : "");
+  if (!home) return false;
+  let text: string;
+  try { text = readFileSync(join(home, "config.toml"), "utf8"); } catch { return false; }
+  for (const line of text.split("\n")) {
+    if (/^\s*\[/.test(line)) return false;   // the first table: the top level is over
+    if (/^\s*developer_instructions\s*=/.test(line)) return true;
+  }
+  return false;
+}
+
 /** Codex gives an MCP tool call 60 s by default: a call waits up to two minutes while a person holds its tab. */
 const BROWSER_TOOL_TIMEOUT_S = 300;
 
@@ -154,6 +180,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
           writeFileSync(mcp, JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });
           args.push("--mcp-config", mcp);
         }
+        if (browser) args.push("--append-system-prompt", BROWSER_GUIDANCE);
         if (req.model) args.push("--model", req.model);
         args.push(...(req.mode === "bypass" ? ["--dangerously-skip-permissions"] : ["--permission-mode", req.mode]));
         // As in iTerm: ⇧Tab can reach bypass later. Only for terminals started on the Mac (not from a paired phone).
@@ -173,6 +200,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // The gate's proxy and CA reach the commands Codex runs, never Codex's own traffic (as the managed executor).
         if (opts.gate) args.push("-c", `shell_environment_policy.set=${tomlInline(gated)}`);
         if (browser) args.push(...codexBrowserArgs(browser));
+        if (browser && !codexHasOwnInstructions(opts.env ?? process.env)) args.push("-c", `developer_instructions=${JSON.stringify(BROWSER_GUIDANCE)}`);
         if (req.model) args.push("-m", req.model);
         if (req.mode === "bypass") args.push("--dangerously-bypass-approvals-and-sandbox");
         // Asking is stated, not left to config.toml (which may never ask): it asks before anything outside the sandbox.
@@ -197,8 +225,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (opts.protected || browser) {
           const config = join(dir, "opencode.json");
           const mcp = browser ? { mcp: { [BROWSER_SERVER]: { type: "local", command: [browser.command, ...browser.args], enabled: true, environment: browser.env } } } : {};
+          const told = join(dir, "browser.md");
+          if (browser) writeFileSync(told, `${BROWSER_GUIDANCE}\n`, { mode: 0o600 });
           const base = opts.protected ? opencodeTerminalConfig(opts.protected, env) : { $schema: "https://opencode.ai/config.json" };
-          writeFileSync(config, JSON.stringify({ ...base, ...mcp }, null, 2), { mode: 0o600 });
+          writeFileSync(config, JSON.stringify({ ...base, ...mcp, ...(browser ? { instructions: [told] } : {}) }, null, 2), { mode: 0o600 });
           own = { ...env, OPENCODE_CONFIG: config };
         }
         const companion = opts.opencodeServer ? new OpenCodeCompanion({ binary: file, cwd: req.cwd, env: own, args: rest, asks: req.mode === "manual" }) : undefined;

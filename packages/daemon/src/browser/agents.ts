@@ -44,7 +44,18 @@ export const RESIZE_REFUSED = "In AgentSwitch's shared browser a tab's size belo
 export const HELD_LOGS_REFUSED = "The user used this tab in AgentSwitch; its network requests and console messages are not available to agents.";
 /** Tools that read a tab's network and console records (heldTraffic.ts keeps a hold's out of them). */
 const LOG_TOOLS = new Set(["browser_network_requests", "browser_network_request", "browser_console_messages"]);
+/** Tools that neither point at the page nor take its picture: they run on a view drawn at a scale (browser-v0 §5).
+ *  Every other one, a newer Playwright MCP's too, gets the agent's tabs at the CSS size first
+ *  (`BrowserHost.agentActing`). A screenshot is one of those: Playwright's capture of a tab whose view is drawn at a
+ *  scale lays the page out at the view's size in pixels and leaves it so (review, 2026-10-03, Chrome 154: a 1280×800
+ *  page watched at 2 saw itself 2560×1600 from then on, what is anchored to its far edges was not in the picture, and
+ *  the screens showed it at half size). Through the gate a screenshot is its masked one, which comes as
+ *  `browser_run_code_unsafe` like its other checks. */
+const POINTLESS_TOOLS = new Set([...LOG_TOOLS, "browser_snapshot", "browser_tabs", "browser_wait_for", "browser_navigate", "browser_navigate_back",
+  "browser_evaluate"]);
 const NOT_OPENED = "Not opened in AgentSwitch's shared browser:";
+/** The calls whose answer is the page as a snapshot. */
+const READS_PAGE = new Set(["browser_navigate", "browser_navigate_back", "browser_snapshot"]);
 
 export type JsonRpcId = string | number;
 export type JsonRpcMessage = {
@@ -69,6 +80,9 @@ export interface EngineConnection {
   /** Before a call is handed over: waits out the grace after a hand-back (heldTraffic.ts) and returns the tabs, held
    *  before, whose logs could not be kept clear of the hold (their log tools are then refused). */
   settle?(): Promise<readonly string[]>;
+  /** The content type of a tab's document that has no body of its own (an SVG file opened as a page): there is
+   *  nothing to snapshot, and the answer says so. Null for an HTML page. */
+  bodiless?(tab: string): Promise<string | null>;
   close(): Promise<void>;
 }
 
@@ -82,7 +96,7 @@ export type EngineOptions = {
 export type AgentEngine = (opts: EngineOptions) => Promise<EngineConnection>;
 
 /** What this module needs of the host. */
-export type AgentHost = Pick<BrowserHost, "get" | "tabsOf" | "watch" | "setStatus" | "setAction" | "close" | "allowed">;
+export type AgentHost = Pick<BrowserHost, "get" | "tabsOf" | "watch" | "setStatus" | "setAction" | "close" | "allowed" | "agentActing" | "agentDone" | "fronted">;
 
 export type BrowserAgentsOptions = {
   readonly host: AgentHost;
@@ -401,14 +415,29 @@ export class BrowserAgents {
       this.quietly(() => this.opts.host.setStatus(target, "busy"));
       if (shown) this.quietly(() => this.opts.host.setAction(target, { tool, description: shown, ...(box ? { box } : {}) }));
     }
-    const answer = await this.forward(conn, request);
+    // Playwright's points are CSS pixels: the agent's tabs at the CSS size while it may point at the page.
+    const pointing = !POINTLESS_TOOLS.has(tool);
+    if (pointing) await this.opts.host.agentActing(owner).catch((err: unknown) => this.log(`browser: agent's tabs not redrawn: ${(err as Error)?.message}`));
+    let answer: JsonRpcMessage | null;
+    try {
+      answer = await this.forward(conn, request);
+    } finally {
+      if (pointing) this.quietly(() => this.opts.host.agentDone(owner));
+    }
     const after = conn.closed ? null : engine.currentTab();
+    // Playwright MCP brings the tab it selects to the front of Chrome's window.
+    if (tool === "browser_tabs" && args.action === "select" && after) this.quietly(() => this.opts.host.fronted(after));
     for (const tab of new Set([target, after])) if (tab && this.opts.host.get(tab)) this.quietly(() => this.opts.host.setStatus(tab, "idle"));
     if (!target && after && shown) this.quietly(() => this.opts.host.setAction(after, { tool, description: shown }));
     sweep(conn.outputDir);
     if (!answer) return;
     if (tool === "browser_navigate" && after && !failed(answer)) {
       this.opts.audit?.record({ tab: after, action: "navigate", via: "agent", detail: { owner: `${owner.kind}:${owner.id}`, target: auditUrl(completed(String(args.url ?? ""))) } });
+    }
+    // A page that is not HTML (an SVG file): its snapshot is empty, which reads as a page that failed to load.
+    if (READS_PAGE.has(tool) && after && !failed(answer)) {
+      const type = await engine.bodiless?.(after).catch(() => null);
+      if (type) answer = withNote(answer, `This page is a ${type} document, not HTML: there is nothing to snapshot. It is open and showing; use browser_take_screenshot to look at it.`);
     }
     this.send(conn, !before && after && !failed(answer) ? withNote(answer, `Opened in tab "${owner.label}" of AgentSwitch's shared browser: the user sees it in AgentSwitch and can take it over.`) : answer);
   }

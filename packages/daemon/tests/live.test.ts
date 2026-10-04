@@ -5,7 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { liveSnapshot, plainLine, splitAction, toolLine } from "../src/api/live.js";
+import { liveSnapshot, plainLine, splitAction, toolLine, toolWord } from "../src/api/live.js";
 import { encodeEvidence } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
@@ -200,6 +200,44 @@ describe("live lines", () => {
     expect(plainLine(event("step", { action: "dispatch", n: 2, target: { model: "claude-opus-5-5" } }))).toBe("第 2 步：交由 Opus 5.5 执行");
     expect(plainLine(event("tool_call", { tool: "Bash", denied: true }))).toBeNull();
     expect(plainLine(event("tool_result", { ok: true }))).toBeNull();
+  });
+
+  it("says in one word what each is doing, as the phone's compact island does (the menu bar's capsule, 2026-10-03)", () => {
+    expect(["Bash", "commandExecution", "MultiEdit", "Grep", "WebFetch", "Task", "TodoWrite", "AskUserQuestion"].map(toolWord))
+      .toEqual(["Run", "Run", "Edit", "Search", "Web", "Agents", "Plan", "Answer"]);
+    expect(toolWord("mcp__playwright__browser_click")).toBe("Web");
+    expect(toolWord("browser_navigate")).toBe("Web");
+    expect(toolWord("mcp__secret-gate__secret_fill")).toBe("Sealed");
+    expect(toolWord("linear.create_issue")).toBe("Tool");
+
+    const f = build();
+    const made = (status: "queued" | "routing" | "running" | "waiting_approval") => {
+      f.at(f.now() + 1_000);
+      const t = f.store.createTask({ task: status, cwd: "/w" });
+      f.store.updateTask(t.id, { status });
+      return t.id;
+    };
+    const queued = made("queued"), routing = made("routing"), started = made("running"), running = made("running"), writing = made("running");
+    f.store.appendEvent(started, "dispatched", { model: "claude-opus-5-5" });
+    f.store.appendEvent(running, "tool_call", { tool: "Bash", denied: true });
+    f.store.appendEvent(running, "tool_call", { tool: "Read", input: { file_path: "/w/a.ts" } });
+    f.store.appendEvent(running, "tool_result", { ok: true });
+    f.store.appendEvent(writing, "tool_call", { tool: "Edit" });
+    f.store.appendEvent(writing, "text", { text: "改好了" });
+    const allow = made("waiting_approval");
+    f.store.createApproval(allow, "Bash: rm -rf build", "{}");
+    const answer = made("waiting_approval");
+    f.store.createApproval(answer, "要删掉吗？", encodeEvidence({ source: "executor", questions: [{ id: "q0", header: "", text: "要删掉吗？", options: [], multi: false, secret: false }] }), "question");
+    const question = [{ question: "用哪个库？", header: "", multiSelect: false, options: [] }];
+    const snap = liveSnapshot(f.store, host([
+      terminal({ id: "k1", status: "working", activity: { tool: "Edit", target: "/w/a.ts" } }),
+      terminal({ id: "k2", status: "working", activity: null }),
+      terminal({ id: "k3", status: "waiting", permissions: [{ id: "p1", tool: "Bash", summary: "Bash: npm test", input: { command: "npm test" }, at: 1 }] }),
+      terminal({ id: "k4", status: "waiting", permissions: [{ id: "p2", tool: "AskUserQuestion", summary: "用哪个库？", input: { questions: question }, at: 2, questions: question }] }),
+    ]), f.now());
+    const doing = new Map(snap.rows.map((r) => [r.id, r.doing]));
+    expect([queued, routing, started, running, writing, allow, answer].map((id) => doing.get(id))).toEqual(["Queued", "Route", "Start", "Read", "Reply", "Allow?", "Answer"]);
+    expect(["k1", "k2", "k3", "k4"].map((id) => doing.get(id))).toEqual(["Edit", "Think", "Allow?", "Answer"]);
   });
 
   it("splits an approval into its tool and what it works on", () => {

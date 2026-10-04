@@ -1,4 +1,5 @@
-/** A screen's input as CDP `Input.*` calls (browser-v0 §1 操作): points on the frame mapped to the page's CSS pixels,
+/** A screen's input as CDP `Input.*` calls (browser-v0 §1 操作): points on the frame mapped to the page's CSS pixels
+ *  (and on to the view's pixels when the host draws the view at a scale, browser-v0 §5),
  *  mouse buttons kept pressed between down and up (a drag selects), text inserted as it is (the system keyboard's), and a
  *  small set of named keys with modifiers. On the Mac, Chrome only edits text for a key when the macOS editing command
  *  comes with it, as Playwright sends them (its macEditingCommands); copy, cut and paste are left out on purpose: they
@@ -74,8 +75,12 @@ export type TextInput = { readonly type: "text"; readonly text: string };
 export type KeyInput = { readonly type: "key"; readonly key: string; readonly modifiers: readonly Modifier[] };
 export type InputEvent = MouseInput | WheelInput | TextInput | KeyInput;
 
-/** How a frame's pixels sit on the page: `scale` frame pixels per CSS pixel; the viewport in CSS pixels. */
-export type Geometry = { readonly scale: number; readonly width: number; readonly height: number };
+/** How a frame's pixels sit on the page: `scale` frame pixels per CSS pixel; the viewport in CSS pixels; `view`: the
+ *  tab's view pixels per CSS pixel when the host draws it at a scale (browser-v0 §5, 2026-10-03), where Chrome takes a
+ *  point of input in the view's pixels and divides it by the scale itself (1 when absent). The view is the one drawn
+ *  now, not the frame's own when it has been redrawn since (a page zoom redraws it at every step, browser-v0 §1
+ *  页面缩放). */
+export type Geometry = { readonly scale: number; readonly width: number; readonly height: number; readonly view?: number };
 /** The buttons held down between calls (for drags). */
 export type Pressed = { readonly buttons: number; readonly button: MouseButton | null };
 export const NOTHING_PRESSED: Pressed = { buttons: 0, button: null };
@@ -92,12 +97,20 @@ export function toPage(x: number, y: number, g: Geometry): { x: number; y: numbe
   return { x: round(clamp(x / s, g.width)), y: round(clamp(y / s, g.height)) };
 }
 
+/** A point on the frame as CDP's input takes it: the page's CSS pixels, times the view's scale (measured with Chrome
+ *  154: at scale 2 a click sent at (200, 120) lands on CSS (100, 60); a wheel's delta stays in CSS pixels). */
+export function toInput(x: number, y: number, g: Geometry): { x: number; y: number } {
+  const p = toPage(x, y, g);
+  const v = g.view !== undefined && g.view > 0 ? g.view : 1;
+  return v === 1 ? p : { x: round(p.x * v), y: round(p.y * v) };
+}
+
 function lowestButton(buttons: number): MouseButton | null {
   return MOUSE_BUTTONS.find((b) => buttons & BUTTON_BIT[b]) ?? null;
 }
 
 function mouseCalls(ev: MouseInput, g: Geometry, pressed: Pressed): { calls: CdpCall[]; pressed: Pressed } {
-  const at = toPage(ev.x, ev.y, g);
+  const at = toInput(ev.x, ev.y, g);
   const modifiers = mask(ev.modifiers);
   const bit = BUTTON_BIT[ev.button];
   const moved = (p: Pressed): CdpCall => ({ method: "Input.dispatchMouseEvent", params: { type: "mouseMoved", ...at, modifiers, button: p.button ?? "none", buttons: p.buttons } });
@@ -136,7 +149,7 @@ export function inputCalls(ev: InputEvent, g: Geometry, pressed: Pressed, mac: b
   switch (ev.type) {
     case "mouse": return mouseCalls(ev, g, pressed);
     case "wheel": {
-      const at = toPage(ev.x, ev.y, g);
+      const at = toInput(ev.x, ev.y, g);
       const s = g.scale > 0 ? g.scale : 1;
       return { calls: [{ method: "Input.dispatchMouseEvent", params: { type: "mouseWheel", ...at, modifiers: mask(ev.modifiers), deltaX: round(ev.deltaX / s), deltaY: round(ev.deltaY / s) } }], pressed };
     }

@@ -11,7 +11,8 @@ import { remoteCaller } from "../core/caller.js";
 import { SSE_HEARTBEAT_MS } from "../core/limits.js";
 import { KEY_NAMES, MODIFIERS, MOUSE_BUTTONS, type InputEvent } from "../browser/input.js";
 import { auditUrl, targetUrl, type OpenTarget } from "../browser/rules.js";
-import { DEFAULT_STREAM, MAX_FPS, type StreamOptions } from "../browser/screencast.js";
+import { DEFAULT_STREAM, MAX_FPS, MAX_SCALE, MAX_VIEW_PIXELS, type StreamOptions } from "../browser/screencast.js";
+import { speedBody, speedSize } from "../browser/speed.js";
 import { BrowserError, YOU, type BrowserEvent } from "../browser/types.js";
 import { mountBrowserAgents } from "./browserAgents.js";
 import { parseBody, type ApiDeps } from "./shared.js";
@@ -38,10 +39,14 @@ const NavigateBody = z.object({ ...TargetFields, action: z.enum(["back", "forwar
 const Hold = z.object({ screen: Screen.optional() });
 /** A ciphertext as people pick one (the phone's saved ones are ciphertexts too); its value never comes back. */
 const FillBody = z.object({ token: z.string().min(1).max(64 * 1024), screen: Screen.optional() });
+/** A tab's size as a screen sets it. A page is no more than the pixels a view is drawn with at most (`MAX_VIEW_PIXELS`,
+ *  3840 × 2400): a page zoomed out is drawn at its CSS size, whatever that is (browser-v0 §1 页面缩放, 2026-10-04: 25% of
+ *  a 945 × 726 area is 3780 × 2904, 11 million pixels drawn to show fewer than 3). The screens do not use such a step;
+ *  one asked for all the same is refused here. */
 const ViewportBody = z.object({
   width: z.number().int().min(200).max(4096), height: z.number().int().min(200).max(4096),
   scale: z.number().min(0.5).max(4).default(1), mobile: z.boolean().default(false), screen: Screen.optional(),
-});
+}).refine((v) => v.width * v.height <= MAX_VIEW_PIXELS, `the page is more than ${MAX_VIEW_PIXELS} pixels (3840 × 2400)`);
 const Coord = z.number().finite().min(-100_000).max(100_000);
 const Mods = z.array(z.enum(MODIFIERS)).max(4).default([]);
 const Seq = z.number().int().nonnegative().optional();
@@ -62,21 +67,26 @@ const InputBody = z.preprocess(
   z.object({ screen: Screen.optional(), events: z.array(InputEventSchema).min(1).max(MAX_EVENTS) }),
 );
 
-/** `?quality=1..100&fps=1..30&maxWidth=&maxHeight=`: what a stream asks of the screencast (the phone over a relay asks
- *  for less). Missing or bad values fall back to the defaults. */
+/** `?quality=1..100&fps=1..30&maxWidth=&maxHeight=&scale=1..8`: what a stream asks of the screencast (the phone over a
+ *  relay asks for less; `scale`, the frame pixels per CSS pixel its screen shows, 2026-10-03: its device pixels, times
+ *  the zoom of a page it zoomed in, which took the most from 3 to 8, browser-v0 §1 页面缩放). Missing or bad values
+ *  fall back to the defaults; more than the most is the most. */
 export function streamOptions(query: (name: string) => string | undefined): StreamOptions {
-  const int = (name: string, min: number, max: number): number | undefined => {
+  const num = (name: string, min: number, max: number, pattern: RegExp): number | undefined => {
     const raw = query(name);
-    const n = raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : NaN;
+    const n = raw !== undefined && pattern.test(raw) ? Number(raw) : NaN;
     return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : undefined;
   };
+  const int = (name: string, min: number, max: number) => num(name, min, max, /^\d+$/);
   const maxWidth = int("maxWidth", 100, 8192);
   const maxHeight = int("maxHeight", 100, 8192);
+  const scale = num("scale", 1, MAX_SCALE, /^\d+(\.\d+)?$/);
   return {
     quality: int("quality", 1, 100) ?? DEFAULT_STREAM.quality,
     fps: int("fps", 1, MAX_FPS) ?? DEFAULT_STREAM.fps,
     ...(maxWidth !== undefined ? { maxWidth } : {}),
     ...(maxHeight !== undefined ? { maxHeight } : {}),
+    ...(scale !== undefined ? { scale } : {}),
   };
 }
 
@@ -111,6 +121,12 @@ export function mountBrowser(app: Hono, deps: ApiDeps): void {
   };
 
   app.get("/browser/tabs", (c) => c.json({ running: host.running, groups: host.groups() }));
+
+  // The phone's measure of its link (browser-v0 §5): bytes that do not compress, never cached.
+  app.get("/browser/speed", (c) => {
+    const body = speedBody(speedSize(c.req.query("bytes")));
+    return c.body(new Uint8Array(body), 200, { "Content-Type": "application/octet-stream", "Content-Length": String(body.length), "Cache-Control": "no-store" });
+  });
 
   app.post("/browser/tabs", async (c) => {
     const body = await parseBody(c, OpenBody);

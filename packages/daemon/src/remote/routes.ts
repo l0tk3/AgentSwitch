@@ -77,6 +77,7 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/browser/tabs/:id/viewport"],
   ["POST", "/browser/tabs/:id/fill"],
   ["GET", "/browser/servers"],
+  ["GET", "/browser/speed"],
   ["GET", "/approvals/policy"],
   ["GET", "/settings/workdir"],
   ["GET", "/update"],

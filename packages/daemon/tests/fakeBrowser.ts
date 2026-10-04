@@ -25,6 +25,10 @@ export class FakePage implements DriverPage {
   readonly histories: string[] = [];
   readonly inputs: { method: InputMethod; params: Record<string, unknown> }[] = [];
   readonly viewports: Viewport[] = [];
+  /** The scale each `setViewport` asked to draw the view at. */
+  readonly renders: number[] = [];
+  /** Chrome draws a view at a scale (`Emulation.setVisibleSize`); false: it answers 1. */
+  scaledViews = true;
   readonly screencasts: ScreencastParams[] = [];
   stops = 0;
   readonly acks: number[] = [];
@@ -53,7 +57,11 @@ export class FakePage implements DriverPage {
     this.closed = true;
     for (const l of this.listeners.closed) l();
   }
-  async setViewport(v: Viewport): Promise<void> { this.viewports.push(v); }
+  async setViewport(v: Viewport, render = 1): Promise<number> {
+    this.viewports.push(v);
+    this.renders.push(render);
+    return this.scaledViews ? render : 1;
+  }
   async input(method: InputMethod, params: Record<string, unknown>): Promise<void> {
     if (this.inputError) throw this.inputError;
     this.inputs.push({ method, params });
@@ -86,9 +94,12 @@ export class FakePage implements DriverPage {
     for (const l of this.listeners.changed) l({ url, title });
   }
   loading(loading: boolean): void { for (const l of this.listeners.loading) l(loading); }
-  /** A screencast frame of a `width`×`height` image for a `deviceWidth`×`deviceHeight` viewport. */
-  frame(width: number, height: number, deviceWidth = width, deviceHeight = height, ackId = 1): void {
-    const raw: RawFrame = { data: fakeJpeg(width, height), ackId, metadata: { deviceWidth, deviceHeight, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: 0, scrollOffsetY: 0 } };
+  /** A screencast frame of a `width`×`height` image for a `deviceWidth`×`deviceHeight` view (Chrome's metadata: the
+   *  view's size, which is the viewport's times the scale the view is drawn at). `timestamp`: when Chrome sent it, in
+   *  seconds, as Chrome says it; none: a Chrome that does not say. */
+  frame(width: number, height: number, deviceWidth = width, deviceHeight = height, ackId = 1, timestamp?: number): void {
+    const metadata = { deviceWidth, deviceHeight, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: 0, scrollOffsetY: 0, ...(timestamp !== undefined ? { timestamp } : {}) };
+    const raw: RawFrame = { data: fakeJpeg(width, height), ackId, metadata };
     for (const l of this.listeners.frame) l(raw);
   }
   /** The page opens another (window.open, a link with a target). */
@@ -98,6 +109,15 @@ export class FakePage implements DriverPage {
     for (const l of this.listeners.popup) l(child);
     return child;
   }
+}
+
+/** Chrome draws `p`'s view as soon as it is asked; its answer to a view at `render` waits for the returned function. */
+export function slowAnswer(p: FakePage, render: number): () => void {
+  let answer: () => void = () => undefined;
+  const answered = new Promise<void>((r) => { answer = r; });
+  const set = p.setViewport.bind(p);
+  p.setViewport = async (v, r) => { const drawn = await set(v, r); if (r === render) await answered; return drawn; };
+  return answer;
 }
 
 export class FakeBrowser implements DriverBrowser {

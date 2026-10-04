@@ -2,7 +2,9 @@
  *  as the whole state, the service, what waits, the way to the terminals) and the side (where to go, the topics, the
  *  usage). app.js patches both in place with their own renderers; ids key the elements that stay. */
 import { ACTIVE, HARNESS_NAMES, agoShort, esc } from "./api.js";
-import { AGENT_PX, SPIN, mark, sprite } from "../pixel.js";
+import { SPIN } from "../pixel.js";
+import { SHADED, shaded, shadedMark } from "./shaded.js";
+import { AGENT_ICON, icon, pageLook } from "./look.js";
 
 const NAV = [["home", "Tasks"], ["log", "Log"], ["ext", "Extensions"], ["ctx", "Context"]];
 const TOPICS_SHOWN = 8;
@@ -10,7 +12,11 @@ const TOPICS_SHOWN = 8;
 /** A square in a status colour (hollow: ended or off). */
 export const square = (tone, hollow = false) => `<span class="sq ${tone}${hollow ? " hollow" : ""}"></span>`;
 export const spinner = () => `<span class="spin" data-spin>${SPIN[0]}</span>`;
-export const agentMark = (harness) => sprite(AGENT_PX[harness] ?? AGENT_PX.pi, { px: 2, cls: "agent" });
+/** An agent's mark: its shaded picture (docs/ui-v0.md §9; pi's for one the page does not know), or its line drawing in
+ *  the classic look (§8). */
+export const agentMark = (harness) => (pageLook() === "classic"
+  ? `<span class="agent">${icon(AGENT_ICON[harness] ?? AGENT_ICON.pi, 13)}</span>`
+  : shaded(Object.hasOwn(AGENT_ICON, harness) && Object.hasOwn(SHADED, harness) ? harness : "pi", { strength: 0.8, cls: "agent" }));
 
 /** A topic's own hue: which topic a task belongs to, never a status. */
 const HUES = ["#9fb4ff", "#e8a0c8", "#8fd8c4", "#d8c28f", "#b9a0e8", "#a0d0e8"];
@@ -24,7 +30,10 @@ export const topicSquare = (id) => `<span class="sq" style="background:${topicHu
 export function band(s) {
   const active = s.tasks.filter((t) => ACTIVE.has(t.status)).length;
   const state = !s.health ? "off" : s.approvals.length ? "waiting" : active ? "busy" : "idle";
-  return `<div class="who"><span id="bandMark">${mark({ px: 2, state })}</span><b>AgentSwitch</b>${s.version ? `<span class="faint" id="version">v${esc(s.version)}</span>` : '<span class="faint" id="version"></span>'}</div>
+  // The app's mark as the whole state; in the classic look the mark as lines, the state as a dot or the spinner.
+  const classic = pageLook() === "classic";
+  const said = classic ? `${icon("dispatch", 18)}${state === "busy" ? spinner() : state === "waiting" ? square("waiting") : state === "off" ? square("off", true) : ""}` : shadedMark({ state, depth: true });
+  return `<div class="who"><span id="bandMark" class="state-${state}">${said}</span><b>AgentSwitch</b>${s.version ? `<span class="faint" id="version">v${esc(s.version)}</span>` : '<span class="faint" id="version"></span>'}</div>
   <span class="sp"></span>
   <div class="st"><span title="${s.health ? "服务运行中" : "服务未连接"}"><span class="dot${s.health ? " on" : ""}" id="dot"></span>Service</span>${s.approvals.length ? `<span class="w">${square("waiting")}${s.approvals.length} Waiting</span>` : ""}</div>
   <a href="/ui/terminal.html" class="out">Terminals ↗</a>`;
@@ -55,7 +64,8 @@ function topics(s) {
 export function meter(pct, cells = 12) {
   const p = Math.max(0, Math.min(100, Math.round(pct)));
   const on = Math.round((p / 100) * cells);
-  return `<span class="meter ${p >= 90 ? "bad" : p >= 70 ? "hi" : ""}">${"█".repeat(on)}<i>${"░".repeat(cells - on)}</i></span>`;
+  // `--p` is for the classic look, which draws the same part of the whole as a thin bar.
+  return `<span class="meter ${p >= 90 ? "bad" : p >= 70 ? "hi" : ""}" style="--p:${p}%">${"█".repeat(on)}<i>${"░".repeat(cells - on)}</i></span>`;
 }
 
 function usage(quota) {
@@ -88,5 +98,5 @@ export function sidebar(s) {
   <div class="rule"></div>
   <div class="sec lbl usage-h"><span>// Usage</span><button class="link" id="q-refresh" title="强制刷新用量">Refresh</button></div>
   <div class="usage">${usage(s.quota || [])}</div>
-  <div class="side-foot"><button class="link" id="refresh">Reload</button></div>`;
+  <div class="side-foot"><button class="link" id="look" title="外观：Pixel 是像素与字符的样子，Classic 是常见应用的样子。点按切换。">Appearance: ${pageLook() === "classic" ? "Classic" : "Pixel"}</button><span class="sp"></span><button class="link" id="refresh">Reload</button></div>`;
 }

@@ -17,6 +17,7 @@ import type { BrowserContext, CDPSession, ElementHandle, Frame, Page, Request, R
 import type { BrowserDriver, DriverBrowser, DriverPage, FocusedField, GuardDecision, LaunchOptions, PageEvents, RequestGuard, ScreencastParams } from "./driver.js";
 import type { InputMethod } from "./driver.js";
 import { isLoopbackHost } from "./rules.js";
+import { viewAt } from "./screencast.js";
 import { DEFAULT_VIEWPORT, type Viewport } from "./types.js";
 
 const LAUNCH_TIMEOUT_MS = 30_000;
@@ -66,6 +67,8 @@ class PlaywrightPage implements DriverPage {
   private networkOn = false;
   private readonly titlePoll: NodeJS.Timeout;
   private readingTitle = false;
+  /** The size and the layout the page was last given (`setViewport`). */
+  private sized: { readonly width: number; readonly height: number; readonly mobile: boolean } | null = null;
   private readonly listeners: { [K in keyof PageEvents]: PageEvents[K][] } = { changed: [], loading: [], popup: [], frame: [], closed: [] };
 
   constructor(private readonly page: Page, private readonly browser: PlaywrightBrowser) {
@@ -174,9 +177,46 @@ class PlaywrightPage implements DriverPage {
 
   async close(): Promise<void> { await this.page.close(); }
 
-  async setViewport(v: Viewport): Promise<void> {
-    await this.send("Emulation.setDeviceMetricsOverride", { width: v.width, height: v.height, deviceScaleFactor: v.scale, mobile: v.mobile, screenWidth: v.width, screenHeight: v.height });
+  /** At `render` > 1 the emulation scales the page's image (`scale`) and the tab's own view is that many times the CSS
+   *  size (`Emulation.setVisibleSize`, which `dontSetVisibleSize` leaves to us; whole pixels, `viewAt`, the size the
+   *  host then expects of the view's frames): the screencast then sends the view's pixels (browser-v0 §5, measured
+   *  with Chrome 154: 1280×800 at 2 gives 2560×1600 frames, the page still sees 1280×800, no resize event; 900×655 at
+   *  2.2 gives 1980×1441). The view's size is per tab (the tabs share one window). At 1 Chrome sets the view to
+   *  the CSS size itself, as before. `setVisibleSize` is deprecated in the protocol: a Chrome without it gets CSS-size
+   *  frames, said once.
+   *
+   *  A phone's layout (`mobile`) at another size than the page has is entered by way of the desktop layout at that
+   *  size (browser-v0 §1 页面缩放, 2026-10-04). A page that does not follow the device's width (no viewport tag: laid
+   *  out 980 wide and fitted to the screen; or `width=1024`) is fitted by Chrome when the phone's layout begins, and
+   *  not again when only its size changes: set from 402 to 804 wide (a phone's 50%) it kept its scale and filled half
+   *  the screen, from 402 to 201 it showed half its width, and its scroll position was lost; after a Mac had sized it,
+   *  a phone's take could leave it at twice the fit. By way of the desktop layout it is fitted at every size, and
+   *  stays scrolled where it was (Chrome 154: 16 sizes in turn, 2 and 4 of them wrong before on the two kinds of
+   *  page, none after). A page that follows the device's width sees no difference, nor one more resize. The same
+   *  size again (the view redrawn at another scale) is set as it is: the page is not laid out twice for it. */
+  async setViewport(v: Viewport, render = 1): Promise<number> {
+    const metrics = { width: v.width, height: v.height, deviceScaleFactor: v.scale, mobile: v.mobile, screenWidth: v.width, screenHeight: v.height };
+    const anew = v.mobile && !(this.sized?.mobile && this.sized.width === v.width && this.sized.height === v.height);
+    const set = async (drawing: Record<string, unknown>): Promise<void> => {
+      if (anew) await this.send("Emulation.setDeviceMetricsOverride", { ...metrics, ...drawing, mobile: false });
+      await this.send("Emulation.setDeviceMetricsOverride", { ...metrics, ...drawing });
+    };
+    let drawn = 1;
+    if (render > 1 && this.browser.scaledViews) {
+      try {
+        const view = viewAt(v, render);
+        await set({ scale: render, dontSetVisibleSize: true });
+        await this.send("Emulation.setVisibleSize", { width: view.width, height: view.height });
+        drawn = render;
+      } catch (err) {
+        if (this.page.isClosed()) throw err;
+        this.browser.noScaledViews(err);
+      }
+    }
+    if (drawn === 1) await set({ scale: 1 });
     await this.send("Emulation.setTouchEmulationEnabled", v.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+    this.sized = { width: v.width, height: v.height, mobile: v.mobile };
+    return drawn;
   }
 
   async input(method: InputMethod, params: Record<string, unknown>): Promise<void> {
@@ -255,6 +295,8 @@ class PlaywrightBrowser implements DriverBrowser {
   private gone = false;
   private blockedKey = "";
   private blockedTimer: NodeJS.Timeout | null = null;
+  /** This Chrome draws a tab's view at a scale (`Emulation.setVisibleSize`); false once it refused. */
+  scaledViews = true;
 
   constructor(private readonly context: BrowserContext, private readonly guard: RequestGuard, private readonly log: (line: string) => void,
               private readonly routed: (url: URL) => boolean = ROUTED_BY_DEFAULT, private readonly blocked: () => readonly string[] = () => []) {
@@ -298,6 +340,13 @@ class PlaywrightBrowser implements DriverBrowser {
   }
 
   track(targetId: string, page: PlaywrightPage): void { this.byTarget.set(targetId, page); }
+
+  /** The view could not be drawn at a scale: CSS-size frames from now on. */
+  noScaledViews(err: unknown): void {
+    if (!this.scaledViews) return;
+    this.scaledViews = false;
+    this.log(`browser: Chrome does not draw a tab's view at a scale; frames stay at the CSS size (${(err as Error)?.message?.split("\n")[0] ?? err})`);
+  }
 
   private refreshBlocked(): void {
     const patterns = this.blockedNow();

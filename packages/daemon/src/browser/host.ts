@@ -6,7 +6,19 @@
  *
  *  Holding a tab (§1 接手): a screen takes a tab over and hands it back, or the hold ends after two minutes without input.
  *  While a tab is held only its holder drives it; an agent's tab is driven by people only while held. The holder alone
- *  sets the tab's size (one size, one owner, as the terminals); the size goes back to the default when the hold ends. */
+ *  sets the tab's size (one size, one owner, as the terminals); the size goes back to the default when the hold ends.
+ *
+ *  Device pixels (§5, 2026-10-03): a tab's view is drawn at the scale its streams ask for (`renderScale`: a Retina Mac
+ *  2, a phone on the local network 3), so frames come at the screens' device pixels; a tab nobody watches stays at the
+ *  CSS size. Chrome takes a point of input in the view's pixels, and Playwright's clicks are CSS pixels: while an agent's
+ *  call that may point at the page runs, and a moment after (`agentActing`, `agentDone`), the agent's tabs are drawn at
+ *  the CSS size. Chrome itself sets the view of a tab that becomes its window's front tab to the window's size: such a
+ *  tab is drawn again (`strayed`: when a frame of another size comes, when a tab closed, when its agent selected it).
+ *
+ *  Page zoom (§1 页面缩放, 2026-10-03) is not known here: the screen that holds a tab sets a smaller size to zoom in (a
+ *  larger one to zoom out) and its stream asks for its device pixels times the zoom, up to 8, so the view of a 201×345
+ *  page on a 3x phone at 200% is drawn at 6. Each step redraws the view (the size, then the stream's new scale), and a
+ *  point of input waits for a redraw under way and goes in the view as it is by then (`input`, `Screencast.geometry`). */
 
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
@@ -15,7 +27,7 @@ import type { BrowserDriver, DriverBrowser, DriverPage, FocusedField, GuardDecis
 import { FillRefused, type FillResolver } from "./fill.js";
 import { inputCalls, NOTHING_PRESSED, type InputEvent, type Pressed } from "./input.js";
 import { AGENT_FILE_REFUSAL, checkLocalFile, checkUrl, isLoopbackAddress, isLoopbackHost, normalHost, OWN_PORT_REFUSAL, placeOf, portOf, type FileRules } from "./rules.js";
-import { Screencast, type StreamOptions } from "./screencast.js";
+import { renderScale, Screencast, viewAt, type StreamOptions } from "./screencast.js";
 import { BrowserError, DEFAULT_VIEWPORT, YOU, type AgentAction, type BrowserEvent, type ClosedReason, type HeldReason, type TabGroup, type TabInfo,
   type TabOwner, type TabOwnerKind, type TabStatus, type Viewport } from "./types.js";
 
@@ -42,6 +54,11 @@ export const HOLD_IDLE_MS = 2 * 60_000;
 export const IDLE_CLOSE_MS = 10 * 60_000;
 /** Shut-down waits this long for Chrome to quit, closing a tab this long for its page, before going on. */
 const CLOSE_TIMEOUT_MS = 5_000;
+/** An agent's tabs go back to the streams' scale this long after its last call that may point at the page: an agent's
+ *  calls come in bursts (look, click, look), and each change of scale redraws the page. */
+export const AGENT_QUIET_MS = 2_000;
+/** An agent's call waits at most this long for its tabs to be drawn at the CSS size. */
+const AGENT_SETTLE_MS = 3_000;
 /** The list's order: the agents' tabs first (terminals, then tasks), then the user's own. */
 const KIND_ORDER: readonly TabOwnerKind[] = ["terminal", "task", "you"];
 
@@ -53,6 +70,8 @@ export type BrowserHostOptions = {
   readonly ownPorts?: () => readonly number[];
   readonly holdIdleMs?: number;
   readonly idleCloseMs?: number;
+  /** How long after an agent's last call that may point at the page its tabs stay at the CSS size (`AGENT_QUIET_MS`). */
+  readonly agentQuietMs?: number;
   readonly defaultViewport?: Viewport;
   /** Before each launch: the profile made ready (folder, password manager off, a stale Chrome on it stopped). */
   readonly prepareProfile?: (dir: string) => void;
@@ -101,7 +120,7 @@ type TabRuntime = {
   pressed: Pressed;
 };
 
-const ownerKey = (o: TabOwner): string => `${o.kind}:${o.id}`;
+const ownerKey = (o: Pick<TabOwner, "kind" | "id">): string => `${o.kind}:${o.id}`;
 const firstLine = (err: unknown): string => String((err as Error)?.message ?? err).split("\n")[0]!.trim();
 const isHttp = (raw: string): boolean => { try { return /^https?:$/.test(new URL(raw).protocol); } catch { return false; } };
 /** `host:port` of an http(s) URL, as the gate names a page's place (`page_host`). */
@@ -126,6 +145,14 @@ export class BrowserHost {
   private readonly now: () => number;
   private readonly log: (line: string) => void;
   private readonly defaultViewport: Viewport;
+  /** Agents with a call under way that may point at the page (calls), or that finished one a moment ago (timer): their
+   *  tabs are drawn at the CSS size meanwhile. By owner key. */
+  private readonly acting = new Map<string, { calls: number; timer: NodeJS.Timeout | null }>();
+  /** Tabs whose view Chrome changed, or may have, while a call of their agent's was under way (`strayed`): drawn again
+   *  when the agent's calls are over. */
+  private readonly unsure = new Set<string>();
+  /** Chrome drew a view at a scale when asked (false once it answered 1 for more). */
+  private scaledViews = true;
 
   constructor(private readonly opts: BrowserHostOptions) {
     this.now = opts.now ?? Date.now;
@@ -223,10 +250,15 @@ export class BrowserHost {
     return this.get(id)!;
   }
 
-  /** The holding screen's size for the tab (phone: its viewport and the mobile layout). */
+  /** The holding screen's size for the tab (phone: its viewport and the mobile layout). The size it set already keeps
+   *  the hold and changes nothing else (the Mac says so while your tab is on its screen, browser-v0 §1 Mac). */
   async setViewport(id: string, holder: string, viewport: Viewport): Promise<TabInfo> {
     const state = this.must(id);
     if (state.heldBy !== holder) throw new BrowserError("conflict", "请先接手此标签，再设置尺寸。");
+    if (state.viewportBy === holder && sameViewport(state.viewport, viewport)) {
+      this.armHold(id, holder);
+      return this.info(state);
+    }
     this.update(id, { viewport, viewportBy: holder });
     await this.applyViewport(id);
     this.viewportChanged(id);
@@ -234,17 +266,27 @@ export class BrowserHost {
     return this.get(id)!;
   }
 
-  /** A screen's input, in order. Points are on the frame `seq` names (default the latest one). */
+  /** A screen's input, in order. Points are on the frame `seq` names (default the latest one), and go to Chrome in the
+   *  view it has when it gets them: a point waits for a change of the view under way (a stream came or went, a zoom
+   *  step, an agent's call began or ended; Chrome has the new scale before the host has recorded it), and its calls
+   *  are sent together (a click is three), so that a change beginning meanwhile comes after all of them. Measured with
+   *  Chrome 154 (review, 2026-10-03): of 40 taps sent 0 to 7 ms after a stream asking 6 came to a view at 3, 14 landed
+   *  at half their coordinates and 8 nowhere; of 40 sent 0 to 2 ms before it, 8 and 5. */
   async input(id: string, holder: string, events: readonly InputEvent[]): Promise<void> {
-    const state = this.mayDrive(id, holder);
+    this.mayDrive(id, holder);
     const rt = this.runtimes.get(id)!;
     for (const ev of events) {
-      const geometry = (ev.type === "mouse" || ev.type === "wheel" ? rt.screencast.geometry(ev.seq) : null)
-        ?? { scale: 1, width: state.viewport.width, height: state.viewport.height };
+      const pointed = ev.type === "mouse" || ev.type === "wheel";
+      if (pointed) await rt.screencast.idle();
+      // The wait, or the event before, took a moment: the tab and the hold must still be as checked.
+      const state = this.mayDrive(id, holder);
+      const geometry = (pointed ? rt.screencast.geometry(ev.seq) : null)
+        ?? { scale: 1, width: state.viewport.width, height: state.viewport.height, view: rt.screencast.view };
       const { calls, pressed } = inputCalls(ev, geometry, rt.pressed, this.opts.mac ?? process.platform === "darwin");
       rt.pressed = pressed;
       try {
-        for (const call of calls) await rt.page.input(call.method, call.params);
+        if (pointed) await Promise.all(calls.map((call) => rt.page.input(call.method, call.params)));
+        else for (const call of calls) await rt.page.input(call.method, call.params);
       } catch (err) {
         if (!this.states.has(id)) throw new BrowserError("not_found", "not found");
         throw new BrowserError("unavailable", `页面未接受输入：${firstLine(err)}`);
@@ -277,6 +319,54 @@ export class BrowserHost {
     const next = action ? { ...action, at: this.now() } : null;
     this.update(id, { action: next });
     this.emit(id, { type: "action", action: next });
+  }
+
+  /** The agent bridge, before an agent's call that may point at the page (a click, a hover, a drag: Playwright's points
+   *  are CSS pixels, which a view drawn at a scale takes for its own): every tab of `owner` is drawn at the CSS size
+   *  until `agentDone` and `AGENT_QUIET_MS` after it. Resolves once they are (at most a few seconds). */
+  async agentActing(owner: Pick<TabOwner, "kind" | "id">): Promise<void> {
+    if (owner.kind === "you") return;
+    const key = ownerKey(owner);
+    const entry = this.acting.get(key) ?? { calls: 0, timer: null };
+    if (entry.timer) clearTimeout(entry.timer);
+    this.acting.set(key, { calls: entry.calls + 1, timer: null });
+    // A change already under way may still draw at a scale: each tab's queue first, then the CSS size where it is not.
+    const settle = this.tabsOf(owner).map(async (t) => {
+      const rt = this.runtimes.get(t.id);
+      if (!rt) return;
+      await rt.screencast.idle();
+      if (rt.screencast.view !== 1) await this.applyViewport(t.id);
+    });
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<"late">((r) => { timer = setTimeout(() => r("late"), AGENT_SETTLE_MS); timer.unref(); });
+    if (await Promise.race([Promise.all(settle).then(() => "done" as const), late]) === "late") this.log(`browser: an agent's tabs were not drawn at the CSS size within ${AGENT_SETTLE_MS} ms`);
+    clearTimeout(timer);
+  }
+
+  /** The agent bridge: that call is over. A moment later, with no other call under way, the agent's tabs are drawn at
+   *  their streams' scale again. A tab whose view Chrome changed during the agent's calls (`strayed`) is drawn again
+   *  now. */
+  agentDone(owner: Pick<TabOwner, "kind" | "id">): void {
+    const key = ownerKey(owner);
+    const entry = this.acting.get(key);
+    if (!entry) return;
+    const calls = Math.max(0, entry.calls - 1);
+    if (entry.timer) clearTimeout(entry.timer);
+    const timer = calls > 0 ? null : setTimeout(() => {
+      this.acting.delete(key);
+      for (const tab of this.tabsOf(owner)) this.redraw(tab.id);
+    }, this.opts.agentQuietMs ?? AGENT_QUIET_MS);
+    timer?.unref();
+    this.acting.set(key, { calls, timer });
+    if (calls > 0) return;
+    for (const tab of this.tabsOf(owner)) if (this.unsure.delete(tab.id)) void this.applyViewport(tab.id);
+  }
+
+  /** The agent bridge: the agent's call brought this tab to the front of Chrome's window (Playwright MCP's
+   *  `browser_tabs` select), where Chrome sets its view to the window's size (`strayed`): drawn again where a screen
+   *  watches it. A tab nobody watches is left as it is: the first frame of a stream that comes says what its view is. */
+  fronted(id: string): void {
+    if (this.runtimes.get(id)?.screencast.watching) this.strayed(id);
   }
 
   /** The agent bridge: every tab opened, held or released, and closed, from now on, until the returned function is
@@ -335,6 +425,8 @@ export class BrowserHost {
   async shutdown(): Promise<void> {
     this.shutDown = true;
     this.cancelIdleClose();
+    for (const entry of this.acting.values()) if (entry.timer) clearTimeout(entry.timer);
+    this.acting.clear();
     for (const id of [...this.states.keys()]) this.drop(id, "shutdown");
     await this.launching?.catch(() => undefined);
     await this.stopBrowser();
@@ -471,7 +563,8 @@ export class BrowserHost {
       id, owner, openedAt: this.now(), url: page.url() || "about:blank", title: page.title(), loading: false,
       status: "idle", heldBy: null, action: null, viewport: this.defaultViewport, viewportBy: null,
     });
-    this.runtimes.set(id, { page, screencast: new Screencast(page, this.now, this.log), listeners: new Set(), holdTimer: null, pressed: NOTHING_PRESSED });
+    const screencast = new Screencast(page, this.now, this.log, () => this.redraw(id), () => this.strayed(id));
+    this.runtimes.set(id, { page, screencast, listeners: new Set(), holdTimer: null, pressed: NOTHING_PRESSED });
     this.cancelIdleClose();
     page.on("changed", ({ url, title }) => this.changed(id, url, title));
     page.on("loading", (loading) => {
@@ -515,12 +608,15 @@ export class BrowserHost {
     if (!rt) return;
     this.states.delete(id);
     this.runtimes.delete(id);
+    this.unsure.delete(id);
     if (rt.holdTimer) clearTimeout(rt.holdTimer);
     rt.screencast.close();
     for (const listener of rt.listeners) this.safely(listener, { type: "closed", reason });
     rt.listeners.clear();
     this.announce({ type: "closed", id });
     this.scheduleIdleClose();
+    // Chrome makes another tab its window's front tab now, and sets that tab's view to the window's size.
+    for (const [left, other] of this.runtimes) if (other.screencast.watching) this.strayed(left);
   }
 
   private must(id: string): TabState {
@@ -624,11 +720,64 @@ export class BrowserHost {
     if (state) this.emit(id, { type: "viewport", viewport: { ...state.viewport, by: state.viewportBy } });
   }
 
+  /** The tab's size and the scale its view is drawn at, as they are when the screencast's turn comes (a newer change
+   *  queued meanwhile finds nothing left to do). The screencast is told the view that was drawn, so that it can tell a
+   *  frame of the view before; where that cannot be said (the tab is gone, Chrome refused), it takes frames as they
+   *  come. */
   private async applyViewport(id: string): Promise<void> {
+    const rt = this.runtimes.get(id);
+    if (!rt) return;
+    await rt.screencast.reconfigure(async () => {
+      const state = this.states.get(id);
+      if (!state) return null;
+      const want = this.renderFor(id);
+      try {
+        const drawn = await rt.page.setViewport(state.viewport, want);
+        if (want > 1 && drawn === 1) this.scaledViews = false;
+        return viewAt(state.viewport, drawn);
+      } catch (err) {
+        // A tab that went meanwhile (closed with others, or with Chrome) has nothing to say.
+        if (this.states.has(id)) this.log(`browser: tab ${id} viewport: ${firstLine(err)}`);
+        return null;
+      }
+    });
+  }
+
+  /** The scale to draw a tab's view at: its streams' (`renderScale`), or the CSS size while its agent may be pointing
+   *  at the page, and where Chrome cannot draw a view at a scale. */
+  private renderFor(id: string): number {
     const state = this.states.get(id);
     const rt = this.runtimes.get(id);
-    if (!state || !rt) return;
-    await rt.page.setViewport(state.viewport).catch((err: unknown) => this.log(`browser: tab ${id} viewport: ${firstLine(err)}`));
-    rt.screencast.restart();
+    if (!state || !rt || !this.scaledViews) return 1;
+    if (state.owner.kind !== "you" && this.acting.has(ownerKey(state.owner))) return 1;
+    return renderScale(state.viewport, rt.screencast.wants());
+  }
+
+  /** Chrome's view of the tab is not the one drawn, or may not be: drawn again. Chrome sets the view of a tab that
+   *  becomes its window's front tab back to the window's size, the emulated page keeping its own, and only drawing the
+   *  view again brings it back (review, 2026-10-03, Chrome 154). The screencast says so when a frame of another size
+   *  comes (`Screencast`); a tab that closed says it may be so for the watched ones left (`drop`): a still page sends
+   *  no frame, and none for what changes outside the part still in view. Not under a call of the tab's agent that may
+   *  point at the page: Playwright's picture of an element has Chrome set the view to the element's size for the
+   *  capture, and a redraw then would spoil it; the tab is drawn again when the agent's calls are over (`agentDone`). */
+  private strayed(id: string): void {
+    const state = this.states.get(id);
+    if (!state) return;
+    if ((this.acting.get(ownerKey(state.owner))?.calls ?? 0) > 0) { this.unsure.add(id); return; }
+    void this.applyViewport(id);
+  }
+
+  /** The streams changed, or an agent's call is over: the view drawn again when its scale should change. The view as
+   *  recorded lags behind a change under way, so a scale that equals it is looked at once more when that is done: a
+   *  stream asking for more that came and went within one redraw left the view at its scale, for nobody (review,
+   *  2026-10-03: 16 of 40 such streams with Chrome 154; with the page zoom that scale is up to 8). */
+  private redraw(id: string): void {
+    const rt = this.runtimes.get(id);
+    if (!rt) return;
+    const differs = (): boolean => this.runtimes.get(id) === rt && this.renderFor(id) !== rt.screencast.view;
+    if (differs()) void this.applyViewport(id);
+    else void rt.screencast.idle().then(() => { if (differs()) void this.applyViewport(id); });
   }
 }
+
+const sameViewport = (a: Viewport, b: Viewport): boolean => a.width === b.width && a.height === b.height && a.scale === b.scale && a.mobile === b.mobile;

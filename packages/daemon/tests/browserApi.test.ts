@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { mountBrowser, streamOptions } from "../src/api/browser.js";
 import type { ApiDeps } from "../src/api/shared.js";
+import { renderScale } from "../src/browser/screencast.js";
 import { sharedBrowser } from "../src/browser/setup.js";
 import { markRemote } from "../src/core/caller.js";
 import { buildDaemon, defaultConfig, type DaemonConfig } from "../src/daemon.js";
@@ -215,6 +216,110 @@ describe("the stream", () => {
     expect(q({})).toEqual({ quality: 70, fps: 15 });
     expect(q({ quality: "500", fps: "0", maxWidth: "50", maxHeight: "9000" })).toEqual({ quality: 100, fps: 1, maxWidth: 100, maxHeight: 8192 });
     expect(q({ quality: "x", fps: "-3" })).toEqual({ quality: 70, fps: 15 });
+    // The frame pixels per CSS pixel a screen shows (2026-10-03): 1 to 8, decimals allowed. It was 1 to 3 before the
+    // page zoom (browser-v0 §1 页面缩放): a 3x phone at 200% asks 6, a 2x Mac at 400% asks 8.
+    expect(q({ scale: "2" })).toEqual({ quality: 70, fps: 15, scale: 2 });
+    expect(q({ scale: "1.5" })).toEqual({ quality: 70, fps: 15, scale: 1.5 });
+    expect(q({ scale: "6", maxWidth: "1206", maxHeight: "2070" })).toEqual({ quality: 70, fps: 15, scale: 6, maxWidth: 1206, maxHeight: 2070 });
+    expect(q({ scale: "3.3" })).toEqual({ quality: 70, fps: 15, scale: 3.3 });
+    expect(q({ scale: String(3 * 1.1) })).toEqual({ quality: 70, fps: 15, scale: 3.3000000000000003 });   // a product as a screen sends it
+    expect(q({ scale: "8" })).toEqual({ quality: 70, fps: 15, scale: 8 });
+    expect(q({ scale: "9" })).toEqual({ quality: 70, fps: 15, scale: 8 });
+    expect(q({ scale: "12" })).toEqual({ quality: 70, fps: 15, scale: 8 });
+    expect(q({ scale: "0.5" })).toEqual({ quality: 70, fps: 15, scale: 1 });
+    expect(q({ scale: "2x" })).toEqual({ quality: 70, fps: 15 });
+    // What the screens send is to the hundredth (a 3x phone at 67%: 3 × 0.67 and 0.02 more, within its whole screen;
+    // at 110%: 3.32), and is drawn at that hundredth, as far as the screen holds it: 1206 / 600 is 2.01.
+    const at67 = q({ scale: "2.03", maxWidth: "1206", maxHeight: "2622" });
+    expect(at67).toEqual({ quality: 70, fps: 15, scale: 2.03, maxWidth: 1206, maxHeight: 2622 });
+    expect(renderScale({ width: 600, height: 1030 }, [at67])).toBe(2.01);
+    expect(renderScale({ width: 600, height: 1030 }, [q({ scale: "2.01", maxWidth: "1206", maxHeight: "2622" })])).toBe(2.01);
+    expect(renderScale({ width: 365, height: 627 }, [q({ scale: "3.32", maxWidth: "1206", maxHeight: "2622" })])).toBe(3.304);
+  });
+
+  it("a stream that asks for scale 2 has the tab's view drawn at 2, and its frames say so", async () => {
+    const { call, driver } = setup();
+    const { tab } = await (await call("POST", "/browser/tabs", { url: "https://a.example/" })).json() as { tab: { id: string } };
+    const res = await call("GET", `/browser/tabs/${tab.id}/stream?quality=80&scale=2&maxWidth=3024&maxHeight=1964`);
+    const page = driver.page(0);
+    setTimeout(() => { page.frame(2560, 1600, 2560, 1600, 4); }, 50);
+    setTimeout(() => { void call("DELETE", `/browser/tabs/${tab.id}`); }, 150);
+    const { events } = await readEvents(res, (evs) => evs.some((e) => e.event === "closed"));
+    expect(page.renders).toEqual([1, 2]);
+    expect(events.find((e) => e.event === "frame")!.data).toMatchObject({ width: 2560, height: 1600, scale: 2, viewport: { width: 1280, height: 800 } });
+  });
+
+  // Page zoom (browser-v0 §1 页面缩放, 2026-10-03): a 3x phone with 402×690 points of browser area at 200% holds the tab
+  // at 201×345 (pixel ratio 4) and asks its stream for 6 frame pixels per CSS pixel, within its 1206×2070 pixels.
+  it("a phone that zoomed its page to 200%: the view at 6, frames at its pixels, taps and drags in frame pixels", async () => {
+    const { call, driver, phone } = setup();
+    const { tab } = await (await call("POST", "/browser/tabs", { url: "https://a.example/" })).json() as { tab: { id: string } };
+    expect((await call("POST", `/browser/tabs/${tab.id}/take`, {}, phone)).status).toBe(200);
+    const sized = await call("POST", `/browser/tabs/${tab.id}/viewport`, { width: 201, height: 345, scale: 4, mobile: true }, phone);
+    expect(((await sized.json()) as { tab: { viewport: unknown } }).tab.viewport).toEqual({ width: 201, height: 345, scale: 4, mobile: true, by: "dev-phone" });
+    const res = await call("GET", `/browser/tabs/${tab.id}/stream?quality=70&fps=30&scale=6&maxWidth=1206&maxHeight=2070`, undefined, phone);
+    const page = driver.page(0);
+    setTimeout(() => { page.frame(1206, 2070, 1206, 2070, 4); }, 50);
+    const { events, reader } = await readEvents(res, (evs) => evs.some((e) => e.event === "frame"));
+    expect(page.renders.at(-1)).toBe(6);
+    expect(events.find((e) => e.event === "frame")!.data).toMatchObject({ width: 1206, height: 2070, scale: 6, viewport: { width: 201, height: 345 } });
+    // Frame (603, 840) is CSS (100.5, 140); 600 frame pixels of drag are 100 CSS pixels of scroll.
+    const sent = await call("POST", `/browser/tabs/${tab.id}/input`, { events: [{ type: "mouse", action: "click", x: 603, y: 840 }, { type: "wheel", x: 603, y: 840, deltaY: 600 }] }, phone);
+    expect(sent.status).toBe(200);
+    expect(page.inputs.at(-2)!.params).toMatchObject({ type: "mouseReleased", x: 603, y: 840 });
+    expect(page.inputs.at(-1)!.params).toMatchObject({ type: "mouseWheel", x: 603, y: 840, deltaY: 100 });
+    // The size's own limits are as they were: 200 to 4096 a side, a pixel ratio of 0.5 to 4.
+    for (const bad of [{ width: 161, height: 276, scale: 4 }, { width: 201, height: 345, scale: 6 }, { width: 4824, height: 8280, scale: 0.5 }, { width: 1608, height: 2760, scale: 0.25 },
+      { width: 4097, height: 345, scale: 1 }, { width: 201, height: 4097, scale: 1 }, { width: 199, height: 345, scale: 1 }, { width: 201, height: 199, scale: 1 }]) {
+      expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { ...bad, mobile: true }, phone)).status, JSON.stringify(bad)).toBe(400);
+    }
+    for (const most of [{ width: 4096, height: 200, scale: 4 }, { width: 200, height: 4096, scale: 0.5 }]) {
+      expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { ...most, mobile: true }, phone)).status, JSON.stringify(most)).toBe(200);
+    }
+    expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { width: 1608, height: 2760, scale: 0.75, mobile: true }, phone)).status).toBe(200);
+    expect(page.renders.at(-1)).toBe(1);
+    // Nor a page of more pixels than a view is drawn with at most (3840 × 2400), though both its sides fit: a Mac's
+    // 25% of a 945 × 726 area. The most itself is taken.
+    for (const large of [{ width: 3780, height: 2904, scale: 0.5 }, { width: 4096, height: 4096, scale: 1 }, { width: 3841, height: 2400, scale: 1 }]) {
+      expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { ...large, mobile: false }, phone)).status, JSON.stringify(large)).toBe(400);
+    }
+    expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { width: 3840, height: 2400, scale: 1, mobile: false }, phone)).status).toBe(200);
+    expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { width: 1608, height: 2760, scale: 0.75, mobile: true }, phone)).status).toBe(200);
+    await reader.cancel();
+  });
+
+  // Most zoom steps fall between quarters, where the view went in quarter steps before: a phone at 110% holds the tab at
+  // 365×627 and asks 3 × 1.1 as the product comes out (3.3000000000000003); it was drawn at 3.25 and stretched.
+  it("a zoom step between quarters: the view at what the screen asks, and frames and taps that go by it", async () => {
+    const { call, driver, phone } = setup();
+    const { tab } = await (await call("POST", "/browser/tabs", { url: "https://a.example/" })).json() as { tab: { id: string } };
+    expect((await call("POST", `/browser/tabs/${tab.id}/take`, {}, phone)).status).toBe(200);
+    expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { width: 365, height: 627, scale: 3 * 1.1, mobile: true }, phone)).status).toBe(200);
+    const res = await call("GET", `/browser/tabs/${tab.id}/stream?quality=70&fps=30&scale=${3 * 1.1}&maxWidth=1206&maxHeight=2070`, undefined, phone);
+    const page = driver.page(0);
+    // A view of 1204.5×2069.1 is drawn as 1205×2069.
+    setTimeout(() => { page.frame(1205, 2069, 1205, 2069, 4); }, 50);
+    const { events, reader } = await readEvents(res, (evs) => evs.some((e) => e.event === "frame"));
+    expect(page.renders.at(-1)).toBe(3.3);
+    expect(events.find((e) => e.event === "frame")!.data).toMatchObject({ width: 1205, height: 2069, scale: 3.3, viewport: { width: 365, height: 627 } });
+    // Frame (330, 462) is CSS (100, 140).
+    expect((await call("POST", `/browser/tabs/${tab.id}/input`, { type: "mouse", action: "click", x: 330, y: 462 }, phone)).status).toBe(200);
+    expect(page.inputs.at(-1)!.params).toMatchObject({ type: "mouseReleased", x: 330, y: 462 });
+    await reader.cancel();
+  });
+
+  it("more than 8 in the query is 8: a 2x Mac at 500% gets its 320×200 page at 8", async () => {
+    const { call, driver } = setup();
+    const { tab } = await (await call("POST", "/browser/tabs", { url: "https://a.example/" })).json() as { tab: { id: string } };
+    expect((await call("POST", `/browser/tabs/${tab.id}/take`, { screen: "mac-main" })).status).toBe(200);
+    expect((await call("POST", `/browser/tabs/${tab.id}/viewport`, { width: 320, height: 200, scale: 4, screen: "mac-main" })).status).toBe(200);
+    const res = await call("GET", `/browser/tabs/${tab.id}/stream?quality=80&scale=12&maxWidth=5120&maxHeight=2880`);
+    const page = driver.page(0);
+    setTimeout(() => { page.frame(2560, 1600, 2560, 1600, 4); }, 50);
+    const { events, reader } = await readEvents(res, (evs) => evs.some((e) => e.event === "frame"));
+    expect(page.renders.at(-1)).toBe(8);
+    expect(events.find((e) => e.event === "frame")!.data).toMatchObject({ width: 2560, height: 1600, scale: 8, viewport: { width: 320, height: 200 } });
+    await reader.cancel();
   });
 });
 
@@ -234,12 +339,29 @@ describe("local servers", () => {
   });
 });
 
+describe("speed", () => {
+  it("the bytes asked for, the default when missing or bad, at most 4 MiB; random, without line feeds, never cached", async () => {
+    const { call, phone } = setup();
+    const res = await call("GET", "/browser/speed?bytes=200000", undefined, phone);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const body = new Uint8Array(await res.arrayBuffer());
+    expect(body.length).toBe(200_000);
+    expect(body.includes(0x0a)).toBe(false);
+    expect(new Set(body.subarray(0, 4096)).size).toBeGreaterThan(200);
+    for (const [query, size] of [["", 1024 * 1024], ["?bytes=abc", 1024 * 1024], ["?bytes=-5", 1024 * 1024], ["?bytes=0", 1], ["?bytes=99999999", 4 * 1024 * 1024]] as const) {
+      expect((await (await call("GET", `/browser/speed${query}`)).arrayBuffer()).byteLength, query).toBe(size);
+    }
+  });
+});
+
 describe("wiring", () => {
   it("every people's route is on the remote allowlist, fill too; the agent bridge's never", () => {
     for (const [m, p] of [["GET", "/browser/tabs"], ["POST", "/browser/tabs"], ["GET", "/browser/tabs/ab12cd34"], ["DELETE", "/browser/tabs/ab12cd34"], ["GET", "/browser/tabs/ab12cd34/stream"],
       ["POST", "/browser/tabs/ab12cd34/input"], ["POST", "/browser/tabs/ab12cd34/navigate"], ["POST", "/browser/tabs/ab12cd34/take"], ["POST", "/browser/tabs/ab12cd34/release"],
-      ["POST", "/browser/tabs/ab12cd34/viewport"], ["POST", "/browser/tabs/ab12cd34/fill"], ["GET", "/browser/servers"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(true);
-    for (const [m, p] of [["GET", "/browser/agent/mcp"], ["POST", "/browser/agent/mcp/ab12cd34"], ["PUT", "/browser/tabs/ab12cd34"], ["GET", "/browser/tabs/a/b/stream"], ["POST", "/browser/servers"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
+      ["POST", "/browser/tabs/ab12cd34/viewport"], ["POST", "/browser/tabs/ab12cd34/fill"], ["GET", "/browser/servers"], ["GET", "/browser/speed"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(true);
+    for (const [m, p] of [["GET", "/browser/agent/mcp"], ["POST", "/browser/agent/mcp/ab12cd34"], ["PUT", "/browser/tabs/ab12cd34"], ["GET", "/browser/tabs/a/b/stream"], ["POST", "/browser/servers"], ["POST", "/browser/speed"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
   });
 
   it("the daemon has the browser unless AGENTSWITCH_BROWSER_HOST=0; tests turn it on with a fake", async () => {

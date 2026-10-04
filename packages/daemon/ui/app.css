@@ -5,6 +5,8 @@
   --bg: #000; --panel: #0b0b0b; --raise: #151515; --hover: #121212;
   --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
   --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d;
+  /* The shaded icons' six tones of the ink, highlight to ground, and their hard shadow (docs/ui-v0.md §9, lib/shaded.js). */
+  --tw: #ffffff; --th: #e9e6df; --tm: #a9a6a0; --td: #6f6c68; --tk: #3b3a37; --ts: #1e1d1b; --px-shadow: #2c2a28;
   --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
   --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
   --scan: rgba(255, 255, 255, .022);
@@ -15,6 +17,7 @@
     --bg: #f3f1ea; --panel: #ece8df; --raise: #e4dfd4; --hover: #e9e5dc;
     --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3;
     --signal: #e0106e; --cyan: #0086a8; --green: #3f8f00; --amber: #c27400; --red: #d7261b;
+    --tw: #000000; --th: #16140f; --tm: #55524b; --td: #8a867d; --tk: #bdb8ac; --ts: #dcd7cb; --px-shadow: #cfc9bc;
     --scan: rgba(0, 0, 0, .025);
     color-scheme: light;
   }
@@ -33,7 +36,7 @@ h1, h2 { margin: 0; }
 /* text tones for short words only (a whole block is never coloured: 2026-10-01, a result read all green) */
 .faint { color: var(--ink3); } .dim { color: var(--ink2); } .w { color: var(--amber); }
 .lbl { color: var(--ink3); font-size: 11px; letter-spacing: .04em; margin: 16px 0 6px; }
-.rule { height: 1px; flex: none; background: repeating-linear-gradient(to right, var(--ink3) 0 2px, transparent 2px 4px); }
+.rule { height: 1px; flex: none; background: linear-gradient(var(--ink4), var(--ink4)); }
 .sp, .grow { flex: 1; min-width: 0; }
 .row { display: flex; align-items: center; gap: 10px; }
 .ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -59,19 +62,23 @@ main.page .empty { text-align: left; padding: 6px 0 12px; font-size: 12.5px; }
 .md pre code, .me pre code, .asked pre code { background: none; padding: 0; white-space: pre; font-size: 12px; line-height: 1.55; }
 .me pre:first-child, .asked pre:first-child { margin-top: 2px; } .me pre:last-child, .asked pre:last-child { margin-bottom: 2px; }
 .md blockquote { margin: 6px 0; padding: 0 0 0 10px; border-left: 1px solid var(--ink3); color: var(--ink2); }
-.md hr { border: 0; height: 1px; margin: 10px 0; background: repeating-linear-gradient(to right, var(--ink3) 0 2px, transparent 2px 4px); }
+.md hr { border: 0; height: 1px; margin: 10px 0; background: linear-gradient(var(--ink4), var(--ink4)); }
 .md a { color: var(--ink); }
 .md strong { font-weight: 600; }
 .mdt { overflow-x: auto; margin: 6px 0 10px; }
 .mdt table { border-collapse: collapse; font-size: 12.5px; }
 .mdt th { text-align: left; font: 11px var(--mono); color: var(--ink3); font-weight: 400; padding: 3px 14px 3px 0; border-bottom: 1px solid var(--ink4); }
 .mdt td { padding: 4px 14px 4px 0; vertical-align: top;
-  background-image: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
+  background-image: linear-gradient(var(--ink4), var(--ink4)); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
 
 /* status: a pixel square in a status colour (hollow when ended or off), the braille spinner while busy */
 .sq, .dot { width: 8px; height: 8px; display: inline-block; flex: none; background: var(--ink3); }
 .sq.busy { background: var(--cyan); } .sq.waiting { background: var(--amber); } .sq.ok { background: var(--green); } .sq.bad { background: var(--red); } .sq.off { background: var(--ink3); }
 .sq.hollow { background: none; box-shadow: inset 0 0 0 2px var(--ink3); }
+/* A status square is a small key (docs/ui-v0.md §9): a light edge above and left, a dark one below and right; a hollow
+   one its empty seat, the other way round. The pixel look's only: the classic look's are dots. */
+:root:not(.classic) .sq:not(.hollow), :root:not(.classic) .badge:not(.cancelled)::before { box-shadow: inset 1px 1px 0 rgba(255, 255, 255, .45), inset -1px -1px 0 rgba(0, 0, 0, .35); }
+:root:not(.classic) .sq.hollow, :root:not(.classic) .badge.cancelled::before { box-shadow: inset 1px 1px 0 rgba(0, 0, 0, .35), inset -1px -1px 0 rgba(255, 255, 255, .3), inset 0 0 0 2px var(--ink3); }
 .dot { background: none; box-shadow: inset 0 0 0 2px var(--red); }
 .dot.on { background: var(--green); box-shadow: none; }
 .spin { color: var(--cyan); display: inline-block; width: 1ch; text-align: center; }
@@ -265,7 +272,7 @@ details.note { display: block; }
 .evs { margin: 16px 0 6px; }
 .evs > summary { color: var(--ink3); font-size: 11px; }
 .events { font: 11.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 50vh; overflow: auto; margin-top: 6px; }
-.ev { padding: 2px 0; border-bottom: 1px dotted var(--ink4); color: var(--ink2); }
+.ev { padding: 2px 0; border-bottom: 1px solid var(--ink4); color: var(--ink2); }
 .ev .ts { color: var(--ink3); margin-right: 8px; }
 .ev.approval_request, .ev.attempt_failed, .ev.redispatch, .ev.partial, .ev.blocked { color: var(--amber); }
 .ev.done { color: var(--green); }
@@ -317,7 +324,7 @@ main.page p, main.page .say { font: 12.5px/1.6 var(--ui); color: var(--ink2); ma
 .opts3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 /* list rows (extensions): on/off, name, kind, approval, what it runs and for whom, actions */
 .xrow { display: grid; grid-template-columns: 12px minmax(8ch, 16ch) 6ch 9ch minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 7px 0; font-size: 12.5px;
-  background-image: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
+  background-image: linear-gradient(var(--ink4), var(--ink4)); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
 .xrow .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xrow .k { color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
 .xrow .d { font: 12.5px/1.5 var(--ui); color: var(--ink2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -354,7 +361,7 @@ h2 .spacer { flex: 1; }
 table.list { width: 100%; border-collapse: collapse; }
 table.list th { text-align: left; font-size: 11px; color: var(--ink3); font-weight: 400; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--ink4); }
 table.list td { padding: 7px 12px 7px 0; vertical-align: top; font-size: 12px;
-  background-image: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
+  background-image: linear-gradient(var(--ink4), var(--ink4)); background-size: 100% 1px; background-repeat: no-repeat; background-position: bottom; }
 table.list td.task-cell { max-width: 36ch; }
 td.nowrap { white-space: nowrap; }
 .platform-memory.expired { border-style: dashed; }
@@ -385,3 +392,131 @@ td.nowrap { white-space: nowrap; }
   .form { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .fb-spin { animation: none; } }
+
+/* ==========================================================================================================
+   The classic look (docs/ui-v0.md §8, concept docs/design/concepts/classic.html): the same console drawn as a
+   standard app's — the system font, round corners, standard buttons, dots for status, the system's blue for the
+   accent, soft shadows. `html.classic` is set by app.js from this browser's `appearance` (the side's
+   `Appearance` changes it); the labels and status words are rewritten by lib/look.js `dress`. Dark and light
+   follow the system, as the pixel look's.
+   ========================================================================================================== */
+.classic {
+  /* The terminal's black, as the Mac window's classic pages (docs/ui-v0.md §8, 2026-10-04; dark greys before). */
+  --bg: #000; --panel: #141416; --raise: #232326; --hover: rgba(255, 255, 255, .06);
+  --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --ink4: rgba(255, 255, 255, .11);
+  --signal: #0a84ff; --cyan: var(--signal); --green: #30d158; --amber: #ff9f0a; --red: #ff453a;
+  --field: rgba(255, 255, 255, .08); --shadow: 0 0 0 .5px rgba(255, 255, 255, .14), 0 10px 30px rgba(0, 0, 0, .45);
+  --scan: transparent;
+}
+@media (prefers-color-scheme: light) {
+  .classic {
+    --bg: #f5f5f7; --panel: #ffffff; --raise: #f0f0f2; --hover: rgba(0, 0, 0, .045);
+    --ink: #1d1d1f; --ink2: #6e6e73; --ink3: #a6a6ab; --ink4: rgba(0, 0, 0, .11);
+    --signal: #007aff; --green: #34c759; --amber: #ff9500; --red: #ff3b30;
+    --field: rgba(0, 0, 0, .055); --shadow: 0 0 0 .5px rgba(0, 0, 0, .14), 0 10px 30px rgba(0, 0, 0, .16);
+  }
+}
+.classic body { font: 13px/1.5 var(--ui); }
+.classic .lbl, .classic label { font: 600 11.5px var(--ui); letter-spacing: 0; color: var(--ink2); }
+.classic label.row, .classic label.opt { font-weight: 400; color: var(--ink); }
+.classic h2 { font: 600 11.5px var(--ui); letter-spacing: 0; color: var(--ink2); }
+.classic .page-title h1 { font: 600 17px var(--ui); }
+.classic .mdt th, .classic .warnbox b, .classic select, .classic .chip, .classic .opts input, .classic .opts select, .classic .handoff input { font-family: var(--ui); }
+.classic .ci { display: block; flex: none; }
+.classic .agent { display: inline-grid; color: var(--ink2); }
+
+/* status: dots; the spinner is a ring that turns */
+.classic .sq, .classic .badge::before, .classic .fb-spin { border-radius: 50%; }
+.classic .sq.hollow, .classic .badge.cancelled::before { box-shadow: inset 0 0 0 1.5px var(--ink3); }
+.classic .dot { border-radius: 50%; }
+.classic .spin, .classic .side nav a .n .busy { display: inline-block; width: 11px; height: 11px; font-size: 0; vertical-align: -1px; border: 1.5px solid var(--ink4); border-top-color: var(--signal); border-radius: 50%; animation: classic-turn .8s linear infinite; }
+.classic .side nav a .n .busy { width: auto; height: auto; font-size: 11.5px; border: 0; animation: none; color: var(--ink2); }
+@keyframes classic-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .classic .spin { animation: none; } }
+.classic #bandMark { display: flex; align-items: center; gap: 6px; color: var(--signal); }
+.classic #bandMark.state-off { color: var(--ink3); }
+.classic .meter { display: block; height: 4px; font-size: 0; letter-spacing: 0; border-radius: 2px; background: linear-gradient(to right, var(--signal) var(--p, 0%), var(--ink4) var(--p, 0%)); }
+.classic .meter.hi { background: linear-gradient(to right, var(--amber) var(--p, 0%), var(--ink4) var(--p, 0%)); }
+.classic .meter.bad { background: linear-gradient(to right, var(--red) var(--p, 0%), var(--ink4) var(--p, 0%)); }
+.classic .bar, .classic .bar i { border-radius: 3px; }
+.classic .bar i { background: var(--signal); }
+.classic .fb-dot { border-radius: 3px; }
+
+/* buttons: standard ones, the main action in the accent; links stay words */
+.classic button { font: 500 12.5px var(--ui); height: 26px; padding: 0 12px; border-radius: 7px; background: var(--raise); box-shadow: inset 0 0 0 .5px var(--ink4), 0 .5px 1px rgba(0, 0, 0, .1); }
+.classic button:not(.sqb):not(.link):not(.chip):not(.x)::before, .classic button:not(.sqb):not(.link):not(.chip):not(.x)::after { content: none; }
+.classic button:hover:not(:disabled) { background: color-mix(in srgb, var(--raise) 86%, var(--ink)); color: var(--ink); }
+.classic button.primary, .classic button.ok { background: var(--signal); color: #fff; box-shadow: 0 .5px 1.5px rgba(0, 0, 0, .25); }
+.classic button.primary:hover:not(:disabled), .classic button.ok:hover:not(:disabled) { background: color-mix(in srgb, var(--signal) 88%, #fff); color: #fff; }
+.classic button.bad, .classic button.warn { color: var(--red); }
+.classic button.bad:hover:not(:disabled), .classic button.warn:hover:not(:disabled) { background: var(--red); color: #fff; }
+.classic button:disabled { opacity: .5; color: var(--ink2); }
+.classic button.primary:disabled, .classic button.ok:disabled { background: var(--raise); }
+.classic button.link, .classic button.x, .classic button.chip { height: auto; padding: 0; background: none; box-shadow: none; border-radius: 0; }
+.classic button.link { color: var(--signal); font-size: 12px; }
+.classic button.link:hover { background: none; color: var(--signal); text-decoration: underline; }
+.classic button.x:hover, .classic .chip:hover { background: none; }
+.classic button.on { color: var(--signal); }
+.classic button:focus-visible, .classic a:focus-visible, .classic summary:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 60%, transparent); outline-offset: 1px; }
+.classic input, .classic textarea, .classic select { border: 0; border-radius: 7px; background: var(--field); box-shadow: inset 0 0 0 .5px var(--ink4); }
+.classic input:focus, .classic textarea:focus, .classic select:focus { box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--signal) 45%, transparent); }
+.classic .opts input, .classic .opts select, .classic .handoff input { border-radius: 5px; padding: 2px 6px; border-bottom: 0; }
+.classic details > summary::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 8px 1px 2px; border: solid var(--ink3); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
+.classic details[open] > summary::before { content: ""; transform: rotate(45deg); margin-bottom: 3px; }
+/* one of several: a ring; several: a box */
+.classic .chip { font: 12.5px var(--ui); display: inline-flex; align-items: center; gap: 6px; }
+.classic .chip::before, .classic .chip.on::before { content: ""; width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--ink3); }
+.classic .chip.on::before { box-shadow: inset 0 0 0 4px var(--signal); background: #fff; }
+.classic .chip[data-h]::before, .classic .chip[data-multi="true"]::before, .classic .chip.on[data-h]::before { content: ""; border-radius: 4px; }
+.classic .chip.on[data-h]::before, .classic .chip.on[data-multi="true"]::before { box-shadow: none; background: var(--signal); }
+
+/* the band and the side */
+.classic .band { background: var(--bg); }
+.classic .band .who b { font-weight: 600; }
+.classic .side { background: var(--bg); background-image: none; padding: 0 8px; }
+.classic .side .sec { padding: 14px 8px 6px; }
+.classic .side .rule { margin: 10px 8px 0; }
+.classic .side nav a { grid-template-columns: 0 1fr auto; padding: 5px 8px; border-radius: 6px; }
+.classic .side nav a.on { background: var(--signal); color: #fff; }
+.classic .side nav a.on .n, .classic .side nav a.on .n .busy, .classic .side nav a.on .w { color: rgba(255, 255, 255, .85); }
+.classic .side nav a .ar { display: none; }
+.classic .topic { padding: 4px 8px; border-radius: 6px; }
+.classic .usage { padding: 0 8px 8px; }
+.classic .usage .ul { grid-template-columns: 5ch minmax(0, 1fr) auto; }
+.classic .side-foot { padding: 6px 8px 12px; }
+
+/* the middle: cards, your words as a bubble in the accent */
+.classic .strip .card, .classic .card, .classic .pane, .classic .fb, .classic .attach, .classic .warnbox { border-radius: 10px; }
+.classic .strip .card { border: 0; box-shadow: 0 0 0 .5px var(--ink4), 0 1px 3px rgba(0, 0, 0, .07); }
+.classic .strip .card:hover { box-shadow: 0 0 0 .5px var(--ink3), 0 1px 3px rgba(0, 0, 0, .07); }
+.classic .strip .card.on { box-shadow: 0 0 0 1.5px var(--signal); }
+.classic .strip .card.wait { box-shadow: 0 0 0 1px var(--amber); }
+.classic .me div { border: 0; border-radius: 17px; background: var(--signal); color: #fff; padding: 8px 13px; }
+.classic .me div code, .classic .me div pre { background: rgba(255, 255, 255, .18); color: #fff; border: 0; }
+.classic .entry.sel { box-shadow: none; background: var(--hover); border-radius: 8px; padding: 6px 8px; margin: 0 -8px 12px; }
+.classic .md code, .classic .say code, .classic .qt code, .classic .sum code, .classic .entry code, .classic .asked code { border-radius: 4px; }
+.classic .md pre, .classic .asked pre { border-radius: 8px; }
+.classic .note { border-left-width: 2px; border-radius: 0 6px 6px 0; }
+.classic .detail .result { border-left-width: 2px; }
+.classic .file img { border-radius: 6px; }
+.classic .tr { display: none; }
+
+/* floating things: round cards with a soft shadow, a plain head */
+.classic .box { border: 0; border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); margin-right: 0; }
+.classic .box::after { display: none; }
+.classic .box .hd { background: none; color: var(--ink); font: 600 13px var(--ui); padding: 10px 12px 0; }
+.classic .box.ask { box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--amber) 55%, transparent), var(--shadow); background: color-mix(in srgb, var(--amber) 9%, var(--panel)); }
+.classic .box.ask .hd { background: none; color: var(--ink); }
+.classic .box.ask code { display: block; margin: 6px 0; padding: 7px 10px; border-radius: 8px; background: var(--field); }
+.classic .box .ft { gap: 8px; }
+
+/* the composer */
+.classic .compose textarea { border-radius: 17px; padding: 8px 14px; }
+.classic .sqb { width: 34px; height: 34px; min-height: 34px; align-self: flex-end; border: 0; border-radius: 50%; background: none; box-shadow: none; color: var(--ink2); }
+.classic .sqb:hover:not(:disabled) { background: var(--hover); }
+.classic .sqb.go { background: var(--signal); color: #fff; }
+.classic .sqb.go:hover:not(:disabled) { background: color-mix(in srgb, var(--signal) 88%, #fff); color: #fff; }
+.classic [data-dropzone].drop { outline: 2px dashed var(--signal); border-radius: 10px; }
+
+@media (max-width: 1100px) { .classic .detail { box-shadow: -10px 0 30px rgba(0, 0, 0, .3); } }
+@media (max-width: 760px) { .classic .side { padding: 0 6px; } .classic .side nav a.on { background: var(--hover); color: var(--ink); } }

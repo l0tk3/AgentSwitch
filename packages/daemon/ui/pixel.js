@@ -1,5 +1,6 @@
-// Pixel marks for the terminal window (docs/ui-v0.md §7): 1-bit sprites on whole-point cells, the app's mark (the
-// icon's switch: one source, three lanes) with its states, the wordmark, and the glitch that marks a change of state.
+// Pixel marks for the terminal window (docs/ui-v0.md §7): 1-bit sprites on whole-point cells, the wordmark, and the
+// glitch that marks a change of state. The icons — the app's mark with its states, each agent's mark, the lock, the
+// status squares — are shaded pictures now (§9, lib/shaded.js).
 
 // A page without matchMedia (a test's DOM) moves.
 export const reducedMotion = globalThis.matchMedia ? matchMedia("(prefers-reduced-motion: reduce)") : { matches: false, addEventListener() {} };
@@ -12,37 +13,10 @@ export function sprite(rows, { px = 2, cls = "" } = {}) {
   return `<svg class="px ${cls}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${r}</svg>`;
 }
 
-/** Each agent's mark, 5×5 (its own logo's shape): Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π. */
-export const AGENT_PX = {
-  "claude-code": ["#.#.#", ".###.", "#####", ".###.", "#.#.#"],
-  codex: ["#....", ".#...", "..#..", ".#...", "#.###"],
-  opencode: ["##.##", "#...#", "#...#", "#...#", "##.##"],
-  pi: ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"],
-};
-export const LOCK = [".###.", "#...#", "#####", "##.##", "#####"];
-/** Status: a square (idle, waiting), hollow when ended; busy is the spinner. */
-export const SQUARE = ["####", "####", "####", "####"];
-export const HOLLOW = ["####", "#..#", "#..#", "####"];
 /** In progress, everywhere the same: a braille spinner (a still first frame with Reduce Motion). */
 export const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-// ---------- the app's mark ----------
-// S = source, a/b/c = lanes, A/B/C = their ends; the top lane is the lit one, as in the icon.
-const MARK = [
-  "...........AAA",
-  "......aaaaaAAA",
-  ".....a.....AAA",
-  "....a.........",
-  "SSSa.......BBB",
-  "SSSbbbbbbbbBBB",
-  "SSSc.......BBB",
-  "....c.........",
-  ".....c.....CCC",
-  "......cccccCCC",
-  "...........CCC",
-];
-const LANE_A = [[3, 4], [4, 3], [5, 2], [6, 1], [7, 1], [8, 1], [9, 1], [10, 1]];
-
+// ---------- half-lit steps ----------
 const lit = (rows, x, y) => y >= 0 && y < rows.length && x >= 0 && x < rows[0].length && rows[y][x] !== ".";
 /** Empty cells in an inside corner of a diagonal step: a half-lit pixel smooths the step (sub-pixel anti-aliasing). */
 function aaCells(rows) {
@@ -56,44 +30,6 @@ function aaCells(rows) {
   return out;
 }
 let uid = 0;
-
-/** The mark in a state: idle (the lit lane), busy (a block runs along it), waiting (its end blinks amber), error (its
- *  end red), off (dithered to half). `depth` for identity marks ≥ 20pt: a 1-pixel hard shadow, half-lit steps, and
- *  the busy block with a sub-pixel trail and a little glow. */
-export function mark({ px = 2, state = "idle", t = 0, depth = false } = {}) {
-  const c = { ink: "var(--ink)", dim: "var(--ink3)", busy: "var(--cyan)", wait: "var(--amber)", error: "var(--red)", shadow: "var(--px-shadow)" };
-  const off = depth ? 1 : 0;
-  const W = (MARK[0].length + off) * px, H = (MARK.length + off) * px;
-  const n = LANE_A.length, k = t % n;
-  const packet = new Map();
-  if (state === "busy") {
-    if (depth) [[0, 1], [1, 0.55], [2, 0.25]].forEach(([back, a]) => { const [x, y] = LANE_A[(k - back + n * 4) % n]; packet.set(`${x},${y}`, a); });
-    else LANE_A.slice(k, k + 2).forEach(([x, y]) => packet.set(`${x},${y}`, 1));
-  }
-  const tone = (ch) => ("aAS".includes(ch) ? c.ink : c.dim);
-  const rect = (x, y, fill, op = 1) => `<rect x="${x * px}" y="${y * px}" width="${px}" height="${px}" fill="${fill}"${op < 1 ? ` opacity="${op}"` : ""}/>`;
-  const cells = [];
-  MARK.forEach((row, y) => [...row].forEach((ch, x) => { if (ch !== "." && !(state === "off" && (x + y) % 2)) cells.push([x, y, ch]); }));
-  let under = "", glow = "";
-  if (depth) {
-    under = cells.map(([x, y]) => rect(x + 1, y + 1, c.shadow)).join("");
-    if (state !== "off") under += aaCells(MARK).map(([x, y, ch]) => rect(x, y, tone(ch), 0.42)).join("");
-    if (state === "busy") {
-      const id = `pxg${uid++}`;
-      const [hx, hy] = LANE_A[k];
-      glow = `<defs><filter id="${id}" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="${px * 1.2}"/></filter></defs><g filter="url(#${id})" opacity=".7">${rect(hx, hy, c.busy)}</g>`;
-    }
-  }
-  const top = cells.map(([x, y, ch]) => {
-    let fill = tone(ch), op = 1;
-    // t counts 140 ms steps; the waiting end changes every 4 (0.56 s): under three flashes a second (WCAG 2.3.1).
-    if (ch === "A" && state === "waiting") { fill = c.wait; op = Math.floor(t / 4) % 2 ? 0.25 : 1; }
-    if (ch === "A" && state === "error") fill = c.error;
-    const p = packet.get(`${x},${y}`);
-    return rect(x, y, fill, op) + (p !== undefined ? rect(x, y, c.busy, p) : "");
-  }).join("");
-  return `<svg class="px mark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges" aria-hidden="true">${glow}${under}${top}</svg>`;
-}
 
 // ---------- the wordmark ----------
 const FONT = {

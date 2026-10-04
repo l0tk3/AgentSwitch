@@ -8,8 +8,12 @@ import { Terminal } from "/ui/vendor/xterm.mjs";
 import { FitAddon } from "/ui/vendor/addon-fit.mjs";
 import { Unicode11Addon } from "/ui/vendor/addon-unicode11.mjs";
 import { WebLinksAddon } from "/ui/vendor/addon-web-links.mjs";
-import { AGENT_PX, flicker, glitch, HOLLOW, LOCK, mark, reducedMotion, revealWordmark, SPIN, sprite, SQUARE } from "/ui/pixel.js";
+import { flicker as pixelFlicker, glitch as pixelGlitch, reducedMotion, revealWordmark, SPIN, sprite } from "/ui/pixel.js";
+import { key, SHADED, shaded, shadedMark, TONE_COLORS } from "/ui/lib/shaded.js";
+import { accentOf, age, AGENT_ICON, bracket, dot, help as helpIn, icon, label as labelIn, lookOf, spinner, word as wordIn } from "/ui/lib/look.js";
 import { everyFolder, everySession, everyTerminal, folderOf, folderTree as buildTree, foldersAbove, slashed, tilde } from "/ui/lib/tree.js";
+import { GAP, MAX_PANES, MIN_H, MIN_W, close as closeIn, drop as dropIn, neighbor, paneOf, paneShowing, panesOf, place, ratioAt, resize as resizeIn, restore as restoreLayout,
+  settle, show as showIn, single, split as splitIn, zoneOf } from "/ui/lib/panes.js";
 
 const $ = (id) => document.getElementById(id);
 const IN_MAC_APP = /AgentSwitchMac/.test(navigator.userAgent);
@@ -30,6 +34,17 @@ if (IN_MAC_APP) document.documentElement.classList.add("mac-app");
 // page leaves the screen's area clear, says where it is and what floats over it, and draws no terminal of its own.
 const NATIVE = IN_MAC_APP && window.agentswitchNativeScreen === true;
 if (NATIVE) document.documentElement.classList.add("native-screen");
+// The Mac window has a status bar across it (docs/dispatch-v0.md §1, 2026-10-03, proposal B): its lock seals a reply
+// (`window.agentswitch.seal`), so the page shows no Encrypt & Send bar under the terminal, and it tells the window what
+// the bar says of the terminal on screen (`context`).
+const STATUS_BAR = IN_MAC_APP && window.agentswitchStatusBar === true;
+if (STATUS_BAR) document.documentElement.classList.add("status-bar");
+// The Mac window splits the terminal area into panes (docs/terminal-v0.md §1 分屏, 2026-10-03, user: 有时候我希望同时调度
+// 多个终端窗口，所以想加一个分屏协作功能，可以用鼠标调整分屏的大小，然后指定选择目录树里的某个session到指定分屏里): the page
+// keeps the layout (lib/panes.js) and tells the window where each pane's screen goes (`screens`); the window draws one
+// native screen a pane. The web console shows one terminal at a time, as before.
+const PANES = NATIVE && window.agentswitchPanes === true;
+if (PANES) document.documentElement.classList.add("panes-on");
 /** The grid the native screen fits (it tells us), for a terminal started or continued here. */
 let nativeGrid = { cols: 100, rows: 30 };
 const narrow = matchMedia("(max-width: 760px), (pointer: coarse)");
@@ -107,6 +122,28 @@ function ago(ms) {
 const remember = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
 const recall = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 
+// ---------- the look (docs/ui-v0.md §8): pixel, or classic — the system font, round corners, line icons, dots ----------
+// The Mac window tells its setting at the start (`window.agentswitchLook`, with the system's accent) and when it changes
+// (`window.agentswitch.look`); a browser keeps its own (`appearance`). Only how things are drawn changes.
+let look = lookOf(window.agentswitchLook ?? recall("appearance"));
+document.documentElement.classList.toggle("classic", look === "classic");
+const classic = () => look === "classic";
+/** A short word, a tooltip and a group's label as the look writes them (lib/look.js). */
+const W = (text) => wordIn(text, look);
+const tip = (text) => helpIn(text, look);
+const label = (text) => labelIn(text, look);
+/** A button's words: `[ Allow ⌘↩ ]`, or the word and its key in the classic look. */
+const buttonWords = (text, key = null) => (classic()
+  ? [bracket(text, look), ...(key ? [h("kbd", {}, key)] : [])]
+  : [`[ ${text}${key ? " " : ""}`, ...(key ? [h("kbd", {}, key)] : []), " ]"]);
+/** A pixel sprite, or the line icon that stands for it in the classic look. */
+const glyph = (rows, px, name, size) => (classic() ? icon(name, size) : sprite(rows, { px }));
+/** An icon: its shaded picture in the pixel look (docs/ui-v0.md §9), its line drawing in the classic one. */
+const picture = (name, classicName, size, opts) => (classic() ? icon(classicName, size) : shaded(name, opts));
+/** The bursts that mark a change are the pixel look's; the classic one has none (§8 动效). */
+const glitch = (el) => { if (!classic()) pixelGlitch(el); };
+const flicker = (el) => { if (!classic()) pixelFlicker(el); };
+
 // ---------- colors: one surface, the screen's own ----------
 function rgb(hex) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
@@ -116,17 +153,20 @@ function rgb(hex) {
 }
 
 const LIGHT = { "--ink": "#151413", "--ink2": "#5f5b54", "--ink3": "#a29d93", "--ink4": "#d3cec3", "--hover": "rgba(0,0,0,.04)", "--sel": "rgba(0,0,0,.06)",
-  "--signal": "#e0106e", "--cyan": "#0086a8", "--amber": "#c27400", "--green": "#3f8f00", "--red": "#d7261b", "--px-shadow": "#cfc9bc", "--dither": "#bdb7ab" };
+  "--signal": "#e0106e", "--cyan": "#0086a8", "--amber": "#c27400", "--green": "#3f8f00", "--red": "#d7261b", "--px-shadow": "#cfc9bc", "--dither": "#bdb7ab", ...TONE_COLORS.light };
 function applyChrome(style) {
   const c = rgb(style?.theme?.background) ?? [0, 0, 0];
   const root = document.documentElement.style;
   root.setProperty("--term", `rgb(${c.join(",")})`);
   if (style?.fontFamily) root.setProperty("--mono", style.fontFamily);
   const dark = (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255 < 0.5;
-  if (!dark) {
-    for (const [k, v] of Object.entries(LIGHT)) root.setProperty(k, v);
-    document.documentElement.style.colorScheme = "light";
-  }
+  // A light terminal gives the pixel look its light inks; the classic look's chrome is dark whatever the screen's colour
+  // (§8 固定深色), so its inks are its own.
+  const light = !dark && !classic();
+  for (const [k, v] of Object.entries(LIGHT)) { if (light) root.setProperty(k, v); else root.removeProperty(k); }
+  root.colorScheme = light ? "light" : "";
+  const accent = classic() ? accentOf(window.agentswitchAccent) : null;
+  if (accent) root.setProperty("--accent", accent); else root.removeProperty("--accent");
 }
 
 // ---------- state ----------
@@ -144,6 +184,16 @@ let creating = false;
 let renaming = false;
 let opening = null;          // the session being continued, until its terminal shows
 let wipeNext = false;        // the next snapshot is another terminal's screen: draw it in top to bottom
+/** The panes and the one in focus: `current` is the terminal the pane in focus shows (none: an empty pane). */
+let layout = single(null);
+let focusPane = 1;
+let zoomed = false;          // the pane in focus fills the area (⌘⇧↩)
+let settledOnce = false;     // the first list has come: from now on a terminal that goes takes its pane with it
+const paneGrids = new Map(); // pane → the grid its native screen fits
+const paneAways = new Map(); // pane → where its terminal is in use when not here ("iphone", "web", "mac")
+let sizing = false;          // a line between panes is being dragged: each pane says its grid
+let rowDrag = null;          // a row of the tree on its way to a pane
+let rowDragEnded = 0;        // when the last drag was let go (the click that follows is not a click)
 let pickedAgent = recall("terminal.agent") || "claude-code";
 let pickedMode = recall("terminal.mode");
 /** The model chosen last, per agent ("" = default). */
@@ -158,16 +208,17 @@ let side = (() => {
 })();
 /** Room for the screen stays (the Mac window is at least 800 wide). */
 const sideWidth = (x) => Math.round(Math.max(SIDE.min, Math.min(x, 560, innerWidth - 420)));
-/** The top bar's list button (a browser's; the Mac window has it in its toolbar): the fine pixel icon, 1 pt cells. */
-const LIST_ICON = [".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#",
-  "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#",
-  "#.....#..........#", ".################."];
-const NEW_ICON = ["......#......", "......#......", "......#......", "......#......", "......#......", "......#......", "#############",
-  "......#......", "......#......", "......#......", "......#......", "......#......", "......#......"];
-$("newBtn").innerHTML = sprite(NEW_ICON, { px: 1 });
+/** The band's two buttons, drawn and said as the look has them. */
+function drawBandButtons() {
+  // A browser's (the Mac window has them in its own bar): the window with its sidebar, the plus with some thickness.
+  $("newBtn").innerHTML = picture("new", "plus", 17);
+  $("newBtn").title = tip("New Terminal ⌘T");
+  $("sideBtn").innerHTML = picture("list", "sidebar", 18);
+  $("sideBtn").title = tip("List ⌘B");
+}
+drawBandButtons();
 function renderSideBtn() {
   const shown = narrow.matches ? document.body.classList.contains("list-open") : !side.closed;
-  if (!$("sideBtn").firstChild) $("sideBtn").innerHTML = sprite(LIST_ICON, { px: 1 });
   $("sideBtn").setAttribute("aria-expanded", String(shown));
 }
 function applySide() {
@@ -263,7 +314,7 @@ term.unicode.activeVersion = "11";
 if (!NATIVE) term.open($("screen"));
 /** This screen's grid, for a terminal started or continued here. */
 function gridHere() {
-  if (NATIVE) return nativeGrid;
+  if (NATIVE) return (PANES && paneGrids.get(focusPane)) || nativeGrid;
   fit.fit();
   return { cols: term.cols, rows: term.rows };
 }
@@ -407,7 +458,7 @@ function inUse() { return (nativeActive ?? document.hasFocus()) && !document.hid
 const reclaim = (active) => () => { if (NATIVE || !inUse()) return; if (mine()) fitAndTell(); else if (active || !sizeOwner) claim(); };
 function claim() {
   if (!current || creating || current.status === "exited") return;
-  if (NATIVE) { native.postMessage({ type: "claim" }); return; }
+  if (NATIVE) { native.postMessage({ type: "claim", pane: focusPane }); return; }
   fit.fit();
   sizeOwner = SCREEN;
   showAway(null);
@@ -419,11 +470,13 @@ const WHERE = { mac: ["On Mac", "这个终端正在 Mac 上使用。"], iphone: 
 const placeOf = (by) => (by.startsWith("phone") ? "iphone" : by.startsWith("mac") ? "mac" : "web");
 /** The placeholder: glitches in; going (this screen took the size back), glitches once more and the screen is drawn in.
  *  Said again while going (the service confirming the claim), it goes on going. */
-function showAway(place) {
+function showAway(place, pane) {
+  if (PANES) return showPaneAway(pane ?? focusPane, place);
   const el = $("away");
   if (!place) {
     if (el.hidden || !el.dataset.place) return;
     delete el.dataset.place;
+    tellContext();
     // Not seen (a window behind the others, whose timers WebKit slows): gone at once.
     if (reducedMotion.matches || document.hidden) { el.hidden = true; return; }
     glitch(el.querySelector(".away-box"));
@@ -435,7 +488,8 @@ function showAway(place) {
   const [head, line] = WHERE[place] ?? WHERE.web;
   const same = !el.hidden && el.dataset.place === place;
   el.dataset.place = place;
-  $("awayHead").textContent = head;
+  tellContext();
+  $("awayHead").textContent = W(head);
   $("awayLine").textContent = line;
   el.hidden = false;
   if (!same) glitch(el.querySelector(".away-box"));
@@ -518,6 +572,12 @@ function ask({ title, body, confirm, destructive = false, check = null, folder =
 function select(id, { loading = null } = {}) {
   const t = terminals.find((x) => x.id === id);
   if (!t) return;
+  if (PANES) {
+    // A terminal is in one pane: shown already, that pane takes the focus; else it goes in the pane in focus.
+    const shown = paneShowing(layout, id);
+    if (shown) focusPane = shown.id; else layout = showIn(layout, focusPane, id);
+    keepLayout();
+  }
   closeStream();
   const moved = current?.id !== t.id;
   wipeNext ||= moved;
@@ -533,9 +593,11 @@ function select(id, { loading = null } = {}) {
   renderSideBtn();
   if (loading) showLoading(loading); else hideLoading();
   sizeOwner = null;
-  clearTimeout(showAway.leaving);
-  $("away").hidden = true;
-  delete $("away").dataset.place;
+  if (!PANES) {
+    clearTimeout(showAway.leaving);
+    $("away").hidden = true;
+    delete $("away").dataset.place;
+  }
   if (NATIVE) {
     // The native screen follows this terminal and sizes it; the page only takes its events.
     follow(id);
@@ -635,8 +697,370 @@ function patch(id, fields) {
 }
 
 function afterRemoval() {
+  // Among several panes the one whose terminal went has closed (refresh): the pane now in focus shows what it holds.
+  if (PANES && panesOf(layout).length > 1) return focusOn(focusPane, true);
   const next = terminalOrder[0] ?? terminals[0]?.id;
   if (next) select(next); else showCreate();
+}
+
+// ---------- split panes (the Mac window; docs/terminal-v0.md §1 分屏, demo docs/design/implemented/split.html) ----------
+// The terminal area as panes side by side and one above another (lib/panes.js). The page draws each pane's header
+// (its number, the terminal's mark and name, its folder and git, ×), the lines between panes (dragged to resize), what an
+// empty pane offers and where a terminal in use elsewhere is; the window draws a native screen in each pane's area.
+// `current` is the terminal of the pane in focus: the bar's title, the status bar, the permission requests and the
+// sealed reply are its. One pane alone looks as the page always did: no header.
+const X_ICON = ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"];
+const ZONE_WORDS = { center: "Open Here", left: "Split Left", right: "Split Right", top: "Split Up", bottom: "Split Down" };
+const paneEls = new Map();   // pane → its element
+const lineEls = new Map();   // split → the line between its two sides
+const paneTerminal = (p) => (p?.term ? terminals.find((t) => t.id === p.term) ?? null : null);
+const gitWords = (g) => (g ? [g.branch, g.changed ? `±${g.changed}` : "", g.ahead ? `↑${g.ahead}` : "", g.behind ? `↓${g.behind}` : ""].filter(Boolean).join(" ") : "");
+
+function keepLayout() {
+  if (PANES) remember("terminal.panes", JSON.stringify({ root: layout, focus: focusPane }));
+}
+
+/** The panes on the stage: all of them, or the one in focus alone while it is zoomed. */
+function placedPanes() {
+  const stage = $("stage");
+  const box = { x: 0, y: 0, w: stage.clientWidth, h: stage.clientHeight };
+  if (zoomed && panesOf(layout).length > 1) {
+    const p = paneOf(layout, focusPane);
+    return { panes: [{ id: p.id, term: p.term, r: box }], lines: [] };
+  }
+  return place(layout, box);
+}
+
+/** The pane a terminal is shown in, on its row of the tree (the one in focus in the signal colour). */
+function paneBadge(id) {
+  if (!PANES) return null;
+  const all = panesOf(layout);
+  const at = all.findIndex((p) => p.term === id);
+  if (all.length < 2 || at < 0) return null;
+  return h("span", { class: `inpane ${all[at].id === focusPane ? "f" : ""}`, title: `Pane ${at + 1}` }, String(at + 1));
+}
+
+function renderPanes() {
+  if (!PANES) return;
+  const root = $("panes");
+  root.hidden = false;
+  const { panes, lines } = placedPanes();
+  const all = panesOf(layout), many = all.length > 1;
+  root.classList.toggle("many", many);
+  const seen = new Set();
+  for (const { id, r } of panes) {
+    seen.add(id);
+    const p = paneOf(layout, id), t = paneTerminal(p);
+    let el = paneEls.get(id);
+    if (!el) {
+      el = h("div", { class: "pane", "data-pane": id }, h("div", { class: "pane-head" }),
+        h("div", { class: "pane-body" }, h("div", { class: "pane-screen" }), h("div", { class: "pane-size" })));
+      const head = el.firstChild;
+      head.addEventListener("mousedown", (e) => { if (!e.target.closest("button")) focusOn(id); });
+      head.addEventListener("dblclick", (e) => { if (!e.target.closest("button")) toggleZoom(); });
+      paneEls.set(id, el);
+      root.append(el);
+    }
+    el.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`;
+    el.classList.toggle("focus", id === focusPane);
+    const head = el.firstChild;
+    head.hidden = !many;
+    if (many) {
+      const n = all.findIndex((q) => q.id === id) + 1;
+      const where = t ? [folderOf(t.workdir || t.cwd), gitWords(gits[t.workdir || t.cwd])].filter(Boolean).join(" · ") : "";
+      head.replaceChildren(...[
+        h("span", { class: "no" }, String(n)),
+        t ? h("span", { class: "st" }, statusMark(t)) : null,
+        t ? h("span", { class: "nm" }, t.name) : h("span", { class: "at" }, "Empty"),
+        t ? h("span", { class: "at" }, where) : null,
+        h("span", { class: "grow" }),
+        zoomed ? h("span", { class: "at" }, `Pane ${n} of ${all.length} · ⌘⇧↩`) : null,
+        // A request waiting in a pane out of focus: its card shows once the pane has the focus.
+        t && id !== focusPane && t.permissions?.length ? h("span", { class: "w" }, W("[!] Approval")) : null,
+        t ? agentMark(t.harness) : null,
+        zoomed ? null : h("button", { class: "x", title: "Close Pane", onclick: () => closePane(id) }, raw(glyph(X_ICON, 1, "x", 12))),
+      ].filter(Boolean));
+    }
+    renderPaneBody(el.lastChild, p, t);
+    const grid = paneGrids.get(id);
+    el.querySelector(".pane-size").textContent = sizing && t && grid ? `${grid.cols} × ${grid.rows}` : "";
+  }
+  for (const [id, el] of paneEls) if (!seen.has(id)) { el.remove(); paneEls.delete(id); paneGrids.delete(id); paneAways.delete(id); }
+  const drawn = new Set();
+  for (const l of lines) {
+    drawn.add(l.id);
+    let el = lineEls.get(l.id);
+    if (!el) {
+      el = h("div", { class: "pane-line", title: "Drag · Double-Click Evens" });
+      el.addEventListener("pointerdown", (e) => startLineDrag(e, l.id));
+      el.addEventListener("dblclick", () => { layout = resizeIn(layout, l.id, 0.5); keepLayout(); renderPanes(); tellScreens(); });
+      lineEls.set(l.id, el);
+      root.append(el);
+    }
+    el.classList.toggle("row", l.dir === "row");
+    el.classList.toggle("col", l.dir !== "row");
+    // 1 px drawn, 7 px to take hold of.
+    el.style.cssText = l.dir === "row" ? `left:${l.r.x - 3}px;top:${l.r.y}px;width:7px;height:${l.r.h}px` : `left:${l.r.x}px;top:${l.r.y - 3}px;width:${l.r.w}px;height:7px`;
+  }
+  for (const [id, el] of lineEls) if (!drawn.has(id)) { el.remove(); lineEls.delete(id); }
+  placeFloats(many && !zoomed);
+}
+
+/** What lies over a pane's screen area: what an empty pane offers, or where its terminal is in use. */
+function renderPaneBody(body, p, t) {
+  let empty = body.querySelector(".pane-empty");
+  if (!t) {
+    const was = p.was ? sessions.find((s) => s.harness === p.was.harness && s.id === p.was.session && RESUMABLE.has(s.harness)) : null;
+    const key = was ? `${was.harness}:${was.id}` : "";
+    if (!empty || empty.dataset.key !== key) {
+      empty?.remove();
+      empty = h("div", { class: "pane-empty", "data-key": key },
+        h("div", { class: "say" }, "将左侧的终端或会话拖到这里，或先点这一块、再在左侧点选。"),
+        was ? h("button", { class: "btn pri", onclick: () => { focusOn(p.id); resume(was); } }, ...buttonWords(`Resume 「${was.title || p.was.title || "会话"}」`)) : null,
+        h("button", { class: "btn line", onclick: () => { focusOn(p.id); showCreate(); } }, ...buttonWords("+ New Terminal")));
+      empty.addEventListener("mousedown", (e) => { if (!e.target.closest("button")) focusOn(p.id); });
+      body.append(empty);
+    }
+  } else empty?.remove();
+  const place = t ? paneAways.get(p.id) : null;
+  let away = body.querySelector(".away");
+  if (!place) { away?.remove(); return; }
+  if (!away) {
+    away = h("div", { class: "away" }, h("div", { class: "away-box box" }, h("div", { class: "hd" }), h("div", { class: "bd" }),
+      h("div", { class: "ft" }, h("span", { class: "hint" }), h("button", { class: "btn pri", type: "button" }, ...buttonWords("Take Over")))));
+    // The placeholder clicked: the size is this window's again, and the pane has the focus.
+    away.addEventListener("mousedown", (e) => { e.preventDefault(); native.postMessage({ type: "claim", pane: p.id }); focusOn(p.id); focusScreen(); });
+    body.append(away);
+    glitch(away.firstChild);
+  }
+  if (away.dataset.place !== place) {
+    const [head, line] = WHERE[place] ?? WHERE.web;
+    away.dataset.place = place;
+    away.querySelector(".hd").textContent = W(head);
+    away.querySelector(".bd").textContent = line;
+  }
+}
+
+/** A pane's terminal is in use on another screen (the window's native screen says so), or back here. */
+function showPaneAway(id, place) {
+  if ((paneAways.get(id) ?? null) === (place ?? null)) return;
+  if (place) paneAways.set(id, place); else paneAways.delete(id);
+  renderPanes();
+  if (id === focusPane) tellContext();
+}
+
+/** What floats over the terminal — the requests, the loading line, the sealed reply — belongs to the pane in focus: among
+ *  several panes it sits over that pane, not over the whole area. */
+function placeFloats(inPane) {
+  const layer = document.querySelector(".composer-layer");
+  const el = inPane ? paneEls.get(focusPane) : null;
+  if (!el) { for (const n of [$("loading"), $("toasts"), layer]) n.style.cssText = ""; return; }
+  const b = el.lastChild.getBoundingClientRect(), stage = $("stage").getBoundingClientRect(), main = layer.parentElement.getBoundingClientRect();
+  $("loading").style.cssText = `inset:auto;left:${b.x - stage.x}px;top:${b.y - stage.y}px;width:${b.width}px;height:${b.height}px`;
+  $("toasts").style.cssText = `top:${b.y - stage.y + 12}px;right:${stage.right - b.right + 20}px;width:min(460px, ${Math.max(200, b.width - 40)}px)`;
+  layer.style.cssText = `left:${b.x - main.x + 14}px;right:${main.right - b.right + 14}px;bottom:${main.bottom - b.bottom + 14}px`;
+}
+
+/** Where each pane's screen goes, for the window's native screens: the terminal it shows (none in an empty pane, none
+ *  at all while a terminal is being made) and which pane has the focus. */
+function tellScreens() {
+  if (!PANES) return;
+  const list = [];
+  for (const [id, el] of paneEls) {
+    const p = paneOf(layout, id);
+    if (!p) continue;
+    const r = el.querySelector(".pane-screen").getBoundingClientRect();
+    const t = paneTerminal(p);
+    list.push({ pane: id, id: creating || !t ? null : t.id, rect: [r.x, r.y, r.width, r.height].map(Math.round), cwd: t ? t.workdir || t.cwd : "", focused: id === focusPane });
+  }
+  tellWindow("screens", { panes: list });
+}
+
+/** The focus to pane `id`: the terminal it shows is followed, or — an empty pane — nothing is. */
+function focusOn(id, force = false) {
+  if (!PANES) return;
+  const p = paneOf(layout, id);
+  if (!p) return;
+  const t = paneTerminal(p);
+  if (!force && id === focusPane && !creating && (t ? current?.id === t.id : !current)) return;
+  focusPane = id;
+  keepLayout();
+  if (t) { select(t.id); return; }
+  closeStream();
+  current = null;
+  leaveCreate();
+  hideLoading();
+  $("toasts").replaceChildren();
+  if (!narrow.matches) { $("composer").hidden = true; $("composerText").value = ""; }
+  render();
+}
+
+/** ⌘D, ⌘⇧D, the bar's buttons: the pane in focus split, the new half empty and in focus. */
+function splitFocused(side) {
+  if (!PANES) return false;
+  if (panesOf(layout).length >= MAX_PANES) { notify(`最多 ${MAX_PANES} 个分屏。`); return false; }
+  const r = placedPanes().panes.find((p) => p.id === focusPane)?.r;
+  const across = side === "left" || side === "right";
+  if (zoomed || !r || (across ? r.w < 2 * MIN_W + GAP : r.h < 2 * MIN_H + GAP)) { notify(zoomed ? "先按 ⌘⇧↩ 还原，再分屏。" : "这一块太小，无法再分。"); return false; }
+  const made = splitIn(layout, focusPane, side);
+  if (!made) return false;
+  layout = made.root;
+  focusOn(made.pane, true);
+  return true;
+}
+
+function closePane(id) {
+  if (panesOf(layout).length < 2) return;
+  layout = closeIn(layout, id);
+  if (panesOf(layout).length < 2) zoomed = false;
+  if (!paneOf(layout, focusPane)) focusPane = panesOf(layout)[0].id;
+  keepLayout();
+  focusOn(focusPane, true);
+}
+
+function toggleZoom() {
+  if (panesOf(layout).length < 2) return;
+  zoomed = !zoomed;
+  render();
+  focusScreen();
+}
+
+function focusNeighbor(dir) {
+  if (zoomed) return;
+  const next = neighbor(placedPanes().panes, focusPane, dir);
+  if (next) focusOn(next);
+}
+
+/** A line between panes dragged: the two sides resize as it moves (each pane saying its new grid), none below its least
+ *  size; the native screens follow and resize their terminals once the drag settles. */
+function startLineDrag(e, id) {
+  if (e.button !== 0) return;
+  const line = placedPanes().lines.find((l) => l.id === id);
+  if (!line) return;
+  e.preventDefault();
+  const stage = $("stage").getBoundingClientRect();
+  sizing = true;
+  document.body.classList.add(line.dir === "row" ? "pane-sizing-row" : "pane-sizing-col");
+  lineEls.get(id)?.classList.add("drag");
+  const move = (ev) => {
+    const at = line.dir === "row" ? ev.clientX - stage.x - line.box.x : ev.clientY - stage.y - line.box.y;
+    layout = resizeIn(layout, id, ratioAt(layout, id, line.box, at));
+    renderPanes();
+    tellScreens();
+  };
+  const end = () => {
+    removeEventListener("pointermove", move);
+    removeEventListener("pointerup", end);
+    removeEventListener("pointercancel", end);
+    sizing = false;
+    document.body.classList.remove("pane-sizing-row", "pane-sizing-col");
+    lineEls.get(id)?.classList.remove("drag");
+    keepLayout();
+    renderPanes();
+    tellScreens();
+  };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", end);
+  addEventListener("pointercancel", end);
+}
+
+/** A row of the tree clicked: its terminal in the pane in focus (a session goes on there); ⌘-click, in a new pane to
+ *  the right. The click that ends a drag is not one. */
+function rowClick(e, what) {
+  if (Date.now() - rowDragEnded < 300) return;
+  if (PANES && e.metaKey) return openBeside(what);
+  if (what.term) select(what.term); else resume(what.session);
+}
+
+/** The terminal a session is already continued in, if any. */
+const openedAs = (s) => terminals.find((t) => t.status !== "exited" && (t.resumedFrom === s.id || t.agentSessionId === s.id)) ?? null;
+
+function openBeside(what) {
+  const term = what.term ?? openedAs(what.session)?.id;
+  if (term && paneShowing(layout, term)) return select(term);
+  if (!splitFocused("right")) return;
+  if (term) select(term); else resume(what.session);
+}
+
+/** A row pressed: once it moves it is on its way to a pane (the rows are drawn again every few seconds, so the drag is
+ *  followed on the window, not on the row). */
+function startRowDrag(e, what) {
+  if (!PANES || e.button !== 0 || e.target.closest("button, input")) return;
+  rowDrag = { what, x: e.clientX, y: e.clientY, moved: false, ghost: null, drop: null };
+}
+addEventListener("pointermove", (e) => {
+  const d = rowDrag;
+  if (!d) return;
+  if (!d.moved) {
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
+    d.moved = true;
+    const t = d.what.term ? terminals.find((x) => x.id === d.what.term) : null;
+    d.ghost = h("div", { class: "pane-ghost" }, t ? statusMark(t) : null, agentMark((t ?? d.what.session).harness), h("span", {}, t ? t.name : d.what.session.title || "(Untitled)"));
+    document.body.append(d.ghost);
+    document.body.classList.add("pane-dragging");
+  }
+  d.ghost.style.left = `${e.clientX + 12}px`;
+  d.ghost.style.top = `${e.clientY + 10}px`;
+  const stage = $("stage").getBoundingClientRect();
+  const x = e.clientX - stage.x, y = e.clientY - stage.y;
+  const hit = placedPanes().panes.find(({ r }) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+  // A terminal dragged out of its own pane frees that pane: one fewer to count.
+  const term = d.what.term ?? openedAs(d.what.session)?.id;
+  const from = term ? paneShowing(layout, term) : null;
+  d.drop = hit && !(from && from.id === hit.id) ? { pane: hit.id, ...zoneOf(hit.r, x, y, panesOf(layout).length - (from ? 1 : 0)) } : null;
+  renderDrop(d.drop);
+});
+const endRowDrag = (e) => {
+  const d = rowDrag;
+  rowDrag = null;
+  if (!d?.moved) return;
+  d.ghost?.remove();
+  document.body.classList.remove("pane-dragging");
+  renderDrop(null);
+  rowDragEnded = Date.now();
+  if (d.drop && e.type === "pointerup") dropRow(d.what, d.drop);
+};
+addEventListener("pointerup", endRowDrag);
+addEventListener("pointercancel", endRowDrag);
+
+/** Where the row lands while it is dragged: the pane's middle, or the half an edge would split off. */
+function renderDrop(drop) {
+  let el = $("panes").querySelector(".pane-drop");
+  if (!drop) { el?.remove(); return; }
+  if (!el) { el = h("div", { class: "pane-drop" }, h("span", {})); $("panes").append(el); }
+  el.style.cssText = `left:${drop.r.x}px;top:${drop.r.y}px;width:${drop.r.w}px;height:${drop.r.h}px`;
+  el.firstChild.textContent = ZONE_WORDS[drop.zone] + (drop.full ? ` · 最多 ${MAX_PANES} 个分屏` : "");
+}
+
+/** The row let go on a pane: its middle shows the terminal there (a session goes on there), an edge splits that side
+ *  for it. */
+function dropRow(what, { pane, zone }) {
+  zoomed = false;
+  const term = what.term ?? openedAs(what.session)?.id;
+  if (term) {
+    const done = dropIn(layout, term, pane, zone);
+    if (!done) return;
+    layout = done.root;
+    focusPane = done.pane;
+    keepLayout();
+    select(term);
+    return;
+  }
+  if (zone !== "center") {
+    const made = splitIn(layout, pane, zone);
+    if (!made) return;
+    layout = made.root;
+    pane = made.pane;
+  }
+  focusOn(pane, true);
+  resume(what.session);
+}
+
+/** The new-terminal panel can be left: a terminal is on screen, or other panes are (an empty one in focus). */
+const canLeaveCreate = () => !!current || (PANES && panesOf(layout).some((p) => paneTerminal(p)));
+function cancelCreate() {
+  if (current) select(current.id);
+  else if (canLeaveCreate()) { leaveCreate(); focusOn(focusPane, true); }
 }
 
 // ---------- permission requests ----------
@@ -648,13 +1072,14 @@ function addToast(id, request, fresh = false) {
   const cwd = terminals.find((t) => t.id === id)?.cwd;
   const detail = cwd && raw_.startsWith(cwd + "/") ? raw_.slice(cwd.length + 1) : tilde(raw_);
   const toast = h("div", { class: "toast box", id: `perm-${request.id}`, "data-id": request.id, "data-terminal": id },
-    h("div", { class: "hd" }, h("span", {}, "[!] Approval"), h("span", { class: "grow" }), h("span", {}, TOOL_WORDS[request.tool] ?? request.tool)),
+    h("div", { class: "hd" }, classic() ? raw(icon("warn", 16), "warn") : null, h("span", { class: "what" }, W("[!] Approval")), h("span", { class: "grow" }),
+      h("span", { class: "tool" }, TOOL_WORDS[request.tool] ?? request.tool)),
     h("code", {}, detail),
-    cwd ? h("div", { class: "path" }, tilde(cwd)) : null,
+    cwd ? h("div", { class: "path" }, classic() ? raw(icon("folder", 12)) : null, tilde(cwd)) : null,
     h("div", { class: "ft" },
       h("span", { class: "hint" }, terminals.find((t) => t.id === id)?.name ?? ""),
-      h("button", { class: "btn", onclick: () => decide("deny") }, "[ Deny ", h("kbd", {}, "⌘⌫"), " ]"),
-      h("button", { class: "btn pri", onclick: () => decide("allow") }, "[ Allow ", h("kbd", {}, "⌘↩"), " ]")));
+      h("button", { class: "btn", onclick: () => decide("deny") }, ...buttonWords("Deny", "⌘⌫")),
+      h("button", { class: "btn pri", onclick: () => decide("allow") }, ...buttonWords("Allow", "⌘↩"))));
   $("toasts").append(toast);
   if (fresh) glitch(toast);
 }
@@ -670,10 +1095,12 @@ function addQuestion(id, request, fresh) {
   const picks = questions.map(() => ({ labels: [], other: "" }));
   const answered = (i) => picks[i].labels.length > 0 || picks[i].other.trim() !== "";
   const complete = () => questions.every((_, i) => answered(i));
-  const markOf = (q, on) => (q.multiSelect ? (on ? "[x]" : "[ ]") : (on ? "<x>" : "< >"));
+  // One of several is < > / <x>, several are [ ] / [x]; the classic look draws a ring or a box in their place (the CSS).
+  const markOf = (q, on) => (classic() ? "" : q.multiSelect ? (on ? "[x]" : "[ ]") : (on ? "<x>" : "< >"));
+  const markClass = (q) => `mk ${q.multiSelect ? "several" : "one"}`;
   const rows = questions.map(() => []);
   const fields = [];
-  const submit = h("button", { class: "btn pri", disabled: true, onclick: () => submitAnswers() }, "[ Submit ", h("kbd", {}, "⌘↩"), " ]");
+  const submit = h("button", { class: "btn pri", disabled: true, onclick: () => submitAnswers() }, ...buttonWords("Submit", "⌘↩"));
   const redraw = (i) => {
     for (const r of rows[i]) { const on = r.on(); r.el.classList.toggle("on", on); r.mk.textContent = markOf(questions[i], on); }
     submit.disabled = !complete();
@@ -686,7 +1113,7 @@ function addQuestion(id, request, fresh) {
   };
   const blocks = questions.map((q, i) => {
     const options = q.options.map((o, n) => {
-      const mk = h("span", { class: "mk" }, markOf(q, false));
+      const mk = h("span", { class: markClass(q) }, markOf(q, false));
       const el = h("button", { class: "opt", onclick: () => pick(i, o.label) },
         h("kbd", {}, String(n + 1)), mk, h("span", { class: "lb" }, o.label), o.description ? h("small", {}, o.description) : null);
       rows[i].push({ el, mk, on: () => picks[i].labels.includes(o.label) });
@@ -699,13 +1126,13 @@ function addQuestion(id, request, fresh) {
       redraw(i);
     } });
     fields[i] = field;
-    const mk = h("span", { class: "mk" }, markOf(q, false));
+    const mk = h("span", { class: markClass(q) }, markOf(q, false));
     const other = h("label", { class: "opt" }, h("kbd", {}, String(q.options.length + 1)), mk, field);
     rows[i].push({ el: other, mk, on: () => picks[i].other.trim() !== "" });
-    return h("div", { class: "q", "data-q": String(i) }, q.header ? h("div", { class: "qh" }, `// ${q.header}`) : null, h("div", { class: "qt" }, q.question), options, other);
+    return h("div", { class: "q", "data-q": String(i) }, q.header ? h("div", { class: "qh" }, label(`// ${q.header}`)) : null, h("div", { class: "qt" }, q.question), options, other);
   });
   const toast = h("div", { class: "toast box ask", id: `perm-${request.id}`, "data-id": request.id, "data-terminal": id, tabindex: "-1" },
-    h("div", { class: "hd" }, h("span", {}, "[?] Question")),
+    h("div", { class: "hd" }, classic() ? raw(icon("question", 16), "warn") : null, h("span", { class: "what" }, W("[?] Question"))),
     h("div", { class: "qs" }, blocks),
     h("div", { class: "ft" }, h("span", { class: "hint" }, terminals.find((t) => t.id === id)?.name ?? ""), submit));
   let busy = false;
@@ -781,25 +1208,36 @@ let terminalOrder = [];
 
 /** A terminal's status mark: the spinner while busy, a square while idle or waiting, hollow once ended. */
 function statusMark(t) {
+  // The classic look: the system's spinner, and dots (the waiting one's ring breathes).
+  if (classic()) return raw(t.status === "working" ? spinner(13) : dot(t.status));
   if (t.status === "working") return h("span", { class: "spin" }, SPIN[spinFrame]);
-  if (t.status === "exited") return raw(sprite(HOLLOW, { px: 2 }), "sq-exited");
-  return raw(sprite(SQUARE, { px: 2 }), t.status === "waiting" ? "sq-waiting blink" : "sq-idle");
+  if (t.status === "exited") return raw(key({ hollow: true }), "sq-exited");
+  return raw(key(), t.status === "waiting" ? "sq-waiting blink" : "sq-idle");
 }
-const agentMark = (harness) => raw(sprite(AGENT_PX[harness] ?? AGENT_PX.pi, { px: 2 }), "agent-mark");
+/** An agent's mark: its shaded picture (pi's for one the page does not know), fainter than the row's words. */
+const agentPicture = (harness) => (Object.hasOwn(AGENT_ICON, harness) && Object.hasOwn(SHADED, harness) ? harness : "pi");
+const agentMark = (harness) => raw(classic() ? icon(AGENT_ICON[harness] ?? AGENT_ICON.pi, 13) : shaded(agentPicture(harness), { strength: 0.6 }), "agent-mark");
+/** Something at work: the braille spinner, or the system's. */
+const busyMark = () => (classic() ? raw(spinner(13)) : h("span", { class: "spin" }, SPIN[spinFrame]));
+/** A row's place in the tree: the branch's characters, or in the classic look only how far in it sits. */
+const twig = (tr, depth) => (classic()
+  ? h("span", { class: "tr", style: `padding-left:${depth * 14}px` })
+  : h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr));
 
 function terminalRow(t, tr, depth, name = t.name) {
   const index = terminalOrder.indexOf(t.id);
-  const meta = t.status === "waiting" ? h("span", { class: "w" }, "Waiting")
-    : t.status === "exited" ? (t.exitCode ? h("span", { class: "x" }, `Exit ${t.exitCode}`) : "Exited")
+  const meta = t.status === "waiting" ? h("span", { class: classic() ? "w pill" : "w" }, W("Waiting"))
+    : t.status === "exited" ? (t.exitCode ? h("span", { class: "x" }, `Exit ${t.exitCode}`) : W("Exited"))
     : agentMark(t.harness);
   return h("div", { class: `row term ${t.status} ${current?.id === t.id && !creating ? "sel" : ""}`, "data-id": t.id, title: `${AGENT[t.harness]}${index < 9 ? ` · ⌘${index + 1}` : ""}`,
-    onclick: () => select(t.id), ondblclick: () => startRename(t.id), oncontextmenu: (e) => { e.preventDefault(); showMenu(e, t); } },
+    onclick: (e) => rowClick(e, { term: t.id }), onpointerdown: (e) => startRowDrag(e, { term: t.id }),
+    ondblclick: () => startRename(t.id), oncontextmenu: (e) => { e.preventDefault(); showMenu(e, t); } },
     h("span", { class: "ix" }, index < 9 ? String(index + 1).padStart(2, "0") : ""),
-    h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr),
+    twig(tr, depth),
     h("span", { class: "st" }, statusMark(t)),
     h("span", { class: `nm ${t.status === "exited" ? "dither" : ""}`, "data-rename": t.id }, name),
-    h("span", { class: "mt" }, meta),
-    h("span", { class: "ac" }, h("button", { title: "Close ⌘W", onclick: (e) => { e.stopPropagation(); closeTerminal(t); } }, "×")));
+    h("span", { class: "mt" }, meta, paneBadge(t.id)),
+    h("span", { class: "ac" }, h("button", { class: "x", title: tip("Close ⌘W"), onclick: (e) => { e.stopPropagation(); closeTerminal(t); } }, classic() ? raw(icon("x", 12)) : "×")));
 }
 
 /** A terminal's sub-agents at work, one level under it (docs/terminal-v0.md §1): what each was sent to do, its kind and
@@ -809,19 +1247,21 @@ function subagentRows(t, tr, depth) {
   const stem = tr === "└─" ? "\u00a0\u00a0" : "│\u00a0";
   return subs.map((a, k) => h("div", { class: "row sub", title: [a.type, a.doing].filter(Boolean).join(" · "), onclick: () => select(t.id) },
     h("span", { class: "ix" }),
-    h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, `${stem}${k === subs.length - 1 ? "└─" : "├─"}`),
-    h("span", { class: "st" }, h("span", { class: "spin" }, SPIN[spinFrame])),
+    twig(`${stem}${k === subs.length - 1 ? "└─" : "├─"}`, classic() ? depth + 1 : depth),
+    h("span", { class: "st" }, busyMark()),
     h("span", { class: "nm" }, a.name, a.doing ? h("i", {}, a.doing) : null),
     h("span", { class: "mt" }, a.type)));
 }
 
 function sessionRow(s, tr, depth, name = s.title || "(Untitled)") {
   const canResume = RESUMABLE.has(s.harness);
-  const meta = opening === s.id ? "Opening" : s.active ? "Busy" : ago(s.updatedAt);
-  return h("div", { class: `row session ${opening === s.id ? "opening" : ""}`, title: `${AGENT[s.harness] ?? s.harness} · ${tilde(s.cwd)}`, onclick: canResume ? () => resume(s) : null },
+  const meta = opening === s.id ? W("Opening") : s.active ? W("Busy") : age(ago(s.updatedAt), look);
+  return h("div", { class: `row session ${opening === s.id ? "opening" : ""}`, title: `${AGENT[s.harness] ?? s.harness} · ${tilde(s.cwd)}`,
+    onclick: canResume ? (e) => rowClick(e, { session: s }) : null, onpointerdown: canResume ? (e) => startRowDrag(e, { session: s }) : null },
     h("span", { class: "ix" }),
-    h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr),
-    h("span", { class: "st" }),
+    twig(tr, depth),
+    // An earlier session: nothing in the status column; a clock in the classic look (it can be gone on with).
+    h("span", { class: "st" }, classic() ? raw(icon("clock", 13)) : null),
     h("span", { class: "nm" }, name),
     h("span", { class: "mt" }, agentMark(s.harness), h("span", {}, meta)),
     h("span", { class: "ac" },
@@ -901,9 +1341,9 @@ function renderSearch(q) {
   const words = (key) => (textFor === q ? textHits.get(key) : undefined);
   // Each folder with terminals or sessions of its own, named by the folders it sits in (Worktop/培训/靶场): a match on
   // a folder's name keeps every folder under it as well.
-  for (const { folder: g, name: label } of everyFolder(folderTree())) {
+  for (const { folder: g, name: named } of everyFolder(folderTree())) {
     if (!g.own) continue;
-    const nameHit = label.toLowerCase().includes(q) || tilde(g.cwd).toLowerCase().includes(q);
+    const nameHit = named.toLowerCase().includes(q) || tilde(g.cwd).toLowerCase().includes(q);
     const rows = [
       ...g.terminals.map((t) => ({ t, title: t.name.toLowerCase().includes(q), said: t.agentSessionId ? words(`${t.harness}:${t.agentSessionId}`) : undefined })),
       ...g.sessions.map((s) => ({ s, title: (s.title || "").toLowerCase().includes(q), said: words(`${s.harness}:${s.id}`) })),
@@ -911,8 +1351,8 @@ function renderSearch(q) {
     if (!nameHit && !rows.length) continue;
     if (nameHit) folderHits++;
     out.push(h("div", { class: "dir", title: tilde(g.cwd) },
-      h("span", { class: "chev" }, "▾"),
-      h("span", { class: "name" }, ...marked(label, q), label.endsWith("/") ? "" : "/", gitMark(gits[g.cwd])),
+      chevron(false),
+      h("span", { class: "name" }, ...marked(classic() ? named.replace(/\/$/, "") : named, q), classic() || named.endsWith("/") ? "" : "/", gitMark(gits[g.cwd])),
       counts(g.terminals, g.sessions)));
     rows.forEach((r, i) => {
       const tr = i === rows.length - 1 ? "└─" : "├─";
@@ -923,7 +1363,7 @@ function renderSearch(q) {
       if (r.said && !r.title) {
         out.push(h("div", { class: "row hit", onclick: () => (r.t ? select(r.t.id) : RESUMABLE.has(r.s.harness) && resume(r.s)) },
           h("span", { class: "ix" }),
-          h("span", { class: "tr" }, `${tr === "└─" ? "\u00a0\u00a0" : "│\u00a0"}└─`),
+          twig(`${tr === "└─" ? "\u00a0\u00a0" : "│\u00a0"}└─`, classic() ? 1 : 0),
           h("span", { class: "st" }),
           h("span", { class: "nm" }, ...marked(near(r.said, q), q))));
       }
@@ -932,7 +1372,7 @@ function renderSearch(q) {
   if (!out.length) return [h("div", { class: "none" }, `没有找到与“${query.trim()}”相关的文件夹或会话。`)];
   const n = (k, one, many) => (k ? `${k} ${k === 1 ? one : many}` : "");
   const said = [n(folderHits, "folder", "folders"), n(titleHits, "title", "titles"), n(textCount, "in text", "in text")].filter(Boolean).join(" · ");
-  return [h("div", { class: "found" }, said ? `// ${said}` : "//"), ...out];
+  return [h("div", { class: "found" }, label(said ? `// ${said}` : "//")), ...out];
 }
 
 function focusSearch() {
@@ -963,8 +1403,14 @@ function gitMark(g) {
 function counts(ts, ss) {
   const live = ts.filter((t) => t.status !== "exited").length;
   const waiting = ts.some((t) => t.status === "waiting");
+  // The classic look: the running ones as a number in a round badge (amber while one waits), no blinking.
+  if (classic()) return h("span", { class: "count" }, live ? h("b", { class: waiting ? "w" : "" }, String(live)) : null, ss.length ? String(ss.length) : null);
   return h("span", { class: "count" }, live ? h("b", { class: waiting ? "w blink" : "" }, `▪${live}`) : null, ss.length ? String(ss.length) : null);
 }
+/** A folder's fold mark: ▸ / ▾, or a chevron and a folder in the classic look. */
+const chevron = (closed) => (classic()
+  ? raw(icon(closed ? "chevright" : "chevdown", 10) + icon("folder", 15), "chev")
+  : h("span", { class: "chev" }, closed ? "▸" : "▾"));
 
 function renderSidebar() {
   if (renaming) return;
@@ -985,11 +1431,12 @@ function renderSidebar() {
   const renderFolder = (g, depth) => {
     const closed = folded(g.cwd);
     const ts = everyTerminal(g);
-    out.push(h("div", { class: `dir ${g.own ? "" : "parent"} ${closed ? holds(ts) : ""}`, title: tilde(g.cwd), style: `padding-left:calc(10px + ${depth * 2}ch)`, onclick: () => toggle(g.cwd) },
-      h("span", { class: "chev" }, closed ? "▸" : "▾"),
-      h("span", { class: "name" }, slashed(g.label), gitMark(gits[g.cwd])),
+    out.push(h("div", { class: `dir ${g.own ? "" : "parent"} ${closed ? holds(ts) : ""}`, title: tilde(g.cwd),
+      style: classic() ? `padding-left:${6 + depth * 14}px` : `padding-left:calc(10px + ${depth * 2}ch)`, onclick: () => toggle(g.cwd) },
+      chevron(closed),
+      h("span", { class: "name" }, classic() ? g.label.replace(/\/$/, "") : slashed(g.label), gitMark(gits[g.cwd])),
       counts(ts, everySession(g)),
-      h("button", { class: "add", title: "New Terminal Here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, "+")));
+      h("button", { class: "add", title: "New Terminal Here", onclick: (e) => { e.stopPropagation(); showCreate(g.cwd); } }, classic() ? raw(icon("plus", 12)) : "+")));
     if (closed) return;
     const all = expanded.has(g.cwd);
     const list = all ? g.sessions : g.sessions.slice(0, SESSIONS_SHOWN);
@@ -1007,8 +1454,8 @@ function renderSidebar() {
     // list read as a folder still to open).
     if (more) {
       out.push(h("div", { class: "row more", onclick: () => { if (all) expanded.delete(g.cwd); else expanded.add(g.cwd); renderSidebar(); } },
-        h("span", { class: "ix" }), h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr()), h("span", { class: "st" }),
-        h("span", { class: "nm" }, all ? "▴ Less" : `▸ ${hidden} More`)));
+        h("span", { class: "ix" }), twig(tr(), depth), h("span", { class: "st" }, classic() ? raw(icon(all ? "chevup" : "chevdown", 10)) : null),
+        h("span", { class: "nm" }, classic() ? (all ? "Less" : `${hidden} More`) : all ? "▴ Less" : `▸ ${hidden} More`)));
     }
     for (const c of g.children) renderFolder(c, depth + 1);
   };
@@ -1028,8 +1475,11 @@ function markState() {
 function renderMark() {
   const [state, tag] = markState();
   // In the list's band, and in the top band while the list is closed.
-  $("mark").innerHTML = mark({ px: 2, state, t: markFrame, depth: true });
-  $("markTag").textContent = tag;
+  // The classic look: the app's mark as a line drawing, a spinner or a dot beside it for what the terminals do.
+  $("mark").innerHTML = classic()
+    ? (state === "busy" ? spinner(12) : state === "waiting" ? dot("waiting") : "") + icon("dispatch", 18)
+    : shadedMark({ state, t: markFrame, depth: true });
+  $("markTag").textContent = W(tag);
   tellWindow("mark", { state, tag });
   document.body.classList.toggle("any-waiting", state === "waiting");
 }
@@ -1050,7 +1500,7 @@ function renderHead() {
   const git = g ? [g.branch, g.changed ? `±${g.changed}` : "", g.ahead ? `↑${g.ahead}` : "", g.behind ? `↓${g.behind}` : ""].filter(Boolean).join(" ") : "";
   $("bandName").replaceChildren(create ? "New Terminal" : where, git ? h("i", { class: "git" }, git) : "");
   $("bandName").title = create ? "" : `${t.name} · ${tilde(t.workdir || t.cwd)}`;
-  const word = create ? "" : STATUS_WORDS[t.status] ?? t.status;
+  const word = create ? "" : W(STATUS_WORDS[t.status] ?? t.status);
   $("bandStatus").className = `band-status ${create ? "" : t.status}`;
   $("bandStatus").textContent = word;
   document.title = create ? "New Terminal" : `${where} — ${t.name}`;
@@ -1058,8 +1508,19 @@ function renderHead() {
   // can hand the wheel over it to the page.
   tellWindow("head", { name: where, git, path: create ? "" : tilde(t.workdir || t.cwd), terminal: create ? "" : t.name, status: create ? null : t.status });
   tellScreen();
+  tellContext();
+}
+/** The Mac window's status bar: the terminal on screen's agent, model, mode and grid, and where it is in use when not
+ *  here (the placeholder's place); nothing while one is being made or none is shown. */
+function tellContext() {
+  if (!STATUS_BAR) return;
+  const t = current;
+  if (!t || creating) return tellWindow("context", {});
+  tellWindow("context", { harness: t.harness, model: t.model ?? "", mode: t.mode ?? "", cols: t.cols ?? 0, rows: t.rows ?? 0,
+    away: (PANES ? paneAways.get(focusPane) : $("away").dataset.place) ?? "", running: t.status !== "exited" });
 }
 function tellScreen() {
+  if (PANES) return tellScreens();
   const r = $("screen").getBoundingClientRect();
   const area = [r.x, r.y, r.width, r.height].map(Math.round);
   const cell = $("screen").querySelector(".xterm-rows > div")?.getBoundingClientRect().height || 16;
@@ -1071,12 +1532,13 @@ function tellScreen() {
 function tellOverlays() {
   if (!NATIVE) return;
   const shown = (el) => el && !el.hidden && el.getClientRects().length > 0;
-  const els = [$("away"), ...document.querySelectorAll("#toasts .toast"), $("composer"), $("loading"), $("sheet")].filter(shown);
+  const els = [$("away"), ...document.querySelectorAll("#panes .away"), ...document.querySelectorAll("#toasts .toast"), $("composer"), $("loading"), $("sheet")].filter(shown);
   tellWindow("overlays", { rects: els.map((el) => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(Math.round); }) });
 }
 
 function render() {
   renderSidebar();
+  renderPanes();
   renderHead();
   renderSeal();
   renderMark();
@@ -1097,7 +1559,9 @@ function showCreate(folder = null) {
   const first = $("create").hidden;
   creating = true;
   $("create").hidden = false;
-  if (first) { stopReveal(); stopReveal = revealWordmark($("wordmark"), "AGENTSWITCH", { px: 6 }); }
+  // The wordmark resolves out of noise the first time; the classic look has the app's mark and its name, still.
+  if (classic()) { stopReveal(); $("wordmark").innerHTML = `${icon("dispatch", 30)}<span>AgentSwitch</span>`; }
+  else if (first || !$("wordmark").querySelector(".px, .noise")) { stopReveal(); stopReveal = revealWordmark($("wordmark"), "AGENTSWITCH", { px: 6 }); }
   $("toasts").replaceChildren();
   document.body.classList.remove("list-open");
   renderSideBtn();
@@ -1106,7 +1570,7 @@ function showCreate(folder = null) {
     const installed = agents.includes(a.id);
     return h("button", { class: `agent ${pickedAgent === a.id ? "on" : ""}`, "data-agent": a.id, disabled: !installed,
       onclick: () => { if (pickedAgent !== a.id) flashAgent = a.id; pickedAgent = a.id; showCreate($("cwd").value); } },
-      raw(sprite(AGENT_PX[a.id], { px: 4 })), h("span", {}, a.name), installed ? null : h("small", {}, "Not Installed"));
+      raw(classic() ? icon(AGENT_ICON[a.id], 22) : shaded(agentPicture(a.id), { cell: 2.5, shadow: true })), h("span", {}, a.name), installed ? null : h("small", {}, "Not Installed"));
   }));
   if (flashAgent) { glitch($("agents").querySelector(`[data-agent="${flashAgent}"]`)); flashAgent = null; }
   const list = models[pickedAgent] ?? [];
@@ -1120,11 +1584,11 @@ function showCreate(folder = null) {
   $("model").disabled = list.length === 0;
   // one of three: angle-bracket marks (< > / <x>), not checkboxes ([ ] / [x] are for picking several)
   $("modes").replaceChildren(...MODES.map((m) => h("button", { class: pickedMode === m.id ? "on" : "", onclick: () => { pickedMode = m.id; remember("terminal.mode", m.id); showCreate($("cwd").value); } },
-    `${pickedMode === m.id ? "<x>" : "< >"} ${m.name}`)));
+    classic() ? m.name : `${pickedMode === m.id ? "<x>" : "< >"} ${m.name}`)));
   if (folder) $("cwd").value = tilde(folder);
   const folders = [...new Set([...terminals.map((t) => t.cwd), ...sessions.map((s) => s.cwd)].map(tilde))].slice(0, 30);
   $("folders").replaceChildren(...folders.map((f) => h("option", { value: f })));
-  $("createCancel").hidden = !current;
+  $("createCancel").hidden = !canLeaveCreate();
   $("createError").textContent = "";
   render();
   $("createStart").focus();
@@ -1217,7 +1681,8 @@ async function resume(s) {
     opening = null;
     hideLoading();
     if (!err.cancelled) notify(`无法继续「${name}」：${err.message}`);
-    if (terminalOrder[0]) select(terminalOrder[0]); else showCreate();
+    if (PANES && (paneOf(layout, focusPane)?.term || panesOf(layout).length > 1)) focusOn(focusPane, true);
+    else if (terminalOrder[0]) select(terminalOrder[0]); else showCreate();
   }
 }
 
@@ -1306,6 +1771,11 @@ function shortcut(e) {
   if (key === "f" && !e.shiftKey) return focusSearch;
   if (key === "w" && !e.shiftKey && current && !creating) return () => closeTerminal(current);
   if (key === "v" && e.shiftKey) return () => openComposer();
+  // The panes, as iTerm2 and Warp have them: ⌘D beside, ⌘⇧D below, ⌘⌥ arrows to the next pane, ⌘⇧↩ the pane alone.
+  if (PANES && key === "d" && !e.altKey) return () => splitFocused(e.shiftKey ? "bottom" : "right");
+  if (PANES && e.key === "Enter" && e.shiftKey) return toggleZoom;
+  const arrow = PANES && e.altKey && !e.shiftKey ? { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key] : null;
+  if (arrow) return () => focusNeighbor(arrow);
   if (e.key === "Enter" && asking) return question ? () => first.answer() : () => decideFirst("allow");
   if (e.key === "Backspace" && asking && !question) return () => decideFirst("deny");
   const n = /^[1-9]$/.test(e.key) ? terminalOrder[Number(e.key) - 1] : null;
@@ -1330,21 +1800,49 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (creating && e.key === "Enter" && !e.isComposing && e.target.tagName !== "BUTTON") { e.preventDefault(); start(); return; }
-  if (creating && e.key === "Escape" && current) { select(current.id); return; }
+  if (creating && e.key === "Escape" && canLeaveCreate()) { cancelCreate(); return; }
   const run = shortcut(e);
   if (run) { e.preventDefault(); run(); }
 });
 
 // ---------- wiring ----------
-$("sealLock").innerHTML = sprite(LOCK, { px: 2 });
-$("composerLock").innerHTML = sprite(LOCK, { px: 2 });
+/** What the page's own markup says once — the locks, the labels, the buttons' words — as the look in force has it. */
+function drawLook() {
+  document.documentElement.classList.toggle("classic", classic());
+  applyChrome(style);
+  drawBandButtons();
+  $("sealLock").innerHTML = picture("lockSmall", "lock", 14);
+  $("composerLock").innerHTML = picture("lockSmall", "lock", 14);
+  for (const el of document.querySelectorAll("[data-label]")) el.textContent = label(`// ${el.dataset.label}`);
+  for (const el of document.querySelectorAll(".folder .prompt")) el.innerHTML = classic() ? icon("folder", 15) : "❯";
+  $("awayGo").replaceChildren(...buttonWords("Take Over"));
+  $("createStart").replaceChildren(...buttonWords("Start", "↩"));
+  $("composerSend").replaceChildren(...buttonWords("Send", "↩"));
+  $("find").closest(".find").querySelector(".slash").innerHTML = classic() ? icon("search", 14) : "/";
+  const spin = $("loading").firstElementChild;
+  spin.className = classic() ? "" : "spin";
+  if (classic()) spin.innerHTML = spinner(14); else spin.textContent = SPIN[0];
+}
+drawLook();
+/** The look changed (the Mac window's setting): everything is drawn again in it. The cards over the screen come back
+ *  from the requests still waiting (a question's picks start over). */
+function setLook(next, accent) {
+  if (accent !== undefined) window.agentswitchAccent = accent;
+  if (lookOf(next) === look && accent === undefined) return;
+  look = lookOf(next);
+  drawLook();
+  $("toasts").replaceChildren();
+  for (const el of paneEls.values()) { el.querySelector(".pane-empty")?.remove(); el.querySelector(".away")?.remove(); }
+  if (creating) showCreate($("cwd").value); else render();
+  if (current && !creating) for (const p of current.permissions) addToast(current.id, p);
+}
 $("newBtn").addEventListener("click", () => showCreate());
 $("sealBar").addEventListener("click", () => ($("composer").hidden ? openComposer() : closeComposer()));
 $("sideBtn").addEventListener("click", toggleList);
 $("find").addEventListener("input", () => searchFor($("find").value));
 $("createStart").addEventListener("click", start);
 $("model").addEventListener("change", () => { pickedModels[pickedAgent] = $("model").value; remember("terminal.models", JSON.stringify(pickedModels)); });
-$("createCancel").addEventListener("click", () => current && select(current.id));
+$("createCancel").addEventListener("click", cancelCreate);
 document.addEventListener("mousedown", (e) => { if (!$("menu").hidden && !$("menu").contains(e.target)) $("menu").hidden = true; });
 window.addEventListener("blur", () => { $("menu").hidden = true; });
 $("composerSend").addEventListener("click", sendComposer);
@@ -1380,17 +1878,35 @@ if (native) {
       $("createStart").focus();
     },
     // ⌘W, ⌘T, ⌘B, ⌘1–9, ⌘⇧V, ⌘↩ / ⌘⌫ on a request, as the window hands them over (a menu would take them first).
-    shortcut: (key, shift = false) => { const run = shortcut({ metaKey: true, shiftKey: shift, key }); run?.(); return !!run; },
-    // The grid the native screen fits at its size.
-    grid: (cols, rows) => { nativeGrid = { cols, rows }; },
+    shortcut: (key, shift = false, alt = false) => { const run = shortcut({ metaKey: true, shiftKey: shift, altKey: alt, key }); run?.(); return !!run; },
+    // The grid a native screen fits at its size (a pane's: the one in focus is where a new terminal starts).
+    grid: (cols, rows, pane) => {
+      if (!PANES || pane === undefined) { nativeGrid = { cols, rows }; return; }
+      paneGrids.set(pane, { cols, rows });
+      if (pane === focusPane) nativeGrid = { cols, rows };
+      if (sizing) renderPanes();
+    },
+    // The user clicked into a pane's screen: it takes the focus.
+    focusPane: (pane) => focusOn(pane),
+    // The bar's split buttons (⌘D, ⌘⇧D).
+    split: (side) => splitFocused(side === "down" ? "bottom" : "right"),
     // ⌘A: the terminal's own selection when it has the keyboard, else the field in focus.
     selectAll: () => (document.activeElement === term.textarea ? term.selectAll() : document.execCommand("selectAll")),
     // The window became the key window, or stopped being it (the screen in use sets the size).
     active: (on) => { nativeActive = on; },
     // Where the terminal is in use when not here ("mac", "iphone", "web"), or null: the placeholder over the screen.
-    away: (place) => showAway(place),
+    away: (place, pane) => showAway(place, pane),
+    // The window's look, and the system's accent with it (docs/ui-v0.md §8).
+    look: (next, accent) => setLook(next, accent),
     // The toolbar's buttons.
     toggleList: () => toggleList(),
+    // The status bar's lock: the sealed reply's box opens under the terminal, or closes (as the bar under it did);
+    // false while no running terminal is on screen.
+    seal: () => {
+      if ($("sealBar").hidden) return false;
+      if ($("composer").hidden) openComposer(); else closeComposer();
+      return true;
+    },
     newTerminal: () => showCreate(),
     // The wheel over the screen, as notches (up positive): the window takes it, WebKit gives the page none there.
     wheel: (n) => wheelNotches(n),
@@ -1398,6 +1914,9 @@ if (native) {
     show: async (id) => { await refresh(); if (terminals.some((t) => t.id === id)) select(id); },
   };
 }
+
+// The window's look changed while this page was starting (it takes `look()` only from here on): drawn again in it.
+if (window.agentswitchLook !== undefined && lookOf(window.agentswitchLook) !== look) setLook(window.agentswitchLook, window.agentswitchAccent);
 
 // The busy spinner and the mark move in steps; with Reduce Motion they hold still, and nothing moves while the page is
 // out of sight: another page of the Mac window, a closed or hidden window, a background tab (2026-10-03, user: 是不是
@@ -1430,6 +1949,20 @@ async function refresh() {
   models = r.models ?? models;
   modelDefaults = r.defaults ?? modelDefaults;
   if (current) current = terminals.find((t) => t.id === current.id) ?? null;
+  if (PANES) {
+    // A terminal closed while the page is open takes its pane with it; one gone before the page came (the service
+    // restarted) leaves its pane, with the session to go on with. The panes note their sessions as they learn them.
+    const settled = settle(layout, terminals, { closing: settledOnce });
+    if (settled !== layout) {
+      layout = settled;
+      if (!paneOf(layout, focusPane)) focusPane = panesOf(layout)[0].id;
+      if (panesOf(layout).length < 2) zoomed = false;
+      keepLayout();
+    }
+    // The pane in focus shows another terminal now (its own went, the focus moved): follow that one.
+    const want = paneOf(layout, focusPane)?.term;
+    if (settledOnce && want && current?.id !== want && !creating && !opening && terminals.some((t) => t.id === want)) { select(want); return; }
+  }
   render();
   for (const t of terminals) {
     const was = before.get(t.id);
@@ -1461,11 +1994,21 @@ if (!MODES.some((m) => m.id === pickedMode)) {
   pickedMode = MODE_FROM_POLICY[policy?.policy?.mode] ?? "manual";
 }
 $("cwd").value = recall("terminal.cwd") || (workdir?.path ? tilde(workdir.path) : "~");
+if (PANES) {
+  // The panes as they were left (terminal.panes), read before the first list settles them.
+  const kept = (() => { try { return JSON.parse(recall("terminal.panes") || "null"); } catch { return null; } })();
+  const root = restoreLayout(kept?.root);
+  if (root) { layout = root; focusPane = paneOf(root, kept.focus) ? kept.focus : panesOf(root)[0].id; }
+  new ResizeObserver(() => { renderPanes(); tellScreens(); }).observe($("stage"));
+}
 await refresh();
+settledOnce = true;
 await refreshSessions();
 void refreshGit();
 const wanted = new URLSearchParams(location.search).get("id") || recall("terminal.last");
 if (wanted && terminals.some((t) => t.id === wanted)) select(wanted);
+else if (PANES && paneOf(layout, focusPane)?.term) select(paneOf(layout, focusPane).term);
+else if (PANES && panesOf(layout).length > 1) focusOn(focusPane, true);   // an empty pane among others: it says what to do
 else if (terminalOrder[0]) select(terminalOrder[0]);
 else showCreate();
 // Out of sight the list is not asked for; it is read again as the page comes back.

@@ -1,6 +1,7 @@
 /** The browser host on a fake Chrome (docs/browser-v0.md §2): Chrome started on first use and once, tabs by owner,
  *  popups, holds that end on hand-back or after two minutes, the holder's size, input mapped from the frame, the
- *  request guard, a dead Chrome and a Chrome with no tabs left, shut-down. */
+ *  request guard, a dead Chrome and a Chrome with no tabs left, shut-down. What else waits for a redraw of a tab's
+ *  view, and the view Chrome changes itself, are in browserHostView.test.ts. */
 
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,9 +10,9 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HOLD_IDLE_MS, BrowserHost, launchFailure, ownPortPatterns, type BrowserHostOptions } from "../src/browser/host.js";
 import { AGENT_FILE_REFUSAL, OWN_PORT_REFUSAL, type FileRules } from "../src/browser/rules.js";
-import { BrowserError, DEFAULT_VIEWPORT, YOU, type BrowserEvent, type TabOwner } from "../src/browser/types.js";
+import { BrowserError, DEFAULT_VIEWPORT, YOU, type BrowserEvent, type FrameEvent, type TabOwner } from "../src/browser/types.js";
 import { defaultProtected } from "../src/executors/protected.js";
-import { FakeDriver, FakePage } from "./fakeBrowser.js";
+import { FakeDriver, FakePage, slowAnswer } from "./fakeBrowser.js";
 
 const CODEX: TabOwner = { kind: "terminal", id: "t1", label: "codex · AgentSwitch" };
 const TASK: TabOwner = { kind: "task", id: "k1", label: "登录财务平台下载对账单" };
@@ -309,6 +310,354 @@ describe("holding a tab", () => {
     host.release(tab.id, "mac-1");
     await vi.waitFor(() => expect(driver.page(0).viewports.at(-1)).toEqual(DEFAULT_VIEWPORT));
     expect(events.filter((e) => e.type === "viewport").map((e) => (e as { viewport: { by: string | null } }).viewport.by)).toEqual(["phone-1", null, "mac-1", null]);
+  });
+
+  it("the size the holder set already keeps the hold and changes nothing else", async () => {
+    vi.useFakeTimers();
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const mac = { width: 1013, height: 700, scale: 2, mobile: false };
+    host.take(tab.id, "mac-1");
+    await host.setViewport(tab.id, "mac-1", mac);
+    const events: BrowserEvent[] = [];
+    host.subscribe(tab.id, { quality: 50, fps: 10 }, (e) => events.push(e));
+    const set = driver.page(0).viewports.length;
+    await vi.advanceTimersByTimeAsync(HOLD_IDLE_MS - 1_000);
+    expect((await host.setViewport(tab.id, "mac-1", { ...mac })).viewport).toEqual({ ...mac, by: "mac-1" });
+    expect(driver.page(0).viewports).toHaveLength(set);
+    await vi.advanceTimersByTimeAsync(HOLD_IDLE_MS - 1_000);
+    expect(host.get(tab.id)!.heldBy).toBe("mac-1");
+    expect(events.filter((e) => e.type === "viewport")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(host.get(tab.id)!.heldBy).toBeNull();
+  });
+});
+
+describe("device pixels", () => {
+  const settled = () => new Promise((r) => setTimeout(r, 20));
+
+  it("a stream that asks for 2 draws the tab's view at 2, the page's size unchanged; with the last such stream gone, at the CSS size", async () => {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    expect(p.renders).toEqual([1]);
+    const mac = host.subscribe(tab.id, { quality: 80, fps: 15, scale: 2, maxWidth: 3024, maxHeight: 1964 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(2));
+    expect(p.viewports.at(-1)).toEqual(DEFAULT_VIEWPORT);
+    // The view drawn before the screencast's first start: no frame of the CSS size first.
+    expect(p.stops).toBe(0);
+    expect(p.screencasts).toHaveLength(1);
+    const asks = p.renders.length;
+    const old = host.subscribe(tab.id, { quality: 50, fps: 5 }, () => undefined);
+    await settled();
+    expect(p.renders).toHaveLength(asks);
+    mac();
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(1));
+    old();
+  });
+
+  it("follows the size: a phone's own at 3, a desktop page it shows smaller than its screen at 1", async () => {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    host.subscribe(tab.id, { quality: 70, fps: 15, scale: 3, maxWidth: 1170, maxHeight: 2532 }, () => undefined);
+    await settled();
+    expect(p.renders.at(-1)).toBe(1);
+    host.take(tab.id, "phone-1");
+    await host.setViewport(tab.id, "phone-1", { width: 390, height: 844, scale: 3, mobile: true });
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(3));
+    host.release(tab.id, "phone-1");
+    await vi.waitFor(() => expect(p.viewports.at(-1)).toEqual(DEFAULT_VIEWPORT));
+    expect(p.renders.at(-1)).toBe(1);
+  });
+
+  it("frames of a view at 2 are the page at 2; input goes in the view's pixels", async () => {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    const frames: BrowserEvent[] = [];
+    host.subscribe(tab.id, { quality: 80, fps: 30, scale: 2 }, (e) => { if (e.type === "frame") frames.push(e); });
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(2));
+    await settled();
+    p.frame(2560, 1600, 2560, 1600);
+    expect(frames.at(-1)).toMatchObject({ width: 2560, height: 1600, scale: 2, viewport: { width: 1280, height: 800 } });
+    await host.input(tab.id, "mac-1", [
+      { type: "mouse", action: "click", x: 200, y: 120, button: "left", clickCount: 1, modifiers: [] },
+      { type: "wheel", x: 200, y: 120, deltaX: 0, deltaY: 80, modifiers: [] },
+    ]);
+    expect(p.inputs.at(-2)!.params).toMatchObject({ type: "mouseReleased", x: 200, y: 120 });
+    expect(p.inputs.at(-1)!.params).toMatchObject({ type: "mouseWheel", x: 200, y: 120, deltaY: 40 });
+  });
+
+  it("an agent's tabs are at the CSS size while its call may point at the page, and a moment after; your own tabs never", async () => {
+    const { host, driver } = make({ agentQuietMs: 60 });
+    const tab = await host.open(CODEX, "https://a.example/");
+    const mine = await host.open(YOU, "https://b.example/");
+    const p = driver.page(0);
+    const q = driver.page(1);
+    host.subscribe(tab.id, { quality: 80, fps: 15, scale: 2 }, () => undefined);
+    host.subscribe(mine.id, { quality: 80, fps: 15, scale: 2 }, () => undefined);
+    await vi.waitFor(() => { expect(p.renders.at(-1)).toBe(2); expect(q.renders.at(-1)).toBe(2); });
+    await host.agentActing(CODEX);
+    expect(p.renders.at(-1)).toBe(1);
+    await host.agentActing(CODEX);   // a second call (another bridge of the session)
+    // A screen coming meanwhile does not draw it at a scale.
+    host.subscribe(tab.id, { quality: 80, fps: 15, scale: 2 }, () => undefined);
+    host.agentDone(CODEX);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(p.renders.at(-1)).toBe(1);
+    host.agentDone(CODEX);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(p.renders.at(-1)).toBe(1);   // the quiet moment
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(2));
+    expect(q.renders.every((r, i) => i === 0 || r === 2)).toBe(true);
+    await host.agentActing(YOU);
+    expect(q.renders.at(-1)).toBe(2);
+    host.agentDone(YOU);
+  });
+
+  it("a Chrome that cannot draw a view at a scale gets CSS-size frames and is not asked again", async () => {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    p.scaledViews = false;
+    host.subscribe(tab.id, { quality: 80, fps: 15, scale: 2 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(2));
+    await settled();
+    const asks = p.renders.length;
+    host.subscribe(tab.id, { quality: 80, fps: 15, scale: 3 }, () => undefined)();
+    await settled();
+    expect(p.renders).toHaveLength(asks);
+    p.frame(1280, 800, 1280, 800);
+    await host.input(tab.id, "mac-1", [{ type: "mouse", action: "click", x: 100, y: 60, button: "left", clickCount: 1, modifiers: [] }]);
+    expect(p.inputs.at(-1)!.params).toMatchObject({ x: 100, y: 60 });
+  });
+
+  it("a size Chrome refuses is said in the log; the stream runs on and takes frames as they come", async () => {
+    const lines: string[] = [];
+    const { host, driver } = make({ log: (l) => lines.push(l) });
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    const frames: FrameEvent[] = [];
+    host.subscribe(tab.id, { quality: 80, fps: 30, scale: 2 }, (e) => { if (e.type === "frame") frames.push(e); });
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(2));
+    await settled();
+    p.setViewport = async () => { throw new Error("Protocol error (Emulation.setDeviceMetricsOverride): Invalid parameters\n    at CRSession.send"); };
+    host.take(tab.id, "phone-1");
+    await host.setViewport(tab.id, "phone-1", { width: 390, height: 844, scale: 3, mobile: true });
+    expect(lines).toEqual([`browser: tab ${tab.id} viewport: Protocol error (Emulation.setDeviceMetricsOverride): Invalid parameters`]);
+    // What the view is now, nobody can say: a frame is shown whatever its size, at the scale recorded.
+    p.frame(2560, 1600, 2560, 1600);
+    expect(frames.at(-1)).toMatchObject({ width: 2560, scale: 2, viewport: { width: 1280, height: 800 } });
+    expect(p.screencasts).toHaveLength(2);
+  });
+});
+
+// Page zoom (browser-v0 §1 页面缩放, 2026-10-03): the host knows no zoom. The screen that holds a tab sets a smaller or a
+// larger size and asks its stream for its device pixels times the zoom (up to 8). Here a 3x phone with 402×690 points of
+// browser area: 1206×2070 pixels.
+describe("page zoom, as the holding screen's size and its stream's scale", () => {
+  const settled = () => new Promise((r) => setTimeout(r, 20));
+  const screen = { quality: 70, fps: 30, maxWidth: 1206, maxHeight: 2070 };
+  const click = (x: number, y: number, seq?: number) =>
+    ({ type: "mouse" as const, action: "click" as const, x, y, button: "left" as const, clickCount: 1, modifiers: [], ...(seq !== undefined ? { seq } : {}) });
+
+  it("the view follows the size: at 6 for 201×345 (200%), 1.5 for 804×1380 (50%), the CSS size for 1608×2760 (25%) and after the hand-back", async () => {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    host.take(tab.id, "phone-1");
+    host.subscribe(tab.id, { ...screen, scale: 6 }, () => undefined);
+    const at200 = { width: 201, height: 345, scale: 4, mobile: true };
+    expect((await host.setViewport(tab.id, "phone-1", at200)).viewport).toEqual({ ...at200, by: "phone-1" });
+    expect([p.viewports.at(-1), p.renders.at(-1)]).toEqual([at200, 6]);
+    await host.setViewport(tab.id, "phone-1", { width: 804, height: 1380, scale: 1.5, mobile: true });
+    expect(p.renders.at(-1)).toBe(1.5);
+    const at25 = { width: 1608, height: 2760, scale: 0.75, mobile: true };
+    await host.setViewport(tab.id, "phone-1", at25);
+    expect([p.viewports.at(-1), p.renders.at(-1)]).toEqual([at25, 1]);
+    // The screencast keeps the frame within the screen's pixels.
+    expect(p.screencasts.at(-1)).toEqual({ quality: 70, maxWidth: 1206, maxHeight: 2070 });
+    host.release(tab.id, "phone-1");
+    await vi.waitFor(() => expect(p.viewports.at(-1)).toEqual(DEFAULT_VIEWPORT));
+    expect(p.renders.at(-1)).toBe(1);
+  });
+
+  it("zooming in: the size first, then the stream asked again at the larger scale; frames, taps and drags at each", async () => {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    host.take(tab.id, "phone-1");
+    await host.setViewport(tab.id, "phone-1", { width: 402, height: 690, scale: 3, mobile: true });
+    const frames: FrameEvent[] = [];
+    const before = host.subscribe(tab.id, { ...screen, scale: 3 }, (e) => { if (e.type === "frame") frames.push(e); });
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(3));
+    // 200%: the page is half the size; the stream still asks 3 until the phone asks again.
+    await host.setViewport(tab.id, "phone-1", { width: 201, height: 345, scale: 4, mobile: true });
+    expect(p.renders.at(-1)).toBe(3);
+    // A capture of the 402×690 page that Chrome sends late is not of this view (603×1035) and reaches nobody.
+    p.frame(1206, 2070, 1206, 2070);
+    expect(frames).toEqual([]);
+    p.frame(603, 1035, 603, 1035);
+    expect(frames.at(-1)).toMatchObject({ width: 603, height: 1035, scale: 3, viewport: { width: 201, height: 345 } });
+    const early = frames.at(-1)!.seq;
+    const after = host.subscribe(tab.id, { ...screen, scale: 6 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(6));
+    await settled();
+    before();
+    await settled();
+    expect(p.renders.at(-1)).toBe(6);
+    // A tap aimed at the earlier frame (CSS 100, 140) after the view was redrawn: Chrome takes it in the view as it is now.
+    await host.input(tab.id, "phone-1", [click(300, 420, early)]);
+    expect(p.inputs.at(-1)!.params).toMatchObject({ type: "mouseReleased", x: 600, y: 840 });
+    // And with no frame of the new view yet, a tap that names none.
+    await host.input(tab.id, "phone-1", [click(300, 420)]);
+    expect(p.inputs.at(-1)!.params).toMatchObject({ type: "mouseReleased", x: 600, y: 840 });
+    p.frame(1206, 2070, 1206, 2070);
+    await host.input(tab.id, "phone-1", [click(603, 840), { type: "wheel", x: 603, y: 840, deltaX: 0, deltaY: 600, modifiers: [] }]);
+    expect(p.inputs.at(-2)!.params).toMatchObject({ type: "mouseReleased", x: 603, y: 840 });
+    expect(p.inputs.at(-1)!.params).toMatchObject({ type: "mouseWheel", x: 603, y: 840, deltaY: 100 });
+    after();
+  });
+
+  it("the most: a 2x Mac at 400% asks 8 for a 320×200 page; a point on its frame is a point of the view", async () => {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    host.take(tab.id, "mac-1");
+    await host.setViewport(tab.id, "mac-1", { width: 320, height: 200, scale: 4, mobile: false });
+    const frames: FrameEvent[] = [];
+    host.subscribe(tab.id, { quality: 80, fps: 30, scale: 8, maxWidth: 3024, maxHeight: 1964 }, (e) => { if (e.type === "frame") frames.push(e); });
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(8));
+    await settled();
+    p.frame(2560, 1600, 2560, 1600);
+    expect(frames.at(-1)).toMatchObject({ width: 2560, height: 1600, scale: 8, viewport: { width: 320, height: 200 } });
+    await host.input(tab.id, "mac-1", [click(804, 1120), { type: "wheel", x: 804, y: 1120, deltaX: 0, deltaY: -160, modifiers: [] }]);
+    expect(p.inputs.at(-2)!.params).toMatchObject({ type: "mouseReleased", x: 804, y: 1120 });
+    expect(p.inputs.at(-1)!.params).toMatchObject({ type: "mouseWheel", x: 804, y: 1120, deltaY: -20 });
+  });
+
+  it("a zoomed agent's tab is at the CSS size while the agent points at another of its tabs; a tap aimed at the frame from before still lands", async () => {
+    const { host, driver } = make({ agentQuietMs: 60 });
+    const tab = await host.open(CODEX, "https://a.example/");
+    await host.open(CODEX, "https://b.example/");
+    const p = driver.page(0);
+    host.take(tab.id, "phone-1");
+    await host.setViewport(tab.id, "phone-1", { width: 201, height: 345, scale: 4, mobile: true });
+    const frames: FrameEvent[] = [];
+    host.subscribe(tab.id, { ...screen, scale: 6 }, (e) => { if (e.type === "frame") frames.push(e); });
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(6));
+    await settled();
+    p.frame(1206, 2070, 1206, 2070);
+    const sharp = frames.at(-1)!;
+    expect(sharp).toMatchObject({ width: 1206, scale: 6 });
+    await host.agentActing(CODEX);
+    expect(p.renders.at(-1)).toBe(1);
+    // Frame (603, 840) at 6 is CSS (100.5, 140), which is what Chrome takes now.
+    await host.input(tab.id, "phone-1", [click(603, 840, sharp.seq)]);
+    expect(p.inputs.at(-1)!.params).toMatchObject({ type: "mouseReleased", x: 100.5, y: 140 });
+    p.frame(201, 345, 201, 345);
+    await vi.waitFor(() => expect(frames.at(-1)).toMatchObject({ width: 201, height: 345, scale: 1, viewport: { width: 201, height: 345 } }));
+    host.agentDone(CODEX);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(6));
+  });
+
+  /** A phone holding its page at 200% (201×345), its stream asking 3, the last frame it has at 3. */
+  async function heldAt3(): Promise<{ host: BrowserHost; tab: string; p: FakePage }> {
+    const { host, driver } = make();
+    const tab = await host.open(YOU, "https://a.example/");
+    const p = driver.page(0);
+    host.take(tab.id, "phone-1");
+    await host.setViewport(tab.id, "phone-1", { width: 201, height: 345, scale: 4, mobile: true });
+    host.subscribe(tab.id, { ...screen, scale: 3 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(3));
+    await settled();
+    p.frame(603, 1035, 603, 1035);
+    return { host, tab: tab.id, p };
+  }
+
+  // Review, 2026-10-03, measured with Chrome 154: of 40 taps sent 0 to 7 ms after a stream asking 6 came to a view at 3,
+  // 14 landed at half their coordinates, on another element: Chrome had the new scale, the host's record still the old.
+  it("a tap sent while the view is being redrawn waits for that, and goes in the view Chrome has by then", async () => {
+    const { host, tab, p } = await heldAt3();
+    const answer = slowAnswer(p, 6);
+    host.subscribe(tab, { ...screen, scale: 6 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(6));
+    // CSS (100, 140) on the frame at 3; a key meanwhile is not held up (it points nowhere).
+    const sent = host.input(tab, "phone-1", [click(300, 420)]);
+    await host.input(tab, "phone-1", [{ type: "key", key: "Tab", modifiers: [] }]);
+    await settled();
+    expect(p.inputs.map((c) => c.params.type)).toEqual(["rawKeyDown", "keyUp"]);
+    answer();
+    await sent;
+    expect(p.inputs.slice(2).map((c) => [c.params.type, c.params.x, c.params.y])).toEqual([["mouseMoved", 600, 840], ["mousePressed", 600, 840], ["mouseReleased", 600, 840]]);
+  });
+
+  // The same review: of 40 taps sent 0 to 2 ms before such a stream came, 8 landed elsewhere: the click's three calls
+  // were sent one by one, each after Chrome's answer to the one before, and the redraw began between them.
+  it("a click's calls go to Chrome together: a redraw that begins meanwhile comes after all of them", async () => {
+    const { host, tab, p } = await heldAt3();
+    // What Chrome is asked, in order; it takes a few milliseconds to answer a call of input.
+    const asked: string[] = [];
+    const input = p.input.bind(p);
+    p.input = async (method, params) => { asked.push(String(params.type)); await new Promise((r) => setTimeout(r, 5)); return input(method, params); };
+    const set = p.setViewport.bind(p);
+    p.setViewport = async (v, render) => { asked.push(`view at ${render}`); return set(v, render); };
+    const sent = host.input(tab, "phone-1", [click(300, 420), { type: "wheel", x: 300, y: 420, deltaX: 0, deltaY: 300, modifiers: [] }]);
+    await new Promise((r) => setTimeout(r, 1));
+    host.subscribe(tab, { ...screen, scale: 6 }, () => undefined);
+    await sent;
+    expect(asked).toEqual(["mouseMoved", "mousePressed", "mouseReleased", "view at 6", "mouseWheel"]);
+    // The click in the view at 3, the drag after it in the view at 6: each as Chrome has it when it gets them.
+    expect(p.inputs.map((c) => [c.params.type, c.params.x, c.params.y])).toEqual([["mouseMoved", 300, 420], ["mousePressed", 300, 420], ["mouseReleased", 300, 420], ["mouseWheel", 600, 840]]);
+    expect(p.inputs.at(-1)!.params).toMatchObject({ deltaY: 100 });
+  });
+
+  it("a page that refuses a click's calls is reported once", async () => {
+    const { host, tab, p } = await heldAt3();
+    p.inputError = new Error("Target closed");
+    expect(await refused(host.input(tab, "phone-1", [click(300, 420)]))).toMatchObject({ code: "unavailable", message: "页面未接受输入：Target closed" });
+    expect(p.inputs).toEqual([]);
+  });
+
+  /** A tap of the phone's sent while the view is being redrawn for a stream asking 6; `answer` lets the redraw end. */
+  async function tapWaiting(): Promise<{ host: BrowserHost; tab: string; p: FakePage; sent: Promise<BrowserError>; answer: () => void }> {
+    const { host, tab, p } = await heldAt3();
+    const answer = slowAnswer(p, 6);
+    host.subscribe(tab, { ...screen, scale: 6 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(6));
+    return { host, tab, p, answer, sent: refused(host.input(tab, "phone-1", [click(300, 420)])) };
+  }
+
+  it("a tap that waited for a redraw is not sent once another screen holds the tab, or the tab is gone", async () => {
+    const taken = await tapWaiting();
+    taken.host.take(taken.tab, "mac-1");
+    taken.answer();
+    expect(await taken.sent).toMatchObject({ code: "conflict", message: "此标签已由其他屏幕接手。" });
+    expect(taken.p.inputs).toEqual([]);
+    const gone = await tapWaiting();
+    await gone.host.close(gone.tab);
+    gone.answer();
+    expect((await gone.sent).code).toBe("not_found");
+    expect(gone.p.inputs).toEqual([]);
+  });
+
+  // The same review: a stream asking 6 that came and went within a redraw left the view at 6 (16 of 40 with Chrome 154):
+  // when it left, the view as recorded was still 3, which is what the streams left ask, so nothing was done.
+  it("a stream that asks for more and leaves while the view is redrawn for it does not leave the view at its scale", async () => {
+    const { host, tab, p } = await heldAt3();
+    const answer = slowAnswer(p, 6);
+    const more = host.subscribe(tab, { ...screen, scale: 6 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(6));
+    more();
+    answer();
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(3));
+    // Once more for a stream that stays, and not again after that.
+    host.subscribe(tab, { ...screen, scale: 6 }, () => undefined);
+    await vi.waitFor(() => expect(p.renders.at(-1)).toBe(6));
+    const asks = p.renders.length;
+    await settled();
+    expect(p.renders).toHaveLength(asks);
   });
 });
 

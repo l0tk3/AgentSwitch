@@ -15,6 +15,8 @@
   --green: #9be22d;
   --red: #ff4a3d;
   --px-shadow: #2c2a28;
+  /* The shaded icons' six tones of the ink, highlight to ground (docs/ui-v0.md §9, lib/shaded.js). */
+  --tw: #ffffff; --th: #e9e6df; --tm: #a9a6a0; --td: #6f6c68; --tk: #3b3a37; --ts: #1e1d1b;
   --dither: var(--ink3);
   --mono: ui-monospace, "SF Mono", Menlo, "PingFang SC", monospace;
   --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
@@ -83,7 +85,7 @@ button:focus-visible, select:focus-visible { outline: 1px solid var(--signal); o
    closed; all the terminals' mark at the right. The rest of the bar moves the window. ---------- */
 .top { position: relative; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 14px 0 8px; background: var(--term); }
 /* the bar's edge (2026-10-01, user: 顶栏没有分界线): dotted, as the list's edge it meets */
-.top::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); pointer-events: none; }
+.top::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(var(--ink4), var(--ink4)); pointer-events: none; }
 /* The Mac window has a native toolbar in its place (the traffic lights, the list's button, the title, the mark). */
 .mac-app .top { display: none; }
 .side-btn { flex: none; display: grid; place-items: center; width: 28px; height: 22px; color: var(--ink2); }
@@ -106,7 +108,7 @@ body.side-closed.any-waiting .side-btn { color: var(--amber); animation: blink 1
 /* ---------- sidebar: the same surface, a dotted pane border, faint scanlines ---------- */
 .side { grid-column: 1; grid-row: 2; position: relative; isolation: isolate; display: flex; flex-direction: column; min-height: 0; background: var(--term);
   background-image: repeating-linear-gradient(to bottom, rgba(255, 255, 255, .022) 0 1px, transparent 1px 3px); line-height: 22px; }
-.side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink4) 0 2px, transparent 2px 4px); }
+.side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: linear-gradient(var(--ink4), var(--ink4)); }
 /* its width: drag the dotted edge (a double click puts it back); past the left edge it closes (the button in the top
    bar or ⌘B brings it back) */
 .side-grip { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; z-index: 2; cursor: col-resize; }
@@ -223,6 +225,53 @@ body.side-dragging .screen { pointer-events: none; }
 @keyframes scan { 0% { top: 0; opacity: .85; } 99% { top: 100%; opacity: .85; } 100% { top: 100%; opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .screen.wipe, .scan.run { animation: none; } }
 
+/* ---------- split panes (the Mac window; docs/terminal-v0.md §1 分屏, demo docs/design/implemented/split.html) ---------- */
+/* Each pane: a header (only among several) over the area the window's native screen fills; solid lines between panes,
+   1 px drawn and 7 px to take hold of; the pane in focus has the signal line over its header. */
+.panes { position: absolute; inset: 0; }
+.panes-on .screen, .panes-on #away { display: none; }
+.pane { position: absolute; display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+.pane-head { position: relative; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 4px 0 10px; overflow: hidden; white-space: nowrap;
+  color: var(--ink2); font-size: 12px; background: color-mix(in srgb, var(--ink) 6%, var(--term)); box-shadow: inset 0 -1px 0 var(--ink4); }
+.pane.focus .pane-head { color: var(--ink); box-shadow: inset 0 2px 0 var(--signal), inset 0 -1px 0 var(--ink4); }
+.pane-head .no { flex: none; font-size: 10.5px; line-height: 13px; padding: 0 3px; color: var(--ink3); box-shadow: inset 0 0 0 1px var(--ink3); }
+.pane.focus .pane-head .no { color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+.pane-head .st { flex: none; display: flex; align-items: center; }
+.pane-head .nm { font: 600 12.5px var(--ui); overflow: hidden; text-overflow: ellipsis; min-width: 3ch; }
+.pane-head .at { color: var(--ink3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.pane-head .w { flex: none; color: var(--amber); font-size: 11px; }
+.pane-head .agent-mark { flex: none; color: var(--ink3); display: flex; }
+.pane-head .x { flex: none; display: grid; place-items: center; width: 20px; height: 20px; color: var(--ink3); }
+.pane-head .x:hover { color: var(--ink); background: var(--hover); }
+.pane-head { grid-row: 1; }
+.pane-body { grid-row: 2; position: relative; min-height: 0; }   /* the second row also when the header is hidden (one pane) */
+.pane-screen { position: absolute; inset: 4px 4px 4px 16px; pointer-events: none; }
+.panes.many .pane-screen { inset: 4px 4px 4px 10px; }
+.pane-size { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; pointer-events: none; padding: 4px 10px;
+  font: 600 15px var(--mono); color: var(--ink); background: color-mix(in srgb, var(--term) 78%, transparent); box-shadow: inset 0 0 0 1px var(--ink3); }
+.pane-size:empty { display: none; }
+.pane-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; background: var(--term); }
+.pane-empty .say { max-width: 28em; color: var(--ink2); font: 13px/1.7 var(--ui); }
+.pane-empty .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pane-line { position: absolute; z-index: 2; }
+.pane-line.row { cursor: col-resize; }
+.pane-line.col { cursor: row-resize; }
+.pane-line::after { content: ""; position: absolute; background: var(--ink4); }
+.pane-line.row::after { left: 3px; top: 0; bottom: 0; width: 1px; }
+.pane-line.col::after { top: 3px; left: 0; right: 0; height: 1px; }
+.pane-line:hover::after, .pane-line.drag::after { background: var(--signal); }
+body.pane-sizing-row, body.pane-sizing-row * { cursor: col-resize !important; }
+body.pane-sizing-col, body.pane-sizing-col * { cursor: row-resize !important; }
+/* a row of the tree on its way to a pane: where it lands (the middle, or the half an edge splits off) */
+.pane-drop { position: absolute; z-index: 4; pointer-events: none; display: grid; place-items: center; border: 1px dashed var(--cyan); background: color-mix(in srgb, var(--cyan) 9%, transparent); }
+.pane-drop span { font-size: 12px; color: #000; background: var(--cyan); padding: 2px 8px; }
+.pane-ghost { position: fixed; z-index: 30; pointer-events: none; display: flex; align-items: center; gap: 8px; padding: 3px 10px; white-space: nowrap; font-size: 12px;
+  background: var(--term); color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink3), 3px 3px 0 var(--ink4); }
+body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; }
+/* the pane a terminal is shown in, on its row of the tree */
+.row .inpane { font-size: 10.5px; line-height: 13px; padding: 0 3px; color: var(--ink2); box-shadow: inset 0 0 0 1px var(--ink3); }
+.row .inpane.f { color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+
 /* permission requests: a box over the screen's top right; amber head; the answer keys spelled out */
 /* In use on another screen (terminal-v0 §1 "不在用的一端显示占位"): what is under it behind a 50% dither (not
    available here), a box saying where; permission requests still float over it. */
@@ -257,7 +306,7 @@ body.side-dragging .screen { pointer-events: none; }
 .toast.ask .opt kbd { color: var(--ink3); opacity: 1; font-size: 11.5px; }
 .toast.ask .opt .lb { overflow-wrap: anywhere; }
 .toast.ask .opt small { grid-column: 3; color: var(--ink3); font-size: 11.5px; line-height: 1.45; }
-.toast.ask .opt input { min-width: 0; background: none; border: 0; border-bottom: 1px dotted var(--ink3); outline: 0; padding: 0; caret-color: var(--signal); user-select: text; -webkit-user-select: text; }
+.toast.ask .opt input { min-width: 0; background: none; border: 0; border-bottom: 1px solid var(--ink3); outline: 0; padding: 0; caret-color: var(--signal); user-select: text; -webkit-user-select: text; }
 .toast.ask .opt input::placeholder { color: var(--ink3); }
 .toast.ask .opt input:focus { border-bottom-color: var(--ink2); }
 
@@ -280,7 +329,7 @@ body.side-dragging .screen { pointer-events: none; }
 .agent { border: 1px solid var(--ink4); padding: 10px 10px 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; text-align: left; }
 .agent:hover { border-color: var(--ink2); }
 .agent.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.agent.on .px { color: var(--signal); }
+.agent .shaded { opacity: .75; } .agent.on .shaded { opacity: 1; }
 .agent:disabled { color: var(--ink3); }
 .agent:disabled > * { -webkit-mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; mask: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
 .agent small { font-size: 11px; color: var(--ink3); }
@@ -305,7 +354,7 @@ body.side-dragging .screen { pointer-events: none; }
 
 /* ---------- sealed reply: a line under each terminal; it opens into the composer in its place ---------- */
 .sealbar { position: relative; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 14px 0 18px; background: var(--term); color: var(--ink3); text-align: left; }
-.sealbar::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); }
+.sealbar::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: linear-gradient(var(--ink4), var(--ink4)); }
 .sealbar .lock { color: var(--signal); display: flex; }
 .sealbar .word { color: var(--ink2); }
 .sealbar kbd { opacity: 1; background: var(--ink4); color: var(--ink2); padding: 0 4px; font-size: 11.5px; }
@@ -313,6 +362,9 @@ body.side-dragging .screen { pointer-events: none; }
 .sealbar:hover kbd { background: var(--signal); color: #000; }
 /* the composer: a box over the terminal's foot, just above its bar; the terminal keeps its size */
 .composer-layer { position: absolute; left: 20px; right: 26px; bottom: 44px; z-index: 3; isolation: isolate; }
+/* The Mac window seals from its status bar's lock (docs/dispatch-v0.md §1, 2026-10-03): no bar under the terminal. */
+.status-bar .sealbar { display: none; }
+.status-bar .composer-layer { bottom: 14px; }
 .composer-head { display: flex; align-items: center; gap: 8px; height: 22px; padding: 0 8px; background: var(--signal); color: #000; font-size: 12px; }
 .composer-head .lock { display: flex; }
 .composer-head .to { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
@@ -350,7 +402,7 @@ body.side-dragging .screen { pointer-events: none; }
   .side { position: fixed; inset: var(--band) auto 0 0; width: min(310px, 86vw); z-index: 5; transform: translateX(-100%); transition: transform .2s steps(6); }
   body.list-open .side { transform: none; }
   .keys { position: relative; display: flex; gap: 6px; overflow-x: auto; padding: 8px 10px; }
-  .keys::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); }
+  .keys::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: linear-gradient(var(--ink4), var(--ink4)); }
   .keys button { flex: none; min-width: 40px; height: 30px; background: #2e2e30; color: var(--ink); box-shadow: 0 2px 0 #0f0f10, inset 0 1px 0 #3d3d40; }
   .sealbar { display: none; }
   .agents { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -360,4 +412,224 @@ body.side-dragging .screen { pointer-events: none; }
   .composer-foot .hint { display: none; }
   #composerSend { margin-left: auto; }
   kbd { display: none; }
+}
+
+/* ==========================================================================================================
+   The classic look (docs/ui-v0.md §8, concept docs/design/concepts/classic.html): the same page drawn as a
+   standard app's — the system font, round corners, line icons, standard buttons, dots for status, the system's
+   accent in place of the signal colour, soft shadows, no bursts. Only how things are drawn: the layout, the
+   keys and the terminal's own screen stay. `html.classic` is set by terminal.js (the Mac window's setting, a
+   browser's own); the chrome is dark whatever the screen's colour (固定深色).
+   ========================================================================================================== */
+.classic {
+  --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --ink4: rgba(255, 255, 255, .11);
+  --hover: rgba(255, 255, 255, .06); --sel: rgba(255, 255, 255, .11);
+  --signal: var(--accent, #0a84ff); --cyan: var(--signal);
+  --amber: #ff9f0a; --amber-ink: #ffb340; --green: #30d158; --red: #ff453a;
+  /* One surface with the screen (2026-10-04; user: classic不够黑，不够一体化，和终端有些割裂; fixed greys before): the list
+     and the bands are the terminal's own ground, what floats or is raised a little lighter than it. */
+  --side: var(--term); --panel: color-mix(in srgb, #fff 8%, var(--term)); --raise: color-mix(in srgb, #fff 14%, var(--term)); --field: rgba(255, 255, 255, .08);
+  --shadow: 0 0 0 .5px rgba(255, 255, 255, .14), 0 12px 34px rgba(0, 0, 0, .5);
+}
+.classic body { font: 13px/1.5 var(--ui); }
+.classic .ci, .classic .cspin { display: block; flex: none; }
+.classic .cspin { color: var(--ink2); animation: cspin .8s steps(8) infinite; }
+@keyframes cspin { to { transform: rotate(360deg); } }
+.classic .dot { display: block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--green); }
+.classic .dot.waiting { background: var(--amber); animation: breathe 1.9s ease-out infinite; }
+.classic .dot.exited { background: none; box-shadow: inset 0 0 0 1.5px var(--ink3); }
+.classic .dot.failed { background: var(--red); }
+@keyframes breathe { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .classic .cspin, .classic .dot.waiting { animation: none; } }
+/* no bursts, no drawn-in refresh */
+.classic .glitch, .classic .flicker, .classic .blink, .classic .screen.wipe, .classic .scan.run { animation: none; }
+.classic .scan { display: none; }
+.classic kbd { font: inherit; }
+
+/* buttons: standard ones, the main action in the accent */
+.classic .btn { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; border-radius: 7px; font: 500 12.5px var(--ui);
+  background: var(--raise); color: var(--ink); box-shadow: inset 0 0 0 .5px var(--ink4), 0 .5px 1px rgba(0, 0, 0, .1); }
+.classic .btn:hover { background: color-mix(in srgb, var(--raise) 86%, #fff); }
+.classic .btn.line, .classic .btn.line:hover { box-shadow: inset 0 0 0 .5px var(--ink4), 0 .5px 1px rgba(0, 0, 0, .1); }
+.classic .btn.pri { background: var(--signal); color: #fff; box-shadow: 0 .5px 1.5px rgba(0, 0, 0, .25); }
+.classic .btn.pri:hover { background: color-mix(in srgb, var(--signal) 88%, #fff); color: #fff; }
+.classic .btn.danger:hover, .classic .btn.pri.danger { background: var(--red); color: #fff; }
+.classic .btn kbd { font-size: 10.5px; font-weight: 400; opacity: .6; }
+.classic button:focus-visible, .classic select:focus-visible { outline: 2px solid color-mix(in srgb, var(--signal) 60%, transparent); outline-offset: 1px; }
+.classic .toast .ft .btn, .classic .create-foot .btn.pri, .classic .sheet-foot .btn { padding: 0 12px; }
+.classic .toast .ft .btn:not(.pri) { box-shadow: inset 0 0 0 .5px var(--ink4), 0 .5px 1px rgba(0, 0, 0, .1); }
+
+/* floating boxes: round cards with a soft shadow */
+.classic .box { background: var(--panel); border: 0; border-radius: 12px; box-shadow: var(--shadow); }
+.classic .box::after { display: none; }
+
+/* the top bar (a browser's; the Mac window has its own) */
+.classic .top { background: var(--term); }
+.classic .side-btn, .classic .band-new { width: 30px; height: 26px; border-radius: 7px; }
+.classic .side-btn:hover, .classic .band-new:hover { background: rgba(127, 127, 127, .16); }
+.classic .band-name { font-weight: 600; }
+.classic .band-name .git, .classic .band-status, .classic .band-tag { font-size: 12px; color: var(--ink2); white-space: nowrap; }
+.classic .band-status.waiting { color: var(--amber-ink); }
+.classic .band-mark { align-items: center; gap: 6px; color: var(--ink2); }
+
+/* the list */
+.classic .side { background: var(--side); background-image: none; line-height: 1.5; }
+.classic .side-grip:hover::after { background: var(--ink3); }
+.classic .side-scroll { padding: 2px 8px 12px; }
+.classic .find { grid-template-columns: 20px minmax(0, 1fr) auto; margin: 10px 8px 6px; height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: var(--field); font-size: 13px; }
+.classic .find:focus-within { box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--signal) 45%, transparent); }
+.classic .find .slash { color: var(--ink3); display: grid; }
+.classic .find input { caret-color: var(--signal); }
+.classic .find kbd { font: 11px var(--ui); }
+.classic .found { font: 600 11.5px var(--ui); color: var(--ink2); padding: 4px 8px; }
+.classic .found:empty { display: none; }
+.classic .none { padding: 16px 8px; }
+.classic .empty-note { padding: 8px; color: var(--ink2); }
+.classic .groups mark { background: color-mix(in srgb, var(--signal) 36%, transparent); color: inherit; border-radius: 3px; }
+.classic .row.hit .nm { color: var(--ink2); font-size: 12px; }
+
+.classic .dir { grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 6px; height: 26px; margin-top: 6px; padding-right: 8px; border-radius: 6px; font: 600 12px var(--ui); color: var(--ink2); }
+.classic .dir:first-child { margin-top: 0; }
+.classic .dir.parent + .dir { margin-top: 0; }
+.classic .dir .chev { display: flex; align-items: center; gap: 5px; color: var(--ink3); }
+.classic .dir .chev .ci + .ci { color: var(--ink2); }
+.classic .dir .name { font-weight: 600; }
+.classic .dir.parent .name { font-weight: 500; }
+.classic .dir .name .git { font-size: 11px; color: var(--ink3); margin-left: 8px; }
+.classic .dir .count { align-items: center; font-weight: 400; }
+.classic .dir .count b { min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; font: 700 10px/15px var(--ui); text-align: center; background: var(--ink4); color: var(--ink2); }
+.classic .dir .count b.w { background: var(--amber); color: #fff; }
+.classic .dir.holds { background: var(--sel); }
+.classic .dir.holds::before { display: none; }
+.classic .dir .add { width: 20px; height: 20px; padding: 0; border-radius: 5px; place-items: center; }
+.classic .dir:hover .add { display: grid; }
+.classic .dir .add:hover { background: rgba(127, 127, 127, .2); }
+
+.classic .row { grid-template-columns: 0 max-content 24px minmax(0, 1fr) auto; column-gap: 0; height: 28px; padding: 0 8px 0 27px; border-radius: 6px; }
+.classic .row .ix { display: block; overflow: hidden; width: 0; }
+.classic .row .tr { min-width: 0; }
+.classic .row .st { width: 16px; justify-content: center; color: var(--ink3); }
+.classic .row .mt { font-size: 11px; gap: 6px; padding-left: 8px; }
+.classic .row .mt .w { color: var(--amber-ink); }
+.classic .row .mt .pill { font: 600 10.5px var(--ui); padding: 1.5px 7px; border-radius: 9px; background: color-mix(in srgb, var(--amber) 20%, transparent); }
+.classic .row .agent-mark { display: grid; color: var(--ink3); }
+.classic .row .ac { gap: 4px; padding-left: 8px; align-items: center; font-size: 11.5px; }
+.classic .row .ac button { height: 20px; padding: 0 8px; border-radius: 6px; background: var(--raise); color: var(--ink); box-shadow: inset 0 0 0 .5px var(--ink4); }
+.classic .row .ac button:hover { background: color-mix(in srgb, var(--raise) 84%, #fff); color: var(--ink); }
+.classic .row .ac .x { display: grid; place-items: center; width: 20px; padding: 0; background: none; box-shadow: none; color: var(--ink2); }
+.classic .row .ac .x:hover { background: rgba(127, 127, 127, .22); }
+.classic .row .ac .go { background: var(--signal); color: #fff; box-shadow: none; }
+.classic .row .ac .go:hover { background: color-mix(in srgb, var(--signal) 88%, #fff); color: #fff; }
+.classic .row .ac .del:hover { background: var(--red); color: #fff; }
+.classic .row.session .nm { color: var(--ink2); }
+.classic .row.sub .nm i { margin-left: 8px; }
+.classic .row.waiting .nm, .classic .row.sel .nm { font-weight: 500; }
+.classic .row.exited .nm { -webkit-mask: none; mask: none; color: var(--ink3); }
+.classic .row.sel { background: var(--sel); }
+.classic .row.sel::before { display: none; }
+.classic .row.more .nm { color: var(--ink2); }
+.classic .row .rename { font: 500 13px var(--ui); height: 22px; border-radius: 5px; background: var(--field); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--signal) 45%, transparent); padding: 0 6px; }
+.classic .row .inpane { border-radius: 4px; padding: 0 4px; box-shadow: inset 0 0 0 .5px var(--ink3); }
+.classic .row .inpane.f { color: #fff; background: var(--signal); box-shadow: none; }
+
+/* split panes */
+.classic .pane-head { height: 26px; font: 12px var(--ui); background: color-mix(in srgb, #fff 5%, var(--term)); }
+.classic .pane.focus .pane-head { box-shadow: inset 0 -1px 0 var(--ink4); background: color-mix(in srgb, var(--signal) 16%, var(--term)); }
+.classic .pane-head .no { border-radius: 4px; padding: 0 4px; box-shadow: inset 0 0 0 .5px var(--ink3); }
+.classic .pane.focus .pane-head .no { color: #fff; background: var(--signal); box-shadow: none; }
+.classic .pane-head .w { color: var(--amber-ink); }
+.classic .pane-head .x { border-radius: 5px; }
+.classic .pane-size { font: 600 15px var(--ui); border-radius: 8px; box-shadow: none; background: color-mix(in srgb, var(--panel) 88%, transparent); }
+.classic .pane-drop { border: 1.5px dashed var(--signal); border-radius: 8px; background: color-mix(in srgb, var(--signal) 12%, transparent); }
+.classic .pane-drop span { color: #fff; background: var(--signal); border-radius: 999px; padding: 2px 10px; }
+.classic .pane-ghost { border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+
+/* in use elsewhere: a quiet veil, a card saying where */
+.classic .away { background: color-mix(in srgb, var(--term) 62%, transparent); }
+.classic .away-box { overflow: hidden; padding: 14px 16px 14px; }
+.classic .away-box > * { background: none; }
+.classic .away-box .hd { height: auto; padding: 0; background: none; color: var(--ink); font: 600 14px var(--ui); }
+.classic .away-box .bd { padding: 4px 0 0; }
+.classic .away-box .ft { padding: 12px 0 0; }
+
+/* permission requests and questions: a card, the command in its own field */
+.classic .toast { padding: 12px 14px; font: 13px var(--ui); }
+.classic .toast .hd { height: auto; padding: 0; background: none; color: var(--ink); font-size: 13px; }
+.classic .toast .hd .warn { color: var(--amber); display: grid; }
+.classic .toast .hd .what { font-weight: 600; }
+.classic .toast .hd .tool { color: var(--ink2); font-size: 12px; opacity: 1; }
+.classic .toast code { margin: 10px 0 6px; padding: 8px 10px; border-radius: 8px; background: var(--field); font: 12px/1.5 var(--mono); }
+.classic .toast .path { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--ink2); font-size: 11.5px; }
+.classic .toast .ft { gap: 8px; padding: 12px 0 0; }
+.classic .toast .ft .hint { color: var(--ink2); font-size: 12px; }
+.classic .toast.ask .hd .warn { color: var(--signal); }
+.classic .toast.ask .q { padding: 10px 0 0; }
+.classic .toast.ask .qh { font: 600 11.5px var(--ui); color: var(--ink2); }
+.classic .toast.ask .opt { grid-template-columns: 16px 18px minmax(0, 1fr); align-items: center; width: calc(100% + 12px); margin: 0 -6px; padding: 3px 6px; border-radius: 6px; }
+.classic .toast.ask .opt kbd { font-size: 11px; }
+.classic .toast.ask .opt .mk { width: 14px; height: 14px; box-shadow: inset 0 0 0 1.5px var(--ink3); }
+.classic .toast.ask .opt .mk.one { border-radius: 50%; }
+.classic .toast.ask .opt .mk.several { border-radius: 4px; }
+.classic .toast.ask .opt.on .mk { box-shadow: inset 0 0 0 4.5px var(--signal); background: #fff; }
+.classic .toast.ask .opt.on .mk.several { box-shadow: none; background: var(--signal) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 7.4l2.3 2.3 4.7-5'/%3E%3C/svg%3E") center / 14px 14px no-repeat; }
+.classic .toast.ask .opt input { border-bottom-color: var(--ink4); caret-color: var(--signal); }
+.classic .toast.ask .opt input:focus { border-bottom-color: var(--signal); }
+
+.classic .notice { border: 0; border-radius: 10px; padding: 8px 14px; background: color-mix(in srgb, var(--red) 14%, var(--panel)); box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--red) 55%, transparent), 0 8px 24px rgba(0, 0, 0, .4); font: 13px/1.5 var(--ui); }
+.classic .notice::before { display: none; }
+.classic .link-hint { font: 11px/1.6 var(--ui); border: 0; border-radius: 6px; background: var(--panel); box-shadow: 0 0 0 .5px var(--ink4); }
+
+/* new terminal */
+.classic .wordmark { height: auto; margin-bottom: 18px; align-items: center; gap: 10px; color: var(--signal); }
+.classic .wordmark span { font: 600 20px var(--ui); color: var(--ink); }
+.classic .label { font: 600 11.5px var(--ui); letter-spacing: 0; color: var(--ink2); margin: 16px 0 6px; }
+.classic .agent { border: 0; border-radius: 10px; padding: 12px 12px 10px; background: var(--field); box-shadow: inset 0 0 0 .5px var(--ink4); color: var(--ink2); font-size: 13px; }
+.classic .agent:hover { border-color: transparent; background: color-mix(in srgb, var(--field) 70%, rgba(255, 255, 255, .12)); }
+.classic .agent.on { color: var(--ink); box-shadow: inset 0 0 0 2px var(--signal); background: color-mix(in srgb, var(--signal) 14%, var(--field)); }
+.classic .agent.on .ci { color: var(--signal); }
+.classic .agent:disabled { opacity: .45; }
+.classic .agent:disabled > * { -webkit-mask: none; mask: none; }
+.classic .select select { height: 28px; padding: 0 30px 0 10px; border: 0; border-radius: 7px; background: var(--field); box-shadow: inset 0 0 0 .5px var(--ink4); font: 13px var(--ui); }
+.classic .select select:hover, .classic .select select:focus { border-color: transparent; }
+.classic .select::after { content: ""; right: 11px; width: 6px; height: 6px; border: solid var(--ink2); border-width: 0 1.5px 1.5px 0; transform: translateY(-70%) rotate(45deg); }
+.classic .folder { gap: 8px; height: 28px; padding: 0 4px 0 9px; border: 0; border-radius: 7px; background: var(--field); box-shadow: inset 0 0 0 .5px var(--ink4); }
+.classic .folder:focus-within { box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--signal) 45%, transparent); }
+.classic .folder .prompt { color: var(--ink3); display: grid; }
+.classic .folder input { font: 12.5px var(--mono); }
+.classic .folder .btn { height: 20px; padding: 0 9px; border-radius: 6px; font-size: 11.5px; }
+.classic .radios { display: inline-flex; gap: 0; padding: 2px; border-radius: 8px; background: var(--field); }
+.classic .radios button { padding: 3px 14px; border-radius: 6px; font-size: 12.5px; color: var(--ink2); }
+.classic .radios button.on { background: var(--raise); color: var(--ink); font-weight: 600; box-shadow: 0 .5px 2px rgba(0, 0, 0, .2), 0 0 0 .5px var(--ink4); }
+.classic .create-foot .error { font-size: 12.5px; }
+
+/* the sealed reply */
+.classic .sealbar { font: 12.5px var(--ui); }
+.classic .sealbar kbd { border-radius: 4px; }
+.classic .sealbar:hover kbd { background: var(--signal); color: #fff; }
+.classic .composer { overflow: hidden; }
+.classic .composer-head { height: 30px; padding: 0 12px; background: none; color: var(--ink); font: 600 12.5px var(--ui); box-shadow: inset 0 -1px 0 var(--ink4); }
+.classic .composer-head .lock { color: var(--signal); }
+.classic .composer-head .to { font-weight: 400; color: var(--ink2); }
+.classic .composer-foot .hint { font-size: 12px; color: var(--ink2); }
+
+/* the right-click menu, confirmations */
+.classic .menu { padding: 5px; border-radius: 8px; box-shadow: var(--shadow); font-size: 13px; }
+.classic .menu button { padding: 3px 10px; border-radius: 5px; }
+.classic .menu button:hover { background: var(--signal); color: #fff; }
+.classic .menu button.danger:hover { background: var(--red); color: #fff; }
+.classic .menu button:disabled { background: none; color: var(--ink); }
+.classic .sheet-card { padding: 18px 20px 16px; }
+.classic .sheet-card h2 { font: 600 14px/1.5 var(--ui); }
+.classic .check { font-size: 13px; }
+.classic .check input { accent-color: var(--signal); }
+.classic .sheet-offers .offer { padding: 1px 8px; border-radius: 5px; }
+.classic .sheet-offers .offer:hover, .classic .sheet-offers .offer.on { background: var(--hover); }
+.classic .loading { font-size: 13px; }
+
+@media (max-width: 760px), (pointer: coarse) {
+  .classic .side { transition: transform .22s ease; box-shadow: 8px 0 30px rgba(0, 0, 0, .4); }
+  .classic .band-tag { display: none; }   /* the dot beside the mark says it; the name keeps the room */
+  .classic .keys { gap: 5px; padding: 7px 8px; background: #1c1c1e; font: 500 12px var(--ui); }
+  .classic .keys button { min-width: 40px; height: 30px; border-radius: 6px; background: #3a3a3d; color: #f2f2f2; box-shadow: none; }
+  .classic .composer { border-radius: 0; box-shadow: inset 0 1px 0 var(--ink4); }
 }

@@ -17,10 +17,18 @@
  *  waiting and failing; a person's Fill Ciphertext refused on the agent's tab, refused into a text field and typed
  *  into a password field of the person's own tab through `secret-gate fill-value`; a login the person types into the
  *  agent's tab while holding it kept out of the agent's network and console logs, also for a second, reconnecting
- *  bridge; the code tools held to the gate's probes; Playwright MCP's folder empty after the calls.
+ *  bridge; the code tools held to the gate's probes; Playwright MCP's folder empty after the calls; an SVG file opened
+ *  as a page (a document without a body) answered at once and said to be one.
  *
  *  Also (review 2026-10-02): AgentSwitch's data refused under the data volume's spelling, a redirect to AgentSwitch's own
- *  port refused for a subresource (Chrome blocks it) and for a navigation (stopped, the refusal shown). */
+ *  port refused for a subresource (Chrome blocks it) and for a navigation (stopped, the refusal shown).
+ *
+ *  Device pixels (§5, 2026-10-03): a stream that asks for scale 2 gets the page drawn at 2 (2560×1600 frames of a
+ *  1280×800 page) and a click on such a frame lands; when a tab opened after it closes (Chrome then makes it the
+ *  window's front tab and sets its view to the window's size) its frames are still 2560×1600 of the 1280×800 page;
+ *  without that stream the frames are the CSS size again; an agent's click through the gate lands while a screen shows
+ *  its tab at 2, which is at 2 again a moment after the call; an agent's screenshots meanwhile are 1280×800 pictures
+ *  and leave the page 1280×800. */
 
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -30,6 +38,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Hono } from "hono";
+import type { Page } from "playwright-core";
 import { mountBrowser } from "../src/api/browser.js";
 import { LocalAuth } from "../src/api/localAuth.js";
 import type { ApiDeps } from "../src/api/shared.js";
@@ -80,8 +89,10 @@ async function main(): Promise<void> {
   writeFileSync(join(site, "page2.html"), "<title>Second</title><p>second page</p>");
   writeFileSync(join(site, "index.html"), `<!doctype html><title>Smoke</title>
 <style>body{margin:0;font:16px sans-serif} #b{position:absolute;left:10px;top:10px;width:200px;height:50px}
-#t{position:absolute;left:10px;top:80px;width:300px;height:30px} #l{position:absolute;left:10px;top:130px} #p{position:absolute;left:10px;top:170px}</style>
+#t{position:absolute;left:10px;top:80px;width:300px;height:30px} #l{position:absolute;left:10px;top:130px} #p{position:absolute;left:10px;top:170px}
+#n{position:absolute;left:900px;top:600px;width:120px;height:40px}</style>
 <button id="b" onclick="document.title='Clicked'">click</button>
+<button id="n" onclick="this.textContent=String(Number(this.textContent)+1);document.title='count:'+this.textContent">0</button>
 <input id="t" oninput="document.title='typed:'+this.value">
 <a id="l" href=".env">env</a>
 <a id="p" href="page2.html" target="_blank">popup</a>
@@ -153,6 +164,43 @@ async function main(): Promise<void> {
   await until(() => [...events].reverse().find((e): e is FrameEvent => e.type === "frame")?.viewport.width === 1280, "the size goes back on release");
   stop();
 
+  // Device pixels (§5, 2026-10-03): a stream that asks for 2 gets the page drawn at 2; a click on such a frame lands
+  // where it was aimed; without that stream the frames are the CSS size again.
+  const crisp = await host.open(YOU, url);
+  await until(() => host.get(crisp.id)?.title === "Smoke", "a second tab of the page loads");
+  const sharp: BrowserEvent[] = [];
+  const stopSharp = host.subscribe(crisp.id, { quality: 80, fps: 10, scale: 2 }, (ev) => sharp.push(ev));
+  const big = await until(() => sharp.find((e): e is FrameEvent => e.type === "frame" && e.width === 2560), "a stream that asks for scale 2 gets 2560-wide frames");
+  check(!!big && big.height === 1600 && big.scale === 2 && big.viewport.width === 1280 && big.viewport.height === 800,
+    `the frame is the 1280x800 page at 2 (${big?.width}x${big?.height}, scale ${big?.scale}, viewport ${big?.viewport.width}x${big?.viewport.height})`);
+  // The button is CSS (10..210, 10..60): frame (100, 60) is CSS (50, 30).
+  await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 100, y: 60, button: "left", clickCount: 1, modifiers: [], seq: big?.seq }]);
+  await until(() => host.get(crisp.id)?.title === "Clicked", "a click on a frame of the page at 2 lands on the button");
+  // A tab opened after it, and closed: Chrome makes this one the window's front tab and sets its view to the window's
+  // 1280×713 (review, 2026-10-03). The view is drawn again: what repaints next comes as the 1280×800 page at 2.
+  const later = await host.open(YOU, url);
+  await until(() => host.get(later.id)?.title === "Smoke", "a tab opened after it loads");
+  const closedAt = sharp.length;
+  await host.close(later.id);
+  await new Promise((r) => setTimeout(r, 300));
+  // The counting button is CSS (900..1020, 600..640), outside the window's 1280×713 at 2: frame (1900, 1240).
+  await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 1900, y: 1240, button: "left", clickCount: 1, modifiers: [] }]);
+  await until(() => host.get(crisp.id)?.title === "count:1", "after that tab closed, a click near the far corner of the watched tab lands");
+  await new Promise((r) => setTimeout(r, 500));
+  const since = sharp.slice(closedAt).filter((e): e is FrameEvent => e.type === "frame");
+  const whole = (f: FrameEvent) => f.width === 2560 && f.height === 1600 && f.scale === 2 && f.viewport.width === 1280 && f.viewport.height === 800;
+  const cut = since.find((f) => !whole(f));
+  check(since.length > 0 && !cut, `and its frames are still 2560x1600 of the 1280x800 page (${since.length} frames since`
+    + `${cut ? `, one ${cut.width}x${cut.height} of a ${cut.viewport.width}x${cut.viewport.height} page` : ""})`);
+  stopSharp();
+  const plain: BrowserEvent[] = [];
+  const stopPlain = host.subscribe(crisp.id, { quality: 60, fps: 10 }, (ev) => plain.push(ev));
+  const small = await until(() => plain.find((e): e is FrameEvent => e.type === "frame" && e.width === 1280), "without it, frames are the CSS size again");
+  await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 50, y: 90, button: "left", clickCount: 1, modifiers: [], seq: small?.seq }, { type: "text", text: "1x" }]);
+  await until(() => host.get(crisp.id)?.title === "typed:1x", "and a click on a CSS-size frame lands too");
+  stopPlain();
+  await host.close(crisp.id);
+
   // A blank tab (Chrome's own first page, sent to about:blank again) still closes.
   const blank = await host.open(YOU, "about:blank");
   const closed = await Promise.race([host.close(blank.id).then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 3_000))]);
@@ -166,6 +214,12 @@ async function main(): Promise<void> {
   let left = "";
   try { left = execFileSync("pgrep", ["-f", "--", `--user-data-dir=${profile}`], { encoding: "utf8" }).trim(); } catch { left = ""; }
   check(left === "", "Chrome quits on shutdown");
+}
+
+/** A PNG's pixel size (its IHDR), from base64. */
+function pngSize(data: string | undefined): string {
+  const png = Buffer.from(data ?? "", "base64");
+  return png.length >= 24 ? `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}` : "no picture";
 }
 
 /** An MCP client on a child's stdio (the agent's side of the gate). */
@@ -193,7 +247,7 @@ function mcpClient(child: ChildProcessWithoutNullStreams) {
   const notify = (method: string) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method })}\n`);
   const call = async (name: string, args: object = {}, ms?: number) => {
     const m = await request("tools/call", { name, arguments: args }, ms);
-    const result = (m.result ?? {}) as { content?: { type: string; text?: string }[]; isError?: boolean };
+    const result = (m.result ?? {}) as { content?: { type: string; text?: string; data?: string }[]; isError?: boolean };
     const text = (result.content ?? []).map((c) => c.text ?? `[${c.type}]`).join("\n");
     return { error: result.isError === true || m.error !== undefined, text: text || JSON.stringify(m.error ?? ""), result };
   };
@@ -217,6 +271,12 @@ async function bridgeRoundTrip(): Promise<void> {
   // A page with a field that shows what reaches it, and a site for it.
   const site = createServer((req, res) => {
     if (req.url === "/report.bin") { res.setHeader("content-disposition", "attachment; filename=report.bin"); res.end("data"); return; }
+    if (req.url === "/ride.svg") {
+      // A picture opened as a page: a document without a body, moving all the time.
+      res.setHeader("content-type", "image/svg+xml");
+      res.end(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><title>Ride</title><circle cx="20" cy="50" r="12" fill="teal"><animate attributeName="cx" values="20;180;20" dur="2s" repeatCount="indefinite"/></circle></svg>`);
+      return;
+    }
     if (req.method === "POST") { req.resume(); req.on("end", () => { res.setHeader("content-type", "text/html; charset=utf-8"); res.end("<title>Signed in</title><p>welcome</p>"); }); return; }
     res.setHeader("content-type", "text/html; charset=utf-8");
     res.end(`<!doctype html><title>Portal</title><style>body{margin:0} #pw{position:absolute;left:10px;top:60px;width:240px;height:30px}
@@ -280,10 +340,36 @@ async function bridgeRoundTrip(): Promise<void> {
     check(!shot.error && shot.text.includes("masked"), `a screenshot after the fill is masked and verified (${shot.text.slice(0, 100)})`);
 
     const box = host.get(tab.id)?.action?.box;
+    // A screen shows the agent's tab at 2 (§5): Playwright's click, in CSS pixels, still lands; the tab is at 2 again
+    // a moment after the call.
+    const watched: BrowserEvent[] = [];
+    const stopWatching = host.subscribe(tab.id, { quality: 80, fps: 10, scale: 2 }, (ev) => watched.push(ev));
+    await until(() => watched.some((e) => e.type === "frame" && e.scale === 2), "a screen sees the agent's tab at 2");
     await mcp.call("browser_click", { target: ref, element: "Merge pull request" });
-    await until(() => host.get(tab.id)?.title === "merged", "a click through the gate reaches the page");
+    await until(() => host.get(tab.id)?.title === "merged", "a click through the gate reaches the page (the tab shown at 2)");
     const action = host.get(tab.id)?.action;
     check(action?.description === 'click "Merge pull request"' && !!action.box && action.box.width > 50, `the overlay shows the click and the button's box (${JSON.stringify(action?.box ?? box)})`);
+    // At 2 again: by the frame's size too, and by what the page says of its own.
+    const at2 = (from: number) => watched.slice(from).some((e) => e.type === "frame" && e.scale === 2 && e.width === 2560 && e.height === 1600 && e.viewport.width === 1280);
+    const pageSize = async (): Promise<string> => String(await (host.page(tab.id)?.playwright?.() as Page | undefined)?.evaluate("innerWidth + 'x' + innerHeight").catch(() => "gone"));
+    const clickedAt = watched.length;
+    await until(() => at2(clickedAt), "the agent's tab is at 2 again after the call (2560x1600 frames)", 8_000);
+    // A screenshot while a screen shows the tab at 2 (review, 2026-10-03): Playwright's capture of a view drawn at a
+    // scale laid the page out at 2560×1600 and left it so. The picture is taken on the CSS size: 1280×800 both times,
+    // and the page is 1280×800 before, between and after.
+    const sizes = [await pageSize()];
+    const pictures: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const taken = await mcp.call("browser_take_screenshot");
+      pictures.push(taken.error ? `refused: ${taken.text.slice(0, 80)}` : pngSize(taken.result.content?.find((c) => c.type === "image")?.data));
+      sizes.push(await pageSize());
+    }
+    check(pictures.every((p) => p === "1280x800") && sizes.every((p) => p === "1280x800"),
+      `two screenshots of the tab shown at 2 are 1280x800 pictures of a page that stays 1280x800 (pictures ${pictures.join(", ")}; the page ${sizes.join(", ")})`);
+    const shotAt = watched.length;
+    await until(() => at2(shotAt), "and the tab is at 2 again after them", 8_000);
+    check(await pageSize() === "1280x800", `the page still 1280x800 (${await pageSize()})`);
+    stopWatching();
 
     host.take(tab.id, "phone-1");
     const waited = Date.now();
@@ -348,6 +434,21 @@ async function bridgeRoundTrip(): Promise<void> {
     const agentsDir = join(bhome, "browser", "agents");
     const leftovers = existsSync(agentsDir) ? readdirSync(agentsDir).flatMap((d) => readdirSync(join(agentsDir, d))) : [];
     check(leftovers.length === 0, `Playwright MCP's files are swept after each call (${leftovers.join(", ") || "none left"})`);
+
+    // An SVG file opened as a page (2026-10-03): Playwright's snapshot looks for a body until the call's 30 s are up,
+    // though the page opened. It gets a stand-in body, the answers come at once and say what the page is.
+    const svgUrl = `http://127.0.0.1:${sitePort}/ride.svg`;
+    const started = Date.now();
+    const svg = await mcp.call("browser_navigate", { url: svgUrl }, 45_000);
+    check(!svg.error && Date.now() - started < 10_000, `an SVG file opens for the agent without waiting out a timeout (${Date.now() - started} ms; ${svg.text.split("\n")[0]})`);
+    check(svg.text.includes("image/svg+xml document, not HTML"), "the answer says the page is an SVG document and how to look at it");
+    const svgSnap = await mcp.call("browser_snapshot", {}, 45_000);
+    check(!svgSnap.error && svgSnap.text.includes("image/svg+xml document"), "a snapshot of it answers too, saying the same");
+    const svgShot = await mcp.call("browser_take_screenshot", {}, 45_000);
+    check(!svgShot.error, `a screenshot of it is taken (${svgShot.text.replace(/\s+/g, " ").slice(0, 80)})`);
+    const back = await mcp.call("browser_navigate", { url: siteUrl });
+    const htmlSnap = await mcp.call("browser_snapshot");
+    check(!back.error && !back.text.includes("not HTML") && !htmlSnap.text.includes("not HTML") && /button "Merge pull request"/.test(htmlSnap.text), "an HTML page after it is read as before");
   } catch (err) {
     check(false, `bridge round trip: ${(err as Error).message}\n${gateErr.slice(-2000)}`);
   } finally {
