@@ -43,9 +43,11 @@ svg.px { shape-rendering: crispEdges; display: block; }
   <div class="row" id="pixel"></div>
   <h2>// MARK · CLASSIC（14 × 11）</h2>
   <div class="row" id="classic"></div>
-  <h2>// MENU BAR（单色，系统着色；14 × 11，1 pt 一格）</h2>
+  <h2>// MENU BAR · PIXEL（单色，系统着色；14 × 11，1 pt 一格）</h2>
   <div class="row" id="glyph"></div>
-  <p class="doc">像素外观下进行中的亮块沿标题栏跑（两格一步，五步），等你时每 0.56 秒明暗一次；经典外观下进行中旁边照旧是系统转圈。菜单栏里的图标静止，只靠实与淡区分状态。</p>
+  <h2>// MENU BAR · CLASSIC（同一幅图的平滑画法）</h2>
+  <div class="row" id="glyphClassic"></div>
+  <p class="doc">像素外观下进行中的亮块沿标题栏跑（两格一步，五步），等你时每 0.56 秒明暗一次；经典外观下进行中旁边照旧是系统转圈。菜单栏里的图标静止，只靠实与淡区分状态：最前面的窗口是一整块实心面板，提示符从里面镂空，后面只留一道边；等你时面板变淡、提示符亮起来。</p>
 </div>
 <script>
 const TONES = { W: "var(--w)", "#": "var(--i)", m: "var(--m)", d: "var(--d)", k: "var(--k)", s: "var(--s)" };
@@ -108,20 +110,35 @@ function classicMark(state) {
 }
 document.getElementById("classic").innerHTML = STATES.map(([state, word]) => fig(`<div class="cell">${classicMark(state)}</div>`, word)).join("");
 
-// ---- the menu bar's one-colour mark: PixelArt.stackRows and stackShows
-const GLYPH = [".....bbbbbbbb.", "....b........b", "...bbbbbbbb..b", "..b........b.b", ".TTTTTTTT..b.b", "TTTTTTTTTT.b.b", "F........F.bb.", "F........F.b..", "F........Fb...", "F........F....", ".FFFFFFFF....."];
-const BLOCK = new Set(["5,4", "6,4", "5,5", "6,5"]);
+// ---- the menu bar's one-colour mark: PixelArt.stackRows and stackShows. P = the front window as a solid panel,
+// p = its prompt (a hole unless something waits), b = the edge of a window behind.
+const GLYPH = ["...bbbbbbbbbb.", ".............b", ".PPPPPPPPPP..b", "PPPPPPPPPPPP.b", "PPppPPPPPPPP.b", "PPPppPPPPPPP.b", "PPPPppPPPPPP.b", "PPPppPPPPPPP.b", "PPppPPppppPP..", "PPPPPPPPPPPP..", ".PPPPPPPPPP..."];
 function glyph(state, ink) {
   const cells = GLYPH.flatMap((row, y) => [...row].flatMap((c, x) => {
-    if (c === "." || (state === "off" && (x + y) % 2)) return [];
-    const full = state === "busy" ? c === "F" || BLOCK.has(`${x},${y}`) : state === "waiting" ? c === "T" : c !== "b";
-    return [cellAt(x, y, ink, full ? 1 : 0.4)];
+    if (c === ".") return [];
+    const off = state === "off";
+    const full = state === "waiting" ? c === "p" : c === "p" || (off && (x + y) % 2) ? null : state === "busy" ? true : c === "P";
+    return full === null ? [] : [cellAt(x, y, ink, full ? 1 : 0.4)];
   }));
   return `<svg class="px" width="140" height="110" viewBox="0 0 14 11">${cells.join("")}</svg>`;
 }
-const GLYPH_STATES = [["idle", "空闲"], ["busy", "进行中"], ["waiting", "等你 / 出错"], ["off", "未运行"]];
+// The classic look's: the same picture drawn smooth (MenuBarGlyph.drawClassic) — a rounded panel, the prompt as round
+// strokes (a hole, or lit on a faint panel while something waits), the window behind as a line; off, the whole mark faint.
+let glyphId = 0;
+function classicGlyph(state, ink) {
+  const id = `g${glyphId++}`, waiting = state === "waiting", whole = state === "off" ? 0.4 : 1;
+  const prompt = `<path d="M2.25 4.86 4.08 6.5 2.25 8.14M5.72 8.14H8.28" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"`;
+  return `<svg width="140" height="110" viewBox="0 0 14 11" opacity="${whole}"><mask id="${id}"><rect width="14" height="11" fill="#fff"/>${waiting ? "" : `${prompt} stroke="#000"/>`}</mask>
+    <path d="M3.5 .5H11.6A1.9 1.9 0 0 1 13.5 2.4V7.5" fill="none" stroke="${ink}" stroke-linecap="round" opacity="${state === "busy" ? 1 : 0.4}"/>
+    <rect x="0" y="2" width="12" height="9" rx="2.4" fill="${ink}" mask="url(#${id})" opacity="${waiting ? 0.4 : 1}"/>${waiting ? `${prompt} stroke="${ink}"/>` : ""}</svg>`;
+}
+// What the menu bar's own mark says is the app as a whole — its two services, and whether anything waits for the
+// user — not whether a task runs: the Live Activity's capsule beside it says that.
+const GLYPH_STATES = [["idle", "正常"], ["busy", "服务启动 / 停止中"], ["waiting", "等你，或服务出问题"], ["off", "服务未运行"]];
 document.getElementById("glyph").innerHTML = GLYPH_STATES.map(([state, word]) => fig(`<div class="cell bar">${glyph(state, "#fff")}</div>`, word)).join("")
   + GLYPH_STATES.map(([state, word]) => fig(`<div class="cell bar light">${glyph(state, "#000")}</div>`, word)).join("");
+document.getElementById("glyphClassic").innerHTML = GLYPH_STATES.map(([state, word]) => fig(`<div class="cell bar">${classicGlyph(state, "#fff")}</div>`, word)).join("")
+  + GLYPH_STATES.map(([state, word]) => fig(`<div class="cell bar light">${classicGlyph(state, "#000")}</div>`, word)).join("");
 </script>
 </body>
 </html>
