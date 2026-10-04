@@ -91,6 +91,13 @@ export const SHADED = {
     "WWWWWWWW#", "#mmmmmmmd", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W##",
     "..#m..#mm",
   ],
+  /** The app's mark (docs/ui-v0.md §10): three windows one behind another, each further one a tone darker; the front
+   *  one has a raised title bar — where a state shows — a dark screen, a bright prompt and a cursor. */
+  stack: [
+    ".....dddddddddd.", "....dkkkkkkkkkkk", "....kssssssssssk", "...mmmmmmmmmmssk", "..mddddddddddksk", "..dssssssssssdsk",
+    ".WWWWWWWWWWssdsk", "W##########msdk.", "#ssssssssssmsd..", "#sWWsssssssmsd..", "#sssWWsssssmd...", "#sWWssmmmssm....",
+    "#ssssssssssm....", ".mmmmmmmmmm.....",
+  ],
 };
 
 /** A number that changes when any picture does (FNV-1a over the names and rows, in this order): the three copies' tests
@@ -126,17 +133,17 @@ export function shaded(name, { cell = 1.5, shadow = false, strength = 1, cls = "
 }
 
 // ---------- the app's mark with a state on it ----------
-/** The nearest lane from the source to its end, two cells a step: the way the busy block runs. */
-export const MARK_LANE = [[[3, 6], [4, 6]], [[4, 5], [5, 5]], [[5, 4], [6, 4]], [[6, 3], [7, 3]], [[7, 2], [8, 2]], [[9, 2], [9, 1]], [[10, 1], [11, 1]]];
-/** The nearest lane's end: the raised block a state colours. */
-export const isEnd = (x, y) => x >= 12 && y <= 3;
+/** The front window's title bar from left to right, a block of two by two cells a step: the way the busy block runs. */
+export const MARK_LANE = [1, 3, 5, 7, 9].map((x) => [[x, 6], [x + 1, 6], [x, 7], [x + 1, 7]]);
+/** The front window's title bar: the raised strip a state colours. */
+export const isEnd = (x, y) => (y === 6 && x >= 1 && x <= 10) || (y === 7 && x <= 11);
 let uid = 0;
 
-/** The mark in a state: idle (the picture), busy (a cyan block runs along the nearest lane), waiting (that lane's end a
- *  raised amber block, blinking), error (red), off (every other cell gone). `t` counts 140 ms steps. `depth` for an
- *  identity mark: the hard shadow, the block's fading trail and a little glow. */
+/** The mark in a state (`SHADED.stack`): idle (the picture), busy (the front window's title bar cyan, a light block
+ *  running along it), waiting (the title bar amber, blinking), error (red), off (every other cell gone). `t` counts
+ *  140 ms steps. `depth` for an identity mark: the hard shadow, the block's fading trail and a little glow. */
 export function shadedMark({ state = "idle", t = 0, cell = 1.5, depth = false, ratio } = {}) {
-  const rows = SHADED.dispatch, pad = depth ? 1 : 0;
+  const rows = SHADED.stack, pad = depth ? 1 : 0;
   const cells = cellsOf(rows).filter(([x, y]) => !(state === "off" && (x + y) % 2));
   const head = t % MARK_LANE.length;
   const steps = state !== "busy" ? [] : (depth ? [[0, 1], [1, 0.55], [2, 0.25]] : [[0, 1]]).map(([back, alpha]) => [MARK_LANE[(head - back + MARK_LANE.length * 4) % MARK_LANE.length], alpha]);
@@ -146,15 +153,15 @@ export function shadedMark({ state = "idle", t = 0, cell = 1.5, depth = false, r
     glow = `<defs><filter id="${id}" x="-300%" y="-300%" width="700%" height="700%"><feGaussianBlur stdDeviation="1.6"/></filter></defs><g filter="url(#${id})" opacity=".7">${MARK_LANE[head].map(([x, y]) => rect(x, y, "var(--cyan)")).join("")}</g>`;
   }
   const under = depth ? cells.map(([x, y]) => rect(x + 1, y + 1, "var(--px-shadow)")).join("") : "";
-  // The waiting end changes every 4 steps (0.56 s): under three flashes a second (WCAG 2.3.1).
-  const end = state === "waiting" ? "var(--amber)" : state === "error" ? "var(--red)" : null;
+  // The waiting bar changes every 4 steps (0.56 s): under three flashes a second (WCAG 2.3.1).
+  const end = state === "waiting" ? "var(--amber)" : state === "error" ? "var(--red)" : state === "busy" ? "var(--cyan)" : null;
   const lit = state === "waiting" && Math.floor(t / 4) % 2 ? 0.25 : 1;
   const top = cells.map(([x, y, tone]) => {
     if (!end || !isEnd(x, y)) return rect(x, y, `var(${TONES[tone]})`);
     const edge = tone === "W" ? rect(x, y, "#fff", 0.45 * lit) : tone === "#" ? "" : rect(x, y, "#000", 0.35 * lit);
     return rect(x, y, end, lit) + edge;
   }).join("");
-  const block = steps.map(([at, alpha]) => at.map(([x, y]) => rect(x, y, "var(--cyan)", alpha)).join("")).join("");
+  const block = steps.map(([at, alpha]) => at.map(([x, y]) => rect(x, y, "#fff", alpha)).join("")).join("");
   return frame(rows[0].length + pad, rows.length + pad, cellPx(cell, ratio), "mark", glow + under + top + block);
 }
 

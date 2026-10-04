@@ -16,6 +16,7 @@ type LookLib = {
   ICONS: Record<string, string>;
   AGENT_ICON: Record<string, string>;
   icon: (name: string, size?: number) => string;
+  mark: (state?: string, size?: number) => string;
   spinner: (size?: number) => string;
   dot: (state: string) => string;
   dress: (html: string, look: Look) => string;
@@ -128,7 +129,7 @@ describe("a page built from strings", () => {
 
 describe("the classic look's icons", () => {
   it("draws each named icon as a line drawing in the text's colour", () => {
-    for (const name of ["sidebar", "plus", "x", "lock", "search", "folder", "chevdown", "chevright", "clock", "warn", "question", "dispatch", "terminal", "check"]) {
+    for (const name of ["sidebar", "plus", "x", "lock", "search", "folder", "chevdown", "chevright", "clock", "warn", "question", "terminal", "check"]) {
       const svg = L.icon(name);
       expect(svg, name).toContain("<svg");
       expect(svg, name).toContain('stroke="currentColor"');
@@ -136,6 +137,29 @@ describe("the classic look's icons", () => {
     }
     expect(L.icon("plus", 12)).toContain('width="12"');
     expect(L.icon("nothing")).toBe("");
+  });
+
+  it("draws the app's mark as three windows, the state on the front one's title bar", () => {
+    const idle = L.mark();
+    expect(idle).toContain('viewBox="0 0 14 11"');
+    expect(idle).toContain('width="18"');
+    expect(idle).not.toMatch(/--cyan|--amber|--red/);
+    // Two windows behind, each clipped clear of the one before it, the further the fainter.
+    expect(idle.split("<clipPath").length - 1).toBe(3);
+    expect(idle).toContain('opacity="0.28"');
+    expect(idle).toContain('opacity="0.45"');
+    // The front one's title bar with its three dots as holes, then a prompt and a cursor.
+    expect(idle).toContain('fill-rule="evenodd"');
+    expect(idle.split("a.36 .36 0 1 0 .72 0").length - 1).toBe(3);
+    for (const [state, colour] of [["busy", "--cyan"], ["waiting", "--amber"], ["error", "--red"]] as const) {
+      const svg = L.mark(state, 22);
+      expect(svg.split(`fill="var(${colour})"`).length - 1, state).toBe(1);
+      expect(svg, state).toContain('width="22"');
+    }
+    expect(L.mark("off")).toContain('opacity=".4"');
+    // Each one's clip paths have names of their own: two marks on a page do not share them.
+    const ids = (svg: string) => [...svg.matchAll(/clipPath id="([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set([...ids(L.mark()), ...ids(L.mark())]).size).toBe(6);
   });
 
   it("has a line mark for each agent, pi's for one it does not know", () => {

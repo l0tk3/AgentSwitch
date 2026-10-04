@@ -4,7 +4,7 @@
 import { ACTIVE, HARNESS_NAMES, agoShort, esc } from "./api.js";
 import { SPIN } from "../pixel.js";
 import { SHADED, shaded, shadedMark } from "./shaded.js";
-import { AGENT_ICON, icon, pageLook } from "./look.js";
+import { AGENT_ICON, icon, mark, pageLook } from "./look.js";
 
 const NAV = [["home", "Tasks"], ["log", "Log"], ["ext", "Extensions"], ["ctx", "Context"]];
 const TOPICS_SHOWN = 8;
@@ -30,9 +30,9 @@ export const topicSquare = (id) => `<span class="sq" style="background:${topicHu
 export function band(s) {
   const active = s.tasks.filter((t) => ACTIVE.has(t.status)).length;
   const state = !s.health ? "off" : s.approvals.length ? "waiting" : active ? "busy" : "idle";
-  // The app's mark as the whole state; in the classic look the mark as lines, the state as a dot or the spinner.
+  // The app's mark as the whole state; in the classic look the mark as lines, a spinner beside it while busy.
   const classic = pageLook() === "classic";
-  const said = classic ? `${icon("dispatch", 18)}${state === "busy" ? spinner() : state === "waiting" ? square("waiting") : state === "off" ? square("off", true) : ""}` : shadedMark({ state, depth: true });
+  const said = classic ? `${mark(state, 22)}${state === "busy" ? spinner() : ""}` : shadedMark({ state, depth: true });
   return `<div class="who"><span id="bandMark" class="state-${state}">${said}</span><b>AgentSwitch</b>${s.version ? `<span class="faint" id="version">v${esc(s.version)}</span>` : '<span class="faint" id="version"></span>'}</div>
   <span class="sp"></span>
   <div class="st"><span title="${s.health ? "服务运行中" : "服务未连接"}"><span class="dot${s.health ? " on" : ""}" id="dot"></span>Service</span>${s.approvals.length ? `<span class="w">${square("waiting")}${s.approvals.length} Waiting</span>` : ""}</div>

@@ -10,7 +10,7 @@ import { Unicode11Addon } from "/ui/vendor/addon-unicode11.mjs";
 import { WebLinksAddon } from "/ui/vendor/addon-web-links.mjs";
 import { flicker as pixelFlicker, glitch as pixelGlitch, reducedMotion, revealWordmark, SPIN, sprite } from "/ui/pixel.js";
 import { key, SHADED, shaded, shadedMark, TONE_COLORS } from "/ui/lib/shaded.js";
-import { accentOf, age, AGENT_ICON, bracket, dot, help as helpIn, icon, label as labelIn, lookOf, spinner, word as wordIn } from "/ui/lib/look.js";
+import { accentOf, age, AGENT_ICON, bracket, dot, help as helpIn, icon, label as labelIn, lookOf, mark as classicMark, spinner, word as wordIn } from "/ui/lib/look.js";
 import { everyFolder, everySession, everyTerminal, folderOf, folderTree as buildTree, foldersAbove, slashed, tilde } from "/ui/lib/tree.js";
 import { GAP, MAX_PANES, MIN_H, MIN_W, close as closeIn, drop as dropIn, neighbor, paneOf, paneShowing, panesOf, place, ratioAt, resize as resizeIn, restore as restoreLayout,
   settle, show as showIn, single, split as splitIn, zoneOf } from "/ui/lib/panes.js";
@@ -1475,9 +1475,9 @@ function markState() {
 function renderMark() {
   const [state, tag] = markState();
   // In the list's band, and in the top band while the list is closed.
-  // The classic look: the app's mark as a line drawing, a spinner or a dot beside it for what the terminals do.
+  // The classic look: the app's mark as lines, the state on its front window's title bar, a spinner beside it while busy.
   $("mark").innerHTML = classic()
-    ? (state === "busy" ? spinner(12) : state === "waiting" ? dot("waiting") : "") + icon("dispatch", 18)
+    ? (state === "busy" ? spinner(12) : "") + classicMark(state, 22)
     : shadedMark({ state, t: markFrame, depth: true });
   $("markTag").textContent = W(tag);
   tellWindow("mark", { state, tag });
@@ -1560,7 +1560,7 @@ function showCreate(folder = null) {
   creating = true;
   $("create").hidden = false;
   // The wordmark resolves out of noise the first time; the classic look has the app's mark and its name, still.
-  if (classic()) { stopReveal(); $("wordmark").innerHTML = `${icon("dispatch", 30)}<span>AgentSwitch</span>`; }
+  if (classic()) { stopReveal(); $("wordmark").innerHTML = `${classicMark("idle", 36)}<span>AgentSwitch</span>`; }
   else if (first || !$("wordmark").querySelector(".px, .noise")) { stopReveal(); stopReveal = revealWordmark($("wordmark"), "AGENTSWITCH", { px: 6 }); }
   $("toasts").replaceChildren();
   document.body.classList.remove("list-open");

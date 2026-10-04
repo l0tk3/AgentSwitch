@@ -25,9 +25,9 @@ describe("the pictures", () => {
   it("are the ones the other copies have", () => {
     // The same number as the Mac's and the phone's ShadedSpritesTests: the three copies are one set. A picture changed
     // here changes it; change the other two copies with it.
-    expect(S.digest()).toBe(4066370870);
+    expect(S.digest()).toBe(3771827503);
     expect(Object.keys(S.SHADED)).toEqual(["dispatch", "terminals", "browser", "settings", "list", "splitRight", "splitDown", "new", "lock",
-      "lockSmall", "claude-code", "codex", "opencode", "pi"]);
+      "lockSmall", "claude-code", "codex", "opencode", "pi", "stack"]);
   });
 
   it("are rectangles of known tones within the board", () => {
@@ -107,54 +107,54 @@ describe("drawing a picture", () => {
 });
 
 describe("the app's mark", () => {
-  const rows = S.SHADED.dispatch!;
+  const rows = S.SHADED.stack!;
   const cells = rows.join("").replace(/\./g, "").length;
+  const bar = rows.flatMap((row, y) => [...row].flatMap((c, x) => (c !== "." && S.isEnd(x, y) ? [`${x},${y}`] : [])));
 
-  it("has its lane and its end on the picture", () => {
-    const lane = S.MARK_LANE.flat();
-    expect(S.MARK_LANE).toHaveLength(7);
-    expect(new Set(lane.map(([x, y]) => `${x},${y}`)).size).toBe(lane.length);
-    for (const [x, y] of lane) {
-      expect(rows[y]![x], `${x},${y} is the lane's ink`).toBe("#");
-      expect(S.isEnd(x, y)).toBe(false);
-    }
-    const end = rows.flatMap((row, y) => [...row].filter((c, x) => c !== "." && S.isEnd(x, y)));
-    expect(end).toHaveLength(16);
+  it("has its title bar and the block's way along it on the picture", () => {
+    expect(bar).toHaveLength(22);
+    expect(S.isEnd(11, 6), "the window behind shows through the front one's clipped corner").toBe(false);
+    const lane = S.MARK_LANE.flat().map(([x, y]) => `${x},${y}`);
+    expect(S.MARK_LANE).toHaveLength(5);
+    expect(S.MARK_LANE.every((step) => step.length === 4)).toBe(true);
+    expect(new Set(lane).size).toBe(lane.length);
+    for (const at of lane) expect(bar, `${at} is the title bar's`).toContain(at);
   });
 
   it("is the picture when idle, with a shadow as an identity mark", () => {
     const flat = S.shadedMark({ ratio: 2 });
     expect(count(flat, "<rect")).toBe(cells);
     expect(flat).not.toMatch(/--cyan|--amber|--red/);
-    expect(flat).toContain('viewBox="0 0 16 16"');
+    expect(flat).toContain('viewBox="0 0 16 14"');
     const deep = S.shadedMark({ depth: true, ratio: 2 });
     expect(count(deep, "var(--px-shadow)")).toBe(cells);
-    expect(deep).toContain('viewBox="0 0 17 17"');
+    expect(deep).toContain('viewBox="0 0 17 15"');
     expect(deep).toContain('width="25.5"');
   });
 
-  it("runs a cyan block along the lane while busy, a trail behind it with depth", () => {
+  it("turns the title bar cyan while busy and runs a light block along it, a trail behind it with depth", () => {
     const at = (t: number) => S.shadedMark({ state: "busy", t, ratio: 2 });
-    expect(count(at(0), "var(--cyan)")).toBe(2);
-    expect(at(0)).toContain('<rect x="3" y="6" width="1" height="1" fill="var(--cyan)"/>');
-    expect(at(6)).toContain('<rect x="11" y="1" width="1" height="1" fill="var(--cyan)"/>');
-    expect(at(7)).toBe(at(0));
+    expect(count(at(0), 'fill="var(--cyan)"')).toBe(22);
+    expect(count(at(0), 'fill="#fff"/>')).toBe(4);
+    expect(at(0)).toContain('<rect x="1" y="6" width="1" height="1" fill="#fff"/>');
+    expect(at(4)).toContain('<rect x="10" y="7" width="1" height="1" fill="#fff"/>');
+    expect(at(5)).toBe(at(0));
     const deep = S.shadedMark({ state: "busy", t: 3, depth: true, ratio: 2 });
     expect(deep).toContain("feGaussianBlur");
-    expect(deep).toContain('fill="var(--cyan)" opacity="0.55"');
-    expect(deep).toContain('fill="var(--cyan)" opacity="0.25"');
+    expect(deep).toContain('fill="#fff" opacity="0.55"');
+    expect(deep).toContain('fill="#fff" opacity="0.25"');
   });
 
-  it("turns the lane's end amber while something waits, blinking under three times a second, red on an error", () => {
+  it("turns the title bar amber while something waits, blinking under three times a second, red on an error", () => {
     const waiting = S.shadedMark({ state: "waiting", t: 0, ratio: 2 });
-    expect(count(waiting, "var(--amber)")).toBe(16);
+    expect(count(waiting, "var(--amber)")).toBe(22);
     expect(waiting).toContain('fill="#fff" opacity="0.45"');
     expect(waiting).toContain('fill="#000" opacity="0.35"');
     expect(S.shadedMark({ state: "waiting", t: 3, ratio: 2 })).toBe(waiting);
     expect(S.shadedMark({ state: "waiting", t: 4, ratio: 2 })).toContain('fill="var(--amber)" opacity="0.25"');
     expect(S.shadedMark({ state: "waiting", t: 8, ratio: 2 })).toBe(waiting);
     const error = S.shadedMark({ state: "error", t: 5, ratio: 2 });
-    expect(count(error, "var(--red)")).toBe(16);
+    expect(count(error, "var(--red)")).toBe(22);
     expect(error).not.toContain("--amber");
   });
 

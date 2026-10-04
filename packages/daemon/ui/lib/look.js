@@ -72,7 +72,6 @@ export const pageLook = () => (globalThis.document?.documentElement.classList.co
 // ---------- line icons: an 18 pt board, 1.5 pt strokes on half pixels (docs/design/concepts/classic.html) ----------
 const BOX = '<rect x="1.75" y="3.25" width="14.5" height="11.5" rx="2.75"/>';
 export const ICONS = {
-  dispatch: '<g fill="currentColor" stroke="none"><rect x="1.5" y="7" width="4" height="4" rx="1.2"/><rect x="12.5" y="1.75" width="4" height="4" rx="1.2"/><rect x="12.5" y="7" width="4" height="4" rx="1.2"/><rect x="12.5" y="12.25" width="4" height="4" rx="1.2"/></g><path d="M5.5 9h7M5.5 8.25C9.6 8.25 8.4 3.75 12.5 3.75M5.5 9.75C9.6 9.75 8.4 14.25 12.5 14.25"/>',
   terminal: BOX + '<path d="M5 6.75 7.25 9 5 11.25M9.5 11.25h3.5"/>',
   sidebar: BOX + '<path d="M6.75 3.25v11.5M3.75 6.25h1.25M3.75 8.5h1.25"/>',
   plus: '<path d="M9 3.75v10.5M3.75 9h10.5"/>',
@@ -100,6 +99,36 @@ export const AGENT_ICON = { "claude-code": "claude", codex: "codex", opencode: "
 export function icon(name, size = 16) {
   if (!Object.hasOwn(ICONS, name)) return "";
   return `<svg class="ci" width="${size}" height="${size}" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+}
+
+// ---------- the app's mark as lines (docs/ui-v0.md §10): 14 × 11 units, the Mac's and the phone's ClassicMark ----------
+const MARK = { w: 9, h: 6.2, r: 1.5, line: 0.95, gap: 0.8, at: [[5, 0], [2.5, 2.4], [0, 4.8]] };
+const round = (n) => Number(n.toFixed(3));
+/** A rounded rectangle as a path, grown by `g` on every side. */
+const box = (x, y, g = 0) => {
+  const r = MARK.r + g, w = MARK.w + 2 * g, h = MARK.h + 2 * g;
+  return `M${round(x - g + r)} ${round(y - g)}h${round(w - 2 * r)}a${r} ${r} 0 0 1 ${r} ${r}v${round(h - 2 * r)}a${r} ${r} 0 0 1 ${-r} ${r}h${round(-(w - 2 * r))}a${r} ${r} 0 0 1 ${-r} ${-r}v${round(-(h - 2 * r))}a${r} ${r} 0 0 1 ${r} ${-r}z`;
+};
+/** A window's title bar: its top `height`, the upper corners round. */
+const bar = (x, y, height) => `M${x} ${round(y + height)}V${round(y + MARK.r)}a${MARK.r} ${MARK.r} 0 0 1 ${MARK.r} ${-MARK.r}h${round(MARK.w - 2 * MARK.r)}a${MARK.r} ${MARK.r} 0 0 1 ${MARK.r} ${MARK.r}V${round(y + height)}z`;
+const MARK_COLOR = { busy: "var(--cyan)", waiting: "var(--amber)", error: "var(--red)" };
+let markId = 0;
+
+/** The app's mark in a state: three windows one behind another, each with its title bar; the front one's is the
+ *  state's light — the accent while busy, amber while something waits, red on an error — and it has its three dots, a
+ *  prompt and a cursor. Off: the whole mark faint. `size` is its width in CSS px. */
+export function mark(state = "idle", size = 18) {
+  const id = `cm${markId++}`;
+  const [back, mid, front] = MARK.at;
+  const behind = ([x, y], [nx, ny], strength, n) => `<clipPath id="${id}${n}"><path clip-rule="evenodd" d="M-1 -1h16v13h-16z${box(nx, ny, MARK.gap)}"/></clipPath>`
+    + `<g clip-path="url(#${id}${n})" opacity="${strength}"><path d="${bar(x, y, 1.5)}" fill="currentColor"/><path d="${box(x, y, -MARK.line / 2)}" fill="none" stroke="currentColor" stroke-width="${MARK.line}"/></g>`;
+  const [fx, fy] = front;
+  const dots = [0, 1, 2].map((i) => `M${round(fx + 1.19 + 1.2 * i)} ${round(fy + 1.15)}a.36 .36 0 1 0 .72 0a.36 .36 0 1 0 -.72 0z`).join("");
+  const body = `<clipPath id="${id}f"><rect x="-1" y="${round(fy + 2.2)}" width="16" height="12"/></clipPath>`
+    + `<path clip-path="url(#${id}f)" d="${box(fx, fy, -MARK.line / 2)}" fill="none" stroke="currentColor" stroke-width="${MARK.line}"/>`
+    + `<path d="M${fx + 1.9} ${round(fy + 2.9)}l1.05 .85l-1.05 .85M${fx + 4} ${round(fy + 4.6)}h1.7" fill="none" stroke="currentColor" stroke-width=".75" stroke-linecap="round" stroke-linejoin="round"/>`
+    + `<path fill-rule="evenodd" d="${bar(fx, fy, 2.2)}${dots}" fill="${MARK_COLOR[state] ?? "currentColor"}"/>`;
+  return `<svg class="ci cmark" width="${size}" height="${round(size * 11 / 14)}" viewBox="0 0 14 11"${state === "off" ? ' opacity=".4"' : ""} aria-hidden="true">${behind(back, mid, 0.28, "b")}${behind(mid, front, 0.45, "m")}${body}</svg>`;
 }
 
 /** In progress: the system's spinner, eight fading spokes turning in steps (still with Reduce Motion, in the CSS). */
