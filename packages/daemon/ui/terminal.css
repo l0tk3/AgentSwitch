@@ -320,6 +320,17 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; }
 /* ---------- new terminal ---------- */
 .create { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--term); overflow-y: auto; z-index: 1; }
 .create-card { width: min(560px, 100%); }
+/* In a pane (two or more on the page): the form in the room that pane has — no wordmark, the agents two to a row
+   where four do not fit, and the whole of it within reach when the pane is lower than the form. */
+.create.in-pane { display: flex; padding: 14px 16px; container-type: inline-size; }
+.create.in-pane .create-card { margin: auto; }
+.create.in-pane .wordmark { display: none; }
+.create.in-pane .create-card > .label { margin-top: 0; }
+@container (max-width: 520px) {
+  .create.in-pane .agents { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .create.in-pane .agent { flex-direction: row; align-items: center; gap: 8px; padding: 7px 9px; }
+  .create.in-pane .agent small { margin-left: auto; }
+}
 .wordmark { height: 48px; margin-bottom: 20px; display: flex; align-items: flex-end; }
 .wordmark .noise { margin: 0; font-family: var(--mono); letter-spacing: 0; color: var(--ink4); }
 .wordmark .noise .on { color: var(--ink); font-weight: 400; }

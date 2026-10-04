@@ -768,16 +768,18 @@ function renderPanes() {
     if (many) {
       const n = all.findIndex((q) => q.id === id) + 1;
       const where = t ? [folderOf(t.workdir || t.cwd), gitWords(gits[t.workdir || t.cwd])].filter(Boolean).join(" · ") : "";
+      // The pane a terminal is being made in says so; what it showed is back if the form is left.
+      const making = creating && id === focusPane;
       head.replaceChildren(...[
         h("span", { class: "no" }, String(n)),
-        t ? h("span", { class: "st" }, statusMark(t)) : null,
-        t ? h("span", { class: "nm" }, t.name) : h("span", { class: "at" }, "Empty"),
-        t ? h("span", { class: "at" }, where) : null,
+        t && !making ? h("span", { class: "st" }, statusMark(t)) : null,
+        making ? h("span", { class: "nm" }, "New Terminal") : t ? h("span", { class: "nm" }, t.name) : h("span", { class: "at" }, "Empty"),
+        t && !making ? h("span", { class: "at" }, where) : null,
         h("span", { class: "grow" }),
         zoomed ? h("span", { class: "at" }, `Pane ${n} of ${all.length} · ⌘⇧↩`) : null,
         // A request waiting in a pane out of focus: its card shows once the pane has the focus.
         t && id !== focusPane && t.permissions?.length ? h("span", { class: "w" }, W("[!] Approval")) : null,
-        t ? agentMark(t.harness) : null,
+        t && !making ? agentMark(t.harness) : null,
         zoomed ? null : h("button", { class: "x", title: "Close Pane", onclick: () => closePane(id) }, raw(glyph(X_ICON, 1, "x", 12))),
       ].filter(Boolean));
     }
@@ -854,9 +856,14 @@ function showPaneAway(id, place) {
 function placeFloats(inPane) {
   const layer = document.querySelector(".composer-layer");
   const el = inPane ? paneEls.get(focusPane) : null;
-  if (!el) { for (const n of [$("loading"), $("toasts"), layer]) n.style.cssText = ""; return; }
+  $("create").classList.toggle("in-pane", !!el);
+  if (!el) { for (const n of [$("loading"), $("toasts"), layer, $("create")]) n.style.cssText = ""; return; }
   const b = el.lastChild.getBoundingClientRect(), stage = $("stage").getBoundingClientRect(), main = layer.parentElement.getBoundingClientRect();
-  $("loading").style.cssText = `inset:auto;left:${b.x - stage.x}px;top:${b.y - stage.y}px;width:${b.width}px;height:${b.height}px`;
+  const over = `inset:auto;left:${b.x - stage.x}px;top:${b.y - stage.y}px;width:${b.width}px;height:${b.height}px`;
+  $("loading").style.cssText = over;
+  // A terminal is made in the pane in focus: its form lies over that pane alone, and the other panes go on showing
+  // theirs (it used to cover them all, with the lines between the panes drawn across it).
+  $("create").style.cssText = over;
   $("toasts").style.cssText = `top:${b.y - stage.y + 12}px;right:${stage.right - b.right + 20}px;width:min(460px, ${Math.max(200, b.width - 40)}px)`;
   layer.style.cssText = `left:${b.x - main.x + 14}px;right:${main.right - b.right + 14}px;bottom:${main.bottom - b.bottom + 14}px`;
 }
@@ -871,7 +878,7 @@ function tellScreens() {
     if (!p) continue;
     const r = el.querySelector(".pane-screen").getBoundingClientRect();
     const t = paneTerminal(p);
-    list.push({ pane: id, id: creating || !t ? null : t.id, rect: [r.x, r.y, r.width, r.height].map(Math.round), cwd: t ? t.workdir || t.cwd : "", focused: id === focusPane });
+    list.push({ pane: id, id: (creating && id === focusPane) || !t ? null : t.id, rect: [r.x, r.y, r.width, r.height].map(Math.round), cwd: t ? t.workdir || t.cwd : "", focused: id === focusPane });
   }
   tellWindow("screens", { panes: list });
 }

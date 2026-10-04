@@ -171,6 +171,16 @@ enum TerminalProbe {
                     say("panes: screen \(pane) holds: \(lines.suffix(3).joined(separator: " / "))")
                 }
                 await shots("panes-two")
+                // A new terminal asked for with two panes showing (the bar's +, ⌘T): the form lies over the pane in
+                // focus alone — the other pane's screen goes on showing its terminal — and Esc gives the pane back.
+                let form = "(() => { const c = document.getElementById('create'), b = document.querySelector('#panes .pane.focus .pane-body'); if (!c || !b) return 'no form'; const r = c.getBoundingClientRect(), p = b.getBoundingClientRect(); return JSON.stringify({hidden: c.hidden, inPane: c.classList.contains('in-pane'), form: [r.x, r.y, r.width, r.height].map(Math.round), pane: [p.x, p.y, p.width, p.height].map(Math.round), head: document.querySelector('#panes .pane.focus .pane-head').innerText.replace(/\\s+/g, ' ').trim()}); })()"
+                _ = await js("window.agentswitch.newTerminal(), ''")
+                try? await Task.sleep(for: .milliseconds(1200))
+                say("panes: new terminal with two panes: \(await js(form)) native \(native())")
+                await shots("panes-new")
+                _ = await js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})), ''")
+                try? await Task.sleep(for: .milliseconds(1200))
+                say("panes: the form left with esc: \(await js(form)) native \(native())")
                 // The line between them dragged 160 pt to the left.
                 let drag = "(() => { const l = document.querySelector('.pane-line'); const r = l.getBoundingClientRect(); const x = r.x + 3, y = r.y + 40; l.dispatchEvent(new PointerEvent('pointerdown', {button: 0, clientX: x, clientY: y, bubbles: true})); window.dispatchEvent(new PointerEvent('pointermove', {clientX: x - 160, clientY: y, bubbles: true})); const sizes = [...document.querySelectorAll('.pane-size')].map(e => e.textContent); window.dispatchEvent(new PointerEvent('pointerup', {clientX: x - 160, clientY: y, bubbles: true})); return JSON.stringify(sizes); })()"
                 say("panes: line dragged, sizes said meanwhile \(await js(drag))")
