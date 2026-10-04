@@ -39,6 +39,12 @@ esac
 if pgrep -f "$APP/Contents/" >/dev/null 2>&1; then
   die "$APP is running; quit it first or build elsewhere with APP_OUT=build/next/AgentSwitch.app"
 fi
+# The bundle is assembled and signed out of the app's sight and moved into place whole at the end. The running app
+# offers a staged bundle as soon as it sees one in build/next, and one switched in before its signature was finished
+# is killed as it starts (2026-10-04: the update went in while codesign was still at work, and the app would not open).
+OUT="$APP"
+APP="$BUILD/assembling/AgentSwitch.app"
+rm -rf "$BUILD/assembling"
 
 [ "$(uname -m)" = "arm64" ] || die "this build targets Apple silicon (arm64)"
 for tool in curl shasum tar rsync xcodegen xcodebuild codesign ditto strip; do
@@ -227,7 +233,14 @@ check_no_build_paths
 SIGN="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -n 1)}"
 SIGN="${SIGN:--}"
 codesign --force --deep --timestamp=none --sign "$SIGN" "$APP"
-codesign --verify --deep --strict "$APP" && if [ "$SIGN" = "-" ]; then echo "signature ok (ad-hoc)"; else echo "signature ok (development identity: stable across builds)"; fi
+codesign --verify --deep --strict "$APP" || die "the signature does not verify: $APP"
+if [ "$SIGN" = "-" ]; then echo "signature ok (ad-hoc)"; else echo "signature ok (development identity: stable across builds)"; fi
+# Only now where it was asked for: whole and signed.
+rm -rf "$OUT"
+mkdir -p "$(dirname "$OUT")"
+mv "$APP" "$OUT"
+rmdir "$BUILD/assembling" 2>/dev/null || true
+APP="$OUT"
 
 log "done"
 cat "$RUNTIME/VERSIONS"
