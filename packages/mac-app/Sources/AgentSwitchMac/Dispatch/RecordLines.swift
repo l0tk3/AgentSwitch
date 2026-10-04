@@ -18,17 +18,20 @@ struct UserBox: View {
     let text: String
     var attached = 0
     var faded = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 140)
             VStack(alignment: .trailing, spacing: 4) {
+                // The classic look's bubble: the accent's colour, round (docs/ui-v0.md §8); the pixel look keeps its
+                // signal off text grounds.
                 TypedText(text: text, size: 14, lineSpacing: 5)
-                    .foregroundStyle(Look.ink)
+                    .foregroundStyle(look.isClassic ? Color.white : Look.ink)
                     .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
-                    .background(Look.raised)
-                    .overlay(Rectangle().strokeBorder(Look.line, lineWidth: 1))
+                    .padding(.vertical, look.isClassic ? 8 : 9)
+                    .grounded(look.isClassic ? Color.signal : Look.raised, radius: Look.bubbleRadius)
+                    .framed(look.isClassic ? Color.clear : Look.line, radius: Look.bubbleRadius)
                     .opacity(faded ? 0.55 : 1)
                 if attached > 0 { Text("\(attached) attached").mono(11).foregroundStyle(Look.ink2) }
             }
@@ -42,6 +45,7 @@ struct AssistantLineView: View {
     let model: DispatchModel
     let open: (DispatchRoute) -> Void
     let delete: (DeleteRequest) -> Void
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -65,8 +69,12 @@ struct AssistantLineView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let dot = line.dot {
-                    Rectangle().fill(dot == .busy ? Color.busy : dot == .off ? Look.faint : dot.color).frame(width: 6, height: 6)
-                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                    Group {
+                        let color = dot == .busy ? Color.busy : dot == .off ? Look.faint : dot.color
+                        if look.isClassic { Circle().fill(color) } else { Rectangle().fill(color) }
+                    }
+                    .frame(width: 6, height: 6)
+                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 }
                 // Reports in the secondary ink; both are model output, so Markdown (their code as code).
                 MarkdownBlocks(text: line.message.text, size: 14, color: line.isSecondary ? Look.ink2 : Look.ink, lineSpacing: 6)
@@ -76,7 +84,11 @@ struct AssistantLineView: View {
             if line.isAnswer {
                 let speaking = model.speaker.isSpeaking(key)
                 Button { model.speaker.toggle(key, text: line.text) } label: {
-                    Text(speaking ? "■ Stop" : "▸ Read Aloud").mono(11.5)
+                    if look.isClassic {
+                        Label(speaking ? "Stop" : "Read Aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2").font(.system(size: 11.5))
+                    } else {
+                        Text(speaking ? "■ Stop" : "▸ Read Aloud").mono(11.5)
+                    }
                 }
                 .buttonStyle(QuietButtonStyle(active: speaking))
             }
@@ -128,9 +140,9 @@ struct EndLine: View {
             HStack(spacing: 8) {
                 StatusMark(level: task.status.level)
                 Text(DispatchMarkdown.codeSpans(title).codeWashed()).font(.system(size: 13)).foregroundStyle(Look.ink2).lineLimit(1)
-                Text(task.statusLabel).mono(12).foregroundStyle(task.status.level.wordColor)
+                LookWord(task.statusLabel).mono(12).foregroundStyle(task.status.level.wordColor)
                 Spacer(minLength: 0)
-                Text("›").mono(12).foregroundStyle(Look.faint)
+                LookGlyph(glyph: "›", symbol: "chevron.right").foregroundStyle(Look.faint)
             }
             .contentShape(Rectangle())
         }
@@ -150,12 +162,12 @@ struct TaskLinkRow: View {
         Button(action: open) {
             HStack(spacing: 8) {
                 TaskMark(level: waiting ? .warning : task.status.level, waiting: waiting || task.waitsForYou)
-                Text(waiting ? DispatchTaskStatus.waitingApproval.label : task.statusLabel).mono(12)
+                LookWord(waiting ? DispatchTaskStatus.waitingApproval.label : task.statusLabel).mono(12)
                     .foregroundStyle((waiting ? StatusLevel.warning : task.status.level).wordColor)
                 Text(DispatchMarkdown.codeSpans(title).codeWashed()).font(.system(size: 13)).foregroundStyle(Look.ink).lineLimit(1)
                 Spacer(minLength: 0)
                 if unread { UnreadSquare() }
-                Text("›").mono(12).foregroundStyle(Look.faint)
+                LookGlyph(glyph: "›", symbol: "chevron.right").foregroundStyle(Look.faint)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
@@ -200,7 +212,7 @@ struct DayLabel: View {
     let text: String
 
     var body: some View {
-        Text(text).font(.system(size: 11, design: .monospaced)).foregroundStyle(Look.faint)
+        Text(text).mono(11).foregroundStyle(Look.faint)
             .frame(maxWidth: .infinity)
             .padding(.top, 10)
     }
@@ -217,12 +229,12 @@ struct BannerLine: View {
             Text(text).font(.system(size: 12.5)).foregroundStyle(Look.ink).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            Button(action: close) { Text("×").mono(14) }
+            Button(action: close) { LookGlyph(glyph: "×", symbol: "xmark", size: 14) }
                 .buttonStyle(QuietButtonStyle())
                 .help("Close")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .overlay(Rectangle().strokeBorder(Color.failed, lineWidth: 1))
+        .framed(Color.failed, radius: 8)
     }
 }

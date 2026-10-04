@@ -83,11 +83,39 @@ public enum PixelArt {
         "......#......", "......#......", "......#......", "......#......", "......#......", "......#......",
     ]
 
+    /// The Terminals bar's split buttons (docs/terminal-v0.md §1 分屏, 2026-10-03; docs/design/implemented/split.html), the
+    /// list's window with a line down its middle (split right) or across it (split down).
+    public static let toolbarSplitRight = [
+        ".################.", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#",
+        "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#",
+        "#........#.......#", ".################.",
+    ]
+    public static let toolbarSplitDown = [
+        ".################.", "#................#", "#................#", "#................#", "#................#", "#................#",
+        "##################", "#................#", "#................#", "#................#", "#................#", "#................#",
+        "#................#", ".################.",
+    ]
+
     /// The main window's settings (dispatch-v0 §1), at the toolbar's weight: three sliders (a gear at this size is a blob,
     /// docs/design/concepts/menu-icons.html); docs/design/implemented/mac-window.html `ICON.sliders`.
     public static let toolbarSettings = [
         "..##.........", "#############", "..##.........", ".............", ".............", "........##...", "#############",
         "........##...", ".............", ".............", ".....##......", "#############", ".....##......",
+    ]
+
+    /// The main window's rail (2026-10-03, proposal B, docs/design/implemented/window-bars.html), in the bar's 1 pt cells
+    /// and one ink: the app's mark for Dispatch, a terminal window with its title bar and a prompt for Terminals, a globe
+    /// — a one-pixel circle, a meridian, the equator — for Browser (the phone's tab icon drawn at 15 × 15); the settings
+    /// at its foot are `toolbarSettings`.
+    public static let railDispatch: [String] = markRows.map { String($0.map { $0 == "." ? "." : "#" }) }
+    public static let railTerminals = [
+        "################", "#..............#", "################", "#..............#", "#.#............#", "#..#...........#",
+        "#...#..........#", "#..#...........#", "#.#...######...#", "#..............#", "#..............#", "################",
+    ]
+    public static let railBrowser = [
+        ".....#####.....", "...##.....##...", "..#..#...#..#..", ".#..#.....#..#.", ".#..#.....#..#.", "#...#.....#...#",
+        "#...#.....#...#", "###############", "#...#.....#...#", "#...#.....#...#", ".#..#.....#..#.", ".#..#.....#..#.",
+        "..#..#...#..#..", "...##.....##...", ".....#####.....",
     ]
 
     /// The lit cells of a sprite.

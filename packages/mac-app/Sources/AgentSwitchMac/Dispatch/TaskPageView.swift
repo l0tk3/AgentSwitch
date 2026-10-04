@@ -99,7 +99,7 @@ struct TaskPageView: View {
                         Text(thread.displayTitle).foregroundStyle(Look.ink2)
                         Text("›").foregroundStyle(Look.faint)
                     }
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .mono(11.5)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 4)
@@ -194,7 +194,7 @@ struct TaskPageView: View {
                     }
                 }
             }
-            .font(.system(size: 12, design: .monospaced))
+            .mono(12)
         }
     }
 
@@ -214,10 +214,10 @@ struct TaskPageView: View {
             ForEach([(1, "Useful"), (-1, "Not Useful")], id: \.0) { value, word in
                 Button { Task { await page.rate(value, model) } } label: {
                     HStack(spacing: 6) {
-                        Text(task.rating == value ? "<x>" : "< >").foregroundStyle(task.rating == value ? Color.signal : Look.ink2)
+                        LookChoice(on: task.rating == value, size: 12.5).foregroundStyle(task.rating == value ? Color.signal : Look.ink2)
                         Text(word).foregroundStyle(Look.ink)
                     }
-                    .font(.system(size: 12.5, design: .monospaced))
+                    .mono(12.5)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

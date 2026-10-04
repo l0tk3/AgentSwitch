@@ -52,6 +52,14 @@ struct DispatchPage: View {
         .onChange(of: window.windowKey && window.windowVisible && window.dispatchShown, initial: true) { _, key in model.windowKey = key }
         .onChange(of: window.editingText, initial: true) { _, editing in model.editingText = editing }
         .onChange(of: routes, initial: true) { routesChanged() }
+        // The status bar's right on Dispatch: the router's model and the open topics.
+        .onChange(of: StatusFacts(router: model.targets?.routerModel?.model, topics: model.threads.filter { $0.status == "open" }.count),
+                  initial: true) { _, facts in window.dispatchChanged(router: facts.router, topics: facts.topics) }
+    }
+
+    private struct StatusFacts: Equatable {
+        let router: String?
+        let topics: Int
     }
 
     @ViewBuilder

@@ -18,6 +18,14 @@ private let browserLog = Logger(subsystem: "com.agentswitch.mac", category: "bro
 ///   one it holds; an agent's tab is taken over first. Holding a tab sets its size to the screen's and keeps it so as
 ///   the window changes; handing back lets the daemon put the default back. Another tab on screen, or the window
 ///   closing, hands back every tab this Mac holds.
+/// - 尺寸有主 (2026-10-03, as the phone): your own tab on screen in a visible window is taken quietly while no other
+///   screen holds it, so it has the browser area's size; its size is set again every minute while it is shown (the
+///   daemon's two idle minutes would give it back). The stream asks for the display's device pixels
+///   (BrowserScreenPolicy), again when the window moves to a display of another scale.
+/// - The tab list's column (BrowserSide): its width and whether it is open, kept on this Mac; the bar's list button and
+///   ⌘B toggle it.
+/// - The page's zoom (BrowserPageModel+Zoom.swift): the status bar's `−` `100%` `+`, ⌘− ⌘+; a tab this Mac sizes has
+///   the browser area ÷ its site's zoom, remembered on this Mac.
 /// - New tabs (the address field, the recent addresses, the Mac's local servers), closing, navigation (a mouse's side
 ///   buttons too).
 /// - Fill Ciphertext (BrowserFillSheet), on your own tabs only: a whole ciphertext, or one sealed here by this Mac's
@@ -53,6 +61,16 @@ final class BrowserPageModel {
     var fillTarget: BrowserFillTarget?
     /// A fill, or the seal before it, is under way.
     private(set) var filling = false
+    /// The tab list's column: its width and whether it is open, kept on this Mac (`browser.side`).
+    var side: BrowserSide {
+        didSet { if side != oldValue { defaults?.set(side.stored, forKey: BrowserSide.storeKey) } }
+    }
+    /// Each site's zoom, kept on this Mac (`browser.zoom`), and the steps the browser area can use now; what they make
+    /// of the tab on screen is BrowserPageModel+Zoom.swift.
+    var zoomMemory: BrowserZoomMemory {
+        didSet { if zoomMemory != oldValue { defaults?.set(zoomMemory.stored, forKey: BrowserZoomMemory.storeKey) } }
+    }
+    private(set) var zoomSteps: [Int]
 
     var current: BrowserTab? { list.tab(selectedID) }
     var screenID: String { BrowserDefaults.screen }
@@ -103,9 +121,23 @@ final class BrowserPageModel {
     @ObservationIgnored private var streamRetry = BrowserStreamRetry()
     /// Agents' tabs whose take-over notice was said (once a tab while the window is open).
     @ObservationIgnored private var noticed: Set<String> = []
+    /// Your own tab on screen being taken (尺寸有主), and the last try, so a refusal is not asked again at every poll.
+    @ObservationIgnored private var claiming = false
+    @ObservationIgnored private var lastClaim: (id: String, at: ContinuousClock.Instant)?
+    /// When this Mac last set the size of the tab on screen (renewed every minute while shown).
+    @ObservationIgnored private var lastSized = ContinuousClock.now
+    /// What the stream on screen asked for. It follows again when it should ask for something else: the window on a
+    /// display of another scale or of other pixels, a step of the zoom that changes the frame pixels asked for, and,
+    /// zoomed out past the display's pixels, another size of the browser area (BrowserScreenPolicy.stream).
+    @ObservationIgnored private var streamAsked: BrowserStreamOptions?
+    /// The page's zoom this Mac last sized the tab on screen with; nil until it has sized it.
+    @ObservationIgnored private var sizedZoom: Double?
 
-    /// `defaults`: where the recent addresses are kept (nil: not kept, the design preview). `sealer`: this Mac's gate,
-    /// for `New…` in Fill Ciphertext.
+    /// A claim is tried again after this long when it did not hold (another screen took the tab meanwhile).
+    private static let claimRetry: Duration = .seconds(5)
+
+    /// `defaults`: where the recent addresses, the list's column and the sites' zoom are kept (nil: not kept, the design
+    /// preview). `sealer`: this Mac's gate, for `New…` in Fill Ciphertext.
     init(service: @escaping () -> any BrowserService, state: MainWindowState?, defaults: UserDefaults? = .standard, recents: [String]? = nil,
          sealer: BrowserSealer? = nil) {
         self.service = service
@@ -113,12 +145,21 @@ final class BrowserPageModel {
         self.state = state
         self.defaults = defaults
         self.recents = recents ?? defaults?.stringArray(forKey: BrowserRecents.storeKey) ?? []
+        side = BrowserSide.restored(defaults?.string(forKey: BrowserSide.storeKey))
+        zoomMemory = BrowserZoomMemory.restored(defaults?.string(forKey: BrowserZoomMemory.storeKey))
+        zoomSteps = BrowserPageZoom.usable(in: screen.bounds.size)
         screen.onInput = { [weak self] event in self?.input(event) }
         screen.onPaste = { [weak self] in self?.paste() }
         screen.onCopy = { [weak self] in self?.say("画面中的内容无法复制。") }
         screen.onResize = { [weak self] in self?.screenResized() }
         screen.onHistory = { [weak self] action in self?.sideButton(action) }
+        screen.onDisplayChange = { [weak self] in self?.displayChanged() }
     }
+
+    // MARK: the tab list's column
+
+    /// The bar's list button and ⌘B.
+    func toggleList() { side = side.toggled() }
 
     // MARK: on screen or not
 
@@ -130,6 +171,7 @@ final class BrowserPageModel {
         self.visible = visible
         if polling { restartPolling() }
         updateStream()
+        claimIfOwn()
     }
 
     /// The window closed: everything stops; every tab this Mac holds is handed back (its size goes back to the default).
@@ -172,6 +214,7 @@ final class BrowserPageModel {
             guard !Task.isCancelled else { return }
             apply(fresh)
             if problem != nil { problem = nil }
+            renewIfDue()
         } catch is CancellationError {
             return
         } catch {
@@ -204,6 +247,9 @@ final class BrowserPageModel {
             lastTitle = title
             onTitle()
         }
+        // Before a tab is taken and sized: the size asked for is at its site's zoom.
+        followZoom()
+        claimIfOwn()
     }
 
     static func mark(_ status: BrowserTabStatus) -> BarTitle.Mark {
@@ -221,6 +267,7 @@ final class BrowserPageModel {
     func select(_ id: String?) {
         guard id != selectedID else { return }
         selectedID = id
+        sizedZoom = nil
         handBackHeld(keeping: id)
         queue.removeAll()
         inputTask?.cancel()
@@ -254,13 +301,61 @@ final class BrowserPageModel {
         streamTask?.cancel()
         streamTask = nil
         streamingID = nil
+        streamAsked = nil
         guard let id = wanted else { return }
         streamingID = id
-        streamTask = Task { [weak self] in await self?.follow(id) }
+        // What it asks is settled here, not once the task runs: a change of the zoom meanwhile is seen as one.
+        let options = streamOptions()
+        streamAsked = options
+        streamTask = Task { [weak self] in await self?.follow(id, options) }
     }
 
-    private func follow(_ id: String) async {
-        let stream = service().tabStream(id: id)
+    /// The stream at the display's device pixels (the window's scale, at most the display's pixels), times the page's
+    /// zoom where this Mac sizes the tab on screen.
+    private func streamOptions() -> BrowserStreamOptions {
+        let window = screen.window
+        let scale = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
+        return BrowserScreenPolicy.stream(backingScale: scale, displayPoints: (window?.screen ?? NSScreen.main)?.frame.size,
+                                          zoom: zoom?.factor ?? 1, area: screen.bounds.size)
+    }
+
+    /// The stream follows again when what it should ask for is no longer what it asked.
+    private func askAgain() {
+        guard streamingID != nil, let asked = streamAsked, streamOptions() != asked else { return }
+        updateStream(restart: true)
+    }
+
+    /// The window went to another display: the stream asks for its pixels — another scale, or the same scale and more
+    /// or fewer of them (a window moved from a 1512 × 982 display to a larger one of the same scale kept the smaller
+    /// one's bound, its picture enlarged from too few pixels; review, 2026-10-03) —, and a tab this Mac holds takes
+    /// the display's pixel ratio (the same size again is only a renewal of the hold).
+    private func displayChanged() {
+        askAgain()
+        screenResized()
+    }
+
+    /// The zoom in force for the tab on screen (BrowserPageModel+Zoom.swift) put to work, after every change of that
+    /// tab (another site, held or let go), of what is remembered and of the area: the screen draws and sizes with it;
+    /// a tab this Mac holds and sized with another zoom is sized again at once (the area did not change: nothing to
+    /// wait for) — `sizing`: also one it has not sized yet, after `−` `+` —; and the stream asks again when the frame
+    /// pixels it asks for are others (another step, unless both are at a limit), as for a display of another scale.
+    /// Not here for another bound alone (the area's pixels, zoomed out past the display's): that waits until a resize
+    /// has settled (`screenResized`), or the stream would begin again at every step of a drag.
+    func followZoom(sizing: Bool = false) {
+        let factor = zoom?.factor ?? 1
+        if screen.zoom != factor { screen.zoom = factor }
+        if shown, visible, holding, let id = selectedID, sizedZoom != factor, sizing || sizedZoom != nil {
+            sizedZoom = factor
+            Task { [weak self] in await self?.fitViewport(id) }
+        }
+        guard streamingID != nil, let asked = streamAsked, streamOptions().scale != asked.scale else { return }
+        updateStream(restart: true)
+    }
+
+    private func follow(_ id: String, _ options: BrowserStreamOptions) async {
+        // Replaced before it began (another step of the zoom at once): nothing to connect.
+        guard !Task.isCancelled else { return }
+        let stream = service().tabStream(id: id, options: options)
         do {
             var heard = false
             for try await event in stream {
@@ -299,7 +394,7 @@ final class BrowserPageModel {
             let next = event.applied(to: tab)
             if next != tab { list = list.replacing(next) }
             if case .held(let heldBy, let reason) = event, was.heldBy == screenID, heldBy != screenID,
-               let said = BrowserTabText.holdEnded(reason: reason, heldBy: heldBy) {
+               let said = BrowserScreenPolicy.holdEnded(was, reason: reason, heldBy: heldBy) {
                 say(said)
             }
             publish()
@@ -420,8 +515,23 @@ final class BrowserPageModel {
         }
     }
 
+    /// ⌘⇧T (2026-10-03): what the status bar's hold button does — `[ Hand Back ]` while this Mac holds the tab,
+    /// `[ Take Over ]` for an agent's tab or one held elsewhere; nothing for your own tab on this screen.
+    func hold() async {
+        guard let tab = current else { return }
+        switch BrowserScreenPolicy.footerHolder(tab, screen: screenID) {
+        case .thisMac?: await handBack()
+        case .elsewhere?: await takeOver()
+        case nil where tab.owner.isAgent: await takeOver()
+        case nil: break
+        }
+    }
+
+    /// The tab on screen, held by this Mac, takes the screen's size at the page's zoom (the screen's own request).
     private func fitViewport(_ id: String) async {
         guard holding, selectedID == id, let size = screen.viewportRequest else { return }
+        lastSized = .now
+        sizedZoom = screen.zoom
         do {
             replace(try await service().setViewport(tabId: id, size, screen: screenID))
         } catch {
@@ -429,14 +539,55 @@ final class BrowserPageModel {
         }
     }
 
-    /// The screen changed size: a held tab follows once it settles.
+    /// 尺寸有主 (docs/browser-v0.md §1 Mac, 2026-10-03): your own tab on screen in a visible window, nobody holding it,
+    /// is taken quietly and given the browser area's size. A take that lands after the page left, the window hid or
+    /// another tab came on screen is given back at once, its size never set.
+    private func claimIfOwn() {
+        guard shown, visible, !claiming, let tab = current, BrowserScreenPolicy.claims(tab) else { return }
+        if let last = lastClaim, last.id == tab.id, ContinuousClock.now - last.at < Self.claimRetry { return }
+        claiming = true
+        lastClaim = (tab.id, .now)
+        let id = tab.id, service = service(), me = screenID
+        Task { [weak self] in
+            do {
+                let fresh = try await service.takeOver(tabId: id, screen: me)
+                self?.claiming = false
+                // The window closed (no page left), the page left or another tab is on screen: given back at once.
+                guard let self, self.shown, self.visible, self.selectedID == id else {
+                    if fresh.heldBy == me { _ = try? await service.handBack(tabId: id, screen: me) }
+                    return
+                }
+                self.replace(fresh)
+                await self.fitViewport(id)
+            } catch {
+                self?.claiming = false
+                browserLog.error("browser claim \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// While your own tab is shown and held here, its size is set again each minute: the daemon takes the same size as
+    /// a renewal of the hold (two idle minutes would give it back and put the default size in its place).
+    private func renewIfDue() {
+        guard shown, visible, let tab = current, BrowserScreenPolicy.renews(tab, screen: screenID),
+              ContinuousClock.now - lastSized >= BrowserScreenPolicy.renewal else { return }
+        let id = tab.id
+        Task { [weak self] in await self?.fitViewport(id) }
+    }
+
+    /// The screen changed size: the zoom's steps are those the new area can use, and a held tab follows once it settles.
     private func screenResized() {
+        let steps = BrowserPageZoom.usable(in: screen.bounds.size)
+        if steps != zoomSteps { zoomSteps = steps }
+        followZoom()
         guard holding, let id = selectedID else { return }
         resizeTask?.cancel()
         resizeTask = Task { [weak self] in
             try? await Task.sleep(for: BrowserDefaults.resizeDelay)
             guard !Task.isCancelled else { return }
             await self?.fitViewport(id)
+            // Zoomed out past the display's pixels the stream's bound is the area's: another area, another bound.
+            self?.askAgain()
         }
     }
 

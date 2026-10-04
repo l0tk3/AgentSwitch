@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// window's Dispatch page, a terminal on its Terminals page; what is open there in the window in use needs no telling.
     lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id in self?.main.show(terminal: id) },
                                  openTask: { [weak self] id in self?.main.show(task: id) },
-                                 watching: { [weak self] in self?.main.watchingTerminal },
+                                 watching: { [weak self] in self?.main.watchingTerminals ?? [] },
                                  watchingTask: { [weak self] in self?.main.watchingTask })
     /// Which of our windows are open: the Dock icon shows while any is.
     private var openWindows: Set<String> = []

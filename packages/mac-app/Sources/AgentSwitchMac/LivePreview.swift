@@ -52,7 +52,7 @@ enum LivePreview {
     }
 
     private static func write<V: View>(_ view: V, to file: URL) throws {
-        let renderer = ImageRenderer(content: view)
+        let renderer = ImageRenderer(content: view.environment(\.interfaceLook, InterfaceLook.current))
         renderer.scale = 2
         guard let image = renderer.cgImage,
               let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
@@ -64,27 +64,27 @@ enum LivePreview {
     /// Made-up work (names, folders, commands), never the user's.
     private struct Samples {
         let now: Date
-        var summary: LiveSnapshot.Row { .init(id: "t4", kind: .task, title: "总结一下这周的提交", step: "选择模型", startedAt: now - 8) }
+        var summary: LiveSnapshot.Row { .init(id: "t4", kind: .task, title: "总结一下这周的提交", step: "选择模型", startedAt: now - 8, doing: "Route") }
         var bug: LiveSnapshot.Row {
-            .init(id: "t1", kind: .task, title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "Opus 5.5", startedAt: now - 640)
+            .init(id: "t1", kind: .task, title: "修 AgentSwitch 的 bug", step: "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "Opus 5.5", startedAt: now - 640, doing: "Run")
         }
-        var downloads: LiveSnapshot.Row { .init(id: "t2", kind: .task, title: "整理下载目录", step: "已交给 DeepSeek Flash", model: "DeepSeek Flash", startedAt: now - 40) }
-        var browse: LiveSnapshot.Row { .init(id: "t3", kind: .task, title: "登录 x.com 看通知", step: "浏览器 · 打开 https://x.com", startedAt: now - 15) }
+        var downloads: LiveSnapshot.Row { .init(id: "t2", kind: .task, title: "整理下载目录", step: "已交给 DeepSeek Flash", model: "DeepSeek Flash", startedAt: now - 40, doing: "Start") }
+        var browse: LiveSnapshot.Row { .init(id: "t3", kind: .task, title: "登录 x.com 看通知", step: "浏览器 · 打开 https://x.com", startedAt: now - 15, doing: "Web") }
         var terminal: LiveSnapshot.Row {
             .init(id: "k1", kind: .terminal, title: "fix-login", step: "Bash: npm test -- --watch=false", model: "Claude Code", agent: "claude-code",
-                  startedAt: now - 42, needsYou: true, ask: .decide(id: "p1", tool: "Bash", target: "npm test -- --watch=false", place: "~/Projects/web"))
+                  startedAt: now - 42, needsYou: true, ask: .decide(id: "p1", tool: "Bash", target: "npm test -- --watch=false", place: "~/Projects/web"), doing: "Allow?")
         }
         var approval: LiveSnapshot.Row {
             .init(id: "t5", kind: .task, title: "登录 x.com 发一条动态", step: "浏览器 · 点击", startedAt: now - 130, needsYou: true,
-                  ask: .decide(id: "a1", tool: "浏览器 · 点击", target: "发布按钮", place: "~/AgentSwitch/tasks/x-post"))
+                  ask: .decide(id: "a1", tool: "浏览器 · 点击", target: "发布按钮", place: "~/AgentSwitch/tasks/x-post"), doing: "Allow?")
         }
         var options: LiveSnapshot.Row {
             .init(id: "t7", kind: .task, title: "清理旧构建", step: "build/ 里有 3.2 GB 旧产物，要删掉吗？", startedAt: now - 182, needsYou: true,
-                  ask: .question(id: "a2", questionId: "q0", text: "build/ 里有 3.2 GB 旧产物，要删掉吗？", options: ["删掉", "保留"], answerable: true))
+                  ask: .question(id: "a2", questionId: "q0", text: "build/ 里有 3.2 GB 旧产物，要删掉吗？", options: ["删掉", "保留"], answerable: true), doing: "Answer")
         }
         var question: LiveSnapshot.Row {
             .init(id: "t6", kind: .task, title: "登录财务平台", step: "短信验证码是多少？", startedAt: now - 95, needsYou: true,
-                  ask: .question(id: "a3", questionId: "q0", text: "短信验证码是多少？", options: [], answerable: false))
+                  ask: .question(id: "a3", questionId: "q0", text: "短信验证码是多少？", options: [], answerable: false), doing: "Answer")
         }
         var done: LiveSnapshot.End { .init(taskId: "t2", title: "整理下载目录", line: "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。", ok: true, at: now - 1) }
         var failed: LiveSnapshot.End { .init(taskId: "t6", title: "登录财务平台", line: "登录页一直打不开，gate 代理连不上。", ok: false, at: now - 1) }

@@ -5,7 +5,10 @@ import ImageIO
 /// The Browser page's screen (docs/browser-v0.md §1 Mac, demo `docs/design/implemented/browser.html`): the tab's frames
 /// drawn aspect-fit from the top on the page's black ground, the agent's last action as a cyan box with its label over
 /// them, and the keyboard and mouse sent on as the daemon's input events (BrowserGeometry maps points to the frame's
-/// pixels; BrowserKeys says which key is what).
+/// pixels; BrowserKeys says which key is what). A tab at this screen's size comes at the display's device pixels and is
+/// drawn one CSS pixel to a point: each of its pixels on one of the display's (§5, 2026-10-03). At another zoom of the
+/// page (`zoom`, §1 页面缩放, 2026-10-03) the tab's size is the screen's ÷ the zoom and it is drawn `zoom` points to a
+/// CSS pixel: across the whole screen, a frame pixel still on one of the display's.
 ///
 /// - Frames: decoded off the main thread, only the newest (a frame that comes while one is decoded replaces the one
 ///   waiting), shown as a layer's contents. `draw(_:)` draws the same for a picture of the window (`cacheDisplay`: the
@@ -27,12 +30,28 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
     var onResize: () -> Void = {}
     /// A mouse's back or forward button.
     var onHistory: (BrowserHistoryAction) -> Void = { _ in }
+    /// The window is on another display (another scale, or other pixels at the same scale): the frames asked for
+    /// follow it.
+    var onDisplayChange: () -> Void = {}
+    private var displayObserver: NSObjectProtocol?
 
     /// Where the frame on screen sits on the page; nil before the first.
     private(set) var geometry: BrowserFrameGeometry?
     private var image: CGImage?
     private var action: (box: BrowserBox, label: String)?
+    /// The page's zoom where this Mac sizes the tab on screen (the model's; 1 where it does not): the size asked for
+    /// is the screen's ÷ it, and the picture of that size is drawn that many points to a CSS pixel.
+    var zoom = 1.0 {
+        didSet {
+            guard zoom != oldValue else { return }
+            place()
+            needsDisplay = true
+        }
+    }
 
+    /// Keeps the picture inside the screen: a tab this Mac sized is drawn a frame pixel to a pixel of the display, up to
+    /// half a CSS pixel past the right or the foot (BrowserGeometry.fit), and that is cut. The action's box is not.
+    private let imageClip = CALayer()
     private let imageLayer = CALayer()
     private let boxLayer = CALayer()
     private let labelLayer = CALayer()
@@ -58,11 +77,15 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        for layer in [imageLayer, boxLayer, labelLayer, labelText] {
+        for layer in [imageClip, imageLayer, boxLayer, labelLayer, labelText] {
             layer.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull(), "frame": NSNull(), "hidden": NSNull()]
         }
+        imageClip.masksToBounds = true
+        imageClip.addSublayer(imageLayer)
         imageLayer.contentsGravity = .resize
         imageLayer.magnificationFilter = .linear
+        // A frame at the device pixels of a page larger than the screen is drawn smaller: filtered across its mipmaps.
+        imageLayer.minificationFilter = .trilinear
         boxLayer.borderColor = Self.cyan.cgColor
         boxLayer.borderWidth = 2
         boxLayer.isHidden = true
@@ -99,7 +122,7 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
 
     override func makeBackingLayer() -> CALayer {
         let layer = CALayer()
-        for sub in [imageLayer, boxLayer, labelLayer] { layer.addSublayer(sub) }
+        for sub in [imageClip, boxLayer, labelLayer] { layer.addSublayer(sub) }
         return layer
     }
 
@@ -112,6 +135,18 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
         let scale = window?.backingScaleFactor ?? 2
         labelText.contentsScale = scale
         imageLayer.contentsScale = scale
+        onDisplayChange()
+    }
+
+    /// A display of the same scale changes no backing property: the window says it moved.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let displayObserver { NotificationCenter.default.removeObserver(displayObserver) }
+        displayObserver = window.map { window in
+            NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onDisplayChange() }
+            }
+        }
     }
 
     override func layout() {
@@ -148,10 +183,12 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
     /// An image drawn at once (the design preview's made-up frames).
     func present(_ image: CGImage, _ geometry: BrowserFrameGeometry) {
         self.image = image
-        let resized = self.geometry.map { $0.width != geometry.width || $0.height != geometry.height } ?? true
+        // Placed again for other pixels, and for the same at another scale (a step of the page's zoom, 2026-10-03):
+        // the action's box is elsewhere on them.
+        let placed = self.geometry.map(geometry.sits(as:)) ?? false
         self.geometry = geometry
         imageLayer.contents = image
-        if resized { place() }
+        if !placed { place() }
         needsDisplay = true
     }
 
@@ -179,10 +216,10 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
         needsDisplay = true
     }
 
-    /// The size the Mac asks for while it holds the tab: these points, at the display's scale.
+    /// The size the Mac asks for while it holds the tab: these points ÷ the page's zoom, at the display's scale × it.
     var viewportRequest: BrowserViewportRequest? {
         guard bounds.width >= 1, bounds.height >= 1 else { return nil }
-        return BrowserGeometry.viewport(for: bounds.size, backingScale: Double(window?.backingScaleFactor ?? 2))
+        return BrowserGeometry.viewport(for: bounds.size, backingScale: Double(window?.backingScaleFactor ?? 2), zoom: zoom)
     }
 
     var hasFrame: Bool { image != nil }
@@ -191,13 +228,14 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
+        imageClip.frame = bounds
         guard let geometry else {
             imageLayer.frame = .zero
             boxLayer.isHidden = true
             labelLayer.isHidden = true
             return
         }
-        imageLayer.frame = BrowserGeometry.fit(geometry, in: bounds.size)
+        imageLayer.frame = BrowserGeometry.fit(geometry, in: bounds.size, zoom: zoom)
         guard let (outline, label, labelSize) = overlay(geometry) else {
             boxLayer.isHidden = true
             labelLayer.isHidden = true
@@ -214,7 +252,7 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
     /// The box around the action's element (2 pt cyan, 3 pt out, as the demo's outline) and where its label goes: above
     /// it, or below when there is no room above.
     private func overlay(_ geometry: BrowserFrameGeometry) -> (CGRect, CGPoint, CGSize)? {
-        guard let action, let rect = BrowserGeometry.viewRect(action.box, frame: geometry, in: bounds.size) else { return nil }
+        guard let action, let rect = BrowserGeometry.viewRect(action.box, frame: geometry, in: bounds.size, zoom: zoom) else { return nil }
         let outline = rect.insetBy(dx: -5, dy: -5)
         let text = (action.label as NSString).size(withAttributes: [.font: Self.labelFont])
         let size = CGSize(width: min(ceil(text.width) + 12, max(bounds.width - 8, 40)), height: ceil(text.height) + 4)
@@ -229,8 +267,12 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
         NSColor.black.setFill()
         bounds.fill()
         guard let geometry, let image else { return }
-        NSImage(cgImage: image, size: .zero).draw(in: BrowserGeometry.fit(geometry, in: bounds.size), from: .zero, operation: .sourceOver,
+        // Cut at the screen's edges, as `imageClip` cuts the layer.
+        NSGraphicsContext.saveGraphicsState()
+        bounds.clip()
+        NSImage(cgImage: image, size: .zero).draw(in: BrowserGeometry.fit(geometry, in: bounds.size, zoom: zoom), from: .zero, operation: .sourceOver,
                                                   fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high.rawValue])
+        NSGraphicsContext.restoreGraphicsState()
         guard let (outline, label, size) = overlay(geometry), let text = action?.label else { return }
         Self.cyan.setStroke()
         let path = NSBezierPath(rect: outline.insetBy(dx: 1, dy: 1))
@@ -283,7 +325,7 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
         let point = convert(event.locationInWindow, from: nil)
         let down = action == .down
         if !down, !pressed.contains(button.rawValue) { return }
-        guard let at = BrowserGeometry.framePoint(point, frame: geometry, in: bounds.size, clamped: !down) else { return }
+        guard let at = BrowserGeometry.framePoint(point, frame: geometry, in: bounds.size, clamped: !down, zoom: zoom) else { return }
         if down {
             pressed.insert(button.rawValue)
             caret = point
@@ -297,7 +339,7 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
     private func move(_ event: NSEvent, dragging: Bool) {
         guard let geometry else { return }
         let point = convert(event.locationInWindow, from: nil)
-        guard let at = BrowserGeometry.framePoint(point, frame: geometry, in: bounds.size, clamped: dragging) else { return }
+        guard let at = BrowserGeometry.framePoint(point, frame: geometry, in: bounds.size, clamped: dragging, zoom: zoom) else { return }
         onInput(.mouse(.move, x: at.x, y: at.y, modifiers: Self.modifiers(event), seq: geometry.seq))
     }
 
@@ -305,10 +347,10 @@ final class BrowserScreenView: NSView, @preconcurrency NSTextInputClient {
     override func scrollWheel(with event: NSEvent) {
         guard let geometry else { return }
         let point = convert(event.locationInWindow, from: nil)
-        guard let at = BrowserGeometry.framePoint(point, frame: geometry, in: bounds.size) else { return }
+        guard let at = BrowserGeometry.framePoint(point, frame: geometry, in: bounds.size, zoom: zoom) else { return }
         let factor: Double = event.hasPreciseScrollingDeltas ? 1 : 40
-        let dx = BrowserGeometry.frameDistance(-Double(event.scrollingDeltaX) * factor, frame: geometry, in: bounds.size)
-        let dy = BrowserGeometry.frameDistance(-Double(event.scrollingDeltaY) * factor, frame: geometry, in: bounds.size)
+        let dx = BrowserGeometry.frameDistance(-Double(event.scrollingDeltaX) * factor, frame: geometry, in: bounds.size, zoom: zoom)
+        let dy = BrowserGeometry.frameDistance(-Double(event.scrollingDeltaY) * factor, frame: geometry, in: bounds.size, zoom: zoom)
         guard dx != 0 || dy != 0 else { return }
         onInput(.wheel(x: at.x, y: at.y, deltaX: dx, deltaY: dy, modifiers: Self.modifiers(event), seq: geometry.seq))
     }

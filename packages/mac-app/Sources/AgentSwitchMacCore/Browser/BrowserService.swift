@@ -23,24 +23,37 @@ public enum BrowserHistoryAction: String, Sendable, Equatable, Encodable {
     case back, forward, reload
 }
 
-/// What the stream asks of the screencast (`?quality=&fps=&maxWidth=&maxHeight=`).
+/// What the stream asks of the screencast (`?quality=&fps=&maxWidth=&maxHeight=&scale=`): `scale` is the frame pixels
+/// per CSS pixel this screen shows (its device pixels, docs/browser-v0.md §5, 2026-10-03); a daemon from before it
+/// ignores it and sends CSS-size frames.
 public struct BrowserStreamOptions: Sendable, Equatable {
     public var quality: Int
     public var fps: Int
     public var maxWidth: Int?
     public var maxHeight: Int?
+    public var scale: Double?
 
-    public init(quality: Int = BrowserDefaults.streamQuality, fps: Int = BrowserDefaults.streamFPS, maxWidth: Int? = nil, maxHeight: Int? = nil) {
+    /// What the daemon takes (api/browser.ts streamOptions): up to 8 since the page's zoom (docs/browser-v0.md §1
+    /// 页面缩放, 2026-10-03: a 2x display at 400 %); a daemon from before it takes more than 3 as 3.
+    public static let scaleRange = 1.0...8.0
+
+    public init(quality: Int = BrowserDefaults.streamQuality, fps: Int = BrowserDefaults.streamFPS, maxWidth: Int? = nil, maxHeight: Int? = nil,
+                scale: Double? = nil) {
         self.quality = quality
         self.fps = fps
         self.maxWidth = maxWidth
         self.maxHeight = maxHeight
+        self.scale = scale
     }
 
     var query: String {
         var parts = ["quality=\(min(max(quality, 1), 100))", "fps=\(min(max(fps, 1), 30))"]
         if let maxWidth { parts.append("maxWidth=\(maxWidth)") }
         if let maxHeight { parts.append("maxHeight=\(maxHeight)") }
+        if let scale, scale > 1 {
+            let s = min(max(scale, Self.scaleRange.lowerBound), Self.scaleRange.upperBound)
+            parts.append("scale=" + String(format: "%g", (s * 100).rounded() / 100))
+        }
         return parts.joined(separator: "&")
     }
 }

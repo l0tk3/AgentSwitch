@@ -4,30 +4,49 @@ import SwiftUI
 
 // MARK: - colours (docs/ui-v0.md §7.3)
 
+// Every colour is one of the pixel look's (§7.3) and, in the classic look (§8, docs/design/concepts/classic.html), the
+// system's: its greys, its status colours, and the accent where the pixel look has its signal (the user: 蓝色 — the
+// system's accent, blue unless it was changed in System Settings).
+
 extension Color {
-    /// The one signal color: selection, the brand mark, the primary action (and the system controls' tint).
-    static let signal = Color(nsColor: .dynamic(light: 0xE0106E, dark: 0xFF2E88, name: "AgentSwitchSignal"))
+    /// The one signal color: selection, the brand mark, the primary action (and the system controls' tint). The
+    /// system's accent in the classic look.
+    static let signal = Color(nsColor: NSColor(name: "AgentSwitchSignal") { appearance in
+        InterfaceLook.current.isClassic ? .controlAccentColor : .rgb(appearance.isDark ? 0xFF2E88 : 0xE0106E)
+    })
     /// The tint of the app's controls: the signal.
     static let brand = signal
-    /// Status colors, only ever for status and never alone (always with a shape or a word).
-    static let busy = Color(nsColor: .dynamic(light: 0x0086A8, dark: 0x2EE6FF, name: "AgentSwitchBusy"))
-    static let waiting = Color(nsColor: .dynamic(light: 0xC27400, dark: 0xFFB000, name: "AgentSwitchWaiting"))
-    static let ok = Color(nsColor: .dynamic(light: 0x3F8F00, dark: 0x9BE22D, name: "AgentSwitchOK"))
-    static let failed = Color(nsColor: .dynamic(light: 0xD7261B, dark: 0xFF4A3D, name: "AgentSwitchFailed"))
+    /// Status colors, only ever for status and never alone (always with a shape or a word). In the classic look work
+    /// under way is the accent's colour, as the system's own progress is.
+    static let busy = Color(nsColor: NSColor(name: "AgentSwitchBusy") { appearance in
+        InterfaceLook.current.isClassic ? .controlAccentColor : .rgb(appearance.isDark ? 0x2EE6FF : 0x0086A8)
+    })
+    static let waiting = Color(nsColor: .dynamic(light: 0xC27400, dark: 0xFFB000, classicLight: 0xFF9500, classicDark: 0xFF9F0A, name: "AgentSwitchWaiting"))
+    static let ok = Color(nsColor: .dynamic(light: 0x3F8F00, dark: 0x9BE22D, classicLight: 0x34C759, classicDark: 0x30D158, name: "AgentSwitchOK"))
+    static let failed = Color(nsColor: .dynamic(light: 0xD7261B, dark: 0xFF4A3D, classicLight: 0xFF3B30, classicDark: 0xFF453A, name: "AgentSwitchFailed"))
     /// Waiting on the user (the old name for it).
     static let attention = waiting
-    /// Faint ink: dim lanes, hollow squares, the empty part of a meter, dotted rules.
-    static let inkDim = Color(nsColor: .dynamic(light: 0xA29D93, dark: 0x4D4B48, name: "AgentSwitchInkDim"))
+    /// Faint ink: dim lanes, hollow squares, the empty part of a meter, solid rules.
+    static let inkDim = Color(nsColor: .dynamic(light: 0xA29D93, dark: 0x4D4B48, classicLight: 0xA6A6AB, classicDark: 0x6C6C72, name: "AgentSwitchInkDim"))
     /// A pixel mark's 1-pixel hard shadow.
     static let pixelShadow = Color(nsColor: .dynamic(light: 0xCFC9BC, dark: 0x2C2A28, name: "AgentSwitchPixelShadow"))
 }
 
+extension NSAppearance {
+    var isDark: Bool { bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
+}
+
 extension NSColor {
-    static func dynamic(light: UInt32, dark: UInt32, name: String) -> NSColor {
+    static func rgb(_ hex: UInt32) -> NSColor {
+        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+
+    /// A colour by the appearance (light, dark) and by the look: the classic look's where it has its own, else the
+    /// pixel look's. Asked at every draw, so a change of the look shows as soon as the views are drawn again.
+    static func dynamic(light: UInt32, dark: UInt32, classicLight: UInt32? = nil, classicDark: UInt32? = nil, name: String) -> NSColor {
         NSColor(name: name) { appearance in
-            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
-            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
-                           blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+            let classic = InterfaceLook.current.isClassic
+            return .rgb(appearance.isDark ? (classic ? classicDark ?? dark : dark) : (classic ? classicLight ?? light : light))
         }
     }
 }

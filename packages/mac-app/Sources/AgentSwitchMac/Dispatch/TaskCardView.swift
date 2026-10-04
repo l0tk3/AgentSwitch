@@ -107,7 +107,7 @@ struct TaskStatusLine: View {
     var body: some View {
         HStack(spacing: 8) {
             TaskMark(level: card.level, waiting: card.waiting || card.task.waitsForYou)
-            Text(card.statusWord).foregroundStyle(card.level.wordColor)
+            LookWord(card.statusWord).foregroundStyle(card.level.wordColor)
             AgentSprite(harness: card.task.harness ?? card.task.pin?.harness)
             if let who = card.who { Text(who) }
             if let stale = card.stale { Text("· \(stale)") }
@@ -115,7 +115,7 @@ struct TaskStatusLine: View {
             TaskClock(card: card)
             if card.unread { UnreadSquare() }
         }
-        .font(.system(size: 11.5, design: .monospaced))
+        .mono(11.5)
         .foregroundStyle(Look.ink2)
         .lineLimit(1)
     }
@@ -139,13 +139,15 @@ struct TaskClock: View {
 /// `└─ 运行 xcodebuild -scheme AgentSwitch`: what a running task is doing now.
 struct StepLine: View {
     let text: String
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("└─").foregroundStyle(Look.faint)
+            // The tree's corner is the pixel look's; the classic one says the step plainly.
+            if !look.isClassic { Text("└─").foregroundStyle(Look.faint) }
             Text(text).foregroundStyle(Look.ink2).lineLimit(2)
         }
-        .font(.system(size: 12, design: .monospaced))
+        .mono(12)
     }
 }
 
@@ -164,7 +166,7 @@ struct FileChip: View {
                 Text(file.name).lineLimit(1).truncationMode(.middle)
                 Text(state == .remote ? "\(file.sizeText) ↓" : file.sizeText).foregroundStyle(Look.faint)
             }
-            .font(.system(size: 12, design: .monospaced))
+            .mono(12)
         }
         .buttonStyle(QuietButtonStyle())
         .help(file.path)
@@ -173,12 +175,23 @@ struct FileChip: View {
 
 struct FileMark: View {
     let state: DispatchFileState
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         switch state {
-        case .remote: PixelSprite(rows: PixelArt.hollow, pixel: 2, color: Look.ink2).accessibilityLabel("On the Mac")
+        case .remote: mark(PixelArt.hollow, symbol: "doc").accessibilityLabel("On the Mac")
         case .downloading: BrailleSpinner()
-        case .local: PixelSprite(rows: PixelArt.square, pixel: 2, color: Look.ink2).accessibilityLabel("Downloaded")
+        case .local: mark(PixelArt.square, symbol: "doc.fill").accessibilityLabel("Downloaded")
+        }
+    }
+
+    /// A hollow or a solid square; a sheet, empty or filled, in the classic look.
+    @ViewBuilder
+    private func mark(_ rows: [String], symbol: String) -> some View {
+        if look.isClassic {
+            Image(systemName: symbol).font(.system(size: 11)).foregroundStyle(Look.ink2)
+        } else {
+            PixelSprite(rows: rows, pixel: 2, color: Look.ink2)
         }
     }
 }

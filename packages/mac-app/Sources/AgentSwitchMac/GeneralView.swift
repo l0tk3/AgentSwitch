@@ -19,6 +19,8 @@ struct GeneralView: View {
     @AppStorage(LiveActivity.enabledKey) private var liveActivity = true
     @AppStorage(LiveActivity.soundKey) private var liveSound = true
     @AppStorage(SleepGuard.enabledKey) private var keepAwake = true
+    /// The interface's look (docs/ui-v0.md §8), this Mac's own; every window follows it at once (`followsWindow`).
+    @AppStorage(InterfaceLook.key) private var appearance = InterfaceLook.pixel.rawValue
 
     private var draft: PortSettings? {
         guard let l = Int(local), let r = Int(remote), let g = Int(gate), let o = Int(opencode) else { return nil }
@@ -27,6 +29,17 @@ struct GeneralView: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(InterfaceLook.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                SectionLabel("Appearance")
+            } footer: {
+                Footer("只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。")
+            }
+
             Section {
                 Toggle("Allow iPhone", isOn: Binding(get: { model.remoteEnabled }, set: { model.setRemoteAccess($0) }))
             } header: {

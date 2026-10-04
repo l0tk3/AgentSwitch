@@ -1,7 +1,8 @@
-// Draws the AgentSwitch app icon for both apps with CoreGraphics: the pixel mark of docs/ui-v0.md §7 (one source
-// switched onto three lanes, the lit one on top) with the depth of an identity mark (§7.2.10: a 1-pixel hard shadow,
-// half-lit pixels in the diagonal steps, a faint glow on the lit lane), on the terminal's black with faint scanlines —
-// docs/design/implemented/depth.html, "应用图标". Every cell is a whole number of pixels at 1024.
+// Draws the AgentSwitch app icon for both apps with CoreGraphics: the app's mark as its shaded picture (docs/ui-v0.md §9,
+// `ShadedSprite.dispatch`: one source switched onto three lanes, the nearest lane and its end the lightest, each further
+// one a tone darker, the blocks raised — tones of the one ink and no hue), over a hard shadow a cell down and right and
+// a faint glow on the nearest lane, on the terminal's black with faint scanlines. Every cell is a whole number of pixels
+// at 1024.
 //
 //   swift scripts/make-icons.swift
 //
@@ -19,35 +20,22 @@ func srgb(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor {
     CGColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
 }
 
-/// PixelArt.markRows (AgentSwitchKit / AgentSwitchMacCore): S the source, a/A the lit lane and its end, b/B and c/C the
-/// others.
+/// `ShadedSprite.dispatch` (AgentSwitchLive / AgentSwitchMacCore; keep in step): one character a cell, `.` clear, the
+/// others the ink's tones from highlight to ground.
 let mark = [
-    "...........AAA",
-    "......aaaaaAAA",
-    ".....a.....AAA",
-    "....a.........",
-    "SSSa.......BBB",
-    "SSSbbbbbbbbBBB",
-    "SSSc.......BBB",
-    "....c.........",
-    ".....c.....CCC",
-    "......cccccCCC",
-    "...........CCC",
+    "............WWW#", ".........###W##m", ".......###..W##m", "......##....#mmd", ".....##.........", "....##..........",
+    "WWW##.......mmmd", "W##mmmmmmmmmmddk", "W##mddddddddmddk", "#mmdd.......dkkk", "....dd..........", ".....dd.........",
+    "......dd....dddk", ".......ddd..dkks", ".........ddddkks", "............ksss",
 ].map { Array($0) }
 
-func lit(_ c: Character) -> Bool { "aAS".contains(c) }
-func on(_ x: Int, _ y: Int) -> Bool { y >= 0 && y < mark.count && x >= 0 && x < mark[y].count && mark[y][x] != "." }
+/// The tones on the tile's black; for the tinted variant plain greys the system tints, the darkest lifted so the
+/// furthest lane still reads.
+let tones: [Character: UInt32] = ["W": 0xFFFFFF, "#": 0xE9E6DF, "m": 0xA9A6A0, "d": 0x6F6C68, "k": 0x3B3A37, "s": 0x1E1D1B]
+let tintedTones: [Character: UInt32] = ["W": 0xFFFFFF, "#": 0xE4E4E4, "m": 0xA6A6A6, "d": 0x767676, "k": 0x525252, "s": 0x3C3C3C]
 
-/// Empty cells in an inside corner of a diagonal step, with the cell they lean on (pixel.js aaCells).
-let halfLit: [(x: Int, y: Int, c: Character)] = mark.indices.flatMap { y in
-    mark[y].indices.compactMap { x -> (x: Int, y: Int, c: Character)? in
-        guard mark[y][x] == "." else { return nil }
-        let n = on(x, y - 1), s = on(x, y + 1), w = on(x - 1, y), e = on(x + 1, y)
-        let corner = (n && e && !on(x + 1, y - 1)) || (n && w && !on(x - 1, y - 1)) || (s && e && !on(x + 1, y + 1)) || (s && w && !on(x - 1, y + 1))
-        guard corner, [n, s, w, e].filter({ $0 }).count == 2 else { return nil }
-        return (x, y, n ? mark[y - 1][x] : mark[y + 1][x])
-    }
-}
+/// The nearest lane with its source and its end — the two lightest tones, above the middle lane or in the source: what
+/// the glow sits under.
+func near(_ x: Int, _ y: Int) -> Bool { "W#".contains(mark[y][x]) && (y <= 6 || x <= 2) }
 
 /// `plain`: the black tile with the mark. `dark`: the mark alone (the system draws the dark ground). `tinted`: the mark
 /// alone in greys, for the system to tint.
@@ -93,7 +81,7 @@ func drawTile(_ ctx: CGContext, _ space: CGColorSpace, _ path: CGPath, _ tile: C
     ctx.restoreGState()
 }
 
-/// The mark centred in the tile at about three quarters of its width (with the shadow's extra cell). Cells and their
+/// The mark centred in the tile at about five eighths of its width (the shadow's extra cell beside it). Cells and their
 /// origin fall on multiples of 8 at 1024, so they stay whole pixels down to the 128 export.
 func drawMark(_ ctx: CGContext, _ tile: CGRect, style: Style) {
     let cols = mark[0].count, rows = mark.count
@@ -103,32 +91,25 @@ func drawMark(_ ctx: CGContext, _ tile: CGRect, style: Style) {
     let top = snap(tile.midY + CGFloat(rows) * cell / 2)
     func rect(_ x: Int, _ y: Int) -> CGRect { CGRect(x: originX + CGFloat(x) * cell, y: top - CGFloat(y + 1) * cell, width: cell, height: cell) }
     let cells = mark.indices.flatMap { y in mark[y].indices.compactMap { x in mark[y][x] == "." ? nil : (x: x, y: y, c: mark[y][x]) } }
+    let palette = style == .tinted ? tintedTones : tones
 
-    let ink: UInt32 = style == .tinted ? 0xFFFFFF : 0xE9E6DF
-    let dim: UInt32 = style == .tinted ? 0x7A7A7A : 0x5B5955
-    func tone(_ c: Character) -> CGColor { srgb(lit(c) ? ink : dim) }
-
-    // A faint glow under the lit lane.
+    // A faint glow under the nearest lane.
     if style != .tinted {
         ctx.saveGState()
-        ctx.setShadow(offset: .zero, blur: cell * 0.9, color: srgb(0xE9E6DF, 0.55))
+        ctx.setShadow(offset: .zero, blur: cell * 0.9, color: srgb(0xE9E6DF, 0.5))
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
         ctx.setFillColor(srgb(0xE9E6DF, 0.28))
-        for c in cells where lit(c.c) { ctx.fill(rect(c.x, c.y)) }
+        for c in cells where near(c.x, c.y) { ctx.fill(rect(c.x, c.y)) }
         ctx.endTransparencyLayer()
         ctx.restoreGState()
     }
-    // The hard shadow: one cell down and right, a step darker than the ground.
+    // The hard shadow: one cell down and right, a step off the ground.
     if style == .plain {
         ctx.setFillColor(srgb(0x2C2A28))
         for c in cells { ctx.fill(rect(c.x + 1, c.y + 1)) }
     }
-    for h in halfLit {
-        ctx.setFillColor(tone(h.c).copy(alpha: 0.42)!)
-        ctx.fill(rect(h.x, h.y))
-    }
     for c in cells {
-        ctx.setFillColor(tone(c.c))
+        ctx.setFillColor(srgb(palette[c.c] ?? 0xFF00FF))
         ctx.fill(rect(c.x, c.y))
     }
 }

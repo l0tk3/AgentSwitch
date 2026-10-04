@@ -17,6 +17,7 @@ struct ApprovalBoxView: View {
     var hints = false
     @State private var form = DispatchQuestionForm()
     @State private var problem: String?
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Group {
@@ -38,14 +39,19 @@ struct ApprovalBoxView: View {
         let text = DispatchApprovalText(approval)
         return FloatingBox(title: "[!] Approval", trailing: text.tool) {
             VStack(alignment: .leading, spacing: 3) {
+                // What it runs: code in both looks; the classic one sets it in a field of its own.
                 Text(text.target)
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundStyle(Look.ink)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-                if let folder { Text(folder).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.faint) }
+                    .frame(maxWidth: look.isClassic ? .infinity : nil, alignment: .leading)
+                    .padding(.horizontal, look.isClassic ? 9 : 0)
+                    .padding(.vertical, look.isClassic ? 6 : 0)
+                    .grounded(look.isClassic ? Look.ink.opacity(0.07) : Color.clear, radius: 7)
+                if let folder { Text(folder).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.faint).padding(.top, look.isClassic ? 2 : 0) }
             }
-            .padding(EdgeInsets(top: 10, leading: 12, bottom: 4, trailing: 12))
+            .padding(EdgeInsets(top: look.isClassic ? 6 : 10, leading: 12, bottom: 4, trailing: 12))
             .frame(maxWidth: .infinity, alignment: .leading)
             .help(approval.evidence)
             footer(hint: [step.map { "第 \($0) 步" }, text.about].compactMap { $0 }.joined(separator: " · ")) {
@@ -74,7 +80,7 @@ struct ApprovalBoxView: View {
 
     private func questions(_ evidence: DispatchQuestionEvidence) -> some View {
         let quick = evidence.oneTapOptions
-        return FloatingBox(title: "? Question", trailing: asker(evidence)) {
+        return FloatingBox(title: "? Question", trailing: asker(evidence), symbol: "questionmark.circle") {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(evidence.questions) { question in
                     VStack(alignment: .leading, spacing: 8) {
@@ -115,8 +121,17 @@ struct ApprovalBoxView: View {
         ForEach(question.options, id: \.label) { option in
             Button { form = form.toggling(question, option.label) } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(form.mark(question, option.label)).mono(13)
-                        .foregroundStyle(form.isChosen(question, option.label) ? Color.signal : Look.ink2)
+                    Group {
+                        if look.isClassic {
+                            // `< >` and `[ ]` as the system draws a choice of one and a choice of several.
+                            let on = form.isChosen(question, option.label)
+                            Image(systemName: question.multi ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle"))
+                                .font(.system(size: 13))
+                        } else {
+                            Text(form.mark(question, option.label)).mono(13)
+                        }
+                    }
+                    .foregroundStyle(form.isChosen(question, option.label) ? Color.signal : Look.ink2)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(option.label).font(.system(size: 13.5)).foregroundStyle(Look.ink)
                         if !option.description.isEmpty {
@@ -141,7 +156,7 @@ struct ApprovalBoxView: View {
         .autocorrectionDisabled()
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .overlay(Rectangle().strokeBorder(Look.line, lineWidth: 1))
+        .framed(Look.line, radius: 7)
     }
 
     private func submitForm(_ evidence: DispatchQuestionEvidence) {
@@ -159,7 +174,7 @@ struct ApprovalBoxView: View {
     }
 
     private func unsupported(_ text: String) -> some View {
-        FloatingBox(title: "? Question", trailing: "Dispatch") {
+        FloatingBox(title: "? Question", trailing: "Dispatch", symbol: "questionmark.circle") {
             VStack(alignment: .leading, spacing: 6) {
                 Text(DispatchMessageDisplay.readable(text)).font(.system(size: 14)).foregroundStyle(Look.ink)
                 Text("此问题的格式暂不支持在此回答，请在网页控制台回答。").font(.system(size: 12)).foregroundStyle(Look.ink2)
@@ -173,7 +188,7 @@ struct ApprovalBoxView: View {
 
     private func footer<Buttons: View>(hint: String, @ViewBuilder buttons: () -> Buttons) -> some View {
         HStack(spacing: 14) {
-            Text(hint).font(.system(size: 12, design: .monospaced)).foregroundStyle(Look.faint).lineLimit(1)
+            Text(hint).mono(12).foregroundStyle(Look.faint).lineLimit(1)
             Spacer(minLength: 8)
             buttons()
         }

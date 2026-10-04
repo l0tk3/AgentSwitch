@@ -2,22 +2,26 @@ import AgentSwitchMacCore
 import SwiftUI
 
 // The Live Activity's two faces (docs/design/implemented/mac-live.html): the capsule among the menu bar's status items —
-// the app mark in its state and, right of it, a clock, a count or the result — and the card under it, the phone's lock
+// the app mark in its state and, right of it, what it is doing in a word, a count or the result — and the card under it, the phone's lock
 // screen card (island.html). Always dark, as the island is. The capsule is still (the menu bar never moves, ui-v0
 // §7); the card's spinners and mark move like the app's own.
+// In the classic look (docs/ui-v0.md §8) both are drawn as a standard app's: the mark as lines, dots for the squares, a
+// turning ring for the spinner, the system font, round buttons without brackets, the system's accent and status colours.
 
-/// The fixed palette: the island's, whatever the Mac's appearance.
+/// The fixed palette: the island's, whatever the Mac's appearance; the classic look's status colours and accent when
+/// that look is kept (asked at every draw).
 enum LiveLook {
-    static let busy = Color(red: 0x2E / 255, green: 0xE6 / 255, blue: 1)
-    static let waiting = Color(red: 1, green: 0xB0 / 255, blue: 0)
+    static var classic: Bool { InterfaceLook.current.isClassic }
+    static var busy: Color { classic ? Color(nsColor: .controlAccentColor) : Color(red: 0x2E / 255, green: 0xE6 / 255, blue: 1) }
+    static var waiting: Color { classic ? Color(red: 1, green: 0x9F / 255, blue: 0x0A / 255) : Color(red: 1, green: 0xB0 / 255, blue: 0) }
     static let waitingEdge = Color(red: 0xA3 / 255, green: 0x6F / 255, blue: 0)
-    static let done = Color(red: 0x9B / 255, green: 0xE2 / 255, blue: 0x2D / 255)
-    static let failed = Color(red: 1, green: 0x4A / 255, blue: 0x3D / 255)
+    static var done: Color { classic ? Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255) : Color(red: 0x9B / 255, green: 0xE2 / 255, blue: 0x2D / 255) }
+    static var failed: Color { classic ? Color(red: 1, green: 0x45 / 255, blue: 0x3A / 255) : Color(red: 1, green: 0x4A / 255, blue: 0x3D / 255) }
     static let ink = Color.white
     static let ink2 = Color.white.opacity(0.72)
     static let ink3 = Color.white.opacity(0.5)
     static let dim = Color.white.opacity(0.45)
-    static let card = Color(red: 8 / 255, green: 8 / 255, blue: 10 / 255).opacity(0.94)
+    static var card: Color { classic ? Color(red: 0x2C / 255, green: 0x2C / 255, blue: 0x30 / 255).opacity(0.96) : Color(red: 8 / 255, green: 8 / 255, blue: 10 / 255).opacity(0.94) }
 
     static func color(_ look: LivePresenter.Look) -> Color {
         switch look {
@@ -29,12 +33,14 @@ enum LiveLook {
     }
 
     static func word(_ look: LivePresenter.Look) -> String {
+        let word: String
         switch look {
-        case .busy: return "Busy"
-        case .waiting: return "Waiting"
-        case .done: return "Done"
-        case .incomplete: return "Incomplete"
+        case .busy: word = "Busy"
+        case .waiting: word = "Waiting"
+        case .done: word = "Done"
+        case .incomplete: word = "Incomplete"
         }
+        return ClassicWords.word(word, in: InterfaceLook.current)
     }
 
     /// 0:42, 10:40, 1:02:03.
@@ -52,28 +58,56 @@ struct LiveMark: View {
     var pixel: CGFloat = 1.5
 
     var body: some View {
-        Canvas { context, _ in
-            func rect(_ x: Int, _ y: Int) -> Path { Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel, width: pixel, height: pixel)) }
-            let lane = PixelArt.laneA
-            let k = frame % lane.count
-            let block = look == .busy ? Set([k, min(k + 1, lane.count - 1)].map { "\(lane[$0].x),\(lane[$0].y)" }) : []
-            for cell in PixelArt.markCells {
-                var color = cell.lit ? LiveLook.ink : LiveLook.dim
-                if cell.end && look != .busy { color = LiveLook.color(look) }
-                if block.contains("\(cell.x),\(cell.y)") { color = LiveLook.busy }
-                context.fill(rect(cell.x, cell.y), with: .color(color))
+        if LiveLook.classic {
+            // The mark as lines; its lit end in the state's colour (the accent while busy).
+            Canvas { context, size in
+                ClassicMark.draw(&context, in: CGRect(origin: .zero, size: size), lit: LiveLook.ink, dim: LiveLook.dim, end: LiveLook.color(look))
             }
+            .frame(width: CGFloat(PixelArt.markWidth) * pixel, height: CGFloat(PixelArt.markHeight) * pixel)
+            .accessibilityLabel("AgentSwitch \(LiveLook.word(look))")
+        } else {
+            // The shaded picture (docs/ui-v0.md §9) on the panel's black: the nearest lane's end in the state's colour,
+            // a block on that lane while busy. 1 pt cells: the capsule is 22 pt high.
+            let paint = ShadedMarkPaint(dark: true, end: look == .busy ? nil : LiveLook.color(look),
+                                        block: look == .busy ? ShadedMarkPaint.block(at: frame, trail: false) : [], busy: LiveLook.busy)
+            Canvas { context, _ in paint.draw(&context, cell: Self.cell) }
+                .frame(width: CGFloat(ShadedMark.picture.width) * Self.cell, height: CGFloat(ShadedMark.picture.height) * Self.cell)
+                .accessibilityLabel("AgentSwitch \(LiveLook.word(look))")
         }
-        .frame(width: CGFloat(PixelArt.markWidth) * pixel, height: CGFloat(PixelArt.markHeight) * pixel)
-        .accessibilityLabel("AgentSwitch \(LiveLook.word(look))")
     }
+
+    private static let cell: CGFloat = 1
 }
 
-/// A 7 pt status square.
+/// A 7 pt status square; a dot in the classic look.
 struct LiveSquare: View {
     let color: Color
 
-    var body: some View { Rectangle().fill(color).frame(width: 7, height: 7) }
+    var body: some View {
+        Group { if LiveLook.classic { Circle().fill(color) } else { KeySquare(color: color, side: 7) } }.frame(width: 7, height: 7)
+    }
+}
+
+/// At work: the braille spinner at `frame`; in the classic look a ring that turns with it.
+struct LiveSpin: View {
+    let frame: Int
+
+    var body: some View {
+        if LiveLook.classic {
+            Circle().trim(from: 0.1, to: 0.8).stroke(LiveLook.busy, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                .rotationEffect(.degrees(Double(frame % 10) * 36))
+                .frame(width: 9, height: 9)
+        } else {
+            Text(BrailleSpinner.frames[frame % BrailleSpinner.frames.count]).fontWeight(.bold).foregroundStyle(LiveLook.busy)
+        }
+    }
+}
+
+/// `└─` before a row's step; nothing in the classic look (the step sits under its title by its indent).
+struct LiveTwig: View {
+    var body: some View {
+        if !LiveLook.classic { Text("└─").mono(12).foregroundStyle(LiveLook.ink3) }
+    }
 }
 
 /// ■ 2  ⠋ 1: how many wait for you and how many run. `spin`: the spinner's frame (0 in the capsule).
@@ -89,7 +123,7 @@ struct LiveTally: View {
             }
             if running > 0 {
                 HStack(spacing: 3) {
-                    Text(BrailleSpinner.frames[spin % BrailleSpinner.frames.count]).fontWeight(.bold).foregroundStyle(LiveLook.busy)
+                    LiveSpin(frame: spin)
                     Text("\(running)")
                 }
             }
@@ -99,8 +133,9 @@ struct LiveTally: View {
     }
 }
 
-/// The compact presentation in the menu bar: the mark and, right of it, the clock, the tally or the result's square,
-/// in a black capsule 22 pt high. Drawn into the status item's image; `minimal` is the mark alone.
+/// The compact presentation in the menu bar: the mark and, right of it, what the one task or terminal is doing in a word
+/// (as the phone's compact island: `Run`, `Edit`, `Allow?` in amber), the tally or the result's square, in a black
+/// capsule 22 pt high. Drawn into the status item's image; `minimal` is the mark alone.
 struct LiveCapsule: View {
     let look: LivePresenter.Look
     let trail: LivePresenter.Trail?
@@ -112,8 +147,8 @@ struct LiveCapsule: View {
             LiveMark(look: look)
             if !minimal, let trail {
                 switch trail {
-                case .clock(let since, let waiting):
-                    Text(LiveLook.clock(since: since, now: now)).mono(12, weight: .medium).monospacedDigit()
+                case .word(let word, let waiting):
+                    Text(ClassicWords.word(word, in: InterfaceLook.current)).mono(12, weight: .medium).lineLimit(1).fixedSize()
                         .foregroundStyle(waiting ? LiveLook.waiting : LiveLook.ink2)
                 case .tally(let waiting, let running):
                     LiveTally(waiting: waiting, running: running)
@@ -127,6 +162,8 @@ struct LiveCapsule: View {
         .frame(height: 22)
         .background(Capsule().fill(Color.black))
         .environment(\.colorScheme, .dark)
+        // Drawn into an image, outside any window: the look is asked where it is kept.
+        .environment(\.interfaceLook, InterfaceLook.current)
     }
 }
 
@@ -138,7 +175,7 @@ struct LiveCardActions {
     var pick: (LiveSnapshot.Row, String) -> Void = { _, _ in }
 }
 
-/// The card under the capsule: the lock screen card of the phone — the mark, `AgentSwitch` and the tally over a dotted
+/// The card under the capsule: the lock screen card of the phone — the mark, `AgentSwitch` and the tally over a
 /// rule; then up to three rows (the waiting first), each a title, `└─` its step, and what answers it; or the result.
 /// It steps every 0.14 s only while something on it spins, else once a second as a row's clock turns, else not at all;
 /// and not while it is not seen (ui-v0 §7.4, 2026-10-03).
@@ -149,6 +186,8 @@ struct LiveCard: View {
     var pending: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.onScreen) private var onScreen
+    /// The look kept in the settings: the card is drawn again when it changes.
+    @AppStorage(InterfaceLook.key) private var lookRaw = InterfaceLook.pixel.rawValue
 
     var body: some View {
         let spins = presenter.cardSpins && !reduceMotion
@@ -173,12 +212,14 @@ struct LiveCard: View {
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(LiveLook.card))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
         .environment(\.colorScheme, .dark)
+        .environment(\.interfaceLook, InterfaceLook.load(lookRaw))
+        .id(lookRaw)
     }
 
     private func content(frame: Int, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             header(frame: frame)
-            DottedRule().padding(.top, 11).padding(.bottom, 9)
+            HairRule().padding(.top, 11).padding(.bottom, 9)
             if !presenter.cardEnds.isEmpty {
                 VStack(alignment: .leading, spacing: 11) {
                     ForEach(presenter.cardEnds, id: \.key) { end in endRow(end) }
@@ -217,20 +258,20 @@ struct LiveCard: View {
                     if row.needsYou {
                         LiveSquare(color: LiveLook.waiting)
                     } else {
-                        Text(BrailleSpinner.frames[frame % BrailleSpinner.frames.count]).mono(12, weight: .bold).foregroundStyle(LiveLook.busy)
+                        LiveSpin(frame: frame).mono(12, weight: .bold)
                     }
                 }
                 .frame(width: 12)
                 LiveTitle(text: row.title) { actions.open(row) }
                 Spacer(minLength: 4)
                 if let agent = row.agent, let rows = PixelArt.agents[agent] {
-                    PixelSprite(rows: rows, pixel: 2, color: LiveLook.ink2).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                    PixelSprite(rows: rows, pixel: 2, color: LiveLook.ink2, strength: 0.8, shadow: false, onDark: true).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 }
                 Text(LiveLook.clock(since: row.startedAt, now: now)).mono(12.5, weight: .medium).monospacedDigit()
                     .foregroundStyle(row.needsYou ? LiveLook.waiting : LiveLook.ink2)
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("└─").mono(12).foregroundStyle(LiveLook.ink3)
+                LiveTwig()
                 stepText(row).lineLimit(row.ask == nil ? 1 : 2).truncationMode(.tail)
             }
             .padding(.leading, 22)
@@ -252,7 +293,8 @@ struct LiveCard: View {
     private func stepText(_ row: LiveSnapshot.Row) -> Text {
         switch row.ask {
         case .decide(_, let tool, let target, _)?:
-            return (Text(tool + "  ").font(.system(size: 12.5, weight: .semibold, design: .monospaced)) + Text(target).font(.system(size: 13)))
+            // The tool as a short word; what it runs on is a command or a path (code in both looks' reading font).
+            return (Text(tool + "  ").font(.system(size: 12.5, weight: .semibold, design: LiveLook.classic ? .default : .monospaced)) + Text(target).font(.system(size: 13)))
                 .foregroundColor(LiveLook.waiting)
         case .question(_, _, let text, _, _)?:
             return Text(text).font(.system(size: 13)).foregroundColor(LiveLook.waiting)
@@ -281,7 +323,7 @@ struct LiveCard: View {
                 Spacer(minLength: 4)
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("└─").mono(12).foregroundStyle(LiveLook.ink3)
+                LiveTwig()
                 Text(end.line).font(.system(size: 13)).foregroundStyle(LiveLook.ink2).lineLimit(2)
             }
             .padding(.leading, 22)
@@ -315,6 +357,24 @@ struct LiveButton: View {
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
+        if LiveLook.classic { classicButton } else { pixelButton }
+    }
+
+    /// The classic look's button: a round one, the main action in the accent.
+    private var classicButton: some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(primary ? LiveLook.busy : Color.white.opacity(hover ? 0.26 : 0.18)))
+                .opacity(enabled ? (primary && hover ? 0.88 : 1) : 0.5)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 && enabled }
+    }
+
+    private var pixelButton: some View {
         Button(action: action) {
             Text("[ \(title) ]").mono(12.5, weight: .semibold)
                 .foregroundStyle(primary || hover ? Color.black : LiveLook.ink)

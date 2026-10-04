@@ -1,14 +1,16 @@
 import Foundation
 
 // The Mac's main window (docs/dispatch-v0.md §1): one window `AgentSwitch`, its pages — Dispatch (the phone's home on a
-// desk), Terminals (terminal-v0 §1) and Browser (the shared browser, browser-v0 §1) — under one 32 pt bar. What the
-// window decides without AppKit is here: the pages, what each has going on (from `GET /live`, the browser's tab list),
-// the refresh that draws a page in, its shortcuts and the bar's trouble word.
+// desk), Terminals (terminal-v0 §1) and Browser (the shared browser, browser-v0 §1) — chosen in the rail on the left,
+// under one 32 pt bar that is the page's own, over one status bar across the window (2026-10-03, proposal B,
+// `implemented/window-bars.html`; its words are MainStatus.swift). What the window decides without AppKit is here: the
+// pages, what each has going on (from `GET /live`, the browser's tab list), the refresh that draws a page in, its
+// shortcuts and the trouble word.
 
 public enum MainPage: String, CaseIterable, Sendable {
     case dispatch, terminals, browser
 
-    /// The page's word in the bar's page switch.
+    /// The page's name (the rail's, the menus').
     public var title: String {
         switch self {
         case .dispatch: "Dispatch"
@@ -17,7 +19,7 @@ public enum MainPage: String, CaseIterable, Sendable {
         }
     }
 
-    /// The page after this one in the bar (⌃⇥), the last followed by the first.
+    /// The page after this one in the rail (⌃⇥), the last followed by the first.
     public var next: MainPage {
         let all = MainPage.allCases
         return all[(all.firstIndex(of: self)! + 1) % all.count]
@@ -29,8 +31,23 @@ public enum MainPage: String, CaseIterable, Sendable {
         return all[(all.firstIndex(of: self)! + all.count - 1) % all.count]
     }
 
-    /// The pages drawn dark whatever the system's look: the terminal window's dark block and the browser's screen.
-    public var alwaysDark: Bool { self != .dispatch }
+    /// The rail's help under the pointer: the page and the key that goes there (⌘1–9 go to a terminal).
+    public var railHelp: String {
+        switch self {
+        case .dispatch: "Dispatch ⌘0"
+        case .terminals: "Terminals ⌘1–9"
+        case .browser: "Browser ⌘⇧B"
+        }
+    }
+
+    /// The page has a list beside it (Terminals' terminals, Browser's tabs): the bar's list button acts there, and is
+    /// dimmed in place elsewhere.
+    public var hasList: Bool { self != .dispatch }
+
+    /// The pages drawn dark whatever the system's look: the terminal window's dark block, the browser's screen, and
+    /// since 2026-10-03 Dispatch too (user: 首页白色的，其他地方黑色的太突兀了，这个dispatcher也改成默认黑色的) — a
+    /// light page between two dark ones made every page change a flash. The settings window still follows the system.
+    public var alwaysDark: Bool { true }
 
     /// Where the page shown last is kept (UserDefaults).
     public static let storeKey = "mainWindowPage"
@@ -42,9 +59,8 @@ public enum MainPage: String, CaseIterable, Sendable {
 }
 
 /// What a page has going on, from `GET /live`: Dispatch's tasks, Terminals' terminals; the Browser's from its tab list
-/// (PageActivity.of(_ list: BrowserTabList)). The page's word carries a mark
-/// while it is not the page on screen — amber while anything waits for you, else the spinner while anything is busy —
-/// and Dispatch's end of the bar counts both (`⠙1 ▪1`).
+/// (PageActivity.of(_ list: BrowserTabList)). The page's icon in the rail carries a mark off its corner, the page on
+/// screen too — amber while anything waits for you, else the spinner while anything is busy.
 public struct PageActivity: Equatable, Sendable {
     public enum Mark: Equatable, Sendable { case none, busy, waiting }
 
@@ -126,7 +142,11 @@ public struct ScanRefresh: Equatable, Sendable {
 /// new task on Dispatch, ⌘, settings; from Dispatch and Browser ⌘1–9 cross to the terminals and from Dispatch ⌘T (on
 /// Terminals they are the terminal page's own, as ⌘B is), and Esc or ⌘[ go back while Dispatch has a page to go back
 /// from. On Browser ⌘T is a new tab, ⌘L the address, ⌘R reload, ⌘[ ⌘] back and forward (a browser's keys; the page
-/// itself has no use for them). Anything else is the page's.
+/// itself has no use for them), ⌘B opens and closes the tab list (as on Terminals, docs/browser-v0.md §1 Mac,
+/// 2026-10-03), ⌘⇧T takes the tab over or hands it back (the status bar's `[ Take Over ]` / `[ Hand Back ]`: what is
+/// in a bottom bar is to be had elsewhere too, 2026-10-03), and ⌘+ (⌘= too, with shift or without, and the keypad's +)
+/// zooms the page in, ⌘− out (the status bar's `−` `100%` `+`, docs/browser-v0.md §1 页面缩放, 2026-10-03; ⌘0 stays
+/// Dispatch, so going back to 100 % has no key). Anything else is the page's.
 public enum MainShortcut: Equatable, Sendable {
     case page(MainPage)
     case nextPage
@@ -140,7 +160,11 @@ public enum MainShortcut: Equatable, Sendable {
 
     /// The Browser page's own keys.
     public enum BrowserShortcut: Equatable, Sendable {
-        case newTab, address, reload, back, forward
+        case newTab, address, reload, back, forward, toggleList
+        /// `[ Take Over ]` or `[ Hand Back ]`, whichever the status bar shows.
+        case hold
+        /// The page's zoom a step up or down, as the status bar's `+` and `−`.
+        case zoomIn, zoomOut
     }
 
     /// A key as AppKit reports it: the characters without modifiers (lowercased), its key code, the modifiers held.
@@ -173,6 +197,9 @@ public enum MainShortcut: Equatable, Sendable {
             return page == .dispatch && canGoBack && !composing ? .back : nil
         }
         if press.command, press.shift, !press.control, !press.option, press.key == "b" { return .page(.browser) }
+        if press.command, press.shift, !press.control, !press.option, press.key == "t" { return page == .browser ? .browser(.hold) : nil }
+        // With shift or without: `+` is ⇧= on most layouts and a key of its own on others and on the keypad.
+        if page == .browser, press.command, !press.control, !press.option, let zoom = zoom(press.key) { return .browser(zoom) }
         guard press.command, !press.control, !press.option, !press.shift else { return nil }
         switch press.key {
         case "0": return .page(.dispatch)
@@ -184,6 +211,7 @@ public enum MainShortcut: Equatable, Sendable {
         case "]": return page == .browser ? .browser(.forward) : nil
         case "l": return page == .browser ? .browser(.address) : nil
         case "r": return page == .browser ? .browser(.reload) : nil
+        case "b": return page == .browser ? .browser(.toggleList) : nil
         case "t":
             switch page {
             case .dispatch: return .newTerminal
@@ -194,12 +222,21 @@ public enum MainShortcut: Equatable, Sendable {
         default: return nil
         }
     }
+
+    /// The Browser page's zoom keys by what they write: `=` or `+` in, `-` out (the keypad's write the same).
+    private static func zoom(_ key: String) -> BrowserShortcut? {
+        switch key {
+        case "=", "+": .zoomIn
+        case "-": .zoomOut
+        default: nil
+        }
+    }
 }
 
 // MARK: - trouble
 
-/// The word before Dispatch's counts while the service or the credential gateway is down (`■ Gateway Down`, red); none
-/// while both are up or starting.
+/// The status bar's word while the service or the credential gateway is down (`■ Gateway Down`, red); none while both
+/// are up or starting.
 public enum ServiceTrouble {
     public static func word(service: StatusLine, gateway: StatusLine) -> String? {
         if down(service) { return "Service Down" }

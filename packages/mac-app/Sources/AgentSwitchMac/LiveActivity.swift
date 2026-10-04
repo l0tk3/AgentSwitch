@@ -42,12 +42,12 @@ final class LiveActivity {
         .needsYou: NSSound(data: Tones.wav(Tones.needsYou)), .done: NSSound(data: Tones.wav(Tones.done)), .failed: NSSound(data: Tones.wav(Tones.failed)),
     ].compactMapValues { $0 }
     /// The terminal on screen, and the task whose page is open, in the main window in use.
-    @ObservationIgnored private let watching: () -> String?
+    @ObservationIgnored private let watching: () -> Set<String>
     @ObservationIgnored private let watchingTask: () -> String?
     @ObservationIgnored private let sleepGuard = SleepGuard()
 
     init(model: AppModel, openTerminal: @escaping (String) -> Void, openTask: @escaping (String) -> Void,
-         watching: @escaping () -> String? = { nil }, watchingTask: @escaping () -> String? = { nil }) {
+         watching: @escaping () -> Set<String> = { [] }, watchingTask: @escaping () -> String? = { nil }) {
         self.model = model
         self.openTerminal = openTerminal
         self.openTask = openTask
@@ -231,7 +231,7 @@ final class LiveActivity {
         item.button?.setAccessibilityLabel("AgentSwitch Live Activity")
         self.target = target
         self.item = item
-        // The bar lays the capsule out again after its image changes (a wider clock, the tally): the card follows.
+        // The bar lays the capsule out again after its image changes (a longer word, the tally): the card follows.
         if let window = item.button?.window {
             for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification] {
                 barObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
@@ -248,13 +248,11 @@ final class LiveActivity {
         if NSApp.currentEvent?.clickCount ?? 1 >= 2 { openFirst() } else { toggle() }
     }
 
-    /// The capsule as the button's image, drawn again when what it says changes (the clock: once a second).
+    /// The capsule as the button's image, drawn again when what it says changes (its word, the tally, the result; no
+    /// clock in it since 2026-10-03, so nothing of it changes by the second).
     private func drawCapsule(_ button: NSStatusBarButton) {
-        let now = Date()
-        let capsule = LiveCapsule(look: presenter.look, trail: presenter.trail, now: now)
-        var clock = ""
-        if case .clock(let since, _)? = presenter.trail { clock = LiveLook.clock(since: since, now: now) }
-        let key = "\(presenter.look)|\(String(describing: presenter.trail))|\(clock)"
+        let capsule = LiveCapsule(look: presenter.look, trail: presenter.trail)
+        let key = "\(presenter.look)|\(String(describing: presenter.trail))"
         guard key != drawn else { return }
         let renderer = ImageRenderer(content: capsule)
         renderer.scale = button.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2

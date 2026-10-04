@@ -9,6 +9,7 @@ struct ComposeBar: View {
     let model: DispatchModel
     @State private var height = ComposeField.minHeight
     @State private var sealing = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         @Bindable var model = model
@@ -36,7 +37,7 @@ struct ComposeBar: View {
                     Text("↩ Send")
                     Text("⇧↩ New Line")
                 }
-                .font(.system(size: 11, design: .monospaced))
+                .mono(11)
                 .foregroundStyle(Look.faint)
             }
         }
@@ -63,10 +64,12 @@ struct ComposeBar: View {
                 Text("输入任务或问题").font(.system(size: 14)).foregroundStyle(Look.faint).allowsHitTesting(false)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, look.isClassic ? 14 : 12)
         .padding(.vertical, 10)
         .frame(minHeight: 38)
-        .overlay(Rectangle().strokeBorder(model.text.isEmpty && !model.inputFocused ? Look.line : Look.faint, lineWidth: 1))
+        // The classic look's field: its own ground, round as a message's bubble (docs/ui-v0.md §8).
+        .grounded(look.isClassic ? Look.panel : Color.clear, radius: 17)
+        .framed(model.text.isEmpty && !model.inputFocused ? Look.line : Look.faint, radius: 17)
     }
 
     private var attachments: some View {
@@ -75,15 +78,15 @@ struct ComposeBar: View {
                 ForEach(model.attachments) { item in
                     HStack(spacing: 8) {
                         Text(item.file.name).lineLimit(1).truncationMode(.middle)
-                        Button { model.removeAttachment(item.id) } label: { Text("×") }
+                        Button { model.removeAttachment(item.id) } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 11.5) }
                             .buttonStyle(QuietButtonStyle())
                             .help("Remove")
                     }
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .mono(11.5)
                     .foregroundStyle(Look.ink2)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .overlay(Rectangle().strokeBorder(Look.line, lineWidth: 1))
+                    .framed(Look.line, radius: Look.controlRadius)
                 }
                 if model.preparing > 0 {
                     HStack(spacing: 6) { BrailleSpinner(); Text("Preparing").mono(11.5).foregroundStyle(Look.ink2) }
@@ -124,56 +127,82 @@ private struct PinChip: View {
     var body: some View {
         HStack(spacing: 8) {
             Text("Pin → \(name)")
-            Button(action: clear) { Text("×") }.buttonStyle(QuietButtonStyle()).help("Auto")
+            Button(action: clear) { LookGlyph(glyph: "×", symbol: "xmark") }.buttonStyle(QuietButtonStyle()).help("Auto")
         }
-        .font(.system(size: 12, design: .monospaced))
+        .mono(12)
         .foregroundStyle(Look.ink)
         .padding(.horizontal, 8)
         .padding(.vertical, 2)
-        .overlay(Rectangle().strokeBorder(Look.faint, lineWidth: 1))
+        .framed(Look.faint, radius: Look.controlRadius)
     }
 }
 
-/// `+`: a framed square, brighter under the pointer.
+/// `+`: a framed square, brighter under the pointer; a plus in a circle in the classic look.
 private struct PlusSquare: View {
     let side: CGFloat
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        Text("+")
-            .font(.system(size: 18, design: .monospaced))
-            .foregroundStyle(hovering ? Look.ink : Look.ink2)
-            .frame(width: 38, height: side)
-            .overlay(Rectangle().strokeBorder(hovering ? Look.ink2 : Look.line, lineWidth: 1))
-            .contentShape(Rectangle())
-            .onHover { hovering = $0 }
+        Group {
+            if look.isClassic {
+                Image(systemName: "plus.circle").font(.system(size: 21, weight: .light))
+                    .foregroundStyle(hovering ? Look.ink : Look.ink2)
+                    .frame(width: 30, height: side)
+            } else {
+                Text("+")
+                    .font(.system(size: 18, design: .monospaced))
+                    .foregroundStyle(hovering ? Look.ink : Look.ink2)
+                    .frame(width: 38, height: side)
+                    .overlay(Rectangle().strokeBorder(hovering ? Look.ink2 : Look.line, lineWidth: 1))
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
     }
 }
 
 /// `↑`: ink when there is something to send (the primary button, §7.2.3), signal under the pointer; a frame otherwise.
+/// In the classic look a disc in the accent's colour with an arrow, grey while there is nothing to send.
 private struct SendSquare: View {
     let active: Bool
     let sending: Bool
     let side: CGFloat
     let send: () -> Void
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Button(action: send) {
-            Group {
-                if sending { BrailleSpinner() } else { Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced)) }
-            }
-            .foregroundStyle(active ? (hovering ? Color.black : Look.ground) : Look.faint)
-            .frame(width: 38, height: side)
-            .background(active ? (hovering ? Color.signal : Look.ink) : Color.clear)
-            .overlay(Rectangle().strokeBorder(active ? Color.clear : Look.line, lineWidth: 1))
-            .contentShape(Rectangle())
+            if look.isClassic { classic } else { pixel }
         }
         .buttonStyle(.plain)
         .disabled(!active)
         .onHover { hovering = $0 }
-        .help("Send ↩")
+        .help(ClassicWords.help("Send ↩", in: look))
         .accessibilityLabel("Send")
+    }
+
+    private var pixel: some View {
+        Group {
+            if sending { BrailleSpinner() } else { Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced)) }
+        }
+        .foregroundStyle(active ? (hovering ? Color.black : Look.ground) : Look.faint)
+        .frame(width: 38, height: side)
+        .background(active ? (hovering ? Color.signal : Look.ink) : Color.clear)
+        .overlay(Rectangle().strokeBorder(active ? Color.clear : Look.line, lineWidth: 1))
+        .contentShape(Rectangle())
+    }
+
+    private var classic: some View {
+        Group {
+            if sending { BrailleSpinner() } else { Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold)) }
+        }
+        .foregroundStyle(active ? Color.white : Look.ink2)
+        .frame(width: 28, height: 28)
+        .background(Circle().fill(active ? Color.signal.opacity(hovering ? 0.85 : 1) : Look.raised))
+        .frame(width: 32, height: side)
+        .contentShape(Rectangle())
     }
 }
 

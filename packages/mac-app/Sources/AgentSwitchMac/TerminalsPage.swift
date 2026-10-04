@@ -14,6 +14,10 @@ private let windowLog = Logger(subsystem: "com.agentswitch.mac", category: "term
 /// leaves the screen's area clear. The bar's Terminals side (the list's button, the terminal on screen as the title, new
 /// terminal and all the terminals' mark) is drawn by the window from what the page reports (`head`); the page says what
 /// they show and does what they ask.
+/// Split panes (docs/terminal-v0.md §1 分屏, 2026-10-03): the page lays the terminal area out in panes and says where
+/// each pane's screen goes (`screens`); there is one native screen a pane, each following its own terminal with its own
+/// screen id, so each pane holds its terminal's size. The pane in focus has the keyboard; the bar's title and the status
+/// bar are its terminal's.
 /// One per open window: the window closing stops it (the terminals keep running: the daemon holds them), the next
 /// window signs in afresh.
 @MainActor
@@ -24,9 +28,19 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
     /// What the bar shows of the terminals, as the page reports it.
     let head = TerminalHead()
     let web: TerminalWebView
-    /// The native screen under the page (docs/terminal-v0.md §1 Mac).
-    let screen: TerminalScreenController
-    /// The page over the screen: what the window shows as its Terminals page.
+    /// The native screens under the page (docs/terminal-v0.md §1 Mac), one a pane, by the page's pane ids.
+    private var screens: [Int: TerminalScreenController] = [:]
+    /// The pane in focus: its screen has the keyboard, and the status bar says its terminal's size.
+    private var focusedPane = 0
+    /// What each pane's screen heard last of its terminal's grid and holder.
+    private var said: [Int: (grid: [Int]?, away: String?)] = [:]
+    /// The screen of the pane in focus (none before the page has said where the screens go).
+    var screen: TerminalScreenController? { screens[focusedPane] ?? screens.values.first }
+    /// The window's page is being drawn in (each screen's own refresh gives way to it).
+    var pageRefreshing: () -> Bool = { false } {
+        didSet { for screen in screens.values { screen.pageRefreshing = pageRefreshing } }
+    }
+    /// The page over the screens: what the window shows as its Terminals page.
     let stage: TerminalStage
     /// The page's title (the terminal on screen), for the window's (Mission Control, the Window menu).
     private(set) var title: String?
@@ -42,6 +56,10 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
     private var pendingTerminal: String?
     /// When the page last signed in again (at most once every few seconds, so a broken service is not asked in a loop).
     private var lastSignIn = Date.distantPast
+    /// The look and the accent the page was told last (TerminalsPage+Look.swift).
+    var toldLook = InterfaceLook.current
+    var toldAccent = TerminalsPageController.accentHex()
+    var lookObservers: [NSObjectProtocol] = []
     /// The Terminals page is the one on screen: it has the keyboard, the page hears it is in use, and the terminal it
     /// shows takes its size from it. Hidden under Dispatch, it keeps its stream but takes nothing.
     var onScreen = false {
@@ -61,20 +79,22 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         config.applicationNameForUserAgent = "AgentSwitchMac/1"   // the page hides what only a browser needs
         let bridge = ScriptBridge()
         config.userContentController.add(bridge, name: "agentswitch")
-        // The page leaves the screen to the native view (terminal.js NATIVE).
-        config.userContentController.addUserScript(WKUserScript(source: "window.agentswitchNativeScreen = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // The page leaves the screen to the native view (terminal.js NATIVE), Encrypt & Send to the window's status bar
+        // (STATUS_BAR, 2026-10-03), and lays the terminal area out in panes this window fills (PANES).
+        // It is drawn in the window's look, with the system's accent (docs/ui-v0.md §8; TerminalsPage+Look.swift).
+        Self.install(scripts: config.userContentController, look: toldLook, accent: toldAccent)
         web = TerminalWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
         web.setValue(false, forKey: "drawsBackground")
         web.underPageBackgroundColor = .black
-        screen = TerminalScreenController(client: { model.client })
-        stage = TerminalStage(web: web, screen: screen.view)
-        // The screen's refresh over it, under the page.
-        stage.addSubview(screen.refresh, positioned: .above, relativeTo: screen.view)
+        stage = TerminalStage(web: web)
         super.init()
         bridge.owner = self
         web.navigationDelegate = self
-        screen.evaluate = { [weak web] js in web?.evaluateJavaScript(js, completionHandler: nil) }
-        web.dropOnScreen = { [weak screen] pasteboard in screen?.drop(pasteboard) ?? false }
+        followLook()
+        // A drop goes to the screen of the pane it lands on.
+        web.dropOnScreen = { [weak self] pasteboard, point in
+            self?.screens.values.first { $0.shown != nil && $0.view.frame.contains(point) }?.drop(pasteboard) ?? false
+        }
         // The page names the window after the terminal on screen.
         titleObservation = web.observe(\.title) { [weak self] web, _ in
             MainActor.assumeIsolated {
@@ -112,22 +132,28 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         web.evaluateJavaScript("window.agentswitch?.show(\(arg))", completionHandler: nil)
     }
 
-    /// The bar's buttons and the window's shortcuts from Dispatch (⌘T, ⌘1–9).
+    /// The bar's buttons and the window's shortcuts from Dispatch (⌘T, ⌘1–9); the status bar's lock (Encrypt & Send).
     func toggleList() { web.evaluateJavaScript("window.agentswitch?.toggleList()", completionHandler: nil) }
+    func seal() { web.evaluateJavaScript("window.agentswitch?.seal()", completionHandler: nil) }
+    /// The bar's split buttons: the pane in focus split to the `right` or `down`, the new half empty.
+    func split(_ side: String) { web.evaluateJavaScript("window.agentswitch?.split(\"\(side)\")", completionHandler: nil) }
+    /// A page change is drawn in over the screens: their next snapshot is not drawn in again.
+    func pageDrawsIn() { for screen in screens.values { screen.pageDrawsIn() } }
     func newTerminal() { web.evaluateJavaScript("window.agentswitch?.newTerminal()", completionHandler: nil) }
     func shortcut(_ key: String) { web.evaluateJavaScript("window.agentswitch?.shortcut(\"\(key)\")", completionHandler: nil) }
 
-    /// The terminal on screen while this page is the one in use: its turns need no telling (the Live Activity).
-    var watching: String? {
-        guard onScreen, let window, window.isKeyWindow, window.isVisible else { return nil }
-        return screen.shown
+    /// The terminals on screen (one a pane) while this page is the one in use: their turns need no telling (the Live
+    /// Activity).
+    var watching: Set<String> {
+        guard onScreen, let window, window.isKeyWindow, window.isVisible else { return [] }
+        return Set(screens.values.compactMap(\.shown))
     }
 
     /// The window became or stopped being the key window: told to the page (the screen in use sets the size).
     func windowKeyChanged(_ key: Bool) {
         web.evaluateJavaScript("window.agentswitch?.active(\(key && onScreen))", completionHandler: nil)
-        // Brought to the front: the size is this window's when nobody else has it.
-        if key && onScreen { screen.windowBecameKey() }
+        // Brought to the front: each terminal's size is this window's when nobody else has it.
+        if key && onScreen { for screen in screens.values { screen.windowBecameKey() } }
     }
 
     /// Shown (the keyboard to the screen or the page; the size, when nobody has it) or hidden under Dispatch.
@@ -137,14 +163,14 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         guard onScreen else { return }
         // The sign-in failed when the window opened (the service was starting): once more.
         if !loaded { load() }
-        if key { screen.windowBecameKey() }
+        if key { for screen in screens.values { screen.windowBecameKey() } }
         focus()
     }
 
     /// The keyboard to the terminal on screen, else to the page (its new-terminal panel).
     func focus() {
         guard onScreen, let window else { return }
-        window.makeFirstResponder(screen.shown != nil ? screen.view : web)
+        window.makeFirstResponder(screen.flatMap { $0.shown != nil ? $0.view : nil } ?? web)
     }
 
     /// The page's sign-in is gone (the service restarted, maybe on another port) or its process ended: sign in again
@@ -167,9 +193,79 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
     /// The window closes: nothing more to show or watch.
     func stop() {
         titleObservation = nil
+        for observer in lookObservers { NotificationCenter.default.removeObserver(observer) }
+        lookObservers = []
         web.navigationDelegate = nil
         web.configuration.userContentController.removeScriptMessageHandler(forName: "agentswitch")
-        screen.stop()
+        for screen in screens.values { screen.stop() }
+    }
+
+    // MARK: the panes' screens
+
+    /// A pane as the page says it: where its screen goes, the terminal it shows (none: an empty pane, or a terminal
+    /// being made), the folder its agent works in, whether it has the focus.
+    private struct PaneScreen {
+        let pane: Int
+        let id: String?
+        let rect: CGRect
+        let cwd: String?
+        let focused: Bool
+    }
+
+    private func makeScreen(_ pane: Int) -> TerminalScreenController {
+        let model = model
+        let screen = TerminalScreenController(client: { model.client })
+        screen.pane = pane
+        screen.pageRefreshing = pageRefreshing
+        screen.evaluate = { [weak web] js in web?.evaluateJavaScript(js, completionHandler: nil) }
+        // The status bar's grid and holder, as the screen hears them from its stream.
+        screen.onSize = { [weak self] grid, away in self?.screenSaid(pane, grid: grid.map { [$0.cols, $0.rows] }, away: away) }
+        screen.onClick = { [weak self] in self?.clicked(pane) }
+        stage.add(screen: screen.view, refresh: screen.refresh)
+        screens[pane] = screen
+        return screen
+    }
+
+    /// The screens where the page has its panes now: each placed and showing its terminal, the ones of panes that are
+    /// gone taken away (their streams end, and with them their hold on the size).
+    private func place(_ panes: [PaneScreen]) {
+        let before = focusedPane
+        var shown: Set<Int> = []
+        var rects: [CGRect] = []
+        for p in panes {
+            shown.insert(p.pane)
+            let screen = screens[p.pane] ?? makeScreen(p.pane)
+            screen.place(p.rect)
+            // The keyboard goes where the page says (`focus`), not to whichever pane was shown last.
+            screen.show(p.id, keyboard: false)
+            screen.workdir = p.cwd
+            if p.id != nil { rects.append(p.rect) }
+            if p.focused { focusedPane = p.pane }
+        }
+        for (pane, screen) in screens where !shown.contains(pane) {
+            screen.stop()
+            screen.view.removeFromSuperview()
+            screen.refresh.removeFromSuperview()
+            screens[pane] = nil
+            said[pane] = nil
+        }
+        web.screenRects = rects
+        if focusedPane != before || screens[before] == nil {
+            let last = said[focusedPane]
+            head.screenSaid(grid: last?.grid ?? nil, away: last?.away ?? nil)
+        }
+    }
+
+    private func screenSaid(_ pane: Int, grid: [Int]?, away: String?) {
+        said[pane] = (grid, away)
+        if pane == focusedPane { head.screenSaid(grid: grid, away: away) }
+    }
+
+    /// A click in a pane's screen: the page gives that pane the focus (its terminal becomes the bar's and the status
+    /// bar's).
+    private func clicked(_ pane: Int) {
+        guard pane != focusedPane else { return }
+        web.evaluateJavaScript("window.agentswitch?.focusPane(\(pane))", completionHandler: nil)
     }
 
     // MARK: the page's reports
@@ -186,25 +282,33 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         case "mark":
             head.mark = PixelArt.MarkState(page: body["state"] as? String)
             head.tag = body["tag"] as? String ?? ""
+        case "context":
+            let context = TerminalContext(report: body)
+            if head.context != context { head.context = context }
+        case "screens":
+            let panes = (body["panes"] as? [[String: Any]] ?? []).compactMap { p -> PaneScreen? in
+                guard let pane = (p["pane"] as? NSNumber)?.intValue, let rect = Self.rect(p["rect"]) else { return nil }
+                return PaneScreen(pane: pane, id: p["id"] as? String, rect: rect, cwd: p["cwd"] as? String, focused: p["focused"] as? Bool ?? false)
+            }
+            place(panes)
+            windowLog.debug("screens \(panes.map { "\($0.pane):\($0.id ?? "-")" }.joined(separator: " "), privacy: .public)")
         case "screen":
-            let rect = Self.rect(body["rect"])
-            web.screenRect = rect
-            screen.place(Self.rect(body["area"]))
-            screen.show(rect == nil ? nil : body["id"] as? String)
-            screen.workdir = body["cwd"] as? String
-            windowLog.debug("screen \(String(describing: rect), privacy: .public) id \(String(describing: body["id"]), privacy: .public)")
+            // A page that knows one screen (an older service's): one pane.
+            guard let area = Self.rect(body["area"]) else { break }
+            place([PaneScreen(pane: 0, id: Self.rect(body["rect"]) == nil ? nil : body["id"] as? String, rect: area, cwd: body["cwd"] as? String, focused: true)])
+            if screen?.shown != nil, onScreen { screen?.focus() }
         case "overlays":
             web.overlays = (body["rects"] as? [Any] ?? []).compactMap(Self.rect)
         case "focus":
-            if onScreen { screen.focus() }
+            if onScreen { screen?.focus() }
         case "focusPage":
             // A field on the page wants the keyboard (the list's search, ⌘F from the terminal).
             if onScreen { window?.makeFirstResponder(web) }
         case "note":
-            if let text = body["text"] as? String { screen.note(text) }
+            if let text = body["text"] as? String { screen?.note(text) }
         case "claim":
-            // The placeholder clicked: the size is this window's again.
-            screen.claim()
+            // A pane's placeholder clicked: its terminal's size is this window's again.
+            ((body["pane"] as? NSNumber).flatMap { screens[$0.intValue] } ?? screen)?.claim()
         default:
             break
         }
@@ -272,7 +376,8 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
     }
 
     #if DEBUG
-    var probeScreen: TerminalScreenController { screen }
+    var probeScreen: TerminalScreenController? { screen }
+    var probeScreens: [Int: TerminalScreenController] { screens }
     var probeWeb: TerminalWebView { web }
     #endif
 }
@@ -291,7 +396,7 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
             if let text = body["url"] as? String, let url = URL(string: text) { MainActor.assumeIsolated { LinkOpener.open(url) } }
         case "signIn":
             MainActor.assumeIsolated { owner?.signIn() }
-        case "head", "mark", "screen", "overlays", "focus", "focusPage", "note", "claim":
+        case "head", "mark", "context", "screen", "screens", "overlays", "focus", "focusPage", "note", "claim":
             MainActor.assumeIsolated { owner?.pageSaid(body) }
         case "log":
             windowLog.notice("page: \(body["text"] as? String ?? "", privacy: .public)")
@@ -301,8 +406,8 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// What the bar shows of the terminals, from the page: the terminal on screen (none while one is being made) and all
-/// the terminals' state.
+/// What the bar and the status bar show of the terminals, from the page: the terminal on screen (none while one is being
+/// made), all the terminals' state, and the terminal on screen's agent, mode and size (`context`).
 @MainActor
 @Observable
 final class TerminalHead {
@@ -314,6 +419,21 @@ final class TerminalHead {
     var status: String?
     var mark: PixelArt.MarkState = .off
     var tag = ""
+    var context: TerminalContext?
+    /// The native screen's word on the terminal on screen: its grid as the service has it (`[cols, rows]`, nil before the
+    /// stream says it) and where it is in use when not here.
+    private(set) var grid: [Int]?
+    private(set) var away: String?
+
+    func screenSaid(grid: [Int]?, away: String?) {
+        if self.grid != grid { self.grid = grid }
+        if self.away != away { self.away = away }
+    }
+
+    /// The status bar's terminal: the page's report, with the grid and the holder the screen heard last.
+    var shown: TerminalContext? {
+        context.map { $0.seen(cols: grid?.first, rows: grid?.last, away: away) }
+    }
 }
 
 extension PixelArt.MarkState {

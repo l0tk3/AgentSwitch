@@ -26,14 +26,18 @@ enum LinkOpener {
 /// the mouse; the screen's area, where the page draws nothing, lets it through to the native view below.
 final class TerminalStage: NSView {
     let web: TerminalWebView
-    let screen: NSView?
 
-    init(web: TerminalWebView, screen: NSView?) {
+    init(web: TerminalWebView) {
         self.web = web
-        self.screen = screen
         super.init(frame: NSRect(origin: .zero, size: web.frame.size))
-        if let screen { addSubview(screen) }
         addSubview(web)
+    }
+
+    /// A native screen under the page (one a pane, docs/terminal-v0.md §1 分屏), and over it, still under the page, the
+    /// refresh that draws another terminal in.
+    func add(screen: NSView, refresh: NSView) {
+        addSubview(screen, positioned: .below, relativeTo: web)
+        addSubview(refresh, positioned: .above, relativeTo: screen)
     }
 
     required init?(coder: NSCoder) { fatalError("not from a nib") }
@@ -49,21 +53,25 @@ final class TerminalStage: NSView {
 
 /// A menu bar app has no Edit menu, so ⌘C / ⌘V / ⌘X / ⌘A / ⌘Z never reach the page on their own: send them here.
 final class TerminalWebView: WKWebView {
-    /// The terminal's screen in the page (its coordinates, top left origin), while one is shown.
-    var screenRect: CGRect?
+    /// The terminals' screens in the page (its coordinates, top left origin), one a pane that shows a terminal.
+    var screenRects: [CGRect] = []
     /// What floats over it (permission requests, the composer, the loading line, a sheet).
     var overlays: [CGRect] = []
-    /// A drop on the screen's area (files, text): the terminal's, as in iTerm; anywhere else the page's (WebKit's).
-    var dropOnScreen: ((NSPasteboard) -> Bool)?
+    /// A drop on a screen's area (files, text) at a point of the page: that terminal's, as in iTerm; anywhere else the
+    /// page's (WebKit's).
+    var dropOnScreen: ((NSPasteboard, CGPoint) -> Bool)?
+    /// Where the drag is over a screen now.
+    private var dragPoint = CGPoint.zero
     /// The drag is over the screen's area now (WebKit is not told of it there).
     private var dragOnScreen = false
     private var droppedOnScreen = false
 
     private func onScreen(_ info: NSDraggingInfo) -> Bool {
-        guard let screen = screenRect, dropOnScreen != nil else { return false }
+        guard !screenRects.isEmpty, dropOnScreen != nil else { return false }
         let local = convert(info.draggingLocation, from: nil)
         let p = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
-        return screen.contains(p) && !overlays.contains(where: { $0.contains(p) })
+        dragPoint = p
+        return screenRects.contains(where: { $0.contains(p) }) && !overlays.contains(where: { $0.contains(p) })
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -94,7 +102,7 @@ final class TerminalWebView: WKWebView {
         guard dragOnScreen else { return super.performDragOperation(sender) }
         dragOnScreen = false
         droppedOnScreen = true
-        return dropOnScreen?(sender.draggingPasteboard) ?? false
+        return dropOnScreen?(sender.draggingPasteboard, dragPoint) ?? false
     }
 
     override func concludeDragOperation(_ sender: NSDraggingInfo?) {
@@ -105,10 +113,10 @@ final class TerminalWebView: WKWebView {
     /// Over the screen and nothing of the page's there: the native screen below takes it (nil lets the stage look
     /// further down).
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if let screen = screenRect, let superview {
+        if !screenRects.isEmpty, let superview {
             let local = convert(point, from: superview)
             let p = CGPoint(x: local.x, y: isFlipped ? local.y : bounds.height - local.y)
-            if screen.contains(p), !overlays.contains(where: { $0.contains(p) }) { return nil }
+            if screenRects.contains(where: { $0.contains(p) }), !overlays.contains(where: { $0.contains(p) }) { return nil }
         }
         return super.hitTest(point)
     }
@@ -121,7 +129,7 @@ final class TerminalWebView: WKWebView {
         }
         // The page's own shortcuts: ⌘W closes the terminal on screen (not the window), ⌘T opens a new one, ⌘B hides or
         // shows the list, ⌘F searches it, ⌘1–9 switch.
-        if key == "w" || key == "t" || key == "b" || key == "f" || (key.count == 1 && ("1"..."9").contains(key)) {
+        if key == "w" || key == "t" || key == "b" || key == "f" || key == "d" || (key.count == 1 && ("1"..."9").contains(key)) {
             evaluateJavaScript("window.agentswitch?.shortcut(\"\(key)\")", completionHandler: nil)
             return true
         }

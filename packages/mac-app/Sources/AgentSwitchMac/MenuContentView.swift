@@ -41,12 +41,12 @@ struct MenuContentView: View {
                     .padding(.bottom, 10)
             }
             if let built = model.stagedUpdate {
-                DottedRule().padding(.horizontal, 12)
+                HairRule().padding(.horizontal, 12)
                 update(built)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
             }
-            DottedRule().padding(.horizontal, 12)
+            HairRule().padding(.horizontal, 12)
             actions
                 .padding(.horizontal, 6)
                 .padding(.vertical, 6)
@@ -70,7 +70,7 @@ struct MenuContentView: View {
                 .accessibilityHidden(true)
             Text("AgentSwitch").mono(13, weight: .bold)
             Spacer(minLength: 8)
-            Text(headline.text).mono(11).foregroundStyle(headline.level >= .warning ? headline.level.color : .secondary)
+            LookWord(headline.text).mono(11).foregroundStyle(headline.level >= .warning ? headline.level.color : .secondary)
         }
     }
 
@@ -121,12 +121,12 @@ struct MenuContentView: View {
                         showSettings(.environment)
                     }
                     .controlSize(.small)
-                    .font(.system(size: 11, design: .monospaced))
+                    .mono(11)
                 }
             }
             ForEach(model.notices, id: \.self) { notice in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("i").mono(11, weight: .bold).foregroundStyle(.secondary).frame(width: 10).accessibilityHidden(true)
+                    LookGlyph(glyph: "i", symbol: "info.circle", size: 11).foregroundStyle(.secondary).frame(width: 10).accessibilityHidden(true)
                     Text(notice).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -145,7 +145,7 @@ struct MenuContentView: View {
             Button("Install…") { confirmUpdate(built) }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .font(.system(size: 11, design: .monospaced))
+                .mono(11)
         }
     }
 
@@ -174,7 +174,7 @@ struct MenuContentView: View {
             MenuAction(title: "Open in Browser", enabled: model.daemonReady) { openConsole() }
             MenuAction(title: "Restart Service") { model.restartAll() }
             MenuAction(title: "Settings…") { showSettings(nil) }
-            DottedRule().padding(.horizontal, 6).padding(.vertical, 5)
+            HairRule().padding(.horizontal, 6).padding(.vertical, 5)
             MenuAction(title: "Quit AgentSwitch") { quitApp() }
         }
     }
@@ -199,7 +199,7 @@ private struct ServiceRow: View {
             StatusMark(level: line.level).frame(width: 10)
             Text(label).mono(12)
             Spacer(minLength: 12)
-            Text(line.text).mono(11.5).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            LookWord(line.text).mono(11.5).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
         .help(detail)
     }
@@ -212,19 +212,21 @@ private struct MenuAction: View {
     var enabled = true
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Color.clear.frame(width: 10, height: 1)
-                Text(title).mono(12)
+                LookWord(title).mono(12)
                 Spacer()
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .contentShape(Rectangle())
-            .foregroundStyle(hovering && enabled ? Color(nsColor: .windowBackgroundColor) : .primary)
-            .background(hovering && enabled ? Color.primary : .clear)
+            // In reverse under the pointer; in the classic look the system's menu highlight: the accent, round.
+            .foregroundStyle(hovering && enabled ? (look.isClassic ? Color.white : Color(nsColor: .windowBackgroundColor)) : .primary)
+            .grounded(hovering && enabled ? (look.isClassic ? Color.signal : Color.primary) : .clear, radius: 5)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)

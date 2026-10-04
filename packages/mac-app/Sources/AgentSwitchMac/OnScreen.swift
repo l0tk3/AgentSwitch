@@ -19,12 +19,23 @@ extension View {
 
 private struct FollowsWindow: ViewModifier {
     @State private var seen = true
+    /// The look (docs/ui-v0.md §8): every root hands it down, and is built afresh when it changes, so that what is
+    /// drawn by the look — the shared marks, buttons, labels, the colours — is drawn again at once.
+    @AppStorage(InterfaceLook.key) private var appearance = InterfaceLook.pixel.rawValue
 
     func body(content: Content) -> some View {
+        let look = InterfaceLook.load(appearance)
         content
             .environment(\.onScreen, seen)
+            .environment(\.interfaceLook, look)
+            .id(look)
             .background(SeenProbe { seen = $0 })
     }
+}
+
+extension EnvironmentValues {
+    /// The interface's look, pixel or classic (docs/ui-v0.md §8), from the window's root (`followsWindow()`).
+    @Entry var interfaceLook = InterfaceLook.pixel
 }
 
 /// An empty view in the wrapped view's place that reports when it starts or stops being seen.

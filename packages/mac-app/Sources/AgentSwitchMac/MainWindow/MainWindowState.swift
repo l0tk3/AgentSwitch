@@ -8,6 +8,7 @@ import SwiftUI
 ///
 /// What the Dispatch page tells the window:
 /// - `dispatchTitle`: the bar's centre — nil on the conversation; a task or topic page's status mark and title.
+/// - `dispatchRouter`, `dispatchTopics`: the status bar's right on Dispatch (`dispatchChanged`).
 /// - `showsBack`: `‹` before the title; Esc and ⌘[ go back too. The page pops when `backRequests` changes.
 /// - `openTask`: the task whose page is open (nil elsewhere): the Live Activity keeps quiet about it while the window is
 ///   in use (`watchingTask`).
@@ -22,14 +23,14 @@ import SwiftUI
 /// window visible), whether the window is key, whether text is being typed in it (`editingText`: the boxes leave ⌘↩ /
 /// ⌘⌫ to the field), and what Dispatch's tasks and the terminals have going on (`GET /live`).
 ///
-/// What the Browser page says (BrowserPageModel): its tabs' activity for the page word's mark and the bar's counts, and
-/// the tab on screen as the bar's title (`browserChanged`).
+/// What the Browser page says (BrowserPageModel): its tabs' activity for the rail's mark on the globe, and the tab on
+/// screen as the bar's title (`browserChanged`).
 @MainActor
 @Observable
 final class MainWindowState {
     // MARK: pages
 
-    /// The page on screen (and the bar's current word): a change goes in at once, then is drawn in from the top.
+    /// The page on screen (and the rail's current icon): a change goes in at once, then is drawn in from the top.
     private(set) var page: MainPage
     /// Dispatch is the page on screen.
     var dispatchShown: Bool { page == .dispatch }
@@ -42,6 +43,9 @@ final class MainWindowState {
     var showsBack = false
     /// The task whose page is open on Dispatch.
     var openTask: String?
+    /// The router's model and the open topics, for the status bar.
+    private(set) var dispatchRouter: String?
+    private(set) var dispatchTopics = 0
 
     // MARK: the window asks the Dispatch page
 
@@ -69,9 +73,13 @@ final class MainWindowState {
 
     // MARK: the bar's row
 
-    /// The title bar's height (the bar fills that row) and where the traffic lights end.
+    /// The title bar's height (the bar fills that row) and where the traffic lights start and end.
     var barHeight: CGFloat = 32
+    var lightsStart: CGFloat = 20
     var lightsEnd: CGFloat = 70
+    /// The window is full screen: macOS hides its traffic lights until the pointer reaches the top, and the bar draws
+    /// its own in their place (FullScreenLights).
+    var fullScreen = false
 
     init(page: MainPage) {
         self.page = page
@@ -121,6 +129,12 @@ final class MainWindowState {
 
     func editingChanged(_ editing: Bool) {
         if editingText != editing { editingText = editing }
+    }
+
+    /// The Dispatch page's router or topics changed.
+    func dispatchChanged(router: String?, topics: Int) {
+        if dispatchRouter != router { dispatchRouter = router }
+        if dispatchTopics != topics { dispatchTopics = topics }
     }
 
     /// The Browser page's tabs changed (a poll, a stream's event).

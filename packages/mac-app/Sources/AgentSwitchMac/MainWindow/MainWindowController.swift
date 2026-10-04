@@ -4,7 +4,9 @@ import SwiftUI
 
 /// The main window `AgentSwitch` (docs/dispatch-v0.md §1): one window, its pages — Dispatch (the phone's home on a desk,
 /// `DispatchPage`), Terminals (the terminal window as it was, `TerminalsPageController`) and Browser (the shared
-/// browser's screen, `BrowserPage`, docs/browser-v0.md §1 Mac) — under one row of bar (MainBar.swift). All pages are in
+/// browser's screen, `BrowserPage`, docs/browser-v0.md §1 Mac) — chosen in the rail on the left (MainRail.swift), under
+/// one row of bar that is the page's own (MainBar.swift), over one status bar across the window (MainStatusBar.swift;
+/// proposal B, 2026-10-03, docs/design/implemented/window-bars.html). All pages are in
 /// the window at once and only one is shown: the terminal page keeps its sign-in and its stream under the others, and
 /// nothing of it takes the keyboard, draws or claims a terminal's size until it is shown; the Browser page follows its
 /// tab only while it is shown (and polls its list slowly for the bar's mark while the window is visible).
@@ -20,7 +22,7 @@ final class MainWindowController: NSObject {
     private(set) var window: NSWindow?
     /// Told when the window opens (true) or closes (false), for the Dock icon.
     var onVisibilityChange: (Bool) -> Void = { _ in }
-    /// The bar's settings button and ⌘,.
+    /// The rail's settings and ⌘,.
     var openSettings: () -> Void = {}
     private var terminals: TerminalsPageController?
     private var browser: BrowserPageModel?
@@ -34,13 +36,18 @@ final class MainWindowController: NSObject {
     /// TerminalProbe: the window opens behind the others and the app is not made active.
     static var probing = false
     var probeScreen: TerminalScreenController? { terminals?.screen }
+    var probeScreens: [Int: TerminalScreenController] { terminals?.probeScreens ?? [:] }
     var probeWeb: TerminalWebView? { terminals?.web }
     var probeBrowser: BrowserPageModel? { browser }
+    var probeHead: TerminalHead? { terminals?.head }
+    /// The status bar's lock, as a click on it.
+    func probeSeal() { barActions.seal() }
     #endif
 
     static let contentSize = NSSize(width: 1280, height: 820)
-    /// Wider than the terminal page's narrow layout (760 pt, terminal.css): its list stays on screen at the smallest size.
-    static let minSize = NSSize(width: 800, height: 480)
+    /// Wider than the terminal page's narrow layout (760 pt, terminal.css) beside the rail (44 pt): its list stays on
+    /// screen at the smallest size.
+    static let minSize = NSSize(width: 850, height: 480)
     static let frameName = "AgentSwitchMain"
     /// Where the terminal window was before there was a main window: the main window opens there the first time.
     static let terminalFrameName = "AgentSwitchTerminal"
@@ -79,8 +86,8 @@ final class MainWindowController: NSObject {
         bringForward()
     }
 
-    /// The terminal on screen in the window in use: the Live Activity says nothing of its turns.
-    var watchingTerminal: String? { terminals?.watching }
+    /// The terminals on screen in the window in use (one a pane): the Live Activity says nothing of their turns.
+    var watchingTerminals: Set<String> { terminals?.watching ?? [] }
 
     /// The task whose page is open in the window in use: the Live Activity says nothing of its result.
     var watchingTask: String? {
@@ -130,12 +137,13 @@ final class MainWindowController: NSObject {
         browser.onTitle = { [weak self] in self?.updateTitle() }
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.stage, .browser: BrowserPage.host(browser)])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: terminals.head, model: model,
-                                                                content: container, actions: barActions))
+                                                                content: container, actions: barActions, browser: browser))
         host.sizingOptions = []
         window.contentViewController = host
         window.setContentSize(Self.contentSize)
         // The title bar's height and where the traffic lights end, for the bar drawn in that row.
         state.barHeight = max(28, window.frame.height - window.contentLayoutRect.height)
+        state.lightsStart = window.standardWindowButton(.closeButton)?.frame.minX ?? 20
         state.lightsEnd = window.standardWindowButton(.zoomButton)?.frame.maxX ?? 70
         window.minSize = Self.minSize
         window.isReleasedWhenClosed = false
@@ -147,7 +155,7 @@ final class MainWindowController: NSObject {
         self.container = container
         dispatchHost = dispatch
         // The terminal screen's own refresh (another terminal) gives way to the page's, drawn in over it.
-        terminals.screen.pageRefreshing = { [weak container] in container?.refresh.playing ?? false }
+        terminals.pageRefreshing = { [weak container] in container?.refresh.playing ?? false }
         observe(window)
         watchKeys()
         // Signed in before it is shown: a window opened on Dispatch has its terminals ready behind it.
@@ -167,6 +175,13 @@ final class MainWindowController: NSObject {
                     self?.terminals?.windowKeyChanged(key)
                     self?.windowChanged()
                 }
+            })
+        }
+        // Full screen: the system's traffic lights go as it starts and come back once it has ended; the bar's own stand in
+        // their place meanwhile (2026-10-03, user: 全屏做的有点智障了，红绿灯直接常驻这里不就好了).
+        for (name, full) in [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.didExitFullScreenNotification, false)] {
+            observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.state.fullScreen = full }
             })
         }
         for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
@@ -224,10 +239,10 @@ final class MainWindowController: NSObject {
 
     // MARK: pages
 
-    /// The user changes pages (a page's word, ⌘0, ⌘⇧B, ⌃⇥, ⌘1–9 or ⌘T from Dispatch, ⌘N from another page): drawn in.
+    /// The user changes pages (the rail, ⌘0, ⌘⇧B, ⌃⇥, ⌘1–9 or ⌘T from Dispatch, ⌘N from another page): drawn in.
     func switchPage(to page: MainPage) { go(to: page, animated: true) }
 
-    /// The bar's words: another page; the current `Dispatch` on a task's page goes back (as the demo).
+    /// The rail: another page; the current Dispatch on a task's page goes back (as the bar's word did).
     private func clicked(_ page: MainPage) {
         guard page != state.page else {
             if page == .dispatch, state.showsBack { state.requestBack() }
@@ -244,7 +259,7 @@ final class MainWindowController: NSObject {
         swap(to: page)
         guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         container?.drawIn(page)
-        if page == .terminals { terminals?.screen.pageDrawsIn() }
+        if page == .terminals { terminals?.pageDrawsIn() }
     }
 
     /// The page goes in: shown, its look on the window, the keyboard to it, remembered.
@@ -280,10 +295,17 @@ final class MainWindowController: NSObject {
         MainBarActions(
             switchPage: { [weak self] page in self?.clicked(page) },
             back: { [weak self] in self?.state.requestBack() },
-            toggleList: { [weak self] in self?.terminals?.toggleList() },
+            toggleList: { [weak self] in
+                guard let self else { return }
+                if self.state.page == .browser { self.browser?.toggleList() } else { self.terminals?.toggleList() }
+            },
             newTerminal: { [weak self] in self?.terminals?.newTerminal() },
             newTab: { [weak self] in self?.browser?.composeNew() },
-            settings: { [weak self] in self?.openSettings() })
+            settings: { [weak self] in self?.openSettings() },
+            seal: { [weak self] in self?.terminals?.seal() },
+            split: { [weak self] side in self?.terminals?.split(side) },
+            closeWindow: { [weak self] in self?.window?.performClose(nil) },
+            exitFullScreen: { [weak self] in self?.window?.toggleFullScreen(nil) })
     }
 
     // MARK: keys
@@ -345,6 +367,10 @@ final class MainWindowController: NSObject {
             case .reload: Task { await browser.history(.reload) }
             case .back: Task { await browser.history(.back) }
             case .forward: Task { await browser.history(.forward) }
+            case .toggleList: browser.toggleList()
+            case .hold: Task { await browser.hold() }
+            case .zoomIn: browser.zoomIn()
+            case .zoomOut: browser.zoomOut()
             }
         }
     }

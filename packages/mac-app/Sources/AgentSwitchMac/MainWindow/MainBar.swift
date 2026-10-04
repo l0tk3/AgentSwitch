@@ -2,7 +2,7 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
-/// What the bar's controls do (MainWindowController).
+/// What the bar's, the rail's and the status bar's controls do (MainWindowController).
 struct MainBarActions {
     var switchPage: (MainPage) -> Void = { _ in }
     var back: () -> Void = {}
@@ -10,69 +10,99 @@ struct MainBarActions {
     var newTerminal: () -> Void = {}
     var newTab: () -> Void = {}
     var settings: () -> Void = {}
+    /// The status bar's lock: Encrypt & Send to the terminal on screen.
+    var seal: () -> Void = {}
+    /// The Terminals bar's split buttons: the pane in focus split to the `right` or `down`.
+    var split: (String) -> Void = { _ in }
+    /// The bar's own traffic lights while the window is full screen.
+    var closeWindow: () -> Void = {}
+    var exitFullScreen: () -> Void = {}
 }
 
-/// The window's content: the bar in the title bar's row (32 pt, as iTerm's compact tabs), its dotted edge, then the page
-/// container. The ground is the page's: black on Terminals (the terminal window's dark block, ui-v0 §3b) and on Browser
-/// (the screen's), the system's light or dark on Dispatch (ui-v0 §7.3).
+/// The window's content in three parts (docs/dispatch-v0.md §1, 左侧图标栏与整窗状态栏; demo
+/// `implemented/window-bars.html`, proposal B, 2026-10-03): the bar in the title bar's row (32 pt, as iTerm's compact
+/// tabs) across the window; under it the rail on the left and the page container; at the foot the status bar across the
+/// window, under the rail too. Solid edges between them (dotted until 2026-10-03). The ground is the page's: black on Terminals (the terminal
+/// window's dark block, ui-v0 §3b) and on Browser (the screen's), the system's light or dark on Dispatch (ui-v0 §7.3).
+/// A page change draws in the page container only: the rail and the bars are the window's.
 struct MainWindowRoot: View {
     let state: MainWindowState
     let head: TerminalHead
     let model: AppModel
     let content: NSView
     let actions: MainBarActions
+    /// The Browser page's model: its hold is the status bar's right on Browser.
+    var browser: BrowserPageModel?
 
     var body: some View {
         VStack(spacing: 0) {
-            MainBar(state: state, head: head, model: model, actions: actions)
+            MainBar(state: state, head: head, actions: actions)
                 .frame(height: state.barHeight)
-            // The bar's edge (2026-10-01, user: 顶栏没有分界线): dotted, as the terminal list's edge it meets.
-            DottedRule(color: Color(nsColor: .barEdge))
-            ContentHost(view: content)
+                .background(ChromeGround(color: Look.chrome))
+            // The bar's edge (2026-10-01, user: 顶栏没有分界线): a solid line since 2026-10-03, as every edge.
+            HairRule(color: Look.line)
+            HStack(spacing: 0) {
+                MainRail(state: state, switchPage: actions.switchPage, settings: actions.settings)
+                    .background(ChromeGround(color: Look.sidebar))
+                HairRule(color: Look.line, vertical: true)
+                ContentHost(view: content)
+            }
+            HairRule(color: Look.line)
+            MainStatusBar(state: state, head: head, model: model, browser: browser, seal: actions.seal)
+                .frame(height: MainStatusBar.height)
+                .background(ChromeGround(color: Look.chrome))
         }
         .background(Color(nsColor: state.page.ground))
         .ignoresSafeArea(.container, edges: .top)
-        // The bar's spinners and marks stop while the window is not seen (ui-v0 §7.4).
+        // The bars' spinners and marks stop while the window is not seen (ui-v0 §7.4).
         .followsWindow()
     }
 }
 
-/// The bar (docs/dispatch-v0.md §1, demo `mac-window.html`): the traffic lights, then the page switch — monospaced
-/// words, the current one in ink over a signal underline, the others followed by a mark when that page has something —
-/// in the same place on every page. On Terminals: the list's button after the switch, the terminal on screen centred,
-/// new terminal and all the terminals' mark at the end (as the terminal window had them). On Dispatch: a task's or
-/// topic's page as `‹` + mark + title in the centre, and at the end the tasks in progress and waiting (`⠙1 ▪1`), with a
-/// red `■ Gateway Down` before them while the service or the gateway is down, and the settings. On Browser (demo
-/// `implemented/browser.html`): the tab on screen's mark and title in the centre, and at the end the tabs agents are
-/// operating and waiting on (`⠙1 ▪1`) and `+`, a new tab. Its empty part moves the window and a double click zooms, as
-/// a title bar does. All of it changes with the page, at once; the page under it is then drawn in.
+/// The window's own greys under the bar, the rail and the status bar in the classic look (docs/ui-v0.md §8); nothing in
+/// the pixel look, where the page's ground runs under them.
+private struct ChromeGround: View {
+    let color: Color
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        if look.isClassic { color } else { Color.clear }
+    }
+}
+
+/// The bar (docs/dispatch-v0.md §1, proposal B): the page's own toolbar. The traffic lights, then the list's button
+/// pinned beside them on every page (Terminals' list, Browser's tabs, ⌘B; dimmed in place on Dispatch, which has none);
+/// the title in the centre — the terminal on screen and its git, Dispatch's task or topic page as `‹` + mark + title,
+/// the tab on screen —; at the end only the page's own action, `+` (a new terminal, a new tab; none on Dispatch). The
+/// pages and what they have going on are the rail's, the trouble and the page's context the status bar's. Its empty
+/// part moves the window and a double click zooms, as a title bar does. All of it changes with the page, at once.
 struct MainBar: View {
     let state: MainWindowState
     let head: TerminalHead
-    let model: AppModel
     let actions: MainBarActions
 
     var body: some View {
         ZStack {
             WindowDragArea()
+            if state.fullScreen {
+                FullScreenLights(key: state.windowKey, close: actions.closeWindow, exitFullScreen: actions.exitFullScreen)
+                    .padding(.leading, state.lightsStart)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             HStack(spacing: 4) {
-                HStack(spacing: 2) {
-                    ForEach(MainPage.allCases, id: \.self) { page in
-                        PageWord(page: page, current: state.page == page, activity: state.activity(of: page)) { actions.switchPage(page) }
-                    }
-                }
-                if state.page == .terminals {
-                    ToolbarPixelButton(rows: PixelArt.toolbarList, help: "List ⌘B", action: actions.toggleList)
-                }
+                ToolbarPixelButton(rows: PixelArt.toolbarList, help: state.page.hasList ? "List ⌘B" : "No List on This Page",
+                                   enabled: state.page.hasList, action: actions.toggleList)
                 Spacer(minLength: 0)
                 switch state.page {
                 case .terminals:
+                    // The pane in focus split in two, the new half empty (docs/terminal-v0.md §1 分屏, 2026-10-03).
+                    ToolbarPixelButton(rows: PixelArt.toolbarSplitRight, help: "Split Right ⌘D") { actions.split("right") }
+                    ToolbarPixelButton(rows: PixelArt.toolbarSplitDown, help: "Split Down ⌘⇧D") { actions.split("down") }
                     ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
-                    TerminalMarkView(head: head)
-                case .dispatch:
-                    dispatchEnd
                 case .browser:
-                    browserEnd
+                    ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Tab ⌘T", action: actions.newTab)
+                case .dispatch:
+                    EmptyView()
                 }
             }
             .padding(.leading, state.lightsEnd + 10)
@@ -87,106 +117,54 @@ struct MainBar: View {
             }
         }
     }
-
-    /// `⠙1 ▪1  +`: the tabs agents operate and wait on, and a new tab.
-    private var browserEnd: some View {
-        HStack(spacing: 10) {
-            ActivityCounts(activity: state.browserActivity)
-            ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Tab ⌘T", action: actions.newTab)
-        }
-    }
-
-    /// `■ Gateway Down  ⠙1 ▪1  ⚙`.
-    private var dispatchEnd: some View {
-        HStack(spacing: 10) {
-            if let trouble = ServiceTrouble.word(service: StatusText.service(model.daemonState, ready: model.daemonReady), gateway: model.gateShortLine) {
-                HStack(spacing: 6) {
-                    PixelSprite(rows: PixelArt.square, pixel: 2, color: .failed)
-                    Text(trouble).mono(11.5).foregroundStyle(Color.failed)
-                }
-                .help(trouble == "Gateway Down" ? model.gateLine.text : model.daemonLine.text)
-            }
-            ActivityCounts(activity: state.dispatchActivity)
-            // The settings window's Dispatch group (docs/dispatch-v0.md §3); ⌘, opens it on the page it showed last.
-            ToolbarPixelButton(rows: PixelArt.toolbarSettings, help: "Settings ⌘,") { SettingsWindowController.request(.context) }
-        }
-    }
 }
 
-/// `⠙1 ▪1`: in progress and waiting for you; nothing for a count of none.
-private struct ActivityCounts: View {
-    let activity: PageActivity
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if activity.busy > 0 {
-                HStack(spacing: 5) {
-                    BrailleSpinner()
-                    Text("\(activity.busy)").mono(11.5).foregroundStyle(.secondary)
-                }
-                .help("\(activity.busy) Busy")
-            }
-            if activity.waiting > 0 {
-                HStack(spacing: 5) {
-                    BlinkingSquare()
-                    Text("\(activity.waiting)").mono(11.5).foregroundStyle(.secondary)
-                }
-                .help("\(activity.waiting) Waiting")
-            }
-        }
-    }
-}
-
-/// `Dispatch` / `Terminals` / `Browser`: words, not a segmented control (the rest of the row is pixels and monospaced words).
-private struct PageWord: View {
-    let page: MainPage
-    let current: Bool
-    let activity: PageActivity
-    let action: () -> Void
+/// The traffic lights kept in their place while the window is full screen (2026-10-03, user: 全屏做的有点智障了，红绿灯
+/// 直接常驻这里不就好了): macOS hides its own until the pointer reaches the top edge, which left a hole before the list's
+/// button. Drawn as the system draws them — 12 pt circles 8 apart, their marks under the pointer, grey while the window
+/// is not the key window —: close the window, minimise (dimmed: a full screen window does not minimise, as the system's
+/// says), leave full screen.
+struct FullScreenLights: View {
+    let key: Bool
+    let close: () -> Void
+    let exitFullScreen: () -> Void
     @State private var hovering = false
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Text(page.title)
-                    .font(.system(size: 12.5, design: .monospaced))
-                    .foregroundStyle(current || hovering ? .primary : .secondary)
-                    // 1 px of signal, 6 pt under the baseline.
-                    .overlay(alignment: .bottom) {
-                        if current { Rectangle().fill(Color.signal).frame(height: 1).offset(y: 3) }
-                    }
-                if !current { ActivityMark(mark: activity.mark) }
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .contentShape(Rectangle())
+        HStack(spacing: 8) {
+            light(fill: 0xFF5F57, rim: 0xE0443E, mark: "xmark", help: "Close", action: close)
+            light(fill: nil, rim: nil, mark: nil, help: "Minimize", action: nil)
+            light(fill: 0x28C840, rim: 0x1AAB29, mark: "arrow.down.forward.and.arrow.up.backward", help: "Exit Full Screen", action: exitFullScreen)
         }
-        .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(Self.help(page))
-        .accessibilityLabel(page.title)
-        .accessibilityAddTraits(current ? .isSelected : [])
     }
 
-    static func help(_ page: MainPage) -> String {
-        switch page {
-        case .dispatch: "Dispatch ⌘0"
-        case .terminals: "Terminals ⌃⇥"
-        case .browser: "Browser ⌘⇧B"
+    /// One light; nil colours draw it dimmed and it does nothing.
+    @ViewBuilder
+    private func light(fill: UInt32?, rim: UInt32?, mark: String?, help: String, action: (() -> Void)?) -> some View {
+        let off = Color(white: scheme == .dark ? 0.32 : 0.82)
+        let lit = key || hovering
+        let body = Circle()
+            .fill(fill.map { lit ? Color(hex: $0) : off } ?? off)
+            .overlay(Circle().strokeBorder(rim.map { lit ? Color(hex: $0) : off } ?? off, lineWidth: 0.5))
+            .overlay {
+                if hovering, let mark, action != nil {
+                    Image(systemName: mark).font(.system(size: 6.5, weight: .bold)).foregroundStyle(Color.black.opacity(0.55))
+                }
+            }
+            .frame(width: 12, height: 12)
+        if let action {
+            Button(action: action) { body.contentShape(Circle()) }.buttonStyle(.plain).help(help).accessibilityLabel(help)
+        } else {
+            body.accessibilityHidden(true)
         }
     }
 }
 
-/// After the other page's word: amber while something there waits for you, the spinner while something is busy.
-private struct ActivityMark: View {
-    let mark: PageActivity.Mark
-
-    var body: some View {
-        switch mark {
-        case .waiting: BlinkingSquare().accessibilityLabel("Waiting")
-        case .busy: BrailleSpinner()
-        case .none: EmptyView()
-        }
+private extension Color {
+    init(hex: UInt32) {
+        self.init(red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255, blue: Double(hex & 0xFF) / 255)
     }
 }
 
@@ -194,10 +172,21 @@ private struct ActivityMark: View {
 /// while not seen (ui-v0 §7.4, 2026-10-03).
 struct BlinkingSquare: View {
     var color: Color = .waiting
+    /// The cell: 2 pt (an 8 pt square) in a line, 1 pt as a mark off an icon (the rail).
+    var pixel: CGFloat = 2
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.onScreen) private var onScreen
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
+        if look.isClassic {
+            ClassicWaitingDot(color: color, side: 4 * pixel)
+        } else {
+            blinking
+        }
+    }
+
+    private var blinking: some View {
         Group {
             if reduceMotion {
                 square(dim: false)
@@ -209,11 +198,11 @@ struct BlinkingSquare: View {
                 square(dim: Motion.step(at: Date(), every: Motion.blink) % 2 == 1)
             }
         }
-        .frame(width: 8, height: 8)
+        .frame(width: 4 * pixel, height: 4 * pixel)
     }
 
     private func square(dim: Bool) -> some View {
-        PixelSprite(rows: PixelArt.square, pixel: 2, color: color).opacity(dim ? 0.25 : 1)
+        PixelSprite(rows: PixelArt.square, pixel: pixel, color: color).opacity(dim ? 0.25 : 1)
     }
 }
 
@@ -224,19 +213,26 @@ private struct DispatchTitleView: View {
     let back: Bool
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(spacing: 8) {
             if back {
                 Button(action: action) {
-                    Text("‹").font(.system(size: 15, design: .monospaced))
-                        .foregroundStyle(hovering ? .primary : .secondary)
-                        .padding(.horizontal, 4)
-                        .contentShape(Rectangle())
+                    Group {
+                        if look.isClassic {
+                            Image(systemName: "chevron.left").font(.system(size: 12, weight: .semibold))
+                        } else {
+                            Text("‹").font(.system(size: 15, design: .monospaced))
+                        }
+                    }
+                    .foregroundStyle(hovering ? .primary : .secondary)
+                    .padding(.horizontal, 4)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
-                .help("Back esc")
+                .help(ClassicWords.help("Back esc", in: look))
                 .accessibilityLabel("Back")
             }
             if let title {
@@ -284,7 +280,7 @@ private struct TerminalTitleView: View {
                 }
                 Text(head.name).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
                 if !head.git.isEmpty {
-                    Text(head.git).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(head.git).mono(11).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
@@ -294,37 +290,28 @@ private struct TerminalTitleView: View {
     }
 }
 
-/// All the terminals' state at the bar's end: the page's word (`1 Waiting`, `Busy`) and the app's mark.
-private struct TerminalMarkView: View {
-    let head: TerminalHead
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if !head.tag.isEmpty { Text(head.tag).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary) }
-            PixelMarkView(state: head.mark, pixel: 1.5, depth: true)
-        }
-        .padding(.horizontal, 4)
-    }
-}
-
 /// A bar button as a pixel icon (1 pt cells): secondary ink, brighter with a faint square behind it under the pointer,
-/// as the demo page's.
+/// as the demo page's; dimmed to the edge's ink where it does nothing (the list's button on Dispatch), in its place.
 struct ToolbarPixelButton: View {
     let rows: [String]
     let help: String
+    var enabled = true
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Button(action: action) {
-            PixelSprite(rows: rows, pixel: 1, color: hovering ? .primary : .secondary)
+            PixelSprite(rows: rows, pixel: 1, color: !enabled ? Look.line : hovering ? .primary : .secondary,
+                        strength: !enabled ? 0.28 : hovering ? 1 : 0.85)
                 .frame(width: 28, height: 24)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.5).opacity(hovering ? 0.16 : 0)))
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.5).opacity(enabled && hovering ? 0.16 : 0)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
         .onHover { hovering = $0 }
-        .help(help)
+        .help(ClassicWords.help(help, in: look))
         .accessibilityLabel(help)
     }
 }

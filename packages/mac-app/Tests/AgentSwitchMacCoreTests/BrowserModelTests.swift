@@ -262,8 +262,9 @@ final class BrowserModelTests: XCTestCase {
     }
 
     func testTheHeldSizeIsTheScreensPointsWithinTheDaemonsRange() {
+        // To the nearest CSS pixel since the page's zoom (2026-10-03; down before): the same rule at every zoom.
         XCTAssertEqual(BrowserGeometry.viewport(for: CGSize(width: 1010.6, height: 700.2), backingScale: 2),
-                       BrowserViewportRequest(width: 1010, height: 700, scale: 2))
+                       BrowserViewportRequest(width: 1011, height: 700, scale: 2))
         XCTAssertEqual(BrowserGeometry.viewport(for: CGSize(width: 120, height: 9000), backingScale: 8),
                        BrowserViewportRequest(width: 200, height: 4096, scale: 4))
     }

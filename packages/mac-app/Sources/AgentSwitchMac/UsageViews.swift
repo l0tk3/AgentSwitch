@@ -11,7 +11,7 @@ struct UsageRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: compact ? 10 : 12) {
-            PixelSprite(rows: row.harness.pixelMark, pixel: 2, color: .secondary)
+            PixelSprite(rows: row.harness.pixelMark, pixel: 2, color: .secondary, strength: 0.8, shadow: false)
                 .padding(.top, compact ? 3 : 4)
             VStack(alignment: .leading, spacing: compact ? 2 : 4) {
                 Text(row.title).mono(compact ? 12 : 13).lineLimit(1)

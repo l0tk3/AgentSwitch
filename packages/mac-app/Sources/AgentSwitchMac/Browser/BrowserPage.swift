@@ -5,12 +5,20 @@ import SwiftUI
 // The main window's third page, Browser (docs/browser-v0.md §1 Mac; demo `docs/design/implemented/browser.html`, "MAC ·
 // MAIN WINDOW, THIRD PAGE"): on the left the tabs grouped by owner — the terminals' agents, the tasks, yours — each with
 // its status mark, title and place; on the right the address bar (‹ › ↻, the address as text, a click to edit it, ↩ to
-// go, the lock for https), the live screen (BrowserScreenView) and the footer (whose tab it is, what an agent waits for,
-// `[ Fill Ciphertext ]` while this Mac drives an http(s) page of your own, `[ Take Over ]` / `[ Hand Back ]`). Always
-// dark, as the Terminals page. The data and the actions are BrowserPageModel's.
+// go, the lock for https) and the live screen (BrowserScreenView). The tab's hold — whose tab it is, what an agent waits
+// for, `[ Fill Ciphertext ]` while this Mac drives an http(s) page of your own, `[ Take Over ]` / `[ Hand Back ]` — was the
+// page's footer; since 2026-10-03 (proposal B, docs/dispatch-v0.md §1) it is the right of the window's status bar
+// (BrowserHoldItems, drawn by MainStatusBar), the page's zoom after it (BrowserZoomItems). Always dark, as the
+// Terminals page. The data and the actions are BrowserPageModel's.
+// The list is a side column as on Terminals (2026-10-03, BrowserSide): its edge drags it wider or narrower, past
+// the left it closes with nothing left; the bar's list button and ⌘B open and close it.
 
 struct BrowserPage: View {
     let model: BrowserPageModel
+    /// The column while its edge is dragged (shown at once, kept when let go).
+    @State private var dragging: BrowserSide?
+    /// The classic look gives the list and the address bar grounds of their own (docs/ui-v0.md §8).
+    @Environment(\.interfaceLook) private var look
 
     /// The page as the window's container holds it: dark whatever the system's look.
     static func host(_ model: BrowserPageModel) -> NSView {
@@ -20,29 +28,55 @@ struct BrowserPage: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            BrowserTabListView(model: model)
-                .frame(width: 270)
-                .overlay(alignment: .trailing) { DottedColumnRule(color: Look.line) }
-            VStack(spacing: 0) {
-                BrowserAddressBar(model: model)
-                screen
-                BrowserFooter(model: model)
-            }
-            // The new tab box, over the screen under the address bar.
-            .overlay(alignment: .top) {
-                if model.composing {
-                    ZStack(alignment: .top) {
-                        // A click beside the box closes it.
-                        Color.black.opacity(0.001).onTapGesture { model.composing = false }
-                        BrowserNewTabBox(model: model).padding(.top, 44).padding(.horizontal, 24)
-                    }
+        GeometryReader { proxy in
+            let pageWidth = Double(proxy.size.width)
+            let side = dragging ?? model.side
+            HStack(spacing: 0) {
+                // While a drag closes it the column stays, at no width, so its edge goes on following the pointer.
+                if !model.side.closed || dragging != nil {
+                    column(width: side.shown(pageWidth: pageWidth), pageWidth: pageWidth)
+                        .zIndex(1)
                 }
+                main
             }
         }
         .background(Color.black)
         .sheet(item: Binding(get: { model.fillTarget }, set: { model.fillTarget = $0 })) { target in
             BrowserFillSheet(model: model, target: target)
+        }
+    }
+
+    private func column(width: Double, pageWidth: Double) -> some View {
+        BrowserTabListView(model: model)
+            .frame(width: width)
+            .background(look.isClassic ? Look.sidebar : Color.clear)
+            .clipped()
+            .overlay(alignment: .trailing) {
+                BrowserSideEdge(dragging: dragging != nil,
+                                width: { width },
+                                drag: { x in dragging = model.side.dragged(to: x, pageWidth: pageWidth) },
+                                drop: { x in
+                                    model.side = model.side.dragged(to: x, pageWidth: pageWidth)
+                                    dragging = nil
+                                },
+                                reset: { model.side = model.side.reset() })
+            }
+    }
+
+    private var main: some View {
+        VStack(spacing: 0) {
+            BrowserAddressBar(model: model).background(look.isClassic ? Look.ground : Color.clear)
+            screen
+        }
+        // The new tab box, over the screen under the address bar.
+        .overlay(alignment: .top) {
+            if model.composing {
+                ZStack(alignment: .top) {
+                    // A click beside the box closes it.
+                    Color.black.opacity(0.001).onTapGesture { model.composing = false }
+                    BrowserNewTabBox(model: model).padding(.top, 44).padding(.horizontal, 24)
+                }
+            }
         }
     }
 
@@ -104,12 +138,19 @@ extension BrowserOwner {
 
 private struct BrowserGroupLabel: View {
     let owner: BrowserOwner
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(spacing: 8) {
             AgentSprite(harness: owner.harness)
-            Text("// \(BrowserTabText.group(owner))").font(.system(size: 11, design: .monospaced)).tracking(0.44)
-                .foregroundStyle(Look.faint).lineLimit(1).truncationMode(.tail)
+            // `// codex · AgentSwitch`; a plain small heading in the classic look (docs/ui-v0.md §8).
+            if look.isClassic {
+                Text(BrowserTabText.group(owner)).font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail)
+            } else {
+                Text("// \(BrowserTabText.group(owner))").font(.system(size: 11, design: .monospaced)).tracking(0.44)
+                    .foregroundStyle(Look.faint).lineLimit(1).truncationMode(.tail)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
@@ -123,6 +164,7 @@ private struct BrowserTabRow: View {
     let select: () -> Void
     let close: () -> Void
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(spacing: 10) {
@@ -131,15 +173,17 @@ private struct BrowserTabRow: View {
                 Text(BrowserTabText.title(tab)).font(.system(size: 13, weight: .semibold)).foregroundStyle(Look.ink)
                     .lineLimit(1).truncationMode(.tail)
                 // A path loses its middle; what an agent waits for keeps its start.
-                second.font(.system(size: 11, design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1)
+                second.mono(11).foregroundStyle(Look.ink2).lineLimit(1)
                     .truncationMode(BrowserTabText.waiting(tab) == nil ? .middle : .tail)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, look.isClassic ? 8 : 16)
         .padding(.vertical, 7)
-        .background(selected ? Look.raised : (hovering ? Look.hover : Color.clear))
-        .overlay(alignment: .leading) { if selected { Rectangle().fill(Color.signal).frame(width: 3) } }
+        // The tab on screen: a raised ground behind a signal line; a round highlight in the classic look.
+        .grounded(selected ? Look.raised : (hovering ? Look.hover : Color.clear), radius: 8)
+        .overlay(alignment: .leading) { if selected && !look.isClassic { Rectangle().fill(Color.signal).frame(width: 3) } }
+        .padding(.horizontal, look.isClassic ? 8 : 0)
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         .onHover { hovering = $0 }
@@ -172,23 +216,6 @@ struct BrowserStatusMark: View {
     }
 }
 
-/// A 1 px dotted rule down the side (2 on, 2 off), as the list's edge on the Terminals page.
-private struct DottedColumnRule: View {
-    var color: Color
-
-    var body: some View {
-        Canvas { context, size in
-            var y: CGFloat = 0
-            while y < size.height {
-                context.fill(Path(CGRect(x: 0, y: y, width: 1, height: 2)), with: .color(color))
-                y += 4
-            }
-        }
-        .frame(width: 1)
-        .accessibilityHidden(true)
-    }
-}
-
 // MARK: - the address bar
 
 private struct BrowserAddressBar: View {
@@ -196,6 +223,7 @@ private struct BrowserAddressBar: View {
     @State private var editing = false
     @State private var text = ""
     @FocusState private var focused: Bool
+    @Environment(\.interfaceLook) private var look
 
     static let prompt = BrowserAddressBarPrompt.text
 
@@ -203,15 +231,15 @@ private struct BrowserAddressBar: View {
         let tab = model.current
         HStack(spacing: 8) {
             HStack(spacing: 2) {
-                BarGlyph(glyph: "‹", help: "Back ⌘[") { Task { await model.history(.back) } }
-                BarGlyph(glyph: "›", help: "Forward ⌘]") { Task { await model.history(.forward) } }
+                BarGlyph(glyph: "‹", symbol: "chevron.left", help: "Back ⌘[") { Task { await model.history(.back) } }
+                BarGlyph(glyph: "›", symbol: "chevron.right", help: "Forward ⌘]") { Task { await model.history(.forward) } }
             }
             .disabled(tab == nil)
             field(tab)
             if tab?.loading == true {
                 BrailleSpinner().frame(width: 22)
             } else {
-                BarGlyph(glyph: "↻", help: "Reload ⌘R") { Task { await model.history(.reload) } }.disabled(tab == nil)
+                BarGlyph(glyph: "↻", symbol: "arrow.clockwise", help: "Reload ⌘R") { Task { await model.history(.reload) } }.disabled(tab == nil)
             }
         }
         .padding(.horizontal, 14)
@@ -231,7 +259,7 @@ private struct BrowserAddressBar: View {
                     .onExitCommand(perform: stopEditing)
             } else {
                 if let tab, BrowserAddress.isSecure(tab.url) {
-                    PixelSprite(rows: PixelArt.lock, pixel: 2, color: Look.faint).help("HTTPS")
+                    PixelSprite(rows: PixelArt.lock, pixel: 2, color: Look.faint, strength: 0.6, shadow: false, picture: .lockSmall).help("HTTPS")
                 }
                 let shown = tab.map { BrowserAddress.display($0.url) } ?? ""
                 Text(shown.isEmpty ? Self.prompt : shown)
@@ -240,10 +268,12 @@ private struct BrowserAddressBar: View {
                 Spacer(minLength: 0)
             }
         }
-        .font(.system(size: 11.5, design: .monospaced))
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .overlay(Rectangle().strokeBorder(editing ? Look.ink2 : Look.line, lineWidth: 1))
+        .mono(look.isClassic ? 12.5 : 11.5)
+        .padding(.horizontal, look.isClassic ? 10 : 8)
+        .frame(height: look.isClassic ? 26 : 24)
+        // A framed line; a round field on its own ground in the classic look, ringed while it is typed in.
+        .grounded(look.isClassic ? Look.raised : Color.clear, radius: 8)
+        .framed(look.isClassic ? (editing ? Color.signal : Color.clear) : (editing ? Look.ink2 : Look.line), radius: 8)
         .contentShape(Rectangle())
         .onTapGesture { if !editing { startEditing() } }
         .help(tab?.url ?? "")
@@ -267,43 +297,45 @@ private struct BrowserAddressBar: View {
     }
 }
 
-/// `‹` `›` `↻`: a monospaced glyph that brightens under the pointer.
+/// `‹` `›` `↻`: a monospaced glyph that brightens under the pointer; the system's symbol in the classic look.
 private struct BarGlyph: View {
     let glyph: String
+    let symbol: String
     let help: String
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.isEnabled) private var enabled
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Button(action: action) {
-            Text(glyph).font(.system(size: 16, design: .monospaced))
+            LookGlyph(glyph: glyph, symbol: symbol, size: 16)
                 .foregroundStyle(enabled && hovering ? Look.ink : Look.ink2)
                 .opacity(enabled ? 1 : 0.4)
-                .frame(width: 20, height: 24)
+                .frame(width: look.isClassic ? 24 : 20, height: 24)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(help)
+        .help(ClassicWords.help(help, in: look))
         .accessibilityLabel(help)
     }
 }
 
-// MARK: - the footer
+// MARK: - the hold (the status bar's right on Browser)
 
 /// Whose tab it is, what is going on, `[ Fill Ciphertext ]` while this Mac drives an http(s) page of yours (nobody else
 /// holding it; never an agent's, even taken over), and the hold: `[ Take Over ]` for an agent's tab (filled while it
-/// waits for you), `[ Hand Back ]` while this Mac holds it.
-private struct BrowserFooter: View {
+/// waits for you), `[ Hand Back ]` while this Mac holds it (both also ⌘⇧T, `hold()`). Your own tab held here is simply on
+/// this screen (尺寸有主): `You`, nothing to hand back. Once the page's footer; the window's status bar since 2026-10-03.
+struct BrowserHoldItems: View {
     let model: BrowserPageModel
 
     var body: some View {
         if let tab = model.current {
-            let holder = BrowserTabText.holder(tab, screen: model.screenID)
+            let holder = BrowserScreenPolicy.footerHolder(tab, screen: model.screenID)
             HStack(spacing: 14) {
                 owner(tab, holder: holder)
-                Spacer(minLength: 8)
                 if let note = model.note ?? model.problem {
                     Text(note).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.tail).help(note)
                 } else if case .elsewhere? = holder {
@@ -318,11 +350,8 @@ private struct BrowserFooter: View {
                 }
                 hold(tab, holder: holder)
             }
-            .font(.system(size: 11.5, design: .monospaced))
+            .mono(11.5)
             .foregroundStyle(Look.ink2)
-            .padding(.horizontal, 14)
-            .frame(height: 30)
-            .overlay(alignment: .top) { Rectangle().fill(Look.line).frame(height: 1) }
         }
     }
 
@@ -376,14 +405,14 @@ private struct BrowserNewTabBox: View {
                 HStack(spacing: 8) {
                     TextField("", text: $text, prompt: Text(BrowserAddressBarPrompt.text).foregroundColor(Look.faint))
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12.5, design: .monospaced))
+                        .mono(12.5)
                         .focused($focused)
                         .onSubmit { open(.typed(text)) }
                     if model.opening { BrailleSpinner() }
                 }
                 .padding(.horizontal, 8)
                 .frame(height: 28)
-                .overlay(Rectangle().strokeBorder(Look.ink2, lineWidth: 1))
+                .framed(Look.ink2, radius: Look.controlRadius)
                 if let error = model.openError {
                     Text(error).font(.system(size: 12)).foregroundStyle(Color.failed).fixedSize(horizontal: false, vertical: true)
                 }
@@ -439,19 +468,22 @@ private struct ChoiceRow: View {
     var mark = false
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
+        // Inverted under the pointer; in the classic look a round highlight in the accent, as a menu's.
+        let over: Color = look.isClassic ? .white : Look.ground
         Button(action: action) {
             HStack(spacing: 8) {
-                if mark { PixelSprite(rows: PixelArt.square, pixel: 2, color: hovering ? Look.ground : .ok) }
+                if mark { PixelSprite(rows: PixelArt.square, pixel: 2, color: hovering ? over : .ok) }
                 Text(text).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundStyle(hovering ? Look.ground : Look.ink)
+            .mono(12)
+            .foregroundStyle(hovering ? over : Look.ink)
             .padding(.horizontal, 6)
-            .frame(height: 22)
-            .background(hovering ? Look.ink : Color.clear)
+            .frame(height: look.isClassic ? 24 : 22)
+            .grounded(hovering ? (look.isClassic ? Color.signal : Look.ink) : Color.clear, radius: 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

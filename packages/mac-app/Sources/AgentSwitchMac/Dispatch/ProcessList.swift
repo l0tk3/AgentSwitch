@@ -61,9 +61,12 @@ private struct ProcessRowFrame<Mark: View, Line: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             mark.frame(width: 14, alignment: .leading)
             line.frame(maxWidth: .infinity, alignment: .leading)
-            if let time { Text(time).font(.system(size: 11, design: .monospaced)).foregroundStyle(Look.faint) }
-            Text(opens ? (open ? "▾" : "▸") : "").font(.system(size: 11, design: .monospaced)).foregroundStyle(Look.faint)
-                .frame(width: 12)
+            if let time { Text(time).mono(11).foregroundStyle(Look.faint) }
+            Group {
+                if opens { LookGlyph(glyph: open ? "▾" : "▸", symbol: open ? "chevron.down" : "chevron.right", size: 11) }
+            }
+            .foregroundStyle(Look.faint)
+            .frame(width: 12)
         }
         .padding(.vertical, 6)
         .padding(.trailing, 4)
@@ -121,7 +124,7 @@ private struct ProcessToolField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(name).font(.system(size: 11, design: .monospaced)).foregroundStyle(tint ?? Look.faint)
+            Text(name).mono(11).foregroundStyle(tint ?? Look.faint)
             Text(value)
                 .font(.system(size: 12, design: .monospaced))
                 .lineSpacing(3)

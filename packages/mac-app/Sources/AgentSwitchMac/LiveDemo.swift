@@ -30,10 +30,12 @@ final class LiveDemoTransport: HTTPTransport, @unchecked Sendable {
         let t = now.timeIntervalSince(start)
         let answered = lock.withLock { self.answered }
         func ms(_ date: Date) -> Double { (date.timeIntervalSince1970 * 1000).rounded() }
-        func row(_ id: String, _ kind: String, _ title: String, _ step: String, model: Any = NSNull(), agent: Any = NSNull(),
+        /// `doing`: the capsule's word; a row that asks says `Allow?`, or `Answer` for a question, as the service does.
+        func row(_ id: String, _ kind: String, _ title: String, _ step: String, doing: String = "Run", model: Any = NSNull(), agent: Any = NSNull(),
                  since: Date, ask: Any = NSNull()) -> [String: Any] {
-            ["id": id, "kind": kind, "title": title, "step": step, "model": model, "agent": agent, "startedAt": ms(since),
-             "needsYou": !(ask is NSNull), "ask": ask]
+            let asked = (ask as? [String: Any])?["kind"] as? String
+            return ["id": id, "kind": kind, "title": title, "step": step, "doing": asked == "question" ? "Answer" : asked != nil ? "Allow?" : doing,
+                    "model": model, "agent": agent, "startedAt": ms(since), "needsYou": !(ask is NSNull), "ask": ask]
         }
         var rows: [[String: Any]] = []
         var ended: [[String: Any]] = []
@@ -58,7 +60,7 @@ final class LiveDemoTransport: HTTPTransport, @unchecked Sendable {
         rows.append(row("t1", "task", "修 AgentSwitch 的 bug", "第 2 步：运行 npx vitest run tests/projects.test.ts", model: "Opus 5.5",
                         since: start.addingTimeInterval(-640)))
         if t < 14 {
-            rows.append(row("t2", "task", "整理下载目录", "已交给 DeepSeek Flash", model: "DeepSeek Flash", since: start.addingTimeInterval(-40)))
+            rows.append(row("t2", "task", "整理下载目录", "已交给 DeepSeek Flash", doing: "Start", model: "DeepSeek Flash", since: start.addingTimeInterval(-40)))
         } else {
             ended.append(["taskId": "t2", "title": "整理下载目录", "line": "下载目录整理好了，一共四十二个文件，重复的放进了“重复”文件夹。", "ok": true,
                           "at": ms(start.addingTimeInterval(14))])

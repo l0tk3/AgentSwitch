@@ -57,8 +57,9 @@ extension MainPage {
 }
 
 extension NSColor {
-    /// The Dispatch page's ground (ui-v0 §7.3): black, or the warm paper of the light look.
-    static let dispatchGround = NSColor.dynamic(light: 0xF3F1EA, dark: 0x000000, name: "AgentSwitchDispatchGround")
-    /// The bar's dotted edge (`--ink4`).
-    static let barEdge = NSColor.dynamic(light: 0xD3CEC3, dark: 0x262524, name: "AgentSwitchBarEdge")
+    /// The Dispatch page's ground (ui-v0 §7.3): black, or the warm paper of the light look. The classic look's is the
+    /// same black as the terminal's (§8, 2026-10-04; user: classic不够黑，不够一体化，和终端有些割裂; a dark grey before).
+    static let dispatchGround = NSColor.dynamic(light: 0xF3F1EA, dark: 0x000000, classicLight: 0xF5F5F7, classicDark: 0x000000, name: "AgentSwitchDispatchGround")
+    /// The bar's edge (`--ink4`); in the classic look a hairline that reads on black.
+    static let barEdge = NSColor.dynamic(light: 0xD3CEC3, dark: 0x262524, classicLight: 0xDCDCDE, classicDark: 0x2A2A2D, name: "AgentSwitchBarEdge")
 }

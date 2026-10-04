@@ -66,9 +66,9 @@ private struct MarkdownBlockView: View {
                 .padding(10)
             }
             .background(Look.raised)
-            .overlay(Rectangle().strokeBorder(Look.line, lineWidth: 1))
+            .framed(Look.line, radius: 8)
         case .rule:
-            DottedRule(color: Look.line)
+            HairRule(color: Look.line)
         }
     }
 

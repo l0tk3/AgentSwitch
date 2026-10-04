@@ -20,6 +20,7 @@ import SwiftUI
 ///   and inline code;
 /// - `main-terminals`: the Terminals bar (list, title, `+`, all the terminals' mark), Dispatch waiting for you; the
 ///   page itself is always dark;
+/// - `main-terminals-fullscreen`: the same full screen — the system's traffic lights gone, the bar's own in their place;
 /// - `main-refresh-2`, `-6`, `-10` (dark): steps of a change from Dispatch to Terminals held still (as the demo's
 ///   `?freeze=`): the bar already on Terminals, the page drawn in down to the scan line, black below it;
 /// - `main-refresh-dispatch-2`, `-6`, `-10` (light): the same back to Dispatch, the scan line in ink on the paper;
@@ -33,6 +34,9 @@ import SwiftUI
 ///   New… form with the page's site filled in;
 /// - `main-browser-waiting`: the task's login waiting for a code (`[ Take Over ]` filled);
 /// - `main-browser-file`: one of your tabs, a file of the Mac's (no hold, no lock);
+/// - `main-browser-zoom`: your dev server's page zoomed to 125 % (2026-10-03): the status bar's `−` `125%` `+`, the
+///   page laid out for the browser area ÷ 1.25 and drawn across it; in the other pictures the zoom is at the bar's far
+///   right at 100 %, dim on a tab this Mac does not size (Codex's before `[ Take Over ]`);
 /// - `main-browser-new`: the new tab box (recent addresses, the Mac's local servers);
 /// - `main-browser-empty`: no tabs yet;
 /// - `main-refresh-browser-6`: a step of the change from Dispatch to Browser.
@@ -57,6 +61,8 @@ enum MainWindowPreview {
             try await shot(model: model, page: .dispatch, system: look, open: .task("t5"), to: file("main-dispatch-code"))
             try await shot(model: model, page: .terminals, system: look, to: file("main-terminals"))
         }
+        try await shot(model: model, page: .terminals, system: NSAppearance(named: .darkAqua), fullScreen: true,
+                       to: directory.appendingPathComponent("main-terminals-fullscreen.png"))
         try await refresh(model: model, to: .terminals, system: NSAppearance(named: .darkAqua), name: "main-refresh", into: directory)
         try await refresh(model: model, to: .dispatch, system: NSAppearance(named: .aqua), name: "main-refresh-dispatch", into: directory)
     }
@@ -75,6 +81,8 @@ enum MainWindowPreview {
         try await fillSheet(model: model, startsNew: true, to: file("main-browser-fill-new"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), select: "portal", to: file("main-browser-waiting"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), select: "mesh", to: file("main-browser-file"))
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(holding: "vite"), select: "vite", zoom: 125,
+                       to: file("main-browser-zoom"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), compose: true, to: file("main-browser-new"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(empty: true), to: file("main-browser-empty"))
         try await refresh(model: model, to: .browser, from: .dispatch, system: dark, steps: [6], name: "main-refresh-browser", into: directory)
@@ -101,31 +109,48 @@ enum MainWindowPreview {
         head.status = "waiting"
         head.mark = .waiting
         head.tag = "1 Waiting"
+        head.context = TerminalContext(harness: "claude-code", model: "claude-opus-5-5", mode: "bypass", cols: 139, rows: 46)
         return head
     }
 
     /// `open`: the Dispatch page opens on this task's or topic's page (as after a click on its card or chip). `browser`:
     /// the made-up browser the Browser page shows (`select`: this tab on screen; `compose`: the new tab box open; `note`:
-    /// the footer's line).
+    /// the footer's line; `zoom`: the page zoomed in to this step).
     private static func shot(model: AppModel, page: MainPage, system: NSAppearance?, size: NSSize = size, open: DispatchRoute? = nil,
                              browser service: BrowserDemoService? = nil, select: String? = nil, compose: Bool = false,
-                             note: String? = nil, to file: URL) async throws {
+                             note: String? = nil, zoom: Int? = nil, fullScreen: Bool = false, to file: URL) async throws {
         let state = state(on: page)
         let browser = BrowserPageModel(service: { service ?? BrowserDemoService(empty: true) }, state: state, defaults: nil,
                                        recents: BrowserDemoService.recents)
         let (window, _) = makeWindow(model: model, state: state, page: page, system: system, size: size, open: open, browser: browser)
+        if fullScreen {
+            for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(button)?.isHidden = true }
+            state.fullScreen = true
+            state.windowChanged(key: true, visible: true)   // the lights in colour, as in the window in use
+        }
         if page == .browser {
             browser.setActive(shown: true, visible: true)
             try await DesignPreview.settle()
             if let select { browser.select(select) }
             if compose { browser.composeNew() }
             if let note { browser.say(note) }
+            if let zoom { try await zoomIn(browser, to: zoom) }
         }
         try await DesignPreview.settle()
         try await DesignPreview.settle()
         try DesignPreview.write(window.contentView?.superview ?? window.contentView!, to: file)
         browser.stop()
         window.close()
+    }
+
+    /// The tab on screen zoomed in to `percent` a step at a time, as `+` does it, then its picture as the daemon would
+    /// send it for the size this Mac asks for now (the made-up browser's pictures are of one size).
+    private static func zoomIn(_ browser: BrowserPageModel, to percent: Int) async throws {
+        for _ in BrowserPageZoom.steps where (browser.zoom?.percent ?? percent) < percent { browser.zoomIn() }
+        try await DesignPreview.settle()
+        guard let id = browser.selectedID, let asked = browser.screen.viewportRequest,
+              let frame = BrowserDemoService.frame(of: id, sized: asked) else { return }
+        browser.screen.show(frame)
     }
 
     /// Fill Ciphertext's sheet over your local dev server's page (always dark, as the page); `startsNew`: the New… form,
@@ -191,7 +216,7 @@ enum MainWindowPreview {
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn()),
                                               .browser: BrowserPage.host(browser)])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head, model: model, content: container,
-                                                                actions: MainBarActions()))
+                                                                actions: MainBarActions(), browser: browser))
         host.sizingOptions = []
         window.contentViewController = host
         window.setContentSize(size)

@@ -49,7 +49,19 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertFalse(p.isOpen)
         XCTAssertTrue(p.visible)
         XCTAssertEqual(p.look, .waiting)
-        XCTAssertEqual(p.trail, .clock(since: t0, waiting: true))
+        XCTAssertEqual(p.trail, .word("Waiting", waiting: true), "a service that says no word: the state's")
+    }
+
+    func testTheCapsuleSaysWhatTheOneRowIsDoingAsThePhoneDoes() throws {
+        // `GET /live` rows carry `doing` (2026-10-03): the capsule's word instead of a clock.
+        let json = #"{"rows":[{"id":"k1","kind":"terminal","title":"fix-login","step":"运行 npm test","doing":"Run","model":"Claude Code","agent":"claude-code","startedAt":0,"needsYou":false,"ask":null}],"running":1,"waiting":0,"ended":[],"open":1,"now":0}"#
+        var p = LivePresenter()
+        p.receive(try JSONDecoder().decode(LiveSnapshot.self, from: Data(json.utf8)), at: t0)
+        XCTAssertEqual(p.trail, .word("Run", waiting: false))
+        let asks = json.replacingOccurrences(of: #""doing":"Run""#, with: #""doing":"Allow?""#).replacingOccurrences(of: #""needsYou":false"#, with: #""needsYou":true"#)
+            .replacingOccurrences(of: #""running":1,"waiting":0"#, with: #""running":0,"waiting":1"#)
+        p.receive(try JSONDecoder().decode(LiveSnapshot.self, from: Data(asks.utf8)), at: t0)
+        XCTAssertEqual(p.trail, .word("Allow?", waiting: true))
     }
 
     func testANewRequestOpensTheCardAndSoundsItClosesOnceAnswered() {
@@ -132,12 +144,12 @@ final class LiveActivityTests: XCTestCase {
         var p = LivePresenter()
         p.receive(snap([row("k1", kind: .terminal)], at: 0), at: t0)
         let failed = LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(9))
-        XCTAssertNil(p.receive(snap([], ended: [failed], at: 10), at: t0, watching: "k1"))
+        XCTAssertNil(p.receive(snap([], ended: [failed], at: 10), at: t0, watching: ["k1", "k7"]), "one of the panes on screen")
         XCTAssertFalse(p.isOpen)
         XCTAssertTrue(p.unseenFailures.isEmpty)
         let again = LiveSnapshot.End(kind: .terminal, id: "k1", title: "fix", line: "rate_limit", ok: false, at: t0.addingTimeInterval(19))
-        XCTAssertEqual(p.receive(snap([], ended: [again, failed], at: 20), at: t0, watching: nil), .failed, "another turn, not looked at")
-        p.receive(snap([], ended: [again, failed], at: 21), at: t0, watching: "k1")
+        XCTAssertEqual(p.receive(snap([], ended: [again, failed], at: 20), at: t0, watching: []), .failed, "another turn, not looked at")
+        p.receive(snap([], ended: [again, failed], at: 21), at: t0, watching: ["k1"])
         XCTAssertTrue(p.unseenFailures.isEmpty, "opened in the window: seen")
     }
 
@@ -172,7 +184,7 @@ final class LiveActivityTests: XCTestCase {
         XCTAssertEqual(p.look, .done)
         p.tick(t0.addingTimeInterval(5))
         XCTAssertEqual(p.look, .busy)
-        XCTAssertEqual(p.trail, .clock(since: t0, waiting: false))
+        XCTAssertEqual(p.trail, .word("Busy", waiting: false))
     }
 
     func testAnOldEndSeenLateDoesNotOpenTheCard() {

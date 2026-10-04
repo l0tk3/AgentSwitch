@@ -195,6 +195,7 @@ enum DesignPreview {
     static func renderSheet<Content: View>(_ view: Content, model: AppModel, appearance: NSAppearance?, to file: URL) async throws {
         let root = view
             .environment(model)
+            .environment(\.interfaceLook, InterfaceLook.current)
             .background(Color(nsColor: .windowBackgroundColor))
         let host = NSHostingView(rootView: root)
         host.appearance = appearance
@@ -218,6 +219,7 @@ enum DesignPreview {
         let root = SetupWizardView()
             .environment(model)
             .environment(navigation)
+            .environment(\.interfaceLook, InterfaceLook.current)
             .background(Color(nsColor: .windowBackgroundColor))
         let host = NSHostingView(rootView: root)
         host.appearance = appearance
@@ -234,6 +236,7 @@ enum DesignPreview {
     private static func renderMenu(model: AppModel, appearance: NSAppearance?, to file: URL) async throws {
         let root = MenuContentView()
             .environment(model)
+            .environment(\.interfaceLook, InterfaceLook.current)
             .background(Color(nsColor: .windowBackgroundColor))
         let host = NSHostingView(rootView: root)
         host.appearance = appearance

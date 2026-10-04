@@ -19,6 +19,11 @@ final class NativeTerminalView: TerminalView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard window?.firstResponder === self else { return super.performKeyEquivalent(with: event) }
         let mods = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        // ⌘⌥ arrows: the focus to the pane next door (the page's, docs/terminal-v0.md §1 分屏).
+        if mods == [.command, .option], let arrow = [123: "ArrowLeft", 124: "ArrowRight", 125: "ArrowDown", 126: "ArrowUp"][event.keyCode] {
+            owner?.pageShortcut(arrow, shift: false, alt: true)
+            return true
+        }
         guard mods.contains(.command), !mods.contains(.control), !mods.contains(.option), let key = event.charactersIgnoringModifiers?.lowercased() else {
             return super.performKeyEquivalent(with: event)
         }
@@ -32,7 +37,8 @@ final class NativeTerminalView: TerminalView {
             }
         }
         let name = event.keyCode == 36 ? "Enter" : event.keyCode == 51 ? "Backspace" : key
-        let page = shift ? ["v"] : ["t", "w", "b", "f", "Enter", "Backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        // ⌘D / ⌘⇧D split the pane in focus, ⌘⇧↩ shows it alone (2026-10-03).
+        let page = shift ? ["v", "d", "Enter"] : ["t", "w", "b", "f", "d", "Enter", "Backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
         guard page.contains(name) else { return super.performKeyEquivalent(with: event) }
         owner?.pageShortcut(name, shift: shift)
         return true
@@ -40,6 +46,7 @@ final class NativeTerminalView: TerminalView {
 
     override func mouseDown(with event: NSEvent) {
         owner?.userActed()
+        owner?.onClick()
         super.mouseDown(with: event)
     }
 
@@ -134,6 +141,10 @@ final class TerminalScreenController: NSObject {
     private var refreshNext = false
     /// The page (its shortcuts, the grid it starts terminals with).
     var evaluate: (String) -> Void = { _ in }
+    /// The pane of the page this screen fills (docs/terminal-v0.md §1 分屏): what it tells the page says which.
+    var pane = 0
+    /// Clicked: its pane takes the focus.
+    var onClick: () -> Void = {}
     private let client: () -> DaemonClient
     private var id: String?
     /// Where the terminal's agent works now (the page says it): a relative path ⌘-clicked on the screen starts there.
@@ -152,9 +163,13 @@ final class TerminalScreenController: NSObject {
     /// (docs/terminal-v0.md §1 "尺寸有主").
     let screenId = "mac-" + UUID().uuidString.prefix(8).lowercased()
     /// Who has the shown terminal's size, as its stream last said (nil: nobody, or not heard yet).
-    private var owner: String?
+    private var owner: String? { didSet { tellSize() } }
     /// The terminal's size as the service has it: what this screen draws at while another has it.
-    private var service: (cols: Int, rows: Int)?
+    private var service: (cols: Int, rows: Int)? { didSet { tellSize() } }
+    /// The shown terminal's grid as the service has it (nil: not heard yet, none shown) and where it is in use when not
+    /// here (`iphone`, `web`, `mac`), told on every change: the window's status bar (2026-10-03) says them at once,
+    /// where the page's list only catches up every few seconds.
+    var onSize: (_ grid: (cols: Int, rows: Int)?, _ away: String?) -> Void = { _, _ in }
     /// The terminal was just opened here while the page is in use: the size is taken once the stream says nobody else
     /// has it.
     private var claimOnConnect = false
@@ -227,11 +242,12 @@ final class TerminalScreenController: NSObject {
         if view.frame != rect { view.frame = rect }
         if refresh.frame != rect { refresh.frame = rect }
         let t = view.getTerminal()
-        evaluate("window.agentswitch?.grid(\(t.cols), \(t.rows))")
+        evaluate("window.agentswitch?.grid(\(t.cols), \(t.rows), \(pane))")
     }
 
-    /// Show terminal `id` (nil: none, the page shows its new-terminal panel there).
-    func show(_ id: String?) {
+    /// Show terminal `id` (nil: none, the page shows its new-terminal panel there). `keyboard`: this screen takes the
+    /// keyboard as it shows the terminal (among several panes only the one in focus does).
+    func show(_ id: String?, keyboard: Bool = true) {
         guard id != self.id else {
             view.isHidden = id == nil
             return
@@ -255,7 +271,7 @@ final class TerminalScreenController: NSObject {
         // in the background, it follows; brought forward, `windowBecameKey` takes the size if nobody has it.
         claimOnConnect = inUse
         connect(id, after: nil)
-        focus()
+        if keyboard { focus() }
     }
 
     /// The keyboard to the screen, while it is seen (not under the Dispatch page).
@@ -316,7 +332,11 @@ final class TerminalScreenController: NSObject {
 
     /// The page draws the placeholder over this screen: where the terminal is in use ("mac", "iphone", "web"), or none.
     private func tellAway(_ place: String?) {
-        evaluate("window.agentswitch?.away(\(place.map { "\"\($0)\"" } ?? "null"))")
+        evaluate("window.agentswitch?.away(\(place.map { "\"\($0)\"" } ?? "null"), \(pane))")
+    }
+
+    private func tellSize() {
+        onSize(service, owner.flatMap { $0 == screenId ? nil : Self.place(of: $0) })
     }
 
     private static func place(of screen: String) -> String {
@@ -519,15 +539,15 @@ final class TerminalScreenController: NSObject {
         }
     }
 
-    func pageShortcut(_ key: String, shift: Bool) {
+    func pageShortcut(_ key: String, shift: Bool, alt: Bool = false) {
         let arg = (try? JSONEncoder().encode(key)).map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
-        evaluate("window.agentswitch?.shortcut(\(arg), \(shift))")
+        evaluate("window.agentswitch?.shortcut(\(arg), \(shift), \(alt))")
     }
 
     /// The view's grid changed (the window, the font, the page's layout): the owner tells the service; another screen's
     /// size stays in the buffer, whatever this view's is.
     fileprivate func sized(cols: Int, rows: Int) {
-        evaluate("window.agentswitch?.grid(\(cols), \(rows))")
+        evaluate("window.agentswitch?.grid(\(cols), \(rows), \(pane))")
         guard let id else { return }
         if mine {
             scheduleResize(id: id, cols: cols, rows: rows)

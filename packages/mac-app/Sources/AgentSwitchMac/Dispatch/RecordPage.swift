@@ -153,7 +153,7 @@ struct TopicStrip: View {
                         }
                     }
                 }
-                DottedRule(color: Look.line)
+                HairRule(color: Look.line)
             }
             .padding(.top, 12)
             .dispatchColumn()
@@ -174,6 +174,7 @@ private struct TopicChip: View {
     let asks: String?
     let open: () -> Void
     @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Button(action: open) {
@@ -181,14 +182,14 @@ private struct TopicChip: View {
                 TaskMark(level: chip.level, waiting: chip.waiting).frame(width: 10)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(chip.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1)
-                    state.font(.system(size: 11, design: .monospaced)).lineLimit(1)
+                    state.mono(11).lineLimit(1)
                 }
                 if chip.unread { UnreadSquare() }
             }
             .padding(EdgeInsets(top: 7, leading: 10, bottom: 8, trailing: 12))
             .frame(maxWidth: 230, alignment: .leading)
             .background(Look.panel)
-            .overlay(Rectangle().strokeBorder(chip.waiting ? Color.waiting : hovering ? Look.faint : Look.line, lineWidth: 1))
+            .framed(chip.waiting ? Color.waiting.opacity(look.isClassic ? 0.6 : 1) : hovering ? Look.faint : Look.line)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -198,8 +199,8 @@ private struct TopicChip: View {
 
     /// `Waiting · 要删掉吗？` in amber, or `Busy · Opus 5.5`.
     private var state: Text {
-        guard chip.waiting else { return Text(chip.stateLine(lastEventAt: lastEventAt)).foregroundStyle(Look.ink2) }
-        let word = Text(chip.stateLine()).foregroundStyle(Color.waiting)
+        guard chip.waiting else { return Text(ClassicWords.phrase(chip.stateLine(lastEventAt: lastEventAt), in: look)).foregroundStyle(Look.ink2) }
+        let word = Text(ClassicWords.phrase(chip.stateLine(), in: look)).foregroundStyle(Color.waiting)
         guard let asks else { return word }
         return word + Text(" · \(asks)").foregroundStyle(Look.ink2)
     }
@@ -219,7 +220,7 @@ private struct LooseApprovalsLine: View {
                 Text(DispatchFeed.looseLabel(approvals.count))
                 Text("›")
             }
-            .font(.system(size: 12, design: .monospaced))
+            .mono(12)
             .foregroundStyle(Color.waiting)
             Group {
                 if approvals.count == 1, let first = approvals.first {

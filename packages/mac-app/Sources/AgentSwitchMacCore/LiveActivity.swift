@@ -35,13 +35,16 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         public let startedAt: Date
         public let needsYou: Bool
         public let ask: Ask?
+        /// What it is doing in one word (`Run`, `Edit`, `Allow?`), for the capsule; nil from a service that does not say.
+        public let doing: String?
 
         public init(id: String, kind: Kind, title: String, step: String, model: String? = nil, agent: String? = nil,
-                    startedAt: Date, needsYou: Bool = false, ask: Ask? = nil) {
+                    startedAt: Date, needsYou: Bool = false, ask: Ask? = nil, doing: String? = nil) {
             self.id = id
             self.kind = kind
             self.title = title
             self.step = step
+            self.doing = doing
             self.model = model
             self.agent = agent
             self.startedAt = startedAt
@@ -49,7 +52,7 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
             self.ask = ask
         }
 
-        private enum CodingKeys: String, CodingKey { case id, kind, title, step, model, agent, startedAt, needsYou, ask }
+        private enum CodingKeys: String, CodingKey { case id, kind, title, step, model, agent, startedAt, needsYou, ask, doing }
         private enum AskKeys: String, CodingKey { case kind, id, tool, target, `where`, questionId, text, options, answerable }
 
         public init(from decoder: Decoder) throws {
@@ -58,6 +61,7 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
             kind = (try? c.decode(Kind.self, forKey: .kind)) ?? .task
             title = try c.decode(String.self, forKey: .title)
             step = try c.decodeIfPresent(String.self, forKey: .step) ?? ""
+            doing = (try c.decodeIfPresent(String.self, forKey: .doing)).flatMap { $0.isEmpty ? nil : $0 }
             model = try c.decodeIfPresent(String.self, forKey: .model)
             agent = try c.decodeIfPresent(String.self, forKey: .agent)
             startedAt = Date(timeIntervalSince1970: try c.decode(Double.self, forKey: .startedAt) / 1000)
@@ -173,9 +177,11 @@ public struct LivePresenter: Equatable, Sendable {
     /// The app mark's look (busy, waiting, done, incomplete).
     public enum Look: Equatable, Sendable { case busy, waiting, done, incomplete }
 
-    /// Right of the mark in the capsule: one row's clock (amber when it waits), how many wait and run, or the result.
+    /// Right of the mark in the capsule: what the one task or terminal is doing in a word (amber when it waits for you;
+    /// 2026-10-03, user: 电脑上这个实时活动的设计还是老的计时器设计，改成和手机上一样 — the phone's compact island since
+    /// 2026-10-01; the clock stays on the card's rows), how many wait and run, or the result.
     public enum Trail: Equatable, Sendable {
-        case clock(since: Date, waiting: Bool)
+        case word(String, waiting: Bool)
         case tally(waiting: Int, running: Int)
         case result(ok: Bool)
     }
@@ -231,7 +237,8 @@ public struct LivePresenter: Equatable, Sendable {
     public var trail: Trail? {
         if let end = shownEnd { return .result(ok: end.ok) }
         guard let s = snapshot, let first = s.rows.first else { return nil }
-        return s.rows.count > 1 ? .tally(waiting: s.waiting, running: s.running) : .clock(since: first.startedAt, waiting: first.needsYou)
+        return s.rows.count > 1 ? .tally(waiting: s.waiting, running: s.running)
+            : .word(first.doing ?? (first.needsYou ? "Waiting" : "Busy"), waiting: first.needsYou)
     }
 
     /// The card's rows (the first few) and how many more there are.
@@ -251,11 +258,11 @@ public struct LivePresenter: Equatable, Sendable {
     /// Where the card's clocks count from (`0:42` on each row); none while it shows results.
     public var cardClocks: [Date] { shownEnd == nil ? cardRows.map(\.startedAt) : [] }
 
-    /// A new answer from `GET /live` (nil: the service is not answering; everything goes). `watching`: the terminal on
-    /// screen in the main window in use; `watchingTask`: the task whose page is open there. Returns the tone for what came
+    /// A new answer from `GET /live` (nil: the service is not answering; everything goes). `watching`: the terminals on
+    /// screen in the main window in use (one a pane); `watchingTask`: the task whose page is open there. Returns the tone for what came
     /// (a request before a failure before a result).
     @discardableResult
-    public mutating func receive(_ next: LiveSnapshot?, at now: Date, watching: String? = nil, watchingTask: String? = nil) -> Cue? {
+    public mutating func receive(_ next: LiveSnapshot?, at now: Date, watching: Set<String> = [], watchingTask: String? = nil) -> Cue? {
         snapshot = next
         guard let next else {
             opener = nil
@@ -269,7 +276,7 @@ public struct LivePresenter: Equatable, Sendable {
         seenAsks = asks
         seenEnds = Set(next.ended.map(\.key))
         let watched = { (end: LiveSnapshot.End) in
-            (end.kind == .terminal && end.id == watching) || (end.kind == .task && end.id == watchingTask)
+            (end.kind == .terminal && watching.contains(end.id)) || (end.kind == .task && end.id == watchingTask)
         }
         // Looking at the terminal (the task) is looking at its failures.
         unseenFailures.removeAll(where: watched)

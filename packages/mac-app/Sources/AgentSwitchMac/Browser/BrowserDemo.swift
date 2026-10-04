@@ -16,8 +16,21 @@ struct BrowserDemoService: BrowserService {
     /// The pull request's merge button on its page (CSS pixels = the frame's here).
     static let mergeBox = BrowserBox(x: 48, y: 446, width: 172, height: 36)
 
-    /// `holding`: the tab this Mac holds (after `[ Take Over ]`: `pr`, the pull request; `portal`, the task's login);
-    /// `empty`: no tabs at all.
+    /// The page each made-up tab shows, in the order their pictures are drawn.
+    @MainActor static let pages: [(id: String, page: DemoPage)] = [("pr", .pullRequest), ("issues", .issues), ("portal", .login),
+                                                                   ("mesh", .file), ("vite", .dev)]
+
+    /// The picture of a tab at a size this Mac set (the page's zoom, MainWindowPreview): the made-up browser itself
+    /// never resizes its pictures.
+    @MainActor
+    static func frame(of id: String, sized viewport: BrowserViewportRequest) -> BrowserFrame? {
+        pages.first { $0.id == id }.map {
+            DemoPage.frame($0.page, viewport: CGSize(width: viewport.width, height: viewport.height), scale: viewport.scale)
+        }
+    }
+
+    /// `holding`: the tab this Mac holds (after `[ Take Over ]`: `pr`, the pull request; `portal`, the task's login;
+    /// `vite`: your dev server's page, on this screen); `empty`: no tabs at all.
     @MainActor
     init(holding: String? = nil, empty: Bool = false) {
         let at = Date()
@@ -34,17 +47,14 @@ struct BrowserDemoService: BrowserService {
                                 action: BrowserAction(tool: "user", description: "等你：短信验证码"), openedAt: at)
         let mesh = BrowserTab(id: "mesh", title: "mesh.html", url: "file:///Users/me/Projects/AgentSwitch/docs/design/concepts/mesh.html",
                               site: "~/Projects/AgentSwitch/docs/design", kind: .file, openedAt: at)
-        let vite = BrowserTab(id: "vite", title: "Acme · Dev", url: "http://localhost:5173/", site: "localhost:5173", kind: .local, openedAt: at)
+        let vite = BrowserTab(id: "vite", title: "Acme · Dev", url: "http://localhost:5173/", site: "localhost:5173", kind: .local,
+                              heldBy: held("vite"), openedAt: at)
         list = empty ? .empty : BrowserTabList(running: true, groups: [
             BrowserTabGroup(owner: Self.codex, tabs: [pr, issues]),
             BrowserTabGroup(owner: Self.task, tabs: [portal]),
             BrowserTabGroup(owner: .you, tabs: [mesh, vite]),
         ])
-        var frames: [String: BrowserFrame] = [:]
-        for (id, page) in [("pr", DemoPage.pullRequest), ("issues", .issues), ("portal", .login), ("mesh", .file), ("vite", .dev)] {
-            frames[id] = DemoPage.frame(page)
-        }
-        self.frames = frames
+        frames = Dictionary(uniqueKeysWithValues: Self.pages.map { ($0.id, DemoPage.frame($0.page)) })
         servers = [
             BrowserLocalServer(port: 5173, pid: 4242, name: "vite", cwd: NSHomeDirectory() + "/Projects/site"),
             BrowserLocalServer(port: 3000, bind: "all", pid: 4343, name: "next dev", cwd: NSHomeDirectory() + "/Projects/web"),
@@ -97,19 +107,23 @@ enum DemoPage {
 
     static let size = CGSize(width: 1280, height: 800)
 
-    static func frame(_ page: DemoPage) -> BrowserFrame {
-        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height), bitsPerSample: 8,
+    /// `viewport`, `scale`: the page's size in CSS pixels and the frame pixels to each — the tabs' own 1280 × 800 at 1,
+    /// or the size and the pixels of a tab this Mac sized (a zoomed page). The pages are drawn for 1280 × 800 and do not
+    /// reflow: a smaller viewport shows their top left.
+    static func frame(_ page: DemoPage, viewport: CGSize = size, scale: Double = 1) -> BrowserFrame {
+        let width = (Double(viewport.width) * scale).rounded(), height = (Double(viewport.height) * scale).rounded()
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width), pixelsHigh: Int(height), bitsPerSample: 8,
                                    samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
         let context = NSGraphicsContext(bitmapImageRep: rep)!
         let flipped = NSGraphicsContext(cgContext: context.cgContext, flipped: true)
-        context.cgContext.translateBy(x: 0, y: size.height)
-        context.cgContext.scaleBy(x: 1, y: -1)
+        context.cgContext.translateBy(x: 0, y: height)
+        context.cgContext.scaleBy(x: scale, y: -scale)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = flipped
         draw(page)
         NSGraphicsContext.restoreGraphicsState()
         let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8]) ?? Data()
-        return BrowserFrame(seq: 1, data: jpeg.base64EncodedString(), width: size.width, height: size.height)
+        return BrowserFrame(seq: 1, data: jpeg.base64EncodedString(), width: width, height: height, scale: scale)
     }
 
     // MARK: drawing
