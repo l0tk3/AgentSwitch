@@ -276,9 +276,16 @@ final class TerminalScreenController: NSObject {
 
     /// The keyboard to the screen, while it is seen (not under the Dispatch page).
     func focus() {
-        guard id != nil, let window = view.window, window.isKeyWindow, !view.isHiddenOrHasHiddenAncestor else { return }
+        guard id != nil, let window = view.window, window.isKeyWindow || Self.probeAsKey, !view.isHiddenOrHasHiddenAncestor else { return }
         window.makeFirstResponder(view)
     }
+
+    #if DEBUG
+    /// The probe's window is never the key one: it says the keyboard may move as in a window in use.
+    static var probeAsKey = false
+    #else
+    private static let probeAsKey = false
+    #endif
 
     /// Something dropped on the screen (docs/terminal-v0.md §1 Mac): files' paths (escaped, as iTerm types them), else the
     /// text or the web address, pasted into the program; the size is this window's, the keyboard too.

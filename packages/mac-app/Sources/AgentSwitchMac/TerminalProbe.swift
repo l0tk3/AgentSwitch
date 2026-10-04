@@ -84,6 +84,50 @@ enum TerminalProbe {
                 terminals.probeSeal()
                 try? await Task.sleep(for: .milliseconds(600))
                 say("lock again: page \(await page())")
+                // The box takes the keys once it is open (2026-10-04, user: esc和cancle还失灵了): the page, not the native
+                // screen under it, is the window's first responder, so Esc reaches the box and closes it, and the keys go
+                // back to the screen.
+                @MainActor func responder() -> String { window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil" }
+                // As in use: the keyboard is the native screen's when the lock is pressed, and may move as in a key window.
+                TerminalScreenController.probeAsKey = true
+                if let screen = terminals.probeScreen?.view { window.makeFirstResponder(screen) }
+                say("typing in the terminal: first responder \(responder())")
+                terminals.probeSeal()
+                try? await Task.sleep(for: .milliseconds(150))
+                say("box open, at once: first responder \(responder())")
+                try? await Task.sleep(for: .milliseconds(700))
+                say("box open: first responder \(responder()) page \(await page())")
+                try? await Task.sleep(for: .seconds(4))
+                say("box open, 4 s on: first responder \(responder()) page \(await page())")
+                if let esc = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                              isARepeat: false, keyCode: 53) {
+                    window.sendEvent(esc)
+                }
+                try? await Task.sleep(for: .milliseconds(700))
+                say("after esc: first responder \(responder()) page \(await page())")
+                // A click on the box's head keeps the keys in the field; the Cancel button closes it; with the keys on the
+                // page and no field holding them, Esc still closes it.
+                @MainActor func run(_ js: String) async { _ = try? await terminals.probeWeb?.evaluateJavaScript(js) }
+                let down = "new MouseEvent('mousedown', {bubbles: true, cancelable: true})"
+                terminals.probeSeal()
+                try? await Task.sleep(for: .milliseconds(500))
+                await run("document.querySelector('.composer-head').dispatchEvent(\(down)); 0")
+                say("head clicked: page \(await page())")
+                await run("document.getElementById('composerCancel').click(); 0")
+                try? await Task.sleep(for: .milliseconds(400))
+                say("cancel clicked: first responder \(responder()) page \(await page())")
+                terminals.probeSeal()
+                try? await Task.sleep(for: .milliseconds(500))
+                await run("document.activeElement.blur(); 0")
+                say("field left: page \(await page())")
+                if let esc = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                              isARepeat: false, keyCode: 53) {
+                    window.sendEvent(esc)
+                }
+                try? await Task.sleep(for: .milliseconds(600))
+                say("esc from the page: first responder \(responder()) page \(await page())")
             }
             if let second = UserDefaults.standard.string(forKey: "probePanes") {
                 // Split panes (docs/terminal-v0.md §1 分屏, 2026-10-03): the pane split, a second terminal put in the new

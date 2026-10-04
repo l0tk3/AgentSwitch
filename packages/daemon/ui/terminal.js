@@ -1736,6 +1736,8 @@ function openComposer() {
   if (!current || current.status === "exited" || creating) return;
   $("composerTo").textContent = `→ ${folderOf(current.workdir || current.cwd)}`;
   if ($("composer").hidden) { $("composer").hidden = false; if (!narrow.matches) glitch($("composer")); }
+  // The field takes the keys (in the Mac window the terminal screen holds them).
+  native?.postMessage({ type: "focusPage" });
   $("composerText").focus();
 }
 function closeComposer() {
@@ -1794,9 +1796,15 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); $("find").value = ""; searchFor(""); $("find").blur(); return; }
     if (!e.metaKey) return;
   }
+  // The sealed reply's box closes on Esc from anywhere in it, and from the page when nothing else holds the keys (a
+  // click on the page took them from the field). Esc typed into the terminal stays the terminal's.
+  if (e.key === "Escape" && !e.isComposing && !$("composer").hidden && !narrow.matches && ($("composer").contains(e.target) || e.target === document.body)) {
+    e.preventDefault();
+    closeComposer();
+    return;
+  }
   if (e.target === $("composerText")) {
-    if (e.key === "Escape") { e.preventDefault(); closeComposer(); }
-    else if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendComposer(); }
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendComposer(); }
     return;
   }
   if (creating && e.key === "Enter" && !e.isComposing && e.target.tagName !== "BUTTON") { e.preventDefault(); start(); return; }
@@ -1846,6 +1854,13 @@ $("createCancel").addEventListener("click", cancelCreate);
 document.addEventListener("mousedown", (e) => { if (!$("menu").hidden && !$("menu").contains(e.target)) $("menu").hidden = true; });
 window.addEventListener("blur", () => { $("menu").hidden = true; });
 $("composerSend").addEventListener("click", sendComposer);
+$("composerCancel").addEventListener("click", closeComposer);
+// A click on the box itself — its head, its edge, its foot — is not a click out of the field: the keys stay in it.
+$("composer").addEventListener("mousedown", (e) => {
+  if (e.target.closest("textarea, button")) return;
+  e.preventDefault();
+  $("composerText").focus();
+});
 $("keys").addEventListener("click", (e) => {
   const key = e.target.closest("button")?.dataset.key;
   if (key && current) api("POST", `/terminals/${current.id}/keys`, { keys: [key] }).catch((err) => notify(err.message));

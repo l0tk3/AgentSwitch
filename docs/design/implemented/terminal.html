@@ -361,14 +361,14 @@ function statusMark(st) {
 const COPY = {
   en: { waiting: "Waiting", exited: "Exited", resume: "Resume", del: "Delete Record", delete: "Delete", close: "Close", more: (n) => `${n} More`, less: "Less",
     kNew: "New", kClose: "Close", kHide: "Hide", seal: "Encrypt & Send", sealTip: "Passwords and tokens are encrypted before they reach the agent.",
-    perm: "[!] Approval", tool: "Run Command", deny: "Deny", allow: "Allow", ph: "Message", cancel: "esc Cancel", send: "Send",
+    perm: "[!] Approval", tool: "Run Command", deny: "Deny", allow: "Allow", ph: "Message", cancel: "Cancel", send: "Send",
     ask: "[?] Question", other: "Other", otherPh: "输入你的答案", submit: "Submit", askHint: "1–4 选择 · ↩ 提交 · esc 回到终端",
     newT: "// New Terminal", model: "// Model", folder: "// Folder", mode: "// Permissions", modes: ["Ask Each", "Auto", "Bypass"], start: "Start",
     missing: "Not Installed", markWaiting: (n) => `${n} Waiting`, busy: "Busy", idle: "Idle", dflt: "Default", live: "Live", end: "Exit",
     awayHd: "On iPhone", awayLine: "这个终端正在 iPhone 上使用。", awayGo: "Take Over", awayKey: "any key" },
   zh: { waiting: "待处理", exited: "已退出", resume: "恢复", del: "删除记录", delete: "删除", close: "关闭", more: (n) => `另有 ${n} 项`, less: "收起",
     kNew: "新建", kClose: "关闭", kHide: "隐藏", seal: "加密发送", sealTip: "密码与令牌在发送前加密，agent 仅接收密文。",
-    perm: "[!] 待确认", tool: "运行命令", deny: "拒绝", allow: "允许", ph: "输入内容", cancel: "esc 取消", send: "发送",
+    perm: "[!] 待确认", tool: "运行命令", deny: "拒绝", allow: "允许", ph: "输入内容", cancel: "取消", send: "发送",
     ask: "[?] 提问", other: "其他", otherPh: "输入你的答案", submit: "提交", askHint: "1–4 选择 · ↩ 提交 · esc 回到终端",
     newT: "// 新建终端", model: "// 模型", folder: "// 文件夹", mode: "// 权限", modes: ["逐项确认", "自动", "跳过权限"], start: "开始",
     missing: "未安装", markWaiting: (n) => `${n} 待处理`, busy: "运行中", idle: "空闲", dflt: "默认", live: "运行", end: "退出",
@@ -838,7 +838,7 @@ function seal() {
   box.className = "box composer";
   box.innerHTML = `<div class="hd">${sprite([".###.", "#...#", "#####", "##.##", "#####"], { px: 2 })}<span>${L("seal")}</span><span class="sp"></span><span>→ ${esc(t.name)}</span></div>
     <div class="bd"><textarea placeholder="${L("ph")}"></textarea></div>
-    <div class="ft"><span class="hint">${L("cancel")}</span><button class="btn pri" data-do="send">[ ${L("send")} <kbd>↩</kbd> ]</button></div>`;
+    <div class="ft"><span class="hint"></span><button class="btn" data-do="cancel">${L("cancel")} <kbd>esc</kbd></button><button class="btn pri" data-do="send">[ ${L("send")} <kbd>↩</kbd> ]</button></div>`;
   document.getElementById("main").append(box);
   glitch(box);
   const ta = box.querySelector("textarea");
