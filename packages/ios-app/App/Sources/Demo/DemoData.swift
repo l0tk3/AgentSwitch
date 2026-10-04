@@ -175,8 +175,9 @@ enum DemoData {
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
                          status: .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
-                         permissions: [UserDefaults.standard.string(forKey: "uiDemoScreen") == "terminalquestion" ? question
-                                       : TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
+                         permissions: UserDefaults.standard.string(forKey: "uiDemoScreen") == "terminallink" ? []
+                                      : [UserDefaults.standard.string(forKey: "uiDemoScreen") == "terminalquestion" ? question
+                                         : TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
                          subagents: [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
                                      TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
@@ -221,7 +222,18 @@ enum DemoData {
             "\(cyan)⏺\(off) \(bold)Bash\(off)(swift test --filter TerminalTests)",
             "  \(dim)⎿  Waiting for permission…\(off)",
         ]
-        return lines.joined(separator: "\r\n")
+        // `-uiDemoScreen terminallink`: an address the agent cut at its width and a path of the Mac's, to tap and hold
+        // (terminal-v0 §1 iPhone 链接).
+        let links = [
+            "",
+            "\(green)⏺\(off) 分屏的说明见这一页，也可以直接打开预览：",
+            "  https://code.claude.com/docs/en/agent-teams.md#choo",
+            "  se-a-display-mode",
+            "  ~/Desktop/WorkSpace/Projects/AgentSwitch/docs/desi",
+            "  gn/concepts/split.html",
+        ]
+        let withLinks = UserDefaults.standard.string(forKey: "uiDemoScreen") == "terminallink"
+        return (withLinks ? Array(lines.dropLast(3)) + links : lines).joined(separator: "\r\n")
     }()
 
     static func sessionMessages(_ session: SessionSummary) -> [SessionMessage] {

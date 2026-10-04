@@ -12,6 +12,8 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
     @State private var frame: Frame?
     @State private var run: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The classic look has no bursts (docs/ui-v0.md §8 动效).
+    @Environment(\.interfaceLook) private var look
 
     struct Frame: Equatable {
         var dx: CGFloat = 0
@@ -49,7 +51,7 @@ struct Glitch<Trigger: Equatable>: ViewModifier {
     }
 
     private func play() {
-        guard !reduceMotion else { return }
+        guard !reduceMotion, !look.isClassic else { return }
         run?.cancel()
         run = Task { @MainActor in
             var elapsed = 0.0
@@ -115,6 +117,8 @@ struct RunningGlitch: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Not while the app is not in front (ui-v0 §7.4, 2026-10-03).
     @Environment(\.scenePhase) private var scenePhase
+    /// Nor in the classic look (§8 动效).
+    @Environment(\.interfaceLook) private var look
 
     static var frames: [(Double, Glitch<Bool>.Frame?)] {
         [(0, .init(dx: -3, top: 0.14, bottom: 0.46, split: 3)),
@@ -126,8 +130,8 @@ struct RunningGlitch: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(Glitch<Bool>.Drawn(frame: frame))
-            .task(id: running && !reduceMotion && scenePhase == .active) {
-                guard running, !reduceMotion, scenePhase == .active else { frame = nil; return }
+            .task(id: running && !reduceMotion && scenePhase == .active && !look.isClassic) {
+                guard running, !reduceMotion, scenePhase == .active, !look.isClassic else { frame = nil; return }
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(Int.random(in: 3000...7000)))
                     var elapsed = 0.0

@@ -20,6 +20,7 @@ struct ActiveThreadsStrip: View {
     let openThread: (String) -> Void
     let openTask: (String) -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.interfaceLook) private var look
 
     /// Ended tasks stay in the strip while unread, for this long and at most this many.
     static let unreadWindow: TimeInterval = 12 * 3600
@@ -80,14 +81,16 @@ struct ActiveThreadsStrip: View {
             StatusMark(status: item.waiting ? .waitingApproval : item.task.status)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).font(.footnote.weight(.semibold)).lineLimit(1)
-                Text(state(item)).mono(11).foregroundStyle(item.waiting ? Theme.waiting : .secondary).lineLimit(1)
+                Text(ClassicWords.phrase(state(item), in: look)).mono(11).foregroundStyle(item.waiting ? Theme.waiting : .secondary).lineLimit(1)
             }
             if item.unread { UnreadDot() }
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, 7)
         .frame(maxWidth: 210, alignment: .leading)
-        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+        // A framed chip; a round one on its own ground in the classic look.
+        .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
+        .framed(look.isClassic ? Color.clear : Theme.line, radius: 10)
     }
 }
 
@@ -123,7 +126,7 @@ struct ThreadView: View {
                     Button("Delete Topic", systemImage: "trash", role: .destructive) {
                         deleting = .topic(id: threadId, title: detail?.thread.title)
                     }
-                } label: { Text("⋯").mono(17) }
+                } label: { LookGlyph.more }
             }
         }
         .deleteConfirmation($deleting, error: $error) { deleted in

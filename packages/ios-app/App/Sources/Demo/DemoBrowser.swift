@@ -7,7 +7,7 @@ import UIKit
 /// has it: codex working on a pull request in its terminal, a dispatched task waiting at a login for a code, and two
 /// tabs of yours — a file of the Mac's and a local dev server. The pictures are mock pages drawn on the phone, standing
 /// in for the Mac's frames. `-uiDemoScreen browser|browserpage|browsertook|browserfile|browserlocal|browserdenied|
-/// browsernew|browserclose`.
+/// browsernew|browserclose|browserzoom|browserzoomwatch`.
 enum DemoBrowser {
     static let codex = BrowserTabOwner(kind: .terminal, id: "e5f6a7b8", label: "codex · AgentSwitch")
     static let task = BrowserTabOwner(kind: .task, id: "t2", label: "登录财务平台，汇总首页的待办")
@@ -47,14 +47,19 @@ enum DemoBrowser {
     static let servers = [BrowserLocalServer(port: 5173, pid: 4211, name: "vite", cwd: "/Users/me/Projects/site"),
                           BrowserLocalServer(port: 3000, bind: "all", pid: 4388, name: "next dev", cwd: "/Users/me/Projects/web")]
     static let recent = ["github.com/acme/app/pulls", "~/Projects/AgentSwitch/docs/design/implemented/browser.html", "localhost:3000"]
+    /// The page zoom the demo phone remembers: none, but the dev server's pages at 50% on `browserzoom` (browser-v0 §1
+    /// 页面缩放) — whatever was kept on the simulator is not shown.
+    static var zoom: BrowserZoomMemory {
+        screen == "browserzoom" ? BrowserZoomMemory().setting(50, for: "localhost:5173") : BrowserZoomMemory()
+    }
 
     /// The tab a demo screen opens.
     static func openRequest(_ screen: String?) -> String? {
         switch screen {
-        case "browserpage", "browserclose": return "pr"
+        case "browserpage", "browserclose", "browserzoomwatch": return "pr"
         case "browsertook": return "portal"
         case "browserfile": return "mesh"
-        case "browserlocal": return "vite"
+        case "browserlocal", "browserzoom": return "vite"
         case "browserdenied": return "denied"
         case "browsernew": return "new"
         default: return nil
@@ -75,7 +80,8 @@ enum DemoBrowser {
         case "denied": page = AnyView(DeniedPage())
         default: return nil
         }
-        let renderer = ImageRenderer(content: page.frame(width: size.width, height: size.height).environment(\.colorScheme, .light))
+        // A page longer than its window (zoomed in) shows its top, as a page does.
+        let renderer = ImageRenderer(content: page.frame(width: size.width, height: size.height, alignment: .topLeading).environment(\.colorScheme, .light))
         renderer.scale = 1
         guard let jpeg = renderer.uiImage?.jpegData(compressionQuality: 0.8) else { return nil }
         return BrowserFrame(seq: 1, jpeg: jpeg, width: size.width, height: size.height)

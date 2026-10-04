@@ -1,3 +1,4 @@
+import AgentSwitchKit
 import SwiftUI
 import UIKit
 
@@ -5,6 +6,8 @@ import UIKit
 /// ink frame, square, a dithered hard shadow, a head bar in a status colour, the words in formal Chinese and the
 /// buttons as short English words in brackets; it glitches as it opens. A confirm box dims what is under it; a menu
 /// sits by the row it belongs to. A tap outside is cancel.
+/// In the classic look (docs/ui-v0.md §8) the same box is a round card with a soft shadow: its head a bold title with
+/// the tone as a dot, its buttons standard ones, its menu rows plain; nothing glitches.
 struct PixelBox {
     enum Tone { case plain, amber, red, signal }
 
@@ -21,8 +24,13 @@ struct PixelBox {
     /// The way out first (`[ Cancel ]`); nil for a box that only informs, or where a tap outside is the way out.
     var cancel: String? = "Cancel"
     var actions: [Action]
-    /// A menu: its actions as rows, placed under (or over) this rect on the screen.
+    /// A menu: its actions as rows, placed under (or over) this rect on the screen. With a `head`, that is its first
+    /// line: what the menu is about (a link's whole address, 2026-10-03).
     var anchor: CGRect?
+    /// A menu wider than the usual (an address reads better whole).
+    var width: CGFloat = PixelBox.menuWidth
+
+    static let menuWidth: CGFloat = 180
 }
 
 /// One window above everything (a sheet, the tab bar) holds the box open now: the page under it keeps its keyboard and
@@ -41,7 +49,8 @@ final class PixelBoxWindow {
         let w = window ?? UIWindow(windowScene: scene)
         w.windowLevel = .alert
         w.backgroundColor = .clear
-        let host = UIHostingController(rootView: PixelBoxLayer(box: box, close: close))
+        // A window of its own: the look is handed to it as the app's root hands it down.
+        let host = UIHostingController(rootView: PixelBoxLayer(box: box, close: close).environment(\.interfaceLook, InterfaceLook.current))
         host.view.backgroundColor = .clear
         host.view.accessibilityViewIsModal = true
         w.rootViewController = host
@@ -66,6 +75,7 @@ final class PixelBoxWindow {
 private struct PixelBoxLayer: View {
     let box: PixelBox
     let close: () -> Void
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         GeometryReader { g in
@@ -90,7 +100,48 @@ private struct PixelBoxLayer: View {
 
     // MARK: confirm
 
-    private var confirm: some View {
+    @ViewBuilder private var confirm: some View {
+        if look.isClassic { classicConfirm } else { pixelConfirm }
+    }
+
+    /// The classic look's box: a title (the tone as a dot before it), the sentence, standard buttons.
+    private var classicConfirm: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let head = box.head {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if box.tone != .plain { Circle().fill(toneColor).frame(width: 8, height: 8).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
+                    Text(head).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(3)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+            }
+            if !box.message.isEmpty {
+                Text(box.message)
+                    .font(.system(size: 14))
+                    .lineSpacing(3)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 18)
+                    .padding(.top, box.head == nil ? 18 : 8)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    Spacer(minLength: 0)
+                    buttons
+                }
+                VStack(alignment: .trailing, spacing: 8) { buttons }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+        }
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .floatingShadow()
+    }
+
+    private var pixelConfirm: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let head = box.head {
                 HStack(spacing: 8) {
@@ -133,10 +184,10 @@ private struct PixelBoxLayer: View {
     @ViewBuilder
     private var buttons: some View {
         if let cancel = box.cancel {
-            Button("[ \(cancel) ]", action: close).buttonStyle(BoxButtonStyle(role: .normal))
+            Button(action: close) { ButtonWord(cancel) }.buttonStyle(BoxButtonStyle(role: .normal))
         }
         ForEach(Array(box.actions.enumerated()), id: \.offset) { _, a in
-            Button("[ \(a.label) ]") { close(); a.run() }.buttonStyle(BoxButtonStyle(role: a.role))
+            Button { close(); a.run() } label: { ButtonWord(a.label) }.buttonStyle(BoxButtonStyle(role: a.role))
         }
     }
 
@@ -151,11 +202,37 @@ private struct PixelBoxLayer: View {
 
     // MARK: menu
 
-    static let menuWidth: CGFloat = 180
     static let menuRow: CGFloat = 36
+    /// A menu's first line: up to three lines of small mono text and its padding (about what it comes to: it only
+    /// decides whether the menu goes under or over its anchor).
+    static let menuHead: CGFloat = 58
 
-    private var menu: some View {
+    @ViewBuilder private var menu: some View {
+        if look.isClassic {
+            menuRows
+                .background(Theme.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .floatingShadow()
+        } else {
+            menuRows
+                .background(Theme.base)
+                .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
+                .background(DitherShadow().offset(x: 6, y: 6))
+                .glitch(on: 0, onAppear: true)
+        }
+    }
+
+    private var menuRows: some View {
         VStack(spacing: 0) {
+            if let head = box.head {
+                // What the menu is about (a link's whole address): code, in both looks.
+                Text(head).code(11).foregroundStyle(.secondary).lineLimit(3).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Theme.raised)
+                    .accessibilityAddTraits(.isHeader)
+            }
             ForEach(Array(box.actions.enumerated()), id: \.offset) { _, a in
                 Button { close(); a.run() } label: {
                     HStack {
@@ -169,17 +246,13 @@ private struct PixelBoxLayer: View {
                 .buttonStyle(MenuRowStyle(destructive: a.role == .destructive))
             }
         }
-        .frame(width: Self.menuWidth)
-        .background(Theme.base)
-        .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
-        .background(DitherShadow().offset(x: 6, y: 6))
-        .glitch(on: 0, onAppear: true)
+        .frame(width: box.width)
     }
 
     /// Under the row, at the right (as the desktop's); over it when there is no room below.
     private func menuOrigin(_ anchor: CGRect, in size: CGSize) -> CGSize {
-        let height = CGFloat(box.actions.count) * Self.menuRow + 2
-        let x = size.width - 28 - Self.menuWidth
+        let height = CGFloat(box.actions.count) * Self.menuRow + 2 + (box.head == nil ? 0 : Self.menuHead)
+        let x = max(12, size.width - 28 - box.width)
         let below = anchor.maxY + 4
         let y = below + height + 40 < size.height ? below : max(60, anchor.minY - 4 - height)
         return CGSize(width: x, height: y)
@@ -188,29 +261,52 @@ private struct PixelBoxLayer: View {
 
 /// A box's button (the web page's .btn): mono words in brackets; the primary one filled with ink, the signal colour
 /// while pressed; a destructive one in red.
+/// In the classic look a standard button: the primary one filled with the accent, a destructive one with red, the rest
+/// on a quiet ground.
 private struct BoxButtonStyle: ButtonStyle {
     let role: PixelBox.Action.Role
+    @Environment(\.interfaceLook) private var look
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
-        configuration.label
-            .mono(13)
-            .lineLimit(1)
-            .fixedSize()
-            .foregroundStyle(role == .primary ? (pressed ? Color.black : Theme.base) : role == .destructive ? Theme.failed : Theme.ink)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .background(role == .primary ? (pressed ? Theme.signal : Theme.ink) : (pressed ? Theme.line : Color.clear))
+        if look.isClassic {
+            configuration.label
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundStyle(role == .normal ? Theme.ink : Color.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(role == .primary ? Theme.fill : role == .destructive ? Theme.failed : Theme.raised,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .opacity(pressed ? 0.7 : 1)
+        } else {
+            configuration.label
+                .mono(13)
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundStyle(role == .primary ? (pressed ? Color.black : Theme.base) : role == .destructive ? Theme.failed : Theme.ink)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(role == .primary ? (pressed ? Theme.signal : Theme.ink) : (pressed ? Theme.line : Color.clear))
+        }
     }
 }
 
 private struct MenuRowStyle: ButtonStyle {
     let destructive: Bool
+    @Environment(\.interfaceLook) private var look
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(configuration.isPressed ? Theme.base : destructive ? Theme.failed : Theme.ink)
-            .background(configuration.isPressed ? Theme.ink : Color.clear)
+        if look.isClassic {
+            configuration.label
+                .foregroundStyle(destructive ? Theme.failed : Theme.ink)
+                .background(configuration.isPressed ? Theme.raised : Color.clear)
+        } else {
+            configuration.label
+                .foregroundStyle(configuration.isPressed ? Theme.base : destructive ? Theme.failed : Theme.ink)
+                .background(configuration.isPressed ? Theme.ink : Color.clear)
+        }
     }
 }
 

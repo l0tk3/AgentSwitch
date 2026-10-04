@@ -256,14 +256,103 @@ final class BrowserTests: XCTestCase {
 
     // MARK: quality
 
-    func testTheStreamAsksForLessOverARelay() {
-        XCTAssertEqual(BrowserStreamPolicy.options(kind: .lan, probeSeconds: 0.02), BrowserStreamOptions(quality: 70, fps: 15))
-        XCTAssertEqual(BrowserStreamPolicy.options(kind: .bonjour, probeSeconds: nil), BrowserStreamPolicy.local)
-        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, probeSeconds: 0.08), BrowserStreamOptions(quality: 60, fps: 10))
-        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, probeSeconds: 0.9, screenPixels: CGSize(width: 1179, height: 2556)),
+    func testTheStreamAsksForLessOnASlowLink() {
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .lan, mbps: nil), BrowserStreamOptions(quality: 70, fps: 15))
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .bonjour, mbps: 1), BrowserStreamPolicy.local, "the local network is not measured")
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, mbps: 30), BrowserStreamPolicy.local)
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, mbps: 12), BrowserStreamOptions(quality: 60, fps: 10))
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, mbps: 3, screenPixels: CGSize(width: 1179, height: 2556)),
                        BrowserStreamOptions(quality: 45, fps: 5, maxWidth: 1179, maxHeight: 2556))
-        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, probeSeconds: nil).fps, 5, "not known: taken for a relay")
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, mbps: nil).fps, 5, "not measured yet: the slow way")
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: nil, mbps: nil).fps, 5, "no address")
+        XCTAssertTrue(BrowserStreamPolicy.measures(.tailnet))
+        XCTAssertFalse(BrowserStreamPolicy.measures(.lan))
+        XCTAssertFalse(BrowserStreamPolicy.measures(.bonjour))
+        XCTAssertFalse(BrowserStreamPolicy.measures(nil))
         XCTAssertEqual(BrowserStreamOptions(quality: 0, fps: 99, maxWidth: 20).query.map(\.value), ["1", "30", "100"])
+    }
+
+    func testTheStreamAsksForTheScreensDevicePixelsWhereTheLinkAllows() {
+        let pixels = CGSize(width: 1179, height: 2556)
+        let local = BrowserStreamOptions(quality: 70, fps: 15, maxWidth: 1179, maxHeight: 2556, scale: 3)
+        let fair = BrowserStreamOptions(quality: 60, fps: 10, maxWidth: 1179, maxHeight: 2556, scale: 2)
+        let slow = BrowserStreamOptions(quality: 45, fps: 5, maxWidth: 1179, maxHeight: 2556)
+        // The local network: the screen's scale, never larger than the screen (a desktop page across the phone's width).
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .lan, mbps: nil, screenPixels: pixels, screenScale: 3), local)
+        // Tailscale by the speed measured, direct or relayed alike: 25 Mbps and up as the local network, 8 and up at most 2,
+        // slower (or not known) the CSS size; each at most the screen's pixels.
+        for (mbps, expected) in [(80.0, local), (25, local), (24.9, fair), (8, fair), (7.9, slow), (0.5, slow)] {
+            XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, mbps: mbps, screenPixels: pixels, screenScale: 3), expected, "\(mbps) Mbps")
+        }
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, mbps: nil, screenPixels: pixels, screenScale: 3), slow)
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .tailnet, mbps: 12, screenPixels: pixels, screenScale: 2), fair, "a 2× screen: its own scale")
+        // Without the screen's pixels or on a 1x screen: as before (no bound means no scale).
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .lan, mbps: nil, screenScale: 3), BrowserStreamPolicy.local)
+        XCTAssertEqual(BrowserStreamPolicy.options(kind: .lan, mbps: nil, screenPixels: pixels, screenScale: 1), BrowserStreamPolicy.local)
+        XCTAssertEqual(BrowserStreamOptions(quality: 70, fps: 15, maxWidth: 1179, maxHeight: 2556, scale: 3).query.map(\.name),
+                       ["quality", "fps", "maxWidth", "maxHeight", "scale"])
+        XCTAssertEqual(BrowserStreamOptions(quality: 70, fps: 15, scale: 9).query.last?.value, "8", "within what the Mac takes (8 since the page zoom)")
+        XCTAssertEqual(BrowserStreamOptions(quality: 70, fps: 15, scale: 2.5).query.last?.value, "2.5")
+        XCTAssertNil(BrowserStreamOptions(quality: 70, fps: 15, scale: 1).query.first { $0.name == "scale" }, "1 is the default: not sent")
+    }
+
+    // MARK: speed
+
+    func testTheSpeedIsTheBytesAfterTheFirstChunkOverTheTimeBetween() {
+        var meter = BrowserSpeed.Meter()
+        XCTAssertNil(meter.mbps, "nothing yet")
+        meter.add(64 * 1024, at: 0.10)
+        XCTAssertNil(meter.mbps, "one chunk says nothing")
+        meter.add(0, at: 0.2)
+        meter.add(500_000, at: 0.30)
+        meter.add(500_000, at: 0.50)
+        XCTAssertEqual(meter.mbps!, 1_000_000 * 8 / 0.4 / 1_000_000, accuracy: 0.001, "the time to the first chunk is not counted")
+        // Cut short at the limit: the time waited counts, never less than the last chunk's.
+        var cut = meter
+        cut.cut(at: 2.1)
+        XCTAssertEqual(cut.mbps!, 1_000_000 * 8 / 2.0 / 1_000_000, accuracy: 0.001)
+        var early = meter
+        early.cut(at: 0.2)
+        XCTAssertEqual(early.mbps, meter.mbps)
+        var empty = BrowserSpeed.Meter()
+        empty.cut(at: 2)
+        XCTAssertNil(empty.mbps, "nothing came: not known")
+        var little = BrowserSpeed.Meter()
+        little.add(4096, at: 0.1)
+        little.add(4096, at: 0.2)
+        XCTAssertNil(little.mbps, "too little to tell")
+    }
+
+    func testTheSpeedIsMeasuredOnTheMacsSpeedRoute() async throws {
+        let transport = FakeTransport(stream: { req, _ in (httpResponse(req.url), Array(repeating: Data(count: 64 * 1024), count: 17), nil) })
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        _ = await api.browserSpeed(bytes: 17 * 64 * 1024)
+        XCTAssertEqual(transport.paths, ["/browser/speed"])
+        XCTAssertEqual(transport.requests.first?.url?.query, "bytes=1114112")
+        XCTAssertEqual(transport.requests.first?.value(forHTTPHeaderField: "Accept"), "application/octet-stream")
+        // An older Mac without the route: not known.
+        let old = FakeTransport(stream: { req, _ in (httpResponse(req.url, status: 404), [Data(#"{"error":"not found"}"#.utf8)], nil) })
+        let none = await AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: old, token: "tok").browserSpeed()
+        XCTAssertNil(none)
+    }
+
+    func testASpeedMeasureEndsAtItsLimitOnWhatCame() async throws {
+        let transport = StallingTransport(chunks: Array(repeating: Data(count: 64 * 1024), count: 5))
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        let began = ContinuousClock.now
+        let mbps = await api.browserSpeed(limit: .milliseconds(300))
+        let took = ContinuousClock.now - began
+        XCTAssertLessThan(took, .seconds(2), "ends at the limit, not when the bytes would come")
+        let measured = try XCTUnwrap(mbps, "what came counts")
+        XCTAssertLessThan(measured, BrowserStreamPolicy.fairMbps, "the time waited counts: 256 KiB in about 0.3 s")
+    }
+
+    func testTheSamePageAtAnotherDensityIsTheSamePage() {
+        let css = BrowserFrame(seq: 1, jpeg: Data(), width: 390, height: 844, scale: 1, viewportWidth: 390, viewportHeight: 844)
+        let sharp = BrowserFrame(seq: 2, jpeg: Data(), width: 1170, height: 2532, scale: 3, viewportWidth: 390, viewportHeight: 844)
+        XCTAssertNotEqual(css.size, sharp.size)
+        XCTAssertEqual(css.pageSize, sharp.pageSize)
+        XCTAssertEqual(BrowserFrame(seq: 3, jpeg: Data(), width: 640, height: 400).pageSize, CGSize(width: 640, height: 400), "an older Mac: the frame's own")
     }
 
     // MARK: the address bar
@@ -350,11 +439,29 @@ final class BrowserTests: XCTestCase {
         XCTAssertEqual(down.picture.minY, 0, "nothing to lift")
     }
 
+    /// A globe (2026-10-03, user: 浏览器是不是可以再换个通用点的图标): a one-pixel circle, a meridian, the equator.
     func testTheTabIconIsAGlobe() {
         XCTAssertEqual(PixelArt.globe.count, 11)
         XCTAssertTrue(PixelArt.globe.allSatisfy { $0.count == 11 })
         XCTAssertEqual(PixelArt.globe, PixelArt.globe.map { String($0.reversed()) }, "symmetric left and right")
         XCTAssertEqual(PixelArt.globe, PixelArt.globe.reversed(), "and top and bottom")
-        XCTAssertEqual(PixelArt.globeSmall, [".###.", "#.#.#", "#####", "#.#.#", ".###."], "the demo page's")
+        XCTAssertEqual(PixelArt.globe[5], "###########", "the equator")
+    }
+}
+
+/// Sends its chunks, then nothing more and never ends (a stalled link).
+private final class StallingTransport: HTTPTransport, @unchecked Sendable {
+    let chunks: [Data]
+    private let open = LockedBox<[AsyncThrowingStream<Data, Error>.Continuation]>([])
+
+    init(chunks: [Data]) { self.chunks = chunks }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) { throw APIError.transport("no requests") }
+
+    func stream(_ request: URLRequest) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
+        let (body, sink) = AsyncThrowingStream<Data, Error>.makeStream()
+        for chunk in chunks { sink.yield(chunk) }
+        open.withLock { $0.append(sink) }
+        return (httpResponse(request.url), body)
     }
 }

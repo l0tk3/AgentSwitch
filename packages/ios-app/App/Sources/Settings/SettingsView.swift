@@ -9,7 +9,8 @@ enum SettingsRoute: Hashable {
 }
 
 /// Everything behind the gear (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top, then the executors' usage
-/// (§4.2); what every task reads (CONTEXT.md, ciphertexts); sounds and reading; the Mac app's new version; the
+/// (§4.2); the look (Appearance, docs/ui-v0.md §8); what every task reads (CONTEXT.md, ciphertexts); sounds and reading;
+/// the Mac app's new version; the
 /// history (every task; clear history deletes it all) and the models; the permission mode
 /// (changed on the Mac); the Face ID lock; re-pairing. Rows carry no icons (the usage rows' tiles are content, not
 /// row icons); footers are one sentence. Pull to refresh re-reads the usage.
@@ -52,6 +53,7 @@ struct SettingsView: View {
                     }
                     if let quota = model.quota { UsageSection(readings: quota) }
                 }
+                AppearanceSection()
                 Section {
                     NavigationLink("Context") { ContextEditorView() }
                     NavigationLink("Ciphertexts") { CiphertextsView() }
@@ -150,6 +152,29 @@ struct SettingsView: View {
     private var connected: Bool {
         if case .connected = model.connection { return true }
         return false
+    }
+}
+
+/// Appearance (docs/ui-v0.md §8, 2026-10-04): `Pixel`, the look of §7 and the default, or `Classic`, a standard app's.
+/// Kept on this iPhone (the Mac keeps its own; the user: 设置各记各的) and in force at once: the root draws everything
+/// again in the look chosen (Look.swift), this sheet staying open.
+private struct AppearanceSection: View {
+    @AppStorage(InterfaceLook.key) private var raw = InterfaceLook.pixel.rawValue
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Section {
+            Picker("Appearance", selection: $raw) {
+                ForEach(InterfaceLook.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            // The Live Activity showing now is drawn again in the look chosen.
+            .onChange(of: raw) { model.syncLive() }
+        } header: {
+            SectionLabel("Appearance")
+        } footer: {
+            Text("只换外观：图标、字体、按钮和提示的写法。功能、位置和操作不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。")
+        }
     }
 }
 

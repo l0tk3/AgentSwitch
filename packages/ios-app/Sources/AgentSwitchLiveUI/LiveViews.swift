@@ -4,23 +4,19 @@ import SwiftUI
 /// The Live Activity's views (assistant-v0 §4), in a package so the Mac can render them in tests (LiveRenderTests);
 /// the widget extension places them in the Dynamic Island's regions and on the lock screen. Drawn in the app's own
 /// language (ui-v0 §7, docs/design/implemented/island.html): the pixel mark as the identity and the state, status squares
-/// and the spinner's first frame, tree lines and dotted rules, short mono words in title case (§7.2.7), a bracket button. Everything is
+/// and the spinner's first frame, tree lines and solid rules, short mono words in title case (§7.2.7), a bracket button. Everything is
 /// drawn for a black background: the island is always black and the lock screen card gets a dark tint, so white text
 /// reads on any wallpaper. The corners of the island clip, so nothing sits in them.
 public enum LiveLook {
     public static let text = Color.white
     public static let secondary = Color.white.opacity(0.72)
     public static let faint = Color.white.opacity(0.5)
-    /// The mark in the app icon's inks (`make-icons.swift`; 2026-10-01, user: 和 App 图标不一致): the lit lane, the
-    /// others, the hard shadow one cell down and right.
-    static let markInk = Color(red: 0xE9 / 255, green: 0xE6 / 255, blue: 0xDF / 255)
-    static let markDim = Color(red: 0x5B / 255, green: 0x59 / 255, blue: 0x55 / 255)
-    static let markShadow = Color(red: 0x2C / 255, green: 0x2A / 255, blue: 0x28 / 255)
-    /// The compact and minimal island's cell: 4 device pixels (every phone with a Dynamic Island draws at 3x), the mark
-    /// with its shadow 20 × 16 pt, clear of the 37 pt circle's edge (2026-10-01, user: 太大、被圆圈裁切).
+    /// The compact and minimal island's mark: `LiveMark` draws a cell of three quarters of this, 3 device pixels (every
+    /// phone with a Dynamic Island draws at 3x) — the mark with its shadow 17 pt square, clear of the 37 pt circle's edge
+    /// (2026-10-01, user: 太大、被圆圈裁切).
     public static let islandPixel: CGFloat = 4.0 / 3.0
     /// Dotted rules.
-    static let rule = Color.white.opacity(0.28)
+    static let rule = Color.white.opacity(0.16)
     public static let background = Color.black.opacity(0.82)
 
     /// docs/ui-v0.md §7.3's status colours (dark set: the island and the card are dark): waiting amber, busy cyan, ok
@@ -32,19 +28,31 @@ public enum LiveLook {
     /// The open button's lower edge, a key cap's (§7).
     static let waitingEdge = Color(red: 0.64, green: 0.44, blue: 0)
 
+    // The classic look's (docs/ui-v0.md §8): the system's status colours and its blue for what is at work.
+    public static func waiting(in classic: Bool) -> Color { classic ? Color(red: 1, green: 0.62, blue: 0.04) : waiting }
+    public static func busy(in classic: Bool) -> Color { classic ? Color(red: 0.04, green: 0.52, blue: 1) : busy }
+    public static func ok(in classic: Bool) -> Color { classic ? Color(red: 0.19, green: 0.82, blue: 0.35) : ok }
+    public static func failed(in classic: Bool) -> Color { classic ? Color(red: 1, green: 0.27, blue: 0.23) : failed }
+    /// The card's ground: near black; a dark grey in the classic look.
+    public static func background(_ state: LiveState) -> Color {
+        state.isClassic ? Color(red: 0.17, green: 0.17, blue: 0.19).opacity(0.86) : background
+    }
+
     public static func tint(_ state: LiveState) -> Color {
+        let classic = state.isClassic
         switch state.phase {
-        case .needsYou: return waiting
-        case .running: return busy
-        case .ended: return state.ended?.ok == true ? ok : failed
+        case .needsYou: return waiting(in: classic)
+        case .running: return busy(in: classic)
+        case .ended: return state.ended?.ok == true ? ok(in: classic) : failed(in: classic)
         }
     }
 
-    /// The status word (§7.2.7, the same as in the app).
+    /// The status word (§7.2.7, the same as in the app; the classic look's own where it has one).
     public static func word(_ state: LiveState) -> String {
+        let classic = state.isClassic
         switch state.phase {
-        case .needsYou: return "Waiting"
-        case .running: return "Busy"
+        case .needsYou: return classic ? "Needs You" : "Waiting"
+        case .running: return classic ? "Working" : "Busy"
         case .ended: return state.ended?.ok == true ? "Done" : "Incomplete"
         }
     }
@@ -60,19 +68,52 @@ public enum LiveLook {
         return more > 0 ? "+\(more) More" : nil
     }
 
-    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+    /// Short words: monospaced; the system font in the classic look.
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular, classic: Bool = false) -> Font {
+        .system(size: size, weight: weight, design: classic ? .default : .monospaced)
+    }
+
+    /// The app's mark as lines (the classic look): one source switched onto three lanes, the squares rounded and the
+    /// steps curved, the lit lane's end in `end`.
+    static func drawClassicMark(_ context: inout GraphicsContext, in rect: CGRect, end: Color?) {
+        let u = min(rect.width / 14, rect.height / 11)
+        let origin = CGPoint(x: rect.midX - 7 * u, y: rect.midY - 5.5 * u)
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: origin.x + x * u, y: origin.y + y * u) }
+        func block(_ x: CGFloat, _ y: CGFloat) -> Path {
+            Path(roundedRect: CGRect(origin: point(x, y), size: CGSize(width: 3 * u, height: 3 * u)), cornerRadius: 0.85 * u, style: .continuous)
+        }
+        let stroke = StrokeStyle(lineWidth: max(1, 0.95 * u), lineCap: .round)
+        func lane(to y: CGFloat) -> Path {
+            var path = Path()
+            path.move(to: point(3, 5.5))
+            path.addCurve(to: point(11, y), control1: point(7.4, 5.5), control2: point(6.6, y))
+            return path
+        }
+        let dim = Color.white.opacity(0.45)
+        context.stroke(lane(to: 5.5), with: .color(dim), style: stroke)
+        context.stroke(lane(to: 9.5), with: .color(dim), style: stroke)
+        context.fill(block(11, 4), with: .color(dim))
+        context.fill(block(11, 8), with: .color(dim))
+        context.stroke(lane(to: 1.5), with: .color(text), style: stroke)
+        context.fill(block(0, 4), with: .color(text))
+        context.fill(block(11, 0), with: .color(end ?? text))
     }
 }
 
-/// The app's mark as the activity's identity and its state (ui-v0 §7.3), drawn as the app icon draws it (§7.2.10): the
-/// lit lane ink, the others dim, the steps' inside corners half lit, a hard shadow a cell down and right. Busy puts a
-/// cyan block on the lit lane (a still frame: the island does not animate), waiting turns its end amber, and once all is
+extension EnvironmentValues {
+    /// The classic look, handed from each of the activity's public views to the parts under it.
+    @Entry var liveClassic = false
+}
+
+/// The app's mark as the activity's identity and its state (ui-v0 §7.3), drawn as the app draws it (§9): the shaded
+/// picture — tones of the one ink, a hard shadow a cell down and right — with the state on its nearest lane. Busy puts a
+/// cyan block on that lane (a still frame: the island does not animate), waiting turns its end amber, and once all is
 /// over the end shows how it went (green done, red not). The compact and minimal island, the expanded island's leading
 /// corner, the lock screen's header.
 public struct LiveMark: View {
     let state: LiveState
     let pixel: CGFloat
+    @Environment(\.displayScale) private var displayScale
 
     public init(state: LiveState, pixel: CGFloat = 2) {
         self.state = state
@@ -80,72 +121,98 @@ public struct LiveMark: View {
     }
 
     public var body: some View {
+        if state.isClassic { classicMark } else { pixelMark }
+    }
+
+    /// The classic look: the mark as lines, its lit end in the state's colour.
+    private var classicMark: some View {
+        let end = LiveLook.tint(state)
+        return Canvas { context, size in LiveLook.drawClassicMark(&context, in: CGRect(origin: .zero, size: size), end: end) }
+            .frame(width: CGFloat(LiveArt.markRows[0].count + 1) * pixel, height: CGFloat(LiveArt.markRows.count + 1) * pixel)
+            .accessibilityElement()
+            .accessibilityLabel("AgentSwitch · \(LiveLook.word(state))")
+    }
+
+    private var pixelMark: some View {
         let end: Color? = switch state.phase {
         case .needsYou: LiveLook.waiting
         case .ended: LiveLook.tint(state)
         case .running: nil
         }
-        // The block two cells long, where the web mark's frame 3 has it (pixel.js).
-        let block = state.phase == .running ? Set(LiveArt.laneA[3...4].map { "\($0.x),\($0.y)" }) : []
-        let pixel = pixel
-        let cells = LiveArt.markRows.enumerated().flatMap { y, row in
-            row.enumerated().compactMap { x, ch in ch == "." ? nil : (x: x, y: y, ch: ch) }
-        }
-        let lane: (Character) -> Color = { "aAS".contains($0) ? LiveLook.markInk : LiveLook.markDim }
+        // A whole number of pixels a cell: 3 in the island (17 pt with the shadow, clear of the 37 pt circle's edge),
+        // 4 on the lock screen. The block where the app's mark has it on its fourth beat.
+        let cell = CGFloat(ShadedSprite.cell(scale: Double(displayScale), points: Double(pixel) * 0.75))
+        let paint = ShadedMarkPaint(depth: true, end: end, block: state.phase == .running ? [(step: LiveMark.stillStep, alpha: 1)] : [])
+        let side = (CGFloat(ShadedMark.picture.width + 1) * cell).rounded(.up)
+        return Canvas { context, _ in paint.draw(&context, cell: cell) }
+            .frame(width: side, height: side, alignment: .topLeading)
+            .accessibilityElement()
+            .accessibilityLabel("AgentSwitch · \(LiveLook.word(state))")
+    }
+
+    static let stillStep = 3
+}
+
+/// A status square as a small key (§9): its colour, a light edge above and left, a dark one below and right.
+struct LiveKey: View {
+    let color: Color
+    var side: CGFloat = 7
+
+    var body: some View {
+        let side = side
         Canvas { context, _ in
-            func fill(_ x: Int, _ y: Int, _ color: Color) {
-                context.fill(Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel, width: pixel, height: pixel)), with: .color(color))
-            }
-            for c in cells { fill(c.x + 1, c.y + 1, LiveLook.markShadow) }
-            for h in LiveArt.halfLit { fill(h.x, h.y, lane(h.lane).opacity(0.42)) }
-            for c in cells {
-                let color: Color = if block.contains("\(c.x),\(c.y)") { LiveLook.busy }
-                    else if c.ch == "A", let end { end }
-                    else { lane(c.ch) }
-                fill(c.x, c.y, color)
-            }
+            context.fill(Path(CGRect(x: 0, y: 0, width: side, height: side)), with: .color(color))
+            ShadedPaint.keyEdges(in: &context, side: side, edge: 1, raised: true)
         }
-        // One more column and row: the shadow.
-        .frame(width: CGFloat(LiveArt.markRows[0].count + 1) * pixel, height: CGFloat(LiveArt.markRows.count + 1) * pixel)
-        .accessibilityElement()
-        .accessibilityLabel("AgentSwitch · \(LiveLook.word(state))")
+        .frame(width: side, height: side)
     }
 }
 
-/// A 1-bit sprite (an agent's mark).
+/// An agent's mark: its shaded picture (§9), without the shadow, a little under full strength beside the text.
 struct LiveSprite: View {
-    let rows: [String]
-    var pixel: CGFloat = 2
-    var color: Color = LiveLook.secondary
+    let harness: String
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        let pixel = pixel
-        Canvas { context, _ in
-            for (y, row) in rows.enumerated() {
-                for (x, ch) in row.enumerated() where ch == "#" {
-                    context.fill(Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel, width: pixel, height: pixel)), with: .color(color))
-                }
-            }
+        if let sprite = ShadedSprite.agents[harness] {
+            let cell = CGFloat(ShadedSprite.cell(scale: Double(displayScale)))
+            Canvas { context, _ in ShadedPaint.draw(sprite, in: &context, cell: cell, dark: true, shadow: false) }
+                .frame(width: (CGFloat(sprite.width) * cell).rounded(.up), height: (CGFloat(sprite.height) * cell).rounded(.up), alignment: .topLeading)
+                .opacity(0.8)
+                .accessibilityHidden(true)
         }
-        .frame(width: CGFloat(rows.first?.count ?? 0) * pixel, height: CGFloat(rows.count) * pixel)
-        .accessibilityHidden(true)
     }
 }
 
 /// A row's status (§7.2.4: static places show the spinner's first frame): ⠋ while busy, a square otherwise.
+/// In the classic look an open ring while busy, a dot otherwise.
 struct RowGlyph: View {
     let color: Color
     let busy: Bool
+    @Environment(\.liveClassic) private var classic
 
     var body: some View {
         Group {
-            if busy {
+            if busy && classic {
+                BusyRing()
+            } else if busy {
                 Text("⠋").font(LiveLook.mono(13, .bold)).foregroundStyle(LiveLook.busy)
+            } else if classic {
+                Circle().fill(color).frame(width: 8, height: 8)
             } else {
-                Rectangle().fill(color).frame(width: 7, height: 7)
+                LiveKey(color: color)
             }
         }
         .frame(width: 12)
+    }
+}
+
+/// At work, in the classic look: a still open ring in the accent (the island does not animate).
+struct BusyRing: View {
+    var body: some View {
+        Circle().trim(from: 0.1, to: 0.8).stroke(LiveLook.busy(in: true), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            .rotationEffect(.degrees(-60))
+            .frame(width: 9, height: 9)
     }
 }
 
@@ -173,21 +240,22 @@ struct Tally: View {
     let state: LiveState
 
     var body: some View {
+        let classic = state.isClassic
         HStack(spacing: 10) {
             if state.waiting > 0 {
                 HStack(spacing: 4) {
-                    Rectangle().fill(LiveLook.waiting).frame(width: 7, height: 7)
+                    if classic { Circle().fill(LiveLook.waiting(in: true)).frame(width: 8, height: 8) } else { LiveKey(color: LiveLook.waiting) }
                     Text("\(state.waiting)")
                 }
             }
             if state.running > 0 {
                 HStack(spacing: 3) {
-                    Text("⠋").fontWeight(.bold).foregroundStyle(LiveLook.busy)
+                    if classic { BusyRing() } else { Text("⠋").fontWeight(.bold).foregroundStyle(LiveLook.busy) }
                     Text("\(state.running)")
                 }
             }
         }
-        .font(LiveLook.mono(12, .medium))
+        .font(LiveLook.mono(12, .medium, classic: classic))
         .foregroundStyle(LiveLook.secondary)
         .fixedSize()
         .accessibilityElement(children: .ignore)
@@ -202,28 +270,22 @@ struct StepLine: View {
     let asks: Bool
     let lines: Int
     var size: CGFloat = 14
+    @Environment(\.liveClassic) private var classic
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("└─").font(LiveLook.mono(size - 1)).foregroundStyle(LiveLook.faint)
-            Text(text).font(.system(size: size)).foregroundStyle(asks ? LiveLook.waiting : LiveLook.secondary)
+            // The tree's corner is the pixel look's; the classic one says the step plainly.
+            if !classic { Text("└─").font(LiveLook.mono(size - 1)).foregroundStyle(LiveLook.faint) }
+            Text(text).font(.system(size: size)).foregroundStyle(asks ? LiveLook.waiting(in: classic) : LiveLook.secondary)
                 .lineLimit(lines).frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
 
-/// Two on, two off, one point high.
-struct DottedRule: View {
+/// One point high, solid (2026-10-03, user: 分割线也别弄虚线了，改成实线吧，看着累人; two on, two off before).
+struct HairRule: View {
     var body: some View {
-        Canvas { context, size in
-            var x: CGFloat = 0
-            while x < size.width {
-                context.fill(Path(CGRect(x: x, y: 0, width: 2, height: 1)), with: .color(LiveLook.rule))
-                x += 4
-            }
-        }
-        .frame(height: 1)
-        .accessibilityHidden(true)
+        LiveLook.rule.frame(height: 1).accessibilityHidden(true)
     }
 }
 
@@ -234,8 +296,8 @@ struct Worker: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if row.kind == .terminal, let model = row.model, let harness = LiveArt.harness(named: model), let rows = LiveArt.agents[harness] {
-                LiveSprite(rows: rows)
+            if row.kind == .terminal, let model = row.model, let harness = LiveArt.harness(named: model) {
+                LiveSprite(harness: harness)
             }
             Text(row.model ?? "Routing").lineLimit(1)
         }
@@ -247,6 +309,7 @@ struct Worker: View {
 struct OpenButton: View {
     let link: URL
     var linked = true
+    @Environment(\.liveClassic) private var classic
 
     var body: some View {
         Group {
@@ -255,7 +318,18 @@ struct OpenButton: View {
         .padding(.bottom, 3)
     }
 
-    private var face: some View {
+    /// `[ Open ]` on amber with a key's lower edge; a round button in the accent in the classic look.
+    @ViewBuilder private var face: some View {
+        if classic {
+            Text("Open").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 5)
+                .background(Capsule().fill(LiveLook.busy(in: true)))
+        } else {
+            pixelFace
+        }
+    }
+
+    private var pixelFace: some View {
         Text("[ Open ]").font(LiveLook.mono(13, .semibold)).foregroundStyle(.black)
             .padding(.horizontal, 10).padding(.vertical, 5)
             // Square (§7: hard edges), drawn as rectangles: a plain colour background comes out rounded here.
@@ -276,7 +350,7 @@ public struct IslandCompactLeading: View {
     public init(state: LiveState) { self.state = state }
 
     public var body: some View {
-        LiveMark(state: state, pixel: LiveLook.islandPixel).padding(.leading, 4)
+        LiveMark(state: state, pixel: LiveLook.islandPixel).padding(.leading, 4).environment(\.liveClassic, state.isClassic)
     }
 }
 
@@ -298,17 +372,20 @@ public struct IslandCompactTrailing: View {
     public init(state: LiveState) { self.state = state }
 
     public var body: some View {
+        let classic = state.isClassic
         Group {
             if state.phase == .ended {
-                Rectangle().fill(LiveLook.tint(state)).frame(width: 8, height: 8)
+                if classic { Circle().fill(LiveLook.tint(state)).frame(width: 8, height: 8) } else { LiveKey(color: LiveLook.tint(state), side: 8) }
             } else if state.running + state.waiting > 1 {
                 Tally(state: state)
             } else if let lead = state.lead {
-                Text(lead.doing ?? (lead.needsYou ? "Waiting" : "Busy")).font(LiveLook.mono(13, .medium)).lineLimit(1).fixedSize()
-                    .foregroundStyle(lead.needsYou ? LiveLook.waiting : LiveLook.secondary)
+                Text(lead.doing ?? (lead.needsYou ? (classic ? "Needs You" : "Waiting") : (classic ? "Working" : "Busy")))
+                    .font(LiveLook.mono(13, .medium, classic: classic)).lineLimit(1).fixedSize()
+                    .foregroundStyle(lead.needsYou ? LiveLook.waiting(in: classic) : LiveLook.secondary)
             }
         }
         .padding(.trailing, 4)
+        .environment(\.liveClassic, classic)
     }
 }
 
@@ -318,7 +395,7 @@ public struct IslandLeading: View {
     public init(state: LiveState) { self.state = state }
 
     public var body: some View {
-        LiveMark(state: state).padding(.leading, 8).padding(.top, 2)
+        LiveMark(state: state).padding(.leading, 8).padding(.top, 2).environment(\.liveClassic, state.isClassic)
     }
 }
 
@@ -328,17 +405,19 @@ public struct IslandTrailing: View {
     public init(state: LiveState) { self.state = state }
 
     public var body: some View {
+        let classic = state.isClassic
         HStack(spacing: 8) {
-            Text(LiveLook.word(state)).font(LiveLook.mono(13, .semibold)).foregroundStyle(LiveLook.tint(state)).lineLimit(1).fixedSize()
+            Text(LiveLook.word(state)).font(LiveLook.mono(13, .semibold, classic: classic)).foregroundStyle(LiveLook.tint(state)).lineLimit(1).fixedSize()
             if let lead = state.lead {
-                LiveClock(since: lead.startedAt, width: 44).font(LiveLook.mono(13, .medium)).foregroundStyle(LiveLook.secondary)
+                LiveClock(since: lead.startedAt, width: 44).font(LiveLook.mono(13, .medium, classic: classic)).foregroundStyle(LiveLook.secondary)
             }
         }
         .padding(.trailing, 8).padding(.top, 2)
+        .environment(\.liveClassic, classic)
     }
 }
 
-/// Expanded island, the wide bottom, aligned left: the title, `└─` what it is doing or asks, then under a dotted rule
+/// Expanded island, the wide bottom, aligned left: the title, `└─` what it is doing or asks, then under a rule
 /// who works on it, how many more, and `[ Open ]` when it waits for you; or how it ended.
 public struct IslandBottom: View {
     let state: LiveState
@@ -354,14 +433,14 @@ public struct IslandBottom: View {
             if let lead = state.lead {
                 Text(lead.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(LiveLook.text).lineLimit(1)
                 StepLine(text: lead.step, asks: lead.needsYou, lines: 2).padding(.top, 3)
-                DottedRule().padding(.top, 12).padding(.bottom, 10)
+                HairRule().padding(.top, 12).padding(.bottom, 10)
                 HStack(spacing: 8) {
                     Worker(row: lead)
                     if let others = LiveLook.others(state) { Text("· \(others)").lineLimit(1) }
                     Spacer(minLength: 4)
                     if lead.needsYou { OpenButton(link: lead.link, linked: linked) }
                 }
-                .font(LiveLook.mono(12))
+                .font(LiveLook.mono(12, classic: state.isClassic))
                 .foregroundStyle(LiveLook.faint)
                 .frame(minHeight: 26)
             } else if let ended = state.ended {
@@ -372,12 +451,13 @@ public struct IslandBottom: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
         .padding(.bottom, 6)
+        .environment(\.liveClassic, state.isClassic)
     }
 }
 
 // MARK: - the lock screen
 
-/// The lock screen: the mark, `AgentSwitch · <Mac>` and the counts (or the word); a dotted rule; then up to three
+/// The lock screen: the mark, `AgentSwitch · <Mac>` and the counts (or the word); a rule; then up to three
 /// rows — tasks and terminals waiting for you first, their question in amber, then tasks in progress — or the last
 /// conclusion.
 public struct LockScreenCard: View {
@@ -392,19 +472,20 @@ public struct LockScreenCard: View {
     }
 
     public var body: some View {
+        let classic = state.isClassic
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 LiveMark(state: state)
-                Text("AgentSwitch").font(LiveLook.mono(12, .semibold)).foregroundStyle(LiveLook.text)
-                Text("· \(mac)").font(LiveLook.mono(12)).foregroundStyle(LiveLook.faint).lineLimit(1)
+                Text("AgentSwitch").font(LiveLook.mono(classic ? 13 : 12, .semibold, classic: classic)).foregroundStyle(LiveLook.text)
+                Text("· \(mac)").font(LiveLook.mono(12, classic: classic)).foregroundStyle(LiveLook.faint).lineLimit(1)
                 Spacer(minLength: 4)
                 if state.running + state.waiting > 1 {
                     Tally(state: state)
                 } else {
-                    Text(LiveLook.word(state)).font(LiveLook.mono(13, .semibold)).foregroundStyle(LiveLook.tint(state)).fixedSize()
+                    Text(LiveLook.word(state)).font(LiveLook.mono(13, .semibold, classic: classic)).foregroundStyle(LiveLook.tint(state)).fixedSize()
                 }
             }
-            DottedRule().padding(.top, 11).padding(.bottom, 9)
+            HairRule().padding(.top, 11).padding(.bottom, 9)
             if let ended = state.ended, state.rows.isEmpty {
                 HStack(spacing: 8) {
                     RowGlyph(color: LiveLook.tint(state), busy: false)
@@ -416,13 +497,13 @@ public struct LockScreenCard: View {
                 ForEach(state.rows) { row in
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 8) {
-                            RowGlyph(color: LiveLook.waiting, busy: !row.needsYou)
+                            RowGlyph(color: LiveLook.waiting(in: classic), busy: !row.needsYou)
                             Text(row.title).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(LiveLook.text).lineLimit(1)
                             Spacer(minLength: 4)
-                            if row.kind == .terminal, let model = row.model, let harness = LiveArt.harness(named: model), let rows = LiveArt.agents[harness] {
-                                LiveSprite(rows: rows)
+                            if row.kind == .terminal, let model = row.model, let harness = LiveArt.harness(named: model) {
+                                LiveSprite(harness: harness)
                             }
-                            LiveClock(since: row.startedAt, width: 48).font(LiveLook.mono(13, .medium)).foregroundStyle(LiveLook.secondary)
+                            LiveClock(since: row.startedAt, width: 48).font(LiveLook.mono(13, .medium, classic: classic)).foregroundStyle(LiveLook.secondary)
                         }
                         StepLine(text: row.step, asks: row.needsYou, lines: 1, size: 13).padding(.leading, 20)
                     }
@@ -434,5 +515,6 @@ public struct LockScreenCard: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        .environment(\.liveClassic, classic)
     }
 }

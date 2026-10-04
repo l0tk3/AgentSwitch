@@ -20,7 +20,7 @@ struct ToolGroupRow: View {
                         .font(.footnote)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     // ▸ / ▾ mean folded / open, as the system uses them (§7.2.6).
-                    Text(open ? "▾" : "▸").mono(12).foregroundStyle(.tertiary)
+                    LookGlyph.fold(open: open).foregroundStyle(.tertiary)
                 }
                 .contentShape(Rectangle())
             }

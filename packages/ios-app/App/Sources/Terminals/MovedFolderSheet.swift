@@ -51,10 +51,10 @@ struct MovedFolderSheet: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    Button("[ Resume ]") {
+                    Button {
                         dismiss()
                         resume(folder.trimmingCharacters(in: .whitespaces))
-                    }
+                    } label: { ButtonWord("Resume") }
                     .buttonStyle(SquareButtonStyle(prominent: true))
                     .disabled(folder.trimmingCharacters(in: .whitespaces).isEmpty)
                 }

@@ -3,21 +3,23 @@ import SwiftUI
 
 /// What you said, on the right, in a raised square box (the signal colour is not for text backgrounds), as you typed it
 /// with its code drawn as code (TypedText). Ciphertexts show as a lock mark; the Mac's legend is not shown.
+/// In the classic look a round bubble in the accent's colour (docs/ui-v0.md §8).
 struct UserBubble: View {
     let text: String
     var attachments: Int = 0
     var faded = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack {
             Spacer(minLength: 56)
             VStack(alignment: .trailing, spacing: Theme.Space.xs) {
                 TypedText(text: MessageDisplay.readable(text))
-                    .foregroundStyle(Theme.ink)
+                    .foregroundStyle(look.isClassic ? Color.white : Theme.ink)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Theme.raised)
-                    .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                    .padding(.vertical, look.isClassic ? 9 : 10)
+                    .grounded(look.isClassic ? Theme.signal : Theme.raised, radius: Theme.Radius.bubble)
+                    .framed(look.isClassic ? Color.clear : Theme.line, radius: Theme.Radius.bubble)
                     .textSelection(.enabled)
                     .opacity(faded ? 0.55 : 1)
                 if attachments > 0 {
@@ -30,7 +32,9 @@ struct UserBubble: View {
 
 /// AgentSwitch's side of the conversation: plain text on the left, no bubble (docs/ui-v0.md: not a chat robot). A
 /// notice carries a small dot in the state of the task it is about; the tasks an answer created hang under it as
-/// cards, the ones it only talks about as small links. Long press: read aloud, copy, delete (the whole entry).
+/// cards, the ones it only talks about as small links. Long press: read aloud, copy, its links (each: Open in Browser,
+/// Copy Link, Open in Safari; browser-v0 §1 入口, 2026-10-03), delete (the whole entry). A tap on a link opens it in the
+/// Mac's browser (RootView).
 struct AssistantBubble: View {
     let message: AssistantMessage
     let created: [AgentTask]
@@ -38,6 +42,7 @@ struct AssistantBubble: View {
     let open: (String) -> Void
     let delete: (DeleteRequest) -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -50,7 +55,10 @@ struct AssistantBubble: View {
     private var line: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                if let dot { Rectangle().fill(dot).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 } }
+                if let dot {
+                    Group { if look.isClassic { Circle().fill(dot) } else { Rectangle().fill(dot) } }
+                        .frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                }
                 // Model output: Markdown, as on the Mac (its code as code).
                 MarkdownView(text: message.text)
                     .foregroundStyle(message.unprompted ? .secondary : .primary)
@@ -75,9 +83,9 @@ struct AssistantBubble: View {
                 StatusMark(status: task.status)
                 Text(Markdown.codeSpans(model.title(of: task)).codeWashed())
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                Text(task.status.label).mono(11).foregroundStyle(Theme.color(task.status))
+                LookWord(task.status.label).mono(11).foregroundStyle(Theme.color(task.status))
                 Spacer(minLength: 0)
-                Text("›").mono(12).foregroundStyle(.tertiary)
+                LookGlyph(glyph: "›", symbol: "chevron.right", size: 12).foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
         }
@@ -125,6 +133,7 @@ struct AssistantBubble: View {
         let speaking = model.speaker.speakingTaskId == speakKey
         Button(speaking ? "Stop" : "Read Aloud", systemImage: speaking ? "stop.fill" : "speaker.wave.2", action: toggleSpeech)
         Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(message.text) }
+        LinkMenuItems(text: message.text)
         Divider()
         Button("Delete", systemImage: "trash", role: .destructive) { delete(.entry(model.conversation.entry(of: message))) }
     }
@@ -136,6 +145,7 @@ struct TaskLink: View {
     var waiting = false
     let open: () -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Button(action: open) {
@@ -144,11 +154,13 @@ struct TaskLink: View {
                 Text(Markdown.codeSpans(title).codeWashed()).font(.subheadline).foregroundStyle(.primary).lineLimit(1)
                 Spacer(minLength: 0)
                 if model.isUnread(task) { UnreadDot() }
-                Text("›").mono(13).foregroundStyle(.tertiary)
+                LookGlyph(glyph: "›", symbol: "chevron.right").foregroundStyle(.tertiary)
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, 10)
-            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+            // A framed line; a round card on its own ground in the classic look.
+            .grounded(look.isClassic ? Theme.panel : Color.clear, radius: Theme.Radius.card)
+            .framed(look.isClassic ? Color.clear : Theme.line, radius: Theme.Radius.card)
         }
         .buttonStyle(.plain)
     }
@@ -170,8 +182,8 @@ struct OutgoingBubble: View {
             if let failure = message.failure {
                 Text(failure).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.trailing)
                 HStack(spacing: Theme.Space.m) {
-                    Button("[ Edit ]") { model.editOutgoing() }.buttonStyle(SquareButtonStyle(expand: false))
-                    Button("[ Resend ]") { Task { await model.resend() } }.buttonStyle(SquareButtonStyle(prominent: true, expand: false))
+                    Button { model.editOutgoing() } label: { ButtonWord("Edit") }.buttonStyle(SquareButtonStyle(expand: false))
+                    Button { Task { await model.resend() } } label: { ButtonWord("Resend") }.buttonStyle(SquareButtonStyle(prominent: true, expand: false))
                 }
                 .disabled(model.sending)
             } else {

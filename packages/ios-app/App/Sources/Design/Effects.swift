@@ -4,6 +4,8 @@ import SwiftUI
 // The rest of the desktop terminal window's motion, on the phone (docs/design/implemented/phone.html, the effects
 // table): the waiting blink, the block caret, rows drawn line by line and wiped out, a screen's refresh, scanlines,
 // the dither, and the wordmark's reveal. All in steps, never eased; still under Reduce Motion.
+// The classic look (§8 动效) has none of these: what waits is a dot whose ring breathes (ClassicWaitingDot), a caret is a
+// thin bar, rows are simply there, a screen is not drawn in, and a floating layer has a soft shadow.
 
 /// What waits for you blinks: 1.1 s a cycle in two steps (under three times a second), every blinker on one clock. It
 /// ticks only while it blinks and the app is in front (ui-v0 §7.4, 2026-10-03).
@@ -11,9 +13,10 @@ struct WaitingBlink: ViewModifier {
     var on = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.interfaceLook) private var look
 
     func body(content: Content) -> some View {
-        if on && !reduceMotion && scenePhase == .active {
+        if on && !reduceMotion && scenePhase == .active && !look.isClassic {
             TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { t in
                 content.opacity(Motion.step(at: t.date, every: Motion.blink) % 2 == 1 ? 0.25 : 1)
             }
@@ -35,6 +38,7 @@ struct BlockCaret: View {
     var color: Color = Theme.ink
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Group {
@@ -49,7 +53,14 @@ struct BlockCaret: View {
         .accessibilityHidden(true)
     }
 
-    private var block: some View { Rectangle().fill(color).frame(width: width, height: height) }
+    /// A block; in the classic look the system's thin caret in the accent.
+    @ViewBuilder private var block: some View {
+        if look.isClassic {
+            Capsule().fill(Theme.signal).frame(width: 2, height: height)
+        } else {
+            Rectangle().fill(color).frame(width: width, height: height)
+        }
+    }
 }
 
 /// Drawn line by line: a row that arrives with an unfold shows at its turn (22 ms a line), in one step.
@@ -64,12 +75,14 @@ struct StepIn: ViewModifier {
         _shown = State(initialValue: !active)
     }
 
+    @Environment(\.interfaceLook) private var look
+
     func body(content: Content) -> some View {
         content
-            .opacity(shown ? 1 : 0)
+            .opacity(shown || look.isClassic ? 1 : 0)
             .task {
                 guard !shown else { return }
-                if !reduceMotion { try? await Task.sleep(for: delay) }
+                if !reduceMotion && !look.isClassic { try? await Task.sleep(for: delay) }
                 shown = true
             }
     }
@@ -112,6 +125,7 @@ struct ScreenRefresh<Trigger: Equatable>: ViewModifier {
     @State private var step: Int?
     @State private var run: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.interfaceLook) private var look
 
     static var steps: Int { 13 }
 
@@ -137,7 +151,7 @@ struct ScreenRefresh<Trigger: Equatable>: ViewModifier {
     }
 
     private func play() {
-        guard !reduceMotion else { return }
+        guard !reduceMotion, !look.isClassic else { return }
         run?.cancel()
         run = Task { @MainActor in
             for s in 0..<Self.steps {
@@ -156,7 +170,13 @@ extension View {
 
 /// Scanlines behind a list (the desktop's sidebar): a 1 pt line every 3 pt at 4 % ink.
 struct Scanlines: View {
+    @Environment(\.interfaceLook) private var look
+
     var body: some View {
+        if look.isClassic { Color.clear.allowsHitTesting(false).accessibilityHidden(true) } else { lines }
+    }
+
+    private var lines: some View {
         Canvas { context, size in
             var path = Path()
             var y: CGFloat = 0
@@ -196,14 +216,45 @@ struct Checker: View {
     }
 }
 
-/// The dithered hard shadow of a floating layer, put 6 pt down and right by the caller.
+/// The dithered hard shadow of a floating layer, put 6 pt down and right by the caller. Nothing in the classic look:
+/// its layers have a soft shadow of their own (`floatingShadow()`).
 struct DitherShadow: View {
-    var body: some View { Checker() }
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        if look.isClassic { Color.clear } else { Checker() }
+    }
+}
+
+/// Half of a view dithered away; in the classic look it is faint instead.
+private struct Dithered: ViewModifier {
+    let on: Bool
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if look.isClassic {
+            content.opacity(on ? 0.4 : 1)
+        } else {
+            content.mask { if on { Checker(color: .black) } else { Rectangle() } }
+        }
+    }
+}
+
+/// A floating layer's soft shadow in the classic look (the pixel look's is the dithered one behind it).
+private struct FloatingShadow: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if look.isClassic { content.shadow(color: .black.opacity(0.28), radius: 18, y: 8) } else { content }
+    }
 }
 
 extension View {
     /// Half of it dithered away: an agent that is not installed.
-    func dithered(_ on: Bool = true) -> some View { mask { if on { Checker(color: .black) } else { Rectangle() } } }
+    func dithered(_ on: Bool = true) -> some View { modifier(Dithered(on: on)) }
+
+    /// The classic look's soft shadow under a floating layer.
+    func floatingShadow() -> some View { modifier(FloatingShadow()) }
 }
 
 /// The wordmark AGENTSWITCH (ui-v0 §7.2.10): ink letters with 2-cell strokes over a signal offset of one fine cell,
@@ -218,15 +269,33 @@ struct Wordmark: View {
     @State private var settleAt: [Double] = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.interfaceLook) private var look
 
     static let ramp = Array(" .:-=+*#%@█")
     static let noiseEnds = 1.1
     static let lcdEnds = 1.38
 
     var body: some View {
+        if look.isClassic { classicMark } else { pixelMark }
+    }
+
+    /// The classic look: the app's mark in the accent and its name, still.
+    private var classicMark: some View {
+        HStack(spacing: cell * 2.5) {
+            Canvas { context, canvas in
+                ClassicMark.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: Theme.signal, dim: Theme.signal.opacity(0.5))
+            }
+            .frame(width: cell * 8 * 14 / 11, height: cell * 8)
+            Text("AgentSwitch").font(.system(size: cell * 6, weight: .semibold)).foregroundStyle(Theme.ink)
+        }
+        .accessibilityElement()
+        .accessibilityLabel("AgentSwitch")
+    }
+
+    private var pixelMark: some View {
         let rows = PixelArt.wordRows(word)
         let cols = rows.first?.count ?? 0
-        Group {
+        return Group {
             if let start {
                 // The reveal lasts 1.38 s; it does not run on while the app is not in front.
                 TimelineView(.animation(minimumInterval: 0.045, paused: scenePhase != .active)) { t in

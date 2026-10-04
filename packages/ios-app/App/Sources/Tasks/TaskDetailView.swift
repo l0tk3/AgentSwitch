@@ -90,7 +90,7 @@ struct TaskDetailView: View {
                     HStack(spacing: 6) {
                         Text("Topic").mono(12).foregroundStyle(.tertiary)
                         Text(title).font(.footnote).foregroundStyle(.secondary)
-                        Text("›").mono(12).foregroundStyle(.tertiary)
+                        LookGlyph.onward(12).foregroundStyle(.tertiary)
                     }
                     .lineLimit(1)
                 }
@@ -113,12 +113,12 @@ struct TaskDetailView: View {
             Text("摘要生成中").font(.footnote).foregroundStyle(.secondary)
         }
         if let result = task.result, !result.isEmpty {
-            Block("Result") { MarkdownView(text: result).textSelection(.enabled) }
+            Block("Result") { MarkdownView(text: result).textSelection(.enabled).linkMenu(for: result) }
         }
         if task.isInterrupted {
             interrupted(task)
         } else if let error = task.error, !error.isEmpty, task.status != .done {
-            Block("Reason") { MarkdownView(text: error).foregroundStyle(Theme.failed).textSelection(.enabled) }
+            Block("Reason") { MarkdownView(text: error).foregroundStyle(Theme.failed).textSelection(.enabled).linkMenu(for: error) }
         }
     }
 
@@ -130,7 +130,7 @@ struct TaskDetailView: View {
                 Text(task.error.map(MessageDisplay.readable) ?? AgentTask.interruptedText)
                     .textSelection(.enabled)
                 if detail.handedOffTo == nil {
-                    Button("[ Continue ]") { Task { await detail.handoff(to: nil, model) } }
+                    Button { Task { await detail.handoff(to: nil, model) } } label: { ButtonWord("Continue") }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
@@ -211,7 +211,7 @@ struct TaskDetailView: View {
                     }
                 }
             } label: {
-                Text("⋯").mono(17)
+                LookGlyph.more
             }
             .disabled(detail.task == nil)
         }

@@ -18,22 +18,6 @@ public enum LiveArt {
         "...........CCC",
     ]
 
-    /// Empty cells in the inside corner of a diagonal step, with the cell they lean on: drawn half lit, as the app icon
-    /// draws them (`packages/mac-app/scripts/make-icons.swift`, ui-v0 §7.2.10).
-    public static let halfLit: [(x: Int, y: Int, lane: Character)] = {
-        let rows = markRows.map(Array.init)
-        func on(_ x: Int, _ y: Int) -> Bool { y >= 0 && y < rows.count && x >= 0 && x < rows[y].count && rows[y][x] != "." }
-        return rows.indices.flatMap { y in
-            rows[y].indices.compactMap { x -> (x: Int, y: Int, lane: Character)? in
-                guard rows[y][x] == "." else { return nil }
-                let n = on(x, y - 1), s = on(x, y + 1), w = on(x - 1, y), e = on(x + 1, y)
-                let corner = (n && e && !on(x + 1, y - 1)) || (n && w && !on(x - 1, y - 1)) || (s && e && !on(x + 1, y + 1)) || (s && w && !on(x - 1, y + 1))
-                guard corner, [n, s, w, e].filter({ $0 }).count == 2 else { return nil }
-                return (x, y, n ? rows[y - 1][x] : rows[y + 1][x])
-            }
-        }
-    }()
-
     /// The lit lane from the source to its end, the way the busy block runs.
     public static let laneA: [(x: Int, y: Int)] = [(3, 4), (4, 3), (5, 2), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1)]
 

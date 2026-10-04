@@ -18,6 +18,7 @@ struct NewTerminalSheet: View {
     @State private var error: String?
     @State private var confirmBypass = false
     @FocusState private var typingFolder: Bool
+    @Environment(\.interfaceLook) private var look
 
     static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi")]
     /// `< >` is one of several (§7.2.6).
@@ -53,10 +54,11 @@ struct NewTerminalSheet: View {
                             HStack {
                                 Text(models.first { $0.id == modelId }?.name ?? defaultLabel).mono(14)
                                 Spacer()
-                                Text("▾").mono(13).foregroundStyle(.secondary)
+                                LookGlyph(glyph: "▾", symbol: "chevron.down").foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, 12).padding(.vertical, 10)
-                            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                            .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
+                            .framed(look.isClassic ? Color.clear : Theme.line, radius: 10)
                         }
                         .tint(Theme.ink)
                         .disabled(models.isEmpty)
@@ -64,18 +66,23 @@ struct NewTerminalSheet: View {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         SectionLabel("Folder")
                         HStack(spacing: 8) {
-                            Text("❯").mono(14).foregroundStyle(Theme.signal)
+                            if look.isClassic {
+                                Image(systemName: "folder").font(.system(size: 14)).foregroundStyle(Theme.inkDim)
+                            } else {
+                                Text("❯").mono(14).foregroundStyle(Theme.signal)
+                            }
+                            // A folder is a path: code in both looks.
                             TextField("~/project", text: $folder)
-                                .mono(14)
+                                .code(14)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
                                 .focused($typingFolder)
                                 // The prompt's block caret after the text while it is not being typed in (the system's
                                 // caret then takes over).
                                 .overlay(alignment: .leading) {
-                                    if !typingFolder {
+                                    if !typingFolder && !look.isClassic {
                                         HStack(spacing: 1) {
-                                            Text(folder.isEmpty ? "" : folder).mono(14).hidden()
+                                            Text(folder.isEmpty ? "" : folder).code(14).hidden()
                                             BlockCaret(width: 8, height: 17)
                                         }
                                         .allowsHitTesting(false)
@@ -83,36 +90,52 @@ struct NewTerminalSheet: View {
                                 }
                                 .clipped()
                         }
-                        .padding(.vertical, 8)
-                        .overlay(alignment: .bottom) { Theme.line.frame(height: 1) }
+                        .padding(.vertical, look.isClassic ? 10 : 8)
+                        .padding(.horizontal, look.isClassic ? 12 : 0)
+                        // A prompt line with a rule under it; a round field in the classic look.
+                        .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
+                        .overlay(alignment: .bottom) { if !look.isClassic { Theme.line.frame(height: 1) } }
                         ForEach(store.recentFolders.map(MacPath.tilde), id: \.self) { f in
                             Button { folder = f } label: {
-                                Text(f).mono(12).foregroundStyle(folder == f ? Theme.ink : .secondary).lineLimit(1).truncationMode(.middle)
+                                Text(f).code(12).foregroundStyle(folder == f ? Theme.ink : .secondary).lineLimit(1).truncationMode(.middle)
                             }
                             .buttonStyle(.plain)
                         }
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         SectionLabel("Permissions")
-                        HStack(spacing: Theme.Space.l) {
+                        // One of three: `< >` / `<x>`; a segmented control's look in the classic one.
+                        HStack(spacing: look.isClassic ? 0 : Theme.Space.l) {
                             ForEach(Self.modes, id: \.id) { m in
                                 Button { if m.id == "bypass" && mode != "bypass" { confirmBypass = true } else { mode = m.id } } label: {
-                                    Text("\(mode == m.id ? "<x>" : "< >") \(m.name)").mono(14)
-                                        .foregroundStyle(mode == m.id ? Theme.ink : .secondary)
+                                    if look.isClassic {
+                                        Text(m.name).font(.system(size: 14, weight: mode == m.id ? .semibold : .regular))
+                                            .foregroundStyle(mode == m.id ? Theme.ink : .secondary)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 7)
+                                            .background(mode == m.id ? Theme.panel : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    } else {
+                                        Text("\(mode == m.id ? "<x>" : "< >") \(m.name)").mono(14)
+                                            .foregroundStyle(mode == m.id ? Theme.ink : .secondary)
+                                    }
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
+                        .padding(look.isClassic ? 2 : 0)
+                        .grounded(look.isClassic ? Theme.raised : Color.clear, radius: 10)
                         if mode == "bypass" {
                             Text("agent 的任何操作都不再询问你；禁区和凭据网关仍然生效。").font(.footnote).foregroundStyle(Theme.waiting)
                         }
                     }
                     if let error { Text(error).font(.footnote).foregroundStyle(Theme.failed) }
                     Button { Task { await start() } } label: {
-                        if starting {
+                        if starting && look.isClassic {
+                            HStack(spacing: 6) { Text("Starting"); BrailleSpinner(color: Theme.onFill) }
+                        } else if starting {
                             HStack(spacing: 6) { Text("[ Starting"); BrailleSpinner(color: Theme.base); Text("]") }
                         } else {
-                            Text("[ Start ]")
+                            ButtonWord("Start")
                         }
                     }
                         .buttonStyle(SquareButtonStyle(prominent: true))
@@ -158,7 +181,9 @@ struct NewTerminalSheet: View {
             agent = id
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.square, pixel: 4, color: on ? Theme.signal : installed ? Theme.ink : Theme.inkDim)
+                // The agent's shaded mark (§9): whole for the one chosen, fainter for the others; the tile's frame says which.
+                PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.square, pixel: 4, color: on ? Theme.signal : installed ? Theme.ink : Theme.inkDim,
+                            strength: on ? 1 : installed ? 0.75 : 0.4, cell: 7.0 / 3)
                 Text(name).mono(13).foregroundStyle(installed ? Theme.ink : Theme.inkDim)
                 if !installed { Text("Not Installed").mono(10).foregroundStyle(.tertiary) }
             }
@@ -193,11 +218,20 @@ struct NewTerminalSheet: View {
 /// scroll view decides it was not a drag).
 private struct AgentTileStyle: ButtonStyle {
     let on: Bool
+    @Environment(\.interfaceLook) private var look
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(configuration.isPressed ? Theme.raised : Color.clear)
-            .overlay(Rectangle().strokeBorder(on || configuration.isPressed ? Theme.ink : Theme.line, lineWidth: on ? 2 : 1))
-            .contentShape(Rectangle())
+        if look.isClassic {
+            // A round tile on its own ground; the one chosen ringed in the accent.
+            configuration.label
+                .background(configuration.isPressed ? Theme.raised : Theme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(on ? Theme.signal : Color.clear, lineWidth: 2))
+                .contentShape(Rectangle())
+        } else {
+            configuration.label
+                .background(configuration.isPressed ? Theme.raised : Color.clear)
+                .overlay(Rectangle().strokeBorder(on || configuration.isPressed ? Theme.ink : Theme.line, lineWidth: on ? 2 : 1))
+                .contentShape(Rectangle())
+        }
     }
 }

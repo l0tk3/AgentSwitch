@@ -43,7 +43,7 @@ struct SessionTranscriptView: View {
         .safeAreaInset(edge: .bottom) {
             if let resume, TerminalsTab.resumable.contains(session.harness) {
                 Button(action: resume) {
-                    if resuming { BrailleSpinner(color: Theme.base) } else { Text("[ Resume ]") }
+                    if resuming { BrailleSpinner(color: Theme.base) } else { ButtonWord("Resume") }
                 }
                     .buttonStyle(SquareButtonStyle(prominent: true))
                     .disabled(resuming)
@@ -144,12 +144,12 @@ private struct SessionItemRow: View {
             }
             .padding(.top, Theme.Space.s)
         case .answer(let m):
-            MarkdownView(text: m.text).textSelection(.enabled)
+            MarkdownView(text: m.text).textSelection(.enabled).linkMenu(for: m.text)
         case .tools(let run):
             VStack(alignment: .leading, spacing: 4) {
                 Button { withAnimation(.snappy(duration: 0.2)) { open.toggle() } } label: {
                     HStack(spacing: 6) {
-                        Text(open ? "▾" : "▸").mono(12).foregroundStyle(.tertiary)
+                        LookGlyph.fold(open: open).foregroundStyle(.tertiary)
                         Text(Self.summary(run)).mono(12).foregroundStyle(.secondary).lineLimit(1)
                         Spacer(minLength: 0)
                     }

@@ -4,7 +4,7 @@ import SwiftUI
 /// The one screen (app-v0 §5, assistant-v0 §1.1): the conversation with the assistant, oldest first — your messages,
 /// its answers, each task under the answer that created it, tasks made elsewhere on their own — and the input box.
 /// Threads are never chosen here; the router files every task. Settings, ciphertexts and the loose approvals open as
-/// sheets.
+/// sheets (presented by RootView, outside what the look rebuilds).
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @State private var feed = FeedModel()
@@ -75,7 +75,6 @@ struct HomeView: View {
                 feed.visible = false
                 feed.stopAll()
             }
-            .sheet(item: $model.sheet) { sheet in sheetContent(sheet) }
             .taskFilePreview(opener)
             .onChange(of: opener.error) { if let error = opener.error { model.banner = error; opener.error = nil } }
             .deleteConfirmation($deleting, error: $model.banner)
@@ -185,24 +184,6 @@ struct HomeView: View {
         ActivityFeed.looseApprovals(model.approvals, shown: shownTaskIds).count
     }
 
-    @ViewBuilder
-    private func sheetContent(_ sheet: HomeSheet) -> some View {
-        switch sheet {
-        case .settings:
-            SettingsView()
-        case .pickCiphertext:
-            CiphertextPicker { token in model.insertIntoCompose(token) }
-        case .makeCiphertext:
-            NavigationStack {
-                CiphertextsView()
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { model.sheet = nil } } }
-            }
-        case .approvals:
-            ApprovalsView()
-        case .addMac:
-            AddMacSheet()
-        }
-    }
 }
 
 /// Pending approvals of tasks that are no longer in the log, behind one button at the top.
@@ -216,7 +197,7 @@ private struct LooseApprovalsButton: View {
                 HStack(spacing: 6) {
                     PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
                     Text("\(count) More Waiting")
-                    Text("›")
+                    LookGlyph(glyph: "›", symbol: "chevron.right", size: 12)
                 }
                 .mono(12, weight: .medium)
                 .foregroundStyle(Theme.waiting)

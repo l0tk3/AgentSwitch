@@ -49,7 +49,7 @@ struct ContextEditorView: View {
                         .disabled(!text.isEmpty)
                     Button("Revert", systemImage: "arrow.uturn.backward") { text = stored ?? "" }
                         .disabled(!dirty)
-                } label: { Text("⋯").mono(17) }
+                } label: { LookGlyph.more }
                 Button(saving ? "保存中" : "保存") { Task { await save() } }
                     .disabled(saving || !dirty || stored == nil)
             }

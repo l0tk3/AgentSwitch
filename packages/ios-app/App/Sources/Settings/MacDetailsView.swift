@@ -154,7 +154,7 @@ private struct CheckRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-            Rectangle().fill(color).frame(width: 6, height: 6).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+            PixelSprite(rows: PixelArt.square, pixel: 1.5, color: color).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             VStack(alignment: .leading, spacing: 2) {
                 Text(check.title).font(.subheadline)
                 Text(check.detail).font(.caption).foregroundStyle(.secondary)

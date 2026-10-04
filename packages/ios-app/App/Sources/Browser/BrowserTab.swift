@@ -13,6 +13,8 @@ enum BrowserRoute: Hashable {
 /// a swipe closes it. Under them the servers listening on the Mac. `+` opens a new tab.
 struct BrowserTab: View {
     @Environment(AppModel.self) private var model
+    /// The classic look writes a group's label without the slashes (docs/ui-v0.md §8).
+    @Environment(\.interfaceLook) private var look
     @State private var path = NavigationPath()
     @State private var creating = false
     @State private var menuFor: RowMenu?
@@ -55,19 +57,19 @@ struct BrowserTab: View {
             .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 1)
             .background { ZStack { Theme.base; Scanlines() }.ignoresSafeArea() }
-            .safeAreaInset(edge: .top, spacing: 0) { DottedRule() }
+            .safeAreaInset(edge: .top, spacing: 0) { HairRule() }
             .navigationTitle("Browser")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 7) {
-                        PixelSprite(rows: PixelArt.globe, pixel: 1, color: Theme.ink)
+                        PixelSprite(rows: PixelArt.globe, pixel: 1, color: Theme.ink, strength: 1, shadow: false, cell: 0.7)
                         Text("Browser").font(.headline)
                     }
                     .accessibilityElement(children: .combine)
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { creating = true } label: { Text("+").mono(20) }
+                    Button { creating = true } label: { LookGlyph(glyph: "+", symbol: "plus", size: 20, weight: .regular) }
                         .disabled(model.api == nil || store.unsupported)
                         .accessibilityLabel("New Tab")
                 }
@@ -113,9 +115,9 @@ struct BrowserTab: View {
     private func groupLabel(_ owner: BrowserTabOwner) -> some View {
         HStack(spacing: 8) {
             if owner.isAgent, let harness = model.harness(of: owner), let rows = PixelArt.agents[harness] {
-                PixelSprite(rows: rows, pixel: 2, color: .secondary)
+                PixelSprite(rows: rows, pixel: 2, color: .secondary, strength: 0.8, shadow: false)
             }
-            Text("// \(owner.label)").mono(11).tracking(0.4).foregroundStyle(.secondary).lineLimit(1)
+            groupWords(owner.label).lineLimit(1)
             Spacer(minLength: 0)
         }
         .padding(.top, Theme.Space.l)
@@ -123,12 +125,18 @@ struct BrowserTab: View {
         .accessibilityAddTraits(.isHeader)
     }
 
+    /// `// label`, close-set; a plain small heading in the classic look.
+    private func groupWords(_ text: String) -> some View {
+        Text(ClassicWords.label(text, in: look)).mono(look.isClassic ? 13 : 11, weight: look.isClassic ? .semibold : .regular)
+            .tracking(look.isClassic ? 0 : 0.4).foregroundStyle(.secondary)
+    }
+
     /// The servers listening on the Mac: a tap opens one.
     @ViewBuilder
     private func servers(_ store: BrowserStore) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            DottedRule().padding(.top, Theme.Space.l)
-            Text("// Local Servers on \(model.profile?.name ?? "Mac")").mono(11).tracking(0.4).foregroundStyle(.secondary)
+            HairRule().padding(.top, Theme.Space.l)
+            groupWords("Local Servers on \(model.profile?.name ?? "Mac")")
                 .padding(.top, Theme.Space.m).padding(.bottom, 4)
         }
         ForEach(store.servers) { server in
@@ -184,11 +192,13 @@ struct BrowserTab: View {
 /// hollow when idle.
 struct BrowserStatusMark: View {
     let status: BrowserTabStatus
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         switch status {
         case .busy: BrailleSpinner()
-        case .waiting: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink()
+        case .waiting:
+            if look.isClassic { ClassicWaitingDot() } else { PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink() }
         default: PixelSprite(rows: PixelArt.hollow, pixel: 2, color: Theme.inkDim)
         }
     }
@@ -211,7 +221,7 @@ private struct TabRow: View {
                 place
             }
             Spacer(minLength: 6)
-            Text("›").mono(13).foregroundStyle(.tertiary)
+            LookGlyph.onward().foregroundStyle(.tertiary)
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 4)

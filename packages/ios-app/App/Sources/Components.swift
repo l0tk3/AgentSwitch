@@ -66,7 +66,7 @@ struct ErrorText: View {
                 PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.failed).padding(.top, 4)
                 Text(message).font(.footnote)
                 Spacer()
-                Button { self.message = nil } label: { Text("×").mono(15) }
+                Button { self.message = nil } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 15) }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                     .accessibilityLabel("close")
             }

@@ -42,6 +42,9 @@ targets:
         product: AgentSwitchKit
       - package: AgentSwitchKit
         product: AgentSwitchLive
+      # The shaded pictures' drawing (ShadedPaint), shared with the Live Activity's views.
+      - package: AgentSwitchKit
+        product: AgentSwitchLiveUI
       - package: SwiftTerm
         product: SwiftTerm
       # The Live Activity's UI (assistant-v0 §4), embedded in the app.

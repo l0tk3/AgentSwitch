@@ -25,24 +25,34 @@ private struct NavigateBody: Encodable {
     }
 }
 
-/// What a tab's stream asks of the Mac's screencast: JPEG quality, frames a second, and an optional cap on the
-/// frame's size in pixels (a slow link asks for less).
+/// What a tab's stream asks of the Mac's screencast: JPEG quality, frames a second, an optional cap on the frame's
+/// size in pixels (a slow link asks for less), and the frame pixels per CSS pixel the screen shows (`scale`, its device
+/// pixels — times the zoom of a page this phone zoomed, BrowserPageZoom.streamScale; docs/browser-v0.md §5,
+/// 2026-10-03 — a Mac from before ignores it and sends CSS-size frames).
 public struct BrowserStreamOptions: Sendable, Equatable {
     public let quality: Int
     public let fps: Int
     public let maxWidth: Int?
     public let maxHeight: Int?
+    public let scale: Double?
 
-    public init(quality: Int, fps: Int, maxWidth: Int? = nil, maxHeight: Int? = nil) {
+    /// The most `scale` the Mac takes: 8 since the page zoom (browser-v0 §1 页面缩放, 2026-10-03: a 3× screen at 200%
+    /// shows 6 frame pixels a CSS pixel), 3 before — a Mac from then cuts a larger ask to 3, and the zoomed page still
+    /// shows, short of the screen's pixels.
+    public static let maxScale = 8.0
+
+    public init(quality: Int, fps: Int, maxWidth: Int? = nil, maxHeight: Int? = nil, scale: Double? = nil) {
         self.quality = min(max(quality, 1), 100)
         self.fps = min(max(fps, 1), 30)
         self.maxWidth = maxWidth.map { min(max($0, 100), 8192) }
         self.maxHeight = maxHeight.map { min(max($0, 100), 8192) }
+        self.scale = scale.map { min(max($0, 1), Self.maxScale) }
     }
 
     public var query: [URLQueryItem] {
-        [URLQueryItem(name: "quality", value: String(quality)), URLQueryItem(name: "fps", value: String(fps))]
-            + [maxWidth.map { URLQueryItem(name: "maxWidth", value: String($0)) }, maxHeight.map { URLQueryItem(name: "maxHeight", value: String($0)) }].compactMap { $0 }
+        let scaled = scale.flatMap { $0 > 1 ? URLQueryItem(name: "scale", value: String(format: "%g", ($0 * 100).rounded() / 100)) : nil }
+        return [URLQueryItem(name: "quality", value: String(quality)), URLQueryItem(name: "fps", value: String(fps))]
+            + [maxWidth.map { URLQueryItem(name: "maxWidth", value: String($0)) }, maxHeight.map { URLQueryItem(name: "maxHeight", value: String($0)) }, scaled].compactMap { $0 }
     }
 }
 
@@ -97,6 +107,42 @@ extension AgentSwitchAPI {
 
     /// The servers listening on the Mac, for the new-tab sheet.
     public func browserServers() async throws -> [BrowserLocalServer] { (try await get(["browser", "servers"]) as ServerList).servers }
+
+    /// The speed of the link to the Mac in megabits a second (`GET /browser/speed`, browser-v0 §5): `bytes` that do not
+    /// compress, timed from the first chunk (BrowserSpeed.Meter), for at most `limit`. Nil when too little came to tell,
+    /// or the Mac has no such route (an older one answers 404).
+    public func browserSpeed(bytes: Int = BrowserSpeed.bytes, limit: Duration = BrowserSpeed.limit) async -> Double? {
+        guard let endpoint = try? await endpoints.endpoint() else { return nil }
+        let req = request("GET", endpoint, ["browser", "speed"], query: [URLQueryItem(name: "bytes", value: String(bytes))], body: nil,
+                          accept: "application/octet-stream", timeout: Self.seconds(limit) + 5)
+        let clock = ContinuousClock()
+        let began = clock.now
+        let meter = LockedBox(BrowserSpeed.Meter())
+        let transport = self.transport
+        let reading = Task { () -> Bool in
+            let (response, body) = try await transport.stream(req)
+            guard (200..<300).contains(response.statusCode) else { return false }
+            for try await chunk in body {
+                let at = Self.seconds(began.duration(to: clock.now))
+                meter.withLock { $0.add(chunk.count, at: at) }
+            }
+            // A cancelled read ends its chunks quietly: cut short, not complete.
+            return !Task.isCancelled
+        }
+        let timer = Task {
+            try? await Task.sleep(for: limit)
+            reading.cancel()
+        }
+        let complete = (try? await reading.value) ?? false
+        timer.cancel()
+        if !complete {
+            let now = Self.seconds(began.duration(to: clock.now))
+            meter.withLock { $0.cut(at: now) }
+        }
+        return meter.withLock { $0.mbps }
+    }
+
+    private static func seconds(_ d: Duration) -> Double { Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18 }
 
     /// A saved ciphertext into the field that has the focus; the gate checks it against the page's site and only the
     /// Mac sees the value. Only on a person's own tab, and only into a password or one-time-code field (the Mac's 409

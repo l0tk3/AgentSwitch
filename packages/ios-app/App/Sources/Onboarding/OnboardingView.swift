@@ -22,7 +22,7 @@ struct OnboardingView: View {
                 if let banner = model.banner {
                     Text(banner).font(.footnote).foregroundStyle(Theme.failed).multilineTextAlignment(.center)
                 }
-                Button { scanning = true } label: { Text("[ Scan QR Code ]") }
+                Button { scanning = true } label: { ButtonWord("Scan QR Code") }
                     .buttonStyle(SquareButtonStyle(prominent: true))
                 Button("Paste Pairing Link") { paste() }
                     .controlSize(.large)

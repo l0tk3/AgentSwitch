@@ -34,7 +34,7 @@ struct NewBrowserTabSheet: View {
                             if opening { BrailleSpinner(color: .secondary) }
                         }
                         .padding(.horizontal, 12).padding(.vertical, 10)
-                        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                        .framed(Theme.line, radius: Theme.Radius.control)
                         if let error {
                             Text(error).font(.footnote).foregroundStyle(Theme.failed).fixedSize(horizontal: false, vertical: true)
                                 .glitch(on: error, onAppear: true)
@@ -97,7 +97,7 @@ struct NewBrowserTabSheet: View {
             HStack(spacing: 8) {
                 label()
                 Spacer(minLength: 0)
-                Text("›").mono(13).foregroundStyle(.tertiary)
+                LookGlyph.onward().foregroundStyle(.tertiary)
             }
             .padding(.vertical, 9)
             .contentShape(Rectangle())

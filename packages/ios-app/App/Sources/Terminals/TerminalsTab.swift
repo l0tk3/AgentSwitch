@@ -12,9 +12,12 @@ enum TerminalRoute: Hashable {
 /// (resume), then the folders under it (TerminalTree has the rules). A folder's line folds and unfolds (remembered); `▸ N
 /// more` lists all of a folder's sessions, the rows drawn line by line; a long press on a session opens its menu
 /// (resume, delete — a deleted row is wiped out). A terminal that needs you or exits glitches once. Menus and confirm
-/// boxes are the desktop's pixel boxes; the list has its scanlines and a dotted rule under the bar. `new` starts one.
+/// boxes are the desktop's pixel boxes; the list has its scanlines and a rule under the bar. `new` starts one.
+/// In the classic look (docs/ui-v0.md §8) the tree is drawn by indentation: a chevron and a folder for a folder's line,
+/// dots for the terminals' states, a clock before a session; the search line is a round field.
 struct TerminalsTab: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.interfaceLook) private var look
     @State private var path = NavigationPath()
     @State private var creating = false
     @State private var elsewhere: Elsewhere?
@@ -75,13 +78,16 @@ struct TerminalsTab: View {
                 .padding(.vertical, Theme.Space.m)
             }
             .background { ZStack { Theme.base; Scanlines() }.ignoresSafeArea() }
-            .safeAreaInset(edge: .top, spacing: 0) { DottedRule() }
+            .safeAreaInset(edge: .top, spacing: 0) { HairRule() }
             .navigationTitle("Terminals")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("New") { creating = true }.mono(15, weight: .medium)
-                        .disabled(store.list == nil)
+                    Button { creating = true } label: {
+                        if look.isClassic { Image(systemName: "plus") } else { Text("New").mono(15, weight: .medium) }
+                    }
+                    .accessibilityLabel("New")
+                    .disabled(store.list == nil)
                 }
             }
             .navigationDestination(for: TerminalRoute.self) { route in
@@ -234,7 +240,9 @@ struct TerminalsTab: View {
         return AnyView(VStack(alignment: .leading, spacing: 0) {
             Button { toggleFold(f.cwd) } label: {
                 HStack(spacing: 6) {
-                    if f.holdsOwn {
+                    if look.isClassic {
+                        ClassicFolderLine(name: f.name, folded: isFolded, depth: depth, own: f.holdsOwn)
+                    } else if f.holdsOwn {
                         Text(line).mono(13, weight: .semibold)
                     } else {
                         Text(line).mono(12).foregroundStyle(Theme.inkDim)
@@ -288,9 +296,15 @@ struct TerminalsTab: View {
                     } label: {
                         HStack(spacing: 6) {
                             TreeLine(last: true, depth: depth)
-                            Text(all ? "▴ Less" : "▸ \(more) More").mono(12).foregroundStyle(.secondary)
+                            if look.isClassic {
+                                Image(systemName: all ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold)).frame(width: 16)
+                                Text(all ? "Less" : "\(more) More").mono(13)
+                            } else {
+                                Text(all ? "▴ Less" : "▸ \(more) More").mono(12)
+                            }
                             Spacer(minLength: 0)
                         }
+                        .foregroundStyle(.secondary)
                         .padding(.vertical, 6)
                         .contentShape(Rectangle())
                     }
@@ -308,11 +322,13 @@ struct TerminalsTab: View {
         let status = t.permissions.isEmpty ? t.status : .waiting
         return HStack(spacing: 8) {
             TreeLine(last: last, depth: depth)
-            TerminalStatusMark(status: status)
+            TerminalStatusMark(status: status).frame(width: look.isClassic ? 16 : nil)
             (title ?? Text(t.name)).font(.subheadline).foregroundStyle(t.isRunning ? Theme.ink : .secondary).lineLimit(1)
             Spacer(minLength: 6)
-            PixelSprite(rows: PixelArt.agents[t.harness] ?? PixelArt.square, pixel: 2, color: .secondary)
-            Text("›").mono(13).foregroundStyle(.tertiary)
+            // The classic look says what its dot means (the pixel look's square blinks).
+            if look.isClassic && status == .waiting { NeedsYouPill() }
+            PixelSprite(rows: PixelArt.agents[t.harness] ?? PixelArt.square, pixel: 2, color: .secondary, strength: 0.8, shadow: false)
+            LookGlyph(glyph: "›", symbol: "chevron.right").foregroundStyle(.tertiary)
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -327,23 +343,34 @@ struct TerminalsTab: View {
     /// A prompt line over the list: `/` as less and vim search, then what is typed; × clears it.
     private var searchLine: some View {
         HStack(spacing: 6) {
-            Text("/").mono(14, weight: .bold).foregroundStyle(Theme.signal)
+            if look.isClassic {
+                Image(systemName: "magnifyingglass").font(.system(size: 14)).foregroundStyle(Theme.inkDim)
+            } else {
+                Text("/").mono(14, weight: .bold).foregroundStyle(Theme.signal)
+            }
             TextField("", text: $query, prompt: Text("Search").foregroundStyle(Theme.inkDim))
-                .font(.system(size: 14, design: .monospaced))
+                .mono(look.isClassic ? 15 : 14)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
                 .tint(Theme.signal)
                 .accessibilityLabel("搜索文件夹和会话")
             if !query.isEmpty {
-                Button { query = "" } label: { Text("×").mono(15).foregroundStyle(.secondary).frame(minWidth: 24, minHeight: 24) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("清除搜索")
+                Button { query = "" } label: {
+                    Group {
+                        if look.isClassic { Image(systemName: "xmark.circle.fill").font(.system(size: 15)) } else { Text("×").mono(15) }
+                    }
+                    .foregroundStyle(.secondary).frame(minWidth: 24, minHeight: 24)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜索")
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+        .padding(.vertical, look.isClassic ? 7 : 6)
+        // A framed prompt line; a round field on a quiet ground in the classic look.
+        .grounded(look.isClassic ? Theme.raised : Color.clear, radius: 10)
+        .framed(look.isClassic ? Color.clear : Theme.line, radius: 10)
         .padding(.top, 4)
         .padding(.bottom, 2)
     }
@@ -358,7 +385,11 @@ struct TerminalsTab: View {
             Text(result.summary).mono(11).foregroundStyle(.tertiary).padding(.top, 8)
             ForEach(result.folders) { folder in
                 HStack(spacing: 6) {
-                    (Text("▾ ") + marked(folder.name) + Text(folder.name.hasSuffix("/") ? "" : "/")).mono(13, weight: .semibold)
+                    if look.isClassic {
+                        ClassicFolderLine(name: folder.name, folded: false, depth: 0, own: true, title: marked(folder.name.hasSuffix("/") ? String(folder.name.dropLast()) : folder.name))
+                    } else {
+                        (Text("▾ ") + marked(folder.name) + Text(folder.name.hasSuffix("/") ? "" : "/")).mono(13, weight: .semibold)
+                    }
                     if let git = folder.git { Text(git.said).mono(11).foregroundStyle(.tertiary).lineLimit(1) }
                     Spacer(minLength: 0)
                 }
@@ -390,7 +421,11 @@ struct TerminalsTab: View {
     private func hitLine(_ words: String, last: Bool, open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(spacing: 8) {
-                Text("\(last ? "  " : "│ ")└─").mono(13).foregroundStyle(Theme.inkDim)
+                if look.isClassic {
+                    Color.clear.frame(width: ClassicTree.lead + ClassicTree.step, height: 1)
+                } else {
+                    Text("\(last ? "  " : "│ ")└─").mono(13).foregroundStyle(Theme.inkDim)
+                }
                 marked(TerminalSearch.near(query, in: words)).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -405,8 +440,9 @@ struct TerminalsTab: View {
         var attributed = AttributedString(text)
         let q = query.trimmingCharacters(in: .whitespaces)
         if !q.isEmpty, let range = attributed.range(of: q, options: [.caseInsensitive]) {
-            attributed[range].backgroundColor = Theme.signal
-            attributed[range].foregroundColor = .black
+            // On the signal colour, in black; a wash of the accent in the classic look.
+            attributed[range].backgroundColor = look.isClassic ? Theme.signal.opacity(0.3) : Theme.signal
+            if !look.isClassic { attributed[range].foregroundColor = .black }
         }
         return Text(attributed)
     }
@@ -511,17 +547,20 @@ private struct SessionRow: View {
     let delete: () -> Void
     @State private var held = false
     @State private var frame = FrameRef()
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         let resumable = TerminalsTab.resumable.contains(session.harness)
         let deletable = TerminalsTab.deletable.contains(session.harness)
         HStack(spacing: 8) {
             TreeLine(last: last, depth: depth)
+            // The classic look: a clock where a terminal has its dot (an earlier session, to go on with).
+            if look.isClassic { Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(Theme.inkDim).frame(width: 16) }
             HStack(spacing: 8) {
                 (title ?? Text(session.displayTitle)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
                 // Which agent wrote it, before its time (as on the Mac): the mark a running terminal has, dimmed.
-                PixelSprite(rows: PixelArt.agents[session.harness] ?? PixelArt.square, pixel: 2, color: Theme.inkDim)
+                PixelSprite(rows: PixelArt.agents[session.harness] ?? PixelArt.square, pixel: 2, color: Theme.inkDim, strength: 0.55, shadow: false)
                     .accessibilityLabel(NewTerminalSheet.agents.first { $0.id == session.harness }?.name ?? session.harness)
                 Text(session.updated.relative).mono(11).foregroundStyle(.tertiary)
             }
@@ -540,7 +579,7 @@ private struct SessionRow: View {
                     if opening == session.id { BrailleSpinner(color: .secondary) } else { Text("Resume").mono(12) }
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Theme.ink)
+                .foregroundStyle(look.isClassic ? Theme.signal : Theme.ink)
                 .disabled(opening != nil)
             }
         }
@@ -551,13 +590,62 @@ private struct SessionRow: View {
     }
 }
 
-/// `├─` / `└─` in front of a row, indented once more for each folder it sits in under the top one.
+/// `├─` / `└─` in front of a row, indented once more for each folder it sits in under the top one. In the classic look
+/// only the indentation: the row starts under its folder's name.
 private struct TreeLine: View {
     let last: Bool
     var depth = 0
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        Text("\(String(repeating: "  ", count: depth))\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+        if look.isClassic {
+            Color.clear.frame(width: ClassicTree.lead + CGFloat(depth) * ClassicTree.step - 8, height: 1)
+        } else {
+            Text("\(String(repeating: "  ", count: depth))\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+        }
+    }
+}
+
+/// The classic look's tree: how far a folder's rows sit in from its line, and each level from the one above.
+private enum ClassicTree {
+    /// A chevron and the gap after it: a row's mark sits under its folder's icon.
+    static let lead: CGFloat = 20
+    static let step: CGFloat = 16
+}
+
+/// A folder's line in the classic look: a chevron (down while open), a folder, its name without the slash. A folder
+/// that only gathers others is quieter.
+private struct ClassicFolderLine: View {
+    let name: String
+    let folded: Bool
+    let depth: Int
+    let own: Bool
+    /// The name as a search marks it.
+    var title: Text? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: folded ? "chevron.right" : "chevron.down").font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.inkDim).frame(width: 12)
+            Image(systemName: "folder").font(.system(size: 14)).foregroundStyle(Theme.secondaryInk)
+            (title ?? Text(name.hasSuffix("/") ? String(name.dropLast()) : name))
+                .font(.system(size: 13.5, weight: own ? .semibold : .regular))
+                .foregroundStyle(own ? Theme.ink : Theme.secondaryInk)
+                .lineLimit(1)
+        }
+        .padding(.leading, CGFloat(depth) * ClassicTree.step)
+    }
+}
+
+/// `Needs You` on a terminal's row in the classic look: the amber dot said in words.
+private struct NeedsYouPill: View {
+    var body: some View {
+        LookWord("Waiting")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Theme.waiting)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Theme.waiting.opacity(0.18), in: Capsule())
     }
 }
 
@@ -569,10 +657,15 @@ private struct SubagentRow: View {
     let underLast: Bool
     let last: Bool
     let depth: Int
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("\(String(repeating: "  ", count: depth))\(underLast ? "  " : "│ ")\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+            if look.isClassic {
+                Color.clear.frame(width: ClassicTree.lead + CGFloat(depth + 1) * ClassicTree.step - 8, height: 1)
+            } else {
+                Text("\(String(repeating: "  ", count: depth))\(underLast ? "  " : "│ ")\(last ? "└─" : "├─")").mono(13).foregroundStyle(Theme.inkDim)
+            }
             BrailleSpinner()
             (Text(agent.name).foregroundStyle(.secondary) + Text(agent.doing.isEmpty ? "" : "  \(agent.doing)").foregroundStyle(.tertiary))
                 .font(.footnote).lineLimit(1)
@@ -588,13 +681,16 @@ private struct SubagentRow: View {
 
 /// A terminal's state in pixels (§7.2.5: only running terminals carry one): the spinner while busy, a square while
 /// waiting (blinking) or idle, hollow once exited.
+/// In the classic look: the system's spinner, a dot (its ring breathing while it waits), a ring once exited.
 struct TerminalStatusMark: View {
     let status: TerminalStatus
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         switch status {
         case .working: BrailleSpinner()
-        case .waiting: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink()
+        case .waiting:
+            if look.isClassic { ClassicWaitingDot() } else { PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink() }
         case .exited: PixelSprite(rows: PixelArt.hollow, pixel: 2, color: Theme.inkDim)
         default: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.done)
         }

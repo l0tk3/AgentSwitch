@@ -19,7 +19,7 @@ struct AgentLiveActivity: Widget {
         ActivityConfiguration(for: AgentActivityAttributes.self) { context in
             LockScreenCard(state: context.state, mac: context.attributes.macName, stale: context.isStale)
                 // Dark on any wallpaper: the views are drawn for it.
-                .activityBackgroundTint(LiveLook.background)
+                .activityBackgroundTint(LiveLook.background(context.state))
                 .activitySystemActionForegroundColor(.white)
                 .widgetURL(LiveLook.link(context.state))
         } dynamicIsland: { context in

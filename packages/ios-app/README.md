@@ -171,7 +171,9 @@ suggestions), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
 `interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
 `transcript`; the Browser tab's `browser` (the list), `browserpage` (watching codex, its last action outlined),
 `browsertook` (taken over, the keyboard and key bar up), `browserfile`, `browserlocal`, `browserdenied`, `browsernew`,
-`browserclose` (mock pages drawn on the phone); `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
+`browserclose`, `browserzoom` (your dev server's page at 50%, the zoom row open; its `−` `+` draw the mock page
+again) and `browserzoomwatch` (watching codex, the row stepping the picture on the phone, at 150%) — mock pages drawn
+on the phone; `-uiDemoOpenTools YES` opens every tool call and fold; `-uiDemoScroll route` (with `mac` or
 `offlinemac`) opens the Mac page scrolled to the end of 排障 with 常见原因 open.
 
 ## Not in v0

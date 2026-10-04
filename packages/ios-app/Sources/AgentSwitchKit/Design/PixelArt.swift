@@ -52,11 +52,11 @@ public enum PixelArt {
     public static let agents: [String: [String]] = LiveArt.agents
     /// The terminals tab and window: a framed terminal (">_" alone means Codex).
     public static let terminalWindow = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"]
-    /// The Browser tab (browser-v0 §1, the demo page's globe): the outline, a meridian and the equator, 11 × 11 for the
-    /// tab bar; `globeSmall` (the demo's 5 × 5) beside a title.
-    public static let globe = ["...#####...", ".##..#..##.", ".#..#.#..#.", "#...#.#...#", "#..#...#..#", "###########",
-                               "#..#...#..#", "#...#.#...#", ".#..#.#..#.", ".##..#..##.", "...#####..."]
-    public static let globeSmall = [".###.", "#.#.#", "#####", "#.#.#", ".###."]
+    /// The Browser tab (browser-v0 §1): a globe, the plainest mark of the web — a one-pixel circle, a meridian and the
+    /// equator — 11 × 11, at 2 pt cells in the tab bar and 1 pt beside the page's title (2026-10-03: drawn again without
+    /// the old one's crossing lines; for a day a fox, then user: 浏览器是不是可以再换个通用点的图标).
+    public static let globe = ["...#####...", ".##.....##.", ".#.#...#.#.", "#..#...#..#", "#..#...#..#", "###########",
+                               "#..#...#..#", "#..#...#..#", ".#.#...#.#.", ".##.....##.", "...#####..."]
 
     /// The lit cells of a sprite.
     public static func sprite(_ rows: [String]) -> [(x: Int, y: Int)] {

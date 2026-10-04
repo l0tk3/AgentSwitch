@@ -59,9 +59,29 @@ final class LiveRenderTests: XCTestCase {
         XCTAssertNil(LiveLook.others(state("routing")))
     }
 
+    /// The look rides with the state (docs/ui-v0.md §8): the classic look has its own two words, the pixel look's are
+    /// untouched; a state saved before the look existed reads as the pixel one.
+    func testTheStateCarriesTheLook() throws {
+        let state = Self.states.first { $0.0 == "needsYou" }!.1
+        XCTAssertFalse(state.isClassic)
+        XCTAssertTrue(state.looking(classic: true).isClassic)
+        XCTAssertEqual(state.looking(classic: true).looking(classic: false), state, "back to the pixel look, the state is as it was")
+        XCTAssertNotEqual(state.looking(classic: true), state, "a change of look is a change of state: the activity is drawn again")
+        XCTAssertEqual(LiveLook.word(state.looking(classic: true)), "Needs You")
+        XCTAssertEqual(LiveLook.word(Self.states.first { $0.0 == "running3" }!.1.looking(classic: true)), "Working")
+        XCTAssertEqual(LiveLook.word(Self.states.first { $0.0 == "endedOK" }!.1.looking(classic: true)), "Done")
+        let saved = try JSONEncoder().encode(state)
+        XCTAssertFalse(String(decoding: saved, as: UTF8.self).contains("classic"), "the pixel look adds nothing to the state")
+        XCTAssertFalse(try JSONDecoder().decode(LiveState.self, from: saved).isClassic)
+        let classic = try JSONDecoder().decode(LiveState.self, from: JSONEncoder().encode(state.looking(classic: true)))
+        XCTAssertTrue(classic.isClassic)
+    }
+
     func testRenderEveryStateForALook() throws {
         let dir = try renderDir()
-        for (name, state) in Self.states {
+        // Each state in the pixel look, then in the classic one (`…-classic`).
+        let both = Self.states + Self.states.map { ("\($0.0)-classic", $0.1.looking(classic: true)) }
+        for (name, state) in both {
             try write(ExpandedIsland(state: state), "island-expanded-\(name)", to: dir)
             try write(CompactIsland(state: state), "island-compact-\(name)", to: dir)
             try write(LockScreen(state: state), "lock-\(name)", to: dir)

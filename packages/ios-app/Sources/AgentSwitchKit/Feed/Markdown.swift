@@ -36,6 +36,7 @@ public enum Markdown {
         for run in out.runs {
             if let link = run.link, !isWebLink(link) { out[run.range].link = nil }
         }
+        out = relinked(out)
         if source != text {
             while let space = out.range(of: zeroWidthSpace) { out.removeSubrange(space) }
         }
@@ -60,6 +61,52 @@ public enum Markdown {
 
     public static func isWebLink(_ url: URL) -> Bool {
         ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+    }
+
+    /// Addresses written out, linked where they stand (2026-10-03, user: 手机上现在点击和复制链接还是费劲). Foundation's
+    /// parser links a bare address up to the next space, and Chinese text has none after it: `https://example.com/a。然后`
+    /// came out as one link to an address nobody wrote, the next address inside it. Such a link is cut at the first
+    /// character that is not an address's and what follows is read again. An address in backticks is a link too.
+    static func relinked(_ input: AttributedString) -> AttributedString {
+        var out = input
+        let runs = out.runs.map { (range: $0.range, linked: $0.link != nil, code: $0.inlinePresentationIntent?.contains(.code) == true) }
+        for run in runs {
+            let text = String(out[run.range].characters)
+            let written = LinkText.schemeStart(in: Array(text)) == 0
+            if run.linked {
+                // `[说明](https://…)` is as its writer made it; only an address standing as its own text is read again.
+                guard written, text.contains(where: { !LinkText.inAddress($0) }) else { continue }
+                out[run.range].link = nil
+            } else {
+                guard run.code, written, LinkText.webAddresses(in: text).first?.address == text else { continue }
+            }
+            for found in LinkText.webAddresses(in: text) {
+                let lower = out.characters.index(run.range.lowerBound, offsetBy: text.distance(from: text.startIndex, to: found.range.lowerBound))
+                let upper = out.characters.index(lower, offsetBy: found.address.count)
+                out[lower..<upper].link = URL(string: found.address)
+            }
+        }
+        return out
+    }
+
+    /// The web addresses in a text as the phone shows it, in the order they stand, each once: what a long press on it
+    /// offers to open or copy. Those in code are read too (a command's address is as good to open).
+    public static func links(in source: String, limit: Int = 6) -> [TappedLink] {
+        var out: [TappedLink] = []
+        func add(_ address: String) {
+            guard let link = TappedLink(address: address), case .web = link, !out.contains(link) else { return }
+            out.append(link)
+        }
+        func read(_ text: String) { for run in inline(text).runs { if let link = run.link { add(link.absoluteString) } } }
+        for block in readableBlocks(source) {
+            switch block {
+            case .heading(_, let text), .paragraph(let text), .quote(let text), .listItem(_, _, let text): read(text)
+            case .code(_, let text): for found in LinkText.webAddresses(in: text) { add(found.address) }
+            case .table(let header, let rows): for cell in header + rows.flatMap({ $0 }) { read(cell) }
+            case .rule: break
+            }
+        }
+        return Array(out.prefix(limit))
     }
 
     /// One attributed text for a preview or an event line (a `Text` with a line limit): list markers, bold headings,

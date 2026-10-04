@@ -1,15 +1,6 @@
 {
-  "originHash" : "f8dbde0d9b0ccd837655e1f48c3e64def043bdf9c629274573a1e015eb1e8581",
+  "originHash" : "b50d0d03ec4104528830b816f5d7bb96a95cd2016a28febe46725c5f3f7fdc09",
   "pins" : [
-    {
-      "identity" : "swift-argument-parser",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-argument-parser",
-      "state" : {
-        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
-        "version" : "1.8.2"
-      }
-    },
     {
       "identity" : "swift-sodium",
       "kind" : "remoteSourceControl",
@@ -17,15 +8,6 @@
       "state" : {
         "revision" : "cfd195c76882aa9b997560ca7cb95d72fbf5db00",
         "version" : "0.11.0"
-      }
-    },
-    {
-      "identity" : "swiftterm",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/migueldeicaza/SwiftTerm",
-      "state" : {
-        "revision" : "7691f85b222a67a66b58499e1b2647443cf0dda7",
-        "version" : "1.18.0"
       }
     }
   ],

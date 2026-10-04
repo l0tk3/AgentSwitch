@@ -14,8 +14,9 @@ struct AgentSwitchApp: App {
         #if DEBUG
         // Screens with sample data and no Mac: `-uiDemo YES`, optionally `-uiDemoScreen settings|task|done|onboarding|
         // stale|interrupted|mac|offline|offlinemac|tasks|search|sessions|transcript|terminals|terminal|terminalsealed|
-        // terminalslash|terminalclose|terminalmenu|terminaldelete|terminalsearch|terminalquestion|newterminal|newterminalbypass|
-        // browser|browserpage|browsertook|browserfile|browserlocal|browserdenied|browsernew|browserclose`.
+        // terminalslash|terminalclose|terminalmenu|terminaldelete|terminalsearch|terminalquestion|terminallink|newterminal|newterminalbypass|
+        // browser|browserpage|browsertook|browserfile|browserlocal|browserdenied|browsernew|browserclose|browserzoom|
+        // browserzoomwatch`.
         if let hosts = UserDefaults.standard.string(forKey: "tlsProbe"), let pin = UserDefaults.standard.string(forKey: "tlsProbePin") {
             TLSProbe.run(hosts: hosts.split(separator: ",").map(String.init), pin: pin)
         }
@@ -33,7 +34,7 @@ struct AgentSwitchApp: App {
             case "stale": model.openTaskRequest = "t4"
             case "interrupted": model.openTaskRequest = "t6"
             case "terminals", "terminalmenu", "terminaldelete", "terminalsearch": model.tab = .terminals
-            case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion":
+            case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion", "terminallink":
                 model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
             case "newterminal", "newterminalbypass": model.tab = .terminals; model.openTerminalRequest = "new"
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)

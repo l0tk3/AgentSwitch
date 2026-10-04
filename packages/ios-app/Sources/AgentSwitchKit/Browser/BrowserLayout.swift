@@ -3,7 +3,9 @@ import Foundation
 
 /// The phone's own zoom of the picture (browser-v0 §1: two fingers zoom the picture on the phone only, the page is not
 /// told): content point `p` shows at `p × scale + offset`. Pinching keeps the point under the fingers where it is; the
-/// zoomed picture always covers the screen area (no empty margin dragged in).
+/// zoomed picture always covers the screen area (no empty margin dragged in). Not the page's zoom (`BrowserPageZoom`,
+/// which lays the page out afresh): that one is the zoom key's while this phone sizes the tab; while it only watches,
+/// the same key steps this one (`steps`, `stepped`).
 public struct BrowserZoom: Sendable, Equatable {
     public var scale: Double
     public var offset: CGPoint
@@ -15,8 +17,29 @@ public struct BrowserZoom: Sendable, Equatable {
 
     public static let none = BrowserZoom()
     public static let range: ClosedRange<Double> = 1...4
+    /// The scales the zoom key goes through (browser-v0 §1 页面缩放, 2026-10-03: 100 125 150 200 300 400); a pinch stops
+    /// anywhere between.
+    public static let steps: [Double] = [1, 1.25, 1.5, 2, 3, 4]
 
     public var isZoomed: Bool { scale > 1.001 }
+
+    /// The scale as the zoom key writes it (`150%`).
+    public var percent: Int { Int((scale * 100).rounded()) }
+
+    /// The scale as the chip at the picture's top right writes it (browser-v0 §1 iPhone: `2.0×`): to one decimal,
+    /// wherever two fingers left it (`1.4×`) — but a step of the zoom key that has hundredths in full (`1.25×`, as the
+    /// demo page; review, 2026-10-03: to one decimal the 125% step read `1.2×` beside a key and a row saying `125%`).
+    public var times: String {
+        let step = Self.steps.first { abs($0 - scale) < 0.001 }
+        let tenths = step.map { ($0 * 10).rounded() == $0 * 10 } ?? true
+        return String(format: tenths ? "%.1f×" : "%.2f×", step ?? scale)
+    }
+
+    /// The next step above the scale now; nil at the end of the range.
+    public var stepIn: Double? { Self.steps.first { $0 > scale + 0.001 } }
+
+    /// The next step below the scale now; nil at the whole picture.
+    public var stepOut: Double? { Self.steps.last { $0 < scale - 0.001 } }
 
     public func apply(_ p: CGPoint) -> CGPoint {
         CGPoint(x: p.x * scale + offset.x, y: p.y * scale + offset.y)
@@ -31,6 +54,20 @@ public struct BrowserZoom: Sendable, Equatable {
         let s = min(max(newScale, Self.range.lowerBound), Self.range.upperBound)
         let content = invert(center)
         return BrowserZoom(scale: s, offset: CGPoint(x: center.x - content.x * s, y: center.y - content.y * s)).clamped(to: area)
+    }
+
+    /// Zoomed to `newScale` by the key rather than by fingers: about the middle of the part of the picture now in view
+    /// (`picture`: where it is drawn before the zoom, BrowserLayout). A picture still shorter than the area keeps its
+    /// top edge at the area's top, where a page being watched sits — it grows downwards, never out of sight with room
+    /// left under it; a taller one covers the area's height.
+    public func stepped(to newScale: Double, picture: CGRect, area: CGSize) -> BrowserZoom {
+        let shown = CGRect(origin: apply(picture.origin), size: CGSize(width: picture.width * scale, height: picture.height * scale))
+        let seen = shown.intersection(CGRect(origin: .zero, size: area))
+        let middle = seen.isNull || seen.isEmpty ? CGPoint(x: area.width / 2, y: area.height / 2) : CGPoint(x: seen.midX, y: seen.midY)
+        let next = pinched(to: newScale, around: middle, area: area)
+        let top = picture.minY * next.scale + next.offset.y
+        let kept = min(0, max(min(0, area.height - picture.height * next.scale), top))
+        return BrowserZoom(scale: next.scale, offset: CGPoint(x: next.offset.x, y: next.offset.y + kept - top)).clamped(to: area)
     }
 
     /// Moved by a two-finger drag.

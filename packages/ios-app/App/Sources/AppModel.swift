@@ -746,7 +746,7 @@ extension AppModel {
         model.hasAssistant = true
         model.quota = DemoData.quota
         model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git)
-        model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent)
+        model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent, zoom: DemoBrowser.zoom)
         model.routeReport = (Date().addingTimeInterval(-40), DemoData.routeReport)
         model.connectionProgress = ConnectionProgress().after(model.connection)
         if offline {

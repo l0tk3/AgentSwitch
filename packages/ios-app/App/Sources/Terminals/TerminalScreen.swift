@@ -5,7 +5,8 @@ import UIKit
 
 /// SwiftTerm as a display only (docs/terminal-v0.md §1 iPhone): it never takes the keyboard and never sends what it
 /// would type or report — the phone has no raw keystroke route; replies go through the box (as typed, or sealed), keys
-/// and the wheel by name.
+/// and the wheel by name. Its own link taps and its long-press menu need the first responder it never is, so they never
+/// act here: the links are read off its screen and handled by the page (`TerminalScreenController.link(at:)`).
 final class DisplayTerminalView: TerminalView {
     override var canBecomeFirstResponder: Bool { false }
 }
@@ -76,6 +77,92 @@ final class TerminalScreenController: NSObject {
     /// One notch of the wheel per this much drag.
     var notch: CGFloat { max(8, view.font.lineHeight) }
 
+    // MARK: links (docs/terminal-v0.md §1 iPhone 链接, 2026-10-03)
+
+    /// A finger's slop around a link, in points: about a line of text (12 points at the usual size).
+    static let linkSlop: CGFloat = 14
+    /// The slop of a tap while the program tracks the mouse: half a line. A tap beside a link is then a click the
+    /// program may be waiting for (an option on the line under an address), not the link's.
+    static let linkSlopClicking: CGFloat = 6
+
+    /// A cell's size in points; nil before the screen has a grid.
+    private var cell: CGSize? {
+        let t = view.getTerminal()
+        let grid = view.getOptimalFrameSize().size
+        guard t.cols > 0, t.rows > 0, grid.width > 0, grid.height > 0 else { return nil }
+        return CGSize(width: grid.width / CGFloat(t.cols), height: grid.height / CGFloat(t.rows))
+    }
+
+    /// The links on the screen now, read afresh at each touch (the screen changes under the finger): its rows cell by
+    /// cell, the rows the terminal wrapped itself, the cells of OSC 8 links. The Kit finds them (`TerminalLinks`).
+    func links(workdir: String?) -> [ScreenLink] {
+        let t = view.getTerminal()
+        var rows: [[Character]] = []
+        var wrapped = Set<Int>()
+        var explicit: [TerminalLinks.Explicit] = []
+        for r in 0..<t.rows {
+            guard let line = t.getLine(row: r) else { rows.append([]); continue }
+            if line.isWrapped { wrapped.insert(r) }
+            var cells: [Character] = []
+            var run: (start: Int, address: String)?
+            let count = min(t.cols, line.count)
+            for col in 0..<count {
+                let data = line[col]
+                let tail = col > 0 && line[col - 1].width == 2
+                cells.append(tail ? TerminalLinks.wideTail : t.getCharacter(for: data))
+                // A wide character's second cell carries on what its first one has.
+                let address = tail ? run?.address : (data.getPayload() as? String).flatMap(TerminalLinks.address(payload:))
+                if address != run?.address {
+                    if let run { explicit.append(TerminalLinks.Explicit(row: r, columns: run.start..<col, address: run.address)) }
+                    run = address.map { (col, $0) }
+                }
+            }
+            if let run { explicit.append(TerminalLinks.Explicit(row: r, columns: run.start..<count, address: run.address)) }
+            rows.append(cells)
+        }
+        return TerminalLinks.find(rows: rows, wrapped: wrapped, explicit: explicit, workdir: workdir)
+    }
+
+    /// The link a touch at `point` (the view's coordinates, which scroll with its history) lands on: the nearest within
+    /// the slop — `tap`: narrower while the program tracks the mouse, where a tap has another meaning.
+    func link(at point: CGPoint, workdir: String?, tap: Bool = false) -> ScreenLink? {
+        guard let cell else { return nil }
+        let t = view.getTerminal()
+        let row = point.y / cell.height - CGFloat(t.getTopVisibleRow())
+        let slop = tap && t.mouseMode != .off ? Self.linkSlopClicking : Self.linkSlop
+        return TerminalLinks.hit(links(workdir: workdir), column: point.x / cell.width, row: row,
+                                 cell: (Double(cell.width), Double(cell.height)), slop: Double(slop))
+    }
+
+    /// Where a link's cells are, row by row, in the view's coordinates.
+    private func rects(of link: ScreenLink) -> [CGRect] {
+        guard let cell else { return [] }
+        let top = CGFloat(view.getTerminal().getTopVisibleRow())
+        return link.spans.map { span in
+            CGRect(x: CGFloat(span.columns.lowerBound) * cell.width, y: (top + CGFloat(span.row)) * cell.height,
+                   width: CGFloat(span.columns.count) * cell.width, height: cell.height)
+        }
+    }
+
+    /// The link's place on the screen (the window's coordinates): its menu opens by it.
+    func frame(of link: ScreenLink) -> CGRect {
+        let all = rects(of: link).map { view.convert($0, to: nil) }
+        return all.dropFirst().reduce(all.first ?? .zero) { $0.union($1) }
+    }
+
+    /// The link touched lights up for a moment: which one the finger took.
+    func flash(_ link: ScreenLink) {
+        for rect in rects(of: link) {
+            let mark = UIView(frame: rect)
+            mark.isUserInteractionEnabled = false
+            mark.backgroundColor = UIColor(Theme.signal).withAlphaComponent(0.4)
+            view.addSubview(mark)
+            UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.18, delay: 0.14, options: [.curveLinear]) {
+                mark.alpha = 0
+            } completion: { _ in mark.removeFromSuperview() }
+        }
+    }
+
     /// The cell under a point of the view while the program tracks the mouse (a tap then clicks there); nil when it does
     /// not, or the point is off the grid. The program's own full screen has no history, so the top of what shows is row 0.
     func clickCell(at point: CGPoint) -> (col: Int, row: Int)? {
@@ -97,11 +184,9 @@ extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
     /// What the view would type (it has no keyboard here) or report: never sent.
     func send(source: TerminalView, data: ArraySlice<UInt8>) {}
     func scrolled(source: TerminalView, position: Double) {}
-    /// Web links open in Safari; nothing else from an agent's output is opened.
-    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
-        guard let url = URL(string: link), Markdown.isWebLink(url) else { return }
-        UIApplication.shared.open(url)
-    }
+    /// Never called here (the view is not the first responder its own link taps need): the page reads the links off
+    /// the screen and opens them in the Mac's browser (`TerminalPage.tapped`).
+    func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
     func bell(source: TerminalView) {}
     func clipboardCopy(source: TerminalView, content: Data) {
         if let text = String(data: content, encoding: .utf8) { UIPasteboard.general.string = text }
@@ -113,22 +198,28 @@ extension TerminalScreenController: @preconcurrency TerminalViewDelegate {
 
 /// The controller's view in SwiftUI, and touch (terminal-v0 §1 second round): a drag scrolls — this screen's history,
 /// or the program itself by wheel notches when it is full screen or tracks the mouse (a flick carries on a little);
-/// pinch changes the text size (the grid follows, and with it the agent); a tap clicks in a program that tracks the
-/// mouse, else puts the keyboard away.
+/// pinch changes the text size (the grid follows, and with it the agent); a tap opens a link, else clicks in a program
+/// that tracks the mouse, else puts the keyboard away; a long press on a link opens its menu (2026-10-03).
 struct TerminalScreen: UIViewRepresentable {
     let controller: TerminalScreenController
     var onPinchEnded: (CGFloat) -> Void = { _ in }
     /// Wheel notches for the program: up (back through what it showed), and how many.
     var onWheel: (Bool, Int) -> Void = { _, _ in }
     var onTap: (CGPoint) -> Void = { _ in }
+    /// A press held where it began, at that point.
+    var onHold: (CGPoint) -> Void = { _ in }
 
     func makeUIView(context: Context) -> DisplayTerminalView {
         let c = context.coordinator
         let pinch = UIPinchGestureRecognizer(target: c, action: #selector(Coordinator.pinched(_:)))
         let pan = UIPanGestureRecognizer(target: c, action: #selector(Coordinator.panned(_:)))
         let tap = UITapGestureRecognizer(target: c, action: #selector(Coordinator.tapped(_:)))
+        let hold = UILongPressGestureRecognizer(target: c, action: #selector(Coordinator.held(_:)))
+        hold.minimumPressDuration = 0.4
+        // A press held is not also a tap (lifting before it counts as held fails it at once: the tap is not delayed).
+        tap.require(toFail: hold)
         pan.maximumNumberOfTouches = 1
-        for g in [pinch, pan, tap] as [UIGestureRecognizer] {
+        for g in [pinch, pan, tap, hold] as [UIGestureRecognizer] {
             g.delegate = c
             g.cancelsTouchesInView = false
             controller.view.addGestureRecognizer(g)
@@ -139,9 +230,10 @@ struct TerminalScreen: UIViewRepresentable {
     func updateUIView(_ uiView: DisplayTerminalView, context: Context) {
         context.coordinator.onWheel = onWheel
         context.coordinator.onTap = onTap
+        context.coordinator.onHold = onHold
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(controller: controller, ended: onPinchEnded, onWheel: onWheel, onTap: onTap) }
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller, ended: onPinchEnded, onWheel: onWheel, onTap: onTap, onHold: onHold) }
 
     @MainActor
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
@@ -149,15 +241,18 @@ struct TerminalScreen: UIViewRepresentable {
         let ended: (CGFloat) -> Void
         var onWheel: (Bool, Int) -> Void
         var onTap: (CGPoint) -> Void
+        var onHold: (CGPoint) -> Void
         private var start: CGFloat = 10
         private var dragged: CGFloat = 0
         private var coast: Task<Void, Never>?
 
-        init(controller: TerminalScreenController, ended: @escaping (CGFloat) -> Void, onWheel: @escaping (Bool, Int) -> Void, onTap: @escaping (CGPoint) -> Void) {
+        init(controller: TerminalScreenController, ended: @escaping (CGFloat) -> Void, onWheel: @escaping (Bool, Int) -> Void, onTap: @escaping (CGPoint) -> Void,
+             onHold: @escaping (CGPoint) -> Void) {
             self.controller = controller
             self.ended = ended
             self.onWheel = onWheel
             self.onTap = onTap
+            self.onHold = onHold
         }
 
         nonisolated func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
@@ -205,6 +300,10 @@ struct TerminalScreen: UIViewRepresentable {
         }
 
         @objc func tapped(_ gesture: UITapGestureRecognizer) { onTap(gesture.location(in: gesture.view)) }
+
+        @objc func held(_ gesture: UILongPressGestureRecognizer) {
+            if gesture.state == .began { onHold(gesture.location(in: gesture.view)) }
+        }
 
         @objc func pinched(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {

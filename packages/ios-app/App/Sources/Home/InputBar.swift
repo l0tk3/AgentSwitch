@@ -12,6 +12,7 @@ struct InputBar: View {
     @State private var pickingPhotos = false
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var pickingFiles = false
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         @Bindable var model = model
@@ -19,14 +20,14 @@ struct InputBar: View {
             if let pin = model.pin {
                 HStack(spacing: 6) {
                     Text("Pin → \(ModelName.display(pin.model))").mono(12, weight: .medium)
-                    Button { model.pin = nil } label: { Text("×").mono(14) }
+                    Button { model.pin = nil } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 14) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("恢复自动选择")
                 }
                 .foregroundStyle(Theme.signal)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .overlay(Rectangle().strokeBorder(Theme.signal, lineWidth: 1))
+                .framed(Theme.signal, radius: Theme.Radius.control)
             }
             AttachmentStrip()
             if error != nil {
@@ -39,13 +40,18 @@ struct InputBar: View {
                     // Passwords may be typed here: keep the keyboard from learning or suggesting them.
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, look.isClassic ? 14 : 12)
                     .padding(.vertical, 9)
-                    .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
-                // Square; ink once there is something to send (the primary button, §7.2.3), pink while pressed.
+                    // The classic look's field: its own ground, round as a bubble.
+                    .grounded(look.isClassic ? Theme.panel : Color.clear, radius: Theme.Radius.bubble)
+                    .framed(Theme.line, radius: Theme.Radius.bubble)
+                // Square; ink once there is something to send (the primary button, §7.2.3), pink while pressed. A disc
+                // in the accent with an arrow in the classic look.
                 Button { Task { error = await model.send() } } label: {
                     if model.sending {
                         BrailleSpinner(color: Theme.base)
+                    } else if look.isClassic {
+                        Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold))
                     } else {
                         Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced))
                     }
@@ -125,11 +131,16 @@ struct InputBar: View {
                 }
             }
         } label: {
-            Text("+")
-                .font(.system(size: 20, weight: .regular, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 38, height: 38)
-                .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+            if look.isClassic {
+                Image(systemName: "plus.circle").font(.system(size: 26, weight: .light)).foregroundStyle(.secondary)
+                    .frame(width: 34, height: 38)
+            } else {
+                Text("+")
+                    .font(.system(size: 20, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 38, height: 38)
+                    .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+            }
         }
         .tint(Theme.ink)   // not the signal colour: it is neither selected nor the primary action
         .accessibilityLabel("more")

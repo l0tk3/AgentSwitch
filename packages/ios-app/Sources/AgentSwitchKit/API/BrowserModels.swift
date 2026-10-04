@@ -373,6 +373,10 @@ public struct BrowserFrame: Sendable, Equatable {
     }
 
     public var size: CGSize { CGSize(width: width, height: height) }
+
+    /// The page's own size (CSS pixels): the same page at another density (the Mac draws a tab's view at a scale, and
+    /// at the CSS size around an agent's clicks, docs/browser-v0.md §5) has another `size` but this one.
+    public var pageSize: CGSize { CGSize(width: viewportWidth, height: viewportHeight) }
 }
 
 /// Why a hold ended or moved.

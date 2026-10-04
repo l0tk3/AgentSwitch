@@ -10,14 +10,21 @@ import UIKit
 /// background gives it back, and the Mac puts its own size back — a take still on its way then is given back as it
 /// lands, its size never set. The stream stops whenever the page is not seen. Frames are decoded off the main thread,
 /// only the newest (BrowserFrameDecoder).
+///
+/// The size carries the page's zoom (browser-v0 §1 页面缩放, 2026-10-03; user: 然后我发现agentswitch的浏览器页没有放大缩小的
+/// 选项，加上 用来调节大小): the screen area over the zoom this phone remembers for the tab's site (BrowserPageZoom), set
+/// again when the zoom or the site changes. So only while this phone sizes the tab does the zoom key zoom the page;
+/// while it only watches, the key steps the picture on the phone, as two fingers do.
 @MainActor
 @Observable
 final class BrowserPageModel {
     let id: String
-    private(set) var tab: BrowserTabInfo
+    private(set) var tab: BrowserTabInfo { didSet { if tab.site != oldValue.site { siteChanged() } } }
     /// The latest frame's size in pixels and its pixels per CSS pixel (nil before the first).
     private(set) var frameSize: CGSize?
     private(set) var frameScale: Double = 1
+    /// The latest frame's page size in CSS pixels (a new one draws the picture in afresh; a new density does not).
+    @ObservationIgnored private var pageSize: CGSize?
     /// Pictures drawn afresh (the first after connecting, the first at a new size): each comes in top down.
     private(set) var refreshes = 0
     private(set) var connection: Connection = .connecting
@@ -35,6 +42,8 @@ final class BrowserPageModel {
     private(set) var zoom = BrowserZoom.none
     /// How far the picture is lifted so what was touched stays above the keyboard.
     private(set) var lift: Double = 0
+    /// The Browser tab's store, which keeps the page zoom this phone remembers by site (set by the page).
+    var store: BrowserStore?
 
     enum Connection: Equatable { case connecting, live, reconnecting }
 
@@ -43,6 +52,9 @@ final class BrowserPageModel {
     @ObservationIgnored private var api: AgentSwitchAPI?
     @ObservationIgnored private var options = BrowserStreamPolicy.local
     @ObservationIgnored private var follow: Task<Void, Never>?
+    /// The stream that was followed before `follow` (`retune`): it goes on drawing until `follow` has brought its
+    /// first event, so the picture does not pause and the Mac never sees the tab without a stream.
+    @ObservationIgnored private var outgoing: Task<Void, Never>?
     /// Which `start` the stream task is (an old one's failure does not touch a newer one).
     @ObservationIgnored private var streamRun = 0
     /// The page is seen (from `start` to `stop`): a take that lands outside it is handed back at once.
@@ -58,12 +70,27 @@ final class BrowserPageModel {
     @ObservationIgnored private var noteHides: Task<Void, Never>?
     /// The frame the picture shows now: input is aimed at it.
     @ObservationIgnored private var seq: Int?
-    /// Where the last touch fell, in frame pixels (what the keyboard must not cover).
+    /// Where the last touch fell, in the page's CSS pixels (what the keyboard must not cover; frames may change density).
     @ObservationIgnored private var touchedY: Double?
     /// Opened or back in front: your own tab is taken when the stream says nobody else holds it.
     @ObservationIgnored private var claimOnConnect = false
-    /// The size this phone last set, so a layout change sends a new one only when it differs.
+    /// The roomiest the screen area has stood at this width (whole points): what the page is sized for, and what the
+    /// zoom's steps go by. Kept apart from the hold (review, 2026-10-03): while it was `sizeSent`, forgotten whenever
+    /// the hold ended, a take with the zoom row, a note or the keyboard up sized the page for what they left and
+    /// again as each went — and the keyboard moved the step in force. Seen by what shows the zoom.
+    private var roomiest: CGSize?
+    /// When the screen area last changed: an area is room the page has only if it stood (`noteRoom`).
+    @ObservationIgnored private var areaSince = ContinuousClock.now
+    /// The area this phone last sized the page for (whole points; the page's own size is that over the zoom), so a
+    /// layout change sends a new one only when it differs; nil while no size of this phone's is in force (the hold
+    /// ended).
     @ObservationIgnored private var sizeSent: CGSize?
+    /// The zoom the page was last sized at (percent), so another site's, or the key's, sends the size again.
+    @ObservationIgnored private var zoomSent: Int?
+    /// The size request sent last (the next waits for it), and how many were asked for (one that is no longer the
+    /// newest when its turn comes is not sent).
+    @ObservationIgnored private var sizeRequest: Task<Void, Never>?
+    @ObservationIgnored private var sizeAsks = 0
 
     init(tab: BrowserTabInfo) {
         id = tab.id
@@ -103,16 +130,33 @@ final class BrowserPageModel {
             #endif
             return
         }
+        // The page opens on the list's copy of the tab, read every 2 s: for that long after a page was left it may still
+        // say this phone holds the tab it gave back on leaving. The stream's first word decides; until then the tab is
+        // nobody's here, as after handBackQuietly (a zoom key pressed in that moment set a size the Mac refused).
+        if mine { tab = tab.applying(.held(nil, reason: .handBack)) }
         claimOnConnect = true
         active = true
         connection = .connecting
+        follow = openStream(api)
+    }
+
+    /// The stream as `options` asks; a failure is said unless a newer stream took over. With its first event, and
+    /// whenever it ends, the stream it takes over from ends (`endOutgoing`).
+    private func openStream(_ api: AgentSwitchAPI) -> Task<Void, Never> {
         let id = id
+        let options = options
         streamRun += 1
         let run = streamRun
-        follow = Task { [weak self] in
+        return Task { [weak self] in
+            defer { self?.endOutgoing(after: run) }
+            var heard = false
             do {
                 for try await event in api.browserEvents(id, options: options) {
                     guard let self, !Task.isCancelled else { return }
+                    if !heard {
+                        heard = true
+                        self.endOutgoing(after: run)
+                    }
                     self.handle(event)
                 }
             } catch {
@@ -124,11 +168,45 @@ final class BrowserPageModel {
         }
     }
 
+    /// Another picture for the same tab: the link was measured (browser-v0 §1 iPhone) and allows more, or less, or
+    /// the page's zoom changed what the stream asks (§1 页面缩放, 2026-10-03). The stream again with `options`, the new
+    /// one opened before the old one ends so the picture does not pause; the tab kept (nothing handed back or taken)
+    /// and, the page the same, not drawn in afresh. Not streaming: the next start asks for them.
+    ///
+    /// The old stream stays, drawing, until the new one has brought its first event (review, 2026-10-03: ended at
+    /// once, before the new request had left, it left the tab without a stream for a moment at every step — the Mac
+    /// drew the view at the CSS size for nobody, and again for the new stream). It also ends when the new one ends.
+    /// A new one replaced in its turn before it has brought anything (two steps within the time a stream takes to
+    /// connect) ends at once, and the one still drawing stays for the newest to take over from: never more than one
+    /// stream beside the one followed.
+    func retune(_ options: BrowserStreamOptions) {
+        guard options != self.options, closed == nil else { return }
+        self.options = options
+        guard let old = follow, let api else { return }
+        if outgoing == nil { outgoing = old } else { old.cancel() }
+        follow = openStream(api)
+    }
+
+    /// Stream `run` has brought its first event, or has ended: the stream it took over from ends. Not when `run` was
+    /// replaced itself meanwhile: the outgoing stream is then the newer one's to end.
+    private func endOutgoing(after run: Int) {
+        guard streamRun == run else { return }
+        outgoing?.cancel()
+        outgoing = nil
+    }
+
+    /// No stream from here on: the one followed and, where it had not taken over yet, the one still drawing.
+    private func endStreams() {
+        follow?.cancel()
+        follow = nil
+        outgoing?.cancel()
+        outgoing = nil
+    }
+
     /// The page is not seen (left, another tab, the background): the stream ends and the tab goes back.
     func stop() {
         active = false
-        follow?.cancel()
-        follow = nil
+        endStreams()
         frames.reset()
         sizing?.cancel()
         typing = false
@@ -167,8 +245,7 @@ final class BrowserPageModel {
         case .closed(let reason):
             closed = reason
             typing = false
-            follow?.cancel()
-            follow = nil
+            endStreams()
         case .dropped:
             connection = .reconnecting
             // The hold may have ended meanwhile; what the stream says on connecting decides.
@@ -185,13 +262,20 @@ final class BrowserPageModel {
         seq = frame.seq
         screen.show(UIImage(cgImage: decoded.image))
         let size = frame.size
-        if frameSize != size {
-            // The first picture, or one at a new size (the page took the phone's size, or gave it back).
-            frameSize = size
+        if frameScale != frame.scale { frameScale = frame.scale }
+        // The first picture, or the page at a new size (it took the phone's size, or gave it back, or was zoomed) comes
+        // in top down; the same page at another density (drawn at the phone's pixels, or at the CSS size while an agent
+        // clicks) just replaces it. By the page's size alone: a zoom step lays the page out afresh and mostly leaves
+        // the frame the screen's pixels as it was (review, 2026-10-03: decided only where the frame's size changed,
+        // the refresh played at some steps and not at others).
+        if pageSize != frame.pageSize {
             refreshes += 1
+            pageSize = frame.pageSize
+        }
+        if frameSize != size {
+            frameSize = size
             relift()
         }
-        if frameScale != frame.scale { frameScale = frame.scale }
         if connection != .live { connection = .live }
         screen.layout = layout
         screen.action = actionShown
@@ -274,32 +358,69 @@ final class BrowserPageModel {
         return true
     }
 
-    /// Leaving: given back whether or not anyone waits for the answer.
+    /// Leaving: given back whether or not anyone waits for the answer, and said here at once rather than left for the
+    /// next stream to say: from now the tab is nobody's. So back on the page, before that stream's first word, your
+    /// own tab is taken as the phone acts on it and an agent's is only watched. (Counted as this phone's until then,
+    /// a press on the zoom key — browser-v0 §1 页面缩放, 2026-10-03 — set a size the Mac refused, and on an agent's tab
+    /// remembered a zoom for a page it had not zoomed.)
     private func handBackQuietly() {
         guard let api else { return }
         let id = id, me = screenId
         sizeSent = nil
+        tab = tab.applying(.held(nil, reason: .handBack))
         leaving = Task { _ = try? await api.releaseBrowserTab(id, screen: me) }
     }
 
-    /// The page at this phone's screen area (points, its pixel ratio, a phone's layout). A keyboard (the page's or the
-    /// address bar's) does not shrink it: the picture is lifted instead, as a phone's browser keeps its layout under
-    /// the keyboard; so after the first, only a new width (the phone turned) or more height is sent.
+    /// The page at this phone's screen area over the page zoom (BrowserPageZoom: points over the factor, the pixel
+    /// ratio times it, a phone's layout). A keyboard (the page's or the address bar's) does not shrink it: the picture
+    /// is lifted instead, as a phone's browser keeps its layout under the keyboard; so after the first, only another
+    /// area to size the page for (`sizedArea`: the phone turned, more room than there has been, or the first sent
+    /// while the page was still being laid out) or another zoom is sent. The requests go one at a time, in the order
+    /// asked, and of those waiting only the newest (the zoom key pressed again and again): a later size landing before
+    /// an earlier one would leave the page at an older zoom.
     private func sendSize(force: Bool = false) async {
         guard let api, active, mine, area.width >= 100, area.height >= 100 else { return }
-        let size = CGSize(width: area.width.rounded(), height: area.height.rounded())
-        let grown = sizeSent.map { size.width != $0.width || size.height > $0.height } ?? true
-        guard force || grown else { return }
+        let size = sizedArea
+        let percent = pageZoom
+        guard force || sizeSent != size || zoomSent != percent else { return }
         sizeSent = size
-        do {
-            tab = try await api.setBrowserViewport(id, width: Int(size.width), height: Int(size.height), scale: Double(max(screen.traitCollection.displayScale, 1)),
-                                                   mobile: true, screen: screenId)
-        } catch {
-            self.error = error.localizedDescription
+        zoomSent = percent
+        let page = BrowserPageZoom.viewport(area: size, screenScale: Double(max(screen.traitCollection.displayScale, 1)), percent: percent)
+        sizeAsks += 1
+        let ask = sizeAsks, earlier = sizeRequest
+        let request = Task { [weak self] in
+            await earlier?.value
+            // A newer size was asked for while this one waited, or the tab went back meanwhile (`sizeSent` is forgotten
+            // then): nothing to set. Not by `mine`: a zoom step on your own tab that nobody holds sends the take and
+            // asks the stream again together, and that stream's first word may still say nobody holds the tab —
+            // handled between the take's answer and this turn, it dropped the size while `sizeSent` said it was set
+            // (review, 2026-10-03).
+            guard let self, self.sizeAsks == ask, self.active, self.sizeSent != nil else { return }
+            do {
+                self.tab = try await api.setBrowserViewport(self.id, width: Int(page.width), height: Int(page.height), scale: page.scale,
+                                                            mobile: page.mobile, screen: self.screenId)
+            } catch {
+                self.error = error.localizedDescription
+            }
         }
+        sizeRequest = request
+        await request.value
+    }
+
+    /// The area the page is sized for, in whole points: the screen area as it is, and no lower than it has stood at
+    /// this width — what a keyboard, a note or the zoom row takes of its height still counts (none of them shrinks
+    /// the page; BrowserPageZoom.sizedArea), whoever holds the tab just then.
+    private var sizedArea: CGSize { BrowserPageZoom.sizedArea(now: area, sent: roomiest) }
+
+    /// The tab is on another site: while this phone holds it, the page at that site's zoom (browser-v0 §1 页面缩放) —
+    /// the size again when the zoom differs from the one last set.
+    private func siteChanged() {
+        guard mine, sizeSent != nil else { return }
+        Task { [weak self] in await self?.sendSize() }
     }
 
     private func areaChanged(from old: CGSize) {
+        noteRoom(old)
         screen.layout = layout
         relift()
         zoom = zoom.clamped(to: area)
@@ -307,10 +428,20 @@ final class BrowserPageModel {
         guard mine, old != .zero else { return }
         sizing?.cancel()
         sizing = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: BrowserPageZoom.settle)
             guard !Task.isCancelled else { return }
             await self?.sendSize()
         }
+    }
+
+    /// The area just replaced is room the page has if it stood (BrowserPageZoom.roomiest: not the passing ones of a
+    /// page being laid out as it opens): the roomiest of those is what the page is sized for when a keyboard, a note
+    /// or the zoom row takes part of the area.
+    private func noteRoom(_ replaced: CGSize) {
+        let now = ContinuousClock.now
+        let roomy = BrowserPageZoom.roomiest(roomiest, after: replaced, stood: areaSince.duration(to: now))
+        if roomiest != roomy { roomiest = roomy }
+        areaSince = now
     }
 
     /// While the keyboard is up, what was last touched stays in sight; down, the picture sits at the top again.
@@ -320,7 +451,7 @@ final class BrowserPageModel {
             screen.layout = layout
             return
         }
-        lift = BrowserLayout.lift(toShow: y, frame: frameSize, areaWidth: area.width, visible: area.height)
+        lift = BrowserLayout.lift(toShow: y * frameScale, frame: frameSize, areaWidth: area.width, visible: area.height)
         screen.layout = layout
     }
 
@@ -329,7 +460,7 @@ final class BrowserPageModel {
     /// A tap clicks there; on your own tab nobody holds, the phone takes it as it acts.
     func tap(at point: CGPoint) {
         guard let at = aim(point) else { return }
-        touchedY = at.y
+        touchedY = at.y / frameScale
         send(.click(x: at.x, y: at.y, seq: seq))
     }
 
@@ -359,6 +490,76 @@ final class BrowserPageModel {
 
     func resetZoom() {
         zoom = .none
+        screen.layout = layout
+    }
+
+    // MARK: the zoom key
+
+    /// This phone sizes the tab: it holds it, or the tab is yours and nobody's for now (the phone takes it as it
+    /// acts). Then the zoom key zooms the page (browser-v0 §1 页面缩放: only the screen that sizes a tab can); otherwise —
+    /// an agent's tab not taken over, a tab held elsewhere — only the picture on the phone.
+    var zoomsPage: Bool { canDrive }
+
+    /// The page zoom in force (percent): what this phone remembers for the tab's site, as far as the area it sizes the
+    /// page for allows; 100 for a site not zoomed and on a blank tab.
+    var pageZoom: Int { BrowserPageZoom.inForce(remembered: store?.zoomMemory.percent(for: tab.site), area: sizedArea) }
+
+    /// What the key says: the page's percent while this phone sizes the tab, the picture's while it only watches.
+    var zoomPercent: Int { zoomsPage ? pageZoom : zoom.percent }
+
+    /// What the stream's scale is multiplied by (BrowserStreamPolicy): the factor of the zoom this phone sets the page
+    /// at, 1 while it only watches. The page asks the stream again when it changes.
+    var streamZoom: Double { zoomsPage ? BrowserPageZoom.factor(pageZoom) : 1 }
+
+    /// A step further in, or out, is there: at the end of the range its cap is off.
+    var canZoomIn: Bool { zoomsPage ? pageStepIn != nil : zoom.stepIn != nil }
+    var canZoomOut: Bool { zoomsPage ? pageStepOut != nil : zoom.stepOut != nil }
+
+    func zoomIn() {
+        if zoomsPage {
+            if let next = pageStepIn { setPageZoom(next) }
+        } else if let next = zoom.stepIn {
+            stepPicture(to: next)
+        }
+    }
+
+    func zoomOut() {
+        if zoomsPage {
+            if let next = pageStepOut { setPageZoom(next) }
+        } else if let next = zoom.stepOut {
+            stepPicture(to: next)
+        }
+    }
+
+    /// The percent cap: back to 100% — the site's zoom forgotten, or the whole picture again.
+    func zoomToStandard() {
+        if zoomsPage { setPageZoom(BrowserPageZoom.standard) } else { resetZoom() }
+    }
+
+    /// The page's next step in and out; none at the end of what the area allows, nor on a blank tab (always 100%).
+    private var pageStepIn: Int? { BrowserPageZoom.stepIn(from: pageZoom, site: tab.site, area: sizedArea) }
+    private var pageStepOut: Int? { BrowserPageZoom.stepOut(from: pageZoom, site: tab.site, area: sizedArea) }
+
+    /// The site's pages at `percent` from now on (remembered on this phone; 100% forgets it): the size again at once —
+    /// the area did not change — and the phone's own zoom of the picture put back, since the page is laid out afresh
+    /// and what was touched is no longer where it was. The stream is asked again by the page when its scale differs
+    /// (streamZoom). Your own tab that nobody holds is taken, as when the phone acts on it.
+    private func setPageZoom(_ percent: Int) {
+        guard let store else { return }
+        do { try store.rememberZoom(percent, for: tab.site) } catch { self.error = error.localizedDescription }
+        zoom = .none
+        touchedY = nil
+        relift()
+        #if DEBUG
+        if api == nil { drawDemo() }
+        #endif
+        if mine { Task { [weak self] in await self?.sendSize() } } else { claim() }
+    }
+
+    /// While only watching: the picture on the phone at `scale`, as two fingers would leave it (not remembered).
+    private func stepPicture(to scale: Double) {
+        guard let picture = layout?.picture else { return }
+        zoom = zoom.stepped(to: scale, picture: picture, area: area)
         screen.layout = layout
     }
 
@@ -462,13 +663,22 @@ final class BrowserPageModel {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.showDemo() }
             return
         }
-        guard let frame = DemoBrowser.frame(for: tab, size: phoneSized ? area : nil) else { return }
-        handle(.frame(frame))
+        guard drawDemo() else { return }
         connection = .live
         if UserDefaults.standard.string(forKey: "uiDemoScreen") == "browsertook" {
             touchedY = 210   // the password field of the mock login page
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.typing = true }
         }
+    }
+
+    /// The mock page as the Mac would send it now: a tab at this phone's size is its screen area over the page zoom
+    /// (drawn again when the zoom key changes it). False: no mock page for this tab.
+    @discardableResult
+    private func drawDemo() -> Bool {
+        let page = BrowserPageZoom.viewport(area: area, screenScale: 1, percent: pageZoom)
+        guard let frame = DemoBrowser.frame(for: tab, size: phoneSized ? CGSize(width: page.width, height: page.height) : nil) else { return false }
+        handle(.frame(frame))
+        return true
     }
     #endif
 }

@@ -1,99 +1,143 @@
 import AgentSwitchKit
+import AgentSwitchLiveUI
 import SwiftUI
 
 // The pixel side of the visual language (docs/ui-v0.md §7), as on the Mac (mac-app PixelViews.swift): marks on
-// whole-point cells, status squares, the busy spinner, `// labels`, character meters and dotted rules. Text people
+// whole-point cells, status squares, the busy spinner, `// labels`, character meters and solid rules. Text people
 // read is left to the system font.
+// In the classic look (§8) each of these draws its standard counterpart (ClassicViews.swift): a system symbol, a dot,
+// the system's spinner, a plain label, a thin bar.
 
-/// A 1-bit sprite on whole-point cells, in one colour.
+/// A 1-bit sprite on whole-point cells, in one colour; in the classic look the symbol that stands for it.
 struct PixelSprite: View {
     let rows: [String]
     var pixel: CGFloat = 2
     var color: Color = .primary
+    /// Set where the pixel look draws the sprite's shaded picture instead (docs/ui-v0.md §9: a lock, an agent's mark,
+    /// the globe): how strongly — 1 for the one in use, less for the others.
+    var strength: Double? = nil
+    /// The shaded picture's hard shadow, a cell down and right.
+    var shadow = true
+    /// The shaded picture's cell in points (drawn as a whole number of pixels).
+    var cell: CGFloat = 1.5
+    /// The shaded picture, where it is not the one that stands for `rows` (the small lock).
+    var picture: ShadedSprite? = nil
+    /// The ground the shaded picture sits on, where it is not the screen's (a button filled with a colour).
+    var onDark: Bool? = nil
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        let lit = PixelArt.sprite(rows)
-        Canvas { context, _ in
-            for cell in lit {
-                context.fill(Path(CGRect(x: CGFloat(cell.x) * pixel, y: CGFloat(cell.y) * pixel, width: pixel, height: pixel)), with: .color(color))
+        let size = CGSize(width: CGFloat(rows.first?.count ?? 0) * pixel, height: CGFloat(rows.count) * pixel)
+        Group {
+            if look.isClassic, let icon = ClassicIcon(rows: rows) {
+                icon.view(in: size, color: color).frame(width: size.width, height: size.height)
+            } else if !look.isClassic, let strength, let picture = picture ?? ShadedSprite.standing(for: rows) {
+                ShadedSpriteView(sprite: picture, strength: strength, shadow: shadow, cell: cell, onDark: onDark)
+            } else {
+                let lit = PixelArt.sprite(rows)
+                // A status square is a small key: a light edge above and left, a dark one below and right (§9). A
+                // hollow one is the key's empty seat: dark above and left, light below and right.
+                let key = rows == PixelArt.square, seat = rows == PixelArt.hollow
+                Canvas { context, _ in
+                    for cell in lit {
+                        context.fill(Path(CGRect(x: CGFloat(cell.x) * pixel, y: CGFloat(cell.y) * pixel, width: pixel, height: pixel)), with: .color(color))
+                    }
+                    if key || seat { ShadedPaint.keyEdges(in: &context, side: size.width, edge: max(1, pixel / 2), raised: key) }
+                }
+                .frame(width: size.width, height: size.height)
             }
         }
-        .frame(width: CGFloat(rows.first?.count ?? 0) * pixel, height: CGFloat(rows.count) * pixel)
         .accessibilityHidden(true)
     }
 }
 
-/// The app's mark: the icon's switch on a pixel grid, in a state. `depth` for marks of 20 pt and up (§7.2.10): a
-/// 1-pixel hard shadow and half-lit pixels in the diagonal steps; while busy a block runs along the lit lane with a
-/// fading trail and a little glow (still under Reduce Motion). Only a busy or waiting mark moves, and only while the app
-/// is in front (ui-v0 §7.4, 2026-10-03): idle, off and error are one picture, and nothing ticks for them.
+/// A shaded sprite (docs/ui-v0.md §9, ShadedSprite): each cell a whole number of pixels, in its tone of the ink, over a hard
+/// shadow a cell down and right.
+struct ShadedSpriteView: View {
+    let sprite: ShadedSprite
+    var strength: Double = 1
+    var shadow = true
+    var cell: CGFloat = 1.5
+    var onDark: Bool? = nil
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let dark = onDark ?? (scheme == .dark)
+        let cell = CGFloat(ShadedSprite.cell(scale: Double(displayScale), points: Double(cell)))
+        let pad: CGFloat = shadow ? 1 : 0
+        Canvas { context, _ in ShadedPaint.draw(sprite, in: &context, cell: cell, dark: dark, shadow: shadow) }
+            .frame(width: ((CGFloat(sprite.width) + pad) * cell).rounded(.up), height: ((CGFloat(sprite.height) + pad) * cell).rounded(.up), alignment: .topLeading)
+            .opacity(strength)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The app's mark in a state: its shaded picture (§9) with the state on its nearest lane — a cyan block running along it
+/// while busy (a fading trail and a little glow; still under Reduce Motion), its end amber while something waits (it
+/// blinks) and red on an error, every other cell gone when off. `depth`: the hard shadow. In the classic look the mark as
+/// lines. Only a busy or waiting mark moves, and only while the app is in front (ui-v0 §7.4, 2026-10-03): idle, off and
+/// error are one picture, and nothing ticks for them.
 struct PixelMarkView: View {
     let state: PixelArt.MarkState
     var pixel: CGFloat = 2
     var depth = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.interfaceLook) private var look
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        if look.isClassic {
+            ClassicMarkView(state: state, height: CGFloat(PixelArt.markHeight) * pixel).accessibilityHidden(true)
+        } else {
+            pixelMark
+        }
+    }
+
+    private var pixelMark: some View {
         let interval = reduceMotion ? nil : state.motionInterval
-        Group {
+        // Five sixths of the old mark's cell: 5 pixels where that was 2 pt, the picture as wide as the mark was.
+        let cell = CGFloat(ShadedSprite.cell(scale: Double(displayScale), points: Double(pixel) * 5 / 6))
+        let side = ((CGFloat(ShadedMark.picture.width) + (depth ? 1 : 0)) * cell).rounded(.up)
+        return Group {
             if let interval, scenePhase == .active {
                 TimelineView(.periodic(from: Motion.epoch, by: interval)) { timeline in
-                    Canvas { context, _ in draw(&context, frame: Motion.step(at: timeline.date, every: interval)) }
+                    Canvas { context, _ in paint(frame: Motion.step(at: timeline.date, every: interval)).draw(&context, cell: cell) }
                 }
                 .id(interval)   // busy ↔ waiting: the other beat
             } else {
                 let frame = interval.map { Motion.step(at: Date(), every: $0) } ?? 0
-                Canvas { context, _ in draw(&context, frame: frame) }
+                Canvas { context, _ in paint(frame: frame).draw(&context, cell: cell) }
             }
         }
-        .frame(width: CGFloat(PixelArt.markWidth + (depth ? 1 : 0)) * pixel, height: CGFloat(PixelArt.markHeight + (depth ? 1 : 0)) * pixel)
+        .frame(width: side, height: side, alignment: .topLeading)
         .accessibilityHidden(true)
     }
 
-    private func draw(_ context: inout GraphicsContext, frame: Int) {
-        func rect(_ x: Int, _ y: Int) -> Path { Path(CGRect(x: CGFloat(x) * pixel, y: CGFloat(y) * pixel, width: pixel, height: pixel)) }
-        let cells = PixelArt.markCells.filter { state != .off || !PixelArt.dithered($0) }
-        let lane = PixelArt.laneA
-        let head = frame % lane.count
-        if depth && state == .busy {
-            var glow = context
-            glow.addFilter(.blur(radius: pixel * 1.2))
-            glow.opacity = 0.7
-            glow.fill(rect(lane[head].x, lane[head].y), with: .color(Theme.busy))
-        }
-        if depth {
-            for cell in cells { context.fill(rect(cell.x + 1, cell.y + 1), with: .color(Theme.pixelShadow)) }
-            if state != .off {
-                for cell in PixelArt.markSmoothing { context.fill(rect(cell.x, cell.y), with: .color((cell.lit ? Theme.ink : Theme.inkDim).opacity(0.42))) }
-            }
-        }
-        for cell in cells {
-            var color: Color = cell.lit ? Theme.ink : Theme.inkDim
-            if cell.end && state == .waiting { color = Theme.waiting.opacity(frame % 2 == 1 ? 0.25 : 1) }
-            if cell.end && state == .error { color = Theme.failed }
-            context.fill(rect(cell.x, cell.y), with: .color(color))
-        }
-        if state == .busy {
-            let trail: [(Int, Double)] = depth ? [(0, 1), (1, 0.55), (2, 0.25)] : [(0, 1)] + (head + 1 < lane.count ? [(-1, 1)] : [])
-            for (back, alpha) in trail {
-                let cell = lane[(head - back + lane.count * 4) % lane.count]
-                context.fill(rect(cell.x, cell.y), with: .color(Theme.busy.opacity(alpha)))
-            }
-        }
+    private func paint(frame: Int) -> ShadedMarkPaint {
+        ShadedMarkPaint(
+            dark: scheme == .dark, depth: depth, glow: depth, off: state == .off,
+            end: state == .waiting ? Theme.waiting : state == .error ? Theme.failed : nil,
+            endLit: state == .waiting && frame % 2 == 1 ? 0.25 : 1,
+            block: state == .busy ? ShadedMarkPaint.block(at: frame, trail: depth) : [], busy: Theme.busy)
     }
 }
 
 /// A task's status in pixels: the braille spinner while it runs, a square while it waits (blinking) or once done,
 /// hollow once it ended otherwise (cancelled, incomplete, failed keep their colour).
+/// In the classic look: the system's spinner, a dot (its ring breathing while it waits), a ring.
 struct StatusMark: View {
     let status: TaskStatus
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         switch status {
         case .routing, .running: BrailleSpinner()
         case .queued, .cancelled, .other: PixelSprite(rows: PixelArt.hollow, pixel: 2, color: Theme.color(status))
-        case .waitingApproval: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink()
+        case .waitingApproval:
+            if look.isClassic { ClassicWaitingDot() } else { PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting).waitingBlink() }
         default: PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.color(status))
         }
     }
@@ -106,10 +150,13 @@ struct BrailleSpinner: View {
     var color: Color = Theme.busy
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
         Group {
-            if reduceMotion {
+            if look.isClassic {
+                ClassicSpinner()
+            } else if reduceMotion {
                 glyph(0)
             } else if scenePhase == .active {
                 TimelineView(.periodic(from: Motion.epoch, by: Motion.spinner)) { timeline in
@@ -134,12 +181,19 @@ struct SectionLabel: View {
 
     init(_ text: String) { self.text = text }
 
+    @Environment(\.interfaceLook) private var look
+
     var body: some View {
-        Text("// \(text)")
-            .font(.system(size: 11, design: .monospaced))
-            .tracking(1.4)
-            .foregroundStyle(.secondary)
-            .textCase(nil)
+        if look.isClassic {
+            // A plain small heading, as a standard app's group has.
+            Text(text).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary).textCase(nil)
+        } else {
+            Text("// \(text)")
+                .font(.system(size: 11, design: .monospaced))
+                .tracking(1.4)
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+        }
     }
 }
 
@@ -148,36 +202,26 @@ struct CharMeter: View {
     let fraction: Double
     var high = false
     var cells = 10
+    @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        let used = max(0, min(cells, Int((fraction * Double(cells)).rounded())))
-        (Text(String(repeating: "█", count: used)).foregroundStyle(high ? Theme.failed : Theme.done)
-            + Text(String(repeating: "░", count: cells - used)).foregroundStyle(Theme.inkDim))
-            .font(.system(size: 11, design: .monospaced))
-            .kerning(-0.5)
-            .accessibilityHidden(true)
-    }
-}
-
-/// A 1 px dotted rule (2 on, 2 off), where a divider would be.
-struct DottedRule: View {
-    var body: some View {
-        Canvas { context, size in
-            var x: CGFloat = 0
-            while x < size.width {
-                context.fill(Path(CGRect(x: x, y: 0, width: 2, height: 1)), with: .color(Theme.inkDim))
-                x += 4
-            }
+        if look.isClassic {
+            ClassicBar(fraction: fraction, color: high ? Theme.failed : Theme.done, width: CGFloat(cells) * 6.5)
+        } else {
+            let used = max(0, min(cells, Int((fraction * Double(cells)).rounded())))
+            (Text(String(repeating: "█", count: used)).foregroundStyle(high ? Theme.failed : Theme.done)
+                + Text(String(repeating: "░", count: cells - used)).foregroundStyle(Theme.inkDim))
+                .font(.system(size: 11, design: .monospaced))
+                .kerning(-0.5)
+                .accessibilityHidden(true)
         }
-        .frame(height: 1)
-        .accessibilityHidden(true)
     }
 }
 
-extension View {
-    /// Short words (states, labels, values): monospaced (§7.2.7).
-    func mono(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> some View {
-        font(.system(size: size, weight: weight, design: .monospaced))
+/// A 1 pt solid rule, where a divider would be (2026-10-03, user: 分割线也别弄虚线了，改成实线吧，看着累人; two on, two off before).
+struct HairRule: View {
+    var body: some View {
+        Theme.line.frame(height: 1).accessibilityHidden(true)
     }
 }
 

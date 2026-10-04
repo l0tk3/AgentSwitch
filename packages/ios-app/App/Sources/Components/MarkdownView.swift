@@ -2,7 +2,8 @@ import AgentSwitchKit
 import SwiftUI
 
 /// Model output rendered by blocks (AgentSwitchKit `Markdown`): headings, lists, quotes, code (CodeBlock) and tables,
-/// with inline Markdown inside each (its code on the code wash). Links open in the browser when tapped; images are never loaded, only their alt text shows.
+/// with inline Markdown inside each (its code on the code wash). A link tapped opens in the Mac's shared browser, on
+/// the Browser tab (RootView's `openURL`; Safari when the Mac has none); images are never loaded, only their alt text shows.
 struct MarkdownView: View {
     let text: String
 

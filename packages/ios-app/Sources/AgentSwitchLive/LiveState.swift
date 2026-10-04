@@ -82,15 +82,28 @@ public struct LiveState: Codable, Hashable, Sendable {
     /// Tasks and terminals waiting for you.
     public let waiting: Int
     public let ended: Ended?
+    /// The look the app is kept in (docs/ui-v0.md §8): true draws the activity as a standard app's. It rides with the
+    /// state because the widget extension reads none of the app's settings; nil (the pixel look) from an activity
+    /// saved before 2026-10-04.
+    public let classic: Bool?
 
-    public init(rows: [Row], running: Int, waiting: Int, ended: Ended? = nil) {
+    public init(rows: [Row], running: Int, waiting: Int, ended: Ended? = nil, classic: Bool? = nil) {
         self.rows = rows
         self.running = running
         self.waiting = waiting
         self.ended = ended
+        self.classic = classic
     }
 
     public static func finished(_ ended: Ended) -> LiveState { LiveState(rows: [], running: 0, waiting: 0, ended: ended) }
+
+    /// The same state, drawn in the classic look or the pixel one.
+    public func looking(classic: Bool) -> LiveState {
+        LiveState(rows: rows, running: running, waiting: waiting, ended: ended, classic: classic ? true : nil)
+    }
+
+    /// Whether it is drawn in the classic look.
+    public var isClassic: Bool { classic == true }
 
     public var phase: Phase { waiting > 0 ? .needsYou : rows.isEmpty && ended != nil ? .ended : .running }
     /// The row the island expands to: the one waiting for you, else the newest.

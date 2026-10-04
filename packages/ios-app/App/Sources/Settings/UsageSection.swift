@@ -85,7 +85,7 @@ private struct HarnessTile: View {
     let harness: String
 
     var body: some View {
-        PixelSprite(rows: PixelArt.agents[harness] ?? PixelArt.square, pixel: 3, color: Theme.ink)
+        PixelSprite(rows: PixelArt.agents[harness] ?? PixelArt.square, pixel: 3, color: Theme.ink, strength: 1, shadow: false, cell: 5.0 / 3)
             .frame(width: 24, height: 24)
             .accessibilityHidden(true)
     }
@@ -98,6 +98,7 @@ private struct Fixed<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        Text(widest).hidden().overlay(alignment: alignment) { content }
+        // Never cut short: in the classic look's proportional font a value may be a hair wider than `widest`.
+        Text(widest).hidden().overlay(alignment: alignment) { content.lineLimit(1).fixedSize() }
     }
 }

@@ -38,7 +38,7 @@ struct FeedEntry: View {
                     .contextMenu { menu }
                 if !task.status.isActive && !files.isEmpty { fileList }
                 ForEach(pending) { approval in
-                    DottedRule()
+                    HairRule()
                     ApprovalCard(approval: approval,
                                  onDecide: { decision in await model.decide(approval, decision) },
                                  onAnswer: { answers in await model.answer(approval, answers) })
@@ -117,7 +117,7 @@ struct FeedEntry: View {
             }
         }
         .padding(.horizontal, 10)
-        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+        .framed(Theme.line, radius: Theme.Radius.control)
     }
 
     private var title: String {

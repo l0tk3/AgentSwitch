@@ -3,7 +3,9 @@ import PhotosUI
 import SwiftUI
 
 /// One terminal on the phone (docs/terminal-v0.md §1): the live screen (drag to scroll — the wheel notches sent show at
-/// its right; pinch for the text size; tap to put the keyboard away), drawn in top down with a scanline as it comes,
+/// its right; pinch for the text size; tap to put the keyboard away; a tap on a link — an address, a path of the Mac's —
+/// opens it in the Mac's browser, a long press on one offers that, copying it and Safari), drawn in top down with a
+/// scanline as it comes,
 /// permission requests as cards over its top, the key bar and the reply box under it. A reply goes as typed (checked
 /// for secret-looking text first) or, from the lock, through the Mac's sealer in the sealed box; `/` lists the agent's
 /// commands; keys go by name. The menu renames or closes it (asked first; the record may go too). What needs you — a
@@ -12,6 +14,7 @@ struct TerminalPage: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.interfaceLook) private var look
     @AppStorage("terminal.fontSize") private var fontSize: Double = 10
     @State private var page: TerminalPageModel
     @State private var reply = ""
@@ -33,6 +36,11 @@ struct TerminalPage: View {
     /// Wheel notches sent in this drag (up positive), shown at the screen's right while it goes on.
     @State private var wheeled = 0
     @State private var wheelChipHides: Task<Void, Never>?
+    /// A link held: its menu (terminal-v0 §1 iPhone 链接, 2026-10-03).
+    @State private var linkMenu: LinkMenu?
+    /// Said over the screen for a moment (`Link Copied`).
+    @State private var said: String?
+    @State private var saidHides: Task<Void, Never>?
 
     /// The terminal as it was opened: where its agent worked until the list says otherwise.
     private let opened: TerminalInfo
@@ -46,12 +54,14 @@ struct TerminalPage: View {
     var body: some View {
         ZStack(alignment: .top) {
             TerminalScreen(controller: page.screen, onPinchEnded: { size in fontSize = Double(size) },
-                           onWheel: { up, count in wheel(up: up, count: count) }, onTap: { point in tapped(point) })
+                           onWheel: { up, count in wheel(up: up, count: count) }, onTap: { point in tapped(point) },
+                           onHold: { point in held(point) })
                 .padding(.horizontal, 6)
                 .background(page.ground)
                 .screenRefresh(on: page.snapshots, ground: page.ground)
                 .overlay(alignment: .trailing) { if wheeled != 0 { wheelChip } }
-                .overlay { if let place = page.away { awayCover(place) } }
+                .overlay(alignment: .bottom) { if let said { chip(said).padding(.bottom, 10) } }
+                .overlay { if let place = page.away { TerminalAwayCover(page: page, place: place) } }
             if !page.drawn && page.away == nil {
                 HStack(spacing: 6) {
                     BrailleSpinner(color: .secondary)
@@ -61,7 +71,7 @@ struct TerminalPage: View {
             }
             VStack(spacing: 10) {
                 ForEach(page.permissions) { p in
-                    if p.isQuestion { questionCard(p) } else { permissionCard(p) }
+                    if p.isQuestion { TerminalQuestionCard(page: page, permission: p) } else { TerminalPermissionCard(page: page, permission: p) }
                 }
             }
             .padding(.horizontal, Theme.Space.m)
@@ -89,7 +99,7 @@ struct TerminalPage: View {
                     .accessibilityHint(page.name)
                     HStack(spacing: 5) {
                         TerminalStatusMark(status: status)
-                        Text(page.permissions.isEmpty ? page.status.label : "Waiting").mono(11).foregroundStyle(.secondary)
+                        LookWord(page.permissions.isEmpty ? page.status.label : "Waiting").mono(11).foregroundStyle(.secondary)
                     }
                 }
                 .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
@@ -98,8 +108,8 @@ struct TerminalPage: View {
                 Menu {
                     Button("Rename", systemImage: "pencil") { newName = page.name; renaming = true }
                     Button("Close", systemImage: "xmark", role: .destructive) { if page.status == .exited && !canDeleteRecord { Task { await close() } } else { confirmClose = true } }
-                } label: { Text("⋯").mono(17) }
-                .tint(Theme.ink)
+                } label: { if look.isClassic { Image(systemName: "ellipsis.circle") } else { Text("⋯").mono(17) } }
+                .tint(look.isClassic ? Theme.signal : Theme.ink)
             }
         }
         .alert("Rename", isPresented: $renaming) {
@@ -115,6 +125,12 @@ struct TerminalPage: View {
                             message: "关闭「\(page.name)」？" + (canDeleteRecord ? "程序将结束并从列表移除。会话记录默认保留，之后可继续；删除记录后无法恢复。"
                                                                                : "程序将结束并从列表移除；会话记录保留，之后可继续。"),
                             actions: actions)
+        }
+        .pixelBox(item: $linkMenu) { menu in
+            let link = menu.hit.link
+            return PixelBox(head: link.text, cancel: nil,
+                            actions: link.actions.map { action in .init(label: action.label(for: link)) { run(action, on: menu.hit) } },
+                            anchor: menu.anchor, width: 264)
         }
         // Either way is an answer; a tap outside keeps the reply in the box.
         .pixelBox(item: $secretCheck) { text in
@@ -133,6 +149,8 @@ struct TerminalPage: View {
             case "terminalslash": reply = "/co"
             case "terminalkeyboard": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { replying = true }
             case "terminalclose": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { confirmClose = true }
+            // A link held, as a long press on the address in the demo's screen would open its menu.
+            case "terminallink": DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { holdFirstLink() }
             default: break
             }
             #endif
@@ -189,176 +207,79 @@ struct TerminalPage: View {
     /// Where the agent is now, from the list as last read (it follows a `cd`).
     private var workdir: String { model.terminals.terminals.first { $0.id == page.id }?.workdir ?? opened.workdir }
 
-    // MARK: permission requests
+    // MARK: the screen's taps (the cards over it are in TerminalCards.swift)
 
-    private func permissionCard(_ p: TerminalPermission) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.waiting)
-                Text("Permission · \(p.tool)").mono(12, weight: .semibold).foregroundStyle(Theme.waiting)
-            }
-            Text(p.detail).font(.callout.monospaced()).foregroundStyle(Theme.ink).lineLimit(6).textSelection(.enabled)
-            HStack(spacing: Theme.Space.m) {
-                Button("[ Deny ]") { Task { await page.decide(p, allow: false) } }.buttonStyle(SquareButtonStyle(destructive: true))
-                Button("[ Allow ]") { Task { await page.decide(p, allow: true) } }.buttonStyle(SquareButtonStyle(prominent: true))
-            }
-        }
-        .padding(14)
-        .background(Theme.base)
-        .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
-        // The floating layer's hard, dithered shadow (§7.3), not a blur.
-        .background(DitherShadow().offset(x: 6, y: 6))
-        .glitch(on: p.id, onAppear: true)
-    }
-
-    /// A question the agent asks (Claude Code's AskUserQuestion; docs/terminal-v0.md §3 "选择题", phone.html?ask;
-    /// 2026-10-01, user: 能不能hook的更精细，直接用这个框来选agent给的选项): no allow / deny — each question with its options
-    /// to tap, one (`< >` / `<x>`) or several (`[ ]` / `[x]`), and Other to write in; `[ Submit ]` once every question
-    /// has an answer. The agent gets them as its own dialog would give them, and that dialog closes.
-    private func questionCard(_ p: TerminalPermission) -> some View {
-        let picks = page.picks(p)
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                PixelSprite(rows: PixelArt.square, pixel: 2, color: .black)
-                Text("Question").mono(12, weight: .semibold)
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(Color.black)
-            .padding(.horizontal, 8)
-            .frame(minHeight: 24)
-            .background(Theme.waiting)
-            // Four questions of four options each may not fit over the screen: then they scroll.
-            ViewThatFits(in: .vertical) {
-                questions(p, picks)
-                ScrollView { questions(p, picks) }.frame(maxHeight: 420)
-            }
-            HStack {
-                Spacer()
-                Button("[ Submit ]") { Task { await page.answer(p) } }
-                    .buttonStyle(SquareButtonStyle(prominent: true, expand: false))
-                    .disabled(!picks.isComplete || page.answering.contains(p.id))
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
-        }
-        .background(Theme.base)
-        .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
-        .background(DitherShadow().offset(x: 6, y: 6))
-        .glitch(on: p.id, onAppear: true)
-    }
-
-    private func questions(_ p: TerminalPermission, _ picks: QuestionPicks) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(p.questions.enumerated()), id: \.offset) { i, q in
-                VStack(alignment: .leading, spacing: 0) {
-                    if !q.header.isEmpty { Text("// \(q.header)").mono(11).foregroundStyle(.secondary) }
-                    Text(q.question).font(.callout).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2).padding(.bottom, 4)
-                    ForEach(q.options, id: \.label) { o in
-                        let on = picks.isPicked(o.label, in: i)
-                        Button { page.updatePicks(p) { $0.pick(o.label, in: i) } } label: {
-                            choice(q, on: on) {
-                                Text(o.label).mono(13)
-                                if !o.description.isEmpty { Text(o.description).font(.caption).foregroundStyle(.secondary) }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    // Writing in Other picks it: in place of the option picked (one), or beside them (several).
-                    choice(q, on: picks.hasOther(in: i)) {
-                        TextField(q.options.isEmpty ? "Answer" : "Other",
-                                  text: Binding(get: { page.picks(p).other(in: i) }, set: { text in page.updatePicks(p) { $0.write(text, in: i) } }))
-                            .mono(13)
-                            .foregroundStyle(Theme.ink)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        DottedRule()
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 10)
-    }
-
-    /// One option's row: its mark — `< >` / `<x>` for one, `[ ]` / `[x]` for several (ui-v0 §7.2.6) — and what it says,
-    /// in ink once picked.
-    private func choice<Content: View>(_ q: TerminalQuestion, on: Bool, @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(q.multiSelect ? (on ? "[x]" : "[ ]") : (on ? "<x>" : "< >")).mono(13)
-            VStack(alignment: .leading, spacing: 2) { content() }
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(on ? Theme.ink : Color.secondary)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
-    /// A tap on the screen: a click there when the program tracks the mouse (Claude Code's full screen: its options,
-    /// its links), the keyboard staying as it is; else the keyboard goes away.
+    /// A tap on the screen: on a link (or within a finger's slop of one), it opens in the Mac's browser — also when the
+    /// program tracks the mouse, which would only get a click it has no use for. Else a click there when the program
+    /// tracks the mouse (Claude Code's full screen: its options), the keyboard staying as it is; else the keyboard goes
+    /// away.
     private func tapped(_ point: CGPoint) {
         page.userActed()
-        if let cell = page.screen.clickCell(at: point) {
+        if let hit = page.screen.link(at: point, workdir: workdir, tap: true) {
+            page.screen.flash(hit)
+            run(.openInBrowser, on: hit)
+        } else if let cell = page.screen.clickCell(at: point) {
             Task { await page.click(col: cell.col, row: cell.row) }
         } else {
             replying = false
         }
     }
 
-    // MARK: in use elsewhere
-
-    /// The terminal is in use on another screen (terminal-v0 §1 "不在用的一端显示占位", phone.html?away): the frame as it
-    /// was behind a 50 % dither, a box saying where, glitching in; a tap anywhere takes the size back here.
-    private func awayCover(_ place: String) -> some View {
-        let (head, line) = Self.awayCopy[place] ?? ("On Web", "这个终端正在浏览器中使用。")
-        return ZStack {
-            page.ground.opacity(0.45)
-            CheckerTile(color: page.screen.view.nativeBackgroundColor)
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 6) {
-                    PixelSprite(rows: PixelArt.square, pixel: 2, color: Theme.base)
-                    Text(head).mono(12, weight: .semibold)
-                }
-                .foregroundStyle(Theme.base)
-                .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                .background(Theme.ink)
-                Text(line).font(.callout).foregroundStyle(Theme.ink)
-                    .padding(.horizontal, 12).padding(.top, 12)
-                HStack {
-                    Spacer()
-                    Button("[ Take Over ]") { page.claim() }.buttonStyle(SquareButtonStyle(prominent: true))
-                }
-                .padding(12)
-            }
-            .background(Theme.base)
-            .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
-            .background(DitherShadow().offset(x: 6, y: 6))
-            .padding(.horizontal, 28)
-            .glitch(on: place, onAppear: true)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { page.claim() }
+    /// A press held on a link: its menu by it (its whole address, then Open in Browser, Copy Link, Open in Safari).
+    private func held(_ point: CGPoint) {
+        guard let hit = page.screen.link(at: point, workdir: workdir) else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        page.screen.flash(hit)
+        linkMenu = LinkMenu(hit: hit, anchor: page.screen.frame(of: hit))
     }
 
-    private static let awayCopy: [String: (String, String)] = [
-        "mac": ("On Mac", "这个终端正在 Mac 上使用。"),
-        "iphone": ("On iPhone", "这个终端正在另一台 iPhone 上使用。"),
-        "web": ("On Web", "这个终端正在浏览器中使用。"),
-    ]
+    /// One of a link's actions. A copy is said on the screen for a moment; a link that did not open in the Mac's
+    /// browser says why in the page's line.
+    private func run(_ action: LinkAction, on hit: ScreenLink) {
+        Task {
+            guard let words = await model.perform(action, on: hit.link, alternates: hit.alternates) else { return }
+            if action == .copy { say(words) } else { page.error = words }
+        }
+    }
+
+    private func say(_ words: String) {
+        said = words
+        saidHides?.cancel()
+        saidHides = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1400))
+            if !Task.isCancelled { said = nil }
+        }
+    }
+
+    #if DEBUG
+    /// The demo's long press: the first address on the screen.
+    private func holdFirstLink() {
+        let links = page.screen.links(workdir: workdir)
+        guard let hit = links.first(where: { if case .web = $0.link { true } else { false } }) ?? links.first else { return }
+        page.screen.flash(hit)
+        linkMenu = LinkMenu(hit: hit, anchor: page.screen.frame(of: hit))
+    }
+    #endif
+
+    private struct LinkMenu: Equatable {
+        let hit: ScreenLink
+        let anchor: CGRect
+    }
 
     /// `Wheel ↑ 3`: what this drag has sent, gone 0.7 s after the last notch.
     private var wheelChip: some View {
-        Text("Wheel \(wheeled > 0 ? "↑" : "↓") \(abs(wheeled))")
+        chip("Wheel \(wheeled > 0 ? "↑" : "↓") \(abs(wheeled))").padding(.trailing, 8).accessibilityHidden(true)
+    }
+
+    /// A few words over the screen for a moment: the wheel's notches, `Link Copied`.
+    private func chip(_ words: String) -> some View {
+        Text(words)
             .mono(11)
             .foregroundStyle(Color(white: 0.91))
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Color.black)
             .overlay(Rectangle().strokeBorder(Color(white: 0.91), lineWidth: 1))
-            .padding(.trailing, 8)
             .allowsHitTesting(false)
-            .accessibilityHidden(true)
     }
 
     private func wheel(up: Bool, count: Int) {
@@ -390,12 +311,12 @@ struct TerminalPage: View {
                     .padding(.horizontal, Theme.Space.l).padding(.vertical, 8)
                     .background(Theme.raised)
             }
-            DottedRule()
+            HairRule()
             if let error = page.error {
                 HStack {
                     Text(error).font(.footnote).foregroundStyle(Theme.failed).lineLimit(2)
                     Spacer()
-                    Button { page.error = nil } label: { Text("×").mono(15) }.buttonStyle(.plain).foregroundStyle(.secondary)
+                    Button { page.error = nil } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 15) }.buttonStyle(.plain).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, Theme.Space.l).padding(.top, 6)
                 .glitch(on: error, onAppear: true)
@@ -438,18 +359,19 @@ struct TerminalPage: View {
         VStack(alignment: .leading, spacing: 0) {
             if !page.draftFiles.isEmpty { draftStrip }
             if sealing {
+                // The head: black on the signal colour; in the classic look the lock in the accent and plain words.
                 HStack(spacing: 8) {
-                    PixelSprite(rows: PixelArt.lock, pixel: 2, color: .black)
-                    Text("Sealed → \(page.name)").mono(12).lineLimit(1)
+                    PixelSprite(rows: PixelArt.lock, pixel: 2, color: look.isClassic ? Theme.signal : .black, strength: 1, shadow: false, picture: .lockSmall, onDark: false)
+                    Text("Sealed → \(page.name)").mono(12, weight: look.isClassic ? .semibold : .regular).lineLimit(1)
                     Spacer(minLength: 4)
-                    Button { toggleSealing() } label: { Text("×").mono(15).frame(width: 28, height: 26) }
+                    Button { toggleSealing() } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 15).frame(width: 28, height: 26) }
                         .buttonStyle(.plain)
                         .accessibilityLabel("cancel")
                 }
-                .foregroundStyle(.black)
-                .padding(.leading, 8)
-                .frame(height: 26)
-                .background(Theme.signal)
+                .foregroundStyle(look.isClassic ? Theme.ink : .black)
+                .padding(.leading, look.isClassic ? 12 : 8)
+                .frame(height: look.isClassic ? 34 : 26)
+                .background(look.isClassic ? Color.clear : Theme.signal)
             }
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
                 if !sealing {
@@ -462,14 +384,19 @@ struct TerminalPage: View {
                         Button("Files", systemImage: "folder") { replying = false; pickingFiles = true }
                         Button("Paste Image", systemImage: "doc.on.clipboard") { pasteImages() }
                     } label: {
-                        Text("+").font(.system(size: 20, weight: .regular, design: .monospaced)).foregroundStyle(Theme.ink.opacity(0.72))
-                            .frame(width: 38, height: 38)
-                            .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                        if look.isClassic {
+                            Image(systemName: "plus.circle").font(.system(size: 26, weight: .light)).foregroundStyle(Theme.ink.opacity(0.72))
+                                .frame(width: 34, height: 38)
+                        } else {
+                            Text("+").font(.system(size: 20, weight: .regular, design: .monospaced)).foregroundStyle(Theme.ink.opacity(0.72))
+                                .frame(width: 38, height: 38)
+                                .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+                        }
                     }
                     .tint(Theme.ink)
                     .disabled(page.sending || page.status == .exited)
                     .accessibilityLabel("attach")
-                    Button { toggleSealing() } label: { PixelSprite(rows: PixelArt.lock, pixel: 3, color: Theme.signal) }
+                    Button { toggleSealing() } label: { PixelSprite(rows: PixelArt.lock, pixel: 3, color: Theme.signal, strength: 1) }
                         .buttonStyle(SquareIconButtonStyle(active: false))
                         .accessibilityLabel("sealed reply")
                 }
@@ -479,9 +406,11 @@ struct TerminalPage: View {
                     .focused($replying)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, look.isClassic && !sealing ? 14 : 12)
                     .padding(.vertical, 9)
-                    .overlay(Rectangle().strokeBorder(sealing ? Color.clear : Theme.line, lineWidth: 1))
+                    // A framed line; a round field on its own ground in the classic look.
+                    .grounded(look.isClassic && !sealing ? Theme.raised : Color.clear, radius: Theme.Radius.bubble)
+                    .framed(sealing || look.isClassic ? Color.clear : Theme.line, radius: Theme.Radius.bubble)
                 if !sealing {
                     Button { Task { await sendDirect() } } label: { sendLabel }
                         .buttonStyle(SquareIconButtonStyle(active: canSend || page.sending))
@@ -496,7 +425,7 @@ struct TerminalPage: View {
                     Text("凭据在 Mac 上换成密文后再交给 agent").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 4)
                     Button { Task { await send(reply, sealed: true) } } label: {
-                        if page.sending { BrailleSpinner(color: Theme.base) } else { Text("[ Send ]") }
+                        if page.sending { BrailleSpinner(color: Theme.base) } else { ButtonWord("Send") }
                     }
                     .buttonStyle(SquareButtonStyle(prominent: true))
                     .fixedSize()
@@ -506,8 +435,9 @@ struct TerminalPage: View {
                 .padding(.vertical, 10)
             }
         }
-        .background(sealing ? Theme.base : Color.clear)
-        .overlay(Rectangle().strokeBorder(sealing ? Theme.ink : Color.clear, lineWidth: 1))
+        // The sealed box: an ink frame over a dithered shadow; a round card in the classic look.
+        .grounded(sealing ? (look.isClassic ? Theme.panel : Theme.base) : Color.clear, radius: 14)
+        .framed(sealing ? (look.isClassic ? Theme.line : Theme.ink) : Color.clear, radius: 14)
         .background(DitherShadow().offset(x: 6, y: 6).opacity(sealing ? 1 : 0))
         .glitch(on: sealing)
         .padding(.leading, sealing ? Theme.Space.l : 0)
@@ -554,7 +484,8 @@ struct TerminalPage: View {
                             reply = TerminalDraft.remove(d.token, from: reply)
                             page.removeDraftFile(d)
                         } label: {
-                            Text("×").mono(12).foregroundStyle(Theme.base).frame(width: 18, height: 18).background(Theme.ink)
+                            LookGlyph(glyph: "×", symbol: "xmark", size: 12).foregroundStyle(Theme.base).frame(width: 18, height: 18)
+                                .grounded(Theme.ink, radius: 9)
                         }
                         .buttonStyle(.plain)
                         .offset(x: 6, y: -6)
@@ -575,7 +506,13 @@ struct TerminalPage: View {
 
     @ViewBuilder
     private var sendLabel: some View {
-        if page.sending { BrailleSpinner(color: Theme.base) } else { Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced)) }
+        if page.sending {
+            BrailleSpinner(color: Theme.base)
+        } else if look.isClassic {
+            Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold))
+        } else {
+            Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced))
+        }
     }
 
     // MARK: slash commands
@@ -636,47 +573,6 @@ struct TerminalPage: View {
         if await page.close(deleteRecord: deleteRecord) {
             model.terminals.remove(page.id)
             dismiss()
-        }
-    }
-}
-
-/// A key on the bar: a small square cap with a 3 pt base; pressed, it sinks 2 pt onto a 1 pt base (the demo page's
-/// key caps). The browser page's key bar uses the same caps.
-struct KeyCapStyle: ButtonStyle {
-    /// The one key that stands out (⏎): ink ground, the base colour's letters, a wider cap.
-    var solid = false
-    /// Narrower caps, for a bar that holds a long key too (the browser page's).
-    var compact = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        let pressed = configuration.isPressed
-        configuration.label
-            .foregroundStyle(solid ? Theme.base : Theme.ink)
-            .frame(minWidth: compact ? (solid ? 36 : 26) : (solid ? 46 : 34))
-            .padding(.horizontal, compact ? 5 : 6)
-            .padding(.top, 6)
-            .padding(.bottom, pressed ? 6 : 8)
-            .background(solid ? (pressed ? Theme.secondaryInk : Theme.ink) : (pressed ? Theme.line : Theme.raised))
-            .overlay(Rectangle().strokeBorder(solid ? Theme.ink : Theme.line, lineWidth: 1))
-            .overlay(alignment: .bottom) { (solid ? Theme.secondaryInk : Theme.inkDim).frame(height: pressed ? 1 : 3) }
-            .offset(y: pressed ? 2 : 0)
-            .padding(.bottom, pressed ? 2 : 0)
-    }
-}
-
-/// A 1 pt checker in `color`, tiled from one small image (a Canvas over the whole screen would draw a cell at a time).
-private struct CheckerTile: View {
-    let color: UIColor
-
-    var body: some View {
-        Image(uiImage: Self.tile(color)).resizable(resizingMode: .tile).allowsHitTesting(false).accessibilityHidden(true)
-    }
-
-    static func tile(_ color: UIColor) -> UIImage {
-        UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
-            color.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
-            context.fill(CGRect(x: 1, y: 1, width: 1, height: 1))
         }
     }
 }

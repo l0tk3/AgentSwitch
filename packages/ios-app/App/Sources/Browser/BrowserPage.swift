@@ -4,8 +4,9 @@ import SwiftUI
 /// One tab on the phone (docs/browser-v0.md §1, demo page `docs/design/implemented/browser.html`): the address on top (the
 /// lock and the place; tap to edit) with `⋯` (Copy URL, Reload, Close Tab); under it who holds the tab — the agent and
 /// what it is doing, or `You`; the live picture, the agent's last action outlined on it; the bar at the bottom — `‹ ›
-/// ↻`, the keyboard, and on an agent's tab `[ Take Over ]` / `[ Hand Back ]`. Typing brings the system keyboard and the
-/// key bar (`esc tab ⏎ ⌫ ← →`, as the terminal page's caps, and on your own tabs `⚿ Fill Ciphertext`).
+/// ↻`, the keyboard, the zoom (`100%`), and on an agent's tab `[ Take Over ]` / `[ Hand Back ]`. Typing brings the
+/// system keyboard and the key bar (`esc tab ⏎ ⌫ ← →`, as the terminal page's caps, and on your own tabs `⚿ Fill
+/// Ciphertext`); the zoom key opens the zoom row in its place (`− 100% +`, BrowserZoomBar).
 struct BrowserPage: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +22,12 @@ struct BrowserPage: View {
     /// On screen (another tab of the app hides it without leaving it): only then does coming back to the app restart
     /// the stream.
     @State private var visible = false
+    /// The zoom row is open over the bar (browser-v0 §1 页面缩放, 2026-10-03): never together with the key bar, closed
+    /// when the page is left.
+    @State private var zooming = false
+    /// The link's speed the picture was last asked by (Tailscale; nil: not measured, or it told nothing): a new zoom
+    /// asks again by the same.
+    @State private var mbps: Double?
 
     init(tab: BrowserTabInfo) {
         _page = State(initialValue: BrowserPageModel(tab: tab))
@@ -30,7 +37,7 @@ struct BrowserPage: View {
         let store = model.browser
         VStack(spacing: 0) {
             holderLine
-            DottedRule()
+            HairRule()
             screenArea
         }
         .background { Theme.base.ignoresSafeArea() }
@@ -45,26 +52,57 @@ struct BrowserPage: View {
         .onAppear {
             visible = true
             page.agentName = model.agentName(of: page.tab.owner)
-            page.start(model.api, options: streamOptions)
+            page.store = model.browser
+            let known = model.browser.knownSpeed(on: model.connection.endpoint) ?? nil
+            mbps = known
+            page.start(model.api, options: streamOptions(mbps: known))
+            measure()
             #if DEBUG
-            if UserDefaults.standard.string(forKey: "uiDemoScreen") == "browserclose" {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { confirmClose = true }
+            switch UserDefaults.standard.string(forKey: "uiDemoScreen") {
+            case "browserclose": DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { confirmClose = true }
+            // After the page has slid in and its picture is drawn, as a tap on the zoom key would; on codex's tab,
+            // only watched, two more on `+` (the picture at 150%).
+            case "browserzoom": DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { zooming = true }
+            case "browserzoomwatch":
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    zooming = true
+                    page.zoomIn()
+                    page.zoomIn()
+                }
+            default: break
             }
             #endif
         }
         .onDisappear {
             visible = false
+            zooming = false
             page.stop()
         }
         // In the background the stream ends and the tab goes back; in front again, the stream comes back.
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background: page.stop()
-            case .active: if visible { page.resume() }
+            case .active:
+                if visible {
+                    page.resume()
+                    measure()
+                }
             default: break
             }
         }
-        .onChange(of: page.closed) { if page.closed != nil { model.browser.remove(page.id) } }
+        .onChange(of: page.closed) {
+            if page.closed != nil {
+                zooming = false
+                model.browser.remove(page.id)
+            }
+        }
+        // The zoom this phone sets the page at changes what the stream asks (a page zoomed in is fewer CSS pixels
+        // across the same screen, one zoomed out more): asked again, as after a measure.
+        .onChange(of: page.streamZoom) { page.retune(streamOptions(mbps: mbps)) }
+        // The zoom row and the key bar never show together: a keyboard coming up (the page's, the address bar's)
+        // closes the row.
+        .onChange(of: page.typing) { if page.typing { zooming = false } }
+        .onChange(of: editing) { if editing { zooming = false } }
         .pixelBox(isPresented: $confirmClose) {
             PixelBox(head: "Close Tab", tone: .red,
                      message: "关闭「\(page.tab.displayTitle)」？\(page.agentName) 正在使用此标签，关闭后它对此标签的操作将失败。",
@@ -76,13 +114,27 @@ struct BrowserPage: View {
         .sheet(isPresented: $makingCiphertext) { NavigationStack { CiphertextsView() } }
     }
 
-    /// What the stream asks for on this link (a relay gets fewer, smaller frames).
-    private var streamOptions: BrowserStreamOptions {
-        let endpoint = model.connection.endpoint
-        let seconds = model.routeReport?.reports.first { $0.endpoint == endpoint && $0.outcome == .ok }?.seconds
+    /// What the stream asks for on this link: the local network the screen's device pixels; Tailscale by the speed
+    /// measured (browser-v0 §1 iPhone; `mbps` nil — not measured yet, or nothing to tell — the slow way); either way
+    /// times the zoom this phone sets the page at.
+    private func streamOptions(mbps: Double?) -> BrowserStreamOptions {
         let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen }.first
         let pixels = screen.map { CGSize(width: $0.bounds.width * $0.scale, height: $0.bounds.height * $0.scale) }
-        return BrowserStreamPolicy.options(kind: endpoint?.kind, probeSeconds: seconds, screenPixels: pixels)
+        return BrowserStreamPolicy.options(kind: model.connection.endpoint?.kind, mbps: mbps, screenPixels: pixels, screenScale: screen.map { Double($0.scale) },
+                                           zoom: page.streamZoom)
+    }
+
+    /// Over Tailscale: the link measured (or the measure from the last minute on this address), and the stream asked
+    /// again when the picture it allows differs from the one asked for.
+    private func measure() {
+        let endpoint = model.connection.endpoint
+        guard BrowserStreamPolicy.measures(endpoint?.kind) else { return }
+        Task {
+            let measured = await model.browser.speed(model.api, on: endpoint)
+            guard visible, model.connection.endpoint == endpoint else { return }
+            mbps = measured
+            page.retune(streamOptions(mbps: measured))
+        }
     }
 
     // MARK: the address
@@ -117,7 +169,7 @@ struct BrowserPage: View {
                         if page.tab.loading {
                             BrailleSpinner(color: .secondary)
                         } else if shown.secure {
-                            PixelSprite(rows: PixelArt.lock, pixel: 2, color: .secondary)
+                            PixelSprite(rows: PixelArt.lock, pixel: 2, color: .secondary, strength: 0.7, shadow: false, picture: .lockSmall)
                         }
                         Text(shown.text.isEmpty ? "about:blank" : shown.text).mono(12).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 0)
@@ -133,7 +185,7 @@ struct BrowserPage: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .frame(minWidth: 230, maxWidth: .infinity)
-        .overlay(Rectangle().strokeBorder(Theme.line, lineWidth: 1))
+        .framed(Theme.line, radius: Theme.Radius.control)
     }
 
     private var menu: some View {
@@ -144,7 +196,7 @@ struct BrowserPage: View {
             Button("Close Tab", systemImage: "xmark", role: .destructive) {
                 if page.tab.owner.isAgent { confirmClose = true } else { Task { await close() } }
             }
-        } label: { Text("⋯").mono(17) }
+        } label: { LookGlyph.more }
         .tint(Theme.ink)
     }
 
@@ -167,7 +219,7 @@ struct BrowserPage: View {
                 Spacer(minLength: 6)
                 if tab.owner.isAgent { Text(tab.owner.label).mono(11).foregroundStyle(.tertiary).lineLimit(1) }
             } else if tab.owner.isAgent {
-                PixelSprite(rows: PixelArt.agents[model.harness(of: tab.owner) ?? ""] ?? PixelArt.square, pixel: 2, color: .secondary)
+                PixelSprite(rows: PixelArt.agents[model.harness(of: tab.owner) ?? ""] ?? PixelArt.square, pixel: 2, color: .secondary, strength: 0.8, shadow: false)
                 Text(tab.owner.label).mono(11).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
                 agentDoing(tab)
@@ -234,7 +286,7 @@ struct BrowserPage: View {
                     if page.connection == .reconnecting { chip { BrailleSpinner(color: .secondary); Text("Reconnecting") } }
                     Spacer()
                     if page.zoom.isZoomed {
-                        Button { page.resetZoom() } label: { chip { Text(String(format: "%.1f×", page.zoom.scale)); Text("×").foregroundStyle(.secondary) } }
+                        Button { page.resetZoom() } label: { chip { Text(page.zoom.times); Text("×").foregroundStyle(.secondary) } }
                             .buttonStyle(.plain)
                             .accessibilityLabel("恢复原始大小")
                     }
@@ -254,7 +306,7 @@ struct BrowserPage: View {
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Theme.base)
-            .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
+            .framed(Theme.ink, radius: Theme.Radius.card)
     }
 
     /// The tab is gone (closed elsewhere, the browser quit): why, over the last picture, dithered.
@@ -276,12 +328,12 @@ struct BrowserPage: View {
                     .padding(.horizontal, 12).padding(.top, 12)
                 HStack {
                     Spacer()
-                    Button("[ Back ]") { dismiss() }.buttonStyle(SquareButtonStyle(prominent: true, expand: false))
+                    Button { dismiss() } label: { ButtonWord("Back") }.buttonStyle(SquareButtonStyle(prominent: true, expand: false))
                 }
                 .padding(12)
             }
             .background(Theme.base)
-            .overlay(Rectangle().strokeBorder(Theme.ink, lineWidth: 1))
+            .framed(Theme.ink, radius: Theme.Radius.card)
             .background(DitherShadow().offset(x: 6, y: 6))
             .padding(.horizontal, 28)
             .glitch(on: reason, onAppear: true)
@@ -300,14 +352,19 @@ struct BrowserPage: View {
                     Text(words).font(.footnote).foregroundStyle(page.error != nil ? Theme.failed : Color.secondary).lineLimit(3)
                     Spacer()
                     if page.error != nil {
-                        Button { page.error = nil } label: { Text("×").mono(15) }.buttonStyle(.plain).foregroundStyle(.secondary)
+                        Button { page.error = nil } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 15) }.buttonStyle(.plain).foregroundStyle(.secondary)
                             .accessibilityLabel("close")
                     }
                 }
                 .padding(.horizontal, Theme.Space.l).padding(.vertical, 6)
                 .glitch(on: words, onAppear: true)
             }
-            if page.typing { keyBar(store) }
+            if page.typing {
+                keyBar(store)
+            } else if zooming {
+                BrowserZoomBar(percent: page.zoomPercent, canZoomOut: page.canZoomOut, canZoomIn: page.canZoomIn, pictureOnly: !page.zoomsPage,
+                               onOut: { page.zoomOut() }, onReset: { page.zoomToStandard() }, onIn: { page.zoomIn() })
+            }
             Theme.line.frame(height: 1)
             bottomBar
         }
@@ -335,7 +392,7 @@ struct BrowserPage: View {
                         if model.ciphertexts.isEmpty { makingCiphertext = true } else { pickingCiphertext = true }
                     } label: {
                         HStack(spacing: 5) {
-                            PixelSprite(rows: PixelArt.lock, pixel: 2, color: Theme.signal)
+                            PixelSprite(rows: PixelArt.lock, pixel: 2, color: Theme.signal, strength: 0.9, shadow: false, picture: .lockSmall)
                             Text("Fill Ciphertext").mono(12)
                         }
                         .foregroundStyle(Theme.signal)
@@ -352,13 +409,14 @@ struct BrowserPage: View {
         .background(Theme.raised.opacity(0.5))
     }
 
-    /// `‹ › ↻`, the keyboard, and `[ Take Over ]` / `[ Hand Back ]` where the tab is an agent's or another screen's.
+    /// `‹ › ↻`, the keyboard, the zoom, and `[ Take Over ]` / `[ Hand Back ]` where the tab is an agent's or another
+    /// screen's.
     private var bottomBar: some View {
         let tab = page.tab
         let showsHold = tab.owner.isAgent || page.heldElsewhere != nil
-        // With the hold button the four keys keep a cap's width and it takes the rest (the demo's 5 columns, the action
-        // over two); without it they share the bar.
-        let key: CGFloat? = showsHold ? 52 : nil
+        // With the hold button the five keys keep a fixed width and it takes the rest — narrow enough to leave it room
+        // on a 375 pt phone (52 while there were four); without it they share the bar.
+        let key: CGFloat? = showsHold ? 46 : nil
         return HStack(spacing: 0) {
             barButton("‹", label: "back", width: key) { Task { await page.history(.back) } }
             barButton("›", label: "forward", width: key) { Task { await page.history(.forward) } }
@@ -375,12 +433,13 @@ struct BrowserPage: View {
             .foregroundStyle(page.canDrive ? Theme.ink : Theme.inkDim)
             .disabled(!page.canDrive)
             .accessibilityLabel("keyboard")
+            zoomKey(width: key)
             if showsHold {
                 Group {
                     if page.mine {
-                        Button("[ Hand Back ]") { Task { await page.handBack() } }
+                        Button { Task { await page.handBack() } } label: { ButtonWord("Hand Back") }
                     } else {
-                        Button("[ Take Over ]") { Task { await page.takeOver() } }
+                        Button { Task { await page.takeOver() } } label: { ButtonWord("Take Over") }
                     }
                 }
                 .buttonStyle(HoldButtonStyle(waiting: tab.status == .waiting && !page.mine))
@@ -390,6 +449,25 @@ struct BrowserPage: View {
         }
         .padding(.horizontal, 6)
         .frame(height: 46)
+    }
+
+    /// The zoom in force (browser-v0 §1 页面缩放, 2026-10-03): the page's while this phone sizes the tab, the picture's
+    /// while it only watches — in the signal colour when it is not 100%. Opens and closes the zoom row; the keyboard
+    /// goes as it opens.
+    private func zoomKey(width: CGFloat?) -> some View {
+        let percent = page.zoomPercent
+        let closed = page.closed != nil
+        return Button {
+            editing = false
+            page.typing = false
+            zooming.toggle()
+        } label: {
+            Text("\(percent)%").mono(12).frame(minWidth: width, maxWidth: width ?? .infinity, minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(closed ? Theme.inkDim : percent == BrowserPageZoom.standard ? Theme.ink : Theme.signal)
+        .disabled(closed)
+        .accessibilityLabel("缩放 \(percent)%")
     }
 
     private func barButton(_ glyph: String, label: String, width: CGFloat?, action: @escaping () -> Void) -> some View {

@@ -40,7 +40,7 @@ struct AttachmentStrip: View {
             .background(Color(.secondarySystemBackground))
             .clipShape(Rectangle())
             Button { model.removeAttachment(item.id) } label: {
-                Text("×").mono(14, weight: .bold).foregroundStyle(.white).frame(width: 20, height: 20).background(Color.black.opacity(0.7))
+                LookGlyph(glyph: "×", symbol: "xmark", size: 14).fontWeight(.bold).foregroundStyle(.white).frame(width: 20, height: 20).background(Color.black.opacity(0.7))
             }
             .offset(x: 6, y: -6)
             .accessibilityLabel("移除 \(item.file.name)")

@@ -4,11 +4,14 @@ import SwiftUI
 /// Ended and not opened yet (control-v0 §5): a small signal-coloured square at the trailing end, so it is never
 /// mistaken for the status mark. No new status colour.
 struct UnreadDot: View {
+    @Environment(\.interfaceLook) private var look
+
     var body: some View {
-        Rectangle()
-            .fill(Theme.signal)
-            .frame(width: 6, height: 6)
-            .accessibilityLabel("未读")
+        Group {
+            if look.isClassic { Circle().fill(Theme.signal) } else { Rectangle().fill(Theme.signal) }
+        }
+        .frame(width: look.isClassic ? 8 : 6, height: look.isClassic ? 8 : 6)
+        .accessibilityLabel("未读")
     }
 }
 

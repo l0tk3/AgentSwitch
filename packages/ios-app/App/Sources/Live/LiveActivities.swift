@@ -37,7 +37,10 @@ final class LiveActivities: @unchecked Sendable {
     /// Whether iOS lets this app show Live Activities (the user can turn them off per app).
     var allowed: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
 
-    func sync(_ state: LiveState?, ended: LiveState.Ended?, macName: String) async {
+    func sync(_ summary: LiveState?, ended: LiveState.Ended?, macName: String) async {
+        // The look rides with the state: the widget extension reads none of the app's settings (docs/ui-v0.md §8).
+        let classic = InterfaceLook.current.isClassic
+        let state = summary?.looking(classic: classic)
         guard enabled else { return }
         guard allowed else { Self.log.notice("Live Activities are off for this app in iOS settings"); return }
         let live = { Activity<AgentActivityAttributes>.activities.filter { $0.activityState == .active || $0.activityState == .stale } }
@@ -71,7 +74,7 @@ final class LiveActivities: @unchecked Sendable {
     private func endAll(_ ended: LiveState.Ended?) async {
         for activity in Activity<AgentActivityAttributes>.activities {
             if let ended {
-                let content = ActivityContent(state: LiveState.finished(ended), staleDate: nil)
+                let content = ActivityContent(state: LiveState.finished(ended).looking(classic: InterfaceLook.current.isClassic), staleDate: nil)
                 await activity.end(content, dismissalPolicy: .after(Date().addingTimeInterval(Self.lingerAfterEnd)))
             } else {
                 await activity.end(nil, dismissalPolicy: .immediate)
