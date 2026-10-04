@@ -30,7 +30,7 @@ h1 b { color: var(--signal); font-weight: 700; }
 .how code { color: var(--ink2); }
 section { margin-top: 30px; }
 .sh { display: flex; align-items: baseline; gap: 12px; padding-bottom: 8px; margin-bottom: 14px;
-  background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px) bottom / 100% 1px no-repeat; }
+  background: linear-gradient(var(--ink4), var(--ink4)) bottom / 100% 1px no-repeat; }
 .sh h2 { margin: 0; font: 600 12px var(--mono); letter-spacing: .08em; color: var(--ink2); }
 .sh span { color: var(--ink3); font-size: 12px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
@@ -63,6 +63,10 @@ const PAGES = [
     say: "规则、深浅两套颜色、标记与抖动、字，Mac 菜单栏下拉与 iPhone 的 Dispatch / Terminals 两个标签页（Dispatch 里的代码块）。" },
   { group: "built", file: "implemented/mac-window.html", name: "Mac 主窗口", when: "2026-10-02",
     say: "Dispatch 与 Terminals 两页、换页的扫描线刷新、Dispatch 页（对话与输入框，代码块与 Copy）、任务页、+ 菜单，设置窗口的 Dispatch 组。" },
+  { group: "built", file: "implemented/window-bars.html", name: "主窗口的图标栏与状态栏", when: "2026-10-03",
+    say: "左侧图标栏切换三页（已定提议 B），顶栏只放当前页的东西，横跨窗口的状态栏：左边网关与手机，右边当前页的上下文与 Encrypt & Send、Take Over。与改之前、提议 A 对照，附查到的规范。代码已做，待安装。" },
+  { group: "built", file: "implemented/split.html", name: "终端分屏", when: "2026-10-03",
+    say: "Mac 的 Terminals 页把终端区分成几块：拖分隔线调大小，把目录树里的终端或会话拖到某一块（中间打开、四边分出新块），点选在当前块打开，⌘D / ⌘⇧D、⌘⌥ 方向键、⌘⇧↩ 放大。代码已做，待安装。" },
   { group: "built", file: "implemented/terminal.html", name: "终端窗口", when: "2026-09-30",
     say: "目录树侧栏（按真实层级嵌套）、新建面板、权限请求、加密发送、搜索、git、子代理、会话的文件夹不在了时选新文件夹继续；Mac 终端页与网页终端页。" },
   { group: "built", file: "implemented/phone.html", name: "iPhone 终端", when: "2026-09-30",
@@ -76,7 +80,11 @@ const PAGES = [
   { group: "built", file: "implemented/depth.html", name: "像素的层次", when: "2026-09-29",
     say: "硬阴影、台阶补半亮、挤出、LCD 次像素：各用在哪、不用在哪；应用图标由此而来。" },
   { group: "built", file: "implemented/browser.html", name: "浏览器", when: "2026-10-02",
-    say: "Mac 上服务持有的浏览器：手机与 Mac 实时查看、接手，Codex 等 agent 经凭据网关操作同一个标签；本地网页与 localhost。代码已做，待安装。" },
+    say: "Mac 上服务持有的浏览器：手机与 Mac 实时查看、接手，Codex 等 agent 经凭据网关操作同一个标签；本地网页与 localhost；页面缩放（Mac 状态栏最右边的 − 100% +，手机底栏的比例键与缩放条，两端都可以直接调）。代码已做，待安装。" },
+  { group: "concept", file: "concepts/classic.html", name: "经典外观", when: "2026-10-03",
+    say: "设置里可选的另一套外观：系统字体、圆角、线性图标、标准按钮与圆点状态，给不喜欢像素风的人。和现在的像素外观逐页对照（Mac 主窗口三页、设置、iPhone），附图标对照表、文案对照、实现方式与分期。已定（蓝色、英文短词、主窗口固定深色、设置各记各的、图标以后再说），分期落地中。" },
+  { group: "concept", file: "concepts/pixel-icons.html", name: "精致的像素图标", when: "2026-10-04",
+    say: "像素外观的图标重画一版：16 格画板、1.5 点一格、只用墨色的六档明暗（不上颜色），光从左上来，带硬阴影；与现在 1 点一格的单色线条逐个对照，并放进 Mac 主窗口与 iPhone 标签栏里看。已定（先试过彩色，放进真实界面后出戏），同日全部换完：三端的图标、带状态的应用标记、agent 标记、实时活动与应用图标。" },
   { group: "concept", file: "concepts/mesh.html", name: "网状连接", when: "2026-10-02",
     say: "手机同时连多台 Mac、Mac 之间互用 Dispatch 与 Terminals：授权、主机切换（换台效果）、配对、汇总。已搁置。" },
   { group: "concept", file: "concepts/menu-icons.html", name: "菜单栏像素图标", when: "2026-09-29",

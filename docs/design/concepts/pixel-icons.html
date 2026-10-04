@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Pixel Icons, Refined</title>
+<style>
+/* The pixel look's icons drawn again with more care, a concept (2026-10-04, user: 所有的像素图标有能力画的更精致一些吗，现在
+   看上去总感觉有些简陋……能不能弄成那种像素风格但是很精致的图标, with a picture of a shaded, outlined pixel-art app icon).
+   Today's icons are 1-bit line drawings on 1 pt cells: the pixels cannot be seen, so they read as thin, rough line icons.
+   Here each is a small solid object on a 16-cell board with cells one can see (1.5 pt), several tones of one ink, light
+   from the top left (a highlight edge, a shadow edge), a half-tone pixel in the steps, and one accent for its live part.
+   Decided 2026-10-04, in two steps: of a one-ink set with pink accents and a coloured one, the coloured (你这单色太丑了，
+   彩色还好看点); then, seeing it in the real window: 好出戏，能不能只用黑灰色强调层次感，就不上色了 — tones of the ink only.
+   ?bg=dark|light&depth=1|0 */
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 16px 16px 6px; }
+.ctl .seg { display: inline-flex; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace; padding: 4px 10px; margin-left: -1px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+.ctl .gap { width: 12px; }
+.note { max-width: 1000px; margin: 4px auto 16px; color: #8f8b84; font-size: 12.5px; line-height: 1.7; text-align: center; padding: 0 16px; }
+.note b { color: #d8d4cc; font-weight: 600; }
+.wrap { max-width: 1120px; margin: 0 auto 70px; padding: 0 16px; }
+h2 { font: 600 12px "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em; color: #8d8a84; margin: 30px 0 10px; }
+.doc { color: #a9a59e; font-size: 12.5px; line-height: 1.75; }
+.doc b { color: #e9e6df; font-weight: 600; }
+.doc ul, .doc ol { margin: 4px 0; padding-left: 18px; }
+.doc code { font: 11.5px "SF Mono", ui-monospace, Menlo, monospace; color: #d8d4cc; }
+
+/* the board the icons sit on: the pixel look's own grounds */
+.bg-dark { --bg: #000; --side: #0b0b0b; --line: #262524; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --signal: #ff2e88; --amber: #ffb000; --green: #9be22d; --shadow: #2c2a28; }
+.bg-light { --bg: #f4f1ea; --side: #ece8df; --line: #d6d1c6; --ink: #16140f; --ink2: #6b675f; --ink3: #a6a196; --signal: #e0106f; --amber: #b87400; --green: #3d8a00; --shadow: #cfc9bc; }
+.px { display: block; flex: none; }
+
+table { border-collapse: collapse; width: 100%; }
+td, th { border: 1px solid #333; padding: 10px 12px; vertical-align: middle; text-align: left; }
+th { color: #d8d4cc; font-weight: 600; font-size: 12px; }
+td.name { width: 190px; color: #d8d4cc; }
+td.name small { display: block; color: #8f8b84; font-size: 11.5px; line-height: 1.5; margin-top: 2px; }
+td.cell { background: var(--bg); color: var(--ink); }
+.pair { display: flex; align-items: center; gap: 22px; min-height: 104px; }
+.pair .real { width: 34px; display: grid; place-items: center; }
+.pair .big { display: grid; place-items: center; }
+
+/* in the window: the rail, the bar, the phone's tab bar */
+.strips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.strip { background: var(--bg); color: var(--ink); border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 .5px rgba(255, 255, 255, .22); }
+.strip .cap { font: 11.5px "SF Mono", ui-monospace, Menlo, monospace; color: var(--ink3); padding: 8px 12px 0; letter-spacing: .04em; }
+.winbit { display: grid; grid-template-columns: 44px minmax(0, 1fr); grid-template-rows: 34px 190px; margin: 8px 0 0; border-top: 1px solid var(--line); }
+.winbit .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); }
+.lights { display: flex; gap: 8px; margin-right: 12px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.tb { display: grid; place-items: center; width: 30px; height: 26px; color: var(--ink2); }
+.bar .title { flex: 1; text-align: center; font: 600 13px -apple-system, "PingFang SC", sans-serif; color: var(--ink); }
+.bar .title small { font: 400 11.5px "SF Mono", ui-monospace, Menlo, monospace; color: var(--ink2); margin-left: 8px; }
+.rail { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; border-right: 1px solid var(--line); }
+.ri { position: relative; width: 100%; height: 38px; display: grid; place-items: center; color: var(--ink2); }
+.ri.on { color: var(--ink); }
+.ri.on::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; background: var(--signal); }
+.ri.dim .px { opacity: .62; }
+.rail .sp { flex: 1; }
+.body { padding: 14px 16px; font: 12.5px/1.7 "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace; color: var(--ink2); }
+.body .row { display: flex; align-items: center; gap: 9px; }
+.tabs { display: flex; justify-content: space-around; padding: 9px 0 12px; margin-top: 10px; border-top: 1px solid var(--line); background: var(--side); }
+.tab { display: flex; flex-direction: column; align-items: center; gap: 4px; font: 500 10px -apple-system, sans-serif; color: var(--ink2); width: 76px; }
+.tab .gl { height: 28px; display: grid; place-items: center; }
+.tab.on { color: var(--ink); }
+.tab.dim .px { opacity: .62; }
+@media (max-width: 760px) { .strips { grid-template-columns: 1fr; } td.name { width: 110px; } .pair { gap: 12px; } }
+</style>
+</head>
+<body>
+<div class="ctl">
+  <div class="seg" id="bgSeg"><button data-bg="dark">深色</button><button data-bg="light">浅色</button></div>
+  <span class="gap"></span>
+  <div class="seg" id="depthSeg"><button data-depth="1">带硬阴影</button><button data-depth="0">不带</button></div>
+</div>
+<div class="note">像素外观的图标重画一版。<b>现在</b>的图标是 1 点一格的单色线条，格子小到看不出来，读起来像粗糙的细线图标；<b>重画</b>的一版把每个图标画成一个有体积的小物件：16 格以内的画板、1.5 点一格（看得出像素）、只用墨色的六档明暗，不上颜色（2026-10-04 定：彩色放进真实界面后“好出戏，能不能只用黑灰色强调层次感，就不上色了”）。每格左边是实际大小，右边放大 6 倍。</div>
+
+<div class="wrap">
+  <h2>// 逐个对照</h2>
+  <table id="icons"></table>
+
+  <h2>// 放进界面里</h2>
+  <div class="strips" id="strips"></div>
+
+  <h2>// 画法</h2>
+  <div class="doc">
+    <ul>
+      <li><b>画板与格子</b>：图标栏、顶栏、标签栏的图标都在 16 × 16 以内的画板上，1.5 点一格（Retina 上是 3 个像素，边缘是整的；iPhone 3 倍屏上取整像素一格）。看得出格子，才是像素画，不是细线。</li>
+      <li><b>只用墨色的六档</b>：高光、墨、中、暗、深、底。不上颜色；浅色背景下六档反过来（最深的墨到纸的暗部）。</li>
+      <li><b>层次靠明暗</b>：近的、凸起的亮，远的、凹下去的暗。凸起的块（方块、滑杆的钮、加号、锁身）上边和左边一格高光，下边和右边一格暗色；窗口类的图标用墨色描边，里面是深色的屏幕或面板；应用标记的三条线一条比一条暗。</li>
+      <li><b>硬阴影</b>：右下偏一格的暗色影子（和文字标、应用标记现有的做法一致），可关。</li>
+      <li><b>状态仍然有颜色</b>：状态方块的绿、橙、红是在说状态，照旧，只是多了亮边和暗边。选中仍是信号粉的竖线。没选中或不可用的图标整体压暗。盲文转圈不动。</li>
+      <li><b>不变的</b>：图标的意思和位置、“一个图标一个意思”。菜单栏里的图标按系统规定是单色模板图，不换。</li>
+    </ul>
+  </div>
+
+  <h2>// 落地</h2>
+  <div class="doc">
+    <ul>
+      <li><b>全部换完</b>（2026-10-04，用户：一口气全换完）：Mac 主窗口的图标栏、顶栏、状态栏的锁；菜单面板、iPhone 首页 / 设置 / 配对页、网页顶栏里带状态的应用标记（忙时一个青色块沿最近的一条线跑，等你时那条线的去处是一颗橙色的键，出错是红的，离线是隔格抽掉）；四个 agent 的标记；地址栏与加密栏的小锁；空心方块（键的空位：上左暗、下右亮）；网页里的图标（终端页的顶栏按钮、目录树的状态方块与 agent 标记、新建终端的选择卡、网页控制台）；两端的实时活动；应用图标（程序坞 / 主屏幕）。</li>
+      <li><b>没有换的</b>：菜单栏里的图标（系统规定是单色模板图）；盲文转圈、折叠箭头、树线、关闭分屏的小叉（它们是字符，不是图标）；经典外观（线性图标）。</li>
+      <li><b>三份图一个样</b>：Mac（<code>ShadedSprites.swift</code>）、iPhone（<code>AgentSwitchLive/ShadedSprites.swift</code>）、网页（<code>ui/lib/shaded.js</code>）各一份同样的图，三边的测试守着同一个校验数，改了一处，另两处的测试就会提醒。</li>
+    </ul>
+  </div>
+</div>
+
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+const S = { bg: "dark", depth: "1" };
+
+// ---------- tones: the one ink from highlight to ground, W # m d k s — and nothing else (decided 2026-10-04) ----------
+// The user, shown a coloured set in the real window: 好出戏，能不能只用黑灰色强调层次感，就不上色了. Depth comes from the tones:
+// what is nearer or raised is lighter; a raised block has a light edge above and left, a dark one below and right; a
+// screen or a pane is a dark ground inside an ink frame. Only a status keeps its colour (green, amber, red).
+const TONES = {
+  dark: { W: "#ffffff", "#": "#e9e6df", m: "#a9a6a0", d: "#6f6c68", k: "#3b3a37", s: "#1e1d1b" },
+  light: { W: "#000000", "#": "#16140f", m: "#55524b", d: "#8a867d", k: "#bdb8ac", s: "#dcd7cb" },
+};
+/** A status's own colour as light · base · dark (the squares only): green G g h, amber Y y z, red R r t. */
+const STATUS_TONES = { G: "#d3f78f", g: "#9be22d", h: "#5d9010", Y: "#ffe08a", y: "#ffb000", z: "#a86f00", R: "#ff9c93", r: "#ff4a3d", t: "#a82318" };
+const palette = () => ({ ...TONES[S.bg], ...STATUS_TONES });
+
+/** A shaded sprite as crisp squares; `cell` in CSS px. With `depth`, a hard shadow one cell down and right. */
+function toned(icon, cell, { depth = S.depth === "1" } = {}) {
+  const rows = icon.rows, pal = palette();
+  const w = rows[0].length, h = rows.length, pad = depth ? 1 : 0;
+  let under = "", top = "";
+  rows.forEach((row, y) => [...row].forEach((c, x) => {
+    if (c === ".") return;
+    if (depth) under += `<rect x="${(x + 1) * cell}" y="${(y + 1) * cell}" width="${cell}" height="${cell}" fill="var(--shadow)"/>`;
+    top += `<rect x="${x * cell}" y="${y * cell}" width="${cell}" height="${cell}" fill="${pal[c] ?? "#f0f"}"/>`;
+  }));
+  return `<svg class="px" width="${(w + pad) * cell}" height="${(h + pad) * cell}" viewBox="0 0 ${(w + pad) * cell} ${(h + pad) * cell}" shape-rendering="crispEdges" aria-hidden="true">${under}${top}</svg>`;
+}
+
+// ---------- the set (the same rows as the apps' ShadedSprites.swift) ----------
+const R = {
+  dispatch: { name: "Dispatch（应用标记）", note: "一个源头分到三条线：最近的一条和它的去处最亮，往后一条比一条暗", rows: [
+    "............WWW#",
+    ".........###W##m",
+    ".......###..W##m",
+    "......##....#mmd",
+    ".....##.........",
+    "....##..........",
+    "WWW##.......mmmd",
+    "W##mmmmmmmmmmddk",
+    "W##mddddddddmddk",
+    "#mmdd.......dkkk",
+    "....dd..........",
+    ".....dd.........",
+    "......dd....dddk",
+    ".......ddd..dkks",
+    ".........ddddkks",
+    "............ksss"] },
+  terminals: { name: "Terminals", note: "一个窗口：标题条上三个点，深色的屏幕，亮的提示符和光标", rows: [
+    ".##############.",
+    "#mkmkmkmmmmmmmm#",
+    "################",
+    "#ssssssssssssss#",
+    "#sWWsssssssssss#",
+    "#sssWWsssssssss#",
+    "#sssssWWsssssss#",
+    "#sssWWsssssssss#",
+    "#sWWssssmmmmsss#",
+    "#ssssssssssssss#",
+    "#ssssssssssssss#",
+    ".##############."] },
+  browser: { name: "Browser", note: "一颗地球：浅的陆地、深的海，左上一道高光，右下压暗", rows: [
+    ".....######.....",
+    "...##mmmkkk##...",
+    "..#mmmmmkkkkk#..",
+    ".#Wmmmmkkkk#kk#.",
+    ".#Wkmmkkkk#mmk#.",
+    "#Wkkkmkkkmmmmmk#",
+    "#Wkkkkkkkkmmmmk#",
+    "#kkmmkkkkkkmmkk#",
+    "#kmmmmkkkkkkmks#",
+    "#kmmmmmkkkkkkss#",
+    "#kkmmmmdkkkksss#",
+    ".#kkmmmdkkksss#.",
+    ".#kkkmdkkkssss#.",
+    "..#kkkdkkssss#..",
+    "...##kkksss##...",
+    ".....######....."] },
+  settings: { name: "Settings", note: "三根滑杆：走过的一段亮，没走的暗，钮是凸起的", rows: [
+    "...WWW#.........",
+    "mmmW##mkkkkkkkkk",
+    "dddW##msssssssss",
+    "...#mmd.........",
+    "................",
+    ".........WWW#...",
+    "mmmmmmmmmW##mkkk",
+    "dddddddddW##msss",
+    ".........#mmd...",
+    "................",
+    ".....WWW#.......",
+    "mmmmmW##mkkkkkkk",
+    "dddddW##msssssss",
+    ".....#mmd......."] },
+  list: { name: "List", note: "带侧栏的窗口：侧栏是浅一档的面板，里面三行", rows: [
+    ".##############.",
+    "#mmmmm#ssssssss#",
+    "#mkkkm#ssssssss#",
+    "#mmmmm#ssssssss#",
+    "#mkkkm#ssssssss#",
+    "#mmmmm#ssssssss#",
+    "#mkkkm#ssssssss#",
+    "#mmmmm#ssssssss#",
+    "#ddddd#ssssssss#",
+    "#ddddd#ssssssss#",
+    ".##############."] },
+  splitRight: { name: "Split Right", note: "两块并排：新分出的那块顶上最亮，底色比另一块浅一档", rows: [
+    ".##############.",
+    "#dddddd##WWWWWW#",
+    "#ssssss##mmmmmm#",
+    "#ssssss##kkkkkk#",
+    "#ssssss##kkkkkk#",
+    "#ssssss##kkkkkk#",
+    "#ssssss##kkkkkk#",
+    "#ssssss##kkkkkk#",
+    "#ssssss##kkkkkk#",
+    "#ssssss##kkkkkk#",
+    ".##############."] },
+  splitDown: { name: "Split Down", note: "上下两块，同上", rows: [
+    ".##############.",
+    "#dddddddddddddd#",
+    "#ssssssssssssss#",
+    "#ssssssssssssss#",
+    "#ssssssssssssss#",
+    "################",
+    "#WWWWWWWWWWWWWW#",
+    "#mmmmmmmmmmmmmm#",
+    "#kkkkkkkkkkkkkk#",
+    "#kkkkkkkkkkkkkk#",
+    ".##############."] },
+  plus: { name: "New", note: "一个有厚度的加号", rows: [
+    ".....WWW#.....",
+    ".....W##m.....",
+    ".....W##m.....",
+    ".....W##m.....",
+    ".....W##m.....",
+    "WWWWWW###WWWW#",
+    "W############m",
+    "W############m",
+    "#mmmm####mmmmd",
+    ".....W##m.....",
+    ".....W##m.....",
+    ".....W##m.....",
+    ".....W##m.....",
+    ".....#mmd....."] },
+  lock: { name: "Encrypt & Send", note: "凸起的锁身，暗一档的锁梁，深色的锁孔", rows: [
+    "...mmmmmm...",
+    "..mm....md..",
+    "..mm....md..",
+    "..mm....md..",
+    "..mm....md..",
+    "WWWWWWWWWWW#",
+    "W##########m",
+    "W####kk####m",
+    "W###kkkk###m",
+    "W####kk####m",
+    "W####kk####m",
+    "W##########m",
+    "#mmmmmmmmmmd"] },
+  lockSmall: { name: "HTTPS · 加密栏", note: "只有 10 点地方时的小锁：同一把锁，小一号", rows: [
+    "..mmm..", ".m...d.", ".m...d.", "WWWWWW#", "W##k##m", "W##k##m", "W#####m", "#mmmmmd"] },
+};
+/** The agents' marks and the status squares: 9 and 6 cells, 1.5 pt each. */
+const SMALL = {
+  cc: { name: "Claude Code", rows: [
+    "....d....", ".d..#..d.", "..#.#.#..", "...###...", "d###W###d", "...###...", "..#.#.#..", ".d..#..d.", "....d...."] },
+  codex: { name: "Codex", rows: [
+    ".........", "W#.......", ".W#......", "..W#.....", "...W#....", "..W#.....", ".W#..mmmm", "W#...dddd", "........."] },
+  oc: { name: "OpenCode", rows: [
+    "W###.###m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "#mmm.mmmd"] },
+  pi: { name: "pi", rows: [
+    "WWWWWWWW#", "#mmmmmmmd", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W#.", "..W#..W##", "..#m..#mm"] },
+};
+const square = (L, b, d) => ({ rows: ["LLLLLb", "Lbbbbd", "Lbbbbd", "Lbbbbd", "Lbbbbd", "bddddd"].map((r) => r.replace(/L/g, L).replace(/b/g, b).replace(/d/g, d)) });
+const STATUS = { idle: square("G", "g", "h"), waiting: square("Y", "y", "z"), failed: square("R", "r", "t"),
+  exited: { rows: ["dddddd", "d....m", "d....m", "d....m", "d....m", "mmmmmm"] } };
+
+// ---------- today's icons (1-bit, 1 pt cells) ----------
+const NOW = {
+  list: [".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#",
+         "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", ".################."],
+  plus: ["......#......", "......#......", "......#......", "......#......", "......#......", "......#......", "#############",
+         "......#......", "......#......", "......#......", "......#......", "......#......", "......#......"],
+  splitRight: [".################.", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#",
+          "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", ".################."],
+  splitDown: [".################.", "#................#", "#................#", "#................#", "#................#", "#................#", "##################",
+         "#................#", "#................#", "#................#", "#................#", "#................#", "#................#", ".################."],
+  settings: ["..##.........", "#############", "..##.........", ".............", ".............", "........##...", "#############", "........##...",
+            ".............", ".............", ".....##......", "#############", ".....##......"],
+  terminals: ["################", "#..............#", "################", "#..............#", "#.#............#", "#..#...........#", "#...#..........#", "#..#...........#", "#.#...######...#", "#..............#", "#..............#", "################"],
+  browser: [".....#####.....", "...##.....##...", "..#..#...#..#..", ".#..#.....#..#.", ".#..#.....#..#.", "#...#.....#...#", "#...#.....#...#", "###############", "#...#.....#...#", "#...#.....#...#", ".#..#.....#..#.", ".#..#.....#..#.", "..#..#...#..#..", "...##.....##...", ".....#####....."],
+  lock: [".###.", "#...#", "#####", "##.##", "#####"],
+};
+const now = (k, zoom = 1) => (k === "dispatch" ? P.mark({ px: zoom, mono: true }) : P.sprite(NOW[k === "lockSmall" ? "lock" : k], { px: (k === "lock" || k === "lockSmall" ? 2 : 1) * zoom }));
+
+// ---------- drawing ----------
+const CELL = 1.5;
+function iconRows() {
+  const row = (name, note, a, b) => `<tr><td class="name">${name}<small>${note ?? ""}</small></td><td class="cell bg-${S.bg}"><div class="pair">${a}</div></td><td class="cell bg-${S.bg}"><div class="pair">${b}</div></td></tr>`;
+  const pair = (real, big) => `<span class="real">${real}</span><span class="big">${big}</span>`;
+  const main = Object.entries(R).map(([k, icon]) => row(icon.name, icon.note, pair(now(k), now(k, 6)), pair(toned(icon, CELL), toned(icon, CELL * 6)))).join("");
+  const agents = row("Claude Code · Codex · OpenCode · pi", "各自的标志：有了高光与暗边",
+    Object.keys(SMALL).map((k) => P.sprite(P.AGENT_PX[k], { px: 2 })).join("") + `<span style="width:14px"></span>` + Object.keys(SMALL).map((k) => P.sprite(P.AGENT_PX[k], { px: 8 })).join(""),
+    Object.values(SMALL).map((i) => toned(i, CELL)).join("") + `<span style="width:14px"></span>` + Object.values(SMALL).map((i) => toned(i, CELL * 5)).join(""));
+  const sq = (c, px, hollowed = false) => `<svg class="px" width="${4 * px}" height="${4 * px}" shape-rendering="crispEdges">${hollowed ? `<rect x="${px / 2}" y="${px / 2}" width="${3 * px}" height="${3 * px}" fill="none" stroke="${c}" stroke-width="${px}"/>` : `<rect width="${4 * px}" height="${4 * px}" fill="${c}"/>`}</svg>`;
+  const status = row("Idle · Waiting · Failed · Exited", "状态方块：一颗小按键，颜色照旧",
+    ["var(--green)", "var(--amber)", "#ff4a3d"].map((c) => sq(c, 2)).join("") + sq("var(--ink3)", 2, true) + `<span style="width:14px"></span>` + ["var(--green)", "var(--amber)", "#ff4a3d"].map((c) => sq(c, 8)).join("") + sq("var(--ink3)", 8, true),
+    Object.values(STATUS).map((i) => toned(i, CELL)).join("") + `<span style="width:14px"></span>` + Object.values(STATUS).map((i) => toned(i, CELL * 5)).join(""));
+  return `<tr><th>图标</th><th>现在（1 点一格，单色线条）</th><th>重画（1.5 点一格，黑灰明暗）</th></tr>${main}${agents}${status}`;
+}
+function strips() {
+  const win = (refined) => {
+    const ic = (k) => (refined ? toned(R[k], CELL) : now(k));
+    const ri = (k, cls) => `<div class="ri ${cls}">${ic(k)}</div>`;
+    const agent = refined ? toned(SMALL.cc, CELL, { depth: false }) : P.sprite(P.AGENT_PX.cc, { px: 2 });
+    const st = (k) => (refined ? toned(STATUS[k], CELL, { depth: false }) : `<svg class="px" width="8" height="8"><rect width="8" height="8" fill="var(--${k === "idle" ? "green" : "amber"})"/></svg>`);
+    return `<div class="strip bg-${S.bg}"><div class="cap">// Mac 主窗口 · ${refined ? "精致" : "现在"}</div><div class="winbit">
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="tb">${ic("list")}</span><span class="title">AgentSwitch<small>main ±5 ↑2</small></span>
+        <span class="tb">${ic("splitRight")}</span><span class="tb">${ic("splitDown")}</span><span class="tb">${ic("plus")}</span></div>
+      <div class="rail">${ri("dispatch", "on")}${ri("terminals", "dim")}${ri("browser", "dim")}<span class="sp"></span>${ri("settings", "dim")}</div>
+      <div class="body"><div class="row">${st("waiting")}<span style="color:var(--ink)">发布前检查</span><span style="margin-left:auto;display:flex;gap:8px;align-items:center">${agent}</span></div>
+        <div class="row">${st("idle")}<span>整理工作目录</span></div><div class="row" style="margin-top:10px">${ic("lock")}<span>Encrypt &amp; Send</span></div></div></div></div>`;
+  };
+  const phone = (refined) => {
+    const ic = (k) => (refined ? toned(R[k], CELL) : k === "dispatch" ? P.mark({ px: 2, mono: true }) : P.sprite(k === "terminals" ? ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"]
+      : ["...#####...", ".##.....##.", ".#.#...#.#.", "#..#...#..#", "#..#...#..#", "###########", "#..#...#..#", "#..#...#..#", ".#.#...#.#.", ".##.....##.", "...#####..."], { px: k === "terminals" ? 3 : 2 }));
+    const tab = (k, name, cls) => `<div class="tab ${cls}"><span class="gl">${ic(k)}</span><span>${name}</span></div>`;
+    return `<div class="strip bg-${S.bg}"><div class="cap">// iPhone 标签栏 · ${refined ? "精致" : "现在"}</div><div class="tabs">${tab("dispatch", "Dispatch", "on")}${tab("terminals", "Terminals", "dim")}${tab("browser", "Browser", "dim")}</div></div>`;
+  };
+  return win(false) + win(true) + phone(false) + phone(true);
+}
+function draw() {
+  document.getElementById("icons").innerHTML = iconRows();
+  document.getElementById("strips").innerHTML = strips();
+  const on = (id, attr, value) => { for (const b of document.querySelectorAll(`#${id} button`)) b.classList.toggle("on", b.dataset[attr] === value); };
+  on("bgSeg", "bg", S.bg); on("depthSeg", "depth", S.depth);
+  document.title = `Pixel Icons · ${S.bg === "dark" ? "Dark" : "Light"} · AgentSwitch`;
+}
+// Every row of a sprite is as long as its first: a short one would shift what is under it.
+for (const [k, icon] of Object.entries({ ...R, ...SMALL, ...STATUS })) console.assert(icon.rows.every((r) => r.length === icon.rows[0].length), `ragged rows in ${k}`);
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".ctl button");
+  if (!b) return;
+  for (const k of ["bg", "depth"]) if (b.dataset[k]) S[k] = b.dataset[k];
+  draw();
+});
+const q = new URLSearchParams(location.search);
+const pick = (k, values) => { if (values.includes(q.get(k))) S[k] = q.get(k); };
+pick("bg", ["dark", "light"]); pick("depth", ["1", "0"]);
+draw();
+</script>
+</body>
+</html>

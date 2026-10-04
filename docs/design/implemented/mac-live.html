@@ -70,7 +70,7 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 .hd { display: flex; align-items: center; gap: 8px; }
 .hd .name { font: 600 12px var(--mono); }
 .hd .sp { flex: 1; }
-.dots { height: 1px; margin: 11px 0 9px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 2px, transparent 2px 4px); }
+.dots { height: 1px; margin: 11px 0 9px; background: linear-gradient(rgba(255,255,255,.16), rgba(255,255,255,.16)); }
 .item + .item { margin-top: 11px; }
 .row1 { display: flex; align-items: baseline; gap: 10px; }
 .row1 .st { width: 12px; display: inline-flex; justify-content: center; flex: none; align-self: center; }
@@ -136,7 +136,7 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 
   <div class="sec">// Menu Bar · 菜单栏</div>
   <div class="fit"><div class="grid zoom static" id="bar"></div></div>
-  <p class="note">只在有任务或请求时出现，在 AgentSwitch 图标左边。胶囊不动，只有计时在走。</p>
+  <p class="note">只在有任务或请求时出现，在 AgentSwitch 图标左边。胶囊不动。2026-10-03 起一个任务时标记右边不再是计时，而是它正在做什么的一个词（Run、Edit、Allow?……同手机的紧凑态），计时留在卡片的行上；</p>
 
   <div class="sec">// Card · 卡片</div>
   <div class="fit"><div class="grid zoom static" id="card"></div></div>
@@ -178,6 +178,9 @@ const sq = (color) => `<i class="sq" style="background:${color}"></i>`;
 const spin = (live) => `<span class="spin"${live ? " data-spin" : ""}>⠋</span>`;
 const tally = (w, r, live) => `<span class="tally">${w ? `<span>${sq(TINT.waiting)}${w}</span>` : ""}${r ? `<span>${spin(live)}${r}</span>` : ""}</span>`;
 const word = (st) => `<span class="word" style="color:${TINT[st]}">${WORD[st]}</span>`;
+/** What a row is doing in one word (the service's `doing`): `Allow?` / `Answer` while it waits, else by its step. */
+const DOING = [[/运行|命令/, "Run"], [/修改|写入/, "Edit"], [/读取/, "Read"], [/搜索|查找/, "Search"], [/browser_|浏览器|网页/, "Web"], [/选择模型/, "Route"], [/交给|交由/, "Start"]];
+const doing = (i, amber) => `<span class="clock"${amber ? ' style="color:var(--amber)"' : ""}>${amber ? (i.options?.length ? "Answer" : "Allow?") : (DOING.find(([re]) => re.test(i.step ?? ""))?.[1] ?? "Busy")}</span>`;
 const clock = (i, live, amber) => `<span class="clock"${amber ? ' style="color:var(--amber)"' : ""}${live ? ` data-since="${i.since}"` : ""}>${live ? fmt(nowS() - i.since) : i.clock}</span>`;
 
 // The other status items, as generic shapes.
@@ -208,8 +211,10 @@ function capsule(m, live, { min = false, on = false } = {}) {
   const s = sum(m), e = showsEnded(m) ? m.flash || fails(m)[0] || m.ended : null;
   const st = e ? e.st : s.st;
   let right = "";
-  // The menu bar never moves (ui-v0 §7): the mark is one frame, the spinner its first; only the clock counts.
-  if (!min) right = e ? sq(TINT[e.st]) : s.n > 1 ? tally(s.w, s.r, false) : clock(ordered(m)[0], live, s.st === "waiting");
+  // The menu bar never moves (ui-v0 §7): the mark is one frame, the spinner its first. One task: what it is doing in a
+  // word, as the phone's compact island (2026-10-03, user: 电脑上这个实时活动的设计还是老的计时器设计，改成和手机上一样);
+  // the clock stays on the card's rows.
+  if (!min) right = e ? sq(TINT[e.st]) : s.n > 1 ? tally(s.w, s.r, false) : doing(ordered(m)[0], s.st === "waiting");
   return `<span class="live${min ? " min" : ""}${on ? " on" : ""}" data-do="capsule">${markEl(st, false)}${right}</span>`;
 }
 

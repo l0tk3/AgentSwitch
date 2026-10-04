@@ -25,13 +25,14 @@ CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 DEFAULT_OUT = Path.home() / "Desktop" / "WorkSpace" / "Scratch" / "agentswitch-design"
 
 # Wide mock windows are drawn whole at a narrow width (zoom) instead of scrolling sideways: any element wider than
-# 600 px and wider than its container, outermost first.
+# 600 px and wider than its container, outermost first. Not what a page itself draws wider than its container and
+# scales: the index's thumbnails, and browser.html's zoomed pages (`.zoomed`: a page at 50% is laid out twice as wide).
 FIT = """<script>
 (function () {
   function fit() {
     for (const el of document.querySelectorAll("[data-fitted]")) { el.style.zoom = ""; delete el.dataset.fitted; }
     for (const el of document.querySelectorAll("body *")) {
-      if (el.closest("[data-fitted]") || el.tagName === "IFRAME" || el.closest(".thumb")) continue;   // the index scales its own thumbnails
+      if (el.closest("[data-fitted]") || el.tagName === "IFRAME" || el.closest(".thumb, .zoomed")) continue;
       const p = el.parentElement, w = el.offsetWidth;
       if (!p || w <= 600) continue;
       const avail = p.clientWidth - 2;

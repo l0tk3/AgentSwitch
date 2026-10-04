@@ -80,7 +80,7 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 
 /* scanlines and dotted rules: the chrome reads as part of one screen (terminal.html .side) */
 .scan-bg { background-image: repeating-linear-gradient(to bottom, color-mix(in srgb, var(--ink) 4%, transparent) 0 1px, transparent 1px 3px); }
-.dots { height: 1px; flex: none; background: repeating-linear-gradient(to right, var(--ink3) 0 2px, transparent 2px 4px); }
+.dots { height: 1px; flex: none; background: linear-gradient(var(--ink4), var(--ink4)); }
 
 /* boxes on the cell grid: a 1 px ink frame, square corners, a dithered hard shadow */
 .box { position: absolute; background: var(--bg); border: 1px solid var(--ink); z-index: 20; font-family: var(--mono); }
@@ -187,6 +187,11 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
 @keyframes scan { 0% { top: 0; opacity: .9; } 99% { top: 100%; opacity: .9; } 100% { opacity: 0; } }
 .wheel { position: absolute; right: 8px; top: 40%; background: #000; border: 1px solid #e9e6df; color: #e9e6df; font: 11px var(--mono); padding: 2px 6px; z-index: 5; opacity: 0; }
 .wheel.on { opacity: 1; }
+/* a link on the terminal's screen (terminal-v0 §1 iPhone 链接, 2026-10-03): a tap opens it in the Mac's browser, a long
+   press opens its menu (the whole address first); the link touched lights up for a moment; copying says so */
+.lk.hit { background: rgba(255, 46, 136, .4); }
+.menu .mh { padding: 7px 12px; font: 11px/1.45 var(--mono); color: var(--ink2); background: var(--raise); word-break: break-all; }
+.chip { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: #000; border: 1px solid #e9e6df; color: #e9e6df; font: 11px var(--mono); padding: 2px 6px; z-index: 5; white-space: nowrap; }
 .perm { left: 12px; right: 18px; top: 10px; }
 /* its parts keep the box's ground over its dithered shadow (which the box's own stacking puts above the ground) */
 .perm > * { position: relative; background: var(--bg); }
@@ -314,8 +319,8 @@ figcaption p { margin: 0; color: #a9a6a0; font-size: 12px; line-height: 1.6; }
       <div class="phone"><div class="scr light" id="p3"></div></div>
       <figcaption>
         <b>Terminal · 终端页</b>
-        <p>打开时画面自上而下 13 步刷出，扫描线在前。同一个终端只有一个尺寸：Mac 上接着用时，这里的画面盖上抖动遮罩，中间写 <span class="mono">On Mac</span>；点屏幕、点输入框或 <span class="mono">[ Take Over ]</span> 就接管到手机上，画面按手机尺寸重画。Mac 关掉窗口时自动回到手机。权限卡片不受影响，照常出现、照常批准。在画面上下拖动：每拖一行高发一格滚轮，右边显示发出的格数，快速一划会继续滚几格。点锁：同一个输入框被加密框围住，键盘保持原样。输入 <span class="mono">/</span> 出命令补全。直接发送像密码的文字会先问一句。agent 出选择题时卡片是问题卡（琥珀标题条 <span class="mono">Question</span>）：点选项作答（单选 <span class="mono">&lt; &gt;</span>、多选 <span class="mono">[ ]</span>），也可以在 <span class="mono">Other</span> 里自己写，每题都有答案后 <span class="mono">[ Submit ]</span>；没有 Allow / Deny。</p>
-        <div class="tr"><button type="button" data-do="p3open">打开终端</button><button type="button" data-do="p3perm">权限请求到达</button><button type="button" data-do="p3ask">选择题到达</button><button type="button" data-do="p3err">滚动被拒（旧版 Mac）</button><button type="button" data-do="p3exit">终端退出</button><button type="button" data-do="p3mac">Mac 上接着用</button><button type="button" data-do="p3free">Mac 关掉窗口</button></div>
+        <p>打开时画面自上而下 13 步刷出，扫描线在前。同一个终端只有一个尺寸：Mac 上接着用时，这里的画面盖上抖动遮罩，中间写 <span class="mono">On Mac</span>；点屏幕、点输入框或 <span class="mono">[ Take Over ]</span> 就接管到手机上，画面按手机尺寸重画。Mac 关掉窗口时自动回到手机。权限卡片不受影响，照常出现、照常批准。在画面上下拖动：每拖一行高发一格滚轮，右边显示发出的格数，快速一划会继续滚几格。点锁：同一个输入框被加密框围住，键盘保持原样。输入 <span class="mono">/</span> 出命令补全。直接发送像密码的文字会先问一句。agent 出选择题时卡片是问题卡（琥珀标题条 <span class="mono">Question</span>）：点选项作答（单选 <span class="mono">&lt; &gt;</span>、多选 <span class="mono">[ ]</span>），也可以在 <span class="mono">Other</span> 里自己写，每题都有答案后 <span class="mono">[ Submit ]</span>；没有 Allow / Deny。画面里的链接（网址、Mac 上的路径；被 agent 折成两行的按一条认）：点一下在 Mac 的浏览器里打开并切到 <span class="mono">Browser</span> 标签页，手指落点差不到一行也算点中；长按出菜单，第一行是完整的地址，下面 <span class="mono">Open in Browser</span> <span class="mono">Copy Link</span> <span class="mono">Open in Safari</span>，复制后画面上短暂写 <span class="mono">Link Copied</span>。</p>
+        <div class="tr"><button type="button" data-do="p3open">打开终端</button><button type="button" data-do="p3perm">权限请求到达</button><button type="button" data-do="p3ask">选择题到达</button><button type="button" data-do="p3err">滚动被拒（旧版 Mac）</button><button type="button" data-do="p3exit">终端退出</button><button type="button" data-do="p3link">长按链接</button><button type="button" data-do="p3mac">Mac 上接着用</button><button type="button" data-do="p3free">Mac 关掉窗口</button></div>
       </figcaption>
     </figure>
   </div>
@@ -1015,6 +1020,38 @@ function p3exit() {
   p3title(); p3controls();
   glitch(document.getElementById("p3title"));
 }
+/* A link on the screen (terminal-v0 §1 iPhone 链接, 2026-10-03): an address the agent cut at its width is one link. A tap
+   opens it in the Mac's browser, on the Browser tab; a press held on it opens its menu by it. */
+const LINK = "https://code.claude.com/docs/en/agent-teams.md#choose-a-display-mode";
+function chip(words) {
+  const term = document.getElementById("p3term");
+  term.querySelector(".chip")?.remove();
+  const el = Object.assign(document.createElement("div"), { className: "chip", textContent: words });
+  term.append(el);
+  setTimeout(() => el.remove(), 1400);
+}
+function p3link() {
+  if (exited || away) return;
+  if (!lines.some((l) => l.includes('class="lk"'))) {
+    lines.push(`<span class="c-grn">●</span> 分屏的说明见这一页：`, `  <span class="lk">https://code.claude.com/docs/en/agent-teams.md#choo</span>`, `  <span class="lk">se-a-display-mode</span>`, ``);
+  }
+  offset = 0; p3lines();
+  const hits = [...document.querySelectorAll("#p3lines .lk")];
+  for (const el of hits) el.classList.add("hit");
+  setTimeout(() => { for (const el of document.querySelectorAll("#p3lines .lk.hit")) el.classList.remove("hit"); }, 320);
+  const under = hits.at(-1).getBoundingClientRect().bottom - p3.getBoundingClientRect().top + 4;
+  const box = document.createElement("div");
+  box.className = "box menu";
+  box.style.cssText = `right:28px;top:${Math.min(under, 520)}px;width:264px`;
+  box.innerHTML = `<div class="mh">${LINK}</div><button type="button" data-a="open">Open in Browser</button><button type="button" data-a="copy">Copy Link</button><button type="button" data-a="safari">Open in Safari</button>`;
+  box.onclick = (e) => {
+    const a = e.target.closest("[data-a]")?.dataset.a;
+    if (!a) return;
+    closeOver(p3);
+    chip(a === "copy" ? "Link Copied" : a === "open" ? "→ Browser" : "→ Safari");
+  };
+  overlay(p3, box, { clear: true });
+}
 /* One size for one terminal: the Mac took it (someone typed there); the phone shows where it is in use. */
 function p3mac() {
   if (exited || away) return;
@@ -1051,7 +1088,7 @@ function here() {
 function p3err() { if (exited) return; oldMac = true; setErr("此 Mac 上的 AgentSwitch 版本不支持滑动翻页，请先更新。"); }
 
 /* ================= wiring ================= */
-const actions = { p1perm, p1exit, p1reset: () => { closeOver(p1); p1reset(); }, p2open: () => { closeOver(p2); p2open(); }, p3open, p3perm, p3ask, p3err, p3exit, p3mac, p3free: here };
+const actions = { p1perm, p1exit, p1reset: () => { closeOver(p1); p1reset(); }, p2open: () => { closeOver(p2); p2open(); }, p3open, p3perm, p3ask, p3err, p3exit, p3link, p3mac, p3free: here };
 document.querySelector(".phones").addEventListener("click", (e) => {
   const b = e.target.closest("figcaption [data-do]");
   if (b) actions[b.dataset.do]?.();
@@ -1069,6 +1106,7 @@ p3open();
 <script>if (new URLSearchParams(location.search).has("draft")) setTimeout(() => { for (let i = 0; i < 2; i++) document.querySelector('[data-x="pic"]').click(); }, 600);</script>
 <script>if (new URLSearchParams(location.search).has("away")) setTimeout(() => document.querySelector('[data-do="p3mac"]').click(), 600);</script>
 <script>if (new URLSearchParams(location.search).has("ask")) setTimeout(() => document.querySelector('[data-do="p3ask"]').click(), 600);</script>
+<script>if (new URLSearchParams(location.search).has("link")) setTimeout(() => document.querySelector('[data-do="p3link"]').click(), 600);</script>
 <script>if (new URLSearchParams(location.search).has("dark")) document.querySelector('#theme [data-t="dark"]')?.click();</script>
 </body>
 </html>

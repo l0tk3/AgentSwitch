@@ -9,7 +9,8 @@
 /* The browser the service holds (docs/browser-v0.md, 2026-10-02, user: 就做一个浏览器，然后顺便给 codex 接入上，然后他调用
    起来和在 app 里一样): one Chrome on the Mac, its screen in the app on the phone and the Mac, and the same tabs driven by
    the agents through the gate's browser tool. A demo for review: the phone's list, watching Codex, taking over, a file of the
-   Mac's opened; the Mac's third page; what Codex itself sees. */
+   Mac's opened; the Mac's third page; what Codex itself sees. 2026-10-03: the page zoom on both ends, working (§1 页面缩放,
+   user: 然后我发现agentswitch的浏览器页没有放大缩小的选项，加上 用来调节大小): the Mac's status bar, the phone's bottom bar. */
 :root {
   --bg: #000; --panel: #0b0b0b; --raise: #151515; --hover: #121212;
   --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
@@ -27,6 +28,7 @@ button:focus { outline: none; }
 .top { max-width: 1320px; margin: 0 auto; padding: 18px 16px 4px; }
 h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 .lede { color: #a9a6a0; font-size: 12.5px; line-height: 1.75; margin: 0 0 10px; max-width: 112ch; }
+.lede b { color: #d8d4cc; font-weight: 600; }
 .sec { max-width: 1320px; margin: 30px auto 12px; padding: 0 16px; font: 11px var(--mono); letter-spacing: .14em; color: #77746e; }
 .row { max-width: 1320px; margin: 0 auto; padding: 0 16px; display: flex; flex-wrap: wrap; gap: 26px 26px; align-items: flex-start; }
 .cell { display: flex; flex-direction: column; gap: 8px; width: 300px; }
@@ -35,6 +37,8 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 .ctl { display: flex; gap: 6px; flex-wrap: wrap; }
 .ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 11.5px var(--mono); padding: 2px 8px; }
 .ctl button.on { background: #e9e6df; color: #111; }
+/* under a screen, for review: what its zoom tells the service (the tab's size and pixel ratio, what the stream is asked) */
+.zs { font: 11px/1.6 var(--mono); color: #77746e; }
 
 .px { display: block; image-rendering: pixelated; }
 .sq { width: 8px; height: 8px; display: inline-block; flex: none; }
@@ -47,7 +51,8 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 
 /* ---------- the phone ---------- */
 .phone { width: 300px; height: 620px; border-radius: 44px; background: #111; padding: 11px; box-shadow: 0 0 0 2px #2a2a2c, 0 24px 60px rgba(0,0,0,.6); }
-.scr { width: 100%; height: 100%; border-radius: 34px; background: var(--bg); color: var(--ink); overflow: hidden; display: grid; grid-template-rows: 40px auto minmax(0, 1fr) auto 50px; position: relative; }
+/* one column as wide as the screen and no wider: a long address is cut short, it does not widen the page area and the bars */
+.scr { width: 100%; height: 100%; border-radius: 34px; background: var(--bg); color: var(--ink); overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 40px auto minmax(0, 1fr) auto 50px; position: relative; }
 .sb { display: flex; justify-content: space-between; align-items: end; padding: 0 26px 4px; font: 600 13px var(--ui); }
 .tabs { display: flex; justify-content: space-around; align-items: center; font: 10.5px var(--mono); color: var(--ink2); border-top: 1px solid #1a1a1a; }
 .tabs span { display: flex; flex-direction: column; align-items: center; gap: 3px; }
@@ -66,28 +71,54 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 /* page */
 .addr { display: flex; align-items: center; gap: 8px; padding: 4px 12px 7px; border-bottom: 1px dotted var(--ink4); }
 .addr .x { font: 16px var(--mono); color: var(--ink2); }
-.addr .u { flex: 1; min-width: 0; border: 1px solid var(--ink4); padding: 4px 8px; font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: center; }
-.addr .u i { font-style: normal; color: var(--ink3); }
+.addr .u { flex: 1; min-width: 0; border: 1px solid var(--ink4); padding: 4px 8px; font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr .u i { font-style: normal; color: var(--ink3); margin-right: 6px; }
 .holder { display: flex; align-items: center; gap: 7px; padding: 5px 12px; font: 11px var(--mono); color: var(--ink2); }
 .holder .sp { flex: 1; }
 .holder.mine { color: var(--signal); }
 .stream { position: relative; overflow: hidden; background: var(--site-bg); }
-.bbar { display: grid; grid-template-columns: repeat(5, 1fr); align-items: center; justify-items: center; border-top: 1px solid var(--ink4); font: 15px var(--mono); color: var(--ink2); padding: 0 6px; }
-.bbar .act { grid-column: span 2; font: 600 11.5px var(--mono); color: var(--ink); white-space: nowrap; }
+/* Page zoom (browser-v0 §1 页面缩放, 2026-10-03): the page of a tab this screen sizes is laid out for the area divided by
+   the factor (--k) and drawn scaled by it, so its picture fills the area at every zoom: 50% is a page twice as wide at half
+   the size. A tab only watched keeps its layout; the phone magnifies its picture (.pic), moved by --x and --y. */
+.zoomed { position: absolute; left: 0; top: 0; width: calc(100% / var(--k, 1)); height: calc(100% / var(--k, 1)); transform-origin: 0 0; transform: scale(var(--k, 1)); }
+.zoomed.pic { width: 100%; height: 100%; transform: translate(var(--x, 0px), var(--y, 0px)) scale(var(--k, 1)); }
+/* the phone's own zoom of a picture, at its corner (a pinch, or the zoom row on a tab only watched): a tap undoes it */
+.chip { position: absolute; right: 8px; top: 8px; z-index: 2; display: flex; gap: 5px; padding: 2px 6px; background: var(--bg); border: 1px solid var(--ink); color: var(--ink); font: 11px var(--mono); }
+.chip i { font-style: normal; color: var(--ink2); }
+/* the bottom bar: ‹ › ↻, the keyboard, the page zoom's percent (2026-10-03; signal while it is not 100%), ⋯; with
+   [ Take Over ] the five keys keep a cap's width and it takes what it needs */
+.bbar { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: center; justify-items: center; border-top: 1px solid var(--ink4); font: 15px var(--mono); color: var(--ink2); padding: 0 6px; }
+.bbar.hold { grid-template-columns: repeat(5, minmax(0, 1fr)) auto; }
+.bbar .act { font: 600 11.5px var(--mono); color: var(--ink); white-space: nowrap; margin-left: 6px; }
 .bbar .act:hover { background: var(--ink); color: var(--bg); }
+.bbar .zk { font: 11px var(--mono); }
+.bbar .zk.set { color: var(--signal); }
+.bbar .zk.off { color: var(--ink3); }
 .keys { display: flex; gap: 5px; padding: 6px 8px; background: #0b0b0b; border-top: 1px solid var(--ink4); overflow: hidden; }
-.keys span { border: 1px solid #3a3a3a; border-bottom-width: 3px; padding: 1px 6px; font: 10.5px var(--mono); color: #b5b1aa; white-space: nowrap; }
+.keys span, .keys button { border: 1px solid #3a3a3a; border-bottom-width: 3px; padding: 1px 6px; font: 10.5px var(--mono); color: #b5b1aa; white-space: nowrap; }
 .keys .fill { border-color: var(--signal); color: var(--signal); }
+/* the zoom row (2026-10-03): over the bottom bar where the typing keys go and drawn as they are — − the percent +, all
+   three as wide as 100% so + stays under the finger; a key pressed sinks as a cap does, one with no step to take is
+   faint; on a tab only watched the row ends with what its keys do instead */
+.keys button { min-width: calc(4ch + 14px); text-align: center; }
+.keys button:active { transform: translateY(2px); border-bottom-width: 1px; margin-bottom: 2px; }
+.keys .off { color: var(--ink3); cursor: default; }
+.keys .off:active { transform: none; border-bottom-width: 3px; margin-bottom: 0; }
+.keys small { margin-left: auto; align-self: center; font: 10.5px var(--ui); color: var(--ink2); white-space: nowrap; }
 .kb { height: 150px; background: #1c1c1e; display: grid; grid-template-rows: repeat(4, 1fr); gap: 6px; padding: 8px 4px; }
 .kb div { display: flex; gap: 5px; justify-content: center; }
 .kb i { flex: 0 0 24px; height: 100%; border-radius: 5px; background: #3a3a3c; }
 .kb i.w2 { flex-basis: 40px; } .kb i.sp { flex-basis: 150px; }
-/* what an agent just did, drawn over the screen */
-.hit { position: relative; outline: 2px solid var(--cyan); outline-offset: 3px; }
-.hit::after { content: attr(data-say); position: absolute; left: -5px; top: -27px; background: var(--cyan); color: #000; font: 600 10.5px var(--mono); padding: 1px 6px; white-space: nowrap; }
-.banner { position: absolute; left: 0; right: 0; top: 0; padding: 5px 10px; font: 11px var(--mono); background: #000; color: var(--amber); display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--amber); z-index: 2; }
+/* what an agent just did, drawn over the screen: the app's own frame and words, so they keep their size while the picture
+   under them is magnified (--k) */
+.hit { position: relative; outline: calc(2px / var(--k, 1)) solid var(--cyan); outline-offset: calc(3px / var(--k, 1)); }
+.hit::after { content: attr(data-say); position: absolute; left: calc(-5px / var(--k, 1)); top: calc(-27px / var(--k, 1)); transform-origin: 0 0; transform: scale(calc(1 / var(--k, 1)));
+  background: var(--cyan); color: #000; font: 600 10.5px var(--mono); padding: 1px 6px; white-space: nowrap; }
+/* a line of the app's above the picture, in a row of its own, so the page below is whole at every zoom (until 2026-10-03
+   it lay on the picture's top and hid the page's first lines, most of all with the page zoomed out) */
+.banner { padding: 5px 10px; font: 11px var(--mono); background: #000; color: var(--amber); display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--amber); }
 .banner .sp { flex: 1; }
-.banner b { color: var(--ink); font-weight: 600; }
+.banner b { color: var(--ink); font-weight: 600; white-space: nowrap; }
 
 /* ---------- mock sites (inside the screen) ---------- */
 .site { font: 12px/1.45 -apple-system, "Helvetica Neue", sans-serif; color: var(--site-ink); }
@@ -102,10 +133,10 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 .gh-check { display: flex; gap: 6px; align-items: center; font-size: 11px; margin-bottom: 4px; }
 .gh-check i { width: 10px; height: 10px; border-radius: 50%; background: var(--site-green); flex: none; }
 .gh-merge { margin-top: 10px; display: inline-block; background: var(--site-green); color: #fff; border-radius: 6px; padding: 6px 12px; font-weight: 600; font-size: 12px; }
-.login { padding: 26px 22px; display: grid; gap: 10px; }
+.login { padding: 26px 22px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }   /* a field never wider than the page, however narrow a zoom makes it */
 .login h2 { margin: 0 0 6px; font: 600 18px -apple-system, sans-serif; text-align: center; }
 .login label { font-size: 11px; font-weight: 600; }
-.login .in { border: 1px solid var(--site-line); border-radius: 6px; padding: 7px 9px; font-size: 12px; color: var(--site-ink); background: #fff; }
+.login .in { border: 1px solid var(--site-line); border-radius: 6px; padding: 7px 9px; font-size: 12px; color: var(--site-ink); background: #fff; overflow: hidden; white-space: nowrap; }
 .login .in.focus { border-color: var(--site-blue); box-shadow: 0 0 0 3px rgba(9,105,218,.25); }
 .login .go { background: var(--site-green); color: #fff; border-radius: 6px; padding: 8px; text-align: center; font-weight: 600; }
 .file { background: #000; color: #e9e6df; height: 100%; padding: 12px; font: 11px var(--mono); }
@@ -121,10 +152,10 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 .dev .c { padding: 12px 14px; display: grid; gap: 8px; color: #9da7b3; }
 
 /* ---------- the Mac's main window, Browser page ---------- */
-.win { width: 1180px; height: 560px; background: var(--bg); color: var(--ink); display: grid; grid-template-rows: 32px minmax(0, 1fr); font: 13px var(--mono);
+.win { width: 1180px; height: 560px; background: var(--bg); color: var(--ink); display: grid; grid-template-rows: 32px minmax(0, 1fr) 24px; font: 13px var(--mono);
   border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); }
 .bar { position: relative; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 20px; font-family: var(--ui); }
-.bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: repeating-linear-gradient(to right, var(--ink4) 0 2px, transparent 2px 4px); }
+.bar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(var(--ink4), var(--ink4)); }
 .lights { display: flex; gap: 8px; margin-right: 18px; }
 .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
 .lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
@@ -132,19 +163,53 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 .pg.on { color: var(--ink); text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 6px; }
 .bar .title { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; font: 600 13px var(--ui); white-space: nowrap; }
 .bar .end { margin-left: auto; display: flex; gap: 10px; align-items: center; font: 11.5px var(--mono); color: var(--ink2); }
-.body { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 0; }
-.side { position: relative; padding: 4px 0; }
-.side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: repeating-linear-gradient(to bottom, var(--ink4) 0 2px, transparent 2px 4px); }
+/* the tab list's button, after the page switch, as on Terminals (mac-window.html .tb) */
+.tb { display: grid; place-items: center; width: 28px; height: 24px; border-radius: 6px; color: var(--ink2); margin-left: 2px; }
+.tb:hover { color: var(--ink); background: rgba(127,127,127,.16); }
+/* the list as a side column (2026-10-03): its dotted edge drags it 220–560 wide (the page keeps 420), past the left it
+   closes with nothing left; the button or ⌘B opens and closes it */
+.win { --side-w: 290px; }
+.body { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 0; }
+.win.side-closed .body { --side-w: 0px; }
+.win.side-closed .side { display: none; }
+.body > .main { grid-column: 2; }
+.side { position: relative; padding: 4px 0; min-width: 0; }
+.side::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: linear-gradient(var(--ink4), var(--ink4)); }
 .side .tr { cursor: pointer; }
-.main { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
+.side-grip { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; z-index: 2; cursor: col-resize; }
+.side-grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; }
+.side-grip:hover::after { background: var(--ink2); }
+.win.side-dragging, .win.side-dragging * { cursor: col-resize !important; user-select: none; }
+.win.side-dragging .side-grip::after { background: var(--signal); }
+.win.side-dragging .stream { pointer-events: none; }
+.main { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
 .main .addr { padding: 8px 14px; }
 .main .stream { margin: 0; }
-.main .foot { display: flex; gap: 14px; align-items: center; padding: 6px 14px; border-top: 1px solid var(--ink4); font: 11.5px var(--mono); color: var(--ink2); }
-.main .foot .sp { flex: 1; }
+/* The window's status bar (window-bars.html, proposal B; dispatch-v0 §1 左侧图标栏与整窗状态栏, 2026-10-03): 24 pt across the
+   whole window, under the list and the page. Its left is the app's — the gateway, the phones; its right is the tab's, what
+   was the page's own bottom strip: who holds it, what an agent waits for, [ Take Over ], and last the page zoom. */
+.status { position: relative; display: flex; align-items: center; gap: 14px; padding: 0 10px 0 12px; font: 11.5px var(--mono); color: var(--ink2); white-space: nowrap; }
+.status::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: linear-gradient(var(--ink4), var(--ink4)); }
+.status .it { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px; }
+.status .sp { flex: 1; }
+.status .sep { color: var(--ink4); }
+.status .ok { color: var(--green); }
+.status .mine { color: var(--signal); }
 .btn { font: 12px var(--mono); color: var(--ink); white-space: nowrap; }
 .btn:hover { background: var(--ink); color: var(--bg); }
 .btn.pri { background: var(--ink); color: var(--bg); padding: 0 2px; }
 .btn.pri:hover { background: var(--signal); color: #000; }
+/* The page zoom (browser-v0 §1 页面缩放, 2026-10-03), last in the bar and always in the same place: − the percent +, in the
+   bar's ink, brighter over a faint square under the pointer (as the bar's lock). − and + go a step (⌘− ⌘+); the percent
+   keeps the width of 100%, goes back to 100% and is in the text's ink while the page is zoomed. Whatever has nothing to do
+   is faint: the percent at 100%, a step that is not there, all three while this Mac does not size the tab (.off: an
+   agent's before Take Over), which then say why under the pointer. */
+.zoom { display: inline-flex; align-items: center; }
+.zoom button { height: 20px; min-width: 20px; padding: 0 5px; border-radius: 5px; text-align: center; }
+.zoom .pc { width: calc(4ch + 10px); }
+.zoom button:hover, .zoom .pc.set { color: var(--ink); }
+.zoom button:hover { background: rgba(127,127,127,.16); }
+.zoom.off button, .zoom button.off, .zoom .pc:not(.set) { color: var(--ink3); background: none; cursor: default; }
 
 /* ---------- what Codex sees ---------- */
 .term { width: 560px; height: 360px; background: #000; color: #d8d8d8; border-radius: 10px; padding: 14px 16px; font: 12px/1.6 var(--mono); white-space: pre; overflow: hidden;
@@ -158,18 +223,20 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; color: #e9e6df; }
 <div class="top">
   <h1>Browser · 浏览器（演示）</h1>
   <p class="lede">Mac 上一个由服务持有的浏览器（同终端）：App 是它的屏幕，手机和 Mac 都能看、能点、能打字；Codex、Claude Code、OpenCode 经凭据网关的浏览器工具操作的是同一个——你看到的就是它正在操作的那一页，随时接手、交还。登录态共用，密码用密文填。你在 App 里还能打开 Mac 上的本地网页和 localhost，手机拿到的只是画面。静态演示，不连服务。</p>
+  <p class="lede"><b>页面缩放</b>（2026-10-03，用户：然后我发现agentswitch的浏览器页没有放大缩小的选项，加上 用来调节大小；browser-v0 §1 页面缩放）：浏览器自己的缩放，同 Chrome——页面按更小或更大的窗口重新排版，画出来就更大或更小。Mac 在状态栏最右边，手机在底栏键盘键之后；只有设尺寸的那块屏幕能调，比例按站点记在各自的设备上。下面两端都可以直接调，每块屏幕下方的一行写出这块屏幕设给服务的尺寸。</p>
 </div>
 
 <div class="sec">IPHONE</div>
 <div class="row">
   <div class="cell"><div class="phone" id="pA"></div><div class="cp"><b>Browser 标签页</b>：按持有者分组——你开的、终端里的 agent、调度的任务；agent 正在操作的转圈，等你的琥珀。右上 + 开新标签：网址、Mac 上的路径或 localhost；底下列出 Mac 上正在监听的本地服务。</div></div>
-  <div class="cell"><div class="phone" id="pB"></div><div class="ctl" id="ctlB"><button data-b="watch" class="on">Watching</button><button data-b="took">Taken Over</button></div><div class="cp" id="cpB"></div></div>
-  <div class="cell"><div class="phone" id="pC"></div><div class="ctl" id="ctlC"><button data-c="file" class="on">Local File</button><button data-c="localhost">localhost</button><button data-c="denied">Blocked</button><button data-c="external">External Link</button></div><div class="cp" id="cpC"></div></div>
+  <div class="cell"><div class="phone" id="pB"></div><div class="ctl" id="ctlB"><button data-b="watch" class="on">Watching</button><button data-b="took">Taken Over</button></div><div class="zs" id="zs-b"></div><div class="cp" id="cpB"></div></div>
+  <div class="cell"><div class="phone" id="pC"></div><div class="ctl" id="ctlC"><button data-c="file" class="on">Local File</button><button data-c="localhost">localhost</button><button data-c="denied">Blocked</button><button data-c="external">External Link</button></div><div class="zs" id="zs-c"></div><div class="cp" id="cpC"></div></div>
 </div>
 
 <div class="sec">MAC · MAIN WINDOW, THIRD PAGE</div>
 <div class="row"><div style="overflow-x:auto;max-width:100%"><div class="win" id="win"></div></div></div>
-<div class="row"><div class="cp" style="max-width:1180px;margin-top:10px">主窗口多出第三页 <b>Browser</b>（Dispatch · Terminals · Browser，⌘0 / ⌃⇥ 之外加 ⌘⇧B），左栏标签列表同手机，右边是画面，键盘鼠标直接转发。点左栏切换标签；Codex 的标签上标出它刚操作的元素。待定：也可以不画画面，而是一个真正的 Chrome 窗口。</div></div>
+<div class="row"><div class="zs" id="zs-mac" style="margin-top:10px"></div></div>
+<div class="row"><div class="cp" style="max-width:1180px;margin-top:10px">主窗口多出第三页 <b>Browser</b>（Dispatch · Terminals · Browser，⌘0 / ⌃⇥ 之外加 ⌘⇧B），左栏标签列表同手机，右边是画面，键盘鼠标直接转发。点左栏切换标签；Codex 的标签上标出它刚操作的元素。待定：也可以不画画面，而是一个真正的 Chrome 窗口。<br><b>左栏同终端页的侧栏</b>（2026-10-03）：拖右边的点线改宽窄（220–560，给画面留 420；双击复原 290），拖过最左边松手即收起、不留细栏；顶栏页面切换后的侧栏按钮或 ⌘B 开关，宽度与开关记在本机。你的标签显示在 Mac 上时归这台 Mac：换成画面区域的尺寸，画面按显示器的像素来，一个 CSS 像素画成一个点。<br><b>状态栏与页面缩放</b>（2026-10-03）：页面底部原来的那一条在横跨整个窗口的状态栏右边（样子见 window-bars.html）。最右边是 <b>− 100% +</b>，位置不随前面的内容变：− 与 + 各换一档，点百分比回到 100%（不是 100% 时用正文色）；指针在这个窗口上时 ⌘+、⌘− 同样有效。只有这台 Mac 在设尺寸的标签能调——你的标签，或 <b>[ Take Over ]</b> 之后 agent 的标签；未接手时三个都暗着，悬停说明原因。比例按站点记：两个 github.com 的标签共用一个比例，localhost:5173 另记。可用的档位随画面区域而定，拖动或收起左栏后随之改变。</div></div>
 
 <div class="sec">WHAT CODEX SEES — 同一个标签</div>
 <div class="row">
@@ -187,9 +254,18 @@ const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "�
 let frame = 0;
 const spin = () => `<span class="spin" data-spin>${SPIN[frame % SPIN.length]}</span>`;
 const agent = (a) => P.sprite(P.AGENT_PX[a], { px: 2 });
-// the tab icon: a globe, 2 pt cells (one icon, one meaning: the Browser tab)
-const GLOBE = [".###.", "#.#.#", "#####", "#.#.#", ".###."];
-const S = { b: "watch", c: "file", sel: "pr" };
+// the tab icon: a globe, 11 × 11 — a one-pixel circle, a meridian, the equator (one icon, one meaning: the Browser tab;
+// 2026-10-03 drawn again cleaner, after a day as a fox: 浏览器是不是可以再换个通用点的图标)
+const GLOBE = ["...#####...", ".##.....##.", ".#.#...#.#.", "#..#...#..#", "#..#...#..#", "###########", "#..#...#..#", "#..#...#..#", ".#.#...#.#.", ".##.....##.", "...#####..."];
+// held: the agent's tab this Mac took over; typing: phone B's keyboard is up while it holds the tab. The page zoom
+// (2026-10-03): zoom is what each device remembers, [site, percent] pairs with the last set last; magnify is the phone's
+// own zoom of a picture it only watches; zoombar says where the phones' zoom row is open.
+const S = { b: "watch", c: "file", sel: "pr", side: { width: 290, closed: false }, held: null, typing: true,
+  zoom: { mac: [], phone: [] }, magnify: 100, zoombar: { b: false, c: false } };
+// the list's button: the toolbar's fine pixel icon (1 pt cells), the same as on Terminals (mac-window.html ICON.side)
+const SIDE_ICON = [".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#",
+  "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", ".################."];
+const SIDE = { width: 290, min: 220, max: 560, room: 420, closeBelow: 120 };
 
 const TABS = [
   { id: "pr", group: "codex", st: "busy", title: "Add native Dispatch page · Pull Request #128", host: "github.com" },
@@ -199,6 +275,8 @@ const TABS = [
   { id: "vite", group: "you", st: "idle", title: "Acme · Dev", host: "localhost:5173" },
 ];
 const GROUPS = { you: "// You", codex: "// codex · AgentSwitch", task: "// 登录财务平台下载对账单" };
+const AGENT_NAME = { codex: "Codex", task: "Claude Code" };
+const tabOf = (id) => TABS.find((x) => x.id === id);
 const mark = (st) => st === "busy" ? spin() : st === "wait" ? sq("var(--amber)", { blink: true }) : sq("var(--ink3)", { hollow: true });
 
 function tabList(selectable) {
@@ -232,7 +310,7 @@ const deniedPage = () => `<div class="denied"><div class="box"><h4>[!] Not Viewa
 // ---------- phones ----------
 function phoneA() {
   return `<div class="scr" style="grid-template-rows:40px auto minmax(0,1fr) 50px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
-    <div class="nav">${P.sprite(GLOBE, { px: 2 })}<span>Browser</span><span class="sp"></span><span class="ic">＋</span></div>
+    <div class="nav">${P.sprite(GLOBE, { px: 1 })}<span>Browser</span><span class="sp"></span><span class="ic">＋</span></div>
     <div class="list">${tabList(false)}<div class="srv"><span class="lbl">// Local Servers on MacBook Pro</span><span>${sq("var(--green)")} localhost:5173 · vite · ~/Projects/site</span><span>${sq("var(--green)")} localhost:3000 · next dev · ~/Projects/web</span></div></div>
     ${tabbar()}</div>`;
 }
@@ -243,16 +321,19 @@ function phoneB() {
     : `<div class="holder">${agent("codex")}<span>codex · AgentSwitch</span><span class="sp"></span>${spin()}<span>Clicking</span></div>`;
   const addr = took ? "portal.example.com/login" : "github.com/acme/app/pull/128";
   const stream = took ? loginPage() : prPage(true);
-  const bottom = took
+  // over the bottom bar: the zoom row, or the typing keys and the keyboard (one at a time: typing puts the row away)
+  const bottom = S.zoombar.b ? zoomRow("b") : took && S.typing
     ? `<div><div class="keys"><span>esc</span><span>tab</span><span>⏎</span><span>⌫</span><span>←</span><span>→</span></div><div class="kb"><div>${"<i></i>".repeat(10)}</div><div>${"<i></i>".repeat(9)}</div><div><i class="w2"></i>${"<i></i>".repeat(7)}<i class="w2"></i></div><div><i class="w2"></i><i class="sp"></i><i class="w2"></i></div></div></div>`
     : "<div></div>";
-  const bar = `<div class="bbar"><span>‹</span><span>›</span><span>↻</span><button class="act" data-b="${took ? "watch" : "took"}">[ ${took ? "Hand Back" : "Take Over"} ]</button></div>`;
+  // the phone's own zoom of the picture it watches, said at the corner as after a pinch (2.0×; 1.25× in full); a tap undoes it
+  const chip = !took && S.magnify !== 100 ? `<button class="chip" data-zoom="b:reset" aria-label="恢复原始大小">${S.magnify % 10 ? S.magnify / 100 : (S.magnify / 100).toFixed(1)}×<i>×</i></button>` : "";
+  const bar = `<div class="bbar hold"><span>‹</span><span>›</span><span>↻</span>${took ? `<button data-kb aria-label="Keyboard">⌨</button>` : `<span>⌨</span>`}${percentKey("b")}<button class="act" data-b="${took ? "watch" : "took"}">[ ${took ? "Hand Back" : "Take Over"} ]</button></div>`;
   document.getElementById("cpB").innerHTML = took
-    ? "<b>接手</b>：标签换成手机的视口，codex 对它的操作排队等待；你打的字直接进页面，不经过模型，但交还后 codex 能在页面上看到（接手时说明一次）。<b>Fill Ciphertext</b> 只在你自己的标签上：从密文填入，网关按站点校验，明文不出现在手机和模型里。<b>Hand Back</b> 或 2 分钟不动就交还。"
-    : "<b>看 codex 操作</b>：地址栏下是持有者和它正在做的事；画面上框出它刚操作的元素。这是 Mac 上那个标签的实时画面（只看时按它的尺寸缩放到手机宽），点 <b>Take Over</b> 接手。";
+    ? "<b>接手</b>：标签换成手机的视口，codex 对它的操作排队等待；你打的字直接进页面，不经过模型，但交还后 codex 能在页面上看到（接手时说明一次）。<b>Fill Ciphertext</b> 只在你自己的标签上：从密文填入，网关按站点校验，明文不出现在手机和模型里。<b>Hand Back</b> 或 2 分钟不动就交还。底栏的 <b>100%</b>：接手后调的是页面，按站点记住；缩放条与键盘只出现一个。"
+    : "<b>看 codex 操作</b>：地址栏下是持有者和它正在做的事；画面上框出它刚操作的元素。这是 Mac 上那个标签的实时画面（只看时按它的尺寸缩放到手机宽），点 <b>Take Over</b> 接手。底栏的 <b>100%</b> 打开缩放条：只看时放大的是手机上的画面（同双指捏合，不记），点右上角的倍数复原。";
   return `<div class="scr" style="grid-template-rows:40px auto auto minmax(0,1fr) auto 44px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
     <div class="addr"><span class="x">‹</span><span class="u"><i>🔒︎</i>${addr}</span><span class="x">⋯</span></div>${holder}
-    <div class="stream">${stream}</div>${bottom}${bar}</div>`;
+    <div class="stream"><div class="zoomed">${stream}</div>${chip}</div>${bottom}${bar}</div>`;
 }
 
 function phoneC() {
@@ -268,29 +349,215 @@ function phoneC() {
     localhost: "<b>本地开发服务</b>：Mac 上正在监听的端口直接打开（只在 Mac 上可达的，也能在手机上看），热更新照常。",
     denied: "<b>看不了的</b>：AgentSwitch 自己的数据、网关、本机令牌、浏览器登录态目录，以及常见凭据文件，宿主在打开前按真实路径检查，页面写明原因。",
     external: "<b>页面里的外部链接</b>：在同一个浏览器的新标签里打开（不跳到手机的 Safari），先确认一次。",
-  }[v];
-  return `<div class="scr" style="grid-template-rows:40px auto auto minmax(0,1fr) 44px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
+  }[v] + (zooms("c") ? " 底栏键盘键后面的 <b>100%</b> 是页面缩放：点开一条 − 100% +，你的标签在这台手机上时调的是页面，按站点记在手机上（不是 100% 时用信号色）。" : "");
+  return `<div class="scr" style="grid-template-rows:40px auto auto auto minmax(0,1fr) auto 44px"><div class="sb"><span>15:42</span><span>▮▮▮</span></div>
     <div class="addr"><span class="x">‹</span><span class="u">${addr}</span><span class="x">⋯</span></div>
     <div class="holder">${sq("var(--ink3)", { hollow: true })}<span>You</span><span class="sp"></span><span>${v === "localhost" ? "vite · ~/Projects/site" : "Mac 上的文件"}</span></div>
-    <div class="stream" style="background:#000">${banner}${page}${sheet}</div>
-    <div class="bbar"><span>‹</span><span>›</span><span>↻</span><span>⌨</span><span>⋯</span></div></div>`;
+    ${banner || "<div></div>"}
+    <div class="stream" style="background:#000"><div class="zoomed">${page}</div>${sheet}</div>
+    ${S.zoombar.c && zooms("c") ? zoomRow("c") : "<div></div>"}
+    <div class="bbar"><span>‹</span><span>›</span><span>↻</span><span>⌨</span>${percentKey("c")}<span>⋯</span></div></div>`;
 }
 
 // ---------- the Mac ----------
 function drawWin() {
-  const t = TABS.find((x) => x.id === S.sel);
-  const page = { pr: prPage(true), issue: `<div class="site"><div class="gh-top">● acme / app</div><div class="gh-body"><div class="gh-title">Issues</div><div class="gh-meta">12 Open · 48 Closed</div></div></div>`,
+  const t = tabOf(S.sel), held = S.held === t.id;
+  // after Take Over the agent's last action is no longer boxed: the tab is yours for now
+  const page = { pr: prPage(!held), issue: `<div class="site"><div class="gh-top">● acme / app</div><div class="gh-body"><div class="gh-title">Issues</div><div class="gh-meta">12 Open · 48 Closed</div></div></div>`,
     portal: loginPage(), mesh: filePage(), vite: devPage() }[t.id];
-  const owner = t.group === "codex" ? `${agent("codex")}<span>codex · AgentSwitch</span>` : t.group === "task" ? `<span>调度任务 · Claude Code</span>` : `<span>You</span>`;
-  const act = t.group === "you" ? "" : t.st === "wait" ? `<button class="btn pri">[ Take Over ]</button>` : `<button class="btn">[ Take Over ]</button>`;
+  const owner = held ? `<span class="it mine">${sq("var(--signal)")}You · Taken Over from ${AGENT_NAME[t.group]}</span>`
+    : t.group === "codex" ? `<span class="it">${agent("codex")}codex · AgentSwitch</span>` : `<span class="it">${t.group === "task" ? "调度任务 · Claude Code" : "You"}</span>`;
+  const act = t.group === "you" ? "" : held ? `<button class="btn" data-hold title="Hand Back ⌘⇧T">[ Hand Back ]</button>`
+    : `<button class="btn ${t.st === "wait" ? "pri" : ""}" data-hold title="Take Over ⌘⇧T">[ Take Over ]</button>`;
   document.getElementById("win").innerHTML = `<div class="bar"><div class="lights"><i></i><i></i><i></i></div>
       <button class="pg">Dispatch</button><button class="pg">Terminals ${sq("var(--amber)", { blink: true })}</button><button class="pg on">Browser</button>
+      <button class="tb" data-side title="List ⌘B">${P.sprite(SIDE_ICON, { px: 1 })}</button>
       <div class="title">${mark(t.st)}<span>${t.title}</span></div><div class="end"><span>${spin()}1</span><span>${sq("var(--amber)", { blink: true })}1</span><span>＋</span></div></div>
-    <div class="body"><div class="side">${tabList(true)}</div>
+    <div class="body"><div class="side">${tabList(true)}<div class="side-grip" data-grip title="Drag · Double-Click Resets"></div></div>
       <div class="main"><div class="addr"><span class="x">‹ ›</span><span class="u">${t.host.startsWith("localhost") || t.host.startsWith("~") ? "" : "<i>🔒︎</i>"}${t.id === "pr" ? "github.com/acme/app/pull/128" : t.id === "portal" ? "portal.example.com/login" : t.id === "mesh" ? "file:///Users/me/…/concepts/mesh.html" : t.host}</span><span class="x">↻</span></div>
-        <div class="stream" style="${t.id === "mesh" || t.id === "vite" ? "background:#000" : ""}">${page}</div>
-        <div class="foot">${owner}<span class="sp"></span>${t.ask ? `<span class="w">${t.ask}</span>` : ""}${act}</div></div></div>`;
+        <div class="stream" style="${t.id === "mesh" || t.id === "vite" ? "background:#000" : ""}"><div class="zoomed">${page}</div></div></div></div>
+    <div class="status"><span class="it ok">${sq("var(--green)")}Gateway</span><span class="sep">│</span><span class="it">iPhone Online</span><span class="sp"></span>
+      ${owner}${t.ask ? `<span class="it w">${t.ask}</span>` : ""}${act}${macZoom()}</div>`;
+  applySide();
 }
+
+// ---------- the Mac's tab list: a side column ----------
+const win = () => document.getElementById("win");
+const sideWidth = (x) => Math.round(Math.max(SIDE.min, Math.min(x, SIDE.max, win().clientWidth - SIDE.room)));
+function applySide() {
+  const w = win();
+  w.style.setProperty("--side-w", `${sideWidth(S.side.width)}px`);
+  w.classList.toggle("side-closed", S.side.closed);
+  fitZoom("mac");   // the page's area changed: the tab is sized again, at the nearest step the new area can use
+}
+const toggleSide = () => { S.side = { ...S.side, closed: !S.side.closed }; applySide(); };
+// A drag follows the pointer (the screen refits as it goes); let go left of 120 and the list closes, nothing left.
+document.addEventListener("pointerdown", (e) => {
+  const grip = e.target.closest("[data-grip]");
+  if (!grip || e.button !== 0) return;
+  e.preventDefault();
+  const body = win().querySelector(".body"), left = body.getBoundingClientRect().left, from = e.clientX;
+  let moved = false;
+  grip.setPointerCapture(e.pointerId);
+  win().classList.add("side-dragging");
+  const move = (ev) => {
+    moved ||= Math.abs(ev.clientX - from) > 3;
+    if (!moved) return;
+    const x = ev.clientX - left, closing = x < SIDE.closeBelow;
+    win().classList.toggle("side-closed", closing);
+    if (!closing) win().style.setProperty("--side-w", `${sideWidth(x)}px`);
+  };
+  const end = (ev) => {
+    grip.removeEventListener("pointermove", move);
+    grip.removeEventListener("pointerup", end);
+    grip.removeEventListener("pointercancel", end);
+    win().classList.remove("side-dragging");
+    const x = ev.clientX - left;
+    if (moved && ev.type === "pointerup") S.side = x < SIDE.closeBelow ? { ...S.side, closed: true } : { closed: false, width: sideWidth(x) };
+    applySide();
+  };
+  grip.addEventListener("pointermove", move);
+  grip.addEventListener("pointerup", end);
+  grip.addEventListener("pointercancel", end);
+});
+document.addEventListener("dblclick", (e) => { if (e.target.closest("[data-grip]") && !S.side.closed) { S.side = { ...S.side, width: SIDE.width }; applySide(); } });
+document.addEventListener("keydown", (e) => { if (e.metaKey && !e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); toggleSide(); } });
+
+// ---------- page zoom ----------
+// Page zoom (docs/browser-v0.md §1 页面缩放, 2026-10-03, user: 然后我发现agentswitch的浏览器页没有放大缩小的选项，加上
+// 用来调节大小): the browser's own zoom, as Chrome's. The service knows nothing of it. The screen that sizes a tab
+// (尺寸有主) sets it to its area divided by the factor, and the page's pixel ratio to its own times the factor, so the
+// page is laid out afresh and comes out larger or smaller; the stream is asked for that many more, or fewer, frame
+// pixels a CSS pixel. Each device keeps a percent per site (what the tab list's second line says); 100 is not kept, a blank tab
+// never. Here the memory is S.zoom and lasts as long as the page.
+const ZOOM = {
+  steps: [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500],   // Chrome's
+  picture: [100, 125, 150, 200, 300, 400],   // a tab only watched: the phone's own zoom of its picture, as a pinch
+  side: [200, 4096],                         // the width and the height POST /browser/tabs/:id/viewport takes
+  ratio: [0.5, 4],                           // and its scale, the page's pixel ratio
+  pixels: 3840 * 2400,                       // the most a page has in all: what the service draws of a view at most
+  ask: 8,                                    // the most frame pixels per CSS pixel a stream asks for
+  sites: 200,                                // kept at most; the one set longest ago is dropped first
+};
+// The screens here that show a tab: where each is drawn, whose memory it uses, its display's pixels per point. The Mac's
+// window is drawn point for point; a phone is drawn 278 wide for a screen of 402 pt, and what it can use goes by its points.
+const SCREENS = {
+  mac: { root: "win", end: "mac", scale: 2 },
+  b: { root: "pB", end: "phone", scale: 3, points: 402 },
+  c: { root: "pC", end: "phone", scale: 3, points: 402 },
+};
+// What a screen shows and what its zoom does there (only the screen that sizes a tab zooms its page): "page" on the Mac
+// for your own tab and for an agent's after Take Over, on the phone for the tab it took over (B) and for your own (C);
+// "picture" on the phone for a tab it only watches; "off" on the Mac for an agent's tab not taken over, and where the Mac
+// refused to open the page.
+function shown(id) {
+  if (id === "mac") { const t = tabOf(S.sel); return { site: t.host, mode: t.group === "you" || S.held === t.id ? "page" : "off" }; }
+  if (id === "b") return S.b === "took" ? { site: tabOf("portal").host, mode: "page" } : { site: tabOf("pr").host, mode: "picture" };
+  return { site: tabOf(S.c === "localhost" ? "vite" : "mesh").host, mode: S.c === "denied" ? "off" : "page" };
+}
+const zooms = (id) => shown(id).mode !== "off";
+
+const within = (v, [min, max]) => Math.min(max, Math.max(min, v));
+const tabSize = (area, percent) => ({ width: Math.round(area.width * 100 / percent), height: Math.round(area.height * 100 / percent) });
+// The steps a screen can use: those that leave both sides of the tab within what the service takes, and the page within
+// the pixels it draws of a view in all (zoomed out the page is drawn at its CSS size, whatever that is).
+const usable = (area) => ZOOM.steps.filter((p) => {
+  const { width, height } = tabSize(area, p);
+  return [width, height].every((v) => v === within(v, ZOOM.side)) && width * height <= ZOOM.pixels;
+});
+// The step in force: the one nearest to what is remembered, a tie going toward 100; 100 where there is none to use.
+const nearest = (steps, percent) => [...steps].sort((a, b) => Math.abs(a - percent) - Math.abs(b - percent) || Math.abs(a - 100) - Math.abs(b - 100))[0] ?? 100;
+const blank = (site) => !site || site === "about:blank";
+const kept = (sites, site) => (blank(site) ? undefined : sites.find(([s]) => s === site)?.[1]) ?? 100;
+// A site's percent, set: it goes last in the list. 100 forgets the site; a blank tab is never kept.
+const remember = (sites, site, percent) => blank(site) ? sites
+  : [...sites.filter(([s]) => s !== site), ...(percent === 100 ? [] : [[site, percent]])].slice(-ZOOM.sites);
+
+// A screen's browser area in its points: the page's part of the screen, with the row or the keyboard that has come up
+// over its bottom (neither sizes the tab again: the picture keeps its size under them).
+function areaOf(id) {
+  const stream = document.querySelector(`#${SCREENS[id].root} .stream`), over = stream.nextElementSibling;
+  const width = stream.clientWidth || 1, k = (SCREENS[id].points ?? width) / width;
+  return { width: width * k, height: (stream.clientHeight + (over && !over.classList.contains("bbar") ? over.offsetHeight : 0)) * k };
+}
+// A screen's zoom now: the percent its keys say and the steps they go through.
+function zoomOf(id) {
+  const { site, mode } = shown(id);
+  if (mode === "picture") return { mode, site, percent: S.magnify, steps: ZOOM.picture };
+  if (mode === "off") return { mode, site, percent: 100, steps: [] };
+  const area = areaOf(id), steps = usable(area);
+  return { mode, site, area, steps, percent: nearest(steps, kept(S.zoom[SCREENS[id].end], site)) };
+}
+// − and + go to the next step the screen can use, none at the ends; the percent goes back to 100%. The tab is sized again
+// at once (here: everything is drawn again, both phones share the phone's memory); a picture's zoom is not kept.
+function zoomStep(id, what) {
+  const z = zoomOf(id), { end } = SCREENS[id];
+  const to = what === "in" ? z.steps.find((p) => p > z.percent) : what === "out" ? z.steps.filter((p) => p < z.percent).at(-1) : 100;
+  if (to === undefined || to === z.percent || z.mode === "off") return;
+  if (z.mode === "picture") S.magnify = to;
+  else S.zoom = { ...S.zoom, [end]: remember(S.zoom[end], z.site, to) };
+  draw();
+}
+// The percent key opens the zoom row and puts it away; the row and the typing keys are never up together.
+function toggleZoomBar(id) {
+  S.zoombar = { ...S.zoombar, [id]: !S.zoombar[id] };
+  if (S.zoombar.b) S.typing = false;
+  draw();
+}
+
+// The three keys of a zoom control: − the percent +. fitZoom writes the percent and dims a step that is not there.
+const zoomKeys = (id, title = {}) => [["out", "−"], ["reset", "100%"], ["in", "+"]].map(([what, label]) =>
+  `<button ${what === "reset" ? `class="pc" data-pc ` : ""}data-zoom="${id}:${what}"${title[what] ? ` title="${title[what]}"` : ""}>${label}</button>`).join("");
+// The Mac's: last in the status bar. All three are dim, and say why under the pointer, while this Mac does not size the tab.
+const MAC_ZOOM = { out: "Zoom Out ⌘−", reset: "Actual Size", in: "Zoom In ⌘+" };
+const macZoom = () => zooms("mac") ? `<span class="zoom">${zoomKeys("mac", MAC_ZOOM)}</span>` : `<span class="zoom off" title="接手后才能缩放。">${zoomKeys("mac")}</span>`;
+// The phone's: the bottom bar's key after the keyboard's says the percent and opens the zoom row over the bar, drawn as
+// the typing keys are. Where the tab is only watched the row ends with what its keys do instead.
+const percentKey = (id) => zooms(id) ? `<button class="zk" data-zoombar="${id}" data-pc aria-label="Zoom">100%</button>` : `<span class="zk off">100%</span>`;
+const zoomRow = (id) => `<div class="keys">${zoomKeys(id)}${shown(id).mode === "picture" ? `<small>仅放大手机上的画面</small>` : ""}</div>`;
+
+// The page under a zoom: laid out for the area divided by the factor and drawn scaled by it (.zoomed). A picture only
+// watched is magnified about its middle, its top kept at the area's top until it fills the area's height (the app
+// goes by the middle of the part in view; with nothing here to move the picture by, that comes to the same within a
+// few points).
+function placePage(page, z) {
+  const f = z.percent / 100, area = page.parentElement;
+  page.classList.toggle("pic", z.mode === "picture");
+  page.style.setProperty("--k", f);
+  if (z.mode !== "picture") return;
+  page.style.setProperty("--x", `${area.clientWidth * (1 - f) / 2}px`);
+  page.style.setProperty("--y", `${Math.min(0, (area.clientHeight - page.firstElementChild.offsetHeight * f) / 2)}px`);
+}
+// The line under a screen, for review: what its zoom tells the service — the tab's size and pixel ratio, the frame pixels
+// per CSS pixel the stream is asked for — and the steps the screen can use. Both ends ask their screen's pixels times
+// the zoom, never under 1 (the service draws no view under the CSS size) nor over 8; zoomed in, the phone asks 0.02 more,
+// so that its bound, the screen's own pixels, settles the frame at exactly the screen's width (the Mac draws a frame
+// that is a pixel short one to one instead).
+function zoomSays(id, z) {
+  if (z.mode === "picture") return `// 只看：放大的是手机上的画面（${z.percent}%），标签的尺寸不变。`;
+  if (z.mode === "off") return id === "mac" ? "// agent 的标签未接手：尺寸不由这台 Mac 设置。" : "// 无可缩放的页面。";
+  const { width, height } = tabSize(z.area, z.percent), { scale } = SCREENS[id], f = z.percent / 100;
+  const num = (v) => String(Math.round(v * 100) / 100);
+  return `// ${z.site} ${z.percent}%：标签 ${width} × ${height}，像素比 ${num(within(scale * f, ZOOM.ratio))}，画面流 ${num(Math.min(ZOOM.ask, Math.max(1, scale * f) + (id !== "mac" && f > 1 ? 0.02 : 0)))} 倍；这块屏幕可用 ${z.steps[0]}%–${z.steps.at(-1)}%。`;
+}
+// A screen after its zoom, its tab or its area changed: the page placed, the percent on its keys, a step that is not
+// there dimmed, the line under it.
+function fitZoom(id) {
+  const root = document.getElementById(SCREENS[id].root), z = zoomOf(id);
+  placePage(root.querySelector(".zoomed"), z);
+  for (const el of root.querySelectorAll("[data-pc]")) { el.textContent = `${z.percent}%`; el.classList.toggle("set", z.percent !== 100); }
+  for (const el of root.querySelectorAll(`[data-zoom$=":in"]`)) el.classList.toggle("off", !z.steps.some((p) => p > z.percent));
+  for (const el of root.querySelectorAll(`[data-zoom$=":out"]`)) el.classList.toggle("off", !z.steps.some((p) => p < z.percent));
+  document.getElementById(`zs-${id}`).textContent = zoomSays(id, z);
+}
+// ⌘+ (⌘=) and ⌘−, the number pad's too, on the Mac's Browser page; ⌘0 stays Dispatch's, the percent is what goes back
+// to 100%. Here only while the pointer is over the window: elsewhere the keys are the viewer's own browser's.
+document.addEventListener("keydown", (e) => {
+  const what = { "+": "in", "=": "in", "-": "out" }[e.key];
+  if (!e.metaKey || !what || !win().matches(":hover")) return;
+  e.preventDefault();
+  zoomStep("mac", what);
+});
 
 function drawTerm() {
   document.getElementById("term").innerHTML = [
@@ -314,17 +581,39 @@ function draw() {
   document.getElementById("pC").innerHTML = phoneC();
   for (const b of document.querySelectorAll("#ctlB button")) b.classList.toggle("on", b.dataset.b === S.b);
   for (const b of document.querySelectorAll("#ctlC button")) b.classList.toggle("on", b.dataset.c === S.c);
+  fitZoom("b"); fitZoom("c");
   drawWin(); drawTerm();
 }
 document.addEventListener("click", (e) => {
-  const b = e.target.closest("[data-b]"); if (b) { S.b = b.dataset.b; draw(); return; }
+  // taking the tab over brings the keyboard up as before, unless the zoom row is open
+  const b = e.target.closest("[data-b]"); if (b) { S.b = b.dataset.b; S.typing = !S.zoombar.b; draw(); return; }
   const c = e.target.closest("[data-c]"); if (c) { S.c = c.dataset.c; draw(); return; }
-  const s = e.target.closest("[data-sel]"); if (s) { S.sel = s.dataset.sel; drawWin(); return; }
+  // another tab on the Mac: the one it had taken over is handed back
+  const s = e.target.closest("[data-sel]"); if (s) { S.sel = s.dataset.sel; S.held = null; drawWin(); return; }
+  if (e.target.closest("[data-side]")) { toggleSide(); return; }
+  if (e.target.closest("[data-hold]")) { S.held = S.held === S.sel ? null : S.sel; drawWin(); return; }
+  const z = e.target.closest("[data-zoom]"); if (z) { zoomStep(...z.dataset.zoom.split(":")); return; }
+  const row = e.target.closest("[data-zoombar]"); if (row) { toggleZoomBar(row.dataset.zoombar); return; }
+  // the keyboard's key: typing starts (the zoom row goes away) or ends
+  if (e.target.closest("[data-kb]")) { S.typing = S.zoombar.b || !S.typing; S.zoombar = { ...S.zoombar, b: false }; draw(); }
 });
 setInterval(() => { frame++; for (const s of document.querySelectorAll("[data-spin]")) s.textContent = SPIN[frame % SPIN.length]; }, 90);
+// ?took, ?file=…, ?listClosed, ?listWidth=… land on a state (for screenshots); for the page zoom: ?tab=vite puts that tab
+// on the Mac's screen and ?macTook has the Mac take its agent's tab over; ?zoom=50 sets every site to the nearest step on
+// both devices (a picture only watched: its nearest); ?zoombar=1 opens the phones' zoom row.
 const q = new URLSearchParams(location.search);
 if (q.has("took")) S.b = "took";
+if (q.has("listClosed")) S.side = { ...S.side, closed: true };
+if (q.get("listWidth")) S.side = { ...S.side, width: Number(q.get("listWidth")) || SIDE.width };
 if (q.get("file")) S.c = q.get("file");
+if (tabOf(q.get("tab"))) S.sel = q.get("tab");
+if (q.has("macTook") && tabOf(S.sel).group !== "you") S.held = S.sel;
+if (q.has("zoombar") && q.get("zoombar") !== "0") { S.zoombar = { b: true, c: true }; S.typing = false; }
+if (Number(q.get("zoom")) > 0) {
+  const percent = nearest(ZOOM.steps, Number(q.get("zoom"))), sites = TABS.reduce((all, t) => remember(all, t.host, percent), []);
+  S.zoom = { mac: sites, phone: sites };
+  S.magnify = nearest(ZOOM.picture, percent);
+}
 draw();
 </script>
 </body>
