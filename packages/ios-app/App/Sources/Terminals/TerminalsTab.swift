@@ -277,7 +277,7 @@ struct TerminalsTab: View {
                         }
                     }
                 }
-                ForEach(Array(sessions.enumerated()), id: \.element.id) { i, s in
+                ForEach(Array(sessions.enumerated()), id: \.element.recordID) { i, s in
                     let index = f.terminals.count + i
                     SessionRow(session: s, last: index == rows - 1, depth: depth, opening: opening,
                                open: { path.append(TerminalRoute.session(s)) },

@@ -42,6 +42,10 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
 
     /// Unique across harnesses (two tools could reuse an id).
     public var id: String { "\(harness)/\(sessionId)" }
+    /// One record of the list: a Codex session's id can stand for several records, each with its own title and times
+    /// (the Mac lists them all), so a row is told from its twins by when it began and was last written (2026-10-05:
+    /// the Mac's native list drew such rows empty).
+    public var recordID: String { "\(id)@\(startedAt ?? 0)-\(updatedAt)" }
     public var updated: Date { Date(milliseconds: updatedAt) }
     public var harnessName: String { ModelName.harness(harness) }
     /// The title, else the start of the last text, else a plain placeholder.

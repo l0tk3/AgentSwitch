@@ -424,7 +424,7 @@ final class TerminalSearchTests: XCTestCase {
     func testFoldersByNameWithAllTheyHold() {
         let result = TerminalSearch.run(nodes, query: "agentsw")
         XCTAssertEqual(result.folders.map(\.name), ["AgentSwitch"])
-        XCTAssertEqual(result.folders[0].rows.map(\.id), ["s:claude-code/s3"])
+        XCTAssertEqual(result.folders[0].rows.map(\.id), ["s:claude-code/s3@1-1"])
         XCTAssertEqual(result.folders[0].git?.branch, "main")
         XCTAssertEqual(result.summary, "// 1 folder")
     }
@@ -434,7 +434,7 @@ final class TerminalSearchTests: XCTestCase {
         let result = TerminalSearch.run(nodes, query: "缓存", said: said)
         XCTAssertEqual(result.folders.map(\.name), ["Work/api", "Work/web"])
         // The terminal by the words of the session it writes; a title that matched carries no line of words.
-        XCTAssertEqual(result.folders[0].rows.map(\.id), ["t:t1", "s:claude-code/s1"])
+        XCTAssertEqual(result.folders[0].rows.map(\.id), ["t:t1", "s:claude-code/s1@1-1"])
         XCTAssertEqual(result.folders[0].rows.map(\.said), ["…连接池太小，改成 64。", nil])
         XCTAssertEqual(result.folders[0].rows.map(\.titleHit), [false, true])
         XCTAssertEqual(result.summary, "// 1 title · 2 in text")

@@ -19,7 +19,7 @@ public enum TerminalSearch {
         public var id: String {
             switch item {
             case .terminal(let t): "t:\(t.id)"
-            case .session(let s): "s:\(s.id)"
+            case .session(let s): "s:\(s.recordID)"
             }
         }
     }
