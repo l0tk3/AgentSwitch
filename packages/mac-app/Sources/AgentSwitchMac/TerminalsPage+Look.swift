@@ -8,10 +8,12 @@ import WebKit
 extension TerminalsPageController {
     /// What the page is given at its start: what this window draws for it (the screens, the status bar's lock, the
     /// panes), and the look.
-    static func install(scripts: WKUserContentController, look: InterfaceLook, accent: String?) {
+    static func install(scripts: WKUserContentController, look: InterfaceLook, accent: String?, detached: Set<String> = []) {
         scripts.removeAllUserScripts()
+        // The terminals out in windows of their own (docs/dispatch-v0.md §1 单独的窗口): known to the page from its
+        // start, so it never shows one of them a second time.
         scripts.addUserScript(WKUserScript(
-            source: "window.agentswitchNativeScreen = true; window.agentswitchStatusBar = true; window.agentswitchPanes = true;",
+            source: "window.agentswitchNativeScreen = true; window.agentswitchStatusBar = true; window.agentswitchPanes = true; window.agentswitchWindows = true; window.agentswitchDetached = \(Self.json(detached));",
             injectionTime: .atDocumentStart, forMainFrameOnly: true))
         scripts.addUserScript(WKUserScript(source: TerminalPageLook.startScript(look: look, accent: accent),
                                            injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -25,6 +27,11 @@ extension TerminalsPageController {
             hex = TerminalPageLook.hex(red: color.redComponent, green: color.greenComponent, blue: color.blueComponent)
         }
         return hex
+    }
+
+    /// Terminal ids as a JavaScript array.
+    static func json(_ ids: Set<String>) -> String {
+        (try? JSONEncoder().encode(ids.sorted())).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
     }
 
     /// The setting and the system's colours are watched while the window is open.
@@ -43,7 +50,7 @@ extension TerminalsPageController {
         guard look != toldLook || accent != toldAccent else { return }
         toldLook = look
         toldAccent = accent
-        Self.install(scripts: web.configuration.userContentController, look: look, accent: accent)
+        Self.install(scripts: web.configuration.userContentController, look: look, accent: accent, detached: detached)
         web.evaluateJavaScript(TerminalPageLook.changeScript(look: look, accent: accent), completionHandler: nil)
     }
 }

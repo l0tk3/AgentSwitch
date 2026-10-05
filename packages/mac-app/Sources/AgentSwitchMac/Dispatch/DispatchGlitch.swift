@@ -1,3 +1,4 @@
+import AgentSwitchMacCore
 import SwiftUI
 
 /// One burst when something happens (docs/ui-v0.md §7.2.9), ported from the iPhone's Glitch: 0.29 s in steps — sideways
@@ -10,9 +11,13 @@ struct GlitchBurst<Trigger: Equatable>: ViewModifier {
     var when: ((Trigger) -> Bool)?
     /// Asked as the view appears: true plays it then (a box that arrived after the page loaded, shown for the first time).
     var onAppear: (() -> Bool)?
+    /// The light burst of something at work (the page's `flicker`): the bands and the split, no inversion, 0.14 s — the
+    /// full glitch stays the sign that something happened.
+    var light = false
     @State private var frame: Frame?
     @State private var run: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.interfaceLook) private var look
 
     struct Frame: Equatable {
         var dx: CGFloat = 0
@@ -36,6 +41,14 @@ struct GlitchBurst<Trigger: Equatable>: ViewModifier {
          (0.288, nil)]
     }
 
+    /// terminal.css `@keyframes flicker`.
+    static var lightFrames: [(Double, Frame?)] {
+        [(0, Frame(dx: -3, top: 0.14, bottom: 0.46, split: 3)),
+         (0.05, Frame(dx: 3, top: 0.56, bottom: 0.10, split: -2)),
+         (0.10, Frame(split: 1)),
+         (0.14, nil)]
+    }
+
     func body(content: Content) -> some View {
         content
             .modifier(Drawn(frame: frame))
@@ -48,11 +61,12 @@ struct GlitchBurst<Trigger: Equatable>: ViewModifier {
     }
 
     private func play() {
-        guard !reduceMotion else { return }
+        // The classic look has the system's fades and no glitch (docs/ui-v0.md §8).
+        guard !reduceMotion, !look.isClassic else { return }
         run?.cancel()
         run = Task { @MainActor in
             var elapsed = 0.0
-            for (at, next) in Self.frames {
+            for (at, next) in light ? Self.lightFrames : Self.frames {
                 try? await Task.sleep(for: .milliseconds(Int((at - elapsed) * 1000)))
                 guard !Task.isCancelled else { return }
                 elapsed = at
@@ -112,5 +126,47 @@ extension View {
     /// `onAppear` says so.
     func glitch<T: Equatable>(on trigger: T, when: ((T) -> Bool)? = nil, onAppear: (() -> Bool)? = nil) -> some View {
         modifier(GlitchBurst(trigger: trigger, when: when, onAppear: onAppear))
+    }
+
+    /// Something at work flickers now and then, on its own beat (docs/ui-v0.md §7.2.9, 2026-10-01, user: 正在运行中的都改
+    /// 成这个效果): every second one time in five, about every 3–7 s; not while it is out of sight.
+    func flickers(while active: Bool) -> some View { modifier(BusyFlicker(active: active)) }
+
+    /// Blinks in two steps (`Motion.blink`), as the waiting square does; still out of sight and under Reduce Motion.
+    func blinks(_ on: Bool) -> some View { modifier(Blinking(on: on)) }
+}
+
+private struct BusyFlicker: ViewModifier {
+    let active: Bool
+    @State private var beat = 0
+    @Environment(\.onScreen) private var onScreen
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(GlitchBurst(trigger: beat, light: true))
+            .task(id: active && onScreen) {
+                guard active, onScreen else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    if !Task.isCancelled, Double.random(in: 0..<1) < 0.2 { beat += 1 }
+                }
+            }
+    }
+}
+
+private struct Blinking: ViewModifier {
+    let on: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.onScreen) private var onScreen
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if on, !reduceMotion, onScreen, !look.isClassic {
+            TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { timeline in
+                content.opacity(Motion.step(at: timeline.date, every: Motion.blink) % 2 == 1 ? 0.25 : 1)
+            }
+        } else {
+            content
+        }
     }
 }

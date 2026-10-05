@@ -20,7 +20,7 @@ final class InterfaceLookTests: XCTestCase {
         // The concept page's "经典 · English" column; everything else is the same word in both looks.
         for (pixel, classic) in [("Busy", "Working"), ("Waiting", "Needs You"), ("Idle", "Ready"), ("Exited", "Ended"),
                                  ("[!] Approval", "Approval Needed"), ("? Question", "Question"), ("Gateway", "Gateway OK"),
-                                 ("On Mac", "On This Mac"), ("bypass", "Bypass"), ("auto", "Auto"), ("OK", "Running"),
+                                 ("On Mac", "On This Mac"), ("bypass", "Bypass"), ("auto", "Auto"), ("manual", "Ask Each"), ("OK", "Running"),
                                  ("Open Dispatch", "Open AgentSwitch")] {
             XCTAssertEqual(ClassicWords.word(pixel, in: .classic), classic)
             XCTAssertEqual(ClassicWords.word(pixel, in: .pixel), pixel, "the pixel look's words are never changed")
@@ -62,8 +62,8 @@ final class InterfaceLookTests: XCTestCase {
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarList), "sidebar.left")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarNew), "plus")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSettings), "slider.horizontal.3")
-        XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSplitRight), "rectangle.split.2x1")
-        XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSplitDown), "rectangle.split.1x2")
+        XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSplitRight), "rectangle.righthalf.inset.filled", "the half a split adds, filled in")
+        XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSplitDown), "rectangle.bottomhalf.inset.filled")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.railTerminals), "terminal")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.railBrowser), "globe")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.square), "circle.fill", "a status square is a dot")

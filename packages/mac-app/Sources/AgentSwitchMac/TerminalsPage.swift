@@ -21,7 +21,10 @@ private let windowLog = Logger(subsystem: "com.agentswitch.mac", category: "term
 /// One per open window: the window closing stops it (the terminals keep running: the daemon holds them), the next
 /// window signs in afresh.
 @MainActor
-final class TerminalsPageController: NSObject, WKNavigationDelegate {
+final class TerminalsPageController: NSObject, WKNavigationDelegate, TerminalsPage {
+    var pageView: NSView { stage }
+    func windowVisible(_ visible: Bool) {}
+
     private let model: AppModel
     /// The main window, once the page is in it.
     weak var window: NSWindow?
@@ -60,6 +63,12 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
     var toldLook = InterfaceLook.current
     var toldAccent = TerminalsPageController.accentHex()
     var lookObservers: [NSObjectProtocol] = []
+    /// The terminals out in windows of their own (docs/dispatch-v0.md §1 单独的窗口): the page shows none of them, and
+    /// asks for one to be put out (`detach`), taken back (`attach`) or brought forward (`raise`).
+    private(set) var detached: Set<String> = []
+    var onDetach: (String) -> Void = { _ in }
+    var onAttach: (String) -> Void = { _ in }
+    var onRaise: (String) -> Void = { _ in }
     /// The Terminals page is the one on screen: it has the keyboard, the page hears it is in use, and the terminal it
     /// shows takes its size from it. Hidden under Dispatch, it keeps its stream but takes nothing.
     var onScreen = false {
@@ -82,7 +91,7 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         // The page leaves the screen to the native view (terminal.js NATIVE), Encrypt & Send to the window's status bar
         // (STATUS_BAR, 2026-10-03), and lays the terminal area out in panes this window fills (PANES).
         // It is drawn in the window's look, with the system's accent (docs/ui-v0.md §8; TerminalsPage+Look.swift).
-        Self.install(scripts: config.userContentController, look: toldLook, accent: toldAccent)
+        Self.install(scripts: config.userContentController, look: toldLook, accent: toldAccent, detached: detached)
         web = TerminalWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
         web.setValue(false, forKey: "drawsBackground")
         web.underPageBackgroundColor = .black
@@ -107,7 +116,9 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
 
     /// Signs in and loads the page (on terminal `id` when given), unless it is loaded or on its way (then `id` is shown
     /// once it is there).
-    func load(terminal id: String? = nil) {
+    func load() { load(terminal: nil) }
+
+    func load(terminal id: String?) {
         if let id { pendingTerminal = id }
         guard !loading, !loaded else { return }
         loading = true
@@ -130,6 +141,23 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         guard pageReady else { return load(terminal: id) }
         let arg = (try? JSONEncoder().encode(id)).map { String(decoding: $0, as: UTF8.self) } ?? "null"
         web.evaluateJavaScript("window.agentswitch?.show(\(arg))", completionHandler: nil)
+    }
+
+    /// Which terminals are out in windows of their own: told to the page open now, and to the next one loaded here.
+    func setDetached(_ ids: Set<String>) {
+        guard ids != detached else { return }
+        detached = ids
+        Self.install(scripts: web.configuration.userContentController, look: toldLook, accent: toldAccent, detached: ids)
+        tellDetached()
+    }
+
+    private func tellDetached() {
+        web.evaluateJavaScript("window.agentswitch?.detached?.(\(Self.json(detached)))", completionHandler: nil)
+    }
+
+    /// The bar's menu: the terminal of the pane in focus goes to a window of its own.
+    func detachShown() {
+        if let id = screen?.shown { onDetach(id) }
     }
 
     /// The bar's buttons and the window's shortcuts from Dispatch (⌘T, ⌘1–9); the status bar's lock (Encrypt & Send).
@@ -221,6 +249,10 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         // The status bar's grid and holder, as the screen hears them from its stream.
         screen.onSize = { [weak self] grid, away in self?.screenSaid(pane, grid: grid.map { [$0.cols, $0.rows] }, away: away) }
         screen.onClick = { [weak self] in self?.clicked(pane) }
+        // The terminal's own ground, for the bar and the status bar over and under it.
+        screen.onGround = { [weak self] color in
+            if self?.head.ground != color { self?.head.ground = color }
+        }
         stage.add(screen: screen.view, refresh: screen.refresh)
         screens[pane] = screen
         return screen
@@ -232,14 +264,17 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         let before = focusedPane
         var shown: Set<Int> = []
         var rects: [CGRect] = []
+        // A terminal out in a window of its own is not shown here too (the page knows; said again if it missed it).
+        if panes.contains(where: { $0.id.map(detached.contains) ?? false }) { tellDetached() }
         for p in panes {
             shown.insert(p.pane)
             let screen = screens[p.pane] ?? makeScreen(p.pane)
+            let id = p.id.flatMap { detached.contains($0) ? nil : $0 }
             screen.place(p.rect)
             // The keyboard goes where the page says (`focus`), not to whichever pane was shown last.
-            screen.show(p.id, keyboard: false)
+            screen.show(id, keyboard: false)
             screen.workdir = p.cwd
-            if p.id != nil { rects.append(p.rect) }
+            if id != nil { rects.append(p.rect) }
             if p.focused { focusedPane = p.pane }
         }
         for (pane, screen) in screens where !shown.contains(pane) {
@@ -285,6 +320,9 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
         case "context":
             let context = TerminalContext(report: body)
             if head.context != context { head.context = context }
+        case "side":
+            let width = CGFloat((body["width"] as? NSNumber)?.doubleValue ?? 0)
+            if head.sideWidth != width { head.sideWidth = width }
         case "screens":
             let panes = (body["panes"] as? [[String: Any]] ?? []).compactMap { p -> PaneScreen? in
                 guard let pane = (p["pane"] as? NSNumber)?.intValue, let rect = Self.rect(p["rect"]) else { return nil }
@@ -378,7 +416,7 @@ final class TerminalsPageController: NSObject, WKNavigationDelegate {
     #if DEBUG
     var probeScreen: TerminalScreenController? { screen }
     var probeScreens: [Int: TerminalScreenController] { screens }
-    var probeWeb: TerminalWebView { web }
+    var probeWeb: TerminalWebView? { web }
     #endif
 }
 
@@ -396,7 +434,18 @@ private final class ScriptBridge: NSObject, WKScriptMessageHandler {
             if let text = body["url"] as? String, let url = URL(string: text) { MainActor.assumeIsolated { LinkOpener.open(url) } }
         case "signIn":
             MainActor.assumeIsolated { owner?.signIn() }
-        case "head", "mark", "context", "screen", "screens", "overlays", "focus", "focusPage", "note", "claim":
+        case "detach", "attach", "raise":
+            guard let id = body["id"] as? String, !id.isEmpty else { break }
+            let kind = body["type"] as? String
+            MainActor.assumeIsolated {
+                guard let owner else { return }
+                switch kind {
+                case "detach": owner.onDetach(id)
+                case "attach": owner.onAttach(id)
+                default: owner.onRaise(id)
+                }
+            }
+        case "head", "mark", "context", "side", "screen", "screens", "overlays", "focus", "focusPage", "note", "claim":
             MainActor.assumeIsolated { owner?.pageSaid(body) }
         case "log":
             windowLog.notice("page: \(body["text"] as? String ?? "", privacy: .public)")
@@ -420,6 +469,11 @@ final class TerminalHead {
     var mark: PixelArt.MarkState = .off
     var tag = ""
     var context: TerminalContext?
+    /// The list's column on the page, in points; nothing while it is closed. The window's bars draw their lines only
+    /// as far as its edge (MainWindowRoot).
+    var sideWidth: CGFloat = 0
+    /// The terminal's own ground (its theme's): the bar's and the status bar's over and under the terminal.
+    var ground: NSColor?
     /// The native screen's word on the terminal on screen: its grid as the service has it (`[cols, rows]`, nil before the
     /// stream says it) and where it is in use when not here.
     private(set) var grid: [Int]?

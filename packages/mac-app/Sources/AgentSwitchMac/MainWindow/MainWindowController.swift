@@ -24,7 +24,9 @@ final class MainWindowController: NSObject {
     var onVisibilityChange: (Bool) -> Void = { _ in }
     /// The rail's settings and ⌘,.
     var openSettings: () -> Void = {}
-    private var terminals: TerminalsPageController?
+    /// The terminals in windows of their own (docs/dispatch-v0.md §1 单独的窗口): one of them is not shown here too.
+    var windows: TerminalWindows?
+    private var terminals: (any TerminalsPage)?
     private var browser: BrowserPageModel?
     private var container: PageContainer?
     private var dispatchHost: NSView?
@@ -35,11 +37,14 @@ final class MainWindowController: NSObject {
     #if DEBUG
     /// TerminalProbe: the window opens behind the others and the app is not made active.
     static var probing = false
-    var probeScreen: TerminalScreenController? { terminals?.screen }
+    var probeScreen: TerminalScreenController? { terminals?.probeScreen }
     var probeScreens: [Int: TerminalScreenController] { terminals?.probeScreens ?? [:] }
-    var probeWeb: TerminalWebView? { terminals?.web }
+    var probeWeb: TerminalWebView? { terminals?.probeWeb ?? nil }
+    /// The native Terminals page's model (nil while the web page is in use).
+    var probeTerminals: TerminalsModel? { (terminals as? NativeTerminalsPage)?.model }
     var probeBrowser: BrowserPageModel? { browser }
     var probeHead: TerminalHead? { terminals?.head }
+    var probeClient: DaemonClient { model.client }
     /// The status bar's lock, as a click on it.
     func probeSeal() { barActions.seal() }
     #endif
@@ -54,8 +59,16 @@ final class MainWindowController: NSObject {
 
     init(model: AppModel) {
         self.model = model
-        state = MainWindowState(page: MainPage.restored(UserDefaults.standard.string(forKey: MainPage.storeKey)))
+        state = MainWindowState(page: MainPage.restored(UserDefaults.standard.string(forKey: MainPage.storeKey)),
+                                railHidden: MainRailLayout.hidden(UserDefaults.standard.object(forKey: MainRailLayout.hiddenKey) as? Bool))
         super.init()
+        // The rail put away stays put away the next time (docs/dispatch-v0.md §1 图标栏可以收起).
+        state.onRailHidden = { hidden in
+            #if DEBUG
+            if Self.probing { return }   // a probe's rail is not the user's
+            #endif
+            UserDefaults.standard.set(hidden, forKey: MainRailLayout.hiddenKey)
+        }
     }
 
     // MARK: opening
@@ -71,6 +84,8 @@ final class MainWindowController: NSObject {
 
     /// One terminal on screen (the Live Activity, the probe): the Terminals page switches to it, or opens on it.
     func show(terminal id: String) {
+        // In a window of its own: that one comes forward.
+        if windows?.raise(id) == true { return }
         let watched = inUse
         if window == nil { open(terminal: id) } else { terminals?.show(terminal: id) }
         go(to: .terminals, animated: watched)
@@ -85,6 +100,15 @@ final class MainWindowController: NSObject {
         go(to: .dispatch, animated: watched)
         bringForward()
     }
+
+    /// A new terminal's panel on the Terminals page (⌘T in a terminal's own window).
+    func newTerminal() {
+        show(.terminals)
+        terminals?.newTerminal()
+    }
+
+    /// The terminals out in windows of their own changed: the page leaves them, or may show them again.
+    func detachedChanged(_ ids: Set<String>) { terminals?.setDetached(ids) }
 
     /// The terminals on screen in the window in use (one a pane): the Live Activity says nothing of their turns.
     var watchingTerminals: Set<String> { terminals?.watching ?? [] }
@@ -128,14 +152,24 @@ final class MainWindowController: NSObject {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
-        let terminals = TerminalsPageController(model: model, size: Self.contentSize)
+        // The Terminals page is native (2026-10-05); the daemon's page in a web view stays behind a hidden default for now.
+        let terminals: any TerminalsPage = UserDefaults.standard.bool(forKey: "terminalsPageWeb")
+            ? TerminalsPageController(model: model, size: Self.contentSize) : NativeTerminalsPage(model: model)
         terminals.window = window
         terminals.onTitle = { [weak self] in self?.updateTitle() }
+        terminals.setDetached(windows?.ids ?? [])
+        terminals.onDetach = { [weak self] id in self?.windows?.show(id) }
+        terminals.onRaise = { [weak self] id in self?.windows?.raise(id) }
+        // Taken back: its window closes (the page hears it is no longer out), then it is shown here.
+        terminals.onAttach = { [weak self] id in
+            self?.windows?.close(id)
+            self?.terminals?.show(terminal: id)
+        }
         let dispatch = NSHostingView(rootView: DispatchRoot(model: model, state: state))
         let browser = BrowserPageModel(service: { [model] in model.client }, state: state,
                                        sealer: { [model] request in try await model.gateCLI.seal(request) })
         browser.onTitle = { [weak self] in self?.updateTitle() }
-        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.stage, .browser: BrowserPage.host(browser)])
+        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.pageView, .browser: BrowserPage.host(browser)])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: terminals.head, model: model,
                                                                 content: container, actions: barActions, browser: browser))
         host.sizingOptions = []
@@ -204,6 +238,7 @@ final class MainWindowController: NSObject {
         if Self.probing { visible = true }   // behind every other window on purpose
         #endif
         state.windowChanged(key: window.isKeyWindow, visible: visible)
+        terminals?.windowVisible(state.windowVisible)
         browser?.setActive(shown: state.page == .browser, visible: state.windowVisible)
     }
 
@@ -304,6 +339,7 @@ final class MainWindowController: NSObject {
             settings: { [weak self] in self?.openSettings() },
             seal: { [weak self] in self?.terminals?.seal() },
             split: { [weak self] side in self?.terminals?.split(side) },
+            detach: { [weak self] in self?.terminals?.detachShown() },
             closeWindow: { [weak self] in self?.window?.performClose(nil) },
             exitFullScreen: { [weak self] in self?.window?.toggleFullScreen(nil) })
     }
@@ -359,6 +395,8 @@ final class MainWindowController: NSObject {
             state.requestBack()
         case .settings:
             openSettings()
+        case .toggleRail:
+            state.toggleRail()
         case .browser(let key):
             guard let browser else { return }
             switch key {

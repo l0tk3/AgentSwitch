@@ -145,6 +145,18 @@ final class TerminalScreenController: NSObject {
     var pane = 0
     /// Clicked: its pane takes the focus.
     var onClick: () -> Void = {}
+    /// The screen's ground in the user's colours, told whenever they are put on.
+    var onGround: (NSColor) -> Void = { _ in }
+    /// A window without the page (a terminal in a window of its own, docs/dispatch-v0.md §1 单独的窗口) takes what the
+    /// page would: every message of the stream by its name (the requests, the status, the name) and the window's
+    /// shortcuts.
+    var onMessage: ((_ event: String, _ data: String) -> Void)?
+    /// Opened here, the terminal's size is taken from another screen of this Mac too (the main window's pane it just
+    /// left holds it for a few seconds more); one in use on the phone or the web is still followed.
+    var claimsFromMac = false
+    var onShortcut: ((_ key: String, _ shift: Bool, _ alt: Bool) -> Void)?
+    /// The grid the view fits, whenever it changes (a new terminal starts at it; a pane being sized says it).
+    var onGrid: ((_ cols: Int, _ rows: Int) -> Void)?
     private let client: () -> DaemonClient
     private var id: String?
     /// Where the terminal's agent works now (the page says it): a relative path ⌘-clicked on the screen starts there.
@@ -176,6 +188,11 @@ final class TerminalScreenController: NSObject {
     /// A claim on its way: the stream may still say the size is another screen's (what it replays on connecting).
     private var claiming = false
     private var mine: Bool { owner == screenId }
+    /// Where the terminal was taken to from this screen (`iphone`, `web`, `mac`), until it is taken back here by hand —
+    /// a click, a key, `[ Use Here ]`. Its owner leaving does not bring it back by itself (2026-10-05, user: 在iPhone上
+    /// 接管了一个session退出去之后mac就自动接管了，不应该这样，应该在mac上手动点击接管才能接管回来): the placeholder stays,
+    /// and the terminal keeps the size it was left at.
+    private var takenTo: String? { didSet { if takenTo != oldValue { tellSize() } } }
     /// The user's look, put back after every reset (a reset takes the terminal's colours back to its defaults).
     private var style: TerminalStyle = .fallback
     private var keyMonitor: Any?
@@ -242,6 +259,7 @@ final class TerminalScreenController: NSObject {
         if view.frame != rect { view.frame = rect }
         if refresh.frame != rect { refresh.frame = rect }
         let t = view.getTerminal()
+        onGrid?(t.cols, t.rows)
         evaluate("window.agentswitch?.grid(\(t.cols), \(t.rows), \(pane))")
     }
 
@@ -263,13 +281,15 @@ final class TerminalScreenController: NSObject {
         owner = nil
         service = nil
         claiming = false
+        takenTo = nil
         tellAway(nil)
         guard let id else { return }
         clear()
         lastSeq = 0
         // Only a page in use takes the size on opening (the web page's `inUse()`): hidden under Dispatch or in a window
         // in the background, it follows; brought forward, `windowBecameKey` takes the size if nobody has it.
-        claimOnConnect = inUse
+        // A window opened for this one terminal (`claimsFromMac`) takes it whether or not it is in front by then.
+        claimOnConnect = inUse || claimsFromMac
         connect(id, after: nil)
         if keyboard { focus() }
     }
@@ -317,17 +337,21 @@ final class TerminalScreenController: NSObject {
     /// The user typed or clicked here (the placeholder's [ take over ] too): the size is this window's.
     func userActed() { if !mine { claim() } }
 
-    /// The window came to the front: the size is this window's only when nobody else has it (in use on the phone, the
-    /// placeholder stays until the user takes it over).
-    func windowBecameKey() { if owner == nil, !claimOnConnect { claim() } }
+    /// The window came to the front: the size is this window's only when nobody else has it and nobody took it from
+    /// here (in use on the phone, or left there, the placeholder stays until the user takes it over).
+    func windowBecameKey() { if owner == nil, takenTo == nil, !claimOnConnect { claim() } }
 
     /// Takes the size: the grid this view fits, told to the service with this screen's id (also when it is the same
     /// size: the owner changes); the placeholder goes.
     func claim() {
         guard let id else { return }
+        // Taken back from where it was in use: the placeholder goes and the screen is drawn in from the top.
+        let back = takenTo != nil || (owner != nil && owner != screenId)
+        takenTo = nil
         owner = screenId
         claiming = true
         tellAway(nil)
+        if back { drawIn() }
         refit()
         let t = view.getTerminal()
         scheduleResize(id: id, cols: t.cols, rows: t.rows)
@@ -343,7 +367,8 @@ final class TerminalScreenController: NSObject {
     }
 
     private func tellSize() {
-        onSize(service, owner.flatMap { $0 == screenId ? nil : Self.place(of: $0) })
+        // Left where it was taken to: still said to be there, until it is taken back.
+        onSize(service, owner.map { $0 == screenId ? nil : Self.place(of: $0) } ?? takenTo)
     }
 
     private static func place(of screen: String) -> String {
@@ -388,8 +413,8 @@ final class TerminalScreenController: NSObject {
     fileprivate func received(_ data: Data, from task: URLSessionDataTask) {
         guard task === self.task else { return }
         for message in parser.feed(data) {
-            guard let event = TerminalStreamEvent.decode(event: message.event, data: message.data) else { continue }
-            handle(event)
+            if let event = TerminalStreamEvent.decode(event: message.event, data: message.data) { handle(event) }
+            onMessage?(message.event, message.data)
         }
     }
 
@@ -437,7 +462,7 @@ final class TerminalScreenController: NSObject {
             if claimOnConnect {
                 // Just opened here: this window's size unless another screen is in use (then the placeholder says where).
                 claimOnConnect = false
-                if by == nil || by == screenId {
+                if by == nil || by == screenId || (claimsFromMac && by?.hasPrefix("mac") == true) {
                     let before = (terminal.cols, terminal.rows)
                     claim()
                     if let id, (terminal.cols, terminal.rows) == before {
@@ -450,8 +475,13 @@ final class TerminalScreenController: NSObject {
             if claiming, by != screenId { return }
             owner = by
             if let by, by != screenId {
+                takenTo = Self.place(of: by)
                 follow(cols: cols, rows: rows)
                 tellAway(Self.place(of: by))
+            } else if by == nil, let takenTo {
+                // Its owner left: it stays as it was left until it is taken back here by hand.
+                follow(cols: cols, rows: rows)
+                tellAway(takenTo)
             } else if by == nil, visible, !claimOnConnect {
                 claim()
             } else {
@@ -547,6 +577,7 @@ final class TerminalScreenController: NSObject {
     }
 
     func pageShortcut(_ key: String, shift: Bool, alt: Bool = false) {
+        if let onShortcut { return onShortcut(key, shift, alt) }
         let arg = (try? JSONEncoder().encode(key)).map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
         evaluate("window.agentswitch?.shortcut(\(arg), \(shift), \(alt))")
     }
@@ -554,6 +585,7 @@ final class TerminalScreenController: NSObject {
     /// The view's grid changed (the window, the font, the page's layout): the owner tells the service; another screen's
     /// size stays in the buffer, whatever this view's is.
     fileprivate func sized(cols: Int, rows: Int) {
+        onGrid?(cols, rows)
         evaluate("window.agentswitch?.grid(\(cols), \(rows), \(pane))")
         guard let id else { return }
         if mine {
@@ -624,6 +656,7 @@ final class TerminalScreenController: NSObject {
             text.flatMap(TerminalStyle.rgba).map { NSColor(srgbRed: $0.red, green: $0.green, blue: $0.blue, alpha: $0.alpha) }
         }
         if let bg = color(style.theme.background) { view.nativeBackgroundColor = bg }
+        onGround(view.nativeBackgroundColor)
         if let fg = color(style.theme.foreground) { view.nativeForegroundColor = fg }
         if let cursor = color(style.theme.cursor) { view.caretColor = cursor }
         if let selection = color(style.theme.selectionBackground) { view.selectedTextBackgroundColor = selection }

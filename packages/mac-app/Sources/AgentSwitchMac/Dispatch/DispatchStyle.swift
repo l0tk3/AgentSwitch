@@ -365,6 +365,9 @@ struct FloatingBox<Content: View>: View {
     /// The classic look's sign before the title: a warning while it waits for you unless another is named (a question's
     /// mark); none for a box that waits for nothing (a new tab).
     var symbol: String? = nil
+    /// A colour of its own for the head bar and the frame (the sealed reply's box: the signal colour); in the classic
+    /// look only its sign takes it.
+    var tint: Color? = nil
     @ViewBuilder let content: Content
     @Environment(\.interfaceLook) private var look
 
@@ -379,7 +382,7 @@ struct FloatingBox<Content: View>: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
                 if let name = symbol ?? (waiting ? "exclamationmark.triangle" : nil) {
-                    Image(systemName: name).font(.system(size: 12.5, weight: .medium)).foregroundStyle(waiting ? Color.waiting : Look.ink2)
+                    Image(systemName: name).font(.system(size: 12.5, weight: .medium)).foregroundStyle(tint ?? (waiting ? Color.waiting : Look.ink2))
                 }
                 Text(ClassicWords.word(title, in: look)).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Look.ink).lineLimit(1)
                 Spacer(minLength: 8)
@@ -406,14 +409,14 @@ struct FloatingBox<Content: View>: View {
                 Text(trailing).lineLimit(1).truncationMode(.middle)
             }
             .font(.system(size: 12, design: .monospaced))
-            .foregroundStyle(waiting ? Color.black : Look.ground)
+            .foregroundStyle(waiting || tint != nil ? Color.black : Look.ground)
             .padding(.horizontal, 10)
             .frame(height: 24)
-            .background(waiting ? Color.waiting : Look.ink)
+            .background(tint ?? (waiting ? Color.waiting : Look.ink))
             content
         }
         .background(Look.ground)
-        .overlay(Rectangle().strokeBorder(waiting ? Color.waiting : Look.ink, lineWidth: 1))
+        .overlay(Rectangle().strokeBorder(tint ?? (waiting ? Color.waiting : Look.ink), lineWidth: 1))
         .background(Checker().offset(x: 6, y: 6))
         .padding(.trailing, 7)
         .padding(.bottom, 7)

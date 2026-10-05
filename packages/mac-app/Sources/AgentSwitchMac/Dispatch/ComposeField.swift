@@ -15,6 +15,10 @@ struct ComposeField: NSViewRepresentable {
     var insert: InsertRequest?
     /// False while a page covers the record: the field gives the keyboard up.
     var active = true
+    /// The field takes the keyboard as it first shows (the input, a box opened to write in); false for a field that
+    /// waits to be asked (a question's Other).
+    var takesFocusAtFirst = true
+    var label = "输入任务或问题"
     var onSubmit: () -> Void
     var onFiles: ([URL]) -> Void
     /// The clipboard holds files or an image: attach them instead of pasting text.
@@ -28,7 +32,11 @@ struct ComposeField: NSViewRepresentable {
     static var minHeight: CGFloat { lineHeight }
     static var maxHeight: CGFloat { CGFloat(maxLines) * (lineHeight + lineSpacing) }
 
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeCoordinator() -> Coordinator {
+        let coordinator = Coordinator(self)
+        if !takesFocusAtFirst { coordinator.focused = focusRequests }
+        return coordinator
+    }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -65,7 +73,7 @@ struct ComposeField: NSViewRepresentable {
         view.autoresizingMask = [.width]
         view.textContainer?.widthTracksTextView = true
         view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
-        view.setAccessibilityLabel("输入任务或问题")
+        view.setAccessibilityLabel(label)
         scroll.documentView = view
         context.coordinator.view = view
         view.string = text

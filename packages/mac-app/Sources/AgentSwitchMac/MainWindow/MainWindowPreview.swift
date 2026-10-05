@@ -39,7 +39,14 @@ import SwiftUI
 ///   right at 100 %, dim on a tab this Mac does not size (Codex's before `[ Take Over ]`);
 /// - `main-browser-new`: the new tab box (recent addresses, the Mac's local servers);
 /// - `main-browser-empty`: no tabs yet;
-/// - `main-refresh-browser-6`: a step of the change from Dispatch to Browser.
+/// - `main-refresh-browser-6`: a step of the change from Dispatch to Browser;
+/// - `main-rail-hidden`, `main-rail-hidden-dispatch`: the rail put away (docs/dispatch-v0.md §1 图标栏可以收起,
+///   2026-10-04) on Terminals and on Dispatch — the bars on the window's edge: Dispatch at work, Terminals waiting for
+///   you, Browser with nothing going on (no bar);
+/// - `main-rail-quiet`: the same with nothing going on anywhere: the one bar of the page on screen;
+/// - `main-bare`: the rail put away and the page's list closed: no line anywhere — the bar, the terminal and the status
+///   bar one surface;
+/// - `main-rail-out`: the pointer on the edge, the rail out over the page.
 /// `-designPreviewOnly browser` draws only the Browser pictures.
 @MainActor
 enum MainWindowPreview {
@@ -65,7 +72,24 @@ enum MainWindowPreview {
                        to: directory.appendingPathComponent("main-terminals-fullscreen.png"))
         try await refresh(model: model, to: .terminals, system: NSAppearance(named: .darkAqua), name: "main-refresh", into: directory)
         try await refresh(model: model, to: .dispatch, system: NSAppearance(named: .aqua), name: "main-refresh-dispatch", into: directory)
+        try await renderRail(model: model, into: directory)
     }
+
+    /// The rail put away, and out again under the pointer.
+    static func renderRail(model: AppModel, into directory: URL) async throws {
+        func file(_ base: String) -> URL { directory.appendingPathComponent("\(base).png") }
+        let dark = NSAppearance(named: .darkAqua)
+        try await shot(model: model, page: .terminals, system: dark, rail: .hidden, to: file("main-rail-hidden"))
+        try await shot(model: model, page: .dispatch, system: dark, rail: .hidden, to: file("main-rail-hidden-dispatch"))
+        try await shot(model: model, page: .terminals, system: dark, rail: .out, to: file("main-rail-out"))
+        try await shot(model: model, page: .terminals, system: dark, rail: .quiet, to: file("main-rail-quiet"))
+        // Everything put away — the rail, and the page's list: no line anywhere (BarRule).
+        try await shot(model: model, page: .terminals, system: dark, rail: .bare, to: file("main-bare"))
+    }
+
+    /// The rail in a picture: as it is, put away, put away with nothing going on anywhere, put away with the page's
+    /// list closed too, or put away and out under the pointer.
+    enum Rail { case shown, hidden, quiet, bare, out }
 
     /// The Browser page's pictures (always dark: one look).
     static func renderBrowser(model: AppModel, into directory: URL) async throws {
@@ -89,11 +113,19 @@ enum MainWindowPreview {
     }
 
     /// Two tasks (one busy, one waiting), two terminals (the same), and the browser's tabs (an agent busy, one waiting).
-    private static func state(on page: MainPage) -> MainWindowState {
-        let state = MainWindowState(page: page)
+    /// With the rail put away, each page a different bar: a task at work, a terminal waiting, nothing in the browser.
+    private static func state(on page: MainPage, rail: Rail = .shown) -> MainWindowState {
+        let state = MainWindowState(page: page, railHidden: rail != .shown)
         let now = Date()
         func row(_ id: String, _ kind: LiveSnapshot.Kind, waiting: Bool) -> LiveSnapshot.Row {
             LiveSnapshot.Row(id: id, kind: kind, title: id, step: "", startedAt: now, needsYou: waiting)
+        }
+        guard rail == .shown else {
+            if rail != .quiet, rail != .bare {
+                state.liveChanged(LiveSnapshot(rows: [row("t1", .task, waiting: false), row("k1", .terminal, waiting: true)], now: now))
+            }
+            state.showRail(out: rail == .out)
+            return state
         }
         state.liveChanged(LiveSnapshot(rows: [row("t1", .task, waiting: false), row("t2", .task, waiting: true),
                                               row("k1", .terminal, waiting: true), row("k2", .terminal, waiting: false)], now: now))
@@ -102,7 +134,7 @@ enum MainWindowPreview {
     }
 
     /// The terminal page's report for a terminal waiting for you.
-    private static var head: TerminalHead {
+    private static func head(list: Bool) -> TerminalHead {
         let head = TerminalHead()
         head.name = "AgentSwitch"
         head.git = "main ±5 ↑2"
@@ -110,6 +142,8 @@ enum MainWindowPreview {
         head.mark = .waiting
         head.tag = "1 Waiting"
         head.context = TerminalContext(harness: "claude-code", model: "claude-opus-5-5", mode: "bypass", cols: 139, rows: 46)
+        // The stand-in page's list (TerminalPageStandIn).
+        head.sideWidth = list ? 300 : 0
         return head
     }
 
@@ -118,11 +152,11 @@ enum MainWindowPreview {
     /// the footer's line; `zoom`: the page zoomed in to this step).
     private static func shot(model: AppModel, page: MainPage, system: NSAppearance?, size: NSSize = size, open: DispatchRoute? = nil,
                              browser service: BrowserDemoService? = nil, select: String? = nil, compose: Bool = false,
-                             note: String? = nil, zoom: Int? = nil, fullScreen: Bool = false, to file: URL) async throws {
-        let state = state(on: page)
+                             note: String? = nil, zoom: Int? = nil, fullScreen: Bool = false, rail: Rail = .shown, to file: URL) async throws {
+        let state = state(on: page, rail: rail)
         let browser = BrowserPageModel(service: { service ?? BrowserDemoService(empty: true) }, state: state, defaults: nil,
                                        recents: BrowserDemoService.recents)
-        let (window, _) = makeWindow(model: model, state: state, page: page, system: system, size: size, open: open, browser: browser)
+        let (window, _) = makeWindow(model: model, state: state, page: page, system: system, size: size, open: open, browser: browser, rail: rail)
         if fullScreen {
             for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] { window.standardWindowButton(button)?.isHidden = true }
             state.fullScreen = true
@@ -202,7 +236,8 @@ enum MainWindowPreview {
     }
 
     private static func makeWindow(model: AppModel, state: MainWindowState, page: MainPage, system: NSAppearance?,
-                                   size: NSSize = size, open: DispatchRoute? = nil, browser: BrowserPageModel) -> (NSWindow, PageContainer) {
+                                   size: NSSize = size, open: DispatchRoute? = nil, browser: BrowserPageModel,
+                                   rail: Rail = .shown) -> (NSWindow, PageContainer) {
         let window = PreviewWindow(contentRect: NSRect(origin: .zero, size: size),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                                    backing: .buffered, defer: false)
@@ -213,9 +248,9 @@ enum MainWindowPreview {
         let dispatch = NSHostingView(rootView: DispatchRoot(model: model, state: state)
             .environment(\.dispatchService, DispatchDemoService())
             .environment(\.dispatchPreviewRoute, open))
-        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn()),
+        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
                                               .browser: BrowserPage.host(browser)])
-        let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head, model: model, content: container,
+        let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head(list: rail != .bare), model: model, content: container,
                                                                 actions: MainBarActions(), browser: browser))
         host.sizingOptions = []
         window.contentViewController = host
@@ -230,10 +265,15 @@ enum MainWindowPreview {
 
 /// Where the terminal page would be: its list's edge and a line saying it is not loaded here.
 private struct TerminalPageStandIn: View {
+    /// Its list is open.
+    var list = true
+
     var body: some View {
         HStack(spacing: 0) {
-            Color.black.frame(width: 300)
-                .overlay(alignment: .trailing) { Rectangle().fill(Color(nsColor: .barEdge)).frame(width: 1) }
+            if list {
+                Color.black.frame(width: 300)
+                    .overlay(alignment: .trailing) { Rectangle().fill(Color(nsColor: .barEdge)).frame(width: 1) }
+            }
             Text("Terminal Page · Not Loaded in Preview").mono(12).foregroundStyle(Color.inkDim)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

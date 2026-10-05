@@ -91,6 +91,72 @@ public struct PageActivity: Equatable, Sendable {
     }
 }
 
+// MARK: - the rail, put away
+
+/// The rail can be put away (docs/dispatch-v0.md §1 图标栏可以收起, 2026-10-04; user: 左边这个侧栏找找是不是可以作成可以收缩的？
+/// 然后收缩之后对应位置留下一个颜色条，如果有动态就变呼吸灯样式). It leaves no column: the page runs to the window's edge, and
+/// half a pill stands out of the edge where an icon was (`RailBar`; the user chose it of three drawn after other apps'
+/// — Discord's server list: A 贴边半圆条). The pointer on the window's edge brings the rail out over the page, as a hidden
+/// Dock comes out, and it goes back when the pointer leaves; a bar clicked goes to its page. The rail is put away and
+/// brought back by its edge (dragged, or clicked twice), by its empty part clicked twice, by its menu under a right
+/// click, and by ⌥⌘B.
+public enum MainRailLayout {
+    /// The rail, in points.
+    public static let width = 44.0
+    /// The strip along the window's edge that takes the pointer and holds the bars, over the page's first points.
+    public static let stripWidth = 8.0
+    /// A bar: how far it stands out of the edge, and its height for the page on screen and for the others.
+    public static let barWidth = 3.0
+    public static let longBar = 20.0
+    public static let shortBar = 8.0
+    /// The pointer rests on the strip this long before the rail comes out, and has left the rail this long before it
+    /// goes back (milliseconds).
+    public static let comeOutAfter = 120
+    public static let goBackAfter = 280
+    /// The edge dragged this far puts the rail away or brings it back.
+    public static let dragDistance = 12.0
+
+    /// Where it is kept that the rail is put away (UserDefaults).
+    public static let hiddenKey = "mainWindowRailHidden"
+
+    /// The rail is shown until it has been put away.
+    public static func hidden(_ stored: Bool?) -> Bool { stored ?? false }
+
+    /// The menu's word and the edge's help, with the key.
+    public static func help(hidden: Bool) -> String { hidden ? "Show Rail ⌥⌘B" : "Hide Rail ⌥⌘B" }
+}
+
+/// A page's bar on the edge of a window whose rail is put away. Three things, each said one way (2026-10-04, user, of
+/// bars where the page on screen was white and a page at work the accent's blue: 当前选中颜色和其他的颜色有冲突，换一套配色
+/// 逻辑吧; demo `docs/design/concepts/rail-strip.html`):
+/// - its colour: amber for what waits for you, wherever it is; else the colour of what is selected for the page on
+///   screen (the accent; the signal in the pixel look — what its icon in the rail has); else ink.
+/// - its length: long for the page on screen, short for the others.
+/// - its motion: it breathes only while something goes on — slowly at work, quicker while it waits for you.
+/// A page that is not on screen and has nothing going on has no bar.
+public struct RailBar: Equatable, Sendable {
+    public enum Tone: Equatable, Sendable { case selected, ink, waiting }
+    public enum Pace: Equatable, Sendable { case still, slow, quick }
+
+    public let long: Bool
+    public let tone: Tone
+    public let pace: Pace
+
+    public init(long: Bool, tone: Tone, pace: Pace) {
+        self.long = long
+        self.tone = tone
+        self.pace = pace
+    }
+
+    public static func of(current: Bool, activity: PageActivity.Mark) -> RailBar? {
+        switch activity {
+        case .waiting: RailBar(long: current, tone: .waiting, pace: .quick)
+        case .busy: RailBar(long: current, tone: current ? .selected : .ink, pace: .slow)
+        case .none: current ? RailBar(long: true, tone: .selected, pace: .still) : nil
+        }
+    }
+}
+
 // MARK: - the refresh
 
 /// A screen drawn afresh (ui-v0 §7.4; dispatch-v0 §1 "换页即刷新"): what it shows comes in from the top in even steps, a
@@ -146,7 +212,8 @@ public struct ScanRefresh: Equatable, Sendable {
 /// 2026-10-03), ⌘⇧T takes the tab over or hands it back (the status bar's `[ Take Over ]` / `[ Hand Back ]`: what is
 /// in a bottom bar is to be had elsewhere too, 2026-10-03), and ⌘+ (⌘= too, with shift or without, and the keypad's +)
 /// zooms the page in, ⌘− out (the status bar's `−` `100%` `+`, docs/browser-v0.md §1 页面缩放, 2026-10-03; ⌘0 stays
-/// Dispatch, so going back to 100 % has no key). Anything else is the page's.
+/// Dispatch, so going back to 100 % has no key). ⌥⌘B puts the rail away and brings it back on every page (2026-10-04).
+/// Anything else is the page's.
 public enum MainShortcut: Equatable, Sendable {
     case page(MainPage)
     case nextPage
@@ -156,6 +223,8 @@ public enum MainShortcut: Equatable, Sendable {
     case newTerminal
     case back
     case settings
+    /// ⌥⌘B: the rail put away or brought back (MainRailLayout).
+    case toggleRail
     case browser(BrowserShortcut)
 
     /// The Browser page's own keys.
@@ -196,6 +265,7 @@ public enum MainShortcut: Equatable, Sendable {
         if press.keyCode == escape, !press.command, !press.control, !press.option, !press.shift {
             return page == .dispatch && canGoBack && !composing ? .back : nil
         }
+        if press.command, press.option, !press.control, !press.shift, press.key == "b" { return .toggleRail }
         if press.command, press.shift, !press.control, !press.option, press.key == "b" { return .page(.browser) }
         if press.command, press.shift, !press.control, !press.option, press.key == "t" { return page == .browser ? .browser(.hold) : nil }
         // With shift or without: `+` is ⇧= on most layouts and a key of its own on others and on the keypad.

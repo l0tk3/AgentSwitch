@@ -7,12 +7,19 @@ import SwiftUI
 // §7); the card's spinners and mark move like the app's own.
 // In the classic look (docs/ui-v0.md §8) both are drawn as a standard app's: the mark as lines, dots for the squares, a
 // turning ring for the spinner, the system font, round buttons without brackets, the system's accent and status colours.
+// There the ring turns smoothly, in the card and in the capsule too (2026-10-04, user, of the capsule's still ring:
+// 这个图标是卡住的; of the card's, stepped ten times a turn: 转圈的动画也一卡一卡的): Core Animation turns it
+// (LayerMotion.swift), and nothing of the card or the capsule is drawn again as it does.
 
 /// The fixed palette: the island's, whatever the Mac's appearance; the classic look's status colours and accent when
 /// that look is kept (asked at every draw).
 enum LiveLook {
     static var classic: Bool { InterfaceLook.current.isClassic }
     static var busy: Color { classic ? Color(nsColor: .controlAccentColor) : Color(red: 0x2E / 255, green: 0xE6 / 255, blue: 1) }
+    /// The classic look's ring: its size and line, and its colour for a layer.
+    static let ring: CGFloat = 9
+    static let ringLine: CGFloat = 1.5
+    static var ringColor: NSColor { .controlAccentColor }
     static var waiting: Color { classic ? Color(red: 1, green: 0x9F / 255, blue: 0x0A / 255) : Color(red: 1, green: 0xB0 / 255, blue: 0) }
     static let waitingEdge = Color(red: 0xA3 / 255, green: 0x6F / 255, blue: 0)
     static var done: Color { classic ? Color(red: 0x30 / 255, green: 0xD1 / 255, blue: 0x58 / 255) : Color(red: 0x9B / 255, green: 0xE2 / 255, blue: 0x2D / 255) }
@@ -89,15 +96,29 @@ struct LiveSquare: View {
     }
 }
 
-/// At work: the braille spinner at `frame`; in the classic look a ring that turns with it.
+/// At work: the braille spinner at `frame`; in the classic look a ring. `turns`: the ring turns by itself, smoothly (the
+/// card in its panel); else it is drawn still — into a picture (the capsule's image, a preview), under Reduce Motion.
+/// `slot`: told where the ring is in the capsule, for the turning one laid over the capsule's picture.
 struct LiveSpin: View {
     let frame: Int
+    var turns = false
+    var slot: LiveRingSlot? = nil
 
     var body: some View {
         if LiveLook.classic {
-            Circle().trim(from: 0.1, to: 0.8).stroke(LiveLook.busy, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                .rotationEffect(.degrees(Double(frame % 10) * 36))
-                .frame(width: 9, height: 9)
+            Group {
+                if turns {
+                    TurningRing(color: LiveLook.ringColor, lineWidth: LiveLook.ringLine)
+                } else {
+                    Circle().trim(from: 0.1, to: 0.8).stroke(LiveLook.busy, style: StrokeStyle(lineWidth: LiveLook.ringLine, lineCap: .round))
+                }
+            }
+            .frame(width: LiveLook.ring, height: LiveLook.ring)
+            // On a line of words it stands on the line, turning or still (a view of AppKit's has no baseline of its own).
+            .alignmentGuide(.firstTextBaseline) { $0[.bottom] }
+            .background {
+                if let slot { GeometryReader { geometry in slot.note(geometry.frame(in: .named(LiveCapsule.space))) } }
+            }
         } else {
             Text(BrailleSpinner.frames[frame % BrailleSpinner.frames.count]).fontWeight(.bold).foregroundStyle(LiveLook.busy)
         }
@@ -111,11 +132,24 @@ struct LiveTwig: View {
     }
 }
 
+/// Where the classic look's ring is in the capsule's picture (points, from its top left): written as the picture is
+/// drawn, read by the status item, which lays the turning ring over it there.
+final class LiveRingSlot {
+    private(set) var frame: CGRect?
+
+    func note(_ frame: CGRect) -> Color {
+        self.frame = frame
+        return .clear
+    }
+}
+
 /// ■ 2  ⠋ 1: how many wait for you and how many run. `spin`: the spinner's frame (0 in the capsule).
 struct LiveTally: View {
     let waiting: Int
     let running: Int
     var spin = 0
+    var turns = false
+    var slot: LiveRingSlot? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -124,7 +158,7 @@ struct LiveTally: View {
             }
             if running > 0 {
                 HStack(spacing: 3) {
-                    LiveSpin(frame: spin)
+                    LiveSpin(frame: spin, turns: turns, slot: slot)
                     Text("\(running)")
                 }
             }
@@ -142,6 +176,10 @@ struct LiveCapsule: View {
     let trail: LivePresenter.Trail?
     var now = Date()
     var minimal = false
+    /// Told where the tally's ring is (the classic look), in the capsule's own points.
+    var slot: LiveRingSlot? = nil
+
+    static let space = "AgentSwitchLiveCapsule"
 
     var body: some View {
         HStack(spacing: 7) {
@@ -152,7 +190,7 @@ struct LiveCapsule: View {
                     Text(ClassicWords.word(word, in: InterfaceLook.current)).mono(12, weight: .medium).lineLimit(1).fixedSize()
                         .foregroundStyle(waiting ? LiveLook.waiting : LiveLook.ink2)
                 case .tally(let waiting, let running):
-                    LiveTally(waiting: waiting, running: running)
+                    LiveTally(waiting: waiting, running: running, slot: slot)
                 case .result(let ok):
                     LiveSquare(color: ok ? LiveLook.done : LiveLook.failed)
                 }
@@ -162,6 +200,7 @@ struct LiveCapsule: View {
         .padding(.trailing, minimal ? 8 : 9)
         .frame(height: 22)
         .background(Capsule().fill(Color.black))
+        .coordinateSpace(.named(Self.space))
         .environment(\.colorScheme, .dark)
         // Drawn into an image, outside any window: the look is asked where it is kept.
         .environment(\.interfaceLook, InterfaceLook.current)
@@ -179,19 +218,22 @@ struct LiveCardActions {
 /// The card under the capsule: the lock screen card of the phone — the mark, `AgentSwitch` and the tally over a
 /// rule; then up to three rows (the waiting first), each a title, `└─` its step, and what answers it; or the result.
 /// It steps every 0.14 s only while something on it spins, else once a second as a row's clock turns, else not at all;
-/// and not while it is not seen (ui-v0 §7.4, 2026-10-03).
+/// and not while it is not seen (ui-v0 §7.4, 2026-10-03). In the classic look nothing on it steps: its rings turn by
+/// themselves (`live`), and it is drawn again only as a clock turns.
 struct LiveCard: View {
     let presenter: LivePresenter
     var actions = LiveCardActions()
     /// Requests being answered: their buttons wait.
     var pending: Set<String> = []
+    /// The card is in its panel, on screen: the classic look's rings turn. A card drawn into a picture has them still.
+    var live = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.onScreen) private var onScreen
     /// The look kept in the settings: the card is drawn again when it changes.
     @AppStorage(InterfaceLook.key) private var lookRaw = InterfaceLook.pixel.rawValue
 
     var body: some View {
-        let spins = presenter.cardSpins && !reduceMotion
+        let spins = presenter.cardSpins && !reduceMotion && !ringsTurn
         let clocks = presenter.cardClocks
         Group {
             if spins && onScreen {
@@ -216,6 +258,9 @@ struct LiveCard: View {
         .environment(\.interfaceLook, InterfaceLook.load(lookRaw))
         .id(lookRaw)
     }
+
+    /// The classic look's rings turn by themselves: nothing has to step for them.
+    private var ringsTurn: Bool { live && InterfaceLook.load(lookRaw).isClassic && presenter.cardSpins && !reduceMotion && onScreen }
 
     private func content(frame: Int, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -245,7 +290,7 @@ struct LiveCard: View {
             Text("AgentSwitch").mono(12, weight: .semibold).foregroundStyle(LiveLook.ink)
             Spacer(minLength: 8)
             if presenter.shownEnd == nil, let s = presenter.snapshot, s.rows.count > 1 {
-                LiveTally(waiting: s.waiting, running: s.running, spin: frame)
+                LiveTally(waiting: s.waiting, running: s.running, spin: frame, turns: ringsTurn)
             } else {
                 Text(LiveLook.word(presenter.look)).mono(12, weight: .semibold).foregroundStyle(LiveLook.color(presenter.look))
             }
@@ -259,7 +304,7 @@ struct LiveCard: View {
                     if row.needsYou {
                         LiveSquare(color: LiveLook.waiting)
                     } else {
-                        LiveSpin(frame: frame).mono(12, weight: .bold)
+                        LiveSpin(frame: frame, turns: ringsTurn).mono(12, weight: .bold)
                     }
                 }
                 .frame(width: 12)

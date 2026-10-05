@@ -34,7 +34,7 @@ public enum ClassicWords {
     static let table: [String: String] = [
         "Busy": "Working", "Waiting": "Needs You", "Idle": "Ready", "Exited": "Ended",
         "[!] Approval": "Approval Needed", "? Question": "Question", "Gateway": "Gateway OK", "On Mac": "On This Mac",
-        "bypass": "Bypass", "auto": "Auto", "plan": "Plan", "ask": "Ask", "edits": "Edits",
+        "bypass": "Bypass", "auto": "Auto", "manual": "Ask Each", "plan": "Plan", "ask": "Ask", "edits": "Edits",
         "OK": "Running", "Remote": "Remote Access", "Open Dispatch": "Open AgentSwitch",
     ]
 
@@ -84,6 +84,8 @@ public extension PixelArt {
         (square, "circle.fill"), (hollow, "circle"), (lock, "lock"),
         (terminalWindow, "terminal"), (railTerminals, "terminal"), (railBrowser, "globe"),
         (toolbarList, "sidebar.left"), (toolbarNew, "plus"), (toolbarSettings, "slider.horizontal.3"),
-        (toolbarSplitRight, "rectangle.split.2x1"), (toolbarSplitDown, "rectangle.split.1x2"),
+        // The window with the half a split adds filled in, as the system's own tiling icons are drawn (2026-10-04,
+        // user, of a box with a line through it: 太违和了，感觉还是按照像素的逻辑画的……画的更加现代一些).
+        (toolbarSplitRight, "rectangle.righthalf.inset.filled"), (toolbarSplitDown, "rectangle.bottomhalf.inset.filled"),
     ]
 }

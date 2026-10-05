@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Bars</title>
+<style>
+/* The Mac main window's top bar and status bar as one thing (2026-10-05, user: 然后顶栏底栏怎么才能看上去更加一体化呢).
+   The window at its real sizes, as it is now and three ways to bring the two bars together:
+     A  one ruler — the same type, icons, button size and side insets in both bars; nothing else changes.
+     B  one frame — the two bars are one surface that runs round the page; the page is a panel set into it, with round
+        corners in the classic look. No lines under or over the bars: the panel's edge parts them.
+     C  one with the terminal — what the user meant (of B: 我说的一体化是和终端一样, with a picture of iTerm's window: no
+        line between its bars and the terminal). With the rail and the list put away there is no line at all: the
+        bar, the terminal and the status line are one surface. While the rail or the list is shown their outlines are
+        drawn whole — the line under the bar and the one over the status bar across the window, the rail's edge, the
+        list's — and nothing ends in mid-air (the first drawing of C stopped the lines at the list's edge; user: 画的有点
+        草率了哥们，如果所有东西都收起来不需要线来划清界限的话就不用展示线，如果需要用线来划分轮廓的话就显示边界线).
+   B and C include A. The rail put away is as on rail-strip.html. */
+:root { --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace; --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px var(--ui); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 16px 16px 6px; }
+.ctl .seg { display: inline-flex; align-items: center; }
+.ctl .seg b { font: 400 12px var(--mono); color: #8d8a84; margin-right: 8px; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; margin-left: -1px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+.ctl .seg.off { opacity: .35; pointer-events: none; }
+.note { max-width: 1060px; margin: 6px auto 14px; color: #8f8b84; font-size: 12.5px; line-height: 1.7; text-align: center; padding: 0 16px; }
+.note b { color: #d8d4cc; font-weight: 600; }
+.stage { padding: 0 16px 8px; overflow-x: auto; }
+.say { max-width: 1180px; margin: 12px auto 60px; padding: 0 16px; color: #a9a59e; font-size: 12.5px; line-height: 1.8; }
+.say h2 { font: 600 12px var(--mono); letter-spacing: .08em; color: #8d8a84; margin: 18px 0 8px; }
+.say b { color: #e9e6df; font-weight: 600; }
+.say ul { margin: 4px 0; padding-left: 18px; }
+
+/* ---------- the two looks ---------- */
+.s-pixel { --bg: #000; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --line: #262524; --sel: #1a1a1a; --hover: #121212;
+  --signal: #ff2e88; --busy: #2ee6ff; --amber: #ffb000; --green: #9be22d; --f: var(--mono); --r: 0px; --card-r: 0px; }
+.s-classic { --bg: #000; --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --line: #2a2a2d; --sel: #232326; --hover: #18181b;
+  --signal: #0a84ff; --busy: #0a84ff; --amber: #ff9f0a; --green: #30d158; --f: var(--ui); --r: 2px; --card-r: 9px; }
+
+/* ---------- the window, at the app's sizes ---------- */
+.win { --chrome: var(--bg); --st-h: 24px; --st-f: 11.5px; --st-lead: 12px; --st-trail: 10px; --bar-trail: 8px; --gap: 14px;
+  width: 1180px; height: 640px; margin: 0 auto; background: var(--chrome); color: var(--ink); display: grid;
+  grid-template-rows: 32px minmax(0, 1fr) var(--st-h); font: 13px var(--f); border-radius: 10px; overflow: hidden; position: relative;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); user-select: none; -webkit-user-select: none; }
+.s-classic .win { --bar-trail: 6px; }
+.bar { display: flex; align-items: center; padding: 0 var(--bar-trail) 0 20px; border-bottom: 1px solid var(--line); position: relative; }
+.lights { display: flex; gap: 8px; margin-right: 10px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.bar .title { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; font: 600 13px var(--ui); white-space: nowrap; }
+.bar .title .git { font: 400 11px var(--f); color: var(--ink2); }
+.bar .end { margin-left: auto; display: flex; gap: 4px; }
+.s-classic .bar .end { gap: 0; }
+.tb { color: var(--ink2); display: grid; place-items: center; width: 28px; height: 24px; }
+.s-classic .tb { width: 26px; height: 22px; border-radius: 6px; }
+.tb:hover { color: var(--ink); background: rgba(127,127,127,.16); }
+.body { display: grid; min-height: 0; position: relative; }
+.status { border-top: 1px solid var(--line); display: flex; align-items: center; gap: var(--gap); padding: 0 var(--st-trail) 0 var(--st-lead); font: var(--st-f) var(--f); color: var(--ink2); white-space: nowrap; }
+.status .sp { flex: 1; }
+.status .it { display: inline-flex; align-items: center; gap: 6px; }
+.status .vr { width: 1px; height: 12px; background: var(--line); }
+.s-pixel .status .vr { width: auto; height: auto; background: none; color: var(--line); }
+.status .lock { width: 22px; height: 20px; display: grid; place-items: center; border-radius: 5px; }
+.status .lock:hover, .rt:hover { color: var(--ink); background: rgba(127,127,127,.16); }
+.rt { width: 20px; height: 20px; display: grid; place-items: center; color: var(--ink2); font: 13px/1 var(--mono); border-radius: 5px; }
+.s-pixel .rt, .s-pixel .status .lock { border-radius: 0; }
+.dot { width: 8px; height: 8px; display: inline-block; background: var(--c, var(--green)); }
+.s-classic .dot { border-radius: 50%; width: 7.5px; height: 7.5px; }
+
+/* ---------- A: one ruler for both bars ----------
+   The status bar's words at the bar's 12 pt and its height 26; every icon 13 pt in a 26 × 22 button, in both bars; the
+   last button of each ends at the same point on the right; the first of the status bar stands under the rail's middle. */
+.v-a .win, .v-b .win { --st-h: 26px; --st-f: 12px; --st-lead: 9px; --st-trail: var(--bar-trail); }
+.v-a .bar .title .git, .v-b .bar .title .git { font-size: 12px; }
+.v-a .rt, .v-b .rt, .v-a .status .lock, .v-b .status .lock { width: 26px; height: 22px; border-radius: 6px; }
+.s-pixel.v-a .rt, .s-pixel.v-b .rt, .s-pixel.v-a .status .lock, .s-pixel.v-b .status .lock { width: 28px; height: 22px; border-radius: 0; }
+.v-a .status svg.ic, .v-b .status svg.ic { width: 15px; height: 15px; }
+
+/* ---------- B: one frame round the page ----------
+   The bars and the margin beside the page are one surface (--chrome); the page is a panel set into it. No lines under
+   the bar, over the status bar or beside the rail: the panel's own edge parts them. */
+.v-b .win { --chrome: var(--frame); }
+.v-b .bar, .v-b .status, .v-b .rail { border-color: transparent; }
+.v-b .panel { margin: 0 6px 0 0; border-radius: var(--card-r); box-shadow: 0 0 0 1px var(--edge); overflow: hidden; }
+.v-b .body.away .panel { margin-left: 6px; }
+.t-0 { --frame: #000; --edge: #2a2a2d; } .t-1 { --frame: #0c0c0e; --edge: #242427; } .t-2 { --frame: #161618; --edge: #2c2c30; }
+.s-pixel.t-0 { --edge: #262524; } .s-pixel.t-1 { --frame: #0b0b0a; --edge: #262524; } .s-pixel.t-2 { --frame: #151514; --edge: #302f2d; }
+
+/* ---------- C: one with the terminal ----------
+   With nothing beside the page (no rail, no list: the window has no `lined`) there is no line at all, as in a
+   terminal's own window. While the rail or the list is shown, the lines are whole: under the bar and over the status
+   bar across the window, the rail's edge and the list's between them. The list's column may be a shade off the
+   terminal's black (the tab bar's of the terminal app, #0d0d0d): --side-tint. */
+.v-c .win { --st-h: 26px; --st-f: 12px; --st-lead: 9px; --st-trail: var(--bar-trail); }
+.v-c .bar .title .git { font-size: 12px; }
+.v-c .rt, .v-c .status .lock { width: 26px; height: 22px; border-radius: 6px; }
+.s-pixel.v-c .rt, .s-pixel.v-c .status .lock { width: 28px; height: 22px; border-radius: 0; }
+.v-c .status svg.ic { width: 15px; height: 15px; }
+.v-c .bar, .v-c .status { border-color: transparent; position: relative; }
+.v-c .win.lined .bar, .v-c .win.lined .status { border-color: var(--line); }
+.v-c .bar::after, .v-c .status::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--side); background: var(--side-tint, transparent); z-index: -1; }
+.v-c .win { isolation: isolate; }
+.v-c .rail, .v-c .list { background: var(--side-tint, transparent); }
+.v-c.k-1 { --side-tint: #0d0d0d; }
+.v-c .title { font-weight: 600; }
+
+/* ---------- the rail, shown or out, and what it leaves ---------- */
+.rail { width: 45px; display: flex; flex-direction: column; gap: 2px; padding: 6px 4px; border-right: 1px solid var(--line); background: var(--chrome); }
+.v-b .rail { width: 44px; }
+.ri { position: relative; height: 36px; display: grid; place-items: center; color: var(--ink2); }
+.ri:hover { color: var(--ink); }
+.s-pixel .ri:hover { background: var(--hover); }
+.s-pixel .ri.on { color: var(--ink); }
+.s-pixel .ri.on::before { content: ""; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 2px; background: var(--signal); }
+.s-classic .ri { height: 30px; margin: 3px 0; border-radius: 7px; }
+.s-classic .ri:hover { background: var(--hover); }
+.s-classic .ri.on { background: var(--sel); color: var(--signal); }
+.ri .ico { position: relative; display: block; line-height: 0; }
+.ri .badge { position: absolute; right: -8px; top: -6px; width: 9px; height: 9px; display: grid; place-items: center; background: var(--chrome); }
+.s-classic .ri .badge { border-radius: 50%; }
+.s-classic .ri.on .badge { background: var(--sel); }
+.badge .w { width: 5px; height: 5px; background: var(--amber); }
+.s-classic .badge .w { width: 7px; height: 7px; border-radius: 50%; }
+.badge .b { font: 9px/9px var(--mono); color: var(--busy); }
+.s-classic .badge .b { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--busy); border-right-color: transparent; animation: turn .9s linear infinite; }
+.rail .sp { flex: 1; }
+.railout { position: absolute; left: 0; top: 0; bottom: 0; z-index: 6; display: flex; }
+.railout .rail { border-right: 1px solid var(--line); }
+.s-classic .railout { animation: railout .16s ease-out; }
+@keyframes railout { from { transform: translateX(-100%); } }
+@keyframes turn { to { transform: rotate(360deg); } }
+.strip { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; z-index: 5; display: flex; flex-direction: column; gap: 2px; padding: 6px 0; }
+.sb { position: relative; height: 36px; display: block; width: 100%; }
+.sb i { position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 8px; background: var(--c); border-radius: 0 var(--r) var(--r) 0; }
+.sb i.long { height: 20px; }
+.t-ink { --c: var(--ink); } .t-signal { --c: var(--signal); } .t-amber { --c: var(--amber); }
+.s-classic .br-busy { animation: breathe 3.2s ease-in-out infinite; } .s-classic .br-wait { animation: breathe 1.6s ease-in-out infinite; }
+.s-pixel .br-busy { animation: breathe-steps 3.2s steps(1) infinite; } .s-pixel .br-wait { animation: blink 1.1s steps(1) infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes breathe-steps { 0%, 100% { opacity: 1; } 25% { opacity: .65; } 50% { opacity: .3; } 75% { opacity: .65; } }
+@keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .sb i, .badge * { animation: none !important; } }
+
+/* ---------- the page (a stand-in) ---------- */
+.panel { display: grid; min-height: 0; background: var(--bg); }
+.list { padding: 10px 0; border-right: 1px solid var(--line); overflow: hidden; font: 12.5px var(--f); }
+.list .grp { padding: 6px 16px 4px; color: var(--ink3); font-size: 11.5px; }
+.list .row { display: flex; align-items: center; gap: 8px; padding: 4px 14px 4px 16px; color: var(--ink2); white-space: nowrap; }
+.list .row.sel { background: var(--sel); color: var(--ink); }
+.s-classic .list .row { margin: 0 8px; padding: 5px 8px; border-radius: 6px; }
+.list .row .mt { margin-left: auto; color: var(--ink3); font-size: 11px; }
+.screen { padding: 16px 20px; font: 12.5px/1.6 var(--mono); color: #d0ccc4; white-space: pre; overflow: hidden; }
+.screen .o { color: #d97757; } .screen .g { color: var(--green); } .screen .d { color: var(--ink3); } .screen .w { color: var(--amber); }
+.center { display: grid; place-items: center; color: var(--ink3); font: 12.5px var(--f); }
+</style>
+</head>
+<body>
+<div class="ctl">
+  <div class="seg" id="lookSeg"><b>外观</b><button data-look="classic">Classic</button><button data-look="pixel">Pixel</button></div>
+  <div class="seg" id="vSeg"><b>顶栏与底栏</b><button data-v="now">现在</button><button data-v="c">C 和终端连成一片</button><button data-v="a">A 同一把尺子</button><button data-v="b">B 连成一圈，页面嵌在里面</button></div>
+  <div class="seg" id="kSeg"><b>C 的列表一侧</b><button data-k="0">和终端同色</button><button data-k="1">深一档 #0d0d0d</button></div>
+  <div class="seg" id="tSeg"><b>B 的底色</b><button data-t="0">纯黑</button><button data-t="1">稍亮</button><button data-t="2">更亮</button></div>
+</div>
+<div class="ctl" style="padding-top:2px">
+  <div class="seg" id="pageSeg"><b>页面</b><button data-page="terminals">Terminals</button><button data-page="dispatch">Dispatch</button></div>
+  <div class="seg" id="railSeg"><b>图标栏</b><button data-rail="shown">展开</button><button data-rail="hidden">收起</button></div>
+  <div class="seg" id="listSeg"><b>列表</b><button data-list="1">显示</button><button data-list="0">隐藏（⌘B）</button></div>
+</div>
+<div class="note">Mac 主窗口的顶栏和底栏（状态栏），按应用里的真实尺寸画。<b>现在</b>：两条各自贴着一根分界线，字号、图标大小、两端留白都不一样。<b>C</b> 照你发的那张终端窗口：图标栏和列表都收起时<b>一根线都没有</b>，顶栏、终端、状态这一行是同一个面；只要有东西展开（图标栏或列表），就把边界线<b>画完整</b>。<b>A</b> 只统一规格；<b>B</b> 把两条栏和页面两侧连成同一个面，页面是嵌在里面的一块。指针移到窗口左缘图标栏浮出，左下角 « / » 收起与展开。</div>
+<div class="stage"><div id="app"></div></div>
+<div class="say"><h2>// 这一种改了什么</h2><div id="what"></div></div>
+
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+const S = { look: "classic", v: "c", t: "1", k: "0", page: "terminals", rail: "hidden", list: "1" };
+const pixel = () => S.look === "pixel";
+const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+let frame = 0, railOut = false, railTimer = 0;
+const ACT = { dispatch: "busy", terminals: "wait", browser: "none" };
+const PAGES = [["dispatch", "Dispatch", "⌘0"], ["terminals", "Terminals", "⌘1–9"], ["browser", "Browser", "⌘⇧B"]];
+
+// ---------- icons ----------
+const GLOBE = [".....#####.....", "...##.....##...", "..#..#...#..#..", ".#..#.....#..#.", ".#..#.....#..#.", "#...#.....#...#", "#...#.....#...#", "###############", "#...#.....#...#", "#...#.....#...#", ".#..#.....#..#.", ".#..#.....#..#.", "..#..#...#..#..", "...##.....##...", ".....#####....."];
+const TERM = ["################", "#..............#", "################", "#..............#", "#.#............#", "#..#...........#", "#...#..........#", "#..#...........#", "#.#...######...#", "#..............#", "#..............#", "################"];
+const PX = {
+  sliders: ["..##.........", "#############", "..##.........", ".............", ".............", "........##...", "#############", "........##...", ".............", ".............", ".....##......", "#############", ".....##......"],
+  sidebar: [".################.", "#.....#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.###.#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", "#.....#..........#", ".################."],
+  plus: ["......#......", "......#......", "......#......", "......#......", "......#......", "......#......", "#############", "......#......", "......#......", "......#......", "......#......", "......#......", "......#......"],
+  right: [".################.", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", "#........#.......#", ".################."],
+  down: [".################.", "#................#", "#................#", "#................#", "#................#", "#................#", "##################", "#................#", "#................#", "#................#", "#................#", "#................#", "#................#", ".################."],
+  lock: [".###.", "#...#", "#####", "##.##", "#####"],
+};
+const BOX = '<rect x="1.75" y="3.25" width="14.5" height="11.5" rx="2.75"/>';
+const CI = {
+  dispatch: '<g fill="currentColor" stroke="none"><rect x="1.5" y="7" width="4" height="4" rx="1.2"/><rect x="12.5" y="1.75" width="4" height="4" rx="1.2"/><rect x="12.5" y="7" width="4" height="4" rx="1.2"/><rect x="12.5" y="12.25" width="4" height="4" rx="1.2"/></g><path d="M5.5 9h7M5.5 9c3.5 0 3.5-5.25 7-5.25M5.5 9c3.5 0 3.5 5.25 7 5.25"/>',
+  terminals: BOX + '<path d="M5 6.75 7.25 9 5 11.25M9.5 11.25h3.5"/>',
+  browser: '<circle cx="9" cy="9" r="6.75"/><ellipse cx="9" cy="9" rx="2.9" ry="6.75"/><path d="M2.25 9h13.5"/>',
+  sliders: '<path d="M2.5 4.75h1.75M8.25 4.75h7.25M2.5 9h7.25M13.75 9h1.75M2.5 13.25h3.25M9.75 13.25h5.75"/><circle cx="6.25" cy="4.75" r="1.9"/><circle cx="11.75" cy="9" r="1.9"/><circle cx="7.75" cy="13.25" r="1.9"/>',
+  sidebar: BOX + '<path d="M6.75 3.25v11.5M3.75 6.25h1.25M3.75 8.5h1.25"/>',
+  plus: '<path d="M9 3.75v10.5M3.75 9h10.5"/>',
+  right: BOX + '<rect x="9.5" y="5.5" width="4.5" height="7" rx="1" fill="currentColor" stroke="none"/>',
+  down: BOX + '<rect x="4" y="9.5" width="10" height="3" rx="1" fill="currentColor" stroke="none"/>',
+  lock: '<rect x="3.75" y="8.25" width="10.5" height="7" rx="2"/><path d="M6 8.25V6a3 3 0 0 1 6 0v2.25"/>',
+  left2: '<path d="M8.25 4.5 3.75 9l4.5 4.5M14.25 4.5 9.75 9l4.5 4.5"/>', right2: '<path d="M9.75 4.5 14.25 9l-4.5 4.5M3.75 4.5 8.25 9l-4.5 4.5"/>',
+  spark: '<path d="M9 2.5v13M2.5 9h13M4.4 4.4l9.2 9.2M13.6 4.4l-9.2 9.2"/>',
+};
+const ci = (name, size = 15) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">${CI[name]}</svg>`;
+const icon = (k) => (pixel() ? (k === "dispatch" ? P.mark({ px: 1, mono: true }) : P.sprite({ terminals: TERM, browser: GLOBE }[k] ?? PX[k], { px: 1 })) : ci(k, k === "dispatch" || k === "terminals" || k === "browser" || k === "sliders" ? 18 : 15));
+
+// ---------- the rail and what it leaves ----------
+function rail() {
+  const badge = (a) => (a === "wait" ? `<span class="badge"><span class="w"></span></span>` : a === "busy" ? `<span class="badge"><span class="b" ${pixel() ? "data-spin" : ""}>${pixel() ? SPIN[frame % SPIN.length] : ""}</span></span>` : "");
+  const ri = ([k, name, key]) => `<button class="ri ${S.page === k ? "on" : ""}" ${k === "browser" ? "" : `data-go="${k}"`} title="${name} ${key}"><span class="ico">${icon(k)}${badge(ACT[k])}</span></button>`;
+  return `<div class="rail">${PAGES.map(ri).join("")}<span class="sp"></span><button class="ri" title="Settings ⌘,"><span class="ico">${icon("sliders")}</span></button></div>`;
+}
+function strip() {
+  const sb = ([k, name, key]) => {
+    const cur = S.page === k, act = ACT[k], tone = act === "wait" ? "amber" : cur ? "signal" : act === "busy" ? "ink" : "";
+    return `<button class="sb" ${k === "browser" ? "" : `data-go="${k}"`} title="${name} ${key}">${tone ? `<i class="t-${tone} ${cur ? "long" : ""} ${act !== "none" ? `br-${act}` : ""}"></i>` : ""}</button>`;
+  };
+  return `<div class="strip" id="strip">${PAGES.map(sb).join("")}</div>`;
+}
+
+// ---------- the page ----------
+function page() {
+  if (S.page === "dispatch") return `<div class="panel"><div class="center">Dispatch：记录与输入框</div></div>`;
+  const mk = (c) => `<span class="dot" style="--c:${c}"></span>`;
+  return `<div class="panel" style="grid-template-columns:${S.list === "1" ? "300px " : ""}minmax(0,1fr)"><div class="list" ${S.list === "1" ? "" : "hidden"}><div class="grp">${pixel() ? "▾ AgentSwitch/" : "AgentSwitch"}</div>
+      <div class="row sel">${mk("var(--amber)")}发布前检查<span class="mt">${pixel() ? "Waiting" : "Needs You"}</span></div>
+      <div class="row">${mk("var(--busy)")}本地构建应用和手机连接</div><div class="row">${mk("var(--ink3)")}终端服务 demo 与窗口<span class="mt">3h</span></div>
+      <div class="grp">${pixel() ? "▾ Worktop/" : "Worktop"}</div><div class="row">${mk("var(--ink3)")}整理工作目录<span class="mt">2d</span></div></div>
+    <div class="screen"><span class="o"> ▐▛███▜▌</span>   Claude Code <span class="d">v2.1.288</span>
+<span class="o">▝▜█████▛▘</span>  <span class="d">Opus 5.5 · ~/Projects/AgentSwitch</span>
+
+<span class="g">●</span> 运行测试：1355 个全部通过。
+
+<span class="w">  Bash(git push origin main)</span>
+  <span class="d">需要你的确认 ·  1. Yes   2. No</span>
+
+❯ <span class="d">█</span></div></div>`;
+}
+
+const WHAT = {
+  now: `<b>现在</b>：顶栏 32 点、标题 13 点粗体、图标 13 点；底栏 24 点、字 11.5 点、图标更小；右端顶栏离边 6 点、底栏 10 点；各有一根分界线。两条栏像是两套东西。`,
+  a: `<b>A 同一把尺子</b>（只改规格，结构不动）：<ul><li>底栏的字和顶栏的小字同为 12 点，底栏高 24 → 26。</li><li>两条栏里的图标都是 13 点、按钮都是 26 × 22（« 和锁不再比顶栏的按钮小一号）。</li><li>两条栏最右边的按钮右端对齐（顶栏的 + 和底栏的锁在一条竖线上），底栏的 « 在图标栏正下方。</li></ul>改动小，看上去是“同一家的”，但还是上下两条。`,
+  c: `<b>C 和终端连成一片</b>（照终端窗口的做法，含 A 的规格）：<ul><li><b>都收起来，就没有线</b>：图标栏收起、列表隐藏（或这一页本来没有列表）时，顶栏、页面、状态栏之间一根线都不画——标题和按钮、终端、状态这一行是同一个面，和那张图里的终端窗口一样。底色跟终端自己的背景色走。</li><li><b>有东西展开，就把边界线画完整</b>：图标栏或列表只要有一个显示着，顶栏下面和状态栏上面的线都横跨整个窗口，图标栏的右边线、列表的右边线夹在两者之间——每根线都顶到头，没有半截的。</li><li>上面切“图标栏”“列表”“页面”看四种组合。列表一侧也可以深一档（“C 的列表一侧”）。</li></ul>`,
+  b: `<b>B 连成一圈，页面嵌在里面</b>（含 A 的规格）：<ul><li>顶栏、底栏、图标栏和页面右侧的 6 点留白是<b>同一个面</b>，不再有分界线；页面是嵌在这个面里的一块——经典外观四角是圆的（9 点），像素外观是方的，靠这一块自己的边和它们分开。</li><li>图标栏收起后，页面左侧也留 6 点，贴边的色条就在这道留白里，不再压着页面。</li><li>底色可以和页面一样纯黑（只靠那圈细边分开），也可以稍亮一点，让“框”和“屏幕”分得更清楚——上面“B 的底色”三档。</li><li>代价：页面左右各少 6 点（图标栏展开时只少右边 6 点）。先例：Arc、Linear、Notion Calendar、macOS 26 自带应用里“内容是嵌在窗口里的一块圆角面板”的做法。</li></ul>`,
+};
+
+function draw() {
+  const app = document.getElementById("app"), shown = S.rail === "shown", terms = S.page === "terminals";
+  app.className = `s-${S.look} v-${S.v} t-${S.t} k-${S.k}`;
+  // The list's column, as wide as it is now: the rail and the list.
+  const side = (shown ? 45 : 0) + (terms && S.list === "1" ? 300 : 0);
+  const title = terms ? `<span class="dot" style="--c:var(--amber)"></span><span>AgentSwitch</span><span class="git">main ±5 ↑2</span>` : "";
+  const tb = (k, help) => `<button class="tb" title="${help}">${icon(k)}</button>`;
+  const end = terms ? tb("right", "Split Right ⌘D") + tb("down", "Split Down ⌘⇧D") + tb("plus", "New Terminal ⌘T") : "";
+  const vr = pixel() ? `<span class="vr">│</span>` : `<span class="vr"></span>`;
+  const ctx = terms
+    ? `<span class="it">${pixel() ? "✱" : ci("spark", 13)}${pixel() ? "claude · Opus 5.5" : "Claude Code · Opus 5.5"}</span><span>${pixel() ? "bypass" : "Bypass"}</span><span>${pixel() ? "On Mac" : "On This Mac"} · 139×46</span><button class="lock" title="Encrypt & Send ⌘⇧V">${pixel() ? P.sprite(PX.lock, { px: 2 }) : ci("lock", 13)}</button>`
+    : `<span>Router · Sonnet 5.5</span><span>2 Topics</span>`;
+  app.innerHTML = `<div class="win ${side > 0 ? "lined" : ""}" style="--side:${side}px"><div class="bar"><div class="lights"><i></i><i></i><i></i></div>${tb("sidebar", "List ⌘B")}<div class="title">${title}</div><div class="end">${end}</div></div>
+    <div class="body ${shown ? "" : "away"}" style="grid-template-columns:${shown ? "auto " : ""}minmax(0, 1fr)">${shown ? rail() : ""}${page()}${shown ? "" : strip()}${!shown && railOut ? `<div class="railout" id="railout">${rail()}</div>` : ""}</div>
+    <div class="status"><button class="rt" data-railclick title="${shown ? "Hide Rail ⌥⌘B" : "Show Rail ⌥⌘B"}">${pixel() ? (shown ? "«" : "»") : ci(shown ? "left2" : "right2", 13)}</button>
+      <span class="it"><span class="dot"></span>${pixel() ? "Gateway" : "Gateway OK"}</span>${vr}<span>iPhone Online</span><span class="sp"></span>${ctx}</div></div>`;
+  document.getElementById("what").innerHTML = WHAT[S.v];
+  const on = (id, attr, value) => { for (const b of document.querySelectorAll(`#${id} button`)) b.classList.toggle("on", b.dataset[attr] === value); };
+  on("lookSeg", "look", S.look); on("vSeg", "v", S.v); on("tSeg", "t", S.t); on("kSeg", "k", S.k); on("pageSeg", "page", S.page); on("railSeg", "rail", S.rail);
+  on("listSeg", "list", S.list);
+  document.getElementById("tSeg").classList.toggle("off", S.v !== "b");
+  document.getElementById("kSeg").classList.toggle("off", S.v !== "c");
+  document.getElementById("listSeg").classList.toggle("off", !terms);
+  const out = (to, wait) => { clearTimeout(railTimer); railTimer = setTimeout(() => { if (railOut !== to) { railOut = to; draw(); } }, wait); };
+  document.getElementById("strip")?.addEventListener("mouseenter", () => out(true, 120));
+  document.getElementById("strip")?.addEventListener("mouseleave", () => { if (!railOut) clearTimeout(railTimer); });
+  document.getElementById("railout")?.addEventListener("mouseleave", () => out(false, 280));
+  document.getElementById("railout")?.addEventListener("mouseenter", () => clearTimeout(railTimer));
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest(".ctl button");
+  if (b) { for (const k of ["look", "v", "t", "k", "page", "rail", "list"]) if (b.dataset[k]) S[k] = b.dataset[k]; railOut = false; return draw(); }
+  if (e.target.closest("[data-railclick]")) { S.rail = S.rail === "shown" ? "hidden" : "shown"; railOut = false; return draw(); }
+  const go = e.target.closest("#app [data-go]")?.dataset.go;
+  if (go) { S.page = go; draw(); }
+});
+// ?look=classic|pixel&v=now|a|b|c&t=0|1|2&k=0|1&page=terminals|dispatch&rail=shown|hidden|out&list=1|0 opens that one
+const q = new URLSearchParams(location.search);
+const pick = (k, values, set) => { if (values.includes(q.get(k))) set(q.get(k)); };
+pick("look", ["pixel", "classic"], (v) => { S.look = v; }); pick("v", ["now", "a", "b", "c"], (v) => { S.v = v; }); pick("t", ["0", "1", "2"], (v) => { S.t = v; });
+pick("k", ["0", "1"], (v) => { S.k = v; }); pick("list", ["0", "1"], (v) => { S.list = v; });
+pick("page", ["terminals", "dispatch"], (v) => { S.page = v; });
+pick("rail", ["hidden", "shown", "out"], (v) => { S.rail = v === "shown" ? "shown" : "hidden"; railOut = v === "out"; });
+draw();
+const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+setInterval(() => {
+  if (reduce.matches || document.hidden) return;
+  frame++;
+  for (const el of document.querySelectorAll("[data-spin]")) el.textContent = SPIN[frame % SPIN.length];
+}, 90);
+</script>
+</body>
+</html>

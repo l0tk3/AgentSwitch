@@ -93,7 +93,12 @@ final class LiveActivity {
            let png = rep.representation(using: .png, properties: [:]) {
             try? png.write(to: shots.appendingPathComponent("\(name)-capsule.png"))
         }
-        var line = "\(name) t=\(Int(Date().timeIntervalSince(started))) open=\(open) opener=\(String(describing: presenter.opener)) look=\(presenter.look) rows=\(presenter.cardRows.map(\.id)) end=\(presenter.shownEnd?.key ?? "-") item=\(NSStringFromRect(button.window?.frame ?? .zero))"
+        // The button as it is in the bar: its picture and, over it, the turning ring where it was laid.
+        if let rep = button.bitmapImageRepForCachingDisplay(in: button.bounds) {
+            button.cacheDisplay(in: button.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: shots.appendingPathComponent("\(name)-item.png"))
+        }
+        var line = "\(name) ring=\(ring.map { NSStringFromRect($0.placed) } ?? "-") in=\(NSStringFromRect(button.bounds)) t=\(Int(Date().timeIntervalSince(started))) open=\(open) opener=\(String(describing: presenter.opener)) look=\(presenter.look) rows=\(presenter.cardRows.map(\.id)) end=\(presenter.shownEnd?.key ?? "-") item=\(NSStringFromRect(button.window?.frame ?? .zero))"
         if open, let panel, let host {
             line += " card=\(NSStringFromRect(panel.frame)) alpha=\(panel.alphaValue)"
             if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
@@ -249,18 +254,43 @@ final class LiveActivity {
     }
 
     /// The capsule as the button's image, drawn again when what it says changes (its word, the tally, the result; no
-    /// clock in it since 2026-10-03, so nothing of it changes by the second).
+    /// clock in it since 2026-10-03, so nothing of it changes by the second), or the look or the accent it is drawn in.
+    /// In the classic look the tally's ring turns: the picture has it still, and a turning one is laid over it
+    /// (LiveCapsuleRing) — Core Animation's, so the picture is not drawn again for it.
     private func drawCapsule(_ button: NSStatusBarButton) {
-        let capsule = LiveCapsule(look: presenter.look, trail: presenter.trail)
-        let key = "\(presenter.look)|\(String(describing: presenter.trail))"
+        let look = InterfaceLook.current
+        let turns = look.isClassic && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB).map { "\($0.redComponent) \($0.greenComponent) \($0.blueComponent)" } ?? ""
+        let key = "\(presenter.look)|\(String(describing: presenter.trail))|\(look)|\(turns)|\(accent)"
         guard key != drawn else { return }
-        let renderer = ImageRenderer(content: capsule)
+        let slot = LiveRingSlot()
+        let renderer = ImageRenderer(content: LiveCapsule(look: presenter.look, trail: presenter.trail, slot: slot))
         renderer.scale = button.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         guard let image = renderer.nsImage else { return }
         image.isTemplate = false
         button.image = image
         drawn = key
+        placeRing(turns ? slot.frame : nil, on: button)
     }
+
+    /// The turning ring over the picture's still one, or none.
+    private func placeRing(_ slot: CGRect?, on button: NSStatusBarButton) {
+        guard let slot else {
+            ring?.removeFromSuperview()
+            ring = nil
+            return
+        }
+        let ring = ring ?? LiveCapsuleRing(frame: button.bounds)
+        if ring.superview !== button {
+            ring.autoresizingMask = [.width, .height]
+            ring.frame = button.bounds
+            button.addSubview(ring)
+        }
+        ring.slot = slot
+        self.ring = ring
+    }
+
+    @ObservationIgnored private var ring: LiveCapsuleRing?
 
     private func showCard(under button: NSStatusBarButton) {
         let appearing = panel?.isVisible != true
@@ -357,11 +387,60 @@ struct LiveCardRoot: View {
 
     var body: some View {
         if activity.presenter.isOpen {
-            LiveCard(presenter: activity.presenter, actions: activity.cardActions, pending: activity.pending)
+            LiveCard(presenter: activity.presenter, actions: activity.cardActions, pending: activity.pending, live: true)
                 .fixedSize()
                 .followsWindow()
         }
     }
+}
+
+/// The capsule's ring, turning (the classic look): a view over the status button that covers the still ring of the
+/// button's picture with the capsule's black and turns its own there. Where the picture is in the button is the
+/// button's own business (its cell says); the ring follows it as the bar lays the button out again. Another display's
+/// menu bar shows the button's picture, with the still ring.
+final class LiveCapsuleRing: NSView {
+    /// The ring's place in the picture, in points from its top left.
+    var slot: CGRect = .zero { didSet { needsLayout = true } }
+    private let patch = NSView()
+    private let turning = TurningRingView()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        patch.wantsLayer = true
+        patch.layer?.backgroundColor = NSColor.black.cgColor
+        addSubview(patch)
+        turning.color = LiveLook.ringColor
+        turning.lineWidth = LiveLook.ringLine
+        addSubview(turning)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not from a nib") }
+
+    /// The picture's coordinates: from the top left, downwards.
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        guard let button = superview as? NSButton, let image = button.image else { return }
+        // Where the button draws its picture; centred, should its cell not say.
+        var picture = (button.cell as? NSButtonCell)?.imageRect(forBounds: button.bounds) ?? .zero
+        if abs(picture.width - image.size.width) > 0.5 || abs(picture.height - image.size.height) > 0.5 {
+            picture = NSRect(x: (button.bounds.width - image.size.width) / 2, y: (button.bounds.height - image.size.height) / 2,
+                             width: image.size.width, height: image.size.height)
+        }
+        let place = slot.offsetBy(dx: picture.minX, dy: picture.minY)
+        turning.frame = place
+        // The still ring's line reaches half its width outside its frame.
+        patch.frame = place.insetBy(dx: -1.5, dy: -1.5)
+        turning.color = LiveLook.ringColor
+        turning.turning = true
+    }
+
+    #if DEBUG
+    /// Where the ring was laid, for the demo's log.
+    var placed: NSRect { turning.frame }
+    #endif
 }
 
 /// A panel that floats over every space (full-screen apps too) and never takes the focus: its buttons act on the first

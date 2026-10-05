@@ -5,7 +5,8 @@ import SwiftUI
 
 /// `-designPreview <dir>` (debug builds, docs/ui-v0.md §5): loads DemoData, draws the menu panel, every settings page
 /// (the Dispatch group's from DispatchSettingsDemo, with a few states and its sheets; `-designPreviewOnly dispatch` draws
-/// only those; `-designPreviewOnly browser` only the main window's Browser page), a few states of the control-v0 pages (skip mode, a folder problem, a fresh Mac), each first-run wizard step and the
+/// only those; `-designPreviewOnly browser` only the main window's Browser page; `-designPreviewOnly window` only the main
+/// window's pictures and the Live Activity's; `-designPreviewOnly rail` only the main window with its rail put away; `-designPreviewOnly item` only a terminal's own window; `-designPreviewOnly terminals` only the native Terminals page), a few states of the control-v0 pages (skip mode, a folder problem, a fresh Mac), each first-run wizard step and the
 /// gate service's states and sheets (gate-service-v0) into PNG files in light and dark, the menu bar's Live Activity
 /// (LivePreview) and the main window's bar over each page and through the refresh between pages (MainWindowPreview:
 /// `main-*.png`, `main-refresh-*.png`), then exits. It runs before the single-instance lock and never calls `launch()`:
@@ -28,6 +29,27 @@ enum DesignPreview {
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "browser" {
                     try await MainWindowPreview.renderBrowser(model: model, into: directory)
                     FileHandle.standardError.write(Data("design preview (Browser) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "rail" {
+                    try await MainWindowPreview.renderRail(model: model, into: directory)
+                    FileHandle.standardError.write(Data("design preview (the rail put away) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "terminals" {
+                    try await TerminalsPagePreview.render(into: directory)
+                    FileHandle.standardError.write(Data("design preview (the Terminals page) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "item" {
+                    try await TerminalWindowPreview.render(into: directory)
+                    FileHandle.standardError.write(Data("design preview (a terminal's own window) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "window" {
+                    try LivePreview.render(into: directory)
+                    try await MainWindowPreview.render(model: model, into: directory)
+                    FileHandle.standardError.write(Data("design preview (main window, Live Activity) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
                 if onlyDispatchGroup {

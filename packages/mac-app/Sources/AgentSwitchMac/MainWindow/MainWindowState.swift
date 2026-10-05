@@ -81,8 +81,21 @@ final class MainWindowState {
     /// its own in their place (FullScreenLights).
     var fullScreen = false
 
-    init(page: MainPage) {
+    // MARK: the rail
+
+    /// The rail is put away (MainRailLayout): a strip of bars stands in its place.
+    private(set) var railHidden: Bool
+    /// The put-away rail is out over the page's edge, the pointer on it.
+    private(set) var railOut = false
+    /// Told when the rail is put away or brought back (the window keeps it).
+    @ObservationIgnored var onRailHidden: (Bool) -> Void = { _ in }
+    @ObservationIgnored private var pointerOnStrip = false
+    @ObservationIgnored private var pointerOnRail = false
+    @ObservationIgnored private var railTimer: Task<Void, Never>?
+
+    init(page: MainPage, railHidden: Bool = false) {
         self.page = page
+        self.railHidden = railHidden
     }
 
     func activity(of page: MainPage) -> PageActivity {
@@ -91,6 +104,43 @@ final class MainWindowState {
         case .terminals: terminalsActivity
         case .browser: browserActivity
         }
+    }
+
+    // MARK: the rail (its edge, its menu, ⌥⌘B; the pointer)
+
+    /// Put away or brought back; brought back it stays, put away it is gone at once (the pointer is where it was).
+    func setRail(hidden: Bool) {
+        railTimer?.cancel()
+        pointerOnStrip = false
+        pointerOnRail = false
+        if railOut { railOut = false }
+        guard hidden != railHidden else { return }
+        railHidden = hidden
+        onRailHidden(hidden)
+    }
+
+    func toggleRail() { setRail(hidden: !railHidden) }
+
+    /// The pointer came onto or left the strip (`strip`) or the rail that is out (`rail`): out once it has rested on
+    /// the strip, back once it has left both.
+    func railPointer(strip: Bool? = nil, rail: Bool? = nil) {
+        if let strip { pointerOnStrip = strip }
+        if let rail { pointerOnRail = rail }
+        railTimer?.cancel()
+        let wanted = railHidden && (pointerOnStrip || pointerOnRail)
+        guard wanted != railOut else { return }
+        let wait = wanted ? MainRailLayout.comeOutAfter : MainRailLayout.goBackAfter
+        railTimer = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(wait))
+            guard !Task.isCancelled, let self, self.railHidden || !wanted else { return }
+            self.railOut = wanted
+        }
+    }
+
+    /// The put-away rail out or back at once (a picture of it).
+    func showRail(out: Bool) {
+        railTimer?.cancel()
+        railOut = out && railHidden
     }
 
     // MARK: asking the Dispatch page
@@ -114,6 +164,9 @@ final class MainWindowState {
 
     /// The window closed: its Dispatch page is gone, and with it what it put in the bar.
     func windowClosed() {
+        showRail(out: false)
+        pointerOnStrip = false
+        pointerOnRail = false
         dispatchTitle = nil
         showsBack = false
         openTask = nil

@@ -201,6 +201,60 @@ final class MainWindowTests: XCTestCase {
         XCTAssertNil(MainShortcut.action(for: esc, on: .dispatch, canGoBack: true, composing: true), "an input method's Esc cancels its composition")
     }
 
+    // MARK: the rail, put away (2026-10-04)
+
+    func testTheRailIsShownUntilItIsPutAway() {
+        XCTAssertFalse(MainRailLayout.hidden(nil), "the first time")
+        XCTAssertTrue(MainRailLayout.hidden(true))
+        XCTAssertFalse(MainRailLayout.hidden(false))
+        XCTAssertLessThan(MainRailLayout.stripWidth, MainRailLayout.width / 4, "the edge, not a narrower rail")
+        XCTAssertLessThan(MainRailLayout.barWidth, MainRailLayout.stripWidth, "a bar stands out of the edge inside the strip")
+        XCTAssertGreaterThan(MainRailLayout.longBar, MainRailLayout.shortBar)
+    }
+
+    func testAPutAwayRailLeavesABarOnlyWhereThereIsSomethingToSay() {
+        // The page on screen: a long bar in the colour of what is selected, still. Another page with nothing going on:
+        // no bar at all.
+        XCTAssertEqual(RailBar.of(current: true, activity: .none), RailBar(long: true, tone: .selected, pace: .still))
+        XCTAssertNil(RailBar.of(current: false, activity: .none))
+    }
+
+    func testABarsColourSaysOneThing() {
+        // Amber is what waits for you, on the page on screen too; the selected colour is only ever the page on screen;
+        // work under way elsewhere is ink.
+        XCTAssertEqual(RailBar.of(current: false, activity: .busy), RailBar(long: false, tone: .ink, pace: .slow))
+        XCTAssertEqual(RailBar.of(current: true, activity: .busy), RailBar(long: true, tone: .selected, pace: .slow), "where you are, and alive")
+        XCTAssertEqual(RailBar.of(current: false, activity: .waiting), RailBar(long: false, tone: .waiting, pace: .quick))
+        XCTAssertEqual(RailBar.of(current: true, activity: .waiting), RailBar(long: true, tone: .waiting, pace: .quick), "amber wins")
+        for activity in [PageActivity.Mark.none, .busy, .waiting] {
+            XCTAssertNotEqual(RailBar.of(current: false, activity: activity)?.tone, .selected, "never a page you are not on")
+            XCTAssertEqual(RailBar.of(current: true, activity: activity)?.long, true, "its length says where you are")
+            XCTAssertNotEqual(RailBar.of(current: false, activity: activity)?.long, true)
+        }
+    }
+
+    func testABarBreathesOnlyWhileSomethingGoesOn() {
+        for current in [true, false] {
+            XCTAssertEqual(RailBar.of(current: current, activity: .busy)?.pace, .slow)
+            XCTAssertEqual(RailBar.of(current: current, activity: .waiting)?.pace, .quick, "what waits for you is the more pressing")
+        }
+        XCTAssertEqual(RailBar.of(current: true, activity: .none)?.pace, .still)
+    }
+
+    func testOptionCommandBPutsTheRailAwayAndBringsItBackOnEveryPage() {
+        let key = MainShortcut.Press(key: "b", keyCode: 11, command: true, control: false, option: true, shift: false)
+        for page in MainPage.allCases {
+            XCTAssertEqual(MainShortcut.action(for: key, on: page, canGoBack: false), .toggleRail)
+            XCTAssertEqual(MainShortcut.action(for: key, on: page, canGoBack: true), .toggleRail)
+        }
+        var shifted = key
+        shifted.shift = true
+        XCTAssertNil(MainShortcut.action(for: shifted, on: .terminals, canGoBack: false))
+        XCTAssertNil(MainShortcut.action(for: press("b"), on: .terminals, canGoBack: false), "⌘B is still the list's")
+        XCTAssertEqual(MainRailLayout.help(hidden: false), "Hide Rail ⌥⌘B")
+        XCTAssertEqual(MainRailLayout.help(hidden: true), "Show Rail ⌥⌘B")
+    }
+
     func testOtherModifiersAreNotTheseShortcuts() {
         XCTAssertNil(MainShortcut.action(for: press("n", shift: true), on: .dispatch, canGoBack: false))
         XCTAssertNil(MainShortcut.action(for: press("0", command: false), on: .dispatch, canGoBack: false))

@@ -30,11 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var settings = SettingsWindowController(model: model)
     /// The main window, Dispatch and Terminals (docs/dispatch-v0.md §1).
     lazy var main = MainWindowController(model: model)
+    /// Terminals in windows of their own, beside the main window (docs/dispatch-v0.md §1 单独的窗口).
+    lazy var windows = TerminalWindows(client: { [model] in model.client })
     /// The menu bar's Live Activity (assistant-v0 §4): its own status item, left of the app's. A task opens on the main
     /// window's Dispatch page, a terminal on its Terminals page; what is open there in the window in use needs no telling.
     lazy var live = LiveActivity(model: model, openTerminal: { [weak self] id in self?.main.show(terminal: id) },
                                  openTask: { [weak self] id in self?.main.show(task: id) },
-                                 watching: { [weak self] in self?.main.watchingTerminals ?? [] },
+                                 watching: { [weak self] in (self?.main.watchingTerminals ?? []).union(self?.windows.watching ?? []) },
                                  watchingTask: { [weak self] in self?.main.watchingTask })
     /// Which of our windows are open: the Dock icon shows while any is.
     private var openWindows: Set<String> = []
@@ -91,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let dir = TerminalProbe.directory {
             NSApp.setActivationPolicy(.accessory)
+            wireWindows()
             TerminalProbe.run(main, into: dir)
             return
         }
@@ -119,6 +122,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.onVisibilityChange = { [weak self] open in self?.windowVisibility("settings", open) }
         main.onVisibilityChange = { [weak self] open in self?.windowVisibility("main", open) }
         main.openSettings = { [weak self] in self?.settings.show(nil) }
+        wireWindows()
+        windows.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminal-windows", open) }
         settings.openTask = { [weak self] id in self?.main.show(task: id) }
         live.onSnapshot = { [weak self] snapshot in self?.main.liveChanged(snapshot) }
         updateDockPresence(settingsWindowOpen: false)
@@ -246,6 +251,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func heardFromAnotherCopy(_ note: Notification) {
         model.errorMessage = "AgentSwitch 已在运行（\(DisplayPath.short(Bundle.main.bundlePath, home: NSHomeDirectory()))），新打开的副本已自动退出：每个数据目录只能由一个 AgentSwitch 管理。如需改用另一个副本，请从菜单栏退出当前副本后再打开。"
         settings.show(nil)
+    }
+
+    /// The main window and the terminals' own windows, each told of the other (docs/dispatch-v0.md §1 单独的窗口).
+    private func wireWindows() {
+        main.windows = windows
+        windows.onChange = { [weak self] ids in self?.main.detachedChanged(ids) }
+        windows.mainFrame = { [weak self] in self?.main.window?.frame }
+        windows.newTerminal = { [weak self] in self?.main.newTerminal() }
+        windows.onError = { [weak self] message in self?.model.errorMessage = message }
     }
 
     private func windowVisibility(_ name: String, _ open: Bool) {

@@ -129,6 +129,102 @@ enum TerminalProbe {
                 try? await Task.sleep(for: .milliseconds(600))
                 say("esc from the page: first responder \(responder()) page \(await page())")
             }
+            if UserDefaults.standard.bool(forKey: "probeRail") {
+                // The rail put away (docs/dispatch-v0.md §1 图标栏可以收起, 2026-10-04): it leaves no column — the page runs
+                // to the window's edge and the terminal takes its new grid; ⌥⌘B brings it back; out over the page's edge it
+                // moves nothing.
+                @MainActor func place() -> String {
+                    let t = screen.view.getTerminal()
+                    let page = terminals.probeWeb.map { "\(Int($0.convert($0.bounds, to: nil).minX)) wide \(Int($0.bounds.width))" } ?? "-"
+                    return "rail hidden \(terminals.state.railHidden) out \(terminals.state.railOut) page at \(page) list \(Int(terminals.probeHead?.sideWidth ?? -1)) grid \(t.cols)x\(t.rows)"
+                }
+                @MainActor func picture(_ name: String) async {
+                    if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
+                        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name)-window.png"))
+                    }
+                    if let web = terminals.probeWeb {
+                        let image: NSImage? = await withCheckedContinuation { done in web.takeSnapshot(with: nil) { image, _ in done.resume(returning: image) } }
+                        if let image, let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name)-page.png"))
+                        }
+                    }
+                }
+                say("rail: shown: \(place())")
+                terminals.state.setRail(hidden: true)
+                try? await Task.sleep(for: .milliseconds(1200))
+                say("rail: put away: \(place())")
+                await picture("rail-hidden")
+                terminals.state.showRail(out: true)
+                try? await Task.sleep(for: .milliseconds(700))
+                say("rail: out under the pointer: \(place())")
+                await picture("rail-out")
+                // Clicks, as the pointer's (events of our own, in the window's coordinates from its top): a bar's place
+                // on the window's edge goes to its page — the page under the strip does not take the click; so does an
+                // icon of the rail that is out; the rail's empty part clicked twice keeps the rail, its edge clicked
+                // twice puts it away, and the edge of the rail that is out, dragged away from the window's edge, brings
+                // it back.
+                @MainActor func mouse(_ type: NSEvent.EventType, _ x: CGFloat, _ top: CGFloat, clicks: Int = 1) {
+                    guard let e = NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: window.frame.height - top), modifierFlags: [],
+                                                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                                                     eventNumber: 0, clickCount: clicks, pressure: type == .leftMouseUp ? 0 : 1) else { return }
+                    NSApp.postEvent(e, atStart: false)
+                }
+                @MainActor func click(_ x: CGFloat, _ top: CGFloat, twice: Bool = false) async {
+                    for n in 1...(twice ? 2 : 1) { mouse(.leftMouseDown, x, top, clicks: n); mouse(.leftMouseUp, x, top, clicks: n) }
+                    try? await Task.sleep(for: .milliseconds(700))
+                }
+                let first = terminals.state.barHeight + 1 + 6 + 18, pitch: CGFloat = 38
+                terminals.state.showRail(out: false)
+                try? await Task.sleep(for: .milliseconds(400))
+                await click(4, first + 2 * pitch)
+                say("rail: the strip's third bar clicked: page \(terminals.state.page)")
+                await click(4, first + pitch)
+                say("rail: the strip's second bar clicked: page \(terminals.state.page)")
+                terminals.state.showRail(out: true)
+                try? await Task.sleep(for: .milliseconds(500))
+                await click(22, first + 2 * pitch)
+                say("rail: out, its third icon clicked: page \(terminals.state.page) \(place())")
+                await click(22, first + pitch)
+                say("rail: out, its second icon clicked: page \(terminals.state.page)")
+                await click(22, 320, twice: true)
+                say("rail: out, its empty part clicked twice: \(place())")
+                await click(44.5, 320, twice: true)
+                say("rail: its edge clicked twice: \(place())")
+                // Put away, it has no edge of its own: the rail that is out has.
+                terminals.state.showRail(out: true)
+                try? await Task.sleep(for: .milliseconds(500))
+                mouse(.leftMouseDown, 44.5, 320)
+                for x in stride(from: 48.0, through: 68.0, by: 5.0) { mouse(.leftMouseDragged, x, 320) }
+                mouse(.leftMouseUp, 68, 320)
+                try? await Task.sleep(for: .milliseconds(700))
+                say("rail: out, its edge dragged away from the window's edge: \(place())")
+                mouse(.leftMouseDown, 44.5, 320)
+                for x in stride(from: 40.0, through: 20.0, by: -5.0) { mouse(.leftMouseDragged, x, 320) }
+                mouse(.leftMouseUp, 20, 320)
+                try? await Task.sleep(for: .milliseconds(700))
+                say("rail: its edge dragged towards the window's edge: \(place())")
+                // `»` at the status bar's left end brings the put-away rail back, with nothing out; `«` in the same
+                // place puts it away.
+                let toggle = window.frame.height - 12
+                await click(22, toggle)
+                say("rail: put away, » clicked: \(place())")
+                await click(22, toggle)
+                say("rail: « clicked: \(place())")
+                key("b", 11, [.command, .option])
+                try? await Task.sleep(for: .milliseconds(1200))
+                say("rail: after ⌥⌘B: \(place())")
+                key("b", 11, [.command, .option])
+                try? await Task.sleep(for: .milliseconds(1200))
+                say("rail: after ⌥⌘B again: \(place())")
+                terminals.state.setRail(hidden: false)
+                try? await Task.sleep(for: .milliseconds(600))
+            }
+            if let second = UserDefaults.standard.string(forKey: "probeTerminals") {
+                await TerminalsPageProbe.run(terminals, id: id, second: second, into: dir, say: say)
+            }
+            if UserDefaults.standard.bool(forKey: "probeDetach") {
+                await TerminalWindowProbe.run(terminals, id: id, into: dir, say: say)
+            }
             if let second = UserDefaults.standard.string(forKey: "probePanes") {
                 // Split panes (docs/terminal-v0.md §1 分屏, 2026-10-03): the pane split, a second terminal put in the new
                 // half, each pane its own native screen and grid, the line between them dragged, the focus moved, a
