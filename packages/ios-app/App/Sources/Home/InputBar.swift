@@ -99,7 +99,9 @@ struct InputBar: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Self.fieldRadius))
+                // Tinted with the field's own ground: what is written must read over whatever scrolls under it, and
+                // nothing else is laid over the conversation to help (no scroll edge effect at the foot).
+                .glassEffect(.regular.tint(Theme.panel.opacity(Self.fieldTint)).interactive(), in: .rect(cornerRadius: Self.fieldRadius))
                 Button { send() } label: {
                     sendMark
                         .foregroundStyle(canSend || model.sending ? Color.white : Color.secondary)
@@ -119,6 +121,13 @@ struct InputBar: View {
 
     /// The field's corner: a line of text makes it a capsule, more lines a round-cornered box.
     private static let fieldRadius: CGFloat = 19
+    /// How much of the field's ground its glass carries.
+    private static var fieldTint: Double {
+        #if DEBUG
+        if let held = UserDefaults.standard.string(forKey: "uiDemoTint").flatMap(Double.init) { return held }
+        #endif
+        return 0.8
+    }
     /// `+` and send: discs as tall as one line of the field.
     private static let disc: CGFloat = 38
 

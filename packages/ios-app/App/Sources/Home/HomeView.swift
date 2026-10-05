@@ -253,18 +253,25 @@ private struct HomeMark: View {
 }
 
 /// The input bar at the foot of the conversation. On iOS 26 and later in the classic look it is a bar of the page's
-/// floating layer (`safeAreaBar`): the conversation scrolls on under it and under the glass tab bar, frosted by the
-/// system's scroll edge effect. Otherwise an inset with its own ground, as before.
+/// floating layer (`safeAreaBar`): the conversation scrolls on under it and under the glass tab bar, with nothing laid
+/// over it. Otherwise an inset with its own ground, as before.
 private struct InputBarPlacement: ViewModifier {
     @Environment(\.interfaceLook) private var look
 
+    private static var bare: Bool {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "uiDemoEdge") == "soft" { return false }
+        #endif
+        return true
+    }
+
     func body(content: Content) -> some View {
         if #available(iOS 26, *), look.isClassic {
-            // The hard edge effect: what scrolls under the bar is frosted from the bar's top down, so the field stays
-            // readable over text (the soft one blurs only under the tab bar, and the conversation's lines ran through
-            // the field's own).
+            // No scroll edge effect at the foot: nothing is laid over the conversation there, and the glass floats on it
+            // as it is (as Photos' controls do on its grid). User, of the hard effect's frosted band: 规范里应该是没有底部
+            // 糊上的一层蒙版才对.
             content.safeAreaBar(edge: .bottom) { InputBar() }
-                .scrollEdgeEffectStyle(.hard, for: .bottom)
+                .scrollEdgeEffectHidden(Self.bare, for: .bottom)
         } else {
             content.safeAreaInset(edge: .bottom) { InputBar() }
         }
