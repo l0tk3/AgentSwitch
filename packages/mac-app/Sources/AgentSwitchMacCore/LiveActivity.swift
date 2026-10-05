@@ -334,3 +334,16 @@ public struct LivePresenter: Equatable, Sendable {
     /// One request per key: its id, or the waiting terminal (a form on its screen has no request id).
     static func askKey(_ row: LiveSnapshot.Row) -> String { row.ask?.id ?? "waiting:\(row.id)" }
 }
+
+/// How often the Mac reads `GET /live` (assistant-v0 §4 数据): every second while something is under way, waits or has
+/// just ended — the capsule's timer and the marks follow it — and every three while nothing is: there is nothing to
+/// keep up with, and what starts next shows three seconds later at most.
+public enum LivePace {
+    public static let busy: Duration = .seconds(1)
+    public static let quiet: Duration = .seconds(3)
+
+    public static func interval(after snapshot: LiveSnapshot?) -> Duration {
+        guard let snapshot, !(snapshot.rows.isEmpty && snapshot.ended.isEmpty) else { return quiet }
+        return busy
+    }
+}

@@ -20,7 +20,6 @@ final class LiveActivity {
     /// 通用 › live activity.
     static let enabledKey = "liveActivity"
     static let soundKey = "liveActivitySound"
-    static let interval: Duration = .seconds(1)
 
     private(set) var presenter = LivePresenter()
     /// Requests being answered: their buttons wait.
@@ -36,6 +35,8 @@ final class LiveActivity {
     @ObservationIgnored private var host: LiveHostingView<LiveCardRoot>?
     @ObservationIgnored private var monitors: [Any] = []
     @ObservationIgnored private var poller: Task<Void, Never>?
+    /// What `GET /live` answered last (nil: nothing), for how soon to ask again (LivePace).
+    @ObservationIgnored private var latest: LiveSnapshot?
     @ObservationIgnored private var drawn: String?
     /// The phone's tones: something needs you, a result, a failure (assistant-v0 §4).
     @ObservationIgnored private let tones: [LivePresenter.Cue: NSSound] = [
@@ -122,7 +123,7 @@ final class LiveActivity {
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.poll()
-                try? await Task.sleep(for: LiveActivity.interval)
+                try? await Task.sleep(for: LivePace.interval(after: self?.latest))
             }
         }
     }
@@ -134,6 +135,7 @@ final class LiveActivity {
         if ready {
             do { next = try await client.live() } catch { liveLog.debug("live: \(error.localizedDescription, privacy: .public)") }
         }
+        latest = next
         // Work under way, a phone connected or a terminal open: the Mac stays awake (SleepGuard), whether the capsule
         // shows or not.
         #if DEBUG

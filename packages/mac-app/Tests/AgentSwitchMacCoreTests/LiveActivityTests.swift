@@ -19,6 +19,17 @@ final class LiveActivityTests: XCTestCase {
 
     private let perm = LiveSnapshot.Ask.decide(id: "p1", tool: "Bash", target: "npm test", place: "~/Projects/web")
 
+    /// `GET /live` is read every second while there is something to follow (a timer on the capsule, a mark that may
+    /// change), every three while there is nothing: an open terminal doing nothing, the service not answering.
+    func testLiveIsReadLessOftenWhileNothingIsUnderWay() {
+        XCTAssertEqual(LivePace.interval(after: snap([row("t1")], at: 0)), .seconds(1))
+        XCTAssertEqual(LivePace.interval(after: snap([row("k1", waiting: true, kind: .terminal)], at: 0)), .seconds(1))
+        XCTAssertEqual(LivePace.interval(after: snap([], ended: [end("t9", at: -5)], at: 0)), .seconds(1), "a result still on the capsule")
+        XCTAssertEqual(LivePace.interval(after: LiveSnapshot(rows: [], open: 3, now: t0)), .seconds(3), "terminals open, none at work")
+        XCTAssertEqual(LivePace.interval(after: snap([], at: 0)), .seconds(3))
+        XCTAssertEqual(LivePace.interval(after: nil), .seconds(3), "no answer")
+    }
+
     func testDecodesTheDaemonsAnswer() throws {
         let json = """
         {"rows":[
