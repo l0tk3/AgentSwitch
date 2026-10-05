@@ -1168,6 +1168,8 @@ extension TerminalView {
             return
         }
         terminal.updateRange(borrowing: displayBuffer, screenRow)
+        // AgentSwitch (PATCHES.md, rows drawn again only when they changed): the highlight is not in the cells.
+        terminal.forceUpdate(startLine: screenRow, endLine: screenRow)
     }
 
     func linkVisibleForClick(match: Terminal.LinkMatch, hasCommandModifier: Bool) -> Bool
@@ -2121,6 +2123,8 @@ extension TerminalView {
             terminalDelegate?.rangeChanged (source: self, startY: rowStart, endY: rowEnd)
         }
 
+        // AgentSwitch (PATCHES.md, rows drawn again only when they changed): read before the range is cleared.
+        let forcedRange = terminal.getForcedUpdateRange ()
         terminal.clearUpdateRange ()
 
         #if os(macOS)
@@ -2156,10 +2160,10 @@ extension TerminalView {
         // something forces a full redraw. Invalidate everything in that case; the
         // draw still only repaints rows intersecting the dirty rect and reads each
         // from its correct `yDisp`-relative buffer line.
-        if displayBuffer.yDisp != displayBuffer.yBase {
-            region = CGRect (x: 0, y: 0, width: frame.width, height: frame.height)
-        } else {
-            region = CGRect (x: 0,
+        // AgentSwitch (PATCHES.md, rows drawn again only when they changed): the rect of a span of rows, as upstream
+        // computed it for the whole range, now also for each run of changed rows.
+        func band (_ redrawStart: Int, _ redrawEnd: Int) -> CGRect {
+            var region = CGRect (x: 0,
                              y: baseLine - (cellDimension.height + CGFloat(redrawEnd) * cellDimension.height),
                              width: frame.width,
                              height: CGFloat(redrawEnd-redrawStart + 1) * cellDimension.height)
@@ -2178,6 +2182,41 @@ extension TerminalView {
                 let extra = cellDimension.height
                 let newY = max (0, region.origin.y - extra)
                 region = CGRect (x: 0, y: newY, width: frame.width, height: region.maxY - newY)
+            }
+            return region
+        }
+        if displayBuffer.yDisp != displayBuffer.yBase {
+            region = CGRect (x: 0, y: 0, width: frame.width, height: frame.height)
+        } else {
+            region = band (redrawStart, redrawEnd)
+        }
+        // AgentSwitch (PATCHES.md, rows drawn again only when they changed): with Core Graphics, the rows of the range
+        // whose line changed or that were asked for outright, each run with the rows shaped along with it; the whole
+        // range, as upstream, when the screen is scrolled back or the range is not of the screen.
+        func invalidateChangedRows () {
+            let rows = terminal.rows
+            // Kitty's placements are drawn from a table of their own, not from the lines: as upstream while there are any.
+            guard displayBuffer.yDisp == displayBuffer.yBase, !displayBuffer.lines.isEmpty,
+                  redrawStart >= 0, redrawEnd >= redrawStart, terminal.kittyGraphicsState.placementsByKey.isEmpty else {
+                rowRedraw.reset ()
+                setNeedsDisplay (region)
+                return
+            }
+            let yDisp = displayBuffer.yDisp
+            let count = displayBuffer.lines.count
+            let forced = forcedRange.map { $0.startY...max ($0.startY, $0.endY) }
+            let runs = rowRedraw.runs (in: redrawStart...redrawEnd, forced: forced, rows: rows) { row in
+                let index = yDisp + row
+                return index >= 0 && index < count ? displayBuffer.lines [index] : nil
+            }
+            for run in runs {
+                let shaped = TerminalBidi.renderingDependencyRange (
+                    rows: (yDisp + run.lowerBound)...(yDisp + run.upperBound),
+                    buffer: displayBuffer,
+                    maximumRows: terminal.options.maximumBidiParagraphRows)
+                let first = max (0, min (run.lowerBound, shaped.lowerBound - yDisp))
+                let last = min (rows - 1, max (run.upperBound, shaped.upperBound - yDisp))
+                setNeedsDisplay (band (first, last))
             }
         }
 #if canImport(MetalKit)
@@ -2210,12 +2249,13 @@ extension TerminalView {
                 }
             }
             lastRenderedCursor = (x: buffer.x, y: buffer.yBase + buffer.y, hidden: terminal.cursorHidden)
+            rowRedraw.reset ()
             requestMetalDisplay()
         } else {
-            setNeedsDisplay(region)
+            invalidateChangedRows ()
         }
 #else
-        setNeedsDisplay(region)
+        invalidateChangedRows ()
 #endif
         #else
         // TODO iOS: need to update the code above, but will do that when I get some real

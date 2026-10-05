@@ -1477,6 +1477,8 @@ extension Terminal {
         kittyGraphicsState.totalImageBytes = 0
         kittyGraphicsState.nextImageAccessTick = 1
         updateRange(startLine: buffer.scrollTop, endLine: buffer.scrollBottom)
+        // AgentSwitch (PATCHES.md, rows drawn again only when they changed): placements are not in the lines.
+        forceUpdate(startLine: buffer.scrollTop, endLine: buffer.scrollBottom)
     }
 
     func clearKittyImages(in buffer: Buffer, isAlternateBuffer: Bool) {
@@ -1662,6 +1664,8 @@ extension Terminal {
             let displayMax = maxLine - buffer.yBase
             if displayMax >= 0 && displayMin < rows {
                 updateRange(startLine: max(0, displayMin), endLine: min(rows - 1, displayMax))
+                // AgentSwitch (PATCHES.md, rows drawn again only when they changed): placements are not in the lines.
+                forceUpdate(startLine: max(0, displayMin), endLine: min(rows - 1, displayMax))
             }
         }
         return removedKeys

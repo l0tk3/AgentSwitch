@@ -17,5 +17,7 @@ let package = Package(
             exclude: ["Mac/README.md"],
             resources: [.process("Apple/Metal/Shaders.metal")]
         ),
+        // AgentSwitch's own tests of its patches (PATCHES.md); upstream's test suite is not vendored. `swift test` here.
+        .testTarget(name: "AgentSwitchPatchTests", dependencies: ["SwiftTerm"], path: "Tests/AgentSwitchPatchTests"),
     ]
 )

@@ -6194,6 +6194,9 @@ open class Terminal {
     {
         refreshStart = 0
         refreshEnd = rows
+        // AgentSwitch (PATCHES.md, rows drawn again only when they changed): asked for outright.
+        forcedRefreshStart = 0
+        forcedRefreshEnd = rows
         
         scrollInvariantRefreshStart = buffer.yDisp
         scrollInvariantRefreshEnd = buffer.yDisp + rows
@@ -6208,6 +6211,25 @@ open class Terminal {
      * after they have used this information, so that new changes only reflect
      * the actual changes.
      */
+    // AgentSwitch (PATCHES.md, rows drawn again only when they changed): the rows asked for outright (`refresh`,
+    // `updateFullScreen`) rather than marked by output. A view that draws only the rows whose content changed
+    // (RowRedraw) still draws these: they are asked for when what changed is not in the cells.
+    var forcedRefreshStart = Int.max
+    var forcedRefreshEnd = -1
+
+    /// The rows of the update range that were asked for outright, or nil when output alone marked it.
+    public func getForcedUpdateRange () -> (startY: Int, endY: Int)?
+    {
+        forcedRefreshEnd < forcedRefreshStart ? nil : (forcedRefreshStart, forcedRefreshEnd)
+    }
+
+    /// These rows of the update range are to be drawn whatever their lines' counters say.
+    func forceUpdate (startLine: Int, endLine: Int)
+    {
+        forcedRefreshStart = min (forcedRefreshStart, startLine, endLine)
+        forcedRefreshEnd = max (forcedRefreshEnd, startLine, endLine)
+    }
+
     public func getUpdateRange () -> (startY: Int, endY: Int)?
     {
         if refreshEnd == -1 && refreshStart == Int.max {
@@ -6275,6 +6297,8 @@ open class Terminal {
     {
         refreshStart = Int.max
         refreshEnd = -1
+        forcedRefreshStart = Int.max
+        forcedRefreshEnd = -1
         
         scrollInvariantRefreshStart = Int.max
         scrollInvariantRefreshEnd = -1
@@ -6770,6 +6794,8 @@ open class Terminal {
         // update, to avoid the backend rtiggering this multiple times.
 
         updateRange (startLine: startRow, endLine: endRow)
+        // AgentSwitch (PATCHES.md, rows drawn again only when they changed): asked for outright.
+        forceUpdate (startLine: startRow, endLine: endRow)
     }
     
     public func showCursor ()
