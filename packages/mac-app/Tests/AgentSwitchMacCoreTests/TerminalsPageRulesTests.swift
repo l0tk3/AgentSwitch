@@ -55,6 +55,19 @@ final class TerminalsPageRulesTests: XCTestCase {
         XCTAssertEqual(Set(rows.map(\.id)).count, rows.count, "every row its own id")
     }
 
+    // 2026-10-05: a Codex session id with three records drew two of its rows empty.
+    func testRecordsThatShareASessionsIdAreRowsOfTheirOwn() {
+        let twins = [SessionSummary(harness: "codex", id: "c1", cwd: "/Users/u/Codex", title: "企业申请", updatedAt: 300, startedAt: 250),
+                     SessionSummary(harness: "codex", id: "c1", cwd: "/Users/u/Codex", title: "监控温度", updatedAt: 250, startedAt: 200),
+                     SessionSummary(harness: "codex", id: "c1", cwd: "/Users/u/Codex", title: "威胁情报", updatedAt: 200, startedAt: 100)]
+        let rows = TerminalListRows.build(TerminalTree.build(terminals: [], sessions: twins))
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertEqual(Set(rows.map(\.id)).count, 4, "every row its own id")
+        let found = TerminalListRows.found(TerminalSearch.run(TerminalTree.build(terminals: [], sessions: twins), query: "x",
+                                                              said: ["codex:c1": "an x here"]), query: "x")
+        XCTAssertEqual(Set(found.map(\.id)).count, found.count, "also what a search shows")
+    }
+
     func testASearchKeepsTheTreesOrderAndShowsTheWordsThatMatched() {
         let (folders, terminals) = tree
         let said = ["claude-code:s2": "…先看了一下配置文件，发现连接池太小"]

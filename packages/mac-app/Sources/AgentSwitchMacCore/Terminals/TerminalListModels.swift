@@ -46,6 +46,10 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
 
     /// Unique across harnesses (two tools could reuse an id).
     public var id: String { "\(harness)/\(sessionId)" }
+    /// One record of the list: a Codex session's id can stand for several records, each with its own title and times
+    /// (the service lists them all), so a row is told from its twins by when it began and was last written
+    /// (2026-10-05, user, of rows drawn empty in the native list: 此乃何物).
+    public var recordID: String { "\(id)@\(startedAt ?? 0)-\(updatedAt)" }
     /// The title, else the start of the last text, else a plain placeholder.
     public var displayTitle: String {
         let firstLine = { (s: String) in s.split(separator: "\n").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? "" }

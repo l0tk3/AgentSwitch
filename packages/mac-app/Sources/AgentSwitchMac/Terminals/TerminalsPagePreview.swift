@@ -66,6 +66,10 @@ enum TerminalsPagePreview {
             session("s6", "\(project)/packages/secret-gate", "Retrieving 6-digit one-time codes", "opencode", ago: 380),
             session("s7", "\(home)/Desktop/WorkSpace/Projects/MailLab", "注意到项目中有一个打开的登录表单", ago: 150),
             session("s8", "\(home)/Desktop/WorkSpace/Worktop", "我要学习计算机基础知识", ago: 1),
+            // One Codex session id with three records (the service lists each): three rows.
+            session("c1", "\(home)/Desktop/WorkSpace/Worktop", "企业申请需要先获得什么", "codex", ago: 500),
+            session("c1", "\(home)/Desktop/WorkSpace/Worktop", "监控核心温度的软件叫什么", "codex", ago: 570),
+            session("c1", "\(home)/Desktop/WorkSpace/Worktop", "威胁情报报告里的要点", "codex", ago: 580),
         ]
         let gits = [project: FolderGit(branch: "main", changed: 42, ahead: 2), "\(project)/packages/secret-gate": FolderGit(branch: "main", changed: 5),
                     "\(home)/Desktop/WorkSpace/Projects/MailLab": FolderGit(branch: "main")]

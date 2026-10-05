@@ -42,7 +42,7 @@ public enum TerminalListRow: Equatable, Sendable, Identifiable {
         case .folder(let f): "d:\(f.cwd)"
         case .terminal(let t, _, _, _): "t:\(t.id)"
         case .subagent(let a, let terminal, _, _): "a:\(terminal):\(a.id)"
-        case .session(let s, _, _): "s:\(s.id)"
+        case .session(let s, _, _): "s:\(s.recordID)"
         case .more(let cwd, _, _, _, _): "m:\(cwd)"
         case .hit(let id, _, _, _, _): "h:\(id)"
         case .found: "found"
@@ -125,7 +125,7 @@ public enum TerminalListRows {
                     if let said = row.said { out.append(.hit(id: row.id, text: TerminalSearch.near(query, in: said), twig: under, terminal: terminal.id, session: nil)) }
                 case .session(let session):
                     out.append(.session(session, twig: twig, depth: 0))
-                    if let said = row.said { out.append(.hit(id: row.id, text: TerminalSearch.near(query, in: said), twig: under, terminal: nil, session: session)) }
+                    if let said = row.said { out.append(.hit(id: "s:\(session.recordID)", text: TerminalSearch.near(query, in: said), twig: under, terminal: nil, session: session)) }
                 }
             }
         }

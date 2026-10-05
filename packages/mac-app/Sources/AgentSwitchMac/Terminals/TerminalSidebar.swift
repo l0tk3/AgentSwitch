@@ -232,7 +232,9 @@ private struct RowFrame<Mark: View, Name: View, Meta: View, Actions: View>: View
             Color.clear.frame(width: look.isClassic ? 24 : 2.4 * ListLook.ch, height: 1)
                 .overlay(alignment: look.isClassic ? .center : .leading) { mark }
             name.frame(maxWidth: .infinity, alignment: .leading)
+            // What the row says of itself, or does, keeps its width: the name gives way.
             Group { if hovering { actions } else { meta } }
+                .fixedSize()
                 .padding(.leading, look.isClassic ? 8 : 10)
         }
         .lineLimit(1)

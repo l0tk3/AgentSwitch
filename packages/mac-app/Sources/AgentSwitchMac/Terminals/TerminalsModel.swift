@@ -251,7 +251,10 @@ final class TerminalsModel {
     }
 
     func refreshSessions() async {
-        guard let all = try? await client().sessions() else { return }
+        guard let listed = try? await client().sessions() else { return }
+        // A record listed twice over is one row.
+        var seen: Set<String> = []
+        let all = listed.filter { seen.insert($0.recordID).inserted }
         if sessions != all { sessions = all }
     }
 
