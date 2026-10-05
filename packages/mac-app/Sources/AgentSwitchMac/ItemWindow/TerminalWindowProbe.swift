@@ -223,9 +223,10 @@ enum TerminalWindowProbe {
         key("w", 13, .command)
         await pause(900)
         say("detach: after ⌘W: \(await page()); window open \(windows.probe(id) != nil)")
+        // Picked again at once (the closed window's screen is still named by the service): held here, no placeholder.
         await out("show")
         await pause(1500)
-        say("detach: picked in the list again: \(await page())")
+        say("detach: picked in the list again: \(await page()) away \(model?.focused?.session?.away ?? "-") mine \(main.probeScreen?.probeOwner == main.probeScreen?.screenId)")
 
         // Out once more, and back by the row's menu (`attach`).
         await out("detach")
@@ -233,7 +234,9 @@ enum TerminalWindowProbe {
         say("detach: out again: \(await page())")
         await out("attach")
         await pause(2000)
-        say("detach: Move Back Here: \(await page())")
+        say("detach: Move Back Here: \(await page()) away \(model?.focused?.session?.away ?? "-") mine \(main.probeScreen?.probeOwner == main.probeScreen?.screenId)")
+        await pause(4000)
+        say("detach: four seconds on: away \(model?.focused?.session?.away ?? "-") mine \(main.probeScreen?.probeOwner == main.probeScreen?.screenId)")
     }
 }
 

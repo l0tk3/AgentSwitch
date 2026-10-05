@@ -151,9 +151,9 @@ final class TerminalScreenController: NSObject {
     /// page would: every message of the stream by its name (the requests, the status, the name) and the window's
     /// shortcuts.
     var onMessage: ((_ event: String, _ data: String) -> Void)?
-    /// Opened here, the terminal's size is taken from another screen of this Mac too (the main window's pane it just
-    /// left holds it for a few seconds more); one in use on the phone or the web is still followed.
-    var claimsFromMac = false
+    /// The terminal's size is taken as it is opened here, whether or not the window is in front by then (a window made
+    /// for this one terminal); one in use on the phone or the web is still followed.
+    var takesOnOpen = false
     var onShortcut: ((_ key: String, _ shift: Bool, _ alt: Bool) -> Void)?
     /// The grid the view fits, whenever it changes (a new terminal starts at it; a pane being sized says it).
     var onGrid: ((_ cols: Int, _ rows: Int) -> Void)?
@@ -288,8 +288,8 @@ final class TerminalScreenController: NSObject {
         lastSeq = 0
         // Only a page in use takes the size on opening (the web page's `inUse()`): hidden under Dispatch or in a window
         // in the background, it follows; brought forward, `windowBecameKey` takes the size if nobody has it.
-        // A window opened for this one terminal (`claimsFromMac`) takes it whether or not it is in front by then.
-        claimOnConnect = inUse || claimsFromMac
+        // A window opened for this one terminal (`takesOnOpen`) takes it whether or not it is in front by then.
+        claimOnConnect = inUse || takesOnOpen
         connect(id, after: nil)
         if keyboard { focus() }
     }
@@ -384,6 +384,9 @@ final class TerminalScreenController: NSObject {
     /// Nobody has the size (its owner left): a window someone can see takes it back (not while Dispatch covers it).
     private var visible: Bool {
         guard let window = view.window, !view.isHiddenOrHasHiddenAncestor else { return false }
+        #if DEBUG
+        if MainWindowController.probing { return true }   // TerminalProbe: behind every other window on purpose
+        #endif
         return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
     }
 
@@ -455,14 +458,16 @@ final class TerminalScreenController: NSObject {
             guard seq > lastSeq else { return }
             lastSeq = seq
             take(data)
-        case .resize(let cols, let rows, let by):
+        case .resize(let cols, let rows, let named):
             // A size, the end, the terminal gone: after the output before them.
             flushHeld()
             service = (cols, rows)
+            // Another screen of this Mac that the service still names has let the terminal go: nobody holds it.
+            let by = TerminalSizeHolder.holder(named, seenFrom: screenId)
             if claimOnConnect {
                 // Just opened here: this window's size unless another screen is in use (then the placeholder says where).
                 claimOnConnect = false
-                if by == nil || by == screenId || (claimsFromMac && by?.hasPrefix("mac") == true) {
+                if by == nil || by == screenId {
                     let before = (terminal.cols, terminal.rows)
                     claim()
                     if let id, (terminal.cols, terminal.rows) == before {

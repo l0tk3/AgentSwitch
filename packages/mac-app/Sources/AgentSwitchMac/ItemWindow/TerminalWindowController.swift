@@ -55,7 +55,7 @@ final class TerminalWindowController: NSObject {
         self.id = id
         model = TerminalWindowModel(id: id, client: client, info: info)
         screen = TerminalScreenController(client: client)
-        screen.claimsFromMac = true
+        screen.takesOnOpen = true
         super.init()
         wire()
     }

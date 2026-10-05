@@ -17,6 +17,14 @@ final class TerminalScreenDataTests: XCTestCase {
         XCTAssertEqual(TerminalStreamEvent.decode(event: got[1].event, data: got[1].data), .output(seq: 4, data: "你好"))
     }
 
+    func testAnotherScreenOfThisMacHoldsNothing() {
+        XCTAssertEqual(TerminalSizeHolder.holder("mac-1a2b", seenFrom: "mac-1a2b"), "mac-1a2b", "this screen's own")
+        XCTAssertNil(TerminalSizeHolder.holder("mac-9f00", seenFrom: "mac-1a2b"), "the pane or the window it was in before: let go already")
+        XCTAssertEqual(TerminalSizeHolder.holder("phone-77", seenFrom: "mac-1a2b"), "phone-77")
+        XCTAssertEqual(TerminalSizeHolder.holder("web-12", seenFrom: "mac-1a2b"), "web-12")
+        XCTAssertNil(TerminalSizeHolder.holder(nil, seenFrom: "mac-1a2b"))
+    }
+
     func testTheEventsTheScreenActsOn() {
         XCTAssertEqual(TerminalStreamEvent.decode(event: "resize", data: #"{"type":"resize","cols":120,"rows":40,"by":"phone-1a"}"#), .resize(cols: 120, rows: 40, by: "phone-1a"))
         XCTAssertEqual(TerminalStreamEvent.decode(event: "resize", data: #"{"type":"resize","cols":120,"rows":40,"by":null}"#), .resize(cols: 120, rows: 40, by: nil))

@@ -195,7 +195,9 @@ enum TerminalsPageProbe {
             picture("page-9-out")
             model.onAttach(id)
             await pause(1800)
-            say("page: back: detached \(model.detached.sorted()) \(panes()) window open \(windows.probe(id) != nil)")
+            say("page: back: detached \(model.detached.sorted()) \(panes()) window open \(windows.probe(id) != nil) away \(model.focused?.session?.away ?? "-") mine \(model.focused?.screen.probeOwner == model.focused?.screen.screenId)")
+            await pause(4000)
+            say("page: back, four seconds on: away \(model.focused?.session?.away ?? "-") mine \(model.focused?.screen.probeOwner == model.focused?.screen.screenId) head \(head())")
         }
 
         // ⌘W on a running terminal asks first; ↩ closes it.

@@ -43,6 +43,20 @@ public enum TerminalStreamEvent: Equatable, Sendable {
     }
 }
 
+/// Who holds a terminal's size, as one of this app's screens sees it (docs/terminal-v0.md §1 "尺寸有主").
+public enum TerminalSizeHolder {
+    /// The screen that holds the size as `screen` should take it: `screen` itself, a screen elsewhere (the phone, the
+    /// web console), or nil for nobody — also when the service names another screen of this Mac (`mac-…`). A terminal is
+    /// on one of the app's screens at a time (a pane of the main window, or a window of its own), so that other screen
+    /// has let it go already; the service only notices a few seconds later. Taken as held elsewhere, a terminal moved
+    /// back from its own window showed "in use in another window of this Mac" for good (2026-10-05, user: 打开新窗口之
+    /// 后再回来会提示这个，显然应该是个bug).
+    public static func holder(_ by: String?, seenFrom screen: String) -> String? {
+        guard let by else { return nil }
+        return by != screen && by.hasPrefix("mac") ? nil : by
+    }
+}
+
 /// Server-sent events from bytes as they arrive: `event:` and `data:` lines up to a blank line; comments (`: ping`)
 /// and other fields are skipped; a line may end in LF or CRLF and may arrive in pieces.
 public struct SSEParser: Sendable {
