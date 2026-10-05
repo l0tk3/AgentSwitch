@@ -52,19 +52,29 @@ struct TerminalCreatePanel: View {
         }
     }
 
+    /// An agent's tile, whether or not the agent is installed.
+    private static let tileHeight: CGFloat = 68
+
     private func tile(_ id: String, _ name: String) -> some View {
         let installed = model.agents.contains(id)
         let on = model.pickedAgent == id
         return Button { model.pickedAgent = id } label: {
-            VStack(alignment: .leading, spacing: 10) {
+            // Every tile is one size: `Not Installed` goes under the name within it (a line more made that tile taller
+            // than the rest; user: notinstalled框太大了 排版崩了 应该和其他的一样大).
+            VStack(alignment: .leading, spacing: installed ? 10 : 6) {
                 PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.agents["pi"]!, pixel: 3, color: Look.ink, strength: on ? 1 : 0.75, shadow: !look.isClassic)
                     .frame(height: 16, alignment: .leading)
-                Text(name).font(look.isClassic ? .system(size: 13, weight: on ? .semibold : .regular) : .system(size: 12.5, design: .monospaced)).lineLimit(1)
-                if !installed { Text("Not Installed").font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint).lineLimit(1) }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(look.isClassic ? .system(size: 13, weight: on ? .semibold : .regular) : .system(size: 12.5, design: .monospaced)).lineLimit(1)
+                    if !installed {
+                        Text("Not Installed").font(.system(size: 10.5, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                }
             }
             .foregroundStyle(installed ? Look.ink : Look.faint)
             .padding(EdgeInsets(top: 10, leading: 10, bottom: 8, trailing: 10))
-            .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: Self.tileHeight, maxHeight: Self.tileHeight, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0).fill(on && look.isClassic ? Color.signal.opacity(0.14) : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0)
                 .strokeBorder(on ? (look.isClassic ? Color.signal : Look.ink) : Look.line, lineWidth: on ? (look.isClassic ? 1.5 : 2) : 1))
