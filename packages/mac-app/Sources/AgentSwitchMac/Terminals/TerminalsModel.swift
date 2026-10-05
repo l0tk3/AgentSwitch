@@ -41,6 +41,8 @@ final class TerminalsModel {
     // MARK: what the service says
     private(set) var terminals: [TerminalInfo] = []
     private(set) var sessions: [SessionSummary] = []
+    /// The version of the list `sessions` came from, to ask with next time.
+    @ObservationIgnored private var sessionsVersion: String?
     private(set) var gits: [String: FolderGit] = [:]
     private(set) var agents: [String] = []
     private(set) var models: [String: [TerminalModelOption]] = [:]
@@ -251,10 +253,12 @@ final class TerminalsModel {
     }
 
     func refreshSessions() async {
-        guard let listed = try? await client().sessions() else { return }
+        // Nothing while the list is the one already here (the service says so without sending it).
+        guard let listed = try? await client().sessions(unless: sessionsVersion) else { return }
+        sessionsVersion = listed.version
         // A record listed twice over is one row.
         var seen: Set<String> = []
-        let all = listed.filter { seen.insert($0.recordID).inserted }
+        let all = listed.value.filter { seen.insert($0.recordID).inserted }
         if sessions != all { sessions = all }
     }
 

@@ -8,7 +8,7 @@ import { SessionSearch } from "../sessions/search.js";
 import { join } from "node:path";
 import { remoteCaller } from "../core/caller.js";
 import { TerminalAudit } from "../terminals/audit.js";
-import { limitParam, type ApiDeps } from "./shared.js";
+import { limitParam, versionedJson, type ApiDeps } from "./shared.js";
 
 const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode", "pi"]);
 /** Agents that keep no register of a running session and no writer lock (docs/terminal-v0.md §5): a session written in
@@ -26,7 +26,8 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
   // Without `limit`, every session the Mac lists, so the tree shows each folder whole: a list cut at the newest 80
   // left older sessions out of their folders, and deleting one let the next one in (2026-10-03, user: 有的目录下面的
   // session显示不完全，经常是有的时候我删除一个session之后又蹦出来几个).
-  app.get("/sessions", (c) => c.json({ sessions: monitor.list(c.req.query("limit") === undefined ? Infinity : limitParam(c, LIST_LIMIT, Infinity)) }));
+  // The Mac's Terminals page reads it every twenty seconds or so: unchanged, it is not sent again (versionedJson).
+  app.get("/sessions", (c) => versionedJson(c, { sessions: monitor.list(c.req.query("limit") === undefined ? Infinity : limitParam(c, LIST_LIMIT, Infinity)) }));
   // What was said in them (docs/terminal-v0.md §1 搜索): the tree's search, for the words only the Mac has.
   const search = new SessionSearch(monitor);
   app.get("/sessions/search", async (c) => {

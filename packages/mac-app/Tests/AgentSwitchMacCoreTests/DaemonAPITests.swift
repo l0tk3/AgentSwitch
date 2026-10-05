@@ -105,6 +105,23 @@ final class StubTransport: HTTPTransport, @unchecked Sendable {
     }
 }
 
+/// As StubTransport, with response headers.
+final class HeaderTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var log: [URLRequest] = []
+    private let answer: @Sendable (URLRequest) -> (Int, String, [String: String])
+
+    init(_ answer: @escaping @Sendable (URLRequest) -> (Int, String, [String: String])) { self.answer = answer }
+
+    var requests: [URLRequest] { lock.withLock { log } }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        lock.withLock { log.append(request) }
+        let (status, body, headers) = answer(request)
+        return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!)
+    }
+}
+
 final class DaemonClientTests: XCTestCase {
     func testTheLocalTokenGoesWithEveryCallAndTheConsoleOpensThroughAOneTimeLink() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("agentswitch-token-\(UUID().uuidString)")
@@ -172,6 +189,43 @@ final class DaemonClientTests: XCTestCase {
         }
     }
 
+    /// The app asks for a client each time it needs one (AppModel.client): they share one session, so requests one
+    /// after another go over one connection instead of a new session and a new connection each.
+    func testClientsMadeOneAfterAnotherShareOneConnection() async throws {
+        let server = KeepAliveServer(body: #"{"ok":true}"#)
+        defer { server.stop() }
+        for _ in 0..<4 {
+            let data = try await DaemonClient(port: server.port).call("GET", "/anything")
+            XCTAssertEqual(String(decoding: data, as: UTF8.self), #"{"ok":true}"#)
+        }
+        XCTAssertEqual(server.requests, 4)
+        XCTAssertEqual(server.connections, 1)
+    }
+
+    /// The Terminals page reads the earlier sessions every twenty seconds or so: with the version of the list it has,
+    /// an unchanged list comes back as nothing (304) and is not decoded or compared again.
+    func testTheEarlierSessionsAreNotReadAgainWhileUnchanged() async throws {
+        let list = #"{"sessions":[{"harness":"codex","id":"x1","cwd":"/w","title":"t","lastText":"","updatedAt":2,"active":false}]}"#
+        let transport = HeaderTransport { request in
+            request.value(forHTTPHeaderField: "If-None-Match") == "\"v1\"" ? (304, "", [:]) : (200, list, ["Etag": "\"v1\""])
+        }
+        let client = DaemonClient(port: 1, transport: transport)
+        let first = try await client.sessions()
+        XCTAssertEqual(first?.value.map(\.sessionId), ["x1"])
+        XCTAssertEqual(first?.version, "\"v1\"")
+        XCTAssertNil(transport.requests[0].value(forHTTPHeaderField: "If-None-Match"))
+        let again = try await client.sessions(unless: first?.version)
+        XCTAssertNil(again)
+        XCTAssertEqual(transport.requests[1].value(forHTTPHeaderField: "If-None-Match"), "\"v1\"")
+        // Its own answers are not to be taken from a cache in between.
+        XCTAssertEqual(transport.requests[1].cachePolicy, .reloadIgnoringLocalCacheData)
+        // A service that names no version (an older one): the whole list each time, as before.
+        let old = DaemonClient(port: 1, transport: HeaderTransport { _ in (200, list, [:]) })
+        let plain = try await old.sessions(unless: "\"v1\"")
+        XCTAssertEqual(plain?.value.count, 1)
+        XCTAssertNil(plain?.version)
+    }
+
     func testUnreachableDaemon() async {
         let client = DaemonClient(port: TestSupport.freePort(), transport: URLSessionTransport(timeout: 1))
         do { _ = try await client.health(); XCTFail() } catch {
@@ -234,5 +288,59 @@ final class FakeDaemonIntegrationTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? DaemonError, .http(status: 400, message: "unknown harness/model"))
         }
+    }
+}
+
+/// A loopback server that keeps each connection open and answers every request on it, counting both.
+final class KeepAliveServer: @unchecked Sendable {
+    let port: Int
+    private let fd: Int32
+    private let response: Data
+    private let lock = NSLock()
+    private var accepted = 0
+    private var answered = 0
+
+    init(body: String) {
+        response = Data("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: keep-alive\r\n\r\n\(body)".utf8)
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        var one: Int32 = 1
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        addr.sin_port = 0
+        _ = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        listen(sock, 8)
+        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(sock, $0, &len) } }
+        fd = sock
+        port = Int(UInt16(bigEndian: addr.sin_port))
+        Thread { [self] in accepting() }.start()
+    }
+
+    var connections: Int { lock.withLock { accepted } }
+    var requests: Int { lock.withLock { answered } }
+
+    private func accepting() {
+        while true {
+            let client = accept(fd, nil, nil)
+            if client < 0 { return }
+            lock.withLock { accepted += 1 }
+            Thread { [self] in serve(client) }.start()
+        }
+    }
+
+    private func serve(_ client: Int32) {
+        while !LoopbackSocket.readHead(client, limit: 8192, timeout: 5).isEmpty {
+            lock.withLock { answered += 1 }
+            if !LoopbackSocket.sendAll(client, response) { break }
+        }
+        close(client)
+    }
+
+    func stop() {
+        shutdown(fd, SHUT_RDWR)
+        close(fd)
     }
 }

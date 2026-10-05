@@ -230,10 +230,12 @@ extension DaemonClient {
         try decode(TerminalList.self, try await call("GET", "/terminals"))
     }
 
-    /// `GET /sessions`: every session the Mac lists (the tree's earlier sessions).
-    public func sessions() async throws -> [SessionSummary] {
+    /// `GET /sessions`: every session the Mac lists (the tree's earlier sessions), with the list's version. Asked with
+    /// the version it already has, nil while the list is unchanged: the service sends nothing and nothing is decoded.
+    public func sessions(unless version: String? = nil) async throws -> Versioned<[SessionSummary]>? {
         struct Body: Decodable { let sessions: [SessionSummary] }
-        return try decode(Body.self, try await call("GET", "/sessions")).sessions
+        guard let answer = try await callUnlessUnchanged("/sessions", version: version) else { return nil }
+        return Versioned(value: try decode(Body.self, answer.value).sessions, version: answer.version)
     }
 
     /// `GET /sessions/search?q=`: the sessions whose words matched, with the words around the match.

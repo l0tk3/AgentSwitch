@@ -2,7 +2,7 @@
 
 import type { Assistant } from "../assistant/assistant.js";
 import type { Sealer } from "../secrets/sealer.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "hono";
@@ -79,6 +79,19 @@ export async function parseBody<T>(c: Context, schema: z.ZodType<T>): Promise<{ 
 export function limitParam(c: Context, fallback: number, max = MAX_LIST_LIMIT): number {
   const n = Number(c.req.query("limit") ?? fallback);
   return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : fallback;
+}
+
+/** Characters of the content's hash that make a list's version. */
+const VERSION_CHARS = 27;
+
+/** A list a screen asks for again and again, under a version of its content (`ETag`): asked for with the version it
+ *  already has (`If-None-Match`), an unchanged list is a 304 with no body, so it is not sent, decoded and compared for
+ *  nothing. Without the header the answer is what `c.json` gives, plus the version. */
+export function versionedJson(c: Context, value: unknown): Response {
+  const body = JSON.stringify(value);
+  const version = `"${createHash("sha256").update(body).digest("base64url").slice(0, VERSION_CHARS)}"`;
+  if (c.req.header("if-none-match") === version) return c.body(null, 304, { ETag: version });
+  return c.body(body, 200, { "Content-Type": "application/json", ETag: version });
 }
 
 export function newWorkDir(root: string): string {

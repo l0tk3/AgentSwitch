@@ -5,6 +5,10 @@ public protocol HTTPTransport: Sendable {
 }
 
 public struct URLSessionTransport: HTTPTransport {
+    /// The one session every client shares unless it is given a transport of its own. The app makes a client each time
+    /// it needs one (AppModel.client), several a second: a session each meant a new connection for every request.
+    public static let shared = URLSessionTransport()
+
     private let session: URLSession
 
     public init(timeout: TimeInterval = 5) {
@@ -44,6 +48,17 @@ public enum DaemonError: LocalizedError, Equatable, Sendable {
     }
 }
 
+/// What the service answered with, and the version to ask with next time (its `ETag`; nil when it names none).
+public struct Versioned<Value: Sendable>: Sendable {
+    public let value: Value
+    public let version: String?
+
+    public init(value: Value, version: String?) {
+        self.value = value
+        self.version = version
+    }
+}
+
 /// Client of the daemon's loopback listener: the management routes only the Mac app uses (app-v0 §2).
 public struct DaemonClient: Sendable {
     public let baseURL: URL
@@ -53,7 +68,7 @@ public struct DaemonClient: Sendable {
     /// start-up. Read on every call, so a client made before the daemon's first start still gets it.
     private let tokenFile: URL?
 
-    public init(port: Int, transport: HTTPTransport = URLSessionTransport(), tokenFile: URL? = nil) {
+    public init(port: Int, transport: HTTPTransport = URLSessionTransport.shared, tokenFile: URL? = nil) {
         baseURL = URL(string: "http://127.0.0.1:\(port)")!
         self.transport = transport
         self.tokenFile = tokenFile
@@ -185,17 +200,37 @@ public struct DaemonClient: Sendable {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        let data: Data, response: HTTPURLResponse
+        let (data, response) = try await answer(to: request)
+        return try DaemonClient.body(data, response, of: "\(method) \(path)")
+    }
+
+    /// `GET path`, unless the service still has the list under `version` (`If-None-Match`): nil then, a 304 with
+    /// nothing sent. A service that names no version answers whole each time.
+    func callUnlessUnchanged(_ path: String, version: String?) async throws -> Versioned<Data>? {
+        guard URL(string: baseURL.absoluteString + path) != nil else { throw DaemonError.unreachable("无效路径 \(path)") }
+        var request = request("GET", path)
+        // The service decides; nothing kept by the session answers in its place.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let version { request.setValue(version, forHTTPHeaderField: "If-None-Match") }
+        let (data, response) = try await answer(to: request)
+        if response.statusCode == 304 { return nil }
+        return Versioned(value: try DaemonClient.body(data, response, of: "GET \(path)"), version: response.value(forHTTPHeaderField: "ETag"))
+    }
+
+    private func answer(to request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
-            (data, response) = try await transport.send(request)
+            return try await transport.send(request)
         } catch let error as DaemonError {
             throw error
         } catch {
             throw DaemonError.unreachable("\(baseURL.host() ?? "127.0.0.1"):\(baseURL.port ?? 0) \(error.localizedDescription)")
         }
+    }
+
+    private static func body(_ data: Data, _ response: HTTPURLResponse, of what: String) throws -> Data {
         switch response.statusCode {
         case 200..<300: return data
-        case 404 where DaemonClient.jsonError(data) == nil: throw DaemonError.notSupported("\(method) \(path)")
+        case 404 where DaemonClient.jsonError(data) == nil: throw DaemonError.notSupported(what)
         default: throw DaemonError.http(status: response.statusCode, message: DaemonClient.errorMessage(data))
         }
     }

@@ -98,6 +98,34 @@ describe("the Mac's coding sessions", () => {
     expect((await app.request("/sessions/vim/x1")).status).toBe(404);
   });
 
+  // 2026-10-05: the Mac's Terminals page asks for the whole list every twenty seconds or so (580 kB on the user's Mac):
+  // sent, decoded and compared each time though nothing in it had changed.
+  it("an unchanged list is not sent again: the answer names its version, and asking with that version gets 304 and no body", async () => {
+    const { sources } = fixture();
+    let now = NOW;
+    const monitor = new SessionMonitor(sources, () => now);
+    const app = new Hono();
+    mountSessions(app, { sessions: monitor } as unknown as ApiDeps);
+    const first = await app.request("/sessions");
+    const version = first.headers.get("etag")!;
+    expect(first.status).toBe(200);
+    expect(version).toMatch(/^"[A-Za-z0-9_-]{16,}"$/);
+    expect(((await first.json()) as { sessions: unknown[] }).sessions).toHaveLength(3);
+    const again = await app.request("/sessions", { headers: { "If-None-Match": version } });
+    expect(again.status).toBe(304);
+    expect(await again.text()).toBe("");
+    expect(again.headers.get("etag")).toBe(version);
+    // Another list (a shorter one) is sent whole, under its own version.
+    const shorter = await app.request("/sessions?limit=1", { headers: { "If-None-Match": version } });
+    expect(shorter.status).toBe(200);
+    expect(shorter.headers.get("etag")).not.toBe(version);
+    // The same sessions later: the one written a moment ago is no longer active, so the list is another one.
+    now = NOW + 5 * 60_000;
+    const later = await app.request("/sessions", { headers: { "If-None-Match": version } });
+    expect(later.status).toBe(200);
+    expect(((await later.json()) as { sessions: unknown[] }).sessions).toHaveLength(3);
+  });
+
   // 2026-10-03, user: 有的目录下面的session显示不完全，经常是有的时候我删除一个session之后又蹦出来几个.
   it("lists every session without a limit, so each folder shows whole; an older one still opens", async () => {
     const { sources } = fixture();
