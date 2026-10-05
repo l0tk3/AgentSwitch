@@ -167,7 +167,8 @@ final class TerminalScreenController: NSObject {
     private var parser = SSEParser()
     private var reconnect: DispatchWorkItem?
     /// Bytes typed since the last send, sent a few milliseconds later together, one request after another.
-    private var pending: [UInt8] = []
+    /// What was typed, on its way to the service: a request at a time (TerminalWriteQueue).
+    private var writes = TerminalWriteQueue()
     private var flushScheduled = false
     private var sending: Task<Void, Never>?
     private var resizeWork: DispatchWorkItem?
@@ -272,6 +273,8 @@ final class TerminalScreenController: NSObject {
         }
         disconnect()
         dropHeld()
+        // What was typed for the terminal shown until now still goes to it, not to the next one.
+        if let was = self.id, let data = writes.drain() { inOrder { try await $0.writeTerminal(id: was, data: data) } }
         self.id = id
         view.isHidden = id == nil
         refresh.cancel()
@@ -424,6 +427,10 @@ final class TerminalScreenController: NSObject {
     fileprivate func ended(_ task: URLSessionTask, error: Error?) {
         guard task === self.task, let id else { return }
         screenLog.notice("stream of \(id, privacy: .public) ended: \(error?.localizedDescription ?? "closed", privacy: .public)")
+        // Its session is done with: a session keeps its delegate (and its connections) until it is invalidated.
+        session?.finishTasksAndInvalidate()
+        session = nil
+        self.task = nil
         // The service restarted or the connection dropped: again, from what this screen already has.
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.id == id else { return }
@@ -551,33 +558,39 @@ final class TerminalScreenController: NSObject {
 
     fileprivate func typed(_ bytes: ArraySlice<UInt8>) {
         guard id != nil else { return }
-        pending.append(contentsOf: bytes)
+        writes.add(bytes)
         guard !flushScheduled else { return }
         flushScheduled = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.004) { [weak self] in self?.flush() }
     }
 
+    /// What was typed, to the service: one request under way at a time; what is typed meanwhile (a pointer crossing an
+    /// agent's screen with mouse tracking on reports every cell) goes together in the next, as that one ends.
     private func flush() {
         flushScheduled = false
-        guard let id, !pending.isEmpty else { pending.removeAll(); return }
-        let data = String(decoding: pending, as: UTF8.self)
-        pending.removeAll(keepingCapacity: true)
-        inOrder { try await $0.writeTerminal(id: id, data: data) }
+        guard let id else { return writes.drop() }
+        guard let data = writes.next() else { return }
+        inOrder({ try await $0.writeTerminal(id: id, data: data) }, then: { [weak self] in
+            self?.writes.sent()
+            self?.flush()
+        })
     }
 
     /// A key the service encodes as the program asked (keys.ts), after what was typed before it.
     func namedKey(_ name: String) {
         guard let id else { return }
-        flush()
+        if let data = writes.drain() { inOrder { try await $0.writeTerminal(id: id, data: data) } }
         inOrder { try await $0.terminalKeys(id: id, [name]) }
     }
 
-    private func inOrder(_ send: @escaping @Sendable (DaemonClient) async throws -> Void) {
+    /// One request after another, in the order asked; `then` once this one is over, however it ended.
+    private func inOrder(_ send: @escaping @Sendable (DaemonClient) async throws -> Void, then: (@MainActor () -> Void)? = nil) {
         let before = sending
         let c = client()
         sending = Task {
             await before?.value
             do { try await send(c) } catch { screenLog.error("send: \(error.localizedDescription, privacy: .public)") }
+            then?()
         }
     }
 
