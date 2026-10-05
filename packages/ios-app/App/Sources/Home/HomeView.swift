@@ -102,7 +102,7 @@ struct HomeView: View {
                 .padding(.horizontal, Theme.Space.l)
                 .padding(.vertical, Theme.Space.m)
             }
-            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(Self.anchor)
             .scrollDismissesKeyboard(.interactively)
             // A short conversation cannot be dragged: a tap anywhere in it puts the keyboard away too.
             .simultaneousGesture(TapGesture().onEnded { Keyboard.dismiss() })
@@ -110,11 +110,19 @@ struct HomeView: View {
             // A new message, answer or task: follow it down.
             .onChange(of: timeline.last?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
             .onChange(of: model.outgoing?.id) { withAnimation { scroller.scrollTo(Self.bottom, anchor: .bottom) } }
-            .safeAreaInset(edge: .bottom) { InputBar() }
+            .modifier(InputBarPlacement())
         }
     }
 
     private static let bottom = "bottom"
+    /// The conversation opens at its end. `-uiDemoAnchor top` (debug builds) opens it at its start, for a picture of it
+    /// running on under the input bar and the tab bar.
+    private static var anchor: UnitPoint {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "uiDemoAnchor") == "top" { return .top }
+        #endif
+        return .bottom
+    }
 
     /// The conversation; a "waits for you" line is left out while its question is open in the task's card (it would
     /// say the same thing twice), and shows as history once answered.
@@ -240,6 +248,25 @@ private struct HomeMark: View {
         case .waiting: return "waiting"
         case .error: return "failed"
         case .off: return "Mac not reachable"
+        }
+    }
+}
+
+/// The input bar at the foot of the conversation. On iOS 26 and later in the classic look it is a bar of the page's
+/// floating layer (`safeAreaBar`): the conversation scrolls on under it and under the glass tab bar, frosted by the
+/// system's scroll edge effect. Otherwise an inset with its own ground, as before.
+private struct InputBarPlacement: ViewModifier {
+    @Environment(\.interfaceLook) private var look
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), look.isClassic {
+            // The hard edge effect: what scrolls under the bar is frosted from the bar's top down, so the field stays
+            // readable over text (the soft one blurs only under the tab bar, and the conversation's lines ran through
+            // the field's own).
+            content.safeAreaBar(edge: .bottom) { InputBar() }
+                .scrollEdgeEffectStyle(.hard, for: .bottom)
+        } else {
+            content.safeAreaInset(edge: .bottom) { InputBar() }
         }
     }
 }

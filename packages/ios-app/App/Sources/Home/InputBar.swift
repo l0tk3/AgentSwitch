@@ -15,59 +15,9 @@ struct InputBar: View {
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
-        @Bindable var model = model
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if let pin = model.pin {
-                HStack(spacing: 6) {
-                    Text("Pin → \(ModelName.display(pin.model))").mono(12, weight: .medium)
-                    Button { model.pin = nil } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 14) }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("恢复自动选择")
-                }
-                .foregroundStyle(Theme.signal)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .framed(Theme.signal, radius: Theme.Radius.control)
-            }
-            AttachmentStrip()
-            if error != nil {
-                ErrorText(message: $error)
-            }
-            HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                extras
-                TextField("输入任务或问题", text: $model.composeText, axis: .vertical)
-                    .lineLimit(1...6)
-                    // Passwords may be typed here: keep the keyboard from learning or suggesting them.
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .padding(.horizontal, look.isClassic ? 14 : 12)
-                    .padding(.vertical, 9)
-                    // The classic look's field: its own ground, round as a bubble.
-                    .grounded(look.isClassic ? Theme.panel : Color.clear, radius: Theme.Radius.bubble)
-                    .framed(Theme.line, radius: Theme.Radius.bubble)
-                // Square; ink once there is something to send (the primary button, §7.2.3), pink while pressed. A disc
-                // in the accent with an arrow in the classic look.
-                Button { Task { error = await model.send() } } label: {
-                    if model.sending {
-                        BrailleSpinner(color: Theme.base)
-                    } else if look.isClassic {
-                        Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold))
-                    } else {
-                        Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced))
-                    }
-                }
-                .buttonStyle(SquareIconButtonStyle(active: canSend || model.sending))
-                .disabled(!canSend)
-                .accessibilityLabel("send")
-            }
-        }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.top, Theme.Space.s)
-        .padding(.bottom, Theme.Space.s)
-        // Down to the screen's edge: the conversation scrolls under the bar and must not show below it.
-        .background(alignment: .top) {
-            VStack(spacing: 0) { Theme.line.frame(height: 1); Theme.base }
-                .ignoresSafeArea(.container, edges: .bottom)
+        Group {
+            // The classic look on iOS 26 and later: the tab bar under it is glass afloat over the page, and so is this.
+            if #available(iOS 26, *), look.isClassic { floating } else { banded }
         }
         .fullScreenCover(isPresented: $takingPhoto) {
             CameraPicker { data in
@@ -93,6 +43,123 @@ struct InputBar: View {
             case .failure(let failure): error = failure.localizedDescription
             }
         }
+    }
+
+    /// A band across the foot of the page (the pixel look; the classic one before iOS 26, whose tab bar is opaque): its
+    /// own ground down to the screen's edge, a line above it.
+    private var banded: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            pinChip
+            AttachmentStrip()
+            if error != nil {
+                ErrorText(message: $error)
+            }
+            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                extras
+                field
+                    .padding(.horizontal, look.isClassic ? 14 : 12)
+                    .padding(.vertical, 9)
+                    // The classic look's field: its own ground, round as a bubble.
+                    .grounded(look.isClassic ? Theme.panel : Color.clear, radius: Theme.Radius.bubble)
+                    .framed(Theme.line, radius: Theme.Radius.bubble)
+                // Square; ink once there is something to send (the primary button, §7.2.3), pink while pressed. A disc
+                // in the accent with an arrow in the classic look.
+                Button { send() } label: { sendMark }
+                    .buttonStyle(SquareIconButtonStyle(active: canSend || model.sending))
+                    .disabled(!canSend)
+                    .accessibilityLabel("send")
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.s)
+        .padding(.bottom, Theme.Space.s)
+        // Down to the screen's edge: the conversation scrolls under the bar and must not show below it.
+        .background(alignment: .top) {
+            VStack(spacing: 0) { Theme.line.frame(height: 1); Theme.base }
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
+    }
+
+    /// Afloat over the conversation (docs/ui-v0.md §8, 2026-10-05; user, of the band under a glass tab bar: 这里的液态
+    /// 玻璃使用不符合规范吧……液态玻璃下面也没有什么有用信息): no ground and no line of its own — the conversation runs
+    /// on under it and under the tab bar to the screen's edge. `+`, the field (what is attached, pinned or went wrong
+    /// inside it) and send are glass, in one container so they sample and move as one.
+    @available(iOS 26, *)
+    private var floating: some View {
+        GlassEffectContainer(spacing: Theme.Space.s) {
+            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                extras
+                VStack(alignment: .leading, spacing: 6) {
+                    pinChip
+                    AttachmentStrip()
+                    if error != nil {
+                        ErrorText(message: $error)
+                    }
+                    field
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Self.fieldRadius))
+                Button { send() } label: {
+                    sendMark
+                        .foregroundStyle(canSend || model.sending ? Color.white : Color.secondary)
+                        .frame(width: Self.disc, height: Self.disc)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .glassEffect(canSend || model.sending ? .regular.tint(Theme.signal).interactive() : .regular.interactive(), in: .circle)
+                .disabled(!canSend)
+                .accessibilityLabel("send")
+            }
+        }
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.s)
+        .padding(.bottom, Theme.Space.s)
+    }
+
+    /// The field's corner: a line of text makes it a capsule, more lines a round-cornered box.
+    private static let fieldRadius: CGFloat = 19
+    /// `+` and send: discs as tall as one line of the field.
+    private static let disc: CGFloat = 38
+
+    @ViewBuilder
+    private var pinChip: some View {
+        if let pin = model.pin {
+            HStack(spacing: 6) {
+                Text("Pin → \(ModelName.display(pin.model))").mono(12, weight: .medium)
+                Button { model.pin = nil } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 14) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("恢复自动选择")
+            }
+            .foregroundStyle(Theme.signal)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .framed(Theme.signal, radius: Theme.Radius.control)
+        }
+    }
+
+    private var field: some View {
+        @Bindable var model = model
+        return TextField("输入任务或问题", text: $model.composeText, axis: .vertical)
+            .lineLimit(1...6)
+            // Passwords may be typed here: keep the keyboard from learning or suggesting them.
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+    }
+
+    @ViewBuilder
+    private var sendMark: some View {
+        if model.sending {
+            BrailleSpinner(color: Theme.base)
+        } else if look.isClassic {
+            Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold))
+        } else {
+            Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced))
+        }
+    }
+
+    private func send() {
+        Task { error = await model.send() }
     }
 
     private func add(_ files: [UploadFile], prepare: Bool) {
@@ -131,7 +198,12 @@ struct InputBar: View {
                 }
             }
         } label: {
-            if look.isClassic {
+            if #available(iOS 26, *), look.isClassic {
+                Image(systemName: "plus").font(.system(size: 17, weight: .medium)).foregroundStyle(.secondary)
+                    .frame(width: Self.disc, height: Self.disc)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
+            } else if look.isClassic {
                 Image(systemName: "plus.circle").font(.system(size: 26, weight: .light)).foregroundStyle(.secondary)
                     .frame(width: 34, height: 38)
             } else {
