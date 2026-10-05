@@ -31,6 +31,7 @@ daemon 读四家本地记录（只读，不改；唯一例外是用户在会话�
 - 只列用户自己的会话：目录在临时目录（`/tmp`、`/private/tmp`、`/private/var/folders`）或 AgentSwitch 数据目录下的不列（那是探测、测试和 AgentSwitch 自己的执行器）。
 - 进行中 = 最近 90 秒内有更新。
 - `GET /sessions?limit=60` → `{sessions: SessionSummary[]}`，新到旧（2026-10-03 起不带 `limit` 给全部，terminal-v0 §4）；`SessionSummary = {harness: "claude-code"|"codex"|"opencode"|"pi", id, cwd, title, lastText, updatedAt, active, origin?, branch?, model?}`。
+  - 回答带 `ETag`（内容的版本）；带 `If-None-Match` 来问而列表没变时回 304、不带内容（2026-10-05，app-v0 §4 省电第二轮）。不带这个头的调用方（手机）照旧拿到整份列表。
 - `GET /sessions/:harness/:id?limit=80` → `{session: SessionSummary, messages: [{role: "user"|"assistant"|"tool", text, ts, tool?}]}`，最近的 N 条，每条截 2000 字。
 - 两条都远程可读（只读）。会话内容是用户自己的，只经钉证书的通道给自己的手机，不入库、不进日志。
 - **调度模型看得到**（2026-09-27 审查后改为按目录）：
