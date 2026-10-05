@@ -7,10 +7,16 @@ import UIKit
 // agent switch浏览器中打开): a tap opens it there, a long press offers that, copying it, and Safari. What a link is, its
 // menu and what happens without the Mac's browser are the Kit's (`TappedLink`, `LinkAction`, `LinkOpening`); here they
 // are carried out.
+//
+// The page comes up over where the link was, and `Done` goes back there (2026-10-05, user, of a tap that took the
+// phone to the Browser tab: 我得返回到浏览器主页面再回来🤔 有没有更方便的符合规范的跳转方法). The tab bar is the user's:
+// "Transporting someone to another tab by tapping on an element within a view is jarring and disorienting. Never force
+// someone to change tabs automatically" (WWDC22, Explore navigation design for iOS); a page to look at and come back
+// from is a modal one, as a link's page is in every app that shows it in Safari's view with `Done`.
 
 extension AppModel {
-    /// Opens `link` in the Mac's browser — a new tab of yours — and shows it: the Browser tab, on that tab's page (the
-    /// page left behind stays where it was on its own tab). `alternates`: other readings of a path that may run over a
+    /// Opens `link` in the Mac's browser — a new tab of yours — and shows it over where you are (`linkedPage`); on the
+    /// Browser tab itself, as that tab's page. `alternates`: other readings of a path that may run over a
     /// line's end, tried in turn while the Mac says the one before is not there. Returns what to say when it did not
     /// open there (nil: it did): without the Mac's browser a web address the phone can reach opens in Safari.
     @discardableResult
@@ -22,8 +28,7 @@ extension AppModel {
                 do {
                     let tab = try await api.openBrowserTab(candidate.target)
                     browser.add(tab)
-                    openBrowserRequest = tab.id
-                    self.tab = .browser
+                    if self.tab == .browser { openBrowserRequest = tab.id } else { linkedPage = tab }
                     return nil
                 } catch {
                     first = first ?? LinkOpening.failure(error, for: candidate)
@@ -107,6 +112,36 @@ extension View {
                 Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = MessageDisplay.readable(text) }
                 LinkMenuItems(text: text)
             }
+        }
+    }
+}
+
+/// A link's page over where the link was: the tab's page as the Browser tab shows it, with `Done` where its way back
+/// would be. Closing the tab from its menu closes this too; `Done` leaves the tab open on the Browser tab.
+struct LinkedPage: View {
+    let tab: BrowserTabInfo
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        NavigationStack {
+            BrowserPage(tab: tab)
+                // `Done` alone leads the bar: the page's role as an editor's would put a way back beside it, and there
+                // is none here but `Done`.
+                .navigationBarBackButtonHidden(true)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Done") { model.linkedPage = nil } }
+                }
+        }
+    }
+}
+
+extension View {
+    /// Shows a tapped link's page over this view. `inSheet`: this view is a sheet's content — a link tapped there
+    /// comes up over the sheet, and one tapped elsewhere over the tabs (one cover at a time, from whichever is in front).
+    func linkedPageCover(_ model: AppModel, inSheet: Bool) -> some View {
+        fullScreenCover(item: Binding(get: { (model.sheet != nil) == inSheet ? model.linkedPage : nil },
+                                      set: { if $0 == nil { model.linkedPage = nil } })) { tab in
+            LinkedPage(tab: tab).followsLook()
         }
     }
 }

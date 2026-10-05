@@ -8,8 +8,9 @@ struct RootView: View {
 
     var body: some View {
         // Only web links open from model output (Markdown.inline also drops other schemes): an agentswitch:// link
-        // in a result must not start pairing with a Mac someone else chose. They open in the Mac's shared browser, on
-        // the Browser tab (browser-v0 §1 入口, 2026-10-03); without it, in Safari as before, with why.
+        // in a result must not start pairing with a Mac someone else chose. They open in the Mac's shared browser, the
+        // page over where the link was (browser-v0 §1 入口, 2026-10-03; LinkOpener); without it, in Safari as before,
+        // with why.
         content.environment(\.openURL, OpenURLAction { url in
             guard Markdown.isWebLink(url) else { return .discarded }
             Task { if let said = await model.open(.web(url.absoluteString)) { model.banner = said } }
@@ -40,7 +41,11 @@ struct RootView: View {
                                  set: { model.incomingPairingLink = $0?.text })) { pending in
                 PairConfirmView(link: pending.text).followsLook()
             }
-            .sheet(item: $model.sheet) { sheet in HomeSheetContent(sheet: sheet).followsLook() }
+            .sheet(item: $model.sheet) { sheet in
+                HomeSheetContent(sheet: sheet).followsLook().linkedPageCover(model, inSheet: true)
+            }
+            // A tapped link's page, over where the link was (LinkOpener).
+            .linkedPageCover(model, inSheet: false)
         }
     }
 }

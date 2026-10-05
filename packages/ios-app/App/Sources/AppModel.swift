@@ -92,6 +92,9 @@ final class AppModel {
     let browser = BrowserStore()
     /// A browser tab to open (a demo screen), or "new"; the Browser tab takes it.
     var openBrowserRequest: String?
+    /// The page of a link tapped outside the Browser tab, shown over where the link was until `Done` (LinkOpener,
+    /// `LinkedPage`); it is one of the Browser tab's tabs too, and stays one.
+    var linkedPage: BrowserTabInfo?
     /// A pairing link from a tap or a scan, waiting for the user to confirm.
     var incomingPairingLink: String?
     var banner: String?

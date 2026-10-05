@@ -85,9 +85,10 @@
 **入口**：终端里点路径（Mac ⌘-点击、手机点）→ `Open in Browser`；任务的 HTML 文件 → 在 Browser 里打开（同目录的资源一并可用）；Dispatch 记录里的链接 → Browser。
 
 > 2026-10-03 手机的入口做了两项（用户：手机上现在点击和复制链接还是费劲，修复一下交互；修复好之后想办法让手机可以方便的点击链接，点击之后直接在agent switch浏览器中打开）：
-> - **终端画面里的链接和路径**：点一下在共享浏览器里开一个你自己的新标签（`POST /browser/tabs`），手机切到 `Browser` 标签页并打开它；长按出菜单 `Open in Browser`、`Copy Link` / `Copy Path`、`Open in Safari`。认哪些、折行怎么接、点不准怎么办，见 terminal-v0 §1 iPhone “链接”。
+> - **终端画面里的链接和路径**：点一下在共享浏览器里开一个你自己的新标签（`POST /browser/tabs`），手机切到 `Browser` 标签页并打开它（2026-10-05 起不再换标签：页面盖在原处，见下）；长按出菜单 `Open in Browser`、`Copy Link` / `Copy Path`、`Open in Safari`。认哪些、折行怎么接、点不准怎么办，见 terminal-v0 §1 iPhone “链接”。
 > - **Dispatch 记录、任务页、会话记录里的链接**：点一下同样在共享浏览器里打开（原来交给 Safari）；长按的菜单里多出每个链接的 `Open in Browser`、`Copy Link`、`Open in Safari`（原来只能把整段文字复制出来）。中文里紧跟着标点或汉字的网址，系统的 Markdown 解析会连同后面的字一起当成链接（`https://example.com/a。然后看https://example.org/b` 整段成了一个打不开的地址），现在在第一个不属于网址的字处截断，后面的网址各自成链；反引号里的网址也是链接。
 > - 打不开时同终端：没连上或 Mac 没有浏览器，网址退回 Safari 并说明；Mac 拒绝时写出原因。只有 http / https 会被打开，`agentswitch://` 等其他协议照旧丢弃。
+> - 2026-10-05 **点开的页面盖在原处，`Done` 回去**（用户：现在我在手机上点击链接跳转到浏览器，我得返回到浏览器主页面再回来🤔 有没有更方便的符合规范的跳转方法）。原来点链接会把手机切到 `Browser` 标签页并推入那一页，而那一页藏着标签栏，要先退回标签列表才能切回原来的标签——两步，而且是应用替人换了标签。苹果的说法（WWDC22 *Explore navigation design for iOS*）：“Transporting someone to another tab by tapping on an element within a view is jarring and disorienting. Never force someone to change tabs automatically.”；要看一眼再回来的内容用模态（“isolating someone into a focused workflow or self-contained task”），就像各应用里用 Safari 视图打开链接、左上角 `Done`。现在：在 Dispatch、任务页、会话记录、终端画面里点链接，页面从下方盖上来（`fullScreenCover`，`LinkedPage`），就是 Browser 标签页里的那一页（地址、谁持有、画面、底栏都一样），左上角是 `Done`；点 `Done` 回到点链接的地方，原来的页面、滚动位置、输入都没动。这个标签仍然留在 `Browser` 标签页的列表里（`Done` 不关它；要关用 `⋯` › `Close Tab`，关掉也回到原处）。已经在 `Browser` 标签页里时照旧推入。从设置等弹出层里点的链接盖在那个弹出层上。`-uiDemoScreen linkedpage` 看这个状态。
 > - 任务的 HTML 文件入口、实时活动未做。
 
 ## 2. 结构

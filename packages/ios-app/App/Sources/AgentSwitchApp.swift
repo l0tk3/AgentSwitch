@@ -16,7 +16,7 @@ struct AgentSwitchApp: App {
         // stale|interrupted|mac|offline|offlinemac|tasks|search|sessions|transcript|terminals|terminal|terminalsealed|
         // terminalslash|terminalclose|terminalmenu|terminaldelete|terminalsearch|terminalquestion|terminallink|newterminal|newterminalbypass|
         // browser|browserpage|browsertook|browserfile|browserlocal|browserdenied|browsernew|browserclose|browserzoom|
-        // browserzoomwatch`.
+        // browserzoomwatch|linkedpage`.
         if let hosts = UserDefaults.standard.string(forKey: "tlsProbe"), let pin = UserDefaults.standard.string(forKey: "tlsProbePin") {
             TLSProbe.run(hosts: hosts.split(separator: ",").map(String.init), pin: pin)
         }
@@ -38,6 +38,10 @@ struct AgentSwitchApp: App {
                 model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
             case "newterminal", "newterminalbypass": model.tab = .terminals; model.openTerminalRequest = "new"
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)
+            // A link tapped on a terminal's screen: its page over the terminal, `Done` back to it.
+            case "linkedpage":
+                model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
+                model.linkedPage = DemoBrowser.list.tabs.first { $0.id == "vite" }
             default: break
             }
             return model
