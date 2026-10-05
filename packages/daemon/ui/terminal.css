@@ -271,6 +271,8 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; }
 /* the pane a terminal is shown in, on its row of the tree */
 .row .inpane { font-size: 10.5px; line-height: 13px; padding: 0 3px; color: var(--ink2); box-shadow: inset 0 0 0 1px var(--ink3); }
 .row .inpane.f { color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+/* Out in a window of its own (the Mac app): the row says so; a click brings that window forward. */
+.row .inwin { color: var(--ink2); font-size: 12px; line-height: 13px; }
 
 /* permission requests: a box over the screen's top right; amber head; the answer keys spelled out */
 /* In use on another screen (terminal-v0 §1 "不在用的一端显示占位"): what is under it behind a 50% dither (not

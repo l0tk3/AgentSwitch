@@ -45,6 +45,15 @@ if (STATUS_BAR) document.documentElement.classList.add("status-bar");
 // native screen a pane. The web console shows one terminal at a time, as before.
 const PANES = NATIVE && window.agentswitchPanes === true;
 if (PANES) document.documentElement.classList.add("panes-on");
+// The Mac app shows a terminal in a window of its own when asked (docs/dispatch-v0.md §1 单独的窗口, 2026-10-05, user:
+// 如果我想单独让某个session的终端单独开窗口打开 应该怎么弄): a terminal out there is not shown here too. The app says which
+// are out (`window.agentswitchDetached` at the start, `agentswitch.detached` after); the page leaves their panes, marks
+// their rows `↗`, and asks for the window when one is picked (`raise`). The row's menu puts one out (`detach`) and
+// takes it back (`attach`).
+const WINDOWS = NATIVE && window.agentswitchWindows === true;
+let detached = new Set(WINDOWS && Array.isArray(window.agentswitchDetached) ? window.agentswitchDetached : []);
+/** The terminal may be shown on this page (it is not out in a window of its own). */
+const here = (id) => !detached.has(id);
 /** The grid the native screen fits (it tells us), for a terminal started or continued here. */
 let nativeGrid = { cols: 100, rows: 30 };
 const narrow = matchMedia("(max-width: 760px), (pointer: coarse)");
@@ -225,6 +234,9 @@ function applySide() {
   document.documentElement.style.setProperty("--side-w", `${sideWidth(side.width)}px`);
   document.body.classList.toggle("side-closed", side.closed);
   renderSideBtn();
+  // The Mac window's bars draw their lines only as far as the list's edge (docs/dispatch-v0.md §1, 2026-10-05): how
+  // wide the list's column is now — nothing while it is closed, or a drawer over the screen.
+  tellWindow("side", { width: side.closed || narrow.matches ? 0 : sideWidth(side.width) });
 }
 /** The list: a drawer over the screen on a narrow one, else the column beside it. */
 function toggleList() {
@@ -451,15 +463,20 @@ new ResizeObserver(() => { clearTimeout(fitAndTell.t); fitAndTell.t = setTimeout
 const SCREEN = `web-${Math.random().toString(36).slice(2, 10)}`;
 let sizeOwner = null;      // who has the current terminal's size (its stream says)
 let claimOnConnect = false;   // just opened here in use: taken once the stream says nobody has it
+// Where the terminal was taken to from this page (the phone, a Mac window), until it is taken back here by hand: its
+// owner leaving does not bring it back by itself (2026-10-05, user: 在iPhone上接管了一个session退出去之后mac就自动接管了，
+// 不应该这样，应该在mac上手动点击接管才能接管回来).
+let takenTo = null;
 const mine = () => sizeOwner === SCREEN;
 let nativeActive = null;   // the Mac window says when it is the key window (window.agentswitch.active)
 function inUse() { return (nativeActive ?? document.hasFocus()) && !document.hidden; }
 /** `active`: the user acts here (a key, a click) and takes it; else only a size nobody has. */
-const reclaim = (active) => () => { if (NATIVE || !inUse()) return; if (mine()) fitAndTell(); else if (active || !sizeOwner) claim(); };
+const reclaim = (active) => () => { if (NATIVE || !inUse()) return; if (mine()) fitAndTell(); else if (active || (!sizeOwner && !takenTo)) claim(); };
 function claim() {
   if (!current || creating || current.status === "exited") return;
   if (NATIVE) { native.postMessage({ type: "claim", pane: focusPane }); return; }
   fit.fit();
+  takenTo = null;
   sizeOwner = SCREEN;
   showAway(null);
   current.cols = term.cols;
@@ -572,6 +589,8 @@ function ask({ title, body, confirm, destructive = false, check = null, folder =
 function select(id, { loading = null } = {}) {
   const t = terminals.find((x) => x.id === id);
   if (!t) return;
+  // Out in a window of its own: that window comes forward, nothing changes here.
+  if (!here(id)) { native.postMessage({ type: "raise", id }); return; }
   if (PANES) {
     // A terminal is in one pane: shown already, that pane takes the focus; else it goes in the pane in focus.
     const shown = paneShowing(layout, id);
@@ -593,6 +612,7 @@ function select(id, { loading = null } = {}) {
   renderSideBtn();
   if (loading) showLoading(loading); else hideLoading();
   sizeOwner = null;
+  takenTo = null;
   if (!PANES) {
     clearTimeout(showAway.leaving);
     $("away").hidden = true;
@@ -655,10 +675,12 @@ function follow(id) {
     }
     sizeOwner = ev.by ?? null;
     if (mine()) return showAway(null);
-    // Its owner left (or an older screen that says no name): the screen in use takes it back.
-    if (!ev.by && inUse()) return claim();
+    // Its owner left: taken from this page, it stays as it was left until it is taken back here by hand; never taken
+    // from here, the screen in use has it.
+    if (!ev.by && !takenTo && inUse()) return claim();
+    if (ev.by) takenTo = placeOf(ev.by);
     if (ev.cols !== term.cols || ev.rows !== term.rows) term.resize(ev.cols, ev.rows);
-    showAway(ev.by ? placeOf(ev.by) : null);
+    showAway(ev.by ? placeOf(ev.by) : takenTo);
   });
   on("status", (ev) => patch(id, { status: ev.status }));
   on("name", (ev) => patch(id, { name: ev.name }));
@@ -699,8 +721,38 @@ function patch(id, fields) {
 function afterRemoval() {
   // Among several panes the one whose terminal went has closed (refresh): the pane now in focus shows what it holds.
   if (PANES && panesOf(layout).length > 1) return focusOn(focusPane, true);
-  const next = terminalOrder[0] ?? terminals[0]?.id;
+  const next = terminalOrder.find(here) ?? terminals.find((t) => here(t.id))?.id;
   if (next) select(next); else showCreate();
+}
+
+/** The panes of terminals now out in windows of their own are left: closed among several, emptied when alone. */
+function leaveDetached() {
+  if (!PANES || !detached.size) return false;
+  const out = panesOf(layout).filter((p) => p.term && !here(p.term));
+  if (!out.length) return false;
+  for (const p of out) layout = closeIn(layout, p.id);
+  if (!paneOf(layout, focusPane)) focusPane = panesOf(layout)[0].id;
+  if (panesOf(layout).length < 2) zoomed = false;
+  keepLayout();
+  return true;
+}
+
+/** The app says which terminals are out in windows of their own now: the one on screen here, if it went, gives way to
+ *  what its pane holds next (or the next terminal, or the new-terminal panel). */
+function setDetached(ids) {
+  detached = new Set(ids);
+  const went = current && !here(current.id);
+  const left = leaveDetached();
+  if (went) {
+    closeStream();
+    current = null;
+    $("toasts").replaceChildren();
+    if (creating) render(); else afterRemoval();
+  } else if (left) {
+    render();
+  } else {
+    renderSidebar();
+  }
 }
 
 // ---------- split panes (the Mac window; docs/terminal-v0.md §1 分屏, demo docs/design/implemented/split.html) ----------
@@ -984,7 +1036,7 @@ const openedAs = (s) => terminals.find((t) => t.status !== "exited" && (t.resume
 
 function openBeside(what) {
   const term = what.term ?? openedAs(what.session)?.id;
-  if (term && paneShowing(layout, term)) return select(term);
+  if (term && (paneShowing(layout, term) || !here(term))) return select(term);
   if (!splitFocused("right")) return;
   if (term) select(term); else resume(what.session);
 }
@@ -993,6 +1045,8 @@ function openBeside(what) {
  *  followed on the window, not on the row). */
 function startRowDrag(e, what) {
   if (!PANES || e.button !== 0 || e.target.closest("button, input")) return;
+  // A terminal out in a window of its own is not dragged into a pane: its menu takes it back.
+  if (what.term && !here(what.term)) return;
   rowDrag = { what, x: e.clientX, y: e.clientY, moved: false, ghost: null, drop: null };
 }
 addEventListener("pointermove", (e) => {
@@ -1243,7 +1297,7 @@ function terminalRow(t, tr, depth, name = t.name) {
     twig(tr, depth),
     h("span", { class: "st" }, statusMark(t)),
     h("span", { class: `nm ${t.status === "exited" ? "dither" : ""}`, "data-rename": t.id }, name),
-    h("span", { class: "mt" }, meta, paneBadge(t.id)),
+    h("span", { class: "mt" }, meta, paneBadge(t.id), here(t.id) ? null : h("span", { class: "inwin", title: tip("In Its Own Window") }, "↗")),
     h("span", { class: "ac" }, h("button", { class: "x", title: tip("Close ⌘W"), onclick: (e) => { e.stopPropagation(); closeTerminal(t); } }, classic() ? raw(icon("x", 12)) : "×")));
 }
 
@@ -1281,10 +1335,16 @@ function sessionRow(s, tr, depth, name = s.title || "(Untitled)") {
 function showMenu(e, t) {
   const item = (label, key, run, opts = {}) => h("button", { class: opts.danger ? "danger" : "", disabled: opts.disabled, onclick: () => { $("menu").hidden = true; run(); } },
     h("span", {}, label), key ? h("kbd", {}, key) : null);
-  $("menu").replaceChildren(
+  // In the Mac app: out to a window of its own, or back from it. Its sealed reply is then that window's (its lock).
+  const out = !here(t.id);
+  const move = !WINDOWS ? null : out
+    ? item("Move Back Here", null, () => native.postMessage({ type: "attach", id: t.id }))
+    : item("Open in New Window", null, () => native.postMessage({ type: "detach", id: t.id }));
+  $("menu").replaceChildren(...[
     item("Rename", null, () => startRename(t.id)),
-    item("Encrypt & Send…", "⌘⇧V", () => { select(t.id); openComposer(); }, { disabled: t.status === "exited" }),
-    item("Close", "⌘W", () => closeTerminal(t), { danger: true }));
+    move,
+    item("Encrypt & Send…", "⌘⇧V", () => { select(t.id); openComposer(); }, { disabled: t.status === "exited" || out }),
+    item("Close", "⌘W", () => closeTerminal(t), { danger: true })].filter(Boolean));
   $("menu").hidden = false;
   const r = $("menu").getBoundingClientRect();
   $("menu").style.left = `${Math.min(e.clientX, innerWidth - r.width - 8)}px`;
@@ -1932,6 +1992,8 @@ if (native) {
     newTerminal: () => showCreate(),
     // The wheel over the screen, as notches (up positive): the window takes it, WebKit gives the page none there.
     wheel: (n) => wheelNotches(n),
+    // The terminals out in windows of their own, whenever they change.
+    detached: (ids) => setDetached(Array.isArray(ids) ? ids : []),
     // One terminal on screen (the menu bar's Live Activity card): the list read again first, it may be new.
     show: async (id) => { await refresh(); if (terminals.some((t) => t.id === id)) select(id); },
   };
@@ -2021,6 +2083,7 @@ if (PANES) {
   const kept = (() => { try { return JSON.parse(recall("terminal.panes") || "null"); } catch { return null; } })();
   const root = restoreLayout(kept?.root);
   if (root) { layout = root; focusPane = paneOf(root, kept.focus) ? kept.focus : panesOf(root)[0].id; }
+  leaveDetached();
   new ResizeObserver(() => { renderPanes(); tellScreens(); }).observe($("stage"));
 }
 await refresh();
@@ -2028,10 +2091,10 @@ settledOnce = true;
 await refreshSessions();
 void refreshGit();
 const wanted = new URLSearchParams(location.search).get("id") || recall("terminal.last");
-if (wanted && terminals.some((t) => t.id === wanted)) select(wanted);
+if (wanted && here(wanted) && terminals.some((t) => t.id === wanted)) select(wanted);
 else if (PANES && paneOf(layout, focusPane)?.term) select(paneOf(layout, focusPane).term);
 else if (PANES && panesOf(layout).length > 1) focusOn(focusPane, true);   // an empty pane among others: it says what to do
-else if (terminalOrder[0]) select(terminalOrder[0]);
+else if (terminalOrder.some(here)) select(terminalOrder.find(here));
 else showCreate();
 // Out of sight the list is not asked for; it is read again as the page comes back.
 setInterval(() => { if (!document.hidden) void refresh(); }, 3000);
