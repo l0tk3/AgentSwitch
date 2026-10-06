@@ -60,6 +60,16 @@ public enum AgentText {
         }
     }
 
+    /// Under an agent whose choice the running service does not have yet: what it still runs, what it will run.
+    /// `applied` is the program the service was started with for this agent.
+    public static func pendingRestart(_ report: AgentReport, chosen: AgentInstall?, applied: String?) -> String {
+        func name(_ install: AgentInstall) -> String { "\(install.source.title) \(install.version ?? "")".trimmingCharacters(in: .whitespaces) }
+        let next = chosen.map { "重启服务后改用 \(name($0))。" } ?? "重启服务后生效。"
+        guard let applied else { return "服务启动时还没有 \(report.agent.title)，" + next }
+        guard let old = report.installs.first(where: { $0.binary == applied }) else { return "服务仍在使用原先的版本，" + next }
+        return "服务仍在使用 \(name(old))，" + next
+    }
+
     /// When the vendors were last asked.
     public static func checked(_ info: AgentReleaseInfo?, checking: Bool, now: Date = Date()) -> String {
         if checking { return "Checking" }

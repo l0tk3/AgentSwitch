@@ -113,7 +113,7 @@
 - 每个 agent 一组：标题是它的标记和名字；下面每行一个安装——单选标记（AgentSwitch 用哪个）、来源（`Stable` `Beta` `Pinned` `ChatGPT App` `Other`）、版本、命令名或位置、大小，右边是这一行的按钮（`Update → 2.1.292`、`Delete…`）。没装的来源是一行淡色的 `Not Installed` 加 `Install`。组尾 `Install Version…`。
 - 进行中的操作占住那一行：进度条和它在做什么（`Downloading 112 / 233 MB`、`Verifying`、`Unpacking`、`Checking`、`Installing`、`Updating`、`Removing`），`Cancel`（过了下载阶段是灰的）。失败时那一行写原因，`Show Log` 打开这个 agent 的操作日志，`OK` 收起；失败只占住它自己那一行，这个 agent 的其他按钮照常可用。
 - 环境检查清单和首次运行向导里没装的那几项（Claude Code、Codex、OpenCode），原来是一行安装命令加 `Copy Command`，现在是 `Install`：点了跳到这一页并开始装它的 Stable（通道还没读到时安装自己先问）。安装期间那一行写 `Installing`、不算未完成；没装成时那一行下面写原因，仍可再点。装好后环境检查自动重测，那一行变成 `Signed Out` 和 `Sign In`——登录仍在终端里由你完成。
-- 改了选用的版本：页面顶上出一条“重启服务后生效”和 `Restart Service`。
+- 改了选用的版本：页面顶上出一条“重启服务后生效”和 `Restart Service…`；**那个 agent 自己的组里也写一行** `Applies After Restart`，说明服务现在还在用哪个、重启后改用哪个，旁边同一个按钮（2026-10-06：只有顶上那条时，在下面的组里选了版本的人看不到它，以为没生效）。
 - 页面底部：版本库的位置与总大小；命令（各家的和 `*-beta`）所在的目录不在登录 shell 的 PATH 里时，每个目录一句：哪些命令还不能直接用、要加的那一行。登录 shell 问不到时不写。
 
 ## 9. 落在哪里、分几步

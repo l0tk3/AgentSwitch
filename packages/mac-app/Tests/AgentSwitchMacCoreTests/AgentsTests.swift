@@ -365,4 +365,26 @@ final class AgentsTests: XCTestCase {
         XCTAssertEqual(AgentCLI.allCases.map(\.environmentKey), ["CLAUDE_BIN", "CODEX_BIN", "OPENCODE_BIN", "PI_BIN"])
         XCTAssertEqual(AgentCLI.allCases.map(\.betaCommand), ["claude-beta", "codex-beta", "opencode-beta", nil])
     }
+
+    /// agents-v0 §3: a choice is saved at once and runs when the service next starts; until then the group says so.
+    func testAChoiceTheServiceDoesNotHaveYetIsSaidWhereItWasMade() {
+        let l = AgentLayout(home: "/Users/u")
+        let app = AgentInstall(agent: .codex, source: .app, key: "app", binary: "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+                               location: "/Applications/ChatGPT.app", version: "0.160.1")
+        let beta = AgentInstall(agent: .codex, source: .beta, key: "beta", binary: l.launcher(.codex, .beta, "0.162.0-alpha.16"), command: "codex-beta",
+                                location: l.storeVersion(.codex, .beta, "0.162.0-alpha.16"), version: "0.162.0-alpha.16")
+        let claude = AgentInstall(agent: .claude, source: .stable, key: "stable", binary: l.command(.claude), command: "claude", location: "/x", version: "2.1.291")
+        let reports = [AgentReport(agent: .claude, installs: [claude]), AgentReport(agent: .codex, installs: [app, beta])]
+        let started: [AgentCLI: String] = [.claude: claude.binary, .codex: app.binary]
+        XCTAssertEqual(AgentSelection.pending(reports, saved: [:], applied: started), [])
+        // The beta is chosen after the service started: Codex waits for a restart, Claude Code does not.
+        XCTAssertEqual(AgentSelection.pending(reports, saved: ["codex": "beta"], applied: started), [.codex])
+        XCTAssertEqual(AgentText.pendingRestart(reports[1], chosen: beta, applied: app.binary), "服务仍在使用 ChatGPT App 0.160.1，重启服务后改用 Beta 0.162.0-alpha.16。")
+        // Once it has restarted with the beta, nothing waits.
+        XCTAssertEqual(AgentSelection.pending(reports, saved: ["codex": "beta"], applied: [.claude: claude.binary, .codex: beta.binary]), [])
+        // Installed after the service started; a program the service has that is no longer listed.
+        XCTAssertEqual(AgentSelection.pending(reports, saved: [:], applied: [.codex: app.binary]), [.claude])
+        XCTAssertEqual(AgentText.pendingRestart(reports[0], chosen: claude, applied: nil), "服务启动时还没有 Claude Code，重启服务后改用 Stable 2.1.291。")
+        XCTAssertEqual(AgentText.pendingRestart(reports[1], chosen: app, applied: "/gone/launch"), "服务仍在使用原先的版本，重启服务后改用 ChatGPT App 0.160.1。")
+    }
 }

@@ -271,6 +271,12 @@ public enum AgentSelection {
         return report.install(saved)?.selectable != true
     }
 
+    /// The agents the running service was started with another program for than the one now chosen: the choice is
+    /// saved and takes effect when the service next starts (agents-v0 §3).
+    public static func pending(_ reports: [AgentReport], saved: [String: String], applied: [AgentCLI: String]) -> Set<AgentCLI> {
+        Set(binaries(reports, saved: saved).filter { applied[$0.key] != $0.value }.keys)
+    }
+
     /// The program for each agent that has one.
     public static func binaries(_ reports: [AgentReport], saved: [String: String]) -> [AgentCLI: String] {
         var out: [AgentCLI: String] = [:]

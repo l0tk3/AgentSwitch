@@ -44,7 +44,8 @@ struct AgentsView: View {
             }
 
             ForEach(model.agents) { report in
-                AgentSection(report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent })
+                AgentSection(report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
+                             restart: { confirmRestart = true })
             }
 
             Section {
@@ -146,6 +147,7 @@ private struct AgentSection: View {
     let delete: (AgentInstall) -> Void
     let clean: () -> Void
     let pin: () -> Void
+    let restart: () -> Void
 
     var body: some View {
         let agent = report.agent
@@ -174,6 +176,21 @@ private struct AgentSection: View {
                 case .leftovers(let leftovers):
                     LeftoversRow(leftovers: leftovers, job: job?.row == row.id ? job : nil, busy: busy, clean: clean)
                 }
+            }
+            // The choice made here is not what the service runs yet: said here, where it was made, with the way to
+            // make it so (on 2026-10-06 the line at the top of the page alone went unseen).
+            if model.agentsPending.contains(agent) {
+                HStack(alignment: .center, spacing: 10) {
+                    StatusDot(level: .warning).frame(width: 16)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Applies After Restart")
+                        Text(AgentText.pendingRestart(report, chosen: used, applied: model.agentsApplied[agent]))
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    Button("Restart Service…", action: restart).controlSize(.small)
+                }
+                .padding(.vertical, 2)
             }
             // A pinned version on its way has no line of its own yet.
             if let job, !rows.contains(where: { $0.id == job.row }) {

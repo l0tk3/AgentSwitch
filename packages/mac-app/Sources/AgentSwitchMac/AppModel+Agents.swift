@@ -92,12 +92,14 @@ extension AppModel {
         config.set(makeConfig(ports: ports, path: config.get().path))
     }
 
-    /// The service runs with other programs than the ones now chosen (a choice changed, an install came or went).
-    var agentsNeedRestart: Bool {
-        guard daemonState.isRunning, !agents.isEmpty else { return false }
-        let planned = AgentSelection.binaries(agents, saved: agentUse)
-        return planned.contains { agentsApplied[$0.key] != $0.value }
+    /// The agents the service runs another program for than the one now chosen (a choice changed, an install came
+    /// or went): each says so in its own group, where the choice was made.
+    var agentsPending: Set<AgentCLI> {
+        guard daemonState.isRunning, !agents.isEmpty else { return [] }
+        return AgentSelection.pending(agents, saved: agentUse, applied: agentsApplied)
     }
+
+    var agentsNeedRestart: Bool { !agentsPending.isEmpty }
 
     // MARK: installing, updating, deleting (agents-v0 §5, §6)
 

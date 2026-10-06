@@ -180,7 +180,11 @@ const STATES = {
 const ORDER = ["claude", "codex", "opencode", "pi"];
 const S = { name: "today", data: null, job: null, alert: null, changed: false, checking: false };
 const clone = (o) => JSON.parse(JSON.stringify(o));
-function load(name) { S.name = name; S.data = clone(STATES[name]); S.job = null; S.alert = null; S.changed = false; draw(); }
+/** `was`: what the service was started with for each agent; a choice that differs waits for a restart and says so in its group. */
+function load(name) { S.name = name; S.data = clone(STATES[name]); ORDER.forEach((k) => { S.data[k].was = S.data[k].use; }); S.job = null; S.alert = null; S.changed = false; draw(); }
+const label = (a, id) => { const r = a.rows.find((x) => x.id === id); return r ? `${r.src} ${r.v ?? ""}`.trim() : "原先的版本"; };
+const waiting = (a) => a.was !== a.use && a.use
+  ? `<div class="r"><span class="dot warn" style="margin:0 3px"></span><span class="txt"><span class="top"><span class="src" style="width:auto">Applies After Restart</span></span><span class="where">${a.was ? `服务仍在使用 ${label(a, a.was)}，` : `服务启动时还没有 ${a.name}，`}重启服务后改用 ${label(a, a.use)}。</span></span><button class="nbtn" data-restart>Restart Service…</button></div>` : "";
 
 const updates = () => ORDER.reduce((n, k) => n + S.data[k].rows.filter((r) => r.newer).length, 0);
 
@@ -210,7 +214,7 @@ function draw() {
     ["grp", "Dispatch"], ["doc", "Context"]];
   const groups = ORDER.map((k) => {
     const a = d[k];
-    return `<div class="sl">${mark(k)}// ${a.name}</div><div class="grpbox">${a.rows.map((r) => row(k, a, r)).join("")}</div>
+    return `<div class="sl">${mark(k)}// ${a.name}</div><div class="grpbox">${a.rows.map((r) => row(k, a, r)).join("")}${waiting(a)}</div>
       <div class="gf"><span class="foot">${a.foot ?? ""}</span>${k === "pi" ? "" : `<button class="nbtn" data-pin="${k}">Install Version…</button>`}</div>`;
   }).join("");
   const alert = S.alert ? `<div class="scrim"><div class="alert"><h3>${S.alert.title}</h3>${S.alert.lines.map((l) => `<p>${l}</p>`).join("")}
@@ -220,7 +224,7 @@ function draw() {
       ${side.map(([ic, t, c]) => ic === "grp" ? `<div class="grp">${t}</div>` : `<div class="it ${t === "Agents" ? "on" : ""}">${SYS[ic]}<span>${t}</span>${c ? `<span class="n">${c}</span>` : ""}</div>`).join("")}</div>
     <div class="pg"><div class="head"><span>Agents</span><span class="sp"></span><span class="when">${S.checking ? "Checking…" : `Checked ${d.checked}`}</span><button class="nbtn" data-do="check" ${S.checking ? "disabled" : ""}>Check Now</button></div>
       <div class="pg-body">
-        ${S.changed ? `<div class="banner"><span class="dot warn"></span><span>已更改 AgentSwitch 选用的版本，重启服务后生效。已打开的终端继续使用原来的程序。</span><span class="sp"></span><button class="nbtn" data-restart>Restart Service</button></div>` : ""}
+        ${ORDER.some((x) => d[x].use && d[x].was !== d[x].use) ? `<div class="banner"><span class="dot warn"></span><span>已更改 AgentSwitch 选用的版本，重启服务后生效。已打开的终端继续使用原来的程序。</span><span class="sp"></span><button class="nbtn" data-restart>Restart Service…</button></div>` : ""}
         ${groups}
         <div class="sl">// Store</div>
         <div class="grpbox"><div class="r"><span class="src" style="width:auto">Beta &amp; Pinned</span><span class="where" style="padding-left:8px">~/.local/share/agentswitch/cli</span><span class="size" style="width:auto">${d.store}</span><button class="nbtn">Show in Finder</button></div>${(d.notes ?? []).map((n) => `<div class="r"><span class="dot warn"></span><span class="where" style="white-space:normal;line-height:1.5">${n}</span></div>`).join("")}</div>
@@ -266,7 +270,7 @@ document.addEventListener("click", (e) => {
   if (act === "check") { S.checking = true; draw(); return setTimeout(() => { S.checking = false; S.data.checked = "Now"; draw(); }, 900); }
   if (act === "beta" || act === "fail") { if (S.name !== "today") load("today"); return run("claude", "beta", "2.1.291", 233, act === "fail"); }
   if (act === "delete") { if (S.name !== "today") load("today"); return ask("opencode", "stable"); }
-  if (b.dataset.use) { const [k, id] = b.dataset.use.split(":"); if (S.data[k].use !== id) { S.data[k].use = id; S.changed = true; } return draw(); }
+  if (b.dataset.use) { const [k, id] = b.dataset.use.split(":"); S.data[k].use = id; S.changed = ORDER.some((x) => S.data[x].was !== S.data[x].use); return draw(); }
   if (b.dataset.install) { const [k, id] = b.dataset.install.split(":"); return run(k, id, find(k, id).avail, SIZES[k]); }
   if (b.dataset.update) { const [k, id] = b.dataset.update.split(":"); return run(k, id, find(k, id).newer, SIZES[k]); }
   if (b.dataset.delete) { const [k, id] = b.dataset.delete.split(":"); return ask(k, id); }
@@ -274,7 +278,7 @@ document.addEventListener("click", (e) => {
   if (b.hasAttribute("data-cancel") || b.hasAttribute("data-dismiss")) { S.job = null; return draw(); }
   if (b.hasAttribute("data-close")) { S.alert = null; return draw(); }
   if (b.hasAttribute("data-confirm")) { S.alert.run(); S.alert = null; return draw(); }
-  if (b.hasAttribute("data-restart")) { S.changed = false; return draw(); }
+  if (b.hasAttribute("data-restart")) { ORDER.forEach((k) => { S.data[k].was = S.data[k].use; }); S.changed = false; return draw(); }
 });
 
 const WHERE = { claude: ["~/.local/share/claude/", "~/.local/bin/claude"], codex: ["~/.codex/packages/standalone/", "~/.local/bin/codex"], opencode: ["~/.opencode/bin/opencode", "~/.opencode/bin/opencode2"], pi: ["~/.local/bin/pi", "~/.pi/agent/bin/pi", "~/.pi/agent/install/"] };
@@ -304,7 +308,7 @@ const go = q.get("do");
 if (go === "beta") run("claude", "beta", "2.1.291", 233);
 if (go === "fail") run("claude", "beta", "2.1.291", 233, true);
 if (go === "delete") ask("opencode", "stable");
-if (go === "changed") { S.data.codex.use = "stable"; S.changed = true; draw(); }
+if (go === "changed") { load("full"); S.data.codex.use = "stable"; draw(); }
 </script>
 </body>
 </html>
