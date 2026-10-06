@@ -112,8 +112,23 @@ enum DesignPreview {
         try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents"))
         model.loadDemoAgents(fresh: true)
         try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents-fresh"))
+        // Everything installed; OpenCode's folder is not on the shell's PATH, so the foot of the page says what to add.
         model.loadDemoAgents(full: true)
-        try await renderSettings(.agents, model: model, appearance: appearance, height: 1100, to: file("settings-agents-full"))
+        let home = model.paths.userHome.path
+        model.setDemoShellPath("/opt/homebrew/bin:\(home)/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 1320, to: file("settings-agents-full"))
+        model.setDemoShellPath(DemoData.path(home: home))
+        // Jobs on their rows: a beta on its way, a pinned version being checked, a download that did not match.
+        model.loadDemoAgents()
+        model.agentJobs = [
+            "claude-code": AgentJob(agent: .claude, row: "missing:beta", source: .beta, version: "2.1.291", phase: .downloading(received: 112_400_000, total: 233_211_568)),
+            "codex": AgentJob(agent: .codex, row: "missing:stable", source: .stable, version: "0.160.1", phase: .installing),
+            "opencode": AgentJob(agent: .opencode, row: "missing:beta", source: .beta, version: "0.0.0-beta-19507", phase: .verifying,
+                                 error: "下载的文件与官方校验值不符，已丢弃。未做任何更改。"),
+            "pi": AgentJob(agent: .pi, row: "stable", source: .stable, version: "1.0.4", phase: .updating),
+        ]
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents-jobs"))
+        model.agentJobs = [:]
         model.loadDemo()
     }
 

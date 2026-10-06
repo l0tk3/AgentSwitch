@@ -9,11 +9,15 @@ public enum LoginShellPath {
         public let source: Source
         /// Why the fallback was used, for the 环境 tab.
         public let note: String?
+        /// What the login shell itself said, before the fallback folders were added: the PATH a new terminal has.
+        /// nil when it could not be asked.
+        public let shell: String?
 
-        public init(path: String, source: Source, note: String?) {
+        public init(path: String, source: Source, note: String?, shell: String? = nil) {
             self.path = path
             self.source = source
             self.note = note
+            self.shell = shell
         }
     }
 
@@ -67,7 +71,7 @@ public enum LoginShellPath {
             let result = try await ProcessRunner.run(URL(fileURLWithPath: shellPath), ["-lic", command],
                                                      environment: shellEnvironment(base: base, home: home), timeout: timeout)
             if let found = extract(from: result.stdoutText) {
-                return Resolution(path: merge(shellPath: found, home: home), source: .loginShell, note: nil)
+                return Resolution(path: merge(shellPath: found, home: home), source: .loginShell, note: nil, shell: found)
             }
             let why = result.timedOut ? "登录 shell 超过 \(Int(timeout)) 秒未返回" : "登录 shell 未输出 PATH（退出码 \(result.status)）"
             return Resolution(path: merge(shellPath: nil, home: home), source: .fallback, note: why)

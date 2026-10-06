@@ -32,6 +32,34 @@ public enum AgentText {
         return nil
     }
 
+    /// The folder of an install's command when the login shell's PATH does not have it: installed, but not yet a
+    /// name a new terminal knows. `path` is what the shell itself said.
+    public static func offPathFolder(_ install: AgentInstall, layout: AgentLayout, path: String) -> String? {
+        guard install.command != nil, install.source == .stable || install.source == .beta else { return nil }
+        let folder = install.source == .beta ? layout.binDir : (install.binary as NSString).deletingLastPathComponent
+        let real = AgentInventory.real(folder)
+        let onPath = path.split(separator: ":").contains { $0 == folder || AgentInventory.real(String($0)) == real }
+        return onPath ? nil : folder
+    }
+
+    /// At the foot of the page (agents-v0 §2, §8): each such folder once, the commands in it, and the line that puts
+    /// it on the PATH — written out, not added to the shell profile for the user.
+    public static func pathNotes(_ reports: [AgentReport], layout: AgentLayout, path: String?) -> [String] {
+        guard let path else { return [] }
+        var folders: [String] = []
+        var commands: [String: [String]] = [:]
+        for install in reports.flatMap(\.installs) {
+            guard let folder = offPathFolder(install, layout: layout, path: path), let command = install.command else { continue }
+            if commands[folder] == nil { folders.append(folder) }
+            commands[folder, default: []].append(command)
+        }
+        return folders.map { folder in
+            let written = folder.hasPrefix(layout.home + "/") ? "$HOME" + folder.dropFirst(layout.home.count) : folder
+            return "\(DisplayPath.short(folder, home: layout.home)) 不在 PATH 中，新开的终端里还不能直接使用 \(commands[folder, default: []].joined(separator: "、"))。"
+                + "可在 shell 配置中加入：export PATH=\"\(written):$PATH\""
+        }
+    }
+
     /// When the vendors were last asked.
     public static func checked(_ info: AgentReleaseInfo?, checking: Bool, now: Date = Date()) -> String {
         if checking { return "Checking" }
@@ -59,9 +87,11 @@ public enum AgentRow: Sendable, Equatable, Identifiable {
         switch self {
         case .install(let install): return install.key
         case .missing(let source, _): return "missing:\(source.rawValue)"
-        case .leftovers: return "leftovers"
+        case .leftovers: return AgentRow.leftoversID
         }
     }
+
+    public static let leftoversID = "leftovers"
 
     public static func rows(_ report: AgentReport, channels: AgentChannels?) -> [AgentRow] {
         var out: [AgentRow] = []

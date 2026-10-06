@@ -22,6 +22,7 @@ public enum AgentInventory {
     // MARK: the vendor's own install
 
     static func stable(_ agent: AgentCLI, layout: AgentLayout, fm: FileManager) -> AgentInstall? {
+        if agent == .pi { return piStable(layout: layout, fm: fm) }
         let command = layout.command(agent)
         guard fm.isExecutableFile(atPath: command) else { return nil }
         let target = real(command)
@@ -40,13 +41,31 @@ public enum AgentInventory {
             guard target == real(layout.programRoot(.opencode)) + "/opencode" else { return nil }
             return AgentInstall(agent: agent, source: .stable, key: "stable", binary: command, command: agent.command, location: command)
         case .pi:
-            guard inside(target, layout.programRoot(.pi)) else { return nil }
-            let install = "\(layout.programRoot(.pi))/install"
-            let current = piCurrent(install: install, fm: fm)
-            let release = current.map { "\(install)/releases/\($0)" }
-            return AgentInstall(agent: agent, source: .stable, key: "stable", binary: command, command: agent.command,
-                                location: release.flatMap { fm.fileExists(atPath: $0) ? $0 : nil } ?? install, version: current)
+            return nil
         }
+    }
+
+    /// pi's own install is its launcher `~/.pi/agent/bin/pi` beside `install/`. Its command is where its installer
+    /// found room on the PATH — `~/.local/bin`, Homebrew's bin, a few others — as a link to the launcher, noted in
+    /// `install/managed-install.json`; with no such folder on the PATH the launcher itself is the command.
+    static func piStable(layout: AgentLayout, fm: FileManager) -> AgentInstall? {
+        let root = layout.programRoot(.pi), install = "\(root)/install", launcher = "\(root)/bin/pi"
+        guard fm.isExecutableFile(atPath: launcher), fm.fileExists(atPath: install) else { return nil }
+        let target = real(launcher)
+        let candidates = [piEntrypoint(install: install, fm: fm), layout.command(.pi)].compactMap { $0 }
+        let command = candidates.first { fm.isExecutableFile(atPath: $0) && real($0) == target } ?? launcher
+        let current = piCurrent(install: install, fm: fm)
+        let release = current.map { "\(install)/releases/\($0)" }
+        return AgentInstall(agent: .pi, source: .stable, key: "stable", binary: command, command: AgentCLI.pi.command,
+                            location: release.flatMap { fm.fileExists(atPath: $0) ? $0 : nil } ?? install, version: current)
+    }
+
+    /// `install/managed-install.json`: `{"entrypoint": {"type": "symlink", "path": "/Users/u/.local/bin/pi"}}`.
+    static func piEntrypoint(install: String, fm: FileManager) -> String? {
+        guard let data = fm.contents(atPath: "\(install)/managed-install.json"), data.count < 100_000,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entry = object["entrypoint"] as? [String: Any], let path = entry["path"] as? String, path.hasPrefix("/") else { return nil }
+        return path
     }
 
     /// pi's `install/current-version`: one line, the release folder's name.

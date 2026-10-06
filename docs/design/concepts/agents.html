@@ -174,6 +174,7 @@ const STATES = {
       { id: "other", src: "Other", v: "1.18.34", where: "/opt/homebrew/bin/opencode · 1.x 不受支持", fixed: true, noUse: true }] },
     pi: { name: "pi", use: "stable", foot: "pi 没有测试通道。", rows: [{ id: "stable", src: "Stable", v: "1.0.4", where: "pi · ~/.local/bin", size: "162 MB" }] },
     store: "1.18 GB", checked: "2m ago",
+    notes: ['<code>~/.opencode/bin</code> 不在 PATH 中，新开的终端里还不能直接使用 opencode。可在 shell 配置中加入：<code>export PATH="$HOME/.opencode/bin:$PATH"</code>'],
   },
 };
 const ORDER = ["claude", "codex", "opencode", "pi"];
@@ -222,28 +223,28 @@ function draw() {
         ${S.changed ? `<div class="banner"><span class="dot warn"></span><span>已更改 AgentSwitch 选用的版本，重启服务后生效。已打开的终端继续使用原来的程序。</span><span class="sp"></span><button class="nbtn" data-restart>Restart Service</button></div>` : ""}
         ${groups}
         <div class="sl">// Store</div>
-        <div class="grpbox"><div class="r"><span class="src" style="width:auto">Beta &amp; Pinned</span><span class="where" style="padding-left:8px">~/.local/share/agentswitch/cli</span><span class="size" style="width:auto">${d.store}</span><button class="nbtn">Show in Finder</button></div></div>
-        <div class="foot">Stable 安装在各自的官方位置，与自行安装的完全相同；删除 AgentSwitch 后仍可使用并照常更新。Beta 与 Pinned 存放在上面的版本库中，可随时整个删除，不影响 Stable。</div>
+        <div class="grpbox"><div class="r"><span class="src" style="width:auto">Beta &amp; Pinned</span><span class="where" style="padding-left:8px">~/.local/share/agentswitch/cli</span><span class="size" style="width:auto">${d.store}</span><button class="nbtn">Show in Finder</button></div>${(d.notes ?? []).map((n) => `<div class="r"><span class="dot warn"></span><span class="where" style="white-space:normal;line-height:1.5">${n}</span></div>`).join("")}</div>
+        <div class="foot">Stable 由各家的官方安装程序安装在官方位置，与自行安装的完全相同：删除 AgentSwitch 后仍可使用并照常更新。Beta 与 Pinned 存放在上面的版本库中，可随时整个删除，不影响 Stable。</div>
       </div></div>${alert}`;
   document.querySelectorAll("#ctl [data-s]").forEach((b) => b.classList.toggle("on", b.dataset.s === S.name));
 }
 
 const find = (k, id) => S.data[k].rows.find((r) => r.id === id);
-/** A job on one row: download with bytes, then verify, install, check; `fail` stops at the checksum. */
+/** A job on one row: download with bytes, then verify, install; `fail` stops at the checksum. The words are the app's (ui-v0 §7.2.7). */
 function run(k, id, to, mb, fail) {
-  S.job = { k, id, step: `下载 0 / ${mb} MB`, pct: 0 };
+  S.job = { k, id, step: `Downloading 0 / ${mb} MB`, pct: 0 };
   draw();
   let got = 0;
   const t = setInterval(() => {
     if (!S.job) return clearInterval(t);
     got = Math.min(mb, got + Math.ceil(mb / 9));
-    if (got < mb) { S.job.step = `下载 ${got} / ${mb} MB`; S.job.pct = Math.round(got / mb * 82); return draw(); }
+    if (got < mb) { S.job.step = `Downloading ${got} / ${mb} MB`; S.job.pct = Math.round(got / mb * 82); return draw(); }
     clearInterval(t);
-    S.job.step = "校验"; S.job.pct = 88; draw();
+    S.job.step = "Verifying"; S.job.pct = 88; draw();
     setTimeout(() => {
       if (!S.job) return;
       if (fail) { S.job.error = "下载的文件与官方校验值不符，已丢弃。未做任何更改。"; return draw(); }
-      S.job.step = "安装"; S.job.pct = 96; draw();
+      S.job.step = id === "stable" ? "Installing" : "Checking"; S.job.pct = 96; draw();
       setTimeout(() => {
         if (!S.job) return;
         const r = find(k, id);
@@ -276,7 +277,7 @@ document.addEventListener("click", (e) => {
   if (b.hasAttribute("data-restart")) { S.changed = false; return draw(); }
 });
 
-const WHERE = { claude: ["~/.local/share/claude/", "~/.local/bin/claude"], codex: ["~/.codex/packages/standalone/", "~/.local/bin/codex"], opencode: ["~/.opencode/bin/opencode"], pi: ["~/.pi/agent/install/", "~/.local/bin/pi"] };
+const WHERE = { claude: ["~/.local/share/claude/", "~/.local/bin/claude"], codex: ["~/.codex/packages/standalone/", "~/.local/bin/codex"], opencode: ["~/.opencode/bin/opencode", "~/.opencode/bin/opencode2"], pi: ["~/.local/bin/pi", "~/.pi/agent/bin/pi", "~/.pi/agent/install/"] };
 const CMD = { claude: "claude", codex: "codex", opencode: "opencode", pi: "pi" };
 function ask(k, id) {
   const a = S.data[k], r = find(k, id), stable = id === "stable";
@@ -285,7 +286,7 @@ function ask(k, id) {
     stable ? `将从这台 Mac 上卸载 ${a.name} ${r.v}（${r.size}）。命令行里的 <code>${CMD[k]}</code> 将不可用。` : `将从版本库中删除 ${a.name} ${r.src} ${r.v}（${r.size}）。`,
     (stable ? WHERE[k] : [`~/.local/share/agentswitch/cli/${k === "claude" ? "claude-code" : k}/${r.src.toLowerCase()}/${r.v}/`]).map((p) => `<code>${p}</code>`).join("<br>"),
     "登录、配置和会话记录不受影响。",
-    a.use === id ? (next ? `AgentSwitch 正在使用此版本，删除后改用 ${next.src} ${next.v}。` : "AgentSwitch 正在使用此版本，删除后将没有可用的 " + a.name + "。") : "",
+    a.use === id ? (next ? `AgentSwitch 正在使用此版本，${stable ? "卸载" : "删除"}后改用 ${next.src} ${next.v}，重启服务后生效。` : `AgentSwitch 正在使用此版本，${stable ? "卸载" : "删除"}后将没有可用的 ${a.name}。`) : "",
   ].filter(Boolean);
   S.alert = { title: `${stable ? "卸载" : "删除"} ${a.name} ${r.src} ${r.v}？`, ok: stable ? "Uninstall" : "Delete", lines, run: () => {
     const wasUsed = a.use === id;

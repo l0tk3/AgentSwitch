@@ -116,6 +116,34 @@ the daemon, and keys added with `ssh-add -c` ask on every use.
   nothing shows; otherwise it opens (resuming a wizard left open). Once closed it never opens by itself;
   通用 › 首次运行引导 › 重新运行 opens it again.
 
+## Agents: the four agent CLIs
+
+设置 › Agents (docs/agents-v0.md, `docs/design/concepts/agents.html`) installs, updates, switches and removes Claude Code,
+Codex, OpenCode and pi. All of it is the app's: the daemon only takes the four paths (`CLAUDE_BIN`, `CODEX_BIN`,
+`OPENCODE_BIN`, `PI_BIN`) at its next start. The rules are in `Sources/AgentSwitchMacCore/Agents/`, the page in
+`AgentsView.swift`, the model's part in `AppModel+Agents.swift`.
+
+- **Stable** is the vendor's own install in the vendor's own place, made by the vendor's own installer and updated by
+  its own updater (`AgentNative`): Claude Code's program downloaded, checked and asked to `install stable`; Codex's,
+  OpenCode's and pi's published scripts fetched and run with the PATH a terminal of the user's has, so they do what
+  they do by hand. Nothing of AgentSwitch is between the shell and the CLI; with the app gone it is an ordinary install.
+  Uninstalling removes the program files in the few places `AgentNative.uninstallPaths` lists, never a login, a
+  setting or a session, and not while a program of it runs.
+- **Beta** and **Pinned** live in the app's own store, `~/.local/share/agentswitch/cli/<agent>/<beta|pinned>/<version>/`
+  (`AgentStore`): downloaded from the vendor, checked against the published digest, the signing team and what
+  `--version` says, then moved into place with a `launch` script that starts that copy with its own updater off. The
+  beta is on the command line as `claude-beta` / `codex-beta` / `opencode-beta` (links in `~/.local/bin`; a name that is
+  somebody else's is left alone). pi has neither.
+- Every operation is one job per agent (`AgentJob`) with its phases on the row and its log in
+  `~/Library/Logs/AgentSwitch/agent-<agent>.log`, started over by the next. Downloads live in the store's `downloads/`
+  for the length of the job; the store is swept at launch, and its empty folders are not kept.
+- Tests use made-up vendors and a home of their own (`AgentsTests`, `AgentStoreTests`, `AgentNativeTests`); nothing is
+  downloaded and the real home is never read. Three live runs are skipped unless asked for, each in a temporary home:
+  `AGENTSWITCH_AGENTS_LIVE=1 swift test --filter AgentsTests/testLive` (scan this Mac, ask the vendors),
+  `AGENTSWITCH_AGENTS_LIVE=store swift test --filter AgentStoreTests/testLiveStore` (the three betas, some 450 MB) and
+  `AGENTSWITCH_AGENTS_LIVE=native swift test --filter AgentNativeTests/testLiveNative` (the four vendors' installers:
+  install, update, uninstall; some 600 MB; `AGENTSWITCH_AGENTS_ONLY=opencode,pi` for some of them).
+
 ## Credential gate as a system service
 
 docs/gate-service-v0.md §4 (Mac 应用). The gate runs as two LaunchDaemons under the role account `_agentswitchgate`
@@ -206,7 +234,7 @@ log), the menu bar's Live Activity (`live-*`) and the main window (MainWindowPre
 and `main-refresh-dispatch-2/6/10`, steps of the refresh that draws a page in; `main-browser*` from a made-up browser,
 BrowserDemo.swift, and `main-refresh-browser-6`; `main-rail-hidden`, `main-rail-hidden-dispatch`, `main-rail-quiet` and
 `main-rail-out`, the rail put away — its bars on the window's edge — and out again under the pointer), then quits. The default sample runs the gate as the installed service (密钥 shows the legacy keys). It takes no lock, starts nothing and opens no socket, so it runs next to the installed app;
-`-designPreviewTall YES` adds each page at 1500 pt to see it whole. `-designPreviewOnly dispatch` renders only the settings window's Dispatch group (about 20 s); `-designPreviewOnly agents` only 设置 › Agents (`settings-agents`, `-fresh`, `-full`; docs/agents-v0.md); `-designPreviewOnly browser` only the Browser page; `-designPreviewOnly item` only a terminal's own window (`item-plain`, `item-approval`, `item-question`, `item-seal`, `item-away`, `item-notice`, in the look given by `-appearance pixel|classic`); `-designPreviewOnly window` only the main window's pictures and the Live Activity's; `-designPreviewOnly rail` only the rail put away. An off-screen window belongs to an inactive app, so
+`-designPreviewTall YES` adds each page at 1500 pt to see it whole. `-designPreviewOnly dispatch` renders only the settings window's Dispatch group (about 20 s); `-designPreviewOnly agents` only 设置 › Agents (`settings-agents`, `-fresh`, `-full`, `-jobs`; docs/agents-v0.md); `-designPreviewOnly browser` only the Browser page; `-designPreviewOnly item` only a terminal's own window (`item-plain`, `item-approval`, `item-question`, `item-seal`, `item-away`, `item-notice`, in the look given by `-appearance pixel|classic`); `-designPreviewOnly window` only the main window's pictures and the Live Activity's; `-designPreviewOnly rail` only the rail put away. An off-screen window belongs to an inactive app, so
 
 The Terminals page is native (docs/terminal-v0.md §1 “Terminals 页全原生”, 2026-10-05): `Sources/AgentSwitchMac/Terminals/` — the list, the panes, the new-terminal panel, the questions — over rules without AppKit in `AgentSwitchMacCore/Terminals/` (`TerminalPanes`, `TerminalTree`, `TerminalSearch`, `TerminalsPageRules`; `TerminalPanesTests`, `TerminalTreeTests`, `TerminalsPageRulesTests`). `-designPreviewOnly terminals` draws it from made-up work; `-terminalProbe <dir> -probeTerminal <id> -probeTerminals <another id>` uses the real page against a throw-away service and writes `probe.txt` and `page-*.png`. The daemon's page in a web view stays behind `defaults write com.agentswitch.mac terminalsPageWeb -bool YES` for now.
 

@@ -68,6 +68,11 @@ final class AppModel {
     var agentsApplied: [AgentCLI: String] = [:]
     @ObservationIgnored var agentsScanning = false
     @ObservationIgnored var agentsScanned: Date?
+    /// Asked to read again while a read was under way: done once that one ends.
+    @ObservationIgnored var agentsRescan = false
+    /// An install, update or delete under way, by the agent's raw value: one at a time per agent.
+    var agentJobs: [String: AgentJob] = [:]
+    @ObservationIgnored var agentTasks: [String: Task<Void, Never>] = [:]
 
     // MARK: gate service (docs/gate-service-v0.md); written by AppModel+GateService.swift
 
@@ -205,6 +210,7 @@ final class AppModel {
                                                           base: baseEnvironment)
             loginPath = resolution
             config.set(makeConfig(ports: ports, path: resolution.path))
+            sweepAgentStore()
             await detectGateService()
             setGateMode(gateService.runMode(paths: paths.gateService, fallbackPort: ports.gate))
             await startGate()
@@ -548,6 +554,22 @@ final class AppModel {
 
     // MARK: environment
 
+    /// The login shell asked for its PATH again: a vendor's installer may just have added its folder to the profile.
+    /// The service gets it at its next start.
+    func reloadLoginPath() async {
+        guard !isDemo else { return }
+        let resolution = await LoginShellPath.resolve(shell: baseEnvironment["SHELL"], home: paths.userHome.path, base: baseEnvironment)
+        loginPath = resolution
+        config.set(makeConfig(ports: ports, path: resolution.path))
+    }
+
+    #if DEBUG
+    /// `-designPreview`: the PATH the login shell is taken to have said.
+    func setDemoShellPath(_ shell: String) {
+        loginPath = LoginShellPath.Resolution(path: LoginShellPath.merge(shellPath: shell, home: paths.userHome.path), source: .loginShell, note: nil, shell: shell)
+    }
+    #endif
+
     func detectEnvironment() {
         guard !detecting, !isDemo else { return }
         refreshAgents()
@@ -706,7 +728,8 @@ final class AppModel {
         remoteProblem = nil
         devices = fresh ? [] : DemoData.devices(now: now)
         devicesKnown = true
-        loginPath = LoginShellPath.Resolution(path: DemoData.path(home: paths.userHome.path), source: .loginShell, note: nil)
+        loginPath = LoginShellPath.Resolution(path: DemoData.path(home: paths.userHome.path), source: .loginShell, note: nil,
+                                              shell: DemoData.path(home: paths.userHome.path))
         harnesses = fresh ? DemoData.freshHarnesses(home: paths.userHome.path) : DemoData.harnesses(home: paths.userHome.path)
         loadDemoAgents(fresh: fresh)
         tailscale = fresh ? DemoData.tailscaleStopped : DemoData.tailscale
