@@ -267,7 +267,7 @@ private struct InstallRow: View {
                     }
                 }
                 if let delete {
-                    Button("Delete…", role: .destructive, action: delete).controlSize(.small).disabled(busy)
+                    SettingsDeleteButton("Delete…", action: delete).controlSize(.small).disabled(busy)
                 }
             }
         }

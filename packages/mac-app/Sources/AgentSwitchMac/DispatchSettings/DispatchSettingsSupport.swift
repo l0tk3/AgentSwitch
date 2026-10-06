@@ -223,8 +223,10 @@ struct SettingsSearchField: NSViewRepresentable {
     }
 }
 
-/// A button that deletes: the system's button with its word in red (the demo's red buttons).
+/// A button that deletes: the system's button with its word in red (the demo's red buttons), paler while it cannot be
+/// pressed — a colour set by hand does not dim by itself.
 struct SettingsDeleteButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let title: String
     let action: () -> Void
 
@@ -234,6 +236,6 @@ struct SettingsDeleteButton: View {
     }
 
     var body: some View {
-        Button(role: .destructive, action: action) { Text(title).foregroundStyle(Color.failed) }
+        Button(role: .destructive, action: action) { Text(title).foregroundStyle(Color.failed.opacity(isEnabled ? 1 : 0.4)) }
     }
 }
