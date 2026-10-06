@@ -236,8 +236,10 @@ struct SettingsView: View {
         NavigationSplitView {
             List(selection: selection) {
                 ForEach(SettingsTab.app) { tab in
-                    // Agents: how many installs have an update (docs/agents-v0.md §4).
-                    Label(tab.title, systemImage: tab.symbol).tag(tab).badge(tab == .agents ? model.agentUpdateCount : 0)
+                    // Agents: how many installs have an update (docs/agents-v0.md §4). The tag goes on last: with the
+                    // badge outside it the list does not take the row for one it may select (macOS 27; the whole
+                    // first group could not be clicked, 2026-10-06).
+                    Label(tab.title, systemImage: tab.symbol).badge(tab == .agents ? model.agentUpdateCount : 0).tag(tab)
                 }
                 Section("Dispatch") {
                     ForEach(SettingsTab.dispatch) { tab in

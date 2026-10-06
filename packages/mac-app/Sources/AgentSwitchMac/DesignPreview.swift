@@ -332,6 +332,7 @@ enum DesignPreview {
                                                          appearance: appearance, dispatch: dispatch)
         if let height { window.setContentSize(NSSize(width: SettingsWindowController.contentSize.width, height: height)) }
         try await settle()
+        try checkSidebar(window)
         if tab == .pairing && pressGenerate && model.pairingSession.pairing == nil {
             await model.pairingSession.start(model: model)
             try await settle()
@@ -339,6 +340,22 @@ enum DesignPreview {
         // The frame view: the title bar and the traffic lights along with the content.
         try write(window.contentView?.superview ?? window.contentView!, to: file)
         window.close()
+    }
+
+    /// Every page's row in the sidebar is one the list will select: asked of the list itself, the way a click asks.
+    /// A picture cannot show this — on 2026-10-06 the first group drew as ever and took no click.
+    private static func checkSidebar(_ window: NSWindow) throws {
+        func outlines(_ view: NSView) -> [NSOutlineView] { (view as? NSOutlineView).map { [$0] } ?? view.subviews.flatMap(outlines) }
+        guard let content = window.contentView, let sidebar = outlines(content).first, let delegate = sidebar.delegate,
+              delegate.responds(to: #selector(NSOutlineViewDelegate.outlineView(_:shouldSelectItem:))) else {
+            throw PreviewError("the settings sidebar could not be asked which rows it selects")
+        }
+        let selectable = (0..<sidebar.numberOfRows).filter { row in
+            sidebar.item(atRow: row).map { delegate.outlineView?(sidebar, shouldSelectItem: $0) ?? false } ?? false
+        }.count
+        guard selectable == SettingsTab.allCases.count else {
+            throw PreviewError("the settings sidebar selects \(selectable) of its \(SettingsTab.allCases.count) pages")
+        }
     }
 
     /// Lets SwiftUI lay out and run the views' `.task`s (they answer from DemoTransport at once).
