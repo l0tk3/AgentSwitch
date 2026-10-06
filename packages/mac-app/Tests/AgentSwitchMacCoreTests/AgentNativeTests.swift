@@ -180,8 +180,11 @@ final class AgentNativeTests: XCTestCase {
 
     func testADownloadThatIsNotClaudeCodeIsNeverRun() async {
         let v = Vendor()
-        await refused("请先检查更新") { try await v.native.install(.claude, version: nil) }
+        // Started before the channels were read (the checklist's `Install`): the stable channel is asked first.
+        await refused("未能读取 Claude Code 的正式版版本号") { try await v.native.install(.claude, version: nil) }
+        v.answer("\(AgentReleases.claudeBase)/stable", "2.1.285\n")
         v.publishClaude("2.1.285", digest: String(repeating: "0", count: 64))
+        await refused("校验值不符") { try await v.native.install(.claude, version: nil) }
         await refused("校验值不符") { try await v.native.install(.claude, version: "2.1.285") }
         v.publishClaude("2.1.285")
         v.signed(by: "EVIL000000")

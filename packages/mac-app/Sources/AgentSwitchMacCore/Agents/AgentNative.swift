@@ -55,8 +55,11 @@ public struct AgentNative: Sendable {
         report(.resolving)
         switch agent {
         case .claude:
-            // What its own script does: the program downloaded and checked, then asked to install itself.
-            guard let version else { throw AgentError("尚未取得 Claude Code 的正式版版本号，请先检查更新。") }
+            // What its own script does: the program downloaded and checked, then asked to install itself. The stable
+            // channel is asked here when the page had not read it yet (an install started from the checklist).
+            let wanted: String
+            if let version { wanted = version } else { wanted = try await stableVersion(.claude) }
+            let version = wanted
             let artifact = try await AgentArtifacts.resolve(.claude, version: version, platform: platform, fetch: fetch)
             log("download \(artifact.url.absoluteString) \(artifact.digest)")
             let file = "\(job)/claude"
@@ -86,6 +89,14 @@ public struct AgentNative: Sendable {
         }
         report(.checking)
         guard AgentInventory.stable(agent, layout: layout, fm: fm) != nil else { throw AgentError("安装程序已运行，但没有找到 \(agent.title) 的安装。") }
+    }
+
+    /// What the agent's stable channel has now.
+    func stableVersion(_ agent: AgentCLI) async throws -> String {
+        for lookup in AgentReleases.lookups(agent, platform: platform).stable {
+            if let data = try? await fetch(lookup.url), let version = lookup.read(data) { return version }
+        }
+        throw AgentError("未能读取 \(agent.title) 的正式版版本号，请检查网络后重试。")
     }
 
     /// The vendor's published installer, fetched to a file of the job's own. Only a shell script is taken.

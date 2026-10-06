@@ -87,6 +87,25 @@ final class HarnessLoginTests: XCTestCase {
 final class SetupChecklistTests: XCTestCase {
     private let home = "/Users/me"
 
+    /// docs/agents-v0.md §4, §8: a missing executor is installed from its row; an update is said and not counted.
+    func testAMissingExecutorIsInstalledFromItsRowAndUpdatesAreOnlySaid() {
+        let reports = [report(.claude, binary: false), report(.codex, binary: false), report(.opencode)]
+        let workDir = WorkDirFact.known(WorkDirSettings(path: "/Users/me/AgentSwitch", defaultPath: nil, problem: nil))
+        let items = SetupChecklist.items(SetupFacts(harnesses: reports, devices: [phone], tailscale: running, workDir: workDir, home: home,
+                                                    installing: [.claude], installFailed: [.codex: "安装未完成：error: no space left on device"], agentUpdates: 2))
+        XCTAssertEqual(items.map(\.id), ["claude", "codex", "opencode", "agent-updates", "phone", "tailscale", "workdir"])
+        XCTAssertEqual(items[0], SetupItem(id: "claude", title: "Claude Code", state: .working, status: "Installing"))
+        XCTAssertEqual(items[1].state, .todo)
+        XCTAssertEqual(items[1].detail, "安装未完成：error: no space left on device")
+        XCTAssertEqual(items[1].action, .installAgent(.codex))
+        XCTAssertEqual(items[3], SetupItem(id: "agent-updates", title: "Agents", state: .done, status: "2 Updates", action: .showAgents))
+        XCTAssertEqual(SetupChecklist.unmet(items), 1, "the one being installed and the updates are not unmet")
+        XCTAssertEqual(SetupChecklist.agentUpdates(1)?.status, "1 Update")
+        XCTAssertNil(SetupChecklist.agentUpdates(0))
+        XCTAssertEqual([SetupAction.installAgent(.claude), .showAgents].map(\.title), ["Install", "Show"])
+        XCTAssertEqual(Harness.allCases.map(\.agent), [.claude, .codex, .opencode])
+    }
+
     private func facts(harnesses: [HarnessReport], devices: [Device]?, tailscale: TailscaleStatus?, workDir: WorkDirFact) -> SetupFacts {
         SetupFacts(harnesses: harnesses, devices: devices, tailscale: tailscale, workDir: workDir, home: home)
     }
@@ -118,12 +137,12 @@ final class SetupChecklistTests: XCTestCase {
         XCTAssertEqual(SetupChecklist.unmet(items), 5)
         let actions = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.action) })
         XCTAssertEqual(actions["claude"], .some(nil))
-        XCTAssertEqual(actions["codex"], .copyInstall(.codex))
+        XCTAssertEqual(actions["codex"], .installAgent(.codex))
+        XCTAssertNil(items.first { $0.id == "codex" }?.detail, "a button, not a command to copy")
         XCTAssertEqual(actions["opencode"], .login(.opencode))
         XCTAssertEqual(actions["phone"], .pair)
         XCTAssertEqual(actions["tailscale"], .installTailscale)
         XCTAssertEqual(actions["workdir"], .chooseWorkDir)
-        XCTAssertEqual(items.first { $0.id == "codex" }?.detail, "brew install codex")
         XCTAssertEqual(items.first { $0.id == "workdir" }?.detail, "~/AgentSwitch：不能写入")
         XCTAssertEqual(SetupAction.login(.claude).title, "Sign In")
     }

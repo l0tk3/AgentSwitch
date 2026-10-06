@@ -163,7 +163,7 @@ private struct ExecutorsStep: View {
     var body: some View {
         Form {
             Section {
-                ForEach(SetupChecklist.harnessItems(model.harnesses)) { SetupItemRow(item: $0) }
+                ForEach(SetupChecklist.harnessItems(model.harnesses, installing: model.harnessesInstalling, failed: model.harnessInstallsFailed)) { SetupItemRow(item: $0) }
             } footer: {
                 HStack(alignment: .top, spacing: 8) {
                     Footer("登录在“终端”中完成，返回此窗口后自动重新检测。")

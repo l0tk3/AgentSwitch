@@ -54,7 +54,7 @@ final class HarnessTests: XCTestCase {
     func testEvaluation() {
         let missing = HarnessEvaluator.evaluate(.init(harness: .codex, binary: nil, versionOutput: nil, loginEvidence: nil))
         XCTAssertEqual(missing.state, .missing)
-        XCTAssertTrue(missing.guidance.joined().contains("brew install codex"))
+        XCTAssertTrue(missing.guidance.joined().contains("可在 Agents 页安装"))
         let noLogin = HarnessEvaluator.evaluate(.init(harness: .claude, binary: "/x/claude", versionOutput: "2.1.0", loginEvidence: nil))
         XCTAssertEqual(noLogin.state, .notLoggedIn)
         XCTAssertEqual(noLogin.version, "2.1.0")

@@ -58,7 +58,6 @@ struct SetupItemRow: View {
     @Environment(AppModel.self) private var model
     @Environment(SettingsNavigation.self) private var navigation
     let item: SetupItem
-    @State private var copied = false
     @State private var confirmTrust = false
     @State private var busy = false
 
@@ -69,7 +68,7 @@ struct SetupItemRow: View {
                 Text(item.title)
                 if let detail = item.detail {
                     Text(detail)
-                        .font(isCommand ? .caption.monospaced() : .caption)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -78,7 +77,7 @@ struct SetupItemRow: View {
             if item.state == .working || busy { ProgressView().controlSize(.small) }
             Text(item.status).mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             if let action = item.action {
-                Button(copied ? "Copied" : action.title) { perform(action) }.disabled(busy)
+                Button(action.title) { perform(action) }.disabled(busy)
             }
         }
         .padding(.vertical, 2)
@@ -97,22 +96,16 @@ struct SetupItemRow: View {
         }
     }
 
-    private var isCommand: Bool {
-        if case .copyInstall = item.action { return true }
-        return false
-    }
-
     private func perform(_ action: SetupAction) {
         switch action {
         case .login(let harness):
             model.login(harness)
-        case .copyInstall(let harness):
-            Clipboard.copy(HarnessInstall.command(harness))
-            copied = true
-            Task {
-                try? await Task.sleep(for: .seconds(2))
-                copied = false
-            }
+        case .installAgent(let harness):
+            // The page where it shows, and the vendor's own install started there.
+            navigation.tab = .agents
+            model.installAgent(harness.agent, .stable, version: model.agentReleases?.channels(harness.agent)?.stable, row: AgentRow.missing(.stable, available: nil).id)
+        case .showAgents:
+            navigation.tab = .agents
         case .pair:
             navigation.tab = .pairing
         case .openTailscale:

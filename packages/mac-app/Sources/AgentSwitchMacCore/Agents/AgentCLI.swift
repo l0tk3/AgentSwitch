@@ -1,5 +1,16 @@
 import Foundation
 
+extension Harness {
+    /// The same program as 设置 › Agents knows it (pi is an agent there and not one of the three executors here).
+    public var agent: AgentCLI {
+        switch self {
+        case .claude: return .claude
+        case .codex: return .codex
+        case .opencode: return .opencode
+        }
+    }
+}
+
 /// The agent CLIs AgentSwitch runs and looks after (docs/agents-v0.md): the three harnesses and pi. The raw value is
 /// the daemon's name for it.
 public enum AgentCLI: String, CaseIterable, Sendable, Identifiable, Codable {

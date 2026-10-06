@@ -3,7 +3,10 @@ import Foundation
 /// What one checklist row asks the user to do; the app performs it.
 public enum SetupAction: Equatable, Sendable {
     case login(Harness)
-    case copyInstall(Harness)
+    /// 设置 › Agents, the vendor's own install started there (docs/agents-v0.md §8).
+    case installAgent(Harness)
+    /// 设置 › Agents, to see what is newer.
+    case showAgents
     case pair
     case openTailscale
     case installTailscale
@@ -21,7 +24,8 @@ public enum SetupAction: Equatable, Sendable {
     public var title: String {
         switch self {
         case .login: return "Sign In"
-        case .copyInstall: return "Copy Command"
+        case .installAgent: return "Install"
+        case .showAgents: return "Show"
         case .pair: return "Pair"
         case .openTailscale: return "Open Tailscale"
         case .installTailscale: return "Get Tailscale"
@@ -45,7 +49,7 @@ public struct SetupItem: Equatable, Sendable, Identifiable {
     public let state: State
     /// One or two words: OK, Signed Out, 1 Paired, ~/AgentSwitch.
     public let status: String
-    /// A second line when the row needs one: the install command, the folder's problem.
+    /// A second line when the row needs one: the folder's problem, what a missing piece costs.
     public let detail: String?
     public let action: SetupAction?
 
@@ -70,9 +74,18 @@ public struct SetupFacts: Sendable {
     public let home: String
     /// nil: the rows are left out (nothing known about the service yet in a caller that does not ask).
     public let gateService: GateServiceFacts?
+    /// The harnesses 设置 › Agents is installing now, and why the last install of one stopped.
+    public let installing: Set<Harness>
+    public let installFailed: [Harness: String]
+    /// How many installs have something newer to move to (agents-v0 §4).
+    public let agentUpdates: Int
 
     public init(harnesses: [HarnessReport], devices: [Device]?, tailscale: TailscaleStatus?, tailnet: [String] = [],
-                workDir: WorkDirFact, home: String, gateService: GateServiceFacts? = nil) {
+                workDir: WorkDirFact, home: String, gateService: GateServiceFacts? = nil, installing: Set<Harness> = [], installFailed: [Harness: String] = [:],
+                agentUpdates: Int = 0) {
+        self.installing = installing
+        self.installFailed = installFailed
+        self.agentUpdates = agentUpdates
         self.harnesses = harnesses
         self.devices = devices
         self.tailscale = tailscale
@@ -88,7 +101,8 @@ public struct SetupFacts: Sendable {
 /// for it, and a check must never raise a prompt.
 public enum SetupChecklist {
     public static func items(_ facts: SetupFacts) -> [SetupItem] {
-        harnessItems(facts.harnesses) + gateServiceItems(facts.gateService)
+        harnessItems(facts.harnesses, installing: facts.installing, failed: facts.installFailed) + [agentUpdates(facts.agentUpdates)].compactMap { $0 }
+            + gateServiceItems(facts.gateService)
             + [phone(facts.devices), tailscale(facts.tailscale, tailnet: facts.tailnet)]
             + [workDir(facts.workDir, home: facts.home)].compactMap { $0 }
     }
@@ -97,8 +111,16 @@ public enum SetupChecklist {
         items.filter { $0.state == .todo }.count
     }
 
-    /// The three harnesses, in the fixed order, checking until detection has run.
-    public static func harnessItems(_ reports: [HarnessReport]) -> [SetupItem] {
+    /// Something newer for an install: said, never counted as unmet — updating is the user's to choose.
+    static func agentUpdates(_ count: Int) -> SetupItem? {
+        guard count > 0 else { return nil }
+        return SetupItem(id: "agent-updates", title: "Agents", state: .done, status: count == 1 ? "1 Update" : "\(count) Updates", action: .showAgents)
+    }
+
+    /// The three harnesses, in the fixed order, checking until detection has run. One that is missing is installed
+    /// from here (the vendor's own install, in 设置 › Agents); while that runs the row waits, and when it stopped
+    /// short the row says why.
+    public static func harnessItems(_ reports: [HarnessReport], installing: Set<Harness> = [], failed: [Harness: String] = [:]) -> [SetupItem] {
         Harness.allCases.map { harness in
             guard let report = reports.first(where: { $0.harness == harness }) else {
                 return SetupItem(id: harness.rawValue, title: harness.title, state: .checking, status: "Checking")
@@ -110,8 +132,11 @@ public enum SetupChecklist {
             case .notLoggedIn:
                 return SetupItem(id: harness.rawValue, title: harness.title, state: .todo, status: status, action: .login(harness))
             case .missing:
-                return SetupItem(id: harness.rawValue, title: harness.title, state: .todo, status: status,
-                                 detail: HarnessInstall.command(harness), action: .copyInstall(harness))
+                if installing.contains(harness) {
+                    return SetupItem(id: harness.rawValue, title: harness.title, state: .working, status: "Installing")
+                }
+                return SetupItem(id: harness.rawValue, title: harness.title, state: .todo, status: status, detail: failed[harness],
+                                 action: .installAgent(harness))
             }
         }
     }

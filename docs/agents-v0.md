@@ -60,9 +60,9 @@
 
 ## 4. 更新探测
 
-- 应用问各家的发布地址（§1 表里的那些）：打开这一页时、点 `Check Now` 时、以及应用运行期间每 12 小时一次。结果连同时间记在应用的数据目录里，下次打开先显示上次的结果。
+- 应用问各家的发布地址（§1 表里的那些）：应用启动时、打开这一页时、点 `Check Now` 时，以及应用运行期间上次的结果满 12 小时时（每小时看一眼，结果还新就谁也不问）。某一家上次没答复的，满 1 小时就再问。结果连同时间记在应用的数据目录里，下次打开先显示上次的结果。
 - 一行“有更新”的条件：它跟的通道有比它新的版本。Stable 行按正式版比（Claude Code 的原位安装按它自己跟的通道比）；Beta 行按测试版比；Pinned 和 ChatGPT App 不比。
-- 有更新时：这一页的那一行出 `Update → 版本`；设置侧栏的 `Agents` 带数字；环境检查清单多一项“有 N 个更新”。**不自动安装**，只提示。
+- 有更新时：这一页的那一行出 `Update → 版本`；设置侧栏的 `Agents` 带数字；环境检查清单多一行 `Agents  2 Updates  [ Show ]`（不算未完成：更新与否由你定）。**不自动安装**，只提示。
 - 探测只读发布信息，不带任何本机信息；GitHub 的匿名接口每小时 60 次，12 小时一次绰绰有余，失败就保留上次的结果并标出时间。
 
 ## 5. 操作
@@ -112,7 +112,7 @@
 - 顶上一行：上次检查的时间、`Check Now`；有更新时 `N Updates`。
 - 每个 agent 一组：标题是它的标记和名字；下面每行一个安装——单选标记（AgentSwitch 用哪个）、来源（`Stable` `Beta` `Pinned` `ChatGPT App` `Other`）、版本、命令名或位置、大小，右边是这一行的按钮（`Update → 2.1.292`、`Delete…`）。没装的来源是一行淡色的 `Not Installed` 加 `Install`。组尾 `Install Version…`。
 - 进行中的操作占住那一行：进度条和它在做什么（`Downloading 112 / 233 MB`、`Verifying`、`Unpacking`、`Checking`、`Installing`、`Updating`、`Removing`），`Cancel`（过了下载阶段是灰的）。失败时那一行写原因，`Show Log` 打开这个 agent 的操作日志，`OK` 收起；失败只占住它自己那一行，这个 agent 的其他按钮照常可用。
-- 没装任何一个 agent 时，环境检查清单和首次运行向导里的那几项从“安装：curl …”变成 `Install` 按钮，点了跳到这一页并开始装 Stable。
+- 环境检查清单和首次运行向导里没装的那几项（Claude Code、Codex、OpenCode），原来是一行安装命令加 `Copy Command`，现在是 `Install`：点了跳到这一页并开始装它的 Stable（通道还没读到时安装自己先问）。安装期间那一行写 `Installing`、不算未完成；没装成时那一行下面写原因，仍可再点。装好后环境检查自动重测，那一行变成 `Signed Out` 和 `Sign In`——登录仍在终端里由你完成。
 - 改了选用的版本：页面顶上出一条“重启服务后生效”和 `Restart Service`。
 - 页面底部：版本库的位置与总大小；命令（各家的和 `*-beta`）所在的目录不在登录 shell 的 PATH 里时，每个目录一句：哪些命令还不能直接用、要加的那一行。登录 shell 问不到时不写。
 
@@ -127,7 +127,7 @@
 1. **看得见**：扫描四个 agent 的所有安装（含 pi 与 ChatGPT App 的 Codex）、探测更新、这一页列出来、选 AgentSwitch 用哪个。不装不删。**已做**（2026-10-06）：`AgentSwitchMacCore/Agents/`（`AgentCLI` 与版本比较、`AgentInventory` 扫描、`AgentReleases` 发布信息与 `AgentUpdates`、`AgentSelection`、`AgentText` 与行的顺序；`AgentsTests`，`AGENTSWITCH_AGENTS_LIVE=1 swift test --filter AgentsTests/testLive` 扫描本机并真去问四家），`AgentsView`，服务认 `CODEX_BIN` 与 `PI_BIN`（`tests/agentBinaries.test.ts`）。这一步里有更新的行只写 `版本 Available`、没装的行只写通道的最新版本，按钮随后两步加上。`-designPreview <目录> -designPreviewOnly agents` 出这一页的三种状态。
 2. **Beta 与 Pinned**：版本库、下载校验、`*-beta`、删除。**已做**（2026-10-06）：`AgentArtifacts`（一个版本是哪个文件、该是什么摘要）、`AgentTransfer`（下载，重定向只跟到名单上的主机）、`AgentStore`（下载 → 核对大小与摘要 → 解包（拒绝出界的条目和链接）→ 核对签名的开发者团队与 `--version` → 写启动脚本、整个文件夹挪到位 → `*-beta` 改指、旧测试版删掉；删除；启动时清扫）、`AgentJob`（行上的进度、可否取消）。`AgentStoreTests` 用假的发布方走完全部路径；`AGENTSWITCH_AGENTS_LIVE=store swift test --filter AgentStoreTests/testLiveStore` 在临时目录里真下载三家的测试版（当日 754 MB，全部通过摘要、签名、版本三道检查并能运行）。
 3. **Stable 的安装、更新、卸载与清旧版本**。**已做**（2026-10-06）：`AgentNative`（运行各家自己的安装程序与更新命令；卸载与清旧版本只删 §5 表里的那几处）、`AgentLog`、页面上的 `Install` `Update →` `Delete…` `Clean Up…` `Show Log` 与三个确认对话框。`AgentNativeTests` 用几行 shell 充当各家的安装程序，放的文件与实测的布局一致；`AGENTSWITCH_AGENTS_LIVE=native swift test --filter AgentNativeTests/testLiveNative` 在临时目录里用四家真的安装程序走一遍 安装 → 它自己的更新 → 卸载（当日全部通过；装齐 936 MB，卸载后剩 33 MB，是各家自己的配置与缓存）。这一遍测出了 §1 里新写的三件事（pi 的命令位置、OpenCode 的 `--method curl`、各家对 PATH 的做法）。
-4. 环境检查清单、首次运行向导接上 `Install`；手机设置里显示“有更新”。
+4. 环境检查清单、首次运行向导接上 `Install`；手机设置里显示“有更新”。**Mac 这一半已做**（2026-10-06）：`SetupAction.installAgent` / `.showAgents`、清单的 `Installing` 与失败原因、`Agents  N Updates` 一行、启动时与满 12 小时的自动探测（`AgentReleaseInfo.isDue`）。**手机上显示“有更新”没做**：要先让服务知道这台 Mac 上装了什么、各家出了什么（现在只有应用知道），是另一件跨服务与 iPhone 的事。
 
 ## 10. 没定的
 

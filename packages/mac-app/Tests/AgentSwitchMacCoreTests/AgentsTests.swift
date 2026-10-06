@@ -81,6 +81,15 @@ final class AgentsTests: XCTestCase {
         XCTAssertEqual(info.checkedAt, now)
         XCTAssertTrue(info.isFresh(at: now.addingTimeInterval(11 * 3600)))
         XCTAssertFalse(info.isFresh(at: now.addingTimeInterval(13 * 3600)))
+        // OpenCode did not answer: asked again after an hour, not after the twelve.
+        XCTAssertFalse(info.isDue(at: now.addingTimeInterval(1800)))
+        XCTAssertTrue(info.isDue(at: now.addingTimeInterval(3700)))
+        var whole = info
+        whole.failed = []
+        XCTAssertFalse(whole.isDue(at: now.addingTimeInterval(11 * 3600)))
+        XCTAssertTrue(whole.isDue(at: now.addingTimeInterval(13 * 3600)))
+        XCTAssertTrue(whole.isDue(at: now.addingTimeInterval(-60)), "a clock set back")
+        XCTAssertTrue(AgentReleaseInfo(channels: [:], checkedAt: nil, failed: []).isDue(at: now), "never asked")
         // Kept between launches.
         let file = TestSupport.tempDir("agents").appendingPathComponent("agents.json")
         try? info.save(to: file)

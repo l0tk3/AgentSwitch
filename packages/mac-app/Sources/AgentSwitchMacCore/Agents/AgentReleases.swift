@@ -30,6 +30,16 @@ public struct AgentReleaseInfo: Sendable, Equatable, Codable {
     public func channels(_ agent: AgentCLI) -> AgentChannels? { channels[agent.rawValue] }
     public func isFresh(at now: Date) -> Bool { checkedAt.map { now.timeIntervalSince($0) < AgentReleaseInfo.freshFor && now >= $0 } ?? false }
 
+    /// A vendor that did not answer is asked again after this long, not after the twelve hours.
+    public static let retryAfter: TimeInterval = 3600
+
+    /// Whether the vendors are to be asked again: the answer has aged twelve hours, or one of them did not answer the
+    /// last time and an hour has passed.
+    public func isDue(at now: Date) -> Bool {
+        guard isFresh(at: now), let checkedAt else { return true }
+        return !failed.isEmpty && now.timeIntervalSince(checkedAt) >= AgentReleaseInfo.retryAfter
+    }
+
     public static func load(from url: URL) -> AgentReleaseInfo? {
         guard let data = try? Data(contentsOf: url), data.count < 200_000 else { return nil }
         let decoder = JSONDecoder()

@@ -134,6 +134,10 @@ Codex, OpenCode and pi. All of it is the app's: the daemon only takes the four p
   `--version` says, then moved into place with a `launch` script that starts that copy with its own updater off. The
   beta is on the command line as `claude-beta` / `codex-beta` / `opencode-beta` (links in `~/.local/bin`; a name that is
   somebody else's is left alone). pi has neither.
+- The vendors are asked what is newest at launch, when the page opens, on `Check Now`, and whenever the last answer has
+  aged twelve hours (`AgentReleaseInfo.isDue`; a vendor that did not answer is asked again after one). Nothing is ever
+  installed by that: the row, the sidebar's number and a line in the setup checklist say what is newer. A missing
+  executor's row in the checklist and the first-run guide has `Install`, which starts its Stable install on this page.
 - Every operation is one job per agent (`AgentJob`) with its phases on the row and its log in
   `~/Library/Logs/AgentSwitch/agent-<agent>.log`, started over by the next. Downloads live in the store's `downloads/`
   for the length of the job; the store is swept at launch, and its empty folders are not kept.

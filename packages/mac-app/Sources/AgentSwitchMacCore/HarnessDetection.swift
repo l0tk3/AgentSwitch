@@ -70,21 +70,21 @@ public enum HarnessEvaluator {
                              guidance: guidance(facts.harness, state))
     }
 
-    /// Install and login steps; commands the user types in Terminal, never run by the app.
+    /// Install and login steps. Installing is 设置 › Agents (docs/agents-v0.md); logging in is the user's, in Terminal.
     public static func guidance(_ harness: Harness, _ state: HarnessState) -> [String] {
         switch (harness, state) {
         case (_, .ready):
             return []
         case (.claude, .missing):
-            return ["安装：curl -fsSL https://claude.ai/install.sh | bash", "安装后在终端运行 claude，按提示登录"]
+            return ["可在 Agents 页安装。", "安装后在终端运行 claude，按提示登录"]
         case (.claude, .notLoggedIn):
             return ["在终端运行 claude，按提示登录（或在 claude 中输入 /login）"]
         case (.codex, .missing):
-            return ["安装：brew install codex，或 npm install -g @openai/codex", "也可使用 ChatGPT 桌面应用自带的 codex"]
+            return ["可在 Agents 页安装，也可使用 ChatGPT 桌面应用自带的 codex。", "安装后在终端运行 codex login，使用 ChatGPT 账户登录"]
         case (.codex, .notLoggedIn):
             return ["在终端运行 codex login，使用 ChatGPT 账户登录"]
         case (.opencode, .missing):
-            return ["安装：curl -fsSL https://opencode.ai/install | bash", "安装后运行 opencode auth login，配置 DeepSeek 等模型提供商"]
+            return ["可在 Agents 页安装。", "安装后运行 opencode auth login，配置 DeepSeek 等模型提供商"]
         case (.opencode, .notLoggedIn):
             return ["在终端运行 opencode auth login，配置 DeepSeek 等模型提供商"]
         }

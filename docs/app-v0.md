@@ -6,7 +6,7 @@
 
 **已定（2026-09-24 用户拍板）**
 - iPhone ↔ Mac：**局域网和 Tailscale 都支持**。同一网络走局域网（Bonjour 发现），在外走 Tailscale。
-- Mac 端：**自包含的菜单栏应用**，内置 Node 与 Python 运行时、daemon 和 secret-gate，双击即用、可登录自启。Claude Code / Codex / OpenCode 仍由用户自己安装并登录，应用负责检测和指引。
+- Mac 端：**自包含的菜单栏应用**，内置 Node 与 Python 运行时、daemon 和 secret-gate，双击即用、可登录自启。Claude Code / Codex / OpenCode 仍由用户自己登录，应用负责检测和指引；安装、更新与换版本自 2026-10-06 起可以在 设置 › Agents 里做（agents-v0）。
 - 推送：**先不做**。App 打开时实时刷新（SSE），接口位置留好。
 - 公钥：**配对时自动带到手机**。手机本地用 gate 公钥把密码加密成 `enc:v1:`，明文不离开手机。
 

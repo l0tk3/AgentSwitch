@@ -47,17 +47,6 @@ public enum HarnessLogin {
     }
 }
 
-/// The install command a 复制命令 button puts on the clipboard (the first option HarnessEvaluator.guidance names).
-public enum HarnessInstall {
-    public static func command(_ harness: Harness) -> String {
-        switch harness {
-        case .claude: return "curl -fsSL https://claude.ai/install.sh | bash"
-        case .codex: return "brew install codex"
-        case .opencode: return "curl -fsSL https://opencode.ai/install | bash"
-        }
-    }
-}
-
 /// POSIX single quoting for a line typed into a shell.
 public enum ShellQuote {
     static let plain = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@%+=:,./_-")

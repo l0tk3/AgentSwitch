@@ -73,6 +73,7 @@ final class AppModel {
     /// An install, update or delete under way, by the agent's raw value: one at a time per agent.
     var agentJobs: [String: AgentJob] = [:]
     @ObservationIgnored var agentTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored var agentWatch: Task<Void, Never>?
 
     // MARK: gate service (docs/gate-service-v0.md); written by AppModel+GateService.swift
 
@@ -217,12 +218,14 @@ final class AppModel {
             await daemon.start()
             startPolling()
             detectEnvironment()
+            watchAgentUpdates()
             refreshKeys()
         }
     }
 
     func shutdown() async {
         pollTask?.cancel()
+        agentWatch?.cancel()
         bonjour.update(nil)
         await daemon.stop()
         await gate.stop()
@@ -621,7 +624,20 @@ final class AppModel {
     var setupItems: [SetupItem] {
         SetupChecklist.items(SetupFacts(harnesses: harnesses, devices: devicesKnown ? devices : nil, tailscale: tailscale,
                                         tailnet: tailnetAddresses, workDir: control.workDir, home: paths.userHome.path,
-                                        gateService: gateServiceFacts))
+                                        gateService: gateServiceFacts, installing: harnessesInstalling, installFailed: harnessInstallsFailed,
+                                        agentUpdates: agentUpdateCount))
+    }
+
+    /// The job installing a harness's own (the vendor's) version in 设置 › Agents, if there is one.
+    private func stableInstallJob(_ harness: Harness) -> AgentJob? {
+        guard let job = agentJobs[harness.agent.rawValue], job.source == .stable, job.row == AgentRow.missing(.stable, available: nil).id else { return nil }
+        return job
+    }
+
+    /// The harnesses being installed right now, and why the last install of one stopped.
+    var harnessesInstalling: Set<Harness> { Set(Harness.allCases.filter { stableInstallJob($0)?.failed == false }) }
+    var harnessInstallsFailed: [Harness: String] {
+        Dictionary(uniqueKeysWithValues: Harness.allCases.compactMap { harness in stableInstallJob(harness)?.error.map { (harness, $0) } })
     }
 
     var setupUnmet: Int { SetupChecklist.unmet(setupItems) }

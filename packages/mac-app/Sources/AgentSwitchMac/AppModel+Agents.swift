@@ -54,7 +54,7 @@ extension AppModel {
     func checkAgentUpdates(force: Bool = false) {
         guard !isDemo, !agentsChecking else { return }
         if agentReleases == nil { agentReleases = AgentReleaseInfo.load(from: agentReleasesFile) }
-        if !force, agentReleases?.isFresh(at: Date()) == true { return }
+        if !force, agentReleases?.isDue(at: Date()) == false { return }
         agentsChecking = true
         let previous = agentReleases
         let file = agentReleasesFile
@@ -63,6 +63,19 @@ extension AppModel {
             agentReleases = info
             try? info.save(to: file)
             agentsChecking = false
+        }
+    }
+
+    /// While the app runs (agents-v0 §4): the vendors are asked at launch when the last answer is older than twelve
+    /// hours, and again whenever it has aged that much — looked at once an hour, which asks nobody while the answer
+    /// is fresh. Nothing is installed by this: the page, the sidebar and the checklist say what is newer.
+    func watchAgentUpdates() {
+        guard !isDemo, agentWatch == nil else { return }
+        agentWatch = Task {
+            while !Task.isCancelled {
+                checkAgentUpdates()
+                try? await Task.sleep(for: .seconds(3600))
+            }
         }
     }
 
@@ -242,6 +255,8 @@ extension AppModel {
     private func agentsChanged() {
         config.set(makeConfig(ports: ports, path: config.get().path))
         refreshAgents(force: true)
+        // The checklist's own look at the three executors: installed now, to be signed in to next.
+        detectEnvironment()
     }
 
     /// The folders whose commands a new terminal does not yet know, each with the line that adds it (agents-v0 §8).

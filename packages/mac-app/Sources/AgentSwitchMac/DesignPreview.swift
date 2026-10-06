@@ -129,6 +129,15 @@ enum DesignPreview {
         ]
         try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents-jobs"))
         model.agentJobs = [:]
+        // A fresh Mac: the checklist and the wizard's first step offer `Install` on a missing executor's row; here
+        // Codex's is on its way (agents-v0 §8).
+        model.loadDemo(fresh: true)
+        model.agentJobs = [
+            "codex": AgentJob(agent: .codex, row: "missing:stable", source: .stable, version: "0.160.1", phase: .installing),
+        ]
+        try await renderSettings(.environment, model: model, appearance: appearance, to: file("settings-agents-checklist"))
+        try await renderWizard(.executors, model: model, appearance: appearance, to: file("settings-agents-wizard"))
+        model.agentJobs = [:]
         model.loadDemo()
     }
 
