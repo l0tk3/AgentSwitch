@@ -1,6 +1,6 @@
 # AgentSwitch
 
-手机遥控 Mac 上多个 AI agent（Claude Code / Codex / OpenCode）的任务编排层。设计稿在 `docs/design-v0.md`（总体）、`docs/router-v0.md`（路由器）、`docs/loop-v0.md`（调度循环）、`docs/threads-v0.md`（线程、交接、记忆）、`docs/gate-next-v0.md`（凭据层下一步）、`docs/app-v0.md`（Mac 应用与 iPhone 应用）、`docs/assistant-v0.md`（助理、线程视图、声音、实时活动、自修复；草案）、`docs/ui-v0.md`（两端界面与文案规范）、`docs/control-v0.md`（权限模式、默认目录、会话监视）、`docs/gate-service-v0.md`（凭据网关以独立服务账户运行）、`docs/local-model-v0.md`（可选的本地模型前台，脱敏后再分发；草案）、`docs/terminal-v0.md`（手动入口：服务持有的终端会话；草案）、`docs/dispatch-v0.md`（调度入口：命名与 Mac 主窗口；草案）、`docs/browser-v0.md`（服务持有的浏览器，App 与 agent 共用；草案）和 `docs/mesh-v0.md`（网状连接与 Linux 纯服务端主机；草案，附一次可行性验证），改架构先改它们。
+手机遥控 Mac 上多个 AI agent（Claude Code / Codex / OpenCode）的任务编排层。设计稿在 `docs/design-v0.md`（总体）、`docs/router-v0.md`（路由器）、`docs/loop-v0.md`（调度循环）、`docs/threads-v0.md`（线程、交接、记忆）、`docs/gate-next-v0.md`（凭据层下一步）、`docs/app-v0.md`（Mac 应用与 iPhone 应用）、`docs/assistant-v0.md`（助理、线程视图、声音、实时活动、自修复；草案）、`docs/ui-v0.md`（两端界面与文案规范）、`docs/control-v0.md`（权限模式、默认目录、会话监视）、`docs/gate-service-v0.md`（凭据网关以独立服务账户运行）、`docs/local-model-v0.md`（可选的本地模型前台，脱敏后再分发；草案）、`docs/terminal-v0.md`（手动入口：服务持有的终端会话；草案）、`docs/dispatch-v0.md`（调度入口：命名与 Mac 主窗口；草案）、`docs/browser-v0.md`（服务持有的浏览器，App 与 agent 共用；草案）、`docs/mesh-v0.md`（网状连接与 Linux 纯服务端主机；草案，附一次可行性验证）和 `docs/agents-v0.md`（四个 agent CLI 的安装、更新与版本；草案），改架构先改它们。
 
 ## 布局
 - `docs/` 设计与决策记录
