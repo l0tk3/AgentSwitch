@@ -234,7 +234,8 @@ export function terminalBinaries(targets: Pick<Targets, "harnesses">, opencodeBi
   const claude = first(env.CLAUDE_BIN ? resolveCommand(env.CLAUDE_BIN, "claude", env.PATH) : undefined, resolveCommand(undefined, "claude", env.PATH), join(home, ".local", "bin", "claude"));
   const codex = first(codexBinary(targets, env));
   const opencode = first(resolveCommand(opencodeBinary || undefined, "opencode", env.PATH), join(home, ".opencode", "bin", "opencode"));
-  const pi = first(resolveCommand(undefined, "pi", env.PATH), join(home, ".local", "bin", "pi"));
+  // pi as chosen in the Mac app's 设置 › Agents (`PI_BIN`, docs/agents-v0.md §3), else where it is found.
+  const pi = first(env.PI_BIN, resolveCommand(undefined, "pi", env.PATH), join(home, ".local", "bin", "pi"));
   if (claude) out["claude-code"] = claude;
   if (codex) out.codex = codex;
   if (opencode) out.opencode = opencode;
@@ -252,8 +253,12 @@ export function claudeBinary(env: NodeJS.ProcessEnv = process.env): string | und
 const withClaude = (bin: string | undefined): { claudeExecutable?: string } => (bin ? { claudeExecutable: bin } : {});
 const executableOf = (bin: string | undefined): { executable?: string } => (bin ? { executable: bin } : {});
 
-/** The codex CLI of this Mac: the catalog's path when it exists, else `codex` on PATH (see resolveCommand). */
+/** The codex CLI of this Mac: the one chosen in the Mac app's 设置 › Agents when it is there (`CODEX_BIN`,
+ *  docs/agents-v0.md §3: the vendor's own install, a beta, a pinned version, or ChatGPT.app's copy), else the catalog's
+ *  path when it exists, else `codex` on PATH (see resolveCommand). */
 export function codexBinary(targets: Pick<Targets, "harnesses">, env: NodeJS.ProcessEnv = process.env): string {
+  const chosen = env.CODEX_BIN;
+  if (chosen && isAbsolute(chosen) && existsSync(chosen)) return chosen;
   return resolveCommand(targets.harnesses.codex?.binary, "codex", env.PATH);
 }
 

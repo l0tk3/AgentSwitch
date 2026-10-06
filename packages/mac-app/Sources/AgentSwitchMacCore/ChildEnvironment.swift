@@ -33,6 +33,7 @@ public enum ChildEnvironment {
     public static func daemon(base: [String: String], paths: AppPaths, ports: PortSettings, options: DaemonOptions,
                               path: String, remote: Bool = true, remoteName: String? = nil,
                               opencodeBinary: String? = nil, claudeBinary: String? = nil,
+                              codexBinary: String? = nil, piBinary: String? = nil,
                               gateMode: GateRunMode = .userProcess) -> [String: String] {
         var env = base
         env["PATH"] = path
@@ -54,6 +55,9 @@ public enum ChildEnvironment {
         env.merge(service(gateMode)) { _, new in new }
         if let opencodeBinary { env["OPENCODE_BIN"] = opencodeBinary }
         if let claudeBinary { env["CLAUDE_BIN"] = claudeBinary }
+        // The install chosen in 设置 › Agents (docs/agents-v0.md §3); unset, the daemon looks where it always did.
+        if let codexBinary { env[AgentCLI.codex.environmentKey] = codexBinary }
+        if let piBinary { env[AgentCLI.pi.environmentKey] = piBinary }
         // Tailscale.app's binary acts as the CLI only with a TERM or this flag; a Finder-launched app has neither,
         // and the daemon's `tailscale ip -4` for the pairing payload would otherwise try to start the GUI.
         env[Tailscale.cliModeVariable] = "1"

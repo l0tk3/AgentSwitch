@@ -16,6 +16,10 @@ public struct RuntimeConfig: Sendable, Equatable {
     /// The user's own Claude Code (`CLAUDE_BIN`): it already holds the Keychain grant for its login; the copy inside
     /// the Agent SDK is another code signature, so macOS would ask again and the daemon's model discovery stalls.
     public let claudeBinary: String?
+    /// Codex and pi as chosen in 设置 › Agents (`CODEX_BIN`, `PI_BIN`, docs/agents-v0.md §3); nil leaves the daemon to
+    /// find them itself (its catalog's path, the PATH).
+    public let codexBinary: String?
+    public let piBinary: String?
     /// 通用 › 允许 iPhone 连接 (RemoteAccess): the daemon's remote listener.
     public let remoteEnabled: Bool
     /// Own `secret-gate proxy` child, or the system service (docs/gate-service-v0.md).
@@ -23,6 +27,7 @@ public struct RuntimeConfig: Sendable, Equatable {
 
     public init(paths: AppPaths, ports: PortSettings, options: DaemonOptions, path: String, baseEnvironment: [String: String],
                 remoteName: String? = nil, opencodeBinary: String? = nil, claudeBinary: String? = nil,
+                codexBinary: String? = nil, piBinary: String? = nil,
                 remoteEnabled: Bool = RemoteAccess.defaultValue, gateMode: GateRunMode = .userProcess) {
         self.paths = paths
         self.ports = ports
@@ -32,11 +37,22 @@ public struct RuntimeConfig: Sendable, Equatable {
         self.remoteName = remoteName
         self.opencodeBinary = opencodeBinary
         self.claudeBinary = claudeBinary
+        self.codexBinary = codexBinary
+        self.piBinary = piBinary
         self.remoteEnabled = remoteEnabled
         self.gateMode = gateMode
     }
 
     public var gateEnvironment: [String: String] { ChildEnvironment.gate(base: baseEnvironment, paths: paths, gateMode: gateMode) }
+    /// The agents' programs this launch hands the daemon, by agent.
+    public var agentBinaries: [AgentCLI: String] {
+        var out: [AgentCLI: String] = [:]
+        out[.claude] = claudeBinary
+        out[.codex] = codexBinary
+        out[.opencode] = opencodeBinary
+        out[.pi] = piBinary
+        return out
+    }
     public var gateCLI: GateCLI { GateCLI(executable: paths.runtime.secretGate, environment: gateEnvironment) }
 }
 
@@ -54,7 +70,7 @@ public enum RuntimePlan {
     public static func daemonSpec(_ c: RuntimeConfig) -> LaunchSpec {
         let env = ChildEnvironment.daemon(base: c.baseEnvironment, paths: c.paths, ports: c.ports, options: c.options, path: c.path,
                                           remote: c.remoteEnabled, remoteName: c.remoteName, opencodeBinary: c.opencodeBinary,
-                                          claudeBinary: c.claudeBinary, gateMode: c.gateMode)
+                                          claudeBinary: c.claudeBinary, codexBinary: c.codexBinary, piBinary: c.piBinary, gateMode: c.gateMode)
         // `npm start` of packages/daemon, with absolute paths.
         let args = ["--no-warnings=ExperimentalWarning", c.paths.runtime.daemonCLI.path, "serve"]
         return LaunchSpec(executable: c.paths.runtime.node, arguments: args,

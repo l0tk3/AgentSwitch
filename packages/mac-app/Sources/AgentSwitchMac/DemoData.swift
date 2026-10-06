@@ -115,6 +115,68 @@ enum DemoData {
                                                 versionOutput: "2.0.8", loginEvidence: nil))]
     }
 
+    /// 设置 › Agents as this Mac was on 2026-10-06 (docs/agents-v0.md §1): Claude Code's own install with two older
+    /// versions kept, Codex only in ChatGPT.app, OpenCode and pi each one version behind.
+    static func agents(home: String) -> [AgentReport] {
+        let layout = AgentLayout(home: home)
+        return [
+            AgentReport(agent: .claude, installs: [
+                AgentInstall(agent: .claude, source: .stable, key: "stable", binary: layout.command(.claude), command: "claude",
+                             location: "\(layout.programRoot(.claude))/2.1.291", version: "2.1.291", bytes: 233_211_568, channel: "latest"),
+            ], leftovers: AgentLeftovers(versions: ["2.1.288", "2.1.289"], paths: ["2.1.288", "2.1.289"].map { "\(layout.programRoot(.claude))/\($0)" }, bytes: 458_871_776)),
+            AgentReport(agent: .codex, installs: [
+                AgentInstall(agent: .codex, source: .app, key: "app", binary: layout.appCodex[0], location: layout.appCodex[0], version: "0.160.1"),
+            ]),
+            AgentReport(agent: .opencode, installs: [
+                AgentInstall(agent: .opencode, source: .stable, key: "stable", binary: layout.command(.opencode), command: "opencode",
+                             location: layout.command(.opencode), version: "2.0.18", bytes: 178_946_960),
+            ]),
+            AgentReport(agent: .pi, installs: [
+                AgentInstall(agent: .pi, source: .stable, key: "stable", binary: layout.command(.pi), command: "pi",
+                             location: "\(layout.programRoot(.pi))/install/releases/0.87.1", version: "0.87.1", bytes: 157_286_400),
+            ]),
+        ]
+    }
+
+    /// Everything there can be (agents.html `?s=full`): each vendor's own install, betas with their names on the
+    /// command line, a pinned version, Homebrew's OpenCode of the first line.
+    static func agentsFull(home: String) -> [AgentReport] {
+        let layout = AgentLayout(home: home)
+        func stored(_ agent: AgentCLI, _ source: AgentSource, _ version: String, _ bytes: Int64) -> AgentInstall {
+            AgentInstall(agent: agent, source: source, key: source == .beta ? "beta" : AgentInstall.pinnedKey(version), binary: layout.launcher(agent, source, version),
+                         command: source == .beta ? agent.betaCommand : nil, location: layout.storeVersion(agent, source, version), version: version, bytes: bytes)
+        }
+        return [
+            AgentReport(agent: .claude, installs: [
+                AgentInstall(agent: .claude, source: .stable, key: "stable", binary: layout.command(.claude), command: "claude",
+                             location: "\(layout.programRoot(.claude))/2.1.285", version: "2.1.285", bytes: 229_255_312, channel: "stable"),
+                stored(.claude, .beta, "2.1.291", 233_211_568), stored(.claude, .pinned, "2.1.270", 228_100_000),
+            ]),
+            AgentReport(agent: .codex, installs: [
+                AgentInstall(agent: .codex, source: .stable, key: "stable", binary: layout.command(.codex), command: "codex",
+                             location: layout.programRoot(.codex), version: "0.160.1", bytes: 310_400_000),
+                AgentInstall(agent: .codex, source: .app, key: "app", binary: layout.appCodex[0], location: layout.appCodex[0], version: "0.160.1"),
+                stored(.codex, .beta, "0.162.0-alpha.15", 312_000_000),
+            ]),
+            AgentReport(agent: .opencode, installs: [
+                AgentInstall(agent: .opencode, source: .stable, key: "stable", binary: layout.command(.opencode), command: "opencode",
+                             location: layout.command(.opencode), version: "2.0.24", bytes: 179_357_602),
+                stored(.opencode, .beta, "0.0.0-beta-19507", 180_200_000),
+                AgentInstall(agent: .opencode, source: .other, key: "other:/opt/homebrew/bin/opencode", binary: "/opt/homebrew/bin/opencode",
+                             location: "/opt/homebrew/bin/opencode", version: "1.18.34"),
+            ]),
+            AgentReport(agent: .pi, installs: [
+                AgentInstall(agent: .pi, source: .stable, key: "stable", binary: layout.command(.pi), command: "pi",
+                             location: "\(layout.programRoot(.pi))/install/releases/1.0.4", version: "1.0.4", bytes: 162_000_000),
+            ]),
+        ]
+    }
+
+    static let agentReleases = AgentReleaseInfo(channels: [
+        "claude-code": AgentChannels(stable: "2.1.285", beta: "2.1.291"), "codex": AgentChannels(stable: "0.160.1", beta: "0.162.0-alpha.16"),
+        "opencode": AgentChannels(stable: "2.0.24", beta: "0.0.0-beta-19507"), "pi": AgentChannels(stable: "1.0.4"),
+    ], checkedAt: Date(timeIntervalSinceNow: -120))
+
     /// The daemon's categories (engine/approvalPolicy.ts CATEGORY_TITLES).
     static let categories: [[String: String]] = [
         ["id": "delete", "title": "删除文件或数据（rm、git clean、DROP/DELETE）"],

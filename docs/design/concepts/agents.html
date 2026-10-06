@@ -138,12 +138,12 @@ const SYS = {
 const STATES = {
   today: {
     claude: { name: "Claude Code", use: "stable", rows: [
-      { id: "stable", src: "Stable", v: "2.1.291", where: "claude · ~/.local/bin · follows latest", size: "233 MB" },
+      { id: "stable", src: "Stable", v: "2.1.291", where: "claude · ~/.local/bin · Follows Latest", size: "233 MB" },
       { id: "old", sub: "Old Versions", v: "2.1.288 · 2.1.289", size: "438 MB", act: "Clean Up…" },
       { id: "beta", src: "Beta", v: null, where: "claude-beta", avail: "2.1.291" }] },
     codex: { name: "Codex", use: "app", rows: [
       { id: "stable", src: "Stable", v: null, where: "codex", avail: "0.160.1" },
-      { id: "app", src: "ChatGPT App", v: "0.160.1", where: "随 ChatGPT App 更新", fixed: true },
+      { id: "app", src: "ChatGPT App", v: "0.160.1", where: "Updates with ChatGPT App", fixed: true },
       { id: "beta", src: "Beta", v: null, where: "codex-beta", avail: "0.162.0-alpha.16" }] },
     opencode: { name: "OpenCode", use: "stable", rows: [
       { id: "stable", src: "Stable", v: "2.0.18", where: "opencode · ~/.opencode/bin", size: "171 MB", newer: "2.0.24" },
@@ -161,17 +161,17 @@ const STATES = {
   },
   full: {
     claude: { name: "Claude Code", use: "stable", rows: [
-      { id: "stable", src: "Stable", v: "2.1.285", where: "claude · ~/.local/bin · follows stable", size: "229 MB" },
+      { id: "stable", src: "Stable", v: "2.1.285", where: "claude · ~/.local/bin · Follows Stable", size: "229 MB" },
       { id: "beta", src: "Beta", v: "2.1.291", where: "claude-beta", size: "233 MB" },
-      { id: "pin1", src: "Pinned", v: "2.1.280", where: "只给 AgentSwitch 用", size: "228 MB" }] },
+      { id: "pin1", src: "Pinned", v: "2.1.280", where: "AgentSwitch Only", size: "228 MB" }] },
     codex: { name: "Codex", use: "beta", rows: [
       { id: "stable", src: "Stable", v: "0.160.1", where: "codex · ~/.local/bin", size: "310 MB" },
-      { id: "app", src: "ChatGPT App", v: "0.160.1", where: "随 ChatGPT App 更新", fixed: true },
+      { id: "app", src: "ChatGPT App", v: "0.160.1", where: "Updates with ChatGPT App", fixed: true },
       { id: "beta", src: "Beta", v: "0.162.0-alpha.15", where: "codex-beta", size: "312 MB", newer: "0.162.0-alpha.16" }] },
     opencode: { name: "OpenCode", use: "stable", rows: [
       { id: "stable", src: "Stable", v: "2.0.24", where: "opencode · ~/.opencode/bin", size: "179 MB" },
       { id: "beta", src: "Beta", v: "0.0.0-beta-19507", where: "opencode-beta", size: "180 MB" },
-      { id: "other", src: "Other", v: "1.18.34", where: "/opt/homebrew/bin/opencode · v1，AgentSwitch 不支持", fixed: true, noUse: true }] },
+      { id: "other", src: "Other", v: "1.18.34", where: "/opt/homebrew/bin/opencode · 1.x 不受支持", fixed: true, noUse: true }] },
     pi: { name: "pi", use: "stable", foot: "pi 没有测试通道。", rows: [{ id: "stable", src: "Stable", v: "1.0.4", where: "pi · ~/.local/bin", size: "162 MB" }] },
     store: "1.18 GB", checked: "2m ago",
   },

@@ -52,6 +52,13 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (main window, Live Activity) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "agents" {
+                    for (suffix, appearance) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
+                        try await renderAgents(model: model, appearance: NSAppearance(named: appearance), suffix: suffix, into: directory)
+                    }
+                    FileHandle.standardError.write(Data("design preview (Agents) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 if onlyDispatchGroup {
                     for (suffix, appearance) in [("", NSAppearance.Name.aqua), ("-dark", .darkAqua)] {
                         try await renderDispatchGroup(model: model, appearance: NSAppearance(named: appearance), suffix: suffix, into: directory)
@@ -95,6 +102,19 @@ enum DesignPreview {
                 exit(1)
             }
         }
+    }
+
+    /// `-designPreviewOnly agents`: 设置 › Agents as this Mac was when it was drawn, on a Mac with nothing installed, and
+    /// with everything there is (docs/design/concepts/agents.html `?s=today|fresh|full`).
+    private static func renderAgents(model: AppModel, appearance: NSAppearance?, suffix: String, into directory: URL) async throws {
+        func file(_ name: String) -> URL { directory.appendingPathComponent("\(name)\(suffix).png") }
+        model.loadDemo()
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents"))
+        model.loadDemoAgents(fresh: true)
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 900, to: file("settings-agents-fresh"))
+        model.loadDemoAgents(full: true)
+        try await renderSettings(.agents, model: model, appearance: appearance, height: 1100, to: file("settings-agents-full"))
+        model.loadDemo()
     }
 
     /// `-designPreviewOnly dispatch`: only the settings window's Dispatch group (its pages, states and sheets).

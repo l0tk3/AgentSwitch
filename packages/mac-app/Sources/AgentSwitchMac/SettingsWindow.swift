@@ -4,14 +4,14 @@ import SwiftUI
 
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, devices, models, permissions, keys, environment, general
+    case pairing, devices, models, permissions, keys, agents, environment, general
     /// The Dispatch group (docs/dispatch-v0.md §3): what the web console's side column and the phone's settings had.
     case context, extensions, log, history
 
     var id: String { rawValue }
 
     /// The sidebar's first block, without a header.
-    static let app: [SettingsTab] = [.pairing, .devices, .models, .permissions, .keys, .environment, .general]
+    static let app: [SettingsTab] = [.pairing, .devices, .models, .permissions, .keys, .agents, .environment, .general]
     /// The sidebar's `Dispatch` group; the main window's settings button opens its first page.
     static let dispatch: [SettingsTab] = [.context, .extensions, .log, .history]
 
@@ -22,6 +22,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .models: return "Models"
         case .permissions: return "Permissions"
         case .keys: return "Keys"
+        case .agents: return "Agents"
         case .environment: return "Environment"
         case .general: return "General"
         case .context: return "Context"
@@ -38,6 +39,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .models: return "cpu"
         case .permissions: return "checkmark.shield"
         case .keys: return "key"
+        case .agents: return "shippingbox"
         case .environment: return "checklist"
         case .general: return "gearshape"
         case .context: return "doc.text"
@@ -234,7 +236,8 @@ struct SettingsView: View {
         NavigationSplitView {
             List(selection: selection) {
                 ForEach(SettingsTab.app) { tab in
-                    Label(tab.title, systemImage: tab.symbol).tag(tab)
+                    // Agents: how many installs have an update (docs/agents-v0.md §4).
+                    Label(tab.title, systemImage: tab.symbol).tag(tab).badge(tab == .agents ? model.agentUpdateCount : 0)
                 }
                 Section("Dispatch") {
                     ForEach(SettingsTab.dispatch) { tab in
@@ -300,6 +303,7 @@ struct SettingsView: View {
         case .models: ModelsView()
         case .permissions: PermissionsView()
         case .keys: KeysView()
+        case .agents: AgentsView()
         case .environment: EnvironmentView()
         case .general: GeneralView()
         case .context: ContextSettingsPage()

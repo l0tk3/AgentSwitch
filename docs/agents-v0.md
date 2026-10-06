@@ -44,7 +44,7 @@
 | **Other**（别处找到的，如 Homebrew、npm 装的，或 OpenCode v1） | 原处 | 原样 | 它自己的安装方式 | 不在这里删；写出它在哪、怎么卸 |
 
 - 版本库在 `~/.local/share/agentswitch/cli/`（不带空格的路径；不随应用的数据目录走）：`<agent>/beta/<版本>/`、`<agent>/pinned/<版本>/`、`downloads/`（进行中的下载）。
-- `*-beta` 是写在 `~/.local/bin/` 里的几行 shell 脚本：设好关掉自更新的变量，`exec` 版本库里那个版本的程序。脚本第二行是固定的记号，AgentSwitch 只改写、只删除带这个记号的文件；同名文件不是它写的就不动，并在界面上说明。`~/.local/bin` 不在登录 shell 的 PATH 里时，界面写出要加的那一行，不替你改 shell 配置。
+- 版本库里每个版本的文件夹里有一个启动脚本 `launch`：几行 shell，设好关掉自更新的变量，`exec` 这个版本的程序。AgentSwitch 选用版本库里的版本时运行的就是它。`*-beta` 是 `~/.local/bin/` 里指向当前测试版 `launch` 的符号链接；AgentSwitch 只改写、只删除指向版本库的链接，同名的东西不是它放的就不动，并在界面上写 `Not on the Command Line`。`~/.local/bin` 不在登录 shell 的 PATH 里时，界面写出要加的那一行，不替你改 shell 配置。
 - Pinned 是“给 AgentSwitch 用的某个确定版本”：某个新版本出问题时退回去用，或固定在验证过的版本上。它不上命令行。pi 的程序是一组 npm 包，暂不做 Beta 与 Pinned（它也没有测试通道）；要换版本就把原位安装换成那个版本（官方脚本的 `?version=`）。
 
 ## 3. AgentSwitch 用哪一个
@@ -116,7 +116,7 @@
 - `AgentSwitchMac/AgentsView.swift`：这一页。
 - 服务：`CODEX_BIN`、`PI_BIN`。
 
-1. **看得见**：扫描四个 agent 的所有安装（含 pi 与 ChatGPT App 的 Codex）、探测更新、这一页列出来、选 AgentSwitch 用哪个。不装不删。
+1. **看得见**：扫描四个 agent 的所有安装（含 pi 与 ChatGPT App 的 Codex）、探测更新、这一页列出来、选 AgentSwitch 用哪个。不装不删。**已做**（2026-10-06）：`AgentSwitchMacCore/Agents/`（`AgentCLI` 与版本比较、`AgentInventory` 扫描、`AgentReleases` 发布信息与 `AgentUpdates`、`AgentSelection`、`AgentText` 与行的顺序；`AgentsTests`，`AGENTSWITCH_AGENTS_LIVE=1 swift test --filter AgentsTests/testLive` 扫描本机并真去问四家），`AgentsView`，服务认 `CODEX_BIN` 与 `PI_BIN`（`tests/agentBinaries.test.ts`）。这一步里有更新的行只写 `版本 Available`、没装的行只写通道的最新版本，按钮随后两步加上。`-designPreview <目录> -designPreviewOnly agents` 出这一页的三种状态。
 2. **Beta 与 Pinned**：版本库、下载校验、`*-beta`、删除。
 3. **Stable 的安装、更新、卸载与清旧版本**。
 4. 环境检查清单、首次运行向导接上 `Install`；手机设置里显示“有更新”。

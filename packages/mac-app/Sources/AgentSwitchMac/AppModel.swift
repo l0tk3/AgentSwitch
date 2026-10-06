@@ -19,7 +19,7 @@ final class AppModel {
     private(set) var ports: PortSettings
     /// 通用 › 允许 iPhone 连接 (RemoteAccess): the daemon's remote listener and the Bonjour advertisement.
     private(set) var remoteEnabled: Bool
-    private let baseEnvironment: [String: String]
+    let baseEnvironment: [String: String]
 
     // MARK: runtime state
 
@@ -54,6 +54,20 @@ final class AppModel {
     /// An install is being checked or started: a second request waits for its outcome.
     @ObservationIgnored private var installing = false
     var errorMessage: String?
+
+    // MARK: agents (docs/agents-v0.md); written by AppModel+Agents.swift
+
+    /// Every install of the four agent CLIs found on this Mac, with versions and sizes as they come in.
+    var agents: [AgentReport] = []
+    /// What the vendors published when last asked: the saved answer until the first check of this launch.
+    var agentReleases: AgentReleaseInfo?
+    var agentsChecking = false
+    /// 设置 › Agents: which install AgentSwitch runs, the agent's raw value → the install's key.
+    var agentUse: [String: String] = [:]
+    /// The programs the running service was started with; a choice made since applies when it restarts.
+    var agentsApplied: [AgentCLI: String] = [:]
+    @ObservationIgnored var agentsScanning = false
+    @ObservationIgnored var agentsScanned: Date?
 
     // MARK: gate service (docs/gate-service-v0.md); written by AppModel+GateService.swift
 
@@ -134,6 +148,7 @@ final class AppModel {
         self.remoteEnabled = remoteEnabled
         computerName = name
         baseEnvironment = base
+        agentUse = defaults.dictionary(forKey: AgentSelection.defaultsKey) as? [String: String] ?? [:]
         config = Locked(RuntimeConfig(paths: paths, ports: ports, options: options, path: LoginShellPath.merge(shellPath: nil, home: home.path),
                                       baseEnvironment: base, remoteName: name, remoteEnabled: remoteEnabled))
         let box = config
@@ -270,11 +285,12 @@ final class AppModel {
     }
 
     func makeConfig(ports: PortSettings, path: String) -> RuntimeConfig {
-        let opencode = ExecutableLookup.find("opencode", path: path, extra: Harness.opencode.knownLocations(home: paths.userHome.path))
-        let claude = ExecutableLookup.find("claude", path: path, extra: Harness.claude.knownLocations(home: paths.userHome.path))
+        // Each agent's program is the install chosen in 设置 › Agents (docs/agents-v0.md §3): the vendor's own when
+        // nothing was chosen, as before. One the scan finds none of is left for the daemon to look for.
+        let chosen = AgentSelection.binaries(AgentInventory.scan(layout: agentLayout, path: path), saved: agentUse)
         return RuntimeConfig(paths: paths, ports: ports, options: options, path: path, baseEnvironment: baseEnvironment,
-                             remoteName: computerName, opencodeBinary: opencode, claudeBinary: claude, remoteEnabled: remoteEnabled,
-                             gateMode: gateMode)
+                             remoteName: computerName, opencodeBinary: chosen[.opencode], claudeBinary: chosen[.claude],
+                             codexBinary: chosen[.codex], piBinary: chosen[.pi], remoteEnabled: remoteEnabled, gateMode: gateMode)
     }
 
     /// The mode and the ports that follow from it (the service's proxy port is the gate port), saved, and the config
@@ -295,6 +311,8 @@ final class AppModel {
     }
 
     private func daemonChanged(_ s: SupervisorState) {
+        // A new process: it was started with the programs the config named just now.
+        if let pid = s.pid, pid != daemonState.pid { agentsApplied = config.get().agentBinaries }
         if !s.isRunning {
             daemonReady = false
             remote = nil
@@ -532,6 +550,7 @@ final class AppModel {
 
     func detectEnvironment() {
         guard !detecting, !isDemo else { return }
+        refreshAgents()
         detecting = true
         let path = config.get().path
         let home = paths.userHome.path
@@ -689,6 +708,7 @@ final class AppModel {
         devicesKnown = true
         loginPath = LoginShellPath.Resolution(path: DemoData.path(home: paths.userHome.path), source: .loginShell, note: nil)
         harnesses = fresh ? DemoData.freshHarnesses(home: paths.userHome.path) : DemoData.harnesses(home: paths.userHome.path)
+        loadDemoAgents(fresh: fresh)
         tailscale = fresh ? DemoData.tailscaleStopped : DemoData.tailscale
         caCopy = .upToDate
         caTrusted = false
