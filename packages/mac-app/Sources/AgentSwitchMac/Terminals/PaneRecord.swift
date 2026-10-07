@@ -483,7 +483,8 @@ final class PaneRecord {
     /// say so beforehand, this is for the moment in between) in the page's own words, anything else as the service put it.
     private static func refused(_ error: Error, busy: String) -> String {
         if case .http(status: 409, message: _)? = error as? DaemonError { return busy }
-        return (error as? DaemonError)?.reason ?? error.localizedDescription
+        let reason = (error as? DaemonError)?.reason ?? error.localizedDescription
+        return RecordDisplay.refusal(reason) ?? reason
     }
 
     /// Types a command of the agent's own (`/model`): its picker opens on its screen.

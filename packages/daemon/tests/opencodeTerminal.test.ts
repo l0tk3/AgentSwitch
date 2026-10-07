@@ -31,7 +31,15 @@ type Request = { id: string; sessionID: string; action: string; resources: strin
 
 /** OpenCode's routes the companion reads and the reply it sends, over a real loopback server with the password. */
 async function fakeServer(password: string) {
-  const state = { active: {} as Record<string, unknown>, requests: [] as Request[], forms: [] as unknown[], replies: [] as { path: string; body: unknown }[], unauthorized: 0 };
+  const state = { active: {} as Record<string, unknown>, requests: [] as Request[], forms: [] as unknown[], replies: [] as { path: string; body: unknown }[], unauthorized: 0,
+    // Its models (two with variants, one switched off), its sessions, and the switches asked of it.
+    models: [
+      { id: "space-bunny", providerID: "opencode", enabled: true, variants: [{ id: "low" }, { id: "high" }, { id: "max" }] },
+      { id: "ling-flash", providerID: "opencode", enabled: true, variants: [] },
+      { id: "retired", providerID: "opencode", enabled: false, variants: [] },
+    ] as { id: string; providerID: string; enabled: boolean; variants: { id: string }[] }[],
+    sessions: [] as { id: string; time: { created: number }; model?: { id: string; providerID: string; variant?: string } }[],
+    switches: [] as { session: string; model: unknown }[] };
   const body = (req: IncomingMessage) => new Promise<unknown>((ok) => { let t = ""; req.on("data", (d) => { t += d; }); req.on("end", () => ok(t ? JSON.parse(t) : null)); });
   const server = createServer(async (req, res) => {
     if (req.headers.authorization !== basicAuth(password)) { state.unauthorized++; res.writeHead(401).end(); return; }
@@ -40,6 +48,19 @@ async function fakeServer(password: string) {
     if (req.method === "GET" && path === "/api/session/active") return json({ data: state.active });
     if (req.method === "GET" && path === "/api/permission/request") return json({ data: state.requests });
     if (req.method === "GET" && path === "/api/form") return json({ data: state.forms });
+    if (req.method === "GET" && path === "/api/model") return json({ data: state.models });
+    if (req.method === "GET" && path === "/api/session") return json({ data: state.sessions });
+    const one = /^\/api\/session\/([^/]+)(\/model)?$/.exec(path);
+    if (one && req.method === "GET" && !one[2]) { const s = state.sessions.find((x) => x.id === decodeURIComponent(one[1]!)); return s ? json({ data: s }) : void res.writeHead(404).end(); }
+    if (one && req.method === "POST" && one[2]) {
+      // As the real one: any model is taken without a word.
+      const sent = (await body(req)) as { model: { id: string; providerID: string; variant?: string } };
+      state.switches.push({ session: decodeURIComponent(one[1]!), model: sent.model });
+      const s = state.sessions.find((x) => x.id === decodeURIComponent(one[1]!));
+      if (s) s.model = sent.model;
+      res.writeHead(204).end();
+      return;
+    }
     if (req.method === "POST" && path.endsWith("/reply")) {
       state.replies.push({ path, body: await body(req) });
       state.requests = state.requests.filter((r) => !path.includes(r.id));
@@ -112,6 +133,52 @@ describe("OpenCode terminal companion", () => {
     state.active = {};
     await until(() => screens.last() === "idle");
     expect(state.unauthorized).toBe(0);
+  });
+
+  it("switches the model and the level of the session the TUI is on, on its own server; only what that server lists", async () => {
+    // 2026-10-07, user: codex不能hook掉它的模型选择…其他的agent也是. Seen on OpenCode 2.0.24: POST /api/session/:id/model,
+    // the TUI writes "Switched model to Space Bunny Free (max)" and its footer follows.
+    const { state, url } = await fakeServer("pw5");
+    const c = new OpenCodeCompanion({ binary: "/bin/opencode", cwd: tmpdir(), env: {}, args: [], asks: true, pollMs: 10, serve: fakeServe(url, "pw5") });
+    closers.push(() => c.stop());
+    await c.start();
+    const screens = fakeLink();
+    c.attach(screens.link);
+    await until(() => screens.last() === "idle");
+    // Before its first message the TUI has no session: nothing to switch. One of another day is not its own.
+    state.sessions = [{ id: "ses_old", time: { created: Date.now() - 86_400_000 }, model: { id: "ling-flash", providerID: "opencode" } }];
+    await expect(c.setModel({ model: "opencode/space-bunny" })).rejects.toThrow(/no session yet/);
+    // Its own: made since the terminal started.
+    state.sessions.push({ id: "ses_new", time: { created: Date.now() }, model: { id: "ling-flash", providerID: "opencode" } });
+    expect(await c.setModel({ model: "opencode/space-bunny" })).toEqual({ model: "opencode/space-bunny", variant: null });
+    expect(state.switches.at(-1)).toEqual({ session: "ses_new", model: { id: "space-bunny", providerID: "opencode" } });
+    // A level alone keeps the model; one that model does not have is refused here (its server would take it).
+    expect(await c.setModel({ variant: "max" })).toEqual({ model: "opencode/space-bunny", variant: "max" });
+    expect(state.switches.at(-1)).toEqual({ session: "ses_new", model: { id: "space-bunny", providerID: "opencode", variant: "max" } });
+    await expect(c.setModel({ variant: "ultra" })).rejects.toThrow(/one of low, high, max/);
+    // Another model starts at its own default level; one that takes none refuses a level.
+    expect(await c.setModel({ model: "opencode/ling-flash" })).toEqual({ model: "opencode/ling-flash", variant: null });
+    await expect(c.setModel({ variant: "high" })).rejects.toThrow(/takes no level/);
+    // Not its model, one switched off, not a model's name at all: never sent.
+    const sent = state.switches.length;
+    await expect(c.setModel({ model: "opencode/no-such" })).rejects.toThrow(/not a model of its/);
+    await expect(c.setModel({ model: "opencode/retired" })).rejects.toThrow(/not a model of its/);
+    await expect(c.setModel({ model: "bare" })).rejects.toThrow(/not a model of its/);
+    expect(state.switches).toHaveLength(sent);
+    // The session seen running is the one, whatever else the folder holds.
+    state.sessions.push({ id: "ses_other", time: { created: Date.now() + 5 }, model: { id: "ling-flash", providerID: "opencode" } });
+    state.active = { ses_new: { type: "busy" } };
+    await until(() => screens.last() === "working");
+    state.active = {};
+    await until(() => screens.last() === "idle");
+    await c.setModel({ model: "opencode/space-bunny" });
+    expect(state.switches.at(-1)!.session).toBe("ses_new");
+    // Started on a session (`--session`): that one.
+    const resumed = new OpenCodeCompanion({ binary: "/bin/opencode", cwd: tmpdir(), env: {}, args: ["--session", "ses_old"], asks: true, pollMs: 10, serve: fakeServe(url, "pw5") });
+    closers.push(() => resumed.stop());
+    await resumed.start();
+    await resumed.setModel({ model: "opencode/space-bunny", variant: "low" });
+    expect(state.switches.at(-1)).toEqual({ session: "ses_old", model: { id: "space-bunny", providerID: "opencode", variant: "low" } });
   });
 
   it("withdraws a card answered in the TUI, and allows once", async () => {
@@ -204,6 +271,34 @@ describe("terminal host with a companion", () => {
     host.kill(info.id);
     await until(() => host.get(info.id)!.status === "exited");
     expect(companion.stops).toBeGreaterThan(0);
+  });
+
+  it("a terminal whose companion sets the model takes the request through it: while it rests, and the screens are told", async () => {
+    const companion = new ScriptedCompanion({ args: [FAKE], env: process.env as Record<string, string> });
+    const asked: unknown[] = [];
+    (companion as Companion).setModel = async (want) => {
+      asked.push(want);
+      if (want.model === "opencode/no-such") throw new Error("not a model of its: opencode/no-such");
+      return { model: want.model ?? "opencode/space-bunny", variant: want.variant ?? null };
+    };
+    const host = new TerminalHost({ launcher: () => ({ file: process.execPath, args: ["-e", "process.exit(3)"], env: process.env as Record<string, string>, hooks: false, companion }) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "opencode", cwd: tmpdir() });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    await until(() => companion.link);
+    // Not while it works.
+    companion.link!.status("working");
+    await expect(host.askModel(info.id, "opencode/space-bunny")).rejects.toMatchObject({ code: "busy" });
+    companion.link!.status("idle");
+    await host.askModel(info.id, "opencode/space-bunny");
+    expect(host.get(info.id)!.modelNow).toBe("opencode/space-bunny");
+    expect(events.filter((e) => e.type === "model")).toEqual([{ type: "model", model: "opencode/space-bunny" }]);
+    await host.askEffort(info.id, "max");
+    expect(host.get(info.id)!.effort).toBe("max");
+    expect(asked).toEqual([{ model: "opencode/space-bunny" }, { variant: "max" }]);
+    // What its companion refuses is said as it said it.
+    await expect(host.askModel(info.id, "opencode/no-such")).rejects.toMatchObject({ code: "invalid", message: "not a model of its: opencode/no-such" });
   });
 
   it("a companion that does not start: the program starts as planned, status guessed", async () => {

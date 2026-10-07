@@ -158,6 +158,9 @@ export type Companion = {
   attach(link: CompanionLink): void;
   /** The program has ended or the terminal is gone (called once or more). */
   stop(): void;
+  /** Another model, or another level, for the session the program is on, where the companion can set them (OpenCode's
+   *  server). What it is on afterwards; throws with a sentence a screen can show. */
+  setModel?(want: { model?: string | null; variant?: string | null }): Promise<{ model: string; variant: string | null }>;
 };
 export type CompanionLink = {
   status(status: Exclude<TerminalStatus, "exited">): void;
@@ -222,7 +225,7 @@ const ECHO_MS = 600;
 /** The agents whose own prompt takes a command that sets the model or the level at once — Claude Code's `/model <id>`
  *  and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>` — so a screen can change them. Codex and
  *  OpenCode choose in pickers of their own (docs/simple-view-v0.md §5.4). */
-const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi"]);
+const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi"]);   // OpenCode: through its companion's server (`Companion.setModel`)
 /** The screen is read for a suggestion once nothing has been drawn for this long. */
 const SUGGEST_MS = 200;
 const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
@@ -756,8 +759,9 @@ export class TerminalHost {
    *  which Claude Code takes without opening its picker). Claude Code alone: the other agents choose a model in a
    *  picker of their own. Not while it works (the command would wait in its queue as a message), nor while something
    *  waits for an answer. Claude Code keeps the choice as its default for new sessions, as its picker's Enter does. */
-  askModel(id: string, model: string): void {
+  async askModel(id: string, model: string): Promise<void> {
     const s = this.need(id);
+    if (s.companion?.setModel) { await this.switched(s, { model }); return; }
     if (!DIRECT.has(s.harness)) throw new TerminalError("invalid", "this agent chooses its model in its own picker");
     if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
     if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
@@ -772,8 +776,9 @@ export class TerminalHost {
    *  which it also takes while it works (the next request of the turn runs at it). Claude Code alone: Codex chooses in
    *  its `/model` picker, OpenCode in `/variants`, pi by a key. Not while something waits for an answer (the keys
    *  would go to that prompt). Claude Code keeps the level as that model's default for later sessions, `max` excepted. */
-  askEffort(id: string, effort: string): void {
+  async askEffort(id: string, effort: string): Promise<void> {
     const s = this.need(id);
+    if (s.companion?.setModel) { await this.switched(s, { variant: effort }); return; }
     if (!DIRECT.has(s.harness)) throw new TerminalError("invalid", "this agent chooses its level in its own picker");
     if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
     if (s.status === "waiting" || s.pending.size) throw new TerminalError("busy", "the agent waits for an answer");
@@ -786,6 +791,17 @@ export class TerminalHost {
       return;
     }
     this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
+  }
+
+  /** A model or a level set through the terminal's companion (OpenCode: on its own server, which its TUI follows):
+   *  while it rests, as the others; what it is on afterwards is what the screens are told. */
+  private async switched(s: Session, want: { model?: string; variant?: string }): Promise<void> {
+    if (s.status === "exited") throw new TerminalError("exited", `terminal ${s.id} has ended`);
+    if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
+    let now: { model: string; variant: string | null };
+    try { now = await s.companion!.setModel!(want); } catch (err) { throw new TerminalError("invalid", (err as Error).message); }
+    if (now.model !== s.modelNow) { s.modelNow = now.model; s.emit({ type: "model", model: now.model }); }
+    s.effort = now.variant;
   }
 
   /** What Claude Code offers as the next message, looked for once its screen has been still a moment: only while

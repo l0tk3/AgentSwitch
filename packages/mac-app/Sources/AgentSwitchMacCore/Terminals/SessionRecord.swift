@@ -561,10 +561,20 @@ public enum RecordDisplay {
         return option.id == model || option.name == ModelName.display(model)
     }
 
-    /// The agents whose model and level a screen can set at once, because their own prompt takes a command that does
-    /// (Claude Code's `/model <id>` and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`). Codex
-    /// and OpenCode choose in pickers of their own: for them a screen only says what they are on.
-    public static func setsDirectly(_ harness: String) -> Bool { harness == "claude-code" || harness == "pi" }
+    /// The agents whose model and level a screen can set at once: their own prompt takes a command that does (Claude
+    /// Code's `/model <id>` and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`), or their own
+    /// server does (OpenCode's `POST /api/session/:id/model`, on the server the terminal's TUI is attached to). Codex
+    /// chooses in a picker of its own: for it a screen only says what it is on.
+    public static func setsDirectly(_ harness: String) -> Bool { harness == "claude-code" || harness == "pi" || harness == "opencode" }
+
+    /// Why the service did not make a change, in the page's words where it is one of the reasons it gives.
+    public static func refusal(_ reason: String) -> String? {
+        if reason.hasPrefix("no session yet") { return "它还没有会话：发出第一句话之后才能切换。" }
+        if reason.hasPrefix("not a model of its") { return "它那边没有这个模型。" }
+        if reason.hasPrefix("not a level of that model") || reason.hasPrefix("that model takes no level") { return "这个模型没有这一档。" }
+        if reason.hasPrefix("its server is not running") || reason.hasPrefix("this agent chooses") { return "这个终端现在不能从这里切换：切到终端视图操作。" }
+        return nil
+    }
 
     /// Why the model, the level or the way of asking cannot be changed from here now; nil when it can. A control that
     /// cannot change anything is not one to press (2026-10-07, user: 不能切换的话就让他点不动): it is said as plain words,

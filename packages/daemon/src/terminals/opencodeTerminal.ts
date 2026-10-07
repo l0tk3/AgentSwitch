@@ -47,7 +47,17 @@ export function openCodeAsk(req: PermissionRequest): { tool: string; input: Json
   }
 }
 
+/** A model as the screens name it (`provider/model`) and as OpenCode's server takes it. */
+const refOf = (model: string): { providerID: string; id: string } | null => {
+  const cut = model.indexOf("/");
+  return cut > 0 && cut < model.length - 1 ? { providerID: model.slice(0, cut), id: model.slice(cut + 1) } : null;
+};
+
 export class OpenCodeCompanion implements Companion {
+  /** When the companion was made: a session of this folder made since is the TUI's own. */
+  private readonly since = Date.now();
+  /** The session last seen running on this server: the one the TUI is on. */
+  private lastActive: string | null = null;
   private server: StdioServe | null = null;
   private link: CompanionLink | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -115,12 +125,52 @@ export class OpenCodeCompanion implements Companion {
       return;
     }
     if (this.stopped) return;
+    const running = Object.keys(active);
+    if (running.length) this.lastActive = running[running.length - 1]!;
     const listed = new Set(requests.map((r) => r.id));
     for (const [id, ctl] of this.open) if (!listed.has(id)) { ctl.abort(); this.open.delete(id); }
     for (const id of this.handled) if (!listed.has(id)) this.handled.delete(id);
     if (this.o.asks) for (const req of requests) if (!this.open.has(req.id) && !this.handled.has(req.id)) this.surface(req);
     const waiting = forms.length > 0 || (this.o.asks && requests.length > 0);
     this.link.status(waiting ? "waiting" : Object.keys(active).length ? "working" : "idle");
+  }
+
+  /** The session the TUI is on, as far as its server shows: the one it was started on (`--session`), else the one
+   *  last seen running, else the newest one of this folder made since the terminal started. Null before its first
+   *  message (the TUI makes its session then). */
+  private async session(): Promise<string | null> {
+    const at = this.o.args.indexOf("--session");
+    if (at >= 0 && this.o.args[at + 1]) return this.o.args[at + 1]!;
+    if (this.lastActive) return this.lastActive;
+    const all = (await this.call("GET", `/api/session?${this.loc}`))?.data;
+    const mine = (Array.isArray(all) ? all as Json[] : [])
+      .map((s) => ({ id: String(s.id ?? ""), made: Number((s.time as Json | undefined)?.created) || 0 }))
+      .filter((s) => s.id && s.made >= this.since - 2_000)
+      .sort((a, b) => b.made - a.made);
+    return mine[0]?.id ?? null;
+  }
+
+  /** Another model, or another variant (how hard it thinks), for the session the TUI is on — OpenCode's own
+   *  `POST /api/session/:id/model` on the terminal's private server (docs/simple-view-v0.md §5.4; seen on 2.0.24: the
+   *  TUI writes "Switched model to …" and its footer follows). Its server takes any id without a word, so what is
+   *  asked for is checked against its own list first. Throws with a sentence a screen can show. */
+  async setModel(want: { model?: string | null; variant?: string | null }): Promise<{ model: string; variant: string | null }> {
+    if (!this.server || this.stopped) throw new Error("its server is not running");
+    const session = await this.session();
+    if (!session) throw new Error("no session yet: it starts with the first message");
+    const now = ((await this.call("GET", `/api/session/${encodeURIComponent(session)}?${this.loc}`))?.data as Json | undefined)?.model as Json | undefined;
+    const target = want.model ? refOf(want.model) : now && typeof now.id === "string" && typeof now.providerID === "string" ? { providerID: now.providerID, id: now.id } : null;
+    if (!target) throw new Error(want.model ? `not a model of its: ${want.model}` : "it has not said which model it is on");
+    const models = (await this.call("GET", `/api/model?${this.loc}`))?.data;
+    const known = (Array.isArray(models) ? models as Json[] : []).find((m) => m.providerID === target.providerID && m.id === target.id && m.enabled !== false);
+    if (!known) throw new Error(`not a model of its: ${target.providerID}/${target.id}`);
+    const variants = (Array.isArray(known.variants) ? known.variants as Json[] : []).map((v) => String(v.id ?? "")).filter(Boolean);
+    // A variant asked for must be one of that model's; another model starts at its own default.
+    const kept = !want.model && typeof now?.variant === "string" ? now.variant : null;
+    const variant = want.variant ?? kept;
+    if (variant && !variants.includes(variant)) throw new Error(variants.length ? `not a level of that model: one of ${variants.join(", ")}` : "that model takes no level");
+    await this.call("POST", `/api/session/${encodeURIComponent(session)}/model?${this.loc}`, { model: { ...target, ...(variant ? { variant } : {}) } });
+    return { model: `${target.providerID}/${target.id}`, variant: variant ?? null };
   }
 
   private surface(req: PermissionRequest): void {

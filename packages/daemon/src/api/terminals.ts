@@ -352,7 +352,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const id = c.req.param("id");
     const body = await parseBody(c, z.object({ model: ModelId }));
     if (!body.ok) return c.json({ error: body.error }, 400);
-    try { host.askModel(id, body.data.model); } catch (err) { return failed(c, err); }
+    try { await host.askModel(id, body.data.model); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "model", via: via(c), detail: { model: body.data.model } });
     return c.json({ ok: true });
   });
@@ -380,10 +380,11 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
-    // Each agent's own levels: Claude Code's, pi's thinking levels; the others take none from a screen.
-    const levels: readonly string[] = info.harness === "pi" ? PI_THINKING : CLAUDE_EFFORTS;
-    if (!levels.includes(body.data.effort)) return c.json({ error: `effort: one of ${levels.join(", ")}` }, 400);
-    try { host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
+    // Each agent's own levels: Claude Code's, pi's thinking levels. OpenCode's are its model's variants, which its own
+    // server knows: checked there.
+    const levels: readonly string[] | null = info.harness === "opencode" ? null : info.harness === "pi" ? PI_THINKING : CLAUDE_EFFORTS;
+    if (levels && !levels.includes(body.data.effort)) return c.json({ error: `effort: one of ${levels.join(", ")}` }, 400);
+    try { await host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "effort", via: via(c), detail: { effort: body.data.effort } });
     return c.json({ ok: true });
   });
