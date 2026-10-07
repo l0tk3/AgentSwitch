@@ -202,3 +202,85 @@
 - **已知**：`browser_run_code_unsafe` 已限于网关的探测模板（见上），直连桥的进程仍可让 daemon 把页面截图写成任意目录下一个 `secret-gate-mask-<16 位十六进制>.png` 新文件。共享浏览器不经网关代理（同你自己的 Chrome），页面里的值只经网关的填写进入。
 - **测试**：`tests/browserAgents.test.ts`（令牌、私有目录、顺序、接手排队与超时、新连接与定位期间的接手、`browser_close` 等交还、日志工具的拒绝、状态与动作、拒绝、关闭）、`browserAgentContext.test.ts`（上下文替身的隔离、新连接的当前标签、标签对象的过滤与交还后的缓冲）、`browserHeldTraffic.test.ts`（Playwright MCP 自己的 `Tab` 类：接手期间的请求与控制台不进列表、计数与日志文件，重连也一样）、`browserProbes.test.ts`（模板放行、逃逸尝试拒绝、与网关生成的代码核对）、`browserBridge.test.ts`（真 HTTP 上的桥与令牌）、`browserFill.test.ts`（只在人的标签、只填密码与验证码输入框、焦点变了不填）、`browserRules.test.ts`（数据卷写法、大小写、副本与名字，真实文件）、`protected.test.ts`（执行器同样的写法）、`terminalBrowser.test.ts`；网关 `tests/test_fill_value.py`、`tests/test_browser_probe_templates.py`。`scripts/browser_smoke.ts` 在临时目录里用真 Chrome 与仓库里的 secret-gate（临时密钥，不连网关服务）走一遍：经网关导航与快照、标签归属与动作、人的标签不在 agent 列表里、`secret_fill` 填入且结果与快照里没有明文、遮罩截图（daemon 写入、网关核对）、接手时调用等待与失败、交还后继续、人在 agent 的标签里手动登录后 agent 与重连的桥都看不到那次 POST 与控制台、人的填入在 agent 的标签上被拒、填入文本框被拒、填入自己标签的密码框经 `fill-value`、数据卷写法的禁区、跳转到自己端口的子资源与导航、被拒的下载不影响 daemon、Playwright MCP 的文件每次调用后清空。没有用真模型验证（约定不打真模型）。
 - **未做**：调度任务迁入宿主（第 5 步）；`waiting` 状态与实时活动（agent 等你时）；标签名跟随终端改名（目前固定为启动时的 `agent · 文件夹`）。
+
+## 7. 真窗口、Camoufox、身份与引擎（2026-10-05 已定）
+
+用户（2026-10-05，先后）：“浏览器在桌面端能不能不用录屏，直接用原生浏览器？手机端用录屏传输”“而且我想让他用camufox，而不是chrome，而且留下更换指纹和代理的接口”“平时就用真窗口不行吗”“需要留一个camufox和playwright更新的接口，不要留下一堆浏览器版本更新的缓存”；Playwright 的更新方式选“也能经接口单独更新”；看过演示页 `docs/design/implemented/browser-window.html` 后：“可以，按照这个做吧”。本节改 §4 的第 2 条（Mac 上不再是画面），其余各条不变。
+
+### 7.1 可行性验证（2026-10-05，只验证、未改代码）
+
+服务内置的 playwright-core 1.64（配 Firefox 156）驱动 Camoufox 156.0.1-beta.34（mac.arm64，下载 1.29 GB，解包 2.4 GB，其中字体 2.0 GB；临时签名）：
+
+- **能用**：启动、开页、弹出页（带 opener）、`setViewportSize`、鼠标、滚轮、按键、`insertText`（中文）、`context.route` 拦请求、无障碍快照；`CAMOU_CONFIG_1` 环境变量给指纹（核心数、语言、平台），Playwright 的 `proxy` 给代理，两者都在启动时给；`navigator.webdriver` 为 false。
+- **画面**：`page.screencast`（Juggler）无头每秒 17 帧；带窗口每秒 20 帧，被别的窗口盖住 21，应用隐藏 19（隐藏时页面的 `requestAnimationFrame` 掉到每秒 1 次，`layout.throttled_frame_rate` 无效）。不需要录屏权限。带窗口时 DPR 是屏幕的（2），帧可按屏幕像素要（每秒约 14 帧）。
+- **网关密文填入**：`secret-gate browser` 在前、Playwright MCP 在 Camoufox 上，`secret_fill`、字段状态、快照遮盖、截图遮罩、拒绝 `browser_evaluate` 全部通过，表单收到真实值（152 与 156 各一遍）。
+- **版本绑定**：Camoufox 152 配这版 Playwright 时 `setViewportSize` 报协议错、录屏只出一帧。构建必须与 Playwright 的 Firefox 同代。
+- **缺口**：`context.route` 拦不到 `file:` 页面；拦不到重定向之后的请求（页面经一次 302 能访问本机被禁的端口，Chrome 靠 `Network.setBlockedURLs`）；DPR、触摸是整个浏览器一份、启动时定，没有按页的手机模拟（`isMobile` 被接受但无效）；`page.evaluate` 与 `addInitScript` 在隔离的世界里，页面的全局变量看不到、页面也看不到它们。
+- **真窗口**：从外面 `newPage` 的每个页面是一个独立窗口，页面自己 `window.open` 的是同一窗口里的标签（宿主都能看到）；启动时应用到最前；之后从外面开页面不抢键盘焦点，但窗口升到当前窗口的正下方；应用被隐藏时从外面开页面会自己取消隐藏；应用隐藏时输入照常。`addInitScript` 装的监听能数到输入。
+- **启动**：156 每次约 8.3 秒（152 约 0.85 秒），与指纹配置无关。
+
+### 7.2 已定
+
+1. **Mac 上浏览器是 Camoufox 自己的窗口**。主窗口的 `Browser` 页不再画画面，是标签列表加 AgentSwitch 加在标签上的东西：所选标签的信息与一张静止预览、`Show Window`、接手与 `Hand Back`、`Fill Ciphertext`、`Copy URL`、`Close Tab`；状态栏右端是身份，点开是指纹、代理与引擎。⌘L、⌘R、⌘[ ⌘] 归 Camoufox，本页保留 ⌘T。
+2. **引擎是 Camoufox**，只经 Playwright 的公开接口驱动。没有显示器的主机（Linux 纯服务端）无头运行。Camoufox 尚未下载时用本机的 Chrome 作后备，那时 Mac 上仍是画面（现在的样子），没有指纹与代理设置。
+3. **手机仍是画面**，接手时 Mac 上那个窗口缩到手机宽度（窗口最窄 500 点）；页面是窄窗口里的桌面版，不再模拟手机（没有 `mobile`、触摸）；点按照旧换成鼠标事件。
+4. **接手改为自动**：在 agent 的窗口里操作即视为你接手——服务发现不是它自己（agent 的调用、手机转发的输入）发出的输入，就把这个标签记为你接手：agent 的操作排队，接手期间的网络与控制台记录不交给它（§6 的规则不变）；2 分钟无操作或 `Hand Back` 交还。自己的标签没有接手一说。
+5. **身份**：指纹保存在配置旁、保持不变，`New Fingerprint`（或导入一份）才换，换后重新启动浏览器并按网址恢复标签。代理即时生效、无需重启；代理密码以密文保存，模型与执行器不接触明文。时区随代理出口。
+   - 2026-10-05 实现时的两处修正（见 §7.5 第 4 步）：其一，原写“服务不持有明文”做不到——转发层要拿明文去连上游代理，所以明文由凭据网关解开后留在服务的内存里（不落盘、不进日志、不进库、不进模型与执行器上下文）；要让服务也不持有，得由网关自己去连上游，那是网关的一个新入口，未做。其二，时区在浏览器启动时给定，所以代理换了之后时区要到下次启动才跟上，界面说明这一点并给 `Restart Browser`。
+6. **引擎更新**：Camoufox 与 Playwright 成对更新。`GET /browser/engine`（现状与可用更新）、`POST /browser/engine/update`（指定版本或取最新的相容版本），设置的环境检测页一行与命令行同此；默认不自动更新。流程：下载 → 核对官方公布的校验值 → 解包 → 自检（启动、开页、改尺寸、连续出帧、拦截、agent 工具）→ 切换 → 删除旧版本。自检不过不切换、保留原版本并说明原因。**磁盘上任何时候只有一份**：压缩包解包后即删，中断的更新在服务启动时清除，不使用 Playwright 自己的浏览器缓存目录，也不碰用户自己的 camoufox 缓存。Playwright 的新版本装在应用包之外（应用包有签名、运行时不能改），自检不过或缺失时用包内的版本。
+
+### 7.3 结构
+
+- **驱动**：`BrowserDriver` 之下两个实现——Chrome（现有，CDP）与 Camoufox（`firefox.launchPersistentContext`，`executablePath` 指向引擎目录，指纹经 `CAMOU_CONFIG_n` 环境变量，`colorScheme` 等四项媒体特性不覆盖）。驱动接口里按 CDP 形状写的输入改成中性的形状，由各驱动翻译。画面在 Camoufox 上用 `page.screencast` 的 `onFrame`：回调返回的承诺就是确认，宿主照旧一帧一确认。
+- **转发层**：浏览器的全部流量（含对本机的，`network.proxy.allow_hijacking_localhost`）先到服务自己的本地转发代理。它按解析后的地址拒绝 AgentSwitch 自己的端口（重定向、WebSocket、指向本机的域名都挡得住），再直连或交给上游代理；换上游不用重启浏览器。按页的规则（谁的标签、`file:` 的范围）照旧在 `context.route` 与导航前的检查里。`file:` 页面内的跳转与子资源拦不到：Camoufox 里本地文件只经宿主检查过的导航打开，页面内再去读别的本地文件由 Firefox 自己的同源规则挡（每个文件一个源），显示类的引用（图片、框架）不在禁区检查之内——这一条写进 `BOUNDARY.md`。
+- **窗口**：`POST /browser/tabs/:id/show` 把标签的窗口排到本应用最前，Mac 应用再把 Camoufox 激活到最前（由前台的应用把位置让给它：`yieldActivation` 加 `activate(from:)`）。浏览器由服务启动时会到最前：Mac 应用记着之前在前台的是谁，浏览器在刚启动的 30 秒内自己到了前台、而这边 8 秒内没人要过它的窗口（`Show Window`、在 `Browser` 页开标签）、0.6 秒内也没有鼠标按下（那是人点过来的），就把之前的应用换回来，一次启动至多两回（`BrowserFrontPolicy`、`BrowserFrontKeeper`）。浏览器的窗口留在原处，只是不在最前。
+- **引擎目录**：`$AGENTSWITCH_HOME/browser/engine/camoufox/current/`（应用本体与 `version.json`）、`…/engine/playwright/current/`（包外的 playwright-core，可无），更新中的在 `…/engine/incoming-*`，启动时清掉。Playwright 一律经一个加载函数取：包外的在且自检过就用它，否则用包内的。
+- **身份**（`src/browser/identity.ts`、`exit.ts`、`src/api/browserIdentity.ts`）：`$AGENTSWITCH_HOME/browser/identity.json`（0600：指纹配置、生成时间与来源、代理地址与用户名、代理密码的密文、上次查到的出口）。
+  - 指纹：默认的一份是“这台机器上的 Firefox”——系统、屏幕、窗口、字体都用真的（窗口大小若是编的，人就没法调它），只把 Camoufox 的字样换成同版本 Firefox 的，另给核数、音频种子等几项自己的值。引擎换到另一个 Firefox 版本时，浏览器的名字跟着走，其余不变。导入的是一组 Camoufox 属性（JSON 对象，至多 256 KB），原样使用。
+  - 代理：`scheme://host:port`（http、https、socks4、socks5），用户名可无；密码只收 `enc:v1:` 密文，须有用户名。设置时即向凭据网关要一次明文（`secret-gate fill-value`，站点是代理自己的 `host:port`，所以密文要对它有 `fill` 用途），要不到就拒绝、什么都不改。服务启动时再要一次；要不到期间上游不可用，出本机的请求一律 502，不改走直连。只改别的、不重输密码时带 `keepPassword`，沿用已存的密文。
+  - 出口：有代理时经转发层（也就经代理）向一个公开的查询服务发一次 GET，取出口地址、地点与时区；默认 `https://ipinfo.io/json`，`AGENTSWITCH_BROWSER_EXIT_LOOKUP` 可换成别的或 `off`。设置代理时与服务带着代理启动时各查一次，没有代理时不查。查不到不影响代理，界面写明。
+  - 时区：指纹自己没写时区、出口又已知时，浏览器在出口的时区里启动。正在运行的浏览器若是用另一份配置启动的，`restartNeeded` 为真。
+  - 接口（只在本机）：`GET /browser/identity`（指纹摘要与全文、代理（密码只说有无）、出口、`restartNeeded`）、`PUT /browser/identity`（`fingerprint: "new" | {config}` 会重启浏览器；`proxy: {server, username?, password?, keepPassword?} | null` 立即生效）、`POST /browser/identity/restart`。
+  - WebRTC：Camoufox 自带的默认设置是“在代理之后只走代理”（`media.peerconnection.ice.proxy_only_if_behind_proxy`、`default_address_only`），而浏览器始终在转发层之后，所以不会绕过代理直接发 UDP；页面里的通话只能靠 TCP 的中继。
+
+### 7.4 分期
+
+1. 引擎管理：目录、现状、下载与校验、自检、切换与清理、Playwright 加载函数、两条接口与命令行。不动现有浏览器。
+2. Camoufox 驱动与转发层：先无头，对齐现有的宿主测试（标签、画面流、输入、接手与排队、填入、agent 工具）。
+3. 真窗口：带窗口启动、`show`、自动接手、静止预览、手机接手时的尺寸。
+4. 身份：指纹生成与保存、代理切换、代理密码经网关。
+5. Mac：`Browser` 页改成列表加控制、状态栏的身份、指纹 / 代理 / 引擎的浮框、环境检测页一行。演示页移进 `implemented/`。
+6. iPhone：文案（不再是 `Phone Size` 的手机版页面）、`Open on Mac`。
+7. `packages/secret-gate/BOUNDARY.md`、各 README；网关代理对大响应改为流式（下载 Camoufox 时发现它把整个响应收进内存）。
+
+### 7.5 进度
+
+**第 1、2 步的服务端已完成（2026-10-05，未提交）**，Mac 与手机的界面还没动；Camoufox 现在仍以无头方式运行，装了它之后 Mac 的 `Browser` 页照旧是画面。
+
+- **引擎管理**（`packages/daemon/src/browser/engine/`）：`store.ts`（目录：`camoufox/current`、`playwright/current`、`incoming-*`；切换即删旧、启动时清扫）、`update.ts`（下载 → 校验 → 解包 → 自检 → 切换，一次一个，可取消）、`releases.ts`（读 GitHub 的发布与 npm 的版本；只给有校验值的构建）、`files.ts`（下载、`ditto` / `tar` 解包、找 Camoufox 的程序）、`loader.ts`（Playwright 从哪来）、`selfCheck.ts`（真的启动一次：启动、开页、改尺寸、连续出帧、拦截、agent 工具）、`kit.ts`（对外的服务）。接口 `GET /browser/engine`（`?check=1` 去问可用版本）、`POST /browser/engine/update`、`POST /browser/engine/cancel`，只在本机（不在手机的白名单上）；命令行 `agentswitch engine [check] | engine update [--camoufox <版本>|latest] [--playwright <版本>|bundled] | engine cancel`。
+  - 同时更新 Playwright 时必须写明 Camoufox 的版本（新 Playwright 驱动哪个 Firefox 要解包后才知道，是否配套由自检决定）；`--playwright bundled` 改回应用自带的那份。
+  - 实测：一次性服务上 `engine update --camoufox latest` 下载 1.29 GB、校验、解包、自检、切换，结束后引擎目录里只有 `camoufox/current`（2.3 GB）。自检对 156 通过（13 秒），对 152 在“改尺寸”一步不通过。
+- **Playwright 只用一份**：浏览器由哪一份启动，agent 的工具（Playwright 自己的 MCP）就从哪一份加载（`playwrightInUse`）；Chrome 的驱动同样经加载函数取。
+- **Camoufox 驱动**（`camoufoxDriver.ts`、`camoufoxInput.ts`）：宿主发给驱动的输入仍是原来的形状（没有改成中性的，改动面太大），由驱动翻译成 Playwright 的鼠标键盘动作，修饰键按需按下松开；尺寸用 `setViewportSize`，不按页缩放；画面用 `page.screencast`，承诺即确认。配置目录是 Chrome 的旁边一份（`browser-profiles/main-camoufox`）：**两个浏览器的登录态不通**，换成 Camoufox 后要重新登录。
+- **转发层**（`forwarder.ts`，库 `proxy-chain`）：只听本机回环，只认本次运行的口令（别的程序用不了它）；AgentSwitch 自己的端口按名字或解析结果拒绝；本机与内网直连，其余交给上游代理（现在还没有设置的入口，第 4 步）。
+- **本地文件**：Firefox 不让 `file:` 经过拦截，页面里的链接或内嵌指向受保护的文件时，改为页面到了之后立刻问、不许看的换成拒绝页（内容在页面里出现过一瞬）。宿主自己发起的打开仍是事先拒绝。
+- **实机检查**：`scripts/browser_smoke.ts` 加了 `BROWSER_SMOKE_CAMOUFOX=<程序>`，同一套检查在 Camoufox 上 62 项全过（4 项 Chrome 独有的“两倍绘制”跳过），在 Chrome 上 75 项全过。
+- **第 3 步的服务端也已完成（同日，未提交）**：
+  - 带窗口：`AGENTSWITCH_BROWSER_WINDOW`（Mac 上默认开，`=0` 或其他系统为无头）。`GET /browser/tabs` 多两项：`engine`（`camoufox` / `chrome`）、`windows`（标签是否各有窗口）。
+  - 尺寸：带窗口的标签不设尺寸，窗口多大就多大，画面按来的尺寸收；有屏幕接手并设了尺寸时窗口跟着变，交还后回到原来的大小（驱动记着接手前的大小）。人改了窗口大小，画面流按新尺寸重开。
+  - `POST /browser/tabs/:id/show`（把窗口排到浏览器各窗口最前；把浏览器叫到别的应用前面由 Mac 应用按应用包的位置来做）、`GET /browser/tabs/:id/preview`（静止的 JPEG，2 秒内复用），都只在本机。
+  - 人自己在窗口里开的标签（不是驱动开的，也不是页面弹出的）登记为 `You` 的标签。
+  - 在 agent 的窗口里动手即接手：浏览器的初始化脚本在页面看不到的世界里数输入，驱动每半秒读一次，数变了就说一声；宿主排除自己发的（agent 的调用进行中、0.6 秒内有屏幕转发过输入），其余算人的，以 `mac-window` 的名义接手，两分钟无输入或 `POST …/release {screen: "mac-window"}` 交还。审计里记一条。
+  - `host.restart(between)`：记下各标签的主人与地址，停浏览器，做中间的事，再逐个开回来。引擎更新的“切换”一步包在它里面（`EngineKit.aroundSwitch`）。
+  - 实机检查 `scripts/browser_window_smoke.ts <Camoufox 的程序>`（会开真窗口约半分钟）：21 项全过——窗口保持自己的大小（1280×864，帧 2560 像素宽）、接手设尺寸与交还后原样恢复、手开的标签归 `You`、屏幕的点击不被当成人的、不是宿主发的输入触发接手、叫到最前、预览、重启后三个标签都回来。
+- **第 5 步的 Mac 页面，主体已做（同日，未提交）**：服务说 `windows: true` 时，`Browser` 页右侧换成详情栏（`BrowserDetailPane.swift`）——静止预览（`GET …/preview`，这一页看得见时每 3 秒一张，按图自己的长宽比）、标题、地址、主人与它在做什么、按钮与一句说明；不再取画面流，不接手、不设尺寸、不缩放，地址栏不出现，状态栏右端的接手与缩放两组不出现。列表行尾标出谁拿着（`You`、`On iPhone`），双击一行即 `Show Window`。`Show Window` 先请服务把窗口排到最前，再按应用包的位置（`BrowserFront`）把 Camoufox 激活。`Hand Back` 以 `mac-window` 交还。文字与按钮的规则在 Core 的 `BrowserWindowText`（有测试）。设计预览多四张：`main-browser-window`、`-agent`、`-took`、`-phone`（两种外观都画过，与演示页对照无出入）。Chrome 作后备时（`windows: false`）页面照旧。
+- **第 4 步，身份（同日，未提交）**：结构见 §7.3“身份”。服务端测试 `tests/browserIdentity.test.ts` 20 项；实机检查 `scripts/browser_identity_smoke.ts <Camoufox 的程序>`（无窗口，上游代理与出口查询都是本机的替身）24 项全过——页面与请求读到的都是指纹里的浏览器（`Firefox/156.0`，没有 Camoufox 字样）、重启后不变、新指纹与导入的指纹重启后生效且标签都回来、带密码的代理即时生效且只管出本机的流量、密码不落盘、出口经代理查到、时区重启后变成出口的、`Direct` 即时生效、密码取不到时不放行。另用一次性的网关目录确认：按 Mac 的做法封的密文（`http` + `fill`，站点 `host:port`）只对那个 `host:port` 给出明文，换端口、换主机都拒绝。默认的出口查询经转发层的 HTTPS 隧道实测可用。
+- **第 5 步余下的界面（同日，未提交）**：状态栏右端两项（`BrowserIdentityItems`）——引擎的一句（更新中、未安装，琥珀色）与身份（`macOS · Firefox 156 · socks5 Tokyo`、`… · direct`、`Chrome · No Identity`），点开是浮框 `BrowserIdentityBox`（页面右下角，窗口矮时可滚动）：Camoufox 在用时三段 `Fingerprint`（六行、`New Fingerprint`、`Import…`）/ `Proxy`（地址、用户名、密码、出口、`Apply`、`Direct`，时区待重启时一句说明加 `Restart Browser`）/ `Engine`（版本、`Check for Update`、有新版时 `Update`）；更新中或未安装时只有 `Engine`（进度条、五步、`Cancel`；`Download`）。代理密码在 Mac 上由本机网关封成密文（名字 `browser/proxy`，站点是代理的 `host:port`）再发给服务，明文不出 Mac 应用。模型 `BrowserIdentityModel`，文字与规则在 Core 的 `BrowserIdentity.swift`（有测试）。设计预览多三张：`main-browser-identity`、`main-browser-engine-update`、`main-browser-engine-missing`。演示页的指纹几行、引擎几行已按做出来的样子改过。
+- **同日补的两处（未提交）**：Camoufox 启动失败有自己的说法（`camoufoxLaunchFailure`：程序不在、或启动报错的第一行，都指向引擎一栏；此前程序不在会被说成“未找到 Google Chrome”）；设置的环境检测页多一节 `Browser`，一行 `Engine`（`Camoufox 156.0.1-beta.34 · Playwright 1.64.0`、`Camoufox Not Installed · Chrome in Use`、`Updating: download 62%`），只读，下载与更新在 `Browser` 页的浮框里。
+- **Mac 页面的整体走查（2026-10-05 夜，未提交）**：调试版应用的探测加了两段（`BrowserProbe+Windows.swift`，`-browserProbe` 连一次性服务，窗口放在最后面），真服务加真的 Camoufox 窗口跑过，全部通过：
+  - 有窗口的服务：服务开的标签（没人在这边要过）让浏览器启动并到了前台，前台随即还给原来的应用；列表、详情、静止预览（1280×864）；`Show Window` 后浏览器在最前；身份浮框；代理 `Apply` 即时生效、出口经代理查到、在这边开的标签经代理出网；`Restart Browser` 后两个标签都回来、时区变成出口的、前台仍是原来的应用；`Direct`；`New Fingerprint`（核数变了、标签都回来、前台不变）；关标签。
+  - 没装 Camoufox 的服务：状态栏 `Camoufox Not Installed` · `Chrome · No Identity`；浮框查到可下载的版本与大小；`Download` 开始真的下载并显示进度；`Cancel` 后回到未安装，引擎目录里不留东西。
+  - 走查中改的：浏览器重启后会留在前台（原先只认 12 秒，带标签启动更久，现在 30 秒，并排除人点过来的）；在 `Browser` 页开的标签现在随即 `Show Window`；浮框里“待重启”的说明与按钮分两行；Playwright 的版本去掉构建戳再显示。
+  - 没走到的：代理带密码时 Mac 上封密文那一步（探测里的应用会用到已安装的网关，没有去碰；服务端与网关各自验过）；agent 的标签在页面上的样子（只在设计预览与服务端的实机检查里看过）；`Show Window` 是从后台的探测进程发的，前台的正式应用里没点过。
+- **还没做的**：iPhone 的文案与 `Open on Mac`；网关大响应流式；命令行里的身份（现在只有接口）；让网关自己去连上游代理（服务不持有代理密码的明文）。
+

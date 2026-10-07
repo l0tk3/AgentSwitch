@@ -89,6 +89,19 @@ agent 的浏览器工具是 `secret-gate browser -- <桥>`：上面各表逐条�
 - Playwright MCP 每个连接都会监听整个进程的未处理 rejection（会把 daemon 自己的报给 agent），daemon 在它加上时摘掉；之后 Playwright 自己的 rejection（如它试图保存被拒的下载）只记日志，其余照 Node 默认处理。
 - 已知：共享浏览器不走网关代理（同用户自己的 Chrome），页面里的值只经 gate 的填写进入；执行器的会话槽浏览器照旧走代理。
 
+## 共享浏览器的引擎、转发层与身份（daemon `src/browser/`，browser-v0 §7；2026-10-05）
+
+装了 Camoufox 之后，服务持有的共享浏览器换成它（未装时仍是 Chrome，上一节与“已知缺口”里关于共享浏览器的各条照旧）。下面是这一部分新增的入口与各自守住的，测试在 `packages/daemon/tests/`（`browserForwarder`、`browserCamoufox`、`browserWindows`、`browserEngine`、`browserIdentity`），实机检查在 `packages/daemon/scripts/`（`browser_smoke.ts`、`browser_window_smoke.ts`、`browser_identity_smoke.ts`）：
+
+- 转发层：浏览器的全部流量先到 daemon 在回环地址上的转发代理，每次运行一个随机口令，只有它启动的浏览器知道。AgentSwitch 自己的端口按名字与解析后的地址拒绝（重定向、WebSocket、指向本机的域名都算）；去本机与私网地址的直连，其余交给上游代理（没有就直连）。上游设了却用不了（密码取不到）时一律 502，不改走直连。
+- 本地文件：Firefox 不让 `file:` 请求经过拦截。宿主检查过的导航照旧事先拒绝；页面里的链接、内嵌把页面带到受保护的文件时，是页面到了之后立刻换成拒绝页——内容会在页面里出现一瞬，见“已知缺口”。
+- 窗口里的接手：在 agent 的窗口里，不是宿主自己发出的输入即视为人接手（`mac-window`），agent 的调用排队，接手期间的网络与控制台照上一节的规则不交给它；两分钟无输入或 `Hand Back` 交还，审计记一条。计数用的初始化脚本在页面看不到的世界里，只数次数，不取内容。
+- 静止预览与 `show`：`GET /browser/tabs/:id/preview`、`POST /browser/tabs/:id/show` 只在本机，配对的手机不可用。
+- 引擎下载：Camoufox 取自它在 GitHub 的发布，playwright-core 取自 npm；下载后核对对方公布的校验值（`sha256:`、`sha512-`），不符即弃；再经一次真启动的自检才切换。接口 `GET /browser/engine`、`POST /browser/engine/update`、`…/cancel` 只在本机。这是从外面取可执行文件：信任的是这两处发布与它们公布的校验值，没有另外的签名核对（Camoufox 的 Mac 版是临时签名）。
+- 代理密码：只以密文进 daemon（Mac 应用用本机网关封好再发；接口拒绝明文），以密文存在 `browser/identity.json`（0600）。daemon 向网关要明文用的是人的 `Fill Ciphertext` 那条路（`secret-gate fill-value`，站点为代理自己的 `host:port`，网关按密文的站点与 `fill` 用途核对并记审计）。明文此后留在 daemon 的内存里，供转发层连接上游；不落盘、不进日志与错误（代理库不记日志，出错只给页面一句固定的话）、不进库、不进模型与执行器上下文。
+- 出口查询：有上游代理时，daemon 经转发层（即经代理）向 `https://ipinfo.io/json` 发一次 GET，取出口地址、地点、时区；设置代理时与带着代理启动时各一次，没有代理时不发。对方看到的是代理的出口地址，与浏览器访问任何站点时一样。`AGENTSWITCH_BROWSER_EXIT_LOOKUP=off` 关掉。
+- 指纹：只在本机接口上读写；导入的一份是用户选的文件，原样交给 Camoufox（它的属性里有 `addons`、`certificates` 这类能改变浏览器行为的项——导入等于信任那份文件）。
+
 ## 凭据网关服务（gate-service-v0）
 
 | 入口 | 规则 | 挡什么 | 失败行为 | 测试 |
@@ -115,6 +128,9 @@ agent 的浏览器工具是 `secret-gate browser -- <桥>`：上面各表逐条�
 - 执行器的路径限制（daemon `protected.ts`，gate 家目录、浏览器会话槽位、远程 TLS 私钥禁读）对工具参数里的路径按规范写法与文件身份比较（2026-10-02 起，`src/core/paths.ts`）：`..`、符号链接、大小写、数据卷的写法 `/System/Volumes/Data/Users/…` 都落到同一个根（此前 Claude 的 Read/Edit/Grep 与终端的 PreToolUse 底线用 `/System/Volumes/Data<路径>` 或换大小写即可读到 gate 的密钥）；OpenCode、Claude Code、Codex 自己的按文字匹配的规则另加数据卷写法。shell 命令仍是字符串匹配：绝对路径、`~`、`$HOME`、`${HOME}`、引号和转义的各种写法都认得出，但 `cd` 之后的相对路径、通配、shell 变量、`find ~ -exec` 认不出；OpenCode 不检查参数带 `$` 的 `cd`；Codex 没有按路径的读限制（它在沙箱里读哪都行；申请到沙箱外跑的命令才按禁区检查，2026-09-25）。这些防的是执行器误读，不防有意绕过。装了凭据网关服务后，网关目录对登录用户在文件系统层面不可读，这些规则对它退为锦上添花；没装服务时它们仍是唯一的屏障。
 - 浏览器登录会保留（daemon 的三个会话槽位，threads-v0 §4b）：gate 进程只认得本会话填过、封装过的值，旧会话留在页面上的账号名、页面数据不在它的状态里，截图遮罩和文本脱敏都不覆盖（个人信息四类模式仍生效）。profile 目录对 Claude、OpenCode 执行器禁读；Codex 没有按路径的读限制，能读到 cookie 数据库。
 - 服务持有的共享浏览器（daemon `src/browser/`，browser-v0 §5；人在 App 里用，终端里的 agent 经 gate 与 agent 桥用，见上一节；调度的任务仍用会话槽）：Chrome 只经管道连到 daemon，无调试端口；`file:` 只有人的标签可开，凭据名单与 AgentSwitch 自己的数据、端口在打开前与浏览器内每个请求上按真实路径与文件身份检查（数据卷写法、大小写、符号链接都认得出；`packages/daemon/tests/browserRules.test.ts`、`browserHost.test.ts`）。AgentSwitch 自己的端口（本机接口、远程、网关代理、各 OpenCode 服务）是纵深防御：`localhost.` 等写法、解析到本机的主机名也拦；跳转到这些端口时，子资源由 Chrome 自己拦（`Network.setBlockedURLs`），页面导航无法在发出前拦住（Playwright 不让路由看到跳转的下一跳），请求会到达服务、页面随即停下并显示拒绝；Chrome 自己解析名字，DNS 重绑定绕得过名字检查。这些服务各自要凭证。`main` 配置的登录态会与终端里的 agent 共用；该目录对执行器禁读，对终端里的 agent 不禁读（与用户同一 uid，terminal-v0 §3），它们能读到 cookie 数据库。人在页面里打的字直接进页面，不经网关脱敏；在 agent 的标签里手打的，交还后 agent 的快照看得到（非密码框），见上一节。
+- 共享浏览器为 Camoufox 时（browser-v0 §7）：页面里的链接或内嵌指向受保护的本地文件，拦截是事后的（页面到了再换成拒绝页），内容会出现一瞬，画面流与截图在那一瞬可能带到它；只有人的标签能开 `file:`，所以碰得到的是人自己的标签。
+- 共享浏览器的上游代理密码：解密后的明文在 daemon 进程的内存里（转发层连接上游要用），直到换代理或服务退出。它不进任何持久的地方，但 daemon 与登录用户同一 uid，同用户的进程读得到进程内存；要让 daemon 也不持有，需要网关自己去连上游代理（一个新入口），未做。
+- 共享浏览器的登录状态在 Camoufox 自己的配置目录里（`$AGENTSWITCH_HOME/browser-profiles/main-camoufox`），与 Chrome 那份不通；它与 `browser/`（身份文件、引擎）都在执行器的禁读名单之内（`protected.ts` 的 `readDenied`），Codex 没有按路径的读限制这一条照旧。
 - 同一 macOS 用户下，其他进程能读到 gate MCP 进程的环境变量（含执行范围）和 shell 的代理地址。执行范围防的是误用和跨任务串值，不防同用户的主动窥探；凭据网关服务也不改变这一点（范围仍在用户侧进程里，`gate.sock` 分不出 daemon 和 agent）。
 - 凭据网关服务：浏览器组件仍以登录用户身份运行，所以用途含 `fill` 的密文，同用户的进程可以冒充浏览器组件，对它声称的、在允许列表里的站点经 `browser.resolve` 取到明文。服务逐次记审计，但无法核实调用方真的是浏览器组件、页面真的在那个站点。只用于 http / exec / otp 的密文不受影响。
 - 凭据网关服务：`browser.resolve` 只认 `fill`，所以只有 `http` 用途的新密文在服务模式下不能由浏览器填写（用旧密钥封的除外）。2026-09-27 起调度模型封装网站表单要填的值、手机新建密文（默认）、`credential-reissue` 修复出的种子导入密文都带 `http` + `fill`；只由工具放进请求的接口密钥只带 `http`，浏览器那条路取不到它。模型若把网站密码误标成只有 `http`，浏览器填写会被拒绝（失败即关闭），需重新提交。

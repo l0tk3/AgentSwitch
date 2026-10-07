@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Browser in a Window of Its Own</title>
+<style>
+/* The browser as a real window (docs/browser-v0.md, concept of 2026-10-05; user: 浏览器在桌面端能不能不用录屏，直接用原生
+   浏览器？手机端用录屏传输 … 我想让他用camufox，而不是chrome，而且留下更换指纹和代理的接口 … 平时就用真窗口不行吗 …
+   需要留一个camufox和playwright更新的接口，不要留下一堆浏览器版本更新的缓存). On the Mac the page is no longer a
+   picture of the browser: Camoufox's own windows are the browser, and the Browser page is the list of tabs with what
+   AgentSwitch adds to them — whose they are, what an agent does in one, taking over, Fill Ciphertext, the identity
+   (fingerprint, proxy) and the engine (Camoufox with its Playwright, updated as a pair). The phone keeps its picture.
+   ?look=pixel|classic  &state=yours|agent|took|phone|identity|update|missing */
+:root { --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace; --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px var(--ui); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 16px 16px 6px; }
+.ctl .seg b { font: 400 12px var(--mono); color: #8d8a84; margin-right: 8px; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; margin-left: -1px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+.note { max-width: 1040px; margin: 6px auto 14px; color: #8f8b84; font-size: 12.5px; line-height: 1.7; text-align: center; padding: 0 16px; min-height: 42px; }
+.note b { color: #d8d4cc; font-weight: 600; }
+.stage { position: relative; width: 1180px; height: 630px; margin: 0 auto; }
+.say { max-width: 1040px; margin: 12px auto 60px; padding: 0 16px; color: #a9a59e; font-size: 12.5px; line-height: 1.8; }
+.say h2 { font: 600 12px var(--mono); letter-spacing: .08em; color: #8d8a84; margin: 18px 0 8px; }
+.say b { color: #e9e6df; font-weight: 600; }
+.say ul { margin: 4px 0; padding-left: 18px; }
+.say table { border-collapse: collapse; margin: 6px 0; } .say td, .say th { border: 1px solid #333; padding: 4px 10px; text-align: left; font-weight: 400; }
+.say th { color: #8d8a84; }
+
+.s-pixel { --bg: #000; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --line: #262524; --sel: #1a1a1a; --panel: #000;
+  --signal: #ff2e88; --busy: #2ee6ff; --amber: #ffb000; --green: #9be22d; --red: #ff4a3d; --f: var(--mono); --r: 0px; }
+.s-classic { --bg: #000; --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --line: #2a2a2d; --sel: #232326; --panel: #141416;
+  --signal: #0a84ff; --busy: #0a84ff; --amber: #ff9f0a; --green: #30d158; --red: #ff453a; --f: var(--ui); --r: 6px; }
+
+/* ---------- the main window: the Browser page ---------- */
+.win { position: absolute; background: var(--bg); color: var(--ink); font: 13px var(--f); border-radius: 10px; overflow: hidden;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); user-select: none; -webkit-user-select: none; }
+.main { left: 0; top: 30px; width: 690px; height: 580px; display: grid; grid-template: 28px minmax(0, 1fr) 26px / 44px 246px minmax(0, 1fr); }
+.bar { grid-column: 1 / -1; display: flex; align-items: center; padding: 0 10px 0 12px; position: relative; border-bottom: 1px solid var(--line); }
+.lights { display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; background: #3a3a3c; }
+.key .lights i:nth-child(1) { background: #ff5f57; } .key .lights i:nth-child(2) { background: #febc2e; } .key .lights i:nth-child(3) { background: #28c840; }
+.title { position: absolute; left: 50%; transform: translateX(-50%); font: 600 13px var(--ui); white-space: nowrap; }
+.bar .grow { flex: 1; } .bar .plus { font: 16px var(--mono); color: var(--ink2); width: 24px; text-align: center; }
+.rail { border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 10px; }
+.rail i { width: 18px; height: 14px; border: 1.5px solid var(--ink3); display: block; border-radius: calc(var(--r) * .6); } .rail i.on { border-color: var(--signal); }
+.list { border-right: 1px solid var(--line); padding: 6px 0; font: 12.5px var(--f); color: var(--ink2); overflow: hidden; }
+.list .g { padding: 8px 12px 3px; color: var(--ink3); font: 11.5px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s-classic .list .g { font: 600 11px var(--ui); letter-spacing: .02em; }
+.row { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; padding: 5px 12px 5px 14px; }
+.row.sel { background: var(--sel); color: var(--ink); box-shadow: inset 3px 0 0 var(--signal); }
+.row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.row .d { grid-column: 2 / 4; font-size: 11.5px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .d.wait { color: var(--amber); }
+.row .tag { font: 11px var(--mono); color: var(--ink2); white-space: nowrap; }
+.row .tag.you { color: var(--signal); } .row .tag.away { color: var(--amber); }
+.sq { width: 8px; height: 8px; background: var(--green); display: block; border-radius: calc(var(--r) * 1.4); }
+.sq.idle { background: none; box-shadow: inset 0 0 0 1.5px var(--ink3); } .sq.busy { background: var(--busy); } .sq.wait { background: var(--amber); }
+.srv { display: flex; gap: 8px; padding: 4px 12px 4px 14px; font-size: 12px; } .srv b { font-weight: 400; color: var(--ink); } .srv span { color: var(--ink3); font-family: var(--mono); }
+
+.detail { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow: hidden; }
+.shot { height: 150px; border: 1px solid var(--line); border-radius: var(--r); position: relative; overflow: hidden; background: #0b0b0c; }
+.shot .pg { position: absolute; inset: 0; padding: 14px 16px; display: grid; gap: 7px; align-content: start; opacity: .75; }
+.shot .pg i { display: block; height: 7px; background: #2d2d30; border-radius: 2px; } .shot .pg i.h { height: 12px; width: 46%; background: #45454a; }
+.shot .pg i.b { width: 90px; height: 20px; background: #24553a; margin-top: 4px; }
+.shot .cap { position: absolute; right: 8px; bottom: 6px; font: 11px var(--mono); color: var(--ink3); }
+.shot.narrow .pg { right: auto; width: 150px; border-right: 1px solid var(--line); }
+.shot .act { position: absolute; left: 13px; top: 77px; width: 96px; height: 26px; border: 1.5px solid var(--busy); border-radius: 3px; }
+.shot .act span { position: absolute; left: -1.5px; top: 28px; font: 11px var(--mono); color: var(--busy); white-space: nowrap; }
+.h1 { font: 600 15px var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr { font: 12px var(--mono); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr b { color: var(--ink); font-weight: 400; }
+.who { font-size: 12.5px; color: var(--ink2); display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.who b { color: var(--ink); font-weight: 400; } .who .amber { color: var(--amber); } .who .sig { color: var(--signal); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.btn { font: 12.5px var(--f); padding: 4px 11px; border: 1px solid var(--ink3); color: var(--ink); border-radius: var(--r); white-space: nowrap; }
+.s-pixel .btn::before { content: "[ "; color: var(--ink3); } .s-pixel .btn::after { content: " ]"; color: var(--ink3); } .s-pixel .btn { border: 0; padding: 4px 2px; }
+.btn.go { color: var(--signal); } .s-classic .btn.go { background: var(--signal); border-color: var(--signal); color: #fff; }
+.btn.dim { color: var(--ink2); } .btn.danger { color: var(--red); }
+.hint { font-size: 12px; line-height: 1.65; color: var(--ink2); } .hint.amber { color: var(--amber); }
+.st { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 10px 0 12px; font: 12px var(--f); color: var(--ink2); white-space: nowrap; border-top: 1px solid var(--line); }
+.st .grow { flex: 1; } .st .dot { display: inline-block; width: 7px; height: 7px; background: var(--green); margin-right: 6px; border-radius: calc(var(--r) * 1.4); }
+.st .id { color: var(--ink); padding: 2px 7px; border-radius: var(--r); } .st .id.on { background: var(--ink); color: #000; } .s-classic .st .id.on { background: var(--signal); color: #fff; }
+.st .warn { color: var(--amber); }
+
+/* ---------- the box over the page: identity, engine ---------- */
+.box { position: absolute; left: 304px; bottom: 34px; width: 372px; background: var(--panel); border: 1px solid var(--ink); font: 12.5px var(--f); z-index: 5; padding: 12px 14px; display: none; }
+.s-classic .box { border: .5px solid #3a3a3e; border-radius: 10px; box-shadow: 0 14px 40px rgba(0,0,0,.6); }
+.box h3 { margin: 0 0 8px; font: 11.5px var(--mono); color: var(--ink3); font-weight: 400; } .s-classic .box h3 { font: 600 11px var(--ui); color: var(--ink2); }
+.box h3:not(:first-child) { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.kv { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 4px 10px; color: var(--ink2); } .kv b { color: var(--ink); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field { border: 1px solid var(--ink3); border-radius: var(--r); padding: 4px 8px; font: 12px var(--mono); color: var(--ink); display: flex; gap: 8px; }
+.field span { color: var(--ink3); } .field .lock { color: var(--green); }
+.box .btns { margin-top: 10px; } .box .hint { margin-top: 8px; }
+.meter { height: 6px; background: var(--line); margin: 8px 0 6px; border-radius: 3px; overflow: hidden; } .meter i { display: block; height: 100%; width: 62%; background: var(--signal); }
+.steps { font: 12px var(--mono); color: var(--ink3); display: grid; gap: 2px; } .steps .done { color: var(--green); } .steps .now { color: var(--ink); }
+
+/* ---------- Camoufox's own window ---------- */
+.fox { left: 712px; top: 86px; width: 468px; height: 450px; background: #1c1b22; color: #fbfbfe; font: 12.5px var(--ui); display: grid; grid-template-rows: 38px 36px minmax(0, 1fr); z-index: 2; transition: width .25s, left .25s; }
+.fox .tabs { display: flex; align-items: flex-end; gap: 6px; padding: 0 10px; background: #1c1b22; }
+.fox .tabs .lights { align-self: center; margin-right: 8px; }
+.fox .tab { height: 30px; padding: 0 12px; display: flex; align-items: center; gap: 8px; background: #2b2a33; border-radius: 6px 6px 0 0; max-width: 220px; white-space: nowrap; overflow: hidden; }
+.fox .tab.off { background: none; color: #a9a8b3; }
+.fox .tab i { width: 10px; height: 10px; border-radius: 2px; background: #5b8def; flex: none; }
+.fox .nav { display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #2b2a33; color: #a9a8b3; }
+.fox .url { flex: 1; height: 24px; border-radius: 5px; background: #1c1b22; display: flex; align-items: center; padding: 0 10px; font: 12px var(--mono); color: #cfcfd8; overflow: hidden; white-space: nowrap; }
+.fox .page { background: #fff; color: #222; padding: 26px 30px; display: grid; gap: 10px; align-content: start; position: relative; overflow: hidden; }
+.fox .page i { display: block; height: 9px; background: #e3e3e8; border-radius: 2px; } .fox .page i.h { height: 18px; width: 52%; background: #c9c9d2; }
+.fox .page i.b { width: 120px; height: 30px; background: #2da44e; border-radius: 6px; margin-top: 8px; }
+.fox .page .field2 { width: 240px; height: 28px; border: 1.5px solid #c9c9d2; border-radius: 6px; margin: 4px 0 2px; background: #fff; position: relative; }
+body.fill .fox .page .field2 { border-color: #0a84ff; box-shadow: 0 0 0 3px rgba(10,132,255,.25); margin-bottom: 20px; }
+body.fill .fox .page .field2::after { content: "Fill Ciphertext → this field"; position: absolute; left: 0; top: 34px; font: 11px var(--mono); color: #0a63c9; white-space: nowrap; }
+.fox .mark { position: absolute; left: 26px; top: 126px; width: 128px; height: 38px; border: 2px solid #19b6d2; border-radius: 6px; display: none; }
+.fox .mark span { position: absolute; left: -2px; top: 40px; font: 11px var(--mono); color: #0b7e93; white-space: nowrap; }
+.fox .hand { position: absolute; left: 150px; top: 92px; font-size: 20px; display: none; }
+.fox .who2 { position: absolute; right: 10px; bottom: 8px; font: 11px var(--mono); color: #8a8a94; }
+
+body.st-agent .fox .mark, body.st-took .fox .hand { display: block; }
+body.st-phone .fox { width: 300px; left: 712px; }
+body.st-identity .box.identity, body.st-update .box.engine, body.st-missing .box.missing { display: block; }
+body.st-missing .fox { display: none; }
+[data-s] { display: none; }
+</style>
+</head>
+<body class="s-classic st-yours">
+<div class="ctl">
+  <span class="seg"><b>look</b><button data-look="classic">classic</button><button data-look="pixel">pixel</button></span>
+  <span class="seg"><b>state</b><button data-state="yours">yours</button><button data-state="agent">agent's</button><button data-state="took">you stepped in</button><button data-state="phone">on iphone</button><button data-state="identity">identity</button><button data-state="update">engine update</button><button data-state="missing">not installed</button></span>
+</div>
+<p class="note" id="note"></p>
+
+<div class="stage">
+  <!-- the main window -->
+  <div class="win main key">
+    <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="title">Browser</span><span class="grow"></span><span class="plus" title="New Tab ⌘T">+</span></div>
+    <div class="rail"><i></i><i></i><i class="on"></i></div>
+    <div class="list">
+      <div class="g">// You</div>
+      <div class="row" data-row="yours"><i class="sq idle"></i><span class="t">Pull requests · l0tk3/AgentSwitch</span><span class="tag"></span><span class="d">github.com</span></div>
+      <div class="row"><i class="sq idle"></i><span class="t">localhost:5173</span><span class="tag"></span><span class="d">Vite · web</span></div>
+      <div class="g">// codex · AgentSwitch</div>
+      <div class="row" data-row="agent"><i class="sq busy"></i><span class="t">Review #128 · l0tk3/AgentSwitch</span><span class="tag" id="agentTag"></span><span class="d" id="agentDoing">click "Merge pull request"</span></div>
+      <div class="g">// claude · MailLab</div>
+      <div class="row" data-row="phone"><i class="sq wait"></i><span class="t">Sign in · Fastmail</span><span class="tag" id="phoneTag"></span><span class="d wait">等你：输入验证码</span></div>
+      <div class="g">// Local Servers on Mac</div>
+      <div class="srv"><b>:5173</b><span>node · web</span></div>
+      <div class="srv"><b>:8000</b><span>python3 · docs</span></div>
+    </div>
+    <div class="detail">
+      <div class="shot" id="shot"><div class="pg"><i class="h"></i><i></i><i style="width:82%"></i><i style="width:64%"></i><i class="b"></i><i style="width:70%"></i></div><div class="act" data-s="agent"><span>codex · click "Merge pull request"</span></div><span class="cap" id="cap">preview · 3s ago</span></div>
+      <div class="h1" id="h1"></div>
+      <div class="addr" id="addr"></div>
+      <div class="who" id="who"></div>
+      <div class="btns" id="btns"></div>
+      <div class="hint" id="hint"></div>
+    </div>
+    <div class="st"><span><i class="dot"></i>Gate</span><span><i class="dot"></i>iPhone</span><span class="grow"></span><span id="stEngine"></span><span class="id" id="stId">macOS · Firefox 156 · direct</span></div>
+
+    <!-- identity -->
+    <div class="box identity">
+      <h3>// Fingerprint</h3>
+      <div class="kv"><span>system</span><b>macOS</b><span>browser</span><b>Firefox 156</b><span>cores</span><b>8</b><span>language</span><b>System</b><span>time zone</span><b>Asia/Tokyo（随代理出口）</b><span>since</span><b>2026-10-05</b></div>
+      <div class="btns"><span class="btn">New Fingerprint</span><span class="btn dim">Import…</span></div>
+      <div class="hint">更换指纹将重新启动浏览器，已打开的标签按网址恢复，页面内未保存的内容会丢失。指纹与配置绑定，不随每次启动变化。</div>
+      <h3>// Proxy</h3>
+      <div class="field">socks5://proxy.example.net:1080</div>
+      <div class="field" style="margin-top:6px"><span>user</span>l0tk3<span style="margin-left:auto" class="lock">■ password sealed</span></div>
+      <div class="kv" style="margin-top:8px"><span>exit</span><b>203.0.113.24 · Tokyo</b></div>
+      <div class="btns"><span class="btn go">Apply</span><span class="btn dim">Direct</span></div>
+      <div class="hint">更换代理立即生效，无需重新启动浏览器。代理密码以密文保存；使用时由凭据网关解密，明文只在服务的内存中。</div>
+    </div>
+    <!-- engine: update -->
+    <div class="box engine">
+      <h3>// Engine</h3>
+      <div class="kv"><span>camoufox</span><b>156.0.1-beta.34</b><span>to</span><b>156.0.1-beta.36</b><span>playwright</span><b>1.64.0 (bundled)</b></div>
+      <div class="meter"><i></i></div>
+      <div class="steps"><span class="done">■ download</span><span class="done">■ checksum matches the release</span><span class="done">■ unpack</span><span class="now">▸ self-check: launch · resize · frames · tools</span><span>□ switch over, remove the old copy</span></div>
+      <div class="btns"><span class="btn dim">Cancel</span></div>
+      <div class="hint">两者成对更新。自检未通过时不切换，继续使用原版本并说明原因。切换成功后立即删除旧版本，磁盘上只保留一份。</div>
+    </div>
+    <!-- engine: not installed -->
+    <div class="box missing">
+      <h3>// Engine</h3>
+      <div class="kv"><span>camoufox</span><b>Not Installed</b><span>playwright</span><b>1.64.0 (bundled)</b><span>download</span><b>156.0.1-beta.34 · 1.29 GB</b></div>
+      <div class="btns"><span class="btn go">Download</span></div>
+      <div class="hint">下载完成前使用本机的 Chrome（无指纹与代理设置，页面以画面显示在此页）。下载后的文件按官方公布的校验值核对。</div>
+    </div>
+  </div>
+
+  <!-- Camoufox's own window -->
+  <div class="win fox key">
+    <div class="tabs"><span class="lights"><i></i><i></i><i></i></span><span class="tab"><i></i><span id="foxTab"></span></span><span class="tab off">+</span></div>
+    <div class="nav"><span>‹</span><span>›</span><span>↻</span><span class="url" id="foxUrl"></span><span>≡</span></div>
+    <div class="page"><i class="h"></i><i></i><i style="width:84%"></i><i class="field2"></i><i class="b"></i><i style="width:66%"></i><i style="width:74%"></i>
+      <div class="mark"><span>codex · click "Merge pull request"</span></div><div class="hand">☝︎</div>
+      <span class="who2">Camoufox · a window of its own</span></div>
+  </div>
+</div>
+
+<div class="say">
+  <h2>// WHAT CHANGES ON THE MAC</h2>
+  <table>
+    <tr><th>部分</th><th>现在（画面）</th><th>改后（真窗口）</th></tr>
+    <tr><td>标签列表</td><td>按持有者分组</td><td>保留；在 Camoufox 里自己开的标签归入 <b>You</b></td></tr>
+    <tr><td>右侧</td><td>实时画面，键鼠转发</td><td>所选标签的信息与一张静止预览（数秒一张，仅此页可见时）</td></tr>
+    <tr><td>选中一行</td><td>右侧显示画面</td><td>单击选中；<b>Show Window</b>（或双击、↩）把它的窗口叫到最前</td></tr>
+    <tr><td>接手</td><td><b>Take Over</b> / <b>Hand Back</b></td><td>在 agent 的窗口里操作即视为接手；停止操作 2 分钟或 <b>Hand Back</b> 交还</td></tr>
+    <tr><td>Fill Ciphertext</td><td>填入画面中的焦点输入框</td><td>填入真窗口中当前标签的焦点输入框（仅你自己的标签）</td></tr>
+    <tr><td>⌘L ⌘R ⌘[ ⌘]</td><td>此页处理</td><td>归 Camoufox；此页保留 ⌘T（新标签）</td></tr>
+    <tr><td>状态栏右端</td><td>—</td><td>身份（系统 · 浏览器 · 代理），点开是指纹、代理与引擎</td></tr>
+  </table>
+  <h2>// RULES</h2>
+  <ul>
+    <li><b>一个标签一个窗口</b>：从 AgentSwitch、手机或 agent 打开的标签各是一个 Camoufox 窗口；你在 Camoufox 里用 ⌘T 开的仍是同一窗口里的标签。agent 打开窗口不抢键盘焦点。</li>
+    <li><b>接手</b>：服务在页面里放一个页面自身读不到的监听，发现不是 agent 发出的输入即视为你接手：agent 的操作排队，接手期间的网络与控制台记录不交给它。密码请在自己的标签里输入，或让 agent 使用 <b>secret_fill</b>。</li>
+    <li><b>手机</b>：仍是画面。接手时 Mac 上的窗口缩到手机宽度（不低于 500 点），页面是窄窗口里的桌面版，不再模拟手机。</li>
+    <li><b>身份</b>：指纹保存在配置里、保持不变；更换需重新启动浏览器。代理经服务自己的转发层，更换即时生效；对本机被禁端口与 file: 的拦截也在这一层。</li>
+    <li><b>引擎</b>：Camoufox 与 Playwright 成对更新（<b>GET /browser/engine</b>、<b>POST /browser/engine/update</b>，设置的环境检测页与命令行同此）。下载、核对校验值、自检、切换、删除旧版本；压缩包解包后即删，中断的更新在下次启动时清除；不使用 Playwright 自己的浏览器缓存目录。Playwright 装在应用包之外，自检未通过时退回包内的版本。</li>
+  </ul>
+</div>
+
+<script>
+const q = new URLSearchParams(location.search);
+let look = q.get("look") === "pixel" ? "pixel" : "classic";
+let state = q.get("state") || "yours";
+const TABS = {
+  yours: { title: "Pull requests · l0tk3/AgentSwitch", host: "github.com", path: "/l0tk3/AgentSwitch/pulls" },
+  agent: { title: "Review #128 · l0tk3/AgentSwitch", host: "github.com", path: "/l0tk3/AgentSwitch/pull/128" },
+  phone: { title: "Sign in · Fastmail", host: "app.fastmail.com", path: "/login" },
+};
+const NOTES = {
+  yours: "<b>你自己的标签。</b>页面在 Camoufox 自己的窗口里；这一页是标签列表，以及 AgentSwitch 加在标签上的东西。",
+  agent: "<b>agent 的标签。</b>它在自己的窗口里操作，不抢键盘焦点；列表与预览上写着它刚做的一步。",
+  took: "<b>你在 agent 的窗口里动了手。</b>服务发现这次输入不是 agent 发出的，即视为你接手：agent 的操作排队等待。",
+  phone: "<b>手机接手了这个标签。</b>Mac 上的窗口缩到手机宽度；手机上看到的是窄窗口里的桌面版页面。",
+  identity: "<b>身份。</b>状态栏右端点开：指纹保存在配置里，更换需重新启动浏览器；代理即时生效，密码以密文保存。",
+  update: "<b>更新引擎。</b>Camoufox 与 Playwright 成对更新，自检通过才切换，切换后删除旧版本，磁盘上只保留一份。",
+  missing: "<b>尚未安装 Camoufox。</b>下载完成前使用本机的 Chrome，页面以画面显示（现在的样子）。",
+};
+function btn(label, cls = "") { return `<span class="btn ${cls}">${label}</span>`; }
+function paint() {
+  document.body.className = `s-${look} st-${state}` + (state === "yours" ? " fill" : "");
+  for (const b of document.querySelectorAll("[data-look]")) b.classList.toggle("on", b.dataset.look === look);
+  for (const b of document.querySelectorAll("[data-state]")) b.classList.toggle("on", b.dataset.state === state);
+  document.getElementById("note").innerHTML = NOTES[state];
+  const which = state === "agent" || state === "took" ? "agent" : state === "phone" ? "phone" : "yours";
+  const tab = TABS[which];
+  for (const r of document.querySelectorAll(".row")) r.classList.toggle("sel", r.dataset.row === which);
+  for (const e of document.querySelectorAll("[data-s]")) e.style.display = e.dataset.s.split(" ").includes(state) ? "block" : "none";
+  document.getElementById("h1").textContent = tab.title;
+  document.getElementById("addr").innerHTML = `■ <b>${tab.host}</b>${tab.path}`;
+  document.getElementById("foxTab").textContent = tab.title;
+  document.getElementById("foxUrl").textContent = `https://${tab.host}${tab.path}`;
+  document.getElementById("agentTag").textContent = state === "took" ? "You" : "";
+  document.getElementById("agentTag").className = "tag" + (state === "took" ? " you" : "");
+  document.getElementById("agentDoing").textContent = state === "took" ? "waiting for you to hand back" : 'click "Merge pull request"';
+  document.getElementById("phoneTag").textContent = state === "phone" ? "On iPhone" : "";
+  document.getElementById("phoneTag").className = "tag" + (state === "phone" ? " away" : "");
+  document.getElementById("shot").classList.toggle("narrow", state === "phone");
+  document.getElementById("cap").textContent = state === "missing" ? "live picture (Chrome)" : "preview · 3s ago";
+  const who = document.getElementById("who"), btns = document.getElementById("btns"), hint = document.getElementById("hint");
+  hint.className = "hint";
+  if (which === "yours") {
+    who.innerHTML = `<i class="sq idle"></i><b>You</b>`;
+    btns.innerHTML = btn("Show Window", "go") + btn("Fill Ciphertext") + btn("Copy URL", "dim") + btn("Close Tab", "dim");
+    hint.textContent = state === "missing" ? "" : "Fill Ciphertext 填入该窗口中当前的焦点输入框，仅限密码与验证码输入框。";
+  } else if (state === "agent") {
+    who.innerHTML = `<i class="sq busy"></i><b>codex · AgentSwitch</b><span>click "Merge pull request"</span>`;
+    btns.innerHTML = btn("Show Window", "go") + btn("Copy URL", "dim") + btn("Close Tab", "danger");
+    hint.textContent = "在它的窗口里操作即视为接手。接手期间输入的内容，交还后 agent 能在页面上看到；密码请在自己的标签中输入。";
+  } else if (state === "took") {
+    who.innerHTML = `<i class="sq wait"></i><b class="sig">You · Taken Over from Codex</b>`;
+    btns.innerHTML = btn("Hand Back", "go") + btn("Show Window") + btn("Copy URL", "dim");
+    hint.textContent = "2 分钟无操作将自动交还。agent 排队等待的操作在交还后继续。";
+  } else {
+    who.innerHTML = `<i class="sq wait"></i><b>claude · MailLab</b><span class="amber">On iPhone · Phone Size</span>`;
+    btns.innerHTML = btn("Show Window") + btn("Copy URL", "dim");
+    hint.className = "hint amber";
+    hint.textContent = "正在 iPhone 上使用。手机交还后窗口恢复原来的大小。";
+  }
+  const id = document.getElementById("stId"), eng = document.getElementById("stEngine");
+  id.classList.toggle("on", state === "identity" || state === "update" || state === "missing");
+  id.textContent = state === "missing" ? "Chrome · No Identity" : state === "identity" ? "macOS · Firefox 156 · socks5 Tokyo" : "macOS · Firefox 156 · direct";
+  eng.className = state === "update" || state === "missing" ? "warn" : "";
+  eng.textContent = state === "update" ? "engine: self-check" : state === "missing" ? "Camoufox Not Installed" : "";
+}
+for (const b of document.querySelectorAll("[data-look]")) b.onclick = () => { look = b.dataset.look; paint(); };
+for (const b of document.querySelectorAll("[data-state]")) b.onclick = () => { state = b.dataset.state; paint(); };
+paint();
+</script>
+</body>
+</html>
