@@ -288,9 +288,19 @@ final class AppModel {
             let state = await manager.verify()
             if let endpoint = state.endpoint, endpoint == before {
                 await refreshAll()
+                await agreeOnConversation()
                 await refreshAddresses()
             }
         }
+    }
+
+    /// The conversation as the Mac has it now: lines deleted there while this phone was not looking (on the Mac's own
+    /// page, or by the service tidying its notices) go from here too. New lines keep coming the usual way.
+    func agreeOnConversation() async {
+        guard let api, conversationLoaded else { return }
+        let asked = session
+        guard let recent = try? await api.assistantMessages(last: Conversation.defaultLimit), asked == session else { return }
+        conversation = conversation.agreeing(with: recent)
     }
 
     func reconnect() {
@@ -326,6 +336,9 @@ final class AppModel {
                 let arrived = conversation.newAssistantMessages(in: fresh)
                 conversation = conversation.merging(fresh)
                 for message in arrived { announceMessage(message) }
+                // A notice may stand for earlier ones the Mac took out as it said it (an install's, after another
+                // install): what the Mac has now is read whole, and what it dropped goes here too.
+                if fresh.contains(where: { $0.kind == .notice }) { await agreeOnConversation() }
             }
             if let waiting = outgoing, conversation.contains(clientId: waiting.clientId) { outgoing = nil }
         } catch APIError.http(status: 404, message: _) {

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { AssistantLog } from "../src/assistant/log.js";
-import { Reporter, updateLine } from "../src/assistant/reports.js";
+import { announceUpdate, Reporter, tidyUpdateNotices, updateLine } from "../src/assistant/reports.js";
 import { Bus } from "../src/engine/bus.js";
 import { markRemote } from "../src/core/caller.js";
 import { buildDaemon, type DaemonConfig } from "../src/daemon.js";
@@ -73,6 +73,36 @@ describe("app updates", () => {
     const reporter = new Reporter({ log: new AssistantLog(join(home, "assistant.db")), store: f.d.store, bus: new Bus(), home });
     reporter.tick();
     expect((await f.conversation()).map((m) => m.text)).toEqual(["新版本安装失败。原因：macOS 在等你在 Mac 上允许"]);
+  });
+
+  it("installs told one after another leave one line: the latest; what was said between them, and an install that failed, stay (2026-10-07)", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-update-"));
+    const log = new AssistantLog(join(home, "assistant.db"));
+    const say = (text: string, role: "assistant" | "user" = "assistant", kind: "notice" | "reply" = "notice") =>
+      log.append({ role, text, kind, taskIds: [], clientId: null, replyTo: null } as Parameters<AssistantLog["append"]>[0]).seq;
+    const ok = (at: string) => updateLine({ ok: true, reverted: false, from: "A", to: at, at: 1, reason: "" });
+    say(ok("2026-10-06T13:32:00Z"));
+    say("把 iOS 端打包装到手机上", "user", "reply");
+    const kept = [
+      say(ok("2026-10-07T04:26:00Z")),   // followed by something else: it stays where it was said
+      say("新版本安装失败。原因：macOS 在等你在 Mac 上允许"),
+    ];
+    const run = [say(ok("2026-10-07T05:05:00Z")), say(ok("2026-10-07T05:26:00Z")), say(ok("2026-10-07T05:40:00Z"))];
+    // The start after the next install: its line is told, and the run before it goes.
+    writeFileSync(join(home, UPDATE_RESULT_FILE), JSON.stringify({ ok: true, reverted: false, from: "A", to: "2026-10-07T05:55:00Z", at: 1 }));
+    announceUpdate(home, log);
+    const now = log.recent(50);
+    expect(now.map((m) => m.text)).toEqual([
+      ok("2026-10-06T13:32:00Z"), "把 iOS 端打包装到手机上", ok("2026-10-07T04:26:00Z"), "新版本安装失败。原因：macOS 在等你在 Mac 上允许", ok("2026-10-07T05:55:00Z"),
+    ]);
+    expect(now.map((m) => m.seq)).toEqual(expect.arrayContaining(kept));
+    for (const seq of run) expect(now.some((m) => m.seq === seq)).toBe(false);
+    // A start with nothing to tell tidies too (the lines piled up before this), and a tidy log is left alone.
+    say(ok("2026-10-07T06:10:00Z"));
+    expect(tidyUpdateNotices(log)).toBe(1);
+    expect(tidyUpdateNotices(log)).toBe(0);
+    announceUpdate(home, log);
+    expect(log.recent(50).at(-1)!.text).toBe(ok("2026-10-07T06:10:00Z"));
   });
 
   it("a switch that fell back says so, with the reason", () => {

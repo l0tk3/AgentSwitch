@@ -165,7 +165,24 @@ function latestWords(events: readonly TaskEvent[]): string | null {
 export function announceUpdate(home: string, log: AssistantLog): void {
   const result = takeUnannounced(home);
   if (result) log.append({ role: "assistant", text: updateLine(result), kind: "notice", taskIds: [], clientId: null, replyTo: null });
+  tidyUpdateNotices(log);
 }
+
+/** An install that went well says the same every time, and a day of them filled the Dispatch page with one line eight
+ *  times over (2026-10-07, user, with the phone's screenshot: 这个页面处理一下，你看看是不是不太协调). Of installs told one
+ *  after another with nothing said between, only the latest stays: it is the one that says which version runs. An
+ *  install that failed or fell back is never one of these and stays. Returns the lines taken out. */
+export function tidyUpdateNotices(log: AssistantLog, look = TIDY_LOOK): number {
+  const recent = log.recent(look);
+  const told = (i: number): boolean => { const m = recent[i]; return m !== undefined && m.role === "assistant" && m.kind === "notice" && UPDATED_OK.test(m.text); };
+  const gone = recent.flatMap((m, i) => (told(i) && told(i + 1) ? [m.seq] : []));
+  return gone.length ? log.remove(gone) : 0;
+}
+
+/** `updateLine` for an install that went well, whatever its time. */
+const UPDATED_OK = /^新版本已安装（构建于 [^）]+），服务运行正常。$/;
+/** How far back a start looks for such a run. */
+const TIDY_LOOK = 300;
 
 export function updateLine(r: UpdateResult): string {
   if (r.ok) return `新版本已安装（构建于 ${localTime(r.to)}），服务运行正常。`;

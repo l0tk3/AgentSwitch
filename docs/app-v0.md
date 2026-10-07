@@ -135,7 +135,9 @@ iPhone: AgentSwitch (SwiftUI)                        Mac: AgentSwitch.app (菜�
     - iOS 默认不收起（`automatic`：“On iOS, iPadOS, tvOS, and watchOS, the tab bar does not minimize”）。要收起须写明 `tabBarMinimizeBehavior(.onScrollDown)`（iOS 26 起，只在 iPhone 上生效）：“Minimize the tab bar when downwards scrolling starts”，收起是“becomes smaller so that the content behind it has more room”，往回滚就恢复。另有 `.onScrollUp`（向上滚时收起）和 `.never`。
     - HIG：“A person can exit the minimized state by tapping a tab or scrolling to the top of the view.”
     - HIG 同时要求不要把底栏藏掉：“Make sure the tab bar is visible when people navigate to different sections of your app. If you hide the tab bar, people can forget which area of the app they're in.” 例外只有盖住它的模态页。它举的收起的例子是带附件的底栏（音乐的迷你播放器收进底栏一行）。
-  - 所以我们用的是 `.onScrollDown`：列表往下读时底栏**缩小**成当前这一项，往回滚或滚到顶恢复，点它也恢复；不是隐藏。iOS 26 以前没有这个状态，底栏照旧。Dispatch 页是从底部往上读的对话，向下滚的机会少，底栏基本一直在。终端页、任务页这类“进到一件事里”的页面照旧整个不显示底栏（它们本来就占满屏）。
+  - 所以我们用的是 `.onScrollDown`：列表往下读时底栏**缩小**成当前这一项，往回滚或滚到顶恢复，点它也恢复；不是隐藏。iOS 26 以前没有这个状态，底栏照旧。终端页、任务页这类“进到一件事里”的页面照旧整个不显示底栏（它们本来就占满屏）。
+  - **Dispatch 页不缩小**（同日，用户发来截图：这个页面处理一下，你看看是不是不太协调）。我原先以为它是从底部往上读的对话、很少向下滚，实际一滚就缩了：输入框留在原处，下面空出一条，角上孤零零一个圆钮。Apple 的做法是让附件跟着缩小的底栏排成一行，但输入框做不了附件（它会长高，还要跟着键盘升起）。所以这一页底栏保持原样，输入框仍然坐在底栏上面。
+  - 同一张截图里另一处不协调：对话里连着八条一模一样的“新版本已安装（构建于 …），服务运行正常。”——每装一次服务就加一条。改成**连着的几次安装只留最新一条**（它说的是现在跑的哪一版）；中间说过别的话的不合并，安装失败和回退的照留。服务每次启动时整理一次，所以已经堆着的那几条在下次安装后就没了。手机原来只收新增的消息，Mac 上删掉的行在手机上要等重开应用才消失；现在收到一条提示、以及应用回到前台时，会把 Mac 现有的最新一段整段读一遍，Mac 没有的行这里也去掉（Mac 主窗口里删掉的对话行同样受益）。
 - **多台 Mac（2026-09-27）**：手机可以配对多台 Mac，同一时间只连“当前 Mac”，在设置顶部切换。
   - 存储：`macs.json` = `{active: <指纹>, servers: [ServerProfile…]}`，按证书指纹区分；令牌仍按指纹存 Keychain，每台一个。旧版的 `server.json` 在首次启动时迁移成只有一台的 `macs.json` 并删掉。
   - 配对：扫到已配对的指纹就更新那一台（新令牌、新地址），扫到新指纹就加一台，两种情况都切到它。配对成功前不动已有的配对。

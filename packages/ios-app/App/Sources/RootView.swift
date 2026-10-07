@@ -113,7 +113,10 @@ struct MainTabs: View {
                 .tag(MainTab.settings)
         }
         .tint(look.isClassic ? Theme.signal : Theme.ink)
-        .minimizesTabBarOnScroll()
+        // Not on the Dispatch page: its reply box sits on the bar, and with the bar made small the box was left above an
+        // empty strip with one round button in its corner (2026-10-07, user's screenshot). Apple moves an accessory in
+        // line with the small bar; a reply box cannot be one (it grows, and must rise with the keyboard).
+        .minimizesTabBarOnScroll(model.tab != .tasks)
         .task(id: model.connection.endpoint) {
             while !Task.isCancelled {
                 await model.refreshTerminals()
@@ -160,8 +163,8 @@ extension View {
     ///   app. If you hide the tab bar, people can forget which area of the app they're in" — so it is made smaller, never
     ///   taken away, and a page of one thing (a terminal, a task) still hides it as before.
     /// Before iOS 26 the bar has no such state and stays as it is.
-    @ViewBuilder func minimizesTabBarOnScroll() -> some View {
-        if #available(iOS 26.0, *) { tabBarMinimizeBehavior(.onScrollDown) } else { self }
+    @ViewBuilder func minimizesTabBarOnScroll(_ on: Bool = true) -> some View {
+        if #available(iOS 26.0, *) { tabBarMinimizeBehavior(on ? .onScrollDown : .never) } else { self }
     }
 }
 

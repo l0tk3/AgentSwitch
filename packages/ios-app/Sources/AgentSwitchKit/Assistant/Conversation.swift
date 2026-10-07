@@ -69,6 +69,16 @@ public struct ConversationLog: Sendable, Equatable {
         return ConversationEntry(seq: message.seq, seqs: lines.map(\.seq).sorted(), exchange: root != nil, createdTaskIds: created)
     }
 
+    /// Without the lines the Mac no longer has. `recent` is the Mac's newest messages, read whole: a line held here that
+    /// is as new as the oldest of them and not among them was taken out there (deleted on the Mac, or an install's
+    /// notice a later one replaced). Lines older than what was read are left as they are.
+    public func agreeing(with recent: [AssistantMessage]) -> ConversationLog {
+        guard let oldest = recent.map(\.seq).min() else { return self }
+        let there = Set(recent.map(\.seq))
+        let kept = messages.filter { $0.seq < oldest || there.contains($0.seq) }
+        return kept.count == messages.count ? self : ConversationLog(kept, keep: keep)
+    }
+
     /// Without these lines (deleted on the Mac); the next full load confirms.
     public func removing(_ seqs: [Int]) -> ConversationLog {
         let gone = Set(seqs)

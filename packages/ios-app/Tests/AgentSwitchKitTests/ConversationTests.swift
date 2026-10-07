@@ -135,6 +135,15 @@ final class ConversationTests: XCTestCase {
                        "a notice is one line and deletes no task")
         XCTAssertEqual(log.entry(of: log.messages[4]).createdTaskIds, [], "a status answer only names the task")
         XCTAssertEqual(log.removing([1, 2]).messages.map(\.seq), [3, 4, 5])
+        // What the Mac no longer has goes from here too (2026-10-07: a run of install notices it tidied to one; a line
+        // deleted on the Mac's own page). The Mac's newest messages are read whole: a held line as new as the oldest
+        // of them and not among them is gone; older ones were not read, and stay.
+        let there = try [m(3, "assistant", kind: "notice", tasks: ["a"]), m(5, "assistant", kind: "status", tasks: ["a"], replyTo: 4)]
+        XCTAssertEqual(log.agreeing(with: there).messages.map(\.seq), [1, 2, 3, 5])
+        XCTAssertEqual(log.agreeing(with: log.messages), log)
+        XCTAssertEqual(log.agreeing(with: []), log, "nothing read is no news")
+        // A line the phone has not got yet is not added this way (it comes with the next poll, and is announced then).
+        XCTAssertEqual(log.agreeing(with: log.messages + (try [m(6, "assistant", kind: "notice")])).messages.map(\.seq), [1, 2, 3, 4, 5])
     }
 
     func testALostAnswerIsFoundByTheClientIdAndNewRepliesAreSingledOut() throws {
