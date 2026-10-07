@@ -211,16 +211,23 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 /* the classic look: a slider of this app's own — a rounded rectangle for the line, a rounded oblong for the knob, light
    streaming forward as particles with short tails in the filled part, the quicker the higher; the top level in its own colour. Its story, the user's words
    on 2026-10-07: a thick pill with a round knob and stars (太大了，而且和codex的一模一样), then bars that rise (太丑了，改成滑块
-   吧还是，然后一个圆角矩形+圆角长方形滑块，里面加上流动特效), slanted bands of light (太难看了 改成粒子流光效果吧), now particles, at the bars' small size. */
+   吧还是，然后一个圆角矩形+圆角长方形滑块，里面加上流动特效), slanted bands of light (太难看了 改成粒子流光效果吧), particles with tails at every level (粒子流光应该克制一些…), now a few
+   plain dots drifting below the top level and the most, the quickest, with tails only at the top. */
 .surf.classic .box.effort { width: 174px; padding: 10px 12px; gap: 7px; }
 .surf.classic .box.effort p, .surf.classic .ee { display: none; }
 .surf.classic .eslider { height: 14px; margin: 4px 0; border-radius: 4.5px; background: color-mix(in srgb, var(--ink) 10%, transparent); }
 .surf.classic .eslider .fill { height: 14px; width: calc(6px + var(--at) * (100% - 12px)); border-radius: 4.5px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 70%, transparent), var(--accent)); }
 .surf.classic .eslider.top .fill { background: linear-gradient(90deg, var(--top-deep), var(--top)); }
-.surf.classic .eslider .fill::after { opacity: calc(.45 + .55 * var(--at)); background-size: 120px 14px; animation: twinkle 2.4s ease-in-out infinite alternate, flow calc(9s - 6.5s * var(--at)) linear infinite;
-  background-image: radial-gradient(7px 1px at 10% 30%, #fff, transparent), radial-gradient(5px .8px at 24% 70%, #fff, transparent), radial-gradient(8px 1px at 39% 45%, #fff, transparent),
-    radial-gradient(5px .8px at 53% 22%, #fff, transparent), radial-gradient(7px 1px at 67% 64%, #fff, transparent), radial-gradient(6px .8px at 81% 38%, #fff, transparent), radial-gradient(8px 1px at 93% 76%, #fff, transparent); }
-@keyframes flow { to { background-position: 120px 0; } }
+.surf.classic .eslider .fill::after { opacity: calc(.3 + .35 * var(--at)); background-size: 150px 14px; animation: twinkle 2.4s ease-in-out infinite alternate, flow calc(26s - 12s * var(--at)) linear infinite;
+  background-image: radial-gradient(1.3px 1.3px at 12% 30%, #fff, transparent), radial-gradient(1px 1px at 31% 68%, #fff, transparent), radial-gradient(1.3px 1.3px at 52% 42%, #fff, transparent),
+    radial-gradient(1px 1px at 71% 24%, #fff, transparent), radial-gradient(1.3px 1.3px at 90% 62%, #fff, transparent); }
+/* the highest level: the most of them, at their quickest, each with a tail */
+.surf.classic .eslider.top .fill::after { opacity: 1; background-size: 120px 14px; animation: twinkle 2.4s ease-in-out infinite alternate, flowtop 3.2s linear infinite;
+  background-image: radial-gradient(8px 1px at 8% 30%, #fff, transparent), radial-gradient(6px .8px at 20% 70%, #fff, transparent), radial-gradient(9px 1px at 33% 45%, #fff, transparent),
+    radial-gradient(6px .8px at 46% 22%, #fff, transparent), radial-gradient(8px 1px at 58% 64%, #fff, transparent), radial-gradient(7px .8px at 70% 38%, #fff, transparent),
+    radial-gradient(9px 1px at 82% 76%, #fff, transparent), radial-gradient(6px .8px at 94% 50%, #fff, transparent); }
+@keyframes flow { to { background-position: 150px 0; } }
+@keyframes flowtop { to { background-position: 120px 0; } }
 .surf.classic .eslider button { top: -3px; width: 24px; height: 20px; margin-left: -6px; left: calc(var(--k) * (100% - 12px)); }
 .surf.classic .eslider button::after { left: 11.25px; top: 7.5px; width: 1.5px; height: 5px; border-radius: .75px; background: color-mix(in srgb, var(--ink) 26%, transparent); }
 .surf.classic .eslider .knob { left: calc(1.5px + var(--at) * (100% - 12px)); top: -3px; width: 9px; height: 20px; border-radius: 3px; background: #fff; box-shadow: 0 .8px 2px rgba(0, 0, 0, .28), 0 0 0 .5px rgba(0, 0, 0, .12); }

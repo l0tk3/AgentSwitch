@@ -4,7 +4,7 @@ import SwiftUI
 // How hard the agent thinks, chosen on a line (docs/terminal-v0.md §1 思考强度; 2026-10-07, user: 思考强度改成滑块调节
 // 加上和官方差不多的特效，新建的时候也这样选): the levels its model takes are the line's stops, lowest first. In the
 // classic look a slider of this app's own: a rounded rectangle for the line, a rounded oblong for the knob, and in the
-// filled part particles of light streaming forward, each with a short tail — the more and the quicker the higher the level, the highest level in a colour of its own
+// filled part a few particles of light drifting forward — a few more and a little quicker with each level, and at the highest level the most, the quickest, each with a tail, the highest level in a colour of its own
 // (violet). Its story, all the user's words on 2026-10-07: first a thick pill with a round knob and stars, after
 // Codex's own (太大了，而且和codex的一模一样); then bars that rise like a signal's strength (太丑了，改成滑块吧还是，然后一个
 // 圆角矩形+圆角长方形滑块，里面加上流动特效); now this, at the bars' small size. In the pixel look a row of cells: a bright
@@ -105,27 +105,33 @@ struct EffortSlider: View {
             inner.fill(shape, with: .linearGradient(Gradient(colors: top ? [Look.topDeep, Look.top] : [colour.opacity(0.7), colour]),
                                                     startPoint: CGPoint(x: 0, y: mid), endPoint: CGPoint(x: max(fill.maxX, 1), y: mid)))
             if moving, fill.width > 12 {
-                // Particles of light streaming forward in the filled part, each with a short tail fading behind it:
-                // more of them, quicker and brighter, the higher the level (2026-10-07, user, of the slanted bands of
-                // light that were here first: 太难看了 改成粒子流光效果吧).
+                // Particles of light drifting forward in the filled part, kept quiet: below the highest level a few
+                // plain dots, slow — a few more and a little quicker with each level; at the highest level the most
+                // of them, at their quickest, and only there each with a tail fading behind it (2026-10-07, user, of
+                // tails and speed at every level: 粒子流光应该克制一些 最高档位之前粒子慢一些而且没拖尾 挡位越高粒子速度和数量
+                // 高一些 到最高挡位速度和粒子数量最大并且加上拖尾; before that, of slanted bands of light: 太难看了).
                 inner.clip(to: shape)
-                let longest: Double = 13
+                let longest: Double = top ? 13 : 0
                 let run = Double(fill.width) + longest
-                for mote in 0..<Int((5 + 12 * heat).rounded()) {
+                let motes = top ? 16 : Int((2 + 7 * heat).rounded())
+                let speed = top ? 30.0 : 4.0 + 9.0 * heat
+                for mote in 0..<motes {
                     let seed = Double(mote) * 12.9898 + 4.1
-                    let pace = (9.0 + 26.0 * heat) * (0.55 + 0.9 * chance(seed * 2.3))
+                    let pace = speed * (0.6 + 0.8 * chance(seed * 2.3))
                     let px = (chance(seed) * run + time * pace).truncatingRemainder(dividingBy: run)
                     let py = Double(track.minY) + 3.0 + chance(seed * 1.7 + 3.1) * (Double(thick) - 3.0 * 2)
                     let twinkle = 0.55 + 0.45 * sin(time * (1.1 + 2.4 * chance(seed * 0.61)) + seed)
-                    let radius = 0.6 + 0.7 * chance(seed * 0.37)
-                    let tail = longest * (0.35 + 0.65 * chance(seed * 0.83)) * (0.55 + 0.45 * heat)
-                    let glow = (0.3 + 0.6 * twinkle) * (0.7 + 0.3 * heat)
-                    var streak = Path()
-                    streak.move(to: CGPoint(x: px - tail, y: py))
-                    streak.addLine(to: CGPoint(x: px, y: py))
-                    inner.stroke(streak, with: .linearGradient(Gradient(colors: [.white.opacity(0), .white.opacity(glow * 0.75)]),
-                                                               startPoint: CGPoint(x: px - tail, y: py), endPoint: CGPoint(x: px, y: py)),
-                                 style: StrokeStyle(lineWidth: radius * 1.5, lineCap: .round))
+                    let radius = 0.6 + 0.6 * chance(seed * 0.37)
+                    let glow = (top ? 0.35 + 0.6 * twinkle : 0.22 + 0.4 * twinkle)
+                    if top {
+                        let tail = longest * (0.4 + 0.6 * chance(seed * 0.83))
+                        var streak = Path()
+                        streak.move(to: CGPoint(x: px - tail, y: py))
+                        streak.addLine(to: CGPoint(x: px, y: py))
+                        inner.stroke(streak, with: .linearGradient(Gradient(colors: [.white.opacity(0), .white.opacity(glow * 0.75)]),
+                                                                   startPoint: CGPoint(x: px - tail, y: py), endPoint: CGPoint(x: px, y: py)),
+                                     style: StrokeStyle(lineWidth: radius * 1.5, lineCap: .round))
+                    }
                     inner.fill(Path(ellipseIn: CGRect(x: px - radius, y: py - radius, width: radius * 2, height: radius * 2)), with: .color(.white.opacity(glow)))
                 }
             }
