@@ -267,6 +267,12 @@ final class RecordTests: XCTestCase {
         let none = try await api.sessionStep(harness: "claude-code", id: "c7", work: "1024", n: 9)
         XCTAssertNil(none)
 
+        // One small picture for each kind of step, no two alike.
+        let kinds: [RecordStep.Kind] = [.read, .search, .list, .run, .edit, .write, .web, .agent, .todo, .think, .tool]
+        XCTAssertEqual(Set(kinds.map(RecordDisplay.symbol)).count, kinds.count)
+        XCTAssertEqual(RecordDisplay.symbol(.run), "terminal")
+        XCTAssertEqual(RecordDisplay.symbol(.web), "globe")
+
         typealias R = ShellHighlight.Run
         XCTAssertEqual(ShellHighlight.runs("cd /a && git commit -F - <<'EOF'\nfix: it\nEOF\ngit log 2>&1 | head -1 # last"),
                        [R("cd", .command), R(" /a && ", .plain), R("git", .command), R(" commit -F - <<", .plain), R("'EOF'", .string), R("\n", .plain), R("fix: it\nEOF", .string), R("\n", .plain),

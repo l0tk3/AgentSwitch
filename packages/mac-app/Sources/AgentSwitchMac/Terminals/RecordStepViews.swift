@@ -77,6 +77,11 @@ struct RecordStepLine: View {
     private func head(open: Bool) -> some View {
         let file = RecordDisplay.namesFile(step)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // The classic look puts a small picture of the kind before the line; the pixel look's word is its mark.
+            if look.isClassic {
+                Image(systemName: RecordDisplay.symbol(step.kind)).font(.system(size: 11.5)).foregroundStyle(step.failed ? Color.failed : Look.ink2)
+                    .frame(width: 16, alignment: .center)
+            }
             Text(RecordDisplay.label(step)).mono(Look.size(11.5, look), weight: .medium).foregroundStyle(step.failed ? Color.failed : Look.ink.opacity(0.75)).lineLimit(1)
                 .layoutPriority(1)
             if let note = step.note {

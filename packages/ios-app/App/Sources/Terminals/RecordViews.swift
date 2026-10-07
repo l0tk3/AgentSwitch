@@ -91,6 +91,7 @@ private struct WorkRow: View {
                     HStack(spacing: 6) {
                         LookGlyph.fold(open: open || verbose).foregroundStyle(.tertiary)
                         Text(RecordDisplay.summary(item, running: running)).mono(12).foregroundStyle(.secondary).lineLimit(1)
+                            .shimmer(running)
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
@@ -169,6 +170,11 @@ private struct StepRow: View {
 
     private var head: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // The classic look puts a small picture of the kind before the line; the pixel look's word is its mark.
+            if look.isClassic {
+                Image(systemName: RecordDisplay.symbol(step.kind)).font(.system(size: 13)).foregroundStyle(step.failed ? Theme.failed : Color.secondary)
+                    .frame(width: 20, alignment: .center)
+            }
             Text(RecordDisplay.label(step)).mono(12, weight: .medium).foregroundStyle(step.failed ? Theme.failed : Theme.ink.opacity(0.72)).lineLimit(1)
                 .layoutPriority(1)
             if let note = step.note {
@@ -269,16 +275,21 @@ struct NowLine: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 BrailleSpinner()
-                if let activity {
-                    Text(ToolDisplay.word(activity.tool)).mono(12, weight: .semibold).foregroundStyle(Theme.ink)
-                    if let note = activity.note, !note.isEmpty {
-                        Text(note).font(.footnote).foregroundStyle(Theme.ink.opacity(0.85)).lineLimit(1)
+                // Still going: its words are quiet, a band of light running across them.
+                HStack(spacing: 7) {
+                    if let activity {
+                        Text(ToolDisplay.word(activity.tool)).mono(12, weight: .semibold).lineLimit(1)
+                        if let note = activity.note, !note.isEmpty {
+                            Text(note).font(.footnote).lineLimit(1)
+                        } else {
+                            Text(MessageDisplay.readable(activity.target)).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                        }
                     } else {
-                        Text(MessageDisplay.readable(activity.target)).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        LookWord("Busy").mono(12, weight: .semibold)
                     }
-                } else {
-                    LookWord("Busy").mono(12, weight: .semibold).foregroundStyle(Theme.busy)
                 }
+                .foregroundStyle(Theme.secondaryInk)
+                .shimmer()
                 Spacer(minLength: 4)
                 if let since {
                     TimelineView(.periodic(from: .now, by: 1)) { context in

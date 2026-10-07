@@ -414,6 +414,24 @@ public enum RecordDisplay {
         }
     }
 
+    /// A kind of step as a small picture before its line, in the classic look (the pixel look says it in its word): one
+    /// picture, one kind (2026-10-07, user, of Codex's own app: 这种小图标…能不能加上). The system's symbol names.
+    public static func symbol(_ kind: RecordStep.Kind) -> String {
+        switch kind {
+        case .read: "doc.text"
+        case .search: "magnifyingglass"
+        case .list: "folder"
+        case .run: "terminal"
+        case .edit: "pencil"
+        case .write: "doc.badge.plus"
+        case .web: "globe"
+        case .agent: "arrow.triangle.branch"
+        case .todo: "checklist"
+        case .think: "brain"
+        case .tool: "wrench.and.screwdriver"
+        }
+    }
+
     /// A step that names a file (shown by the end of its path) rather than a command or a query.
     public static func namesFile(_ step: RecordStep) -> Bool { [.read, .edit, .write, .list].contains(step.kind) }
 

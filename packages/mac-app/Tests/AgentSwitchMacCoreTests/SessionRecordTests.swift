@@ -188,6 +188,12 @@ final class SessionRecordTests: XCTestCase {
         let detail = try JSONDecoder().decode(RecordStepDetail.self, from: Data(#"{"kind":"run","text":"a\nb","note":"Two lines","out":"x","clipped":true}"#.utf8))
         XCTAssertEqual(detail, RecordStepDetail(text: "a\nb", note: "Two lines", out: "x", clipped: true))
 
+        // One small picture for each kind of step, no two alike.
+        let kinds: [RecordStep.Kind] = [.read, .search, .list, .run, .edit, .write, .web, .agent, .todo, .think, .tool]
+        XCTAssertEqual(Set(kinds.map(RecordDisplay.symbol)).count, kinds.count)
+        XCTAssertEqual(RecordDisplay.symbol(.run), "terminal")
+        XCTAssertEqual(RecordDisplay.symbol(.web), "globe")
+
         typealias R = ShellHighlight.Run
         // The word each command begins with, what is quoted, a here-document's body, a comment.
         XCTAssertEqual(ShellHighlight.runs("cd /a/b && git add -A"), [R("cd", .command), R(" /a/b && ", .plain), R("git", .command), R(" add -A", .plain)])

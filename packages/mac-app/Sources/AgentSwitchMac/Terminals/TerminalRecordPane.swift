@@ -223,6 +223,7 @@ private struct RecordRow: View {
                     HStack(spacing: 6) {
                         RecordFold(open: shown)
                         Text(RecordDisplay.summary(item, running: running)).mono(Look.size(11.5, look)).foregroundStyle(Look.ink2).lineLimit(1)
+                            .shimmer(running)
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
@@ -289,16 +290,21 @@ private struct RecordNowLine: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
                 BrailleSpinner().foregroundStyle(Color.busy)
-                if let activity {
-                    Text(RecordDisplay.toolWord(activity.tool)).mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Look.ink)
-                    if let note = activity.note, !note.isEmpty {
-                        Text(note).font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(1)
+                // Still going: its words are quiet, a band of light running across them.
+                HStack(spacing: 7) {
+                    if let activity {
+                        Text(RecordDisplay.toolWord(activity.tool)).mono(Look.size(11.5, look), weight: .semibold).lineLimit(1)
+                        if let note = activity.note, !note.isEmpty {
+                            Text(note).font(.system(size: Look.size(12.5, look))).lineLimit(1)
+                        } else {
+                            Text(activity.target).font(.system(size: Look.size(11.5, look), design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                        }
                     } else {
-                        Text(activity.target).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle)
+                        Text("Working").mono(Look.size(11.5, look), weight: .semibold)
                     }
-                } else {
-                    Text("Working").mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Color.busy)
                 }
+                .foregroundStyle(Look.ink2)
+                .shimmer()
                 Spacer(minLength: 4)
                 if let since {
                     TimelineView(.periodic(from: .now, by: 1)) { context in

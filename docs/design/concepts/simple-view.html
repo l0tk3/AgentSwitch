@@ -148,6 +148,11 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .diffstat { flex: none; display: inline-flex; gap: 5px; font: 12px var(--mono); padding: 1px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); }
 .diffstat em, .stat em, .files em { font-style: normal; color: var(--green); } .diffstat s, .stat s, .files s, .call s.del { text-decoration: none; color: var(--red); }
 .call.think { color: var(--ink3); font-family: var(--ui); }
+.call .ki, .call button.stepfold i.ki { font-style: normal; display: inline-flex; width: 18px; margin-left: 0; vertical-align: -2px; color: var(--ink2); }
+/* still going: quiet words with a band of the ink's full colour running across them */
+.line.now .w, .line.now .x { color: transparent; background: linear-gradient(90deg, var(--ink2) 0 38%, var(--ink) 50%, var(--ink2) 62% 100%) 0 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; animation: shim 1.9s linear infinite; }
+@keyframes shim { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .line.now .w, .line.now .x { animation: none; color: var(--ink2); background: none; } }
 .md.quiet { color: var(--ink2); }
 .call .said { font-family: var(--ui); color: var(--ink); } .call .sub { display: block; font-family: var(--mono); font-size: 11px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .call button.stepfold { color: inherit; font: inherit; text-align: left; } .call button.stepfold i { font-style: normal; color: var(--ink3); margin-left: 4px; }
@@ -832,6 +837,9 @@ function load(preset) {
 
 /* ---------- the two looks' marks: line icons in the classic look (SF Symbols in the app), characters and sprites in the pixel one ---------- */
 const PATHS = {
+  // a kind of step, before its line in the classic look: a page read, a search, an edit, a page made
+  read: '<path d="M6 2.500h5.500L15 6v11.500H6z"/><path d="M11.500 2.500V6H15M8.500 10h4M8.500 13h4"/>', search: '<circle cx="8.700" cy="8.700" r="5"/><path d="M12.500 12.500L17 17"/>',
+  edit: '<path d="M4 16l1-3.600L13.600 3.800l2.600 2.600L7.600 15z"/>', write: '<path d="M6 2.500h5.500L15 6v11.500H6z"/><path d="M10.500 9.500v5M8 12h5"/>',
   back: '<path d="M12.5 4.5L7 10l5.5 5.5"/>', right: '<path d="M7.5 4.5L13 10l-5.5 5.5"/>', down: '<path d="M4.5 7.5L10 13l5.5-5.5"/>', upc: '<path d="M4.5 12.5L10 7l5.5 5.5"/>',
   more: '<circle cx="10" cy="10" r="7.6"/><circle cx="6.5" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="13.5" cy="10" r="1" fill="currentColor" stroke="none"/>',
   plus: '<path d="M10 4.5v11M4.5 10h11"/>', up: '<path d="M10 15.5v-11M5.5 9L10 4.5 14.5 9"/>', latest: '<path d="M10 4.5v11M5.5 11L10 15.5 14.5 11"/>',
@@ -889,12 +897,13 @@ function item(it, i) {
     const took = it.secs >= 60 ? `${Math.floor(it.secs / 60)}m ${it.secs % 60}s` : `${it.secs}s`;
     const stat = add || del ? `<button class="diffstat" data-a="changes" aria-label="查看改动"><em>+${add}</em><s>−${del}</s></button>` : "";
     const verb = { read: "Read", search: "Searched", run: "Ran", edit: "Edited", write: "Created" };
+    const kindIcon = (k) => (S.classic ? `<i class="ki">${icon(k === "run" ? "term" : k, 14, 1.4)}</i>` : "");
     // A command says what the agent said it is for, the command itself under it; opened, the command whole — its
     // lines kept, in colour — and all it printed.
     const step = (st, n) => st.k === "think" ? `<div class="call think">${esc(st.text)}</div>`
-      : st.note ? `<div class="call"><button class="stepfold" data-a="step" data-i="${i}" data-n="${n}" aria-expanded="${!!st.open}"><b>Run</b> <span class="said">${esc(st.note)}</span><i>${G(st.open ? "down" : "right", st.open ? "▾" : "▸", 11)}</i></button>${
+      : st.note ? `<div class="call"><button class="stepfold" data-a="step" data-i="${i}" data-n="${n}" aria-expanded="${!!st.open}">${kindIcon("run")}<b>Run</b> <span class="said">${esc(st.note)}</span><i>${G(st.open ? "down" : "right", st.open ? "▾" : "▸", 11)}</i></button>${
           st.open ? `<div class="cmd"><span class="ps">$</span><pre>${shell(st.full ?? st.text)}</pre><button data-a="copy">Copy</button></div>${st.out ? `<div class="cmdout">${esc(st.outFull ?? st.out)}</div>` : ""}` : `<span class="sub">${esc(st.text)}</span>`}</div>`
-      : `<div class="call"><b>${verb[st.k]}</b> <code>${esc(st.text)}</code>${st.add != null ? ` <em>+${st.add}</em> <s class="del">−${st.del}</s>` : ""}${st.out ? `<br><s>${S.classic ? "" : "⎿ "}${esc(st.out)}</s>` : ""}</div>`;
+      : `<div class="call">${kindIcon(st.k)}<b>${verb[st.k]}</b> <code>${esc(st.text)}</code>${st.add != null ? ` <em>+${st.add}</em> <s class="del">−${st.del}</s>` : ""}${st.out ? `<br><s>${S.classic ? "" : "⎿ "}${esc(st.out)}</s>` : ""}</div>`;
     const steps = open ? it.steps.map((st, n) => (S.verbose || st.k !== "think" ? step(st, n) : "")).join("") : "";
     return `<div class="tools"><div class="wrow"><button class="fold" data-a="fold" data-i="${i}" aria-expanded="${!!open}"><i>${G(open ? "down" : "right", open ? "▾" : "▸", 12)}</i><span>Worked ${took} · ${parts.join(" · ")}</span></button>${stat}</div>${steps}</div>`;
   }
