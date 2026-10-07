@@ -97,6 +97,14 @@ enum TerminalsPagePreview {
         TextScale.shared.set(-2)
         try await shot(to: file("terminals-record-smaller-light"), light: true) { model in stageRecord(model, working: true) }
         TextScale.shared.set(0)
+        // An agent whose model and level a screen cannot set (Codex chooses in a picker of its own): plain words under
+        // the reply box, nothing to press.
+        try await shot(to: file("terminals-record-codex-light"), light: true) { model in
+            model.select("t2")
+            stageRecord(model, working: false, terminal: "t2")
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+        }
         // What Claude Code offers as the next message, in the empty box.
         try await shot(to: file("terminals-record-suggestion-light"), light: true) { model in
             stageRecord(model, working: false)
@@ -125,9 +133,9 @@ enum TerminalsPagePreview {
     }
 
     /// Terminal `t1` as its record, with a made-up session.
-    private static func stageRecord(_ model: TerminalsModel, working: Bool) {
-        model.setSimple(true, pane: TerminalPanes.paneShowing(model.layout, "t1")?.id)
-        guard let pane = model.panes.values.first(where: { $0.session?.id == "t1" }), let info = pane.session?.info else { return }
+    private static func stageRecord(_ model: TerminalsModel, working: Bool, terminal: String = "t1") {
+        model.setSimple(true, pane: TerminalPanes.paneShowing(model.layout, terminal)?.id)
+        guard let pane = model.panes.values.first(where: { $0.session?.id == terminal }), let info = pane.session?.info else { return }
         let ago = { (seconds: Int64) in Int64(Date().timeIntervalSince1970 * 1000) - seconds * 1000 }
         // The pictures sent with the first message, and the reply being written with a file and a picture of its own.
         let source = RecordSource(harness: info.harness, session: info.agentSessionId ?? "preview", client: { DaemonClient(port: 1) })

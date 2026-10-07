@@ -380,7 +380,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
-    if (!CLAUDE_EFFORTS.includes(body.data.effort as (typeof CLAUDE_EFFORTS)[number])) return c.json({ error: `effort: one of ${CLAUDE_EFFORTS.join(", ")}` }, 400);
+    // Each agent's own levels: Claude Code's, pi's thinking levels; the others take none from a screen.
+    const levels: readonly string[] = info.harness === "pi" ? PI_THINKING : CLAUDE_EFFORTS;
+    if (!levels.includes(body.data.effort)) return c.json({ error: `effort: one of ${levels.join(", ")}` }, 400);
     try { host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "effort", via: via(c), detail: { effort: body.data.effort } });
     return c.json({ ok: true });

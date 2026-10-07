@@ -488,15 +488,20 @@ private struct RecordDock: View {
         let current = RecordDisplay.model(now: record.modelNow, record: record.usage?.model, started: info?.model)
         let levels = TerminalEffort.levels(models: model.models, any: model.efforts, harness: harness, current: current)
         let effort = TerminalEffort.level(asked: record.effortAsked, record: record.usage?.effort, started: info?.effort)
-        let ended = info?.status == "exited"
-        let resting = info?.status == "idle" && !waiting
+        // What cannot be changed from here now is said as plain words, not as something to press (2026-10-07, user:
+        // 不能切换的话就让他点不动); resting the pointer on it says why.
+        let options = model.models[harness] ?? []
+        let modeLock = harness == "claude-code" ? RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting) : "这个 agent 的权限方式在启动时选定。"
+        let modelLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting) ?? (options.isEmpty ? "还没有读到它的模型列表。" : nil)
+        // Claude Code takes a level while it works too (the next request of the turn runs at it); pi only at rest.
+        let effortLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting, whileWorking: harness == "claude-code")
         HStack(spacing: 5) {
             if let mode, !mode.isEmpty {
                 // Skipping every permission is said in the colour of a warning; Claude Code's mode is chosen here
-                // (2026-10-07, user: Bypass权限那一块要可以调整，同时要标注出颜色), the others' on their own screens.
+                // (2026-10-07, user: Bypass权限那一块要可以调整，同时要标注出颜色).
                 let tone = RecordDisplay.skipsPermissions(raw) ? Color.failed : Look.ink2
-                if harness == "claude-code" {
-                    MenuButton(entries: { modeEntries(current: raw, resting: resting, ended: ended) }, above: true, help: "Permissions") {
+                if modeLock == nil {
+                    MenuButton(entries: { modeEntries(current: raw) }, above: true, help: "Permissions") {
                         HStack(spacing: 3) {
                             Text(mode).lineLimit(1)
                             LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
@@ -506,22 +511,29 @@ private struct RecordDock: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text(mode).foregroundStyle(RecordDisplay.skipsPermissions(raw) ? Color.failed : Look.faint).lineLimit(1)
+                    Text(mode).foregroundStyle(RecordDisplay.skipsPermissions(raw) ? Color.failed : Look.faint).lineLimit(1).help(modeLock ?? "")
                 }
                 Text("·").foregroundStyle(Look.faint)
             }
-            MenuButton(entries: { modelEntries(harness: harness, current: current, resting: resting, ended: ended) }, above: true, help: "Model") {
+            if modelLock == nil, !record.changing {
+                MenuButton(entries: { modelEntries(harness: harness, options: options, current: current) }, above: true, help: "Model") {
+                    HStack(spacing: 3) {
+                        Text(current.map(ModelName.display) ?? "Model").lineLimit(1)
+                        LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
+                    }
+                    .foregroundStyle(Look.ink2)
+                    .padding(.vertical, 5).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
                 HStack(spacing: 3) {
                     if record.changing { BrailleSpinner() }
                     Text(current.map(ModelName.display) ?? "Model").lineLimit(1)
-                    LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
                 }
-                .foregroundStyle(Look.ink2)
-                .padding(.vertical, 5).contentShape(Rectangle())
+                .foregroundStyle(Look.faint)
+                .help(modelLock ?? "")
             }
-            .buttonStyle(.plain)
-            // The level's slider is Claude Code's here; the others name theirs in the menu beside it.
-            if harness == "claude-code", !levels.isEmpty {
+            if RecordDisplay.setsDirectly(harness), !levels.isEmpty, effortLock == nil {
                 Text("·").foregroundStyle(Look.faint)
                 Button { choosingEffort = true } label: {
                     HStack(spacing: 3) {
@@ -532,12 +544,11 @@ private struct RecordDock: View {
                     .padding(.vertical, 5).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(ended)
                 .help(TerminalEffort.word(harness))
                 .popover(isPresented: $choosingEffort, arrowEdge: .top) {
                     EffortPicker(word: TerminalEffort.word(harness), levels: levels, level: effort,
-                                 enabled: !waiting && !ended && !record.changing,
-                                 note: waiting ? "它正在等待回答，回答后再调整。" : "会记成这个模型的默认；Max 只用于这一次。",
+                                 enabled: !record.changing,
+                                 note: harness == "claude-code" ? "会记成这个模型的默认；Max 只用于这一次。" : nil,
                                  choose: { record.setEffort($0) })
                         .frame(width: 300)
                         .padding(14)
@@ -547,7 +558,7 @@ private struct RecordDock: View {
                 }
             } else if let effort {
                 Text("·").foregroundStyle(Look.faint)
-                Text(TerminalEffort.name(effort)).foregroundStyle(Look.faint).lineLimit(1)
+                Text(TerminalEffort.name(effort)).foregroundStyle(Look.faint).lineLimit(1).help(effortLock ?? "")
             }
         }
         .mono(Look.size(10.5, look))
@@ -562,9 +573,7 @@ private struct RecordDock: View {
         return stops ? "Reply · esc to Stop" : "Reply"
     }
 
-    private func modeEntries(current: String?, resting: Bool, ended: Bool) -> [MenuEntry] {
-        if ended { return [MenuEntry(title: "终端已结束", enabled: false)] }
-        guard resting else { return [MenuEntry(title: "它正在工作或等待回答，结束后再切换", enabled: false)] }
+    private func modeEntries(current: String?) -> [MenuEntry] {
         let record = state.record
         let now = RecordDisplay.mode(current)
         return RecordDisplay.claudeModes.compactMap { raw in
@@ -572,30 +581,16 @@ private struct RecordDock: View {
         }
     }
 
-    private func modelEntries(harness: String, current: String?, resting: Bool, ended: Bool) -> [MenuEntry] {
+    /// The agent's models, the one it is on checked. Only for an agent that takes a model from here, while it rests
+    /// (otherwise there is no menu: `RecordDisplay.locked`).
+    private func modelEntries(harness: String, options: [TerminalModelOption], current: String?) -> [MenuEntry] {
         let record = state.record
-        if ended { return [MenuEntry(title: "终端已结束", enabled: false)] }
-        let options = model.models[harness] ?? []
-        guard harness == "claude-code", !options.isEmpty else {
-            // Its own picker, on its own screen (Codex chooses the reasoning with the model there).
-            let open = { (command: String) in
-                model.setSimple(false, pane: state.id)
-                record.type(command: command)
-            }
-            var entries = [MenuEntry(title: harness == "codex" ? "Model and Reasoning in Terminal…" : "Choose in Terminal…", symbol: "terminal", enabled: resting,
-                                     action: { open(RecordDisplay.modelPicker(harness)) })]
-            if let picker = RecordDisplay.effortPicker(harness) {
-                entries.append(MenuEntry(title: "\(TerminalEffort.word(harness)) in Terminal…", symbol: "terminal", enabled: resting, action: { open(picker) }))
-            }
-            return entries
-        }
-        guard resting else { return [MenuEntry(title: "它正在工作或等待回答，结束后再切换", enabled: false)] }
         let entry = { (option: TerminalModelOption) in
             MenuEntry(title: option.name, checked: RecordDisplay.isCurrent(option, model: current), action: { record.setModel(option.id) })
         }
         let older = options.filter(\.older)
         return options.filter { !$0.older }.map(entry) + (older.isEmpty ? [] : [.separator, MenuEntry(title: "Older", symbol: "clock", children: older.map(entry))])
-            + [.separator, MenuEntry(title: "Claude Code 会把它记成新会话的默认模型", enabled: false)]
+            + (harness == "claude-code" ? [.separator, MenuEntry(title: "Claude Code 会把它记成新会话的默认模型", enabled: false)] : [])
     }
 }
 

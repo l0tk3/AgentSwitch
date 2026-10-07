@@ -561,6 +561,32 @@ public enum RecordDisplay {
         return option.id == model || option.name == ModelName.display(model)
     }
 
+    /// The agents whose model and level a screen can set at once, because their own prompt takes a command that does
+    /// (Claude Code's `/model <id>` and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`). Codex
+    /// and OpenCode choose in pickers of their own: for them a screen only says what they are on.
+    public static func setsDirectly(_ harness: String) -> Bool { harness == "claude-code" || harness == "pi" }
+
+    /// Why the model, the level or the way of asking cannot be changed from here now; nil when it can. A control that
+    /// cannot change anything is not one to press (2026-10-07, user: 不能切换的话就让他点不动): it is said as plain words,
+    /// with this for whoever rests the pointer on it.
+    public static func locked(harness: String, status: String?, waiting: Bool, whileWorking: Bool = false) -> String? {
+        if status == "exited" { return "终端已结束。" }
+        if !setsDirectly(harness) { return "\(agentName(harness)) 在自己的界面里选：切到终端视图操作。" }
+        if waiting || status == "waiting" { return "它正在等待回答，回答后再调整。" }
+        if status != "idle", !whileWorking { return "它正在工作，结束后再调整。" }
+        return nil
+    }
+
+    private static func agentName(_ harness: String) -> String {
+        switch harness {
+        case "claude-code": "Claude Code"
+        case "codex": "Codex"
+        case "opencode": "OpenCode"
+        case "pi": "pi"
+        default: harness
+        }
+    }
+
     /// The command that opens an agent's own model picker, typed for the user who then chooses on its screen; and its
     /// own picker for the thinking level, where it has one apart from that.
     public static func modelPicker(_ harness: String) -> String { harness == "opencode" ? "/models" : "/model" }

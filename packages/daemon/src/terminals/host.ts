@@ -219,6 +219,10 @@ type Chunk = { readonly seq: number; readonly data: string };
 const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
 /** How long output counts as the program answering what was just sent (echo, a mouse move, a resize), not work. */
 const ECHO_MS = 600;
+/** The agents whose own prompt takes a command that sets the model or the level at once — Claude Code's `/model <id>`
+ *  and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>` — so a screen can change them. Codex and
+ *  OpenCode choose in pickers of their own (docs/simple-view-v0.md §5.4). */
+const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi"]);
 /** The screen is read for a suggestion once nothing has been drawn for this long. */
 const SUGGEST_MS = 200;
 const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
@@ -754,11 +758,14 @@ export class TerminalHost {
    *  waits for an answer. Claude Code keeps the choice as its default for new sessions, as its picker's Enter does. */
   askModel(id: string, model: string): void {
     const s = this.need(id);
-    if (s.harness !== "claude-code") throw new TerminalError("invalid", "this agent chooses its model in its own picker");
+    if (!DIRECT.has(s.harness)) throw new TerminalError("invalid", "this agent chooses its model in its own picker");
     if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
     if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
-    s.modelAsked = { model, at: this.o.now() };
+    if (s.harness === "claude-code") s.modelAsked = { model, at: this.o.now() };
     this.write(id, replyBytes(`/model ${model}`, this.bracketedPaste(id), true));
+    // pi says nothing of its model to the service: the one asked for is taken as the one it is on (its own line
+    // says "Model: …"; an id it does not know leaves it where it was, and the screens list only its own ids).
+    if (s.harness === "pi" && s.modelNow !== model) { s.modelNow = model; s.emit({ type: "model", model }); }
   }
 
   /** A screen asks the agent in terminal `id` to think at another level: Claude Code's own command (`/effort <level>`),
@@ -767,9 +774,17 @@ export class TerminalHost {
    *  would go to that prompt). Claude Code keeps the level as that model's default for later sessions, `max` excepted. */
   askEffort(id: string, effort: string): void {
     const s = this.need(id);
-    if (s.harness !== "claude-code") throw new TerminalError("invalid", "this agent chooses its level in its own picker");
+    if (!DIRECT.has(s.harness)) throw new TerminalError("invalid", "this agent chooses its level in its own picker");
     if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
     if (s.status === "waiting" || s.pending.size) throw new TerminalError("busy", "the agent waits for an answer");
+    if (s.harness === "pi") {
+      // pi's command is `/thinking <level>` (seen on 0.87.1: "Thinking level: xhigh"); typed while it works it would
+      // be a message to it, so only while it rests. The level it is at now is what a screen reads as its level.
+      if (s.status !== "idle") throw new TerminalError("busy", "the agent is at work");
+      this.write(id, replyBytes(`/thinking ${effort}`, this.bracketedPaste(id), true));
+      s.effort = effort;
+      return;
+    }
     this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
   }
 

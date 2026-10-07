@@ -34,6 +34,15 @@ const fakeLauncher = (url: () => string, hooks: boolean): Launcher => (req) => (
   hooks,
 });
 
+/** Waits on something that has to be asked for (`until` takes a plain predicate: a promise would always pass). */
+async function untilAsked(get: () => Promise<boolean>, ms = 4000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await get())) {
+    if (Date.now() > end) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 40));
+  }
+}
+
 async function until<T>(get: () => T | undefined | null | false, ms = 8000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
@@ -589,7 +598,7 @@ describe("terminals over HTTP", () => {
     await until(() => offered().length === 3);
     // It works again: gone at once, and not read while it works.
     await say("tool");
-    await until(async () => (await info()).status === "working");
+    await untilAsked(async () => (await info()).status === "working");
     await until(() => offered().length === 4);
     await say("suggest not while it works");
     await new Promise((r) => setTimeout(r, 500));
@@ -693,6 +702,32 @@ describe("terminals over HTTP", () => {
     expect(audit.filter((a) => a.action === "effort").map((a) => a.detail.effort)).toEqual(["high", "max"]);
     const codex = (await call("POST", "/terminals", { harness: "codex", cwd })).json.terminal.id as string;
     expect((await call("POST", `/terminals/${codex}/effort`, { effort: "high" })).status).toBe(400);
+    expect((await call("POST", `/terminals/${codex}/model`, { model: "gpt-6-sol" })).status).toBe(400);
+  });
+
+  it("pi takes both from a screen too, in its own commands: `/model <provider/id>` and `/thinking <level>`, while it rests", async () => {
+    // 2026-10-07, user: codex不能hook掉它的模型选择…其他的agent也是. Seen on pi 0.87.1: "Model: …", "Thinking level: xhigh".
+    const { cwd, base, token, call } = await start();
+    const id = (await call("POST", "/terminals", { harness: "pi", cwd, effort: "medium" })).json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    const info = async () => (await call("GET", `/terminals/${id}`)).json.terminal as { status: string; effort: string | null; modelNow: string | null };
+    await until(() => screen().includes("fake agent ready"));
+    // Its status comes from its output here (no hooks in this test): at rest once it has been quiet.
+    await untilAsked(async () => (await info()).status === "idle");
+    expect((await call("POST", `/terminals/${id}/effort`, { effort: "xhigh" })).json).toEqual({ ok: true });
+    await until(() => screen().includes("got: /thinking xhigh"));
+    await untilAsked(async () => (await info()).status === "idle");
+    expect((await info()).effort).toBe("xhigh");
+    // pi's own levels, not Claude Code's: `off` is one, `ultra` is not.
+    expect((await call("POST", `/terminals/${id}/effort`, { effort: "off" })).status).toBe(200);
+    await until(() => screen().includes("got: /thinking off"));
+    await untilAsked(async () => (await info()).status === "idle");
+    expect((await call("POST", `/terminals/${id}/effort`, { effort: "ultra" })).status).toBe(400);
+    expect((await call("POST", `/terminals/${id}/model`, { model: "anthropic/claude-haiku-4-5" })).json).toEqual({ ok: true });
+    await until(() => screen().includes("/model anthropic/claude-haiku-4-5") || screen().includes("to anthropic/claude-haiku-4-5") || screen().includes("set: anthropic/claude-haiku-4-5"));
+    expect((await info()).modelNow).toBe("anthropic/claude-haiku-4-5");
+    expect(events.filter((e) => e.event === "model").map((e) => e.data.model)).toEqual(["anthropic/claude-haiku-4-5"]);
   });
 
   it("a screen changes the agent's model: its own command typed, Claude Code's question skipped for that one change, the new model told (simple-view-v0 §5.4)", async () => {
