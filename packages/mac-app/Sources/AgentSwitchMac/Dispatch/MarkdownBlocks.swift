@@ -9,9 +9,11 @@ struct MarkdownBlocks: View {
     var size: CGFloat = 14
     var color: Color = Look.ink
     var lineSpacing: CGFloat = 4
+    /// Between one block and the next.
+    var blockSpacing: CGFloat = 8
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: blockSpacing) {
             ForEach(Array(DispatchMarkdown.readableBlocks(text).enumerated()), id: \.offset) { _, block in
                 MarkdownBlockView(block: block, size: size, lineSpacing: lineSpacing)
             }

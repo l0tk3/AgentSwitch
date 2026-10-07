@@ -197,7 +197,8 @@ private struct RecordRow: View {
             let head = whole ? nil : RecordDisplay.preview(item.text)
             VStack(alignment: .leading, spacing: 6) {
                 // What it thought on the way reads quieter than what it has to say to you.
-                MarkdownBlocks(text: head ?? item.text, size: Look.size(13.5, look), color: item.thinking ? Look.ink2 : Look.ink)
+                MarkdownBlocks(text: head ?? item.text, size: Look.prose(look).size, color: item.thinking ? Look.ink2 : Look.ink,
+                               lineSpacing: Look.prose(look).lineSpacing, blockSpacing: Look.prose(look).blockSpacing)
                 if head != nil {
                     Button { whole = true } label: { Text("Show More").mono(Look.size(12, look), weight: .medium) }.buttonStyle(.plain).foregroundStyle(Color.signal)
                 } else if item.clipped {
@@ -381,7 +382,8 @@ private struct RecordDock: View {
         @Bindable var record = state.record
         let info = state.session?.info
         let stops = working && !waiting && record.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !record.sending
-        let radius: CGFloat = look.isClassic ? 14 : 0
+        // A rounder box (2026-10-07, user: 回复的这个框体圆角可以更大): 20, as the agents' own apps round theirs.
+        let radius: CGFloat = look.isClassic ? 20 : 0
         VStack(alignment: .leading, spacing: 6) {
             if let error = record.error {
                 Text(error).font(.system(size: Look.size(12, look))).foregroundStyle(Color.failed).lineLimit(2).textSelection(.enabled).padding(.horizontal, 4)
@@ -406,15 +408,11 @@ private struct RecordDock: View {
                 }
                 if !record.draftFiles.isEmpty { RecordDraftStrip(record: record).padding(.horizontal, 10).padding(.top, 9) }
                 ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
-                             takesFocusAtFirst: focused, label: "Reply", onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
+                             takesFocusAtFirst: focused, label: "Reply", placeholder: stops ? "Reply · esc to Stop" : "Reply",
+                             onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
                              onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
                     .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
-                    .overlay(alignment: .topLeading) {
-                        if record.draft.isEmpty {
-                            Text(stops ? "Reply · esc to Stop" : "Reply").font(.system(size: 14)).foregroundStyle(Look.faint).padding(.leading, 5).allowsHitTesting(false)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.top, 11).padding(.bottom, 7)
+                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 7)
                 HStack(spacing: 8) {
                     MenuButton(entries: {
                         [MenuEntry(title: "Files…", symbol: "folder", action: { record.chooseFiles() }),
@@ -444,7 +442,7 @@ private struct RecordDock: View {
                     .disabled(!record.canSend && !stops)
                     .help(stops ? "Stop esc" : "Send ↩ · New Line ⇧↩")
                 }
-                .padding(.leading, 7).padding(.trailing, 8).padding(.bottom, 8)
+                .padding(.leading, 9).padding(.trailing, 9).padding(.bottom, 9)
             }
             .grounded(Look.panel, radius: radius)
             .framed(Look.line, radius: radius)
@@ -478,7 +476,9 @@ private struct RecordDock: View {
     /// level on a slider. Another agent chooses on its own screen: the menu types its picker's command there.
     @ViewBuilder private func session(_ info: TerminalInfo?, _ record: PaneRecord) -> some View {
         let harness = info?.harness ?? record.agent
-        let mode = RecordDisplay.mode(record.mode) ?? RecordDisplay.mode(info?.mode) ?? info?.mode?.capitalized
+        // How it asks: what its stream or screen said last, else its record's word, else what it was started with.
+        let raw = RecordDisplay.modeNow(now: record.modeNow ?? info?.modeNow, record: record.mode, started: info?.mode)
+        let mode = RecordDisplay.mode(raw) ?? raw?.capitalized
         let current = RecordDisplay.model(now: record.modelNow, record: record.usage?.model, started: info?.model)
         let levels = TerminalEffort.levels(models: model.models, any: model.efforts, harness: harness, current: current)
         let effort = TerminalEffort.level(asked: record.effortAsked, record: record.usage?.effort, started: info?.effort)
@@ -486,7 +486,22 @@ private struct RecordDock: View {
         let resting = info?.status == "idle" && !waiting
         HStack(spacing: 5) {
             if let mode, !mode.isEmpty {
-                Text(mode).foregroundStyle(Look.faint).lineLimit(1)
+                // Skipping every permission is said in the colour of a warning; Claude Code's mode is chosen here
+                // (2026-10-07, user: Bypass权限那一块要可以调整，同时要标注出颜色), the others' on their own screens.
+                let tone = RecordDisplay.skipsPermissions(raw) ? Color.failed : Look.ink2
+                if harness == "claude-code" {
+                    MenuButton(entries: { modeEntries(current: raw, resting: resting, ended: ended) }, above: true, help: "Permissions") {
+                        HStack(spacing: 3) {
+                            Text(mode).lineLimit(1)
+                            LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
+                        }
+                        .foregroundStyle(tone)
+                        .padding(.vertical, 5).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(mode).foregroundStyle(RecordDisplay.skipsPermissions(raw) ? Color.failed : Look.faint).lineLimit(1)
+                }
                 Text("·").foregroundStyle(Look.faint)
             }
             MenuButton(entries: { modelEntries(harness: harness, current: current, resting: resting, ended: ended) }, above: true, help: "Model") {
@@ -530,6 +545,18 @@ private struct RecordDock: View {
             }
         }
         .mono(Look.size(10.5, look))
+    }
+
+    /// Claude Code's ways of asking; the one it is in checked. It changes while it rests: the service presses its ⇧Tab
+    /// until its screen names the mode chosen.
+    private func modeEntries(current: String?, resting: Bool, ended: Bool) -> [MenuEntry] {
+        if ended { return [MenuEntry(title: "终端已结束", enabled: false)] }
+        guard resting else { return [MenuEntry(title: "它正在工作或等待回答，结束后再切换", enabled: false)] }
+        let record = state.record
+        let now = RecordDisplay.mode(current)
+        return RecordDisplay.claudeModes.compactMap { raw in
+            RecordDisplay.mode(raw).map { name in MenuEntry(title: name, checked: name == now, action: { record.setMode(raw, name: name) }) }
+        }
     }
 
     private func modelEntries(harness: String, current: String?, resting: Bool, ended: Bool) -> [MenuEntry] {

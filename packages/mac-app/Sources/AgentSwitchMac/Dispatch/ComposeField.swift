@@ -19,6 +19,10 @@ struct ComposeField: NSViewRepresentable {
     /// waits to be asked (a question's Other).
     var takesFocusAtFirst = true
     var label = "输入任务或问题"
+    /// What the empty field says. The field draws it itself: it is empty only while nothing is typed *and* nothing is
+    /// being composed — an input method's letters are in the field before they are in `text`, and words drawn over it
+    /// from outside sat on top of them (2026-10-07, user: 打字的时候这个占位的字体会覆盖我的字体).
+    var placeholder = ""
     var onSubmit: () -> Void
     var onFiles: ([URL]) -> Void
     /// The clipboard holds files or an image: attach them instead of pasting text.
@@ -76,6 +80,7 @@ struct ComposeField: NSViewRepresentable {
         view.setAccessibilityLabel(label)
         scroll.documentView = view
         context.coordinator.view = view
+        view.placeholder = placeholder
         view.string = text
         return scroll
     }
@@ -84,8 +89,10 @@ struct ComposeField: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.parent = self
         guard let view = coordinator.view else { return }
+        if view.placeholder != placeholder { view.placeholder = placeholder }
         if view.string != text, !view.hasMarkedText() {
             view.string = text
+            view.needsDisplay = true
             coordinator.measure()
         }
         if let insert, insert.id != coordinator.inserted {
@@ -174,6 +181,31 @@ final class ComposeTextView: NSTextView {
     weak var coordinator: ComposeField.Coordinator?
     /// Asked for the keyboard while the page was hidden (⌘N from Terminals, before the page is in): taken once shown.
     var wantsFocus = false
+
+    var placeholder = "" { didSet { needsDisplay = true } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard !placeholder.isEmpty, string.isEmpty, !hasMarkedText() else { return }
+        let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0), y: textContainerInset.height)
+        (placeholder as NSString).draw(at: origin, withAttributes: [.font: ComposeField.font, .foregroundColor: NSColor(Look.faint)])
+    }
+
+    // What is in the field changed, by a key or by an input method: the placeholder comes or goes with it.
+    override func didChangeText() {
+        super.didChangeText()
+        needsDisplay = true
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        needsDisplay = true
+    }
+
+    override func unmarkText() {
+        super.unmarkText()
+        needsDisplay = true
+    }
 
     /// Never from a hidden page: the terminal page keeps its keyboard while Dispatch is behind it.
     func takeFocusIfShown() {

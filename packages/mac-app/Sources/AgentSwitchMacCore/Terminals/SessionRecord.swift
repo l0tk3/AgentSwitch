@@ -291,6 +291,8 @@ public enum TerminalRecordEvent: Equatable, Sendable {
     case record(rev: String)
     /// The agent is on another model now.
     case model(String)
+    /// It asks in another way now (its permission mode, in its own word).
+    case mode(String)
 
     public static func decode(event: String, data: String) -> TerminalRecordEvent? {
         let bytes = Data(data.utf8)
@@ -304,6 +306,9 @@ public enum TerminalRecordEvent: Equatable, Sendable {
         case "model":
             struct Body: Decodable { let model: String }
             return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .model($0.model) }
+        case "mode":
+            struct Body: Decodable { let mode: String }
+            return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .mode($0.mode) }
         default:
             return nil
         }
@@ -549,6 +554,17 @@ public enum RecordDisplay {
     /// The command that opens an agent's own model picker, typed for the user who then chooses on its screen; and its
     /// own picker for the thinking level, where it has one apart from that.
     public static func modelPicker(_ harness: String) -> String { harness == "opencode" ? "/models" : "/model" }
+
+    /// Claude Code's ways of asking, in its own words, as the menu lists them: asking each time first, skipping every
+    /// permission last.
+    public static let claudeModes = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"]
+
+    /// The way of asking that lets everything through: said in the colour of a warning wherever it is said.
+    public static func skipsPermissions(_ raw: String?) -> Bool { raw == "bypassPermissions" || raw == "bypass" }
+
+    /// How a terminal asks, as far as anything says: what the agent last reported or its screen showed, the mode its
+    /// record last named, the one it was started with.
+    public static func modeNow(now: String?, record: String?, started: String?) -> String? { now ?? record ?? started }
     public static func effortPicker(_ harness: String) -> String? { harness == "opencode" ? "/variants" : nil }
 
     /// The tool it is using, in one short word (the phone's island says the same).
@@ -606,6 +622,15 @@ extension DaemonClient {
     /// Another model, or another thinking level, for the Claude Code in a terminal (docs/simple-view-v0.md §5.4).
     public func setTerminalModel(id: String, model: String) async throws {
         _ = try await call("POST", "/terminals/\(Self.segment(id))/model", body: try JSONEncoder().encode(["model": model]))
+    }
+
+    /// Another way of asking for the Claude Code in a terminal: the service presses its ⇧Tab until its screen names
+    /// the mode (docs/simple-view-v0.md §5.4). The mode it is in afterwards.
+    @discardableResult
+    public func setTerminalMode(id: String, mode: String) async throws -> String {
+        struct Reply: Decodable { let mode: String }
+        let data = try await call("POST", "/terminals/\(Self.segment(id))/mode", body: try JSONEncoder().encode(["mode": mode]))
+        return (try? JSONDecoder().decode(Reply.self, from: data))?.mode ?? mode
     }
 
     public func setTerminalEffort(id: String, effort: String) async throws {

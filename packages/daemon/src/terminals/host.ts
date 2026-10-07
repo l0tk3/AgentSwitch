@@ -52,6 +52,9 @@ export type TerminalInfo = {
   /** The model the agent says it is on now (Claude Code, each time it changes: a `/model` in the terminal, one a
    *  screen asked for, a fallback of its own); null until it has said. `model` is what the terminal was started with. */
   readonly modelNow: string | null;
+  /** How it asks now, in its own word (`acceptEdits`, `plan` …), once anything says: a hook call's `permission_mode`,
+   *  or its screen read after a change asked for here. Null before; `mode` is what it was started with. */
+  readonly modeNow: string | null;
   /** The thinking level it was started at, in the agent's own word; null: the agent's default. What it is at now is
    *  in its session's record (Claude Code and Codex write it with every turn). */
   readonly effort: string | null;
@@ -118,6 +121,8 @@ export type TerminalEvent =
   | { readonly type: "removed" }
   /** The agent is on another model now (Claude Code's PostModelSwitch). */
   | { readonly type: "model"; readonly model: string }
+  /** It asks in another way now (its permission mode). */
+  | { readonly type: "mode"; readonly mode: string }
   /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
    *  (docs/simple-view-v0.md §4). */
   | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
@@ -312,6 +317,23 @@ function said(input: unknown): { note?: string } {
   return note ? { note } : {};
 }
 
+/** Claude Code's permission modes, in its own words, and the one the line under its input names (2.1.292 says
+ *  `accept edits on`, `plan mode on`, `auto mode on`, `bypass permissions on`; none of them: it asks each time). Read
+ *  from the screen's last lines, the newest first: an older line that scrolled up does not count over a newer one. */
+export const CLAUDE_MODES = ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] as const;
+export type ClaudeMode = (typeof CLAUDE_MODES)[number];
+export function modeOnScreen(lines: readonly string[]): ClaudeMode {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.toLowerCase();
+    if (line.includes("bypass permissions on")) return "bypassPermissions";
+    if (line.includes("accept edits on")) return "acceptEdits";
+    if (line.includes("plan mode on")) return "plan";
+    if (line.includes("auto mode on")) return "auto";
+    if (line.includes("? for shortcuts")) return "default";
+  }
+  return "default";
+}
+
 export function permissionTarget(tool: string, input: unknown): string {
   const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const pick = (k: string) => (typeof i[k] === "string" ? (i[k] as string) : null);
@@ -407,6 +429,7 @@ class Session {
   agentCwd: string | null = null;
   /** The model the agent says it is on now (PostModelSwitch); and one a screen asked for a moment ago. */
   modelNow: string | null = null;
+  modeNow: string | null = null;
   /** The level it was started at; null: the agent's own default. */
   effort: string | null = null;
   modelAsked: { readonly model: string; readonly at: number } | null = null;
@@ -698,6 +721,55 @@ export class TerminalHost {
     this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
   }
 
+  private modeIs(s: Session, mode: string): void {
+    if (mode === s.modeNow) return;
+    s.modeNow = mode;
+    s.emit({ type: "mode", mode });
+  }
+
+  /** The last `rows` lines of the terminal's screen that have anything on them, as text (top to bottom). */
+  screenTail(id: string, rows = 10): string[] {
+    const s = this.need(id);
+    const buffer = s.term.buffer.active;
+    const out: string[] = [];
+    for (let y = buffer.baseY + s.term.rows - 1; y >= buffer.baseY && out.length < rows; y--) {
+      const text = buffer.getLine(y)?.translateToString(true).trimEnd() ?? "";
+      if (text.trim()) out.unshift(text);
+    }
+    return out;
+  }
+
+  /** A screen asks the Claude Code in terminal `id` to ask in another way (docs/simple-view-v0.md §5.4 “换模式”). It
+   *  has no command for a mode: ⇧Tab steps through the ones this session offers, and the line under its input names
+   *  the one it is in. So the key is pressed and that line read, until it names `mode` — or it is back where it began
+   *  (the session does not offer that mode: one started without skipping permissions never reaches it). While it
+   *  rests only: the key would go to whatever else has the screen. Resolves to the mode it is in afterwards. */
+  async askMode(id: string, mode: ClaudeMode, o: { stepMs?: number; waitMs?: number } = {}): Promise<ClaudeMode> {
+    const s = this.need(id);
+    if (s.harness !== "claude-code") throw new TerminalError("invalid", "this agent chooses how it asks on its own screen");
+    if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
+    if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
+    const step = o.stepMs ?? 80, wait = o.waitMs ?? 1500;
+    const read = (): ClaudeMode => modeOnScreen(this.screenTail(id));
+    const began = read();
+    let now = began;
+    for (let press = 0; now !== mode && press < CLAUDE_MODES.length + 1; press++) {
+      this.write(id, "\x1b[Z");
+      const was = now;
+      for (let waited = 0; waited < wait && now === was; waited += step) {
+        await new Promise((r) => setTimeout(r, step));
+        if (!this.sessions.has(id) || (s.status as TerminalStatus) === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
+        now = read();
+      }
+      // The key did nothing its screen shows: something else has the keyboard there.
+      if (now === was) throw new TerminalError("busy", "its screen did not take the key");
+      if (now === began) break;
+    }
+    this.modeIs(s, now);
+    if (now !== mode) throw new TerminalError("invalid", `this session does not offer ${mode}`);
+    return now;
+  }
+
   /** A hook call from the agent in terminal `id`, proven by its hook token. Permission requests wait for a screen, or
    *  until `signal` aborts: the hook command went away, which happens when the request was answered in the terminal. */
   async hook(id: string, token: string, call: HookCall, signal?: AbortSignal): Promise<HookAnswer> {
@@ -705,6 +777,8 @@ export class TerminalHost {
     if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
     const p = call.payload;
     if (typeof p.session_id === "string" && p.session_id) this.reported(s, p.session_id);
+    // How it asks now: Claude Code says it with every call.
+    if (typeof p.permission_mode === "string" && /^[A-Za-z]{2,40}$/.test(p.permission_mode)) this.modeIs(s, p.permission_mode);
     // Where it works now (the window's title says it): Claude Code and Codex send it with every call.
     if (typeof p.cwd === "string" && p.cwd.startsWith("/") && p.cwd.length < 4096) s.agentCwd = p.cwd;
     // Claude Code says in every hook call made inside a sub-agent which one it is.
@@ -1081,7 +1155,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

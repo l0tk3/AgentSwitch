@@ -19,6 +19,10 @@ let blink = null;
 async function handle(line) {
   if (!line) return;
   if (line === "exit") process.exit(3);
+  // The turn ends, as Claude Code says it (its Stop hook): the terminal rests.
+  if (line === "stop") { await hook({ hook_event_name: "Stop" }); process.stdout.write("stopped\r\n"); return; }
+  // Keys one at a time, as a full-screen program takes them (a key that ends no line — ⇧Tab — arrives at once).
+  if (line === "raw") { process.stdin.setRawMode?.(true); process.stdout.write("raw on\r\n"); return; }
   // A full-screen program with the mouse on, as Claude Code's current screen is; "normal" goes back.
   if (line === "fullscreen") { process.stdout.write("\x1b[?1049h\x1b[?1003h\x1b[?1006hfullscreen on\r\n"); return; }
   if (line === "kitty") { process.stdout.write("\x1b[?u\x1b[>7ukitty on\r\n"); return; }
@@ -73,9 +77,21 @@ async function handle(line) {
   process.stdout.write(`got: ${line}\r\n`);
 }
 
+// Claude Code's ⇧Tab: the next permission mode, named on a line of its own as its screen names it. `FAKE_MODES` is
+// the round this session offers (one started without skipping permissions has no bypass in it).
+const FOOT = { default: "? for shortcuts", acceptEdits: "⏵⏵ accept edits on (shift+tab to cycle)", plan: "⏸ plan mode on (shift+tab to cycle)",
+  auto: "⏵⏵ auto mode on (shift+tab to cycle)", bypassPermissions: "⏵⏵ bypass permissions on (shift+tab to cycle)" };
+const round = (process.env.FAKE_MODES ?? "default,acceptEdits,plan").split(",");
+let mode = 0;
+
 let buf = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => {
+  if (String(d).includes("\x1b[Z") && process.env.FAKE_MODES !== "none") {
+    for (const _ of String(d).split("\x1b[Z").slice(1)) { mode = (mode + 1) % round.length; process.stdout.write(`${FOOT[round[mode]]}\r\n`); }
+    d = String(d).split("\x1b[Z").join("");
+    if (!d) return;
+  }
   buf += d;
   let i;
   while ((i = buf.search(/[\r\n]/)) >= 0) {

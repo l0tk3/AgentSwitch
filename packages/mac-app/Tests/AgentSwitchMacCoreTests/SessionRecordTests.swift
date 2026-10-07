@@ -183,6 +183,15 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(items[1].steps.map(\.note), ["Check the tree", nil])
         let busy = TerminalRecordEvent.decode(event: "activity", data: #"{"activity":{"tool":"Bash","target":"cat > x <<'EOF' …","note":"Write the patch"},"subagents":[]}"#)
         XCTAssertEqual(busy, .activity(TerminalActivity(tool: "Bash", target: "cat > x <<'EOF' …", note: "Write the patch"), []))
+        // How it asks: the stream says a change, the menu lists Claude Code's own modes, the one that skips every
+        // permission is marked.
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "mode", data: #"{"type":"mode","mode":"plan"}"#), .mode("plan"))
+        XCTAssertEqual(RecordDisplay.claudeModes.compactMap(RecordDisplay.mode), ["Ask", "Edits", "Plan", "Auto", "Bypass"])
+        XCTAssertTrue(RecordDisplay.skipsPermissions("bypassPermissions"))
+        XCTAssertTrue(RecordDisplay.skipsPermissions("bypass"))
+        XCTAssertFalse(RecordDisplay.skipsPermissions("acceptEdits"))
+        XCTAssertEqual(RecordDisplay.modeNow(now: "plan", record: "acceptEdits", started: "manual"), "plan")
+        XCTAssertEqual(RecordDisplay.modeNow(now: nil, record: nil, started: "manual"), "manual")
         XCTAssertEqual(TerminalActivity(tool: "Bash", target: "npm test", note: "Run the tests").words, "Run the tests")
         XCTAssertEqual(TerminalActivity(tool: "Bash", target: "npm test").words, "npm test")
         let detail = try JSONDecoder().decode(RecordStepDetail.self, from: Data(#"{"kind":"run","text":"a\nb","note":"Two lines","out":"x","clipped":true}"#.utf8))

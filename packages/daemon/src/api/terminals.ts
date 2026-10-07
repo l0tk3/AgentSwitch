@@ -12,7 +12,7 @@ import { remoteCaller } from "../core/caller.js";
 import { SSE_HEARTBEAT_MS } from "../core/limits.js";
 import type { TerminalAudit } from "../terminals/audit.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
-import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost } from "../terminals/host.js";
+import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost, CLAUDE_MODES } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
@@ -354,6 +354,21 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     try { host.askModel(id, body.data.model); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "model", via: via(c), detail: { model: body.data.model } });
     return c.json({ ok: true });
+  });
+
+  // Another way of asking for the agent (docs/simple-view-v0.md §5.4 “换模式”): Claude Code only, while it rests; the
+  // service presses its ⇧Tab and reads its screen until it is there. 409 while it works or waits, or when its screen
+  // did not take the key; 400 for a mode this session does not offer (the answer says the one it is in).
+  app.post("/terminals/:id/mode", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseBody(c, z.object({ mode: z.enum(CLAUDE_MODES) }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    // Skipping every permission is chosen on this Mac, where the terminal is started (terminal-v0 §7): not from a phone.
+    if (body.data.mode === "bypassPermissions" && remoteCaller(c.env)) return c.json({ error: "bypass is chosen on the Mac" }, 403);
+    let mode: string;
+    try { mode = await host.askMode(id, body.data.mode); } catch (err) { return failed(c, err); }
+    audit.record({ terminal: id, action: "mode", via: via(c), detail: { mode } });
+    return c.json({ ok: true, mode });
   });
 
   // Another thinking level for the agent (terminal-v0 §1 思考强度): Claude Code's own command typed for the screen. One of

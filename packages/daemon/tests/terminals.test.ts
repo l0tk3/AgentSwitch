@@ -13,7 +13,7 @@ import { ensureLocalToken, LocalAuth } from "../src/api/localAuth.js";
 import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, modeOnScreen } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -547,6 +547,52 @@ describe("terminals over HTTP", () => {
     expect(terminal.some((e) => e.event === "activity" || e.event === "record")).toBe(false);
     // It draws no terminal, so it never owns the size.
     expect((await call("GET", `/terminals/${id}`)).json.terminal.sizedBy ?? null).toBeNull();
+  });
+
+  it("a screen changes how Claude Code asks: ⇧Tab pressed and its screen read until it names the mode; not one the session does not offer", async () => {
+    // 2026-10-07, user: Bypass权限那一块要可以调整. The line under its input, newest first.
+    expect(modeOnScreen(["⏵⏵ accept edits on (shift+tab to cycle)", "> ", "⏸ plan mode on (shift+tab to cycle)"])).toBe("plan");
+    expect(modeOnScreen(["⏸ plan mode on (shift+tab to cycle)", "  ? for shortcuts"])).toBe("default");
+    expect(modeOnScreen(["⏵⏵ bypass permissions on (shift+tab to cycle)"])).toBe("bypassPermissions");
+    expect(modeOnScreen(["⏵⏵ auto mode on"])).toBe("auto");
+    expect(modeOnScreen([])).toBe("default");
+
+    const { home, cwd, base, token, call } = await start();
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    await until(() => screen().includes("fake agent ready"));
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.modeNow).toBeNull();
+    // Its keys one at a time, as Claude Code's screen takes them.
+    expect((await call("POST", `/terminals/${id}/input`, { text: "raw", seal: false })).status).toBe(200);
+    await until(() => screen().includes("raw on"));
+    // Two presses round to plan (the fake's round: default, acceptEdits, plan); the stream says the mode it is in.
+    const first = await call("POST", `/terminals/${id}/mode`, { mode: "plan" });
+    expect(first.json, JSON.stringify([first.status, first.json, (await call("GET", `/terminals/${id}`)).json.terminal.status])).toEqual({ ok: true, mode: "plan" });
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.modeNow).toBe("plan");
+    await until(() => events.some((e) => e.event === "mode" && e.data.mode === "plan"));
+    expect(screen().split("mode on").length - 1).toBe(1);
+    // Already there: no key at all.
+    const before = screen().length;
+    expect((await call("POST", `/terminals/${id}/mode`, { mode: "plan" })).json).toEqual({ ok: true, mode: "plan" });
+    expect(screen().length).toBe(before);
+    // One more press is the round's start again.
+    expect((await call("POST", `/terminals/${id}/mode`, { mode: "default" })).json).toEqual({ ok: true, mode: "default" });
+    // A mode this session's round has not: once round and back where it began, said as such.
+    const refused = await call("POST", `/terminals/${id}/mode`, { mode: "bypassPermissions" });
+    expect(refused.status).toBe(400);
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.modeNow).toBe("default");
+    expect((await call("POST", `/terminals/${id}/mode`, { mode: "yolo" })).status).toBe(400);
+    expect((await call("POST", "/terminals/nope/mode", { mode: "plan" })).status).toBe(404);
+    // Not while it works (the key would go to whatever has its screen).
+    expect((await call("POST", `/terminals/${id}/input`, { text: "tool" })).status).toBe(200);
+    await until(() => screen().includes("tool used"));
+    expect((await call("POST", `/terminals/${id}/mode`, { mode: "plan" })).status).toBe(409);
+    const audit = readFileSync(join(home, "terminals", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.filter((a) => a.action === "mode").map((a) => a.detail.mode)).toEqual(["plan", "plan", "default"]);
+    // Another agent chooses on its own screen.
+    const codex = (await call("POST", "/terminals", { harness: "codex", cwd })).json.terminal.id as string;
+    expect((await call("POST", `/terminals/${codex}/mode`, { mode: "plan" })).status).toBe(400);
   });
 
   it("a screen changes how hard Claude Code thinks: its own command typed, also while it works; not for an agent with a picker of its own", async () => {

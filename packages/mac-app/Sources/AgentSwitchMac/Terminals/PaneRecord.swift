@@ -24,6 +24,8 @@ final class PaneRecord {
     private(set) var activitySince: Date?
     /// The model the agent says it is on now (Claude Code), once it has said.
     private(set) var modelNow: String?
+    /// How it asks now, as the terminal's stream said or as a change asked for here left it.
+    private(set) var modeNow: String?
     /// The thinking level just asked for here, until the record says one of its own.
     private(set) var effortAsked: String?
     /// A change of model or level is on its way to the agent.
@@ -116,7 +118,7 @@ final class PaneRecord {
         terminal = nil
         session = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
-        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil
+        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil
         draft = ""
         draftFiles = []
         insert = nil
@@ -140,6 +142,8 @@ final class PaneRecord {
             refresh()
         case .model(let model):
             modelNow = model
+        case .mode(let mode):
+            modeNow = mode
         case nil:
             // A turn began or ended: its clock starts over, and what the record holds may have moved on.
             if event == "status" { activitySince = Date(); refresh() }
@@ -325,6 +329,29 @@ final class PaneRecord {
                 self?.error = nil
             } catch {
                 self?.error = Self.refused(error, busy: "它正在工作或等待回答，结束后再切换模型。")
+            }
+        }
+    }
+
+    /// Another way of asking for the Claude Code in the terminal, while it rests: the service presses its ⇧Tab until its
+    /// screen names the mode. A mode this session does not offer (skipping permissions in one started without it) is
+    /// said as such.
+    func setMode(_ raw: String, name: String) {
+        guard let terminal, !changing else { return }
+        changing = true
+        let client = client
+        Task { [weak self] in
+            defer { self?.changing = false }
+            do {
+                let reached = try await client().setTerminalMode(id: terminal, mode: raw)
+                self?.modeNow = reached
+                self?.error = nil
+            } catch {
+                if case .http(status: 400, message: _)? = error as? DaemonError {
+                    self?.error = "这个会话不能切到 \(name)：它启动时没有开放这种方式。"
+                } else {
+                    self?.error = Self.refused(error, busy: "它正在工作或等待回答，结束后再切换。")
+                }
             }
         }
     }

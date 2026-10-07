@@ -106,6 +106,30 @@ enum TerminalProbe {
             await pause(1500)
             say("model: now \(record.modelNow ?? "-") error \(record.error ?? "none")")
         }
+        // How it asks, as the reply box's menu sets it (2026-10-07, user: Bypass权限那一块要可以调整): the turn ended and
+        // its keys one at a time first (as Claude Code's screen takes them), then a mode its round has and one it has not.
+        if let record = model.focused?.record, let id = model.focused?.session?.id {
+            try? await model.client().typeIntoTerminal(id: id, text: "stop")
+            await pause(900)
+            try? await model.client().typeIntoTerminal(id: id, text: "raw")
+            await pause(700)
+            record.setMode("plan", name: "Plan")
+            await pause(1500)
+            say("mode: now \(record.modeNow ?? "-") status \(model.focused?.session?.info?.status ?? "-") error \(record.error ?? "none")")
+            record.setMode("bypassPermissions", name: "Bypass")
+            await pause(2600)
+            say("mode, one not offered: now \(record.modeNow ?? "-") error \(record.error ?? "none")")
+            picture("simple-mode")
+        }
+        // The window made smaller than its least size from outside (a window manager): put back.
+        let least = window.minSize
+        let was = window.frame
+        window.setFrame(NSRect(x: was.minX, y: was.maxY - 300, width: 271, height: 300), display: true)
+        await pause(500)
+        let dragged = window.delegate?.windowWillResize?(window, to: NSSize(width: 271, height: 300)) ?? .zero
+        say("least size: set to 271x300 from outside, now \(Int(window.frame.width))x\(Int(window.frame.height)); a drag to 271x300 stops at \(Int(dragged.width))x\(Int(dragged.height)); the window's own minSize reads \(Int(least.width))x\(Int(least.height))")
+        window.setFrame(was, display: true)
+        await pause(500)
         // Split off the record (2026-10-07, user: 简略模式下我点击分屏会切回暗黑终端模式…分屏出来的也是简略模式): the new
         // pane waits as the simple view — the window keeps its look — and a terminal started there is shown as its
         // record. Then that pane is closed again.

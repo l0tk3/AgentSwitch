@@ -54,15 +54,12 @@ struct ComposeBar: View {
         @Bindable var model = model
         return ZStack(alignment: .topLeading) {
             ComposeField(text: $model.text, height: $height, focusRequests: model.focusRequests, insert: model.insertRequest,
-                         active: model.route == nil,
+                         active: model.route == nil, placeholder: "输入任务或问题",
                          onSubmit: { Task { await model.send() } },
                          onFiles: { model.attach(urls: $0) },
                          onPasteAttachments: { model.pasteFromClipboard() },
                          onFocus: { model.inputFocused = $0 })
                 .frame(height: height)
-            if model.text.isEmpty {
-                Text("输入任务或问题").font(.system(size: 14)).foregroundStyle(Look.faint).allowsHitTesting(false)
-            }
         }
         .padding(.horizontal, look.isClassic ? 14 : 12)
         .padding(.vertical, 10)

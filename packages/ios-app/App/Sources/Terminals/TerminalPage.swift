@@ -448,7 +448,8 @@ struct TerminalPage: View {
     private var sessionLine: some View {
         let mode = RecordDisplay.mode(record.mode) ?? RecordDisplay.mode(listed.mode) ?? listed.mode.capitalized
         return HStack(spacing: 6) {
-            Text(mode).lineLimit(1)
+            // Skipping every permission is said in the colour of a warning (2026-10-07, as on the Mac).
+            Text(mode).lineLimit(1).foregroundStyle(mode == "Bypass" ? AnyShapeStyle(Theme.failed) : AnyShapeStyle(.tertiary))
             Text("·")
             modelMenu
             effortButton

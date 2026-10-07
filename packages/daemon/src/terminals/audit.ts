@@ -7,7 +7,7 @@ import { dirname } from "node:path";
 
 export type AuditEntry = {
   readonly terminal: string;
-  readonly action: "create" | "resume" | "rename" | "input" | "attach" | "keys" | "model" | "effort" | "permission" | "kill" | "delete" | "session-delete";
+  readonly action: "create" | "resume" | "rename" | "input" | "attach" | "keys" | "model" | "effort" | "mode" | "permission" | "kill" | "delete" | "session-delete";
   /** "local" (this Mac: web page, Mac app) or the paired device's id. */
   readonly via: string;
   readonly detail?: Record<string, unknown>;

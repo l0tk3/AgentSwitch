@@ -182,6 +182,10 @@ final class MainWindowController: NSObject {
         state.lightsStart = window.standardWindowButton(.closeButton)?.frame.minX ?? 20
         state.lightsEnd = window.standardWindowButton(.zoomButton)?.frame.maxX ?? 70
         window.minSize = Self.minSize
+        // `minSize` alone does not hold: with a SwiftUI controller as the window's content it reads back as zero a
+        // moment later (measured in the probe, 2026-10-07), which is how the window could be dragged down to nothing.
+        // The delegate holds a drag at the least size whatever the window thinks its own is.
+        window.delegate = leastSize
         window.isReleasedWhenClosed = false
         if !window.setFrameUsingName(Self.frameName), !window.setFrameUsingName(Self.terminalFrameName) { window.center() }
         window.setFrameAutosaveName(Self.frameName)
@@ -203,6 +207,12 @@ final class MainWindowController: NSObject {
 
     private func observe(_ window: NSWindow) {
         let center = NotificationCenter.default
+        // Dragging stops at the least size by itself; a size set from outside (a window manager, the system's tiling)
+        // does not, and the pages are not laid out for less — they ran over each other (2026-10-07, user: 缩小到极限之后
+        // 再往后排版就全乱了，建议加一个缩小的限制). So a frame that ends up smaller is put back to the least size.
+        observers.append(center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.keepLeastSize() }
+        })
         observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.closed() }
         })
@@ -232,6 +242,27 @@ final class MainWindowController: NSObject {
                 self?.state.editingChanged((window.firstResponder as? NSText)?.isEditable == true)
             }
         }
+    }
+
+    private let leastSize = LeastSize(MainWindowController.minSize)
+
+    /// A window's drag stopped at its least size.
+    private final class LeastSize: NSObject, NSWindowDelegate {
+        let size: NSSize
+        init(_ size: NSSize) { self.size = size }
+
+        func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+            NSSize(width: max(frameSize.width, size.width), height: max(frameSize.height, size.height))
+        }
+    }
+
+    /// The window's frame brought back up to its least size, its top left where it was.
+    private func keepLeastSize() {
+        guard let window, !window.styleMask.contains(.fullScreen), !window.inLiveResize else { return }
+        let frame = window.frame
+        let size = NSSize(width: max(frame.width, Self.minSize.width), height: max(frame.height, Self.minSize.height))
+        guard size != frame.size else { return }
+        window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height), display: true)
     }
 
     private func windowChanged() {

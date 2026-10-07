@@ -6,6 +6,8 @@ import SwiftUI
 struct AgentSwitchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
+    init() { SoftType.apply() }
+
     var body: some Scene {
         // Hidden while this copy only waits on a newly installed one (AppModel.installUpdate).
         MenuBarExtra(isInserted: Binding(get: { !delegate.model.updating && !AppDelegate.previewOnly && !AppDelegate.liveDemoOnly && !AppDelegate.probeOnly }, set: { _ in })) {
@@ -20,6 +22,20 @@ struct AgentSwitchApp: App {
             MenuBarIcon(level: delegate.model.overallLevel, waiting: delegate.model.waitingCount)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// The app's text is drawn without the system's font smoothing — the thickening of strokes macOS adds to text —, as
+/// a browser's `antialiased` text is, which is how both agents' own desktop apps (Electron) look: lighter, softer
+/// (docs/ui-v0.md §8, 2026-10-07; user, of Codex's conversation: 字体看上去比我们的app柔和). Measured on a specimen of
+/// the same paragraph: the size and the leading are a small part of it, this is most of it. The system reads the
+/// setting (`AppleFontSmoothing`, this app's own) once, when it first draws text: it is written as the app starts,
+/// before anything is drawn. A value someone set by hand (`defaults write`) is left as it is.
+enum SoftType {
+    static let key = "AppleFontSmoothing"
+
+    static func apply(_ defaults: UserDefaults = .standard) {
+        if defaults.object(forKey: key) == nil { defaults.set(0, forKey: key) }
     }
 }
 
