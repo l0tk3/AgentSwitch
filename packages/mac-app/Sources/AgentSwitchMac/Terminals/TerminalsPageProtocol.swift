@@ -27,6 +27,10 @@ protocol TerminalsPage: AnyObject {
     func seal()
     func split(_ side: String)
     func newTerminal()
+    /// The pane in focus as its session's record, or as the terminal again. A requirement, not only the extension's
+    /// default: the window calls it through `any TerminalsPage`, and a method that lives in the extension alone is the
+    /// one called there — the bar's switch did nothing (2026-10-07, user: macos的简略视图我点了没反应).
+    func toggleView()
     func shortcut(_ key: String)
     func pageDrawsIn()
     func windowKeyChanged(_ key: Bool)
@@ -45,7 +49,7 @@ protocol TerminalsPage: AnyObject {
 }
 
 extension TerminalsPage {
-    /// The pane in focus as its session's record, or as the terminal again (the native page's; the web page has none).
+    /// The web page has no record view.
     func toggleView() {}
 
     /// The hidden default that keeps the web page (`defaults write com.agentswitch.mac terminalsPageWeb -bool YES`).

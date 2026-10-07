@@ -42,6 +42,8 @@ final class MainWindowController: NSObject {
     var probeWeb: TerminalWebView? { terminals?.probeWeb ?? nil }
     /// The native Terminals page's model (nil while the web page is in use).
     var probeTerminals: TerminalsModel? { (terminals as? NativeTerminalsPage)?.model }
+    /// The bar's switch, as its button calls it.
+    func probeToggleView() { barActions.toggleView() }
     var probeBrowser: BrowserPageModel? { browser }
     var probeHead: TerminalHead? { terminals?.head }
     var probeClient: DaemonClient { model.client }

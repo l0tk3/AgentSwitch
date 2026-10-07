@@ -43,9 +43,10 @@ enum TerminalProbe {
         window.makeKey()
         await pause(2500)   // the fake agent's request, and the session it reported, reach the list
         state("terminal")
-        model.toggleSimple()
+        // The bar's switch, through the window's own action (calling the model past it hid that the button did nothing).
+        main.probeToggleView()
         await pause(2500)
-        state("record")
+        state("record (the bar's button)")
         picture("simple-record")
         // A reply from the record's box: typed into the terminal as it is.
         if let record = model.focused?.record {
@@ -54,9 +55,15 @@ enum TerminalProbe {
             await pause(1200)
             say("reply: draft '\(record.draft)' error \(record.error ?? "none")")
         }
-        model.toggleSimple()
+        // Back by the key, ⌘⇧E, as an event of the window's.
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [.command, .shift], timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: window.windowNumber, context: nil, characters: "E", charactersIgnoringModifiers: "E", isARepeat: false, keyCode: 14) {
+                NSApp.postEvent(e, atStart: false)
+            }
+        }
         await pause(2500)
-        state("terminal again")
+        state("terminal again (⌘⇧E)")
         let screen = model.focused?.screen
         let t = screen?.view.getTerminal()
         let lines = (0..<(t?.rows ?? 0)).compactMap { row -> String? in

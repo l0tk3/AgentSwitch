@@ -38,7 +38,7 @@ final class NativeTerminalView: TerminalView {
         }
         let name = event.keyCode == 36 ? "Enter" : event.keyCode == 51 ? "Backspace" : key
         // ⌘D / ⌘⇧D split the pane in focus, ⌘⇧↩ shows it alone (2026-10-03).
-        let page = shift ? ["v", "d", "Enter"] : ["t", "w", "b", "f", "d", "Enter", "Backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        let page = shift ? ["v", "d", "e", "Enter"] : ["t", "w", "b", "f", "d", "Enter", "Backspace", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
         guard page.contains(name) else { return super.performKeyEquivalent(with: event) }
         owner?.pageShortcut(name, shift: shift)
         return true
