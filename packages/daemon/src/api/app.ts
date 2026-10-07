@@ -3,6 +3,8 @@
 import { Hono } from "hono";
 import { mountAssistant } from "./assistant.js";
 import { mountBrowser } from "./browser.js";
+import { mountBrowserEngine } from "./browserEngine.js";
+import { mountBrowserIdentity } from "./browserIdentity.js";
 import { mountUpdate } from "./update.js";
 import { mountExtensions } from "./extensions.js";
 import { mountFiles } from "./files.js";
@@ -32,6 +34,8 @@ export function createApp(deps: ApiDeps): Hono {
   mountSessions(app, deps);
   mountTerminals(app, deps);
   mountBrowser(app, deps);
+  mountBrowserEngine(app, deps);
+  mountBrowserIdentity(app, deps);
   mountLive(app, deps);
   mountExtensions(app, deps.extensions);
   return app;

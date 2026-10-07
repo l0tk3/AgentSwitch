@@ -5,6 +5,7 @@ import type { Sealer } from "../secrets/sealer.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import type { EngineKit } from "../browser/engine/kit.js";
 import type { Context } from "hono";
 import type { z } from "zod";
 import type { Bus } from "../engine/bus.js";
@@ -48,6 +49,8 @@ export type ApiDeps = {
   readonly terminals?: Terminals;
   /** The shared browser (docs/browser-v0.md); absent = off. */
   readonly browser?: SharedBrowser;
+  /** The browser engine — Camoufox and its Playwright — on disk and its updates (docs/browser-v0.md §7); absent = off. */
+  readonly engineKit?: EngineKit;
   readonly uploads: Uploads;
   readonly artifactsDir: string;
   readonly extensions: Extensions;

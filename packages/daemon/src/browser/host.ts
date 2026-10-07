@@ -28,7 +28,7 @@ import { FillRefused, type FillResolver } from "./fill.js";
 import { inputCalls, NOTHING_PRESSED, type InputEvent, type Pressed } from "./input.js";
 import { AGENT_FILE_REFUSAL, checkLocalFile, checkUrl, isLoopbackAddress, isLoopbackHost, normalHost, OWN_PORT_REFUSAL, placeOf, portOf, type FileRules } from "./rules.js";
 import { renderScale, Screencast, viewAt, type StreamOptions } from "./screencast.js";
-import { BrowserError, DEFAULT_VIEWPORT, YOU, type AgentAction, type BrowserEvent, type ClosedReason, type HeldReason, type TabGroup, type TabInfo,
+import { BrowserError, DEFAULT_VIEWPORT, WINDOW_HOLDER, YOU, type AgentAction, type BrowserEvent, type ClosedReason, type HeldReason, type TabGroup, type TabInfo,
   type TabOwner, type TabOwnerKind, type TabStatus, type Viewport } from "./types.js";
 
 /** A person's fill on an agent's tab (browser-v0 §6): the value would stay in the page, which the agent reads after the
@@ -49,6 +49,10 @@ export function ownPortPatterns(ports: readonly number[]): string[] {
 }
 
 /** A hold ends after this long without input from the holder (browser-v0 §1). */
+/** How long a still picture of a tab serves (the Mac's list asks every few seconds while it shows the tab). */
+const PICTURE_FRESH_MS = 2_000;
+/** Input the page reports within this of a screen's input is that screen's, not the person's in the window. */
+const FORWARDED_INPUT_MS = 600;
 export const HOLD_IDLE_MS = 2 * 60_000;
 /** Chrome is stopped after this long without a tab. */
 export const IDLE_CLOSE_MS = 10 * 60_000;
@@ -79,6 +83,8 @@ export type BrowserHostOptions = {
   readonly afterExit?: () => void;
   /** A hold that ran out (for the audit). */
   readonly onIdleRelease?: (tabId: string, holder: string) => void;
+  /** The person took an agent's tab over by acting in its window (for the audit). */
+  readonly onWindowTake?: (tabId: string) => void;
   /** Send the macOS editing commands with keys (Chrome on the Mac needs them). */
   readonly mac?: boolean;
   /** The addresses a host name resolves to (default `dns.lookup`), for AgentSwitch's own ports under other names. */
@@ -118,6 +124,10 @@ type TabRuntime = {
   readonly listeners: Set<(ev: BrowserEvent) => void>;
   holdTimer: NodeJS.Timeout | null;
   pressed: Pressed;
+  /** When a screen's input was last sent to the page (what the page then says of input is that screen's). */
+  forwardedAt: number;
+  /** The last still picture of the page, and when it was taken. */
+  picture: { readonly at: number; readonly data: Buffer } | null;
 };
 
 const ownerKey = (o: Pick<TabOwner, "kind" | "id">): string => `${o.kind}:${o.id}`;
@@ -126,8 +136,17 @@ const isHttp = (raw: string): boolean => { try { return /^https?:$/.test(new URL
 /** `host:port` of an http(s) URL, as the gate names a page's place (`page_host`). */
 const hostOf = (raw: string): string => { const url = new URL(raw); return `${url.hostname}:${portOf(url)}`; };
 
-/** Why Chrome did not start, in the user's words. */
+/** Why the browser did not start, already in the user's words (a driver that knows its own browser says it). */
+export class LaunchProblem extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LaunchProblem";
+  }
+}
+
+/** Why the browser did not start, in the user's words. */
 export function launchFailure(err: unknown): string {
+  if (err instanceof LaunchProblem) return err.message;
   const text = String((err as Error)?.message ?? err);
   if (/distribution 'chrome' is not found|executable doesn't exist|ENOENT/i.test(text)) return "未找到 Google Chrome。请在 Mac 上安装 Google Chrome。";
   return `浏览器未能启动：${firstLine(err)}`;
@@ -284,6 +303,7 @@ export class BrowserHost {
         ?? { scale: 1, width: state.viewport.width, height: state.viewport.height, view: rt.screencast.view };
       const { calls, pressed } = inputCalls(ev, geometry, rt.pressed, this.opts.mac ?? process.platform === "darwin");
       rt.pressed = pressed;
+      rt.forwardedAt = this.now();
       try {
         if (pointed) await Promise.all(calls.map((call) => rt.page.input(call.method, call.params)));
         else for (const call of calls) await rt.page.input(call.method, call.params);
@@ -293,6 +313,56 @@ export class BrowserHost {
       }
     }
     this.touch(id, holder);
+  }
+
+  /** The tab's window to the front of the browser's windows (docs/browser-v0.md §7.3 窗口). */
+  async show(id: string): Promise<void> {
+    this.must(id);
+    const page = this.runtimes.get(id)!.page;
+    if (!page.show) throw new BrowserError("unavailable", "此浏览器的标签没有自己的窗口。");
+    try { await page.show(); } catch (err) { throw new BrowserError("unavailable", `无法显示此标签的窗口：${firstLine(err)}`); }
+  }
+
+  /** A still picture of the tab (JPEG), for a list that shows no stream; one serves `PICTURE_FRESH_MS`. */
+  async picture(id: string): Promise<Buffer> {
+    this.must(id);
+    const rt = this.runtimes.get(id)!;
+    if (!rt.page.picture) throw new BrowserError("unavailable", "此浏览器不提供标签的预览。");
+    const now = this.now();
+    if (rt.picture && now - rt.picture.at < PICTURE_FRESH_MS) return rt.picture.data;
+    let data: Buffer;
+    try { data = await rt.page.picture(); } catch (err) { throw new BrowserError("unavailable", `无法取得预览：${firstLine(err)}`); }
+    rt.picture = { at: now, data };
+    return data;
+  }
+
+  /** Input reached a tab's page in its window. In an agent's tab it is the person stepping in (§7.2 第 4 条) unless it
+   *  is ours: the agent's own call under way, or what a screen sent a moment ago. The person then holds the tab — the
+   *  agent's calls wait, what the page sends meanwhile is kept from it (agents.ts, heldTraffic.ts) — until they hand
+   *  it back or two minutes pass without input. */
+  private touched(id: string): void {
+    const state = this.states.get(id);
+    const rt = this.runtimes.get(id);
+    if (!state || !rt || state.owner.kind === "you" || !rt.page.windowed?.()) return;
+    if ((this.acting.get(ownerKey(state.owner))?.calls ?? 0) > 0) return;
+    if (this.now() - rt.forwardedAt < FORWARDED_INPUT_MS) return;
+    if (state.heldBy === WINDOW_HOLDER) this.armHold(id, WINDOW_HOLDER);
+    else if (state.heldBy === null) { this.take(id, WINDOW_HOLDER); this.opts.onWindowTake?.(id); }
+  }
+
+  /** The browser stopped and started again with its tabs (another engine switched to, another fingerprint): each tab
+   *  comes back as a new one of the same owner at the address it was at. `between` runs while the browser is down.
+   *  With no tabs open it only stops, and starts with the next tab. */
+  async restart(between?: () => Promise<void> | void): Promise<void> {
+    const open = this.list().map((t) => ({ owner: t.owner, url: t.url }));
+    for (const id of [...this.states.keys()]) this.drop(id, "closed");
+    await this.launching?.catch(() => undefined);
+    await this.stopBrowser();
+    await between?.();
+    for (const tab of open) {
+      try { await this.open(tab.owner, tab.url); }
+      catch (err) { this.log(`browser: a tab did not come back after the restart (${firstLine(err)})`); }
+    }
   }
 
   /** A screen's stream: the tab now, then frames (at the stream's own rate) and every change, until the returned
@@ -458,6 +528,8 @@ export class BrowserHost {
       throw new BrowserError("unavailable", "浏览器已关闭。");
     }
     browser.onExit((expected) => this.exited(browser, expected));
+    // A tab the person opened in a window themselves is a tab of theirs.
+    browser.onPage?.((page) => { if (this.browser === browser && !this.idOf(page)) void this.applyViewport(this.register(page, YOU)); });
     this.browser = browser;
     this.scheduleIdleClose();
     return browser;
@@ -564,7 +636,10 @@ export class BrowserHost {
       status: "idle", heldBy: null, action: null, viewport: this.defaultViewport, viewportBy: null,
     });
     const screencast = new Screencast(page, this.now, this.log, () => this.redraw(id), () => this.strayed(id));
-    this.runtimes.set(id, { page, screencast, listeners: new Set(), holdTimer: null, pressed: NOTHING_PRESSED });
+    this.runtimes.set(id, { page, screencast, listeners: new Set(), holdTimer: null, pressed: NOTHING_PRESSED, forwardedAt: 0, picture: null });
+    // In a window of its own the person may act in an agent's tab: the page says when input reaches it (`touched`).
+    if (owner.kind !== "you" && page.windowed?.()) page.watchTouches?.(true);
+    page.on("touched", () => this.touched(id));
     this.cancelIdleClose();
     page.on("changed", ({ url, title }) => this.changed(id, url, title));
     page.on("loading", (loading) => {
@@ -730,6 +805,12 @@ export class BrowserHost {
     await rt.screencast.reconfigure(async () => {
       const state = this.states.get(id);
       if (!state) return null;
+      // A window of its own is the person's to size (docs/browser-v0.md §7.3 窗口): it is given a size only by the
+      // screen that holds the tab, and has its own back after; pictures are then taken at whatever size they come.
+      if (rt.page.windowed?.() && state.viewportBy === null) {
+        await rt.page.restoreSize?.().catch((err: unknown) => { if (this.states.has(id)) this.log(`browser: tab ${id} window size: ${firstLine(err)}`); });
+        return null;
+      }
       const want = this.renderFor(id);
       try {
         const drawn = await rt.page.setViewport(state.viewport, want);

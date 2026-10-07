@@ -325,6 +325,24 @@ its screencast is run once more (`src/browser/screencast.ts`), and a stream ends
 navigation, an animation or a scroll, at no cost in frames where the page keeps changing or is still, and gets its
 frames from the first when it takes over from another.
 
+Camoufox, windows, identity and the engine (docs/browser-v0.md §7): once Camoufox is installed under
+`$AGENTSWITCH_HOME/browser/engine/camoufox/current` the shared browser is Camoufox on a profile of its own
+(`browser-profiles/main-camoufox`), driven by the same Playwright; until then it is Chrome as above. On a Mac its tabs
+have windows of their own (`AGENTSWITCH_BROWSER_WINDOW=0` for none): `GET /browser/tabs` says `engine` and `windows`,
+`POST /browser/tabs/:id/show` and `GET /browser/tabs/:id/preview` are for the Mac's page, and input in an agent's
+window that the service did not send makes the person its holder (`mac-window`). All its traffic goes through a
+forwarder on loopback (`src/browser/forwarder.ts`): AgentSwitch's own ports refused, what leaves the Mac given to the
+upstream proxy when one is set. Local-only routes: `GET|PUT /browser/identity` and `POST /browser/identity/restart`
+(the fingerprint — kept in `browser/identity.json`, a new or imported one restarts the browser — and the proxy, in
+force at once; its password only as a ciphertext, asked of the gate with `secret-gate fill-value` for the proxy's own
+`host:port`; its exit looked up through it, `AGENTSWITCH_BROWSER_EXIT_LOOKUP=off` for none), and
+`GET /browser/engine[?check=1]`, `POST /browser/engine/update`, `POST /browser/engine/cancel` (`agentswitch engine …`):
+download, the published digest, unpack, a self-check with a real start, switch, the old copy removed — one copy on
+disk. Opt-in checks against a real Camoufox, none part of `npm test`:
+`BROWSER_SMOKE_CAMOUFOX=<its program> npx tsx scripts/browser_smoke.ts`, `scripts/browser_window_smoke.ts <program>`
+(opens real windows for half a minute), `scripts/browser_identity_smoke.ts <program>` (no windows; a stand-in proxy,
+exit lookup and gate), `scripts/browser_engine_check.ts <folder>` (the engine's self-check alone).
+
 ## MCP servers and skills
 
 Managed in the UI's 扩展 tab (or `GET /mcp`, `GET /skills`), stored under `$AGENTSWITCH_HOME`:

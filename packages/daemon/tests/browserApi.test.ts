@@ -54,7 +54,7 @@ function setup() {
 describe("tabs", () => {
   it("list, open what is typed, read one, close", async () => {
     const { call, driver, auditLines } = setup();
-    expect(await (await call("GET", "/browser/tabs")).json()).toEqual({ running: false, groups: [] });
+    expect(await (await call("GET", "/browser/tabs")).json()).toEqual({ running: false, groups: [], engine: "chrome", windows: false });
     const res = await call("POST", "/browser/tabs", { url: "github.com/acme/app?token=abc" });
     expect(res.status).toBe(201);
     const { tab } = await res.json() as { tab: { id: string; url: string; owner: { kind: string } } };
@@ -375,7 +375,7 @@ describe("wiring", () => {
     const driver = new FakeDriver();
     const on = buildDaemon(cfg(), { browserDriver: driver });
     expect(on.browser).not.toBeNull();
-    expect(await (await on.api.request("/browser/tabs")).json()).toEqual({ running: false, groups: [] });
+    expect(await (await on.api.request("/browser/tabs")).json()).toEqual({ running: false, groups: [], engine: "chrome", windows: false });
     const opened = await on.api.request("/browser/tabs", { method: "POST", body: JSON.stringify({ url: "https://a.example/" }), headers: { "content-type": "application/json" } });
     expect(opened.status).toBe(201);
     expect(driver.launches[0]!.profileDir).toMatch(/browser-profiles\/main$/);

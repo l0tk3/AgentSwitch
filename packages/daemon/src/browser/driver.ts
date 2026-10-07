@@ -45,6 +45,9 @@ export type PageEvents = {
   readonly popup: (page: DriverPage) => void;
   readonly frame: (frame: RawFrame) => void;
   readonly closed: () => void;
+  /** Input reached the page — anyone's: the person's in its window, a screen's, an agent's. Only from a page that is
+   *  asked to say so (`watchTouches`). */
+  readonly touched: () => void;
 };
 
 /** Where the caret is, for a person's Fill Ciphertext (browser-v0 §1, §6): the field itself, held until `release`. */
@@ -86,6 +89,17 @@ export interface DriverPage {
   focusedField?(): Promise<FocusedField | null>;
   /** The Playwright page behind this one, for the agents' Playwright MCP in the daemon (agentMcp.ts); absent on a fake. */
   playwright?(): unknown;
+  /** The page has a window of its own, which the person sizes and acts in (docs/browser-v0.md §7.3 窗口). Such a page
+   *  is given a size only while a screen holds it (`setViewport`), and its own again after (`restoreSize`). */
+  windowed?(): boolean;
+  /** The window's size from before a holder's, back. */
+  restoreSize?(): Promise<void>;
+  /** The page's window to the front of the browser's windows (bringing the browser itself forward is the Mac app's). */
+  show?(): Promise<void>;
+  /** A still picture of the page as it is now (JPEG). */
+  picture?(): Promise<Buffer>;
+  /** Whether `touched` is wanted of this page. */
+  watchTouches?(on: boolean): void;
 }
 
 export type InputMethod = "Input.dispatchMouseEvent" | "Input.dispatchKeyEvent" | "Input.insertText";
@@ -96,6 +110,8 @@ export interface DriverBrowser {
   /** Called once when the browser goes away; `expected` when `close()` asked for it. */
   onExit(listener: (expected: boolean) => void): void;
   close(): Promise<void>;
+  /** Pages nobody asked this driver for and no page opened: a tab the person made in a window themselves. */
+  onPage?(listener: (page: DriverPage) => void): void;
 }
 
 export type LaunchOptions = {

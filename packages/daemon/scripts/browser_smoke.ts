@@ -48,6 +48,9 @@ import { listenLocal } from "../src/daemon.js";
 import { VENV_GATE_BIN } from "../src/executors/gate.js";
 import { defaultProtected } from "../src/executors/protected.js";
 import { sharedBrowser } from "../src/browser/setup.js";
+import { camoufoxDriver } from "../src/browser/camoufoxDriver.js";
+import { Forwarder, type ForwarderAddress } from "../src/browser/forwarder.js";
+import { bundledPlaywright } from "../src/browser/engine/loader.js";
 import { BrowserError, YOU, type BrowserEvent, type FrameEvent } from "../src/browser/types.js";
 
 const root = mkdtempSync(join(tmpdir(), "agentswitch-browser-smoke-"));
@@ -58,6 +61,15 @@ mkdirSync(site, { recursive: true });
 mkdirSync(home, { recursive: true });
 
 const failures: string[] = [];
+let forwarded: ForwarderAddress | null = null;
+/** `BROWSER_SMOKE_CAMOUFOX=<its program>`: the same checks on Camoufox (docs/browser-v0.md §7), headless, with the
+ *  bundled Playwright. What only Chrome does is left out there and said so. */
+const CAMOUFOX = process.env.BROWSER_SMOKE_CAMOUFOX;
+const forwarder = new Forwarder({ ownPorts: () => own ? [own.port] : [] });
+const engineOption = () => CAMOUFOX && forwarded ? { driver: camoufoxDriver({ executable: CAMOUFOX, playwright: bundledPlaywright(), headless: true, proxy: forwarded }) } : {};
+/** How a browser of `profile` shows on a command line. */
+const ofProfile = (profile: string) => CAMOUFOX ? `-profile ${profile}` : `--user-data-dir=${profile}`;
+const skipped = (what: string) => console.log(`skip ${what} (Chrome only)`);
 const check = (ok: boolean, what: string) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) failures.push(what); };
 
 async function until<T>(get: () => T | undefined | null | false, what: string, ms = 10_000): Promise<T | null> {
@@ -84,6 +96,7 @@ function redirector(to: number): Promise<{ server: Server; port: number }> {
 
 async function main(): Promise<void> {
   own = await listen();
+  if (CAMOUFOX) forwarded = await forwarder.start();
   redirect = await redirector(own.port);
   writeFileSync(join(site, ".env"), "SECRET=1\n");
   writeFileSync(join(site, "page2.html"), "<title>Second</title><p>second page</p>");
@@ -99,7 +112,7 @@ async function main(): Promise<void> {
 <iframe src=".env" style="position:absolute;top:220px"></iframe>
 <img src="http://127.0.0.1:${own.port}/pixel.png"><img src="http://localhost:${redirect.port}/redirected-pixel.png">`);
 
-  const api = sharedBrowser({ home, userHome, protected: defaultProtected({ ...process.env, HOME: userHome, AGENTSWITCH_HOME: home }), ownPorts: () => [own.port] });
+  const api = sharedBrowser({ home, userHome, protected: defaultProtected({ ...process.env, HOME: userHome, AGENTSWITCH_HOME: home }), ownPorts: () => [own.port], ...engineOption() });
   const host = api.host;
   const profile = join(home, "browser-profiles", "main");
 
@@ -108,14 +121,18 @@ async function main(): Promise<void> {
   check(tab.owner.kind === "you" && tab.kind === "file", "a local page opens as the user's tab");
 
   // The pipe, not a port.
-  const pids = execFileSync("pgrep", ["-f", "--", `--user-data-dir=${profile}`], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-  const main = pids.find((pid) => !execFileSync("ps", ["-o", "command=", "-p", pid], { encoding: "utf8" }).includes("--type="));
+  const pids = execFileSync("pgrep", ["-f", "--", ofProfile(profile)], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+  const main = pids.find((pid) => !execFileSync("ps", ["-o", "command=", "-p", pid], { encoding: "utf8" }).includes(CAMOUFOX ? "-contentproc" : "--type="));
   const command = main ? execFileSync("ps", ["-ww", "-o", "command=", "-p", main], { encoding: "utf8" }) : "";
-  check(command.includes("--remote-debugging-pipe") && !command.includes("--remote-debugging-port"), "Chrome is driven over --remote-debugging-pipe, with no --remote-debugging-port");
-  check(command.includes("--headless") && !command.includes("--no-sandbox"), "new headless, sandbox on");
+  if (CAMOUFOX) {
+    check(command.includes("-juggler-pipe") && !/-remote-debugging-port|--marionette/.test(command), "Camoufox is driven over Playwright's pipe, with no debugging port");
+  } else {
+    check(command.includes("--remote-debugging-pipe") && !command.includes("--remote-debugging-port"), "Chrome is driven over --remote-debugging-pipe, with no --remote-debugging-port");
+    check(command.includes("--headless") && !command.includes("--no-sandbox"), "new headless, sandbox on");
+  }
   let listening = "";
   try { listening = execFileSync("lsof", ["-nP", "-a", "-p", pids.join(","), "-iTCP", "-sTCP:LISTEN"], { encoding: "utf8" }); } catch { listening = ""; }
-  check(listening.trim() === "", "no Chrome process of the profile listens on a TCP port");
+  check(listening.trim() === "", "no browser process of the profile listens on a TCP port");
 
   const events: BrowserEvent[] = [];
   const stop = host.subscribe(tab.id, { quality: 60, fps: 10 }, (ev) => events.push(ev));
@@ -164,42 +181,45 @@ async function main(): Promise<void> {
   await until(() => [...events].reverse().find((e): e is FrameEvent => e.type === "frame")?.viewport.width === 1280, "the size goes back on release");
   stop();
 
-  // Device pixels (§5, 2026-10-03): a stream that asks for 2 gets the page drawn at 2; a click on such a frame lands
-  // where it was aimed; without that stream the frames are the CSS size again.
-  const crisp = await host.open(YOU, url);
-  await until(() => host.get(crisp.id)?.title === "Smoke", "a second tab of the page loads");
-  const sharp: BrowserEvent[] = [];
-  const stopSharp = host.subscribe(crisp.id, { quality: 80, fps: 10, scale: 2 }, (ev) => sharp.push(ev));
-  const big = await until(() => sharp.find((e): e is FrameEvent => e.type === "frame" && e.width === 2560), "a stream that asks for scale 2 gets 2560-wide frames");
-  check(!!big && big.height === 1600 && big.scale === 2 && big.viewport.width === 1280 && big.viewport.height === 800,
-    `the frame is the 1280x800 page at 2 (${big?.width}x${big?.height}, scale ${big?.scale}, viewport ${big?.viewport.width}x${big?.viewport.height})`);
-  // The button is CSS (10..210, 10..60): frame (100, 60) is CSS (50, 30).
-  await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 100, y: 60, button: "left", clickCount: 1, modifiers: [], seq: big?.seq }]);
-  await until(() => host.get(crisp.id)?.title === "Clicked", "a click on a frame of the page at 2 lands on the button");
-  // A tab opened after it, and closed: Chrome makes this one the window's front tab and sets its view to the window's
-  // 1280×713 (review, 2026-10-03). The view is drawn again: what repaints next comes as the 1280×800 page at 2.
-  const later = await host.open(YOU, url);
-  await until(() => host.get(later.id)?.title === "Smoke", "a tab opened after it loads");
-  const closedAt = sharp.length;
-  await host.close(later.id);
-  await new Promise((r) => setTimeout(r, 300));
-  // The counting button is CSS (900..1020, 600..640), outside the window's 1280×713 at 2: frame (1900, 1240).
-  await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 1900, y: 1240, button: "left", clickCount: 1, modifiers: [] }]);
-  await until(() => host.get(crisp.id)?.title === "count:1", "after that tab closed, a click near the far corner of the watched tab lands");
-  await new Promise((r) => setTimeout(r, 500));
-  const since = sharp.slice(closedAt).filter((e): e is FrameEvent => e.type === "frame");
-  const whole = (f: FrameEvent) => f.width === 2560 && f.height === 1600 && f.scale === 2 && f.viewport.width === 1280 && f.viewport.height === 800;
-  const cut = since.find((f) => !whole(f));
-  check(since.length > 0 && !cut, `and its frames are still 2560x1600 of the 1280x800 page (${since.length} frames since`
-    + `${cut ? `, one ${cut.width}x${cut.height} of a ${cut.viewport.width}x${cut.viewport.height} page` : ""})`);
-  stopSharp();
-  const plain: BrowserEvent[] = [];
-  const stopPlain = host.subscribe(crisp.id, { quality: 60, fps: 10 }, (ev) => plain.push(ev));
-  const small = await until(() => plain.find((e): e is FrameEvent => e.type === "frame" && e.width === 1280), "without it, frames are the CSS size again");
-  await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 50, y: 90, button: "left", clickCount: 1, modifiers: [], seq: small?.seq }, { type: "text", text: "1x" }]);
-  await until(() => host.get(crisp.id)?.title === "typed:1x", "and a click on a CSS-size frame lands too");
-  stopPlain();
-  await host.close(crisp.id);
+  if (CAMOUFOX) skipped("a page drawn at 2 for a stream that asks for it");
+  else {
+    // Device pixels (§5, 2026-10-03): a stream that asks for 2 gets the page drawn at 2; a click on such a frame lands
+    // where it was aimed; without that stream the frames are the CSS size again.
+    const crisp = await host.open(YOU, url);
+    await until(() => host.get(crisp.id)?.title === "Smoke", "a second tab of the page loads");
+    const sharp: BrowserEvent[] = [];
+    const stopSharp = host.subscribe(crisp.id, { quality: 80, fps: 10, scale: 2 }, (ev) => sharp.push(ev));
+    const big = await until(() => sharp.find((e): e is FrameEvent => e.type === "frame" && e.width === 2560), "a stream that asks for scale 2 gets 2560-wide frames");
+    check(!!big && big.height === 1600 && big.scale === 2 && big.viewport.width === 1280 && big.viewport.height === 800,
+      `the frame is the 1280x800 page at 2 (${big?.width}x${big?.height}, scale ${big?.scale}, viewport ${big?.viewport.width}x${big?.viewport.height})`);
+    // The button is CSS (10..210, 10..60): frame (100, 60) is CSS (50, 30).
+    await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 100, y: 60, button: "left", clickCount: 1, modifiers: [], seq: big?.seq }]);
+    await until(() => host.get(crisp.id)?.title === "Clicked", "a click on a frame of the page at 2 lands on the button");
+    // A tab opened after it, and closed: Chrome makes this one the window's front tab and sets its view to the window's
+    // 1280×713 (review, 2026-10-03). The view is drawn again: what repaints next comes as the 1280×800 page at 2.
+    const later = await host.open(YOU, url);
+    await until(() => host.get(later.id)?.title === "Smoke", "a tab opened after it loads");
+    const closedAt = sharp.length;
+    await host.close(later.id);
+    await new Promise((r) => setTimeout(r, 300));
+    // The counting button is CSS (900..1020, 600..640), outside the window's 1280×713 at 2: frame (1900, 1240).
+    await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 1900, y: 1240, button: "left", clickCount: 1, modifiers: [] }]);
+    await until(() => host.get(crisp.id)?.title === "count:1", "after that tab closed, a click near the far corner of the watched tab lands");
+    await new Promise((r) => setTimeout(r, 500));
+    const since = sharp.slice(closedAt).filter((e): e is FrameEvent => e.type === "frame");
+    const whole = (f: FrameEvent) => f.width === 2560 && f.height === 1600 && f.scale === 2 && f.viewport.width === 1280 && f.viewport.height === 800;
+    const cut = since.find((f) => !whole(f));
+    check(since.length > 0 && !cut, `and its frames are still 2560x1600 of the 1280x800 page (${since.length} frames since`
+      + `${cut ? `, one ${cut.width}x${cut.height} of a ${cut.viewport.width}x${cut.viewport.height} page` : ""})`);
+    stopSharp();
+    const plain: BrowserEvent[] = [];
+    const stopPlain = host.subscribe(crisp.id, { quality: 60, fps: 10 }, (ev) => plain.push(ev));
+    const small = await until(() => plain.find((e): e is FrameEvent => e.type === "frame" && e.width === 1280), "without it, frames are the CSS size again");
+    await host.input(crisp.id, "smoke", [{ type: "mouse", action: "click", x: 50, y: 90, button: "left", clickCount: 1, modifiers: [], seq: small?.seq }, { type: "text", text: "1x" }]);
+    await until(() => host.get(crisp.id)?.title === "typed:1x", "and a click on a CSS-size frame lands too");
+    stopPlain();
+    await host.close(crisp.id);
+  }
 
   // A blank tab (Chrome's own first page, sent to about:blank again) still closes.
   const blank = await host.open(YOU, "about:blank");
@@ -212,8 +232,8 @@ async function main(): Promise<void> {
   await host.shutdown();
   await new Promise((r) => setTimeout(r, 500));
   let left = "";
-  try { left = execFileSync("pgrep", ["-f", "--", `--user-data-dir=${profile}`], { encoding: "utf8" }).trim(); } catch { left = ""; }
-  check(left === "", "Chrome quits on shutdown");
+  try { left = execFileSync("pgrep", ["-f", "--", ofProfile(profile)], { encoding: "utf8" }).trim(); } catch { left = ""; }
+  check(left === "", "the browser quits on shutdown");
 }
 
 /** A PNG's pixel size (its IHDR), from base64. */
@@ -293,7 +313,7 @@ async function bridgeRoundTrip(): Promise<void> {
   check(token.startsWith("enc:v1:"), "a throw-away ciphertext for the test site");
 
   const api = sharedBrowser({ home: bhome, userHome, protected: defaultProtected({ ...process.env, HOME: userHome, AGENTSWITCH_HOME: bhome }), ownPorts: () => [own.port],
-    holdWaitMs: 1_500, fill: gateFill({ bin: VENV_GATE_BIN, home: gateHome }) });
+    holdWaitMs: 1_500, fill: gateFill({ bin: VENV_GATE_BIN, home: gateHome }), ...engineOption() });
   const host = api.host;
   const app = new Hono();
   mountBrowser(app, { browser: api } as unknown as ApiDeps);
@@ -344,7 +364,7 @@ async function bridgeRoundTrip(): Promise<void> {
     // a moment after the call.
     const watched: BrowserEvent[] = [];
     const stopWatching = host.subscribe(tab.id, { quality: 80, fps: 10, scale: 2 }, (ev) => watched.push(ev));
-    await until(() => watched.some((e) => e.type === "frame" && e.scale === 2), "a screen sees the agent's tab at 2");
+    if (CAMOUFOX) skipped("a screen sees the agent's tab at 2"); else await until(() => watched.some((e) => e.type === "frame" && e.scale === 2), "a screen sees the agent's tab at 2");
     await mcp.call("browser_click", { target: ref, element: "Merge pull request" });
     await until(() => host.get(tab.id)?.title === "merged", "a click through the gate reaches the page (the tab shown at 2)");
     const action = host.get(tab.id)?.action;
@@ -353,7 +373,7 @@ async function bridgeRoundTrip(): Promise<void> {
     const at2 = (from: number) => watched.slice(from).some((e) => e.type === "frame" && e.scale === 2 && e.width === 2560 && e.height === 1600 && e.viewport.width === 1280);
     const pageSize = async (): Promise<string> => String(await (host.page(tab.id)?.playwright?.() as Page | undefined)?.evaluate("innerWidth + 'x' + innerHeight").catch(() => "gone"));
     const clickedAt = watched.length;
-    await until(() => at2(clickedAt), "the agent's tab is at 2 again after the call (2560x1600 frames)", 8_000);
+    if (CAMOUFOX) skipped("the agent's tab is at 2 again after the call (2560x1600 frames)"); else await until(() => at2(clickedAt), "the agent's tab is at 2 again after the call (2560x1600 frames)", 8_000);
     // A screenshot while a screen shows the tab at 2 (review, 2026-10-03): Playwright's capture of a view drawn at a
     // scale laid the page out at 2560×1600 and left it so. The picture is taken on the CSS size: 1280×800 both times,
     // and the page is 1280×800 before, between and after.
@@ -367,7 +387,7 @@ async function bridgeRoundTrip(): Promise<void> {
     check(pictures.every((p) => p === "1280x800") && sizes.every((p) => p === "1280x800"),
       `two screenshots of the tab shown at 2 are 1280x800 pictures of a page that stays 1280x800 (pictures ${pictures.join(", ")}; the page ${sizes.join(", ")})`);
     const shotAt = watched.length;
-    await until(() => at2(shotAt), "and the tab is at 2 again after them", 8_000);
+    if (CAMOUFOX) skipped("and the tab is at 2 again after them"); else await until(() => at2(shotAt), "and the tab is at 2 again after them", 8_000);
     check(await pageSize() === "1280x800", `the page still 1280x800 (${await pageSize()})`);
     stopWatching();
 

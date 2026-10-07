@@ -91,6 +91,7 @@ import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
 import type { BrowserHost } from "./browser/host.js";
 import { sharedBrowser } from "./browser/setup.js";
+import { newEngineKit } from "./browser/engine/setup.js";
 import { stdioServePorts } from "./harness/opencodeStdio.js";
 
 export const VERSION = "0.1.0";
@@ -134,6 +135,8 @@ export type DaemonConfig = {
   /** The shared browser (docs/browser-v0.md): one Chrome the daemon holds, for the screens and later the agents. On
    *  unless AGENTSWITCH_BROWSER_HOST=0; tests build configs without it. */
   readonly browserHost?: boolean;
+  /** Camoufox with windows of its own (docs/browser-v0.md §7.2); off: headless. */
+  readonly browserWindow?: boolean;
 };
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
@@ -164,6 +167,9 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
     terminals: env.AGENTSWITCH_TERMINALS !== "0",
     browserHost: env.AGENTSWITCH_BROWSER_HOST !== "0",
+    // docs/browser-v0.md §7.2: Camoufox's tabs have windows of their own on a Mac; `AGENTSWITCH_BROWSER_WINDOW=0`
+    // (throw-away services, a Mac nobody sits at) and every other system keep it without one.
+    browserWindow: process.platform === "darwin" && env.AGENTSWITCH_BROWSER_WINDOW !== "0",
   };
 }
 
@@ -331,11 +337,17 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const gateProxyPort = proxyEndpoint(gate?.proxy ?? process.env.SECRET_GATE_PROXY ?? "http://127.0.0.1:8080")?.port;
   // With every OpenCode server the daemon runs now: the executors' resident one and the terminals' companions (port 0).
   const ownPorts = (): number[] => [localPort, cfg.port, cfg.remote?.port, cfg.opencodePort, gateProxyPort, ...stdioServePorts()].filter((p): p is number => typeof p === "number" && p > 0);
+  // docs/browser-v0.md §7: Camoufox and its Playwright on disk, and their updates. What an update that never finished
+  // left is cleared now; nothing is downloaded until asked.
+  const engineKit = cfg.browserHost ? newEngineKit(cfg.home) : undefined;
+  engineKit?.start();
   const browser = cfg.browserHost || overrides.browserDriver
-    ? sharedBrowser({ home: cfg.home, userHome: process.env.HOME ?? homedir(), protected: prot, ownPorts, ...(gate ? { gateHome: gate.home } : {}), ...(overrides.browserDriver ? { driver: overrides.browserDriver } : {}),
+    ? sharedBrowser({ home: cfg.home, userHome: process.env.HOME ?? homedir(), protected: prot, ownPorts, ...(engineKit ? { kit: engineKit } : {}), headless: !cfg.browserWindow, ...(gate ? { gateHome: gate.home } : {}), ...(overrides.browserDriver ? { driver: overrides.browserDriver } : {}),
       ...(overrides.browserEngine ? { engine: overrides.browserEngine } : {}), ...(gate ? { fill: gateFill(gate) } : {}),
       ...(clones ? { afterExit: () => clones.schedule() } : {}) })
     : undefined;
+  // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
+  if (browser && engineKit) engineKit.aroundSwitch((apply) => browser.host.restart(apply));
   // The terminals' agents use it through the gate (docs/terminal-v0.md §3): a session of their own per terminal, ended
   // with the program; the terminal's tabs close when the terminal is deleted.
   const agents = browser?.agents;
@@ -387,7 +399,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   sweepThreads(store, Date.now(), engine);
   forgetDeletedTasks(conversation, store);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const apiDeps: ApiDeps = { ...(browser ? { browser } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -401,7 +413,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
   return { app, api, remote, engine, store, quota, targets, terminals: terminalHost, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
-    stopBrowser: async () => { await browser?.agents.shutdown(); await browser?.host.shutdown(); },
+    stopBrowser: async () => { await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
     close: () => { terminalHost?.closeAll(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 

@@ -1,5 +1,6 @@
 /** Thin HTTP client used by the CLI; the phone app will do the same calls. */
 
+import type { EngineStatus, EngineUpdateRequest } from "./browser/engine/kit.js";
 import type { Approval, Task, TaskEvent } from "./engine/types.js";
 import type { Thread, ThreadState } from "./threads/types.js";
 
@@ -26,6 +27,12 @@ export class Client {
   }
 
   health() { return this.call<{ ok: boolean; version: string }>("GET", "/healthz"); }
+  /** docs/browser-v0.md §7: the browser engine as installed; `check` asks what could be. */
+  browserEngine(opts: { check?: boolean; prerelease?: boolean } = {}) {
+    return this.call<EngineStatus>("GET", `/browser/engine${opts.check ? `?check=1${opts.prerelease ? "&prerelease=1" : ""}` : ""}`);
+  }
+  updateBrowserEngine(req: EngineUpdateRequest) { return this.call<EngineStatus & { ok: true }>("POST", "/browser/engine/update", req); }
+  cancelBrowserEngine() { return this.call<{ ok: true }>("POST", "/browser/engine/cancel", {}); }
   submit(task: string, cwd: string | undefined, opts: { pin?: { harness: string; model: string }; needsBrowser?: boolean; ephemeral?: boolean; parentId?: string; threadId?: string } = {}) {
     return this.call<Task>("POST", "/tasks", { task, ...(cwd ? { cwd } : {}), ...(opts.pin ? { pin: opts.pin } : {}), ...(opts.needsBrowser ? { needs_browser: true } : {}), ...(opts.ephemeral ? { ephemeral: true } : {}), ...(opts.parentId ? { parent_id: opts.parentId } : {}), ...(opts.threadId ? { thread_id: opts.threadId } : {}) });
   }

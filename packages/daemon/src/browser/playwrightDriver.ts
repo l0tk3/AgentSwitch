@@ -16,6 +16,7 @@
 import type { BrowserContext, CDPSession, ElementHandle, Frame, Page, Request, Route } from "playwright-core";
 import type { BrowserDriver, DriverBrowser, DriverPage, FocusedField, GuardDecision, LaunchOptions, PageEvents, RequestGuard, ScreencastParams } from "./driver.js";
 import type { InputMethod } from "./driver.js";
+import { bundledPlaywright, notePlaywrightInUse, type PlaywrightCopy } from "./engine/loader.js";
 import { isLoopbackHost } from "./rules.js";
 import { viewAt } from "./screencast.js";
 import { DEFAULT_VIEWPORT, type Viewport } from "./types.js";
@@ -69,7 +70,7 @@ class PlaywrightPage implements DriverPage {
   private readingTitle = false;
   /** The size and the layout the page was last given (`setViewport`). */
   private sized: { readonly width: number; readonly height: number; readonly mobile: boolean } | null = null;
-  private readonly listeners: { [K in keyof PageEvents]: PageEvents[K][] } = { changed: [], loading: [], popup: [], frame: [], closed: [] };
+  private readonly listeners: { [K in keyof PageEvents]: PageEvents[K][] } = { changed: [], loading: [], popup: [], frame: [], closed: [], touched: [] };
 
   constructor(private readonly page: Page, private readonly browser: PlaywrightBrowser) {
     this.currentUrl = page.url();
@@ -235,48 +236,52 @@ class PlaywrightPage implements DriverPage {
     (this.listeners[event] as PageEvents[K][]).push(listener);
   }
 
-  /** The one frame whose document has an editable field in focus, and the frames above it (URLs as Playwright tracks
-   *  them from the browser). A frame holding a focused child frame matches `iframe:focus`, which is left out, so only
-   *  the innermost document counts. The field is held (an element handle) and typed into itself: if focus moved to
-   *  another field meanwhile (a tap on the phone while the gate answered), nothing is typed. */
   async focusedField(): Promise<FocusedField | null> {
-    const found: Frame[] = [];
-    for (const frame of this.page.frames()) {
-      const field = frame.locator(FOCUSED_FIELD);
-      try {
-        if (await field.count() === 1 && await field.isEditable({ timeout: FOCUS_CHECK_MS })) found.push(frame);
-      } catch { /* not editable (isEditable throws for other elements), or the frame went away */ }
-    }
-    if (found.length !== 1) return null;
-    const frame = found[0]!;
-    const frames = frameChain(frame);
-    const handle = await frame.locator(FOCUSED_FIELD).elementHandle({ timeout: FOCUS_CHECK_MS }).catch(() => null);
-    if (!handle) return null;
-    const secret = await frame.locator(`${FOCUSED_FIELD}${SECRET_FIELD}`).count().then((n) => n === 1, () => false);
-    return {
-      frames, secret,
-      insert: (text) => this.insertInto(frame, frames, handle, text),
-      release: async () => { await handle.dispose().catch(() => undefined); },
-    };
-  }
-
-  /** `text` into `handle`, if it is still the focused field of `frame` and the frame chain is still `frames`. */
-  private async insertInto(frame: Frame, frames: readonly string[], handle: ElementHandle, text: string): Promise<boolean> {
-    if (frame.isDetached() || frameChain(frame).join("\n") !== frames.join("\n")) return false;
-    const now = await frame.locator(FOCUSED_FIELD).elementHandle({ timeout: FOCUS_CHECK_MS }).catch(() => null);
-    if (!now) return false;
-    try {
-      // `===` of the two handles' elements: the page cannot redefine it.
-      const same = await frame.evaluate(([a, b]) => a === b, [handle, now] as const).catch(() => false);
-      if (!same) return false;
-      await handle.fill(text, { timeout: FILL_TIMEOUT_MS });
-      return true;
-    } finally {
-      await now.dispose().catch(() => undefined);
-    }
+    return focusedFieldOf(this.page);
   }
 
   playwright(): Page { return this.page; }
+}
+
+/** The one frame whose document has an editable field in focus, and the frames above it (URLs as Playwright tracks
+ *  them from the browser). A frame holding a focused child frame matches `iframe:focus`, which is left out, so only
+ *  the innermost document counts. The field is held (an element handle) and typed into itself: if focus moved to
+ *  another field meanwhile (a tap on the phone while the gate answered), nothing is typed. */
+export async function focusedFieldOf(page: Page): Promise<FocusedField | null> {
+  const found: Frame[] = [];
+  for (const frame of page.frames()) {
+    const field = frame.locator(FOCUSED_FIELD);
+    try {
+      if (await field.count() === 1 && await field.isEditable({ timeout: FOCUS_CHECK_MS })) found.push(frame);
+    } catch { /* not editable (isEditable throws for other elements), or the frame went away */ }
+  }
+  if (found.length !== 1) return null;
+  const frame = found[0]!;
+  const frames = frameChain(frame);
+  const handle = await frame.locator(FOCUSED_FIELD).elementHandle({ timeout: FOCUS_CHECK_MS }).catch(() => null);
+  if (!handle) return null;
+  const secret = await frame.locator(`${FOCUSED_FIELD}${SECRET_FIELD}`).count().then((n) => n === 1, () => false);
+  return {
+    frames, secret,
+    insert: (text) => insertInto(frame, frames, handle, text),
+    release: async () => { await handle.dispose().catch(() => undefined); },
+  };
+}
+
+/** `text` into `handle`, if it is still the focused field of `frame` and the frame chain is still `frames`. */
+async function insertInto(frame: Frame, frames: readonly string[], handle: ElementHandle, text: string): Promise<boolean> {
+  if (frame.isDetached() || frameChain(frame).join("\n") !== frames.join("\n")) return false;
+  const now = await frame.locator(FOCUSED_FIELD).elementHandle({ timeout: FOCUS_CHECK_MS }).catch(() => null);
+  if (!now) return false;
+  try {
+    // `===` of the two handles' elements: the page cannot redefine it.
+    const same = await frame.evaluate(([a, b]) => a === b, [handle, now] as const).catch(() => false);
+    if (!same) return false;
+    await handle.fill(text, { timeout: FILL_TIMEOUT_MS });
+    return true;
+  } finally {
+    await now.dispose().catch(() => undefined);
+  }
 }
 
 /** How often the patterns Chrome blocks are compared with AgentSwitch's ports now (servers come and go). */
@@ -409,14 +414,21 @@ class PlaywrightBrowser implements DriverBrowser {
   }
 }
 
-export type PlaywrightDriverOptions = { readonly viewport?: Viewport; readonly log?: (line: string) => void };
+export type PlaywrightDriverOptions = {
+  readonly viewport?: Viewport;
+  readonly log?: (line: string) => void;
+  /** The Playwright to start Chrome with (docs/browser-v0.md §7.3): the engine's, else the bundled one. */
+  readonly playwright?: () => PlaywrightCopy;
+};
 
 export function playwrightDriver(opts: PlaywrightDriverOptions = {}): BrowserDriver {
   const log = opts.log ?? console.error;
   const size = opts.viewport ?? DEFAULT_VIEWPORT;
   return {
     async launch({ profileDir, guard, routed, blocked }: LaunchOptions): Promise<DriverBrowser> {
-      const { chromium } = await import("playwright-core");
+      const copy = (opts.playwright ?? bundledPlaywright)();
+      notePlaywrightInUse(copy);
+      const { chromium } = copy.require("playwright-core") as typeof import("playwright-core");
       const context = await chromium.launchPersistentContext(profileDir, {
         channel: "chrome",
         headless: true,

@@ -120,7 +120,27 @@ export function mountBrowser(app: Hono, deps: ApiDeps): void {
     return failed(c, err);
   };
 
-  app.get("/browser/tabs", (c) => c.json({ running: host.running, groups: host.groups() }));
+  // `engine`: which browser the host starts now; `windows`: its tabs have windows of their own on this Mac (docs/browser-v0.md
+  // §7.2), so a screen there shows the list and brings windows forward instead of drawing pictures.
+  app.get("/browser/tabs", (c) => c.json({ running: host.running, groups: host.groups(), engine: b.engine(), windows: b.windows() }));
+
+  // The tab's window before the browser's other windows (the Mac app then brings the browser forward). Local only.
+  app.post("/browser/tabs/:id/show", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "not available from a paired device" }, 403);
+    try {
+      await host.show(c.req.param("id"));
+      return c.json({ ok: true });
+    } catch (err) { return failed(c, err); }
+  });
+
+  // A still picture of the tab for the Mac's list (JPEG). Local only: a phone has the stream.
+  app.get("/browser/tabs/:id/preview", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "not available from a paired device" }, 403);
+    try {
+      const picture = await host.picture(c.req.param("id"));
+      return c.body(new Uint8Array(picture), 200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+    } catch (err) { return failed(c, err); }
+  });
 
   // The phone's measure of its link (browser-v0 §5): bytes that do not compress, never cached.
   app.get("/browser/speed", (c) => {

@@ -66,6 +66,10 @@ export type FrameEvent = {
 /** Why a hold ended: handed back, two minutes without input, or another screen took it. */
 export type HeldReason = "take" | "hand-back" | "idle";
 /** Why a stream ends. */
+/** Who holds an agent's tab once the person has acted in its window (docs/browser-v0.md §7.2 第 4 条): the Mac hands it
+ *  back under this name. */
+export const WINDOW_HOLDER = "mac-window";
+
 export type ClosedReason = "closed" | "browser-exited" | "shutdown";
 
 export type BrowserEvent =

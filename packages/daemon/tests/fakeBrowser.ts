@@ -42,7 +42,23 @@ export class FakePage implements DriverPage {
   released = 0;
   /** What Playwright MCP would get as this page (the agent context's tests). */
   readonly raw = { fakePage: this };
-  private readonly listeners: { [K in keyof PageEvents]: PageEvents[K][] } = { changed: [], loading: [], popup: [], frame: [], closed: [] };
+  private readonly listeners: { [K in keyof PageEvents]: PageEvents[K][] } = { changed: [], loading: [], popup: [], frame: [], closed: [], touched: [] };
+  /** The page has a window of its own (Camoufox with windows, docs/browser-v0.md §7.3 窗口). */
+  hasWindow = false;
+  /** How often the window was given back its own size, was brought to the front, and was pictured. */
+  restores = 0;
+  fronts = 0;
+  pictures = 0;
+  /** Whether the host asked to hear of input in this page. */
+  watched: boolean | null = null;
+
+  windowed(): boolean { return this.hasWindow; }
+  async restoreSize(): Promise<void> { this.restores++; }
+  async show(): Promise<void> { this.fronts++; }
+  async picture(): Promise<Buffer> { this.pictures++; return Buffer.from(`picture ${this.pictures}`); }
+  watchTouches(on: boolean): void { this.watched = on; }
+  /** Input reached the page. */
+  touch(): void { for (const l of this.listeners.touched) l(); }
 
   url(): string { return this.currentUrl; }
   title(): string { return this.currentTitle; }
@@ -123,13 +139,27 @@ export function slowAnswer(p: FakePage, render: number): () => void {
 export class FakeBrowser implements DriverBrowser {
   readonly pages: FakePage[] = [];
   closed = false;
+  /** Pages have windows of their own. */
+  windows = false;
   private readonly exitListeners: ((expected: boolean) => void)[] = [];
+  private readonly pageListeners: ((page: DriverPage) => void)[] = [];
 
   constructor(readonly guard: RequestGuard) {}
 
   async newPage(): Promise<DriverPage> {
     const page = new FakePage();
+    page.hasWindow = this.windows;
     this.pages.push(page);
+    return page;
+  }
+  onPage(listener: (page: DriverPage) => void): void { this.pageListeners.push(listener); }
+  /** A tab the person opened in a window. */
+  appear(url: string): FakePage {
+    const page = new FakePage();
+    page.hasWindow = this.windows;
+    page.currentUrl = url;
+    this.pages.push(page);
+    for (const l of this.pageListeners) l(page);
     return page;
   }
   onExit(listener: (expected: boolean) => void): void { this.exitListeners.push(listener); }
@@ -146,11 +176,14 @@ export class FakeDriver implements BrowserDriver {
   readonly browsers: FakeBrowser[] = [];
   readonly launches: LaunchOptions[] = [];
   failure: Error | null = null;
+  /** The browsers it starts give every page a window of its own. */
+  windows = false;
 
   async launch(opts: LaunchOptions): Promise<DriverBrowser> {
     this.launches.push(opts);
     if (this.failure) throw this.failure;
     const browser = new FakeBrowser(opts.guard);
+    browser.windows = this.windows;
     this.browsers.push(browser);
     return browser;
   }

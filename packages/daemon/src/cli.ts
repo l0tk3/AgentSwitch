@@ -8,6 +8,9 @@
  *   threads [--archived] | thread <id> | archive <id> | reopen <id> | rmthread <id>
  *   approvals | quota [--refresh] | preview "<text>" [--cwd d] | log
  *   route "<text>" ... (local, no daemon) | reroute ... | context init
+ *   engine [check [--prerelease]] | engine update [--camoufox <version>|latest] [--playwright <version>|bundled] [--prerelease]
+ *     | engine cancel         the browser engine, Camoufox and its Playwright (docs/browser-v0.md §7): what is installed,
+ *                               what could be, updating the pair (download, digest, self-check, switch, the old copy deleted)
  *   browser-mcp --session <id> --token-file <file>   the shared browser's agent bridge on stdio (docs/browser-v0.md §2),
  *                               as `secret-gate browser -- agentswitch browser-mcp …` (the terminals run the same script)
  */
@@ -56,6 +59,9 @@ const { values, positionals } = parseArgs({
     kind: { type: "string", default: "refusal" },
     excerpt: { type: "string", default: "" },
     server: { type: "string", default: `http://127.0.0.1:${cfg.port}` },
+    camoufox: { type: "string" },
+    playwright: { type: "string" },
+    prerelease: { type: "boolean", default: false },
     json: { type: "boolean", default: false },
     watch: { type: "boolean", default: true },
     refresh: { type: "boolean", default: false },
@@ -129,7 +135,7 @@ async function watchInteractive(id: string): Promise<void> {
   }
 }
 
-const USAGE = "usage: serve | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp";
+const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp";
 
 async function main(): Promise<number> {
   if (values.help) { console.log(USAGE); return 0; }
@@ -211,6 +217,26 @@ async function main(): Promise<number> {
     case "route":
     case "reroute":
       return localRoute(cmd, a1);
+    case "engine": {
+      if (!a1) { out(await client.browserEngine()); return 0; }
+      if (a1 === "check") { out(await client.browserEngine({ check: true, prerelease: values.prerelease })); return 0; }
+      if (a1 === "cancel") { out(await client.cancelBrowserEngine()); return 0; }
+      if (a1 !== "update") throw new Error("engine [check] | engine update [--camoufox <version>|latest] [--playwright <version>|bundled] | engine cancel");
+      await client.updateBrowserEngine({ ...(values.camoufox ? { camoufox: values.camoufox } : {}), ...(values.playwright ? { playwright: values.playwright } : {}), ...(values.prerelease ? { prerelease: true } : {}) });
+      // Its progress, a line a phase, until it is over.
+      let said = "";
+      for (;;) {
+        const { update } = await client.browserEngine();
+        const line = update.running ? `${update.phase ?? "starting"}${update.part ? ` ${update.part}` : ""}${update.phase === "download" && update.total ? ` ${Math.floor(100 * (update.received ?? 0) / update.total)}%` : ""}` : "";
+        if (line && line !== said) { console.log(line); said = line; }
+        if (!update.running) {
+          console.log(update.ok === false ? `not updated: ${update.error ?? ""}` : "updated");
+          out(await client.browserEngine());
+          return update.ok === false ? 1 : 0;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
     case "browser-mcp": {
       const { bridgeArgs, runBridge } = await import("./browser/bridgeClient.js");
       return runBridge(bridgeArgs(["--url", values.server, ...(values.session ? ["--session", values.session] : []), ...(values["token-file"] ? ["--token-file", values["token-file"]] : [])]));

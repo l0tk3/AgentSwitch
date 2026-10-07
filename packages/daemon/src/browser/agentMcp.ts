@@ -19,8 +19,8 @@
  *  to the agent, and keep a real one from stopping the daemon) is taken off as it is added; rejections from Playwright's
  *  code (a refused download it tries to save) are logged instead. */
 
+import { playwrightInUse } from "./engine/loader.js";
 import { EventEmitter } from "node:events";
-import { createRequire } from "node:module";
 import type { Page } from "playwright-core";
 import type { AgentEngine, EngineConnection, JsonRpcMessage } from "./agents.js";
 import { HeldTraffic } from "./heldTraffic.js";
@@ -71,11 +71,13 @@ type McpTools = {
 /** What an agent's context needs of the host. */
 export type AgentContextHost = Pick<BrowserHost, "tabsOf" | "watch" | "page" | "open" | "close" | "list">;
 
-let tools: McpTools | null = null;
-/** playwright-core's bundle (CommonJS), loaded with the first agent connection. */
+let tools: { readonly dir: string; readonly tools: McpTools } | null = null;
+/** playwright-core's bundle (CommonJS), loaded with the first agent connection — of the copy the browser was started
+ *  with (docs/browser-v0.md §7.3: Playwright may be the bundled one or one installed by an engine update). */
 function mcpTools(): McpTools {
-  tools ??= (createRequire(import.meta.url)("playwright-core/lib/coreBundle") as { tools: McpTools }).tools;
-  return tools;
+  const copy = playwrightInUse();
+  if (tools?.dir !== copy.dir) tools = { dir: copy.dir, tools: (copy.require("playwright-core/lib/coreBundle") as { tools: McpTools }).tools };
+  return tools.tools;
 }
 
 const refused = (what: string): Error => new Error(`${what} is not available to agents in AgentSwitch's shared browser`);
@@ -264,15 +266,19 @@ let connections = 0;
 let logRejection: (line: string) => void = console.error;
 /** Playwright MCP's context listener (it collects every unhandled rejection of the process for its next answer). */
 const isMcpListener = (listener: unknown): boolean => typeof listener === "function" && String(listener).includes("_pendingUnhandledRejections");
-let playwrightError: (abstract new (...args: never[]) => Error) | null | undefined;
+type ErrorClass = abstract new (...args: never[]) => Error;
+let playwrightError: { readonly dir: string; readonly known: ErrorClass | null } | null = null;
 /** Playwright's own error class (what a refused download's `saveAs` rejects with; its stack points at the caller). */
-function playwrightErrorClass(): (abstract new (...args: never[]) => Error) | null {
-  if (playwrightError !== undefined) return playwrightError;
+function playwrightErrorClass(): ErrorClass | null {
+  const copy = playwrightInUse();
+  if (playwrightError?.dir === copy.dir) return playwrightError.known;
+  let known: ErrorClass | null = null;
   try {
-    const { errors } = createRequire(import.meta.url)("playwright-core") as { errors: { TimeoutError: { prototype: object } } };
-    playwrightError = (Object.getPrototypeOf(errors.TimeoutError.prototype) as { constructor: abstract new (...args: never[]) => Error }).constructor;
-  } catch { playwrightError = null; }
-  return playwrightError;
+    const { errors } = copy.require("playwright-core") as { errors: { TimeoutError: { prototype: object } } };
+    known = (Object.getPrototypeOf(errors.TimeoutError.prototype) as { constructor: ErrorClass }).constructor;
+  } catch { known = null; }
+  playwrightError = { dir: copy.dir, known };
+  return known;
 }
 const fromPlaywright = (reason: unknown): boolean => {
   if (!(reason instanceof Error)) return false;
