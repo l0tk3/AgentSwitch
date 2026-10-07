@@ -172,6 +172,7 @@ permission), `terminalsealed` (the sealed box opens 3 s in, with its glitch), `t
 suggestions), the same terminal's simple view (docs/simple-view-v0.md) as `simple` (a permission card at the end of
 the record), `simplebusy` (at work: what it is doing, its sub-agents, a queued message, the stop key),
 `simplecompact` (while it compacts its context: `Compact` and the clock, an earlier one a line in the record),
+`simpledaybreak` (a Codex terminal with its Daybreak switch on; `simpledaybreakclash`: on a model Codex lists without it),
 `simpleidle` (at rest: the model under the reply box opens the menu that changes it), `simplequestion`,
 `simpleprompt` (waiting on a screen of its own: the keys come out) and `simplechanges` (what the last turn
 changed), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,

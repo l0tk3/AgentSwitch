@@ -24,6 +24,8 @@ public struct TerminalAttachmentRef: Encodable, Sendable, Equatable {
 private struct CommandList: Decodable { let commands: [SlashCommand] }
 private struct ModelBody: Encodable { let model: String }
 private struct EffortBody: Encodable { let effort: String }
+private struct DaybreakBody: Encodable { let on: Bool }
+private struct DaybreakReply: Decodable { let on: Bool? }
 private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int; let screen: String? }
 private struct ClickBody: Encodable { let keys: [String] }
@@ -117,6 +119,13 @@ extension AgentSwitchAPI {
     /// Another thinking level for the agent in a terminal (Claude Code: `/effort <level>`, which it also keeps as that
     /// model's default, `max` excepted). Refused while it waits for an answer (409), and for an agent that chooses in a
     /// picker of its own (400).
+    /// Codex's Daybreak switch turned for the session a terminal is on: the Mac types Codex's own command when the
+    /// switch stands otherwise, and waits until Codex says so (docs/simple-view-v0.md §5.8). How it stands after.
+    public func setTerminalDaybreak(_ id: String, on: Bool) async throws -> Bool {
+        let reply: DaybreakReply = try await post(["terminals", id, "daybreak"], body: DaybreakBody(on: on))
+        return reply.on ?? on
+    }
+
     public func setTerminalEffort(_ id: String, effort: String) async throws -> ModelChange {
         do {
             let _: OKReply = try await post(["terminals", id, "effort"], body: EffortBody(effort: effort))

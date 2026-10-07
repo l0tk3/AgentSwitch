@@ -177,10 +177,13 @@ enum DemoData {
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
         // `simplecompact`: while it compacts its context (docs/simple-view-v0.md §5.7).
         let compact = screen == "simplecompact"
-        let busy = screen == "simplebusy" || compact, prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep" || screen == "simplesuggest"
+        // `simpledaybreak`: a Codex terminal with its Daybreak switch on (§5.8); `simpledaybreakclash`: on a model that
+        // Codex lists without a Daybreak program.
+        let clash = screen == "simpledaybreakclash", daybreak = screen == "simpledaybreak" || clash
+        let busy = screen == "simplebusy" || compact, prompt = screen == "simpleprompt", idle = daybreak || screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep" || screen == "simplesuggest"
         let five = ["low", "medium", "high", "xhigh", "max"]
         return TerminalList(terminals: [
-            TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
+            TerminalInfo(id: "a1b2c3d4", harness: daybreak ? "codex" : "claude-code", cwd: repo, model: clash ? "gpt-6.1-sol" : daybreak ? "gpt-6-sol" : "claude-opus-5-5", mode: daybreak ? "manual" : "auto", name: "iPhone 终端标签页",
                          status: busy ? .working : idle ? .idle : .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
                          permissions: screen == "terminallink" || busy || prompt || idle ? []
                                       : [screen == "terminalquestion" || screen == "simplequestion" ? question
@@ -189,7 +192,7 @@ enum DemoData {
                          statusSince: busy ? ago(compact ? 65 : 41) : nil,
                          subagents: prompt || idle || compact ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
                                                    TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")],
-                         suggestion: screen == "simplesuggest" ? "跑一遍测试确认" : nil),
+                         suggestion: screen == "simplesuggest" ? "跑一遍测试确认" : nil, daybreak: daybreak ? true : nil),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
                          createdAt: ago(900), lastOutputAt: ago(2)),
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,
@@ -198,7 +201,10 @@ enum DemoData {
             "claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "claude-fable-5-1", name: "Fable 5.1", efforts: five),
                             TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five), TerminalModelOption(id: "haiku", name: "Haiku 4.5", efforts: []),
                             TerminalModelOption(id: "claude-opus-4-6", name: "Opus 4.6", older: true, efforts: ["low", "medium", "high", "max"])],
-            "codex": [TerminalModelOption(id: "gpt-6-luna", name: "GPT-6 Luna", efforts: five, defaultEffort: "medium")],
+            "codex": [TerminalModelOption(id: "gpt-6.1-sol", name: "GPT-6.1-Sol", efforts: five, daybreak: "never"),
+                      TerminalModelOption(id: "gpt-6-sol", name: "GPT-6-Sol", efforts: five, daybreak: "also"),
+                      TerminalModelOption(id: "gpt-6-luna", name: "GPT-6 Luna", efforts: five, defaultEffort: "medium", daybreak: "also"),
+                      TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", efforts: five, daybreak: "only")],
             "opencode": [TerminalModelOption(id: "deepseek/deepseek-flash", name: "DeepSeek Flash", efforts: ["none", "low", "high", "max"])],
         ], defaults: ["claude-code": "Opus 5.5"],
            efforts: ["claude-code": five, "codex": five + ["ultra"], "pi": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]], effortDefaults: ["claude-code": "medium", "codex": "low"])
@@ -286,6 +292,9 @@ enum DemoData {
         let summary = decode(SessionSummary.self, ["harness": harness, "id": id, "cwd": "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch", "title": "iPhone 终端标签页",
                                                    "lastText": "", "updatedAt": ago(20), "startedAt": ago(1800), "active": true, "model": "claude-opus-5-5", "branch": "main"])
         let compact = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplecompact"
+        let demo = UserDefaults.standard.string(forKey: "uiDemoScreen")
+        let daybreak = demo == "simpledaybreak" || demo == "simpledaybreakclash"
+        let codexModel = demo == "simpledaybreakclash" ? "gpt-6.1-sol" : "gpt-6-sol"
         let busy = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplebusy"
         var items: [RecordItem] = [
             RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 2),
@@ -327,7 +336,7 @@ enum DemoData {
         return SessionRecord(session: summary, items: items, more: true, cursor: 100, rev: "demo",
                              plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done),
                                     PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
-                             usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: "acceptEdits")
+                             usage: RecordUsage(model: daybreak ? codexModel : "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: daybreak ? nil : "acceptEdits")
     }
 
     /// What a run of work changed (the simple view's Changes).

@@ -1,9 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildDaemon, type DaemonConfig } from "../src/daemon.js";
-import type { ClaudeModelInfo, CodexModelInfo } from "../src/router/discovery.js";
+import { codexDaybreakOf, type ClaudeModelInfo, type CodexModelInfo } from "../src/router/discovery.js";
 import { claudeOffer, codexOffer, familyOf, ModelOffers } from "../src/router/modelOffers.js";
 import { effortArgs, effortsFor, openCodeVariants, ordered, PI_THINKING, type EffortOffers } from "../src/harness/efforts.js";
 import type { Launcher } from "../src/terminals/host.js";
@@ -213,6 +213,70 @@ describe("model offers: each agent's own list for the terminals' model menus", (
     fail = true;
     await offers.refresh();
     expect(offers.current()["claude-code"]?.models.map((m) => m.name)).toContain("Opus 6");
+  });
+
+  it("Codex's Daybreak: each model's place under it; the switch only where its program and the account have it; turned through the API (2026-10-07)", async () => {
+    // What `model/list` says of a model (0.162, a real account): the programs it can be asked under.
+    expect(codexDaybreakOf({ cyber: ["standard", "daybreakBlue"] })).toBe("also");
+    expect(codexDaybreakOf({ cyber: ["daybreakBlue"] })).toBe("only");
+    expect(codexDaybreakOf({ cyber: ["standard"] })).toBe("never");
+    expect(codexDaybreakOf({ cyber: ["daybreak_red", "standard"] })).toBe("also");
+    for (const none of [null, undefined, {}, { cyber: [] }, { cyber: "standard" }]) expect(codexDaybreakOf(none)).toBeUndefined();
+    const codex: CodexModelInfo[] = [
+      { id: "gpt-6.1-sol", displayName: "GPT-6.1-Sol", daybreak: "never", isDefault: true },
+      { id: "gpt-6-sol", displayName: "GPT-6-Sol", daybreak: "also" },
+      { id: "gpt-daybreak-blue-latest", displayName: "Daybreak Blue", daybreak: "only" },
+      { id: "gpt-x", displayName: "GPT-X" },
+    ];
+    expect(codexOffer(codex).models.map((m) => [m.id, m.daybreak])).toEqual([["gpt-6.1-sol", "never"], ["gpt-6-sol", "also"], ["gpt-daybreak-blue-latest", "only"], ["gpt-x", undefined]]);
+    let features = ["fast_mode"], byDefault = true, list = codex;
+    const modelOffers = new ModelOffers({ log: () => undefined, listClaude: async () => CLAUDE, listCodex: async () => list, codexFeatures: async () => features, codexDaybreakDefault: async () => byDefault });
+    await modelOffers.refresh();
+    expect(modelOffers.current().codex?.daybreak).toBeUndefined();   // this Codex has no such feature: no switch
+    features = ["fast_mode", "cli_daybreak"];
+    list = codex.map(({ daybreak: _, ...m }) => ({ ...m, daybreak: "never" as const }));
+    await modelOffers.refresh();
+    expect(modelOffers.current().codex?.daybreak).toBeUndefined();   // the account has no Daybreak program: no switch
+    list = codex;
+    await modelOffers.refresh();
+    expect(modelOffers.current().codex?.daybreak).toBe(true);   // how its new sessions start, as its own config says
+
+    // Through the API: the listing, a terminal with the switch, the switch turned, and what follows.
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-daybreak-"));
+    const flag = join(home, "daybreak-flag");
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const fake = resolve(import.meta.dirname, "fixtures", "fakeTerminalAgent.mjs");
+    const launcher: Launcher = (req) => {
+      const plan = { file: process.execPath, args: [fake], env: { ...(process.env as Record<string, string>), FAKE_DAYBREAK_FILE: flag }, hooks: true };
+      // The companion says what the TUI saved on its server (here: the fake agent's file); Claude Code has none.
+      return req.harness !== "codex" ? plan : { ...plan, companion: { start: async () => ({ args: plan.args, env: plan.env }), attach: () => undefined, stop: () => undefined, reportsStatus: false,
+        daybreak: async () => existsSync(flag) && readFileSync(flag, "utf8") === "on" } };
+    };
+    const daemon = buildDaemon(cfg, { terminalLauncher: launcher, modelOffers });
+    closers.push(() => daemon.close());
+    const get = async (path: string) => (await (await daemon.api.request(path)).json()) as Record<string, any>;
+    const post = (path: string, body: unknown) => daemon.api.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const listed = await get("/terminals");
+    expect(listed.daybreak).toEqual({ codex: true });
+    expect(listed.models.codex.map((m: { id: string; daybreak?: string }) => [m.id, m.daybreak])).toContainEqual(["gpt-daybreak-blue-latest", "only"]);
+    const cwd = mkdtempSync(join(tmpdir(), "agentswitch-daybreak-cwd-"));
+    const made = (await (await post("/terminals", { harness: "codex", cwd })).json()) as { terminal: { id: string; daybreak: boolean | null } };
+    expect(made.terminal.daybreak).toBe(false);
+    const turned = await post(`/terminals/${made.terminal.id}/daybreak`, { on: true });
+    expect([turned.status, await turned.json()]).toEqual([200, { ok: true, on: true }]);
+    expect((await get(`/terminals/${made.terminal.id}`)).terminal.daybreak).toBe(true);
+    // Codex keeps the choice as how its new sessions start: the listing says so at once.
+    expect((await get("/terminals")).daybreak).toEqual({ codex: true });
+    expect((await (await post(`/terminals/${made.terminal.id}/daybreak`, { on: false })).json())).toEqual({ ok: true, on: false });
+    expect((await get("/terminals")).daybreak).toEqual({ codex: false });
+    expect((await post(`/terminals/${made.terminal.id}/daybreak`, { on: "yes" })).status).toBe(400);
+    // Its command is offered where the terminal has the switch, and nowhere else.
+    expect((await get(`/terminals/${made.terminal.id}/commands`)).commands.map((c: { name: string }) => c.name)).toContain("daybreak");
+    const other = (await (await post("/terminals", { harness: "claude-code", cwd })).json()) as { terminal: { id: string; daybreak: boolean | null } };
+    expect(other.terminal.daybreak).toBeNull();
+    expect((await get(`/terminals/${other.terminal.id}/commands`)).commands.map((c: { name: string }) => c.name)).not.toContain("daybreak");
+    const refused = await post(`/terminals/${other.terminal.id}/daybreak`, { on: true });
+    expect([refused.status, ((await refused.json()) as { error: string }).error]).toEqual([400, "this terminal has no Daybreak switch"]);
   });
 
   it("GET /terminals serves the offers (and what default is), the catalog for an agent not asked", async () => {

@@ -175,6 +175,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .chiprow .sp { flex: 1; }
 .pchip { font: 12px var(--short); color: var(--ink2); padding: 2px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
 .pchip.bad { color: var(--red); border-color: var(--red); }
+.pchip.warn { color: var(--amber, #c27400); } .err.warn { color: var(--amber, #c27400); }
 /* the effort slider (docs/terminal-v0.md §1 思考强度 “滑块”): a thick pill filled up to a round knob inside its end, stars
    twinkling in the filled part; the highest level in its own colour (violet). No sentence about a level. */
 .box.effort { width: 300px; padding: 14px; display: flex; flex-direction: column; gap: 8px; --top: #8e5cf7; --top-deep: #2f3dc8; }
@@ -207,15 +208,21 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .surf:not(.classic) .eslider .knob { border-radius: 0; width: 4px; height: 24px; top: -3px; left: calc(10px + var(--at) * (100% - 24px)); background: var(--ink); box-shadow: none; }
 .surf:not(.classic) .eslider button::after { top: 20px; left: 13.5px; width: 1px; height: 3px; border-radius: 0; background: color-mix(in srgb, var(--ink) 40%, transparent); }
 .surf:not(.classic) .eslider button.on::after { display: block; }
-/* the classic look: bars that rise, a signal's strength — lit up to the level, the top level in its own colour. Half the
-   size of the pill with stars it was (2026-10-07, user: 太大了，而且和codex的一模一样，可以稍微改一下). */
+/* the classic look: a slider of this app's own — a rounded rectangle for the line, a rounded oblong for the knob, light
+   flowing forward in the filled part, the quicker the higher; the top level in its own colour. Its story, the user's words
+   on 2026-10-07: a thick pill with a round knob and stars (太大了，而且和codex的一模一样), then bars that rise (太丑了，改成滑块
+   吧还是，然后一个圆角矩形+圆角长方形滑块，里面加上流动特效), now this at the bars' small size. */
 .surf.classic .box.effort { width: 174px; padding: 10px 12px; gap: 7px; }
 .surf.classic .box.effort p, .surf.classic .ee { display: none; }
-.surf.classic .eslider { display: flex; align-items: flex-end; gap: 7px; height: 22px; background: none; border-radius: 0; }
-.surf.classic .eslider .fill, .surf.classic .eslider .knob, .surf.classic .eslider button::after { display: none; }
-.surf.classic .eslider button { position: static; margin: 0; width: 10px; height: calc(6px + var(--k) * 14px); border-radius: 2.5px; background: color-mix(in srgb, var(--ink) 11%, transparent); }
-.surf.classic .eslider button.on { background: color-mix(in srgb, var(--accent) calc(62% + var(--k) * 38%), transparent); }
-.surf.classic .eslider.top button.on { background: color-mix(in srgb, var(--top) calc(62% + var(--k) * 38%), transparent); }
+.surf.classic .eslider { height: 14px; margin: 4px 0; border-radius: 4.5px; background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.surf.classic .eslider .fill { height: 14px; width: calc(6px + var(--at) * (100% - 12px)); border-radius: 4.5px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 70%, transparent), var(--accent)); }
+.surf.classic .eslider.top .fill { background: linear-gradient(90deg, var(--top-deep), var(--top)); }
+.surf.classic .eslider .fill::after { opacity: 1; background: linear-gradient(115deg, transparent 0 34%, rgba(255, 255, 255, calc(.16 + .22 * var(--at))) 50%, transparent 66% 100%) 0 0 / 58px 14px repeat-x;
+  animation: flow calc(4.1s - 2.8s * var(--at)) linear infinite; }
+@keyframes flow { to { background-position: 58px 0; } }
+.surf.classic .eslider button { top: -3px; width: 24px; height: 20px; margin-left: -6px; left: calc(var(--k) * (100% - 12px)); }
+.surf.classic .eslider button::after { left: 11.25px; top: 7.5px; width: 1.5px; height: 5px; border-radius: .75px; background: color-mix(in srgb, var(--ink) 26%, transparent); }
+.surf.classic .eslider .knob { left: calc(1.5px + var(--at) * (100% - 12px)); top: -3px; width: 9px; height: 20px; border-radius: 3px; background: #fff; box-shadow: 0 .8px 2px rgba(0, 0, 0, .28), 0 0 0 .5px rgba(0, 0, 0, .12); }
 .ctx { font-variant-numeric: tabular-nums; color: var(--ink3); }
 .box.menu.wide { min-width: 258px; } .two { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; } .two b { font-weight: 500; } .two small { font: 12px var(--ui); color: var(--ink2); }
 /* what the turn changed: the files, and the lines of the one picked */
@@ -742,6 +749,12 @@ const FILES = ["packages/daemon/src/terminals/host.ts", "packages/daemon/tests/h
 const COMMANDS = [["compact", "压缩上下文，留下摘要"], ["clear", "清空对话"], ["model", "换模型"], ["review", "审查当前改动"], ["init", "为项目写 CLAUDE.md"]];
 const KEYS = ["⏎", "⌫", "↑", "↓", "1", "2", "3", "y", "n", "esc", "tab", "⇧tab", "←", "→", "pgup", "pgdn", "^C"];
 const MODELS = [["Opus 5.5", "most capable"], ["Sonnet 5.5", "everyday tasks"], ["Haiku 4.5", "fastest"]];
+// Codex's, each with whether it runs with Daybreak on and off (also), on alone (only), off alone (never).
+const CODEX_MODELS = [["GPT-6.1 Sol", "never"], ["GPT-6 Sol", "also"], ["GPT-6 Luna", "also"], ["Daybreak Blue", "only"]];
+const daybreakModels = () => CODEX_MODELS.filter(([, d]) => d !== (S.daybreak ? "never" : "only"));
+const daybreakClash = () => { const d = CODEX_MODELS.find(([m]) => m === S.model)?.[1];
+  return S.daybreak == null || !d ? "" : S.daybreak && d === "never" ? `Codex 的模型列表里 ${S.model} 不支持 Daybreak，开着时它的下一轮会被 Codex 拒绝。换一个模型，或关掉 Daybreak。`
+    : !S.daybreak && d === "only" ? `Codex 的模型列表里 ${S.model} 只在 Daybreak 开着时可用，下一轮会被 Codex 拒绝。换一个模型，或打开 Daybreak。` : ""; };
 
 const PRESETS = {
   preview:    { w: "Preview", n: "<b>现在已有的样子。</b>终端列表里点开一个会话：只读的记录，底部一个 <code>Resume</code>。下面各状态都是按下它之后、留在这一页上的样子。",
@@ -757,6 +770,8 @@ const PRESETS = {
                 m: "<b>回复。</b><code>+</code>、粘贴或把文件拖到这一块上，输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令。" },
   suggest:    { w: "Suggestion", n: "<b>它猜你下一句。</b>Claude Code 歇下来时有时会在自己的输入行里用暗色字写一句它猜的话。这里把它写在回复框上面一行，点一下填进回复框，可以改了再发。",
                 m: "<b>它猜你下一句。</b>Claude Code 歇下来时有时会在自己的输入行里用暗色字写一句它猜的话。这里把它写在空的回复框里，按 <code>tab</code> 填进去，可以改了再发；一打字它就让开。" },
+  daybreak:   { w: "Daybreak", n: "<b>Codex 的 Daybreak 开关。</b>支持它的 Codex 多一项 <code>Daybreak On</code>：点开选 On / Off，对之后的新一轮生效，Codex 会把它记成新会话的默认。模型列表跟着变：开着时没有 Daybreak 那一档的模型不列出，关着时只有那一档的不列出。Codex 的列表里当前模型在这个状态下用不了时（先关掉、选 GPT-6.1 Sol、再打开，可以看到），回复框上方一行提醒。",
+                m: "<b>Codex 的 Daybreak 开关。</b>支持它的 Codex 多一项 <code>Daybreak On</code>：点开选 On / Off，对之后的新一轮生效，Codex 会把它记成新会话的默认。模型列表跟着变：开着时没有 Daybreak 那一档的模型不列出，关着时只有那一档的不列出。当前模型用不了时，回复框上方一行提醒。" },
   compact:    { w: "Compact", n: "<b>它在压缩上下文。</b>你打了 <code>/compact</code>，或者上下文满了它自己压缩：这段时间“正在做什么”写 <code>Compact</code> 和已用时间，回复框和它工作时一样。压缩完，记录里留一行，写着前后各有多少。",
                 m: "<b>它在压缩上下文。</b>你打了 <code>/compact</code>，或者上下文满了它自己压缩：这段时间“正在做什么”写 <code>Compact</code> 和已用时间，空着的回复框按 <code>esc</code> 是取消。压缩完，记录里留一行，写着前后各有多少。" },
   files:      { w: "Files", n: "<b>提到文件。</b>打 <code>@</code> 列出这个文件夹里的文件，按名字找，点一下填进去。行首的 <code>!</code> 是在它的 shell 里运行这一行，上面写一句。记录里读了图片的那一步可以点开看图。",
@@ -843,7 +858,9 @@ function load(preset) {
   if (isDispatch()) return loadDispatch(DPRESETS[preset] ? preset : "home");
   Object.assign(S, { preset, joined: preset !== "preview", status: "busy", away: null, items: BASE(), card: null, live: null, sub: null,
     draft: "", suggest: null, files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple",
-    plan: null, planOpen: false, ctx: 62 });
+    plan: null, planOpen: false, ctx: 62, daybreak: null, mode: "Edits", model: "Opus 5.5", effort: "Medium" });
+  // Codex with its Daybreak switch on, on a model that runs under it (turn it off, pick GPT-6.1 Sol, turn it on: the caution).
+  if (preset === "daybreak") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.daybreak = true; S.mode = "Ask"; S.model = "GPT-6 Sol"; S.effort = "High"; }
   if (["live", "away", "permission", "question"].includes(preset)) S.plan = PLAN();
   if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", note: "Build the release app", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
   if (preset === "away") S.away = isMac() ? "iPhone" : "Mac";
@@ -983,7 +1000,7 @@ function body() {
     <div class="meta">${busy ? `<span style="color:var(--cyan);display:inline-flex;gap:6px;align-items:center">${spinner()}${W("Busy")}</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
     <div class="meta path">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>`;
   const earlier = S.earlier ? EARLIER.map((it, i) => item(it, "e" + i)).join("") : `<button class="earlier" data-a="earlier">${S.classic ? `${icon("upc", 13)}Earlier` : "· · ·  Earlier"}</button>`;
-  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${S.classic ? `<i class="ki">${icon(sub ? "branch" : l.tool === "Compact" ? "compact" : "term", 14, 1.4)}</i>` : ""}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note || !l.text ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
+  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${S.classic && (sub || l.tool !== "Working") ? `<i class="ki">${icon(sub ? "branch" : l.tool === "Compact" ? "compact" : "term", 14, 1.4)}</i>` : ""}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note || !l.text ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
   const live = S.joined && !S.card ? (S.live ? now(S.live) : "") + (S.sub ? now(S.sub, true) : "") : "";
   return meta + earlier + S.items.map(item).join("") + live + card();
 }
@@ -1003,7 +1020,7 @@ function dock(noKeys) {
   const tasks = S.plan && !noKeys ? `<div class="tasks"><button class="fold" data-a="plan" aria-expanded="${S.planOpen}"><i>${G(S.planOpen ? "down" : "right", S.planOpen ? "▾" : "▸", 12)}</i><b>Tasks ${done}/${S.plan.length}</b><span>${esc(doing?.t ?? "")}</span></button>
     ${S.planOpen ? `<div class="tlist">${S.plan.map((x) => `<div class="${x.s}"><i>${pmark(x.s)}</i><span>${esc(x.t)}</span></div>`).join("")}</div>` : ""}</div>` : "";
   const hints = !isMac() || S.split ? "" : S.classic ? `<span class="hintk"><span>Return to send</span><span>Esc to stop</span></span>` : `<span class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></span>`;
-  const chips = noKeys ? "" : `<div class="chiprow"><button class="pchip ${S.mode === "Bypass" ? "bad" : ""}" data-a="modes">${S.mode}${G("down", " ▾", 11)}</button><button class="pchip" data-a="models">${S.model}${G("down", " ▾", 11)}</button><button class="pchip" data-a="effort">${S.effort}${G("down", " ▾", 11)}</button><span class="sp"></span>${hints}<span class="ctx" title="上下文用量">${S.ctx}%</span></div>`;
+  const chips = noKeys ? "" : `<div class="chiprow"><button class="pchip ${S.mode === "Bypass" ? "bad" : ""}" data-a="modes">${S.mode}${G("down", " ▾", 11)}</button><button class="pchip ${daybreakClash() ? "warn" : ""}" data-a="models">${S.model}${G("down", " ▾", 11)}</button><button class="pchip" data-a="effort">${S.effort}${G("down", " ▾", 11)}</button>${S.daybreak == null ? "" : `<button class="pchip" data-a="daybreak">Daybreak ${S.daybreak ? "On" : "Off"}${G("down", " ▾", 11)}</button>`}<span class="sp"></span>${hints}<span class="ctx" title="上下文用量">${S.ctx}%</span></div>`;
   // Files of the folder after an `@` (the word the caret is in), a line on what another first character does.
   const word = S.sealed ? "" : S.draft.split(/\s/).pop();
   const files = /^@[^@]*$/.test(word) ? FILES.filter((f) => f.toLowerCase().includes(word.slice(1).toLowerCase())).slice(0, 5) : [];
@@ -1016,6 +1033,7 @@ function dock(noKeys) {
     : mark;
   return `${isMac() ? "" : sugList}
     ${S.error ? `<div class="err"><span>${esc(S.error)}</span><button data-a="errx" aria-label="关闭">${G("x", "×", 14)}</button></div>` : ""}
+    ${daybreakClash() ? `<div class="err warn"><span>${esc(daybreakClash())}</span></div>` : ""}
     ${S.away && S.view === "simple" ? `<div class="quiet">这个终端正在 ${S.away} 上使用。在这里回复不会改变它的窗口大小。</div>` : ""}
     ${tasks}${S.keys && !noKeys && !isMac() ? keysBar(true) : ""}${isMac() ? sugList : ""}${thumbs}
     <div class="comp ${S.sealed ? "sealed" : ""}" id="comp">
@@ -1059,8 +1077,11 @@ function over() {
       <div class="ee"><span>${EFFORTS[0]}</span><span>${EFFORTS[last]}</span></div>
       <p>会记成这个模型的默认；Max 只用于这一次。</p></div></div>`;
   }
+  if (o.kind === "daybreak") return `<div class="veil low" data-a="shut"><div class="box menu wide" style="align-self:flex-start"><div class="ba">
+    ${[["On", true], ["Off", false]].map(([w, on]) => `<button data-a="setdaybreak" data-on="${on ? 1 : ""}">${w}<span>${S.daybreak === on ? G("check", "<x>", 15) : ""}</span></button>`).join("")}
+    <button disabled><span class="two"><small>对之后的新一轮生效；Codex 会把它记成新会话的默认</small></span></button></div></div></div>`;
   if (o.kind === "models") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
-    ${MODELS.map(([m]) => `<button data-a="model" data-m="${m}">${m}<span>${S.model === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
+    ${(S.daybreak == null ? MODELS : daybreakModels()).map(([m]) => `<button data-a="model" data-m="${m}">${m}<span>${S.model === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
   if (o.kind === "changes") {
     const CH = isDispatch() ? DCHANGES : CHANGES;
     const f = CH[o.file ?? 0], add = CH.reduce((x, c) => x + c.add, 0), del = CH.reduce((x, c) => x + c.del, 0);
@@ -1254,10 +1275,10 @@ function send(sealed) {
   Object.assign(S, { draft: "", files: [], sealed: false, over: null, unseen: 0 });
   if (text === "/model") { S.status = "waiting"; S.card = { kind: "prompt" }; S.keys = true; S.sel = 0; render(true); return glitch("card"); }
   const answer = () => {
-    mine.queued = false; S.status = "busy"; S.sub = null; S.live = { tool: "Thinking", text: "", t0: Date.now() };
+    mine.queued = false; S.status = "busy"; S.sub = null; S.live = { tool: "Working", text: "", t0: Date.now() };
     render(true);
     setTimeout(() => {
-      if (S.status !== "busy" || S.live?.tool !== "Thinking") return;
+      if (S.status !== "busy" || S.live?.tool !== "Working") return;
       S.live = null; S.status = "idle"; if (S.plan) S.plan.forEach((x) => { x.s = "done"; });
       push({ t: "md", html: "<p>收到。（演示页到此为止：真的会话里这里是 agent 的回答。）</p>" });
       render();
@@ -1326,6 +1347,8 @@ document.addEventListener("click", (e) => {
     case "verbose": S.verbose = !S.verbose; S.over = null; return render();
     case "modes": S.over = { kind: "modes" }; return render();
     case "models": S.over = { kind: "models" }; return render();
+    case "daybreak": S.over = { kind: "daybreak" }; return render();
+    case "setdaybreak": S.daybreak = !!el.dataset.on; S.over = null; return render();
     case "mode": S.mode = el.dataset.m; S.over = null; return render();
     case "model": S.model = el.dataset.m; S.over = null; return render();
     case "effort": S.over = { kind: "effort" }; return render();

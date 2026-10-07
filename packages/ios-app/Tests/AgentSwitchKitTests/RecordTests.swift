@@ -287,7 +287,7 @@ final class RecordTests: XCTestCase {
         // The browser's tools read as the web here (ToolDisplay's word for them); any other tool is a tool.
         XCTAssertEqual(RecordDisplay.toolSymbol("mcp__browser__browser_click"), "globe")
         XCTAssertEqual(RecordDisplay.toolSymbol("mcp__github__create_issue"), RecordDisplay.symbol(.tool))
-        XCTAssertEqual(RecordDisplay.toolSymbol(nil), RecordDisplay.symbol(.think))
+        XCTAssertNil(RecordDisplay.toolSymbol(nil))   // at work with no tool: no picture
         // Compacting its context is no tool: a word and a picture of its own, like no step's.
         XCTAssertEqual(ToolDisplay.word("Compact"), "Compact")
         XCTAssertEqual(ToolDisplay.label("Compact"), "压缩上下文")
@@ -337,5 +337,42 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(activity, TerminalActivity(tool: "Bash", target: "npm test"))
         XCTAssertEqual(subagents.map(\.name), ["找出所有用到的地方"])
         XCTAssertEqual(subagents.first?.doing, "搜索 Delete")
+    }
+
+    /// Codex's Daybreak switch (docs/simple-view-v0.md §5.8): the models offered as it stands, the line when the one
+    /// it is on cannot run, and what the service says of it.
+    func testCodexDaybreakSwitchAndItsModels() throws {
+        let never = TerminalModelOption(id: "gpt-6.1-sol", name: "GPT-6.1-Sol", daybreak: "never")
+        let also = TerminalModelOption(id: "gpt-6-sol", name: "GPT-6-Sol", daybreak: "also")
+        let only = TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", daybreak: "only")
+        let unsaid = TerminalModelOption(id: "gpt-x", name: "GPT-X")
+        let all = [never, also, only, unsaid]
+        // No switch: every model. On: not the ones with the standard program alone. Off: not the Daybreak-only ones.
+        XCTAssertEqual(TerminalDaybreak.offered(all, on: nil), all)
+        XCTAssertEqual(TerminalDaybreak.offered(all, on: true), [also, only, unsaid])
+        XCTAssertEqual(TerminalDaybreak.offered(all, on: false), [never, also, unsaid])
+        // The model it is on cannot run as the switch stands: said, named as the control names it.
+        XCTAssertEqual(TerminalDaybreak.clash(model: never, on: true), "Codex 的模型列表里 GPT-6.1-Sol 不支持 Daybreak，开着时它的下一轮会被 Codex 拒绝。换一个模型，或关掉 Daybreak。")
+        XCTAssertEqual(TerminalDaybreak.clash(model: only, on: false, name: "Blue"), "Codex 的模型列表里 Blue 只在 Daybreak 开着时可用，下一轮会被 Codex 拒绝。换一个模型，或打开 Daybreak。")
+        for (model, on) in [(also, true), (also, false), (never, false), (only, true), (unsaid, true)] as [(TerminalModelOption, Bool)] {
+            XCTAssertNil(TerminalDaybreak.clash(model: model, on: on))
+        }
+        XCTAssertNil(TerminalDaybreak.clash(model: nil, on: true))
+        XCTAssertNil(TerminalDaybreak.clash(model: never, on: nil))
+        XCTAssertEqual([TerminalDaybreak.word(true), TerminalDaybreak.word(false)], ["Daybreak On", "Daybreak Off"])
+        // As the service sends it: a terminal's switch (none said: no switch), each model's place, how new sessions start.
+        let list = try JSONDecoder().decode(TerminalList.self, from: Data(#"""
+        {"terminals":[{"id":"t1","harness":"codex","cwd":"/w","name":"a","status":"idle","createdAt":1,"daybreak":true},
+                      {"id":"t2","harness":"codex","cwd":"/w","name":"b","status":"idle","createdAt":2,"daybreak":null},
+                      {"id":"t3","harness":"claude-code","cwd":"/w","name":"c","status":"idle","createdAt":3}],
+         "agents":["codex"],"models":{"codex":[{"id":"gpt-6.1-sol","name":"GPT-6.1-Sol","daybreak":"never"},{"id":"gpt-x","name":"GPT-X"}]},
+         "daybreak":{"codex":false}}
+        """#.utf8))
+        XCTAssertEqual(list.terminals.map(\.daybreak), [true, nil, nil])
+        XCTAssertEqual(list.models["codex"]?.map(\.daybreak), ["never", nil])
+        XCTAssertEqual(list.daybreak, ["codex": false])
+        XCTAssertEqual(try JSONDecoder().decode(TerminalList.self, from: Data(#"{"terminals":[],"agents":[]}"#.utf8)).daybreak, [:])
+        XCTAssertEqual(TerminalEvent.parse(event: "daybreak", data: #"{"type":"daybreak","on":false}"#), .daybreak(false))
+        XCTAssertNil(TerminalEvent.parse(event: "daybreak", data: #"{"type":"daybreak"}"#))
     }
 }

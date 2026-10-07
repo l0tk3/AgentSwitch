@@ -24,6 +24,8 @@ final class PaneRecord {
     private(set) var activitySince: Date?
     /// The model the agent says it is on now (Claude Code), once it has said.
     private(set) var modelNow: String?
+    /// Codex's Daybreak switch as its stream said last (nil: nothing said yet — the terminal's own word stands).
+    private(set) var daybreakNow: Bool?
     /// How it asks now, as the terminal's stream said or as a change asked for here left it.
     private(set) var modeNow: String?
     /// What Claude Code offers as your next message (its prompt suggestion), while it shows one; said in the empty
@@ -135,7 +137,7 @@ final class PaneRecord {
         terminal = nil
         session = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
-        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil
+        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil; daybreakNow = nil
         draft = ""
         draftFiles = []
         insert = nil
@@ -163,6 +165,8 @@ final class PaneRecord {
             modeNow = mode
         case .suggestion(let text):
             suggestion = text
+        case .daybreak(let on):
+            daybreakNow = on
         case nil:
             // A turn began or ended: its clock starts over, and what the record holds may have moved on.
             if event == "status" { activitySince = Date(); refresh() }
@@ -456,6 +460,23 @@ final class PaneRecord {
                 } else {
                     self?.error = Self.refused(error, busy: "它正在工作或等待回答，结束后再切换。")
                 }
+            }
+        }
+    }
+
+    /// Codex's Daybreak switch turned (docs/simple-view-v0.md §5.8): the service types Codex's own command and waits
+    /// until Codex says so, which takes a moment.
+    func setDaybreak(_ on: Bool) {
+        guard let terminal, !changing else { return }
+        changing = true
+        let client = client
+        Task { [weak self] in
+            defer { self?.changing = false }
+            do {
+                self?.daybreakNow = try await client().setTerminalDaybreak(id: terminal, on: on)
+                self?.error = nil
+            } catch {
+                self?.error = Self.refused(error, busy: "Codex 没有切换：它正在等待回答，或它的屏幕上写着原因。")
             }
         }
     }

@@ -284,8 +284,8 @@ struct NowLine: View {
                 // Still going: its words are quiet, a band of light running across them — and that says it, so no
                 // spinner turns beside them (2026-10-07, user: 加载图标实际上转圈圈可以去掉了，有流光特效的话). The classic
                 // look has the small picture a step of that kind has; the pixel look, its words alone.
-                if look.isClassic {
-                    Image(systemName: RecordDisplay.toolSymbol(activity?.tool)).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20, alignment: .center)
+                if look.isClassic, let symbol = RecordDisplay.toolSymbol(activity?.tool) {
+                    Image(systemName: symbol).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20, alignment: .center)
                 }
                 HStack(spacing: 7) {
                     if let activity {

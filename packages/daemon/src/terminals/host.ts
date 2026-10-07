@@ -62,6 +62,9 @@ export type TerminalInfo = {
    *  companion of this terminal sets them on the agent's own server. False for one that can only say what it is on (a
    *  Codex or an OpenCode started without its server). */
   readonly sets: boolean;
+  /** Codex's Daybreak switch for the session it is on (docs/simple-view-v0.md §5.8): on, off; null where there is no
+   *  such switch (another agent, a Codex without it, one that runs without its own server) or it has not been read. */
+  readonly daybreak: boolean | null;
   /** The thinking level it was started at, in the agent's own word; null: the agent's default. What it is at now is
    *  in its session's record (Claude Code and Codex write it with every turn). */
   readonly effort: string | null;
@@ -128,6 +131,8 @@ export type TerminalEvent =
   | { readonly type: "removed" }
   /** The agent is on another model now (Claude Code's PostModelSwitch). */
   | { readonly type: "model"; readonly model: string }
+  /** Codex's Daybreak switch stands otherwise now. */
+  | { readonly type: "daybreak"; readonly on: boolean }
   /** It asks in another way now (its permission mode). */
   | { readonly type: "mode"; readonly mode: string }
   | { readonly type: "suggestion"; readonly text: string | null }
@@ -168,6 +173,9 @@ export type Companion = {
   /** Another model, or another level, for the session the program is on, where the companion can set them (OpenCode's
    *  server). What it is on afterwards; throws with a sentence a screen can show. */
   setModel?(want: { model?: string | null; variant?: string | null; session?: string | null }): Promise<{ model: string; variant: string | null }>;
+  /** How a switch of the agent's own stands for the session the program is on, where the terminal has it (Codex's
+   *  Daybreak, read from its server). The switch itself is turned in the program, by its own command. */
+  daybreak?(session?: string | null): Promise<boolean>;
 };
 export type CompanionLink = {
   status(status: Exclude<TerminalStatus, "exited">): void;
@@ -203,6 +211,8 @@ export type TerminalHostOptions = {
   /** Claude Code's screen is read for its compacting line this long after it drew (default 400 ms;
    *  docs/simple-view-v0.md §5.7). */
   readonly compactLookMs?: number;
+  /** How long Codex is given to turn its Daybreak switch after its command was typed (default 5 s). */
+  readonly daybreakWaitMs?: number;
   /** How long a permission request waits for a screen before the agent asks in the terminal itself (default 30 min). */
   readonly permissionTimeoutMs?: number;
   /** After SIGHUP, how long before SIGKILL (default 3 s). */
@@ -240,6 +250,14 @@ const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi"]);   // OpenCod
 const SUGGEST_MS = 200;
 /** What a terminal is doing while its agent compacts its context: the tool its `activity` names. */
 const COMPACT_TOOL = "Compact";
+/** Codex's server is asked how its Daybreak switch stands this long after its screen named it, and after the
+ *  command that turns it was typed: this often, for this long. */
+const DAYBREAK_LOOK_MS = 400;
+/** A terminal's start waits this long at most for the first answer, and asks again after these. */
+const DAYBREAK_FIRST_MS = 2000;
+const DAYBREAK_AGAIN_MS = [2000, 6000];
+const DAYBREAK_POLL_MS = 250;
+const DAYBREAK_WAIT_MS = 5000;
 /** After a hook said a compaction is over, a compacting line still on the screen is not believed for this long. */
 const COMPACT_GRACE_MS = 1500;
 const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, compactLookMs: 400, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
@@ -551,6 +569,9 @@ class Session {
   /** When a hook last said a compaction was over. */
   compactEndedAt = 0;
   compactTimer: NodeJS.Timeout | null = null;
+  /** Codex's Daybreak switch as last read from its server; null: no switch, or not read yet. */
+  daybreak: boolean | null = null;
+  daybreakTimer: NodeJS.Timeout | null = null;
   /** Output until then answers what was just sent (an agent without hooks is not busy for it). */
   quietUntil = 0;
   killTimer: NodeJS.Timeout | null = null;
@@ -611,6 +632,7 @@ export class TerminalHost {
       snapshotScrollback: opts.snapshotScrollback ?? DEFAULTS.snapshotScrollback,
       idleAfterMs: opts.idleAfterMs ?? DEFAULTS.idleAfterMs,
       compactLookMs: opts.compactLookMs ?? DEFAULTS.compactLookMs,
+      daybreakWaitMs: opts.daybreakWaitMs ?? DAYBREAK_WAIT_MS,
       permissionTimeoutMs: opts.permissionTimeoutMs ?? DEFAULTS.permissionTimeoutMs,
       sizeReleaseMs: opts.sizeReleaseMs ?? DEFAULTS.sizeReleaseMs,
       killGraceMs: opts.killGraceMs ?? DEFAULTS.killGraceMs,
@@ -678,6 +700,14 @@ export class TerminalHost {
       status: (status) => { if (status === "idle") this.turnEnded(s, true, null); this.setStatus(s, status); },
       ask: async (tool, input, signal) => (await this.ask(s, tool, input, signal))?.decision ?? null,
     });
+    const daybreak = s.companion?.daybreak?.bind(s.companion);
+    if (daybreak) {
+      // How its switch stands as it starts: how its new sessions start, until its TUI has made its thread or loaded
+      // the one it goes on with — asked again once that has had time (a session resumed keeps its own choice, and
+      // says nothing on its screen when that is off).
+      s.daybreak = await Promise.race([daybreak(null).catch(() => null), new Promise<null>((r) => { setTimeout(() => r(null), DAYBREAK_FIRST_MS).unref(); })]);
+      for (const ms of DAYBREAK_AGAIN_MS) setTimeout(() => this.daybreakLooks(s, 0), ms).unref();
+    }
     return this.info(s);
   }
 
@@ -825,6 +855,52 @@ export class TerminalHost {
     this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
   }
 
+  /** A screen turns Codex's Daybreak switch (docs/simple-view-v0.md §5.8). Its TUI holds the switch — a change made
+   *  on its server alone it does not follow — so its own command is typed, `/daybreak`, which only flips: typed when
+   *  the switch stands otherwise than asked, and then its server is asked until it says so. Codex takes the command
+   *  while it works too (it holds from the next turn); not while something waits for an answer, where the keys
+   *  would go. Codex itself keeps the choice as how its new sessions start. Returns how it stands. */
+  async askDaybreak(id: string, on: boolean): Promise<boolean> {
+    const s = this.need(id);
+    const read = s.companion?.daybreak?.bind(s.companion);
+    if (!read) throw new TerminalError("invalid", "this terminal has no Daybreak switch");
+    if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
+    if (s.status === "waiting" || s.pending.size) throw new TerminalError("busy", "the agent waits for an answer");
+    const ask = async (): Promise<boolean> => { try { return await read(s.agentSessionId); } catch (err) { throw new TerminalError("invalid", (err as Error).message); } };
+    let now = await ask();
+    if (now !== on) {
+      this.write(id, replyBytes("/daybreak", this.bracketedPaste(id), true));
+      for (const end = this.o.now() + this.o.daybreakWaitMs; now !== on && this.o.now() < end; ) {
+        await new Promise((r) => setTimeout(r, DAYBREAK_POLL_MS));
+        if (!this.sessions.has(id) || (s.status as TerminalStatus) === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
+        now = await ask();
+      }
+    }
+    this.daybreakIs(s, now);
+    if (now !== on) throw new TerminalError("busy", "Codex did not turn it: its screen says why");
+    return now;
+  }
+
+  private daybreakIs(s: Session, on: boolean): void {
+    if (s.daybreak === on) return;
+    s.daybreak = on;
+    s.emit({ type: "daybreak", on });
+  }
+
+  /** Asks the terminal's companion how the switch stands, a moment from now (once, however often it is asked for):
+   *  when the terminal starts, when its screen names the switch (it was turned there, or says how it begins), when a
+   *  turn ends. What cannot be read leaves what was read before. */
+  private daybreakLooks(s: Session, inMs = DAYBREAK_LOOK_MS): void {
+    const read = s.companion?.daybreak?.bind(s.companion);
+    if (!read || s.daybreakTimer || s.status === "exited") return;
+    s.daybreakTimer = setTimeout(() => {
+      s.daybreakTimer = null;
+      if (!this.sessions.has(s.id) || s.status === "exited") return;
+      read(s.agentSessionId).then((on) => { if (this.sessions.has(s.id)) this.daybreakIs(s, on); }, () => undefined);
+    }, inMs);
+    s.daybreakTimer.unref();
+  }
+
   /** A model or a level set through the terminal's companion (OpenCode: on its own server, which its TUI follows):
    *  while it rests, as the others; what it is on afterwards is what the screens are told. */
   private async switched(s: Session, want: { model?: string; variant?: string }): Promise<void> {
@@ -945,7 +1021,7 @@ export class TerminalHost {
         if (p.source === "compact") return null;
         this.noSubagents(s); this.setStatus(s, "idle"); return null;
       case "UserPromptSubmit": this.settleAll(s, "working"); this.setStatus(s, "working"); return null;
-      case "Stop": this.settleAll(s, "idle"); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); return null;
+      case "Stop": this.settleAll(s, "idle"); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); this.daybreakLooks(s); return null;
       case "SubagentStart": if (agentId) this.subagentStarted(s, agentId, String(p.agent_type ?? "")); return null;
       case "SubagentStop": if (agentId && s.subagents.delete(agentId)) this.doing(s); return null;
       // Claude Code: the turn ended on an API error (a rate limit, overload, authentication…), which Stop does not say.
@@ -1125,6 +1201,9 @@ export class TerminalHost {
     s.bytes += data.length;
     while (s.bytes > this.o.bufferBytes && s.chunks.length > 1) s.bytes -= s.chunks.shift()!.data.length;
     s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); this.compactLooks(s); });
+    // Codex names its Daybreak switch on its screen when it is turned there and when a session begins with it on:
+    // the word is only the cue, its server says how it stands.
+    if (s.companion?.daybreak && data.includes("Daybreak")) this.daybreakLooks(s);
     s.lastOutputAt = this.o.now();
     s.emit({ type: "output", seq, data });
     // Waiting for you, it waits whatever it draws.
@@ -1341,7 +1420,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, sets: DIRECT.has(s.harness) || !!s.companion?.setModel, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, sets: DIRECT.has(s.harness) || !!s.companion?.setModel, daybreak: s.daybreak, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

@@ -1,6 +1,7 @@
 // A stand-in for an agent CLI in an AgentSwitch terminal (tests/terminals.test.ts): sets its title, answers each line,
 // and on "perm" asks for a permission through the real hook command, the way Claude Code does, printing the answer.
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 
 process.stdout.write("\x1b]0;fake agent\x07fake agent ready\r\n");
 
@@ -15,6 +16,7 @@ function hook(payload) {
 }
 
 let blink = null;
+let daybreak = false;
 
 async function handle(line) {
   if (!line) return;
@@ -74,6 +76,14 @@ async function handle(line) {
     return;
   }
   if (line === "answered") { clearInterval(blink); process.stdout.write("\x1b]0;查看进程 | Codex\x07\r\nallowed\r\n"); return; }
+  // Codex's Daybreak switch: its command flips it and says how it stands, as its TUI does.
+  // (`FAKE_DAYBREAK_FILE`: where it also keeps the choice, as the TUI saves it on its server.)
+  if (line === "/daybreak") {
+    daybreak = !daybreak;
+    if (process.env.FAKE_DAYBREAK_FILE) writeFileSync(process.env.FAKE_DAYBREAK_FILE, daybreak ? "on" : "off");
+    process.stdout.write(`• Daybreak ${daybreak ? "on" : "off"}. Applies to new turns.\r\n`);
+    return;
+  }
   // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.
   if (line === "compacting") { process.stdout.write("\r\x1b[2K✻ Compacting conversation… (1s)"); return; }
   // (What was typed to say so was echoed onto that row: it is the one above by now.)

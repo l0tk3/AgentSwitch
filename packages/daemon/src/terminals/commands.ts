@@ -242,6 +242,11 @@ export function slashCommands(harness: string, cwd: string, home: string = homed
   return ranked([...custom, ...builtin]);
 }
 
+/** `commands` with a built-in one more, in its place (one of that name already there stays as it is). */
+export function withCommand(commands: readonly SlashCommand[], one: { readonly name: string; readonly description: string }): SlashCommand[] {
+  return commands.some((c) => c.name === one.name) ? [...commands] : ranked([...commands, { name: one.name, description: oneLine(one.description), source: "builtin" }]);
+}
+
 function ranked(all: readonly SlashCommand[]): SlashCommand[] {
   const best = new Map<string, SlashCommand>();
   for (const c of all) {

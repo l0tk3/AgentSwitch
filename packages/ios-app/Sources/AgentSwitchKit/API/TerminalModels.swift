@@ -161,6 +161,9 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let modelNow: String?
     /// What Claude Code offers as your next message (its prompt suggestion), while it rests and shows one.
     public let suggestion: String?
+    /// Codex's Daybreak switch for the session it is on (docs/simple-view-v0.md §5.8); nil: this terminal has none
+    /// (and from a Mac that does not say).
+    public let daybreak: Bool?
     /// The thinking level it was started at, in the agent's own word; nil: the agent's default.
     public let effort: String?
     /// manual · auto · bypass
@@ -188,8 +191,9 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
-                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil) {
+                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil, daybreak: Bool? = nil) {
         self.suggestion = suggestion
+        self.daybreak = daybreak
         self.modelNow = modelNow
         self.effort = effort
         self.id = id
@@ -216,7 +220,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, modelNow, suggestion, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
+        case id, harness, cwd, workdir, model, modelNow, suggestion, daybreak, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
              agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents
     }
 
@@ -229,6 +233,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         modelNow = try? c.decodeIfPresent(String.self, forKey: .modelNow)
         suggestion = (try? c.decodeIfPresent(String.self, forKey: .suggestion)).flatMap { $0.isEmpty ? nil : $0 }
+        daybreak = (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil
         effort = try? c.decodeIfPresent(String.self, forKey: .effort)
         mode = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? "manual"
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -267,17 +272,21 @@ public struct TerminalModelOption: Decodable, Sendable, Hashable, Identifiable {
     public let efforts: [String]?
     /// The level it uses unless told, when the agent says.
     public let defaultEffort: String?
+    /// Codex: whether it runs with Daybreak on and off (`also`), on alone (`only`), off alone (`never`); nil when Codex
+    /// does not say (docs/simple-view-v0.md §5.8).
+    public let daybreak: String?
 
-    public init(id: String, name: String, description: String? = nil, older: Bool = false, efforts: [String]? = nil, defaultEffort: String? = nil) {
+    public init(id: String, name: String, description: String? = nil, older: Bool = false, efforts: [String]? = nil, defaultEffort: String? = nil, daybreak: String? = nil) {
         self.id = id
         self.name = name
         self.description = description
         self.older = older
         self.efforts = efforts
         self.defaultEffort = defaultEffort
+        self.daybreak = daybreak
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, description, older, efforts, defaultEffort }
+    private enum CodingKeys: String, CodingKey { case id, name, description, older, efforts, defaultEffort, daybreak }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -287,6 +296,7 @@ public struct TerminalModelOption: Decodable, Sendable, Hashable, Identifiable {
         older = try c.decodeIfPresent(Bool.self, forKey: .older) ?? false
         efforts = try? c.decodeIfPresent([String].self, forKey: .efforts)
         defaultEffort = try? c.decodeIfPresent(String.self, forKey: .defaultEffort)
+        daybreak = try? c.decodeIfPresent(String.self, forKey: .daybreak)
     }
 }
 
@@ -302,9 +312,12 @@ public struct TerminalList: Decodable, Sendable, Hashable {
     public let efforts: [String: [String]]
     /// Per agent, the level its default model uses unless told, when the agent says.
     public let effortDefaults: [String: String]
+    /// Per agent with a Daybreak switch (Codex), how its new sessions start; an agent without one is not named.
+    public let daybreak: [String: Bool]
 
     public init(terminals: [TerminalInfo], agents: [String], models: [String: [TerminalModelOption]] = [:], defaults: [String: String] = [:],
-                efforts: [String: [String]] = [:], effortDefaults: [String: String] = [:]) {
+                efforts: [String: [String]] = [:], effortDefaults: [String: String] = [:], daybreak: [String: Bool] = [:]) {
+        self.daybreak = daybreak
         self.terminals = terminals
         self.agents = agents
         self.models = models
@@ -313,7 +326,7 @@ public struct TerminalList: Decodable, Sendable, Hashable {
         self.effortDefaults = effortDefaults
     }
 
-    private enum CodingKeys: String, CodingKey { case terminals, agents, models, defaults, efforts, effortDefaults }
+    private enum CodingKeys: String, CodingKey { case terminals, agents, models, defaults, efforts, effortDefaults, daybreak }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -323,7 +336,35 @@ public struct TerminalList: Decodable, Sendable, Hashable {
         defaults = (try? c.decodeIfPresent([String: String].self, forKey: .defaults)) ?? [:]
         efforts = (try? c.decodeIfPresent([String: [String]].self, forKey: .efforts)) ?? [:]
         effortDefaults = (try? c.decodeIfPresent([String: String].self, forKey: .effortDefaults)) ?? [:]
+        daybreak = (try? c.decodeIfPresent([String: Bool].self, forKey: .daybreak)) ?? [:]
     }
+}
+
+/// Codex's Daybreak switch and its models (docs/simple-view-v0.md §5.8; the Mac app has the same rules): with the
+/// switch on a turn goes out under the model's Daybreak program, off under its standard one — a model without the one
+/// in force cannot run, so it is not offered.
+public enum TerminalDaybreak {
+    /// The models to choose from as the switch stands (nil: no switch — all of them). One Codex says nothing of
+    /// stays either way.
+    public static func offered(_ options: [TerminalModelOption], on: Bool?) -> [TerminalModelOption] {
+        guard let on else { return options }
+        return options.filter { $0.daybreak != (on ? "never" : "only") }
+    }
+
+    /// Why the model it is on cannot run as the switch stands, as a line for the user; nil when it can (or nothing
+    /// says otherwise). `name`: the model as the control beside the line writes it.
+    public static func clash(model: TerminalModelOption?, on: Bool?, name: String? = nil) -> String? {
+        guard let on, let model else { return nil }
+        let name = name ?? model.name
+        if on, model.daybreak == "never" { return "Codex 的模型列表里 \(name) 不支持 Daybreak，开着时它的下一轮会被 Codex 拒绝。换一个模型，或关掉 Daybreak。" }
+        if !on, model.daybreak == "only" { return "Codex 的模型列表里 \(name) 只在 Daybreak 开着时可用，下一轮会被 Codex 拒绝。换一个模型，或打开 Daybreak。" }
+        return nil
+    }
+
+    /// The switch as its control's words.
+    public static func word(_ on: Bool) -> String { on ? "Daybreak On" : "Daybreak Off" }
+    /// What turning it does beyond this session, said in its menu.
+    public static let note = "对之后的新一轮生效；Codex 会把它记成新会话的默认"
 }
 
 /// `POST /terminals`. Bypass is chosen on the Mac only (the daemon answers 403 to a phone).
@@ -483,6 +524,8 @@ public enum TerminalEvent: Sendable, Equatable {
     case model(String)
     /// What it offers as your next message changed (nil: it offers none now).
     case suggestion(String?)
+    /// Codex's Daybreak switch stands otherwise now.
+    case daybreak(Bool)
 
     /// The SSE frame: the event name, the JSON data. Anything unknown or broken is skipped (nil), not fatal.
     public static func parse(event: String, data: String) -> TerminalEvent? {
@@ -528,6 +571,8 @@ public enum TerminalEvent: Sendable, Equatable {
             return (obj["model"] as? String).map { .model($0) }
         case "suggestion":
             return .suggestion((obj["text"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+        case "daybreak":
+            return (obj["on"] as? Bool).map { .daybreak($0) }
         default:
             return nil
         }

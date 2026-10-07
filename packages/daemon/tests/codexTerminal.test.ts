@@ -132,13 +132,14 @@ describe("Codex terminal companion", () => {
     { id: "gpt-6-sol", model: "gpt-6-sol", defaultReasoningEffort: "medium", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }, { reasoningEffort: "high" }] },
     { id: "gpt-6-astra", model: "gpt-6-astra", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "ultra" }] },
   ];
-  async function companion(threads: string[], thread: Record<string, unknown>) {
+  async function companion(threads: string[], thread: Record<string, unknown>, more: { daybreak?: boolean; config?: Record<string, unknown> } = {}) {
     const updates: Record<string, unknown>[] = [];
     const { url, seen } = await wsServer("secret", (method, params) => {
       if (method === "thread/loaded/list") return { data: threads };
       // A helper of Codex's own keeps no record (`th-helper`); the others are the same thread's settings here.
       if (method === "thread/read") return { thread: params.threadId === "th-helper" ? { ephemeral: true } : thread };
       if (method === "model/list") return { data: models };
+      if (method === "config/read") return { config: more.config ?? {} };
       if (method === "thread/settings/update") { updates.push(params); Object.assign(thread, { model: params.model, reasoningEffort: params.effort ?? thread.reasoningEffort }); return {}; }
       return {};
     });
@@ -150,7 +151,7 @@ describe("Codex terminal companion", () => {
       return { child, url, token: "secret" };
     };
     const args = ["-c", 'notify=["n"]', ...codexHookArgs("/n/node /h/hook.js", 10, 600), "-c", 'tui.notification_method="osc9"', "-m", "gpt-6-sol", "-a", "on-request"];
-    const c = new CodexCompanion({ binary: "/bin/codex", cwd: tmpdir(), env: { PATH: "/usr/bin" }, args, dir: tmpdir(), serve, log: () => undefined, threadWaitMs: 0 });
+    const c = new CodexCompanion({ binary: "/bin/codex", cwd: tmpdir(), env: { PATH: "/usr/bin" }, args, dir: tmpdir(), serve, log: () => undefined, threadWaitMs: 0, ...(more.daybreak ? { daybreak: true } : {}) });
     closers.push(() => c.stop());
     return { c, updates, seen, started };
   }
@@ -202,6 +203,29 @@ describe("Codex terminal companion", () => {
     c.stop();
     await expect(c.setModel({ model: "gpt-6-sol" })).rejects.toThrow(/its server is not running/);
     expect(updates).toHaveLength(0);
+  });
+
+  it("says how Codex's Daybreak switch stands: the thread's saved choice, its own default before it has a thread; only where the switch is on offer", async () => {
+    // Not started with the switch: the companion has no word of it (the host then offers none).
+    expect((await companion(["th1"], { daybreakEnabled: true })).c.daybreak).toBeUndefined();
+    const thread: Record<string, unknown> = { model: "gpt-6-sol", daybreakEnabled: true };
+    const { c, seen } = await companion(["th-helper", "th1"], thread, { daybreak: true, config: { daybreak: true } });
+    await c.start();
+    expect(await c.daybreak!()).toBe(true);
+    thread.daybreakEnabled = false;   // turned in the TUI, which saved it on its server
+    expect(await c.daybreak!("th1")).toBe(false);
+    expect(seen.some((m) => m.method === "config/read")).toBe(false);
+    // A thread with no choice saved is off, as the TUI reads it (one begun with the switch on is given it at its start).
+    delete thread.daybreakEnabled;
+    expect(await c.daybreak!()).toBe(false);
+    expect(seen.some((m) => m.method === "config/read")).toBe(false);
+    // No thread yet: how its new sessions start (its config, read not written).
+    const fresh = await companion([], {}, { daybreak: true, config: { daybreak: true } });
+    await fresh.c.start();
+    expect(await fresh.c.daybreak!()).toBe(true);
+    expect(fresh.seen.filter((m) => m.method?.startsWith("thread/metadata") || m.method === "config/batchWrite" || m.method === "config/value/write")).toEqual([]);
+    // The feature goes to both: the TUI holds the switch, its server the program it sends.
+    expect(splitCodexArgs(["-c", "features.cli_daybreak=true", "-m", "gpt-6-sol"])).toEqual({ server: ["-c", "features.cli_daybreak=true"], tui: ["-c", "features.cli_daybreak=true", "-m", "gpt-6-sol"] });
   });
 
   it("a server that does not start leaves the TUI to run on its own", async () => {

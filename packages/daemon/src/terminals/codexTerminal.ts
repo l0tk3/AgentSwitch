@@ -72,6 +72,9 @@ export type CodexCompanionOptions = {
   readonly serve?: (o: { binary: string; flags: readonly string[]; cwd: string; env: Record<string, string>; dir: string }) => Promise<CodexServer>;
   /** How long a change waits for the TUI's thread (tests: none). */
   readonly threadWaitMs?: number;
+  /** This terminal was started with Codex's Daybreak switch on offer (its feature enabled, docs/simple-view-v0.md
+   *  §5.8): the companion says how the switch stands. */
+  readonly daybreak?: boolean;
   readonly log?: (line: string) => void;
 };
 
@@ -114,11 +117,44 @@ export async function startCodexServer(o: { binary: string; flags: readonly stri
 export class CodexCompanion implements Companion {
   /** Its status and its cards come from the hooks, as for a Codex that runs on its own. */
   readonly reportsStatus = false;
+  /** Present only where the switch is on offer: `Companion.daybreak` is how the host knows there is one. */
+  readonly daybreak?: (session?: string | null) => Promise<boolean>;
   private server: CodexServer | null = null;
   private stopped = false;
   private client: { rpc: AppServerClient; ws: WsLines } | null = null;
 
-  constructor(private readonly o: CodexCompanionOptions) {}
+  constructor(private readonly o: CodexCompanionOptions) {
+    if (o.daybreak) this.daybreak = (session) => this.daybreakNow(session ?? null);
+  }
+
+  /** Which thread the TUI is on, and what the server says of it: the one the terminal follows (its hooks named it),
+   *  when the server holds it; else the one the server holds that keeps a record — beside it Codex runs helpers of its
+   *  own that keep none (seen on 0.162 with a real login: an ephemeral thread). The TUI makes its thread a moment
+   *  after it shows its prompt: waited for, up to `waitMs`. */
+  private async thread(rpc: AppServerClient, session: string | null, waitMs: number): Promise<{ thread?: string; now: Json }> {
+    for (const end = Date.now() + waitMs; ; ) {
+      const loaded = ((await rpc.request("thread/loaded/list", {}, CALL_TIMEOUT_MS)).data as unknown[] | undefined ?? []).map(String);
+      for (const id of session && loaded.includes(session) ? [session] : loaded) {
+        const read = ((await rpc.request("thread/read", { threadId: id, includeTurns: false }, CALL_TIMEOUT_MS)).thread ?? {}) as Json;
+        if (read.ephemeral === true) continue;
+        return { thread: id, now: read };
+      }
+      if (Date.now() > end || this.stopped) return { now: {} };
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  /** How Codex's Daybreak switch stands for the thread the TUI is on: what is saved there (`thread/read`'s
+   *  `daybreakEnabled` — the TUI holds the switch and saves each turn of it; a thread with none saved is off, as the
+   *  TUI reads it: one begun with the switch on is given `true` at its start). Before it has a thread, how its new
+   *  sessions start (`config/read`'s `daybreak`), which is what it will begin with. */
+  private async daybreakNow(session: string | null): Promise<boolean> {
+    const rpc = await this.rpc();
+    const { thread, now } = await this.thread(rpc, session, 0);
+    if (thread) return now.daybreakEnabled === true;
+    const config = ((await rpc.request("config/read", { includeLayers: false, cwd: this.o.cwd }, CALL_TIMEOUT_MS)).config ?? {}) as Json;
+    return (config.daybreak ?? (config.additional as Json | undefined)?.daybreak) === true;
+  }
 
   async start(): Promise<{ args: string[]; env: Record<string, string> } | null> {
     const log = this.o.log ?? ((l: string) => console.error(l));
@@ -162,21 +198,7 @@ export class CodexCompanion implements Companion {
    *  and the effort are checked against the server's own list first. Throws with a sentence a screen can show. */
   async setModel(want: { model?: string | null; variant?: string | null; session?: string | null }): Promise<{ model: string; variant: string | null }> {
     const rpc = await this.rpc();
-    // Which thread: the one the terminal follows (its hooks named it), when the server holds it; else the one the
-    // server holds that keeps a record — beside it Codex runs helpers of its own that keep none (seen on 0.162 with a
-    // real login: an ephemeral thread). The TUI makes its thread a moment after it shows its prompt: waited for.
-    let thread: string | undefined, now: Json = {};
-    for (const end = Date.now() + (this.o.threadWaitMs ?? THREAD_WAIT_MS); ; ) {
-      const loaded = ((await rpc.request("thread/loaded/list", {}, CALL_TIMEOUT_MS)).data as unknown[] | undefined ?? []).map(String);
-      for (const id of want.session && loaded.includes(want.session) ? [want.session] : loaded) {
-        const read = ((await rpc.request("thread/read", { threadId: id, includeTurns: false }, CALL_TIMEOUT_MS)).thread ?? {}) as Json;
-        if (read.ephemeral === true) continue;
-        thread = id; now = read;
-        break;
-      }
-      if (thread || Date.now() > end || this.stopped) break;
-      await new Promise((r) => setTimeout(r, 300));
-    }
+    const { thread, now } = await this.thread(rpc, want.session ?? null, this.o.threadWaitMs ?? THREAD_WAIT_MS);
     if (!thread) throw new Error("no session yet: it starts with the TUI");
     const model = want.model ?? (typeof now.model === "string" ? now.model : null);
     if (!model) throw new Error("it has not said which model it is on");

@@ -436,6 +436,12 @@ struct TerminalPage: View {
                 Text(note).mono(11).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
             }
+            // Codex's Daybreak switch and the model it is on do not go together: its next turn would not start, and
+            // only its own screen would say so (docs/simple-view-v0.md §5.8).
+            if simple, let clash = daybreakClash {
+                Text(clash).font(.footnote).foregroundStyle(Theme.waiting).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
+            }
             if simple { sessionLine }
         }
         // Down to the screen's bottom edge, under the keyboard too: its rounded corners and the gap above it would
@@ -455,8 +461,10 @@ struct TerminalPage: View {
             Text("·")
             modelMenu
             effortButton
+            daybreakMenu
             Spacer(minLength: 4)
-            if let context = RecordDisplay.context(record.usage) { Text("Context \(context)").lineLimit(1) }
+            // With Codex's Daybreak switch in the row there is no room for the word: the figure alone.
+            if let context = RecordDisplay.context(record.usage) { Text(daybreak == nil ? "Context \(context)" : context).lineLimit(1).layoutPriority(-1) }
         }
         .mono(11).foregroundStyle(.tertiary)
         .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
@@ -508,6 +516,48 @@ struct TerminalPage: View {
                 .presentationCompactAdaptation(.popover)
                 .followsLook()
             }
+        }
+    }
+
+    /// Codex's Daybreak switch as it stands, where this terminal has one.
+    private var daybreak: Bool? { page.daybreakNow ?? listed.daybreak }
+
+    /// Why the model it is on cannot run as the switch stands (nil: it can, or there is no switch).
+    private var daybreakClash: String? {
+        guard let on = daybreak, page.status != .exited else { return nil }
+        let option = (model.terminals.list?.models[page.harness] ?? []).first { RecordDisplay.isCurrent($0, model: currentModel) }
+        return TerminalDaybreak.clash(model: option, on: on, name: currentModel.map(ModelName.display))
+    }
+
+    /// `Daybreak On ▾`: on, off — the one it stands at checked — and what turning it does beyond this session. Codex
+    /// takes it while it works too (it holds from the next turn); not while it waits for an answer.
+    @ViewBuilder private var daybreakMenu: some View {
+        if let on = daybreak, page.status != .exited {
+            let answering = page.status == .waiting || !page.permissions.isEmpty
+            Text("·")
+            Menu {
+                Section(TerminalDaybreak.note) {
+                    if answering {
+                        Button("它正在等待回答，回答后再调整") {}.disabled(true)
+                    } else {
+                        ForEach([true, false], id: \.self) { want in
+                            Button { Task { await page.setDaybreak(want) } } label: {
+                                if want == on { Label(want ? "On" : "Off", systemImage: "checkmark") } else { Text(want ? "On" : "Off") }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(TerminalDaybreak.word(on)).lineLimit(1)
+                    LookGlyph(glyph: "▾", symbol: "chevron.down", size: 10)
+                }
+                .mono(12, weight: .medium).foregroundStyle(.secondary)
+                .padding(.vertical, 8).padding(.trailing, 10)
+                .contentShape(Rectangle())
+            }
+            .padding(.vertical, -8)
+            .accessibilityLabel("daybreak")
         }
     }
 

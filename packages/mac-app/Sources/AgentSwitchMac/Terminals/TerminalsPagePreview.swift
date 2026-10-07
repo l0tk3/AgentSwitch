@@ -19,7 +19,8 @@ import SwiftUI
 ///   terminal that stays dark, a request's card at the record's end; the pictures sent with a message small under it,
 ///   a thought of the agent's said quietly, a command with what it is for opened whole and in colour, and a reply
 ///   being written with a picture and a file in its floating box.
-///   `terminals-record-compact-light`: while it compacts its context.
+///   `terminals-record-compact-light`: while it compacts its context. `terminals-record-working-light`: at work with
+///   no tool, the word alone. `terminals-record-daybreak-light`: Codex with its Daybreak switch.
 @MainActor
 enum TerminalsPagePreview {
     static let size = NSSize(width: 1235, height: 764)
@@ -113,6 +114,26 @@ enum TerminalsPagePreview {
             model.focused?.record.stageDraft("", files: [])
             model.focused?.record.stageSuggestion("跑一遍测试确认")
         }
+        // At work with no tool in use: the word alone, no picture before it.
+        try await shot(to: file("terminals-record-working-light"), light: true) { model in
+            stageRecord(model, working: true, bare: true)
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+        }
+        // Codex with its Daybreak switch on (docs/simple-view-v0.md §5.8); and on a model Codex lists without a Daybreak
+        // program, which its next turn would be refused on.
+        try await shot(to: file("terminals-record-daybreak-light"), light: true) { model in
+            model.select("t5")
+            stageRecord(model, working: false, terminal: "t5", on: "gpt-6-sol")
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+        }
+        try await shot(to: file("terminals-record-daybreak-clash-light"), light: true) { model in
+            model.select("t5")
+            stageRecord(model, working: false, terminal: "t5", on: "gpt-6.1-sol")
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+        }
         // It compacts its context (docs/simple-view-v0.md §5.7): at work on that, the earlier one a line in the record.
         try await shot(to: file("terminals-record-compact-light"), light: true) { model in
             stageRecord(model, working: true, compacting: true)
@@ -140,7 +161,7 @@ enum TerminalsPagePreview {
     }
 
     /// Terminal `t1` as its record, with a made-up session.
-    private static func stageRecord(_ model: TerminalsModel, working: Bool, terminal: String = "t1", compacting: Bool = false) {
+    private static func stageRecord(_ model: TerminalsModel, working: Bool, terminal: String = "t1", compacting: Bool = false, bare: Bool = false, on usageModel: String? = nil) {
         model.setSimple(true, pane: TerminalPanes.paneShowing(model.layout, terminal)?.id)
         guard let pane = model.panes.values.first(where: { $0.session?.id == terminal }), let info = pane.session?.info else { return }
         let ago = { (seconds: Int64) in Int64(Date().timeIntervalSince1970 * 1000) - seconds * 1000 }
@@ -171,8 +192,8 @@ enum TerminalsPagePreview {
             ]),
             RecordItem(id: "550", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。正在重新构建。"),
         ], plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done), PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
-        usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: "acceptEdits",
-        activity: compacting ? TerminalActivity(tool: "Compact", target: "") : working ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
+        usage: RecordUsage(model: usageModel ?? "claude-opus-5-5", used: 124_000, window: 200_000, effort: usageModel == nil ? "medium" : "high"), mode: usageModel == nil ? "acceptEdits" : nil,
+        activity: compacting ? TerminalActivity(tool: "Compact", target: "") : working && !bare ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
         since: working ? Date().addingTimeInterval(compacting ? -65 : -41) : nil)
     }
 
@@ -235,6 +256,7 @@ enum TerminalsPagePreview {
                          permissions: [TerminalRequest(id: "r1", tool: "Bash", summary: "Bash: npm test")]),
             TerminalInfo(id: "t3", harness: "opencode", cwd: "\(home)/Desktop/WorkSpace/Projects/MailLab", name: "解析退信", status: "idle", createdAt: 30),
             TerminalInfo(id: "t4", harness: "claude-code", cwd: "\(home)/Desktop/WorkSpace/Projects/MailLab", name: "旧的导出", status: "exited", createdAt: 5, exitCode: 1),
+            TerminalInfo(id: "t5", harness: "codex", cwd: project, model: "gpt-6-sol", mode: "manual", name: "查一处越界读", status: "idle", createdAt: 40, effort: "high", sets: true, daybreak: true),
         ]
         let sessions = [
             session("s1", project, "完成未完成的部分 gate-next", ago: 0, active: true), session("s2", project, "简单看一下项目内容", "codex", ago: 13),
@@ -251,7 +273,10 @@ enum TerminalsPagePreview {
                     "\(home)/Desktop/WorkSpace/Projects/MailLab": FolderGit(branch: "main")]
         let five = ["low", "medium", "high", "xhigh", "max"]
         let models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five),
-                                      TerminalModelOption(id: "opus-4", name: "Opus 4.5", older: true, efforts: ["low", "medium", "high", "max"])]]
+                                      TerminalModelOption(id: "opus-4", name: "Opus 4.5", older: true, efforts: ["low", "medium", "high", "max"])],
+                      // Codex's, each with its place under Daybreak (docs/simple-view-v0.md §5.8).
+                      "codex": [TerminalModelOption(id: "gpt-6.1-sol", name: "GPT-6.1-Sol", efforts: five, daybreak: "never"), TerminalModelOption(id: "gpt-6-sol", name: "GPT-6-Sol", efforts: five, daybreak: "also"),
+                                TerminalModelOption(id: "gpt-6-luna", name: "GPT-6-Luna", efforts: five, daybreak: "also"), TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", efforts: five, daybreak: "only")]]
         model.stage(terminals: terminals, sessions: sessions, gits: gits, agents: ["claude-code", "codex", "opencode"], models: models, efforts: ["claude-code": five])
         model.area = CGSize(width: size.width - 291, height: size.height)
         let host = NSHostingView(rootView: TerminalsPageView(model: model))

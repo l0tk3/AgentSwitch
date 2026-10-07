@@ -3,11 +3,12 @@ import SwiftUI
 
 // How hard the agent thinks, chosen on a line (docs/terminal-v0.md §1 思考强度; 2026-10-07, user: 思考强度改成滑块调节
 // 加上和官方差不多的特效，新建的时候也这样选): the levels its model takes are the line's stops, lowest first. In the
-// classic look the stops are bars that rise, a signal's strength — lit up to the level, the highest level in a colour
-// of its own (violet), a light passing over the lit ones. It was a thick pill with a round knob and stars, drawn after
-// Codex's own, and the user found it too large and the same as Codex's (太大了，而且和codex的一模一样，可以稍微改一下): this
-// is half the size and this app's own picture. In the pixel look a row of cells: a bright one running along the lit
-// ones, and at the top the row in violet, twinkling. Nothing moves under Reduce Motion.
+// classic look a slider of this app's own: a rounded rectangle for the line, a rounded oblong for the knob, and in the
+// filled part light flowing forward — the quicker the higher the level, the highest level in a colour of its own
+// (violet). Its story, all the user's words on 2026-10-07: first a thick pill with a round knob and stars, after
+// Codex's own (太大了，而且和codex的一模一样); then bars that rise like a signal's strength (太丑了，改成滑块吧还是，然后一个
+// 圆角矩形+圆角长方形滑块，里面加上流动特效); now this, at the bars' small size. In the pixel look a row of cells: a bright
+// one running along the lit ones, and at the top the row in violet, twinkling. Nothing moves under Reduce Motion.
 
 /// The line itself.
 struct EffortSlider: View {
@@ -24,13 +25,10 @@ struct EffortSlider: View {
     @State private var dragging: Int?
     @FocusState private var focused: Bool
 
-    /// The room the line is drawn in: the tallest bar's height (the pixel look's cells with their ticks).
+    /// The room the line is drawn in: the knob's height (the pixel look's cells with their ticks).
     private static let height: CGFloat = 22
-    /// A bar's share of the width at most: the bars stand together at the leading edge of a wide row.
-    private static let stride: CGFloat = 17
-    /// A stop is in the middle of its bar: half a share inside each end. The pixel look's row of cells runs from end to
-    /// end, its first and last stops a little inside.
-    private func inset(_ width: CGFloat) -> CGFloat { look.isClassic ? width / CGFloat(max(levels.count, 1)) / 2 : 12 }
+    /// The first and last stops stand a little inside the line's ends: the knob stays within it there.
+    private func inset(_ width: CGFloat) -> CGFloat { look.isClassic ? 6 : 12 }
 
     var body: some View {
         let chosen = EffortScale.index(of: level, in: levels)
@@ -55,9 +53,6 @@ struct EffortSlider: View {
                     })
             }
             .frame(height: Self.height)
-            // The bars stand together; the pixel look's cells run the row's width.
-            .frame(maxWidth: look.isClassic ? CGFloat(levels.count) * Self.stride : .infinity, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .opacity(enabled ? 1 : 0.45)
         .allowsHitTesting(enabled)
@@ -93,22 +88,55 @@ struct EffortSlider: View {
         func chance(_ seed: Double) -> Double { let v = sin(seed) * 43758.5453; return v - v.rounded(.down) }
 
         if look.isClassic {
-            // Bars that rise, one a level: lit up to the level chosen, the rest faint. Where none is chosen the model's
-            // own level is lit faintly. A light passes over the lit ones, the quicker the higher.
-            let share = size.width / CGFloat(max(count, 1))
-            // Narrow and tall, as a signal's bars are.
-            let wide = min(share - 6, 10)
-            let lowest: CGFloat = 6, tallest = size.height - 2
-            let lap = 3.2 - 1.6 * heat
-            let light = moving ? (time.truncatingRemainder(dividingBy: lap) / lap) * Double(count + 2) - 1 : -9
-            for index in 0..<count {
-                let tall = count > 1 ? lowest + (tallest - lowest) * CGFloat(index) / CGFloat(count - 1) : tallest
-                let bar = Path(roundedRect: CGRect(x: x(index) - wide / 2, y: size.height - 1 - tall, width: wide, height: tall), cornerRadius: 2.5)
-                guard let at, index <= at else { g.fill(bar, with: .color(Look.ink.opacity(0.11))); continue }
-                g.fill(bar, with: .color(colour.opacity(firm ? 0.62 + 0.38 * Double(index + 1) / Double(at + 1) : 0.3)))
-                let near = max(0, 1 - abs(Double(index) - light))
-                if near > 0, firm { g.fill(bar, with: .color(.white.opacity(0.32 * near))) }
+            // A rounded rectangle for the line and a rounded oblong for the knob, light flowing in the filled part.
+            let thick: CGFloat = 14, radius: CGFloat = 4.5
+            let track = CGRect(x: 0, y: mid - thick / 2, width: size.width, height: thick)
+            g.fill(Path(roundedRect: track, cornerRadius: radius), with: .color(Look.ink.opacity(0.1)))
+            // The stops still ahead, faintly: where a level is.
+            for index in 0..<count where at.map({ index > $0 }) ?? true {
+                g.fill(Path(roundedRect: CGRect(x: x(index) - 0.75, y: mid - 5 / 2, width: 1.5, height: 5), cornerRadius: 0.75), with: .color(Look.ink.opacity(0.26)))
             }
+            guard let knob else { return }
+            // Filled up to the knob.
+            let fill = CGRect(x: 0, y: track.minY, width: knob, height: thick)
+            let shape = Path(roundedRect: fill, cornerRadius: radius)
+            var inner = g
+            inner.opacity = firm ? 1 : 0.38
+            inner.fill(shape, with: .linearGradient(Gradient(colors: top ? [Look.topDeep, Look.top] : [colour.opacity(0.7), colour]),
+                                                    startPoint: CGPoint(x: 0, y: mid), endPoint: CGPoint(x: max(fill.maxX, 1), y: mid)))
+            if moving, fill.width > 12 {
+                // Light flowing forward in the filled part: soft slanted bands of it, well apart, the quicker and the
+                // brighter the higher the level. Each fades to nothing at its own edges (the gradient runs across the
+                // slant), so it reads as light passing, not as stripes.
+                inner.clip(to: shape)
+                let wide: Double = 30, apart: Double = 58, lean = Double(thick) * 0.5
+                let pace = 14.0 + 30.0 * heat
+                let bands = max(2, Int(((Double(fill.width) + wide + lean * 2) / apart).rounded(.up)) + 1)
+                // Across the slant: from one slanted edge of a band to the other.
+                let reach = hypot(Double(thick), lean * 2)
+                let nx = Double(thick) / reach, ny = lean * 2 / reach
+                let half = wide / 2 * nx
+                for band in 0..<bands {
+                    let cx = (time * pace + Double(band) * apart).truncatingRemainder(dividingBy: Double(bands) * apart) - wide / 2 - lean
+                    guard cx - wide < Double(fill.maxX) else { continue }
+                    var slab = Path()
+                    slab.move(to: CGPoint(x: cx - wide / 2 + lean, y: Double(track.minY)))
+                    slab.addLine(to: CGPoint(x: cx + wide / 2 + lean, y: Double(track.minY)))
+                    slab.addLine(to: CGPoint(x: cx + wide / 2 - lean, y: Double(track.maxY)))
+                    slab.addLine(to: CGPoint(x: cx - wide / 2 - lean, y: Double(track.maxY)))
+                    slab.closeSubpath()
+                    let glow = Color.white.opacity(0.16 + 0.22 * heat)
+                    inner.fill(slab, with: .linearGradient(Gradient(colors: [.white.opacity(0), glow, .white.opacity(0)]),
+                                                           startPoint: CGPoint(x: cx - half * nx, y: Double(mid) - half * ny), endPoint: CGPoint(x: cx + half * nx, y: Double(mid) + half * ny)))
+                }
+            }
+            // The knob: an oblong standing over the line, white; hollow while it only shows the model's own level.
+            let grip = CGRect(x: knob - 9 / 2, y: mid - 20 / 2, width: 9, height: 20)
+            let oblong = Path(roundedRect: grip, cornerRadius: 3)
+            var shaded = g
+            shaded.addFilter(.shadow(color: .black.opacity(0.28), radius: 2, y: 0.8))
+            shaded.fill(oblong, with: .color(.white.opacity(firm ? 1 : 0.8)))
+            g.stroke(Path(roundedRect: grip.insetBy(dx: 0.25, dy: 0.25), cornerRadius: 3), with: .color(.black.opacity(0.12)), lineWidth: 0.5)
         } else {
             // A row of cells; the lit ones up to the knob, a bright one running along them.
             let cell: CGFloat = 6, gap: CGFloat = 2, tall: CGFloat = 18

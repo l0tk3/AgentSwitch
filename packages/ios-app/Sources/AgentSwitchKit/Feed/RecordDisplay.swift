@@ -100,10 +100,11 @@ public enum RecordDisplay {
         }
     }
 
-    /// The picture for what the agent is doing now, by the tool it uses: the one a step of that kind has; none in use
-    /// (it is thinking) is the thinking one.
-    public static func toolSymbol(_ tool: String?) -> String {
-        guard let tool else { return symbol(.think) }
+    /// The picture for what the agent is doing now, by the tool it uses: the one a step of that kind has. None while
+    /// it uses no tool — at work, and no more to say: the star that stood there read as another product's mark
+    /// (2026-10-07, user: Work提示的星星图标去掉吧，看上去像是gemini，work这个动作就别加图标了).
+    public static func toolSymbol(_ tool: String?) -> String? {
+        guard let tool else { return nil }
         switch ToolDisplay.word(tool) {
         case "Run": return symbol(.run)
         case "Read": return symbol(.read)

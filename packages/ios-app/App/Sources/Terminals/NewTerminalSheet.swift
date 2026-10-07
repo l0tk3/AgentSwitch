@@ -29,7 +29,8 @@ struct NewTerminalSheet: View {
     var body: some View {
         let store = model.terminals
         let installed = Set(store.list?.agents ?? [])
-        let models = store.list?.models[agent] ?? []
+        // Codex: the models that run as its new sessions start (its Daybreak switch, docs/simple-view-v0.md §5.8).
+        let models = TerminalDaybreak.offered(store.list?.models[agent] ?? [], on: store.list?.daybreak[agent])
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.xl) {

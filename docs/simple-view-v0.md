@@ -89,7 +89,7 @@
 - “正在做什么”的一行：有 `note` 时写 `Run  Build the release app  0:42`，不再是一长串命令。
 - **小图标与流光**（2026-10-07，用户贴 Codex 桌面端的步骤列表：这种小图标和思考过程中的闪烁能不能加上）：
   - 经典外观里每一步的行首多一个小图标，一种步骤一个：读文件是一页纸、搜索是放大镜、列目录是文件夹、跑命令是终端、改文件是铅笔、新建文件是带加号的纸、联网是地球、子代理是分叉、任务清单是清单、其他工具是扳手（系统的符号，`RecordDisplay.symbol`，两端各一份，有测试保证不重样）。图标后面的词照旧。**像素外观不加**：它的词（`Read` `Run`…）本身就是标记。
-  - **有流光就不要转圈**（同日，用户：加载图标实际上转圈圈可以去掉了，有流光特效的话）：“正在做什么”那一行和它下面每个子代理的一行，原来行首各有一个转圈；流光已经说明“还在进行”，转圈去掉。经典外观行首换成这一步的小图标（跑命令是终端、读文件是一页纸……没在用工具、在想的时候是“思考”那个；子代理是分叉），像素外观只剩字。子代理的行也带流光。
+  - **有流光就不要转圈**（同日，用户：加载图标实际上转圈圈可以去掉了，有流光特效的话）：“正在做什么”那一行和它下面每个子代理的一行，原来行首各有一个转圈；流光已经说明“还在进行”，转圈去掉。经典外观行首换成这一步的小图标（跑命令是终端、读文件是一页纸……没在用工具时**不放图标**，只有 `Working` 一个词——原来放的是“思考”那颗星，同日用户：Work提示的星星图标去掉吧，看上去像是gemini，work这个动作就别加图标了；子代理是分叉），像素外观只剩字。子代理的行也带流光。
   - 还在进行的字上有一道流光：“正在做什么”的那一行，和还没结束的那段工作的一行（`Working 1m 12s · …`）。字本身是次一级的灰，一道正文色的光带从左扫到右，约 1.9 秒一遍；经典外观的光带是柔和的，像素外观是一小块、一格一格地走。结束了就停。系统开了“减弱动态效果”时不动。
 - 你的话带了图片时，图片缩成小图排在那句话下面（高 84 点 / 手机 96 点，宽按比例、有上下限；多于几张只排前几张，后面写 `+n`）。点一张看整张：Mac 上一页（`←` `→` 换张、`⌘C` 拷贝），手机上用系统的预览（可放大、可分享）。只有你发的图片；工具读到或截到的图片不进记录。
 - 忙且回复框为空时发送键是停止（发 `esc`）；打了字发出去，那条消息标 `Queued`，它读到后才算数。
@@ -208,6 +208,30 @@
   - 服务的测试：按真实屏幕造的行（算的几种、只是提到它的几种、窄屏截断的计时）；假 agent 画出同一行——歇着时出现即进行中且在做 `Compact`、`SessionStart {source: "compact"}` 立刻回到空闲且那一行还在屏幕上时不闪、没有 hook 时那一行消失即空闲、一轮中途前后都是进行中且子代理还在、辅助子代理停下不算结束、别的 agent 的屏幕不读；记录的那一行与用量。
   - `packages/daemon/scripts/claude_compact_probe.ts`（打真模型的脚本，不进测试；Haiku，几句很小的话）用服务自己的代码对真的 Claude Code 2.1.292 跑：`/compact` 发出 0.4 秒后服务报进行中、在做 `Compact`（屏幕上是 `✢ Compacting conversation… (0s)`）；18 秒后 `SessionStart(compact)` 到，回到空闲，中间没有别的状态变化；终端里只有它自己的一行 `Compacted (ctrl+o to see full summary)`；记录末尾是 `/compact`、`Compacted · 39k → 4k`，用量 3661。再压缩一次、1.5 秒后按 `esc`：0.2 秒后回到空闲，主 agent 没有任何 hook；之后再说一句话照常。`PROBE_HOOKS=compact` 是加上那两个 hook 的对照。
   - 两端的样子：Mac 的 `-designPreviewOnly terminals` 多一张 `terminals-record-compact-light`（两种外观都看过）；手机的演示屏 `simplecompact` 在模拟器里看过像素外观；演示页在浏览器里看过。**没验证**：装好的应用连着你真的会话压缩一次（“应用 → 服务 → 真的 Claude Code”这一整条没有连起来跑；各段分别跑过）；一轮中途的自动压缩在真的 Claude Code 上（只用假 agent 走过，真的要把上下文填满才会发生）；手机的经典外观。
+
+### 5.8 Codex 的 Daybreak 开关
+
+2026-10-07 用户：还有beta版的codex有独立的/daybreak开关，行为不太一样，应该适配一下。问清楚后：简洁版控制测试版（支持daybreak的版本）的时候加一个daybreak开关，然后按照daybreak打开/关闭后的模型列表来更新可选模型列表。
+
+- **它是什么**（读的是 0.162.0-alpha.18 这个版本公开的源码，`codex-rs/tui/src/daybreak.rs`、`app/daybreak.rs`、`chatwidget/slash_dispatch.rs`，并只读地问了这台 Mac 上的 Codex）：
+  - Daybreak 是 OpenAI 给做安全工作的账户开的一档权限。每个模型在 `model/list` 里写着它能用哪几档（`availableAccessPrograms.cyber`：`standard`、`daybreakBlue`、`daybreakRed`）；每一轮由**界面**决定带哪一档发出去：开着就带这个模型的 Daybreak 那一档，关着带 `standard`。
+  - `/daybreak` 是一个没有参数的开关，打一次翻一次，工作中也能打，只对之后的新一轮生效。翻的时候界面做三件事：把这段会话的选择存到它的服务上（`thread/metadata/update {daybreakEnabled}`），改自己的状态，再把 `daybreak = true|false` 写进 `~/.codex/config.toml` 当作新会话的默认。
+  - 状态在界面手里：从外面改会话存的那个值，正在跑的界面不会跟着变（服务不为它发通知）。所以要切只能在它的输入行里打它自己的命令。
+  - 开着、而当前模型没有 Daybreak 那一档时，下一轮**发不出去**：界面里写一句 “Daybreak support for model … could not be confirmed… Use /daybreak to turn it off, or choose a compatible model”，不触发任何 hook。
+  - 整个开关在这个版本里还压在功能开关 `cli_daybreak` 下面（`under development`，默认关）：不开它，`/daybreak` 不在命令列表里、打了也没反应，配置里的 `daybreak = true` 也不起作用。0.160.1（ChatGPT App 自带的那份）没有这个功能。
+- **什么时候有这个开关**：三样都成立——这份 Codex 的功能列表里有 `cli_daybreak`（`experimentalFeature/list`）；它的模型列表里至少一个模型有 Daybreak 那一档（账户有这个权限）；终端经它自己的 app-server 运行（§5.4 Codex 那一行，默认如此）。成立时服务给这个终端加 `-c features.cli_daybreak=true`（界面和它的 server 各一份；只对这一个终端，不写你的配置），于是 `/daybreak` 可用，你 Codex 配置里的默认（`daybreak`）对它生效——和在一份开了这个功能的 Codex 里一样。不成立时什么都不加、界面上没有这个开关。
+- **读**：终端多一个字段 `daybreak`（`true` / `false`；`null` 是没有这个开关），事件流多一种事件 `daybreak {on}`。服务作为终端 server 的第二个客户端读 `thread/read` 的 `daybreakEnabled`；界面还没建会话时读 `config/read` 的 `daybreak`（它将用的默认）。什么时候读：终端起来后；屏幕上出现 “Daybreak” 这个词后的一瞬（你自己在终端里打了 `/daybreak`，或它开场的那句 “Daybreak is on for new turns.”——字只当提示，值以 server 说的为准）；每一轮结束时。
+- **切**：`POST /terminals/:id/daybreak {on}`。服务先读一次，已经是要的状态就不动；否则往终端里打一次 `/daybreak` 回车，然后每 0.25 秒问一次 server，5 秒内读到新状态才算成功，读不到就报错（“看它的屏幕”）。工作中也可以切；有东西等你回答时不行（键会打到那个提问上）。**Codex 自己会顺手把默认改掉**：之后在任何地方新开的 Codex 会话都按这个状态开始，不只是 AgentSwitch 里的——菜单里写着这一句。
+- **模型列表跟着变**：`GET /terminals` 里 Codex 的每个模型多一个字段 `daybreak`：`also`（两档都有）、`only`（只有 Daybreak 那一档，如 `Daybreak Blue`）、`never`（只有 `standard`）；它没说的模型不带这个字段，两种状态下都列出。开着时列 `never` 以外的，关着时列 `only` 以外的。这台 Mac 今天：开着去掉 `GPT-6.1-Sol`、`GPT-6-Astra`，多出 `Daybreak Blue`；关着相反。新建终端的面板按你 Codex 的默认状态列（同一份列表里的 `daybreak.codex`，没有这个开关时不带）。
+- **当前模型用不了时**（开了 Daybreak 而正用着 `GPT-6.1-Sol`）：回复框上方一行提醒“Codex 的模型列表里 GPT-6.1 Sol 不支持 Daybreak，开着时它的下一轮会被 Codex 拒绝。换一个模型，或关掉 Daybreak。”，模型那一项标成提醒色。不拦发送。这句话说的是 Codex 自己的列表，不是 AgentSwitch 的判断（同日用户看到演示图里这一行：这是啥提示。。认真的吗？6 sol有daybreak——`GPT-6-Sol` 确实有，图里是 `GPT-6.1-Sol`；原来那句“没有 Daybreak 那一档”没说清楚是谁说的，演示也不该拿例外当门面，都改了：演示默认是 `GPT-6-Sol` 开着 Daybreak，没有提醒）。
+- **两端**：回复框下面那一行，强度后面多一项 `Daybreak On ▾` / `Daybreak Off ▾`，菜单里 `On`、`Off`（当前的打勾）和上面那句说明。没有这个开关的终端没有这一项。`/` 的命令提示里，有这个开关的 Codex 终端多一条 `/daybreak`。
+- **手机**：开关、提醒行和新建终端时按默认状态列模型都有；运行中的 Codex 换模型在手机上仍是打开它自己的选择器（手机的模型菜单只对 Claude Code 列模型），所以“列表跟着开关变”在手机上只体现在新建终端。那一行多了一项之后放不下 `Context` 这个词，只写百分数。
+- **验证**：
+  - 服务的测试：模型各自的档（`also` / `only` / `never`，没说的不带）；这份 Codex 不认识这个功能、或账户没有 Daybreak 那一档时没有开关；启动参数只在有开关时多那一条，界面和 server 各一份；伴随进程读会话存的选择（没存过的算关，还没有会话时读默认），不写任何东西；主机只在状态不同时打一次 `/daybreak`、读到新状态才算成功、读不到报错、终端里自己切了也跟上、等你回答时不切、没有开关的终端回 400；接口、列表里的默认状态、命令提示。
+  - 两端的规则各有测试（列哪些模型、提醒那句话、解码）；Mac 的预览图（`terminals-record-daybreak-light` 与 `-clash-light`，两种外观）、手机模拟器的演示屏（`simpledaybreak`、`simpledaybreakclash`）、演示页的 `Daybreak` 预设都看过图。
+  - **真的 Codex，只看不动**（`packages/daemon/scripts/codex_daybreak_probe.ts`，2026-10-07，0.162.0-alpha.18，你的登录；不输入任何字、不发消息、不切开关）：用服务自己的代码起一个带这个功能的 Codex 终端——界面和它的 server 的命令行里都有 `features.cli_daybreak=true`；Codex 自己的屏幕写出 `• Daybreak is on for new turns.`，它的状态栏（探针另加的一项）写 `GPT-6-Sol high · Daybreak on`；它的 server 上那段会话 `daybreakEnabled: true`、配置 `daybreak: true`；服务读到的也是开；命令提示里有 `/daybreak`。结束后你的 Codex 配置没变、后台服务没被拉起、没有多出会话文件。
+  - **没验证**：**切开关这一下**在真的 Codex 上没跑——每切一次 Codex 就改写一次你配置里的默认，这一步留给你来做（或你说可以，我用探针开→关→开各一次并核对最后和原来一样）。开着 Daybreak 发一轮真的消息也没跑。
+- **没做**：调度任务（Codex 执行器）不带 Daybreak，仍按 `standard`；不经自己 server 运行的 Codex 终端（`AGENTSWITCH_CODEX_TERMINAL=direct`，或 server 没起来）界面里有 `/daybreak` 命令，但简略视图读不到状态，不给开关；`Daybreak Red` 没见过（这个账户只有 Blue），按同样的规则处理。
 
 ## 6. 安全
 

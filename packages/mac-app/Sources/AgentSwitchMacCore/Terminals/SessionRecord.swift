@@ -300,6 +300,8 @@ public enum TerminalRecordEvent: Equatable, Sendable {
     case mode(String)
     /// What it offers as your next message changed (nil: it offers none now).
     case suggestion(String?)
+    /// Codex's Daybreak switch stands otherwise now.
+    case daybreak(Bool)
 
     public static func decode(event: String, data: String) -> TerminalRecordEvent? {
         let bytes = Data(data.utf8)
@@ -319,6 +321,9 @@ public enum TerminalRecordEvent: Equatable, Sendable {
         case "suggestion":
             struct Body: Decodable { let text: String? }
             return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .suggestion($0.text.flatMap { $0.isEmpty ? nil : $0 }) }
+        case "daybreak":
+            struct Body: Decodable { let on: Bool }
+            return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .daybreak($0.on) }
         default:
             return nil
         }
@@ -447,10 +452,11 @@ public enum RecordDisplay {
         }
     }
 
-    /// The picture for what the agent is doing now, by the tool it uses: the one a step of that kind has; none in use
-    /// (it is thinking) is the thinking one.
-    public static func toolSymbol(_ tool: String?) -> String {
-        guard let tool else { return symbol(.think) }
+    /// The picture for what the agent is doing now, by the tool it uses: the one a step of that kind has. None while
+    /// it uses no tool — at work, and no more to say: the star that stood there read as another product's mark
+    /// (2026-10-07, user: Work提示的星星图标去掉吧，看上去像是gemini，work这个动作就别加图标了).
+    public static func toolSymbol(_ tool: String?) -> String? {
+        guard let tool else { return nil }
         switch toolWord(tool) {
         case "Run": return symbol(.run)
         case "Read": return symbol(.read)
@@ -689,6 +695,15 @@ extension DaemonClient {
         struct Reply: Decodable { let mode: String }
         let data = try await call("POST", "/terminals/\(Self.segment(id))/mode", body: try JSONEncoder().encode(["mode": mode]))
         return (try? JSONDecoder().decode(Reply.self, from: data))?.mode ?? mode
+    }
+
+    /// Codex's Daybreak switch turned for the session a terminal is on: the service types Codex's own command when
+    /// the switch stands otherwise, and waits until Codex says so (docs/simple-view-v0.md §5.8). How it stands after.
+    @discardableResult
+    public func setTerminalDaybreak(id: String, on: Bool) async throws -> Bool {
+        struct Reply: Decodable { let on: Bool }
+        let data = try await call("POST", "/terminals/\(Self.segment(id))/daybreak", body: try JSONEncoder().encode(["on": on]))
+        return (try? JSONDecoder().decode(Reply.self, from: data))?.on ?? on
     }
 
     public func setTerminalEffort(id: String, effort: String) async throws {

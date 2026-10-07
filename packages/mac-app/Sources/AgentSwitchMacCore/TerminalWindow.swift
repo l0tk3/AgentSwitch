@@ -22,6 +22,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let suggestion: String?
     /// A screen can set its model and level; nil from a service that does not say (then by the agent's kind).
     public let sets: Bool?
+    /// Codex's Daybreak switch for the session it is on (docs/simple-view-v0.md §5.8); nil: this terminal has none.
+    public let daybreak: Bool?
     public let mode: String?
     /// The list's name for it: the user's own (`customName`), else the agent's title, else the folder's.
     public let name: String
@@ -42,7 +44,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let subagents: [TerminalSubagent]
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, effort, modeNow, suggestion, sets, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
+        case id, harness, cwd, workdir, model, effort, modeNow, suggestion, sets, daybreak, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
              permissions, subagents
     }
 
@@ -50,8 +52,9 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                 name: String, customName: Bool = false, status: String, cols: Int? = nil, rows: Int? = nil, createdAt: Int64 = 0,
                 exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil, forked: Bool = false,
                 permissions: [TerminalRequest] = [], subagents: [TerminalSubagent] = [], effort: String? = nil, modeNow: String? = nil,
-                suggestion: String? = nil, sets: Bool? = nil) {
+                suggestion: String? = nil, sets: Bool? = nil, daybreak: Bool? = nil) {
         self.sets = sets
+        self.daybreak = daybreak
         self.suggestion = suggestion.flatMap { $0.isEmpty ? nil : $0 }
         self.effort = effort.flatMap { $0.isEmpty ? nil : $0 }
         self.modeNow = modeNow.flatMap { $0.isEmpty ? nil : $0 }
@@ -98,7 +101,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   effort: (try? c.decodeIfPresent(String.self, forKey: .effort)) ?? nil,
                   modeNow: (try? c.decodeIfPresent(String.self, forKey: .modeNow)) ?? nil,
                   suggestion: (try? c.decodeIfPresent(String.self, forKey: .suggestion)) ?? nil,
-                  sets: (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil)
+                  sets: (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil,
+                  daybreak: (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil)
     }
 
     public var running: Bool { status != "exited" }
@@ -109,7 +113,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
         TerminalInfo(id: id, harness: harness, cwd: cwd, workdir: workdir, model: model, mode: mode, name: name ?? self.name,
                      customName: customName, status: status ?? self.status, cols: cols, rows: rows, createdAt: createdAt,
                      exitCode: exitCode ?? self.exitCode, agentSessionId: agentSessionId, resumedFrom: resumedFrom, forked: forked,
-                     permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow, suggestion: suggestion, sets: sets)
+                     permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow, suggestion: suggestion, sets: sets, daybreak: daybreak)
     }
 
     /// The status bar's words for it (MainStatus.swift): agent and model, mode, grid; the lock acts while it runs.

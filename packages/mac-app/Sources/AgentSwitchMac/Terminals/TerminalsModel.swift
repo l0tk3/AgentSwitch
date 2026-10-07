@@ -50,6 +50,8 @@ final class TerminalsModel {
     /// Per agent, the thinking levels of its default model (no model picked), and the one that is its default.
     private(set) var efforts: [String: [String]] = [:]
     private(set) var effortDefaults: [String: String] = [:]
+    /// Per agent with a Daybreak switch (Codex), how its new sessions start: a new terminal's models are listed by it.
+    private(set) var daybreakDefaults: [String: Bool] = [:]
     /// The first list has come: from now on a terminal that goes takes its pane with it.
     private(set) var settled = false
     /// A count a terminal, raised each time it starts waiting for you or ends with an error: its row flashes once.
@@ -266,6 +268,7 @@ final class TerminalsModel {
         if modelDefaults != list.defaults { modelDefaults = list.defaults }
         if efforts != list.efforts { efforts = list.efforts }
         if effortDefaults != list.effortDefaults { effortDefaults = list.effortDefaults }
+        if daybreakDefaults != list.daybreak { daybreakDefaults = list.daybreak }
         let next = TerminalPanes.settle(layout, terminals, closing: settled)
         if next != layout { setLayout(next) }
         let first = !settled

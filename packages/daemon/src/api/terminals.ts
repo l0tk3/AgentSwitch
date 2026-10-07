@@ -16,7 +16,7 @@ import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalEr
 import type { TerminalStyle } from "../terminals/style.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
-import { slashCommands } from "../terminals/commands.js";
+import { slashCommands, withCommand } from "../terminals/commands.js";
 import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
@@ -44,6 +44,9 @@ export type Terminals = {
   readonly offers?: () => Offers;
   /** OpenCode's variants per model (`provider/id`), as its server lists them. */
   readonly variants?: () => Readonly<Record<string, readonly string[]>>;
+  /** Codex's Daybreak switch was turned from a screen: its own default went with it (the offers say how new sessions
+   *  start). */
+  readonly daybreakTurned?: (on: boolean) => void;
   /** Where a terminal's attached files go (`<dir>/<id>/`); default the system's temporary folder (no spaces). */
   readonly attachDir?: string;
   /** Before an agent starts (Codex: its hooks trusted, codexHooks.ts); whatever happens, the start goes on. */
@@ -207,7 +210,10 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       return own?.length ? [[a, own]] : [];
     }));
     const effortDefaults = Object.fromEntries(Object.entries(offers).flatMap(([a, o]) => (o?.defaultEffort ? [[a, o.defaultEffort]] : [])));
-    return { models, defaults, efforts, effortDefaults };
+    // Codex's Daybreak switch, where it has one: how its new sessions start (a new terminal's models are listed by it,
+    // docs/simple-view-v0.md §5.8). An agent without the switch is not named.
+    const daybreak = Object.fromEntries(Object.entries(offers).flatMap(([a, o]) => (o?.daybreak !== undefined ? [[a, o.daybreak]] : [])));
+    return { models, defaults, efforts, effortDefaults, daybreak };
   };
   /** What a new terminal may be started at, from the same lists the screens were given. */
   const effortOffers = (): EffortOffers => {
@@ -389,6 +395,20 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     return c.json({ ok: true });
   });
 
+  // Codex's Daybreak switch turned from a screen (docs/simple-view-v0.md §5.8): its own `/daybreak` typed when it
+  // stands otherwise, then its server asked until it says so. 400 for a terminal without the switch; 409 while
+  // something waits for an answer, or when Codex did not turn it. Codex keeps the choice as its default as well.
+  app.post("/terminals/:id/daybreak", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseBody(c, z.object({ on: z.boolean() }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    let on: boolean;
+    try { on = await host.askDaybreak(id, body.data.on); } catch (err) { return failed(c, err); }
+    t.daybreakTurned?.(on);
+    audit.record({ terminal: id, action: "daybreak", via: via(c), detail: { on } });
+    return c.json({ ok: true, on });
+  });
+
   // A sealed reply goes through the sealer first, like a task (router-v0 §9): credentials in it reach the agent as
   // ciphertext. `seal: false` types it as it is, as a keyboard on the Mac would (the phone checks for secrets first).
   app.post("/terminals/:id/input", async (c) => {
@@ -472,7 +492,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   app.get("/terminals/:id/commands", (c) => {
     const info = host.get(c.req.param("id"));
     if (!info) return c.json({ error: "not found" }, 404);
-    return c.json({ commands: slashCommands(info.harness, info.cwd) });
+    // Codex's `/daybreak` is a command only where this terminal has the switch (its feature enabled at its start).
+    const commands = slashCommands(info.harness, info.cwd);
+    return c.json({ commands: info.daybreak === null ? commands : withCommand(commands, { name: "daybreak", description: "turn Daybreak on or off" }) });
   });
 
   // What `@` offers in a reply (docs/simple-view-v0.md §5.5): the files of the folder the agent works in, by name.

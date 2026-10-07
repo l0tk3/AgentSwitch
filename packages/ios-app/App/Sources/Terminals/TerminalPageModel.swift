@@ -82,6 +82,8 @@ final class TerminalPageModel {
     private(set) var recordRev: String?
     /// The model the agent says it is on now (Claude Code), as the stream last said; nil until it has.
     private(set) var modelNow: String?
+    /// Codex's Daybreak switch as the stream said last (nil: nothing said — the list's word stands).
+    private(set) var daybreakNow: Bool?
     /// What Claude Code offers as your next message, while it shows one: said over the empty reply box, a tap takes it.
     private(set) var suggestion: String?
     /// A change of model is on its way to the agent.
@@ -247,6 +249,8 @@ final class TerminalPageModel {
             recordRev = rev
         case .model(let model):
             modelNow = model
+        case .daybreak(let on):
+            daybreakNow = on
         case .suggestion(let text):
             suggestion = text
         case .name(let n):
@@ -408,6 +412,22 @@ final class TerminalPageModel {
             self.error = error.localizedDescription
         }
         return nil
+    }
+
+    /// Codex's Daybreak switch turned (docs/simple-view-v0.md §5.8): the Mac types Codex's own command and waits
+    /// until Codex says so, which takes a moment.
+    func setDaybreak(_ on: Bool) async {
+        guard let api, !changingModel else { return }
+        changingModel = true
+        defer { changingModel = false }
+        do {
+            daybreakNow = try await api.setTerminalDaybreak(id, on: on)
+            error = nil
+        } catch APIError.http(status: 409, message: _) {
+            error = "Codex 没有切换：它正在等待回答，或它的屏幕上写着原因。"
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     /// Another thinking level for the agent (Claude Code: its `/effort <level>`, typed by the Mac).

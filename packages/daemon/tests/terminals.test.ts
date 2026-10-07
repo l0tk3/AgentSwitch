@@ -501,6 +501,64 @@ describe("terminal host", () => {
     expect(host.get(other.id)!.activity).toBeNull();
   });
 
+  it("turns Codex's Daybreak switch by its own command and follows it: read from its companion, typed only when it stands otherwise (2026-10-07)", async () => {
+    // The fake agent flips on `/daybreak` and says how it stands, as Codex's TUI does; the companion here answers
+    // what the TUI would have saved on its server — the last such line.
+    let said = "";
+    const stands = () => { const all = [...said.matchAll(/Daybreak (on|off)\. Applies/g)]; return all.length ? all.at(-1)![1] === "on" : false; };
+    const asked: (string | null | undefined)[] = [];
+    const plan = fakeLauncher(() => "http://127.0.0.1:9", true);
+    const launcher: Launcher = (req) => ({ ...plan(req), ...(req.harness === "codex" ? { companion: {
+      start: async () => ({ args: plan(req).args, env: plan(req).env }), attach: () => undefined, stop: () => undefined, reportsStatus: false,
+      daybreak: async (session?: string | null) => { asked.push(session); return stands(); },
+    } } : {}) });
+    const host = new TerminalHost({ launcher, daybreakWaitMs: 1500 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    expect(info.daybreak).toBe(false);   // read as it starts
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => { events.push(e); if (e.type === "output" || e.type === "snapshot") said += e.data; });
+    await until(() => host.get(info.id)!.title === "fake agent");
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    await host.hook(info.id, token, { event: "SessionStart", payload: { session_id: "th1" } });
+    const typed = () => [...said.matchAll(/Daybreak (on|off)\. Applies/g)].length;
+    // On: its command typed once, its companion asked (of the session its hooks named) until it says so.
+    expect(await host.askDaybreak(info.id, true)).toBe(true);
+    expect(typed()).toBe(1);
+    expect(asked.at(-1)).toBe("th1");
+    expect(host.get(info.id)!.daybreak).toBe(true);
+    expect(events.filter((e) => e.type === "daybreak")).toEqual([{ type: "daybreak", on: true }]);
+    // Already so: nothing typed (the command only flips).
+    expect(await host.askDaybreak(info.id, true)).toBe(true);
+    expect(typed()).toBe(1);
+    // Turned in the terminal itself: its screen names the switch, the companion is asked, the screens are told.
+    host.write(info.id, "/daybreak\r");
+    await until(() => host.get(info.id)!.daybreak === false);
+    expect(events.filter((e) => e.type === "daybreak").at(-1)).toEqual({ type: "daybreak", on: false });
+    // While it works too (Codex takes the command then; it holds from the next turn).
+    await host.hook(info.id, token, { event: "UserPromptSubmit", payload: {} });
+    expect(await host.askDaybreak(info.id, true)).toBe(true);
+    // Not while something waits for an answer: the keys would go there.
+    const gone = new AbortController();
+    const card = host.hook(info.id, token, { event: "PermissionRequest", payload: { tool_name: "Bash", tool_input: { command: "ls" } } }, gone.signal);
+    await expect(host.askDaybreak(info.id, false)).rejects.toMatchObject({ code: "busy" });
+    gone.abort(); await card;
+    // A terminal without the switch: no such thing to turn, and its info says none.
+    const plain = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    expect(plain.daybreak).toBeNull();
+    await expect(host.askDaybreak(plain.id, true)).rejects.toMatchObject({ code: "invalid" });
+  });
+
+  it("Codex that does not turn its Daybreak switch is said so, and what its companion says stands", async () => {
+    const plan = fakeLauncher(() => "http://127.0.0.1:9", true);
+    const launcher: Launcher = (req) => ({ ...plan(req), companion: { start: async () => ({ args: plan(req).args, env: plan(req).env }), attach: () => undefined, stop: () => undefined, reportsStatus: false, daybreak: async () => false } });
+    const host = new TerminalHost({ launcher, daybreakWaitMs: 600 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    await expect(host.askDaybreak(info.id, true)).rejects.toThrow(/did not turn it/);
+    expect(host.get(info.id)!.daybreak).toBe(false);
+  });
+
   it("a program that ends on an error by itself is a failed turn; one the service ended is not", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), killGraceMs: 200 });
     closers.push(() => host.closeAll());
@@ -1291,6 +1349,16 @@ describe("terminal pieces", () => {
     expect(launch({ id: "t4", harness: "claude-code", cwd: "/tmp", resume: "s-1", mode: "manual", hookToken: "tok" }).args.slice(-2)).toEqual(["--resume", "s-1"]);
     expect(launch({ id: "t10", harness: "claude-code", cwd: "/tmp", resume: "s-1", fork: true, mode: "manual", hookToken: "tok" }).args.slice(-3)).toEqual(["--resume", "s-1", "--fork-session"]);
     expect(() => launch({ id: "t3", harness: "pi", cwd: "/tmp", mode: "manual", hookToken: "tok" })).toThrow(/not installed/);
+    // Codex's Daybreak switch (docs/simple-view-v0.md §5.8): the feature it is kept under, for a terminal started
+    // where Codex and the account have it — and its companion then says how the switch stands. Otherwise neither.
+    expect(codex.args.join(" ")).not.toContain("cli_daybreak");
+    const offered = agentLauncher({ binaries: { codex: "/bin/codex" }, gate: null, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin" }, codexServer: true, codexDaybreak: () => true });
+    const withSwitch = offered({ id: "t11", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
+    expect(withSwitch.args.join(" ")).toContain("-c features.cli_daybreak=true");
+    expect(withSwitch.args.slice(0, 4)).toEqual(["resume", "-C", "/tmp", "abc"]);
+    expect(withSwitch.companion?.daybreak).toBeTypeOf("function");
+    const without = agentLauncher({ binaries: { codex: "/bin/codex" }, gate: null, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin" }, codexServer: true, codexDaybreak: () => false });
+    expect(without({ id: "t12", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).companion?.daybreak).toBeUndefined();
   });
 
   it("refuses the protected paths each agent's own way: Claude's deny rules, Codex's profile, OpenCode's config, pi's extension", () => {

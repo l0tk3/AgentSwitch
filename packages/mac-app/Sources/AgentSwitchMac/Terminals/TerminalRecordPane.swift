@@ -293,8 +293,8 @@ private struct RecordNowLine: View {
                 // Still going: its words are quiet, a band of light running across them — and that says it, so no
                 // spinner turns beside them (2026-10-07, user: 加载图标实际上转圈圈可以去掉了，有流光特效的话). The classic
                 // look has the small picture a step of that kind has; the pixel look, its words alone.
-                if look.isClassic {
-                    Image(systemName: RecordDisplay.toolSymbol(activity?.tool)).font(.system(size: 11.5)).foregroundStyle(Look.ink2).frame(width: 16, alignment: .center)
+                if look.isClassic, let symbol = RecordDisplay.toolSymbol(activity?.tool) {
+                    Image(systemName: symbol).font(.system(size: 11.5)).foregroundStyle(Look.ink2).frame(width: 16, alignment: .center)
                 }
                 HStack(spacing: 7) {
                     if let activity {
@@ -387,6 +387,11 @@ private struct RecordDock: View {
         VStack(alignment: .leading, spacing: 6) {
             if let error = record.error {
                 Text(error).font(.system(size: Look.size(12, look))).foregroundStyle(Color.failed).lineLimit(2).textSelection(.enabled).padding(.horizontal, 4)
+            }
+            // Codex's Daybreak switch and the model it is on do not go together: its next turn would not start, and
+            // only its own screen would say so (docs/simple-view-v0.md §5.8).
+            if let clash = daybreakClash(info, record) {
+                Text(clash).font(.system(size: Look.size(12, look))).foregroundStyle(Color.attention).lineLimit(2).padding(.horizontal, 4)
             }
             VStack(alignment: .leading, spacing: 0) {
                 if !beside, let line = RecordDisplay.plan(record.plan) {
@@ -490,7 +495,12 @@ private struct RecordDock: View {
         let effort = TerminalEffort.level(asked: record.effortAsked, record: record.usage?.effort, started: info?.effort)
         // What cannot be changed from here now is said as plain words, not as something to press (2026-10-07, user:
         // 不能切换的话就让他点不动); resting the pointer on it says why.
-        let options = model.models[harness] ?? []
+        // Codex's Daybreak switch, where this terminal has one: its models are the ones that run as it stands.
+        let daybreak = record.daybreakNow ?? info?.daybreak
+        let options = TerminalDaybreak.offered(model.models[harness] ?? [], on: daybreak)
+        let clashes = daybreakClash(info, record) != nil
+        // Codex takes its command while it works too (it holds from the next turn); not while it waits for an answer.
+        let daybreakLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting, whileWorking: true, sets: true)
         let modeLock = harness == "claude-code" ? RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting) : "这个 agent 的权限方式在启动时选定。"
         let modelLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting, sets: info?.sets) ?? (options.isEmpty ? "还没有读到它的模型列表。" : nil)
         // Claude Code takes a level while it works too (the next request of the turn runs at it); pi only at rest.
@@ -521,7 +531,7 @@ private struct RecordDock: View {
                         Text(current.map(ModelName.display) ?? "Model").lineLimit(1)
                         LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
                     }
-                    .foregroundStyle(Look.ink2)
+                    .foregroundStyle(clashes ? Color.attention : Look.ink2)
                     .padding(.vertical, 5).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -560,8 +570,40 @@ private struct RecordDock: View {
                 Text("·").foregroundStyle(Look.faint)
                 Text(TerminalEffort.name(effort)).foregroundStyle(Look.faint).lineLimit(1).help(effortLock ?? "")
             }
+            if let daybreak {
+                Text("·").foregroundStyle(Look.faint)
+                if daybreakLock == nil, !record.changing {
+                    MenuButton(entries: { daybreakEntries(on: daybreak) }, above: true, help: "Daybreak") {
+                        HStack(spacing: 3) {
+                            Text(TerminalDaybreak.word(daybreak)).lineLimit(1)
+                            LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
+                        }
+                        .foregroundStyle(Look.ink2)
+                        .padding(.vertical, 5).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(TerminalDaybreak.word(daybreak)).foregroundStyle(Look.faint).lineLimit(1).help(daybreakLock ?? "")
+                }
+            }
         }
         .mono(Look.size(10.5, look))
+    }
+
+    /// Why the model it is on cannot run as Codex's Daybreak switch stands; nil when it can, or where there is no switch.
+    private func daybreakClash(_ info: TerminalInfo?, _ record: PaneRecord) -> String? {
+        guard let on = record.daybreakNow ?? info?.daybreak else { return nil }
+        let current = RecordDisplay.model(now: record.modelNow, record: record.usage?.model, started: info?.model)
+        let option = (model.models[info?.harness ?? record.agent] ?? []).first { RecordDisplay.isCurrent($0, model: current) }
+        return TerminalDaybreak.clash(model: option, on: on, name: current.map(ModelName.display))
+    }
+
+    /// Codex's Daybreak switch: on, off — the one it stands at checked — and what turning it does beyond this session.
+    private func daybreakEntries(on: Bool) -> [MenuEntry] {
+        let record = state.record
+        return [MenuEntry(title: "On", checked: on, action: { record.setDaybreak(true) }),
+                MenuEntry(title: "Off", checked: !on, action: { record.setDaybreak(false) }),
+                .separator, MenuEntry(title: TerminalDaybreak.note, enabled: false)]
     }
 
     /// Claude Code's ways of asking; the one it is in checked. It changes while it rests: the service presses its ⇧Tab

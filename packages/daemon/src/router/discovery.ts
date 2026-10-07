@@ -46,7 +46,21 @@ export type CodexModelInfo = {
   readonly efforts?: readonly string[]; readonly defaultEffort?: string;
   /** Codex's own default model. */
   readonly isDefault?: boolean;
+  /** Whether it runs with Daybreak on, off, or both (`availableAccessPrograms.cyber`: a `daybreak…` program, `standard`;
+   *  docs/simple-view-v0.md §5.8). Absent when the list does not say. */
+  readonly daybreak?: CodexDaybreak;
 };
+/** `also`: with Daybreak on and off; `only`: on alone (Daybreak Blue); `never`: off alone. */
+export type CodexDaybreak = "also" | "only" | "never";
+
+/** A model's place under Daybreak from the programs Codex lists for it; undefined when it lists none. */
+export function codexDaybreakOf(programs: unknown): CodexDaybreak | undefined {
+  const cyber = (programs as { cyber?: unknown } | null | undefined)?.cyber;
+  if (!Array.isArray(cyber) || !cyber.length) return undefined;
+  const names = cyber.map((p) => String(p).toLowerCase());
+  const on = names.some((p) => p.startsWith("daybreak")), off = names.includes("standard");
+  return on && off ? "also" : on ? "only" : off ? "never" : undefined;
+}
 
 /** Codex app-server `model/list`, entries as it gives them; tolerant of the result's shape. */
 export async function listCodexModels(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<CodexModelInfo[]> {
@@ -60,13 +74,36 @@ export async function listCodexModels(binary: string, timeoutMs = APP_SERVER_REQ
       ? m.supportedReasoningEfforts.map((e) => (typeof e === "string" ? e : str((e as Record<string, unknown> | null)?.reasoningEffort))).filter((e): e is string => Boolean(e))
       : undefined;
     const defaultEffort = str(m.defaultReasoningEffort);
+    const daybreak = codexDaybreakOf(m.availableAccessPrograms);
     return {
       id: String(m.id ?? m.model ?? m.name ?? ""),
       ...(displayName ? { displayName } : {}), ...(description ? { description } : {}),
       ...(m.hidden === true ? { hidden: true } : {}), ...(upgrade ? { upgrade } : {}),
       ...(efforts ? { efforts } : {}), ...(defaultEffort ? { defaultEffort } : {}), ...(m.isDefault === true ? { isDefault: true } : {}),
+      ...(daybreak ? { daybreak } : {}),
     };
   }).filter((m) => m.id.length > 0);
+}
+
+/** The feature flags this Codex knows, by name (`experimentalFeature/list`): whether it has a switch at all. */
+export async function listCodexFeatures(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<string[]> {
+  const names: string[] = [];
+  let cursor: unknown;
+  for (let page = 0; page < 10; page++) {
+    const r = await appServerRequest(binary, "experimentalFeature/list", cursor ? { cursor } : {}, timeoutMs);
+    for (const f of (Array.isArray(r.data) ? r.data : []) as Array<Record<string, unknown>>) if (typeof f.name === "string") names.push(f.name);
+    cursor = r.nextCursor;
+    if (!cursor) break;
+  }
+  return names;
+}
+
+/** Whether the user's Codex starts new sessions with Daybreak on (`daybreak` in its config, which its own switch
+ *  writes). Read, never written. */
+export async function codexDaybreakDefault(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<boolean> {
+  const r = await appServerRequest(binary, "config/read", { includeLayers: false }, timeoutMs);
+  const config = (r.config ?? {}) as Record<string, unknown>;
+  return (config.daybreak ?? (config.additional as Record<string, unknown> | undefined)?.daybreak) === true;
 }
 
 export async function discoverCodexModels(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<string[]> {

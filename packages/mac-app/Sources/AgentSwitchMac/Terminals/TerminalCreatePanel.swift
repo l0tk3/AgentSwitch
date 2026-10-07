@@ -93,7 +93,8 @@ struct TerminalCreatePanel: View {
 
     /// `Default · Opus 5.5`, the agent's current models, then the ones a newer model superseded under `Older`.
     private var modelMenu: some View {
-        let all = model.models[model.pickedAgent] ?? []
+        // Codex: the models that run as its new sessions start (its Daybreak switch, docs/simple-view-v0.md §5.8).
+        let all = TerminalDaybreak.offered(model.models[model.pickedAgent] ?? [], on: model.daybreakDefaults[model.pickedAgent])
         let picked = model.pickedModels[model.pickedAgent].flatMap { id in all.first { $0.id == id } }
         let fallback = model.modelDefaults[model.pickedAgent].map { "Default · \($0)" } ?? "Default"
         return Menu {

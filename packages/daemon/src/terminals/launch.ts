@@ -6,6 +6,7 @@
 import { effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
 import { CodexCompanion } from "./codexTerminal.js";
+import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,6 +51,10 @@ export type LauncherOptions = {
   /** Codex's TUI attaches to a private app-server the service starts (codexTerminal.ts), so a screen can set its
    *  model and reasoning effort. Without it, or when that server does not start, Codex runs on its own as before. */
   readonly codexServer?: boolean;
+  /** Codex has its Daybreak switch here (its program knows the feature, the account has the program;
+   *  router/modelOffers.ts): a terminal is started with the feature enabled, for that terminal alone
+   *  (docs/simple-view-v0.md §5.8). */
+  readonly codexDaybreak?: () => boolean;
   /** The shared browser for the agent (docs/browser-v0.md §2 给 agent, terminal-v0 §3): the agent bridge's command for
    *  terminal `id`, made when it starts (a session of its own); the gate wraps it as the `browser` MCP server. Codex,
    *  Claude Code and OpenCode; only with the gate (no ungated browser for an agent); absent or null: no browser tool. */
@@ -211,6 +216,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (opts.gate) args.push("-c", `shell_environment_policy.set=${tomlInline(gated)}`);
         if (browser) args.push(...codexBrowserArgs(browser));
         if (browser && !codexHasOwnInstructions(opts.env ?? process.env)) args.push("-c", `developer_instructions=${JSON.stringify(BROWSER_GUIDANCE)}`);
+        // Its Daybreak switch, where it has one: the feature it is kept under is off unless enabled (0.162), and
+        // without it `/daybreak` is no command and the user's own default does nothing. For this terminal alone.
+        const daybreak = opts.codexDaybreak?.() ?? false;
+        if (daybreak) args.push("-c", `features.${CODEX_DAYBREAK_FEATURE}=true`);
         if (req.model) args.push("-m", req.model);
         args.push(...effortArgs("codex", req.effort, req.model).args);
         if (req.mode === "bypass") args.push("--dangerously-bypass-approvals-and-sandbox");
@@ -223,7 +232,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // The folder is named (`-C`, the terminal's own): Codex does not ask whether to use the one the session ran in,
         // which may be gone (docs/terminal-v0.md §5).
         if (req.resume) args.unshift(req.fork ? "fork" : "resume", "-C", req.cwd, req.resume);
-        const companion = opts.codexServer ? new CodexCompanion({ binary: file, cwd: req.cwd, env: own, args, dir }) : undefined;
+        const companion = opts.codexServer ? new CodexCompanion({ binary: file, cwd: req.cwd, env: own, args, dir, daybreak }) : undefined;
         return { file, args, env: own, hooks: hooked, ...(companion ? { companion } : {}) };
       }
       case "opencode": {

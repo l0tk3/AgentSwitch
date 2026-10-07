@@ -350,7 +350,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true,
         // Codex through an app-server of the terminal's own, so a screen can set its model and effort (codexTerminal.ts);
         // `AGENTSWITCH_CODEX_TERMINAL=direct` starts it on its own as before.
-        codexServer: process.env.AGENTSWITCH_CODEX_TERMINAL !== "direct", ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
+        codexServer: process.env.AGENTSWITCH_CODEX_TERMINAL !== "direct",
+        // Its Daybreak switch, where this Codex and this account have one (router/modelOffers.ts; simple-view-v0 §5.8).
+        codexDaybreak: () => overrides.modelOffers?.current().codex?.daybreak !== undefined,
+        ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
       ...(agents ? { onExit: (id: string) => agents.end({ kind: "terminal", id }), onRemove: (id: string) => agents.end({ kind: "terminal", id }, true) } : {}),
@@ -364,7 +367,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
     ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure({ fresh: true }), 8000); } } : {}),
-    ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current(), variants: () => overrides.modelOffers!.variants() } : {}),
+    ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current(), variants: () => overrides.modelOffers!.variants(), daybreakTurned: (on: boolean) => overrides.modelOffers!.noteCodexDaybreak(on) } : {}),
   } : undefined;
   // Deleting an OpenCode session goes through the user's own opencode (docs/terminal-v0.md §5, threads-v0 删除): the
   // user's from the session list, the executors' with their tasks. None with a fake launcher, nor when no opencode is
