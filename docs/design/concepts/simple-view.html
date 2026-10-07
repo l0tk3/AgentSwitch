@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentSwitch Simple View</title>
+<style>
+/* Layout: one live phone, the states to put it in beside it, and under them what the terminal page has and where each
+   of those things is here. The phone carries the app's own palette (ui-v0 §7); the page around it is a quiet board. */
+:root {
+  --board: #e8e5dc; --board-ink: #171614; --board-dim: #6a655d; --board-line: #cbc5b8; --board-card: #f3f1ea;
+  /* the phone's palette, light */
+  --bg: #f3f1ea; --panel: #ebe8df; --raise: #e6e2d8;
+  --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3;
+  --signal: #e0106e; --cyan: #0086a8; --green: #3f8f00; --amber: #c27400; --red: #d7261b;
+  --accent: var(--signal); --on-accent: #fff;
+  --term: #0c0c0c; --term-ink: #e9e6df; --term-dim: #8d8a84;
+  --mono: "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+  --short: var(--mono);
+  --r-bubble: 0px; --r-card: 0px; --r-btn: 0px; --r-key: 0px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; --board: #1b1b1d; --board-ink: #e9e6df; --board-dim: #8e8e93; --board-line: #2e2e31; --board-card: #121213; }
+}
+:root[data-theme="dark"] { color-scheme: dark; --board: #1b1b1d; --board-ink: #e9e6df; --board-dim: #8e8e93; --board-line: #2e2e31; --board-card: #121213; }
+/* the phone's own appearance, chosen on the page (it starts as the viewer's) */
+.scr.dark {
+  color-scheme: dark;
+  --bg: #000; --panel: #0b0b0b; --raise: #151515;
+  --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+  --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d; --on-accent: #000;
+}
+.scr.light { color-scheme: light; }
+/* the classic look (ui-v0 §8): round, the system's type for short words, blue */
+.scr.classic { --short: var(--ui); --r-bubble: 18px; --r-card: 14px; --r-btn: 10px; --r-key: 6px; --accent: #0a7aff; --on-accent: #fff; }
+.scr.classic.dark { --accent: #0a84ff; --raise: #1c1c1e; --panel: #111113; --ink4: #2c2c2e; }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--board); color: var(--board-ink); font: 14px/1.6 var(--ui); padding-block: 24px 56px; padding-inline: 16px; }
+button { font: inherit; color: inherit; }
+.page { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+header h1 { font: 700 17px var(--mono); margin: 0 0 6px; letter-spacing: .01em; }
+header p { margin: 0; color: var(--board-dim); max-width: 68ch; font-size: 13.5px; }
+.grid { display: grid; grid-template-columns: minmax(0, 397px) minmax(0, 1fr); grid-template-areas: "stage ctl" "stage docs"; gap: 18px 32px; align-items: start; }
+.ctl { grid-area: ctl; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.stage { grid-area: stage; position: sticky; top: 14px; min-width: 0; }
+.docs { grid-area: docs; display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--board-card); border: 1px solid var(--board-line); padding: 4px 10px; font: 12px var(--mono); cursor: pointer; color: var(--board-ink); }
+.chip.on { background: var(--board-ink); color: var(--board); border-color: var(--board-ink); }
+.chip:focus-visible, .scr button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
+.note { margin: 0; color: var(--board-dim); font-size: 13px; min-height: 3.2em; }
+.note b { color: var(--board-ink); font-weight: 600; }
+.sec { font: 600 11px var(--mono); letter-spacing: .14em; color: var(--board-dim); margin: 0 0 8px; }
+.docs h2 { font: 600 15px var(--ui); margin: 0 0 8px; text-wrap: balance; }
+.docs p, .docs li { color: var(--board-dim); font-size: 13.5px; }
+.docs p { margin: 0 0 8px; max-width: 68ch; }
+.docs ul, .docs ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; max-width: 70ch; }
+.docs li b, .docs p b { color: var(--board-ink); font-weight: 600; }
+.docs code, header code, .note code { font: 12px var(--mono); color: var(--board-ink); }
+.tbl { overflow-x: auto; border: 1px solid var(--board-line); background: var(--board-card); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--board-line); }
+th { font: 600 11px var(--mono); letter-spacing: .08em; color: var(--board-dim); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { color: var(--board-ink); width: 42%; }
+td:last-child { color: var(--board-dim); }
+td a { color: var(--board-ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
+
+/* ---------- the phone ---------- */
+.phone { width: 100%; min-width: 0; max-width: 397px; padding: 11px; border-radius: 50px; background: #0a0a0b; box-shadow: 0 0 0 1.5px #3a3a3e, 0 22px 50px rgba(0,0,0,.35); }
+.scr { position: relative; min-width: 0; height: 780px; border-radius: 40px; overflow: hidden; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--ui); display: flex; flex-direction: column; isolation: isolate; }
+:where(.scr) button { background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.sb { flex: none; height: 44px; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 30px 6px; font: 600 15px var(--ui); }
+.sb i { font: 11px var(--mono); font-style: normal; color: var(--ink2); }
+.nav { flex: none; display: flex; align-items: center; gap: 2px; padding: 2px 8px 8px; border-bottom: 1px solid var(--ink4); }
+.nb { flex: none; width: 40px; height: 40px; display: grid; place-items: center; font: 20px var(--short); color: var(--ink); }
+.scr.classic .nb { color: var(--accent); }
+.nb.view { font: 600 13px var(--mono); }
+.nb.view span { border: 1px solid currentColor; padding: 2px 5px; border-radius: var(--r-key); }
+.ttl { flex: 1; min-width: 0; text-align: center; }
+.t1 { display: flex; justify-content: center; align-items: baseline; gap: 6px; min-width: 0; }
+.t1 b { font: 600 16px var(--ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t1 span { font: 12px var(--mono); color: var(--ink2); white-space: nowrap; }
+.t2 { display: flex; justify-content: center; align-items: center; gap: 5px; font: 11px var(--short); color: var(--ink2); }
+.sq { width: 8px; height: 8px; background: var(--ink3); flex: none; }
+.scr.classic .sq { border-radius: 50%; }
+.sq.busy { background: var(--cyan); } .sq.waiting { background: var(--amber); } .sq.idle { background: none; box-shadow: inset 0 0 0 1.5px var(--ink2); } .sq.exited { background: none; box-shadow: inset 0 0 0 1.5px var(--ink3); }
+
+.body > * { min-width: 0; max-width: 100%; }
+.body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 16px; position: relative; scrollbar-width: none; }
+.body::-webkit-scrollbar { display: none; }
+.hdr h3 { font: 600 20px/1.25 var(--ui); margin: 0 0 6px; text-wrap: balance; }
+.meta { font: 12px/1.6 var(--mono); color: var(--ink2); display: flex; flex-wrap: wrap; gap: 0 6px; align-items: center; }
+.meta svg { color: var(--ink); }
+.earlier { font: 12px var(--short); color: var(--ink2); text-align: center; padding: 4px; width: 100%; }
+.u { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-left: 56px; }
+.u time { font: 11px var(--mono); color: var(--ink3); }
+.u .bub { background: var(--raise); border: 1px solid var(--ink4); border-radius: var(--r-bubble); padding: 10px 14px; max-width: 100%; overflow-wrap: anywhere; }
+.scr.classic .u .bub { background: var(--accent); border-color: transparent; color: #fff; }
+.u .pics { display: flex; gap: 6px; }
+.pic { width: 54px; height: 54px; border: 1px solid var(--ink4); border-radius: calc(var(--r-key) + 2px); position: relative; overflow: hidden;
+  background: linear-gradient(135deg, var(--ink4) 0 50%, var(--raise) 50%); }
+.pic i { position: absolute; left: 3px; bottom: 2px; font: 10px var(--mono); font-style: normal; color: var(--ink2); }
+.md { display: flex; flex-direction: column; gap: 8px; overflow-wrap: anywhere; }
+.md p { margin: 0; }
+.md ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.md code { font: 13px var(--mono); background: var(--raise); padding: 1px 4px; border-radius: 3px; }
+/* a code block: its own frame, `Copy` on a slim line above the code so it never lies over it */
+.code { background: var(--raise); border: 1px solid var(--ink4); border-radius: var(--r-key); display: flex; flex-direction: column; min-width: 0; }
+.code button { align-self: flex-end; font: 11px var(--short); color: var(--ink2); padding: 4px 8px 0; }
+.md pre { margin: 0; padding: 2px 10px 9px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; font-size: 12.5px; white-space: pre; }
+.md a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink3); text-underline-offset: 3px; cursor: pointer; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.scr.classic .md a { color: var(--accent); text-decoration-color: currentColor; }
+.more { font: 12px var(--short); color: var(--ink2); align-self: flex-start; text-decoration: underline; text-underline-offset: 3px; }
+.tools { display: flex; flex-direction: column; gap: 4px; }
+.tools > button { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; font: 12px var(--mono); color: var(--ink2); }
+.tools > button i { font-style: normal; color: var(--ink3); width: 10px; }
+.tools > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call { font: 12px/1.5 var(--mono); color: var(--ink2); padding-left: 16px; overflow-wrap: anywhere; }
+.call b { color: var(--ink); font-weight: 500; } .call em { font-style: normal; color: var(--green); } .call s { text-decoration: none; color: var(--ink3); }
+.line { display: flex; align-items: baseline; gap: 6px; font: 12px var(--mono); color: var(--ink2); min-width: 0; }
+.line .w { color: var(--ink); white-space: nowrap; }
+.line .x { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line .tm { color: var(--ink3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.line.now .spin { color: var(--cyan); width: 10px; }
+.line.sub { padding-left: 16px; }
+.line.said .sq { align-self: center; }
+.line .w.ok { color: var(--green); } .line .w.no { color: var(--red); }
+
+/* what needs you sits at the end of the record: a framed card, the pixel look's dithered shadow under it */
+.card { border: 1px solid var(--ink); border-radius: var(--r-card); background: var(--bg); position: relative; margin: 2px 7px 9px 0; }
+.card::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.scr.classic .card { border-color: var(--ink4); background: var(--panel); margin-right: 0; box-shadow: 0 6px 22px rgba(0,0,0,.18); }
+.scr.classic .card::after { display: none; }
+.card .hd { display: flex; align-items: center; gap: 6px; padding: 9px 12px 0; font: 600 12px var(--short); color: var(--amber); }
+.card .hd .sp { flex: 1; }
+.card .hd button { font: 12px var(--short); color: var(--ink2); }
+.card .bd { padding: 8px 12px 0; display: flex; flex-direction: column; gap: 8px; }
+.card .cmd { font: 13px/1.5 var(--mono); overflow-wrap: anywhere; }
+.scr.classic .card .cmd { background: var(--raise); padding: 9px 10px; border-radius: 8px; }
+.card .q { font: 15px/1.45 var(--ui); }
+.card .ft { display: flex; gap: 10px; padding: 12px; }
+.btn { flex: 1; text-align: center; font: 500 14px var(--short); padding: 10px 0; border: 1px solid var(--ink4); border-radius: var(--r-btn); }
+.btn.pri { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.scr.classic .btn { border-color: transparent; background: var(--raise); font-weight: 600; font-size: 15px; }
+.scr.classic .btn.pri { background: var(--accent); color: #fff; }
+.btn.bad { color: var(--red); }
+.btn:disabled { opacity: .4; cursor: default; }
+.opt { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; padding: 5px 0; color: var(--ink2); }
+.opt i { font: 13px var(--mono); font-style: normal; flex: none; }
+.opt.on { color: var(--ink); }
+.opt small { display: block; font-size: 12.5px; color: var(--ink2); }
+.other { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--ink4); color: var(--ink); font: 14px var(--ui); padding: 6px 0; outline: none; border-radius: 0; }
+.peek { background: var(--term); color: var(--term-ink); font: 11.5px/1.5 var(--mono); padding: 9px 10px; white-space: pre; overflow-x: auto; border-radius: var(--r-key); }
+.peek .dim { color: var(--term-dim); } .peek .sel { color: #2ee6ff; }
+.hint { font-size: 12.5px; color: var(--ink2); }
+
+/* ---------- under the record: the same parts the terminal page has ---------- */
+.dock { flex: none; border-top: 1px solid var(--ink4); background: var(--bg); display: flex; flex-direction: column; padding-bottom: 20px; }
+.err { display: flex; gap: 8px; align-items: baseline; padding: 6px 16px 0; font-size: 12.5px; color: var(--red); }
+.err span { flex: 1; } .err button { color: var(--ink2); font: 15px var(--mono); }
+.quiet { padding: 7px 16px 0; font-size: 12px; color: var(--ink2); }
+.sugs { background: var(--raise); border-bottom: 1px solid var(--ink4); }
+.sugs button { display: flex; gap: 10px; align-items: baseline; padding: 7px 16px; width: 100%; text-align: left; font-size: 12px; }
+.sugs b { font: 600 13px var(--mono); white-space: nowrap; } .sugs span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+.keys { display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px 0; scrollbar-width: none; }
+.keys::-webkit-scrollbar { display: none; }
+.key { flex: none; min-width: 36px; padding: 6px 7px 5px; font: 13px var(--mono); text-align: center; background: var(--raise); border: 1px solid var(--ink4); border-bottom: 3px solid var(--ink3); border-radius: var(--r-key); }
+.key:active { transform: translateY(2px); border-bottom-width: 1px; margin-bottom: 2px; }
+.key.solid { background: var(--ink); color: var(--bg); border-color: var(--ink); border-bottom-color: var(--ink2); font-weight: 600; min-width: 48px; }
+.scr.classic .key { border: 0; padding: 7px 8px; } .scr.classic .key.solid { background: var(--accent); color: #fff; }
+.thumbs { display: flex; gap: 8px; padding: 8px 16px 0; }
+.thumbs .pic button { position: absolute; right: 0; top: 0; width: 18px; height: 18px; background: var(--bg); color: var(--ink); font: 12px/1 var(--mono); }
+.comp { margin: 8px 16px 0; position: relative; }
+.comp .seal { display: none; }
+.comp.sealed { border: 1px solid var(--ink); border-radius: var(--r-card); background: var(--bg); margin-right: 22px; }
+.comp.sealed::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.scr.classic .comp.sealed::after { display: none; }
+.comp.sealed .seal { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; background: var(--accent); color: var(--on-accent); font: 600 12px var(--short); border-radius: calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0; }
+.comp.sealed .seal .sp { flex: 1; } .comp.sealed .seal button { color: inherit; font: 15px var(--mono); }
+.comp.sealed .row { padding: 8px; }
+.comp.sealed .sealnote { display: block; }
+.sealnote { display: none; padding: 0 10px 8px; font-size: 12px; color: var(--ink2); }
+.row { display: flex; gap: 8px; align-items: flex-end; }
+.sqb { flex: none; width: 44px; height: 42px; display: grid; place-items: center; border: 1px solid var(--ink4); border-radius: var(--r-btn); color: var(--ink2); font: 20px var(--mono); }
+.sqb.lock { color: var(--accent); }
+.sqb.go { background: var(--ink); color: var(--bg); border-color: var(--ink); font: 700 18px var(--mono); }
+.scr.classic .sqb.go { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sqb.go.stop { font-size: 13px; }
+.sqb.go:disabled { background: none; color: var(--ink3); border-color: var(--ink4); cursor: default; }
+.comp.sealed .sqb.lock { display: none; }
+textarea#field { flex: 1; min-width: 0; min-height: 42px; max-height: 108px; resize: none; background: none; color: var(--ink); border: 1px solid var(--ink4); border-radius: var(--r-btn); padding: 9px 11px; font: 16px/1.35 var(--ui); outline: none; }
+textarea#field::placeholder { color: var(--ink3); }
+.comp.sealed textarea#field { border-color: transparent; padding-left: 4px; }
+.resume { margin: 10px 16px 0; }
+.resume .btn { display: block; width: 100%; }
+
+/* ---------- over the screen ---------- */
+.veil { position: absolute; inset: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 55%, transparent); display: flex; flex-direction: column; justify-content: center; padding: 0 28px; }
+.veil.low { justify-content: flex-end; padding: 0 16px 96px; }
+.veil.top { justify-content: flex-start; align-items: flex-end; padding: 92px 12px 0; }
+.box { border: 1px solid var(--ink); border-radius: var(--r-card); background: var(--bg); position: relative; font-family: var(--short); max-width: 100%; }
+.box::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
+.scr.classic .box { border-color: var(--ink4); background: var(--panel); box-shadow: 0 10px 40px rgba(0,0,0,.3); overflow: hidden; }
+.scr.classic .box::after { display: none; }
+.box .bh { display: flex; align-items: center; min-height: 26px; padding: 4px 10px; font: 600 12px var(--short); background: var(--ink); color: var(--bg); overflow-wrap: anywhere; }
+.box .bh.amber { background: var(--amber); color: #000; } .box .bh.red { background: var(--red); color: #000; }
+.box .bm { padding: 10px 12px 2px; font: 13.5px/1.55 var(--ui); color: var(--ink2); }
+.box .ba { display: flex; flex-direction: column; padding: 6px 0; }
+.box .ba button { display: flex; justify-content: space-between; padding: 9px 12px; font: 14px var(--short); text-align: left; width: 100%; }
+.box .ba button:active { background: var(--ink); color: var(--bg); }
+.box .ba button.bad { color: var(--red); } .box .ba button.pri { font-weight: 700; } .box .ba hr { border: 0; border-top: 1px solid var(--ink4); margin: 4px 0; width: 100%; }
+.box input { margin: 10px 12px 4px; width: calc(100% - 24px); background: none; border: 0; border-bottom: 1px solid var(--ink3); color: var(--ink); font: 15px var(--ui); padding: 6px 0; outline: none; border-radius: 0; }
+.menu { min-width: 210px; }
+.toast { position: absolute; left: 50%; transform: translateX(-50%); bottom: 150px; z-index: 40; background: var(--ink); color: var(--bg); font: 12px var(--short); padding: 5px 10px; border-radius: var(--r-key); white-space: nowrap; }
+.latest { position: absolute; right: 16px; z-index: 5; background: var(--bg); border: 1px solid var(--ink); border-radius: var(--r-key); font: 12px var(--short); padding: 5px 9px; }
+
+/* ---------- the terminal view, for the switch ---------- */
+.scr.term .nav, .scr.term .sb { background: #000; color: #e9e6df; border-color: #262524; }
+.scr.term .t1 span, .scr.term .t2, .scr.term .sb i { color: #8d8a84; } .scr.term .nb { color: #e9e6df; }
+.tscreen { flex: 1; min-height: 0; background: var(--term); color: var(--term-ink); font: 11.5px/1.45 var(--mono); padding: 10px 8px; white-space: pre; overflow: auto; position: relative; margin: 0; }
+.tscreen .dim { color: var(--term-dim); } .tscreen .cy { color: #2ee6ff; } .tscreen .am { color: #ffb000; }
+.cover { position: absolute; inset: 0; background: repeating-conic-gradient(#000 0 25%, transparent 0 50%) 0 0 / 2px 2px; display: grid; place-items: center; padding: 0 28px; white-space: normal; }
+.cover .box { width: 100%; }
+.scr.term .dock { --bg: #000; --raise: #151515; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524; background: #000; color: #e9e6df; border-color: #262524; }
+.spin { display: inline-block; }
+@media (max-width: 860px) {
+  /* one column; the states stay at the top of the screen while the phone under them is looked at */
+  .grid { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+  .ctl { display: contents; }
+  #presets { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    background: var(--board); padding: 8px 16px; margin: 0 -16px; border-bottom: 1px solid var(--board-line); }
+  #presets::-webkit-scrollbar { display: none; }
+  #presets .chip { flex: none; }
+  .stage { position: static; display: flex; justify-content: center; }
+  .docs { margin-top: 14px; }
+  .note { min-height: 0; }
+}
+@media (max-width: 520px) {
+  .phone { padding: 0; border-radius: 22px; box-shadow: 0 0 0 1px var(--board-line); background: none; }
+  .scr { border-radius: 21px; height: 700px; }
+  .sb { height: 30px; padding-bottom: 2px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+<style id="gcss"></style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Simple View</h1>
+    <p>iPhone 上终端的简略视图。接手前那个只读的记录页不变，按下 <code>Resume</code> 之后不换到终端的屏幕，而是留在同一页上，把回复、确认、提问、按键这些补进来。终端页能做的事这里都能做；程序自己画的界面随时切回终端。概念稿，2026-10-07。</p>
+  </header>
+  <div class="grid">
+    <aside class="ctl">
+      <div class="chips" id="presets" role="tablist" aria-label="状态"></div>
+      <p class="note" id="note"></p>
+      <div class="chips" id="toggles" aria-label="外观"></div>
+    </aside>
+    <div class="stage"><div class="phone"><div class="scr" id="scr"></div></div></div>
+    <div class="docs">
+      <section>
+        <p class="sec">// 比接手前的记录页多了什么</p>
+        <ul>
+          <li><b>回复</b>：终端页的同一个输入框——<code>+</code> 附件、<code>/</code> 命令、锁（加密发送）、像密码时先问。</li>
+          <li><b>需要你时</b>：确认卡和提问卡排在记录的末尾，答完收成一行，留在记录里。</li>
+          <li><b>正在做什么</b>：末尾一行写当前的工具与已用时间，子代理另起一行；忙的时候发送键变成 <code>■</code>，按下打断。</li>
+          <li><b>程序自己的界面</b>（选模型的菜单、登录、任何没被认成卡片的提问）：一张 Prompt 卡，画出屏幕最后几行，按键条自己出来，旁边 <code>Open Terminal</code>。</li>
+          <li><b>其余</b>：<code>Earlier</code> 取更早的记录，过长的消息 <code>Show More</code>，往回翻时 <code>↓ Latest</code>，代码块 <code>Copy</code>，链接点开与长按菜单，<code>⋯</code> 里改名、关闭与换视图。</li>
+        </ul>
+      </section>
+      <section>
+        <p class="sec">// 终端页有的，这里在哪</p>
+        <div class="tbl"><table>
+          <thead><tr><th>终端页</th><th>简略视图</th></tr></thead>
+          <tbody id="map"></tbody>
+        </table></div>
+      </section>
+      <section>
+        <p class="sec">// 需要你定的</p>
+        <ol>
+          <li><b>默认进哪个视图。</b>建议：有会话记录的 agent，<code>Resume</code> 和新建之后默认进简略视图；每个终端记住上次用的那个。</li>
+          <li><b>换视图的入口放哪。</b>现在画的是导航栏右边一个图标（<code>&gt;_</code> 去终端，<code>≡</code> 回来），<code>⋯</code> 里也有一项。也可以只留 <code>⋯</code> 里那一项，顶上更干净。</li>
+          <li><b>按键平时收起。</b>现在放在 <code>+</code> 菜单的最后一项，程序等按键时自己出来。也可以在输入框旁常驻一个键盘图标，多占一格。</li>
+          <li><b>深浅色。</b>简略视图跟随手机的外观（和现在的记录页一样）；终端视图仍然固定深色。</li>
+          <li><b>Mac 上要不要同样的视图。</b>这一稿只画了手机。</li>
+        </ol>
+      </section>
+      <section>
+        <p class="sec">// 做的话，服务要补的</p>
+        <ul>
+          <li>记录现在每 10 秒取一次，每条消息截到 2000 字。简略视图要跟着终端的事件更新，并能取一条消息的全文。</li>
+          <li>“正在做什么”现在只有 Busy、Waiting 和子代理行；当前工具与命令要从会话记录的最新一条或 hook 里拿。</li>
+          <li>Prompt 卡要服务给出屏幕最后几行的文字。终端页已有整屏画面，这里只取尾部。</li>
+          <li>Claude Code、Codex、OpenCode、pi 都有会话记录，都能用；没有记录的程序只有终端视图，不显示切换。</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+</div>
+<script src="pixel.js"></script>
+<script>
+const P = window.Pixel;
+document.getElementById("gcss").textContent = P.GLITCH_CSS;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ---------- what the session holds ---------- */
+const EARLIER = [
+  { t: "user", time: "10:12", text: "给设置加一页 Agents，四个 CLI 能装、能更新、能删。" },
+  { t: "md", html: "<p>先定存放的位置：正式版留在各家的官方位置，测试版和指定版本放进 AgentSwitch 自己的版本库，互不影响。</p>" },
+  { t: "tools", calls: [{ tool: "Read", text: "docs/agents-v0.md" }, { tool: "Write", text: "AgentStore.swift", diff: "+276" }, { tool: "Bash", text: "swift test --filter AgentStoreTests", out: "14 tests, 0 failures" }] },
+];
+const BASE = () => [
+  { t: "user", time: "10:31", text: "codex 我选了测试版，怎么好像没生效" },
+  { t: "md", html: `<p>选择已经存下来了，但<b>换版本要重启服务才生效</b>。正在运行的服务拿到的仍是 ChatGPT App 里那一份：</p><pre><code>CODEX_BIN=/Applications/ChatGPT.app/…/bin/codex</code></pre><ul><li>测试版已装好，<code>codex-beta</code> 在命令行里可用。</li><li>页面顶部有 <code>Restart Service…</code>，但你是在下面那一组里选的，看不到它。</li></ul>` },
+  { t: "tools", calls: [{ tool: "Read", text: "AppModel+Agents.swift" }, { tool: "Read", text: "AgentsView.swift" }, { tool: "Bash", text: "ps eww -p 64277 | grep CODEX_BIN" }, { tool: "Edit", text: "AgentsView.swift", diff: "+14 −2" }, { tool: "Bash", text: "swift test --filter AgentsTests", out: "580 tests, 0 failures" }] },
+  { t: "md", clip: true, html: `<p>已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 <a data-link="docs/agents-v0.md">docs/agents-v0.md</a> §8。演示页：<a data-link="http://127.0.0.1:8765/concepts/agents.html">http://127.0.0.1:8765/concepts/agents.html</a></p>`,
+    rest: `<p>顶部那一行留着作为整页的提要；两处是同一个按钮，点了先问一次，因为重启会中断正在跑的任务和已打开的终端。</p>` },
+  { t: "user", time: "10:44", text: "delete 应该标红才对", images: [1] },
+  { t: "md", html: "<p>改好了：换成应用里已有的红字删除按钮，禁用时变淡。正在重新构建。</p>" },
+];
+const COMMANDS = [["compact", "压缩上下文，留下摘要"], ["clear", "清空对话"], ["model", "换模型"], ["review", "审查当前改动"], ["init", "为项目写 CLAUDE.md"]];
+const KEYS = ["⏎", "⌫", "↑", "↓", "1", "2", "3", "y", "n", "esc", "tab", "⇧tab", "←", "→", "pgup", "pgdn", "^C"];
+const MODELS = [["Opus 5.5", "most capable"], ["Sonnet 5.5", "everyday tasks"], ["Haiku 4.5", "fastest"]];
+
+const PRESETS = {
+  preview:    ["Preview", "<b>现在已有的样子。</b>终端列表里点开一个会话：只读的记录，底部一个 <code>Resume</code>。下面各状态都是按下它之后、留在这一页上的样子。"],
+  live:       ["Busy", "<b>接手之后。</b>记录照旧，末尾一行写它正在做什么，子代理另起一行。忙且输入框为空时发送键是 <code>■</code>，按下打断；打了字就变回发送。"],
+  permission: ["Permission", "<b>要你确认。</b>确认卡排在记录末尾，不盖住内容。答完收成一行，留在记录里。"],
+  question:   ["Question", "<b>它问你。</b>选项、Other、Submit，和终端页的提问卡是同一张，只是排在记录里。"],
+  prompt:     ["Prompt", "<b>程序自己画的界面。</b>这里是 <code>/model</code> 的菜单。卡片里是屏幕最后几行，按键条自己出来：按 <code>↑</code> <code>↓</code> <code>⏎</code> 试试，或者 <code>Open Terminal</code>。"],
+  reply:      ["Reply", "<b>回复。</b><code>+</code> 选图后在输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令；<code>+</code> 的最后一项取出按键条。"],
+  sealed:     ["Sealed", "<b>加密发送。</b>点锁，输入框被加密框围住，Mac 先把其中的凭据换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。"],
+  away:       ["On Mac", "<b>终端正在 Mac 上用着。</b>看记录、回复都不占它的窗口大小，所以这里没有占位和 <code>Take Over</code>，标题里写一句 On Mac。切到终端视图时照旧要接手。"],
+  exited:     ["Exited", "<b>程序结束了。</b>回到只读的记录，底部又是 <code>Resume</code>：和接手前是同一页。"],
+};
+const MAP = [
+  ["实时屏幕：程序画什么显示什么", "会话记录：你的话在右，回答排成 Markdown，一串工具调用折成一行、点开看每一条", "live"],
+  ["标题：目录与 git，下面 Busy / Waiting / Exited", "相同", "live"],
+  ["回复框，原样发出", "相同，是同一个输入框", "reply"],
+  ["锁：加密发送；像密码时先问", "相同", "sealed"],
+  ["+ 相机、照片、文件、粘贴图片；[Image #n] 占位与缩略图", "相同；发出后图片留在那条消息下面", "reply"],
+  ["/ 列出 agent 的命令", "相同；会打开菜单的命令落到 Prompt 卡", "reply"],
+  ["确认卡 Deny / Allow，浮在屏幕上方", "排在记录末尾，答完收成一行", "permission"],
+  ["提问卡：选项、Other、Submit", "同上", "question"],
+  ["17 个按键：⏎ ⌫ ↑ ↓ 1 2 3 y n esc tab ⇧tab ← → pgup pgdn ^C", "平时收起，+ 的最后一项取出；程序等按键时自己出来", "prompt"],
+  ["打断：esc 或 ^C", "忙且输入框为空时，发送键是 ■", "live"],
+  ["拖动滚屏（给程序发滚轮）", "记录本身能滚；顶上 Earlier 取更早的，往回翻时出现 ↓ Latest", "live"],
+  ["双指调字号", "跟随系统字号：这里是排版的文字", null],
+  ["点链接在 Mac 的浏览器里打开；长按：Open in Browser、Copy Link、Open in Safari", "相同（长按或右键试试）", "live"],
+  ["复制屏幕上的字", "代码块右上角 Copy；消息可选中", "live"],
+  ["子代理：列表里那个终端下面的行", "记录末尾一行：名字、在做什么、已用时间", "live"],
+  ["在别处使用时的占位与 Take Over", "不需要：标题里写 On Mac，看和回复都不抢窗口大小", "away"],
+  ["⋯：Rename、Close（可选 Delete Record）", "相同，另加 Terminal View", "live"],
+  ["错误行、Connecting", "相同的位置", null],
+  ["程序自己的全屏界面：菜单、登录、编辑器", "Prompt 卡：屏幕最后几行、按键条、Open Terminal", "prompt"],
+  ["结束后：Exited，记录保留", "回到只读的记录与 Resume", "exited"],
+];
+
+/* ---------- state ---------- */
+const prefersDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+const S = { preset: "live", view: "simple", dark: prefersDark(), classic: false };
+let tick = 0, spinTimer = null, flickTimer = null, toastTimer = null;
+
+function load(preset) {
+  Object.assign(S, { preset, joined: preset !== "preview", status: "busy", away: null, items: BASE(), card: null, live: null, sub: null,
+    draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch" });
+  if (preset === "preview") S.status = "busy";
+  if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
+  if (preset === "away") S.away = "mac";
+  if (preset === "permission") { S.status = "waiting"; S.card = { kind: "permission", tool: "Bash", detail: "git push origin main" }; }
+  if (preset === "question") { S.status = "waiting"; S.card = { kind: "question", q: "PATH 里没有 ~/.opencode/bin 时，安装正式版要怎么处理？",
+    opts: [["让官方脚本自己加", "和手动安装完全一样，会往 shell 配置里加一行"], ["只在页面上提示", "AgentSwitch 不动 shell 配置，写出要加的那一行"]], pick: -1, other: "" }; }
+  if (preset === "prompt") { S.status = "waiting"; S.items.push({ t: "user", time: "10:51", text: "/model" }); S.card = { kind: "prompt" }; S.keys = true; }
+  if (preset === "reply") { S.status = "idle"; S.items.push({ t: "said", tone: "idle", text: "Idle", time: "10:49" }); S.files = [1]; S.draft = "[Image #1] 这一行的间距再收一点"; }
+  if (preset === "sealed") { S.status = "idle"; S.sealed = true; S.draft = "部署用的密码是 hunter2"; }
+  if (preset === "exited") { S.status = "exited"; S.joined = false; S.items.push({ t: "said", tone: "exited", text: "Exited · 0", time: "10:52" }); }
+  S.view = "simple";
+  render(true);
+  try { history.replaceState(null, "", "#" + preset); } catch { /* a frame that keeps its own address */ }
+}
+
+/* ---------- drawing ---------- */
+const agentMark = () => P.sprite(P.AGENT_PX.cc, { px: 2 });
+const statusWord = () => S.card ? "Waiting" : { busy: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited" }[S.status];
+const statusKind = () => S.card ? "waiting" : S.status;
+const since = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
+function item(it, i) {
+  if (it.t === "user") {
+    const pics = it.images ? `<div class="pics">${it.images.map((n) => `<span class="pic"><i>#${n}</i></span>`).join("")}</div>` : "";
+    return `<div class="u"><time>${it.time}</time>${pics}<div class="bub">${esc(it.text)}</div></div>`;
+  }
+  if (it.t === "md") {
+    const html = it.html.replace(/<pre>/g, '<div class="code"><button data-a="copy">Copy</button><pre>').replace(/<\/pre>/g, "</pre></div>") + (it.clip ? (it.open ? it.rest : "") : "");
+    return `<div class="md">${html}${it.clip && !it.open ? `<button class="more" data-a="more" data-i="${i}">Show More</button>` : ""}</div>`;
+  }
+  if (it.t === "tools") {
+    const names = []; it.calls.forEach((c) => { const n = names.find((x) => x[0] === c.tool); n ? n[1]++ : names.push([c.tool, 1]); });
+    const sum = names.map(([n, k]) => k > 1 ? `${n} ×${k}` : n).join(" · ");
+    const calls = it.open ? it.calls.map((c) => `<div class="call"><b>${c.tool}</b> ${esc(c.text)}${c.diff ? ` <em>${c.diff}</em>` : ""}${c.out ? `<br><s>⎿ ${esc(c.out)}</s>` : ""}</div>`).join("") : "";
+    return `<div class="tools"><button data-a="fold" data-i="${i}" aria-expanded="${!!it.open}"><i>${it.open ? "▾" : "▸"}</i><span>${sum}</span></button>${calls}</div>`;
+  }
+  if (it.t === "said") {
+    const tone = { ok: "ok", no: "no", idle: "", exited: "" }[it.tone] ?? "";
+    return `<div class="line said"><span class="w ${tone}">${esc(it.text)}</span><span class="x">${esc(it.detail ?? "")}</span><span class="tm">${it.time ?? ""}</span></div>`;
+  }
+  return "";
+}
+
+function card() {
+  const c = S.card;
+  if (!c) return "";
+  if (c.kind === "permission") {
+    return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>Permission · ${c.tool}</div>
+      <div class="bd"><div class="cmd">${esc(c.detail)}</div></div>
+      <div class="ft"><button class="btn" data-a="deny">Deny</button><button class="btn pri" data-a="allow">Allow</button></div></div>`;
+  }
+  if (c.kind === "question") {
+    const mark = (on) => S.classic ? (on ? "◉" : "○") : (on ? "&lt;x&gt;" : "&lt; &gt;");
+    const opts = c.opts.map(([l, d], i) => `<button class="opt ${c.pick === i ? "on" : ""}" data-a="pick" data-i="${i}"><i>${mark(c.pick === i)}</i><span>${l}<small>${d}</small></span></button>`).join("");
+    const ready = c.pick >= 0 || c.other.trim();
+    return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>Question</div>
+      <div class="bd"><div class="q">${esc(c.q)}</div><div>${opts}</div><input class="other" id="other" placeholder="Other" value="${esc(c.other)}" autocomplete="off"></div>
+      <div class="ft"><button class="btn pri" data-a="submit" ${ready ? "" : "disabled"}>Submit</button></div></div>`;
+  }
+  const rows = MODELS.map(([n, d], i) => `${i === S.sel ? '<span class="sel"> ❯ ' : "   "}${i + 1}. ${n.padEnd(13)}${i === S.sel ? "</span>" : ""}<span class="dim">${d}</span>`).join("\n");
+  return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>Prompt<span class="sp"></span><button data-a="view">Open Terminal ›</button></div>
+    <div class="bd"><div class="peek"> Select model\n${rows}\n<span class="dim"> Enter to confirm · Esc to cancel</span></div>
+    <div class="hint">程序在等按键。用下面的按键作答，或打开终端。</div></div><div class="ft" style="padding-top:4px"></div></div>`;
+}
+
+function body() {
+  const meta = `<div class="hdr"><h3>Agents 页：安装、更新与版本</h3>
+    <div class="meta">${S.status === "busy" && !S.card ? `<span class="spin" style="color:var(--cyan)">⠋</span><span style="color:var(--cyan)">Busy</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
+    <div class="meta">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>`;
+  const earlier = S.earlier ? EARLIER.map((it, i) => item(it, "e" + i)).join("") : `<button class="earlier" data-a="earlier">· · ·  Earlier</button>`;
+  const live = S.live && S.joined && !S.card ? `<div class="line now"><span class="spin">⠋</span><span class="w">${S.live.tool}</span><span class="x">${esc(S.live.text)}</span><span class="tm" data-t0="${S.live.t0}">${since(S.live.t0)}</span></div>` : "";
+  const sub = S.sub && S.joined && !S.card ? `<div class="line sub now"><span class="spin">⠋</span><span class="w">${S.sub.name}</span><span class="x">${esc(S.sub.doing)}</span><span class="tm" data-t0="${S.sub.t0}">${since(S.sub.t0)}</span></div>` : "";
+  return meta + earlier + S.items.map(item).join("") + live + sub + card();
+}
+
+function dock() {
+  if (!S.joined) {
+    const gone = S.status === "exited";
+    return `${gone ? `<div class="quiet">程序已结束，会话记录保留。</div>` : ""}<div class="resume"><button class="btn pri" data-a="resume">Resume</button></div>`;
+  }
+  const sugs = !S.sealed && /^\/[a-z]*$/.test(S.draft) ? COMMANDS.filter(([n]) => n.startsWith(S.draft.slice(1))) : [];
+  const keys = S.keys ? `<div class="keys"><button class="key" data-a="keysoff" aria-label="收起按键">⌄</button>${KEYS.map((k) => `<button class="key ${k === "⏎" ? "solid" : ""}" data-k="${k}">${k}</button>`).join("")}</div>` : "";
+  const thumbs = S.files.length ? `<div class="thumbs">${S.files.map((n) => `<span class="pic"><i>#${n}</i><button data-a="unfile" data-n="${n}" aria-label="移除">×</button></span>`).join("")}</div>` : "";
+  const stop = S.status === "busy" && !S.card && !S.draft.trim();
+  const lock = S.classic ? `<svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="8" width="11" height="8" rx="2"/><path d="M5 8V5.5a3 3 0 0 1 6 0V8"/></svg>` : P.sprite(["..###..", ".#...#.", ".#...#.", "#######", "###.###", "###.###", "#######"], { px: 2 });
+  return `${sugs.length ? `<div class="sugs">${sugs.map(([n, d]) => `<button data-a="sug" data-n="${n}"><b>/${n}</b><span>${d}</span></button>`).join("")}</div>` : ""}
+    ${S.error ? `<div class="err"><span>${esc(S.error)}</span><button data-a="errx" aria-label="关闭">×</button></div>` : ""}
+    ${S.away && S.view === "simple" ? `<div class="quiet">这个终端正在 Mac 上使用。在这里回复不会改变它的窗口大小。</div>` : ""}
+    ${keys}${thumbs}
+    <div class="comp ${S.sealed ? "sealed" : ""}" id="comp">
+      <div class="seal">${S.classic ? "" : P.sprite(P.SQUARE, { px: 2 })}<span>Encrypt &amp; Send → claude</span><span class="sp"></span><button data-a="lock" aria-label="取消加密">×</button></div>
+      <div class="row"><button class="sqb" data-a="plus" aria-label="附件与按键">+</button>
+        <textarea id="field" rows="1" placeholder="${S.sealed ? "凭据会先换成密文" : "Reply"}" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(S.draft)}</textarea>
+        <button class="sqb lock" data-a="lock" aria-label="加密发送">${lock}</button>
+        <button class="sqb go ${stop ? "stop" : ""}" data-a="${stop ? "stop" : "send"}" id="go" aria-label="${stop ? "打断" : "发送"}">${stop ? "■" : "↑"}</button></div>
+      <div class="sealnote">Mac 先把其中的凭据换成密文，再交给 agent。</div>
+    </div>`;
+}
+
+function terminal() {
+  const prompt = S.card?.kind === "permission" ? `\n<span class="am">╭ Bash command ────────────────────────╮</span>\n<span class="am">│</span> git push origin main\n<span class="am">│</span> Do you want to proceed?\n<span class="am">│</span> <span class="cy">❯ 1. Yes</span>\n<span class="am">│</span>   2. Yes, and don't ask again\n<span class="am">│</span>   3. No, tell Claude what to do\n<span class="am">╰──────────────────────────────────────╯</span>`
+    : S.card?.kind === "prompt" ? `\n Select model\n${MODELS.map(([n, d], i) => `${i === S.sel ? '<span class="cy"> ❯ ' : "   "}${i + 1}. ${n.padEnd(13)}${i === S.sel ? "</span>" : ""}<span class="dim">${d}</span>`).join("\n")}\n<span class="dim"> Enter to confirm · Esc to cancel</span>`
+    : `\n<span class="cy">⏺</span> ${esc(S.live?.tool ?? "Bash")}(${esc(S.live?.text || "swift build -c release")})\n  <span class="dim">⎿  Running… (${since(S.live?.t0 ?? Date.now())} · esc to interrupt)</span>\n\n<span class="dim">╭──────────────────────────────────────╮</span>\n<span class="dim">│</span> &gt;                                    <span class="dim">│</span>\n<span class="dim">╰──────────────────────────────────────╯</span>\n<span class="dim">  ⏵⏵ accept edits on (shift+tab to cycle)</span>`;
+  const cover = S.away ? `<div class="cover"><div class="box"><div class="bh">On Mac</div><div class="bm" style="padding-bottom:10px">这个终端正在 Mac 上使用。</div><div class="ba"><button class="pri" data-a="take">Take Over</button></div></div></div>` : "";
+  return `<pre class="tscreen"><span class="dim"> ✳ Claude Code v2.1.291 · Opus 5.5\n   ~/Desktop/WorkSpace/Projects/AgentSwitch</span>\n\n&gt; delete 应该标红才对 <span class="dim">[Image #1]</span>\n\n<span class="cy">⏺</span> 改好了：换成应用里已有的红字删除按钮，\n  禁用时变淡。正在重新构建。\n${prompt}${cover}</pre>`;
+}
+
+function over() {
+  const o = S.over;
+  if (!o) return "";
+  if (o.kind === "more") return `<div class="veil top" data-a="shut"><div class="box menu"><div class="ba">
+    <button data-a="view">${S.view === "simple" ? "Terminal View" : "Simple View"}<span>${S.view === "simple" ? "&gt;_" : "≡"}</span></button>
+    <button data-a="rename">Rename</button><hr><button class="bad" data-a="close">Close…</button></div></div></div>`;
+  if (o.kind === "plus") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
+    <button data-a="file">Camera</button><button data-a="file">Photos</button><button data-a="file">Files</button><button data-a="file">Paste Image</button><hr>
+    <button data-a="keyson">Keys<span>⏎ ⌫ ↑ ↓ …</span></button></div></div></div>`;
+  if (o.kind === "link") return `<div class="veil" data-a="shut"><div class="box"><div class="bh">${esc(o.link)}</div><div class="ba">
+    <button data-a="open">Open in Browser<span>Mac</span></button><button data-a="copylink">Copy Link</button><button data-a="safari">Open in Safari</button></div></div></div>`;
+  if (o.kind === "close") return `<div class="veil" data-a="shut"><div class="box"><div class="bh red">Close</div>
+    <div class="bm">关闭「${esc(S.title)}」？程序将结束并从列表移除。会话记录默认保留，之后可继续；删除记录后无法恢复。</div>
+    <div class="ba"><button class="bad" data-a="doclose">Delete Record</button><button class="pri" data-a="doclose">Close</button><button data-a="shut">Cancel</button></div></div></div>`;
+  if (o.kind === "secret") return `<div class="veil" data-a="shut"><div class="box"><div class="bh amber">这段文字可能包含密码或令牌</div>
+    <div class="bm">加密发送时，Mac 会先把其中的凭据换成密文，再交给 agent。</div>
+    <div class="ba"><button data-a="sendplain">Send as Typed</button><button class="pri" data-a="sendsealed">Sealed</button></div></div></div>`;
+  if (o.kind === "rename") return `<div class="veil" data-a="shut"><div class="box"><div class="bh">Rename</div>
+    <input id="newname" value="${esc(S.title)}" placeholder="名称（留空恢复自动命名）" autocomplete="off">
+    <div class="ba"><button class="pri" data-a="dorename">Save</button><button data-a="shut">Cancel</button></div></div></div>`;
+  return "";
+}
+
+function render(toEnd) {
+  const scr = $("scr"), old = scr.querySelector(".body");
+  const stick = toEnd || !old || old.scrollHeight - old.scrollTop - old.clientHeight < 40, top = old?.scrollTop ?? 0;
+  const focused = document.activeElement?.id;
+  scr.className = `scr ${S.dark ? "dark" : "light"} ${S.classic ? "classic" : ""} ${S.view === "terminal" ? "term dark" : ""}`;
+  const where = S.away ? `<span>· On Mac</span>` : "";
+  const nav = S.joined
+    ? `<div class="nav"><button class="nb" data-a="back" aria-label="返回">‹</button>
+        <div class="ttl"><div class="t1"><b>${esc(S.title)}</b><span>main ±3</span></div><div class="t2" id="st"><span class="sq ${statusKind()}"></span><span>${statusWord()}</span>${where}</div></div>
+        <button class="nb view" data-a="view" aria-label="${S.view === "simple" ? "终端视图" : "简略视图"}"><span>${S.view === "simple" ? "&gt;_" : "≡"}</span></button>
+        <button class="nb" data-a="menu" aria-label="更多">⋯</button></div>`
+    : `<div class="nav"><button class="nb" data-a="back" aria-label="返回">‹</button><div class="ttl"><div class="t1"><b>Agents 页：安装、更新与版本</b></div></div><span class="nb"></span></div>`;
+  scr.innerHTML = `<div class="sb"><span>9:41</span><i>5G ▮▮▮</i></div>${nav}
+    ${S.view === "terminal" ? terminal() : `<div class="body" id="body">${body()}</div>`}
+    <div class="dock">${S.view === "terminal" ? `<div class="keys">${KEYS.map((k) => `<button class="key ${k === "⏎" ? "solid" : ""}" data-k="${k}">${k}</button>`).join("")}</div>` + dock().replace(/<div class="keys">[\s\S]*?<\/div>/, "") : dock()}</div>
+    ${S.unseen && S.view === "simple" ? `<button class="latest" data-a="latest" style="bottom:${$("scr").querySelector(".dock")?.offsetHeight ?? 110}px">↓ Latest</button>` : ""}
+    ${over()}${S.toast ? `<div class="toast">${esc(S.toast)}</div>` : ""}`;
+  const b = scr.querySelector(".body");
+  if (b) { b.scrollTop = stick ? b.scrollHeight : top; b.addEventListener("scroll", () => { if (S.unseen && b.scrollHeight - b.scrollTop - b.clientHeight < 40) { S.unseen = 0; scr.querySelector(".latest")?.remove(); } }); }
+  const ta = $("field");
+  if (ta) { grow(ta); if (focused === "field") { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
+  if (focused === "other") { const o = $("other"); o?.focus(); o?.setSelectionRange(o.value.length, o.value.length); }
+  if (S.over?.kind === "rename") $("newname")?.select();
+  document.querySelectorAll("#presets .chip").forEach((c) => { c.classList.toggle("on", c.dataset.p === S.preset); c.setAttribute("aria-selected", c.dataset.p === S.preset); });
+  $("note").innerHTML = PRESETS[S.preset][1];
+  $("tg-dark").classList.toggle("on", S.dark); $("tg-light").classList.toggle("on", !S.dark);
+  $("tg-pixel").classList.toggle("on", !S.classic); $("tg-classic").classList.toggle("on", S.classic);
+}
+const grow = (ta) => { ta.style.height = "auto"; ta.style.height = Math.min(108, ta.scrollHeight + 2) + "px"; };
+const glitch = (id) => { if (!S.classic) P.glitch($(id)); };
+function say(text) { S.toast = text; render(); clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = null; render(); }, 1400); }
+function push(it) {
+  const b = $("body"), away = b && b.scrollHeight - b.scrollTop - b.clientHeight > 40;
+  S.items.push(it);
+  if (away) S.unseen++;
+}
+
+/* ---------- what the taps do ---------- */
+function send(sealed) {
+  const text = S.draft.trim();
+  if (!text) return;
+  const images = S.files.slice();
+  S.items.push({ t: "user", time: "Now", text: sealed ? text.replace(/hunter2|sk-[\w-]+/g, "enc:v1:9f3c…a1") : text, images: images.length ? images : null });
+  if (sealed) S.items.push({ t: "said", text: "Sealed", detail: "1 处凭据已换成密文", tone: "ok" });
+  S.draft = ""; S.files = []; S.sealed = false; S.over = null; S.unseen = 0;
+  if (text === "/model") { S.status = "waiting"; S.card = { kind: "prompt" }; S.keys = true; S.sel = 0; render(true); return glitch("card"); }
+  S.status = "busy"; S.live = { tool: "Thinking", text: "", t0: Date.now() };
+  render(true);
+  setTimeout(() => {
+    if (S.status !== "busy" || !S.live || S.live.tool !== "Thinking") return;
+    S.live = null; S.status = "idle";
+    push({ t: "md", html: "<p>收到。（演示页到此为止：真的会话里这里是 agent 的回答。）</p>" });
+    render();
+  }, 2200);
+}
+function key(k) {
+  if (S.card?.kind === "prompt") {
+    if (k === "↑") S.sel = (S.sel + MODELS.length - 1) % MODELS.length;
+    else if (k === "↓") S.sel = (S.sel + 1) % MODELS.length;
+    else if (/^[123]$/.test(k)) S.sel = +k - 1;
+    else if (k === "⏎") { S.items.push({ t: "said", text: "Model", detail: MODELS[S.sel][0], tone: "ok", time: "Now" }); S.card = null; S.keys = false; S.status = "idle"; return render(true); }
+    else if (k === "esc" || k === "^C") { S.items.push({ t: "said", text: "Cancelled", detail: "/model", time: "Now" }); S.card = null; S.keys = false; S.status = "idle"; return render(true); }
+    return render();
+  }
+  if ((k === "esc" || k === "^C") && S.status === "busy") return stop();
+  say(`Key · ${k}`);
+}
+function stop() { S.live = null; S.sub = null; S.status = "idle"; S.items.push({ t: "said", text: "Interrupted", time: "Now" }); render(true); }
+
+document.addEventListener("click", (e) => {
+  const chip = e.target.closest("#presets .chip");
+  if (chip) return load(chip.dataset.p);
+  const tg = e.target.closest("#toggles .chip");
+  if (tg) { if (tg.id === "tg-dark") S.dark = true; if (tg.id === "tg-light") S.dark = false; if (tg.id === "tg-pixel") S.classic = false; if (tg.id === "tg-classic") S.classic = true; return render(); }
+  const jump = e.target.closest("[data-go]");
+  if (jump) { load(jump.dataset.go); return $("scr").scrollIntoView({ behavior: "smooth", block: "center" }); }
+  const k = e.target.closest("[data-k]");
+  if (k) return key(k.dataset.k);
+  const link = e.target.closest("[data-link]");
+  if (link) return say("Opened on Mac");
+  const el = e.target.closest("[data-a]");
+  if (!el) return;
+  const a = el.dataset.a, i = el.dataset.i;
+  if (a === "shut") { if (e.target !== el && !e.target.closest("button[data-a='shut']")) return; S.over = null; return render(); }
+  e.stopPropagation();
+  const at = (j) => String(j).startsWith("e") ? EARLIER[+String(j).slice(1)] : S.items[+j];
+  switch (a) {
+    case "fold": at(i).open = !at(i).open; return render();
+    case "more": at(i).open = true; return render();
+    case "earlier": S.earlier = true; return render();
+    case "copy": return say("Copied");
+    case "latest": S.unseen = 0; return render(true);
+    case "resume": S.joined = true; S.status = "idle"; if (S.preset === "exited") S.items.push({ t: "said", text: "Resumed", time: "Now", tone: "ok" }); render(true); return glitch("st");
+    case "back": return say("‹ Terminals");
+    case "menu": S.over = { kind: "more" }; return render();
+    case "plus": S.over = { kind: "plus" }; return render();
+    case "view": S.view = S.view === "simple" ? "terminal" : "simple"; S.over = null; return render(true);
+    case "take": S.away = null; return render();
+    case "rename": S.over = { kind: "rename" }; return render();
+    case "dorename": S.title = $("newname").value.trim() || "AgentSwitch"; S.over = null; return render();
+    case "close": S.over = { kind: "close" }; return render();
+    case "doclose": S.over = null; return say("Closed · ‹ Terminals");
+    case "keyson": S.keys = true; S.over = null; return render();
+    case "keysoff": S.keys = false; return render();
+    case "file": { const n = (Math.max(0, ...S.files) || 0) + 1; S.files.push(n); S.draft = `${S.draft}${S.draft && !S.draft.endsWith(" ") ? " " : ""}[Image #${n}] `; S.over = null; render(); return $("field")?.focus(); }
+    case "unfile": S.files = S.files.filter((n) => n !== +el.dataset.n); S.draft = S.draft.replace(`[Image #${el.dataset.n}] `, "").replace(`[Image #${el.dataset.n}]`, ""); return render();
+    case "sug": S.draft = `/${el.dataset.n}`; render(); return $("field")?.focus();
+    case "lock": S.sealed = !S.sealed; render(); if (S.sealed) glitch("comp"); return $("field")?.focus();
+    case "errx": S.error = null; return render();
+    case "stop": return stop();
+    case "send": if (!S.sealed && /password|密码|token|令牌|hunter2|sk-/i.test(S.draft)) { S.over = { kind: "secret" }; return render(); } return send(S.sealed);
+    case "sendplain": return send(false);
+    case "sendsealed": return send(true);
+    case "allow": case "deny": {
+      S.items.push({ t: "said", text: a === "allow" ? "Allowed" : "Denied", detail: `${S.card.tool} ${S.card.detail}`, tone: a === "allow" ? "ok" : "no", time: "Now" });
+      S.card = null; S.status = a === "allow" ? "busy" : "idle"; S.live = a === "allow" ? { tool: "Bash", text: "git push origin main", t0: Date.now() } : null; return render(true);
+    }
+    case "pick": S.card.pick = S.card.pick === +i ? -1 : +i; S.card.other = ""; return render();
+    case "submit": {
+      const c = S.card, ans = c.other.trim() || c.opts[c.pick][0];
+      S.items.push({ t: "said", text: "Answered", detail: ans, tone: "ok", time: "Now" });
+      S.card = null; S.status = "busy"; S.live = { tool: "Edit", text: "AgentNative.swift", t0: Date.now() }; return render(true);
+    }
+    case "open": S.over = null; return say("Opened on Mac");
+    case "copylink": S.over = null; return say("Link Copied");
+    case "safari": S.over = null; return say("Opened in Safari");
+  }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.id === "field") {
+    const before = S.draft; S.draft = e.target.value; grow(e.target);
+    S.files = S.files.filter((n) => S.draft.includes(`[Image #${n}]`));
+    // The parts that follow the text (the commands, the send key) are redrawn; the field keeps its caret.
+    const slash = (s) => /^\/[a-z]*$/.test(s), busyEmpty = (s) => S.status === "busy" && !S.card && !s.trim();
+    if (slash(before) || slash(S.draft) || busyEmpty(before) !== busyEmpty(S.draft) || before.includes("[Image") !== S.draft.includes("[Image")) render();
+  }
+  if (e.target.id === "other") { S.card.other = e.target.value; if (S.card.other) S.card.pick = -1; const b = document.querySelector("[data-a='submit']"); if (b) b.disabled = !(S.card.pick >= 0 || S.card.other.trim()); document.querySelectorAll(".opt").forEach((o) => o.classList.toggle("on", false)); }
+});
+document.addEventListener("keydown", (e) => { if (e.target.id === "field" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("go").click(); } });
+// A press held on a link, or a right click: its menu.
+let hold = null;
+const linkMenu = (el) => { S.over = { kind: "link", link: el.dataset.link }; render(); };
+document.addEventListener("contextmenu", (e) => { const l = e.target.closest("[data-link]"); if (l) { e.preventDefault(); linkMenu(l); } });
+document.addEventListener("pointerdown", (e) => { const l = e.target.closest("[data-link]"); if (l) hold = setTimeout(() => { hold = "done"; linkMenu(l); }, 520); });
+document.addEventListener("pointerup", () => { if (hold !== "done") clearTimeout(hold); setTimeout(() => { hold = null; }, 0); });
+document.addEventListener("click", (e) => { if (hold === "done" && e.target.closest("[data-link]")) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+
+/* ---------- the page around the phone ---------- */
+$("presets").innerHTML = Object.entries(PRESETS).map(([k, [w]]) => `<button class="chip" role="tab" data-p="${k}">${w}</button>`).join("");
+$("toggles").innerHTML = `<button class="chip" id="tg-dark">Dark</button><button class="chip" id="tg-light">Light</button><button class="chip" id="tg-pixel">Pixel</button><button class="chip" id="tg-classic">Classic</button>`;
+$("map").innerHTML = MAP.map(([a, b, go]) => `<tr><td>${a}</td><td>${b}${go ? ` <a data-go="${go}">${PRESETS[go][0]} ›</a>` : ""}</td></tr>`).join("");
+const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+spinTimer = setInterval(() => {
+  tick++;
+  document.querySelectorAll(".spin").forEach((el) => { el.textContent = FRAMES[tick % FRAMES.length]; });
+  if (tick % 10 === 0) document.querySelectorAll("[data-t0]").forEach((el) => { el.textContent = since(+el.dataset.t0); });
+}, 100);
+flickTimer = setInterval(() => { if (!S.classic && S.status === "busy" && !S.card && Math.random() < 0.2) P.flicker($("st")); }, 1000);
+const q = new URLSearchParams(location.search), wanted = location.hash.slice(1) || q.get("s");
+if (q.has("light")) S.dark = false;
+if (q.has("dark")) S.dark = true;
+if (q.get("look") === "classic") S.classic = true;
+load(PRESETS[wanted] ? wanted : "live");
+if (q.get("view") === "terminal") { S.view = "terminal"; render(true); }
+</script>
+</body>
+</html>
