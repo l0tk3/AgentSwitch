@@ -96,6 +96,7 @@
 - 确认卡 `Deny` / `Allow`，下面一行 `Always Allow <规则>`；卡片在的时候直接回复等于“不同意，并告诉它换个做法”。提问卡同终端页。答完收成记录里的一行。
 - 手机的按键条平时收起（`+` 的最后一项取出），程序等按键而又没有卡片时自己出来，连同 Prompt 卡。Mac 没有按键条：`↩` 发送、`⇧↩` 换行、忙时 `esc` 打断；Prompt 卡在的时候键盘给程序；确认卡 `⌘↩` / `⌘⌫`。
 - 链接点开与长按 / 右键菜单、代码块 `Copy`、过长消息 `Show More`、往回翻时 `↓ Latest`。
+- 手机上键盘出来之后，点记录里任何一处都把键盘收回去（2026-10-07，用户：键盘弹出之后我点击空白处应该可以让键盘缩回去才对；调度页一直如此，终端的简略视图原来只能往下拖）。
 
 ### 5.2 Mac
 
@@ -225,7 +226,7 @@
 - **模型列表跟着变**：`GET /terminals` 里 Codex 的每个模型多一个字段 `daybreak`：`also`（两档都有）、`only`（只有 Daybreak 那一档，如 `Daybreak Blue`）、`never`（只有 `standard`）；它没说的模型不带这个字段，两种状态下都列出。开着时列 `never` 以外的，关着时列 `only` 以外的。这台 Mac 今天：开着去掉 `GPT-6.1-Sol`、`GPT-6-Astra`，多出 `Daybreak Blue`；关着相反。新建终端的面板按你 Codex 的默认状态列（同一份列表里的 `daybreak.codex`，没有这个开关时不带）。
 - **当前模型用不了时**（开了 Daybreak 而正用着 `GPT-6.1-Sol`）：回复框上方一行提醒“Codex 的模型列表里 GPT-6.1 Sol 不支持 Daybreak，开着时它的下一轮会被 Codex 拒绝。换一个模型，或关掉 Daybreak。”，模型那一项标成提醒色。不拦发送。这句话说的是 Codex 自己的列表，不是 AgentSwitch 的判断（同日用户看到演示图里这一行：这是啥提示。。认真的吗？6 sol有daybreak——`GPT-6-Sol` 确实有，图里是 `GPT-6.1-Sol`；原来那句“没有 Daybreak 那一档”没说清楚是谁说的，演示也不该拿例外当门面，都改了：演示默认是 `GPT-6-Sol` 开着 Daybreak，没有提醒）。
 - **两端**：回复框下面那一行，强度后面多一项 `Daybreak On ▾` / `Daybreak Off ▾`，菜单里 `On`、`Off`（当前的打勾）和上面那句说明。没有这个开关的终端没有这一项。`/` 的命令提示里，有这个开关的 Codex 终端多一条 `/daybreak`。
-- **手机**：开关、提醒行和新建终端时按默认状态列模型都有；运行中的 Codex 换模型在手机上仍是打开它自己的选择器（手机的模型菜单只对 Claude Code 列模型），所以“列表跟着开关变”在手机上只体现在新建终端。那一行多了一项之后放不下 `Context` 这个词，只写百分数。
+- **手机**：开关、提醒行、新建终端时按默认状态列模型都有。运行中换模型起初在手机上只对 Claude Code 列模型，别的 agent 是“到终端里用它自己的选择器”；同日用户在 Codex 终端上点开只看到 `Model and Reasoning in Terminal…`：手机上怎么还是不能选模型。改成和 Mac 一个规则（`TerminalModelMenu`）：**Mac 能替它设模型的终端**（`sets`：Claude Code、pi、经自己 server 运行的 Codex 和 OpenCode）就列出模型，Codex 的按 Daybreak 开关过滤；强度滑块同样对这些终端开放（Claude Code 工作中也能调，其余只在空闲时）。Mac 设不了的（不经自己 server 的 Codex）才是打开它自己的选择器。那一行多了一项之后放不下 `Context` 这个词，只写百分数。
 - **验证**：
   - 服务的测试：模型各自的档（`also` / `only` / `never`，没说的不带）；这份 Codex 不认识这个功能、或账户没有 Daybreak 那一档时没有开关；启动参数只在有开关时多那一条，界面和 server 各一份；伴随进程读会话存的选择（没存过的算关，还没有会话时读默认），不写任何东西；主机只在状态不同时打一次 `/daybreak`、读到新状态才算成功、读不到报错、终端里自己切了也跟上、等你回答时不切、没有开关的终端回 400；接口、列表里的默认状态、命令提示。
   - 两端的规则各有测试（列哪些模型、提醒那句话、解码）；Mac 的预览图（`terminals-record-daybreak-light` 与 `-clash-light`，两种外观）、手机模拟器的演示屏（`simpledaybreak`、`simpledaybreakclash`）、演示页的 `Daybreak` 预设都看过图。

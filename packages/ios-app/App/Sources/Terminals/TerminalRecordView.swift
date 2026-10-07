@@ -92,6 +92,10 @@ struct TerminalRecordView: View {
                 .padding(.vertical, Theme.Space.m)
             }
             .scrollDismissesKeyboard(.interactively)
+            // A tap anywhere in the record puts the keyboard away, as on the Dispatch page: a short record cannot be
+            // dragged, and a tap beside the box is how one leaves it (2026-10-07, user: 键盘弹出之后我点击空白处应该可以让
+            // 键盘缩回去才对).
+            .simultaneousGesture(TapGesture().onEnded { Keyboard.dismiss() })
             // The end is what matters: there when it opens, and following it while the user is there. Scrolled back to
             // read, the page stays put and says there is more below.
             .onChange(of: record.loaded) { scroller.scrollTo(Self.end, anchor: .bottom) }

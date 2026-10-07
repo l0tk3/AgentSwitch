@@ -164,6 +164,9 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     /// Codex's Daybreak switch for the session it is on (docs/simple-view-v0.md §5.8); nil: this terminal has none
     /// (and from a Mac that does not say).
     public let daybreak: Bool?
+    /// The Mac can set its model and its level from a screen (`POST …/model`, `…/effort`): its agent takes a command
+    /// for them, or the terminal's own server does. Nil from a Mac that does not say (then Claude Code alone).
+    public let sets: Bool?
     /// The thinking level it was started at, in the agent's own word; nil: the agent's default.
     public let effort: String?
     /// manual · auto · bypass
@@ -191,9 +194,10 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
-                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil, daybreak: Bool? = nil) {
+                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil, daybreak: Bool? = nil, sets: Bool? = nil) {
         self.suggestion = suggestion
         self.daybreak = daybreak
+        self.sets = sets
         self.modelNow = modelNow
         self.effort = effort
         self.id = id
@@ -220,7 +224,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, modelNow, suggestion, daybreak, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
+        case id, harness, cwd, workdir, model, modelNow, suggestion, daybreak, sets, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
              agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents
     }
 
@@ -234,6 +238,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         modelNow = try? c.decodeIfPresent(String.self, forKey: .modelNow)
         suggestion = (try? c.decodeIfPresent(String.self, forKey: .suggestion)).flatMap { $0.isEmpty ? nil : $0 }
         daybreak = (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil
+        sets = (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil
         effort = try? c.decodeIfPresent(String.self, forKey: .effort)
         mode = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? "manual"
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -337,6 +342,35 @@ public struct TerminalList: Decodable, Sendable, Hashable {
         efforts = (try? c.decodeIfPresent([String: [String]].self, forKey: .efforts)) ?? [:]
         effortDefaults = (try? c.decodeIfPresent([String: String].self, forKey: .effortDefaults)) ?? [:]
         daybreak = (try? c.decodeIfPresent([String: Bool].self, forKey: .daybreak)) ?? [:]
+    }
+}
+
+/// What the model control under a terminal's reply box opens (docs/simple-view-v0.md §5.4): the agent's models where
+/// the Mac can set one for it — Claude Code by its own command, another where the terminal says so (`sets`: a Codex or
+/// an OpenCode behind its own server, pi) — else the agent's own picker on its own screen. The phone listed models for
+/// Claude Code alone until 2026-10-07 (user, of a Codex terminal: 手机上怎么还是不能选模型).
+public enum TerminalModelMenu: Equatable, Sendable {
+    /// The terminal has ended.
+    case ended
+    /// Choose one of these (as Codex's Daybreak switch stands, where it has one).
+    case models([TerminalModelOption])
+    /// It takes a model from here, but not while it works or waits for an answer.
+    case busy
+    /// Its own picker, in the terminal view.
+    case picker
+
+    public static func offer(harness: String, sets: Bool?, exited: Bool, resting: Bool, options: [TerminalModelOption], daybreak: Bool?) -> TerminalModelMenu {
+        if exited { return .ended }
+        let offered = TerminalDaybreak.offered(options, on: daybreak)
+        guard sets ?? (harness == "claude-code"), !offered.isEmpty else { return .picker }
+        return resting ? .models(offered) : .busy
+    }
+
+    /// Whether its level is chosen on the slider here, and when: Claude Code takes one while it works too (the next
+    /// request of the turn runs at it), the others only at rest. Nil: not from here.
+    public static func levelTakenWhileWorking(harness: String, sets: Bool?) -> Bool? {
+        guard sets ?? (harness == "claude-code") else { return nil }
+        return harness == "claude-code"
     }
 }
 

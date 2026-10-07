@@ -68,10 +68,11 @@ enum ClassicLanes {
             path.addCurve(to: point(11, y), control1: point(7.4, 5.5), control2: point(6.6, y))
             return path
         }
-        context.stroke(lane(to: 5.5), with: .color(dim), style: stroke)
-        context.stroke(lane(to: 9.5), with: .color(dim), style: stroke)
-        context.fill(block(11, 4), with: .color(dim))
-        context.fill(block(11, 8), with: .color(dim))
+        // The two fainter lanes and their squares as one shape, filled once: drawn each by itself, the faint colour lay
+        // twice where a lane ran into its square and where the two lanes leave the source together, and showed there
+        // as brighter patches (2026-10-07, user: 线和方块在交界处重叠上了 有点难看).
+        let faint = lane(to: 5.5).strokedPath(stroke).union(lane(to: 9.5).strokedPath(stroke)).union(block(11, 4)).union(block(11, 8))
+        context.fill(faint, with: .color(dim))
         context.stroke(lane(to: 1.5), with: .color(lit), style: stroke)
         context.fill(block(0, 4), with: .color(lit))
         context.fill(block(11, 0), with: .color(end ?? lit))

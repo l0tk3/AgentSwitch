@@ -440,7 +440,7 @@ final class TerminalPageModel {
             effortAsked = level
             error = how == .typed ? "已输入 \(EffortDisplay.command(level))。Mac 上的 AgentSwitch 版本较旧：Claude Code 若要求确认，请切到终端查看。" : nil
         } catch APIError.http(status: 409, message: _) {
-            error = "它正在等待回答，回答后再调整。"
+            error = "它正在工作或等待回答，结束后再调整。"
         } catch {
             self.error = error.localizedDescription
         }

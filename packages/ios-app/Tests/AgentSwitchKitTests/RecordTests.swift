@@ -375,4 +375,37 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(TerminalEvent.parse(event: "daybreak", data: #"{"type":"daybreak","on":false}"#), .daybreak(false))
         XCTAssertNil(TerminalEvent.parse(event: "daybreak", data: #"{"type":"daybreak"}"#))
     }
+
+    /// What the model control opens on the phone (2026-10-07, user, of a Codex terminal: 手机上怎么还是不能选模型): the
+    /// agent's models wherever the Mac can set one, not for Claude Code alone.
+    func testTheModelControlListsModelsWhereverTheMacCanSetOne() throws {
+        let never = TerminalModelOption(id: "gpt-6.1-sol", name: "GPT-6.1-Sol", daybreak: "never")
+        let also = TerminalModelOption(id: "gpt-6-sol", name: "GPT-6-Sol", daybreak: "also")
+        let only = TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", daybreak: "only")
+        let codex = [never, also, only]
+        func offer(_ harness: String, sets: Bool?, exited: Bool = false, resting: Bool = true, _ options: [TerminalModelOption], daybreak: Bool? = nil) -> TerminalModelMenu {
+            TerminalModelMenu.offer(harness: harness, sets: sets, exited: exited, resting: resting, options: options, daybreak: daybreak)
+        }
+        // A Codex terminal the Mac can set a model for (it runs behind its own server): its models, as its Daybreak
+        // switch stands; not while it works or waits; its own picker where the Mac cannot (started on its own).
+        XCTAssertEqual(offer("codex", sets: true, codex), .models(codex))
+        XCTAssertEqual(offer("codex", sets: true, codex, daybreak: true), .models([also, only]))
+        XCTAssertEqual(offer("codex", sets: true, codex, daybreak: false), .models([never, also]))
+        XCTAssertEqual(offer("codex", sets: true, resting: false, codex), .busy)
+        XCTAssertEqual(offer("codex", sets: false, codex), .picker)
+        XCTAssertEqual(offer("codex", sets: true, []), .picker)   // its list was not read: nothing to choose from here
+        XCTAssertEqual(offer("codex", sets: true, exited: true, codex), .ended)
+        // A Mac that does not say: Claude Code alone, as before.
+        XCTAssertEqual(offer("claude-code", sets: nil, [also]), .models([also]))
+        XCTAssertEqual(offer("codex", sets: nil, codex), .picker)
+        XCTAssertEqual(offer("opencode", sets: true, [also]), .models([also]))
+        // The level: from here for the same agents; while it works only Claude Code.
+        XCTAssertEqual(TerminalModelMenu.levelTakenWhileWorking(harness: "claude-code", sets: nil), true)
+        XCTAssertEqual(TerminalModelMenu.levelTakenWhileWorking(harness: "codex", sets: true), false)
+        XCTAssertNil(TerminalModelMenu.levelTakenWhileWorking(harness: "codex", sets: nil))
+        XCTAssertNil(TerminalModelMenu.levelTakenWhileWorking(harness: "codex", sets: false))
+        let info = try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex","cwd":"/w","name":"a","status":"idle","createdAt":1,"sets":true}"#.utf8))
+        XCTAssertEqual(info.sets, true)
+        XCTAssertNil(try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex","cwd":"/w","name":"a","status":"idle","createdAt":1}"#.utf8)).sets)
+    }
 }

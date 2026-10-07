@@ -481,9 +481,11 @@ struct TerminalPage: View {
         EffortDisplay.level(asked: page.effortAsked, record: record.usage?.effort, started: listed.effort)
     }
 
-    /// Claude Code's level is chosen on a slider of its own beside the model (the others choose theirs on their screen).
+    /// The level is chosen on a slider of its own beside the model, for an agent whose level the Mac can set (Claude
+    /// Code; another where the terminal says so). The others choose theirs on their screen.
     private var slidesEffort: Bool {
-        page.harness == "claude-code" && page.status != .exited && !EffortDisplay.levels(model.terminals.list, harness: page.harness, current: currentModel).isEmpty
+        TerminalModelMenu.levelTakenWhileWorking(harness: page.harness, sets: listed.sets) != nil && page.status != .exited
+            && !EffortDisplay.levels(model.terminals.list, harness: page.harness, current: currentModel).isEmpty
     }
 
     /// How hard it thinks, and a slider to change it (2026-10-07, user: 思考强度改成滑块调节): it takes a new level
@@ -492,6 +494,9 @@ struct TerminalPage: View {
         if slidesEffort {
             let levels = EffortDisplay.levels(model.terminals.list, harness: page.harness, current: currentModel)
             let answering = page.status == .waiting || !page.permissions.isEmpty
+            // Claude Code takes a level while it works; the others only at rest.
+            let whileWorking = TerminalModelMenu.levelTakenWhileWorking(harness: page.harness, sets: listed.sets) ?? false
+            let locked: String? = answering ? "它正在等待回答，回答后再调整。" : !whileWorking && page.status != .idle ? "它正在工作，结束后再调整。" : nil
             Text("·")
             Button { choosingEffort = true } label: {
                 HStack(spacing: 3) {
@@ -506,8 +511,8 @@ struct TerminalPage: View {
             .padding(.vertical, -8)
             .accessibilityLabel(EffortDisplay.word(page.harness).lowercased())
             .popover(isPresented: $choosingEffort, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
-                EffortPicker(levels: levels, level: currentEffort, enabled: !answering,
-                             note: answering ? "它正在等待回答，回答后再调整。" : nil,
+                EffortPicker(levels: levels, level: currentEffort, enabled: locked == nil,
+                             note: locked,
                              choose: { level in Task { await page.setEffort(level) } }) {
                     LookWord(EffortDisplay.word(page.harness)).mono(13, weight: .semibold).foregroundStyle(Theme.ink)
                 }
@@ -565,23 +570,23 @@ struct TerminalPage: View {
     /// 思考强度). Claude Code takes `/model <id>` and `/effort <level>` as commands: the Mac types them. The other agents
     /// choose in a picker of their own: the menu opens it in the terminal view.
     private var modelMenu: some View {
-        let options = model.terminals.list?.models[page.harness] ?? []
         let resting = page.status == .idle && page.permissions.isEmpty
         let word = EffortDisplay.word(page.harness)
+        let offer = TerminalModelMenu.offer(harness: page.harness, sets: listed.sets, exited: page.status == .exited, resting: resting,
+                                            options: model.terminals.list?.models[page.harness] ?? [], daybreak: daybreak)
         return Menu {
-            if page.status == .exited {
+            switch offer {
+            case .ended:
                 Button("终端已结束") {}.disabled(true)
-            } else if page.harness == "claude-code", !options.isEmpty {
-                if resting {
-                    Section("Model · Claude Code 会把它记成新会话的默认模型") {
-                        ForEach(options.filter { !$0.older }) { option in modelButton(option) }
-                        let older = options.filter(\.older)
-                        if !older.isEmpty { Menu("Older", systemImage: "clock") { ForEach(older) { option in modelButton(option) } } }
-                    }
-                } else {
-                    Section("Model") { Button("它正在工作或等待回答，结束后再切换") {}.disabled(true) }
+            case .models(let options):
+                Section(page.harness == "claude-code" ? "Model · Claude Code 会把它记成新会话的默认模型" : "Model") {
+                    ForEach(options.filter { !$0.older }) { option in modelButton(option) }
+                    let older = options.filter(\.older)
+                    if !older.isEmpty { Menu("Older", systemImage: "clock") { ForEach(older) { option in modelButton(option) } } }
                 }
-            } else {
+            case .busy:
+                Section("Model") { Button("它正在工作或等待回答，结束后再切换") {}.disabled(true) }
+            case .picker:
                 // Its own picker, on its own screen (Codex chooses the reasoning with the model there).
                 Button(page.harness == "codex" ? "Model and Reasoning in Terminal…" : "Choose in Terminal…", systemImage: "terminal") {
                     show(.terminal)
