@@ -69,23 +69,11 @@ struct NewTerminalSheet: View {
                     // (terminal-v0 §1 思考强度). Not shown where there is nothing to choose: a model with no levels, or
                     // OpenCode before a model is chosen (a variant is a model's).
                     if !levels.isEmpty {
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            SectionLabel(EffortDisplay.word(agent))
-                            Menu {
-                                Button(effortDefaultLabel) { effortId = "" }
-                                ForEach(levels, id: \.self) { level in Button(EffortDisplay.name(level)) { effortId = level } }
-                            } label: {
-                                HStack {
-                                    Text(effortId.isEmpty ? effortDefaultLabel : EffortDisplay.name(effortId)).mono(14)
-                                    Spacer()
-                                    LookGlyph(glyph: "▾", symbol: "chevron.down").foregroundStyle(.secondary)
-                                }
-                                .padding(.horizontal, 12).padding(.vertical, 10)
-                                .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
-                                .framed(look.isClassic ? Color.clear : Theme.line, radius: 10)
-                            }
-                            .tint(Theme.ink)
-                        }
+                        // On a line, the model's stops lowest first; none chosen is the model's own default (the
+                        // knob resting there hollow), and `Default` puts a choice back.
+                        EffortPicker(levels: levels, level: effortId.isEmpty ? nil : effortId,
+                                     fallback: EffortDisplay.defaultLevel(model.terminals.list, harness: agent, model: modelId),
+                                     choose: { effortId = $0 }, reset: { effortId = "" }) { SectionLabel(EffortDisplay.word(agent)) }
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         SectionLabel("Folder")
@@ -199,10 +187,6 @@ struct NewTerminalSheet: View {
     /// The levels the chosen model takes (none chosen: the agent's default model's).
     private var levels: [String] { EffortDisplay.levels(model.terminals.list, harness: agent, model: modelId) }
 
-    /// `Default`, and the level that is when the agent says (`Default · Medium`).
-    private var effortDefaultLabel: String {
-        EffortDisplay.defaultLevel(model.terminals.list, harness: agent, model: modelId).map { "Default · \(EffortDisplay.name($0))" } ?? "Default"
-    }
 
     /// What bypass leaves in force, said before it is chosen (here and when a bypass session is continued).
     static let bypassNote = "agent 的任何操作都不再询问你，包括删除文件和执行命令。仍然生效的：凭据网关（密钥不可读）。"

@@ -87,6 +87,25 @@ enum TerminalProbe {
             await pause(1500)
             say("sent: draft '\(record.draft)' files \(record.draftFiles.count) error \(record.error ?? "none")")
         }
+        // The level and the model, as the reply box's foot sets them once chosen (2026-10-07, user: 模型和思考强度怎么都
+        // 动不了): the request answered first (it takes no level while it waits), then a level — the terminal is told —
+        // and a model. The click that opens the slider is not made here: a window kept behind the others on purpose
+        // takes no click (tried: a mouse event and an accessibility press, neither is taken), so that step is a
+        // person's to try.
+        if let pane = model.focused, let session = pane.session, let request = session.requests.first {
+            session.decide(request, allow: true)
+            await pause(1200)
+        }
+        if let record = model.focused?.record {
+            let levels = TerminalEffort.levels(models: model.models, any: model.efforts, harness: record.agent, current: record.usage?.model)
+            say("level: offered \(levels) status \(model.focused?.session?.info?.status ?? "-") requests \(model.focused?.session?.requests.count ?? 0)")
+            record.setEffort("max")
+            await pause(1500)
+            say("level: asked \(record.effortAsked ?? "-") error \(record.error ?? "none")")
+            record.setModel("sonnet")
+            await pause(1500)
+            say("model: now \(record.modelNow ?? "-") error \(record.error ?? "none")")
+        }
         // Back by the key, ⌘⇧E, as an event of the window's.
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [.command, .shift], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -105,6 +124,7 @@ enum TerminalProbe {
             return text.isEmpty ? nil : text
         }
         say("screen: \(lines.suffix(4).joined(separator: " ⏎ "))")
+        say("screen says: level \(lines.contains { $0.contains("/effort max") }) model \(lines.contains { $0.contains("sonnet") })")
         picture("simple-terminal")
     }
 

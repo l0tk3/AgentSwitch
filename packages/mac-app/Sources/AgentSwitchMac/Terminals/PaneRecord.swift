@@ -24,6 +24,10 @@ final class PaneRecord {
     private(set) var activitySince: Date?
     /// The model the agent says it is on now (Claude Code), once it has said.
     private(set) var modelNow: String?
+    /// The thinking level just asked for here, until the record says one of its own.
+    private(set) var effortAsked: String?
+    /// A change of model or level is on its way to the agent.
+    private(set) var changing = false
     private(set) var error: String?
 
     // The reply being written.
@@ -100,7 +104,7 @@ final class PaneRecord {
         guard info.agentSessionId != session || info.harness != harness else { return }
         harness = info.harness
         session = info.agentSessionId
-        items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; error = nil
+        items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; error = nil; effortAsked = nil
         openFiles = []; diffs = [:]
         loaded = session == nil
         refresh()
@@ -112,7 +116,7 @@ final class PaneRecord {
         terminal = nil
         session = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
-        activity = nil; subagents = []; activitySince = nil; modelNow = nil
+        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil
         draft = ""
         draftFiles = []
         insert = nil
@@ -172,6 +176,8 @@ final class PaneRecord {
 
     private func take(_ page: SessionRecord) {
         if plan != page.plan { plan = page.plan }
+        // The record names a level of its own again (changed on the agent's own screen): that is the one in force.
+        if usage?.effort != page.usage?.effort, usage != nil { effortAsked = nil }
         if usage != page.usage { usage = page.usage }
         if mode != page.mode { mode = page.mode }
         let (next, replaced) = SessionRecord.merged(held: items, page: page.items)
@@ -303,6 +309,52 @@ final class PaneRecord {
         error = nil
         insert = InsertRequest(text: "", tokens: tokens)
         focusReply()
+    }
+
+    // MARK: its model, how hard it thinks
+
+    /// Another model for the Claude Code in the terminal, while it rests (it keeps it as the default for new sessions).
+    func setModel(_ id: String) {
+        guard let terminal, !changing else { return }
+        changing = true
+        let client = client
+        Task { [weak self] in
+            defer { self?.changing = false }
+            do {
+                try await client().setTerminalModel(id: terminal, model: id)
+                self?.error = nil
+            } catch {
+                self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription
+            }
+        }
+    }
+
+    /// Another thinking level for it (it takes one while it works too: the next request of the turn runs at it).
+    func setEffort(_ level: String) {
+        guard let terminal, !changing else { return }
+        changing = true
+        let was = effortAsked
+        effortAsked = level
+        let client = client
+        Task { [weak self] in
+            defer { self?.changing = false }
+            do {
+                try await client().setTerminalEffort(id: terminal, effort: level)
+                self?.error = nil
+            } catch {
+                self?.effortAsked = was
+                self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription
+            }
+        }
+    }
+
+    /// Types a command of the agent's own (`/model`): its picker opens on its screen.
+    func type(command: String) {
+        guard let terminal else { return }
+        let client = client
+        Task { [weak self] in
+            do { try await client().typeIntoTerminal(id: terminal, text: command) } catch { self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription }
+        }
     }
 
     /// While it works: stop it (esc, as in the terminal).

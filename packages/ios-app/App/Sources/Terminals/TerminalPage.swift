@@ -19,6 +19,7 @@ struct TerminalPage: View {
     @State private var page: TerminalPageModel
     @State private var reply = ""
     @State private var renaming = false
+    @State private var choosingEffort = false
     @State private var newName = ""
     @State private var confirmClose = false
     /// The sealed box is open (the lock): the reply goes through the sealer.
@@ -232,6 +233,7 @@ struct TerminalPage: View {
             case "terminalslash": reply = "/co"
             // What the last turn changed, as the menu's Changes would open it.
             case "simplechanges": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { lastTurnChanges = true }
+            case "simpleeffort": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { choosingEffort = true }
             case "terminalkeyboard": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { replying = true }
             case "terminalclose": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { confirmClose = true }
             // A link held, as a long press on the address in the demo's screen would open its menu.
@@ -449,6 +451,7 @@ struct TerminalPage: View {
             Text(mode).lineLimit(1)
             Text("·")
             modelMenu
+            effortButton
             Spacer(minLength: 4)
             if let context = RecordDisplay.context(record.usage) { Text("Context \(context)").lineLimit(1) }
         }
@@ -467,14 +470,50 @@ struct TerminalPage: View {
         EffortDisplay.level(asked: page.effortAsked, record: record.usage?.effort, started: listed.effort)
     }
 
+    /// Claude Code's level is chosen on a slider of its own beside the model (the others choose theirs on their screen).
+    private var slidesEffort: Bool {
+        page.harness == "claude-code" && page.status != .exited && !EffortDisplay.levels(model.terminals.list, harness: page.harness, current: currentModel).isEmpty
+    }
+
+    /// How hard it thinks, and a slider to change it (2026-10-07, user: 思考强度改成滑块调节): it takes a new level
+    /// while it works too (the next request of the turn runs at it), not while it waits for an answer.
+    @ViewBuilder private var effortButton: some View {
+        if slidesEffort {
+            let levels = EffortDisplay.levels(model.terminals.list, harness: page.harness, current: currentModel)
+            let answering = page.status == .waiting || !page.permissions.isEmpty
+            Text("·")
+            Button { choosingEffort = true } label: {
+                HStack(spacing: 3) {
+                    Text(currentEffort.map(EffortDisplay.name) ?? EffortDisplay.word(page.harness)).lineLimit(1)
+                    LookGlyph(glyph: "▾", symbol: "chevron.down", size: 10)
+                }
+                .mono(12, weight: .medium).foregroundStyle(.secondary)
+                .padding(.vertical, 8).padding(.trailing, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.vertical, -8)
+            .accessibilityLabel(EffortDisplay.word(page.harness).lowercased())
+            .popover(isPresented: $choosingEffort, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+                EffortPicker(levels: levels, level: currentEffort, enabled: !answering,
+                             note: answering ? "它正在等待回答，回答后再调整。" : "会记成这个模型的默认；Max 只用于这一次。",
+                             choose: { level in Task { await page.setEffort(level) } }) {
+                    LookWord(EffortDisplay.word(page.harness)).mono(13, weight: .semibold).foregroundStyle(Theme.ink)
+                }
+                .frame(width: 290)
+                .padding(16)
+                .presentationCompactAdaptation(.popover)
+                .followsLook()
+            }
+        }
+    }
+
     /// The model and how hard it thinks, and a menu to change either (docs/simple-view-v0.md §5.4, terminal-v0 §1
     /// 思考强度). Claude Code takes `/model <id>` and `/effort <level>` as commands: the Mac types them. The other agents
     /// choose in a picker of their own: the menu opens it in the terminal view.
     private var modelMenu: some View {
         let options = model.terminals.list?.models[page.harness] ?? []
         let resting = page.status == .idle && page.permissions.isEmpty
-        let answering = page.status == .waiting || !page.permissions.isEmpty
-        let levels = EffortDisplay.levels(model.terminals.list, harness: page.harness, current: currentModel)
         let word = EffortDisplay.word(page.harness)
         return Menu {
             if page.status == .exited {
@@ -488,20 +527,6 @@ struct TerminalPage: View {
                     }
                 } else {
                     Section("Model") { Button("它正在工作或等待回答，结束后再切换") {}.disabled(true) }
-                }
-                // It takes a new level while it works too (the next request of the turn runs at it), not while it waits.
-                if !levels.isEmpty {
-                    Section("\(word) · 会记成这个模型的默认，Max 只用于这一次") {
-                        if answering {
-                            Button("它正在等待回答，回答后再调整") {}.disabled(true)
-                        } else {
-                            ForEach(levels, id: \.self) { level in
-                                Button { Task { await page.setEffort(level) } } label: {
-                                    if level == currentEffort { Label(EffortDisplay.name(level), systemImage: "checkmark") } else { Text(EffortDisplay.name(level)) }
-                                }
-                            }
-                        }
-                    }
                 }
             } else {
                 // Its own picker, on its own screen (Codex chooses the reasoning with the model there).
@@ -521,7 +546,7 @@ struct TerminalPage: View {
         } label: {
             HStack(spacing: 3) {
                 if page.changingModel { BrailleSpinner(color: .secondary) }
-                Text([currentModel.map(ModelName.display) ?? "Model", currentEffort.map(EffortDisplay.name)].compactMap { $0 }.joined(separator: " · ")).lineLimit(1)
+                Text([currentModel.map(ModelName.display) ?? "Model", slidesEffort ? nil : currentEffort.map(EffortDisplay.name)].compactMap { $0 }.joined(separator: " · ")).lineLimit(1)
                 LookGlyph(glyph: "▾", symbol: "chevron.down", size: 10)
             }
             .mono(12, weight: .medium)

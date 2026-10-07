@@ -14,6 +14,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let cwd: String
     public let workdir: String
     public let model: String?
+    /// The thinking level it was started at, when one was chosen.
+    public let effort: String?
     public let mode: String?
     /// The list's name for it: the user's own (`customName`), else the agent's title, else the folder's.
     public let name: String
@@ -34,14 +36,15 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let subagents: [TerminalSubagent]
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
+        case id, harness, cwd, workdir, model, effort, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
              permissions, subagents
     }
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String? = nil,
                 name: String, customName: Bool = false, status: String, cols: Int? = nil, rows: Int? = nil, createdAt: Int64 = 0,
                 exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil, forked: Bool = false,
-                permissions: [TerminalRequest] = [], subagents: [TerminalSubagent] = []) {
+                permissions: [TerminalRequest] = [], subagents: [TerminalSubagent] = [], effort: String? = nil) {
+        self.effort = effort.flatMap { $0.isEmpty ? nil : $0 }
         self.id = id
         self.harness = harness
         self.cwd = cwd
@@ -81,7 +84,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   resumedFrom: (try? c.decodeIfPresent(String.self, forKey: .resumedFrom)) ?? nil,
                   forked: (try? c.decodeIfPresent(Bool.self, forKey: .forked)) ?? false,
                   permissions: (try? c.decodeIfPresent([TerminalRequest].self, forKey: .permissions)) ?? [],
-                  subagents: (try? c.decodeIfPresent([TerminalSubagent].self, forKey: .subagents)) ?? [])
+                  subagents: (try? c.decodeIfPresent([TerminalSubagent].self, forKey: .subagents)) ?? [],
+                  effort: (try? c.decodeIfPresent(String.self, forKey: .effort)) ?? nil)
     }
 
     public var running: Bool { status != "exited" }
@@ -92,7 +96,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
         TerminalInfo(id: id, harness: harness, cwd: cwd, workdir: workdir, model: model, mode: mode, name: name ?? self.name,
                      customName: customName, status: status ?? self.status, cols: cols, rows: rows, createdAt: createdAt,
                      exitCode: exitCode ?? self.exitCode, agentSessionId: agentSessionId, resumedFrom: resumedFrom, forked: forked,
-                     permissions: permissions, subagents: subagents)
+                     permissions: permissions, subagents: subagents, effort: effort)
     }
 
     /// The status bar's words for it (MainStatus.swift): agent and model, mode, grid; the lock acts while it runs.

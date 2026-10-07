@@ -3,6 +3,55 @@ import XCTest
 
 /// The native Terminals page's rules (docs/terminal-v0.md §1 Mac, 2026-10-05): the list's rows, its words, its keys.
 final class TerminalsPageRulesTests: XCTestCase {
+    /// The effort slider (2026-10-07, user: 思考强度改成滑块调节): the levels are stops on a line, and a running
+    /// terminal's are its current model's.
+    func testEffortAsAPlaceOnALine() throws {
+        let levels = ["low", "medium", "high", "xhigh", "max"]
+        XCTAssertEqual(EffortScale.index(of: "high", in: levels), 2)
+        XCTAssertNil(EffortScale.index(of: nil, in: levels))
+        XCTAssertNil(EffortScale.index(of: "ultra", in: levels))
+        // The nearest stop to where the pointer is, never off the line's ends.
+        XCTAssertEqual([-40, 0, 24, 26, 100, 149, 151, 200, 900].map { EffortScale.stop(at: $0, width: 200, count: 5) }, [0, 0, 0, 1, 2, 3, 3, 4, 4])
+        XCTAssertEqual(EffortScale.stop(at: 50, width: 200, count: 1), 0)
+        XCTAssertEqual(EffortScale.stop(at: 50, width: 0, count: 5), 0)
+        XCTAssertEqual((0..<5).map { EffortScale.place(of: $0, width: 200, count: 5) }, [0, 50, 100, 150, 200])
+        XCTAssertEqual(EffortScale.place(of: 0, width: 200, count: 1), 0)
+        XCTAssertEqual((0..<5).map { EffortScale.heat($0, count: 5) }, [0, 0.25, 0.5, 0.75, 1])
+        XCTAssertEqual(EffortScale.heat(0, count: 1), 0)
+        // The arrow keys: a step either way, stopping at the ends; from none chosen, the first step chooses the default.
+        XCTAssertEqual(EffortScale.step(from: 2, by: 1, start: nil, count: 5), 3)
+        XCTAssertEqual(EffortScale.step(from: 4, by: 1, start: nil, count: 5), 4)
+        XCTAssertEqual(EffortScale.step(from: 0, by: -1, start: nil, count: 5), 0)
+        XCTAssertEqual(EffortScale.step(from: nil, by: 1, start: 1, count: 5), 1)
+        XCTAssertEqual(EffortScale.step(from: nil, by: -1, start: nil, count: 5), 0)
+        XCTAssertNil(EffortScale.step(from: nil, by: 1, start: nil, count: 0))
+        XCTAssertNotNil(EffortScale.hint("xhigh"))
+        XCTAssertEqual(EffortScale.hint("max"), EffortScale.hint("ultra"))
+        XCTAssertNil(EffortScale.hint("thinking-32k"))
+
+        let models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: levels, defaultEffort: "medium"),
+                                      TerminalModelOption(id: "haiku", name: "Haiku 4.5", efforts: [])]]
+        let any = ["claude-code": ["low", "medium", "high"]]
+        // By the id the agent reports, which reads as the listed model's name; a model that takes none has none; one
+        // not listed falls back to the agent's default model's.
+        XCTAssertEqual(TerminalEffort.levels(models: models, any: any, harness: "claude-code", current: "claude-opus-5-5"), levels)
+        XCTAssertEqual(TerminalEffort.levels(models: models, any: any, harness: "claude-code", current: "haiku"), [])
+        XCTAssertEqual(TerminalEffort.levels(models: models, any: any, harness: "claude-code", current: nil), ["low", "medium", "high"])
+        XCTAssertEqual(TerminalEffort.levels(models: models, any: any, harness: "codex", current: "gpt-5.5"), [])
+        XCTAssertEqual(TerminalEffort.level(asked: "max", record: "medium", started: "high"), "max")
+        XCTAssertEqual(TerminalEffort.level(asked: nil, record: nil, started: "high"), "high")
+        XCTAssertTrue(RecordDisplay.isCurrent(models["claude-code"]![0], model: "claude-opus-5-5"))
+        XCTAssertFalse(RecordDisplay.isCurrent(models["claude-code"]![0], model: nil))
+        XCTAssertEqual(RecordDisplay.modelPicker("opencode"), "/models")
+        XCTAssertEqual(RecordDisplay.modelPicker("codex"), "/model")
+        XCTAssertEqual(RecordDisplay.effortPicker("opencode"), "/variants")
+        XCTAssertNil(RecordDisplay.effortPicker("claude-code"))
+        // The level a terminal was started at comes with it.
+        let info = try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","cwd":"/w","name":"n","status":"idle","effort":"xhigh"}"#.utf8))
+        XCTAssertEqual(info.effort, "xhigh")
+        XCTAssertEqual(info.with(status: "working").effort, "xhigh")
+    }
+
     private func term(_ id: String, _ cwd: String, created: Int64, status: String = "idle", subagents: [TerminalSubagent] = []) -> TerminalInfo {
         TerminalInfo(id: id, harness: "claude-code", cwd: cwd, name: id, status: status, createdAt: created, subagents: subagents)
     }

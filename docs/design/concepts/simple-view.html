@@ -166,6 +166,29 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .chiprow .sp { flex: 1; }
 .pchip { font: 12px var(--short); color: var(--ink2); padding: 2px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
 .pchip.bad { color: var(--red); border-color: var(--red); }
+/* the effort slider (docs/terminal-v0.md §1 思考强度 “滑块”): stops on a line, livelier the higher */
+.box.effort { width: 300px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.box.effort p { margin: 0; font: 12px var(--ui); color: var(--ink2); } .box.effort p.q { color: var(--ink3); font-size: 11.5px; }
+.eh, .ee { display: flex; justify-content: space-between; align-items: baseline; }
+.eh { font: 600 12px var(--short); color: var(--ink); } .eh span { color: var(--accent); font-weight: 500; } .ee { font: 11px var(--short); color: var(--ink3); }
+.eslider { position: relative; height: 26px; margin: 0 9px; }
+.eslider::before { content: ""; position: absolute; left: -4px; right: -4px; top: 10px; height: 6px; background: var(--ink4); border-radius: 3px; }
+.eslider .fill { position: absolute; left: -4px; top: 10px; height: 6px; width: calc(var(--at) * 100% + 4px); background: var(--accent); border-radius: 3px; overflow: hidden; opacity: calc(.5 + .5 * var(--at)); }
+.eslider .fill::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 54px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .8), transparent); animation: sheen calc(2.8s - 1.9s * var(--at)) linear infinite; }
+.eslider.still .fill::after { display: none; }
+@keyframes sheen { from { transform: translateX(-54px); } to { transform: translateX(300px); } }
+.eslider button { position: absolute; top: 0; width: 24px; height: 26px; margin-left: -12px; }
+.eslider button::after { content: ""; position: absolute; left: 10.5px; top: 11.5px; width: 3px; height: 3px; border-radius: 50%; background: var(--ink3); }
+.eslider .knob { position: absolute; left: calc(var(--at) * 100%); top: 5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #fff; border: 1.5px solid var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .25); pointer-events: none; transition: left .12s; }
+.eslider.top .knob { animation: breath 2s ease-in-out infinite; }
+@keyframes breath { 0%, 100% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent), 0 1px 3px rgba(0, 0, 0, .25); } 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 8%, transparent), 0 1px 3px rgba(0, 0, 0, .25); } }
+@media (prefers-reduced-motion: reduce) { .eslider .fill::after, .eslider.top .knob { animation: none; } }
+/* the pixel look: the same in cells, the knob a bar */
+.surf:not(.classic) .eslider::before { border-radius: 0; height: 12px; top: 7px; background: repeating-linear-gradient(90deg, var(--ink4) 0 5px, transparent 5px 7px); }
+.surf:not(.classic) .eslider .fill { border-radius: 0; height: 12px; top: 7px; background: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 7px); }
+.surf:not(.classic) .eslider .fill::after { width: 5px; background: var(--ink); animation-timing-function: steps(24); }
+.surf:not(.classic) .eslider .knob { border-radius: 0; width: 3px; margin-left: -1.5px; height: 18px; top: 4px; background: var(--ink); border: 0; box-shadow: none; animation: none; }
+.surf:not(.classic) .eslider button::after { top: 21px; left: 11.5px; width: 1px; height: 3px; border-radius: 0; }
 .ctx { font-variant-numeric: tabular-nums; color: var(--ink3); }
 .box.menu.wide { min-width: 258px; } .two { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; } .two b { font-weight: 500; } .two small { font: 12px var(--ui); color: var(--ink2); }
 /* what the turn changed: the files, and the lines of the one picked */
@@ -748,7 +771,7 @@ const MAP = [
 
 /* ---------- state ---------- */
 const prefersDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
-const S = { preset: "live", page: "terminals", device: "phone", view: "simple", dark: prefersDark(), classic: true, split: false, verbose: false, mode: "Edits", model: "Opus 5.5" };
+const S = { preset: "live", page: "terminals", device: "phone", view: "simple", dark: prefersDark(), classic: true, split: false, verbose: false, mode: "Edits", model: "Opus 5.5", effort: "Medium" };
 const isDispatch = () => S.page === "dispatch";
 const presets = () => (isDispatch() ? DPRESETS : PRESETS);
 const address = (preset) => { try { history.replaceState(null, "", "#" + (isMac() ? "mac-" : "") + (isDispatch() ? "d-" : "") + preset); } catch { /* a frame that keeps its own address */ } };
@@ -833,6 +856,8 @@ function shell(text) {
   return esc(text).replace(/(#[^\n]*$)|(&quot;[^\n]*?&quot;|'[^'\n]*')|((?:^|&amp;&amp;\s*|\|\s*|;\s*|\n\s*)(?!\|))([A-Za-z_.\/-]+)/gm,
     (all, rem, quoted, lead, word) => rem ? `<span class="rem">${rem}</span>` : quoted ? `<span class="q">${quoted}</span>` : `${lead}<span class="c">${word}</span>`);
 }
+
+const EFFORTS = [["Low", "想得少，快，适合简单的事。"], ["Medium", "均衡。"], ["High", "想得更深，慢一些。"], ["XHigh", "深入推理，明显更慢。"], ["Max", "想到底：最慢，也最费额度。"]];
 
 function item(it, i) {
   if (it.t === "user") {
@@ -922,7 +947,7 @@ function dock(noKeys) {
   const tasks = S.plan && !noKeys ? `<div class="tasks"><button class="fold" data-a="plan" aria-expanded="${S.planOpen}"><i>${G(S.planOpen ? "down" : "right", S.planOpen ? "▾" : "▸", 12)}</i><b>Tasks ${done}/${S.plan.length}</b><span>${esc(doing?.t ?? "")}</span></button>
     ${S.planOpen ? `<div class="tlist">${S.plan.map((x) => `<div class="${x.s}"><i>${pmark(x.s)}</i><span>${esc(x.t)}</span></div>`).join("")}</div>` : ""}</div>` : "";
   const hints = !isMac() || S.split ? "" : S.classic ? `<span class="hintk"><span>Return to send</span><span>Esc to stop</span></span>` : `<span class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></span>`;
-  const chips = noKeys ? "" : `<div class="chiprow"><button class="pchip ${S.mode === "Bypass" ? "bad" : ""}" data-a="modes">${S.mode}${G("down", " ▾", 11)}</button><button class="pchip" data-a="models">${S.model}${G("down", " ▾", 11)}</button><span class="sp"></span>${hints}<span class="ctx" title="上下文用量">${S.ctx}%</span></div>`;
+  const chips = noKeys ? "" : `<div class="chiprow"><button class="pchip ${S.mode === "Bypass" ? "bad" : ""}" data-a="modes">${S.mode}${G("down", " ▾", 11)}</button><button class="pchip" data-a="models">${S.model}${G("down", " ▾", 11)}</button><button class="pchip" data-a="effort">${S.effort}${G("down", " ▾", 11)}</button><span class="sp"></span>${hints}<span class="ctx" title="上下文用量">${S.ctx}%</span></div>`;
   const sugList = sugs.length ? `<div class="sugs">${sugs.map(([n, d]) => `<button data-a="sug" data-n="${n}"><b>/${n}</b><span>${d}</span></button>`).join("")}</div>` : "";
   return `${isMac() ? "" : sugList}
     ${S.error ? `<div class="err"><span>${esc(S.error)}</span><button data-a="errx" aria-label="关闭">${G("x", "×", 14)}</button></div>` : ""}
@@ -958,6 +983,16 @@ function over() {
     <button data-a="rename">Rename</button><hr><button class="bad" data-a="close">Close…</button></div></div></div>`;
   if (o.kind === "modes") return `<div class="veil low" data-a="shut"><div class="box menu wide" style="align-self:flex-start"><div class="ba">
     ${MODES.map(([m, d]) => `<button class="${m === "Bypass" ? "bad" : ""}" data-a="mode" data-m="${m}"><span class="two"><b>${m}</b><small>${d}</small></span><span>${S.mode === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
+  // How hard it thinks, on a line: the model's levels are its stops; the line is livelier the higher the level.
+  if (o.kind === "effort") {
+    const at = Math.max(0, EFFORTS.findIndex(([e]) => e === S.effort)), last = EFFORTS.length - 1;
+    return `<div class="veil low" data-a="shut"><div class="box effort" style="align-self:flex-start" data-a="noop">
+      <div class="eh"><b>Effort</b><span>${S.effort}</span></div>
+      <div class="eslider ${at === 0 ? "still" : ""} ${at === last ? "top" : ""}" style="--at:${at / last}"><i class="fill"></i>
+        ${EFFORTS.map(([e], k) => `<button data-a="seteffort" data-e="${e}" style="left:${(k / last) * 100}%" aria-label="${e}"></button>`).join("")}<i class="knob"></i></div>
+      <div class="ee"><span>${EFFORTS[0][0]}</span><span>${EFFORTS[last][0]}</span></div>
+      <p>${EFFORTS[at][1]}</p><p class="q">会记成这个模型的默认；Max 只用于这一次。</p></div></div>`;
+  }
   if (o.kind === "models") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
     ${MODELS.map(([m]) => `<button data-a="model" data-m="${m}">${m}<span>${S.model === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
   if (o.kind === "changes") {
@@ -1227,6 +1262,8 @@ document.addEventListener("click", (e) => {
     case "models": S.over = { kind: "models" }; return render();
     case "mode": S.mode = el.dataset.m; S.over = null; return render();
     case "model": S.model = el.dataset.m; S.over = null; return render();
+    case "effort": S.over = { kind: "effort" }; return render();
+    case "seteffort": S.effort = el.dataset.e; return render();
     case "always": S.items.push({ t: "said", text: "Always Allowed", detail: S.card.always ?? "git push", cmd: true, tone: "ok", time: "Now" }); S.live = { tool: "Bash", text: S.card.detail, t0: Date.now() }; S.card = null; S.status = "busy"; return render(true);
     case "more": at(i).open = true; return render();
     case "earlier": S.earlier = true; return render();

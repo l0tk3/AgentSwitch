@@ -354,6 +354,7 @@ private struct RecordDock: View {
     @Binding var sideShown: Bool
     let lastTurnChanges: () -> Void
     @State private var planOpen = false
+    @State private var choosingEffort = false
     @Environment(\.interfaceLook) private var look
 
     /// The ground fades in over this much above the box.
@@ -406,7 +407,7 @@ private struct RecordDock: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(info?.status == "exited")
-                    Text(sessionWords(info, record)).mono(10.5).foregroundStyle(Look.faint).lineLimit(1)
+                    session(info, record)
                     Spacer(minLength: 8)
                     if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
                         Text("Context \(context)").mono(10.5).foregroundStyle(Look.faint).lineLimit(1)
@@ -455,11 +456,89 @@ private struct RecordDock: View {
         else { Rectangle().fill(active ? Look.ink : Color.clear).overlay(Rectangle().strokeBorder(active ? Color.clear : Look.line, lineWidth: 1)) }
     }
 
-    /// `Edits · Opus 5.5 · Medium`: how it asks, its model, how hard it thinks.
-    private func sessionWords(_ info: TerminalInfo?, _ record: PaneRecord) -> String {
+    /// `Edits · Opus 5.5 ▾ · Medium ▾`: how it asks, then its model and how hard it thinks — each chosen there (2026-10-07,
+    /// user: 简略模式的模型和思考强度怎么都动不了). Claude Code takes both from here: the model while it rests (a menu), the
+    /// level on a slider. Another agent chooses on its own screen: the menu types its picker's command there.
+    @ViewBuilder private func session(_ info: TerminalInfo?, _ record: PaneRecord) -> some View {
+        let harness = info?.harness ?? record.agent
         let mode = RecordDisplay.mode(record.mode) ?? RecordDisplay.mode(info?.mode) ?? info?.mode?.capitalized
-        let modelName = RecordDisplay.model(now: record.modelNow, record: record.usage?.model, started: info?.model).map(ModelName.display)
-        return [mode, modelName, record.usage?.effort.map(TerminalEffort.name)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        let current = RecordDisplay.model(now: record.modelNow, record: record.usage?.model, started: info?.model)
+        let levels = TerminalEffort.levels(models: model.models, any: model.efforts, harness: harness, current: current)
+        let effort = TerminalEffort.level(asked: record.effortAsked, record: record.usage?.effort, started: info?.effort)
+        let ended = info?.status == "exited"
+        let resting = info?.status == "idle" && !waiting
+        HStack(spacing: 5) {
+            if let mode, !mode.isEmpty {
+                Text(mode).foregroundStyle(Look.faint).lineLimit(1)
+                Text("·").foregroundStyle(Look.faint)
+            }
+            MenuButton(entries: { modelEntries(harness: harness, current: current, resting: resting, ended: ended) }, above: true, help: "Model") {
+                HStack(spacing: 3) {
+                    if record.changing { BrailleSpinner() }
+                    Text(current.map(ModelName.display) ?? "Model").lineLimit(1)
+                    LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
+                }
+                .foregroundStyle(Look.ink2)
+                .padding(.vertical, 5).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            // The level's slider is Claude Code's here; the others name theirs in the menu beside it.
+            if harness == "claude-code", !levels.isEmpty {
+                Text("·").foregroundStyle(Look.faint)
+                Button { choosingEffort = true } label: {
+                    HStack(spacing: 3) {
+                        Text(effort.map(TerminalEffort.name) ?? TerminalEffort.word(harness)).lineLimit(1)
+                        LookGlyph(glyph: "▾", symbol: "chevron.down", size: 9)
+                    }
+                    .foregroundStyle(Look.ink2)
+                    .padding(.vertical, 5).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(ended)
+                .help(TerminalEffort.word(harness))
+                .popover(isPresented: $choosingEffort, arrowEdge: .top) {
+                    EffortPicker(word: TerminalEffort.word(harness), levels: levels, level: effort,
+                                 enabled: !waiting && !ended && !record.changing,
+                                 note: waiting ? "它正在等待回答，回答后再调整。" : "会记成这个模型的默认；Max 只用于这一次。",
+                                 choose: { record.setEffort($0) })
+                        .frame(width: 300)
+                        .padding(14)
+                        .background(Look.panel)
+                        // A popover is a window of its own: the look goes with it.
+                        .environment(\.interfaceLook, look)
+                }
+            } else if let effort {
+                Text("·").foregroundStyle(Look.faint)
+                Text(TerminalEffort.name(effort)).foregroundStyle(Look.faint).lineLimit(1)
+            }
+        }
+        .mono(10.5)
+    }
+
+    private func modelEntries(harness: String, current: String?, resting: Bool, ended: Bool) -> [MenuEntry] {
+        let record = state.record
+        if ended { return [MenuEntry(title: "终端已结束", enabled: false)] }
+        let options = model.models[harness] ?? []
+        guard harness == "claude-code", !options.isEmpty else {
+            // Its own picker, on its own screen (Codex chooses the reasoning with the model there).
+            let open = { (command: String) in
+                model.setSimple(false, pane: state.id)
+                record.type(command: command)
+            }
+            var entries = [MenuEntry(title: harness == "codex" ? "Model and Reasoning in Terminal…" : "Choose in Terminal…", symbol: "terminal", enabled: resting,
+                                     action: { open(RecordDisplay.modelPicker(harness)) })]
+            if let picker = RecordDisplay.effortPicker(harness) {
+                entries.append(MenuEntry(title: "\(TerminalEffort.word(harness)) in Terminal…", symbol: "terminal", enabled: resting, action: { open(picker) }))
+            }
+            return entries
+        }
+        guard resting else { return [MenuEntry(title: "它正在工作或等待回答，结束后再切换", enabled: false)] }
+        let entry = { (option: TerminalModelOption) in
+            MenuEntry(title: option.name, checked: RecordDisplay.isCurrent(option, model: current), action: { record.setModel(option.id) })
+        }
+        let older = options.filter(\.older)
+        return options.filter { !$0.older }.map(entry) + (older.isEmpty ? [] : [.separator, MenuEntry(title: "Older", symbol: "clock", children: older.map(entry))])
+            + [.separator, MenuEntry(title: "Claude Code 会把它记成新会话的默认模型", enabled: false)]
     }
 }
 

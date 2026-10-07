@@ -175,7 +175,7 @@ enum DemoData {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
-        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle"
+        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort"
         let five = ["low", "medium", "high", "xhigh", "max"]
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
@@ -198,7 +198,7 @@ enum DemoData {
             "codex": [TerminalModelOption(id: "gpt-6-luna", name: "GPT-6 Luna", efforts: five, defaultEffort: "medium")],
             "opencode": [TerminalModelOption(id: "deepseek/deepseek-flash", name: "DeepSeek Flash", efforts: ["none", "low", "high", "max"])],
         ], defaults: ["claude-code": "Opus 5.5"],
-           efforts: ["claude-code": five, "codex": five + ["ultra"], "pi": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]], effortDefaults: ["codex": "low"])
+           efforts: ["claude-code": five, "codex": five + ["ultra"], "pi": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]], effortDefaults: ["claude-code": "medium", "codex": "low"])
     }
 
     /// The agent asking (AskUserQuestion, terminal-v0 §3 "选择题"): `-uiDemoScreen terminalquestion`.

@@ -182,6 +182,17 @@ public enum TerminalEffort {
 
     /// The level chosen, if the model takes it; nil otherwise (its default).
     public static func kept(_ level: String?, in levels: [String]) -> String? { level.flatMap { levels.contains($0) ? $0 : nil } }
+
+    /// The levels of the model a running terminal is on: the listed model that is it (by id, or by the name people
+    /// read), else the agent's default model's.
+    public static func levels(models: [String: [TerminalModelOption]], any: [String: [String]], harness: String, current model: String?) -> [String] {
+        if let own = models[harness]?.first(where: { RecordDisplay.isCurrent($0, model: model) })?.efforts { return own }
+        return any[harness] ?? []
+    }
+
+    /// The level a terminal is at, as far as anything says: one just asked for, the last turn's in its record, the one
+    /// it was started at.
+    public static func level(asked: String?, record: String?, started: String?) -> String? { asked ?? record ?? started }
 }
 
 /// `GET /terminals`: the terminals, the agents this Mac can start, each one's models, and what "default" is today for

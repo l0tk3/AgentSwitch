@@ -505,6 +505,18 @@ public enum RecordDisplay {
     /// answer in the record, else the one it was started with.
     public static func model(now: String?, record: String?, started: String?) -> String? { now ?? record ?? started }
 
+    /// Which of the listed models is the one in use: by its id, else by the name people read (`opus` is listed for
+    /// `claude-opus-5-5`, both read "Opus 5.5").
+    public static func isCurrent(_ option: TerminalModelOption, model: String?) -> Bool {
+        guard let model else { return false }
+        return option.id == model || option.name == ModelName.display(model)
+    }
+
+    /// The command that opens an agent's own model picker, typed for the user who then chooses on its screen; and its
+    /// own picker for the thinking level, where it has one apart from that.
+    public static func modelPicker(_ harness: String) -> String { harness == "opencode" ? "/models" : "/model" }
+    public static func effortPicker(_ harness: String) -> String? { harness == "opencode" ? "/variants" : nil }
+
     /// The tool it is using, in one short word (the phone's island says the same).
     public static func toolWord(_ tool: String) -> String {
         switch tool.lowercased() {

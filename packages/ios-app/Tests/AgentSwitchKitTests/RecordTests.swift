@@ -276,6 +276,24 @@ final class RecordTests: XCTestCase {
         }
     }
 
+    /// The effort slider (2026-10-07, user: 思考强度改成滑块调节): the levels are stops on a line.
+    func testEffortAsAPlaceOnALine() {
+        let levels = ["low", "medium", "high", "xhigh", "max"]
+        XCTAssertEqual(EffortScale.index(of: "high", in: levels), 2)
+        XCTAssertNil(EffortScale.index(of: nil, in: levels))
+        // The nearest stop to where the finger is, never off the line's ends.
+        XCTAssertEqual([-40, 0, 24, 26, 100, 149, 151, 200, 900].map { EffortScale.stop(at: $0, width: 200, count: 5) }, [0, 0, 0, 1, 2, 3, 3, 4, 4])
+        XCTAssertEqual(EffortScale.stop(at: 50, width: 200, count: 1), 0)
+        XCTAssertEqual((0..<5).map { EffortScale.place(of: $0, width: 200, count: 5) }, [0, 50, 100, 150, 200])
+        XCTAssertEqual((0..<5).map { EffortScale.heat($0, count: 5) }, [0, 0.25, 0.5, 0.75, 1])
+        // VoiceOver's step: one stop either way, stopping at the ends; from none chosen, the default.
+        XCTAssertEqual(EffortScale.step(from: 4, by: 1, start: nil, count: 5), 4)
+        XCTAssertEqual(EffortScale.step(from: nil, by: 1, start: 1, count: 5), 1)
+        XCTAssertNil(EffortScale.step(from: nil, by: 1, start: nil, count: 0))
+        XCTAssertNotNil(EffortScale.hint("medium"))
+        XCTAssertNil(EffortScale.hint("thinking-32k"))
+    }
+
     func testChangesDecode() throws {
         let list = try JSONDecoder().decode(FileDiffList.self, from: Data(#"""
         {"files":[{"path":"src/retry.ts","added":1,"removed":1,"hunks":[{"header":"@@ -3,1 +3,1 @@","lines":["-const RETRIES = 5;","+const RETRIES = 3;"]}]},
