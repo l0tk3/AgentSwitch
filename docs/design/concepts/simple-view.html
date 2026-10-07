@@ -207,6 +207,15 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .surf:not(.classic) .eslider .knob { border-radius: 0; width: 4px; height: 24px; top: -3px; left: calc(10px + var(--at) * (100% - 24px)); background: var(--ink); box-shadow: none; }
 .surf:not(.classic) .eslider button::after { top: 20px; left: 13.5px; width: 1px; height: 3px; border-radius: 0; background: color-mix(in srgb, var(--ink) 40%, transparent); }
 .surf:not(.classic) .eslider button.on::after { display: block; }
+/* the classic look: bars that rise, a signal's strength — lit up to the level, the top level in its own colour. Half the
+   size of the pill with stars it was (2026-10-07, user: 太大了，而且和codex的一模一样，可以稍微改一下). */
+.surf.classic .box.effort { width: 174px; padding: 10px 12px; gap: 7px; }
+.surf.classic .box.effort p, .surf.classic .ee { display: none; }
+.surf.classic .eslider { display: flex; align-items: flex-end; gap: 7px; height: 22px; background: none; border-radius: 0; }
+.surf.classic .eslider .fill, .surf.classic .eslider .knob, .surf.classic .eslider button::after { display: none; }
+.surf.classic .eslider button { position: static; margin: 0; width: 10px; height: calc(6px + var(--k) * 14px); border-radius: 2.5px; background: color-mix(in srgb, var(--ink) 11%, transparent); }
+.surf.classic .eslider button.on { background: color-mix(in srgb, var(--accent) calc(62% + var(--k) * 38%), transparent); }
+.surf.classic .eslider.top button.on { background: color-mix(in srgb, var(--top) calc(62% + var(--k) * 38%), transparent); }
 .ctx { font-variant-numeric: tabular-nums; color: var(--ink3); }
 .box.menu.wide { min-width: 258px; } .two { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; } .two b { font-weight: 500; } .two small { font: 12px var(--ui); color: var(--ink2); }
 /* what the turn changed: the files, and the lines of the one picked */
@@ -1035,7 +1044,8 @@ function over() {
     <button data-a="rename">Rename</button><hr><button class="bad" data-a="close">Close…</button></div></div></div>`;
   if (o.kind === "modes") return `<div class="veil low" data-a="shut"><div class="box menu wide" style="align-self:flex-start"><div class="ba">
     ${MODES.map(([m, d]) => `<button class="${m === "Bypass" ? "bad" : ""}" data-a="mode" data-m="${m}"><span class="two"><b>${m}</b><small>${d}</small></span><span>${S.mode === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
-  // How hard it thinks, on a line: the model's levels are its stops; the line is livelier the higher the level.
+  // How hard it thinks, on a line: the model's levels are its stops — bars that rise in the classic look, a row of
+  // cells in the pixel one.
   if (o.kind === "effort") {
     const at = Math.max(0, EFFORTS.indexOf(S.effort)), last = EFFORTS.length - 1;
     return `<div class="veil low" data-a="shut"><div class="box effort" style="align-self:flex-start" data-a="noop">

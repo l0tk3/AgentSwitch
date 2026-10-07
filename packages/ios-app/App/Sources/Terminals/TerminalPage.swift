@@ -499,12 +499,12 @@ struct TerminalPage: View {
             .accessibilityLabel(EffortDisplay.word(page.harness).lowercased())
             .popover(isPresented: $choosingEffort, attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
                 EffortPicker(levels: levels, level: currentEffort, enabled: !answering,
-                             note: answering ? "它正在等待回答，回答后再调整。" : "会记成这个模型的默认；Max 只用于这一次。",
+                             note: answering ? "它正在等待回答，回答后再调整。" : nil,
                              choose: { level in Task { await page.setEffort(level) } }) {
                     LookWord(EffortDisplay.word(page.harness)).mono(13, weight: .semibold).foregroundStyle(Theme.ink)
                 }
-                .frame(width: 290)
-                .padding(16)
+                .frame(width: 200)
+                .padding(.horizontal, 14).padding(.vertical, 12)
                 .presentationCompactAdaptation(.popover)
                 .followsLook()
             }

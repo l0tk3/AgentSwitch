@@ -550,8 +550,8 @@ private struct RecordDock: View {
                                  enabled: !record.changing,
                                  note: harness == "claude-code" ? "会记成这个模型的默认；Max 只用于这一次。" : nil,
                                  choose: { record.setEffort($0) })
-                        .frame(width: 300)
-                        .padding(14)
+                        .frame(width: 150)
+                        .padding(.horizontal, 12).padding(.vertical, 10)
                         .background(Look.panel)
                         // A popover is a window of its own: the look goes with it.
                         .environment(\.interfaceLook, look)

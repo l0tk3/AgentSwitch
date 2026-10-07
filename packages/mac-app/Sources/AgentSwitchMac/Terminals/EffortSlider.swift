@@ -2,12 +2,12 @@ import AgentSwitchMacCore
 import SwiftUI
 
 // How hard the agent thinks, chosen on a line (docs/terminal-v0.md §1 思考强度; 2026-10-07, user: 思考强度改成滑块调节
-// 加上和官方差不多的特效，新建的时候也这样选; then, shown Codex's own: 太细了，而且描述没有必要，而且最高档最好换个颜色
-// … 就像这样): the levels its model takes are the line's stops, lowest first. The line is a thick pill, filled up to a
-// round knob that sits inside its end; stars twinkle in the filled part, more of them the higher the level; the
-// highest level has a colour of its own (violet), drifting stars, and its name in that colour. In the pixel look the
-// same in cells: a bright one running along the lit ones, and at the top the row in violet, twinkling. Nothing moves
-// under Reduce Motion.
+// 加上和官方差不多的特效，新建的时候也这样选): the levels its model takes are the line's stops, lowest first. In the
+// classic look the stops are bars that rise, a signal's strength — lit up to the level, the highest level in a colour
+// of its own (violet), a light passing over the lit ones. It was a thick pill with a round knob and stars, drawn after
+// Codex's own, and the user found it too large and the same as Codex's (太大了，而且和codex的一模一样，可以稍微改一下): this
+// is half the size and this app's own picture. In the pixel look a row of cells: a bright one running along the lit
+// ones, and at the top the row in violet, twinkling. Nothing moves under Reduce Motion.
 
 /// The line itself.
 struct EffortSlider: View {
@@ -24,11 +24,13 @@ struct EffortSlider: View {
     @State private var dragging: Int?
     @FocusState private var focused: Bool
 
-    /// The pill's thickness, and the room it is drawn in (its knob's shadow below).
-    static let thick: CGFloat = 24
-    private static let height: CGFloat = 30
-    /// The first and last stops stand half the pill's thickness inside its ends: the knob sits inside the pill there.
-    private static let inset: CGFloat = thick / 2
+    /// The room the line is drawn in: the tallest bar's height (the pixel look's cells with their ticks).
+    private static let height: CGFloat = 22
+    /// A bar's share of the width at most: the bars stand together at the leading edge of a wide row.
+    private static let stride: CGFloat = 17
+    /// A stop is in the middle of its bar: half a share inside each end. The pixel look's row of cells runs from end to
+    /// end, its first and last stops a little inside.
+    private func inset(_ width: CGFloat) -> CGFloat { look.isClassic ? width / CGFloat(max(levels.count, 1)) / 2 : 12 }
 
     var body: some View {
         let chosen = EffortScale.index(of: level, in: levels)
@@ -36,7 +38,8 @@ struct EffortSlider: View {
         let at = dragging ?? resting
         VStack(spacing: 3) {
             GeometryReader { geo in
-                let width = Double(geo.size.width - Self.inset * 2)
+                let inset = inset(geo.size.width)
+                let width = Double(geo.size.width - inset * 2)
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: still || !enabled || (at ?? 0) == 0)) { context in
                     Canvas { g, size in
                         draw(&g, size: size, at: at, firm: dragging != nil || chosen != nil, time: context.date.timeIntervalSinceReferenceDate)
@@ -44,20 +47,17 @@ struct EffortSlider: View {
                 }
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { value in dragging = EffortScale.stop(at: Double(value.location.x - Self.inset), width: width, count: levels.count) }
+                    .onChanged { value in dragging = EffortScale.stop(at: Double(value.location.x - inset), width: width, count: levels.count) }
                     .onEnded { value in
-                        let stop = EffortScale.stop(at: Double(value.location.x - Self.inset), width: width, count: levels.count)
+                        let stop = EffortScale.stop(at: Double(value.location.x - inset), width: width, count: levels.count)
                         dragging = nil
                         if levels.indices.contains(stop) { choose(levels[stop]) }
                     })
             }
             .frame(height: Self.height)
-            HStack {
-                Text(levels.first.map(TerminalEffort.name) ?? "")
-                Spacer(minLength: 8)
-                Text(levels.last.map(TerminalEffort.name) ?? "")
-            }
-            .mono(Look.size(10.5, look)).foregroundStyle(Look.faint)
+            // The bars stand together; the pixel look's cells run the row's width.
+            .frame(maxWidth: look.isClassic ? CGFloat(levels.count) * Self.stride : .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .opacity(enabled ? 1 : 0.45)
         .allowsHitTesting(enabled)
@@ -80,9 +80,10 @@ struct EffortSlider: View {
 
     private func draw(_ g: inout GraphicsContext, size: CGSize, at: Int?, firm: Bool, time: Double) {
         let count = levels.count
-        let width = Double(size.width - Self.inset * 2)
+        let inset = inset(size.width)
+        let width = Double(size.width - inset * 2)
         let mid = size.height / 2 - 1
-        func x(_ index: Int) -> CGFloat { Self.inset + CGFloat(EffortScale.place(of: index, width: width, count: count)) }
+        func x(_ index: Int) -> CGFloat { inset + CGFloat(EffortScale.place(of: index, width: width, count: count)) }
         let knob = at.map(x)
         let heat = at.map { EffortScale.heat($0, count: count) } ?? 0
         let moving = !still && enabled && heat > 0
@@ -92,43 +93,22 @@ struct EffortSlider: View {
         func chance(_ seed: Double) -> Double { let v = sin(seed) * 43758.5453; return v - v.rounded(.down) }
 
         if look.isClassic {
-            let thick = Self.thick
-            let track = CGRect(x: 0, y: mid - thick / 2, width: size.width, height: thick)
-            g.fill(Path(roundedRect: track, cornerRadius: thick / 2), with: .color(Look.ink.opacity(0.09)))
-            // The stops still ahead, faintly: where a level is.
-            for index in 0..<count where at.map({ index > $0 }) ?? true {
-                g.fill(Path(ellipseIn: CGRect(x: x(index) - 1.5, y: mid - 1.5, width: 3, height: 3)), with: .color(Look.ink.opacity(0.28)))
+            // Bars that rise, one a level: lit up to the level chosen, the rest faint. Where none is chosen the model's
+            // own level is lit faintly. A light passes over the lit ones, the quicker the higher.
+            let share = size.width / CGFloat(max(count, 1))
+            // Narrow and tall, as a signal's bars are.
+            let wide = min(share - 6, 10)
+            let lowest: CGFloat = 6, tallest = size.height - 2
+            let lap = 3.2 - 1.6 * heat
+            let light = moving ? (time.truncatingRemainder(dividingBy: lap) / lap) * Double(count + 2) - 1 : -9
+            for index in 0..<count {
+                let tall = count > 1 ? lowest + (tallest - lowest) * CGFloat(index) / CGFloat(count - 1) : tallest
+                let bar = Path(roundedRect: CGRect(x: x(index) - wide / 2, y: size.height - 1 - tall, width: wide, height: tall), cornerRadius: 2.5)
+                guard let at, index <= at else { g.fill(bar, with: .color(Look.ink.opacity(0.11))); continue }
+                g.fill(bar, with: .color(colour.opacity(firm ? 0.62 + 0.38 * Double(index + 1) / Double(at + 1) : 0.3)))
+                let near = max(0, 1 - abs(Double(index) - light))
+                if near > 0, firm { g.fill(bar, with: .color(.white.opacity(0.32 * near))) }
             }
-            guard let knob else { return }
-            // Filled up to the knob, which sits inside the fill's round end.
-            let fill = CGRect(x: 0, y: track.minY, width: knob + thick / 2, height: thick)
-            let shape = Path(roundedRect: fill, cornerRadius: thick / 2)
-            var inner = g
-            inner.opacity = firm ? 1 : 0.38
-            inner.fill(shape, with: .linearGradient(Gradient(colors: top ? [Look.topDeep, Look.top, Look.top.opacity(0.82)] : [colour.opacity(0.72), colour]),
-                                                    startPoint: CGPoint(x: 0, y: mid), endPoint: CGPoint(x: fill.maxX, y: mid)))
-            if moving, fill.width > thick + 6 {
-                // Stars in the filled part: more of them the higher, each twinkling at its own pace and moving forward,
-                // the quicker the higher (2026-10-07, user: 里面的粒子在最高档位之前应该也会向前滚动才对; they stood
-                // still below the highest level).
-                inner.clip(to: shape)
-                let room = Double(fill.width - thick - 2)
-                for star in 0..<Int((3 + 13 * heat).rounded()) {
-                    let seed = Double(star) * 12.9898 + 4.1
-                    let pace = (2.5 + 7 * heat) * (0.55 + 0.9 * chance(seed * 2.3))
-                    let px = (chance(seed) * room + time * pace).truncatingRemainder(dividingBy: room)
-                    let py = 4 + chance(seed * 1.7 + 3.1) * Double(thick - 8)
-                    let twinkle = 0.5 + 0.5 * sin(time * (1.1 + 2.4 * chance(seed * 0.61)) + seed)
-                    let radius = 0.6 + 0.9 * chance(seed * 0.37)
-                    inner.fill(Path(ellipseIn: CGRect(x: 4 + px - radius, y: Double(track.minY) + py - radius, width: radius * 2, height: radius * 2)),
-                               with: .color(.white.opacity(0.2 + 0.75 * twinkle)))
-                }
-            }
-            let across = thick - 4
-            let circle = Path(ellipseIn: CGRect(x: knob - across / 2, y: mid - across / 2, width: across, height: across))
-            var shaded = g
-            shaded.addFilter(.shadow(color: .black.opacity(0.25), radius: 2.5, y: 1))
-            shaded.fill(circle, with: .color(.white.opacity(firm ? 1 : 0.85)))
         } else {
             // A row of cells; the lit ones up to the knob, a bright one running along them.
             let cell: CGFloat = 6, gap: CGFloat = 2, tall: CGFloat = 18
@@ -188,7 +168,9 @@ struct EffortPicker: View {
                     .contentTransition(.opacity)
             }
             EffortSlider(levels: levels, level: level, fallback: fallback, enabled: enabled, choose: choose)
-            if let note {
+                .help(note ?? "")
+            // Why it cannot be chosen now is a line; what choosing does is for whoever rests the pointer on the bars.
+            if let note, !enabled {
                 Text(note).font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
             }
         }
