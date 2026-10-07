@@ -24,17 +24,19 @@
   :root:not([data-theme="light"]) { color-scheme: dark; --board: #1b1b1d; --board-ink: #e9e6df; --board-dim: #8e8e93; --board-line: #2e2e31; --board-card: #121213; }
 }
 :root[data-theme="dark"] { color-scheme: dark; --board: #1b1b1d; --board-ink: #e9e6df; --board-dim: #8e8e93; --board-line: #2e2e31; --board-card: #121213; }
-/* the phone's own appearance, chosen on the page (it starts as the viewer's) */
-.scr.dark {
+/* a surface (the phone's screen, the Mac's window) and its own appearance, chosen on the page */
+.surf.dark {
   color-scheme: dark;
   --bg: #000; --panel: #0b0b0b; --raise: #151515;
   --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
   --signal: #ff2e88; --cyan: #2ee6ff; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d; --on-accent: #000;
 }
-.scr.light { color-scheme: light; }
-/* the classic look (ui-v0 §8): round, the system's type for short words, blue */
-.scr.classic { --short: var(--ui); --r-bubble: 18px; --r-card: 14px; --r-btn: 10px; --r-key: 6px; --accent: #0a7aff; --on-accent: #fff; }
-.scr.classic.dark { --accent: #0a84ff; --raise: #1c1c1e; --panel: #111113; --ink4: #2c2c2e; }
+.surf.light { color-scheme: light; }
+/* the classic look (ui-v0 §8): round, the system's type for short words, the system's blue and its state colours */
+.surf.classic { --short: var(--ui); --r-bubble: 18px; --r-card: 14px; --r-btn: 10px; --r-key: 6px; --accent: #007aff; --on-accent: #fff;
+  --cyan: #007aff; --amber: #d98200; --green: #1f9d3f; --red: #e0352b; }
+.surf.classic.dark { --accent: #0a84ff; --cyan: #0a84ff; --amber: #ff9f0a; --green: #30d158; --red: #ff453a;
+  --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --ink4: #2c2c2e; --raise: #1c1c1e; --panel: #111113; }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--board); color: var(--board-ink); font: 14px/1.6 var(--ui); padding-block: 24px 56px; padding-inline: 16px; }
@@ -49,7 +51,13 @@ header p { margin: 0; color: var(--board-dim); max-width: 68ch; font-size: 13.5p
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { background: var(--board-card); border: 1px solid var(--board-line); padding: 4px 10px; font: 12px var(--mono); cursor: pointer; color: var(--board-ink); }
 .chip.on { background: var(--board-ink); color: var(--board); border-color: var(--board-ink); }
-.chip:focus-visible, .scr button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
+.chip:focus-visible, .surf button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
+.ctlrow { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.ctlrow .seg { display: inline-flex; align-items: center; gap: 6px; }
+.ctlrow .seg b { font: 400 11px var(--mono); letter-spacing: .08em; color: var(--board-dim); }
+.ctlrow .seg span { display: inline-flex; }
+.ctlrow .seg .chip + .chip { margin-left: -1px; }
+.chip:disabled { opacity: .35; cursor: default; }
 .note { margin: 0; color: var(--board-dim); font-size: 13px; min-height: 3.2em; }
 .note b { color: var(--board-ink); font-weight: 600; }
 .sec { font: 600 11px var(--mono); letter-spacing: .14em; color: var(--board-dim); margin: 0 0 8px; }
@@ -71,12 +79,12 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 /* ---------- the phone ---------- */
 .phone { width: 100%; min-width: 0; max-width: 397px; padding: 11px; border-radius: 50px; background: #0a0a0b; box-shadow: 0 0 0 1.5px #3a3a3e, 0 22px 50px rgba(0,0,0,.35); }
 .scr { position: relative; min-width: 0; height: 780px; border-radius: 40px; overflow: hidden; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--ui); display: flex; flex-direction: column; isolation: isolate; }
-:where(.scr) button { background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+:where(.surf) button { background: none; border: 0; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .sb { flex: none; height: 44px; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 30px 6px; font: 600 15px var(--ui); }
 .sb i { font: 11px var(--mono); font-style: normal; color: var(--ink2); }
 .nav { flex: none; display: flex; align-items: center; gap: 2px; padding: 2px 8px 8px; border-bottom: 1px solid var(--ink4); }
 .nb { flex: none; width: 40px; height: 40px; display: grid; place-items: center; font: 20px var(--short); color: var(--ink); }
-.scr.classic .nb { color: var(--accent); }
+.surf.classic .nb { color: var(--accent); }
 .nb.view { font: 600 13px var(--mono); }
 .nb.view span { border: 1px solid currentColor; padding: 2px 5px; border-radius: var(--r-key); }
 .ttl { flex: 1; min-width: 0; text-align: center; }
@@ -85,7 +93,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .t1 span { font: 12px var(--mono); color: var(--ink2); white-space: nowrap; }
 .t2 { display: flex; justify-content: center; align-items: center; gap: 5px; font: 11px var(--short); color: var(--ink2); }
 .sq { width: 8px; height: 8px; background: var(--ink3); flex: none; }
-.scr.classic .sq { border-radius: 50%; }
+.surf.classic .sq { border-radius: 50%; }
 .sq.busy { background: var(--cyan); } .sq.waiting { background: var(--amber); } .sq.idle { background: none; box-shadow: inset 0 0 0 1.5px var(--ink2); } .sq.exited { background: none; box-shadow: inset 0 0 0 1.5px var(--ink3); }
 
 .body > * { min-width: 0; max-width: 100%; }
@@ -98,7 +106,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .u { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-left: 56px; }
 .u time { font: 11px var(--mono); color: var(--ink3); }
 .u .bub { background: var(--raise); border: 1px solid var(--ink4); border-radius: var(--r-bubble); padding: 10px 14px; max-width: 100%; overflow-wrap: anywhere; }
-.scr.classic .u .bub { background: var(--accent); border-color: transparent; color: #fff; }
+.surf.classic .u .bub { background: var(--accent); border-color: transparent; color: #fff; }
 .u .pics { display: flex; gap: 6px; }
 .pic { width: 54px; height: 54px; border: 1px solid var(--ink4); border-radius: calc(var(--r-key) + 2px); position: relative; overflow: hidden;
   background: linear-gradient(135deg, var(--ink4) 0 50%, var(--raise) 50%); }
@@ -113,7 +121,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .md pre { margin: 0; padding: 2px 10px 9px; overflow-x: auto; }
 .md pre code { background: none; padding: 0; font-size: 12.5px; white-space: pre; }
 .md a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink3); text-underline-offset: 3px; cursor: pointer; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-.scr.classic .md a { color: var(--accent); text-decoration-color: currentColor; }
+.surf.classic .md a { color: var(--accent); text-decoration-color: currentColor; }
 .more { font: 12px var(--short); color: var(--ink2); align-self: flex-start; text-decoration: underline; text-underline-offset: 3px; }
 .tools { display: flex; flex-direction: column; gap: 4px; }
 .tools > button { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; font: 12px var(--mono); color: var(--ink2); }
@@ -133,20 +141,20 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 /* what needs you sits at the end of the record: a framed card, the pixel look's dithered shadow under it */
 .card { border: 1px solid var(--ink); border-radius: var(--r-card); background: var(--bg); position: relative; margin: 2px 7px 9px 0; }
 .card::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
-.scr.classic .card { border-color: var(--ink4); background: var(--panel); margin-right: 0; box-shadow: 0 6px 22px rgba(0,0,0,.18); }
-.scr.classic .card::after { display: none; }
+.surf.classic .card { border-color: var(--ink4); background: var(--panel); margin-right: 0; box-shadow: 0 6px 22px rgba(0,0,0,.18); }
+.surf.classic .card::after { display: none; }
 .card .hd { display: flex; align-items: center; gap: 6px; padding: 9px 12px 0; font: 600 12px var(--short); color: var(--amber); }
 .card .hd .sp { flex: 1; }
 .card .hd button { font: 12px var(--short); color: var(--ink2); }
 .card .bd { padding: 8px 12px 0; display: flex; flex-direction: column; gap: 8px; }
 .card .cmd { font: 13px/1.5 var(--mono); overflow-wrap: anywhere; }
-.scr.classic .card .cmd { background: var(--raise); padding: 9px 10px; border-radius: 8px; }
+.surf.classic .card .cmd { background: var(--raise); padding: 9px 10px; border-radius: 8px; }
 .card .q { font: 15px/1.45 var(--ui); }
 .card .ft { display: flex; gap: 10px; padding: 12px; }
 .btn { flex: 1; text-align: center; font: 500 14px var(--short); padding: 10px 0; border: 1px solid var(--ink4); border-radius: var(--r-btn); }
 .btn.pri { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.scr.classic .btn { border-color: transparent; background: var(--raise); font-weight: 600; font-size: 15px; }
-.scr.classic .btn.pri { background: var(--accent); color: #fff; }
+.surf.classic .btn { border-color: transparent; background: var(--raise); font-weight: 600; font-size: 15px; }
+.surf.classic .btn.pri { background: var(--accent); color: #fff; }
 .btn.bad { color: var(--red); }
 .btn:disabled { opacity: .4; cursor: default; }
 .opt { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left; padding: 5px 0; color: var(--ink2); }
@@ -156,7 +164,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .other { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--ink4); color: var(--ink); font: 14px var(--ui); padding: 6px 0; outline: none; border-radius: 0; }
 .peek { background: var(--term); color: var(--term-ink); font: 11.5px/1.5 var(--mono); padding: 9px 10px; white-space: pre; overflow-x: auto; border-radius: var(--r-key); }
 .peek .dim { color: var(--term-dim); } .peek .sel { color: #2ee6ff; }
-.hint { font-size: 12.5px; color: var(--ink2); }
+.hint { font-size: 12.5px; color: var(--ink2); font-family: var(--ui); }
 
 /* ---------- under the record: the same parts the terminal page has ---------- */
 .dock { flex: none; border-top: 1px solid var(--ink4); background: var(--bg); display: flex; flex-direction: column; padding-bottom: 20px; }
@@ -171,14 +179,14 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .key { flex: none; min-width: 36px; padding: 6px 7px 5px; font: 13px var(--mono); text-align: center; background: var(--raise); border: 1px solid var(--ink4); border-bottom: 3px solid var(--ink3); border-radius: var(--r-key); }
 .key:active { transform: translateY(2px); border-bottom-width: 1px; margin-bottom: 2px; }
 .key.solid { background: var(--ink); color: var(--bg); border-color: var(--ink); border-bottom-color: var(--ink2); font-weight: 600; min-width: 48px; }
-.scr.classic .key { border: 0; padding: 7px 8px; } .scr.classic .key.solid { background: var(--accent); color: #fff; }
+.surf.classic .key { border: 0; padding: 7px 8px; } .surf.classic .key.solid { background: var(--accent); color: #fff; }
 .thumbs { display: flex; gap: 8px; padding: 8px 16px 0; }
 .thumbs .pic button { position: absolute; right: 0; top: 0; width: 18px; height: 18px; background: var(--bg); color: var(--ink); font: 12px/1 var(--mono); }
 .comp { margin: 8px 16px 0; position: relative; }
 .comp .seal { display: none; }
 .comp.sealed { border: 1px solid var(--ink); border-radius: var(--r-card); background: var(--bg); margin-right: 22px; }
 .comp.sealed::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
-.scr.classic .comp.sealed::after { display: none; }
+.surf.classic .comp.sealed::after { display: none; }
 .comp.sealed .seal { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; background: var(--accent); color: var(--on-accent); font: 600 12px var(--short); border-radius: calc(var(--r-card) - 1px) calc(var(--r-card) - 1px) 0 0; }
 .comp.sealed .seal .sp { flex: 1; } .comp.sealed .seal button { color: inherit; font: 15px var(--mono); }
 .comp.sealed .row { padding: 8px; }
@@ -188,7 +196,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .sqb { flex: none; width: 44px; height: 42px; display: grid; place-items: center; border: 1px solid var(--ink4); border-radius: var(--r-btn); color: var(--ink2); font: 20px var(--mono); }
 .sqb.lock { color: var(--accent); }
 .sqb.go { background: var(--ink); color: var(--bg); border-color: var(--ink); font: 700 18px var(--mono); }
-.scr.classic .sqb.go { background: var(--accent); border-color: var(--accent); color: #fff; }
+.surf.classic .sqb.go { background: var(--accent); border-color: var(--accent); color: #fff; }
 .sqb.go.stop { font-size: 13px; }
 .sqb.go:disabled { background: none; color: var(--ink3); border-color: var(--ink4); cursor: default; }
 .comp.sealed .sqb.lock { display: none; }
@@ -204,8 +212,8 @@ textarea#field::placeholder { color: var(--ink3); }
 .veil.top { justify-content: flex-start; align-items: flex-end; padding: 92px 12px 0; }
 .box { border: 1px solid var(--ink); border-radius: var(--r-card); background: var(--bg); position: relative; font-family: var(--short); max-width: 100%; }
 .box::after { content: ""; position: absolute; left: 6px; top: 6px; right: -7px; bottom: -7px; z-index: -1; background: repeating-conic-gradient(var(--ink3) 0 25%, transparent 0 50%) 0 0 / 2px 2px; }
-.scr.classic .box { border-color: var(--ink4); background: var(--panel); box-shadow: 0 10px 40px rgba(0,0,0,.3); overflow: hidden; }
-.scr.classic .box::after { display: none; }
+.surf.classic .box { border-color: var(--ink4); background: var(--panel); box-shadow: 0 10px 40px rgba(0,0,0,.3); overflow: hidden; }
+.surf.classic .box::after { display: none; }
 .box .bh { display: flex; align-items: center; min-height: 26px; padding: 4px 10px; font: 600 12px var(--short); background: var(--ink); color: var(--bg); overflow-wrap: anywhere; }
 .box .bh.amber { background: var(--amber); color: #000; } .box .bh.red { background: var(--red); color: #000; }
 .box .bm { padding: 10px 12px 2px; font: 13.5px/1.55 var(--ui); color: var(--ink2); }
@@ -227,7 +235,89 @@ textarea#field::placeholder { color: var(--ink3); }
 .cover .box { width: 100%; }
 .scr.term .dock { --bg: #000; --raise: #151515; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524; background: #000; color: #e9e6df; border-color: #262524; }
 .spin { display: inline-block; }
+
+/* ---------- the Mac's main window, Terminals page (the app's sizes: bar 32, rail 45, list 300, status 24) ---------- */
+.grid.wide { grid-template-columns: minmax(0, 1fr); grid-template-areas: "ctl" "stage" "docs"; }
+.grid.wide .stage { position: static; display: block; }
+.mscroll { overflow-x: auto; padding: 4px 2px 26px; }
+.mwin { width: 100%; min-width: 660px; max-width: 1180px; height: 690px; margin: 0 auto; background: var(--bg); color: var(--ink); border-radius: 10px; overflow: hidden; position: relative;
+  display: grid; grid-template-rows: 32px minmax(0, 1fr) 24px; font: 13px/1.5 var(--ui); box-shadow: 0 0 0 .5px rgba(127,127,127,.5), 0 20px 50px rgba(0,0,0,.4); isolation: isolate; }
+.mbar { display: flex; align-items: center; gap: 4px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--ink4); position: relative; }
+.lights { display: flex; gap: 8px; margin-right: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.mtitle { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; white-space: nowrap; font: 600 13px var(--ui); }
+.mtitle span { font: 400 11px var(--short); color: var(--ink2); }
+.mend { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.tb { width: 28px; height: 24px; display: grid; place-items: center; color: var(--ink2); border-radius: var(--r-key); }
+.tb:hover { color: var(--ink); background: rgba(127,127,127,.16); }
+.vseg { display: inline-flex; border: 1px solid var(--ink4); border-radius: calc(var(--r-key) + 1px); margin-right: 6px; overflow: hidden; }
+.vseg button { height: 22px; padding: 0 8px; font: 600 11px var(--mono); color: var(--ink2); }
+.vseg button.on { background: var(--ink); color: var(--bg); }
+.surf.classic .vseg button.on { background: var(--accent); color: #fff; }
+.mmain { display: grid; grid-template-columns: 45px 300px minmax(0, 1fr); min-height: 0; }
+.mrail { display: flex; flex-direction: column; gap: 2px; padding: 6px 4px; border-right: 1px solid var(--ink4); }
+.ri { height: 36px; display: grid; place-items: center; color: var(--ink2); position: relative; border-radius: 7px; }
+.ri.on { color: var(--ink); }
+.ri.on::before { content: ""; position: absolute; left: -4px; top: 9px; bottom: 9px; width: 2px; background: var(--accent); }
+.surf.classic .ri { height: 30px; margin: 3px 0; } .surf.classic .ri.on { background: var(--raise); color: var(--accent); } .surf.classic .ri.on::before { display: none; }
+.mrail .sp { flex: 1; }
+.mlist { border-right: 1px solid var(--ink4); padding: 8px 0; overflow: hidden; font: 12.5px var(--short); display: flex; flex-direction: column; }
+.mlist .find { margin: 0 12px 6px; padding: 4px 8px; border: 1px solid var(--ink4); border-radius: var(--r-key); color: var(--ink3); }
+.mlist .grp { padding: 7px 16px 3px; color: var(--ink3); font-size: 11.5px; display: flex; gap: 6px; }
+.mlist .grp span { color: var(--ink3); }
+.mrow { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 16px; color: var(--ink2); white-space: nowrap; min-width: 0; }
+.mrow > span.nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mrow .mt { color: var(--ink3); font-size: 11px; }
+.mrow.sel { background: var(--raise); color: var(--ink); }
+.surf.classic .mrow { margin: 0 8px; padding: 5px 8px; border-radius: 6px; }
+.mrow button { font: 11px var(--short); color: var(--ink2); padding: 0 3px; }
+.mrow button.pri { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.mrow.past { padding-left: 32px; } .surf.classic .mrow.past { padding-left: 24px; }
+.mpanes { display: flex; min-width: 0; min-height: 0; position: relative; }
+.mpane { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.mpane + .mpane { border-left: 1px solid var(--ink4); }
+.phd { flex: none; display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--ink4); font: 12px var(--short); color: var(--ink2); white-space: nowrap; }
+.phd b { color: var(--ink); font-weight: 600; } .phd .sp { flex: 1; }
+.phd.focus { box-shadow: inset 0 2px 0 var(--accent); }
+.phd .vseg { margin: 0; } .phd .vseg button { height: 18px; padding: 0 6px; }
+/* the record in a pane: one column in the middle, the reply box under it at the same width */
+.surf.mac .body { padding: 22px max(22px, calc((100% - 700px) / 2)) 20px; gap: 14px; font-size: 13.5px; }
+.surf.mac .hdr h3 { font-size: 18px; }
+.surf.mac .u { padding-left: 120px; } .surf.mac .u .bub { padding: 7px 12px; }
+.surf.mac .md code { font-size: 12px; } .surf.mac .md pre code { font-size: 12px; }
+.surf.mac .card { max-width: 520px; }
+.surf.mac .card .q { font-size: 13.5px; } .surf.mac .btn { padding: 6px 0; font-size: 13px; flex: none; min-width: 96px; } .surf.mac .card .ft { justify-content: flex-end; }
+.surf.mac .card .ft kbd, .hintk kbd { font: 10.5px var(--mono); color: var(--ink3); border: 1px solid var(--ink4); border-radius: 4px; padding: 0 4px; margin-left: 6px; }
+.surf.mac .btn.pri kbd { color: inherit; border-color: currentColor; opacity: .6; }
+.surf.mac .dock { padding: 0 max(22px, calc((100% - 700px) / 2)) 10px; border-top: 1px solid var(--ink4); }
+.surf.mac .comp { margin: 10px 0 0; } .surf.mac .comp.sealed { margin-right: 8px; }
+.surf.mac .sqb { width: 34px; height: 32px; font-size: 16px; } .surf.mac .sqb.go { font-size: 15px; }
+.surf.mac textarea#field { min-height: 32px; font-size: 13.5px; padding: 6px 10px; }
+.surf.mac .quiet, .surf.mac .err, .surf.mac .thumbs { padding-left: 0; padding-right: 0; }
+.surf.mac .sugs { margin-top: 8px; border: 1px solid var(--ink4); } .surf.mac .sugs button { padding: 5px 10px; }
+.surf.mac .resume { margin: 10px 0 0; display: flex; justify-content: flex-end; gap: 12px; align-items: center; } .surf.mac .resume .btn { width: auto; padding: 6px 22px; }
+.hintk { display: flex; justify-content: flex-end; gap: 12px; padding-top: 6px; font: 11px var(--short); color: var(--ink3); }
+.hintk kbd { margin: 0 4px 0 0; }
+.surf.mac .veil { padding: 0; align-items: center; } .surf.mac .veil .box { width: 340px; }
+.surf.mac .veil.low { align-items: flex-start; justify-content: flex-end; padding: 0 0 84px max(22px, calc((100% - 700px) / 2)); } .surf.mac .veil.low .box { width: 220px; }
+.surf.mac .veil.top { align-items: flex-start; justify-content: flex-start; padding: 40px 0 0 60px; } .surf.mac .veil.top .box { width: 230px; }
+.surf.mac .toast { bottom: 96px; }
+.surf.mac .tscreen { font-size: 12.5px; line-height: 1.55; padding: 16px 20px; }
+.surf.mac .over-card { position: absolute; left: 50%; transform: translateX(-50%); top: 14px; width: min(480px, calc(100% - 40px)); z-index: 6; white-space: normal; font-family: var(--ui); }
+.surf.mac .cover { padding: 0; } .surf.mac .cover .box { width: 320px; }
+.mstatus { display: flex; align-items: center; gap: 14px; padding: 0 10px 0 12px; border-top: 1px solid var(--ink4); font: 11.5px var(--short); color: var(--ink2); white-space: nowrap; overflow: hidden; }
+.mstatus .sp { flex: 1; } .mstatus .it { display: inline-flex; align-items: center; gap: 6px; }
+.mstatus .vr { width: 1px; height: 12px; background: var(--ink4); }
+.mstatus .ok { background: var(--green); }
+.swipe { display: none; font: 11px var(--mono); color: var(--board-dim); text-align: center; }
+@media (max-width: 1000px) { .mmain { grid-template-columns: 45px minmax(0, 1fr); } .mlist { display: none; } }
 @media (max-width: 860px) {
+  /* a phone looking at the Mac's window: the rail put away too (as the app can), the window at its real size, dragged sideways */
+  .swipe { display: block; }
+  .mwin { min-width: 560px; height: 640px; }
+  .mrail { display: none; } .mmain { grid-template-columns: minmax(0, 1fr); }
+  .surf.mac .u { padding-left: 48px; }
   /* one column; the states stay at the top of the screen while the phone under them is looked at */
   .grid { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
   .ctl { display: contents; }
@@ -252,15 +342,15 @@ textarea#field::placeholder { color: var(--ink3); }
 <div class="page">
   <header>
     <h1>Simple View</h1>
-    <p>iPhone 上终端的简略视图。接手前那个只读的记录页不变，按下 <code>Resume</code> 之后不换到终端的屏幕，而是留在同一页上，把回复、确认、提问、按键这些补进来。终端页能做的事这里都能做；程序自己画的界面随时切回终端。概念稿，2026-10-07。</p>
+    <p>终端的简略视图，iPhone 与 Mac 两端，Pixel 与 Classic 两种外观。接手前那个只读的记录页不变，按下 <code>Resume</code> 之后不换到终端的屏幕，而是留在同一页上，把回复、确认、提问、按键这些补进来。终端页能做的事这里都能做；程序自己画的界面随时切回终端。概念稿，2026-10-07。</p>
   </header>
-  <div class="grid">
+  <div class="grid" id="grid">
     <aside class="ctl">
       <div class="chips" id="presets" role="tablist" aria-label="状态"></div>
       <p class="note" id="note"></p>
-      <div class="chips" id="toggles" aria-label="外观"></div>
+      <div class="ctlrow" id="toggles" aria-label="设备与外观"></div>
     </aside>
-    <div class="stage"><div class="phone"><div class="scr" id="scr"></div></div></div>
+    <div class="stage" id="stage"></div>
     <div class="docs">
       <section>
         <p class="sec">// 比接手前的记录页多了什么</p>
@@ -280,13 +370,25 @@ textarea#field::placeholder { color: var(--ink3); }
         </table></div>
       </section>
       <section>
+        <p class="sec">// MAC 上不一样的地方</p>
+        <ul>
+          <li><b>在一块分屏里。</b>记录排成中间一栏（最宽 700 点），输入框在这一块的底部、同样宽。分屏时每一块各有各的视图，块的标题栏右边切换；只有一块时切换在窗口顶栏的右边。</li>
+          <li><b>先看再接手。</b>Mac 上现在点列表里以前的会话只有 <code>Resume</code> 和 <code>Delete</code>，没有记录页。这一稿里点它就在这一块里打开只读的记录，底部 <code>Resume</code>，和手机一样。</li>
+          <li><b>没有按键条。</b>有真键盘：输入框里 <code>↩</code> 发送、<code>⇧↩</code> 换行、忙的时候 <code>esc</code> 打断。出现 Prompt 卡时键盘直接给程序（切到 Mac · Prompt，按方向键和回车试试）。</li>
+          <li><b>确认卡带快捷键</b>：<code>↩</code> Allow，<code>esc</code> Deny，和终端视图里的卡片一样。</li>
+          <li><b>附件</b>：<code>+</code>、粘贴，或者把文件拖到这一块上（终端视图已有的拖放）。</li>
+          <li><b>改名、关闭、单独开窗口</b>照旧在列表那一行的菜单里；状态栏右边原来写终端尺寸的地方写 <code>Simple</code>，锁仍是 Encrypt &amp; Send。</li>
+          <li><b>主窗口固定深色</b>（ui-v0 §8），所以 Mac 上没有浅色；Classic 用系统的蓝和它自己的词（Working、Needs You、Ready、Ended）。</li>
+        </ul>
+      </section>
+      <section>
         <p class="sec">// 需要你定的</p>
         <ol>
-          <li><b>默认进哪个视图。</b>建议：有会话记录的 agent，<code>Resume</code> 和新建之后默认进简略视图；每个终端记住上次用的那个。</li>
-          <li><b>换视图的入口放哪。</b>现在画的是导航栏右边一个图标（<code>&gt;_</code> 去终端，<code>≡</code> 回来），<code>⋯</code> 里也有一项。也可以只留 <code>⋯</code> 里那一项，顶上更干净。</li>
-          <li><b>按键平时收起。</b>现在放在 <code>+</code> 菜单的最后一项，程序等按键时自己出来。也可以在输入框旁常驻一个键盘图标，多占一格。</li>
-          <li><b>深浅色。</b>简略视图跟随手机的外观（和现在的记录页一样）；终端视图仍然固定深色。</li>
-          <li><b>Mac 上要不要同样的视图。</b>这一稿只画了手机。</li>
+          <li><b>默认进哪个视图。</b>建议：有会话记录的 agent，<code>Resume</code> 和新建之后默认进简略视图；每个终端记住上次用的那个，两端各记各的。</li>
+          <li><b>换视图的入口放哪。</b>手机上现在画的是导航栏右边一个图标（<code>&gt;_</code> 去终端，<code>≡</code> 回来），<code>⋯</code> 里也有一项；Mac 上是顶栏右边的两格开关。手机上也可以只留 <code>⋯</code> 里那一项，顶上更干净。</li>
+          <li><b>手机的按键平时收起。</b>现在放在 <code>+</code> 菜单的最后一项，程序等按键时自己出来。也可以在输入框旁常驻一个键盘图标，多占一格。</li>
+          <li><b>手机的深浅色。</b>简略视图跟随手机的外观（和现在的记录页一样）；终端视图仍然固定深色。</li>
+          <li><b>Mac 上点以前的会话先看记录。</b>这是新行为（见上）；不要的话保持现在的悬停 <code>Resume</code>。</li>
         </ol>
       </section>
       <section>
@@ -328,67 +430,79 @@ const KEYS = ["⏎", "⌫", "↑", "↓", "1", "2", "3", "y", "n", "esc", "tab",
 const MODELS = [["Opus 5.5", "most capable"], ["Sonnet 5.5", "everyday tasks"], ["Haiku 4.5", "fastest"]];
 
 const PRESETS = {
-  preview:    ["Preview", "<b>现在已有的样子。</b>终端列表里点开一个会话：只读的记录，底部一个 <code>Resume</code>。下面各状态都是按下它之后、留在这一页上的样子。"],
-  live:       ["Busy", "<b>接手之后。</b>记录照旧，末尾一行写它正在做什么，子代理另起一行。忙且输入框为空时发送键是 <code>■</code>，按下打断；打了字就变回发送。"],
-  permission: ["Permission", "<b>要你确认。</b>确认卡排在记录末尾，不盖住内容。答完收成一行，留在记录里。"],
-  question:   ["Question", "<b>它问你。</b>选项、Other、Submit，和终端页的提问卡是同一张，只是排在记录里。"],
-  prompt:     ["Prompt", "<b>程序自己画的界面。</b>这里是 <code>/model</code> 的菜单。卡片里是屏幕最后几行，按键条自己出来：按 <code>↑</code> <code>↓</code> <code>⏎</code> 试试，或者 <code>Open Terminal</code>。"],
-  reply:      ["Reply", "<b>回复。</b><code>+</code> 选图后在输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令；<code>+</code> 的最后一项取出按键条。"],
-  sealed:     ["Sealed", "<b>加密发送。</b>点锁，输入框被加密框围住，Mac 先把其中的凭据换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。"],
-  away:       ["On Mac", "<b>终端正在 Mac 上用着。</b>看记录、回复都不占它的窗口大小，所以这里没有占位和 <code>Take Over</code>，标题里写一句 On Mac。切到终端视图时照旧要接手。"],
-  exited:     ["Exited", "<b>程序结束了。</b>回到只读的记录，底部又是 <code>Resume</code>：和接手前是同一页。"],
+  preview:    { w: "Preview", n: "<b>现在已有的样子。</b>终端列表里点开一个会话：只读的记录，底部一个 <code>Resume</code>。下面各状态都是按下它之后、留在这一页上的样子。",
+                m: "<b>先看再接手。</b>Mac 上现在点以前的会话只有 <code>Resume</code> 和 <code>Delete</code>。这里点它就在这一块里打开只读的记录，底部 <code>Resume</code>，和手机上那一页一样。" },
+  live:       { w: "Busy", n: "<b>接手之后。</b>记录照旧，末尾一行写它正在做什么，子代理另起一行。忙且输入框为空时发送键是 <code>■</code>，按下打断；打了字就变回发送。",
+                m: "<b>接手之后。</b>记录排成中间一栏，输入框在这一块的底部。<code>↩</code> 发送，<code>⇧↩</code> 换行，忙的时候 <code>esc</code> 或 <code>■</code> 打断。顶栏右边的两格开关换视图；Panes 选 Two 看分屏时两种视图并排。" },
+  permission: { w: "Permission", n: "<b>要你确认。</b>确认卡排在记录末尾，不盖住内容。答完收成一行，留在记录里。",
+                m: "<b>要你确认。</b>确认卡排在记录末尾，<code>↩</code> 是 Allow，<code>esc</code> 是 Deny（点一下页面空白处再按）。答完收成一行。" },
+  question:   { w: "Question", n: "<b>它问你。</b>选项、Other、Submit，和终端页的提问卡是同一张，只是排在记录里。" },
+  prompt:     { w: "Prompt", n: "<b>程序自己画的界面。</b>这里是 <code>/model</code> 的菜单。卡片里是屏幕最后几行，按键条自己出来：按 <code>↑</code> <code>↓</code> <code>⏎</code> 试试，或者 <code>Open Terminal</code>。",
+                m: "<b>程序自己画的界面。</b>这里是 <code>/model</code> 的菜单。卡片里是屏幕最后几行，键盘这时直接给程序：点一下页面空白处，按 <code>↑</code> <code>↓</code> <code>↩</code> 试试，或者 <code>Open Terminal</code>。" },
+  reply:      { w: "Reply", n: "<b>回复。</b><code>+</code> 选图后在输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令；<code>+</code> 的最后一项取出按键条。",
+                m: "<b>回复。</b><code>+</code>、粘贴或把文件拖到这一块上，输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令。" },
+  sealed:     { w: "Sealed", n: "<b>加密发送。</b>点锁，输入框被加密框围住，Mac 先把其中的凭据换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。",
+                m: "<b>加密发送。</b>输入框旁的锁和状态栏右边的锁是同一个：输入框被加密框围住，凭据先换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。" },
+  away:       { w: "On Mac", wm: "On iPhone", n: "<b>终端正在 Mac 上用着。</b>看记录、回复都不占它的窗口大小，所以这里没有占位和 <code>Take Over</code>，标题里写一句 On Mac。切到终端视图时照旧要接手。",
+                m: "<b>终端正在 iPhone 上用着。</b>看记录、回复都不占它的窗口大小，所以这里没有 On iPhone 的占位，标题里写一句。切到终端视图时照旧要接手。" },
+  exited:     { w: "Exited", n: "<b>程序结束了。</b>回到只读的记录，底部又是 <code>Resume</code>：和接手前是同一页。" },
 };
 const MAP = [
   ["实时屏幕：程序画什么显示什么", "会话记录：你的话在右，回答排成 Markdown，一串工具调用折成一行、点开看每一条", "live"],
   ["标题：目录与 git，下面 Busy / Waiting / Exited", "相同", "live"],
-  ["回复框，原样发出", "相同，是同一个输入框", "reply"],
+  ["回复框，原样发出（Mac 上是直接打进终端）", "相同的输入框；Mac 上是这一块底部的输入框", "reply"],
   ["锁：加密发送；像密码时先问", "相同", "sealed"],
   ["+ 相机、照片、文件、粘贴图片；[Image #n] 占位与缩略图", "相同；发出后图片留在那条消息下面", "reply"],
   ["/ 列出 agent 的命令", "相同；会打开菜单的命令落到 Prompt 卡", "reply"],
   ["确认卡 Deny / Allow，浮在屏幕上方", "排在记录末尾，答完收成一行", "permission"],
   ["提问卡：选项、Other、Submit", "同上", "question"],
-  ["17 个按键：⏎ ⌫ ↑ ↓ 1 2 3 y n esc tab ⇧tab ← → pgup pgdn ^C", "平时收起，+ 的最后一项取出；程序等按键时自己出来", "prompt"],
-  ["打断：esc 或 ^C", "忙且输入框为空时，发送键是 ■", "live"],
+  ["手机的 17 个按键：⏎ ⌫ ↑ ↓ 1 2 3 y n esc tab ⇧tab ← → pgup pgdn ^C", "平时收起，+ 的最后一项取出；程序等按键时自己出来。Mac 用真键盘", "prompt"],
+  ["打断：esc 或 ^C", "忙且输入框为空时，发送键是 ■；Mac 上 esc 也行", "live"],
   ["拖动滚屏（给程序发滚轮）", "记录本身能滚；顶上 Earlier 取更早的，往回翻时出现 ↓ Latest", "live"],
-  ["双指调字号", "跟随系统字号：这里是排版的文字", null],
-  ["点链接在 Mac 的浏览器里打开；长按：Open in Browser、Copy Link、Open in Safari", "相同（长按或右键试试）", "live"],
+  ["双指调字号（Mac：⌘+ ⌘−）", "跟随系统字号：这里是排版的文字", null],
+  ["点链接在 Mac 的浏览器里打开；长按或右键：Open in Browser、Copy Link、Open in Safari", "相同（长按或右键试试）", "live"],
   ["复制屏幕上的字", "代码块右上角 Copy；消息可选中", "live"],
   ["子代理：列表里那个终端下面的行", "记录末尾一行：名字、在做什么、已用时间", "live"],
-  ["在别处使用时的占位与 Take Over", "不需要：标题里写 On Mac，看和回复都不抢窗口大小", "away"],
-  ["⋯：Rename、Close（可选 Delete Record）", "相同，另加 Terminal View", "live"],
+  ["在别处使用时的占位与 Take Over", "不需要：标题里写在哪一端，看和回复都不抢窗口大小", "away"],
+  ["改名、关闭（可选 Delete Record）；Mac 另有单独开窗口", "手机在 ⋯ 里，另加 Terminal View；Mac 照旧在列表那一行的菜单里", "live"],
   ["错误行、Connecting", "相同的位置", null],
-  ["程序自己的全屏界面：菜单、登录、编辑器", "Prompt 卡：屏幕最后几行、按键条、Open Terminal", "prompt"],
+  ["程序自己的全屏界面：菜单、登录、编辑器", "Prompt 卡：屏幕最后几行、按键、Open Terminal", "prompt"],
   ["结束后：Exited，记录保留", "回到只读的记录与 Resume", "exited"],
 ];
 
 /* ---------- state ---------- */
 const prefersDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
-const S = { preset: "live", view: "simple", dark: prefersDark(), classic: false };
-let tick = 0, spinTimer = null, flickTimer = null, toastTimer = null;
+const S = { preset: "live", device: "phone", view: "simple", dark: prefersDark(), classic: true, split: false };
+let tick = 0, toastTimer = null;
+const isMac = () => S.device === "mac";
+// The classic look's own words (ClassicWords): the rest are the same in both looks.
+const CLASSIC = { Busy: "Working", Waiting: "Needs You", Idle: "Ready", Exited: "Ended" };
+const W = (w) => (S.classic ? CLASSIC[w] ?? w : w);
 
 function load(preset) {
   Object.assign(S, { preset, joined: preset !== "preview", status: "busy", away: null, items: BASE(), card: null, live: null, sub: null,
-    draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch" });
-  if (preset === "preview") S.status = "busy";
+    draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple" });
   if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
-  if (preset === "away") S.away = "mac";
+  if (preset === "away") S.away = isMac() ? "iPhone" : "Mac";
   if (preset === "permission") { S.status = "waiting"; S.card = { kind: "permission", tool: "Bash", detail: "git push origin main" }; }
   if (preset === "question") { S.status = "waiting"; S.card = { kind: "question", q: "PATH 里没有 ~/.opencode/bin 时，安装正式版要怎么处理？",
     opts: [["让官方脚本自己加", "和手动安装完全一样，会往 shell 配置里加一行"], ["只在页面上提示", "AgentSwitch 不动 shell 配置，写出要加的那一行"]], pick: -1, other: "" }; }
   if (preset === "prompt") { S.status = "waiting"; S.items.push({ t: "user", time: "10:51", text: "/model" }); S.card = { kind: "prompt" }; S.keys = true; }
-  if (preset === "reply") { S.status = "idle"; S.items.push({ t: "said", tone: "idle", text: "Idle", time: "10:49" }); S.files = [1]; S.draft = "[Image #1] 这一行的间距再收一点"; }
+  if (preset === "reply") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.files = [1]; S.draft = "[Image #1] 这一行的间距再收一点"; }
   if (preset === "sealed") { S.status = "idle"; S.sealed = true; S.draft = "部署用的密码是 hunter2"; }
-  if (preset === "exited") { S.status = "exited"; S.joined = false; S.items.push({ t: "said", tone: "exited", text: "Exited · 0", time: "10:52" }); }
-  S.view = "simple";
+  if (preset === "exited") { S.status = "exited"; S.joined = false; S.items.push({ t: "said", text: "Exited · 0", time: "10:52" }); }
   render(true);
-  try { history.replaceState(null, "", "#" + preset); } catch { /* a frame that keeps its own address */ }
+  try { history.replaceState(null, "", "#" + (isMac() ? "mac-" : "") + preset); } catch { /* a frame that keeps its own address */ }
 }
 
-/* ---------- drawing ---------- */
+/* ---------- the record: the same on both devices ---------- */
 const agentMark = () => P.sprite(P.AGENT_PX.cc, { px: 2 });
-const statusWord = () => S.card ? "Waiting" : { busy: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited" }[S.status];
-const statusKind = () => S.card ? "waiting" : S.status;
+const statusWord = () => (S.card ? "Waiting" : { busy: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited" }[S.status]);
+const statusKind = () => (S.card ? "waiting" : S.status);
 const since = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const lockIcon = (px = 2) => S.classic
+  ? `<svg width="${px * 7}" height="${px * 8}" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="8" width="11" height="8" rx="2"/><path d="M5 8V5.5a3 3 0 0 1 6 0V8"/></svg>`
+  : P.sprite(["..###..", ".#...#.", ".#...#.", "#######", "###.###", "###.###", "#######"], { px });
 
 function item(it, i) {
   if (it.t === "user") {
@@ -401,13 +515,13 @@ function item(it, i) {
   }
   if (it.t === "tools") {
     const names = []; it.calls.forEach((c) => { const n = names.find((x) => x[0] === c.tool); n ? n[1]++ : names.push([c.tool, 1]); });
-    const sum = names.map(([n, k]) => k > 1 ? `${n} ×${k}` : n).join(" · ");
+    const sum = names.map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(" · ");
     const calls = it.open ? it.calls.map((c) => `<div class="call"><b>${c.tool}</b> ${esc(c.text)}${c.diff ? ` <em>${c.diff}</em>` : ""}${c.out ? `<br><s>⎿ ${esc(c.out)}</s>` : ""}</div>`).join("") : "";
     return `<div class="tools"><button data-a="fold" data-i="${i}" aria-expanded="${!!it.open}"><i>${it.open ? "▾" : "▸"}</i><span>${sum}</span></button>${calls}</div>`;
   }
   if (it.t === "said") {
-    const tone = { ok: "ok", no: "no", idle: "", exited: "" }[it.tone] ?? "";
-    return `<div class="line said"><span class="w ${tone}">${esc(it.text)}</span><span class="x">${esc(it.detail ?? "")}</span><span class="tm">${it.time ?? ""}</span></div>`;
+    const text = it.text.replace(/^(Idle|Exited)/, (w) => W(w));
+    return `<div class="line said"><span class="w ${it.tone ?? ""}">${esc(text)}</span><span class="x">${esc(it.detail ?? "")}</span><span class="tm">${it.time ?? ""}</span></div>`;
   }
   return "";
 }
@@ -415,13 +529,15 @@ function item(it, i) {
 function card() {
   const c = S.card;
   if (!c) return "";
+  const k = (key) => (isMac() ? `<kbd>${key}</kbd>` : "");
   if (c.kind === "permission") {
-    return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>Permission · ${c.tool}</div>
+    const head = S.classic ? `Approval Needed<span class="sp"></span><span style="color:var(--ink2);font-weight:400">${c.tool}</span>` : `Permission · ${c.tool}`;
+    return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>${head}</div>
       <div class="bd"><div class="cmd">${esc(c.detail)}</div></div>
-      <div class="ft"><button class="btn" data-a="deny">Deny</button><button class="btn pri" data-a="allow">Allow</button></div></div>`;
+      <div class="ft"><button class="btn" data-a="deny">Deny${k("esc")}</button><button class="btn pri" data-a="allow">Allow${k("↩")}</button></div></div>`;
   }
   if (c.kind === "question") {
-    const mark = (on) => S.classic ? (on ? "◉" : "○") : (on ? "&lt;x&gt;" : "&lt; &gt;");
+    const mark = (on) => (S.classic ? (on ? "◉" : "○") : on ? "&lt;x&gt;" : "&lt; &gt;");
     const opts = c.opts.map(([l, d], i) => `<button class="opt ${c.pick === i ? "on" : ""}" data-a="pick" data-i="${i}"><i>${mark(c.pick === i)}</i><span>${l}<small>${d}</small></span></button>`).join("");
     const ready = c.pick >= 0 || c.other.trim();
     return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>Question</div>
@@ -429,50 +545,54 @@ function card() {
       <div class="ft"><button class="btn pri" data-a="submit" ${ready ? "" : "disabled"}>Submit</button></div></div>`;
   }
   const rows = MODELS.map(([n, d], i) => `${i === S.sel ? '<span class="sel"> ❯ ' : "   "}${i + 1}. ${n.padEnd(13)}${i === S.sel ? "</span>" : ""}<span class="dim">${d}</span>`).join("\n");
-  return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>Prompt<span class="sp"></span><button data-a="view">Open Terminal ›</button></div>
+  const how = isMac() ? `键盘现在直接给程序：<kbd>↑</kbd><kbd>↓</kbd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>↩</kbd><kbd>esc</kbd>` : "程序在等按键。用下面的按键作答，或打开终端。";
+  return `<div class="card" id="card"><div class="hd"><span class="sq waiting"></span>Prompt<span class="sp"></span><button data-a="term">Open Terminal ›</button></div>
     <div class="bd"><div class="peek"> Select model\n${rows}\n<span class="dim"> Enter to confirm · Esc to cancel</span></div>
-    <div class="hint">程序在等按键。用下面的按键作答，或打开终端。</div></div><div class="ft" style="padding-top:4px"></div></div>`;
+    <div class="hint hintk" style="justify-content:flex-start;gap:0;padding:0">${how}</div></div><div class="ft" style="padding-top:4px"></div></div>`;
 }
 
 function body() {
+  const busy = S.status === "busy" && !S.card;
   const meta = `<div class="hdr"><h3>Agents 页：安装、更新与版本</h3>
-    <div class="meta">${S.status === "busy" && !S.card ? `<span class="spin" style="color:var(--cyan)">⠋</span><span style="color:var(--cyan)">Busy</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
+    <div class="meta">${busy ? `<span class="spin" style="color:var(--cyan)">⠋</span><span style="color:var(--cyan)">${W("Busy")}</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
     <div class="meta">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>`;
   const earlier = S.earlier ? EARLIER.map((it, i) => item(it, "e" + i)).join("") : `<button class="earlier" data-a="earlier">· · ·  Earlier</button>`;
-  const live = S.live && S.joined && !S.card ? `<div class="line now"><span class="spin">⠋</span><span class="w">${S.live.tool}</span><span class="x">${esc(S.live.text)}</span><span class="tm" data-t0="${S.live.t0}">${since(S.live.t0)}</span></div>` : "";
-  const sub = S.sub && S.joined && !S.card ? `<div class="line sub now"><span class="spin">⠋</span><span class="w">${S.sub.name}</span><span class="x">${esc(S.sub.doing)}</span><span class="tm" data-t0="${S.sub.t0}">${since(S.sub.t0)}</span></div>` : "";
-  return meta + earlier + S.items.map(item).join("") + live + sub + card();
+  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}"><span class="spin">⠋</span><span class="w">${l.tool ?? l.name}</span><span class="x">${esc(l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
+  const live = S.joined && !S.card ? (S.live ? now(S.live) : "") + (S.sub ? now(S.sub, true) : "") : "";
+  return meta + earlier + S.items.map(item).join("") + live + card();
 }
 
-function dock() {
+const keysBar = (hide) => `<div class="keys">${hide ? `<button class="key" data-a="keysoff" aria-label="收起按键">⌄</button>` : ""}${KEYS.map((k) => `<button class="key ${k === "⏎" ? "solid" : ""}" data-k="${k}">${k}</button>`).join("")}</div>`;
+
+function dock(noKeys) {
   if (!S.joined) {
     const gone = S.status === "exited";
     return `${gone ? `<div class="quiet">程序已结束，会话记录保留。</div>` : ""}<div class="resume"><button class="btn pri" data-a="resume">Resume</button></div>`;
   }
   const sugs = !S.sealed && /^\/[a-z]*$/.test(S.draft) ? COMMANDS.filter(([n]) => n.startsWith(S.draft.slice(1))) : [];
-  const keys = S.keys ? `<div class="keys"><button class="key" data-a="keysoff" aria-label="收起按键">⌄</button>${KEYS.map((k) => `<button class="key ${k === "⏎" ? "solid" : ""}" data-k="${k}">${k}</button>`).join("")}</div>` : "";
   const thumbs = S.files.length ? `<div class="thumbs">${S.files.map((n) => `<span class="pic"><i>#${n}</i><button data-a="unfile" data-n="${n}" aria-label="移除">×</button></span>`).join("")}</div>` : "";
   const stop = S.status === "busy" && !S.card && !S.draft.trim();
-  const lock = S.classic ? `<svg width="16" height="18" viewBox="0 0 16 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="8" width="11" height="8" rx="2"/><path d="M5 8V5.5a3 3 0 0 1 6 0V8"/></svg>` : P.sprite(["..###..", ".#...#.", ".#...#.", "#######", "###.###", "###.###", "#######"], { px: 2 });
-  return `${sugs.length ? `<div class="sugs">${sugs.map(([n, d]) => `<button data-a="sug" data-n="${n}"><b>/${n}</b><span>${d}</span></button>`).join("")}</div>` : ""}
+  const sugList = sugs.length ? `<div class="sugs">${sugs.map(([n, d]) => `<button data-a="sug" data-n="${n}"><b>/${n}</b><span>${d}</span></button>`).join("")}</div>` : "";
+  return `${isMac() ? "" : sugList}
     ${S.error ? `<div class="err"><span>${esc(S.error)}</span><button data-a="errx" aria-label="关闭">×</button></div>` : ""}
-    ${S.away && S.view === "simple" ? `<div class="quiet">这个终端正在 Mac 上使用。在这里回复不会改变它的窗口大小。</div>` : ""}
-    ${keys}${thumbs}
+    ${S.away && S.view === "simple" ? `<div class="quiet">这个终端正在 ${S.away} 上使用。在这里回复不会改变它的窗口大小。</div>` : ""}
+    ${S.keys && !noKeys && !isMac() ? keysBar(true) : ""}${isMac() ? sugList : ""}${thumbs}
     <div class="comp ${S.sealed ? "sealed" : ""}" id="comp">
-      <div class="seal">${S.classic ? "" : P.sprite(P.SQUARE, { px: 2 })}<span>Encrypt &amp; Send → claude</span><span class="sp"></span><button data-a="lock" aria-label="取消加密">×</button></div>
-      <div class="row"><button class="sqb" data-a="plus" aria-label="附件与按键">+</button>
+      <div class="seal">${S.classic ? lockIcon(1.6) : P.sprite(P.SQUARE, { px: 2 })}<span>Encrypt &amp; Send → claude</span><span class="sp"></span><button data-a="lock" aria-label="取消加密">×</button></div>
+      <div class="row"><button class="sqb" data-a="plus" aria-label="附件${isMac() ? "" : "与按键"}">+</button>
         <textarea id="field" rows="1" placeholder="${S.sealed ? "凭据会先换成密文" : "Reply"}" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(S.draft)}</textarea>
-        <button class="sqb lock" data-a="lock" aria-label="加密发送">${lock}</button>
+        <button class="sqb lock" data-a="lock" aria-label="加密发送">${lockIcon()}</button>
         <button class="sqb go ${stop ? "stop" : ""}" data-a="${stop ? "stop" : "send"}" id="go" aria-label="${stop ? "打断" : "发送"}">${stop ? "■" : "↑"}</button></div>
       <div class="sealnote">Mac 先把其中的凭据换成密文，再交给 agent。</div>
-    </div>`;
+    </div>
+    ${isMac() ? `<div class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></div>` : ""}`;
 }
 
 function terminal() {
   const prompt = S.card?.kind === "permission" ? `\n<span class="am">╭ Bash command ────────────────────────╮</span>\n<span class="am">│</span> git push origin main\n<span class="am">│</span> Do you want to proceed?\n<span class="am">│</span> <span class="cy">❯ 1. Yes</span>\n<span class="am">│</span>   2. Yes, and don't ask again\n<span class="am">│</span>   3. No, tell Claude what to do\n<span class="am">╰──────────────────────────────────────╯</span>`
     : S.card?.kind === "prompt" ? `\n Select model\n${MODELS.map(([n, d], i) => `${i === S.sel ? '<span class="cy"> ❯ ' : "   "}${i + 1}. ${n.padEnd(13)}${i === S.sel ? "</span>" : ""}<span class="dim">${d}</span>`).join("\n")}\n<span class="dim"> Enter to confirm · Esc to cancel</span>`
     : `\n<span class="cy">⏺</span> ${esc(S.live?.tool ?? "Bash")}(${esc(S.live?.text || "swift build -c release")})\n  <span class="dim">⎿  Running… (${since(S.live?.t0 ?? Date.now())} · esc to interrupt)</span>\n\n<span class="dim">╭──────────────────────────────────────╮</span>\n<span class="dim">│</span> &gt;                                    <span class="dim">│</span>\n<span class="dim">╰──────────────────────────────────────╯</span>\n<span class="dim">  ⏵⏵ accept edits on (shift+tab to cycle)</span>`;
-  const cover = S.away ? `<div class="cover"><div class="box"><div class="bh">On Mac</div><div class="bm" style="padding-bottom:10px">这个终端正在 Mac 上使用。</div><div class="ba"><button class="pri" data-a="take">Take Over</button></div></div></div>` : "";
+  const cover = S.away ? `<div class="cover"><div class="box"><div class="bh">On ${S.away}</div><div class="bm" style="padding-bottom:10px">这个终端正在 ${S.away} 上使用。</div><div class="ba"><button class="pri" data-a="take">Take Over</button></div></div></div>` : "";
   return `<pre class="tscreen"><span class="dim"> ✳ Claude Code v2.1.291 · Opus 5.5\n   ~/Desktop/WorkSpace/Projects/AgentSwitch</span>\n\n&gt; delete 应该标红才对 <span class="dim">[Image #1]</span>\n\n<span class="cy">⏺</span> 改好了：换成应用里已有的红字删除按钮，\n  禁用时变淡。正在重新构建。\n${prompt}${cover}</pre>`;
 }
 
@@ -480,13 +600,13 @@ function over() {
   const o = S.over;
   if (!o) return "";
   if (o.kind === "more") return `<div class="veil top" data-a="shut"><div class="box menu"><div class="ba">
-    <button data-a="view">${S.view === "simple" ? "Terminal View" : "Simple View"}<span>${S.view === "simple" ? "&gt;_" : "≡"}</span></button>
+    ${isMac() ? `<button data-a="window">Open in New Window<span>↗</span></button>` : `<button data-a="view">${S.view === "simple" ? "Terminal View" : "Simple View"}<span>${S.view === "simple" ? "&gt;_" : "≡"}</span></button>`}
     <button data-a="rename">Rename</button><hr><button class="bad" data-a="close">Close…</button></div></div></div>`;
   if (o.kind === "plus") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
-    <button data-a="file">Camera</button><button data-a="file">Photos</button><button data-a="file">Files</button><button data-a="file">Paste Image</button><hr>
-    <button data-a="keyson">Keys<span>⏎ ⌫ ↑ ↓ …</span></button></div></div></div>`;
+    ${isMac() ? `<button data-a="file">Choose Files…</button><button data-a="file">Paste Image<span>⌘V</span></button>` : `<button data-a="file">Camera</button><button data-a="file">Photos</button><button data-a="file">Files</button><button data-a="file">Paste Image</button><hr>
+    <button data-a="keyson">Keys<span>⏎ ⌫ ↑ ↓ …</span></button>`}</div></div></div>`;
   if (o.kind === "link") return `<div class="veil" data-a="shut"><div class="box"><div class="bh">${esc(o.link)}</div><div class="ba">
-    <button data-a="open">Open in Browser<span>Mac</span></button><button data-a="copylink">Copy Link</button><button data-a="safari">Open in Safari</button></div></div></div>`;
+    <button data-a="open">Open in Browser<span>${isMac() ? "" : "Mac"}</span></button><button data-a="copylink">Copy Link</button><button data-a="safari">Open in Safari</button></div></div></div>`;
   if (o.kind === "close") return `<div class="veil" data-a="shut"><div class="box"><div class="bh red">Close</div>
     <div class="bm">关闭「${esc(S.title)}」？程序将结束并从列表移除。会话记录默认保留，之后可继续；删除记录后无法恢复。</div>
     <div class="ba"><button class="bad" data-a="doclose">Delete Record</button><button class="pri" data-a="doclose">Close</button><button data-a="shut">Cancel</button></div></div></div>`;
@@ -498,57 +618,109 @@ function over() {
     <div class="ba"><button class="pri" data-a="dorename">Save</button><button data-a="shut">Cancel</button></div></div></div>`;
   return "";
 }
+const floats = () => `${S.unseen && S.view === "simple" ? `<button class="latest" data-a="latest">↓ Latest</button>` : ""}${over()}${S.toast ? `<div class="toast">${esc(S.toast)}</div>` : ""}`;
+const looks = () => `${S.classic ? "classic" : ""}`;
 
-function render(toEnd) {
-  const scr = $("scr"), old = scr.querySelector(".body");
-  const stick = toEnd || !old || old.scrollHeight - old.scrollTop - old.clientHeight < 40, top = old?.scrollTop ?? 0;
-  const focused = document.activeElement?.id;
-  scr.className = `scr ${S.dark ? "dark" : "light"} ${S.classic ? "classic" : ""} ${S.view === "terminal" ? "term dark" : ""}`;
-  const where = S.away ? `<span>· On Mac</span>` : "";
+/* ---------- the phone ---------- */
+function phone() {
+  const where = S.away ? `<span>· On ${S.away}</span>` : "", term = S.view === "terminal";
   const nav = S.joined
     ? `<div class="nav"><button class="nb" data-a="back" aria-label="返回">‹</button>
-        <div class="ttl"><div class="t1"><b>${esc(S.title)}</b><span>main ±3</span></div><div class="t2" id="st"><span class="sq ${statusKind()}"></span><span>${statusWord()}</span>${where}</div></div>
-        <button class="nb view" data-a="view" aria-label="${S.view === "simple" ? "终端视图" : "简略视图"}"><span>${S.view === "simple" ? "&gt;_" : "≡"}</span></button>
+        <div class="ttl"><div class="t1"><b>${esc(S.title)}</b><span>main ±3</span></div><div class="t2" id="st"><span class="sq ${statusKind()}"></span><span>${W(statusWord())}</span>${where}</div></div>
+        <button class="nb view" data-a="view" aria-label="${term ? "简略视图" : "终端视图"}"><span>${term ? "≡" : "&gt;_"}</span></button>
         <button class="nb" data-a="menu" aria-label="更多">⋯</button></div>`
     : `<div class="nav"><button class="nb" data-a="back" aria-label="返回">‹</button><div class="ttl"><div class="t1"><b>Agents 页：安装、更新与版本</b></div></div><span class="nb"></span></div>`;
-  scr.innerHTML = `<div class="sb"><span>9:41</span><i>5G ▮▮▮</i></div>${nav}
-    ${S.view === "terminal" ? terminal() : `<div class="body" id="body">${body()}</div>`}
-    <div class="dock">${S.view === "terminal" ? `<div class="keys">${KEYS.map((k) => `<button class="key ${k === "⏎" ? "solid" : ""}" data-k="${k}">${k}</button>`).join("")}</div>` + dock().replace(/<div class="keys">[\s\S]*?<\/div>/, "") : dock()}</div>
-    ${S.unseen && S.view === "simple" ? `<button class="latest" data-a="latest" style="bottom:${$("scr").querySelector(".dock")?.offsetHeight ?? 110}px">↓ Latest</button>` : ""}
-    ${over()}${S.toast ? `<div class="toast">${esc(S.toast)}</div>` : ""}`;
-  const b = scr.querySelector(".body");
-  if (b) { b.scrollTop = stick ? b.scrollHeight : top; b.addEventListener("scroll", () => { if (S.unseen && b.scrollHeight - b.scrollTop - b.clientHeight < 40) { S.unseen = 0; scr.querySelector(".latest")?.remove(); } }); }
+  return `<div class="phone"><div class="scr surf ${S.dark || term ? "dark" : "light"} ${looks()} ${term ? "term" : ""}" id="surf">
+    <div class="sb"><span>9:41</span><i>5G ▮▮▮</i></div>${nav}
+    ${term ? terminal() : `<div class="body" id="body">${body()}</div>`}
+    <div class="dock">${term ? keysBar(false) + dock(true) : dock()}</div>${floats()}</div></div>`;
+}
+
+/* ---------- the Mac's main window ---------- */
+const ICON = {
+  dispatch: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="6.5" width="10" height="8" rx="1.5"/><path d="M5 6.5V5a1.5 1.5 0 0 1 1.5-1.5H14A1.5 1.5 0 0 1 15.5 5v6a1.5 1.5 0 0 1-1.5 1.5h-2"/></svg>`,
+  terminals: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3.5" width="14" height="11" rx="1.8"/><path d="M5 7.5l2.2 1.8L5 11.1M9.5 11.2h3.5"/></svg>`,
+  browser: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="9" cy="9" r="6.5"/><path d="M2.5 9h13M9 2.5c2.2 2 2.2 11 0 13M9 2.5c-2.2 2-2.2 11 0 13"/></svg>`,
+  gear: `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 5.5h7M13 5.5h2M3 12.5h2M8 12.5h7"/><circle cx="11.5" cy="5.5" r="1.6"/><circle cx="6.5" cy="12.5" r="1.6"/></svg>`,
+  right: `<svg width="15" height="13" viewBox="0 0 15 13" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="13" height="11" rx="1.5"/><path d="M7.5 1v11"/></svg>`,
+  down: `<svg width="15" height="13" viewBox="0 0 15 13" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="13" height="11" rx="1.5"/><path d="M1 6.5h13"/></svg>`,
+};
+const vseg = () => `<span class="vseg" role="group" aria-label="视图"><button class="${S.view === "simple" ? "on" : ""}" data-a="simple" title="Simple View">≡</button><button class="${S.view === "terminal" ? "on" : ""}" data-a="term" title="Terminal View">&gt;_</button></span>`;
+
+function macList() {
+  const age = (a) => (S.classic ? `${a} ago` : a), grp = (n, git) => `<div class="grp">${S.classic ? n : `▾ ${n}/`}${git ? `<span>${git}</span>` : ""}</div>`;
+  const mine = `Agents 页：安装、更新与版本`;
+  return `<aside class="mlist"><div class="find">${S.classic ? "Search" : "/ Search"}</div>${grp("AgentSwitch", "main ±3")}
+    ${S.joined ? `<div class="mrow sel"><span class="sq ${statusKind()}"></span><span class="nm">${mine}</span>${S.card ? `<span class="mt" style="color:var(--amber)">${W("Waiting")}</span>` : ""}<button data-a="menu" aria-label="更多">⋯</button></div>` : ""}
+    <div class="mrow"><span class="sq idle"></span><span class="nm">修浏览器页的缩放</span></div>
+    ${S.joined ? "" : `<div class="mrow past sel"><span class="nm">${mine}</span><button class="pri" data-a="resume">Resume</button><button data-a="nodelete">Delete</button></div>`}
+    <div class="mrow past"><span class="nm">把首页改成一栏</span><span class="mt">${age("2d")}</span></div>
+    <div class="mrow past"><span class="nm">灵动岛重画</span><span class="mt">${age("5d")}</span></div>
+    ${grp("web-console", "main")}<div class="mrow"><span class="sq busy"></span><span class="nm">控制台的侧栏</span></div></aside>`;
+}
+
+function mac() {
+  const split = S.split && S.joined, term = S.view === "terminal" && S.joined;
+  const title = S.joined
+    ? `<span class="sq ${statusKind()}"></span><b>${esc(S.title)}</b><span>main ±3</span><span id="st">${W(statusWord())}${S.away ? ` · On ${S.away}` : ""}</span>`
+    : `<b>AgentSwitch</b><span>main ±3</span>`;
+  const tb = (k, help) => `<button class="tb" title="${help}" data-a="${k === "right" ? "split" : "noop"}">${ICON[k] ?? "+"}</button>`;
+  const first = term
+    ? `${terminal()}${S.card && S.card.kind !== "prompt" ? `<div class="over-card">${card()}</div>` : ""}`
+    : `<div class="body" id="body">${body()}</div><div class="dock">${dock()}</div>`;
+  const phd = `<div class="phd focus"><span>1</span><span class="sq ${statusKind()}"></span><b>claude</b><span>AgentSwitch · main ±3</span><span class="sp"></span>${vseg()}<button class="tb" data-a="unsplit" aria-label="关闭分屏">×</button></div>`;
+  const second = `<div class="mpane"><div class="phd"><span>2</span><span class="sq busy"></span><b>codex</b><span>web-console · main</span><span class="sp"></span><span class="vseg"><button>≡</button><button class="on">&gt;_</button></span><button class="tb" data-a="unsplit" aria-label="关闭分屏">×</button></div>
+    <pre class="tscreen"><span class="dim">›_ OpenAI Codex (v0.160.1)\n   model: gpt-5.5   directory: ~/…/web-console</span>\n\n<span class="cy">▌</span> 把控制台的侧栏改成可以收起\n\n<span class="dim">•</span> Explored\n  <span class="dim">└ Read ui/console.js, ui/console.css</span>\n\n<span class="dim">•</span> Edited ui/console.css <span class="cy">(+18 -4)</span>\n\n<span class="dim">⠋ Working (38s · esc to interrupt)</span></pre></div>`;
+  return `<div class="mwin surf dark mac ${looks()}" id="surf">
+    <div class="mbar"><span class="lights"><i></i><i></i><i></i></span><div class="mtitle">${title}</div>
+      <div class="mend">${S.joined && !split ? vseg() : ""}${tb("right", "Split Right ⌘D")}${tb("down", "Split Down ⌘⇧D")}${tb("plus", "New Terminal ⌘T")}</div></div>
+    <div class="mmain"><nav class="mrail"><span class="ri">${ICON.dispatch}</span><span class="ri on">${ICON.terminals}</span><span class="ri">${ICON.browser}</span><span class="sp"></span><span class="ri">${ICON.gear}</span></nav>
+      ${macList()}
+      <section class="mpanes"><div class="mpane">${split ? phd : ""}${first}${floats()}</div>${split ? second : ""}</section></div>
+    <div class="mstatus"><span class="it"><span class="sq ok"></span>Gateway</span><span class="it"><span class="sq ok"></span>iPhone</span><span class="sp"></span>
+      <span class="it">${agentMark()}Claude Code</span><span class="vr"></span><span>Opus 5.5</span><span class="vr"></span><span>Accept Edits</span><span class="vr"></span><span>${term ? "104 × 33" : "Simple"}</span>
+      <button class="tb" data-a="lock" title="Encrypt &amp; Send">${lockIcon(1.6)}</button></div></div>`;
+}
+
+/* ---------- putting it on the page ---------- */
+function render(toEnd) {
+  const stage = $("stage"), old = $("body");
+  const stick = toEnd || !old || old.scrollHeight - old.scrollTop - old.clientHeight < 40, top = old?.scrollTop ?? 0;
+  const focused = document.activeElement?.id;
+  $("grid").classList.toggle("wide", isMac());
+  stage.innerHTML = isMac() ? `<div class="swipe">← 左右拖动看整个窗口 →</div><div class="mscroll">${mac()}</div>` : phone();
+  const b = $("body"), d = stage.querySelector(".dock"), l = stage.querySelector(".latest");
+  if (l && d) l.style.bottom = d.offsetHeight + 10 + "px";
+  if (b) { b.scrollTop = stick ? b.scrollHeight : top; b.addEventListener("scroll", () => { if (S.unseen && b.scrollHeight - b.scrollTop - b.clientHeight < 40) { S.unseen = 0; stage.querySelector(".latest")?.remove(); } }); }
   const ta = $("field");
   if (ta) { grow(ta); if (focused === "field") { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
   if (focused === "other") { const o = $("other"); o?.focus(); o?.setSelectionRange(o.value.length, o.value.length); }
   if (S.over?.kind === "rename") $("newname")?.select();
-  document.querySelectorAll("#presets .chip").forEach((c) => { c.classList.toggle("on", c.dataset.p === S.preset); c.setAttribute("aria-selected", c.dataset.p === S.preset); });
-  $("note").innerHTML = PRESETS[S.preset][1];
-  $("tg-dark").classList.toggle("on", S.dark); $("tg-light").classList.toggle("on", !S.dark);
-  $("tg-pixel").classList.toggle("on", !S.classic); $("tg-classic").classList.toggle("on", S.classic);
+  document.querySelectorAll("#presets .chip").forEach((c) => { const p = PRESETS[c.dataset.p]; c.textContent = isMac() ? p.wm ?? p.w : p.w; c.classList.toggle("on", c.dataset.p === S.preset); c.setAttribute("aria-selected", c.dataset.p === S.preset); });
+  $("note").innerHTML = (isMac() && PRESETS[S.preset].m) || PRESETS[S.preset].n;
+  const on = (id, v) => $(id).classList.toggle("on", v);
+  on("tg-phone", !isMac()); on("tg-mac", isMac()); on("tg-pixel", !S.classic); on("tg-classic", S.classic);
+  on("tg-dark", S.dark || isMac()); on("tg-light", !S.dark && !isMac()); $("tg-light").disabled = isMac(); $("tg-light").title = isMac() ? "Mac 主窗口固定深色" : "";
+  $("seg-panes").hidden = !isMac(); on("tg-one", !S.split); on("tg-two", S.split);
 }
 const grow = (ta) => { ta.style.height = "auto"; ta.style.height = Math.min(108, ta.scrollHeight + 2) + "px"; };
 const glitch = (id) => { if (!S.classic) P.glitch($(id)); };
 function say(text) { S.toast = text; render(); clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = null; render(); }, 1400); }
-function push(it) {
-  const b = $("body"), away = b && b.scrollHeight - b.scrollTop - b.clientHeight > 40;
-  S.items.push(it);
-  if (away) S.unseen++;
-}
+function push(it) { const b = $("body"), away = b && b.scrollHeight - b.scrollTop - b.clientHeight > 40; S.items.push(it); if (away) S.unseen++; }
 
-/* ---------- what the taps do ---------- */
+/* ---------- what the taps and keys do ---------- */
 function send(sealed) {
   const text = S.draft.trim();
   if (!text) return;
   const images = S.files.slice();
   S.items.push({ t: "user", time: "Now", text: sealed ? text.replace(/hunter2|sk-[\w-]+/g, "enc:v1:9f3c…a1") : text, images: images.length ? images : null });
   if (sealed) S.items.push({ t: "said", text: "Sealed", detail: "1 处凭据已换成密文", tone: "ok" });
-  S.draft = ""; S.files = []; S.sealed = false; S.over = null; S.unseen = 0;
+  Object.assign(S, { draft: "", files: [], sealed: false, over: null, unseen: 0 });
   if (text === "/model") { S.status = "waiting"; S.card = { kind: "prompt" }; S.keys = true; S.sel = 0; render(true); return glitch("card"); }
   S.status = "busy"; S.live = { tool: "Thinking", text: "", t0: Date.now() };
   render(true);
   setTimeout(() => {
-    if (S.status !== "busy" || !S.live || S.live.tool !== "Thinking") return;
+    if (S.status !== "busy" || S.live?.tool !== "Thinking") return;
     S.live = null; S.status = "idle";
     push({ t: "md", html: "<p>收到。（演示页到此为止：真的会话里这里是 agent 的回答。）</p>" });
     render();
@@ -559,32 +731,40 @@ function key(k) {
     if (k === "↑") S.sel = (S.sel + MODELS.length - 1) % MODELS.length;
     else if (k === "↓") S.sel = (S.sel + 1) % MODELS.length;
     else if (/^[123]$/.test(k)) S.sel = +k - 1;
-    else if (k === "⏎") { S.items.push({ t: "said", text: "Model", detail: MODELS[S.sel][0], tone: "ok", time: "Now" }); S.card = null; S.keys = false; S.status = "idle"; return render(true); }
-    else if (k === "esc" || k === "^C") { S.items.push({ t: "said", text: "Cancelled", detail: "/model", time: "Now" }); S.card = null; S.keys = false; S.status = "idle"; return render(true); }
+    else if (k === "⏎") { S.items.push({ t: "said", text: "Model", detail: MODELS[S.sel][0], tone: "ok", time: "Now" }); Object.assign(S, { card: null, keys: false, status: "idle" }); return render(true); }
+    else if (k === "esc" || k === "^C") { S.items.push({ t: "said", text: "Cancelled", detail: "/model", time: "Now" }); Object.assign(S, { card: null, keys: false, status: "idle" }); return render(true); }
     return render();
   }
   if ((k === "esc" || k === "^C") && S.status === "busy") return stop();
   say(`Key · ${k}`);
 }
-function stop() { S.live = null; S.sub = null; S.status = "idle"; S.items.push({ t: "said", text: "Interrupted", time: "Now" }); render(true); }
+function stop() { Object.assign(S, { live: null, sub: null, status: "idle" }); S.items.push({ t: "said", text: "Interrupted", time: "Now" }); render(true); }
+function decide(allow) {
+  S.items.push({ t: "said", text: allow ? "Allowed" : "Denied", detail: `${S.card.tool} ${S.card.detail}`, tone: allow ? "ok" : "no", time: "Now" });
+  S.card = null; S.status = allow ? "busy" : "idle"; S.live = allow ? { tool: "Bash", text: "git push origin main", t0: Date.now() } : null; render(true);
+}
 
 document.addEventListener("click", (e) => {
   const chip = e.target.closest("#presets .chip");
   if (chip) return load(chip.dataset.p);
   const tg = e.target.closest("#toggles .chip");
-  if (tg) { if (tg.id === "tg-dark") S.dark = true; if (tg.id === "tg-light") S.dark = false; if (tg.id === "tg-pixel") S.classic = false; if (tg.id === "tg-classic") S.classic = true; return render(); }
+  if (tg) {
+    if (tg.id === "tg-phone" || tg.id === "tg-mac") { S.device = tg.id === "tg-mac" ? "mac" : "phone"; return load(S.preset); }
+    if (tg.id === "tg-dark") S.dark = true; if (tg.id === "tg-light") S.dark = false; if (tg.id === "tg-pixel") S.classic = false; if (tg.id === "tg-classic") S.classic = true;
+    if (tg.id === "tg-one") S.split = false; if (tg.id === "tg-two") { S.split = true; if (!S.joined) return load("live"); }
+    return render();
+  }
   const jump = e.target.closest("[data-go]");
-  if (jump) { load(jump.dataset.go); return $("scr").scrollIntoView({ behavior: "smooth", block: "center" }); }
+  if (jump) { load(jump.dataset.go); return $("stage").scrollIntoView({ behavior: "smooth", block: "start" }); }
   const k = e.target.closest("[data-k]");
   if (k) return key(k.dataset.k);
   const link = e.target.closest("[data-link]");
-  if (link) return say("Opened on Mac");
+  if (link) return say(isMac() ? "Opened in Browser" : "Opened on Mac");
   const el = e.target.closest("[data-a]");
   if (!el) return;
   const a = el.dataset.a, i = el.dataset.i;
   if (a === "shut") { if (e.target !== el && !e.target.closest("button[data-a='shut']")) return; S.over = null; return render(); }
-  e.stopPropagation();
-  const at = (j) => String(j).startsWith("e") ? EARLIER[+String(j).slice(1)] : S.items[+j];
+  const at = (j) => (String(j).startsWith("e") ? EARLIER[+String(j).slice(1)] : S.items[+j]);
   switch (a) {
     case "fold": at(i).open = !at(i).open; return render();
     case "more": at(i).open = true; return render();
@@ -596,33 +776,36 @@ document.addEventListener("click", (e) => {
     case "menu": S.over = { kind: "more" }; return render();
     case "plus": S.over = { kind: "plus" }; return render();
     case "view": S.view = S.view === "simple" ? "terminal" : "simple"; S.over = null; return render(true);
+    case "simple": S.view = "simple"; return render(true);
+    case "term": S.view = "terminal"; return render(true);
+    case "split": if (S.joined) { S.split = true; render(); } return;
+    case "unsplit": S.split = false; return render();
+    case "window": S.over = null; return say("Opened in New Window");
     case "take": S.away = null; return render();
     case "rename": S.over = { kind: "rename" }; return render();
     case "dorename": S.title = $("newname").value.trim() || "AgentSwitch"; S.over = null; return render();
     case "close": S.over = { kind: "close" }; return render();
-    case "doclose": S.over = null; return say("Closed · ‹ Terminals");
+    case "doclose": S.over = null; return say(isMac() ? "Closed" : "Closed · ‹ Terminals");
     case "keyson": S.keys = true; S.over = null; return render();
     case "keysoff": S.keys = false; return render();
     case "file": { const n = (Math.max(0, ...S.files) || 0) + 1; S.files.push(n); S.draft = `${S.draft}${S.draft && !S.draft.endsWith(" ") ? " " : ""}[Image #${n}] `; S.over = null; render(); return $("field")?.focus(); }
     case "unfile": S.files = S.files.filter((n) => n !== +el.dataset.n); S.draft = S.draft.replace(`[Image #${el.dataset.n}] `, "").replace(`[Image #${el.dataset.n}]`, ""); return render();
     case "sug": S.draft = `/${el.dataset.n}`; render(); return $("field")?.focus();
-    case "lock": S.sealed = !S.sealed; render(); if (S.sealed) glitch("comp"); return $("field")?.focus();
+    case "lock": if (!S.joined) return; S.view = "simple"; S.sealed = !S.sealed; render(); if (S.sealed) glitch("comp"); return $("field")?.focus();
     case "errx": S.error = null; return render();
     case "stop": return stop();
     case "send": if (!S.sealed && /password|密码|token|令牌|hunter2|sk-/i.test(S.draft)) { S.over = { kind: "secret" }; return render(); } return send(S.sealed);
     case "sendplain": return send(false);
     case "sendsealed": return send(true);
-    case "allow": case "deny": {
-      S.items.push({ t: "said", text: a === "allow" ? "Allowed" : "Denied", detail: `${S.card.tool} ${S.card.detail}`, tone: a === "allow" ? "ok" : "no", time: "Now" });
-      S.card = null; S.status = a === "allow" ? "busy" : "idle"; S.live = a === "allow" ? { tool: "Bash", text: "git push origin main", t0: Date.now() } : null; return render(true);
-    }
+    case "allow": return decide(true);
+    case "deny": return decide(false);
     case "pick": S.card.pick = S.card.pick === +i ? -1 : +i; S.card.other = ""; return render();
     case "submit": {
       const c = S.card, ans = c.other.trim() || c.opts[c.pick][0];
       S.items.push({ t: "said", text: "Answered", detail: ans, tone: "ok", time: "Now" });
       S.card = null; S.status = "busy"; S.live = { tool: "Edit", text: "AgentNative.swift", t0: Date.now() }; return render(true);
     }
-    case "open": S.over = null; return say("Opened on Mac");
+    case "open": S.over = null; return say(isMac() ? "Opened in Browser" : "Opened on Mac");
     case "copylink": S.over = null; return say("Link Copied");
     case "safari": S.over = null; return say("Opened in Safari");
   }
@@ -635,9 +818,21 @@ document.addEventListener("input", (e) => {
     const slash = (s) => /^\/[a-z]*$/.test(s), busyEmpty = (s) => S.status === "busy" && !S.card && !s.trim();
     if (slash(before) || slash(S.draft) || busyEmpty(before) !== busyEmpty(S.draft) || before.includes("[Image") !== S.draft.includes("[Image")) render();
   }
-  if (e.target.id === "other") { S.card.other = e.target.value; if (S.card.other) S.card.pick = -1; const b = document.querySelector("[data-a='submit']"); if (b) b.disabled = !(S.card.pick >= 0 || S.card.other.trim()); document.querySelectorAll(".opt").forEach((o) => o.classList.toggle("on", false)); }
+  if (e.target.id === "other") { S.card.other = e.target.value; if (S.card.other) S.card.pick = -1; const b = document.querySelector("[data-a='submit']"); if (b) b.disabled = !(S.card.pick >= 0 || S.card.other.trim()); if (S.card.other) document.querySelectorAll(".opt").forEach((o) => o.classList.remove("on")); }
 });
-document.addEventListener("keydown", (e) => { if (e.target.id === "field" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("go").click(); } });
+document.addEventListener("keydown", (e) => {
+  const typing = e.target.matches?.("textarea, input");
+  if (e.target.id === "field" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); return $("go").click(); }
+  if (e.target.id === "field" && e.key === "Escape" && isMac() && S.status === "busy" && !S.card) return stop();
+  // On the Mac the keyboard is the program's while a card waits (and nothing is being typed).
+  if (!isMac() || typing || !S.card || S.over) return;
+  const named = { ArrowUp: "↑", ArrowDown: "↓", Enter: "⏎", Escape: "esc", 1: "1", 2: "2", 3: "3" }[e.key];
+  if (!named) return;
+  e.preventDefault();
+  if (S.card.kind === "prompt") return key(named);
+  if (S.card.kind === "permission" && named === "⏎") return decide(true);
+  if (S.card.kind === "permission" && named === "esc") return decide(false);
+});
 // A press held on a link, or a right click: its menu.
 let hold = null;
 const linkMenu = (el) => { S.over = { kind: "link", link: el.dataset.link }; render(); };
@@ -646,21 +841,29 @@ document.addEventListener("pointerdown", (e) => { const l = e.target.closest("[d
 document.addEventListener("pointerup", () => { if (hold !== "done") clearTimeout(hold); setTimeout(() => { hold = null; }, 0); });
 document.addEventListener("click", (e) => { if (hold === "done" && e.target.closest("[data-link]")) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
 
-/* ---------- the page around the phone ---------- */
-$("presets").innerHTML = Object.entries(PRESETS).map(([k, [w]]) => `<button class="chip" role="tab" data-p="${k}">${w}</button>`).join("");
-$("toggles").innerHTML = `<button class="chip" id="tg-dark">Dark</button><button class="chip" id="tg-light">Light</button><button class="chip" id="tg-pixel">Pixel</button><button class="chip" id="tg-classic">Classic</button>`;
-$("map").innerHTML = MAP.map(([a, b, go]) => `<tr><td>${a}</td><td>${b}${go ? ` <a data-go="${go}">${PRESETS[go][0]} ›</a>` : ""}</td></tr>`).join("");
+/* ---------- the page around the device ---------- */
+$("presets").innerHTML = Object.entries(PRESETS).map(([k, p]) => `<button class="chip" role="tab" data-p="${k}">${p.w}</button>`).join("");
+const seg = (name, chips, id = "") => `<span class="seg" ${id ? `id="${id}"` : ""}><b>${name}</b><span>${chips.map(([cid, w]) => `<button class="chip" id="${cid}">${w}</button>`).join("")}</span></span>`;
+$("toggles").innerHTML = seg("DEVICE", [["tg-phone", "iPhone"], ["tg-mac", "Mac"]]) + seg("LOOK", [["tg-classic", "Classic"], ["tg-pixel", "Pixel"]])
+  + seg("APPEARANCE", [["tg-dark", "Dark"], ["tg-light", "Light"]]) + seg("PANES", [["tg-one", "One"], ["tg-two", "Two"]], "seg-panes");
+$("map").innerHTML = MAP.map(([a, b, go]) => `<tr><td>${a}</td><td>${b}${go ? ` <a data-go="${go}">${PRESETS[go].w} ›</a>` : ""}</td></tr>`).join("");
 const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
-spinTimer = setInterval(() => {
+setInterval(() => {
   tick++;
   document.querySelectorAll(".spin").forEach((el) => { el.textContent = FRAMES[tick % FRAMES.length]; });
   if (tick % 10 === 0) document.querySelectorAll("[data-t0]").forEach((el) => { el.textContent = since(+el.dataset.t0); });
 }, 100);
-flickTimer = setInterval(() => { if (!S.classic && S.status === "busy" && !S.card && Math.random() < 0.2) P.flicker($("st")); }, 1000);
-const q = new URLSearchParams(location.search), wanted = location.hash.slice(1) || q.get("s");
+setInterval(() => { if (!S.classic && S.status === "busy" && !S.card && Math.random() < 0.2) P.flicker($("st")); }, 1000);
+// `#mac-prompt`, `#permission`; in a browser also `?device=mac&look=pixel&light&view=terminal&panes=2`.
+const q = new URLSearchParams(location.search);
+let wanted = location.hash.slice(1) || q.get("s") || "live";
+if (wanted.startsWith("mac-")) { S.device = "mac"; wanted = wanted.slice(4); }
+if (q.get("device") === "mac") S.device = "mac";
 if (q.has("light")) S.dark = false;
 if (q.has("dark")) S.dark = true;
+if (q.get("look") === "pixel") S.classic = false;
 if (q.get("look") === "classic") S.classic = true;
+if (q.get("panes") === "2") S.split = true;
 load(PRESETS[wanted] ? wanted : "live");
 if (q.get("view") === "terminal") { S.view = "terminal"; render(true); }
 </script>
