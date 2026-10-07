@@ -41,6 +41,8 @@ enum TerminalsPagePreview {
         // model's default), a low, a high and the highest level, in the dark and in the light.
         try await sliders(to: file("effort-slider"), light: false)
         try await sliders(to: file("effort-slider-light"), light: true)
+        // Every level chosen in turn, at the popover's own width: how one level differs from the next.
+        try await sliders(to: file("effort-levels"), light: false, each: true)
         try await shot(to: file("terminals-create")) { $0.showCreate(folder: project) }
         try await shot(to: file("terminals-create-pane")) { model in
             model.split(.right)
@@ -200,16 +202,20 @@ enum TerminalsPagePreview {
     private static let command = "cd packages/mac-app && swift test --filter AgentsTests 2>&1 \\\n  | grep -E \"error:|Executed [0-9]+ tests\" | tail -2   # the totals\ngit status --short"
     private static let printed = "\t Executed 41 tests, with 0 failures (0 unexpected) in 0.412 (0.418) seconds\n M packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"
 
-    private static func sliders(to file: URL, light: Bool) async throws {
+    private static func sliders(to file: URL, light: Bool, each: Bool = false) async throws {
         let levels = ["low", "medium", "high", "xhigh", "max"]
         let view = VStack(alignment: .leading, spacing: 22) {
+          if each {
+            ForEach(levels, id: \.self) { level in EffortPicker(word: "Effort", levels: levels, level: level, choose: { _ in }) }
+          } else {
             EffortPicker(word: "Effort", levels: levels, level: nil, fallback: "medium", choose: { _ in }, reset: {})
             EffortPicker(word: "Effort", levels: levels, level: "low", fallback: "medium", choose: { _ in }, reset: {})
             EffortPicker(word: "Effort", levels: levels, level: "xhigh", note: "会记成这个模型的默认；Max 只用于这一次。", choose: { _ in })
             EffortPicker(word: "Effort", levels: levels, level: "max", choose: { _ in })
             EffortPicker(word: "Reasoning", levels: ["minimal", "low", "medium", "high", "xhigh", "ultra"], level: "high", enabled: false, note: "它正在等待回答，回答后再调整。", choose: { _ in })
+          }
         }
-        .frame(width: 300)
+        .frame(width: each ? 150 : 300)
         .padding(18)
         .background(Look.panel)
         .environment(\.interfaceLook, InterfaceLook.current)
