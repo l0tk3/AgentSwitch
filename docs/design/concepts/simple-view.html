@@ -67,6 +67,13 @@ header p { margin: 0; color: var(--board-dim); max-width: 68ch; font-size: 13.5p
 .docs ul, .docs ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; max-width: 70ch; }
 .docs li b, .docs p b { color: var(--board-ink); font-weight: 600; }
 .docs code, header code, .note code { font: 12px var(--mono); color: var(--board-ink); }
+.learn { display: flex; flex-direction: column; gap: 14px; max-width: 74ch; }
+.learn > div { border-left: 2px solid var(--board-line); padding-left: 12px; display: flex; flex-direction: column; gap: 3px; }
+.learn h3 { font: 600 13.5px var(--ui); margin: 0 0 1px; color: var(--board-ink); }
+.learn p { margin: 0; font-size: 13px; }
+.learn p > b:first-child { font: 600 11px var(--mono); letter-spacing: .04em; color: var(--board-ink); margin-right: 6px; }
+.src { font-size: 12px; color: var(--board-dim); }
+.src a { color: var(--board-ink); }
 .tbl { overflow-x: auto; border: 1px solid var(--board-line); background: var(--board-card); }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--board-line); }
@@ -125,9 +132,37 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .surf.classic .md a { color: var(--accent); text-decoration-color: currentColor; }
 .more { font: 12px var(--short); color: var(--ink2); align-self: flex-start; text-decoration: underline; text-underline-offset: 3px; }
 .tools { display: flex; flex-direction: column; gap: 4px; }
-.tools > button { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; font: 12px var(--short); color: var(--ink2); }
-.tools > button i { font-style: normal; color: var(--ink3); width: 10px; }
-.tools > button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a run of work: one line of what was done, what it changed beside it; the steps under it when opened */
+.wrow { display: flex; align-items: center; gap: 8px; }
+.fold { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; text-align: left; font: 12px var(--short); color: var(--ink2); }
+.fold i { font-style: normal; color: var(--ink3); width: 10px; flex: none; }
+.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold b { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.diffstat { flex: none; display: inline-flex; gap: 5px; font: 12px var(--mono); padding: 1px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); }
+.diffstat em, .stat em, .files em { font-style: normal; color: var(--green); } .diffstat s, .stat s, .files s, .call s.del { text-decoration: none; color: var(--red); }
+.call.think { color: var(--ink3); font-family: var(--ui); }
+.u.queued .bub { opacity: .55; } .u.queued time { color: var(--amber); }
+.always { align-self: flex-start; margin: -4px 12px 12px; font: 12px var(--short); color: var(--ink2); text-decoration: underline; text-underline-offset: 3px; display: block; }
+.always code { font: 12px var(--mono); }
+/* over the reply box: what is being worked through; under it: the mode, the model, how full the context is */
+.tasks { padding: 7px 16px 0; }
+.tlist { padding: 5px 0 2px 16px; display: flex; flex-direction: column; gap: 4px; font: 12.5px var(--ui); color: var(--ink2); }
+.tlist div { display: flex; gap: 8px; align-items: center; } .tlist i { font: 12px var(--mono); font-style: normal; flex: none; color: var(--ink3); display: grid; }
+.tlist .done span { color: var(--ink3); text-decoration: line-through; } .tlist .doing span { color: var(--ink); } .tlist .done i { color: var(--green); }
+.chiprow { display: flex; align-items: center; gap: 6px; margin: 7px 16px 0; font: 12px var(--short); color: var(--ink2); }
+.chiprow .sp { flex: 1; }
+.pchip { font: 12px var(--short); color: var(--ink2); padding: 2px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.pchip.bad { color: var(--red); border-color: var(--red); }
+.ctx { font-variant-numeric: tabular-nums; color: var(--ink3); }
+.box.menu.wide { min-width: 258px; } .two { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; } .two b { font-weight: 500; } .two small { font: 12px var(--ui); color: var(--ink2); }
+/* what the turn changed: the files, and the lines of the one picked */
+.veil.sheet { padding: 0 12px; } .sheetbox { width: 100%; } .sheetbox .bh .stat { font: 12px var(--mono); display: inline-flex; gap: 5px; }
+.files { display: flex; flex-direction: column; border-bottom: 1px solid var(--ink4); }
+.files button { display: flex; justify-content: space-between; gap: 10px; padding: 7px 12px; font: 12px var(--mono); text-align: left; }
+.files button.on { background: var(--raise); } .files code { font: inherit; overflow: hidden; text-overflow: ellipsis; } .files span { display: inline-flex; gap: 5px; flex: none; }
+.diff { margin: 0; font: 11.5px/1.55 var(--mono); max-height: 250px; overflow: auto; padding: 6px 0; background: var(--bg); }
+.diff span { display: block; padding: 0 12px; white-space: pre; min-width: max-content; }
+.diff .a { background: color-mix(in srgb, var(--green) 18%, transparent); } .diff .d { background: color-mix(in srgb, var(--red) 18%, transparent); } .diff .h { color: var(--ink3); padding-top: 4px; }
 .call { font: 12px/1.5 var(--short); color: var(--ink2); padding-left: 16px; overflow-wrap: anywhere; }
 .call code, .line .x.cmd { font-family: var(--mono); }
 .call b { color: var(--ink); font-weight: 500; } .call em { font-style: normal; color: var(--green); } .call s { text-decoration: none; color: var(--ink3); }
@@ -184,7 +219,13 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .surf.classic .u time { font-size: 11.5px; }
 .surf.classic .md code { border-radius: 5px; }
 .surf.classic .code { border: 0; border-radius: 10px; } .surf.classic .code button { color: var(--accent); font-size: 12px; }
-.surf.classic .tools > button { font-size: 13px; gap: 3px; } .surf.classic .tools > button i { width: 14px; display: grid; place-items: center; }
+.surf.classic .fold { font-size: 13px; gap: 3px; } .surf.classic .fold i { width: 14px; display: grid; place-items: center; }
+.surf.classic .diffstat { border: 0; background: var(--raise); border-radius: 999px; padding: 2px 9px; }
+.surf.classic .pchip { border: 0; background: var(--raise); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; gap: 3px; } .surf.classic .pchip.bad { background: color-mix(in srgb, var(--red) 16%, transparent); }
+.surf.classic .always { color: var(--accent); text-decoration: none; font-size: 13px; }
+.surf.classic .sheetbox .bh .stat { background: var(--raise); border-radius: 999px; padding: 2px 9px; font-weight: 400; }
+.surf.classic .files button { padding: 9px 16px; } .surf.classic .files { border-top: 1px solid var(--ink4); margin-top: 12px; }
+.surf.classic .diff span { padding: 0 16px; }
 .surf.classic .call { font-size: 13px; padding-left: 17px; } .surf.classic .call code { font-size: 12px; }
 .surf.classic .line { font-size: 13px; align-items: center; gap: 7px; } .surf.classic .line .x.cmd { font-size: 12px; }
 .surf.classic .line .w { font-weight: 600; } .surf.classic .line.sub { padding-left: 18px; }
@@ -380,10 +421,14 @@ textarea#field::placeholder { color: var(--ink3); }
 .surf.mac .comp { margin: 10px 0 0; } .surf.mac .comp.sealed { margin-right: 8px; }
 .surf.mac .sqb { width: 34px; height: 32px; font-size: 16px; } .surf.mac .sqb.go { font-size: 15px; }
 .surf.mac textarea#field { min-height: 32px; font-size: 13.5px; padding: 6px 10px; }
-.surf.mac .quiet, .surf.mac .err, .surf.mac .thumbs { padding-left: 0; padding-right: 0; }
+.surf.mac .quiet, .surf.mac .err, .surf.mac .thumbs, .surf.mac .tasks { padding-left: 0; padding-right: 0; }
+.surf.mac .chiprow { margin: 7px 0 0; } .surf.mac .tlist { font-size: 13px; }
+.surf.mac .veil.sheet { padding: 0; } .surf.mac .veil.sheet .box { width: min(580px, 92%); } .surf.mac .diff { max-height: 320px; font-size: 12px; }
+.surf.mac .box.menu.wide { width: 280px; }
 .surf.mac .sugs { margin-top: 8px; border: 1px solid var(--ink4); } .surf.mac .sugs button { padding: 5px 10px; }
 .surf.mac .resume { margin: 10px 0 0; display: flex; justify-content: flex-end; gap: 12px; align-items: center; } .surf.mac .resume .btn { width: auto; padding: 6px 22px; }
 .hintk { display: flex; justify-content: flex-end; gap: 12px; padding-top: 6px; font: 11px var(--short); color: var(--ink3); }
+.chiprow .hintk { padding: 0; margin-right: 10px; }
 .hintk kbd { margin: 0 4px 0 0; }
 .surf.mac .veil { padding: 0; align-items: center; } .surf.mac .veil .box { width: 340px; }
 .surf.mac .veil.low { align-items: flex-start; justify-content: flex-end; padding: 0 0 84px max(22px, calc((100% - 700px) / 2)); } .surf.mac .veil.low .box { width: 220px; }
@@ -441,7 +486,8 @@ textarea#field::placeholder { color: var(--ink3); }
       <section>
         <p class="sec">// 比接手前的记录页多了什么</p>
         <ul>
-          <li><b>回复</b>：终端页的同一个输入框——<code>+</code> 附件、<code>/</code> 命令、锁（加密发送）、像密码时先问。</li>
+          <li><b>回复</b>：终端页的同一个输入框——<code>+</code> 附件、<code>/</code> 命令、锁（加密发送）、像密码时先问；下面一行是模式、模型和上下文用量。</li>
+          <li><b>一段工作</b>：折成一行摘要（用了多久、读了几个、跑了几条、改了几个），点开看每一步；改动的统计点开是按文件的 diff；输入框上面是任务清单。</li>
           <li><b>需要你时</b>：确认卡和提问卡排在记录的末尾，答完收成一行，留在记录里。</li>
           <li><b>正在做什么</b>：末尾一行写当前的工具与已用时间，子代理另起一行；忙的时候发送键变成 <code>■</code>，按下打断。</li>
           <li><b>程序自己的界面</b>（选模型的菜单、登录、任何没被认成卡片的提问）：一张 Prompt 卡，画出屏幕最后几行，按键条自己出来，旁边 <code>Open Terminal</code>。</li>
@@ -479,12 +525,51 @@ textarea#field::placeholder { color: var(--ink3); }
         </ol>
       </section>
       <section>
-        <p class="sec">// 做的话，服务要补的</p>
+        <p class="sec">// 从 CLAUDE 与 CODEX 桌面端学到的</p>
+        <div class="learn">
+          <div><h3>怎么驱动 agent</h3>
+            <p><b>CLAUDE</b>桌面端跑的是同一个引擎，不开终端界面，收的是结构化的消息流：开头一条说明模型与可用工具，之后是一条条完整的回答、工具结果和收尾的用量；子代理的消息带上级调用的编号。确认不靠终端里的对话框，由回调来答；权限模式可以中途换。</p>
+            <p><b>CODEX</b>桌面端是 <code>codex app-server</code> 的一个客户端。对象分三层：会话、轮次、条目。条目有十九种，一个界面要画的主要是：你的话、回答、思考、计划、命令执行、文件改动、MCP 调用、搜索、子代理活动、上下文压缩。进行中有逐字的增量；确认和提问是服务端主动发来、等客户端答复的请求。</p>
+            <p><b>这一稿</b>两家都不是从终端画面里读内容的。我们也不该只靠每 10 秒取一次记录：按 agent 接各自结构化的来源，见下面“怎么实现”。</p></div>
+          <div><h3>终端和图形界面能不能同时看同一个会话</h3>
+            <p><b>CLAUDE</b>不能。<code>/desktop</code> 是把会话交给桌面端并退出终端；在桌面端 <code>/resume</code> 一个终端会话，第一步是先把终端里的关掉。同一时间只有一端在跑。能把正在跑的终端会话镜像出去的是 Remote Control，只到它自己的网页和手机端，不对第三方开放。</p>
+            <p><b>CODEX</b>能。它有一个本机的后台服务，桌面端是它的客户端；这个服务在运行时终端界面也连它（加 <code>--no-daemon</code> 才不连），<code>codex agents</code> 列出上面所有会话。协议里还有一条通知，专门说某个确认已经被处理掉了，供其余客户端收起自己的卡片。这台 Mac 上这个服务现在没有在运行。</p>
+            <p><b>这一稿</b>两个视图同时活着、随时互换，正是简略视图的前提。Codex 可以照它自己的办法做到完全同步；Claude Code 没有这样的通道，只能用 hook 加会话文件，细节少一档。</p></div>
+          <div><h3>一段工作怎么显示</h3>
+            <p><b>CLAUDE</b>记录有三档：Normal 把工具调用折成摘要、回答给全文；Thinking 再加上思考；Verbose 把每一步都列出来。</p>
+            <p><b>CODEX</b>服务端把命令解析成读文件、列目录、搜索这几类，界面可以说“读了哪个文件”而不是贴一条命令；回答分成过程中的话和最终回答。</p>
+            <p><b>这一稿</b>原来只列工具名（<code>Read ×2 · Bash</code>）。现在一段工作是一行 <code>Worked 1m 12s · Read 1 · Searched 1 · Ran 2 · Edited 1</code>，点开是每一步做了什么；<code>⋯</code> 里的 Transcript 在 Normal 与 Verbose 之间切，Verbose 全部展开并显示思考。</p></div>
+          <div><h3>改了什么</h3>
+            <p><b>CLAUDE</b>改动之后出现一个 <code>+12 -1</code> 的统计，点开是左边文件列表、右边改动的 diff 视图，可以在行上留评论。</p>
+            <p><b>CODEX</b>文件改动这一条带着每个文件的 diff，另有整轮改动的更新通知。</p>
+            <p><b>这一稿</b>新加：摘要行右边的 <code>+14 −2</code>，点开按文件看 diff。行上评论这一稿不做。</p></div>
+          <div><h3>确认与提问</h3>
+            <p><b>CLAUDE</b>Manual 模式下逐项确认，看得到 diff，逐个接受或拒绝。</p>
+            <p><b>CODEX</b>对一条命令的答复有六种：这一次同意、这个会话里都同意、同意并记成规则（以后同类不再问）、放行一条网络规则、拒绝、取消整轮。提问的每个问题带标题、选项与说明、是否可自由填写、是否是保密内容。</p>
+            <p><b>这一稿</b>确认卡新加一行 <code>Always Allow git push</code>（记成规则）。提问卡不变；标了保密的问题走加密发送。</p></div>
+          <div><h3>它忙的时候再发话</h3>
+            <p><b>CLAUDE</b>停止键立刻打断；打字回车则不打断，等当前动作做完它才读到并调整。</p>
+            <p><b>CODEX</b>协议里分开三件事：运行中插话、打断、排队。</p>
+            <p><b>这一稿</b>忙且输入框为空时发送键是停止；打了字发出去，那条消息先标 <code>Queued</code>，它读到后才算数（在 Busy 状态下发一条试试）。</p></div>
+          <div><h3>模式、模型、上下文、计划</h3>
+            <p><b>CLAUDE</b>权限模式的选择就在发送键旁边（Manual、Accept edits、Plan、Auto、Bypass permissions），按文件夹记住；计划、任务、子代理各有一块面板，后台任务面板列出子代理和后台命令。</p>
+            <p><b>CODEX</b>计划是一组带状态的步骤（未开始、进行中、完成），随轮次更新；用量通知里带上下文窗口的大小。</p>
+            <p><b>这一稿</b>新加：输入框上面一行 <code>Tasks 2/4</code>，点开是清单；输入框下面一行是模式、模型和上下文用量，模式与模型点开可换。</p></div>
+          <div><h3>只有终端里才有的界面</h3>
+            <p><b>CLAUDE</b>会在终端里打开面板的命令，在桌面端直接不可用（比如 <code>/permissions</code> 只回一句“这个环境里不可用”）。</p>
+            <p><b>这一稿</b>我们背后一直有真的终端，所以能给一张 Prompt 卡并一键切回去。这一点比它完整，保留。</p></div>
+        </div>
+        <p class="src">依据：Claude Code 桌面端文档（<a href="https://code.claude.com/docs/en/desktop" target="_blank" rel="noopener">code.claude.com/docs/en/desktop</a>）与无界面运行文档；Codex 的部分取自这台 Mac 上 codex 0.160.1 自己导出的协议定义（<code>codex app-server generate-ts</code>）和它的命令行帮助，不是转述。</p>
+      </section>
+      <section>
+        <p class="sec">// 怎么实现</p>
         <ul>
-          <li>记录现在每 10 秒取一次，每条消息截到 2000 字。简略视图要跟着终端的事件更新，并能取一条消息的全文。</li>
-          <li>“正在做什么”现在只有 Busy、Waiting 和子代理行；当前工具与命令要从会话记录的最新一条或 hook 里拿。</li>
-          <li>Prompt 卡要服务给出屏幕最后几行的文字。终端页已有整屏画面，这里只取尾部。</li>
-          <li>Claude Code、Codex、OpenCode、pi 都有会话记录，都能用；没有记录的程序只有终端视图，不显示切换。</li>
+          <li><b>Codex：连它自己的后台服务。</b>我们的服务作为又一个客户端连上去，订阅这个终端所在的会话：逐条的记录、逐字增量、确认、提问、计划、改动、用量都是现成的；回复、插话、打断各有对应的请求。终端界面照常开着，两边看到的是同一个会话。要先验证三件事：这个后台服务在这台 Mac 上现在没在运行，要弄清由谁启动、能不能由我们连；我们启动的 Codex 终端连的确实是它；这套协议目前标着 experimental，版本升级可能变。</li>
+          <li><b>Claude Code：hook 加会话文件。</b>它没有对第三方开放的实时通道。终端继续跑；状态、当前工具、确认、提问、子代理我们已经从 hook 拿到；记录改成盯着它的会话文件（边做边写），不再每 10 秒取一次，也不再把每条消息截到 2000 字。代价是没有逐字输出，一条消息写完才出现；改动要从 Edit 的输入里还原。</li>
+          <li><b>Claude Code 的另一条路：像它的桌面端那样。</b>不开终端，直接收它的消息流，逐字输出和改动都有；切到终端视图时做一次交接（一边停、另一边按会话编号接上）。细节全，但两个视图不能同时活着，切换有一两秒。建议先走上一条，这条留作以后。</li>
+          <li><b>OpenCode 与 pi。</b>OpenCode 的终端已经是经它的服务接口接的，记录与确认可以直接取；pi 经它的扩展事件。</li>
+          <li><b>Prompt 卡</b>要服务给出屏幕最后几行的文字。终端页已有整屏画面，这里只取尾部。</li>
+          <li><b>模式与模型的切换。</b>Codex 有对应的请求；Claude Code 在终端里是按键轮换模式，要靠 hook 报的当前模式来对齐，换模型是发 <code>/model</code>。这两项的可靠性要实测。</li>
         </ul>
       </section>
     </div>
@@ -501,17 +586,27 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 const EARLIER = [
   { t: "user", time: "10:12", text: "给设置加一页 Agents，四个 CLI 能装、能更新、能删。" },
   { t: "md", html: "<p>先定存放的位置：正式版留在各家的官方位置，测试版和指定版本放进 AgentSwitch 自己的版本库，互不影响。</p>" },
-  { t: "tools", calls: [{ tool: "Read", text: "docs/agents-v0.md" }, { tool: "Write", text: "AgentStore.swift", diff: "+276" }, { tool: "Bash", text: "swift test --filter AgentStoreTests", out: "14 tests, 0 failures" }] },
+  { t: "work", secs: 184, steps: [{ k: "read", text: "docs/agents-v0.md" }, { k: "write", text: "AgentStore.swift", add: 276, del: 0 }, { k: "run", text: "swift test --filter AgentStoreTests", out: "14 tests, 0 failures" }] },
 ];
 const BASE = () => [
   { t: "user", time: "10:31", text: "codex 我选了测试版，怎么好像没生效" },
   { t: "md", html: `<p>选择已经存下来了，但<b>换版本要重启服务才生效</b>。正在运行的服务拿到的仍是 ChatGPT App 里那一份：</p><pre><code>CODEX_BIN=/Applications/ChatGPT.app/…/bin/codex</code></pre><ul><li>测试版已装好，<code>codex-beta</code> 在命令行里可用。</li><li>页面顶部有 <code>Restart Service…</code>，但你是在下面那一组里选的，看不到它。</li></ul>` },
-  { t: "tools", calls: [{ tool: "Read", text: "AppModel+Agents.swift" }, { tool: "Read", text: "AgentsView.swift" }, { tool: "Bash", text: "ps eww -p 64277 | grep CODEX_BIN" }, { tool: "Edit", text: "AgentsView.swift", diff: "+14 −2" }, { tool: "Bash", text: "swift test --filter AgentsTests", out: "580 tests, 0 failures" }] },
+  { t: "work", secs: 72, steps: [
+    { k: "think", text: "提示只在页面顶部，选择发生在下面的组里。把同一条提示放到那个 agent 自己的组末尾，并写明现在用的和将要用的。" },
+    { k: "read", text: "AppModel+Agents.swift" }, { k: "search", text: "agentsNeedRestart" }, { k: "run", text: "ps eww -p 64277 | grep CODEX_BIN", out: "CODEX_BIN=/Applications/ChatGPT.app/…/bin/codex" },
+    { k: "edit", text: "AgentsView.swift", add: 14, del: 2 }, { k: "run", text: "swift test --filter AgentsTests", out: "580 tests, 0 failures" }] },
   { t: "md", clip: true, html: `<p>已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 <a data-link="docs/agents-v0.md">docs/agents-v0.md</a> §8。演示页：<a data-link="http://127.0.0.1:8765/concepts/agents.html">http://127.0.0.1:8765/concepts/agents.html</a></p>`,
     rest: `<p>顶部那一行留着作为整页的提要；两处是同一个按钮，点了先问一次，因为重启会中断正在跑的任务和已打开的终端。</p>` },
   { t: "user", time: "10:44", text: "delete 应该标红才对", images: [1] },
   { t: "md", html: "<p>改好了：换成应用里已有的红字删除按钮，禁用时变淡。正在重新构建。</p>" },
 ];
+/** What the turn changed, file by file (the diff stat opens it). */
+const CHANGES = [
+  { file: "AgentsView.swift", add: 14, del: 2, lines: [["h", "@@ AgentSection · 201"], ["c", "// A pinned version on its way has no line of its own yet."], ["a", "if model.agentsPending.contains(agent) {"], ["a", "    HStack(alignment: .center, spacing: 10) {"], ["a", "        StatusDot(level: .warning)"], ["a", "        Text(\"Applies After Restart\")"], ["a", "        Spacer(minLength: 12)"], ["a", "        Button(\"Restart Service…\", action: restart)"], ["a", "    }"], ["a", "}"], ["h", "@@ InstallRow · 268"], ["d", "Button(\"Delete…\", role: .destructive, action: delete)"], ["a", "SettingsDeleteButton(\"Delete…\", action: delete)"]] },
+  { file: "AgentText.swift", add: 9, del: 0, lines: [["h", "@@ AgentText · 44"], ["a", "public static func pendingRestart(_ report: AgentReport, chosen: AgentInstall?, applied: String?) -> String {"], ["a", "    …"], ["a", "}"]] },
+];
+const PLAN = () => [{ s: "done", t: "查清为什么没生效" }, { s: "done", t: "在 Codex 那一组里加提示" }, { s: "doing", t: "删除按钮标红" }, { s: "todo", t: "重新构建并出图" }];
+const MODES = [["Ask", "每次改文件、跑命令前都问"], ["Edits", "改文件不问，跑命令仍然问"], ["Plan", "只读，先出方案"], ["Auto", "不逐条问，由分类器把关"], ["Bypass", "一律不问"]];
 const COMMANDS = [["compact", "压缩上下文，留下摘要"], ["clear", "清空对话"], ["model", "换模型"], ["review", "审查当前改动"], ["init", "为项目写 CLAUDE.md"]];
 const KEYS = ["⏎", "⌫", "↑", "↓", "1", "2", "3", "y", "n", "esc", "tab", "⇧tab", "←", "→", "pgup", "pgdn", "^C"];
 const MODELS = [["Opus 5.5", "most capable"], ["Sonnet 5.5", "everyday tasks"], ["Haiku 4.5", "fastest"]];
@@ -519,7 +614,7 @@ const MODELS = [["Opus 5.5", "most capable"], ["Sonnet 5.5", "everyday tasks"], 
 const PRESETS = {
   preview:    { w: "Preview", n: "<b>现在已有的样子。</b>终端列表里点开一个会话：只读的记录，底部一个 <code>Resume</code>。下面各状态都是按下它之后、留在这一页上的样子。",
                 m: "<b>先看再接手。</b>Mac 上现在点以前的会话只有 <code>Resume</code> 和 <code>Delete</code>。这里点它就在这一块里打开只读的记录，底部 <code>Resume</code>，和手机上那一页一样。" },
-  live:       { w: "Busy", n: "<b>接手之后。</b>记录照旧，末尾一行写它正在做什么，子代理另起一行。忙且输入框为空时发送键是 <code>■</code>，按下打断；打了字就变回发送。",
+  live:       { w: "Busy", n: "<b>接手之后。</b>一段工作是一行摘要，右边的 <code>+14 −2</code> 点开看改动；末尾一行写它正在做什么。输入框上面是任务清单，下面是模式、模型和上下文用量。忙且输入框为空时发送键是停止；打了字发出去会先排队。",
                 m: "<b>接手之后。</b>记录排成中间一栏，输入框在这一块的底部。<code>↩</code> 发送，<code>⇧↩</code> 换行，忙的时候 <code>esc</code> 或 <code>■</code> 打断。顶栏右边的两格开关换视图；Panes 选 Two 看分屏时两种视图并排。" },
   permission: { w: "Permission", n: "<b>要你确认。</b>确认卡排在记录末尾，不盖住内容。答完收成一行，留在记录里。",
                 m: "<b>要你确认。</b>确认卡排在记录末尾，<code>⌘↩</code> 是 Allow，<code>⌘⌫</code> 是 Deny，和终端视图里那张卡片的键一样。答完收成一行。" },
@@ -535,21 +630,25 @@ const PRESETS = {
   exited:     { w: "Exited", n: "<b>程序结束了。</b>回到只读的记录，底部又是 <code>Resume</code>：和接手前是同一页。" },
 };
 const MAP = [
-  ["实时屏幕：程序画什么显示什么", "会话记录：你的话在右，回答排成 Markdown，一串工具调用折成一行、点开看每一条", "live"],
+  ["实时屏幕：程序画什么显示什么", "会话记录：你的话在右，回答排成 Markdown，一段工作折成一行摘要、点开看每一步；⋯ 里 Transcript 切 Normal / Verbose", "live"],
   ["标题：目录与 git，下面 Busy / Waiting / Exited", "相同", "live"],
   ["回复框，原样发出（Mac 上是直接打进终端）", "相同的输入框；Mac 上是这一块底部的输入框", "reply"],
   ["锁：加密发送；像密码时先问", "相同", "sealed"],
   ["+ 相机、照片、文件、粘贴图片；[Image #n] 占位与缩略图", "相同；发出后图片留在那条消息下面", "reply"],
   ["/ 列出 agent 的命令", "相同；会打开菜单的命令落到 Prompt 卡", "reply"],
-  ["确认卡 Deny / Allow，浮在屏幕上方", "排在记录末尾，答完收成一行", "permission"],
+  ["确认卡 Deny / Allow，浮在屏幕上方", "排在记录末尾，答完收成一行；另有一行 Always Allow，记成规则", "permission"],
   ["提问卡：选项、Other、Submit", "同上", "question"],
   ["手机的 17 个按键：⏎ ⌫ ↑ ↓ 1 2 3 y n esc tab ⇧tab ← → pgup pgdn ^C", "平时收起，+ 的最后一项取出；程序等按键时自己出来。Mac 用真键盘", "prompt"],
   ["打断：esc 或 ^C", "忙且输入框为空时，发送键是 ■；Mac 上 esc 也行", "live"],
+  ["它忙的时候接着打字发出去", "那条消息先标 Queued，它读到后才算数", "live"],
   ["拖动滚屏（给程序发滚轮）", "记录本身能滚；顶上 Earlier 取更早的，往回翻时出现 ↓ Latest", "live"],
   ["双指调字号（Mac：⌘+ ⌘−）", "跟随系统字号：这里是排版的文字", null],
   ["点链接在 Mac 的浏览器里打开；长按或右键：Open in Browser、Copy Link、Open in Safari", "相同（长按或右键试试）", "live"],
   ["复制屏幕上的字", "代码块右上角 Copy；消息可选中", "live"],
   ["子代理：列表里那个终端下面的行", "记录末尾一行：名字、在做什么、已用时间", "live"],
+  ["看它改了什么：在屏幕上往回翻", "摘要行右边的 +14 −2，点开按文件看 diff", "live"],
+  ["模式（⇧tab 轮换）、模型（/model）、上下文用量（状态行）", "输入框下面一行，点开可换", "live"],
+  ["任务清单：屏幕上的 todo", "输入框上面 Tasks 2/4，点开是清单", "live"],
   ["在别处使用时的占位与 Take Over", "不需要：标题里写在哪一端，看和回复都不抢窗口大小", "away"],
   ["改名、关闭（可选 Delete Record）；Mac 另有单独开窗口", "手机在 ⋯ 里，另加 Terminal View；Mac 照旧在列表那一行的菜单里", "live"],
   ["错误行、Connecting", "相同的位置", null],
@@ -559,7 +658,7 @@ const MAP = [
 
 /* ---------- state ---------- */
 const prefersDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
-const S = { preset: "live", device: "phone", view: "simple", dark: prefersDark(), classic: true, split: false };
+const S = { preset: "live", device: "phone", view: "simple", dark: prefersDark(), classic: true, split: false, verbose: false, mode: "Edits", model: "Opus 5.5" };
 let tick = 0, toastTimer = null;
 const isMac = () => S.device === "mac";
 // The classic look's own words (ClassicWords): the rest are the same in both looks.
@@ -568,7 +667,9 @@ const W = (w) => (S.classic ? CLASSIC[w] ?? w : w);
 
 function load(preset) {
   Object.assign(S, { preset, joined: preset !== "preview", status: "busy", away: null, items: BASE(), card: null, live: null, sub: null,
-    draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple" });
+    draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple",
+    plan: null, planOpen: false, ctx: 62 });
+  if (["live", "away", "permission", "question"].includes(preset)) S.plan = PLAN();
   if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
   if (preset === "away") S.away = isMac() ? "iPhone" : "Mac";
   if (preset === "permission") { S.status = "waiting"; S.card = { kind: "permission", tool: "Bash", detail: "git push origin main" }; }
@@ -617,17 +718,26 @@ const lockIcon = (px = 2) => (S.classic ? icon("lock", px * 9) : P.sprite(["..##
 function item(it, i) {
   if (it.t === "user") {
     const pics = it.images ? `<div class="pics">${it.images.map((n) => `<span class="pic"><i>#${n}</i></span>`).join("")}</div>` : "";
-    return `<div class="u"><time>${it.time}</time>${pics}<div class="bub">${esc(it.text)}</div></div>`;
+    return `<div class="u ${it.queued ? "queued" : ""}"><time>${it.queued ? "Queued" : it.time}</time>${pics}<div class="bub">${esc(it.text)}</div></div>`;
   }
   if (it.t === "md") {
     const html = it.html.replace(/<pre>/g, '<div class="code"><button data-a="copy">Copy</button><pre>').replace(/<\/pre>/g, "</pre></div>") + (it.clip ? (it.open ? it.rest : "") : "");
     return `<div class="md">${html}${it.clip && !it.open ? `<button class="more" data-a="more" data-i="${i}">Show More</button>` : ""}</div>`;
   }
-  if (it.t === "tools") {
-    const names = []; it.calls.forEach((c) => { const n = names.find((x) => x[0] === c.tool); n ? n[1]++ : names.push([c.tool, 1]); });
-    const sum = names.map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(" · ");
-    const calls = it.open ? it.calls.map((c) => `<div class="call"><b>${c.tool}</b> <code>${esc(c.text)}</code>${c.diff ? ` <em>${c.diff}</em>` : ""}${c.out ? `<br><s>${S.classic ? "" : "⎿ "}${esc(c.out)}</s>` : ""}</div>`).join("") : "";
-    return `<div class="tools"><button data-a="fold" data-i="${i}" aria-expanded="${!!it.open}"><i>${G(it.open ? "down" : "right", it.open ? "▾" : "▸", 12)}</i><span>${sum}</span></button>${calls}</div>`;
+  if (it.t === "work") {
+    // Collapsed to one line of what was done and what changed (both desktop apps do: Claude's Normal transcript,
+    // Codex's parsed commands); every step and the thinking in the verbose transcript.
+    const open = S.verbose || it.open, n = {};
+    it.steps.forEach((st) => { n[st.k] = (n[st.k] ?? 0) + 1; });
+    const parts = [["read", "Read"], ["search", "Searched"], ["run", "Ran"], ["edit", "Edited"], ["write", "Created"]].filter(([k]) => n[k]).map(([k, w]) => `${w} ${n[k]}`);
+    const add = it.steps.reduce((x, st) => x + (st.add ?? 0), 0), del = it.steps.reduce((x, st) => x + (st.del ?? 0), 0);
+    const took = it.secs >= 60 ? `${Math.floor(it.secs / 60)}m ${it.secs % 60}s` : `${it.secs}s`;
+    const stat = add || del ? `<button class="diffstat" data-a="changes" aria-label="查看改动"><em>+${add}</em><s>−${del}</s></button>` : "";
+    const verb = { read: "Read", search: "Searched", run: "Ran", edit: "Edited", write: "Created" };
+    const step = (st) => st.k === "think" ? `<div class="call think">${esc(st.text)}</div>`
+      : `<div class="call"><b>${verb[st.k]}</b> <code>${esc(st.text)}</code>${st.add != null ? ` <em>+${st.add}</em> <s class="del">−${st.del}</s>` : ""}${st.out ? `<br><s>${S.classic ? "" : "⎿ "}${esc(st.out)}</s>` : ""}</div>`;
+    const steps = open ? it.steps.filter((st) => S.verbose || st.k !== "think").map(step).join("") : "";
+    return `<div class="tools"><div class="wrow"><button class="fold" data-a="fold" data-i="${i}" aria-expanded="${!!open}"><i>${G(open ? "down" : "right", open ? "▾" : "▸", 12)}</i><span>Worked ${took} · ${parts.join(" · ")}</span></button>${stat}</div>${steps}</div>`;
   }
   if (it.t === "said") {
     const text = it.text.replace(/^(Idle|Exited)/, (w) => W(w));
@@ -644,7 +754,8 @@ function card() {
     const head = S.classic ? `${icon("warn", 17)}Approval Needed<span class="sp"></span><span class="tool">${c.tool}</span>` : `<span class="sq waiting"></span>Permission · ${c.tool}`;
     return `<div class="card" id="card"><div class="hd">${head}</div>
       <div class="bd"><div class="cmd">${esc(c.detail)}</div></div>
-      <div class="ft"><button class="btn" data-a="deny">Deny${k("⌘⌫")}</button><button class="btn pri" data-a="allow">Allow${k("⌘↩")}</button></div></div>`;
+      <div class="ft"><button class="btn" data-a="deny">Deny${k("⌘⌫")}</button><button class="btn pri" data-a="allow">Allow${k("⌘↩")}</button></div>
+      <button class="always" data-a="always">Always Allow <code>git push</code></button></div>`;
   }
   if (c.kind === "question") {
     const pick = (on) => (S.classic ? icon(on ? "radioOn" : "radio", 18) : on ? "&lt;x&gt;" : "&lt; &gt;");
@@ -682,11 +793,17 @@ function dock(noKeys) {
   const sugs = !S.sealed && /^\/[a-z]*$/.test(S.draft) ? COMMANDS.filter(([n]) => n.startsWith(S.draft.slice(1))) : [];
   const thumbs = S.files.length ? `<div class="thumbs">${S.files.map((n) => `<span class="pic"><i>#${n}</i><button data-a="unfile" data-n="${n}" aria-label="移除">${G("x", "×", 10)}</button></span>`).join("")}</div>` : "";
   const stop = S.status === "busy" && !S.card && !S.draft.trim();
+  const done = S.plan?.filter((x) => x.s === "done").length, doing = S.plan?.find((x) => x.s === "doing");
+  const pmark = (st) => (S.classic ? (st === "done" ? icon("check", 14, 2) : st === "doing" ? `<span class="ring"></span>` : icon("radio", 14)) : st === "done" ? "[x]" : st === "doing" ? "[>]" : "[ ]");
+  const tasks = S.plan && !noKeys ? `<div class="tasks"><button class="fold" data-a="plan" aria-expanded="${S.planOpen}"><i>${G(S.planOpen ? "down" : "right", S.planOpen ? "▾" : "▸", 12)}</i><b>Tasks ${done}/${S.plan.length}</b><span>${esc(doing?.t ?? "")}</span></button>
+    ${S.planOpen ? `<div class="tlist">${S.plan.map((x) => `<div class="${x.s}"><i>${pmark(x.s)}</i><span>${esc(x.t)}</span></div>`).join("")}</div>` : ""}</div>` : "";
+  const hints = !isMac() ? "" : S.classic ? `<span class="hintk"><span>Return to send</span><span>Esc to stop</span></span>` : `<span class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></span>`;
+  const chips = noKeys ? "" : `<div class="chiprow"><button class="pchip ${S.mode === "Bypass" ? "bad" : ""}" data-a="modes">${S.mode}${G("down", " ▾", 11)}</button><button class="pchip" data-a="models">${S.model}${G("down", " ▾", 11)}</button><span class="sp"></span>${hints}<span class="ctx" title="上下文用量">${S.ctx}%</span></div>`;
   const sugList = sugs.length ? `<div class="sugs">${sugs.map(([n, d]) => `<button data-a="sug" data-n="${n}"><b>/${n}</b><span>${d}</span></button>`).join("")}</div>` : "";
   return `${isMac() ? "" : sugList}
     ${S.error ? `<div class="err"><span>${esc(S.error)}</span><button data-a="errx" aria-label="关闭">${G("x", "×", 14)}</button></div>` : ""}
     ${S.away && S.view === "simple" ? `<div class="quiet">这个终端正在 ${S.away} 上使用。在这里回复不会改变它的窗口大小。</div>` : ""}
-    ${S.keys && !noKeys && !isMac() ? keysBar(true) : ""}${isMac() ? sugList : ""}${thumbs}
+    ${tasks}${S.keys && !noKeys && !isMac() ? keysBar(true) : ""}${isMac() ? sugList : ""}${thumbs}
     <div class="comp ${S.sealed ? "sealed" : ""}" id="comp">
       <div class="seal">${S.classic ? icon("lock", 15) : P.sprite(P.SQUARE, { px: 2 })}<span>${S.classic ? "Encrypt &amp; Send" : "Encrypt &amp; Send → claude"}</span><span class="sp"></span><button data-a="lock" aria-label="取消加密">${G("x", "×", 15)}</button></div>
       <div class="row"><button class="sqb" data-a="plus" aria-label="附件${isMac() ? "" : "与按键"}">${G("plus", "+", 18)}</button>
@@ -694,8 +811,8 @@ function dock(noKeys) {
         <button class="sqb lock" data-a="lock" aria-label="加密发送">${lockIcon()}</button>
         <button class="sqb go ${stop ? "stop" : ""}" data-a="${stop ? "stop" : "send"}" id="go" aria-label="${stop ? "打断" : "发送"}">${stop ? G("stop", "■", 18) : G("up", "↑", 18)}</button></div>
       <div class="sealnote">Mac 先把其中的凭据换成密文，再交给 agent。</div>
-    </div>
-    ${isMac() ? (S.classic ? `<div class="hintk"><span>Return to send</span><span>Shift-Return for a new line</span><span>Esc to stop</span></div>` : `<div class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></div>`) : ""}`;
+    </div>${chips}
+`;
 }
 
 function terminal() {
@@ -711,7 +828,19 @@ function over() {
   if (!o) return "";
   if (o.kind === "more") return `<div class="veil top" data-a="shut"><div class="box menu"><div class="ba">
     ${isMac() ? `<button data-a="window">Open in New Window<span>${G("window", "↗", 16)}</span></button>` : `<button data-a="view">${S.view === "simple" ? "Terminal View" : "Simple View"}<span>${S.view === "simple" ? G("term", "&gt;_", 18) : G("list", "≡", 18)}</span></button>`}
+    <button data-a="verbose">Transcript<span>${S.verbose ? "Verbose" : "Normal"}</span></button>
     <button data-a="rename">Rename</button><hr><button class="bad" data-a="close">Close…</button></div></div></div>`;
+  if (o.kind === "modes") return `<div class="veil low" data-a="shut"><div class="box menu wide" style="align-self:flex-start"><div class="ba">
+    ${MODES.map(([m, d]) => `<button class="${m === "Bypass" ? "bad" : ""}" data-a="mode" data-m="${m}"><span class="two"><b>${m}</b><small>${d}</small></span><span>${S.mode === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
+  if (o.kind === "models") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
+    ${MODELS.map(([m]) => `<button data-a="model" data-m="${m}">${m}<span>${S.model === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
+  if (o.kind === "changes") {
+    const f = CHANGES[o.file ?? 0], add = CHANGES.reduce((x, c) => x + c.add, 0), del = CHANGES.reduce((x, c) => x + c.del, 0);
+    return `<div class="veil sheet" data-a="shut"><div class="box sheetbox"><div class="bh">Changes<span class="sp"></span><span class="stat"><em>+${add}</em> <s>−${del}</s></span></div>
+      <div class="files">${CHANGES.map((c, i) => `<button class="${i === (o.file ?? 0) ? "on" : ""}" data-a="file2" data-i="${i}"><code>${c.file}</code><span><em>+${c.add}</em> <s>−${c.del}</s></span></button>`).join("")}</div>
+      <pre class="diff">${f.lines.map(([k, t]) => `<span class="${k}">${k === "a" ? "+" : k === "d" ? "−" : " "} ${esc(t)}</span>`).join("")}</pre>
+      <div class="ba"><button class="pri" data-a="shut">Done</button></div></div></div>`;
+  }
   if (o.kind === "plus") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
     ${isMac() ? `<button data-a="file">Choose Files…</button><button data-a="file">Paste Image<span>⌘V</span></button>` : `<button data-a="file">Camera</button><button data-a="file">Photos</button><button data-a="file">Files</button><button data-a="file">Paste Image</button><hr>
     <button data-a="keyson">Keys<span>${G("keys", "⏎ ⌫ ↑ ↓ …", 18)}</span></button>`}</div></div></div>`;
@@ -792,7 +921,7 @@ function mac() {
       ${macList()}
       <section class="mpanes"><div class="mpane">${split ? phd : ""}${first}${floats()}</div>${split ? second : ""}</section></div>
     <div class="mstatus"><span class="it"><span class="sq ok"></span>${S.classic ? "Gateway OK" : "Gateway"}</span><span class="it"><span class="sq ok"></span>iPhone</span><span class="sp"></span>
-      <span class="it">${agentMark()}${S.classic ? "Claude Code · Opus 5.5" : "Claude Code"}</span>${S.classic ? "" : `<span class="vr"></span><span>Opus 5.5</span>`}<span class="vr"></span><span>Accept Edits</span><span class="vr"></span><span>${term ? (S.classic ? "On This Mac · 104×33" : "104 × 33") : "Simple"}</span>
+      <span class="it">${agentMark()}${S.classic ? "Claude Code · Opus 5.5" : "Claude Code"}</span>${S.classic ? "" : `<span class="vr"></span><span>Opus 5.5</span>`}<span class="vr"></span><span>${S.mode}</span><span class="vr"></span><span>${term ? (S.classic ? "On This Mac · 104×33" : "104 × 33") : "Simple"}</span>
       <button class="tb" data-a="lock" title="Encrypt &amp; Send">${lockIcon(1.6)}</button></div></div>`;
 }
 
@@ -826,19 +955,25 @@ function push(it) { const b = $("body"), away = b && b.scrollHeight - b.scrollTo
 function send(sealed) {
   const text = S.draft.trim();
   if (!text) return;
-  const images = S.files.slice();
-  S.items.push({ t: "user", time: "Now", text: sealed ? text.replace(/hunter2|sk-[\w-]+/g, "enc:v1:9f3c…a1") : text, images: images.length ? images : null });
+  const images = S.files.slice(), waits = S.status === "busy" && !S.card;
+  const mine = { t: "user", time: "Now", queued: waits, text: sealed ? text.replace(/hunter2|sk-[\w-]+/g, "enc:v1:9f3c…a1") : text, images: images.length ? images : null };
+  S.items.push(mine);
   if (sealed) S.items.push({ t: "said", text: "Sealed", detail: "1 处凭据已换成密文", tone: "ok" });
   Object.assign(S, { draft: "", files: [], sealed: false, over: null, unseen: 0 });
   if (text === "/model") { S.status = "waiting"; S.card = { kind: "prompt" }; S.keys = true; S.sel = 0; render(true); return glitch("card"); }
-  S.status = "busy"; S.live = { tool: "Thinking", text: "", t0: Date.now() };
-  render(true);
-  setTimeout(() => {
-    if (S.status !== "busy" || S.live?.tool !== "Thinking") return;
-    S.live = null; S.status = "idle";
-    push({ t: "md", html: "<p>收到。（演示页到此为止：真的会话里这里是 agent 的回答。）</p>" });
-    render();
-  }, 2200);
+  const answer = () => {
+    mine.queued = false; S.status = "busy"; S.sub = null; S.live = { tool: "Thinking", text: "", t0: Date.now() };
+    render(true);
+    setTimeout(() => {
+      if (S.status !== "busy" || S.live?.tool !== "Thinking") return;
+      S.live = null; S.status = "idle"; if (S.plan) S.plan.forEach((x) => { x.s = "done"; });
+      push({ t: "md", html: "<p>收到。（演示页到此为止：真的会话里这里是 agent 的回答。）</p>" });
+      render();
+    }, 2200);
+  };
+  // Sent while it works: the message waits (`Queued`) until the action under way ends, then it is read.
+  if (waits) { render(true); return setTimeout(() => { if (mine.queued) answer(); }, 1800); }
+  answer();
 }
 function key(k) {
   if (S.card?.kind === "prompt") {
@@ -881,6 +1016,15 @@ document.addEventListener("click", (e) => {
   const at = (j) => (String(j).startsWith("e") ? EARLIER[+String(j).slice(1)] : S.items[+j]);
   switch (a) {
     case "fold": at(i).open = !at(i).open; return render();
+    case "plan": S.planOpen = !S.planOpen; return render();
+    case "changes": S.over = { kind: "changes", file: 0 }; return render();
+    case "file2": S.over = { kind: "changes", file: +i }; return render();
+    case "verbose": S.verbose = !S.verbose; S.over = null; return render();
+    case "modes": S.over = { kind: "modes" }; return render();
+    case "models": S.over = { kind: "models" }; return render();
+    case "mode": S.mode = el.dataset.m; S.over = null; return render();
+    case "model": S.model = el.dataset.m; S.over = null; return render();
+    case "always": S.items.push({ t: "said", text: "Always Allowed", detail: "git push", cmd: true, tone: "ok", time: "Now" }); S.card = null; S.status = "busy"; S.live = { tool: "Bash", text: "git push origin main", t0: Date.now() }; return render(true);
     case "more": at(i).open = true; return render();
     case "earlier": S.earlier = true; return render();
     case "copy": return say("Copied");
