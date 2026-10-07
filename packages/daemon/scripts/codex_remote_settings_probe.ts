@@ -10,7 +10,7 @@
  *  to a model, and everything it starts is stopped and removed at the end. Seen 2026-10-07 on 0.160–0.162: the footer
  *  went from "GPT-6.1-Sol default" to "GPT-6-Astra high". Not a test: it runs the real program. */
 import { spawn, execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +74,12 @@ try {
     await sleep(1500);
     console.log("notified:", short(notes.filter((n) => /settings/.test(n.method ?? "")).map((n) => ({ method: n.method, model: n.params?.threadSettings?.model, effort: n.params?.threadSettings?.effort })), 300), "others:", short([...new Set(notes.map((n) => n.method))].slice(0, 8)));
     console.log("TUI foot after:", short(foot(), 400));
+    // What it shares with any other Codex on the same home (the desktop app, another terminal): did the change go
+    // into config.toml (everyone's default), and did this server take the home's shared control socket or daemon?
+    const config = existsSync(join(home, "config.toml")) ? readFileSync(join(home, "config.toml"), "utf8") : "";
+    console.log("config.toml says of a model or effort:", short(config.split("\n").filter((l) => /^\s*(model|model_reasoning_effort)\s*=/.test(l)), 200) || "[]");
+    const held = (dir: string) => existsSync(join(home, dir)) ? readdirSync(join(home, dir)).join(" ") : "(none)";
+    console.log("home's control socket folder:", held("app-server-control"), "| daemon folder:", held("app-server-daemon"));
   } else console.log("no thread is loaded yet; notifications:", short([...new Set(notes.map((n) => n.method))].slice(0, 8)));
 } catch (e) {
   console.log("failed:", String(e), "| app-server said:", short(log.trim().split("\n").slice(-2).join(" | "), 300));
