@@ -90,6 +90,13 @@ enum TerminalsPagePreview {
                 ReplyHintRow(kind: .file, title: "PaneStageHost.swift", detail: "packages/mac-app/Sources/AgentSwitchMac/Terminals", range: range, typed: "@packages/mac-app/Sources/AgentSwitchMac/Terminals/PaneStageHost.swift "),
             ])
         }
+        // What Claude Code offers as the next message, in the empty box.
+        try await shot(to: file("terminals-record-suggestion-light"), light: true) { model in
+            stageRecord(model, working: false)
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+            model.focused?.record.stageSuggestion("跑一遍测试确认")
+        }
         try await shot(to: file("terminals-record-shell-light"), light: true) { model in
             stageRecord(model, working: false)
             PaneRecord.previewOpenStep = nil

@@ -18,6 +18,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let effort: String?
     /// How it asks now, in its own word, once anything has said (`mode` is what it was started with).
     public let modeNow: String?
+    /// What Claude Code offers as your next message, while it rests and shows one on its screen.
+    public let suggestion: String?
     public let mode: String?
     /// The list's name for it: the user's own (`customName`), else the agent's title, else the folder's.
     public let name: String
@@ -38,14 +40,16 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let subagents: [TerminalSubagent]
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, effort, modeNow, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
+        case id, harness, cwd, workdir, model, effort, modeNow, suggestion, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
              permissions, subagents
     }
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String? = nil,
                 name: String, customName: Bool = false, status: String, cols: Int? = nil, rows: Int? = nil, createdAt: Int64 = 0,
                 exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil, forked: Bool = false,
-                permissions: [TerminalRequest] = [], subagents: [TerminalSubagent] = [], effort: String? = nil, modeNow: String? = nil) {
+                permissions: [TerminalRequest] = [], subagents: [TerminalSubagent] = [], effort: String? = nil, modeNow: String? = nil,
+                suggestion: String? = nil) {
+        self.suggestion = suggestion.flatMap { $0.isEmpty ? nil : $0 }
         self.effort = effort.flatMap { $0.isEmpty ? nil : $0 }
         self.modeNow = modeNow.flatMap { $0.isEmpty ? nil : $0 }
         self.id = id
@@ -89,7 +93,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   permissions: (try? c.decodeIfPresent([TerminalRequest].self, forKey: .permissions)) ?? [],
                   subagents: (try? c.decodeIfPresent([TerminalSubagent].self, forKey: .subagents)) ?? [],
                   effort: (try? c.decodeIfPresent(String.self, forKey: .effort)) ?? nil,
-                  modeNow: (try? c.decodeIfPresent(String.self, forKey: .modeNow)) ?? nil)
+                  modeNow: (try? c.decodeIfPresent(String.self, forKey: .modeNow)) ?? nil,
+                  suggestion: (try? c.decodeIfPresent(String.self, forKey: .suggestion)) ?? nil)
     }
 
     public var running: Bool { status != "exited" }
@@ -100,7 +105,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
         TerminalInfo(id: id, harness: harness, cwd: cwd, workdir: workdir, model: model, mode: mode, name: name ?? self.name,
                      customName: customName, status: status ?? self.status, cols: cols, rows: rows, createdAt: createdAt,
                      exitCode: exitCode ?? self.exitCode, agentSessionId: agentSessionId, resumedFrom: resumedFrom, forked: forked,
-                     permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow)
+                     permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow, suggestion: suggestion)
     }
 
     /// The status bar's words for it (MainStatus.swift): agent and model, mode, grid; the lock acts while it runs.

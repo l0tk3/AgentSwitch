@@ -55,6 +55,9 @@ export type TerminalInfo = {
   /** How it asks now, in its own word (`acceptEdits`, `plan` …), once anything says: a hook call's `permission_mode`,
    *  or its screen read after a change asked for here. Null before; `mode` is what it was started with. */
   readonly modeNow: string | null;
+  /** What Claude Code offers as your next message (its prompt suggestion: dim words in its empty input), while it
+   *  rests and shows one; null otherwise. It is on its screen and nowhere else (docs/simple-view-v0.md §5.6). */
+  readonly suggestion: string | null;
   /** The thinking level it was started at, in the agent's own word; null: the agent's default. What it is at now is
    *  in its session's record (Claude Code and Codex write it with every turn). */
   readonly effort: string | null;
@@ -123,6 +126,7 @@ export type TerminalEvent =
   | { readonly type: "model"; readonly model: string }
   /** It asks in another way now (its permission mode). */
   | { readonly type: "mode"; readonly mode: string }
+  | { readonly type: "suggestion"; readonly text: string | null }
   /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
    *  (docs/simple-view-v0.md §4). */
   | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
@@ -215,6 +219,8 @@ type Chunk = { readonly seq: number; readonly data: string };
 const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
 /** How long output counts as the program answering what was just sent (echo, a mouse move, a resize), not work. */
 const ECHO_MS = 600;
+/** The screen is read for a suggestion once nothing has been drawn for this long. */
+const SUGGEST_MS = 200;
 const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
 const MAX_TITLE = 200;
 /** A split escape sequence is held this long at most, and never more than this much of it. */
@@ -329,9 +335,53 @@ export function modeOnScreen(lines: readonly string[]): ClaudeMode {
     if (line.includes("accept edits on")) return "acceptEdits";
     if (line.includes("plan mode on")) return "plan";
     if (line.includes("auto mode on")) return "auto";
-    if (line.includes("? for shortcuts")) return "default";
+    // Asking each time: "manual mode on" where its footer names the mode (seen on 2.1.292 with a status line set),
+    // its hint for the shortcuts where it names none.
+    if (line.includes("manual mode on") || line.includes("? for shortcuts")) return "default";
   }
   return "default";
+}
+
+/** One row of a screen for `suggestionOnScreen`: its text, and for each character whether it is drawn dim. */
+export type ScreenRow = { readonly text: string; readonly dim: readonly boolean[] };
+
+/** Claude Code's prompt suggestion, read off the last rows of its screen (docs/simple-view-v0.md §5.6). Its input is
+ *  the line that begins `❯ `; empty, it shows what it offers as your next message in dim letters (seen on 2.1.292,
+ *  scripts/claude_suggestion_probe.ts: `❯ ⟦add both⟧`). What you typed there is not dim, so it is never taken for one;
+ *  nor are the examples it shows before the first message (`Try "…"`). Null: no input line in these rows, an empty
+ *  one, or one with typing in it. */
+export function suggestionOnScreen(rows: readonly ScreenRow[]): string | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]!;
+    if (!/^❯[ \u00a0]/.test(row.text)) continue;
+    const said = row.text.slice(2);
+    if (!said.trim()) return null;
+    for (let x = 2; x < row.text.length; x++) if (row.text[x]!.trim() && !row.dim[x]) return null;
+    const text = said.trim().replace(/\s+/g, " ");
+    return /^Try "|^Press /.test(text) || text.length > 300 ? null : text;
+  }
+  return null;
+}
+
+/** The last `count` rows of a screen with anything on them, each with which of its characters are dim. */
+export function screenRows(term: { readonly rows: number; readonly cols: number; readonly buffer: { readonly active: import("@xterm/headless").IBuffer } }, count = 10): ScreenRow[] {
+  const buffer = term.buffer.active;
+  const out: ScreenRow[] = [];
+  for (let y = buffer.baseY + term.rows - 1; y >= buffer.baseY && out.length < count; y--) {
+    const line = buffer.getLine(y);
+    if (!line) continue;
+    let text = "";
+    const dim: boolean[] = [];
+    for (let x = 0; x < term.cols; x++) {
+      const cell = line.getCell(x);
+      if (!cell) break;
+      const chars = cell.getChars();
+      if (!chars && cell.getWidth() === 0) continue;   // the second half of a wide character
+      for (const ch of chars || " ") { text += ch; dim.push(!!cell.isDim()); }
+    }
+    if (text.trim()) out.unshift({ text: text.replace(/\s+$/, ""), dim });
+  }
+  return out;
 }
 
 export function permissionTarget(tool: string, input: unknown): string {
@@ -430,6 +480,8 @@ class Session {
   /** The model the agent says it is on now (PostModelSwitch); and one a screen asked for a moment ago. */
   modelNow: string | null = null;
   modeNow: string | null = null;
+  suggestion: string | null = null;
+  suggestTimer: NodeJS.Timeout | null = null;
   /** The level it was started at; null: the agent's own default. */
   effort: string | null = null;
   modelAsked: { readonly model: string; readonly at: number } | null = null;
@@ -721,6 +773,26 @@ export class TerminalHost {
     this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
   }
 
+  /** What Claude Code offers as the next message, looked for once its screen has been still a moment: only while
+   *  it rests (at work its input shows other things), and gone the moment it works again. */
+  private suggests(s: Session): void {
+    if (s.harness !== "claude-code") return;
+    if (s.status !== "idle") { this.suggestionIs(s, null); return; }
+    if (s.suggestTimer) clearTimeout(s.suggestTimer);
+    s.suggestTimer = setTimeout(() => {
+      s.suggestTimer = null;
+      if (s.status === "idle" && this.sessions.has(s.id)) this.suggestionIs(s, suggestionOnScreen(screenRows(s.term)));
+    }, SUGGEST_MS);
+    s.suggestTimer.unref();
+  }
+
+  private suggestionIs(s: Session, text: string | null): void {
+    if (s.suggestTimer && text === null) { clearTimeout(s.suggestTimer); s.suggestTimer = null; }
+    if (text === s.suggestion) return;
+    s.suggestion = text;
+    s.emit({ type: "suggestion", text });
+  }
+
   private modeIs(s: Session, mode: string): void {
     if (mode === s.modeNow) return;
     s.modeNow = mode;
@@ -975,7 +1047,7 @@ export class TerminalHost {
     s.chunks.push({ seq, data });
     s.bytes += data.length;
     while (s.bytes > this.o.bufferBytes && s.chunks.length > 1) s.bytes -= s.chunks.shift()!.data.length;
-    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; });
+    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); });
     s.lastOutputAt = this.o.now();
     s.emit({ type: "output", seq, data });
     // Waiting for you, it waits whatever it draws.
@@ -1077,6 +1149,7 @@ export class TerminalHost {
     s.statusSince = this.o.now();
     if (status === "idle" || status === "exited") s.activity = null;
     s.emit({ type: "status", status });
+    this.suggests(s);
     this.doing(s);
   }
 
@@ -1155,7 +1228,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

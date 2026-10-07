@@ -175,7 +175,7 @@ enum DemoData {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
-        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep"
+        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep" || screen == "simplesuggest"
         let five = ["low", "medium", "high", "xhigh", "max"]
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
@@ -186,7 +186,8 @@ enum DemoData {
                          activity: busy ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
                          statusSince: busy ? ago(41) : nil,
                          subagents: prompt || idle ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
-                                                   TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
+                                                   TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")],
+                         suggestion: screen == "simplesuggest" ? "跑一遍测试确认" : nil),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
                          createdAt: ago(900), lastOutputAt: ago(2)),
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,

@@ -153,6 +153,24 @@ enum TerminalProbe {
             } else {
                 say("hints: no reply field found")
             }
+            // What it offers as the next message (2026-10-07, user: 有的时候cli会进行回复预测，这个也做出来，按tap补全): at rest,
+            // its input line shows dim words — said in the empty box, written in by tab through the window.
+            if let box = field(window.contentView), let id = model.focused?.session?.id {
+                try? await model.client().typeIntoTerminal(id: id, text: "stop")
+                await pause(900)
+                try? await model.client().typeIntoTerminal(id: id, text: "suggest run the tests again")
+                await pause(1200)
+                say("suggestion: offered '\(record.suggestion ?? "-")' status \(model.focused?.session?.info?.status ?? "-") the box says '\(box.placeholder)'")
+                picture("simple-suggestion")
+                window.makeFirstResponder(box)
+                key(48, "\t")
+                await pause(400)
+                say("suggestion tab: draft '\(record.draft)' field '\(box.string)'")
+                box.selectAll(nil); box.insertText("", replacementRange: box.selectedRange())
+                try? await model.client().typeIntoTerminal(id: id, text: "tool")
+                await pause(900)
+                say("suggestion, at work again: offered '\(record.suggestion ?? "-")' the box says '\(box.placeholder)'")
+            }
             // A step that brought a picture back (2026-10-07, user: 这种readpng能不能展开后看到真的png内容呢).
             if let work = record.items.first(where: { $0.steps.contains { $0.images > 0 } }), let n = work.steps.firstIndex(where: { $0.images > 0 }), let session = record.sessionId {
                 let source = RecordSource(harness: record.agent, session: session, client: model.client)

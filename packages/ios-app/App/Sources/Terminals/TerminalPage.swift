@@ -393,6 +393,7 @@ struct TerminalPage: View {
     private var controls: some View {
         VStack(spacing: 0) {
             if !suggestions.isEmpty { suggestionList }
+            if let offered { offeredRow(offered) }
             if commandsMissing {
                 Text("命令补全需要更新 Mac 上的 AgentSwitch。").font(.footnote).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -750,6 +751,34 @@ struct TerminalPage: View {
         } else {
             Text("↑").font(.system(size: 18, weight: .bold, design: .monospaced))
         }
+    }
+
+    // MARK: what it offers as the next message
+
+    /// Claude Code's prompt suggestion, while it rests and the reply box is empty (docs/simple-view-v0.md §5.6).
+    private var offered: String? {
+        guard !sealing, reply.isEmpty, page.status == .idle, let text = page.suggestion, !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// One line over the reply box: a tap writes it in, yours to change or send.
+    private func offeredRow(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Theme.line.frame(height: 1)
+            Button { reply = text; replying = true } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(text).font(.subheadline).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                    LookWord("Use").mono(11).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, Theme.Space.l)
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("use suggestion")
+        }
+        .background(Theme.raised)
     }
 
     // MARK: slash commands

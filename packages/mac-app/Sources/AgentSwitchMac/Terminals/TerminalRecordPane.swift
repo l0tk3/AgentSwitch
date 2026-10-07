@@ -413,7 +413,7 @@ private struct RecordDock: View {
                 }
                 if !record.draftFiles.isEmpty { RecordDraftStrip(record: record).padding(.horizontal, 10).padding(.top, 9) }
                 ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
-                             takesFocusAtFirst: focused, label: "Reply", placeholder: stops ? "Reply · esc to Stop" : "Reply",
+                             takesFocusAtFirst: focused, label: "Reply", placeholder: placeholder(stops: stops, offered: record.suggestion ?? info?.suggestion, resting: info?.status == "idle"),
                              replace: record.replace, onKey: { record.hintKey($0) }, onCaret: { record.typing($0, caret: $1) },
                              onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
                              onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
@@ -555,6 +555,13 @@ private struct RecordDock: View {
 
     /// Claude Code's ways of asking; the one it is in checked. It changes while it rests: the service presses its ⇧Tab
     /// until its screen names the mode chosen.
+    /// What the empty box says: what Claude Code offers as your next message while it rests and offers one (tab writes
+    /// it in), else the box's own word.
+    private func placeholder(stops: Bool, offered: String?, resting: Bool) -> String {
+        if resting, let offered, !offered.isEmpty { return "\(offered)  ·  tab" }
+        return stops ? "Reply · esc to Stop" : "Reply"
+    }
+
     private func modeEntries(current: String?, resting: Bool, ended: Bool) -> [MenuEntry] {
         if ended { return [MenuEntry(title: "终端已结束", enabled: false)] }
         guard resting else { return [MenuEntry(title: "它正在工作或等待回答，结束后再切换", enabled: false)] }

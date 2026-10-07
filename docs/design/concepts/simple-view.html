@@ -746,6 +746,8 @@ const PRESETS = {
                 m: "<b>程序自己画的界面。</b>这里是 <code>/model</code> 的菜单。卡片里是屏幕最后几行，键盘这时直接给程序：点一下页面空白处，按 <code>↑</code> <code>↓</code> <code>↩</code> 试试，或者 <code>Open Terminal</code>。" },
   reply:      { w: "Reply", n: "<b>回复。</b><code>+</code> 选图后在输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令；<code>+</code> 的最后一项取出按键条。",
                 m: "<b>回复。</b><code>+</code>、粘贴或把文件拖到这一块上，输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令。" },
+  suggest:    { w: "Suggestion", n: "<b>它猜你下一句。</b>Claude Code 歇下来时有时会在自己的输入行里用暗色字写一句它猜的话。这里把它写在回复框上面一行，点一下填进回复框，可以改了再发。",
+                m: "<b>它猜你下一句。</b>Claude Code 歇下来时有时会在自己的输入行里用暗色字写一句它猜的话。这里把它写在空的回复框里，按 <code>tab</code> 填进去，可以改了再发；一打字它就让开。" },
   files:      { w: "Files", n: "<b>提到文件。</b>打 <code>@</code> 列出这个文件夹里的文件，按名字找，点一下填进去。行首的 <code>!</code> 是在它的 shell 里运行这一行，上面写一句。记录里读了图片的那一步可以点开看图。",
                 m: "<b>提到文件。</b>打 <code>@</code> 列出这个文件夹里的文件，按名字找；<code>↑</code> <code>↓</code> 选，<code>tab</code> 或 <code>↩</code> 填进去，<code>esc</code> 收起。<code>/</code> 的命令列表同样。行首的 <code>!</code> 是在它的 shell 里运行这一行。记录里读了图片的那一步可以点开看图。" },
   sealed:     { w: "Sealed", n: "<b>加密发送。</b>点锁，输入框被加密框围住，Mac 先把其中的凭据换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。",
@@ -829,7 +831,7 @@ function loadDispatch(preset) {
 function load(preset) {
   if (isDispatch()) return loadDispatch(DPRESETS[preset] ? preset : "home");
   Object.assign(S, { preset, joined: preset !== "preview", status: "busy", away: null, items: BASE(), card: null, live: null, sub: null,
-    draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple",
+    draft: "", suggest: null, files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple",
     plan: null, planOpen: false, ctx: 62 });
   if (["live", "away", "permission", "question"].includes(preset)) S.plan = PLAN();
   if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", note: "Build the release app", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
@@ -839,6 +841,7 @@ function load(preset) {
     opts: [["让官方脚本自己加", "和手动安装完全一样，会往 shell 配置里加一行"], ["只在页面上提示", "AgentSwitch 不动 shell 配置，写出要加的那一行"]], pick: -1, other: "" }; }
   if (preset === "prompt") { S.status = "waiting"; S.items.push({ t: "user", time: "10:51", text: "/model" }); S.card = { kind: "prompt" }; S.keys = true; }
   if (preset === "reply") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.files = [1]; S.draft = "[Image #1] 这一行的间距再收一点"; }
+  if (preset === "suggest") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.suggest = "跑一遍测试确认"; }
   if (preset === "files") {
     S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.draft = "看一下 @host";
     // The run of work that read a picture, open on it.
@@ -992,7 +995,10 @@ function dock(noKeys) {
   const word = S.sealed ? "" : S.draft.split(/\s/).pop();
   const files = /^@[^@]*$/.test(word) ? FILES.filter((f) => f.toLowerCase().includes(word.slice(1).toLowerCase())).slice(0, 5) : [];
   const mark = !S.sealed && S.draft.startsWith("!") ? `<div class="sugs"><div class="mark"><b>!</b><b>Shell</b><span>这一行作为命令在它的 shell 里运行，输出进入对话。</span></div></div>` : "";
+  // What Claude Code offers as your next message, while it rests and the box is empty.
+  const offered = !S.sealed && !S.draft && S.status === "idle" ? S.suggest : null;
   const sugList = sugs.length ? `<div class="sugs">${sugs.map(([n, d], k) => `<button data-a="sug" data-n="${n}" class="${k ? "" : "on"}"><b>/${n}</b><span>${d}</span>${k || !isMac() ? "" : "<kbd>tab</kbd>"}</button>`).join("")}</div>`
+    : offered && !isMac() ? `<div class="sugs"><button data-a="usesug"><span>${esc(offered)}</span><kbd>Use</kbd></button></div>`
     : files.length ? `<div class="sugs">${files.map((f, k) => `<button data-a="sugfile" data-n="${f}" class="${k ? "" : "on"}"><b>${esc(f.split("/").pop())}</b><span class="dir">${esc(f.split("/").slice(0, -1).join("/"))}</span>${k || !isMac() ? "" : "<kbd>tab</kbd>"}</button>`).join("")}</div>`
     : mark;
   return `${isMac() ? "" : sugList}
@@ -1002,7 +1008,7 @@ function dock(noKeys) {
     <div class="comp ${S.sealed ? "sealed" : ""}" id="comp">
       <div class="seal">${S.classic ? icon("lock", 15) : P.sprite(P.SQUARE, { px: 2 })}<span>${S.classic ? "Encrypt &amp; Send" : "Encrypt &amp; Send → claude"}</span><span class="sp"></span><button data-a="lock" aria-label="取消加密">${G("x", "×", 15)}</button></div>
       <div class="row"><button class="sqb" data-a="plus" aria-label="附件${isMac() ? "" : "与按键"}">${G("plus", "+", 18)}</button>
-        <textarea id="field" rows="1" placeholder="${S.sealed ? "凭据会先换成密文" : "Reply"}" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(S.draft)}</textarea>
+        <textarea id="field" rows="1" placeholder="${S.sealed ? "凭据会先换成密文" : offered && isMac() ? `${esc(offered)}  ·  tab` : "Reply"}" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(S.draft)}</textarea>
         <button class="sqb lock" data-a="lock" aria-label="加密发送">${lockIcon()}</button>
         <button class="sqb go ${stop ? "stop" : ""}" data-a="${stop ? "stop" : "send"}" id="go" aria-label="${stop ? "打断" : "发送"}">${stop ? G("stop", "■", 18) : G("up", "↑", 18)}</button></div>
       <div class="sealnote">Mac 先把其中的凭据换成密文，再交给 agent。</div>
@@ -1336,6 +1342,7 @@ document.addEventListener("click", (e) => {
     case "file": { const n = (Math.max(0, ...S.files) || 0) + 1; S.files.push(n); S.draft = `${S.draft}${S.draft && !S.draft.endsWith(" ") ? " " : ""}[Image #${n}] `; S.over = null; render(); return $("field")?.focus(); }
     case "unfile": S.files = S.files.filter((n) => n !== +el.dataset.n); S.draft = S.draft.replace(`[Image #${el.dataset.n}] `, "").replace(`[Image #${el.dataset.n}]`, ""); return render();
     case "sug": S.draft = `/${el.dataset.n} `; render(); return $("field")?.focus();
+    case "usesug": S.draft = S.suggest; render(); return $("field")?.focus();
     case "sugfile": S.draft = S.draft.replace(/@[^@\s]*$/, `@${el.dataset.n} `); render(); return $("field")?.focus();
     case "lock": if (!S.joined) return; S.view = "simple"; S.sealed = !S.sealed; render(); if (S.sealed) glitch("comp"); return $("field")?.focus();
     case "errx": S.error = null; return render();
@@ -1372,6 +1379,8 @@ document.addEventListener("keydown", (e) => {
   if (isMac() && S.card?.kind === "permission" && e.metaKey && (e.key === "Enter" || e.key === "Backspace")) { e.preventDefault(); return decide(e.key === "Enter"); }
   if (e.target.id === "field" && e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); return $("go").click(); }
   if (e.target.id === "field" && e.key === "Escape" && isMac() && S.status === "busy" && !S.card) return stop();
+  // tab in the empty box writes in what it offers.
+  if (e.target.id === "field" && e.key === "Tab" && isMac() && !S.draft && S.suggest && S.status === "idle") { e.preventDefault(); S.draft = S.suggest; render(); return $("field")?.focus(); }
   // On the Mac the keyboard is the program's while a card waits (and nothing is being typed).
   if (!isMac() || typing || !S.card || S.over) return;
   const named = { ArrowUp: "↑", ArrowDown: "↓", Enter: "⏎", Escape: "esc", 1: "1", 2: "2", 3: "3" }[e.key];

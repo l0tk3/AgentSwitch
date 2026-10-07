@@ -14,7 +14,7 @@ import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
 import { folderFiles, matchFiles } from "../src/terminals/files.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, modeOnScreen } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -548,6 +548,58 @@ describe("terminals over HTTP", () => {
     expect(terminal.some((e) => e.event === "activity" || e.event === "record")).toBe(false);
     // It draws no terminal, so it never owns the size.
     expect((await call("GET", `/terminals/${id}`)).json.terminal.sizedBy ?? null).toBeNull();
+  });
+
+  it("Claude Code's prompt suggestion is read off its screen while it rests: dim words in its empty input", async () => {
+    // 2026-10-07, user: 有的时候cli会进行回复预测，这个也做出来，按tap补全. The shape is the real screen's (2.1.292).
+    const dim = (text: string, from = 2): ScreenRow => ({ text, dim: [...text].map((_, x) => x >= from) });
+    const plain = (text: string): ScreenRow => ({ text, dim: [...text].map(() => false) });
+    const rule = plain("─".repeat(40));
+    expect(suggestionOnScreen([plain("⏺ Should I add this one too?"), rule, dim("❯ add both"), rule, plain("  ⏸ manual mode on")])).toBe("add both");
+    expect(suggestionOnScreen([rule, dim("❯\u00a0run the tests"), rule])).toBe("run the tests");
+    // Nothing offered; typing in it; an example from before the first message; no input line at all.
+    expect(suggestionOnScreen([rule, plain("❯"), rule])).toBeNull();
+    expect(suggestionOnScreen([rule, plain("❯ "), rule])).toBeNull();
+    expect(suggestionOnScreen([rule, plain("❯ add both"), rule])).toBeNull();
+    expect(suggestionOnScreen([rule, { text: "❯ add both", dim: [false, false, true, true, true, true, false, true, true, true] }, rule])).toBeNull();
+    expect(suggestionOnScreen([rule, dim('❯ Try "fix the lint errors"'), rule])).toBeNull();
+    expect(suggestionOnScreen([plain("⏺ done"), plain("  ? for shortcuts")])).toBeNull();
+    // The last input line is the one: what was sent earlier is above it.
+    expect(suggestionOnScreen([plain("❯ Read notes.md"), plain("⏺ It is a list."), rule, dim("❯ add a third item"), rule])).toBe("add a third item");
+    expect(modeOnScreen(["  ⏸ manual mode on · ← for agents"])).toBe("default");
+
+    const { cwd, base, token, call } = await start();
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    const offered = () => events.filter((e) => e.event === "suggestion").map((e) => e.data.text);
+    const info = async () => (await call("GET", `/terminals/${id}`)).json.terminal as { status: string; suggestion: string | null };
+    const say = (text: string) => call("POST", `/terminals/${id}/input`, { text, seal: false });
+    await until(() => screen().includes("fake agent ready"));
+    expect((await info()).suggestion).toBeNull();
+    // At rest, its input shows what it offers.
+    await say("suggest add both");
+    await until(() => offered().includes("add both"));
+    expect((await info()).suggestion).toBe("add both");
+    // You typed there yourself: not a suggestion.
+    await say("typed add both of them");
+    await until(() => offered().length === 2);
+    expect((await info()).suggestion).toBeNull();
+    await say("suggest run the tests");
+    await until(() => offered().length === 3);
+    // It works again: gone at once, and not read while it works.
+    await say("tool");
+    await until(async () => (await info()).status === "working");
+    await until(() => offered().length === 4);
+    await say("suggest not while it works");
+    await new Promise((r) => setTimeout(r, 500));
+    expect((await info()).suggestion).toBeNull();
+    expect(offered()).toEqual(["add both", null, "run the tests", null]);
+    // Another agent's screen is not read for one.
+    const other = (await call("POST", "/terminals", { harness: "codex", cwd })).json.terminal.id as string;
+    await call("POST", `/terminals/${other}/input`, { text: "suggest add both", seal: false });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(((await call("GET", `/terminals/${other}`)).json.terminal as { suggestion: string | null }).suggestion).toBeNull();
   });
 
   it("a reply's @: the files of the terminal's folder by name, a name that starts with what was typed first", async () => {

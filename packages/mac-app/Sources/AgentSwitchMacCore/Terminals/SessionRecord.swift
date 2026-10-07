@@ -298,6 +298,8 @@ public enum TerminalRecordEvent: Equatable, Sendable {
     case model(String)
     /// It asks in another way now (its permission mode, in its own word).
     case mode(String)
+    /// What it offers as your next message changed (nil: it offers none now).
+    case suggestion(String?)
 
     public static func decode(event: String, data: String) -> TerminalRecordEvent? {
         let bytes = Data(data.utf8)
@@ -314,6 +316,9 @@ public enum TerminalRecordEvent: Equatable, Sendable {
         case "mode":
             struct Body: Decodable { let mode: String }
             return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .mode($0.mode) }
+        case "suggestion":
+            struct Body: Decodable { let text: String? }
+            return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .suggestion($0.text.flatMap { $0.isEmpty ? nil : $0 }) }
         default:
             return nil
         }

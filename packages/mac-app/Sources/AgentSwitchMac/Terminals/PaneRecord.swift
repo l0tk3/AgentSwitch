@@ -26,6 +26,9 @@ final class PaneRecord {
     private(set) var modelNow: String?
     /// How it asks now, as the terminal's stream said or as a change asked for here left it.
     private(set) var modeNow: String?
+    /// What Claude Code offers as your next message (its prompt suggestion), while it shows one; said in the empty
+    /// reply box, taken with tab.
+    private(set) var suggestion: String?
     /// The thinking level just asked for here, until the record says one of its own.
     private(set) var effortAsked: String?
     /// A change of model or level is on its way to the agent.
@@ -132,7 +135,7 @@ final class PaneRecord {
         terminal = nil
         session = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
-        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil
+        activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil
         draft = ""
         draftFiles = []
         insert = nil
@@ -158,6 +161,8 @@ final class PaneRecord {
             modelNow = model
         case .mode(let mode):
             modeNow = mode
+        case .suggestion(let text):
+            suggestion = text
         case nil:
             // A turn began or ended: its clock starts over, and what the record holds may have moved on.
             if event == "status" { activitySince = Date(); refresh() }
@@ -248,6 +253,7 @@ final class PaneRecord {
                 try await client().typeIntoTerminal(id: terminal, text: text, files: refs)
                 guard let self else { return }
                 if self.draft == text { self.draft = ""; self.draftFiles = []; self.hinting?.cancel(); self.closeHints() }
+                self.suggestion = nil   // it was for the message before this one
                 self.error = nil
             } catch {
                 self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription
@@ -316,6 +322,11 @@ final class PaneRecord {
     func hintKey(_ key: ComposeKey) -> Bool {
         guard !hints.isEmpty else {
             if key == .escape, hintMark != nil { hintsPutAway = draft; closeHints(); return true }
+            // What it offers as your next message, in the empty box: tab writes it in, yours to change or send.
+            if key == .tab, draft.isEmpty, let suggestion {
+                replace = ReplaceRequest(range: NSRange(location: 0, length: 0), text: suggestion)
+                return true
+            }
             return false
         }
         switch key {
@@ -509,6 +520,9 @@ final class PaneRecord {
         more = true
         loaded = true
     }
+
+    /// The design preview's: what it offers as the next message.
+    func stageSuggestion(_ text: String?) { suggestion = text }
 
     /// The design preview's: the box offering rows for what is typed.
     func stageHints(_ rows: [ReplyHintRow], pick: Int = 0, mark: ReplyHints.Mark? = nil) {

@@ -82,6 +82,8 @@ final class TerminalPageModel {
     private(set) var recordRev: String?
     /// The model the agent says it is on now (Claude Code), as the stream last said; nil until it has.
     private(set) var modelNow: String?
+    /// What Claude Code offers as your next message, while it shows one: said over the empty reply box, a tap takes it.
+    private(set) var suggestion: String?
     /// A change of model is on its way to the agent.
     private(set) var changingModel = false
     /// The thinking level a screen here asked for, until a turn has run at it (the record then says).
@@ -96,6 +98,7 @@ final class TerminalPageModel {
         ownsRecord = terminal.resumedFrom == nil || terminal.forked
         self.showsScreen = showsScreen
         modelNow = terminal.modelNow
+        suggestion = terminal.suggestion
         activity = terminal.activity
         subagents = terminal.subagents
         activitySince = terminal.statusSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
@@ -244,6 +247,8 @@ final class TerminalPageModel {
             recordRev = rev
         case .model(let model):
             modelNow = model
+        case .suggestion(let text):
+            suggestion = text
         case .name(let n):
             name = n
         case .resize(_, _, let by):

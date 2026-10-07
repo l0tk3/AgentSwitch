@@ -183,6 +183,9 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(items[1].steps.map(\.note), ["Check the tree", nil])
         let busy = TerminalRecordEvent.decode(event: "activity", data: #"{"activity":{"tool":"Bash","target":"cat > x <<'EOF' …","note":"Write the patch"},"subagents":[]}"#)
         XCTAssertEqual(busy, .activity(TerminalActivity(tool: "Bash", target: "cat > x <<'EOF' …", note: "Write the patch"), []))
+        // What it offers as the next message comes and goes with its stream.
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "suggestion", data: #"{"type":"suggestion","text":"add both"}"#), .suggestion("add both"))
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "suggestion", data: #"{"type":"suggestion","text":null}"#), .suggestion(nil))
         // A step that brought pictures back says how many; one that says nothing has none.
         let steps = try JSONDecoder().decode([RecordStep].self, from: Data(#"[{"kind":"read","text":"shot.png","images":2},{"kind":"read","text":"a.ts"}]"#.utf8))
         XCTAssertEqual(steps.map(\.images), [2, 0])

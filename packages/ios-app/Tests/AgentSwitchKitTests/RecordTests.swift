@@ -75,6 +75,9 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(RecordDisplay.summary(work), "Worked 1m 12s · Read 1 · Searched 1 · Ran 2 · Edited 2 · Tools 2 · Agent 1")
         XCTAssertEqual(RecordDisplay.summary(work, running: true), "Working 1m 12s · Read 1 · Searched 1 · Ran 2 · Edited 2 · Tools 2 · Agent 1")
         XCTAssertEqual(RecordDisplay.summary(RecordItem(id: "2", kind: .work, steps: [RecordStep(kind: .list, text: "src")])), "Worked · Listed 1")
+        // What it offers as the next message comes and goes with the terminal's stream.
+        XCTAssertEqual(TerminalEvent.parse(event: "suggestion", data: #"{"type":"suggestion","text":"add both"}"#), .suggestion("add both"))
+        XCTAssertEqual(TerminalEvent.parse(event: "suggestion", data: #"{"type":"suggestion","text":null}"#), .suggestion(nil))
         // A step that brought pictures back says how many; one that says nothing has none (an older Mac).
         let steps = try? JSONDecoder().decode([RecordStep].self, from: Data(#"[{"kind":"read","text":"shot.png","images":2},{"kind":"read","text":"a.ts"}]"#.utf8))
         XCTAssertEqual(steps?.map(\.images), [2, 0])

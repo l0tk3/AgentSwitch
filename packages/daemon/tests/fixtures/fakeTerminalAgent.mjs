@@ -74,6 +74,9 @@ async function handle(line) {
     return;
   }
   if (line === "answered") { clearInterval(blink); process.stdout.write("\x1b]0;查看进程 | Codex\x07\r\nallowed\r\n"); return; }
+  // Claude Code's input line as it rests: empty, with dim words it offers as the next message, or with typing in it.
+  if (line.startsWith("suggest ")) { process.stdout.write(`❯ \x1b[2m${line.slice(8)}\x1b[22m\r\n`); return; }
+  if (line.startsWith("typed ")) { process.stdout.write(`❯ ${line.slice(6)}\r\n`); return; }
   process.stdout.write(`got: ${line}\r\n`);
 }
 

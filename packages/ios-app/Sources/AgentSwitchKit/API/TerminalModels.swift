@@ -159,6 +159,8 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     /// The model the agent says it is on now (Claude Code, each time it changes); nil until it has said, and from a Mac
     /// that does not ask it. `model` is what the terminal was started with.
     public let modelNow: String?
+    /// What Claude Code offers as your next message (its prompt suggestion), while it rests and shows one.
+    public let suggestion: String?
     /// The thinking level it was started at, in the agent's own word; nil: the agent's default.
     public let effort: String?
     /// manual · auto · bypass
@@ -186,7 +188,8 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
-                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil) {
+                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil) {
+        self.suggestion = suggestion
         self.modelNow = modelNow
         self.effort = effort
         self.id = id
@@ -213,7 +216,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, modelNow, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
+        case id, harness, cwd, workdir, model, modelNow, suggestion, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
              agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents
     }
 
@@ -225,6 +228,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         workdir = (try? c.decodeIfPresent(String.self, forKey: .workdir)).flatMap { $0 } ?? cwd
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         modelNow = try? c.decodeIfPresent(String.self, forKey: .modelNow)
+        suggestion = (try? c.decodeIfPresent(String.self, forKey: .suggestion)).flatMap { $0.isEmpty ? nil : $0 }
         effort = try? c.decodeIfPresent(String.self, forKey: .effort)
         mode = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? "manual"
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
@@ -477,6 +481,8 @@ public enum TerminalEvent: Sendable, Equatable {
     case record(rev: String)
     /// The agent is on another model now.
     case model(String)
+    /// What it offers as your next message changed (nil: it offers none now).
+    case suggestion(String?)
 
     /// The SSE frame: the event name, the JSON data. Anything unknown or broken is skipped (nil), not fatal.
     public static func parse(event: String, data: String) -> TerminalEvent? {
@@ -520,6 +526,8 @@ public enum TerminalEvent: Sendable, Equatable {
             return (obj["rev"] as? String).map { .record(rev: $0) }
         case "model":
             return (obj["model"] as? String).map { .model($0) }
+        case "suggestion":
+            return .suggestion((obj["text"] as? String).flatMap { $0.isEmpty ? nil : $0 })
         default:
             return nil
         }
