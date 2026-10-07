@@ -106,6 +106,30 @@ enum TerminalProbe {
             await pause(1500)
             say("model: now \(record.modelNow ?? "-") error \(record.error ?? "none")")
         }
+        // Split off the record (2026-10-07, user: 简略模式下我点击分屏会切回暗黑终端模式…分屏出来的也是简略模式): the new
+        // pane waits as the simple view — the window keeps its look — and a terminal started there is shown as its
+        // record. Then that pane is closed again.
+        let first = model.focusPane
+        if model.split(.right) {
+            await pause(1200)
+            say("split: panes \(model.paneList.count) focus \(model.focusPane) waiting \(model.simplePanes.sorted()) light \(model.focusedLight) window \(dressed()) head.light \(main.probeHead?.light ?? false)")
+            picture("simple-split")
+            model.showCreate(folder: model.terminals.first?.cwd)
+            await pause(600)
+            say("split, the new-terminal panel: creating \(model.creating) light \(model.focusedLight) window \(dressed())")
+            picture("simple-split-create")
+            model.start()
+            await pause(3500)
+            say("split, a terminal started there: simple \(model.focused?.simple ?? false) shows \(model.focused?.session?.info?.id.prefix(8) ?? "-") waiting \(model.simplePanes.sorted()) window \(dressed()) error '\(model.createError)'")
+            picture("simple-split-started")
+            model.closePane(model.focusPane)
+            await pause(600)
+            model.focus(pane: first, force: true)
+            await pause(600)
+            say("split closed: panes \(model.paneList.count) focus \(model.focusPane) window \(dressed())")
+        } else {
+            say("split: no room")
+        }
         // Back by the key, ⌘⇧E, as an event of the window's.
         for type in [NSEvent.EventType.keyDown, .keyUp] {
             if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [.command, .shift], timestamp: ProcessInfo.processInfo.systemUptime,

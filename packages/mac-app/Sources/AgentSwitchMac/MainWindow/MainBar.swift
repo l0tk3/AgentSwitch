@@ -83,7 +83,7 @@ struct MainWindowRoot: View {
     /// terminal and the status bar under it are of one piece with it.
     private var ground: NSColor {
         // A record in the pane in focus: the page's own ground, light or dark with the system.
-        if state.page == .terminals, head.simple { return .dispatchGround }
+        if state.page == .terminals, head.light { return .dispatchGround }
         return state.page == .terminals ? head.ground ?? state.page.ground : state.page.ground
     }
 

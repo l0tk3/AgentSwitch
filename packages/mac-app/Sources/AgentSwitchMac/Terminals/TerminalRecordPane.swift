@@ -289,8 +289,12 @@ private struct RecordNowLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
-                BrailleSpinner().foregroundStyle(Color.busy)
-                // Still going: its words are quiet, a band of light running across them.
+                // Still going: its words are quiet, a band of light running across them — and that says it, so no
+                // spinner turns beside them (2026-10-07, user: 加载图标实际上转圈圈可以去掉了，有流光特效的话). The classic
+                // look has the small picture a step of that kind has; the pixel look, its words alone.
+                if look.isClassic {
+                    Image(systemName: RecordDisplay.toolSymbol(activity?.tool)).font(.system(size: 11.5)).foregroundStyle(Look.ink2).frame(width: 16, alignment: .center)
+                }
                 HStack(spacing: 7) {
                     if let activity {
                         Text(RecordDisplay.toolWord(activity.tool)).mono(Look.size(11.5, look), weight: .semibold).lineLimit(1)
@@ -314,9 +318,15 @@ private struct RecordNowLine: View {
             }
             ForEach(subagents) { agent in
                 HStack(spacing: 7) {
-                    BrailleSpinner().foregroundStyle(Look.ink2)
-                    Text(agent.name).mono(Look.size(11.5, look), weight: .medium).foregroundStyle(Look.ink.opacity(0.8)).lineLimit(1)
-                    Text(agent.doing).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1)
+                    if look.isClassic {
+                        Image(systemName: RecordDisplay.symbol(.agent)).font(.system(size: 11.5)).foregroundStyle(Look.ink2).frame(width: 16, alignment: .center)
+                    }
+                    HStack(spacing: 7) {
+                        Text(agent.name).mono(Look.size(11.5, look), weight: .medium).lineLimit(1)
+                        Text(agent.doing).font(.system(size: Look.size(11.5, look), design: .monospaced)).lineLimit(1)
+                    }
+                    .foregroundStyle(Look.ink2)
+                    .shimmer()
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 17)

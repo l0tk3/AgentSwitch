@@ -48,6 +48,22 @@ public enum PaneZone: Equatable, Sendable {
     case side(PaneSide)
 }
 
+/// Panes that open what they come to show as its record (docs/simple-view-v0.md §5.2 “分屏”): a pane split off one
+/// that showed a record waits as the simple view too — the window keeps its look — and the terminal that lands in it
+/// is shown as its record.
+public enum SimplePanes {
+    /// After the panes changed: the terminals that take the simple view because they landed in a pane that waited for
+    /// one, and the panes still waiting (a pane no longer there waits for nothing).
+    public static func settle(waiting: Set<Int>, panes: [(id: Int, term: String?)]) -> (terminals: Set<String>, waiting: Set<Int>) {
+        var landed = Set<String>()
+        var left = Set<Int>()
+        for pane in panes where waiting.contains(pane.id) {
+            if let term = pane.term { landed.insert(term) } else { left.insert(pane.id) }
+        }
+        return (landed, left)
+    }
+}
+
 public enum TerminalPanes {
     public static let maxPanes = 4
     /// The least a pane may be, in points: about 40 × 8 cells and its header.

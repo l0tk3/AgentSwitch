@@ -4,6 +4,19 @@ import XCTest
 /// The Terminals page's split panes (docs/terminal-v0.md §1 分屏): the tree of splits, what a drop does, the lines'
 /// limits, what is kept across a restart — the web page's tests of the same rules (packages/daemon/tests/terminalPanes.test.ts).
 final class TerminalPanesTests: XCTestCase {
+    /// 2026-10-07, user: 简略模式下我点击分屏会切回暗黑终端模式…如果我在简略模式点分屏出来的也是简略模式.
+    func testAPaneSplitOffARecordWaitsAsTheSimpleViewForWhatLandsInIt() {
+        // Pane 2 was split off a record and is still empty; pane 3 too, and a terminal has just landed in it.
+        let settled = SimplePanes.settle(waiting: [2, 3, 9], panes: [(1, "t1"), (2, nil), (3, "t7")])
+        XCTAssertEqual(settled.terminals, ["t7"])
+        // Pane 2 goes on waiting; pane 3 has what it waited for; pane 9 is no longer there.
+        XCTAssertEqual(settled.waiting, [2])
+        // A pane nobody flagged changes nothing, whatever it shows.
+        let none = SimplePanes.settle(waiting: [], panes: [(1, "t1"), (2, nil)])
+        XCTAssertTrue(none.terminals.isEmpty)
+        XCTAssertTrue(none.waiting.isEmpty)
+    }
+
     private typealias P = TerminalPanes
     private func terms(_ node: PaneNode) -> [String?] { P.panes(of: node).map(\.term) }
     private let box = CGRect(x: 0, y: 0, width: 1001, height: 601)

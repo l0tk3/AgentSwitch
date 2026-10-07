@@ -49,6 +49,9 @@ extension TerminalsModel {
         let across = side == .left || side == .right
         let room = rect.map { across ? $0.width >= 2 * TerminalPanes.minWidth + TerminalPanes.gap : $0.height >= 2 * TerminalPanes.minHeight + TerminalPanes.gap } ?? false
         guard room, let made = TerminalPanes.split(layout, focusPane, side) else { say("这一块太小，无法再分。"); return false }
+        // Split off a record (or off a pane waiting as one): the new pane is the simple view too — the window keeps
+        // its look, and what lands there is shown as its record (2026-10-07, user: 简略模式下我点击分屏会切回暗黑终端模式).
+        if isLight(pane: focusPane) { simplePanes.insert(made.pane) }
         setLayout(made.root)
         focus(pane: made.pane, force: true)
         return true

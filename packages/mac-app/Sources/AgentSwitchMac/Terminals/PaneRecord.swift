@@ -324,7 +324,7 @@ final class PaneRecord {
                 try await client().setTerminalModel(id: terminal, model: id)
                 self?.error = nil
             } catch {
-                self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription
+                self?.error = Self.refused(error, busy: "它正在工作或等待回答，结束后再切换模型。")
             }
         }
     }
@@ -343,9 +343,16 @@ final class PaneRecord {
                 self?.error = nil
             } catch {
                 self?.effortAsked = was
-                self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription
+                self?.error = Self.refused(error, busy: "它正在等待回答，回答后再调整。")
             }
         }
+    }
+
+    /// Why a change was not made, as the page says it: the service's 409 (the agent is busy — the menu and the slider
+    /// say so beforehand, this is for the moment in between) in the page's own words, anything else as the service put it.
+    private static func refused(_ error: Error, busy: String) -> String {
+        if case .http(status: 409, message: _)? = error as? DaemonError { return busy }
+        return (error as? DaemonError)?.reason ?? error.localizedDescription
     }
 
     /// Types a command of the agent's own (`/model`): its picker opens on its screen.

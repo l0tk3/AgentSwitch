@@ -158,6 +158,9 @@ struct TerminalPaneView: View {
     var body: some View {
         let state = model.panes[placed.id]
         let record = state?.simple == true && state?.session != nil && !making
+        // The simple view's look: a record, and a pane that waits as one (split off a record) — its empty state and
+        // the new-terminal panel over it with it.
+        let light = model.isLight(pane: placed.id)
         VStack(spacing: 0) {
             if model.many {
                 PaneHeader(pane: placed.id, number: number, state: state, making: making, model: model)
@@ -190,8 +193,8 @@ struct TerminalPaneView: View {
             }
         }
         // A terminal's pane is the terminal's dark block whatever the window around it (a record beside it may be light).
-        .background(record ? Look.ground : Color(nsColor: model.ground))
-        .environment(\.colorScheme, record ? scheme : .dark)
+        .background(light ? Look.ground : Color(nsColor: model.ground))
+        .environment(\.colorScheme, light ? scheme : .dark)
         .simultaneousGesture(TapGesture().onEnded { if !focused { model.focus(pane: placed.id) } })
     }
 }
@@ -312,7 +315,7 @@ private struct EmptyPane: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: model.ground))
+        .background(model.isLight(pane: pane) ? Look.ground : Color(nsColor: model.ground))
         .contentShape(Rectangle())
     }
 }

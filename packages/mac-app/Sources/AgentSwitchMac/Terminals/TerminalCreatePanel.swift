@@ -36,7 +36,8 @@ struct TerminalCreatePanel: View {
             .containerRelativeFrame(.vertical, alignment: .center) { length, _ in max(length, 0) }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .background(Color(nsColor: model.ground))
+        // Over a pane of the simple view's look, the panel takes it too.
+        .background(model.focusedLight ? Look.ground : Color(nsColor: model.ground))
     }
 
     // MARK: the agent

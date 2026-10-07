@@ -100,6 +100,22 @@ public enum RecordDisplay {
         }
     }
 
+    /// The picture for what the agent is doing now, by the tool it uses: the one a step of that kind has; none in use
+    /// (it is thinking) is the thinking one.
+    public static func toolSymbol(_ tool: String?) -> String {
+        guard let tool else { return symbol(.think) }
+        switch ToolDisplay.word(tool) {
+        case "Run": return symbol(.run)
+        case "Read": return symbol(.read)
+        case "Edit": return symbol(.edit)
+        case "Search": return symbol(.search)
+        case "Web": return symbol(.web)
+        case "Agents": return symbol(.agent)
+        case "Plan": return symbol(.todo)
+        default: return symbol(.tool)
+        }
+    }
+
     /// The steps a run shows when opened: its thinking only in the verbose transcript.
     public static func shown(_ steps: [RecordStep], verbose: Bool) -> [RecordStep] {
         verbose ? steps : steps.filter { $0.kind != .think }

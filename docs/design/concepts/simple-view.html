@@ -148,7 +148,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .diffstat { flex: none; display: inline-flex; gap: 5px; font: 12px var(--mono); padding: 1px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); }
 .diffstat em, .stat em, .files em { font-style: normal; color: var(--green); } .diffstat s, .stat s, .files s, .call s.del { text-decoration: none; color: var(--red); }
 .call.think { color: var(--ink3); font-family: var(--ui); }
-.call .ki, .call button.stepfold i.ki { font-style: normal; display: inline-flex; width: 18px; margin-left: 0; vertical-align: -2px; color: var(--ink2); }
+.call .ki, .call button.stepfold i.ki, .line .ki { font-style: normal; display: inline-flex; width: 18px; margin-left: 0; vertical-align: -2px; color: var(--ink2); }
 /* still going: quiet words with a band of the ink's full colour running across them */
 .line.now .w, .line.now .x { color: transparent; background: linear-gradient(90deg, var(--ink2) 0 38%, var(--ink) 50%, var(--ink2) 62% 100%) 0 0 / 280% 100%; -webkit-background-clip: text; background-clip: text; animation: shim 1.9s linear infinite; }
 @keyframes shim { from { background-position: 100% 0; } to { background-position: 0 0; } }
@@ -185,11 +185,13 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .eslider .fill { position: absolute; left: 0; top: 0; height: 24px; width: calc(24px + var(--at) * (100% - 24px)); border-radius: 12px; overflow: hidden;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, transparent), var(--accent)); }
 .eslider.top .fill { background: linear-gradient(90deg, var(--top-deep), var(--top) 60%, color-mix(in srgb, var(--top) 82%, #fff)); }
-.eslider .fill::after { content: ""; position: absolute; inset: 0; opacity: calc(.35 + .65 * var(--at)); animation: twinkle 2.4s ease-in-out infinite alternate;
+.eslider .fill::after { content: ""; position: absolute; inset: 0; opacity: calc(.35 + .65 * var(--at)); background-size: 150px 24px;
+  animation: twinkle 2.4s ease-in-out infinite alternate, drift calc(24s - 16s * var(--at)) linear infinite;
   background: radial-gradient(1.5px 1.5px at 12% 30%, #fff, transparent), radial-gradient(1px 1px at 27% 68%, #fff, transparent), radial-gradient(1.5px 1.5px at 41% 40%, #fff, transparent),
     radial-gradient(1px 1px at 55% 72%, #fff, transparent), radial-gradient(1.5px 1.5px at 66% 26%, #fff, transparent), radial-gradient(1px 1px at 78% 58%, #fff, transparent), radial-gradient(1px 1px at 88% 34%, #fff, transparent); }
 .eslider.still .fill::after { display: none; }
 @keyframes twinkle { from { opacity: .2; } to { opacity: 1; } }
+@keyframes drift { to { background-position: 150px 0; } }
 .eslider button { position: absolute; top: 0; width: 28px; height: 24px; margin-left: -2px; left: calc(var(--k) * (100% - 24px)); }
 .eslider button::after { content: ""; position: absolute; left: 12.5px; top: 10.5px; width: 3px; height: 3px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 28%, transparent); }
 .eslider button.on::after { display: none; }
@@ -837,6 +839,7 @@ function load(preset) {
 
 /* ---------- the two looks' marks: line icons in the classic look (SF Symbols in the app), characters and sprites in the pixel one ---------- */
 const PATHS = {
+  branch: '<circle cx="6" cy="4.500" r="1.800"/><circle cx="6" cy="15.500" r="1.800"/><circle cx="14" cy="8" r="1.800"/><path d="M6 6.300v7.400M14 9.800c0 2.700-3 3.200-8 3.700"/>',
   // a kind of step, before its line in the classic look: a page read, a search, an edit, a page made
   read: '<path d="M6 2.500h5.500L15 6v11.500H6z"/><path d="M11.500 2.500V6H15M8.500 10h4M8.500 13h4"/>', search: '<circle cx="8.700" cy="8.700" r="5"/><path d="M12.500 12.500L17 17"/>',
   edit: '<path d="M4 16l1-3.600L13.600 3.800l2.600 2.600L7.600 15z"/>', write: '<path d="M6 2.500h5.500L15 6v11.500H6z"/><path d="M10.500 9.500v5M8 12h5"/>',
@@ -947,7 +950,7 @@ function body() {
     <div class="meta">${busy ? `<span style="color:var(--cyan);display:inline-flex;gap:6px;align-items:center">${spinner()}${W("Busy")}</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
     <div class="meta path">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>`;
   const earlier = S.earlier ? EARLIER.map((it, i) => item(it, "e" + i)).join("") : `<button class="earlier" data-a="earlier">${S.classic ? `${icon("upc", 13)}Earlier` : "· · ·  Earlier"}</button>`;
-  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${spinner()}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
+  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${S.classic ? `<i class="ki">${icon(sub ? "branch" : "term", 14, 1.4)}</i>` : ""}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
   const live = S.joined && !S.card ? (S.live ? now(S.live) : "") + (S.sub ? now(S.sub, true) : "") : "";
   return meta + earlier + S.items.map(item).join("") + live + card();
 }

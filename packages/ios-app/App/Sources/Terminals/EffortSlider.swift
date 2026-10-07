@@ -107,13 +107,15 @@ struct EffortSlider: View {
             inner.fill(shape, with: .linearGradient(Gradient(colors: top ? [Theme.topDeep, Theme.top, Theme.top.opacity(0.82)] : [colour.opacity(0.72), colour]),
                                                     startPoint: CGPoint(x: 0, y: mid), endPoint: CGPoint(x: fill.maxX, y: mid)))
             if moving, fill.width > thick + 6 {
-                // Stars in the filled part: more of them the higher, each twinkling at its own pace; at the highest they drift.
+                // Stars in the filled part: more of them the higher, each twinkling at its own pace and moving forward,
+                // the quicker the higher (2026-10-07, user: 里面的粒子在最高档位之前应该也会向前滚动才对; they stood
+                // still below the highest level).
                 inner.clip(to: shape)
                 let room = Double(fill.width - thick - 2)
                 for star in 0..<Int((3 + 13 * heat).rounded()) {
                     let seed = Double(star) * 12.9898 + 4.1
-                    var px = chance(seed) * room
-                    if top { px = (px + time * (3 + 5 * chance(seed * 2.3))).truncatingRemainder(dividingBy: room) }
+                    let pace = (2.5 + 7 * heat) * (0.55 + 0.9 * chance(seed * 2.3))
+                    let px = (chance(seed) * room + time * pace).truncatingRemainder(dividingBy: room)
                     let py = 4 + chance(seed * 1.7 + 3.1) * Double(thick - 8)
                     let twinkle = 0.5 + 0.5 * sin(time * (1.1 + 2.4 * chance(seed * 0.61)) + seed)
                     let radius = 0.6 + 0.9 * chance(seed * 0.37)
@@ -132,7 +134,7 @@ struct EffortSlider: View {
             let cells = max(1, Int((size.width + gap) / (cell + gap)))
             let lit = knob.map { min(cells, Int($0 / (cell + gap)) + 1) } ?? 0
             let lap = 2.8 - 1.9 * heat
-            let runner = moving && !top && lit > 1 ? Int(time.truncatingRemainder(dividingBy: lap) / lap * Double(lit)) : -1
+            let runner = moving && lit > 1 ? Int(time.truncatingRemainder(dividingBy: lap) / lap * Double(lit)) : -1
             let frame = Int(time * 9)
             let strength = firm ? 0.55 + 0.45 * heat : 0.3
             for index in 0..<cells {

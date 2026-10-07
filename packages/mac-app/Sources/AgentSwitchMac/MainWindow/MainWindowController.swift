@@ -305,7 +305,7 @@ final class MainWindowController: NSObject {
         state.show(page)
         UserDefaults.standard.set(page.rawValue, forKey: MainPage.storeKey)
         guard let window, let container else { return }
-        Self.dress(window, for: page, record: terminals?.head.simple ?? false)
+        Self.dress(window, for: page, record: terminals?.head.light ?? false)
         container.show(page)
         terminals?.onScreen = page == .terminals
         browser?.setActive(shown: page == .browser, visible: state.windowVisible)
@@ -327,10 +327,10 @@ final class MainWindowController: NSObject {
     /// The window dressed again whenever the pane in focus changes between a terminal and its record: dark for the one,
     /// the system's light or dark for the other.
     private func followRecord() {
-        withObservationTracking { _ = terminals?.head.simple } onChange: { [weak self] in
+        withObservationTracking { _ = terminals?.head.light } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, let window = self.window, self.terminals != nil else { return }
-                if self.state.page == .terminals { Self.dress(window, for: .terminals, record: self.terminals?.head.simple ?? false) }
+                if self.state.page == .terminals { Self.dress(window, for: .terminals, record: self.terminals?.head.light ?? false) }
                 self.followRecord()
             }
         }

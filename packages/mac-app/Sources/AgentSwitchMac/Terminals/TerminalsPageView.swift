@@ -24,8 +24,8 @@ struct TerminalsPageView: View {
         }
         // The terminal's dark block, in its own ground; with a record in the pane in focus, the system's light or dark,
         // and the list with it (docs/simple-view-v0.md §5.2; the window is dressed the same way).
-        .background(model.focusedSimple ? Look.ground : Color(nsColor: model.ground))
-        .modifier(DarkUnlessRecord(record: model.focusedSimple))
+        .background(model.focusedLight ? Look.ground : Color(nsColor: model.ground))
+        .modifier(DarkUnlessRecord(record: model.focusedLight))
         .tint(.brand)
         .followsWindow()
     }

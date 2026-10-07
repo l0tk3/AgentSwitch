@@ -193,6 +193,14 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(Set(kinds.map(RecordDisplay.symbol)).count, kinds.count)
         XCTAssertEqual(RecordDisplay.symbol(.run), "terminal")
         XCTAssertEqual(RecordDisplay.symbol(.web), "globe")
+        // What it is doing now has the picture of the step it will be; thinking, the thinking one.
+        XCTAssertEqual(RecordDisplay.toolSymbol("Bash"), "terminal")
+        XCTAssertEqual(RecordDisplay.toolSymbol("MultiEdit"), "pencil")
+        XCTAssertEqual(RecordDisplay.toolSymbol("WebSearch"), "globe")
+        XCTAssertEqual(RecordDisplay.toolSymbol("Agent"), RecordDisplay.symbol(.agent))
+        XCTAssertEqual(RecordDisplay.toolSymbol("TodoWrite"), RecordDisplay.symbol(.todo))
+        XCTAssertEqual(RecordDisplay.toolSymbol("mcp__browser__browser_click"), RecordDisplay.symbol(.tool))
+        XCTAssertEqual(RecordDisplay.toolSymbol(nil), RecordDisplay.symbol(.think))
 
         typealias R = ShellHighlight.Run
         // The word each command begins with, what is quoted, a here-document's body, a comment.

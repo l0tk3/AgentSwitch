@@ -67,6 +67,9 @@ final class TerminalsModel {
     /// The terminals shown as their session's record here (docs/simple-view-v0.md §1). The Mac opens a terminal as the
     /// terminal; one switched to the record stays so until switched back, or until it is gone.
     private(set) var simpleViews: Set<String> { didSet { defaults?.set(simpleViews.sorted(), forKey: Keys.simple) } }
+    /// Panes that wait as the simple view: split off a pane that showed a record, and nothing in them yet. What lands
+    /// in one is shown as its record (`SimplePanes`).
+    var simplePanes: Set<Int> { didSet { defaults?.set(simplePanes.sorted(), forKey: Keys.simplePanes) } }
 
     // MARK: the list
     var sideClosed: Bool { didSet { defaults?.set(sideClosed, forKey: Keys.sideClosed) } }
@@ -136,7 +139,7 @@ final class TerminalsModel {
         static let sideWidth = "terminals.sideWidth", sideClosed = "terminals.sideClosed"
         static let agent = "terminals.agent", models = "terminals.models", mode = "terminals.mode", folder = "terminals.folder"
         static let efforts = "terminals.efforts"
-        static let simple = "terminals.simple"
+        static let simple = "terminals.simple", simplePanes = "terminals.simplePanes"
     }
 
     enum Side {
@@ -159,6 +162,7 @@ final class TerminalsModel {
         pickedModels = defaults?.dictionary(forKey: Keys.models) as? [String: String] ?? [:]
         pickedEfforts = defaults?.dictionary(forKey: Keys.efforts) as? [String: String] ?? [:]
         simpleViews = Set(defaults?.stringArray(forKey: Keys.simple) ?? [])
+        simplePanes = Set((defaults?.array(forKey: Keys.simplePanes) as? [Int]) ?? [])
         pickedMode = defaults?.string(forKey: Keys.mode) ?? ""
         folderText = defaults?.string(forKey: Keys.folder) ?? ""
         if let root = TerminalPanes.restore(defaults?.data(forKey: Keys.panes)) {
@@ -324,6 +328,12 @@ final class TerminalsModel {
     /// them their hold on the size).
     func syncPanes() {
         let all = paneList
+        // A terminal that landed in a pane waiting as the simple view is shown as its record.
+        if !simplePanes.isEmpty {
+            let settled = SimplePanes.settle(waiting: simplePanes, panes: all.map { pane in (pane.id, terminal(pane.term).flatMap { here($0.id) ? $0.id : nil }) })
+            if !settled.terminals.isSubset(of: simpleViews) { simpleViews.formUnion(settled.terminals) }
+            if settled.waiting != simplePanes { simplePanes = settled.waiting }
+        }
         for pane in all {
             let state = panes[pane.id] ?? makePane(pane.id)
             let shown = terminal(pane.term).flatMap { here($0.id) ? $0 : nil }
@@ -429,8 +439,17 @@ final class TerminalsModel {
         return await withCheckedContinuation { sheetDone = $0 }
     }
 
-    /// The pane in focus shows its terminal's record: the window takes the system's light or dark with it.
+    /// The pane in focus shows its terminal's record (its keys are the record's: esc stops the agent, ⌘⇧E goes back).
     var focusedSimple: Bool { !creating && (focused?.simple ?? false) && focused?.session != nil }
+
+    /// A pane of the simple view's look — the system's light or dark, where a terminal's pane is its dark block: one
+    /// that shows a record (also while the new-terminal panel is over it), and one that waits as the simple view.
+    func isLight(pane id: Int) -> Bool {
+        (panes[id]?.simple == true && panes[id]?.session != nil) || simplePanes.contains(id)
+    }
+
+    /// The window takes that look with the pane in focus.
+    var focusedLight: Bool { isLight(pane: focusPane) }
 
     /// The terminal of `pane` (the one in focus) as its record, or as the terminal again.
     func setSimple(_ on: Bool, pane: Int? = nil) {

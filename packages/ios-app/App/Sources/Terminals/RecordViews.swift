@@ -266,6 +266,7 @@ struct DiffStat: View {
 
 /// What it is doing now: the tool, what on, and for how long; each sub-agent on a line of its own under it.
 struct NowLine: View {
+    @Environment(\.interfaceLook) private var look
     let activity: TerminalActivity?
     let subagents: [TerminalSubagent]
     /// When this began (the activity, else the turn).
@@ -274,8 +275,12 @@ struct NowLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
-                BrailleSpinner()
-                // Still going: its words are quiet, a band of light running across them.
+                // Still going: its words are quiet, a band of light running across them — and that says it, so no
+                // spinner turns beside them (2026-10-07, user: 加载图标实际上转圈圈可以去掉了，有流光特效的话). The classic
+                // look has the small picture a step of that kind has; the pixel look, its words alone.
+                if look.isClassic {
+                    Image(systemName: RecordDisplay.toolSymbol(activity?.tool)).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20, alignment: .center)
+                }
                 HStack(spacing: 7) {
                     if let activity {
                         Text(ToolDisplay.word(activity.tool)).mono(12, weight: .semibold).lineLimit(1)
@@ -299,9 +304,15 @@ struct NowLine: View {
             }
             ForEach(subagents) { agent in
                 HStack(spacing: 7) {
-                    BrailleSpinner(color: .secondary)
-                    Text(agent.name).mono(12, weight: .medium).foregroundStyle(Theme.ink.opacity(0.8)).lineLimit(1)
-                    Text(agent.doing).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                    if look.isClassic {
+                        Image(systemName: RecordDisplay.symbol(.agent)).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20, alignment: .center)
+                    }
+                    HStack(spacing: 7) {
+                        Text(agent.name).mono(12, weight: .medium).lineLimit(1)
+                        Text(agent.doing).font(.caption.monospaced()).lineLimit(1)
+                    }
+                    .foregroundStyle(Theme.secondaryInk)
+                    .shimmer()
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 18)

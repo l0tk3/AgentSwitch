@@ -153,6 +153,8 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
         if head.tag != mark.tag { head.tag = mark.tag }
         let simple = model.focusedSimple
         if head.simple != simple { head.simple = simple }
+        let light = model.focusedLight
+        if head.light != light { head.light = light }
         var context = terminal == nil ? nil : session?.context
         context?.simple = simple
         if head.context != context { head.context = context }

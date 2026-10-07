@@ -272,6 +272,16 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(Set(kinds.map(RecordDisplay.symbol)).count, kinds.count)
         XCTAssertEqual(RecordDisplay.symbol(.run), "terminal")
         XCTAssertEqual(RecordDisplay.symbol(.web), "globe")
+        // What it is doing now has the picture of the step it will be; thinking, the thinking one.
+        XCTAssertEqual(RecordDisplay.toolSymbol("Bash"), "terminal")
+        XCTAssertEqual(RecordDisplay.toolSymbol("MultiEdit"), "pencil")
+        XCTAssertEqual(RecordDisplay.toolSymbol("WebSearch"), "globe")
+        XCTAssertEqual(RecordDisplay.toolSymbol("Agent"), RecordDisplay.symbol(.agent))
+        XCTAssertEqual(RecordDisplay.toolSymbol("TodoWrite"), RecordDisplay.symbol(.todo))
+        // The browser's tools read as the web here (ToolDisplay's word for them); any other tool is a tool.
+        XCTAssertEqual(RecordDisplay.toolSymbol("mcp__browser__browser_click"), "globe")
+        XCTAssertEqual(RecordDisplay.toolSymbol("mcp__github__create_issue"), RecordDisplay.symbol(.tool))
+        XCTAssertEqual(RecordDisplay.toolSymbol(nil), RecordDisplay.symbol(.think))
 
         typealias R = ShellHighlight.Run
         XCTAssertEqual(ShellHighlight.runs("cd /a && git commit -F - <<'EOF'\nfix: it\nEOF\ngit log 2>&1 | head -1 # last"),

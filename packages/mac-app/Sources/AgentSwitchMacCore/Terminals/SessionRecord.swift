@@ -432,6 +432,22 @@ public enum RecordDisplay {
         }
     }
 
+    /// The picture for what the agent is doing now, by the tool it uses: the one a step of that kind has; none in use
+    /// (it is thinking) is the thinking one.
+    public static func toolSymbol(_ tool: String?) -> String {
+        guard let tool else { return symbol(.think) }
+        switch toolWord(tool) {
+        case "Run": return symbol(.run)
+        case "Read": return symbol(.read)
+        case "Edit": return symbol(.edit)
+        case "Search": return symbol(.search)
+        case "Web": return symbol(.web)
+        case "Agent": return symbol(.agent)
+        case "Tasks": return symbol(.todo)
+        default: return symbol(.tool)
+        }
+    }
+
     /// A step that names a file (shown by the end of its path) rather than a command or a query.
     public static func namesFile(_ step: RecordStep) -> Bool { [.read, .edit, .write, .list].contains(step.kind) }
 
