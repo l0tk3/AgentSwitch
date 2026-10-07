@@ -57,6 +57,12 @@ public enum LiveLook {
         }
     }
 
+    /// What one side of the camera may take in the expanded island, in points: the narrowest it is on a phone with an
+    /// island, with a little to spare (about 110 on a 402 pt phone, measured from a screenshot of an iPhone 17 Pro).
+    public static let islandSide: CGFloat = 104
+    /// The expanded island's clock: room for `1:02:25` in either look's 13 pt digits.
+    public static let islandClock: CGFloat = 57
+
     /// A tap opens what matters most: the task or terminal waiting for you, the newest task, or the one that ended last.
     public static func link(_ state: LiveState) -> URL? {
         state.lead?.link ?? state.ended.map { LiveLink.task($0.taskId) }
@@ -239,21 +245,25 @@ struct BusyRing: View {
 }
 
 /// Counts up from `since` on its own, also while the app is suspended. A timer text reserves room for its longest
-/// form, so it gets a fixed width and trailing alignment rather than growing into a clipped corner.
+/// form, so it gets a fixed width and an edge to keep to rather than growing into a clipped corner: the trailing
+/// edge at the end of a row, the leading one after a mark.
 public struct LiveClock: View {
     let since: Date
     let width: CGFloat
+    let leading: Bool
 
-    public init(since: Date, width: CGFloat = 52) {
+    public init(since: Date, width: CGFloat = 52, leading: Bool = false) {
         self.since = since
         self.width = width
+        self.leading = leading
     }
 
     public var body: some View {
         Text(timerInterval: since...Date.distantFuture, countsDown: false)
             .monospacedDigit()
-            .multilineTextAlignment(.trailing)
-            .frame(width: width, alignment: .trailing)
+            .lineLimit(1)
+            .multilineTextAlignment(leading ? .leading : .trailing)
+            .frame(width: width, alignment: leading ? .leading : .trailing)
     }
 }
 
@@ -411,31 +421,41 @@ public struct IslandCompactTrailing: View {
     }
 }
 
-/// Expanded island, left of the camera: the mark alone (a word would run under the camera).
+/// Expanded island, left of the camera: the mark, and how long the lead has run (a terminal: has waited).
+///
+/// Each side of the camera is about 110 pt wide on a 402 pt phone and what does not fit is cut off (2026-10-07, user:
+/// 灵动岛有点遮挡问题 — `Working` had lost the start of its W): the word and the clock together are wider than that
+/// (`Needs You` with a clock by 8 pt and more), so each has a side of its own. `LiveLook.islandSide` is what either
+/// side may take; LiveRenderTests measures both against it.
 public struct IslandLeading: View {
-    let state: LiveState
-    public init(state: LiveState) { self.state = state }
-
-    public var body: some View {
-        LiveMark(state: state).padding(.leading, 8).padding(.top, 2).environment(\.liveClassic, state.isClassic)
-    }
-}
-
-/// Expanded island, right of the camera: the status word and how long the lead has run (a terminal: has waited).
-public struct IslandTrailing: View {
     let state: LiveState
     public init(state: LiveState) { self.state = state }
 
     public var body: some View {
         let classic = state.isClassic
         HStack(spacing: 8) {
-            Text(LiveLook.word(state)).font(LiveLook.mono(13, .semibold, classic: classic)).foregroundStyle(LiveLook.tint(state)).lineLimit(1).fixedSize()
+            LiveMark(state: state)
             if let lead = state.lead {
-                LiveClock(since: lead.startedAt, width: 44).font(LiveLook.mono(13, .medium, classic: classic)).foregroundStyle(LiveLook.secondary)
+                // Wide enough for hours (`1:02:25`), so it is never cut between two updates; it keeps to the mark.
+                LiveClock(since: lead.startedAt, width: LiveLook.islandClock, leading: true)
+                    .font(LiveLook.mono(13, .medium, classic: classic)).foregroundStyle(LiveLook.secondary)
             }
         }
-        .padding(.trailing, 8).padding(.top, 2)
+        .padding(.leading, 8).padding(.top, 2)
         .environment(\.liveClassic, classic)
+    }
+}
+
+/// Expanded island, right of the camera: the status word alone.
+public struct IslandTrailing: View {
+    let state: LiveState
+    public init(state: LiveState) { self.state = state }
+
+    public var body: some View {
+        let classic = state.isClassic
+        Text(LiveLook.word(state)).font(LiveLook.mono(13, .semibold, classic: classic)).foregroundStyle(LiveLook.tint(state)).lineLimit(1).fixedSize()
+            .padding(.trailing, 8).padding(.top, 2)
+            .environment(\.liveClassic, classic)
     }
 }
 

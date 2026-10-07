@@ -54,7 +54,7 @@ h1 { font: 700 15px var(--mono); margin: 0 0 8px; }
 .island .cam { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 126px; height: 37px; border-radius: 19px; background: #000; }
 .island .cam .lens { --lens-shift: 36px; }
 .island .top { height: 37px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.island .top .l { display: flex; align-items: center; padding-left: 2px; }
+.island .top .l { display: flex; align-items: center; gap: 8px; padding-left: 2px; }
 .island .top .r { display: flex; align-items: center; gap: 8px; }
 .word { font: 600 13px var(--mono); letter-spacing: .01em; }
 .clock { font: 500 13px var(--mono); color: var(--ink2); font-variant-numeric: tabular-nums; }
@@ -168,8 +168,9 @@ function compact(s) {
 function expanded(s) {
   const lead = s.rows?.[0];
   const n = (s.w ?? 0) + (s.r ?? 0);
-  // Left of the camera only the mark (a word would run under it); the state's word and the clock on the right.
-  const top = `<div class="top"><span class="l">${mark(s.st)}</span><span class="r"><span class="word" style="color:${TINT[s.st]}">${WORD[s.st]}</span>${lead ? `<span class="clock">${lead.clock}</span>` : ""}</span></div>`;
+  // Left of the camera the mark and the clock; right of it the state's word alone. Each side is about 110 pt on the
+  // phone and cut there: the word and the clock together do not fit one side (2026-10-07).
+  const top = `<div class="top"><span class="l">${mark(s.st)}${lead ? `<span class="clock">${lead.clock}</span>` : ""}</span><span class="r"><span class="word" style="color:${TINT[s.st]}">${WORD[s.st]}</span></span></div>`;
   if (s.ended) {
     return `<div class="island"><div class="cam"><span class="lens"></span></div>${top}
       <div class="title">${esc(s.ended.title)}</div>

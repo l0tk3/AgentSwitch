@@ -77,6 +77,28 @@ final class LiveRenderTests: XCTestCase {
         XCTAssertTrue(classic.isClassic)
     }
 
+    /// Either side of the camera is cut at its edge on the phone: what each holds fits, in every state and both looks
+    /// (2026-10-07, user: 灵动岛有点遮挡问题).
+    @MainActor func testWhatIsBesideTheCameraFitsItsSide() {
+        for (name, state) in Self.states + Self.states.map({ ("\($0.0)-classic", $0.1.looking(classic: true)) }) {
+            let leading = NSHostingView(rootView: IslandLeading(state: state)).fittingSize.width
+            let trailing = NSHostingView(rootView: IslandTrailing(state: state)).fittingSize.width
+            XCTAssertLessThanOrEqual(leading, LiveLook.islandSide, "\(name): left of the camera")
+            XCTAssertLessThanOrEqual(trailing, LiveLook.islandSide, "\(name): right of the camera")
+        }
+        // The longest words there are, whatever the states above happen to hold.
+        for word in ["Needs You", "Incomplete", "Working", "Waiting"] {
+            for mono in [false, true] {
+                let font = mono ? NSFont.monospacedSystemFont(ofSize: 13, weight: .semibold) : NSFont.systemFont(ofSize: 13, weight: .semibold)
+                XCTAssertLessThanOrEqual((word as NSString).size(withAttributes: [.font: font]).width + 8, LiveLook.islandSide, word)
+            }
+        }
+        // The clock's room holds an hour and more in either look's digits.
+        for font in [NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium), NSFont.monospacedSystemFont(ofSize: 13, weight: .medium)] {
+            XCTAssertLessThanOrEqual(("8:88:88" as NSString).size(withAttributes: [.font: font]).width, LiveLook.islandClock)
+        }
+    }
+
     func testRenderEveryStateForALook() throws {
         let dir = try renderDir()
         // Each state in the pixel look, then in the classic one (`…-classic`).
@@ -92,15 +114,16 @@ final class LiveRenderTests: XCTestCase {
 }
 
 /// The expanded island as WidgetKit lays it out: leading and trailing beside the camera, the bottom across; black,
-/// with rounded ends.
+/// with rounded ends. Each side is as wide as the phone gives it and cut there, as on the phone: drawn with all the
+/// room there was, the pictures showed a word and a clock the phone had no room for.
 private struct ExpandedIsland: View {
     let state: LiveState
     var body: some View {
         VStack(spacing: 6) {
-            HStack(alignment: .center) {
-                IslandLeading(state: state)
-                Spacer(minLength: 120)   // the camera
-                IslandTrailing(state: state)
+            HStack(alignment: .center, spacing: 0) {
+                IslandLeading(state: state).frame(width: Self.side, alignment: .leading).clipped()
+                Spacer(minLength: 0)   // the camera
+                IslandTrailing(state: state).frame(width: Self.side, alignment: .trailing).clipped()
             }
             .frame(height: 36)
             IslandBottom(state: state, linked: false)
@@ -110,6 +133,9 @@ private struct ExpandedIsland: View {
         .background(.black, in: RoundedRectangle(cornerRadius: 44, style: .continuous))
         .padding(12)
     }
+
+    /// One side of the camera on a 402 pt phone (an iPhone 17 Pro's screenshot, 2026-10-07).
+    static let side: CGFloat = 110
 }
 
 private struct CompactIsland: View {
