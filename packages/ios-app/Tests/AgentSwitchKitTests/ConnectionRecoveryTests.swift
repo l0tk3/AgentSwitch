@@ -61,7 +61,8 @@ final class ConnectionRecoveryTests: XCTestCase {
         XCTAssertEqual(missing[2].ok, false)
         XCTAssertTrue(missing[2].detail.contains("无 Tailscale 地址"))
         XCTAssertEqual(Troubleshooting.checks(state: .selecting, reports: nil, book: book).map(\.ok), [nil, nil, nil], "nothing tried yet")
-        XCTAssertEqual(Troubleshooting.causes.count, 4)
+        XCTAssertEqual(Troubleshooting.causes.count, 5)
+        XCTAssertTrue(Troubleshooting.causes.contains { $0.contains("Mac 更换了网络") }, "a Mac that moved where devices cannot find each other, and the two ways to tell the phone")
     }
 
     // MARK: - manager

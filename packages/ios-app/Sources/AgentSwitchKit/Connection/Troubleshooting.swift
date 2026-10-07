@@ -60,6 +60,7 @@ public enum Troubleshooting {
     public static let causes: [String] = [
         "Mac 处于睡眠状态，或 AgentSwitch 未运行。",
         "iPhone 与 Mac 不在同一 Wi-Fi，且 iPhone 上的 Tailscale 未开启。",
+        "Mac 更换了网络，而当前 Wi-Fi 不允许设备相互发现。开启 Tailscale 连接一次，或用 iPhone 重新扫描 Mac 上的配对二维码，iPhone 即记下新地址。",
         "其他 VPN 应用正在使用 VPN 通道，Tailscale 未连接（iOS 同一时间只允许一个 VPN）。",
         "Mac 上的 AgentSwitch 重装或重置后证书已更换。请重新配对。",
     ]

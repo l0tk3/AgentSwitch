@@ -46,7 +46,9 @@ AgentSwitchKit, by folder:
 - `Connection/` — `EndpointSelector` (Bonjour with matching `fp` prefix → LAN addresses → Tailscale; probe `/healthz`
   then `/me`), `ConnectionManager` (actor; re-selects on failure and on `NWPathMonitor` changes, checks the address
   in use with `/healthz` on returning to the foreground, retries on its own while unreachable — 2 s doubling to
-  30 s, no cap), `ConnectionProgress` (连接中 → 重连中 → 无法连接（第 N 次）→ 未找到 Mac after 6 minutes → 配对已失效),
+  30 s, no cap; the Mac's current addresses are fetched when a connection is made, on returning to the foreground and
+  every 5 minutes while connected, and `ServerProfile.updated(with:)` keeps the LAN addresses the Mac had before
+  behind the current ones, up to 8, so a Mac that moves between networks is found on each), `ConnectionProgress` (连接中 → 重连中 → 无法连接（第 N 次）→ 未找到 Mac after 6 minutes → 配对已失效),
   `Troubleshooting` (设置 › Mac › 排障), Bonjour and path monitor adapters behind protocols.
 - `Feed/` — the home log's pure parts: `ActivityFeed` (oldest-first timeline, which active tasks get one of the 3 live
   streams, approvals outside the log), `EventTail` (the last lines under a running task), `MessageDisplay` (the

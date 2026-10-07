@@ -116,6 +116,16 @@ struct MainTabs: View {
                 try? await Task.sleep(for: TerminalsTab.pollInterval)
             }
         }
+        // Where the Mac is now, asked again now and then for as long as this connection lasts (the connection itself
+        // asked once when it was made).
+        .task(id: model.connection.endpoint) {
+            guard model.connection.endpoint != nil else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: AppModel.addressRefreshInterval)
+                guard !Task.isCancelled else { break }
+                await model.refreshAddresses()
+            }
+        }
         .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
             while !Task.isCancelled {
                 await model.browser.refreshList(model.api)

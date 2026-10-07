@@ -112,7 +112,42 @@ final class ConnectionManagerTests: XCTestCase {
                                   bonjour: "b", gate: nil, deviceId: "d", pairedAt: Date())
         XCTAssertNil(saved.updated(with: MacAddresses(lan: ["192.168.1.5"], tailnet: [])), "Tailscale off for a moment keeps the saved address")
         XCTAssertNil(saved.updated(with: MacAddresses(lan: [], tailnet: ["100.101.102.103"])))
-        XCTAssertEqual(saved.updated(with: MacAddresses(lan: ["192.168.1.20", "bad host!"], tailnet: []))?.lan, ["192.168.1.20"])
+        XCTAssertEqual(saved.updated(with: MacAddresses(lan: ["192.168.1.20", "bad host!"], tailnet: []))?.lan, ["192.168.1.20", "192.168.1.5"],
+                       "the new address first, the one before kept behind it; what is no address dropped")
+    }
+
+    /// 2026-10-07: a Mac that moves between networks has another address on each, and the phone kept only the last
+    /// one it was told. It keeps the earlier ones too, so the Mac is found where it has been before without Bonjour
+    /// or Tailscale to tell the phone again.
+    func testAMacThatMovesBetweenNetworksIsFoundOnEitherOne() async throws {
+        let fp = String(repeating: "ab", count: 32)
+        let home = ServerProfile(name: "Mac", port: 4713, fingerprint: fp, lan: ["192.168.31.137"], tailnet: ["100.77.168.100"],
+                                 bonjour: "b", gate: nil, deviceId: "d", pairedAt: Date())
+        // At the office, reached over Tailscale: the phone is told the address there.
+        let office = try XCTUnwrap(home.updated(with: MacAddresses(lan: ["10.38.120.101"], tailnet: ["100.77.168.100"])))
+        XCTAssertEqual(office.lan, ["10.38.120.101", "192.168.31.137"])
+        XCTAssertEqual(office.tailnet, ["100.77.168.100"])
+        // Told the same again: nothing to save. Back home: the order turns, nothing is lost.
+        XCTAssertNil(office.updated(with: MacAddresses(lan: ["10.38.120.101"], tailnet: ["100.77.168.100"])))
+        let back = try XCTUnwrap(office.updated(with: MacAddresses(lan: ["192.168.31.137"], tailnet: [])))
+        XCTAssertEqual(back.lan, ["192.168.31.137", "10.38.120.101"])
+        // On both at once (two interfaces): both first, in the Mac's order.
+        XCTAssertNil(back.updated(with: MacAddresses(lan: ["192.168.31.137", "10.38.120.101"], tailnet: [])))
+        XCTAssertEqual(back.updated(with: MacAddresses(lan: ["10.38.120.101", "192.168.31.137"], tailnet: []))?.lan, ["10.38.120.101", "192.168.31.137"])
+
+        // The next morning at the office, no Bonjour on that network and Tailscale off: the address from yesterday answers.
+        let prober = FakeProber(["10.38.120.101": .ok])
+        let manager = ConnectionManager(book: back, token: "t", discovery: nil, prober: prober)
+        let found = try await manager.endpoint()
+        XCTAssertEqual(found, APIEndpoint(host: "10.38.120.101", port: 4713, kind: .lan))
+
+        // Only so many are kept, the newest first.
+        var many = home
+        for i in 1...12 { many = try XCTUnwrap(many.updated(with: MacAddresses(lan: ["10.0.\(i).2"], tailnet: []))) }
+        XCTAssertEqual(many.lan.count, ServerProfile.rememberedLAN)
+        XCTAssertEqual(many.lan.first, "10.0.12.2")
+        XCTAssertEqual(many.lan.last, "10.0.5.2")
+        XCTAssertFalse(many.lan.contains("192.168.31.137"), "the oldest go")
     }
 
     func testRevokedTokenSurfacesAsUnauthorized() async {

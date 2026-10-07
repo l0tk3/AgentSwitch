@@ -285,7 +285,10 @@ final class AppModel {
         let before = connection.endpoint
         Task {
             let state = await manager.verify()
-            if let endpoint = state.endpoint, endpoint == before { await refreshAll() }
+            if let endpoint = state.endpoint, endpoint == before {
+                await refreshAll()
+                await refreshAddresses()
+            }
         }
     }
 
@@ -452,8 +455,14 @@ final class AppModel {
         syncLive()
     }
 
+    /// While connected the Mac is asked for its addresses again this often (app-v0 §5): it may move to another network
+    /// while the phone stays connected over Tailscale, and the phone should hold the new address before it next has
+    /// to find the Mac without it.
+    static let addressRefreshInterval: Duration = .seconds(300)
+
     /// The Mac's current addresses into the saved profile and the address choice, so a phone paired while Tailscale was
-    /// off (or before the Mac's LAN address changed) still finds it elsewhere next time.
+    /// off (or before the Mac's LAN address changed) still finds it elsewhere next time. Asked when a connection is
+    /// made, when the app comes back to the front, and every `addressRefreshInterval` while connected.
     func refreshAddresses() async {
         guard let api, let profile, let now = try? await api.addresses(), let updated = profile.updated(with: now),
               updated.fingerprint == self.profile?.fingerprint else { return }

@@ -52,13 +52,23 @@ public struct ServerProfile: Codable, Sendable, Equatable, ServerAddressBook {
                       gate: gate, deviceId: deviceId, pairedAt: pairedAt)
     }
 
+    /// How many LAN addresses are kept: the Mac's current ones and the ones it had on networks it was on before.
+    public static let rememberedLAN = 8
+
     /// A copy with the Mac's current addresses, or nil when nothing changes. A kind the Mac reports empty (Tailscale
     /// off for a moment, no network) keeps the saved ones; malformed entries are dropped (2026-09-26: a phone paired
     /// before the Mac found its Tailscale address never learned it and could not connect off the LAN).
+    ///
+    /// The LAN addresses it has now go first and the ones it had before stay behind them, up to `rememberedLAN`
+    /// (2026-10-07: a Mac that moves between two networks got a new address on each move, and the phone, holding only
+    /// the last one, needed Bonjour or Tailscale every time to be told again). The certificate is pinned, so an old
+    /// address that now belongs to something else is refused like any other stranger.
     public func updated(with now: MacAddresses) -> ServerProfile? {
-        let lan = now.lan.filter(HostAddress.isValid)
+        let current = now.lan.filter(HostAddress.isValid)
         let tailnet = now.tailnet.filter(HostAddress.isValid)
-        let next = (lan: lan.isEmpty ? self.lan : lan, tailnet: tailnet.isEmpty ? self.tailnet : tailnet)
+        var seen = Set<String>()
+        let lan = Array((current + self.lan).filter { seen.insert($0).inserted }.prefix(Self.rememberedLAN))
+        let next = (lan: current.isEmpty ? self.lan : lan, tailnet: tailnet.isEmpty ? self.tailnet : tailnet)
         guard next.lan != self.lan || next.tailnet != self.tailnet else { return nil }
         return ServerProfile(name: name, port: port, fingerprint: fingerprint, lan: next.lan, tailnet: next.tailnet,
                              bonjour: bonjour, gate: gate, deviceId: deviceId, pairedAt: pairedAt)
