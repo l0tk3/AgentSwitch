@@ -96,10 +96,10 @@ export class SessionMonitor {
 
   /** A session's record for the simple view (docs/simple-view-v0.md §2): Claude Code's and Codex's from their files,
    *  step by step; the others' (and an older Codex rollout's) from the coarse messages, one line per tool. */
-  record(harness: SessionHarness, id: string, o: { limit?: number; before?: number } = {}): { session: SessionSummary; record: SessionRecord } | null {
-    const session = this.find(harness, id);
-    if (!session) return null;
-    const path = this.files.get(`${harness}:${id}`);
+  record(harness: SessionHarness, id: string, o: { limit?: number; before?: number } = {}, ours = false): { session: SessionSummary; record: SessionRecord } | null {
+    const found = this.open(harness, id, ours);
+    if (!found) return null;
+    const { session, path } = found;
     if (path && (harness === "claude-code" || harness === "codex")) {
       const record = readRecord(harness, path, { ...o, cwd: session.cwd });
       if (record) return { session, record };
@@ -108,13 +108,63 @@ export class SessionMonitor {
     return coarse && { session, record: recordFromMessages(coarse.messages, `u${session.updatedAt.toString(36)}`) };
   }
 
+  /** A session and where it is kept. `ours`: it is the session of a terminal of ours, read wherever it runs — the list
+   *  leaves out scratch folders (a terminal started under /tmp) and sessions with nothing said yet, and such a
+   *  terminal's simple view had no record to show (found with a live probe, 2026-10-07). Anyone else's unlisted session
+   *  stays unreadable by its id. */
+  private open(harness: SessionHarness, id: string, ours: boolean): { session: SessionSummary; path: string | undefined } | null {
+    const listed = this.find(harness, id);
+    if (listed) return { session: listed, path: this.files.get(`${harness}:${id}`) };
+    if (!ours) return null;
+    const path = this.locate(harness, id);
+    if (!path) return null;
+    try {
+      const st = statSync(path);
+      const facts = harness === "claude-code" ? claudeFacts(path, st.mtimeMs) : harness === "pi" ? piFacts(path, st.mtimeMs) : codexFacts(path, st.mtimeMs);
+      return facts ? { session: this.summary(harness, { startedAt: st.birthtimeMs || st.ctimeMs, ...facts }, this.now()), path } : null;
+    } catch { return null; }
+  }
+
+  /** Where the session of a terminal of ours is kept, listed or not: its file as the list knows it, else looked for by
+   *  its id (Claude Code's `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`, pi's `<time>_<id>.jsonl`). Null for
+   *  OpenCode (one database for all) and for a session with no file yet. */
+  locate(harness: SessionHarness, id: string): string | null {
+    if (harness === "opencode" || !SESSION_ID.test(id)) return null;
+    const key = `${harness}:${id}`;
+    const known = this.files.get(key);
+    if (known && existsSync(known)) return known;
+    let found: string | null = null;
+    if (harness === "claude-code") {
+      for (const dir of safeDirs(this.sources.claudeProjects)) {
+        const file = join(this.sources.claudeProjects, dir, `${id}.jsonl`);
+        if (existsSync(file)) { found = file; break; }
+      }
+    } else if (harness === "codex") {
+      const walk = (dir: string, left: number) => {
+        for (const name of safeDirs(dir, true)) {
+          if (found) return;
+          const path = join(dir, name);
+          if (left > 0) walk(path, left - 1);
+          else if (name.startsWith("rollout-") && name.endsWith(`-${id}.jsonl`)) found = path;
+        }
+      };
+      walk(this.sources.codexSessions, 3);
+    } else if (this.sources.piSessions) {
+      for (const dir of safeDirs(this.sources.piSessions)) {
+        const name = safeDirs(join(this.sources.piSessions, dir), true).find((n) => n.endsWith(`_${id}.jsonl`));
+        if (name) { found = join(this.sources.piSessions, dir, name); break; }
+      }
+    }
+    if (found) this.files.set(key, found);
+    return found;
+  }
+
   /** What a session changed, file by file: in one run of work, else in its last turn. Null when it is not listed, the
    *  run is not there, or the agent's record carries no changes (OpenCode, pi). */
-  changes(harness: SessionHarness, id: string, work?: string): FileDiff[] | null {
-    const session = this.find(harness, id);
-    const path = this.files.get(`${harness}:${id}`);
-    if (!session || !path || (harness !== "claude-code" && harness !== "codex")) return null;
-    return readChanges(harness, path, { ...(work !== undefined ? { work } : {}), cwd: session.cwd });
+  changes(harness: SessionHarness, id: string, work?: string, ours = false): FileDiff[] | null {
+    const found = this.open(harness, id, ours);
+    if (!found?.path || (harness !== "claude-code" && harness !== "codex")) return null;
+    return readChanges(harness, found.path, { ...(work !== undefined ? { work } : {}), cwd: found.session.cwd });
   }
 
   private scan(refs: FileRef[], harness: "claude-code" | "codex" | "pi", now: number): (SessionSummary | null)[] {

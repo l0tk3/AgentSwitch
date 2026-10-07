@@ -11,6 +11,63 @@ import SwiftTerm
 enum TerminalProbe {
     static var directory: URL? { UserDefaults.standard.string(forKey: "terminalProbe").map { URL(fileURLWithPath: $0) } }
 
+    /// `-probeSimple YES`: the simple view against a running service (docs/simple-view-v0.md §5.2) — the pane switched to
+    /// its terminal's record, what it then holds (the record, the request waiting, who has the keyboard, how the window
+    /// is dressed), a reply sent from its box, and the terminal again with that reply on its screen. Pictures
+    /// `simple-record.png` and `simple-terminal.png`.
+    private static func simple(_ main: MainWindowController, id: String, window: NSWindow, into dir: URL, say: (String) -> Void) async {
+        guard let model = main.probeTerminals else { return say("simple: not the native page") }
+        func pause(_ ms: Int) async { try? await Task.sleep(for: .milliseconds(ms)) }
+        func picture(_ name: String) {
+            window.displayIfNeeded()
+            guard let frame = window.contentView?.superview, let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { return }
+            frame.cacheDisplay(in: frame.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        func responder() -> String {
+            guard let r = window.firstResponder else { return "nil" }
+            if let editor = r as? NSTextView { return editor.delegate.map { String(describing: type(of: $0)) } ?? "NSTextView" }
+            return String(describing: type(of: r))
+        }
+        func dressed() -> String { window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "light" }
+        func state(_ at: String) {
+            let pane = model.focused
+            let record = pane?.record
+            let kinds = record?.items.map { "\($0.kind.rawValue)\($0.kind == .work ? "(\($0.steps.count))" : "")" }.joined(separator: " ") ?? "-"
+            say("\(at): simple \(pane?.simple ?? false) focusedSimple \(model.focusedSimple) head.simple \(main.probeHead?.simple ?? false) window \(dressed()) "
+                + "screen shows \(pane?.screen.probeShown ?? "-") status \(pane?.session?.info?.status ?? "-") requests \(pane?.session?.requests.count ?? 0) "
+                + "record loaded \(record?.loaded ?? false) session \(record?.sessionId ?? "-") items [\(kinds)] plan \(record?.plan.count ?? 0) "
+                + "usage \(record?.usage?.model ?? "-")/\(record?.usage?.used ?? 0)/\(record?.usage?.effort ?? "-") mode \(record?.mode ?? "-") "
+                + "context '\(main.probeHead?.shown?.size ?? "-")' keyboard \(responder())")
+        }
+        window.makeKey()
+        await pause(2500)   // the fake agent's request, and the session it reported, reach the list
+        state("terminal")
+        model.toggleSimple()
+        await pause(2500)
+        state("record")
+        picture("simple-record")
+        // A reply from the record's box: typed into the terminal as it is.
+        if let record = model.focused?.record {
+            record.draft = "hello from the record"
+            record.send()
+            await pause(1200)
+            say("reply: draft '\(record.draft)' error \(record.error ?? "none")")
+        }
+        model.toggleSimple()
+        await pause(2500)
+        state("terminal again")
+        let screen = model.focused?.screen
+        let t = screen?.view.getTerminal()
+        let lines = (0..<(t?.rows ?? 0)).compactMap { row -> String? in
+            guard let t, let line = t.getLine(row: row) else { return nil }
+            let text = String((0..<line.count).map { t.getCharacter(for: line[$0]) }).trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\0")))
+            return text.isEmpty ? nil : text
+        }
+        say("screen: \(lines.suffix(4).joined(separator: " ⏎ "))")
+        picture("simple-terminal")
+    }
+
     static func run(_ terminals: MainWindowController, into dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var log: [String] = []
@@ -26,6 +83,10 @@ enum TerminalProbe {
                 if let screen, screen.probeShown == id, screen.probeSeq > 0 { break }
             }
             guard let screen, let window = terminals.window else { say("no window or screen"); exit(1) }
+            if UserDefaults.standard.bool(forKey: "probeSimple") {
+                await simple(terminals, id: id, window: window, into: dir, say: say)
+                exit(0)
+            }
             say("shown \(screen.probeShown ?? "-") seq \(screen.probeSeq) frame \(NSStringFromRect(screen.view.frame)) hidden \(screen.view.isHidden) grid \(screen.view.getTerminal().cols)x\(screen.view.getTerminal().rows)")
             // Key within the app (posted keys go to the key window), still behind the others, the app not active.
             window.makeKey()

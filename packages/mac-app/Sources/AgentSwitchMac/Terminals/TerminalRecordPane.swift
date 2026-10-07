@@ -111,7 +111,7 @@ struct TerminalRecordPane: View {
                 .frame(maxWidth: Self.column)
                 .padding(.horizontal, 24).padding(.bottom, 8)
             }
-            RecordDock(state: state, model: model, working: working, waiting: !requests.isEmpty || info?.status == "waiting") {
+            RecordDock(state: state, model: model, focused: focused, working: working, waiting: !requests.isEmpty || info?.status == "waiting") {
                 if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: nil) }
             }
         }
@@ -326,6 +326,8 @@ private struct RecordPromptNote: View {
 private struct RecordDock: View {
     let state: TerminalPaneState
     let model: TerminalsModel
+    /// The pane has the focus: its reply box takes the keyboard as it shows.
+    let focused: Bool
     let working: Bool
     let waiting: Bool
     let lastTurnChanges: () -> Void
@@ -369,7 +371,7 @@ private struct RecordDock: View {
                 }
                 HStack(alignment: .bottom, spacing: 8) {
                     ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, active: info?.status != "exited",
-                                 takesFocusAtFirst: false, label: "Reply", onSubmit: { record.send() }, onFiles: { _ in }, onPasteAttachments: {},
+                                 takesFocusAtFirst: focused, label: "Reply", onSubmit: { record.send() }, onFiles: { _ in }, onPasteAttachments: {},
                                  onFocus: { on in if on { model.focus(pane: state.id) } })
                         .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
                         .padding(.horizontal, look.isClassic ? 11 : 10).padding(.vertical, 8)

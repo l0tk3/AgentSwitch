@@ -124,7 +124,8 @@ export function watchRecord(host: TerminalHost, sessions: SessionMonitor, id: st
     if (!path) {
       if (Date.now() - looked < RECORD_FIND_MS) return;
       looked = Date.now();
-      path = sessions.source(t.harness, session) ?? (sessions.find(t.harness, session), sessions.source(t.harness, session));
+      // Its own session, wherever it runs (the list leaves scratch folders out).
+      path = sessions.locate(t.harness, session);
       if (!path) return;
     }
     try { const { rev } = fileRev(path); if (rev !== last) { last = rev; changed(rev); } } catch { path = null; }

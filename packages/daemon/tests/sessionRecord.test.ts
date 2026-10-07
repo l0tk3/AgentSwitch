@@ -335,6 +335,38 @@ describe("the record over the API", () => {
   });
 });
 
+describe("the session of a terminal of ours, wherever it runs (2026-10-07: a terminal under /tmp had no record)", () => {
+  it("is read by its id though the list leaves its folder out; anyone else's unlisted session is not", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-record-")));
+    const scratch = "/private/tmp/scratch/project";
+    const dir = join(root, "claude", "-private-tmp-scratch-project");
+    mkdirSync(dir, { recursive: true });
+    const lines = turn.map((l) => l.split(REPO).join(scratch));
+    writeFileSync(join(dir, "s9.jsonl"), lines.join("\n") + "\n");
+    const sources: SessionSources = { claudeProjects: join(root, "claude"), codexSessions: join(root, "codex"), opencodeDb: join(root, "none.db"), excluded: ["/private/tmp"] };
+    const monitor = new SessionMonitor(sources, () => Date.parse(at(100)));
+    expect(monitor.list()).toEqual([]);
+    expect(monitor.record("claude-code", "s9")).toBeNull();
+    const own = monitor.record("claude-code", "s9", {}, true)!;
+    expect(own.session).toMatchObject({ id: "s9", cwd: scratch });
+    expect(kinds(own.record.items)).toEqual(["user", "work", "answer"]);
+    expect(monitor.changes("claude-code", "s9", undefined, true)!.map((f) => f.path)).toEqual(["Sources/AgentsView.swift", "notes.md"]);
+    expect(monitor.changes("claude-code", "s9")).toBeNull();
+    expect(monitor.locate("claude-code", "s9")).toBe(join(dir, "s9.jsonl"));
+    expect(monitor.locate("claude-code", "../s9")).toBeNull();
+    expect(monitor.locate("claude-code", "nope")).toBeNull();
+
+    // Over the API: the session of a terminal the service runs, and no other.
+    const app = new Hono();
+    let running: { agentSessionId: string | null }[] = [];
+    mountSessions(app, { sessions: monitor, terminals: { host: { list: () => running } } } as unknown as ApiDeps);
+    expect((await app.request("/sessions/claude-code/s9/record")).status).toBe(404);
+    running = [{ agentSessionId: "s9" }];
+    expect((await app.request("/sessions/claude-code/s9/record")).status).toBe(200);
+    expect((await app.request("/sessions/claude-code/s9/changes")).status).toBe(200);
+  });
+});
+
 describe("a terminal's record, watched", () => {
   it("says the record's version at once and again each time the agent writes; a terminal with no session yet waits for one", async () => {
     const { monitor, claudePath } = monitored();
