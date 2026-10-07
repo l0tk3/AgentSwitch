@@ -24,7 +24,7 @@ function build() {
 
 function terminal(over: Partial<TerminalInfo>): TerminalInfo {
   return {
-    id: "t1", harness: "claude-code", cwd: join(homedir(), "Projects/web"), workdir: join(homedir(), "Projects/web"), model: null, modelNow: null, modeNow: null, suggestion: null, effort: null, mode: "manual", name: "fix-login", customName: false,
+    id: "t1", harness: "claude-code", cwd: join(homedir(), "Projects/web"), workdir: join(homedir(), "Projects/web"), model: null, modelNow: null, modeNow: null, suggestion: null, sets: true, effort: null, mode: "manual", name: "fix-login", customName: false,
     title: "", status: "working", pid: 1, cols: 80, rows: 24, createdAt: 0, lastOutputAt: 0, exitCode: null, agentSessionId: null,
     resumedFrom: null, forked: false, hooks: true, permissions: [], activity: null, subagents: [], statusSince: 0, seq: 0, ...over,
   };

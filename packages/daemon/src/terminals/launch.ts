@@ -5,6 +5,7 @@
 
 import { effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
+import { CodexCompanion } from "./codexTerminal.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,6 +47,9 @@ export type LauncherOptions = {
    *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
    *  guessed. */
   readonly opencodeServer?: boolean;
+  /** Codex's TUI attaches to a private app-server the service starts (codexTerminal.ts), so a screen can set its
+   *  model and reasoning effort. Without it, or when that server does not start, Codex runs on its own as before. */
+  readonly codexServer?: boolean;
   /** The shared browser for the agent (docs/browser-v0.md §2 给 agent, terminal-v0 §3): the agent bridge's command for
    *  terminal `id`, made when it starts (a session of its own); the gate wraps it as the `browser` MCP server. Codex,
    *  Claude Code and OpenCode; only with the gate (no ungated browser for an agent); absent or null: no browser tool. */
@@ -219,7 +223,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // The folder is named (`-C`, the terminal's own): Codex does not ask whether to use the one the session ran in,
         // which may be gone (docs/terminal-v0.md §5).
         if (req.resume) args.unshift(req.fork ? "fork" : "resume", "-C", req.cwd, req.resume);
-        return { file, args, env: own, hooks: hooked };
+        const companion = opts.codexServer ? new CodexCompanion({ binary: file, cwd: req.cwd, env: own, args, dir }) : undefined;
+        return { file, args, env: own, hooks: hooked, ...(companion ? { companion } : {}) };
       }
       case "opencode": {
         // A private server — the service's own, which it watches (opencodeTerminal.ts), else the TUI's `--standalone` one:

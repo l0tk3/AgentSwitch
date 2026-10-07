@@ -380,9 +380,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
-    // Each agent's own levels: Claude Code's, pi's thinking levels. OpenCode's are its model's variants, which its own
-    // server knows: checked there.
-    const levels: readonly string[] | null = info.harness === "opencode" ? null : info.harness === "pi" ? PI_THINKING : CLAUDE_EFFORTS;
+    // Each agent's own levels: Claude Code's, pi's thinking levels. OpenCode's are its model's variants and Codex's its
+    // model's reasoning efforts, which their own servers know: checked there.
+    const levels: readonly string[] | null = info.harness === "opencode" || info.harness === "codex" ? null : info.harness === "pi" ? PI_THINKING : CLAUDE_EFFORTS;
     if (levels && !levels.includes(body.data.effort)) return c.json({ error: `effort: one of ${levels.join(", ")}` }, 400);
     try { await host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "effort", via: via(c), detail: { effort: body.data.effort } });

@@ -563,9 +563,10 @@ public enum RecordDisplay {
 
     /// The agents whose model and level a screen can set at once: their own prompt takes a command that does (Claude
     /// Code's `/model <id>` and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`), or their own
-    /// server does (OpenCode's `POST /api/session/:id/model`, on the server the terminal's TUI is attached to). Codex
-    /// chooses in a picker of its own: for it a screen only says what it is on.
-    public static func setsDirectly(_ harness: String) -> Bool { harness == "claude-code" || harness == "pi" || harness == "opencode" }
+    /// server does, the one the terminal's TUI is attached to (OpenCode's `POST /api/session/:id/model`, Codex's
+    /// `thread/settings/update`). All four now; a terminal says itself when it cannot (`TerminalInfo.sets`: a Codex or
+    /// an OpenCode started without its server).
+    public static func setsDirectly(_ harness: String) -> Bool { ["claude-code", "pi", "opencode", "codex"].contains(harness) }
 
     /// Why the service did not make a change, in the page's words where it is one of the reasons it gives.
     public static func refusal(_ reason: String) -> String? {
@@ -579,9 +580,10 @@ public enum RecordDisplay {
     /// Why the model, the level or the way of asking cannot be changed from here now; nil when it can. A control that
     /// cannot change anything is not one to press (2026-10-07, user: 不能切换的话就让他点不动): it is said as plain words,
     /// with this for whoever rests the pointer on it.
-    public static func locked(harness: String, status: String?, waiting: Bool, whileWorking: Bool = false) -> String? {
+    public static func locked(harness: String, status: String?, waiting: Bool, whileWorking: Bool = false, sets: Bool? = nil) -> String? {
         if status == "exited" { return "终端已结束。" }
-        if !setsDirectly(harness) { return "\(agentName(harness)) 在自己的界面里选：切到终端视图操作。" }
+        // What the terminal says of itself first (it knows whether its agent's server is there); else by its kind.
+        if !(sets ?? setsDirectly(harness)) { return "\(agentName(harness)) 的这个终端只能在它自己的界面里选：切到终端视图操作。" }
         if waiting || status == "waiting" { return "它正在等待回答，回答后再调整。" }
         if status != "idle", !whileWorking { return "它正在工作，结束后再调整。" }
         return nil

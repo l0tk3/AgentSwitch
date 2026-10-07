@@ -196,6 +196,33 @@ describe("terminal host", () => {
     expect(events.some((e) => e.type === "permission_resolved" && e.decision === null)).toBe(true);
   });
 
+  it("a turn-end notice from another thread of the same Codex is not this terminal's, once its hooks have named its session", async () => {
+    // Seen 2026-10-07 on Codex 0.162 with a real login: beside the thread its TUI shows it runs an ephemeral helper
+    // with no record, whose own `notify` named itself — the terminal then followed a session that has no file and
+    // was at rest in the middle of its turn.
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown>) => host.hook(info.id, token, { event, payload });
+    await hook("SessionStart", { session_id: "thread-main", transcript_path: "/x/rollout-thread-main.jsonl" });
+    await hook("UserPromptSubmit", { session_id: "thread-main", prompt: "go" });
+    expect(host.get(info.id)).toMatchObject({ status: "working", agentSessionId: "thread-main" });
+    await hook("CodexNotify", { type: "agent-turn-complete", "thread-id": "thread-helper", "last-assistant-message": "noted" });
+    expect(host.get(info.id)).toMatchObject({ status: "working", agentSessionId: "thread-main" });
+    // Its own thread's notice still ends the turn.
+    await hook("CodexNotify", { type: "agent-turn-complete", "thread-id": "thread-main", "last-assistant-message": "done" });
+    expect(host.get(info.id)).toMatchObject({ status: "idle", agentSessionId: "thread-main" });
+    // Without the hooks the notice is all there is: followed, as before.
+    const plain = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false) });
+    closers.push(() => plain.closeAll());
+    const bare = await plain.spawn({ harness: "codex", cwd: tmpdir() });
+    const bareToken = (plain as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(bare.id)!.hookToken;
+    await plain.hook(bare.id, bareToken, { event: "CodexNotify", payload: { type: "agent-turn-complete", "thread-id": "thread-a" } });
+    await plain.hook(bare.id, bareToken, { event: "CodexNotify", payload: { type: "agent-turn-complete", "thread-id": "thread-b" } });
+    expect(plain.get(bare.id)!.agentSessionId).toBe("thread-b");
+  });
+
   it("follows Claude Code's sub-agents: named by what each was sent to do, what it does now, gone when it stops (2026-09-30)", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());

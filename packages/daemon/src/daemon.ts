@@ -347,7 +347,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
-        codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true, ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
+        codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true,
+        // Codex through an app-server of the terminal's own, so a screen can set its model and effort (codexTerminal.ts);
+        // `AGENTSWITCH_CODEX_TERMINAL=direct` starts it on its own as before.
+        codexServer: process.env.AGENTSWITCH_CODEX_TERMINAL !== "direct", ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
       ...(agents ? { onExit: (id: string) => agents.end({ kind: "terminal", id }), onRemove: (id: string) => agents.end({ kind: "terminal", id }, true) } : {}),

@@ -58,6 +58,10 @@ export type TerminalInfo = {
   /** What Claude Code offers as your next message (its prompt suggestion: dim words in its empty input), while it
    *  rests and shows one; null otherwise. It is on its screen and nowhere else (docs/simple-view-v0.md §5.6). */
   readonly suggestion: string | null;
+  /** A screen can set its model and its level (`POST …/model`, `…/effort`): its agent takes a command for them, or a
+   *  companion of this terminal sets them on the agent's own server. False for one that can only say what it is on (a
+   *  Codex or an OpenCode started without its server). */
+  readonly sets: boolean;
   /** The thinking level it was started at, in the agent's own word; null: the agent's default. What it is at now is
    *  in its session's record (Claude Code and Codex write it with every turn). */
   readonly effort: string | null;
@@ -158,9 +162,12 @@ export type Companion = {
   attach(link: CompanionLink): void;
   /** The program has ended or the terminal is gone (called once or more). */
   stop(): void;
+  /** False: the companion reports no status (Codex's hooks do, as when it runs on its own), so whether the terminal
+   *  has hooks stays as its plan said. Absent: it reports (OpenCode's server). */
+  readonly reportsStatus?: boolean;
   /** Another model, or another level, for the session the program is on, where the companion can set them (OpenCode's
    *  server). What it is on afterwards; throws with a sentence a screen can show. */
-  setModel?(want: { model?: string | null; variant?: string | null }): Promise<{ model: string; variant: string | null }>;
+  setModel?(want: { model?: string | null; variant?: string | null; session?: string | null }): Promise<{ model: string; variant: string | null }>;
 };
 export type CompanionLink = {
   status(status: Exclude<TerminalStatus, "exited">): void;
@@ -512,6 +519,8 @@ class Session {
   givenName: string | null = null;
   exitCode: number | null = null;
   agentSessionId: string | null = null;
+  /** A hook call of the agent's has named its session (Codex's turn-end notice names a thread, which may be a helper's). */
+  sessionByHook = false;
   /** The session this terminal started (a new one, or a fork's): the only record closing it may delete. */
   ownSessionId: string | null = null;
   hooks = false;
@@ -626,7 +635,7 @@ export class TerminalHost {
         this.ended(id, true);
         throw new TerminalError("not_found", `terminal ${id} was deleted while it started`);
       }
-      if (started) { ({ args, env } = started); s.hooks = true; s.companion = plan.companion; }
+      if (started) { ({ args, env } = started); if (plan.companion.reportsStatus !== false) s.hooks = true; s.companion = plan.companion; }
       else plan.companion.stop();
     }
     let proc: pty.IPty;
@@ -799,7 +808,7 @@ export class TerminalHost {
     if (s.status === "exited") throw new TerminalError("exited", `terminal ${s.id} has ended`);
     if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
     let now: { model: string; variant: string | null };
-    try { now = await s.companion!.setModel!(want); } catch (err) { throw new TerminalError("invalid", (err as Error).message); }
+    try { now = await s.companion!.setModel!({ ...want, session: s.agentSessionId }); } catch (err) { throw new TerminalError("invalid", (err as Error).message); }
     if (now.model !== s.modelNow) { s.modelNow = now.model; s.emit({ type: "model", model: now.model }); }
     s.effort = now.variant;
   }
@@ -879,7 +888,7 @@ export class TerminalHost {
     const s = this.sessions.get(id);
     if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
     const p = call.payload;
-    if (typeof p.session_id === "string" && p.session_id) this.reported(s, p.session_id);
+    if (typeof p.session_id === "string" && p.session_id) { this.reported(s, p.session_id); s.sessionByHook = true; }
     // How it asks now: Claude Code says it with every call.
     if (typeof p.permission_mode === "string" && /^[A-Za-z]{2,40}$/.test(p.permission_mode)) this.modeIs(s, p.permission_mode);
     // Where it works now (the window's title says it): Claude Code and Codex send it with every call.
@@ -954,7 +963,14 @@ export class TerminalHost {
       // pi blocks on a question of its own (a confirm or a choice in its screen): the terminal waits for you.
       case "PiWaiting": this.setStatus(s, "waiting"); return null;
       case "CodexNotify": {
-        if (typeof p["thread-id"] === "string" && p["thread-id"]) this.reported(s, p["thread-id"]);
+        const thread = typeof p["thread-id"] === "string" ? p["thread-id"] : "";
+        // Codex starts helper threads of its own beside the one its TUI shows (seen 2026-10-07 on 0.162 with a real
+        // login: an ephemeral thread with no record), and each says when its turn ends. Where the hooks have named
+        // the terminal's session, a notice of another thread is not this terminal's: taken for it, the terminal would
+        // follow a session that has no record and be at rest while it works. Without the hooks the notice is all
+        // there is, and it is followed as before.
+        if (s.hooks && s.sessionByHook && thread && thread !== s.agentSessionId) return null;
+        if (thread) this.reported(s, thread);
         if (p.type === "agent-turn-complete") { this.turnEnded(s, true, p["last-assistant-message"]); this.setStatus(s, "idle"); }
         return null;
       }
@@ -1259,7 +1275,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, sets: DIRECT.has(s.harness) || !!s.companion?.setModel, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

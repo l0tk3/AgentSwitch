@@ -296,7 +296,7 @@ describe("terminal host with a companion", () => {
     expect(events.filter((e) => e.type === "model")).toEqual([{ type: "model", model: "opencode/space-bunny" }]);
     await host.askEffort(info.id, "max");
     expect(host.get(info.id)!.effort).toBe("max");
-    expect(asked).toEqual([{ model: "opencode/space-bunny" }, { variant: "max" }]);
+    expect(asked).toEqual([{ model: "opencode/space-bunny", session: null }, { variant: "max", session: null }]);
     // What its companion refuses is said as it said it.
     await expect(host.askModel(info.id, "opencode/no-such")).rejects.toMatchObject({ code: "invalid", message: "not a model of its: opencode/no-such" });
   });

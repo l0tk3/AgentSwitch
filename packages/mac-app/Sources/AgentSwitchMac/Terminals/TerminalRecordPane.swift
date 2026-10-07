@@ -492,9 +492,9 @@ private struct RecordDock: View {
         // 不能切换的话就让他点不动); resting the pointer on it says why.
         let options = model.models[harness] ?? []
         let modeLock = harness == "claude-code" ? RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting) : "这个 agent 的权限方式在启动时选定。"
-        let modelLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting) ?? (options.isEmpty ? "还没有读到它的模型列表。" : nil)
+        let modelLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting, sets: info?.sets) ?? (options.isEmpty ? "还没有读到它的模型列表。" : nil)
         // Claude Code takes a level while it works too (the next request of the turn runs at it); pi only at rest.
-        let effortLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting, whileWorking: harness == "claude-code")
+        let effortLock = RecordDisplay.locked(harness: harness, status: info?.status, waiting: waiting, whileWorking: harness == "claude-code", sets: info?.sets)
         HStack(spacing: 5) {
             if let mode, !mode.isEmpty {
                 // Skipping every permission is said in the colour of a warning; Claude Code's mode is chosen here
@@ -533,7 +533,7 @@ private struct RecordDock: View {
                 .foregroundStyle(Look.faint)
                 .help(modelLock ?? "")
             }
-            if RecordDisplay.setsDirectly(harness), !levels.isEmpty, effortLock == nil {
+            if !levels.isEmpty, effortLock == nil {
                 Text("·").foregroundStyle(Look.faint)
                 Button { choosingEffort = true } label: {
                     HStack(spacing: 3) {
