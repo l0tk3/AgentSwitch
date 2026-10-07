@@ -114,6 +114,12 @@ public enum PixelArt {
         "opencode": ["##.##", "#...#", "#...#", "#...#", "##.##"],
         "pi": ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"],
     ]
+    /// The menu bar panel's actions (2026-10-07, user: 剩下的几个都加上图标), in 1 pt cells: pairing as the code that is
+    /// scanned, restarting as two arrows round, quitting as the power mark. Settings, Dispatch and Terminals use the
+    /// rail's own pictures.
+    public static let menuPair = ["###.#.###", "#.#...#.#", "###.#.###", "....#....", "#.##.#.##", "....#....", "###..#.#.", "#.#.#..##", "###.#.#.#"]
+    public static let menuRestart = ["..####.#.", ".#....##.", "#....###.", "#........", "#.......#", "........#", ".###....#", ".##....#.", ".#.####.."]
+    public static let menuQuit = ["....#....", "..#.#.#..", ".#..#..#.", "#...#...#", "#...#...#", "#.......#", "#.......#", ".#.....#.", "..#####.."]
     /// The terminals tab and window: a framed terminal (">_" alone means Codex).
     public static let terminalWindow = ["#########", "#.......#", "#.#.....#", "#..#....#", "#.#..##.#", "#.......#", "#########"]
 

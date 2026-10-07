@@ -162,28 +162,21 @@ struct MenuContentView: View {
 
     private var actions: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // words only: an icon on every item differentiates nothing (docs/ui-v0.md §7.2.5)
-            MenuAction(title: "Pair Device…") { showSettings(.pairing) }
+            // Each with its picture (2026-10-07, user: 剩下的几个都加上图标 — until then words only, ui-v0 §7.2.5): the ones
+            // the same things have elsewhere — the pairing page's code, the rail's own for its pages and for Settings.
+            MenuAction(title: "Pair Device…", rows: PixelArt.menuPair) { showSettings(.pairing) }
             // The Dock icon opens the main window (2026-09-30, user: dock 栏直接点图标就可以打开 terminal，就不用状态栏里的
             // open terminal 了; dispatch-v0 §1); without a Dock icon these are the way in, one per page.
             if !alwaysShowInDock {
-                MenuAction(title: "Open Dispatch", enabled: model.daemonReady) { showMainWindow(.dispatch) }
-                MenuAction(title: "Open Terminals", enabled: model.daemonReady) { showMainWindow(.terminals) }
+                MenuAction(title: "Open Dispatch", rows: PixelArt.railDispatch, enabled: model.daemonReady) { showMainWindow(.dispatch) }
+                MenuAction(title: "Open Terminals", rows: PixelArt.railTerminals, enabled: model.daemonReady) { showMainWindow(.terminals) }
             }
-            // The web console, for a big screen or looking from elsewhere (dispatch-v0 §4).
-            MenuAction(title: "Open in Browser", enabled: model.daemonReady) { openConsole() }
-            MenuAction(title: "Restart Service") { model.restartAll() }
-            MenuAction(title: "Settings…") { showSettings(nil) }
+            // No `Open in Browser` (the web console in the system's browser): taken out 2026-10-07, user: open in brower
+            // 删掉，把这个功能直接删掉.
+            MenuAction(title: "Restart Service", rows: PixelArt.menuRestart) { model.restartAll() }
+            MenuAction(title: "Settings…", rows: PixelArt.toolbarSettings) { showSettings(nil) }
             HairRule().padding(.horizontal, 6).padding(.vertical, 5)
-            MenuAction(title: "Quit AgentSwitch") { quitApp() }
-        }
-    }
-
-    /// Signed in through a one-time link (the local API wants its token; the browser gets a session instead).
-    private func openConsole() {
-        Task {
-            do { NSWorkspace.shared.open(try await model.client.consoleLink()) }
-            catch { model.errorMessage = "无法打开网页控制台：\(error.localizedDescription)" }
+            MenuAction(title: "Quit AgentSwitch", rows: PixelArt.menuQuit) { quitApp() }
         }
     }
 }
@@ -205,27 +198,32 @@ private struct ServiceRow: View {
     }
 }
 
-/// A menu-style row: full width, in reverse under the pointer (a text-mode menu's highlight); the words start in the
-/// mark column's line.
+/// A menu-style row: full width, in reverse under the pointer (a text-mode menu's highlight); its picture before the
+/// words, which start in the line of the words above (the status rows').
 private struct MenuAction: View {
     let title: String
+    /// Its picture: a sprite in the pixel look, the system's symbol that stands for it in the classic one.
+    let rows: [String]
     var enabled = true
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
+        // In reverse under the pointer; in the classic look the system's menu highlight: the accent, round.
+        let ink: Color = hovering && enabled ? (look.isClassic ? Color.white : Color(nsColor: .windowBackgroundColor)) : .primary
         Button(action: action) {
-            HStack(spacing: 8) {
-                Color.clear.frame(width: 10, height: 1)
+            HStack(spacing: 6) {
+                // One size for all of them in the classic look, whatever grid each sprite was drawn on.
+                PixelSprite(rows: rows, pixel: look.isClassic ? 9.5 / CGFloat(max(rows.count, 1)) : 1, color: ink.opacity(hovering && enabled ? 1 : 0.8))
+                    .frame(width: 14, height: 12)
                 LookWord(title).mono(12)
                 Spacer()
             }
-            .padding(.horizontal, 10)
+            .padding(.leading, 8).padding(.trailing, 10)
             .padding(.vertical, 4)
             .contentShape(Rectangle())
-            // In reverse under the pointer; in the classic look the system's menu highlight: the accent, round.
-            .foregroundStyle(hovering && enabled ? (look.isClassic ? Color.white : Color(nsColor: .windowBackgroundColor)) : .primary)
+            .foregroundStyle(ink)
             .grounded(hovering && enabled ? (look.isClassic ? Color.signal : Color.primary) : .clear, radius: 5)
         }
         .buttonStyle(.plain)
