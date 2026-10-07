@@ -32,11 +32,12 @@ enum Look {
     static let topDeep = Color(nsColor: .dynamic(light: 0x3B3FD8, dark: 0x4B4FE0, classicLight: 0x2F3DC8, classicDark: 0x3D4BE0, name: "AgentSwitchEffortTopDeep"))
 
     /// How an answer is set in this look — its size, the room between its lines and between its blocks (docs/ui-v0.md
-    /// §8 “对话的字号”): the classic look gives what the agent says more room than the words around it (15 on 24, as
-    /// the agents' own apps set prose), so that it reads as text to read and not as one more label; the pixel look
-    /// keeps its own.
+    /// §8 “对话的字号”): the classic look sets what the agent says at 14, the size both agents' own apps set prose and
+    /// this app's reply box is typed in, with a little more room between lines and blocks than a label has, so that
+    /// it reads as text to read. Not larger: at 15 it stood out against everything around it (2026-10-07, user: Mac上的
+    /// 字体太大了哥们 和其他的字体比起来). The pixel look keeps its own.
     static func prose(_ look: InterfaceLook) -> (size: CGFloat, lineSpacing: CGFloat, blockSpacing: CGFloat) {
-        look.isClassic ? (15, 6, 12) : (13.5, 4, 8)
+        look.isClassic ? (14, 5, 10) : (13.5, 4, 8)
     }
 
     /// A size of the conversation's text in this look (docs/ui-v0.md §8 “对话的字号”, 2026-10-07): the pixel look's own,
