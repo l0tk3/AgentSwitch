@@ -144,6 +144,8 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .u.queued .bub { opacity: .55; } .u.queued time { color: var(--amber); }
 .always { align-self: flex-start; margin: -4px 12px 12px; font: 12px var(--short); color: var(--ink2); text-decoration: underline; text-underline-offset: 3px; display: block; }
 .always code { font: 12px var(--mono); }
+.or { margin: -6px 12px 12px; font-size: 12px; color: var(--ink3); }
+.u time button { font: inherit; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; margin-left: 6px; }
 /* over the reply box: what is being worked through; under it: the mode, the model, how full the context is */
 .tasks { padding: 7px 16px 0; }
 .tlist { padding: 5px 0 2px 16px; display: flex; flex-direction: column; gap: 4px; font: 12.5px var(--ui); color: var(--ink2); }
@@ -223,6 +225,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .surf.classic .diffstat { border: 0; background: var(--raise); border-radius: 999px; padding: 2px 9px; }
 .surf.classic .pchip { border: 0; background: var(--raise); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; gap: 3px; } .surf.classic .pchip.bad { background: color-mix(in srgb, var(--red) 16%, transparent); }
 .surf.classic .always { color: var(--accent); text-decoration: none; font-size: 13px; }
+.surf.classic .u time button { color: var(--accent); text-decoration: none; }
 .surf.classic .sheetbox .bh .stat { background: var(--raise); border-radius: 999px; padding: 2px 9px; font-weight: 400; }
 .surf.classic .files button { padding: 9px 16px; } .surf.classic .files { border-top: 1px solid var(--ink4); margin-top: 12px; }
 .surf.classic .diff span { padding: 0 16px; }
@@ -533,38 +536,39 @@ textarea#field::placeholder { color: var(--ink3); }
             <p><b>这一稿</b>两家都不是从终端画面里读内容的。我们也不该只靠每 10 秒取一次记录：按 agent 接各自结构化的来源，见下面“怎么实现”。</p></div>
           <div><h3>终端和图形界面能不能同时看同一个会话</h3>
             <p><b>CLAUDE</b>不能。<code>/desktop</code> 是把会话交给桌面端并退出终端；在桌面端 <code>/resume</code> 一个终端会话，第一步是先把终端里的关掉。同一时间只有一端在跑。能把正在跑的终端会话镜像出去的是 Remote Control，只到它自己的网页和手机端，不对第三方开放。</p>
-            <p><b>CODEX</b>能。它有一个本机的后台服务，桌面端是它的客户端；这个服务在运行时终端界面也连它（加 <code>--no-daemon</code> 才不连），<code>codex agents</code> 列出上面所有会话。协议里还有一条通知，专门说某个确认已经被处理掉了，供其余客户端收起自己的卡片。这台 Mac 上这个服务现在没有在运行。</p>
-            <p><b>这一稿</b>两个视图同时活着、随时互换，正是简略视图的前提。Codex 可以照它自己的办法做到完全同步；Claude Code 没有这样的通道，只能用 hook 加会话文件，细节少一档。</p></div>
+            <p><b>CODEX</b>能看，能不能两处同时操作没有文档。它有一个本机的后台服务，桌面端是它的客户端；终端界面也可以连它（<code>--remote</code>，0.157 起符合条件的终端会话会自动启动并连上，加 <code>--no-daemon</code> 才不连）。第二个客户端接上一个正在跑的会话时，会拿到历史并从那一刻起收到更新。但更新日志里写明：在别的应用里打开着的会话，在终端里是锁住的，只能另开分支；确认请求发给哪一个客户端也没有写。这台 Mac 上这个服务现在没有在运行。</p>
+            <p><b>这一稿</b>两个视图同时活着、随时互换，正是简略视图的前提，而两家自己都没有把这件事当成常规用法。所以不能指望照搬：Codex 那条路要先实测“终端开着的同时，另一个客户端能不能看、能不能答确认”；Claude Code 没有这样的通道，只能用 hook 加会话文件，细节少一档。</p></div>
           <div><h3>一段工作怎么显示</h3>
             <p><b>CLAUDE</b>记录有三档：Normal 把工具调用折成摘要、回答给全文；Thinking 再加上思考；Verbose 把每一步都列出来。</p>
-            <p><b>CODEX</b>服务端把命令解析成读文件、列目录、搜索这几类，界面可以说“读了哪个文件”而不是贴一条命令；回答分成过程中的话和最终回答。</p>
+            <p><b>CODEX</b>文档里的样子是回答上面一行折起来的 <code>Worked for 2m 30s ›</code>，改动写成 <code>Edited retry.ts +2 −2</code>。服务端把命令解析成读文件、列目录、搜索这几类，界面可以说“读了哪个文件”而不是贴一条命令；回答分成过程中的话和最终回答。聊天里显示多少命令输出是一项设置。</p>
             <p><b>这一稿</b>原来只列工具名（<code>Read ×2 · Bash</code>）。现在一段工作是一行 <code>Worked 1m 12s · Read 1 · Searched 1 · Ran 2 · Edited 1</code>，点开是每一步做了什么；<code>⋯</code> 里的 Transcript 在 Normal 与 Verbose 之间切，Verbose 全部展开并显示思考。</p></div>
           <div><h3>改了什么</h3>
             <p><b>CLAUDE</b>改动之后出现一个 <code>+12 -1</code> 的统计，点开是左边文件列表、右边改动的 diff 视图，可以在行上留评论。</p>
-            <p><b>CODEX</b>文件改动这一条带着每个文件的 diff，另有整轮改动的更新通知。</p>
+            <p><b>CODEX</b>文件改动这一条带着每个文件的 diff，另有整轮改动的更新通知。桌面端有一块审阅面板（未暂存、已暂存、提交、分支、上一轮），可以在行上留评论，按文件或按块暂存、撤回。</p>
             <p><b>这一稿</b>新加：摘要行右边的 <code>+14 −2</code>，点开按文件看 diff。行上评论这一稿不做。</p></div>
           <div><h3>确认与提问</h3>
             <p><b>CLAUDE</b>Manual 模式下逐项确认，看得到 diff，逐个接受或拒绝。</p>
             <p><b>CODEX</b>对一条命令的答复有六种：这一次同意、这个会话里都同意、同意并记成规则（以后同类不再问）、放行一条网络规则、拒绝、取消整轮。提问的每个问题带标题、选项与说明、是否可自由填写、是否是保密内容。</p>
-            <p><b>这一稿</b>确认卡新加一行 <code>Always Allow git push</code>（记成规则）。提问卡不变；标了保密的问题走加密发送。</p></div>
+            <p><b>CODEX</b>（手机端的确认卡）四个选择：Approve、Always approve、Tell Codex what to do、Deny。Claude Code 在终端里的第三个选项也是“不同意，并告诉它换个做法”。</p>
+            <p><b>这一稿</b>确认卡新加一行 <code>Always Allow git push</code>（记成规则）；卡片在的时候直接在下面回复，就是“不同意，并告诉它换个做法”（在 Permission 状态下发一句试试）。提问卡不变；标了保密的问题走加密发送。</p></div>
           <div><h3>它忙的时候再发话</h3>
             <p><b>CLAUDE</b>停止键立刻打断；打字回车则不打断，等当前动作做完它才读到并调整。</p>
-            <p><b>CODEX</b>协议里分开三件事：运行中插话、打断、排队。</p>
-            <p><b>这一稿</b>忙且输入框为空时发送键是停止；打了字发出去，那条消息先标 <code>Queued</code>，它读到后才算数（在 Busy 状态下发一条试试）。</p></div>
+            <p><b>CODEX</b>协议里分开三件事：运行中插话、打断、排队。桌面端里接着发的话是插话还是排队由一项设置定；排着队的话停在输入框上面，可以改、调顺序、立刻发或删掉。</p>
+            <p><b>这一稿</b>忙且输入框为空时发送键是停止；打了字发出去，那条消息先标 <code>Queued</code>，旁边可以 <code>Cancel</code>，它读到后才算数（在 Busy 状态下发一条试试）。排队的话不做改写和调顺序。</p></div>
           <div><h3>模式、模型、上下文、计划</h3>
             <p><b>CLAUDE</b>权限模式的选择就在发送键旁边（Manual、Accept edits、Plan、Auto、Bypass permissions），按文件夹记住；计划、任务、子代理各有一块面板，后台任务面板列出子代理和后台命令。</p>
-            <p><b>CODEX</b>计划是一组带状态的步骤（未开始、进行中、完成），随轮次更新；用量通知里带上下文窗口的大小。</p>
+            <p><b>CODEX</b>权限的选择在输入框下面（Ask for approval、Approve for me、Full access），旁边是在哪里干活（这台电脑或云端）。计划是一组带状态的步骤（未开始、进行中、完成），随轮次更新；用量通知里带上下文窗口的大小。子代理各有自己的会话，从主会话里的活动点进去。</p>
             <p><b>这一稿</b>新加：输入框上面一行 <code>Tasks 2/4</code>，点开是清单；输入框下面一行是模式、模型和上下文用量，模式与模型点开可换。</p></div>
           <div><h3>只有终端里才有的界面</h3>
             <p><b>CLAUDE</b>会在终端里打开面板的命令，在桌面端直接不可用（比如 <code>/permissions</code> 只回一句“这个环境里不可用”）。</p>
             <p><b>这一稿</b>我们背后一直有真的终端，所以能给一张 Prompt 卡并一键切回去。这一点比它完整，保留。</p></div>
         </div>
-        <p class="src">依据：Claude Code 桌面端文档（<a href="https://code.claude.com/docs/en/desktop" target="_blank" rel="noopener">code.claude.com/docs/en/desktop</a>）与无界面运行文档；Codex 的部分取自这台 Mac 上 codex 0.160.1 自己导出的协议定义（<code>codex app-server generate-ts</code>）和它的命令行帮助，不是转述。</p>
+        <p class="src">依据：Claude Code 桌面端文档（<a href="https://code.claude.com/docs/en/desktop" target="_blank" rel="noopener">code.claude.com/docs/en/desktop</a>）与无界面运行文档；Codex 的协议取自这台 Mac 上 codex 0.160.1 自己导出的定义（<code>codex app-server generate-ts</code>）和它的命令行帮助，界面与更新日志取自它的文档（<a href="https://learn.chatgpt.com/docs/app-server" target="_blank" rel="noopener">learn.chatgpt.com/docs/app-server</a> 及同站的 prompting、code-review、mobile、changelog 各页）。Codex 桌面端里确认按钮的文字、计划与思考的画法，文档没有写。</p>
       </section>
       <section>
         <p class="sec">// 怎么实现</p>
         <ul>
-          <li><b>Codex：连它自己的后台服务。</b>我们的服务作为又一个客户端连上去，订阅这个终端所在的会话：逐条的记录、逐字增量、确认、提问、计划、改动、用量都是现成的；回复、插话、打断各有对应的请求。终端界面照常开着，两边看到的是同一个会话。要先验证三件事：这个后台服务在这台 Mac 上现在没在运行，要弄清由谁启动、能不能由我们连；我们启动的 Codex 终端连的确实是它；这套协议目前标着 experimental，版本升级可能变。</li>
+          <li><b>Codex：连它自己的后台服务。</b>我们的服务作为又一个客户端连上去，订阅这个终端所在的会话：逐条的记录、逐字增量、确认、提问、计划、改动、用量都是现成的；回复、插话、打断各有对应的请求。终端界面照常开着，两边看到的是同一个会话。要先实测四件事：这个后台服务在这台 Mac 上现在没在运行，要弄清由谁启动、能不能由我们连；我们启动的 Codex 终端连的确实是它；终端开着的同时第二个客户端能看到更新、能答确认，而不是被锁在外面（文档没有写，更新日志说别处打开的会话在终端里是锁住的）；这套协议标着 experimental，版本升级可能变。实测不通的话，Codex 也退回 hook 加会话文件，和 Claude Code 一样。</li>
           <li><b>Claude Code：hook 加会话文件。</b>它没有对第三方开放的实时通道。终端继续跑；状态、当前工具、确认、提问、子代理我们已经从 hook 拿到；记录改成盯着它的会话文件（边做边写），不再每 10 秒取一次，也不再把每条消息截到 2000 字。代价是没有逐字输出，一条消息写完才出现；改动要从 Edit 的输入里还原。</li>
           <li><b>Claude Code 的另一条路：像它的桌面端那样。</b>不开终端，直接收它的消息流，逐字输出和改动都有；切到终端视图时做一次交接（一边停、另一边按会话编号接上）。细节全，但两个视图不能同时活着，切换有一两秒。建议先走上一条，这条留作以后。</li>
           <li><b>OpenCode 与 pi。</b>OpenCode 的终端已经是经它的服务接口接的，记录与确认可以直接取；pi 经它的扩展事件。</li>
@@ -616,7 +620,7 @@ const PRESETS = {
                 m: "<b>先看再接手。</b>Mac 上现在点以前的会话只有 <code>Resume</code> 和 <code>Delete</code>。这里点它就在这一块里打开只读的记录，底部 <code>Resume</code>，和手机上那一页一样。" },
   live:       { w: "Busy", n: "<b>接手之后。</b>一段工作是一行摘要，右边的 <code>+14 −2</code> 点开看改动；末尾一行写它正在做什么。输入框上面是任务清单，下面是模式、模型和上下文用量。忙且输入框为空时发送键是停止；打了字发出去会先排队。",
                 m: "<b>接手之后。</b>记录排成中间一栏，输入框在这一块的底部。<code>↩</code> 发送，<code>⇧↩</code> 换行，忙的时候 <code>esc</code> 或 <code>■</code> 打断。顶栏右边的两格开关换视图；Panes 选 Two 看分屏时两种视图并排。" },
-  permission: { w: "Permission", n: "<b>要你确认。</b>确认卡排在记录末尾，不盖住内容。答完收成一行，留在记录里。",
+  permission: { w: "Permission", n: "<b>要你确认。</b>确认卡排在记录末尾，不盖住内容：这一次同意、记成规则、拒绝，或者直接在下面回复告诉它换个做法。答完收成一行，留在记录里。",
                 m: "<b>要你确认。</b>确认卡排在记录末尾，<code>⌘↩</code> 是 Allow，<code>⌘⌫</code> 是 Deny，和终端视图里那张卡片的键一样。答完收成一行。" },
   question:   { w: "Question", n: "<b>它问你。</b>选项、Other、Submit，和终端页的提问卡是同一张，只是排在记录里。" },
   prompt:     { w: "Prompt", n: "<b>程序自己画的界面。</b>这里是 <code>/model</code> 的菜单。卡片里是屏幕最后几行，按键条自己出来：按 <code>↑</code> <code>↓</code> <code>⏎</code> 试试，或者 <code>Open Terminal</code>。",
@@ -636,11 +640,11 @@ const MAP = [
   ["锁：加密发送；像密码时先问", "相同", "sealed"],
   ["+ 相机、照片、文件、粘贴图片；[Image #n] 占位与缩略图", "相同；发出后图片留在那条消息下面", "reply"],
   ["/ 列出 agent 的命令", "相同；会打开菜单的命令落到 Prompt 卡", "reply"],
-  ["确认卡 Deny / Allow，浮在屏幕上方", "排在记录末尾，答完收成一行；另有一行 Always Allow，记成规则", "permission"],
+  ["确认卡 Deny / Allow，浮在屏幕上方", "排在记录末尾，答完收成一行；另有一行 Always Allow，记成规则；直接回复等于拒绝并告诉它换个做法", "permission"],
   ["提问卡：选项、Other、Submit", "同上", "question"],
   ["手机的 17 个按键：⏎ ⌫ ↑ ↓ 1 2 3 y n esc tab ⇧tab ← → pgup pgdn ^C", "平时收起，+ 的最后一项取出；程序等按键时自己出来。Mac 用真键盘", "prompt"],
   ["打断：esc 或 ^C", "忙且输入框为空时，发送键是 ■；Mac 上 esc 也行", "live"],
-  ["它忙的时候接着打字发出去", "那条消息先标 Queued，它读到后才算数", "live"],
+  ["它忙的时候接着打字发出去", "那条消息先标 Queued，可以 Cancel，它读到后才算数", "live"],
   ["拖动滚屏（给程序发滚轮）", "记录本身能滚；顶上 Earlier 取更早的，往回翻时出现 ↓ Latest", "live"],
   ["双指调字号（Mac：⌘+ ⌘−）", "跟随系统字号：这里是排版的文字", null],
   ["点链接在 Mac 的浏览器里打开；长按或右键：Open in Browser、Copy Link、Open in Safari", "相同（长按或右键试试）", "live"],
@@ -718,7 +722,7 @@ const lockIcon = (px = 2) => (S.classic ? icon("lock", px * 9) : P.sprite(["..##
 function item(it, i) {
   if (it.t === "user") {
     const pics = it.images ? `<div class="pics">${it.images.map((n) => `<span class="pic"><i>#${n}</i></span>`).join("")}</div>` : "";
-    return `<div class="u ${it.queued ? "queued" : ""}"><time>${it.queued ? "Queued" : it.time}</time>${pics}<div class="bub">${esc(it.text)}</div></div>`;
+    return `<div class="u ${it.queued ? "queued" : ""}"><time>${it.queued ? `Queued<button data-a="unqueue" data-i="${i}">Cancel</button>` : it.time}</time>${pics}<div class="bub">${esc(it.text)}</div></div>`;
   }
   if (it.t === "md") {
     const html = it.html.replace(/<pre>/g, '<div class="code"><button data-a="copy">Copy</button><pre>').replace(/<\/pre>/g, "</pre></div>") + (it.clip ? (it.open ? it.rest : "") : "");
@@ -755,7 +759,8 @@ function card() {
     return `<div class="card" id="card"><div class="hd">${head}</div>
       <div class="bd"><div class="cmd">${esc(c.detail)}</div></div>
       <div class="ft"><button class="btn" data-a="deny">Deny${k("⌘⌫")}</button><button class="btn pri" data-a="allow">Allow${k("⌘↩")}</button></div>
-      <button class="always" data-a="always">Always Allow <code>git push</code></button></div>`;
+      <button class="always" data-a="always">Always Allow <code>git push</code></button>
+      <div class="or">也可以直接在下面回复，告诉它换个做法。</div></div>`;
   }
   if (c.kind === "question") {
     const pick = (on) => (S.classic ? icon(on ? "radioOn" : "radio", 18) : on ? "&lt;x&gt;" : "&lt; &gt;");
@@ -956,6 +961,7 @@ function send(sealed) {
   const text = S.draft.trim();
   if (!text) return;
   const images = S.files.slice(), waits = S.status === "busy" && !S.card;
+  if (S.card?.kind === "permission") { S.items.push({ t: "said", text: "Denied", detail: `${S.card.tool} ${S.card.detail}`, cmd: true, tone: "no", time: "Now" }); S.card = null; }
   const mine = { t: "user", time: "Now", queued: waits, text: sealed ? text.replace(/hunter2|sk-[\w-]+/g, "enc:v1:9f3c…a1") : text, images: images.length ? images : null };
   S.items.push(mine);
   if (sealed) S.items.push({ t: "said", text: "Sealed", detail: "1 处凭据已换成密文", tone: "ok" });
@@ -972,7 +978,7 @@ function send(sealed) {
     }, 2200);
   };
   // Sent while it works: the message waits (`Queued`) until the action under way ends, then it is read.
-  if (waits) { render(true); return setTimeout(() => { if (mine.queued) answer(); }, 1800); }
+  if (waits) { render(true); return setTimeout(() => { if (mine.queued && S.items.includes(mine)) answer(); }, 1800); }
   answer();
 }
 function key(k) {
@@ -1017,6 +1023,7 @@ document.addEventListener("click", (e) => {
   switch (a) {
     case "fold": at(i).open = !at(i).open; return render();
     case "plan": S.planOpen = !S.planOpen; return render();
+    case "unqueue": S.items.splice(+i, 1); return render();
     case "changes": S.over = { kind: "changes", file: 0 }; return render();
     case "file2": S.over = { kind: "changes", file: +i }; return render();
     case "verbose": S.verbose = !S.verbose; S.over = null; return render();
