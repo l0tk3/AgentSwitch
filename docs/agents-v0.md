@@ -135,3 +135,30 @@
 - 卸载后各家留下的缓存（`~/.npm`、`~/.cache` 里它们的东西）不清：那和手动卸载一样，也不是越积越多的东西。
 - pi 的 Pinned：要在版本库里装一组 npm 包，等它的发布方式稳定再说。
 - 版本库里的程序要不要对执行器只读（同受保护路径一类的事）。
+
+## 11. 代理：四家认不认（2026-10-07 实测）
+
+2026-10-07 用户：接下来要构思一下账号切换相关的问题，首先这几个agent吃代理吗。这里只记测到的事实，账号切换本身还没有设计。
+
+**怎么测的**：`packages/daemon/scripts/agent_proxy_check.py`（不是测试）。每个 agent 用假密钥和一次性的配置目录各跑一次，代理变量指向本机一个只记下“被要求连哪里”、一律拒绝的监听端口；没有请求到达任何服务商，没有用到任何账户。
+
+| agent | 设了 `HTTPS_PROXY` / `HTTP_PROXY` | 只设 `ALL_PROXY=socks5://…` |
+|---|---|---|
+| Claude Code | 走代理（要连 `api.anthropic.com`） | 不认，直连 |
+| Codex | 走代理（`chatgpt.com`、`api.openai.com`、`github.com`） | 认，但只有一部分连接做了 SOCKS 握手，其余把它当 HTTP 代理用 |
+| OpenCode | 走代理（`models.opencode.ai`、`opencode.ai`） | 不认，直连 |
+| pi | 走代理（`api.anthropic.com`） | 不认，直连 |
+
+- 四家都认环境变量里的 **HTTP 代理**，自己发往模型服务商的流量会走它。**SOCKS 只有 Codex 认，而且不完整**：要用 SOCKS 出口，得在前面加一层 HTTP 转 SOCKS。
+- 代理是**按进程的环境变量**生效的，所以每个终端、每次执行可以各用各的出口。
+- **OpenCode 会把访问自己本地服务的请求也送进代理**：`NO_PROXY` 里必须留着 `127.0.0.1,localhost`，否则它启动就卡住。
+
+**AgentSwitch 现在默认给了什么**（`packages/daemon/src/executors/gate.ts` 的 `gateEnv`、`NO_PROXY_HOSTS`；`terminals/launch.ts`）：
+
+- 启动 agent 时默认就设了代理，指向凭据网关：`HTTP_PROXY` / `HTTPS_PROXY`（大小写各一份）`= http://127.0.0.1:8080`，外加网关的 CA（`SSL_CERT_FILE`、`REQUESTS_CA_BUNDLE`、`NODE_EXTRA_CA_CERTS`）和 `SECRET_GATE_HOME`。目的是让它跑的命令发出的请求经过网关，密文在那里换成明文。
+- **模型流量故意绕过**：`NO_PROXY` 里列着 `127.0.0.1,localhost`、`anthropic.com`、`claude.ai`、`openai.com`、`chatgpt.com`、`deepseek.com`、`statsig.com`、`sentry.io`。所以各家访问自己的服务商是直连，不经网关。
+- 终端里：Claude Code、OpenCode、pi 的进程本身带着这组变量；**Codex 的进程本身不带**，只通过 `shell_environment_policy.set` 给它跑的命令（网关的代理和 CA 到不了 Codex 自己的流量）。
+
+**浏览器是另一套**：共享浏览器（Camoufox）的出口与指纹不走这些环境变量，在它自己的“身份”里设——全部流量先到服务的本地转发层，再直连或交给上游代理（http、https、socks4、socks5 都行，换上游不用重启），见 `docs/browser-v0.md` §7。所以“一个账号一个出口”要分两头配：agent 进程的代理变量，和浏览器的身份。
+
+**对账号切换意味着什么**（待设计）：要让某个账号走指定出口，得改这份 `NO_PROXY` 名单，并决定是经网关转发，还是让那个进程直接指向另一个代理；Codex 要另外给它自己的进程设代理变量。
