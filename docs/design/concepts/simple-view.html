@@ -35,6 +35,8 @@
 /* the classic look (ui-v0 §8): round, the system's type for short words, the system's blue and its state colours */
 .surf.classic { --short: var(--ui); --r-bubble: 18px; --r-card: 14px; --r-btn: 10px; --r-key: 6px; --accent: #007aff; --on-accent: #fff;
   --cyan: #007aff; --amber: #d98200; --green: #1f9d3f; --red: #e0352b; }
+/* the classic look in the light: the system's own greys */
+.surf.classic.light { --bg: #ffffff; --panel: #f7f7f9; --raise: #efeff3; --ink: #1c1c1e; --ink2: #6e6e73; --ink3: #aeaeb2; --ink4: #e3e3e8; }
 .surf.classic.dark { --accent: #0a84ff; --cyan: #0a84ff; --amber: #ff9f0a; --green: #30d158; --red: #ff453a;
   --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --ink4: #2c2c2e; --raise: #1c1c1e; --panel: #111113; }
 
@@ -101,6 +103,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .t2 { display: flex; justify-content: center; align-items: center; gap: 5px; font: 11px var(--short); color: var(--ink2); }
 .sq { width: 8px; height: 8px; background: var(--ink3); flex: none; }
 .surf.classic .sq { border-radius: 50%; }
+.sq.done { background: var(--green); } .sq.failed { background: var(--red); }
 .sq.busy { background: var(--cyan); } .sq.waiting { background: var(--amber); } .sq.idle { background: none; box-shadow: inset 0 0 0 1.5px var(--ink2); } .sq.exited { background: none; box-shadow: inset 0 0 0 1.5px var(--ink3); }
 
 .body > * { min-width: 0; max-width: 100%; }
@@ -145,6 +148,7 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .always { align-self: flex-start; margin: -4px 12px 12px; font: 12px var(--short); color: var(--ink2); text-decoration: underline; text-underline-offset: 3px; display: block; }
 .always code { font: 12px var(--mono); }
 .or { margin: -6px 12px 12px; font-size: 12px; color: var(--ink3); }
+.card .bd .where { margin-top: -4px; }
 .u time button { font: inherit; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; margin-left: 6px; }
 /* over the reply box: what is being worked through; under it: the mode, the model, how full the context is */
 .tasks { padding: 7px 16px 0; }
@@ -296,6 +300,29 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .surf.classic.mac .box .bh { font-size: 14px; }
 .surf.classic.mac .comp.sealed { margin-right: 0; }
 
+/* ---------- the router's page (Dispatch): the conversation with the router, and a task as the same record ---------- */
+.day { font: 11px var(--short); color: var(--ink3); text-align: center; letter-spacing: .04em; }
+.tcard { border: 1px solid var(--ink4); background: var(--panel); border-radius: var(--r-card); padding: 10px 12px 11px; display: flex; flex-direction: column; gap: 7px; cursor: pointer; text-align: left; }
+.surf.classic .tcard { border: 0; box-shadow: 0 0 0 .5px var(--ink4); border-radius: 12px; padding: 12px 14px; }
+.l1 { display: flex; align-items: center; gap: 7px; font: 12px var(--short); color: var(--ink2); min-width: 0; }
+.l1 .sp { flex: 1; } .l1 .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.l1 .waiting { color: var(--amber); } .l1 .done { color: var(--green); } .l1 .failed { color: var(--red); } .l1 .busy { color: var(--cyan); }
+.l1 .tm { color: var(--ink3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ti { font: 600 15px/1.4 var(--ui); }
+.res { font-size: 14px; line-height: 1.55; }
+.acts { display: flex; gap: 10px; }
+.tcard .card { margin: 2px 7px 6px 0; cursor: default; } .surf.classic .tcard .card { margin: 2px 0 4px; background: var(--bg); }
+.tcard .line { cursor: pointer; }
+.where { font: 12px var(--mono); color: var(--ink3); overflow-wrap: anywhere; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font: 12px var(--short); color: var(--ink2); padding: 4px 0 0 16px; }
+.kv b { color: var(--ink); font-weight: 400; font-family: var(--mono); overflow-wrap: anywhere; }
+.dock .acts { margin: 10px 16px 0; }
+.tabbar { display: flex; justify-content: space-around; padding: 9px 0 0; margin-top: 10px; border-top: 1px solid var(--ink4); font: 11px var(--short); color: var(--ink3); }
+.tabbar b { color: var(--ink); font-weight: 600; } .surf.classic .tabbar b { color: var(--accent); }
+.mmain.nolist { grid-template-columns: 45px minmax(0, 1fr); }
+.surf.mac .dock .acts { margin: 10px 0 0; justify-content: flex-end; } .surf.mac .tcard { max-width: 560px; } .surf.mac .ti { font-size: 14.5px; } .surf.mac .res { font-size: 13.5px; }
+.mtitle button { font: 600 15px var(--short); color: var(--ink2); padding: 0 4px; display: grid; }
+
 /* ---------- under the record: the same parts the terminal page has ---------- */
 .dock { flex: none; border-top: 1px solid var(--ink4); background: var(--bg); display: flex; flex-direction: column; padding-bottom: 20px; }
 .err { display: flex; gap: 8px; align-items: baseline; padding: 6px 16px 0; font-size: 12.5px; color: var(--red); }
@@ -431,11 +458,12 @@ textarea#field::placeholder { color: var(--ink3); }
 .surf.mac .sugs { margin-top: 8px; border: 1px solid var(--ink4); } .surf.mac .sugs button { padding: 5px 10px; }
 .surf.mac .resume { margin: 10px 0 0; display: flex; justify-content: flex-end; gap: 12px; align-items: center; } .surf.mac .resume .btn { width: auto; padding: 6px 22px; }
 .hintk { display: flex; justify-content: flex-end; gap: 12px; padding-top: 6px; font: 11px var(--short); color: var(--ink3); }
-.chiprow .hintk { padding: 0; margin-right: 10px; }
+.chiprow .hintk { padding: 0; margin-right: 10px; white-space: nowrap; }
 .hintk kbd { margin: 0 4px 0 0; }
 .surf.mac .veil { padding: 0; align-items: center; } .surf.mac .veil .box { width: 340px; }
 .surf.mac .veil.low { align-items: flex-start; justify-content: flex-end; padding: 0 0 84px max(22px, calc((100% - 700px) / 2)); } .surf.mac .veil.low .box { width: 220px; }
 .surf.mac .veil.top { align-items: flex-start; justify-content: flex-start; padding: 40px 0 0 60px; } .surf.mac .veil.top .box { width: 230px; }
+.mmain.nolist .veil.top { align-items: flex-end; padding: 8px 12px 0 0; }
 .surf.mac .toast { bottom: 96px; }
 .surf.mac .tscreen { font-size: 12.5px; line-height: 1.55; padding: 16px 20px; }
 .surf.mac .over-card { position: absolute; left: 50%; transform: translateX(-50%); top: 14px; width: min(480px, calc(100% - 40px)); z-index: 6; white-space: normal; font-family: var(--ui); }
@@ -450,7 +478,7 @@ textarea#field::placeholder { color: var(--ink3); }
   /* a phone looking at the Mac's window: the rail put away too (as the app can), the window at its real size, dragged sideways */
   .swipe { display: block; }
   .mwin { min-width: 560px; height: 640px; }
-  .mrail { display: none; } .mmain { grid-template-columns: minmax(0, 1fr); }
+  .mrail { display: none; } .mmain, .mmain.nolist { grid-template-columns: minmax(0, 1fr); }
   .surf.mac .u { padding-left: 48px; }
   /* one column; the states stay at the top of the screen while the phone under them is looked at */
   .grid { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
@@ -476,7 +504,7 @@ textarea#field::placeholder { color: var(--ink3); }
 <div class="page">
   <header>
     <h1>Simple View</h1>
-    <p>终端的简略视图，iPhone 与 Mac 两端，Pixel 与 Classic 两种外观。接手前那个只读的记录页不变，按下 <code>Resume</code> 之后不换到终端的屏幕，而是留在同一页上，把回复、确认、提问、按键这些补进来。终端页能做的事这里都能做；程序自己画的界面随时切回终端。概念稿，2026-10-07。</p>
+    <p>终端的简略视图，iPhone 与 Mac 两端，Pixel 与 Classic 两种外观；同一套画法也用到调度页（Dispatch）的任务上。接手前那个只读的记录页不变，按下 <code>Resume</code> 之后不换到终端的屏幕，而是留在同一页上，把回复、确认、提问、按键这些补进来。终端页能做的事这里都能做；程序自己画的界面随时切回终端。概念稿，2026-10-07。</p>
   </header>
   <div class="grid" id="grid">
     <aside class="ctl">
@@ -505,6 +533,32 @@ textarea#field::placeholder { color: var(--ink3); }
         </table></div>
       </section>
       <section>
+        <p class="sec">// 已定的（2026-10-07）</p>
+        <ul>
+          <li><b>两端都做，两种外观都做。</b>手机和 Mac 都能在终端视图与简略视图之间切换。</li>
+          <li><b>默认不同。</b>Mac 上默认是终端原来的样子；手机上默认是简略视图。每个终端记住上次用的那个，两端各记各的。</li>
+          <li><b>Mac 的简略视图可以是白色的。</b>它跟随系统的深浅；变成白色时目录（左边的列表）跟着变。顶栏、图标栏、状态栏我也画成一起变：只变列表的话，白色的列表会夹在黑色的栏之间。终端视图仍然是深色，分屏里的终端那一块也仍然是深色（切到 Mac · Light，再把 Panes 选 Two 看）。</li>
+          <li><b>这套画法也用到调度页。</b>见下一节；上面 Page 选 Dispatch 可以直接点。</li>
+        </ul>
+      </section>
+      <section>
+        <p class="sec">// 调度页（DISPATCH）也用这一套</p>
+        <p>调度页上路由器派出去的任务，本来就是一个 agent 的一段会话。任务卡片和任务页换成和简略视图同一套零件，原来的入口、动作和规则不变。</p>
+        <div class="tbl"><table>
+          <thead><tr><th>现在</th><th>换成</th></tr></thead>
+          <tbody>
+            <tr><td>卡片上的进度块 <code>▮▮▮▯▯ 3/5</code> 和 <code>└─ 当前一步</code></td><td><code>Tasks 2/5</code>（点开是清单）和“正在做什么”的一行：工具、命令、已用时间</td></tr>
+            <tr><td>任务页的 <code>// Process</code>：工具调用一次一行</td><td>一段工作一行摘要 <code>Worked 1m 14s · Read 1 · Ran 1 · Edited 1</code>，点开看每一步；Transcript 切到 Verbose 全部展开</td></tr>
+            <tr><td>结果一段话</td><td>回答照旧排成 Markdown，旁边多一个改动统计 <code>+2 −1</code>，点开按文件看 diff</td></tr>
+            <tr><td>审批卡 <code>[ Deny ] [ Allow ]</code></td><td>同一张确认卡，多一行 <code>Always Allow</code>（记成规则）</td></tr>
+            <tr><td>任务页的 <code>// Task</code>：Folder、Browser、Approval、ID</td><td>收进末尾一行 <code>Details</code>，点开才看</td></tr>
+            <tr><td>动作 <code>[ Cancel ] [ Hand to ▾ ] [ Retry ] [ Delete ]</code>、评分</td><td>不变，Classic 下是标准按钮</td></tr>
+            <tr><td>调度页的输入框（<code>+</code>：附件、密文、Pin Model）</td><td>不变</td></tr>
+          </tbody>
+        </table></div>
+        <p style="margin-top:8px">这一页比终端那边好做：派出去的任务本来就是经结构化的接口跑的（Claude 的消息流、Codex 的 app-server、OpenCode 的服务接口），每一步、改动、计划现在就有，不需要 hook 和会话文件。</p>
+      </section>
+      <section>
         <p class="sec">// MAC 上不一样的地方</p>
         <ul>
           <li><b>在一块分屏里。</b>记录排成中间一栏（最宽 700 点），输入框在这一块的底部、同样宽。分屏时每一块各有各的视图，块的标题栏右边切换；只有一块时切换在窗口顶栏的右边。</li>
@@ -513,17 +567,16 @@ textarea#field::placeholder { color: var(--ink3); }
           <li><b>确认卡带快捷键</b>：<code>⌘↩</code> Allow，<code>⌘⌫</code> Deny，和终端视图里的卡片一样。</li>
           <li><b>附件</b>：<code>+</code>、粘贴，或者把文件拖到这一块上（终端视图已有的拖放）。</li>
           <li><b>改名、关闭、单独开窗口</b>照旧在列表那一行的菜单里；状态栏右边原来写终端尺寸的地方写 <code>Simple</code>，锁仍是 Encrypt &amp; Send。</li>
-          <li><b>主窗口固定深色</b>（ui-v0 §8），所以 Mac 上没有浅色。</li>
+          <li><b>深浅色。</b>主窗口原来固定深色（ui-v0 §8）；现在简略视图跟随系统，可以是白色，列表和各条栏跟着变，终端视图不变。</li>
           <li><b>Classic 怎么画</b>（两端）：界面文字一律系统字体，等宽字只留给代码、命令和路径；线性图标；状态是圆点，进行中是系统的转圈，等你的那个橙点缓慢呼吸；卡片与弹框是圆角加柔和投影、标准按钮；输入框是圆角框加圆形的发送键；自己的词（Working、Needs You、Ready、Ended、Approval Needed、Gateway OK）；没有 glitch 和闪动。</li>
         </ul>
       </section>
       <section>
-        <p class="sec">// 需要你定的</p>
+        <p class="sec">// 还需要你定的</p>
         <ol>
-          <li><b>默认进哪个视图。</b>建议：有会话记录的 agent，<code>Resume</code> 和新建之后默认进简略视图；每个终端记住上次用的那个，两端各记各的。</li>
-          <li><b>换视图的入口放哪。</b>手机上现在画的是导航栏右边一个图标（<code>&gt;_</code> 去终端，<code>≡</code> 回来），<code>⋯</code> 里也有一项；Mac 上是顶栏右边的两格开关。手机上也可以只留 <code>⋯</code> 里那一项，顶上更干净。</li>
+          <li><b>Mac 的调度页要不要也可以变白。</b>它 10 月 3 日定成和另外两页一样的深色（当时是因为只有它是白的太突兀）。现在简略视图能变白了，这一稿把调度页也画成跟随系统；不要的话它保持深色。</li>
+          <li><b>手机上换视图的入口放哪。</b>现在画的是导航栏右边一个图标（<code>&gt;_</code> 去终端，<code>≡</code> 回来），<code>⋯</code> 里也有一项。也可以只留 <code>⋯</code> 里那一项，顶上更干净。</li>
           <li><b>手机的按键平时收起。</b>现在放在 <code>+</code> 菜单的最后一项，程序等按键时自己出来。也可以在输入框旁常驻一个键盘图标，多占一格。</li>
-          <li><b>手机的深浅色。</b>简略视图跟随手机的外观（和现在的记录页一样）；终端视图仍然固定深色。</li>
           <li><b>Mac 上点以前的会话先看记录。</b>这是新行为（见上）；不要的话保持现在的悬停 <code>Resume</code>。</li>
         </ol>
       </section>
@@ -633,6 +686,20 @@ const PRESETS = {
                 m: "<b>终端正在 iPhone 上用着。</b>看记录、回复都不占它的窗口大小，所以这里没有 On iPhone 的占位，标题里写一句。切到终端视图时照旧要接手。" },
   exited:     { w: "Exited", n: "<b>程序结束了。</b>回到只读的记录，底部又是 <code>Resume</code>：和接手前是同一页。" },
 };
+const DPRESETS = {
+  home:    { w: "Dispatch", n: "<b>调度页。</b>你和路由器的对话照旧；它派出去的任务是一张卡片。卡片上原来的进度块和“当前一步”换成 <code>Tasks 2/5</code> 与正在做什么的一行。点卡片进任务页。" },
+  task:    { w: "Task", n: "<b>任务页。</b>和终端的简略视图是同一套：你的请求、标题与一行说明、回答、一段工作一行摘要（点开看每一步）、改动统计、正在做什么。底部是任务清单和这个任务的动作。原来的 <code>// Task</code> 收进末尾的 <code>Details</code>。" },
+  approve: { w: "Approval", n: "<b>任务要你确认。</b>同一张确认卡，多一行 <code>Always Allow</code>。它在任务页上排在记录末尾，在调度页上嵌在那张任务卡片里。" },
+  done:    { w: "Done", n: "<b>任务做完了。</b>结果、这一轮改了什么、过程都在；动作换成 <code>Retry</code> 和 <code>Delete</code>。" },
+};
+const TASK_ITEMS = () => [
+  { t: "md", html: "<p>先跑测试，再构建并安装到手机。</p>" },
+  { t: "work", secs: 74, steps: [{ k: "read", text: "packages/ios-app/project.yml" }, { k: "run", text: "npm test", out: "135 files, 1196 tests passed" }, { k: "edit", text: "project.yml", add: 2, del: 1 }] },
+  { t: "md", html: "<p>测试全部通过。工程里没有写签名用的开发团队，已补上，接着构建。</p>" },
+];
+const TASK_PLAN = () => [{ s: "done", t: "读取工程配置" }, { s: "done", t: "运行测试" }, { s: "doing", t: "构建应用" }, { s: "todo", t: "安装到手机" }, { s: "todo", t: "启动并确认" }];
+const DCHANGES = [{ file: "project.yml", add: 2, del: 1, lines: [["h", "@@ targets · AgentSwitch"], ["c", "    settings:"], ["d", "      DEVELOPMENT_TEAM: \"\""], ["a", "      DEVELOPMENT_TEAM: A1B2C3D4E5"], ["a", "      CODE_SIGN_STYLE: Automatic"]] }];
+const REQUEST = { t: "user", time: "10:20", text: "把 iOS 端打包装到手机上" };
 const MAP = [
   ["实时屏幕：程序画什么显示什么", "会话记录：你的话在右，回答排成 Markdown，一段工作折成一行摘要、点开看每一步；⋯ 里 Transcript 切 Normal / Verbose", "live"],
   ["标题：目录与 git，下面 Busy / Waiting / Exited", "相同", "live"],
@@ -662,14 +729,37 @@ const MAP = [
 
 /* ---------- state ---------- */
 const prefersDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
-const S = { preset: "live", device: "phone", view: "simple", dark: prefersDark(), classic: true, split: false, verbose: false, mode: "Edits", model: "Opus 5.5" };
+const S = { preset: "live", page: "terminals", device: "phone", view: "simple", dark: prefersDark(), classic: true, split: false, verbose: false, mode: "Edits", model: "Opus 5.5" };
+const isDispatch = () => S.page === "dispatch";
+const presets = () => (isDispatch() ? DPRESETS : PRESETS);
+const address = (preset) => { try { history.replaceState(null, "", "#" + (isMac() ? "mac-" : "") + (isDispatch() ? "d-" : "") + preset); } catch { /* a frame that keeps its own address */ } };
 let tick = 0, toastTimer = null;
 const isMac = () => S.device === "mac";
 // The classic look's own words (ClassicWords): the rest are the same in both looks.
 const CLASSIC = { Busy: "Working", Waiting: "Needs You", Idle: "Ready", Exited: "Ended" };
 const W = (w) => (S.classic ? CLASSIC[w] ?? w : w);
 
+/** A task the router handed to Claude Code, at one of four moments. */
+function loadDispatch(preset) {
+  Object.assign(S, { preset, joined: true, status: "busy", away: null, items: TASK_ITEMS(), card: null, sub: null, draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null,
+    earlier: true, sel: 0, unseen: 0, title: "构建 AgentSwitch.app，装到手机上", view: "simple", plan: TASK_PLAN(), planOpen: false, ctx: 41, dview: preset === "home" ? "home" : "task", details: false, extra: [],
+    live: { tool: "Bash", text: "xcodebuild -scheme AgentSwitch -destination 'id=00008150-…'", t0: Date.now() - 48000 }, t0: Date.now() - 134000 });
+  const built = { t: "work", secs: 96, steps: [{ k: "run", text: "xcodebuild -scheme AgentSwitch -destination 'id=00008150-…'", out: "BUILD SUCCEEDED" }] };
+  if (preset === "approve") {
+    S.status = "waiting"; S.live = null; S.plan[2].s = "done"; S.plan[3].s = "doing"; S.items.push(built);
+    S.card = { kind: "permission", tool: "Install App", detail: "xcrun devicectl device install app --device 00008150-… AgentSwitch.app", where: "~/Projects/AgentSwitch/packages/ios-app", always: "devicectl device install" };
+  }
+  if (preset === "done") {
+    S.status = "done"; S.live = null; S.plan.forEach((x) => { x.s = "done"; });
+    S.items.push(built, { t: "work", secs: 21, steps: [{ k: "run", text: "xcrun devicectl device install app …", out: "App installed" }, { k: "run", text: "xcrun devicectl device process launch …", out: "Launched" }] },
+      { t: "md", html: "<p>已装到 iPhone 并启动。免费开发者账户的签名 7 天后过期，到时需要重装。</p>" });
+  }
+  render(true);
+  address(preset);
+}
+
 function load(preset) {
+  if (isDispatch()) return loadDispatch(DPRESETS[preset] ? preset : "home");
   Object.assign(S, { preset, joined: preset !== "preview", status: "busy", away: null, items: BASE(), card: null, live: null, sub: null,
     draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple",
     plan: null, planOpen: false, ctx: 62 });
@@ -684,7 +774,7 @@ function load(preset) {
   if (preset === "sealed") { S.status = "idle"; S.sealed = true; S.draft = "部署用的密码是 hunter2"; }
   if (preset === "exited") { S.status = "exited"; S.joined = false; S.items.push({ t: "said", text: "Exited · 0", time: "10:52" }); }
   render(true);
-  try { history.replaceState(null, "", "#" + (isMac() ? "mac-" : "") + preset); } catch { /* a frame that keeps its own address */ }
+  address(preset);
 }
 
 /* ---------- the two looks' marks: line icons in the classic look (SF Symbols in the app), characters and sprites in the pixel one ---------- */
@@ -714,7 +804,7 @@ const mark = (kind) => (S.classic && kind === "busy" ? `<span class="ring"></spa
 
 /* ---------- the record: the same on both devices ---------- */
 const agentMark = () => (S.classic ? icon("spark", 13, 1.8) : P.sprite(P.AGENT_PX.cc, { px: 2 }));
-const statusWord = () => (S.card ? "Waiting" : { busy: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited" }[S.status]);
+const statusWord = () => (S.card ? "Waiting" : { busy: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited", done: "Done", failed: "Incomplete" }[S.status]);
 const statusKind = () => (S.card ? "waiting" : S.status);
 const since = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 const lockIcon = (px = 2) => (S.classic ? icon("lock", px * 9) : P.sprite(["..###..", ".#...#.", ".#...#.", "#######", "###.###", "###.###", "#######"], { px }));
@@ -757,10 +847,10 @@ function card() {
   if (c.kind === "permission") {
     const head = S.classic ? `${icon("warn", 17)}Approval Needed<span class="sp"></span><span class="tool">${c.tool}</span>` : `<span class="sq waiting"></span>Permission · ${c.tool}`;
     return `<div class="card" id="card"><div class="hd">${head}</div>
-      <div class="bd"><div class="cmd">${esc(c.detail)}</div></div>
+      <div class="bd"><div class="cmd">${esc(c.detail)}</div>${c.where ? `<div class="where">${esc(c.where)}</div>` : ""}</div>
       <div class="ft"><button class="btn" data-a="deny">Deny${k("⌘⌫")}</button><button class="btn pri" data-a="allow">Allow${k("⌘↩")}</button></div>
-      <button class="always" data-a="always">Always Allow <code>git push</code></button>
-      <div class="or">也可以直接在下面回复，告诉它换个做法。</div></div>`;
+      <button class="always" data-a="always">Always Allow <code>${esc(c.always ?? "git push")}</code></button>
+      ${isDispatch() ? "" : `<div class="or">也可以直接在下面回复，告诉它换个做法。</div>`}</div>`;
   }
   if (c.kind === "question") {
     const pick = (on) => (S.classic ? icon(on ? "radioOn" : "radio", 18) : on ? "&lt;x&gt;" : "&lt; &gt;");
@@ -802,7 +892,7 @@ function dock(noKeys) {
   const pmark = (st) => (S.classic ? (st === "done" ? icon("check", 14, 2) : st === "doing" ? `<span class="ring"></span>` : icon("radio", 14)) : st === "done" ? "[x]" : st === "doing" ? "[>]" : "[ ]");
   const tasks = S.plan && !noKeys ? `<div class="tasks"><button class="fold" data-a="plan" aria-expanded="${S.planOpen}"><i>${G(S.planOpen ? "down" : "right", S.planOpen ? "▾" : "▸", 12)}</i><b>Tasks ${done}/${S.plan.length}</b><span>${esc(doing?.t ?? "")}</span></button>
     ${S.planOpen ? `<div class="tlist">${S.plan.map((x) => `<div class="${x.s}"><i>${pmark(x.s)}</i><span>${esc(x.t)}</span></div>`).join("")}</div>` : ""}</div>` : "";
-  const hints = !isMac() ? "" : S.classic ? `<span class="hintk"><span>Return to send</span><span>Esc to stop</span></span>` : `<span class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></span>`;
+  const hints = !isMac() || S.split ? "" : S.classic ? `<span class="hintk"><span>Return to send</span><span>Esc to stop</span></span>` : `<span class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></span>`;
   const chips = noKeys ? "" : `<div class="chiprow"><button class="pchip ${S.mode === "Bypass" ? "bad" : ""}" data-a="modes">${S.mode}${G("down", " ▾", 11)}</button><button class="pchip" data-a="models">${S.model}${G("down", " ▾", 11)}</button><span class="sp"></span>${hints}<span class="ctx" title="上下文用量">${S.ctx}%</span></div>`;
   const sugList = sugs.length ? `<div class="sugs">${sugs.map(([n, d]) => `<button data-a="sug" data-n="${n}"><b>/${n}</b><span>${d}</span></button>`).join("")}</div>` : "";
   return `${isMac() ? "" : sugList}
@@ -831,6 +921,8 @@ function terminal() {
 function over() {
   const o = S.over;
   if (!o) return "";
+  if (o.kind === "more" && isDispatch()) return `<div class="veil top" data-a="shut"><div class="box menu"><div class="ba">
+    <button data-a="verbose">Transcript<span>${S.verbose ? "Verbose" : "Normal"}</span></button><button data-a="noop2">Copy Result</button></div></div></div>`;
   if (o.kind === "more") return `<div class="veil top" data-a="shut"><div class="box menu"><div class="ba">
     ${isMac() ? `<button data-a="window">Open in New Window<span>${G("window", "↗", 16)}</span></button>` : `<button data-a="view">${S.view === "simple" ? "Terminal View" : "Simple View"}<span>${S.view === "simple" ? G("term", "&gt;_", 18) : G("list", "≡", 18)}</span></button>`}
     <button data-a="verbose">Transcript<span>${S.verbose ? "Verbose" : "Normal"}</span></button>
@@ -840,9 +932,10 @@ function over() {
   if (o.kind === "models") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
     ${MODELS.map(([m]) => `<button data-a="model" data-m="${m}">${m}<span>${S.model === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
   if (o.kind === "changes") {
-    const f = CHANGES[o.file ?? 0], add = CHANGES.reduce((x, c) => x + c.add, 0), del = CHANGES.reduce((x, c) => x + c.del, 0);
+    const CH = isDispatch() ? DCHANGES : CHANGES;
+    const f = CH[o.file ?? 0], add = CH.reduce((x, c) => x + c.add, 0), del = CH.reduce((x, c) => x + c.del, 0);
     return `<div class="veil sheet" data-a="shut"><div class="box sheetbox"><div class="bh">Changes<span class="sp"></span><span class="stat"><em>+${add}</em> <s>−${del}</s></span></div>
-      <div class="files">${CHANGES.map((c, i) => `<button class="${i === (o.file ?? 0) ? "on" : ""}" data-a="file2" data-i="${i}"><code>${c.file}</code><span><em>+${c.add}</em> <s>−${c.del}</s></span></button>`).join("")}</div>
+      <div class="files">${CH.map((c, i) => `<button class="${i === (o.file ?? 0) ? "on" : ""}" data-a="file2" data-i="${i}"><code>${c.file}</code><span><em>+${c.add}</em> <s>−${c.del}</s></span></button>`).join("")}</div>
       <pre class="diff">${f.lines.map(([k, t]) => `<span class="${k}">${k === "a" ? "+" : k === "d" ? "−" : " "} ${esc(t)}</span>`).join("")}</pre>
       <div class="ba"><button class="pri" data-a="shut">Done</button></div></div></div>`;
   }
@@ -865,8 +958,57 @@ function over() {
 const floats = () => `${S.unseen && S.view === "simple" ? `<button class="latest" data-a="latest">${G("latest", "↓ ", 13)}Latest</button>` : ""}${over()}${S.toast ? `<div class="toast">${esc(S.toast)}</div>` : ""}`;
 const looks = () => `${S.classic ? "classic" : ""}`;
 
+/* ---------- the router's page (Dispatch) ---------- */
+const stat = () => { const add = S.items.reduce((x, it) => x + (it.steps ?? []).reduce((y, st) => y + (st.add ?? 0), 0), 0), del = S.items.reduce((x, it) => x + (it.steps ?? []).reduce((y, st) => y + (st.del ?? 0), 0), 0);
+  return add || del ? `<button class="diffstat" data-a="changes" aria-label="查看改动"><em>+${add}</em><s>−${del}</s></button>` : ""; };
+const took = () => since(S.t0).replace(":", "m ") + "s";
+const statusLine = () => `<div class="l1">${mark(statusKind())}<span class="${statusKind()}">${W(statusWord())}</span>${agentMark()}<span class="who">Claude Code · Opus 5.5</span><span class="sp"></span><span class="tm">${took()}</span></div>`;
+const nowLine = () => (S.live && !S.card ? `<div class="line now">${spinner()}<span class="w">${S.live.tool}</span><span class="x cmd">${esc(S.live.text)}</span><span class="tm" data-t0="${S.live.t0}">${since(S.live.t0)}</span></div>` : "");
+/** A task's card in the conversation: its state, its title, how far it is, what it is doing; what needs you inside it. */
+function taskCard() {
+  const done = S.plan.filter((x) => x.s === "done").length, doing = S.plan.find((x) => x.s === "doing");
+  const last = [...S.items].reverse().find((it) => it.t === "md");
+  const progress = S.status === "done" ? "" : `<div class="wrow"><span class="fold"><i>${G("right", "▸", 12)}</i><b>Tasks ${done}/${S.plan.length}</b><span>${esc(doing?.t ?? "")}</span></span>${stat()}</div>`;
+  const result = S.status === "done" || S.status === "failed" ? `<div class="res md">${last?.html ?? ""}</div>${S.status === "done" ? `<div class="wrow"><span class="fold"><span>Worked ${took()}</span></span>${stat()}</div>` : ""}` : "";
+  return `<div class="tcard" data-a="opentask" role="button" tabindex="0">${statusLine()}<div class="ti">${esc(S.title)}</div>${progress}${nowLine()}${card()}${result}</div>`;
+}
+const failedCard = () => `<div class="tcard"><div class="l1"><span class="sq failed"></span><span class="failed">Incomplete</span>${agentMark()}<span class="who">Claude Code · Sonnet 5.5</span><span class="sp"></span><span class="tm">1m 02s</span></div>
+  <div class="ti">登录财务平台下载本月对账单</div><div class="res">凭据网关的代理连不上，没有登录。</div><div class="acts"><button class="btn" data-a="noop2">Retry</button><button class="btn" data-a="noop2">Hand to${G("down", " ▾", 12)}</button></div></div>`;
+const feed = () => `<div class="day">Yesterday</div>${item({ t: "user", time: "18:02", text: "登录财务平台，把本月的对账单下载下来" })}
+  <div class="md"><p>交给 Claude Code，需要浏览器和财务平台的凭据。</p></div>${failedCard()}
+  <div class="day">Today</div>${item(REQUEST)}<div class="md"><p>交给 Claude Code，在 <code>~/Projects/AgentSwitch</code> 里做。</p></div>${taskCard()}${S.extra.map((it) => item(it)).join("")}`;
+/** A task's page: the request, then the same record as a terminal's simple view. */
+const taskBody = () => `${item(REQUEST)}<div class="hdr"><h3>${esc(S.title)}</h3>${statusLine()}<div class="meta path">~/Projects/AgentSwitch</div></div>
+  ${S.items.map(item).join("")}${nowLine()}${card()}
+  <div class="tools"><div class="wrow"><button class="fold" data-a="details" aria-expanded="${S.details}"><i>${G(S.details ? "down" : "right", S.details ? "▾" : "▸", 12)}</i><span>Details</span></button></div>
+    ${S.details ? `<div class="kv"><span>Folder</span><b>~/Projects/AgentSwitch</b><span>Browser</span><b>None</b><span>Approval</span><b>Default</b><span>ID</span><b>1e04b10a</b></div>` : ""}</div>`;
+function dockDispatch() {
+  if (S.dview === "home") {
+    return `<div class="comp" id="comp"><div class="row"><button class="sqb" data-a="dplus" aria-label="附件、密文、固定模型">${G("plus", "+", 18)}</button>
+      <textarea id="field" rows="1" placeholder="Message" autocapitalize="off" autocomplete="off" spellcheck="false">${esc(S.draft)}</textarea>
+      <button class="sqb go" data-a="dsend" id="go" aria-label="发送">${G("up", "↑", 18)}</button></div></div>
+      ${isMac() ? "" : `<div class="tabbar"><b>Dispatch</b><span>Terminals</span><span>Browser</span></div>`}`;
+  }
+  const done = S.plan.filter((x) => x.s === "done").length, doing = S.plan.find((x) => x.s === "doing");
+  const pmark = (st) => (S.classic ? (st === "done" ? icon("check", 14, 2) : st === "doing" ? `<span class="ring"></span>` : icon("radio", 14)) : st === "done" ? "[x]" : st === "doing" ? "[>]" : "[ ]");
+  const tasks = `<div class="tasks"><button class="fold" data-a="plan" aria-expanded="${S.planOpen}"><i>${G(S.planOpen ? "down" : "right", S.planOpen ? "▾" : "▸", 12)}</i><b>Tasks ${done}/${S.plan.length}</b><span>${esc(doing?.t ?? "")}</span></button>
+    ${S.planOpen ? `<div class="tlist">${S.plan.map((x) => `<div class="${x.s}"><i>${pmark(x.s)}</i><span>${esc(x.t)}</span></div>`).join("")}</div>` : ""}</div>`;
+  const running = S.status === "busy" || S.status === "waiting" || S.card;
+  return `${tasks}<div class="acts">${running ? `<button class="btn bad" data-a="cancel">Cancel</button><button class="btn" data-a="noop2">Hand to${G("down", " ▾", 12)}</button>`
+    : `<button class="btn" data-a="retry">Retry</button><button class="btn bad" data-a="noop2">Delete</button>`}</div>`;
+}
+
 /* ---------- the phone ---------- */
 function phone() {
+  if (isDispatch()) {
+    const home = S.dview === "home";
+    const nav = home
+      ? `<div class="nav"><span class="nb"></span><div class="ttl"><div class="t1"><b>Mac mini</b></div><div class="t2" id="st">${mark(statusKind())}<span>1 ${W(statusWord())}</span></div></div><span class="nb"></span></div>`
+      : `<div class="nav"><button class="nb" data-a="backhome" aria-label="返回">${G("back", "‹", 22)}</button><div class="ttl"><div class="t1"><b>${esc(S.title)}</b></div><div class="t2" id="st">${mark(statusKind())}<span>${W(statusWord())}</span></div></div>
+          <button class="nb" data-a="menu" aria-label="更多">${G("more", "⋯", 22)}</button></div>`;
+    return `<div class="phone"><div class="scr surf ${S.dark ? "dark" : "light"} ${looks()}" id="surf"><div class="sb"><span>9:41</span><i>5G ▮▮▮</i></div>${nav}
+      <div class="body" id="body">${home ? feed() : taskBody()}</div><div class="dock">${dockDispatch()}</div>${floats()}</div></div>`;
+  }
   const where = S.away ? `<span>· On ${S.away}</span>` : "", term = S.view === "terminal";
   const nav = S.joined
     ? `<div class="nav"><button class="nb" data-a="back" aria-label="返回">${G("back", "‹", 22)}</button>
@@ -907,6 +1049,16 @@ function macList() {
 }
 
 function mac() {
+  if (isDispatch()) {
+    const home = S.dview === "home";
+    const title = home ? "" : `<button data-a="backhome" aria-label="返回">${G("back", "‹", 15)}</button>${mark(statusKind())}<b>${esc(S.title)}</b><span id="st">${W(statusWord())}</span>`;
+    return `<div class="mwin surf ${S.dark ? "dark" : "light"} mac ${looks()}" id="surf">
+      <div class="mbar"><span class="lights"><i></i><i></i><i></i></span><div class="mtitle">${title}</div><div class="mend">${home ? "" : `<button class="tb" data-a="menu" aria-label="更多">${G("more", "⋯", 16)}</button>`}</div></div>
+      <div class="mmain nolist"><nav class="mrail"><span class="ri on">${ICON.dispatch}</span><span class="ri">${ICON.terminals}</span><span class="ri">${ICON.browser}</span><span class="sp"></span><span class="ri">${ICON.gear}</span></nav>
+        <section class="mpanes"><div class="mpane"><div class="body" id="body">${home ? feed() : taskBody()}</div><div class="dock">${dockDispatch()}</div>${floats()}</div></section></div>
+      <div class="mstatus"><span class="it"><span class="sq ok"></span>${S.classic ? "Gateway OK" : "Gateway"}</span><span class="it"><span class="sq ok"></span>iPhone</span><span class="sp"></span>
+        <span>${S.classic ? "Router · Sonnet 5.5" : "Router"}</span>${S.classic ? "" : `<span class="vr"></span><span>Sonnet 5.5</span>`}<span class="vr"></span><span>2 Topics</span></div></div>`;
+  }
   const split = S.split && S.joined, term = S.view === "terminal" && S.joined;
   const title = S.joined
     ? `${mark(statusKind())}<b>${esc(S.title)}</b><span>main ±3</span><span id="st">${W(statusWord())}${S.away ? ` · On ${S.away}` : ""}</span>`
@@ -919,7 +1071,8 @@ function mac() {
   const phd = `<div class="phd focus"><span>1</span>${mark(statusKind())}<b>claude</b><span>AgentSwitch · main ±3</span><span class="sp"></span>${vseg()}${shut}</div>`;
   const second = `<div class="mpane"><div class="phd"><span>2</span>${mark("busy")}<b>codex</b><span>web-console · main</span><span class="sp"></span><span class="vseg"><button>${G("list", "≡", 14)}</button><button class="on">${G("term", "&gt;_", 14)}</button></span>${shut}</div>
     <pre class="tscreen"><span class="dim">›_ OpenAI Codex (v0.160.1)\n   model: gpt-5.5   directory: ~/…/web-console</span>\n\n<span class="cy">▌</span> 把控制台的侧栏改成可以收起\n\n<span class="dim">•</span> Explored\n  <span class="dim">└ Read ui/console.js, ui/console.css</span>\n\n<span class="dim">•</span> Edited ui/console.css <span class="cy">(+18 -4)</span>\n\n<span class="dim">⠋ Working (38s · esc to interrupt)</span></pre></div>`;
-  return `<div class="mwin surf dark mac ${looks()}" id="surf">
+  // The simple view takes the system's light or dark, and the list and the bars with it; the terminal view is dark.
+  return `<div class="mwin surf ${S.dark || term ? "dark" : "light"} mac ${looks()}" id="surf">
     <div class="mbar"><span class="lights"><i></i><i></i><i></i></span><div class="mtitle">${title}</div>
       <div class="mend">${S.joined && !split ? vseg() : ""}${tb("right", "Split Right ⌘D")}${tb("down", "Split Down ⌘⇧D")}${tb("plus", "New Terminal ⌘T")}</div></div>
     <div class="mmain"><nav class="mrail"><span class="ri">${ICON.dispatch}</span><span class="ri on">${ICON.terminals}</span><span class="ri">${ICON.browser}</span><span class="sp"></span><span class="ri">${ICON.gear}</span></nav>
@@ -944,12 +1097,15 @@ function render(toEnd) {
   if (ta) { grow(ta); if (focused === "field") { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
   if (focused === "other") { const o = $("other"); o?.focus(); o?.setSelectionRange(o.value.length, o.value.length); }
   if (S.over?.kind === "rename") $("newname")?.select();
-  document.querySelectorAll("#presets .chip").forEach((c) => { const p = PRESETS[c.dataset.p]; c.textContent = isMac() ? p.wm ?? p.w : p.w; c.classList.toggle("on", c.dataset.p === S.preset); c.setAttribute("aria-selected", c.dataset.p === S.preset); });
-  $("note").innerHTML = (isMac() && PRESETS[S.preset].m) || PRESETS[S.preset].n;
+  $("presets").innerHTML = Object.entries(presets()).map(([k, p]) => `<button class="chip ${k === S.preset ? "on" : ""}" role="tab" aria-selected="${k === S.preset}" data-p="${k}">${isMac() ? p.wm ?? p.w : p.w}</button>`).join("");
+  $("note").innerHTML = (isMac() && presets()[S.preset].m) || presets()[S.preset].n;
   const on = (id, v) => $(id).classList.toggle("on", v);
   on("tg-phone", !isMac()); on("tg-mac", isMac()); on("tg-pixel", !S.classic); on("tg-classic", S.classic);
-  on("tg-dark", S.dark || isMac()); on("tg-light", !S.dark && !isMac()); $("tg-light").disabled = isMac(); $("tg-light").title = isMac() ? "Mac 主窗口固定深色" : "";
-  $("seg-panes").hidden = !isMac(); on("tg-one", !S.split); on("tg-two", S.split);
+  // The terminal view is dark whatever the system says; everything else follows it.
+  const fixed = !isDispatch() && S.view === "terminal" && S.joined;
+  on("tg-dark", S.dark || fixed); on("tg-light", !S.dark && !fixed); $("tg-light").disabled = fixed; $("tg-light").title = fixed ? "终端视图固定深色" : "";
+  $("seg-panes").hidden = !isMac() || isDispatch(); on("tg-one", !S.split); on("tg-two", S.split);
+  on("tg-terminals", !isDispatch()); on("tg-dispatch", isDispatch());
 }
 const grow = (ta) => { ta.style.height = "auto"; ta.style.height = Math.min(108, ta.scrollHeight + 2) + "px"; };
 const glitch = (id) => { if (!S.classic) P.glitch($(id)); };
@@ -996,7 +1152,7 @@ function key(k) {
 function stop() { Object.assign(S, { live: null, sub: null, status: "idle" }); S.items.push({ t: "said", text: "Interrupted", time: "Now" }); render(true); }
 function decide(allow) {
   S.items.push({ t: "said", text: allow ? "Allowed" : "Denied", detail: `${S.card.tool} ${S.card.detail}`, cmd: true, tone: allow ? "ok" : "no", time: "Now" });
-  S.card = null; S.status = allow ? "busy" : "idle"; S.live = allow ? { tool: "Bash", text: "git push origin main", t0: Date.now() } : null; render(true);
+  S.live = allow ? { tool: "Bash", text: S.card.detail, t0: Date.now() } : null; S.card = null; S.status = allow ? "busy" : isDispatch() ? "failed" : "idle"; render(true);
 }
 
 document.addEventListener("click", (e) => {
@@ -1005,12 +1161,13 @@ document.addEventListener("click", (e) => {
   const tg = e.target.closest("#toggles .chip");
   if (tg) {
     if (tg.id === "tg-phone" || tg.id === "tg-mac") { S.device = tg.id === "tg-mac" ? "mac" : "phone"; return load(S.preset); }
+    if (tg.id === "tg-terminals" || tg.id === "tg-dispatch") { S.page = tg.id === "tg-dispatch" ? "dispatch" : "terminals"; return load(isDispatch() ? "home" : "live"); }
     if (tg.id === "tg-dark") S.dark = true; if (tg.id === "tg-light") S.dark = false; if (tg.id === "tg-pixel") S.classic = false; if (tg.id === "tg-classic") S.classic = true;
     if (tg.id === "tg-one") S.split = false; if (tg.id === "tg-two") { S.split = true; if (!S.joined) return load("live"); }
     return render();
   }
   const jump = e.target.closest("[data-go]");
-  if (jump) { load(jump.dataset.go); return $("stage").scrollIntoView({ behavior: "smooth", block: "start" }); }
+  if (jump) { S.page = "terminals"; load(jump.dataset.go); return $("stage").scrollIntoView({ behavior: "smooth", block: "start" }); }
   const k = e.target.closest("[data-k]");
   if (k) return key(k.dataset.k);
   const link = e.target.closest("[data-link]");
@@ -1023,6 +1180,15 @@ document.addEventListener("click", (e) => {
   switch (a) {
     case "fold": at(i).open = !at(i).open; return render();
     case "plan": S.planOpen = !S.planOpen; return render();
+    case "opentask": S.dview = "task"; return render(true);
+    case "backhome": S.dview = "home"; S.over = null; return render(true);
+    case "details": S.details = !S.details; return render();
+    case "cancel": S.items.push({ t: "said", text: "Cancelled", time: "Now" }); Object.assign(S, { live: null, card: null, status: "failed" }); return render(true);
+    case "retry": return loadDispatch("task");
+    case "noop2": return say("演示页不做这一步");
+    case "dplus": return say("Attach · Ciphertext · Pin Model");
+    case "dsend": { const text = S.draft.trim(); if (!text) return; S.extra.push({ t: "user", time: "Now", text }); S.draft = ""; render(true);
+      return setTimeout(() => { S.extra.push({ t: "md", html: "<p>收到。（演示页到此为止：真的调度页上这里是路由器的回答和它派出的任务。）</p>" }); render(true); }, 1200); }
     case "unqueue": S.items.splice(+i, 1); return render();
     case "changes": S.over = { kind: "changes", file: 0 }; return render();
     case "file2": S.over = { kind: "changes", file: +i }; return render();
@@ -1031,13 +1197,14 @@ document.addEventListener("click", (e) => {
     case "models": S.over = { kind: "models" }; return render();
     case "mode": S.mode = el.dataset.m; S.over = null; return render();
     case "model": S.model = el.dataset.m; S.over = null; return render();
-    case "always": S.items.push({ t: "said", text: "Always Allowed", detail: "git push", cmd: true, tone: "ok", time: "Now" }); S.card = null; S.status = "busy"; S.live = { tool: "Bash", text: "git push origin main", t0: Date.now() }; return render(true);
+    case "always": S.items.push({ t: "said", text: "Always Allowed", detail: S.card.always ?? "git push", cmd: true, tone: "ok", time: "Now" }); S.live = { tool: "Bash", text: S.card.detail, t0: Date.now() }; S.card = null; S.status = "busy"; return render(true);
     case "more": at(i).open = true; return render();
     case "earlier": S.earlier = true; return render();
     case "copy": return say("Copied");
     case "latest": S.unseen = 0; return render(true);
     case "resume": S.joined = true; S.status = "idle"; if (S.preset === "exited") S.items.push({ t: "said", text: "Resumed", time: "Now", tone: "ok" }); render(true); return glitch("st");
     case "back": return say("‹ Terminals");
+    case "nodelete": return say("演示页不做这一步");
     case "menu": S.over = { kind: "more" }; return render();
     case "plus": S.over = { kind: "plus" }; return render();
     case "view": S.view = S.view === "simple" ? "terminal" : "simple"; S.over = null; return render(true);
@@ -1107,9 +1274,8 @@ document.addEventListener("pointerup", () => { if (hold !== "done") clearTimeout
 document.addEventListener("click", (e) => { if (hold === "done" && e.target.closest("[data-link]")) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
 
 /* ---------- the page around the device ---------- */
-$("presets").innerHTML = Object.entries(PRESETS).map(([k, p]) => `<button class="chip" role="tab" data-p="${k}">${p.w}</button>`).join("");
 const seg = (name, chips, id = "") => `<span class="seg" ${id ? `id="${id}"` : ""}><b>${name}</b><span>${chips.map(([cid, w]) => `<button class="chip" id="${cid}">${w}</button>`).join("")}</span></span>`;
-$("toggles").innerHTML = seg("DEVICE", [["tg-phone", "iPhone"], ["tg-mac", "Mac"]]) + seg("LOOK", [["tg-classic", "Classic"], ["tg-pixel", "Pixel"]])
+$("toggles").innerHTML = seg("PAGE", [["tg-terminals", "Terminals"], ["tg-dispatch", "Dispatch"]]) + seg("DEVICE", [["tg-phone", "iPhone"], ["tg-mac", "Mac"]]) + seg("LOOK", [["tg-classic", "Classic"], ["tg-pixel", "Pixel"]])
   + seg("APPEARANCE", [["tg-dark", "Dark"], ["tg-light", "Light"]]) + seg("PANES", [["tg-one", "One"], ["tg-two", "Two"]], "seg-panes");
 $("map").innerHTML = MAP.map(([a, b, go]) => `<tr><td>${a}</td><td>${b}${go ? ` <a data-go="${go}">${PRESETS[go].w} ›</a>` : ""}</td></tr>`).join("");
 const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
@@ -1119,17 +1285,19 @@ setInterval(() => {
   if (tick % 10 === 0) document.querySelectorAll("[data-t0]").forEach((el) => { el.textContent = since(+el.dataset.t0); });
 }, 100);
 setInterval(() => { if (!S.classic && S.status === "busy" && !S.card && Math.random() < 0.2) P.flicker($("st")); }, 1000);
-// `#mac-prompt`, `#permission`; in a browser also `?device=mac&look=pixel&light&view=terminal&panes=2`.
+// `#mac-prompt`, `#permission`, `#d-task`, `#mac-d-home`; in a browser also `?device=mac&page=dispatch&look=pixel&light&view=terminal&panes=2`.
 const q = new URLSearchParams(location.search);
 let wanted = location.hash.slice(1) || q.get("s") || "live";
 if (wanted.startsWith("mac-")) { S.device = "mac"; wanted = wanted.slice(4); }
+if (wanted.startsWith("d-")) { S.page = "dispatch"; wanted = wanted.slice(2); }
+if (q.get("page") === "dispatch") S.page = "dispatch";
 if (q.get("device") === "mac") S.device = "mac";
 if (q.has("light")) S.dark = false;
 if (q.has("dark")) S.dark = true;
 if (q.get("look") === "pixel") S.classic = false;
 if (q.get("look") === "classic") S.classic = true;
 if (q.get("panes") === "2") S.split = true;
-load(PRESETS[wanted] ? wanted : "live");
+load(presets()[wanted] ? wanted : isDispatch() ? "home" : "live");
 if (q.get("view") === "terminal") { S.view = "terminal"; render(true); }
 </script>
 </body>
