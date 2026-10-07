@@ -45,6 +45,9 @@ protocol TerminalsPage: AnyObject {
 }
 
 extension TerminalsPage {
+    /// The pane in focus as its session's record, or as the terminal again (the native page's; the web page has none).
+    func toggleView() {}
+
     /// The hidden default that keeps the web page (`defaults write com.agentswitch.mac terminalsPageWeb -bool YES`).
     static var webKey: String { "terminalsPageWeb" }
 }

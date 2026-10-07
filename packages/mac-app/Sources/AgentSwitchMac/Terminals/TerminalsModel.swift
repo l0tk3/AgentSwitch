@@ -64,6 +64,9 @@ final class TerminalsModel {
     @ObservationIgnored var area = CGSize(width: 900, height: 600)
     /// A line between panes is being dragged: each pane says its grid.
     var sizing = false
+    /// The terminals shown as their session's record here (docs/simple-view-v0.md §1). The Mac opens a terminal as the
+    /// terminal; one switched to the record stays so until switched back, or until it is gone.
+    private(set) var simpleViews: Set<String> { didSet { defaults?.set(simpleViews.sorted(), forKey: Keys.simple) } }
 
     // MARK: the list
     var sideClosed: Bool { didSet { defaults?.set(sideClosed, forKey: Keys.sideClosed) } }
@@ -133,6 +136,7 @@ final class TerminalsModel {
         static let sideWidth = "terminals.sideWidth", sideClosed = "terminals.sideClosed"
         static let agent = "terminals.agent", models = "terminals.models", mode = "terminals.mode", folder = "terminals.folder"
         static let efforts = "terminals.efforts"
+        static let simple = "terminals.simple"
     }
 
     enum Side {
@@ -154,6 +158,7 @@ final class TerminalsModel {
         pickedAgent = defaults?.string(forKey: Keys.agent) ?? "claude-code"
         pickedModels = defaults?.dictionary(forKey: Keys.models) as? [String: String] ?? [:]
         pickedEfforts = defaults?.dictionary(forKey: Keys.efforts) as? [String: String] ?? [:]
+        simpleViews = Set(defaults?.stringArray(forKey: Keys.simple) ?? [])
         pickedMode = defaults?.string(forKey: Keys.mode) ?? ""
         folderText = defaults?.string(forKey: Keys.folder) ?? ""
         if let root = TerminalPanes.restore(defaults?.data(forKey: Keys.panes)) {
@@ -249,6 +254,9 @@ final class TerminalsModel {
             }
         }
         if terminals != list.terminals { terminals = list.terminals }
+        // A terminal that is gone leaves nothing behind.
+        let gone = simpleViews.subtracting(list.terminals.map(\.id))
+        if settled, !gone.isEmpty { simpleViews.subtract(gone) }
         if agents != list.agents { agents = list.agents }
         if models != list.models { models = list.models }
         if modelDefaults != list.defaults { modelDefaults = list.defaults }
@@ -319,7 +327,7 @@ final class TerminalsModel {
         for pane in all {
             let state = panes[pane.id] ?? makePane(pane.id)
             let shown = terminal(pane.term).flatMap { here($0.id) ? $0 : nil }
-            state.show(shown, git: shown.flatMap { gits[$0.workdir] })
+            state.show(shown, git: shown.flatMap { gits[$0.workdir] }, simple: shown.map { simpleViews.contains($0.id) } ?? false)
         }
         for (id, state) in panes where !all.contains(where: { $0.id == id }) {
             state.stop()
@@ -419,6 +427,22 @@ final class TerminalsModel {
         sheetFolder = folder
         self.sheet = sheet
         return await withCheckedContinuation { sheetDone = $0 }
+    }
+
+    /// The pane in focus shows its terminal's record: the window takes the system's light or dark with it.
+    var focusedSimple: Bool { !creating && (focused?.simple ?? false) && focused?.session != nil }
+
+    /// The terminal of `pane` (the one in focus) as its record, or as the terminal again.
+    func setSimple(_ on: Bool, pane: Int? = nil) {
+        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term, terminal(id) != nil, simpleViews.contains(id) != on else { return }
+        if on { simpleViews.insert(id) } else { simpleViews.remove(id) }
+        syncPanes()
+        onFocusScreen(pane ?? focusPane)
+    }
+
+    func toggleSimple(pane: Int? = nil) {
+        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term else { return }
+        setSimple(!simpleViews.contains(id), pane: pane)
     }
 
     /// The model picked for a new terminal of the agent picked, when the agent still lists it.

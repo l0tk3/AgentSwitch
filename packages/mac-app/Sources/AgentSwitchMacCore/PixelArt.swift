@@ -141,7 +141,11 @@ public enum PixelArt {
         "##################", "#................#", "#................#", "#................#", "#................#", "#................#",
         "#................#", ".################.",
     ]
-
+    /// The simple view (docs/simple-view-v0.md): a page of lines, as a record reads.
+    public static let toolbarRecord = [
+        "##########.....", "...............", "###############", "...............", "############...", "...............", "###############",
+        "...............", "########.......",
+    ]
     /// The main window's settings (dispatch-v0 §1), at the toolbar's weight: three sliders (a gear at this size is a blob,
     /// docs/design/concepts/menu-icons.html); docs/design/implemented/mac-window.html `ICON.sliders`.
     public static let toolbarSettings = [

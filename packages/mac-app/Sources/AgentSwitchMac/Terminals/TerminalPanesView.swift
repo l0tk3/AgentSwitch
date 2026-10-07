@@ -148,6 +148,8 @@ struct TerminalPaneView: View {
     let number: Int
     let model: TerminalsModel
     @Environment(\.interfaceLook) private var look
+    /// The window's light or dark: a record's pane keeps it, a terminal's is dark whatever it is.
+    @Environment(\.colorScheme) private var scheme
 
     private var focused: Bool { placed.id == model.focusPane }
     /// A terminal is being made here.
@@ -155,12 +157,17 @@ struct TerminalPaneView: View {
 
     var body: some View {
         let state = model.panes[placed.id]
+        let record = state?.simple == true && state?.session != nil && !making
         VStack(spacing: 0) {
             if model.many {
                 PaneHeader(pane: placed.id, number: number, state: state, making: making, model: model)
             }
             ZStack {
-                if let state {
+                if let state, state.simple, state.session != nil, !making {
+                    // The terminal's record in place of its screen (docs/simple-view-v0.md §5.2): the system's light or
+                    // dark, where the terminal is always dark.
+                    TerminalRecordPane(state: state, model: model, focused: focused)
+                } else if let state {
                     PaneStageHost(view: state.stage, compact: model.many).id(placed.id)
                     if let session = state.session {
                         // The cards and the sealed reply are the pane in focus's; the placeholder shows in any pane.
@@ -176,7 +183,9 @@ struct TerminalPaneView: View {
                 }
             }
         }
-        .background(Color.black.opacity(0.001))
+        // A terminal's pane is the terminal's dark block whatever the window around it (a record beside it may be light).
+        .background(record ? Look.ground : Color(nsColor: model.ground))
+        .environment(\.colorScheme, record ? scheme : .dark)
         .simultaneousGesture(TapGesture().onEnded { if !focused { model.focus(pane: placed.id) } })
     }
 }
@@ -237,6 +246,19 @@ struct PaneHeader: View {
                 Text(ClassicWords.word("[!] Approval", in: look)).font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Color.waiting)
             }
             if let info { AgentSprite(harness: info.harness).opacity(0.75) }
+            // The other view of the same session (docs/simple-view-v0.md §1): each pane has its own.
+            if info != nil, let state {
+                Button { model.focus(pane: pane); model.toggleSimple(pane: pane) } label: {
+                    Group {
+                        if look.isClassic { Image(systemName: state.simple ? "terminal" : "text.alignleft").font(.system(size: 10.5, weight: .medium)) }
+                        else { PixelSprite(rows: state.simple ? PixelArt.terminalWindow : PixelArt.toolbarRecord, pixel: 1, color: Look.ink2) }
+                    }
+                    .foregroundStyle(Look.ink2)
+                    .frame(width: 22, height: 20).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(state.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E")
+            }
             if !model.zoomed {
                 Button { model.closePane(pane) } label: {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Look.faint)
@@ -251,7 +273,7 @@ struct PaneHeader: View {
         .padding(.leading, 10)
         .padding(.trailing, 4)
         .frame(height: Self.height(look))
-        .background(look.isClassic ? (focused ? Color.signal.opacity(0.16) : Color.white.opacity(0.05)) : Color.clear)
+        .background(look.isClassic ? (focused ? Color.signal.opacity(0.16) : Look.ink.opacity(0.05)) : Color.clear)
         .overlay(alignment: .top) { if focused, !look.isClassic { Rectangle().fill(Color.signal).frame(height: 2) } }
         .overlay(alignment: .bottom) { Rectangle().fill(Look.line).frame(height: 1) }
         .contentShape(Rectangle())

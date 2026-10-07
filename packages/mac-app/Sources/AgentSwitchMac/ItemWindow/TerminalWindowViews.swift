@@ -120,7 +120,7 @@ struct TerminalWindowOverlays: View {
 }
 
 /// Leave to use a tool: what in plain words, on what, where; `[ Deny ⌘⌫ ]` `[ Allow ⌘↩ ]`.
-private struct TerminalApprovalCard: View {
+struct TerminalApprovalCard: View {
     let request: TerminalRequest
     let model: TerminalWindowModel
     /// The first card: the keys are its, and it says so.
@@ -162,7 +162,7 @@ private struct TerminalApprovalCard: View {
 /// The agent's own question: each with its options to pick — one or several — and Other to write in; `[ Submit ⌘↩ ]`
 /// once each has an answer. A click into the card gives it the keyboard: numbers pick in the question in focus (the
 /// number after its last option is Other), ⇥ goes to the next question, ↩ submits, esc gives the keyboard back.
-private struct TerminalQuestionCard: View {
+struct TerminalQuestionCard: View {
     let request: TerminalRequest
     let model: TerminalWindowModel
     let keys: Bool
@@ -285,7 +285,7 @@ private struct CardFoot<Buttons: View>: View {
 
 /// The sealed reply's box at the screen's foot (the page's composer): `Encrypt & Send → folder`, what you write — it may
 /// hold a password, which reaches the agent as ciphertext —, `[ Cancel esc ]` `[ Send ↩ ]`. ⇧↩ is a new line.
-private struct SealBox: View {
+struct SealBox: View {
     let model: TerminalWindowModel
     @State private var height = ComposeField.minHeight
     @Environment(\.interfaceLook) private var look
@@ -349,7 +349,7 @@ private struct AwayCover: View {
 }
 
 /// Something went wrong, in a sentence, for a few seconds.
-private struct NoticeLine: View {
+struct NoticeLine: View {
     let text: String
     @Environment(\.interfaceLook) private var look
 

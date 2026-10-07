@@ -18,8 +18,9 @@ enum ListLook {
         return out
     }
 
-    static let hover = Color.white.opacity(0.04)
-    static let selected = Color.white.opacity(0.07)
+    // A wash of the ink, not of white: the list is light while the pane in focus shows a record (simple-view-v0 §5.2).
+    static let hover = Look.ink.opacity(0.04)
+    static let selected = Look.ink.opacity(0.08)
     /// A character's width in the list's 12.5 pt monospaced type.
     static let ch: CGFloat = 7.55
 }

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The Terminals page (docs/terminal-v0.md §1 Mac; dispatch-v0 §1): the list on the left — its edge dragged for its
 /// width, past the window's edge to close it —, the panes on the right, and over both the page's question when it asks
-/// one. Always dark, in the terminal's own ground.
+/// one. Dark, in the terminal's own ground; the system's light or dark while the pane in focus shows a record.
 struct TerminalsPageView: View {
     let model: TerminalsModel
     @Environment(\.interfaceLook) private var look
@@ -22,10 +22,21 @@ struct TerminalsPageView: View {
                 if let sheet = model.sheet { TerminalSheetView(sheet: sheet, model: model) }
             }
         }
-        .background(Color(nsColor: model.ground))
-        .environment(\.colorScheme, .dark)
+        // The terminal's dark block, in its own ground; with a record in the pane in focus, the system's light or dark,
+        // and the list with it (docs/simple-view-v0.md §5.2; the window is dressed the same way).
+        .background(model.focusedSimple ? Look.ground : Color(nsColor: model.ground))
+        .modifier(DarkUnlessRecord(record: model.focusedSimple))
         .tint(.brand)
         .followsWindow()
+    }
+}
+
+/// Dark whatever the system says, except while the pane in focus shows a record.
+private struct DarkUnlessRecord: ViewModifier {
+    let record: Bool
+
+    func body(content: Content) -> some View {
+        if record { content } else { content.environment(\.colorScheme, .dark) }
     }
 }
 

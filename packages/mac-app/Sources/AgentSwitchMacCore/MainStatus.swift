@@ -67,6 +67,9 @@ public struct TerminalContext: Equatable, Sendable {
     public var away: String?
     /// The terminal runs: the lock (Encrypt & Send) acts.
     public var running: Bool
+    /// The pane shows the terminal's record, not its screen (docs/simple-view-v0.md §5.2): it holds no size here, and
+    /// the bar says `Simple` where the size was.
+    public var simple = false
 
     public init(harness: String, model: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil,
                 away: String? = nil, running: Bool = true) {
@@ -124,6 +127,7 @@ public struct TerminalContext: Equatable, Sendable {
     /// `On Mac · 139×46`, `On iPhone · 50×30`: where the size is held and the grid (the place alone without one), in
     /// the placeholder's words.
     public var size: String {
+        if simple { return "Simple" }
         let place: String = switch away {
         case "iphone": "On iPhone"
         case "web": "On Web"

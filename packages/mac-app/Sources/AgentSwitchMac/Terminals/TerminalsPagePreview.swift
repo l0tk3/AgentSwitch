@@ -12,7 +12,10 @@ import SwiftUI
 /// - `terminals-search`: a search with titles and words that matched;
 /// - `terminals-sheet`: closing a running terminal asked first;
 /// - `terminals-rename`: a name being changed; the list's folders folded around the terminal on screen;
-/// - `terminals-closed`: the list put away.
+/// - `terminals-closed`: the list put away;
+/// - `terminals-record`, `terminals-record-light`, `terminals-record-split-light`: the simple view (docs/simple-view-v0.md
+///   §5.2) — a terminal's record in its pane, dark and in the system's light with the list following it, and beside a
+///   terminal that stays dark, a request's card at the record's end.
 @MainActor
 enum TerminalsPagePreview {
     static let size = NSSize(width: 1235, height: 764)
@@ -44,9 +47,46 @@ enum TerminalsPagePreview {
             model.startRename("t1")
         }
         try await shot(to: file("terminals-closed")) { $0.sideClosed = true }
+        // The simple view (docs/simple-view-v0.md §5.2): the terminal's record in its pane; the system's light, and the
+        // list with it; beside a terminal, which stays dark; waiting on a request, its card at the record's end.
+        try await shot(to: file("terminals-record")) { model in stageRecord(model, working: true) }
+        try await shot(to: file("terminals-record-light"), light: true) { model in stageRecord(model, working: true) }
+        try await shot(to: file("terminals-record-split-light"), light: true) { model in
+            model.split(.right)
+            model.select("t2")
+            model.focus(pane: TerminalPanes.paneShowing(model.layout, "t1")?.id ?? 1, force: true)
+            stageRecord(model, working: false)
+            model.focused?.session?.received(event: "permission", data: #"{"request":{"id":"r1","tool":"Bash","summary":"Bash: git push origin main"}}"#)
+        }
     }
 
-    private static func shot(to file: URL, stage: (TerminalsModel) -> Void) async throws {
+    /// Terminal `t1` as its record, with a made-up session.
+    private static func stageRecord(_ model: TerminalsModel, working: Bool) {
+        model.setSimple(true, pane: TerminalPanes.paneShowing(model.layout, "t1")?.id)
+        guard let pane = model.panes.values.first(where: { $0.session?.id == "t1" }), let info = pane.session?.info else { return }
+        let ago = { (seconds: Int64) in Int64(Date().timeIntervalSince1970 * 1000) - seconds * 1000 }
+        pane.record.stage(terminal: info, items: [
+            RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 1),
+            RecordItem(id: "200", kind: .work, at: ago(890), seconds: 72, steps: [
+                RecordStep(kind: .read, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"),
+                RecordStep(kind: .search, text: "pendingRestart"),
+                RecordStep(kind: .run, text: "swift test --filter AgentsTests", out: "Executed 41 tests, with 0 failures (0 unexpected) in 0.412 seconds"),
+                RecordStep(kind: .edit, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 12, removed: 1),
+                RecordStep(kind: .edit, text: "docs/agents-v0.md", added: 2, removed: 1),
+            ]),
+            RecordItem(id: "300", kind: .answer, at: ago(815), text: "生效了，只是还没有用上：\n\n- 测试版已装好，`codex-beta` 在命令行里可用。\n- 页面顶部有 `Restart Service…`，但你是在下面那一组里选的，看不到它。\n\n已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 [docs/agents-v0.md](docs/agents-v0.md) §8。"),
+            RecordItem(id: "400", kind: .user, at: ago(300), text: "delete 应该标红才对"),
+            RecordItem(id: "500", kind: .work, at: ago(290), seconds: 38, steps: [
+                RecordStep(kind: .search, text: "SettingsDeleteButton"),
+                RecordStep(kind: .edit, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 3, removed: 3),
+            ]),
+            RecordItem(id: "550", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。正在重新构建。"),
+        ], plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done), PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
+        usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: "acceptEdits",
+        activity: working ? TerminalActivity(tool: "Bash", target: "swift build -c release") : nil, since: working ? Date().addingTimeInterval(-41) : nil)
+    }
+
+    private static func shot(to file: URL, light: Bool = false, stage: (TerminalsModel) -> Void) async throws {
         let model = TerminalsModel(client: { DaemonClient(port: 1) }, defaults: nil)
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         func session(_ id: String, _ cwd: String, _ title: String, _ harness: String = "claude-code", ago hours: Int64, active: Bool = false) -> SessionSummary {
@@ -81,8 +121,9 @@ enum TerminalsPagePreview {
         let host = NSHostingView(rootView: TerminalsPageView(model: model))
         host.sizingOptions = []
         let window = PreviewWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = .black
+        // As the window is dressed: dark, or (a record in the pane in focus) the system's — here the light one.
+        window.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
+        window.backgroundColor = light ? .dispatchGround : .black
         window.isReleasedWhenClosed = false
         window.contentView = host
         try await DesignPreview.settle()

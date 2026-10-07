@@ -208,6 +208,8 @@ public enum TerminalsPageKey: Equatable, Sendable {
     case split(PaneSide)
     /// ⌘⇧↩: the pane in focus alone, or all of them again.
     case zoom
+    /// ⌘⇧E: the pane in focus as its session's record (the simple view), or as the terminal again.
+    case toggleView
     /// ⌘⌥ arrows: the focus to the pane next door.
     case neighbor(dx: Int, dy: Int)
     /// ⌘1–9: the terminal opened first, second…
@@ -236,6 +238,7 @@ public enum TerminalsPageKey: Equatable, Sendable {
         if press.command {
             if press.shift {
                 if press.key == "d" { return .split(.bottom) }
+                if press.key == "e" { return .toggleView }
                 if press.keyCode == ItemWindowKey.returnKey { return .zoom }
             } else {
                 switch press.key {

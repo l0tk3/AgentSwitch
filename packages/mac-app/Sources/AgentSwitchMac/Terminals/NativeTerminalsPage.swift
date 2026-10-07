@@ -61,6 +61,7 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
     func seal() { model.focused?.session?.toggleSeal() }
     func split(_ side: String) { model.split(side == "down" ? .bottom : .right) }
     func newTerminal() { model.showCreate() }
+    func toggleView() { model.toggleSimple() }
     func setDetached(_ ids: Set<String>) { model.setDetached(ids) }
     func detachShown() { if let id = model.current?.id { onDetach(id) } }
 
@@ -104,6 +105,12 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
 
     private func focusScreen(_ pane: Int) {
         guard onScreen, let window, model.sheet == nil, model.renaming == nil else { return }
+        // A pane that shows a record: the keyboard to its reply box.
+        if let state = model.panes[pane], state.simple, state.session != nil, !model.creating {
+            if window.firstResponder is NativeTerminalView { window.makeFirstResponder(nil) }
+            state.record.focusReply()
+            return
+        }
         let screen = model.panes[pane]?.screen
         // A field that is going away may still hold the keyboard: off it first.
         if window.firstResponder !== screen?.view { window.makeFirstResponder(nil) }
@@ -144,7 +151,10 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
         let state = PixelArt.MarkState(page: mark.state)
         if head.mark != state { head.mark = state }
         if head.tag != mark.tag { head.tag = mark.tag }
-        let context = terminal == nil ? nil : session?.context
+        let simple = model.focusedSimple
+        if head.simple != simple { head.simple = simple }
+        var context = terminal == nil ? nil : session?.context
+        context?.simple = simple
         if head.context != context { head.context = context }
         let width = model.sideClosed ? 0 : model.sideWidth + 1
         if head.sideWidth != width { head.sideWidth = width }
@@ -192,6 +202,13 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
             return true
         }
         let session = model.creating ? nil : model.focused?.session
+        // A record in the pane in focus: esc stops the agent while it works, as it does in the terminal (a card's keys
+        // and a composition come first).
+        if model.focusedSimple, press.keyCode == 53, !press.command, !press.option, !press.shift, !plain, !marking,
+           session?.info?.status == "working", !(session?.cardHasKeys ?? false), !(session?.composing ?? false) {
+            model.focused?.record.interrupt()
+            return true
+        }
         let inSeal = editing && !plain && (session?.composing ?? false) && (session?.sealFocused ?? false)
         guard let key = TerminalsPageKey.action(for: press, editing: editing, plainField: plain, marking: marking, inSeal: inSeal,
                                                 cardHasKeys: session?.cardHasKeys ?? false, creating: model.creating) else { return false }

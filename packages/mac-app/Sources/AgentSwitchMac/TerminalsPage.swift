@@ -474,6 +474,9 @@ final class TerminalHead {
     var sideWidth: CGFloat = 0
     /// The terminal's own ground (its theme's): the bar's and the status bar's over and under the terminal.
     var ground: NSColor?
+    /// The pane in focus shows its terminal's record (the simple view): the window takes the system's light or dark,
+    /// its bars with it, and the bar's switch says the other view.
+    var simple = false
     /// The native screen's word on the terminal on screen: its grid as the service has it (`[cols, rows]`, nil before the
     /// stream says it) and where it is in use when not here.
     private(set) var grid: [Int]?

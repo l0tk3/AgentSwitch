@@ -16,6 +16,8 @@ struct MainBarActions {
     var split: (String) -> Void = { _ in }
     /// The bar's menu on Terminals: the terminal of the pane in focus to a window of its own.
     var detach: () -> Void = {}
+    /// The Terminals bar's switch: the pane in focus as its session's record, or as the terminal again.
+    var toggleView: () -> Void = {}
     /// The bar's own traffic lights while the window is full screen.
     var closeWindow: () -> Void = {}
     var exitFullScreen: () -> Void = {}
@@ -80,7 +82,9 @@ struct MainWindowRoot: View {
     /// The window's ground: the page's; on Terminals the terminal's own (its theme's), so that the bar over the
     /// terminal and the status bar under it are of one piece with it.
     private var ground: NSColor {
-        state.page == .terminals ? head.ground ?? state.page.ground : state.page.ground
+        // A record in the pane in focus: the page's own ground, light or dark with the system.
+        if state.page == .terminals, head.simple { return .dispatchGround }
+        return state.page == .terminals ? head.ground ?? state.page.ground : state.page.ground
     }
 
     /// Where what is beside the page ends, from the window's left edge: the rail with its edge, if it is shown, and
@@ -173,6 +177,11 @@ struct MainBar: View {
                 HStack(spacing: look.isClassic ? 0 : 4) {
                     switch state.page {
                     case .terminals:
+                        // The other view of the terminal in focus (docs/simple-view-v0.md §1): its record, or its screen.
+                        if !head.name.isEmpty {
+                            ToolbarPixelButton(rows: head.simple ? PixelArt.railTerminals : PixelArt.toolbarRecord,
+                                               help: head.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E", action: actions.toggleView)
+                        }
                         // The pane in focus split in two, the new half empty (docs/terminal-v0.md §1 分屏, 2026-10-03).
                         ToolbarPixelButton(rows: PixelArt.toolbarSplitRight, help: "Split Right ⌘D") { actions.split("right") }
                         ToolbarPixelButton(rows: PixelArt.toolbarSplitDown, help: "Split Down ⌘⇧D") { actions.split("down") }

@@ -192,6 +192,7 @@ final class MainWindowController: NSObject {
         terminals.pageRefreshing = { [weak container] in container?.refresh.playing ?? false }
         observe(window)
         watchKeys()
+        followRecord()
         // Signed in before it is shown: a window opened on Dispatch has its terminals ready behind it.
         terminals.load(terminal: id)
         swap(to: state.page)
@@ -302,7 +303,7 @@ final class MainWindowController: NSObject {
         state.show(page)
         UserDefaults.standard.set(page.rawValue, forKey: MainPage.storeKey)
         guard let window, let container else { return }
-        Self.dress(window, for: page)
+        Self.dress(window, for: page, record: terminals?.head.simple ?? false)
         container.show(page)
         terminals?.onScreen = page == .terminals
         browser?.setActive(shown: page == .browser, visible: state.windowVisible)
@@ -321,9 +322,24 @@ final class MainWindowController: NSObject {
 
     /// Terminals is the terminal window's dark block (ui-v0 §3b), Browser the screen's dark ground; Dispatch takes the
     /// system's light or dark (`system`: the design preview's choice instead).
-    static func dress(_ window: NSWindow, for page: MainPage, system: NSAppearance? = nil) {
-        window.appearance = page.alwaysDark ? NSAppearance(named: .darkAqua) : system
-        window.backgroundColor = page.ground
+    /// The window dressed again whenever the pane in focus changes between a terminal and its record: dark for the one,
+    /// the system's light or dark for the other.
+    private func followRecord() {
+        withObservationTracking { _ = terminals?.head.simple } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self, let window = self.window, self.terminals != nil else { return }
+                if self.state.page == .terminals { Self.dress(window, for: .terminals, record: self.terminals?.head.simple ?? false) }
+                self.followRecord()
+            }
+        }
+    }
+
+    static func dress(_ window: NSWindow, for page: MainPage, system: NSAppearance? = nil, record: Bool = false) {
+        // A terminal's record in the pane in focus (the simple view, docs/simple-view-v0.md §5.2): the system's light or
+        // dark, the whole window with it — the list, the bars, the rail.
+        let follows = page == .terminals && record
+        window.appearance = page.alwaysDark && !follows ? NSAppearance(named: .darkAqua) : system
+        window.backgroundColor = follows ? .dispatchGround : page.ground
     }
 
     private var barActions: MainBarActions {
@@ -340,6 +356,7 @@ final class MainWindowController: NSObject {
             seal: { [weak self] in self?.terminals?.seal() },
             split: { [weak self] side in self?.terminals?.split(side) },
             detach: { [weak self] in self?.terminals?.detachShown() },
+            toggleView: { [weak self] in self?.terminals?.toggleView() },
             closeWindow: { [weak self] in self?.window?.performClose(nil) },
             exitFullScreen: { [weak self] in self?.window?.toggleFullScreen(nil) })
     }

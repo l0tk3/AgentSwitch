@@ -376,6 +376,7 @@ extension TerminalsModel {
         case .search: focusSearch()
         case .split(let side): split(side)
         case .zoom: toggleZoom()
+        case .toggleView: toggleSimple()
         case .neighbor(let dx, let dy): focusNeighbor(dx: dx, dy: dy)
         case .select(let number):
             guard order.indices.contains(number - 1) else { return true }

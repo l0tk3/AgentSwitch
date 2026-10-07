@@ -18,6 +18,10 @@ final class TerminalPaneState: Identifiable {
     private(set) var loading: String?
     /// The screen's grid, as it fits its pane.
     private(set) var grid: (cols: Int, rows: Int)?
+    /// The pane shows its terminal's record instead of its screen (docs/simple-view-v0.md §1): the screen is put away —
+    /// no stream of its own, no hold on the size — and `record` follows the terminal.
+    private(set) var simple = false
+    @ObservationIgnored let record = PaneRecord()
     @ObservationIgnored private var loadingTask: Task<Void, Never>?
     /// The screen was clicked: the pane takes the focus.
     @ObservationIgnored var onClick: () -> Void = {}
@@ -54,10 +58,12 @@ final class TerminalPaneState: Identifiable {
         screen.onGrid = { [weak self] cols, rows in self?.grid = (cols, rows) }
     }
 
-    /// The terminal the pane shows (nil: none), with what the list knows of it now.
-    func show(_ terminal: TerminalInfo?, git: FolderGit?) {
+    /// The terminal the pane shows (nil: none), with what the list knows of it now; `simple`: as its record.
+    func show(_ terminal: TerminalInfo?, git: FolderGit?, simple: Bool = false) {
         guard let terminal else {
             if session != nil { leave() }
+            if self.simple { self.simple = false }
+            record.stop()
             screen.show(nil)
             return
         }
@@ -75,6 +81,14 @@ final class TerminalPaneState: Identifiable {
             next.onInfo = { [weak self, weak next] in self?.screen.workdir = next?.info?.workdir }
             session = next
         }
+        if self.simple != simple { self.simple = simple }
+        if simple {
+            // The record's stream brings the terminal's own events too (its status, what it waits on).
+            screen.show(nil)
+            record.follow(terminal, client: client) { [weak self] event, data in self?.session?.received(event: event, data: data) }
+            return
+        }
+        record.stop()
         screen.workdir = terminal.workdir
         // The keyboard goes where the page says, not to whichever pane was shown last.
         screen.show(terminal.id, keyboard: false)
@@ -108,6 +122,7 @@ final class TerminalPaneState: Identifiable {
 
     func stop() {
         leave()
+        record.stop()
         screen.stop()
         stage.removeFromSuperview()
     }
