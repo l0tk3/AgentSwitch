@@ -37,19 +37,26 @@ enum Look {
     /// it reads as text to read. Not larger: at 15 it stood out against everything around it (2026-10-07, user: Mac上的
     /// 字体太大了哥们 和其他的字体比起来). The pixel look keeps its own.
     static func prose(_ look: InterfaceLook) -> (size: CGFloat, lineSpacing: CGFloat, blockSpacing: CGFloat) {
-        look.isClassic ? (14, 5, 10) : (13.5, 4, 8)
+        let own: (size: CGFloat, lineSpacing: CGFloat, blockSpacing: CGFloat) = look.isClassic ? (14, 5, 10) : (13.5, 4, 8)
+        return (scaled(own.size), own.lineSpacing, own.blockSpacing)
     }
+
+    /// The size an answer is set at in this look before the setting moves it: what the setting names a step by.
+    static func proseBase(_ look: InterfaceLook) -> CGFloat { look.isClassic ? 14 : 13.5 }
+
+    /// A size of the conversation's text moved by the step set in 设置 › General (`TextSize`).
+    static func scaled(_ size: CGFloat) -> CGFloat { CGFloat(TextSize.size(Double(size), step: TextScale.shared.step)) }
 
     /// A size of the conversation's text in this look (docs/ui-v0.md §8 “对话的字号”, 2026-10-07): the pixel look's own,
     /// set in its fixed-width letters; in the classic look no smaller than both agents' own desktop apps set theirs —
     /// text 14, code and the small words 12.
     static func size(_ pixel: CGFloat, _ look: InterfaceLook) -> CGFloat {
-        guard look.isClassic else { return pixel }
+        guard look.isClassic else { return scaled(pixel) }
         switch pixel {
-        case ..<11.75: return 12
-        case ..<12.75: return 13
-        case ..<13.75: return 14
-        default: return pixel
+        case ..<11.75: return scaled(12)
+        case ..<12.75: return scaled(13)
+        case ..<13.75: return scaled(14)
+        default: return scaled(pixel)
         }
     }
     /// Code's ground (2026-10-03): a wash of ink, so a block or a span stands out on the page, a card and your raised

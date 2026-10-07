@@ -95,7 +95,7 @@ public enum RecordDisplay {
         case .web: "globe"
         case .agent: "arrow.triangle.branch"
         case .todo: "checklist"
-        case .think: "brain"
+        case .think: "sparkle"   // not a brain: it stood out of the line (2026-10-07, user: 这个脑子太突兀了)
         case .tool: "wrench.and.screwdriver"
         }
     }

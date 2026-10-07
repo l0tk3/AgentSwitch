@@ -35,7 +35,8 @@ struct ComposeField: NSViewRepresentable {
     var onPasteAttachments: () -> Void
     var onFocus: (Bool) -> Void
 
-    static let font = NSFont.systemFont(ofSize: 14)
+    /// 14, moved with the conversation's text by the size set in 设置 › General.
+    static var font: NSFont { NSFont.systemFont(ofSize: Look.scaled(14)) }
     static let lineSpacing: CGFloat = 3
     static let maxLines = 6
     static var lineHeight: CGFloat { ceil(font.ascender - font.descender + font.leading) }
@@ -96,6 +97,14 @@ struct ComposeField: NSViewRepresentable {
         coordinator.parent = self
         guard let view = coordinator.view else { return }
         if view.placeholder != placeholder { view.placeholder = placeholder }
+        // The text size was changed in the settings: the field's own follows, and its height with it.
+        let font = Self.font
+        if view.font?.pointSize != font.pointSize {
+            view.font = font
+            view.typingAttributes[.font] = font
+            view.needsDisplay = true
+            coordinator.measure()
+        }
         if view.string != text, !view.hasMarkedText() {
             view.string = text
             view.needsDisplay = true

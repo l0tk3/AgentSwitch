@@ -106,6 +106,24 @@ enum TerminalProbe {
             await pause(1500)
             say("model: now \(record.modelNow ?? "-") error \(record.error ?? "none")")
         }
+        // The conversation's text size, changed as 设置 › General changes it while the record is on screen (2026-10-07,
+        // user: 设置里加上字体调节): what is already drawn follows, the reply box's own text too.
+        do {
+            func field(_ view: NSView?) -> ComposeTextView? {
+                guard let view else { return nil }
+                if let field = view as? ComposeTextView, field.window != nil, !field.isHiddenOrHasHiddenAncestor { return field }
+                for child in view.subviews { if let found = field(child) { return found } }
+                return nil
+            }
+            let before = field(window.contentView)?.font?.pointSize ?? 0
+            TextScale.shared.set(3)
+            await pause(600)
+            say("text size +3: the reply box's text \(before) → \(field(window.contentView)?.font?.pointSize ?? 0), an answer at \(Look.prose(InterfaceLook.current).size)")
+            picture("simple-larger")
+            TextScale.shared.set(0)
+            await pause(400)
+            say("text size back: the reply box's text \(field(window.contentView)?.font?.pointSize ?? 0)")
+        }
         // What the reply box offers (2026-10-07, user: 我输入/的时候输入框应该给我提示应有的选项): typed into the real field,
         // the keys through the window — a `/` lists commands, ↓ and tab take the second; an `@` lists the folder's files.
         if let record = model.focused?.record {

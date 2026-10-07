@@ -34,10 +34,24 @@ struct GeneralView: View {
                     ForEach(InterfaceLook.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
                 }
                 .pickerStyle(.segmented)
+                // The conversation's text, a point at a time (docs/ui-v0.md §8 “字号调节”).
+                LabeledContent("Text Size") {
+                    HStack(spacing: 8) {
+                        Text("A").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Slider(value: Binding(get: { Double(TextScale.shared.step) }, set: { TextScale.shared.set(Int($0.rounded())) }),
+                               in: Double(TextSize.steps.lowerBound)...Double(TextSize.steps.upperBound), step: 1)
+                            .frame(width: 170)
+                            .accessibilityLabel("Text Size")
+                        Text("A").font(.system(size: 17)).foregroundStyle(.secondary)
+                        Text(TextSize.label(prose: Double(Look.proseBase(InterfaceLook.load(appearance))), step: TextScale.shared.step))
+                            .monospacedDigit().foregroundStyle(.secondary).frame(width: 52, alignment: .trailing)
+                        Button("Reset") { TextScale.shared.set(0) }.disabled(TextScale.shared.step == 0)
+                    }
+                }
             } header: {
                 SectionLabel("Appearance")
             } footer: {
-                Footer("只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。")
+                Footer("Appearance 只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Text Size 调整对话里文字的大小：消息、步骤、代码和回复框；侧栏、按钮和终端画面不变。")
             }
 
             Section {

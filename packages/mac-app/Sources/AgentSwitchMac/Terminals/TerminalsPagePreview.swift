@@ -90,6 +90,13 @@ enum TerminalsPagePreview {
                 ReplyHintRow(kind: .file, title: "PaneStageHost.swift", detail: "packages/mac-app/Sources/AgentSwitchMac/Terminals", range: range, typed: "@packages/mac-app/Sources/AgentSwitchMac/Terminals/PaneStageHost.swift "),
             ])
         }
+        // The conversation's text set larger and smaller in 设置 › General: messages, steps, code and the reply box
+        // follow; the list beside them does not. The preview's own setting, put back after.
+        TextScale.shared.set(3)
+        try await shot(to: file("terminals-record-larger-light"), light: true) { model in stageRecord(model, working: true) }
+        TextScale.shared.set(-2)
+        try await shot(to: file("terminals-record-smaller-light"), light: true) { model in stageRecord(model, working: true) }
+        TextScale.shared.set(0)
         // What Claude Code offers as the next message, in the empty box.
         try await shot(to: file("terminals-record-suggestion-light"), light: true) { model in
             stageRecord(model, working: false)
