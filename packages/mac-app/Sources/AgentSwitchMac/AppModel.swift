@@ -14,6 +14,8 @@ final class AppModel {
     // MARK: configuration
 
     let paths: AppPaths
+    /// Keeps the shared browser from taking the front when the service starts it (BrowserFront.swift).
+    let browserFront: BrowserFrontKeeper
     let options: DaemonOptions
     let computerName: String
     private(set) var ports: PortSettings
@@ -149,6 +151,7 @@ final class AppModel {
         let name = (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? Host.current().localizedName ?? "Mac"
         let base = ChildEnvironment.base(from: env, userHome: home)
         self.paths = paths
+        browserFront = BrowserFrontKeeper(agentswitchHome: paths.agentswitchHome)
         self.options = options
         self.ports = ports
         self.remoteEnabled = remoteEnabled

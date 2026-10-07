@@ -45,6 +45,8 @@ final class BrowserPageModel {
     private(set) var note: String?
     /// The screen has a frame of the tab on screen.
     private(set) var hasFrame = false
+    /// The selected tab's still picture, where tabs have windows of their own (nil until the first one comes).
+    private(set) var preview: NSImage?
 
     /// The new tab box is open.
     var composing = false
@@ -75,6 +77,10 @@ final class BrowserPageModel {
     var current: BrowserTab? { list.tab(selectedID) }
     var screenID: String { BrowserDefaults.screen }
 
+    /// The browser's tabs have windows of their own (docs/browser-v0.md §7.2): the page lists them and shows what
+    /// AgentSwitch adds to the selected one; its picture is in its window, and nothing here takes or sizes it.
+    var windows: Bool { list.windows }
+
     /// This Mac holds the tab on screen.
     var holding: Bool { current.map { BrowserTabText.holder($0, screen: screenID) == .thisMac } ?? false }
 
@@ -90,12 +96,17 @@ final class BrowserPageModel {
 
     /// `[ Fill Ciphertext ]` is offered: this Mac drives the tab on screen, one of your own, on an http(s) page (an
     /// agent's tab never: the daemon refuses it even while held, as the agent sees the page after the hand-back).
-    var canFill: Bool { canDrive && current.map(BrowserFillText.offered(on:)) ?? false }
+    var canFill: Bool {
+        if windows { return current.map { BrowserWindowText.buttons($0).contains(.fill) } ?? false }
+        return canDrive && current.map(BrowserFillText.offered(on:)) ?? false
+    }
     /// `New…` in Fill Ciphertext: this Mac's gate seals here.
     var canSeal: Bool { sealer != nil }
 
     // MARK: plumbing
 
+    /// The browser's identity and engine: the status bar's right end and its box.
+    @ObservationIgnored let identity: BrowserIdentityModel
     @ObservationIgnored let screen = BrowserScreenView(frame: NSRect(x: 0, y: 0, width: 960, height: 640))
     @ObservationIgnored private let service: () -> any BrowserService
     /// Seals a value with this Mac's gate (`GateCLI.seal`, the value on stdin); nil where sealing is not offered.
@@ -116,6 +127,10 @@ final class BrowserPageModel {
     @ObservationIgnored private var inputRun = 0
     @ObservationIgnored private var resizeTask: Task<Void, Never>?
     @ObservationIgnored private var noteTask: Task<Void, Never>?
+    @ObservationIgnored private var previewTask: Task<Void, Never>?
+    @ObservationIgnored private var previewID: String?
+    /// Brings the browser's own app before the other apps (the window controller's: it knows where the app is).
+    @ObservationIgnored var activateBrowser: () -> Void = {}
     @ObservationIgnored private var lastTitle: String?
     /// A refused stream is followed again backing off, its reason said once.
     @ObservationIgnored private var streamRetry = BrowserStreamRetry()
@@ -142,6 +157,7 @@ final class BrowserPageModel {
          sealer: BrowserSealer? = nil) {
         self.service = service
         self.sealer = sealer
+        identity = BrowserIdentityModel(service: { service() as? any BrowserIdentityService }, sealer: sealer)
         self.state = state
         self.defaults = defaults
         self.recents = recents ?? defaults?.stringArray(forKey: BrowserRecents.storeKey) ?? []
@@ -167,6 +183,9 @@ final class BrowserPageModel {
     func setActive(shown: Bool, visible: Bool) {
         guard shown != self.shown || visible != self.visible || (visible && pollTask == nil) else { return }
         let polling = shown != self.shown || visible != self.visible || pollTask == nil
+        // The page comes into view: its identity and engine are read once (they change only from its own box).
+        if shown, visible, !(self.shown && self.visible) { Task { await identity.refresh() } }
+        if !shown { identity.open = false }
         self.shown = shown
         self.visible = visible
         if polling { restartPolling() }
@@ -185,7 +204,8 @@ final class BrowserPageModel {
         visible = false
         fillTarget = nil
         fillAttempt = nil
-        for task in [pollTask, streamTask, inputTask, resizeTask, noteTask] { task?.cancel() }
+        for task in [pollTask, streamTask, inputTask, resizeTask, noteTask, previewTask] { task?.cancel() }
+        previewTask = nil
         pollTask = nil
         streamTask = nil
         streamingID = nil
@@ -228,6 +248,7 @@ final class BrowserPageModel {
     private func apply(_ fresh: BrowserTabList) {
         let previous = list
         if fresh != list { list = fresh }
+        identity.engineChanged(fresh.engine)
         let next = fresh.selection(keeping: selectedID, previous: previous)
         if next != selectedID {
             select(next)
@@ -294,6 +315,15 @@ final class BrowserPageModel {
     }
 
     private func updateStream(restart: Bool = false) {
+        // With windows there is no stream to follow: a still picture of the selected tab, taken again now and then.
+        if windows {
+            streamTask?.cancel()
+            streamTask = nil
+            streamingID = nil
+            streamAsked = nil
+            updatePreview()
+            return
+        }
         var wanted = shown && visible ? selectedID : nil
         // A refused stream waits out its backoff (the polls keep asking).
         if let id = wanted, id != streamingID, !streamRetry.allows(id, at: .now) { wanted = nil }
@@ -519,6 +549,10 @@ final class BrowserPageModel {
     /// `[ Take Over ]` for an agent's tab or one held elsewhere; nothing for your own tab on this screen.
     func hold() async {
         guard let tab = current else { return }
+        if windows {
+            if BrowserWindowText.state(tab) == .steppedIn { await handBackWindow() }
+            return
+        }
         switch BrowserScreenPolicy.footerHolder(tab, screen: screenID) {
         case .thisMac?: await handBack()
         case .elsewhere?: await takeOver()
@@ -543,7 +577,7 @@ final class BrowserPageModel {
     /// is taken quietly and given the browser area's size. A take that lands after the page left, the window hid or
     /// another tab came on screen is given back at once, its size never set.
     private func claimIfOwn() {
-        guard shown, visible, !claiming, let tab = current, BrowserScreenPolicy.claims(tab) else { return }
+        guard !windows, shown, visible, !claiming, let tab = current, BrowserScreenPolicy.claims(tab) else { return }
         if let last = lastClaim, last.id == tab.id, ContinuousClock.now - last.at < Self.claimRetry { return }
         claiming = true
         lastClaim = (tab.id, .now)
@@ -617,6 +651,8 @@ final class BrowserPageModel {
     }
 
     func history(_ action: BrowserHistoryAction) async {
+        // Back, forward and reload are the window's own.
+        if windows { return }
         guard let id = selectedID else { return }
         do {
             replace(try await service().history(tabId: id, action, screen: screenID))
@@ -643,6 +679,8 @@ final class BrowserPageModel {
             }
             select(tab.id)
             screen.window?.makeFirstResponder(screen)
+            // A tab opened here is to be looked at: its window comes forward (the page is in it, not on this one).
+            if windows { await showWindow(tab.id) }
             return true
         } catch {
             openError = Self.describe(error)
@@ -666,7 +704,69 @@ final class BrowserPageModel {
         Task { await loadServers() }
     }
 
-    func focusAddress() { addressRequests += 1 }
+    func focusAddress() { if !windows { addressRequests += 1 } }
+
+    // MARK: windows (docs/browser-v0.md §7.2)
+
+    /// The selected tab's still picture, while the page shows it: at once, then every few seconds.
+    private func updatePreview() {
+        let wanted = shown && visible ? selectedID : nil
+        if wanted == previewID, previewTask != nil || wanted == nil { return }
+        previewTask?.cancel()
+        previewTask = nil
+        if wanted != previewID { preview = nil }
+        previewID = wanted
+        guard let id = wanted else { return }
+        previewTask = Task { [weak self] in
+            while !Task.isCancelled {
+                if let self, let data = try? await self.service().tabPreview(id: id), !Task.isCancelled, self.previewID == id,
+                   let image = NSImage(data: data) {
+                    self.preview = image
+                }
+                try? await Task.sleep(for: BrowserDefaults.previewInterval)
+            }
+        }
+    }
+
+    /// `[ Show Window ]`, a double click on the row, ↩: the tab's window before the browser's others, the browser
+    /// before the other apps.
+    func showWindow(_ id: String? = nil) async {
+        guard let id = id ?? selectedID else { return }
+        do {
+            try await service().showTab(id: id)
+            activateBrowser()
+        } catch {
+            say(Self.describe(error))
+        }
+    }
+
+    /// `[ Hand Back ]` after stepping into an agent's window: the agent goes on.
+    func handBackWindow() async {
+        guard let id = selectedID else { return }
+        do {
+            replace(try await service().handBack(tabId: id, screen: BrowserDefaults.windowScreen))
+        } catch {
+            say(Self.describe(error))
+        }
+    }
+
+    func copyURL() {
+        guard let url = current?.url, !url.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url, forType: .string)
+        say("Copied")
+    }
+
+    /// One of the detail pane's buttons.
+    func perform(_ action: BrowserWindowText.Action) {
+        switch action {
+        case .show: Task { await showWindow() }
+        case .fill: openFill()
+        case .handBack: Task { await handBackWindow() }
+        case .copy: copyURL()
+        case .close: if let id = selectedID { Task { await close(id) } }
+        }
+    }
 
     func loadServers() async {
         serversLoading = true

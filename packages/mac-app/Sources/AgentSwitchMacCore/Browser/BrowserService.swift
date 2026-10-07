@@ -94,6 +94,11 @@ public protocol BrowserService: Sendable {
     /// http(s); 404: an unknown tab; 409: not the holder, or the focus moved meanwhile; 503: no gate. The value never
     /// comes back; `BrowserFillText.reason` words the refusals.
     func fill(tabId: String, token: String, screen: String) async throws -> BrowserFillResult
+    /// `POST /browser/tabs/:id/show` (docs/browser-v0.md §7.3 窗口): the tab's window before the browser's other
+    /// windows; bringing the browser before other apps is this app's to do. 503 where tabs have no windows.
+    func showTab(id: String) async throws
+    /// `GET /browser/tabs/:id/preview`: a still picture of the tab (JPEG).
+    func tabPreview(id: String) async throws -> Data
 }
 
 extension BrowserService {

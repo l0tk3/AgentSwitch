@@ -109,6 +109,21 @@ enum MainWindowPreview {
                        to: file("main-browser-zoom"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), compose: true, to: file("main-browser-new"))
         try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(empty: true), to: file("main-browser-empty"))
+        // Tabs with windows of their own (docs/browser-v0.md §7.2; implemented/browser-window.html): a tab of yours, an
+        // agent's at work, one you stepped into, one a phone holds — the last two also in the classic look's twin below.
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(windows: true), select: "vite", to: file("main-browser-window"))
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(windows: true), select: "pr", to: file("main-browser-window-agent"))
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(windows: true, heldBy: ["pr": BrowserDefaults.windowScreen]),
+                       select: "pr", to: file("main-browser-window-took"))
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(windows: true, heldBy: ["portal": "phone-1a2b3c4d"]),
+                       select: "portal", to: file("main-browser-window-phone"))
+        // The identity and engine box (states identity / update / missing of the same design page).
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(windows: true), select: "vite", identity: .identity,
+                       to: file("main-browser-identity"))
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(windows: true), select: "vite", identity: .updating,
+                       to: file("main-browser-engine-update"))
+        try await shot(model: model, page: .browser, system: dark, browser: BrowserDemoService(), select: "vite", identity: .missing,
+                       to: file("main-browser-engine-missing"))
         try await refresh(model: model, to: .browser, from: .dispatch, system: dark, steps: [6], name: "main-refresh-browser", into: directory)
     }
 
@@ -152,7 +167,8 @@ enum MainWindowPreview {
     /// the footer's line; `zoom`: the page zoomed in to this step).
     private static func shot(model: AppModel, page: MainPage, system: NSAppearance?, size: NSSize = size, open: DispatchRoute? = nil,
                              browser service: BrowserDemoService? = nil, select: String? = nil, compose: Bool = false,
-                             note: String? = nil, zoom: Int? = nil, fullScreen: Bool = false, rail: Rail = .shown, to file: URL) async throws {
+                             note: String? = nil, zoom: Int? = nil, identity: BrowserIdentityDemo? = nil, fullScreen: Bool = false, rail: Rail = .shown,
+                             to file: URL) async throws {
         let state = state(on: page, rail: rail)
         let browser = BrowserPageModel(service: { service ?? BrowserDemoService(empty: true) }, state: state, defaults: nil,
                                        recents: BrowserDemoService.recents)
@@ -169,6 +185,9 @@ enum MainWindowPreview {
             if compose { browser.composeNew() }
             if let note { browser.say(note) }
             if let zoom { try await zoomIn(browser, to: zoom) }
+            // The status bar's right end, and its box where a picture is of it.
+            let shown = identity ?? (browser.windows ? .closed : .chrome)
+            browser.identity.preview(identity: shown.identity, engine: shown.engine, inUse: shown.inUse, open: shown.open)
         }
         try await DesignPreview.settle()
         try await DesignPreview.settle()

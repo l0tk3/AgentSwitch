@@ -171,6 +171,10 @@ final class MainWindowController: NSObject {
         let browser = BrowserPageModel(service: { [model] in model.client }, state: state,
                                        sealer: { [model] request in try await model.gateCLI.seal(request) })
         browser.onTitle = { [weak self] in self?.updateTitle() }
+        browser.activateBrowser = { [model] in
+            model.browserFront.asked()
+            BrowserFront.activate(agentswitchHome: model.paths.agentswitchHome)
+        }
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.pageView, .browser: BrowserPage.host(browser)])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: terminals.head, model: model,
                                                                 content: container, actions: barActions, browser: browser))

@@ -59,6 +59,14 @@ extension DaemonClient: BrowserService {
                                                                           timeout: BrowserTimeouts.fill))
     }
 
+    public func showTab(id: String) async throws {
+        _ = try await dispatchCall("POST", "/browser/tabs/\(Self.segment(id))/show", json: [String: String](), timeout: BrowserTimeouts.request)
+    }
+
+    public func tabPreview(id: String) async throws -> Data {
+        try await dispatchCall("GET", "/browser/tabs/\(Self.segment(id))/preview", timeout: BrowserTimeouts.request)
+    }
+
     private func tabCall<B: Encodable>(_ id: String, _ route: String, _ body: B) async throws -> BrowserTab {
         try decode(BrowserTabReply.self, try await dispatchCall("POST", "/browser/tabs/\(Self.segment(id))/\(route)", json: body,
                                                                 timeout: BrowserTimeouts.request)).tab

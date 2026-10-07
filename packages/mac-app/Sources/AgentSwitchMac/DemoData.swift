@@ -310,6 +310,10 @@ struct DemoTransport: HTTPTransport {
         let body: Any
         switch (method, path) {
         case ("GET", "/healthz"): body = ["ok": true, "version": "0.9.0"]
+        // The shared browser's engine, for the Environment page's line.
+        case ("GET", "/browser/engine"):
+            body = ["camoufox": ["installed": ["version": "156.0.1-beta.34"], "ready": true],
+                    "playwright": ["active": "bundled", "version": "1.64.0"], "update": ["running": false]]
         case ("GET", "/devices"): body = backend.hasPairedDevices ? DemoData.devices(now: now).map(Self.json) : []
         case ("GET", "/settings/models"): body = DemoData.modelSettings
         // A fresh Mac has no paired phone; its usage has no readings either.

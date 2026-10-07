@@ -42,8 +42,13 @@ struct MainStatusBar: View {
                 if let context = head.shown { TerminalStatusItems(context: context, seal: seal) }
             case .browser:
                 if let browser {
-                    BrowserHoldItems(model: browser)
-                    BrowserZoomItems(model: browser)
+                    // Tabs with windows of their own are held, sized and zoomed in their windows (docs/browser-v0.md §7.2).
+                    if !browser.windows {
+                        BrowserHoldItems(model: browser)
+                        BrowserZoomItems(model: browser)
+                    }
+                    // Last: the engine's word and the browser's identity, which opens its box (docs/browser-v0.md §7.2).
+                    BrowserIdentityItems(model: browser.identity)
                 }
             case .dispatch:
                 ForEach(MainStatus.dispatch(router: state.dispatchRouter, topics: state.dispatchTopics), id: \.self) { Text($0) }

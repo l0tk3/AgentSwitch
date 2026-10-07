@@ -31,10 +31,12 @@ struct BrowserDemoService: BrowserService {
 
     /// `holding`: the tab this Mac holds (after `[ Take Over ]`: `pr`, the pull request; `portal`, the task's login;
     /// `vite`: your dev server's page, on this screen); `empty`: no tabs at all.
+    /// `windows`: the tabs have windows of their own (docs/browser-v0.md §7.2), and `heldBy` says who holds which
+    /// (`pr` by `BrowserDefaults.windowScreen`: you acted in the agent's window; `portal` by a phone).
     @MainActor
-    init(holding: String? = nil, empty: Bool = false) {
+    init(holding: String? = nil, empty: Bool = false, windows: Bool = false, heldBy: [String: String] = [:]) {
         let at = Date()
-        let held = { (id: String) in holding == id ? BrowserDefaults.screen : nil }
+        let held = { (id: String) in heldBy[id] ?? (holding == id ? BrowserDefaults.screen : nil) }
         let pr = BrowserTab(id: "pr", owner: Self.codex, title: "Add native Dispatch page · Pull Request #128",
                             url: "https://github.com/acme/app/pull/128", site: "github.com", status: holding == "pr" ? .idle : .busy,
                             heldBy: held("pr"),
@@ -53,7 +55,7 @@ struct BrowserDemoService: BrowserService {
             BrowserTabGroup(owner: Self.codex, tabs: [pr, issues]),
             BrowserTabGroup(owner: Self.task, tabs: [portal]),
             BrowserTabGroup(owner: .you, tabs: [mesh, vite]),
-        ])
+        ], engine: windows ? "camoufox" : "chrome", windows: windows)
         frames = Dictionary(uniqueKeysWithValues: Self.pages.map { ($0.id, DemoPage.frame($0.page)) })
         servers = [
             BrowserLocalServer(port: 5173, pid: 4242, name: "vite", cwd: NSHomeDirectory() + "/Projects/site"),
@@ -88,6 +90,14 @@ struct BrowserDemoService: BrowserService {
 
     func fill(tabId: String, token: String, screen: String) async throws -> BrowserFillResult {
         throw DaemonError.http(status: 403, message: "演示数据，未填入。")
+    }
+
+    func showTab(id: String) async throws {}
+
+    /// The tab's made-up page as a still picture.
+    func tabPreview(id: String) async throws -> Data {
+        guard let frame = frames[id], let picture = Data(base64Encoded: frame.data) else { throw DaemonError.http(status: 404, message: "not found") }
+        return picture
     }
 
     private func tab(_ id: String) throws -> BrowserTab {
@@ -266,5 +276,40 @@ enum DemoPage {
         fill(CGRect(x: 40, y: 312, width: 560, height: 80), hex(0x161B22), radius: 8)
         text("改了 src/App.tsx，热更新后这里立即变。", CGPoint(x: 64, y: 342), size: 15, color: hex(0x9DA7B3))
     }
+}
+
+/// Made-up identities and engines for the design preview's pictures of the status bar's right end and its box
+/// (implemented/browser-window.html, states identity / update / missing).
+struct BrowserIdentityDemo {
+    let identity: BrowserIdentity?
+    let engine: BrowserEngine?
+    let inUse: String
+    let open: Bool
+
+    private static let fingerprint = BrowserIdentity.Fingerprint(system: "macOS", browser: "Firefox 156", cores: 8,
+                                                                 since: Date(timeIntervalSince1970: 1_791_158_400))
+    private static let direct = BrowserIdentity(fingerprint: fingerprint, proxy: nil)
+    private static let viaTokyo = BrowserIdentity(
+        fingerprint: BrowserIdentity.Fingerprint(system: "macOS", browser: "Firefox 156", cores: 8, timezone: "Asia/Tokyo", timezoneFollowsExit: true,
+                                                 since: Date(timeIntervalSince1970: 1_791_158_400)),
+        proxy: BrowserProxy(server: "socks5://proxy.example.net:1080", username: "l0tk3", sealed: true),
+        exit: .found(ip: "203.0.113.24", place: "Tokyo"))
+
+    private static func engine(_ json: String) -> BrowserEngine? { try? JSONDecoder().decode(BrowserEngine.self, from: Data(json.utf8)) }
+    private static let installed = engine(#"{"camoufox":{"installed":{"version":"156.0.1-beta.34"},"ready":true},"playwright":{"active":"bundled","version":"1.64.0"},"update":{"running":false}}"#)
+
+    /// Camoufox runs, straight out; the box closed.
+    static let closed = BrowserIdentityDemo(identity: direct, engine: installed, inUse: "camoufox", open: false)
+    /// Chrome stands in, nothing known of the engine; the box closed.
+    static let chrome = BrowserIdentityDemo(identity: nil, engine: nil, inUse: "chrome", open: false)
+    static let identity = BrowserIdentityDemo(identity: viaTokyo, engine: installed, inUse: "camoufox", open: true)
+    static let updating = BrowserIdentityDemo(
+        identity: direct,
+        engine: engine(#"{"camoufox":{"installed":{"version":"156.0.1-beta.34"},"ready":true},"playwright":{"active":"bundled","version":"1.64.0"},"update":{"running":true,"to":{"camoufox":"156.0.1-beta.36"},"part":"camoufox","phase":"check"}}"#),
+        inUse: "camoufox", open: true)
+    static let missing = BrowserIdentityDemo(
+        identity: nil,
+        engine: engine(#"{"camoufox":{"installed":null,"ready":false},"playwright":{"active":"bundled","version":"1.64.0"},"update":{"running":false},"available":{"camoufox":{"version":"156.0.1-beta.34","bytes":1289764252,"prerelease":false},"checkedAt":1}}"#),
+        inUse: "chrome", open: true)
 }
 #endif

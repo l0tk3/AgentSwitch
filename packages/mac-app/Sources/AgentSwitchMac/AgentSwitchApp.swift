@@ -134,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         guard claimInstance() else { return }
         running = true
+        model.browserFront.start()
         // The app has a main window (Dispatch, Terminals): the Dock icon is there by default (settings can take it away).
         UserDefaults.standard.register(defaults: [DockPresence.alwaysShowKey: true])
         let atLogin = Self.launchedAtLogin

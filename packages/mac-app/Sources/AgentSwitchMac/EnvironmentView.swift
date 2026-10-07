@@ -8,6 +8,8 @@ struct EnvironmentView: View {
     @State private var trusting = false
     @State private var confirmTrust = false
     @State private var trustResult: String?
+    /// The shared browser's engine, read when the page comes up (docs/browser-v0.md §7.2 第 6 条).
+    @State private var engine: BrowserEngine?
 
     var body: some View {
         Form {
@@ -39,6 +41,15 @@ struct EnvironmentView: View {
             }
 
             GateServiceSection()
+
+            Section {
+                StatusRow(label: "Engine", line: BrowserEngineText.environment(engine))
+            } header: {
+                SectionLabel("Browser")
+            } footer: {
+                Footer(BrowserEngineText.environmentHint)
+            }
+            .task { engine = try? await model.client.browserEngine(check: false) }
 
             Section {
                 StatusRow(label: "Cert File", line: model.caFilePresent ? StatusLine(model.shortPath(model.gateCA), .ok)

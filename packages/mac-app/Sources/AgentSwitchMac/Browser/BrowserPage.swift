@@ -65,8 +65,14 @@ struct BrowserPage: View {
 
     private var main: some View {
         VStack(spacing: 0) {
-            BrowserAddressBar(model: model).background(look.isClassic ? Look.ground : Color.clear)
-            screen
+            // Tabs with windows of their own (docs/browser-v0.md §7.2): the selected tab's details; its page, its
+            // address bar and its picture are in its window.
+            if model.windows, model.current != nil {
+                BrowserDetailPane(model: model)
+            } else {
+                if !model.windows { BrowserAddressBar(model: model).background(look.isClassic ? Look.ground : Color.clear) }
+                screen
+            }
         }
         // The new tab box, over the screen under the address bar.
         .overlay(alignment: .top) {
@@ -78,6 +84,15 @@ struct BrowserPage: View {
                 }
             }
         }
+        // The identity and engine box, over the lower right corner: above the status bar's item that opens it.
+        .overlay(alignment: .bottomTrailing) {
+            if model.identity.open {
+                ZStack(alignment: .bottomTrailing) {
+                    Color.black.opacity(0.001).onTapGesture { model.identity.open = false }
+                    BrowserIdentityBox(model: model.identity).padding(.trailing, 12).padding(.bottom, 8).padding(.top, 8)
+                }
+            }
+        }
     }
 
     private var screen: some View {
@@ -86,7 +101,7 @@ struct BrowserPage: View {
             if model.current == nil {
                 Color.black
                 empty
-            } else if !model.hasFrame {
+            } else if !model.hasFrame, !model.windows {
                 BrailleSpinner().accessibilityLabel("Loading")
             }
         }
@@ -121,7 +136,9 @@ private struct BrowserTabListView: View {
                     ForEach(group.tabs) { tab in
                         BrowserTabRow(tab: tab, selected: tab.id == model.selectedID,
                                       select: { model.select(tab.id) },
-                                      close: { Task { await model.close(tab.id) } })
+                                      close: { Task { await model.close(tab.id) } },
+                                      tag: model.windows ? BrowserWindowText.tag(tab) : nil,
+                                      open: model.windows ? { Task { await model.showWindow(tab.id) } } : nil)
                     }
                 }
             }
@@ -163,6 +180,9 @@ private struct BrowserTabRow: View {
     let selected: Bool
     let select: () -> Void
     let close: () -> Void
+    /// The word at the row's end (windows only), and what a double click does there (the tab's window to the front).
+    var tag: String?
+    var open: (() -> Void)?
     @State private var hovering = false
     @Environment(\.interfaceLook) private var look
 
@@ -177,6 +197,10 @@ private struct BrowserTabRow: View {
                     .truncationMode(BrowserTabText.waiting(tab) == nil ? .middle : .tail)
             }
             Spacer(minLength: 0)
+            // Who holds it, where tabs have windows: `You` once you stepped into an agent's, `On iPhone`.
+            if let tag {
+                Text(tag).mono(11).foregroundStyle(tag == "You" ? Color.signal : Color.waiting).lineLimit(1).fixedSize()
+            }
         }
         .padding(.horizontal, look.isClassic ? 8 : 16)
         .padding(.vertical, 7)
@@ -185,6 +209,7 @@ private struct BrowserTabRow: View {
         .overlay(alignment: .leading) { if selected && !look.isClassic { Rectangle().fill(Color.signal).frame(width: 3) } }
         .padding(.horizontal, look.isClassic ? 8 : 0)
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) { select(); open?() }
         .onTapGesture(perform: select)
         .onHover { hovering = $0 }
         .help(tab.url)

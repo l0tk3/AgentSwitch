@@ -58,6 +58,9 @@ enum BrowserProbe {
             guard let browser = main.probeBrowser, let window = main.window else { say("FAIL no window"); exit(1) }
             await browser.refresh()
             say("list: \(browser.list.tabs.count) tabs, running \(browser.list.running), problem \(browser.problem ?? "-")")
+            // The other two walks (BrowserProbe+Windows.swift): the engine's box alone, and tabs with windows of their own.
+            if mode == "engine" { await engineWalk(browser, window, dir: dir, say: say); exit(0) }
+            if browser.windows { await windowsWalk(browser, window, model: model, file: file, dir: dir, say: say); exit(0) }
             let opened = await browser.open(.path(file.path))
             say("open \(file.lastPathComponent): \(opened ? "ok" : "FAIL") \(browser.openError ?? "") → tab \(browser.selectedID ?? "-") \(browser.current?.url ?? "")")
             guard opened else { exit(1) }
@@ -252,7 +255,7 @@ enum BrowserProbe {
         }
     }
 
-    private static func shot(_ window: NSWindow, _ file: URL) {
+    static func shot(_ window: NSWindow, _ file: URL) {
         guard let view = window.contentView?.superview ?? window.contentView,
               let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)

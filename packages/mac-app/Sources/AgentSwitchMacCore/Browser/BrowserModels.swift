@@ -228,16 +228,26 @@ public struct BrowserTabGroup: Sendable, Equatable, Decodable {
 public struct BrowserTabList: Sendable, Equatable, Decodable {
     public let running: Bool
     public let groups: [BrowserTabGroup]
+    /// Which browser the service starts (docs/browser-v0.md §7.2): `camoufox`, or `chrome` (also from a service that
+    /// does not say).
+    public let engine: String
+    /// The tabs have windows of their own on this Mac: the page lists them and brings windows forward instead of
+    /// drawing their pictures.
+    public let windows: Bool
 
-    public init(running: Bool = false, groups: [BrowserTabGroup] = []) {
+    public init(running: Bool = false, groups: [BrowserTabGroup] = [], engine: String = "chrome", windows: Bool = false) {
         self.running = running
         self.groups = groups
+        self.engine = engine
+        self.windows = windows
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
         running = c.first(Bool.self, "running") ?? false
         groups = (c.first([BrowserTabGroup].self, "groups") ?? []).filter { !$0.tabs.isEmpty }
+        engine = c.first(String.self, "engine") ?? "chrome"
+        windows = c.first(Bool.self, "windows") ?? false
     }
 
     public static let empty = BrowserTabList()

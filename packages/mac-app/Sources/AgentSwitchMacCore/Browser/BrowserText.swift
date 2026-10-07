@@ -203,6 +203,11 @@ public struct BrowserStreamRetry: Sendable, Equatable {
 public enum BrowserDefaults {
     /// This Mac's main window as a screen: the holder id it takes tabs over with.
     public static let screen = "mac-main"
+    /// Who holds an agent's tab once the person acted in its window (the daemon's `WINDOW_HOLDER`): handed back under
+    /// this name.
+    public static let windowScreen = "mac-window"
+    /// The still picture of the selected tab is taken again this often while the page shows it.
+    public static let previewInterval: Duration = .seconds(3)
     /// The tab list is polled this often while the page is on screen (the daemon has no list stream yet).
     public static let pollInterval: Duration = .seconds(2)
     /// And this often while the window is visible on another page, for the bar's mark on `Browser`.
