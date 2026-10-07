@@ -35,8 +35,8 @@ struct ComposeField: NSViewRepresentable {
     var onPasteAttachments: () -> Void
     var onFocus: (Bool) -> Void
 
-    /// 14, moved with the conversation's text by the size set in 设置 › General.
-    static var font: NSFont { NSFont.systemFont(ofSize: Look.scaled(14)) }
+    /// The size of what you said in the conversation, moved with it by the size set in 设置 › General.
+    static var font: NSFont { NSFont.systemFont(ofSize: Look.typed) }
     static let lineSpacing: CGFloat = 3
     static let maxLines = 6
     static var lineHeight: CGFloat { ceil(font.ascender - font.descender + font.leading) }

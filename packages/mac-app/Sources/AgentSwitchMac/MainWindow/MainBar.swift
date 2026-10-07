@@ -406,8 +406,10 @@ struct ToolbarPixelButton: View {
                         .fill(Color(white: 0.5).opacity(enabled && hovering ? 0.16 : 0)).padding(.horizontal, 1))
                     .contentShape(Rectangle())
             } else {
+                // The shaded picture on 1 pt cells, the size the classic look's icons are in this bar: on 1.5 pt cells
+                // they stood half as large again as everything beside them (2026-10-07, user: 像素页面这几个图标太大了).
                 PixelSprite(rows: rows, pixel: 1, color: !enabled ? Look.line : hovering ? .primary : .secondary,
-                            strength: !enabled ? 0.28 : hovering ? 1 : 0.85)
+                            strength: !enabled ? 0.28 : hovering ? 1 : 0.85, cell: 1)
                     .frame(width: 28, height: 24)
                     .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.5).opacity(enabled && hovering ? 0.16 : 0)))
                     .contentShape(Rectangle())

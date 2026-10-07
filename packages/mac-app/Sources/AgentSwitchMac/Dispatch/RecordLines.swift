@@ -26,7 +26,7 @@ struct UserBox: View {
             VStack(alignment: .trailing, spacing: 4) {
                 // Ink on a quiet ground in both looks: the classic look's bubble is a wash of the ink, round (it was
                 // the accent's colour with white text until 2026-10-07, docs/ui-v0.md §8); the pixel look's a raised box.
-                TypedText(text: text, size: Look.scaled(14), lineSpacing: 5)
+                TypedText(text: text, size: Look.typed, lineSpacing: 5)
                     .foregroundStyle(Look.ink)
                     .padding(.horizontal, 13)
                     .padding(.vertical, look.isClassic ? 8 : 9)
@@ -77,7 +77,7 @@ struct AssistantLineView: View {
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 }
                 // Reports in the secondary ink; both are model output, so Markdown (their code as code).
-                MarkdownBlocks(text: line.message.text, size: Look.scaled(14), color: line.isSecondary ? Look.ink2 : Look.ink, lineSpacing: 6)
+                MarkdownBlocks(text: line.message.text, size: Look.typed, color: line.isSecondary ? Look.ink2 : Look.ink, lineSpacing: 6)
             }
             .frame(maxWidth: 560, alignment: .leading)
             .contextMenu { menu }

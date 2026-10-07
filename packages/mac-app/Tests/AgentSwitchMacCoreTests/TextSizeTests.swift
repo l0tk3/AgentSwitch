@@ -18,8 +18,8 @@ final class TextSizeTests: XCTestCase {
     }
 
     func testTheSettingNamesAStepByTheSizeOfAnAnswer() {
-        XCTAssertEqual(TextSize.label(prose: 14, step: 0), "14 pt")
-        XCTAssertEqual(TextSize.label(prose: 14, step: -1), "13 pt")
+        XCTAssertEqual(TextSize.label(prose: 13, step: 0), "13 pt")
+        XCTAssertEqual(TextSize.label(prose: 13, step: 1), "14 pt")
         XCTAssertEqual(TextSize.label(prose: 13.5, step: 0), "13.5 pt")
         XCTAssertEqual(TextSize.label(prose: 13.5, step: 4), "17.5 pt")
     }

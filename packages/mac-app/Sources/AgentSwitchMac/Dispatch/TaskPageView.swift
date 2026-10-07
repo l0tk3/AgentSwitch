@@ -143,13 +143,13 @@ struct TaskPageView: View {
         if let result = task.result, !result.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 PartLabel("Result")
-                MarkdownBlocks(text: result, size: Look.scaled(14), lineSpacing: 6)
+                MarkdownBlocks(text: result, size: Look.typed, lineSpacing: 6)
             }
         }
         if let reason = DispatchTaskPage.reason(task) {
             VStack(alignment: .leading, spacing: 6) {
                 PartLabel("Reason")
-                MarkdownBlocks(text: reason, size: Look.scaled(14), color: task.isInterrupted ? Look.ink2 : Look.ink, lineSpacing: 6)
+                MarkdownBlocks(text: reason, size: Look.typed, color: task.isInterrupted ? Look.ink2 : Look.ink, lineSpacing: 6)
             }
         }
     }
