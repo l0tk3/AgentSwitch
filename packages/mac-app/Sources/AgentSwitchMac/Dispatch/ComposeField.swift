@@ -91,7 +91,10 @@ struct ComposeField: NSViewRepresentable {
         if let insert, insert.id != coordinator.inserted {
             coordinator.inserted = insert.id
             view.window?.makeFirstResponder(view)
-            view.insertText(insert.text, replacementRange: view.selectedRange())
+            let range = view.selectedRange()
+            let before = range.location > 0 && range.location <= (view.string as NSString).length
+                ? (view.string as NSString).substring(with: NSRange(location: range.location - 1, length: 1)).first : nil
+            view.insertText(insert.tokens.isEmpty ? insert.text : TerminalDraft.typed(insert.tokens, after: before), replacementRange: range)
         }
         if !active {
             if view.window?.firstResponder === view { view.window?.makeFirstResponder(nil) }

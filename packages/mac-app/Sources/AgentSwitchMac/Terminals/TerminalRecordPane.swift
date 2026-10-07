@@ -15,6 +15,7 @@ struct TerminalRecordPane: View {
     @Environment(\.interfaceLook) private var look
     @State private var changes: ChangesRequest?
     @State private var atEnd = true
+    @State private var dropping = false
 
     /// The reading column (the demo page's 700 pt).
     static let column: CGFloat = 700
@@ -32,6 +33,7 @@ struct TerminalRecordPane: View {
         let info = state.session?.info
         let working = info?.status == "working"
         let requests = state.session?.requests ?? []
+        let pictures = record.sessionId.map { RecordPictureSource(harness: record.agent, session: $0, client: model.client) }
         VStack(spacing: 0) {
             ScrollViewReader { scroller in
                 ScrollView {
@@ -54,7 +56,7 @@ struct TerminalRecordPane: View {
                                 .font(.system(size: 12.5)).foregroundStyle(Look.faint)
                         }
                         ForEach(record.items) { item in
-                            RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work) {
+                            RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, pictures: pictures) {
                                 if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: item.id) }
                             }
                         }
@@ -116,6 +118,16 @@ struct TerminalRecordPane: View {
             }
         }
         .background(Look.ground)
+        // Files dropped anywhere on the record are the reply's (on a terminal's screen they are typed at once).
+        .onDrop(of: [.fileURL], isTargeted: $dropping) { providers in
+            guard info != nil, info?.status != "exited" else { return false }
+            RecordPage.load(providers) { urls in
+                model.focus(pane: state.id)
+                record.attach(urls: urls)
+            }
+            return true
+        }
+        .overlay { if dropping { Rectangle().strokeBorder(Color.signal, lineWidth: 1).allowsHitTesting(false) } }
         .sheet(item: $changes) { request in
             RecordChangesSheet(request: request, client: model.client)
         }
@@ -140,6 +152,8 @@ private struct RecordRow: View {
     let item: RecordItem
     let verbose: Bool
     let running: Bool
+    /// Where the pictures sent with a message are asked for (absent before the session is known).
+    let pictures: RecordPictureSource?
     let showChanges: () -> Void
     @State private var open = false
     @State private var whole = false
@@ -153,7 +167,10 @@ private struct RecordRow: View {
                 Text(item.queued ? "Queued" : TerminalListText.age(since: item.at, classic: look.isClassic)).mono(10.5).foregroundStyle(Look.faint)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 if !item.text.isEmpty { UserBox(text: item.text, faded: item.queued) }
-                if item.images > 0 { Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(10.5).foregroundStyle(Look.ink2) }
+                if item.images > 0 {
+                    if let pictures { RecordPictures(source: pictures, item: item.id, count: item.images) }
+                    else { Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(10.5).foregroundStyle(Look.ink2) }
+                }
             }
             .padding(.top, 4)
         case .answer:
@@ -369,10 +386,19 @@ private struct RecordDock: View {
                 if let error = record.error {
                     Text(error).font(.system(size: 12)).foregroundStyle(Color.failed).lineLimit(2).textSelection(.enabled)
                 }
+                if !record.draftFiles.isEmpty { RecordDraftStrip(record: record) }
                 HStack(alignment: .bottom, spacing: 8) {
-                    ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, active: info?.status != "exited",
-                                 takesFocusAtFirst: focused, label: "Reply", onSubmit: { record.send() }, onFiles: { _ in }, onPasteAttachments: {},
-                                 onFocus: { on in if on { model.focus(pane: state.id) } })
+                    MenuButton(entries: {
+                        [MenuEntry(title: "Files…", symbol: "folder", action: { record.chooseFiles() }),
+                         MenuEntry(title: "Paste Image", symbol: "doc.on.clipboard", key: "v", action: { record.pasteFromClipboard() })]
+                    }, above: true, help: "Attach") {
+                        PlusSquare(side: look.isClassic ? 28 : ComposeField.minHeight + 16)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(info?.status == "exited")
+                    ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
+                                 takesFocusAtFirst: focused, label: "Reply", onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
+                                 onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
                         .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
                         .padding(.horizontal, look.isClassic ? 11 : 10).padding(.vertical, 8)
                         .grounded(look.isClassic ? Look.raised : Color.clear, radius: look.isClassic ? 12 : 0)
@@ -408,6 +434,7 @@ private struct RecordDock: View {
             .frame(maxWidth: .infinity)
         }
         .background(Look.ground)
+        .onChange(of: record.draft) { record.keepDraftFiles() }
         .contextMenu {
             Button(record.verbose ? "Transcript: Normal" : "Transcript: Verbose") { record.verbose.toggle() }
             if record.hasSession, record.agent == "claude-code" || record.agent == "codex" { Button("Changes of the Last Turn", action: lastTurnChanges) }

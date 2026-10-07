@@ -747,6 +747,29 @@ describe("terminals over HTTP", () => {
     await until(() => screen().includes(`got: 看这张 ${path} 哪里不对 [File #9]`));
     expect(existsSync(join(tmpdir(), "agentswitch-attach", id, "dropped.png"))).toBe(false);   // its placeholder was deleted
     expect((await call("POST", `/terminals/${id}/input`, { text: "x", attachments: [{ token: "[Image #1] rm", upload: shot }] })).status).toBe(400);
+
+    // A file already on this Mac, by where it is (the Mac app's reply box, 2026-10-07): not copied, its path typed as a
+    // terminal types a dropped file — one word, whatever is in its name. One staged and one by its path in one reply.
+    const here = mkdtempSync(join(tmpdir(), "agentswitch-local files-"));
+    const local = join(here, "屏幕截图 (2).png");
+    writeFileSync(local, "png");
+    const pasted = await stage("pasted.png");
+    const both = await call("POST", `/terminals/${id}/input`, {
+      text: "对比 [Image #1] 和 [Image #2]", seal: false,
+      attachments: [{ token: "[Image #1]", path: local }, { token: "[Image #2]", upload: pasted }],
+    });
+    expect(both.json).toMatchObject({ ok: true, attached: 2 });
+    const typed = local.replace(/[ ()]/g, "\\$&");
+    await until(() => screen().includes(`got: 对比 ${typed} 和 ${join(tmpdir(), "agentswitch-attach", id, "pasted.png")}`));
+    expect(existsSync(local)).toBe(true);
+    // A folder dragged in: its path, as a terminal types it.
+    expect((await call("POST", `/terminals/${id}/input`, { text: "在 [File #1] 里找", seal: false, attachments: [{ token: "[File #1]", path: here }] })).json).toMatchObject({ ok: true, attached: 1 });
+    await until(() => screen().includes(`got: 在 ${here.replace(/ /g, "\\ ")} 里找`));
+    // Not there, not absolute, a line hidden in it, both ways at once, neither.
+    for (const attachment of [{ token: "[File #1]", path: join(here, "gone.txt") }, { token: "[File #1]", path: "relative.txt" },
+      { token: "[File #1]", path: `${local}\nrm -rf ~` }, { token: "[File #1]", path: local, upload: shot }, { token: "[File #1]" }]) {
+      expect((await call("POST", `/terminals/${id}/input`, { text: "看 [File #1]", seal: false, attachments: [attachment] })).status, JSON.stringify(attachment)).toBe(400);
+    }
     expect((await call("DELETE", `/terminals/${id}`)).status).toBe(200);
   });
 
@@ -819,6 +842,9 @@ describe("terminals over HTTP", () => {
     daemon.terminals!.subscribe(id, null, (e) => events.push(e));
     await until(() => text(events).includes("fake agent ready"));
     expect(await (await req(`/terminals/${id}/input`, { text: "pw hunter2" })).json()).toEqual({ ok: true, sealed: 1, attached: 0 });
+    // A phone sends its files; it does not point at the Mac's.
+    writeFileSync(join(cwd, "notes.txt"), "x");
+    expect((await req(`/terminals/${id}/input`, { text: "看 [File #1]", seal: false, attachments: [{ token: "[File #1]", path: join(cwd, "notes.txt") }] })).status).toBe(403);
     await until(() => text(events).includes(`got: pw ${TOKEN}`));
     expect(await (await req(`/terminals/${id}/input`, { text: "ls -la", seal: false })).json()).toEqual({ ok: true, sealed: 0, attached: 0 });
     await until(() => text(events).includes("got: ls -la"));

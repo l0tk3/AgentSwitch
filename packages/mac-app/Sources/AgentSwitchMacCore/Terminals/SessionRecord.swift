@@ -438,9 +438,15 @@ extension DaemonClient {
 
     /// A reply typed as it is and entered, as the keyboard would (`POST /terminals/:id/input`, not sealed): the simple
     /// view's reply box. The sealed reply (`replyToTerminal`) is the lock's.
-    public func typeIntoTerminal(id: String, text: String) async throws {
-        struct Body: Encodable { let text: String; let seal = false }
-        _ = try await call("POST", "/terminals/\(Self.segment(id))/input", body: try JSONEncoder().encode(Body(text: text)))
+    /// `files`: each where its placeholder stands in `text` (docs/terminal-v0.md §4).
+    public func typeIntoTerminal(id: String, text: String, files: [TerminalReplyFile] = []) async throws {
+        struct Body: Encodable { let text: String; let seal = false; let attachments: [TerminalReplyFile] }
+        _ = try await call("POST", "/terminals/\(Self.segment(id))/input", body: try JSONEncoder().encode(Body(text: text, attachments: files)))
+    }
+
+    /// A picture the user sent with a message: the `n`-th of the record's item `item`, as the agent kept it.
+    public func sessionImage(harness: String, id: String, item: String, n: Int) async throws -> Data {
+        try await call("GET", "/sessions/\(Self.segment(harness))/\(Self.segment(id))/images/\(Self.segment(item))/\(n)")
     }
 
     /// Another model, or another thinking level, for the Claude Code in a terminal (docs/simple-view-v0.md §5.4).

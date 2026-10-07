@@ -137,8 +137,9 @@ private struct PinChip: View {
     }
 }
 
-/// `+`: a framed square, brighter under the pointer; a plus in a circle in the classic look.
-private struct PlusSquare: View {
+/// `+`: a framed square, brighter under the pointer; a plus in a circle in the classic look. The input's, and the
+/// reply box's of a pane's simple view.
+struct PlusSquare: View {
     let side: CGFloat
     @State private var hovering = false
     @Environment(\.interfaceLook) private var look

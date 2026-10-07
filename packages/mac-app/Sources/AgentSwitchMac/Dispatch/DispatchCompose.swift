@@ -40,10 +40,12 @@ struct OutgoingMessage: Identifiable, Equatable {
     var sendable: DispatchNewMessage { message.staging(staged ?? []) }
 }
 
-/// A token to put into the input at its cursor (`New Ciphertext`), once.
+/// A token to put into the input at its cursor (`New Ciphertext`), once. `tokens`: a reply's files, typed there with
+/// the spaces typing them would take (docs/terminal-v0.md §4) instead of `text`.
 struct InsertRequest: Equatable {
     let id = UUID()
     let text: String
+    var tokens: [String] = []
 }
 
 /// What a delete removes — only what is seen (threads-v0 手动删除; ui-v0 §4): one entry of the record (a message with

@@ -11,7 +11,7 @@ import { mountSessions } from "../src/api/sessions.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { watchRecord } from "../src/api/terminals.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
-import { DIFF_LINES, OUTPUT_CHARS, readChanges, readRecord, recordFromMessages, shortPath, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
+import { DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, recordFromMessages, shortPath, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
 import type { TerminalHost } from "../src/terminals/host.js";
 
 const REPO = "/Users/u/code/site";
@@ -332,6 +332,77 @@ describe("the record over the API", () => {
     expect(kinds(body.items)).toEqual(["user", "work", "answer"]);
     expect(body.items[1]).toMatchObject({ steps: [{ kind: "run", text: "ls" }] });
     expect((await app.request("/sessions/pi/p1/changes")).status).toBe(404);
+  });
+});
+
+describe("a picture the user sent with a message", () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const image = (type = "image/png", data = PNG.toString("base64")) => ({ type: "image", source: { type: "base64", media_type: type, data } });
+
+  it("Claude Code keeps it in the line: read back by the message's id and its place among the message's pictures", () => {
+    const path = claudeFile([
+      c.user(0, [image(), { type: "text", text: "这里不对" }, image("image/jpeg", Buffer.from("jpeg").toString("base64"))]),
+      c.text(1, "看到了。"),
+      line({ type: "attachment", cwd: REPO, timestamp: at(2), attachment: { type: "queued_command", commandMode: "prompt", origin: { kind: "human" }, prompt: [image(), { type: "text", text: "还有这张" }] } }),
+      c.tool(3, "t1", "Read", { file_path: `${REPO}/shot.png` }),
+      c.user(4, [{ type: "tool_result", tool_use_id: "t1", content: [image("image/png", Buffer.from("a tool's own").toString("base64"))] }]),
+    ]);
+    const record = readRecord("claude-code", path)!;
+    const [first, , queued] = record.items;
+    expect(first).toMatchObject({ type: "user", images: 2 });
+    expect(queued).toMatchObject({ type: "user", images: 1, text: "还有这张" });
+    expect(readImage("claude-code", path, first!.id, 0)).toEqual({ type: "image/png", data: PNG });
+    expect(readImage("claude-code", path, first!.id, 1)).toEqual({ type: "image/jpeg", data: Buffer.from("jpeg") });
+    expect(readImage("claude-code", path, queued!.id, 0)).toEqual({ type: "image/png", data: PNG });
+    // No third picture, not a message's line, not a line's start, not a number.
+    expect(readImage("claude-code", path, first!.id, 2)).toBeNull();
+    expect(readImage("claude-code", path, record.items[1]!.id, 0)).toBeNull();
+    expect(readImage("claude-code", path, String(Number(first!.id) + 5), 0)).toBeNull();
+    expect(readImage("claude-code", path, "abc", 0)).toBeNull();
+    expect(readImage("claude-code", path, first!.id, -1)).toBeNull();
+    // What a browser would run is not a picture here, whatever the record calls it.
+    const drawn = claudeFile([c.user(0, [image("image/svg+xml", Buffer.from("<svg onload=alert(1)/>").toString("base64"))])]);
+    expect(readImage("claude-code", drawn, readRecord("claude-code", drawn)!.items[0]!.id, 0)).toBeNull();
+  });
+
+  it("Codex keeps where the file is: read while it is there and a picture by its name; a data URL as it stands", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-record-")));
+    const shot = join(dir, "shot.png"), secret = join(dir, "id_rsa");
+    writeFileSync(shot, PNG);
+    writeFileSync(secret, "not a picture");
+    const path = codexFile([
+      line({ timestamp: at(0), type: "session_meta", payload: { id: "x1", cwd: API } }),
+      x.item(1, { type: "UserMessage", id: "u1", content: [{ type: "text", text: "看这张" }, { type: "local_image", path: shot }, { type: "local_image", path: secret },
+        { type: "image", image_url: `data:image/webp;base64,${Buffer.from("webp").toString("base64")}` }, { type: "local_image", path: join(dir, "gone.png") }] }),
+    ]);
+    const item = readRecord("codex", path, { cwd: API })!.items[0]!;
+    expect(item).toMatchObject({ type: "user", images: 4 });
+    expect(readImage("codex", path, item.id, 0)).toEqual({ type: "image/png", data: PNG });
+    // A path that is not a picture's is not read, whatever the record says is at it.
+    expect(readImage("codex", path, item.id, 1)).toBeNull();
+    expect(readImage("codex", path, item.id, 2)).toEqual({ type: "image/webp", data: Buffer.from("webp") });
+    expect(readImage("codex", path, item.id, 3)).toBeNull();
+  });
+
+  it("over the API: the picture with its type, kept by the screen; nothing for a stranger's unlisted session", async () => {
+    const { app, monitor } = monitored();
+    void monitor;
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-record-")));
+    const dir = join(root, "claude", "-Users-u-code-site");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "c7.jsonl"), [c.user(0, [image(), { type: "text", text: "这里不对" }]), c.text(1, "看到了。")].join("\n") + "\n");
+    const own = new Hono();
+    mountSessions(own, { sessions: new SessionMonitor({ claudeProjects: join(root, "claude"), codexSessions: join(root, "codex"), opencodeDb: join(root, "none.db"), excluded: [] }, () => Date.parse(at(100))) } as unknown as ApiDeps);
+    const item = ((await (await own.request("/sessions/claude-code/c7/record")).json()) as { items: RecordItem[] }).items[0]!;
+    const res = await own.request(`/sessions/claude-code/c7/images/${item.id}/0`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("cache-control")).toContain("immutable");
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
+    expect((await own.request(`/sessions/claude-code/c7/images/${item.id}/1`)).status).toBe(404);
+    expect((await own.request(`/sessions/claude-code/c7/images/..%2Fx/0`)).status).toBe(400);
+    expect((await own.request(`/sessions/claude-code/nope/images/${item.id}/0`)).status).toBe(404);
+    expect((await app.request(`/sessions/pi/p1/images/0/0`)).status).toBe(404);
   });
 });
 

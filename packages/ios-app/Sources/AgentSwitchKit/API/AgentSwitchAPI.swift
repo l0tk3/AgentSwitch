@@ -114,7 +114,18 @@ public struct AgentSwitchAPI: Sendable {
 
     /// One file's bytes; `path` as `taskFiles` lists it (each segment is encoded on its own).
     public func download(taskId: String, path: String) async throws -> Data {
-        let segments = ["tasks", taskId, "files"] + path.split(separator: "/").map(String.init)
+        try await bytes(["tasks", taskId, "files"] + path.split(separator: "/").map(String.init))
+    }
+
+    /// A picture the user sent with a message of a session (docs/simple-view-v0.md §4, §5.1): the `n`-th of the record's
+    /// item `item`, as the agent kept it. 404 from a Mac from before this route, for an agent read coarsely, or when
+    /// the agent kept only where the file was and it is no longer there.
+    public func sessionImage(harness: String, id: String, item: String, n: Int) async throws -> Data {
+        try await bytes(["sessions", harness, id, "images", item, String(n)])
+    }
+
+    /// A file's bytes as they are.
+    func bytes(_ segments: [String]) async throws -> Data {
         let endpoint = try await endpoints.endpoint()
         do {
             let (data, response) = try await transport.send(request("GET", endpoint, segments, query: [], body: nil, accept: "*/*", timeout: Self.uploadTimeout))

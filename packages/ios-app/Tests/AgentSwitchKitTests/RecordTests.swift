@@ -215,6 +215,36 @@ final class RecordTests: XCTestCase {
         XCTAssertNil((try JSONSerialization.jsonObject(with: JSONEncoder().encode(NewTerminalRequest(harness: "codex", cwd: "~/p"))) as? [String: Any])?["effort"])
     }
 
+    /// A picture sent with a message (2026-10-07): asked of the Mac by the item it came with and its place among
+    /// that item's pictures; what it is, by its first bytes.
+    func testAMessagesPictureIsAskedByItsItemAndPlace() async throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3])
+        let transport = FakeTransport { req, _ in
+            req.url?.path.hasSuffix("/images/1024.2/1") == true ? (png, httpResponse(req.url, contentType: "image/png"))
+                : (json(["error": "no such picture"]), httpResponse(req.url, status: 404))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(APIEndpoint(host: "192.168.1.5", port: 4400, kind: .lan)), transport: transport, token: "tok")
+        let data = try await api.sessionImage(harness: "claude-code", id: "c7", item: "1024.2", n: 1)
+        XCTAssertEqual(data, png)
+        XCTAssertEqual(transport.paths, ["/sessions/claude-code/c7/images/1024.2/1"])
+        XCTAssertEqual(transport.requests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+        // An older Mac, or a picture no longer there: an HTTP error, not a picture.
+        do {
+            _ = try await api.sessionImage(harness: "codex", id: "x1", item: "0", n: 0)
+            XCTFail("a picture that is not there")
+        } catch APIError.http(let status, _) {
+            XCTAssertEqual(status, 404)
+        }
+
+        XCTAssertEqual(RecordDisplay.pictureExtension(png), "png")
+        XCTAssertEqual(RecordDisplay.pictureExtension(Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10])), "jpg")
+        XCTAssertEqual(RecordDisplay.pictureExtension(Data("GIF89a....".utf8)), "gif")
+        XCTAssertEqual(RecordDisplay.pictureExtension(Data("RIFF\u{24}\u{0}\u{0}\u{0}WEBPVP8 ".utf8)), "webp")
+        XCTAssertEqual(RecordDisplay.pictureExtension(Data([0, 0, 0, 0x18] + Array("ftypheic".utf8))), "heic")
+        XCTAssertEqual(RecordDisplay.pictureExtension(Data()), "png")
+        XCTAssertEqual(RecordDisplay.pictureExtension(Data("RIFF....WAVE".utf8)), "png")
+    }
+
     func testChangesDecode() throws {
         let list = try JSONDecoder().decode(FileDiffList.self, from: Data(#"""
         {"files":[{"path":"src/retry.ts","added":1,"removed":1,"hunks":[{"header":"@@ -3,1 +3,1 @@","lines":["-const RETRIES = 5;","+const RETRIES = 3;"]}]},

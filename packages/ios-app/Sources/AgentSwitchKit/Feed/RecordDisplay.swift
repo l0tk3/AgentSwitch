@@ -3,6 +3,17 @@ import Foundation
 /// How the simple view words a session's record (docs/simple-view-v0.md §2, §5): a run of work as one line, each step's
 /// label, how full the context is, the mode. Short English words in title case (ui-v0 §7.2.7).
 public enum RecordDisplay {
+    /// What a picture is, by its first bytes: the extension the system's viewer opens it by (`png` when unknown).
+    public static func pictureExtension(_ data: Data) -> String {
+        let head = [UInt8](data.prefix(12))
+        func starts(_ bytes: [UInt8], at offset: Int = 0) -> Bool { head.count >= offset + bytes.count && Array(head[offset..<(offset + bytes.count)]) == bytes }
+        if starts([0xFF, 0xD8, 0xFF]) { return "jpg" }
+        if starts([0x47, 0x49, 0x46, 0x38]) { return "gif" }
+        if starts([0x52, 0x49, 0x46, 0x46]), starts([0x57, 0x45, 0x42, 0x50], at: 8) { return "webp" }
+        if starts([0x66, 0x74, 0x79, 0x70], at: 4) { return "heic" }
+        return "png"
+    }
+
     /// A run of work on one line: `Worked 1m 12s · Read 1 · Searched 1 · Ran 2 · Edited 1`, the kinds in the order they
     /// first came. Thinking and updates of the task list are not counted. `running`: it is the one still going.
     public static func summary(_ item: RecordItem, running: Bool = false) -> String {

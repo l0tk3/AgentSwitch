@@ -1,6 +1,7 @@
 #if DEBUG
 import AgentSwitchKit
 import Foundation
+import UIKit
 
 /// Sample state for looking at the screens without a Mac (`-uiDemo YES`, debug builds only): a conversation with a task
 /// running, one waiting for an answer, one finished and not opened yet, one gone quiet for a quarter of an hour and one
@@ -244,6 +245,24 @@ enum DemoData {
         return (withLinks ? Array(lines.dropLast(3)) + links : lines).joined(separator: "\r\n")
     }()
 
+    /// A made-up screenshot sent with a message: a window with a few lines, wide or tall.
+    static func picture(_ n: Int) -> Data? {
+        let wide = n % 2 == 0
+        let size = wide ? CGSize(width: 480, height: 300) : CGSize(width: 220, height: 440)
+        return UIGraphicsImageRenderer(size: size).pngData { context in
+            UIColor(red: 0.93, green: 0.92, blue: 0.89, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor(red: 0.84, green: 0.82, blue: 0.78, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: wide ? 130 : size.width, height: wide ? size.height : 54))
+            UIColor(red: 0.12, green: 0.11, blue: 0.10, alpha: 1).setFill()
+            for row in 0..<(wide ? 7 : 11) {
+                context.fill(CGRect(x: wide ? 150 : 18, y: CGFloat(wide ? 30 : 80) + CGFloat(row) * 32, width: CGFloat(wide ? 260 : 150) - CGFloat((row * 37) % 90), height: 9))
+            }
+            UIColor(red: 0.85, green: 0.33, blue: 0.16, alpha: 1).setFill()
+            context.fill(CGRect(x: wide ? 150 : 18, y: wide ? 250 : 396, width: 86, height: 22))
+        }
+    }
+
     /// A session's record for the simple view (docs/simple-view-v0.md §2): what was said, two runs of work, a message
     /// typed while it worked; its task list and how full its context is.
     static func sessionRecord(harness: String, id: String) -> SessionRecord {
@@ -251,7 +270,7 @@ enum DemoData {
                                                    "lastText": "", "updatedAt": ago(20), "startedAt": ago(1800), "active": true, "model": "claude-opus-5-5", "branch": "main"])
         let busy = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplebusy"
         var items: [RecordItem] = [
-            RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 1),
+            RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 2),
             RecordItem(id: "200", kind: .work, at: ago(890), seconds: 72, steps: [
                 RecordStep(kind: .think, text: "The choice is saved, but the service reads it only when it starts."),
                 RecordStep(kind: .read, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"),

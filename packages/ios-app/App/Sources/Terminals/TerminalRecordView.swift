@@ -71,7 +71,8 @@ struct TerminalRecordView: View {
                     }
                     ForEach(record.items) { item in
                         RecordItemRow(item: item, verbose: verbose, running: working && item.id == record.items.last?.id && item.kind == .work,
-                                      changes: canShowChanges ? { changes = ChangesRequest(work: item.id) } : nil)
+                                      changes: canShowChanges ? { changes = ChangesRequest(work: item.id) } : nil,
+                                      pictures: terminal.agentSessionId.map { RecordPictureSource(harness: terminal.harness, session: $0) })
                     }
                     if working && page.permissions.isEmpty {
                         NowLine(activity: page.activity ?? terminal.activity, subagents: page.activityKnown ? page.subagents : terminal.subagents, since: page.activitySince)

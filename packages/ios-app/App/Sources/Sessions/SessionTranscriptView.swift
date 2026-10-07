@@ -45,7 +45,8 @@ struct SessionTranscriptView: View {
                             .disabled(record.loadingEarlier)
                         }
                         ForEach(record.items) { item in
-                            RecordItemRow(item: item, changes: hasChanges ? { changes = Changes(work: item.id) } : nil)
+                            RecordItemRow(item: item, changes: hasChanges ? { changes = Changes(work: item.id) } : nil,
+                                          pictures: RecordPictureSource(harness: session.harness, session: session.sessionId))
                         }
                     } else if record.error == nil {
                         BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)

@@ -11,7 +11,7 @@ import { claudeFacts, claudeMessages } from "./claude.js";
 import { codexFacts, codexMessages } from "./codex.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
-import { MAX_RECORD_LIMIT, readChanges, readRecord, recordFromMessages, type FileDiff, type SessionRecord } from "./record.js";
+import { MAX_RECORD_LIMIT, readChanges, readImage, readRecord, recordFromMessages, type FileDiff, type RecordImage, type SessionRecord } from "./record.js";
 import { ACTIVE_MS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
@@ -106,6 +106,13 @@ export class SessionMonitor {
     }
     const coarse = this.read(harness, id, MAX_RECORD_LIMIT);
     return coarse && { session, record: recordFromMessages(coarse.messages, `u${session.updatedAt.toString(36)}`) };
+  }
+
+  /** A picture the user sent with a message of the session: the `n`-th of the record's item `item`. */
+  image(harness: SessionHarness, id: string, item: string, n: number, ours = false): RecordImage | null {
+    const found = this.open(harness, id, ours);
+    if (!found?.path || (harness !== "claude-code" && harness !== "codex")) return null;
+    try { return readImage(harness, found.path, item, n); } catch { return null; }
   }
 
   /** A session and where it is kept. `ours`: it is the session of a terminal of ours, read wherever it runs — the list

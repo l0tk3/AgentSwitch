@@ -4,7 +4,7 @@
 
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
@@ -17,7 +17,7 @@ import type { TerminalStyle } from "../terminals/style.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands } from "../terminals/commands.js";
-import { CLICK, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
+import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { GitStatus } from "../terminals/gitStatus.js";
 import type { TerminalInfo } from "../terminals/host.js";
@@ -68,10 +68,18 @@ const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a 
 const Effort = z.string().regex(EFFORT, "not a level");
 const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), model: ModelId.optional(), effort: Effort.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
-/** `attachments`: files staged with POST /uploads, each where its placeholder stands in `text` (terminal-v0 §4). */
+/** `attachments`: a reply's files, each where its placeholder stands in `text` (terminal-v0 §4): one staged with
+ *  POST /uploads (`upload`, a phone's, or a picture pasted on the Mac with no file behind it), or one already on this
+ *  Mac by where it is (`path`, the Mac app's: a file dragged into its reply box is not copied, its path is typed as a
+ *  terminal would type it). */
 const Input = z.object({
   text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true), seal: z.boolean().default(true),
-  attachments: z.array(z.object({ token: z.string().regex(/^\[(Image|File) #\d{1,3}\]$/), upload: z.string().min(1).max(64) })).max(10).default([]),
+  attachments: z.array(z.object({
+    token: z.string().regex(/^\[(Image|File) #\d{1,3}\]$/),
+    upload: z.string().min(1).max(64).optional(),
+    // No control character: nothing in it could end the paste or enter a line.
+    path: z.string().min(2).max(4096).regex(/^\/[^\x00-\x1f\x7f]*$/, "an absolute path").optional(),
+  }).refine((a) => (a.upload === undefined) !== (a.path === undefined), "one of upload, path")).max(10).default([]),
 });
 /** Between the pastes of one reply: the agent takes each (Claude Code reads an image's path) before the next. */
 const PASTE_GAP_MS = 150;
@@ -381,15 +389,25 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     }
     // The placeholders in the text that have a file, in order: the text is pasted between them, each file's path on its
     // own (as a file dragged into a Mac terminal), then Enter.
-    const byToken = new Map(body.data.attachments.map((a) => [a.token, a.upload]));
+    const byToken = new Map(body.data.attachments.map((a) => [a.token, a]));
     const pieces = byToken.size ? text.split(/(\[(?:Image|File) #\d{1,3}\])/) : [text];
     const used = [...new Set(pieces.filter((p) => byToken.has(p)))];
-    let files: { name: string; path: string; size: number }[] = [];
-    if (used.length) {
-      try { files = deps.uploads.moveToDir(used.map((t) => byToken.get(t)!), attachDir(id)); }
+    // A file by its place on this Mac is the Mac's own screens' to name (a phone's files are sent, never pointed at),
+    // and it has to be there (a file, or a folder: a terminal types a dragged folder's path too).
+    const local = used.filter((t) => byToken.get(t)!.path !== undefined);
+    if (local.length && remoteCaller(c.env)) return c.json({ error: "attachments: a path is this Mac's own to give" }, 403);
+    const missing = local.find((t) => !existsSync(byToken.get(t)!.path!));
+    if (missing) return c.json({ error: `文件不存在：${byToken.get(missing)!.path}` }, 400);
+    const staged = used.filter((t) => byToken.get(t)!.upload !== undefined);
+    let moved: { name: string; path: string; size: number }[] = [];
+    if (staged.length) {
+      try { moved = deps.uploads.moveToDir(staged.map((t) => byToken.get(t)!.upload!), attachDir(id)); }
       catch (err) { return c.json({ error: (err as Error).message }, 400); }
     }
-    const path = new Map(used.map((t, i) => [t, files[i]!.path]));
+    const sized = (p: string): number => { try { const st = statSync(p); return st.isFile() ? st.size : 0; } catch { return 0; } };
+    const files = [...moved, ...local.map((t) => ({ name: byToken.get(t)!.path!.split("/").pop() ?? "", path: byToken.get(t)!.path!, size: sized(byToken.get(t)!.path!) }))];
+    // Typed as a terminal types a dropped file: one word, whatever is in its name.
+    const path = new Map([...staged.map((t, i): [string, string] => [t, moved[i]!.path]), ...local.map((t): [string, string] => [t, droppedPath(byToken.get(t)!.path!)])]);
     try {
       const bracketed = host.bracketedPaste(id);
       if (!files.length) {

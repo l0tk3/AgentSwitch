@@ -561,6 +561,57 @@ export function readChanges(harness: RecordHarness, path: string, o: { work?: st
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// a picture the user sent with a message
+// ---------------------------------------------------------------------------------------------------------------------
+
+export type RecordImage = { readonly type: string; readonly data: Buffer };
+/** A picture is shown as a thumbnail: one larger than this is not sent. */
+export const IMAGE_BYTES = 12 * 1024 * 1024;
+/** A line with pictures in it is long (base64): this much is read for one. */
+const IMAGE_LINE_BYTES = 48 * 1024 * 1024;
+const IMAGE_TYPES: Readonly<Record<string, string>> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", heic: "image/heic" };
+/** What is served as a picture: never a type a browser would run (SVG), whatever the record calls it. */
+const SERVED = new Set(Object.values(IMAGE_TYPES));
+
+/** The `n`-th picture of the user's message `item` (its id: where its line begins). Claude Code keeps the picture in
+ *  the line itself; Codex keeps where the file is (`local_image`), which is read if it is still there and a picture
+ *  by its name. Null: no such message, no such picture, or one too large. */
+export function readImage(harness: RecordHarness, path: string, item: string, n: number): RecordImage | null {
+  const at = Number(item.split(".")[0]);
+  const { size } = fileRev(path);
+  if (!Number.isInteger(at) || at < 0 || at >= size || !Number.isInteger(n) || n < 0) return null;
+  const line = readLines(path, at, Math.min(size, at + IMAGE_LINE_BYTES)).lines.find((l) => l.at === at)?.value;
+  if (!line) return null;
+  const pictures: Json[] = harness === "claude-code"
+    ? (line.type === "attachment" ? (Array.isArray(obj(line.attachment).prompt) ? (obj(line.attachment).prompt as unknown[]).map(obj) : []) : parts(line)).filter((p) => p.type === "image")
+    : (Array.isArray(obj(obj(line.payload).item).content) ? (obj(obj(line.payload).item).content as unknown[]).map(obj) : []).filter((p) => /image/i.test(str(p.type)));
+  const picture = pictures[n];
+  if (!picture) return null;
+  const source = obj(picture.source);
+  if (source.type === "base64" && str(source.data)) return decoded(str(source.media_type), str(source.data));
+  // Codex: a data URL, or a file on this Mac.
+  const url = str(picture.image_url) || str(picture.url);
+  const inline = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(url);
+  if (inline) return decoded(inline[1]!, inline[2]!);
+  const file = str(picture.path);
+  const type = IMAGE_TYPES[file.split(".").pop()?.toLowerCase() ?? ""];
+  if (!file.startsWith("/") || !type) return null;
+  try {
+    const st = statSync(file);
+    if (!st.isFile() || st.size > IMAGE_BYTES) return null;
+    const fd = openSync(file, "r");
+    try { const data = Buffer.alloc(st.size); readSync(fd, data, 0, st.size, 0); return { type, data }; } finally { closeSync(fd); }
+  } catch { return null; }
+}
+
+function decoded(type: string, base64: string): RecordImage | null {
+  const kind = type.toLowerCase() === "image/jpg" ? "image/jpeg" : type.toLowerCase();
+  if (!SERVED.has(kind) || base64.length > IMAGE_BYTES * 1.4) return null;
+  const data = Buffer.from(base64, "base64");
+  return data.length && data.length <= IMAGE_BYTES ? { type: kind, data } : null;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // agents whose record is read coarsely (OpenCode, pi, an older Codex rollout): words, and one line per tool
 // ---------------------------------------------------------------------------------------------------------------------
 

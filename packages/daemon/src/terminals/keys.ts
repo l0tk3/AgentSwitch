@@ -69,6 +69,12 @@ function leftClick(col: number, row: number, ctx: KeyContext): string {
 
 /** A reply typed into the agent: pasted as one block when the program asked for bracketed paste (so a line break does
  *  not send half of it), then Enter. */
+/** A file's path as a terminal types one dragged onto it (iTerm, Terminal; the Mac app's TerminalDrop): the shell's
+ *  special characters each behind a backslash, so the path is one word. Claude Code turns a picture's into [Image #n]. */
+export function droppedPath(path: string): string {
+  return path.replace(/[ \t\\'"`$&;|<>()[\]{}*?!#~^]/g, "\\$&");
+}
+
 export function replyBytes(text: string, bracketedPaste: boolean, submit: boolean): string {
   const body = text.replace(/\r\n?/g, "\n");
   const pasted = bracketedPaste ? `\x1b[200~${body.replace(/\x1b\[20[01]~/g, "")}\x1b[201~` : body.replace(/\n/g, "\r");

@@ -15,7 +15,8 @@ import SwiftUI
 /// - `terminals-closed`: the list put away;
 /// - `terminals-record`, `terminals-record-light`, `terminals-record-split-light`: the simple view (docs/simple-view-v0.md
 ///   §5.2) — a terminal's record in its pane, dark and in the system's light with the list following it, and beside a
-///   terminal that stays dark, a request's card at the record's end.
+///   terminal that stays dark, a request's card at the record's end; the pictures sent with a message small under it,
+///   and a reply being written with a picture and a file above its box.
 @MainActor
 enum TerminalsPagePreview {
     static let size = NSSize(width: 1235, height: 764)
@@ -65,8 +66,13 @@ enum TerminalsPagePreview {
         model.setSimple(true, pane: TerminalPanes.paneShowing(model.layout, "t1")?.id)
         guard let pane = model.panes.values.first(where: { $0.session?.id == "t1" }), let info = pane.session?.info else { return }
         let ago = { (seconds: Int64) in Int64(Date().timeIntervalSince1970 * 1000) - seconds * 1000 }
+        // The pictures sent with the first message, and the reply being written with a file and a picture of its own.
+        let source = RecordPictureSource(harness: info.harness, session: info.agentSessionId ?? "preview", client: { DaemonClient(port: 1) })
+        RecordPictureStore.shared.stage(source.key("100", 0), picture(wide: true))
+        RecordPictureStore.shared.stage(source.key("100", 1), picture(wide: false))
+        pane.record.stageDraft("对照 [Image #1] 看，日志在 [File #2] ", files: [("截屏 2026-10-07 14.02.11.png", picture(wide: true)), ("daemon.log", nil)])
         pane.record.stage(terminal: info, items: [
-            RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 1),
+            RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 2),
             RecordItem(id: "200", kind: .work, at: ago(890), seconds: 72, steps: [
                 RecordStep(kind: .read, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"),
                 RecordStep(kind: .search, text: "pendingRestart"),
@@ -84,6 +90,24 @@ enum TerminalsPagePreview {
         ], plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done), PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
         usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: "acceptEdits",
         activity: working ? TerminalActivity(tool: "Bash", target: "swift build -c release") : nil, since: working ? Date().addingTimeInterval(-41) : nil)
+    }
+
+    /// A made-up screenshot: a window with a list and a few lines.
+    private static func picture(wide: Bool) -> NSImage {
+        let size = wide ? NSSize(width: 480, height: 300) : NSSize(width: 220, height: 440)
+        return NSImage(size: size, flipped: true) { rect in
+            NSColor(srgbRed: 0.93, green: 0.92, blue: 0.89, alpha: 1).setFill()
+            rect.fill()
+            NSColor(srgbRed: 0.84, green: 0.82, blue: 0.78, alpha: 1).setFill()
+            NSRect(x: 0, y: 0, width: wide ? 130 : rect.width, height: wide ? rect.height : 54).fill()
+            NSColor(srgbRed: 0.12, green: 0.11, blue: 0.10, alpha: 1).setFill()
+            for row in 0..<(wide ? 7 : 11) {
+                NSRect(x: wide ? 150 : 18, y: CGFloat(wide ? 30 : 80) + CGFloat(row) * 32, width: CGFloat(wide ? 260 : 150) - CGFloat((row * 37) % 90), height: 9).fill()
+            }
+            NSColor(srgbRed: 0.85, green: 0.33, blue: 0.16, alpha: 1).setFill()
+            NSRect(x: wide ? 150 : 18, y: wide ? 250 : 396, width: 86, height: 22).fill()
+            return true
+        }
     }
 
     private static func shot(to file: URL, light: Bool = false, stage: (TerminalsModel) -> Void) async throws {

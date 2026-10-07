@@ -14,10 +14,12 @@ struct RecordItemRow: View {
     var running = false
     /// Opens what this run changed (absent where there is nothing to open it with).
     var changes: (() -> Void)?
+    /// Which session the pictures sent with a message are asked of (absent before it is known).
+    var pictures: RecordPictureSource?
 
     var body: some View {
         switch item.kind {
-        case .user: UserRow(item: item)
+        case .user: UserRow(item: item, pictures: pictures)
         case .answer: AnswerRow(item: item)
         case .work: WorkRow(item: item, verbose: verbose, running: running, changes: changes)
         case .note:
@@ -28,6 +30,7 @@ struct RecordItemRow: View {
 
 private struct UserRow: View {
     let item: RecordItem
+    let pictures: RecordPictureSource?
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -38,7 +41,11 @@ private struct UserRow: View {
             .mono(11).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .trailing)
             if !item.text.isEmpty { UserBubble(text: item.text, faded: item.queued) }
             if item.images > 0 {
-                Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(11).foregroundStyle(.secondary)
+                if let pictures {
+                    RecordPictures(source: pictures, item: item.id, count: item.images)
+                } else {
+                    Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(11).foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.top, Theme.Space.s)

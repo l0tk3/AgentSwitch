@@ -32,6 +32,26 @@ final class PaneRecord {
     private(set) var sending = false
     /// Each change puts the keyboard in the reply box.
     private(set) var focusRequests = 0
+    /// The reply's files (docs/terminal-v0.md §4): each stands in the text as its placeholder, where it was dropped.
+    private(set) var draftFiles: [DraftFile] = []
+    /// Placeholders to type at the box's caret, once.
+    private(set) var insert: InsertRequest?
+
+    /// One file of the reply being written.
+    struct DraftFile: Identifiable, Equatable {
+        let id = UUID()
+        let token: String
+        let number: Int
+        let isImage: Bool
+        let name: String
+        let thumbnail: NSImage?
+        /// Where it is on this Mac: its path is typed, nothing is copied. Nil for a picture off the clipboard, which has
+        /// no file behind it: `pasted` goes to the service first.
+        let path: String?
+        let pasted: DispatchUploadFile?
+
+        static func == (a: DraftFile, b: DraftFile) -> Bool { a.id == b.id }
+    }
     /// The transcript in full: every run of work open, thinking shown.
     var verbose = false
 
@@ -86,6 +106,8 @@ final class PaneRecord {
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
         activity = nil; subagents = []; activitySince = nil; modelNow = nil
         draft = ""
+        draftFiles = []
+        insert = nil
     }
 
     private func took(_ event: String, _ data: String) {
@@ -163,23 +185,107 @@ final class PaneRecord {
 
     var canSend: Bool { !sending && terminal != nil && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-    /// The reply typed into the terminal as it is and entered, as the keyboard would.
+    /// The reply typed into the terminal as it is and entered, as the keyboard would; each file's path where its
+    /// placeholder stands, as a terminal types a file dragged onto it (a picture's path is a picture to the agent).
     func send() {
         guard canSend, let terminal else { return }
         let text = draft
+        let files = draftFiles.filter { text.contains($0.token) }
         sending = true
         let client = client
         Task { [weak self] in
             defer { self?.sending = false }
             do {
-                try await client().typeIntoTerminal(id: terminal, text: text)
+                var refs = files.compactMap { file in file.path.map { TerminalReplyFile(token: file.token, path: $0) } }
+                // A picture off the clipboard has no path yet: the service keeps it with the terminal's files.
+                let pasted = files.filter { $0.path == nil }
+                if !pasted.isEmpty {
+                    let staged = try await client().upload(pasted.compactMap(\.pasted))
+                    guard staged.count == pasted.count else { throw DaemonError.unreachable("图片未能送达") }
+                    refs += zip(pasted, staged).map { TerminalReplyFile(token: $0.token, upload: $1.id) }
+                }
+                try await client().typeIntoTerminal(id: terminal, text: text, files: refs)
                 guard let self else { return }
-                if self.draft == text { self.draft = "" }
+                if self.draft == text { self.draft = ""; self.draftFiles = [] }
                 self.error = nil
             } catch {
                 self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription
             }
         }
+    }
+
+    // MARK: the reply's files
+
+    /// Files from the disk (dragged in, `Files…`, copied in Finder): kept for the reply, their placeholders typed where
+    /// the caret is. A folder too: its path is typed, as a terminal types it.
+    func attach(urls: [URL]) {
+        guard terminal != nil else { return }
+        var tokens: [String] = []
+        for url in urls where url.isFileURL {
+            let path = url.standardizedFileURL.path
+            var folder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &folder) else { error = "\(url.lastPathComponent) 无法读取"; continue }
+            if draftFiles.contains(where: { $0.path == path }) { continue }
+            let image = !folder.boolValue && TerminalDraft.isImage(name: url.lastPathComponent)
+            let name = url.lastPathComponent + (folder.boolValue ? "/" : "")
+            guard let token = add(name: name, image: image, thumbnail: image ? RecordPictureStore.image(url: url, side: 104) : nil, path: path, pasted: nil) else { break }
+            tokens.append(token)
+        }
+        type(tokens)
+    }
+
+    /// `Paste Image` (⌘V with files or a picture on the clipboard).
+    func pasteFromClipboard() {
+        let board = NSPasteboard.general
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            return attach(urls: urls)
+        }
+        guard terminal != nil else { return }
+        guard let picture = DispatchModel.pastedImage(board) else { error = "剪贴板中无图片"; return }
+        guard picture.data.count <= DispatchUploadFile.maxFileBytes else { error = "图片超过 50 MB"; return }
+        guard let token = add(name: picture.name, image: true, thumbnail: RecordPictureStore.image(picture.data, side: 104), path: nil, pasted: picture) else { return }
+        type([token])
+    }
+
+    /// `Files…`: the system's open panel, several files or folders.
+    func chooseFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Attach"
+        guard panel.runModal() == .OK else { return }
+        attach(urls: panel.urls)
+    }
+
+    /// Takes a file out, its placeholder with it.
+    func remove(_ file: DraftFile) {
+        draftFiles.removeAll { $0.id == file.id }
+        draft = TerminalDraft.remove(file.token, from: draft)
+    }
+
+    /// A placeholder deleted from the box: its file goes too.
+    func keepDraftFiles() {
+        // What was just added is typed into the box a moment later: it is not gone.
+        let waiting = Set(insert?.tokens ?? [])
+        let kept = draftFiles.filter { draft.contains($0.token) || waiting.contains($0.token) }
+        if kept.count != draftFiles.count { draftFiles = kept }
+        if !waiting.isEmpty, waiting.allSatisfy({ draft.contains($0) }) { insert = nil }
+    }
+
+    private func add(name: String, image: Bool, thumbnail: NSImage?, path: String?, pasted: DispatchUploadFile?) -> String? {
+        guard draftFiles.count < TerminalDraft.maxFiles else { error = "每次最多 \(TerminalDraft.maxFiles) 个附件"; return nil }
+        let number = (draftFiles.map(\.number).max() ?? 0) + 1
+        let token = TerminalDraft.token(image: image, number: number)
+        draftFiles.append(DraftFile(token: token, number: number, isImage: image, name: name, thumbnail: thumbnail, path: path, pasted: pasted))
+        return token
+    }
+
+    private func type(_ tokens: [String]) {
+        guard !tokens.isEmpty else { return }
+        error = nil
+        insert = InsertRequest(text: "", tokens: tokens)
+        focusReply()
     }
 
     /// While it works: stop it (esc, as in the terminal).
@@ -206,6 +312,15 @@ final class PaneRecord {
         activitySince = since
         more = true
         loaded = true
+    }
+
+    /// The design preview's: a reply being written, with files.
+    func stageDraft(_ text: String, files: [(name: String, thumbnail: NSImage?)]) {
+        draftFiles = files.enumerated().map { n, file in
+            let image = TerminalDraft.isImage(name: file.name)
+            return DraftFile(token: TerminalDraft.token(image: image, number: n + 1), number: n + 1, isImage: image, name: file.name, thumbnail: file.thumbnail, path: "/tmp/\(file.name)", pasted: nil)
+        }
+        draft = text
     }
     #endif
 }

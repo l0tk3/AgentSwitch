@@ -13,8 +13,9 @@ enum TerminalProbe {
 
     /// `-probeSimple YES`: the simple view against a running service (docs/simple-view-v0.md §5.2) — the pane switched to
     /// its terminal's record, what it then holds (the record, the request waiting, who has the keyboard, how the window
-    /// is dressed), a reply sent from its box, and the terminal again with that reply on its screen. Pictures
-    /// `simple-record.png` and `simple-terminal.png`.
+    /// is dressed), a reply sent from its box, the picture sent with a message read small, a file dragged in and sent
+    /// (its path reaches the terminal as one word), and the terminal again with those replies on its screen. Pictures
+    /// `simple-record.png`, `simple-attached.png` and `simple-terminal.png`.
     private static func simple(_ main: MainWindowController, id: String, window: NSWindow, into dir: URL, say: (String) -> Void) async {
         guard let model = main.probeTerminals else { return say("simple: not the native page") }
         func pause(_ ms: Int) async { try? await Task.sleep(for: .milliseconds(ms)) }
@@ -54,6 +55,27 @@ enum TerminalProbe {
             record.send()
             await pause(1200)
             say("reply: draft '\(record.draft)' error \(record.error ?? "none")")
+            // The picture sent with the first message, as its thumbnail is asked for.
+            if let first = record.items.first(where: { $0.images > 0 }), let session = record.sessionId {
+                let source = RecordPictureSource(harness: record.agent, session: session, client: model.client)
+                let small = await RecordPictureStore.shared.thumbnail(source, item: first.id, n: 0)
+                say("picture: item \(first.id) images \(first.images) thumbnail \(small.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "none")")
+            } else {
+                say("picture: no message with one")
+            }
+            // A file dragged in (a name a shell would split): its placeholder typed at the caret, words after it, sent —
+            // the terminal gets its path as one word.
+            let file = dir.appendingPathComponent("probe shot (1).png")
+            try? Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")?.write(to: file)
+            record.attach(urls: [file])
+            await pause(600)
+            say("attached: draft '\(record.draft)' files \(record.draftFiles.map { "\($0.token) \($0.name) thumbnail \($0.thumbnail != nil)" })")
+            picture("simple-attached")
+            record.draft += "look"
+            await pause(300)
+            record.send()
+            await pause(1500)
+            say("sent: draft '\(record.draft)' files \(record.draftFiles.count) error \(record.error ?? "none")")
         }
         // Back by the key, ⌘⇧E, as an event of the window's.
         for type in [NSEvent.EventType.keyDown, .keyUp] {

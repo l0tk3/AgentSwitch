@@ -105,6 +105,30 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(context.size, "Simple")
     }
 
+    /// A reply's files (2026-10-07): placeholders as the phone's, a file on this Mac by where it is.
+    func testAReplysFilesStandAsPlaceholdersAndGoByTheirPath() throws {
+        XCTAssertEqual(TerminalDraft.token(image: true, number: 1), "[Image #1]")
+        XCTAssertEqual(TerminalDraft.token(image: false, number: 12), "[File #12]")
+        XCTAssertTrue(TerminalDraft.isImage(name: "屏幕截图 (2).PNG"))
+        XCTAssertTrue(TerminalDraft.isImage(name: "a.b.jpeg"))
+        XCTAssertFalse(TerminalDraft.isImage(name: "notes.pdf"))
+        XCTAssertFalse(TerminalDraft.isImage(name: "png"))
+        // Typed at the caret: a space before only where the text has none, one after each.
+        XCTAssertEqual(TerminalDraft.typed(["[Image #1]"], after: nil), "[Image #1] ")
+        XCTAssertEqual(TerminalDraft.typed(["[Image #1]", "[File #2]"], after: "看"), " [Image #1] [File #2] ")
+        XCTAssertEqual(TerminalDraft.typed(["[File #2]"], after: " "), "[File #2] ")
+        XCTAssertEqual(TerminalDraft.typed([], after: "x"), "")
+        XCTAssertEqual(TerminalDraft.remove("[Image #1]", from: "看 [Image #1] 和 [Image #11]"), "看 和 [Image #11]")
+        XCTAssertEqual(TerminalDraft.remove("[File #2]", from: "[File #2]"), "")
+
+        struct Body: Encodable { let attachments: [TerminalReplyFile] }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let wire = String(decoding: try encoder.encode(Body(attachments: [TerminalReplyFile(token: "[Image #1]", path: "/Users/u/a b.png"), TerminalReplyFile(token: "[Image #2]", upload: "u_9")])), as: UTF8.self)
+        // One of the two each, never a null for the other: the service takes exactly one.
+        XCTAssertEqual(wire, #"{"attachments":[{"path":"/Users/u/a b.png","token":"[Image #1]"},{"token":"[Image #2]","upload":"u_9"}]}"#)
+    }
+
     func testChangesDecode() throws {
         struct Reply: Decodable { let files: [FileDiff] }
         let list = try JSONDecoder().decode(Reply.self, from: Data(#"""
