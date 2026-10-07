@@ -31,6 +31,14 @@ enum TerminalProbe {
             return String(describing: type(of: r))
         }
         func dressed() -> String { window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "dark" : "light" }
+        /// Where the pane's screen really is: in the window or not, how large, hidden or covered.
+        func seen() -> String {
+            guard let pane = model.focused else { return "no pane" }
+            let stage = pane.stage, view = pane.screen.view, cover = pane.screen.refresh
+            return "stage window \(stage.window != nil) superview \(stage.superview != nil) frame \(Int(stage.frame.width))x\(Int(stage.frame.height)) hidden \(stage.isHiddenOrHasHiddenAncestor) "
+                + "| screen superview \(view.superview === stage) frame \(Int(view.frame.width))x\(Int(view.frame.height)) hidden \(view.isHidden) alpha \(view.alphaValue) "
+                + "| cover hidden \(cover.isHidden) playing \(cover.playing)"
+        }
         func state(_ at: String) {
             let pane = model.focused
             let record = pane?.record
@@ -44,6 +52,8 @@ enum TerminalProbe {
         window.makeKey()
         await pause(2500)   // the fake agent's request, and the session it reported, reach the list
         state("terminal")
+        say("seen: \(seen())")
+        picture("simple-before")
         // The bar's switch, through the window's own action (calling the model past it hid that the button did nothing).
         main.probeToggleView()
         await pause(2500)
@@ -86,6 +96,7 @@ enum TerminalProbe {
         }
         await pause(2500)
         state("terminal again (⌘⇧E)")
+        say("seen: \(seen())")
         let screen = model.focused?.screen
         let t = screen?.view.getTerminal()
         let lines = (0..<(t?.rows ?? 0)).compactMap { row -> String? in

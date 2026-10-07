@@ -163,12 +163,18 @@ struct TerminalPaneView: View {
                 PaneHeader(pane: placed.id, number: number, state: state, making: making, model: model)
             }
             ZStack {
-                if let state, state.simple, state.session != nil, !making {
+                if let state {
+                    // The screen stays where it is under the record, put away (it shows no terminal then): taken out of
+                    // the window and handed to a new host on the way back, it was never put in again — the pane stayed
+                    // black (2026-10-07, user: 从简略模式切换到终端模式就变成黑屏了).
+                    PaneStageHost(view: state.stage, compact: model.many).id(placed.id)
+                        .allowsHitTesting(!record)
+                }
+                if let state, record {
                     // The terminal's record in place of its screen (docs/simple-view-v0.md §5.2): the system's light or
                     // dark, where the terminal is always dark.
                     TerminalRecordPane(state: state, model: model, focused: focused)
                 } else if let state {
-                    PaneStageHost(view: state.stage, compact: model.many).id(placed.id)
                     if let session = state.session {
                         // The cards and the sealed reply are the pane in focus's; the placeholder shows in any pane.
                         TerminalWindowOverlays(model: session, cards: focused && !making)
