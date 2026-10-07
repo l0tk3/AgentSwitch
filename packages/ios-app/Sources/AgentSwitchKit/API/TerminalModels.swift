@@ -131,10 +131,13 @@ public struct TerminalPermission: Decodable, Sendable, Hashable, Identifiable {
 public struct TerminalActivity: Decodable, Sendable, Hashable {
     public let tool: String
     public let target: String
+    /// What the agent says this is for, in its own words; the record's line says that in place of the command.
+    public let note: String?
 
-    public init(tool: String, target: String) {
+    public init(tool: String, target: String, note: String? = nil) {
         self.tool = tool
         self.target = target
+        self.note = note
     }
 
     /// As people say it: `运行 npm test`, `修改 /w/a.ts` (the Live Activity's step).

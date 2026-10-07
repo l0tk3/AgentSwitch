@@ -15,23 +15,26 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     public let text: String
     /// The tool's own name, for a step that is none of the kinds.
     public let tool: String?
+    /// What the agent said the step is for, in its own words (Claude Code's description of a command).
+    public let note: String?
     /// The end of what a command printed.
     public let out: String?
     public let failed: Bool
     public let added: Int?
     public let removed: Int?
 
-    public init(kind: Kind, text: String, tool: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil) {
+    public init(kind: Kind, text: String, tool: String? = nil, note: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil) {
         self.kind = kind
         self.text = text
         self.tool = tool
+        self.note = note
         self.out = out
         self.failed = failed
         self.added = added
         self.removed = removed
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, out, failed, added, removed }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -39,6 +42,7 @@ public struct RecordStep: Decodable, Sendable, Hashable {
         kind = Kind(rawValue: raw) ?? .tool
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         tool = (try? c.decodeIfPresent(String.self, forKey: .tool)) ?? (Kind(rawValue: raw) == nil && !raw.isEmpty ? raw : nil)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)).flatMap { $0.isEmpty ? nil : $0 }
         out = try? c.decodeIfPresent(String.self, forKey: .out)
         failed = (try? c.decodeIfPresent(Bool.self, forKey: .failed)) ?? false
         added = try? c.decodeIfPresent(Int.self, forKey: .added)
@@ -64,6 +68,8 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
     public let queued: Bool
     /// The Mac cut a very long text.
     public let clipped: Bool
+    /// An answer that is what the agent thought on the way (where it wrote that down), not what it has to say to you.
+    public let thinking: Bool
     /// A run of work: how long it took, and what it did.
     public let seconds: Int
     public let steps: [RecordStep]
@@ -71,7 +77,8 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
 
     public init(id: String, kind: Kind, at: Int64 = 0, text: String = "", images: Int = 0, queued: Bool = false, clipped: Bool = false,
-                seconds: Int = 0, steps: [RecordStep] = []) {
+                thinking: Bool = false, seconds: Int = 0, steps: [RecordStep] = []) {
+        self.thinking = thinking
         self.id = id
         self.kind = kind
         self.at = at
@@ -83,7 +90,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         self.steps = steps
     }
 
-    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, secs, steps }
+    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, thinking, secs, steps }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -98,6 +105,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         images = (try? c.decodeIfPresent(Int.self, forKey: .images)) ?? 0
         queued = (try? c.decodeIfPresent(Bool.self, forKey: .queued)) ?? false
         clipped = (try? c.decodeIfPresent(Bool.self, forKey: .clipped)) ?? false
+        thinking = (try? c.decodeIfPresent(Bool.self, forKey: .thinking)) ?? false
         seconds = (try? c.decodeIfPresent(Int.self, forKey: .secs)) ?? 0
         steps = (try? c.decodeIfPresent([RecordStep].self, forKey: .steps)) ?? []
     }
@@ -261,4 +269,23 @@ public struct FileDiff: Decodable, Sendable, Hashable, Identifiable {
 
 struct FileDiffList: Decodable {
     let files: [FileDiff]
+}
+
+/// One step of a run of work, whole (`GET /sessions/:harness/:id/steps/:item/:n`): a command as it was written, its
+/// lines kept, and all it printed — the record itself carries one line and the end of the output.
+public struct RecordStepDetail: Decodable, Sendable, Hashable {
+    public let text: String
+    public let note: String?
+    public let out: String?
+    public let failed: Bool?
+    /// Longer than is sent: the command's start, the output's end.
+    public let clipped: Bool?
+
+    public init(text: String, note: String? = nil, out: String? = nil, failed: Bool? = nil, clipped: Bool? = nil) {
+        self.text = text
+        self.note = note
+        self.out = out
+        self.failed = failed
+        self.clipped = clipped
+    }
 }

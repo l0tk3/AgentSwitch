@@ -6,8 +6,8 @@ import SwiftUI
 // Pictures in a pane's simple view (docs/simple-view-v0.md §4, §5.1, §5.2): the ones you sent with a message, small under
 // it, and the files of the reply being written, above its box.
 
-/// Where a record's pictures are asked for.
-struct RecordPictureSource {
+/// Where what a record holds more of is asked for: a message's pictures, a step whole.
+struct RecordSource {
     let harness: String
     let session: String
     let client: () -> DaemonClient
@@ -31,7 +31,7 @@ final class RecordPictureStore {
     func isMissing(_ key: String) -> Bool { missing.contains(key) }
 
     /// The picture small, read once; nil when the service has none (an agent read coarsely, a file since moved).
-    func thumbnail(_ source: RecordPictureSource, item: String, n: Int) async -> NSImage? {
+    func thumbnail(_ source: RecordSource, item: String, n: Int) async -> NSImage? {
         let key = source.key(item, n)
         if let image = held(key) { return image }
         if missing.contains(key) { return nil }
@@ -45,7 +45,7 @@ final class RecordPictureStore {
     }
 
     /// The picture whole, for a closer look.
-    func whole(_ source: RecordPictureSource, item: String, n: Int) async -> NSImage? {
+    func whole(_ source: RecordSource, item: String, n: Int) async -> NSImage? {
         guard let data = try? await source.client().sessionImage(harness: source.harness, id: source.session, item: item, n: n) else { return nil }
         return NSImage(data: data)
     }
@@ -66,7 +66,7 @@ final class RecordPictureStore {
 
 /// The pictures sent with a message, small, in a row under it; a click shows one whole.
 struct RecordPictures: View {
-    let source: RecordPictureSource
+    let source: RecordSource
     let item: String
     let count: Int
     @State private var shown: Shown?
@@ -89,7 +89,7 @@ struct RecordPictures: View {
 }
 
 private struct RecordPicture: View {
-    let source: RecordPictureSource
+    let source: RecordSource
     let item: String
     let n: Int
     let open: () -> Void
@@ -138,7 +138,7 @@ private struct RecordPicture: View {
 
 /// One picture whole.
 private struct RecordPictureSheet: View {
-    let source: RecordPictureSource
+    let source: RecordSource
     let item: String
     @State var n: Int
     let count: Int

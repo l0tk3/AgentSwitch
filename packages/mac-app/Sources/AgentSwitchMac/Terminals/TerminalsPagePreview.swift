@@ -13,10 +13,12 @@ import SwiftUI
 /// - `terminals-sheet`: closing a running terminal asked first;
 /// - `terminals-rename`: a name being changed; the list's folders folded around the terminal on screen;
 /// - `terminals-closed`: the list put away;
-/// - `terminals-record`, `terminals-record-light`, `terminals-record-split-light`: the simple view (docs/simple-view-v0.md
+/// - `terminals-record`, `terminals-record-light`, `terminals-record-split-light`, `terminals-record-side-light` (its
+///   side asked for: context, tasks, the changed files with one open on its diff): the simple view (docs/simple-view-v0.md
 ///   §5.2) — a terminal's record in its pane, dark and in the system's light with the list following it, and beside a
 ///   terminal that stays dark, a request's card at the record's end; the pictures sent with a message small under it,
-///   and a reply being written with a picture and a file above its box.
+///   a thought of the agent's said quietly, a command with what it is for opened whole and in colour, and a reply
+///   being written with a picture and a file in its floating box.
 @MainActor
 enum TerminalsPagePreview {
     static let size = NSSize(width: 1235, height: 764)
@@ -59,6 +61,18 @@ enum TerminalsPagePreview {
             stageRecord(model, working: false)
             model.focused?.session?.received(event: "permission", data: #"{"request":{"id":"r1","tool":"Bash","summary":"Bash: git push origin main"}}"#)
         }
+        // The side asked for (`Show Side Pane`): the context's fill, the task list and the changed files beside the
+        // record, one file open on its diff. The preview's own setting, put back after.
+        UserDefaults.standard.set(true, forKey: "terminals.recordSide")
+        defer { UserDefaults.standard.removeObject(forKey: "terminals.recordSide") }
+        try await shot(to: file("terminals-record-side-light"), light: true) { model in
+            model.sideClosed = true
+            stageRecord(model, working: true)
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageChanges(["500": [FileDiff(path: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 3, removed: 3, hunks: [
+                FileDiff.Hunk(header: "@@ -212,7 +212,7 @@", lines: ["     HStack(spacing: 8) {", "-        Button(\"Delete\") { remove(version) }", "+        SettingsDeleteButton { remove(version) }", "             .disabled(version.inUse)", "     }"]),
+            ])]], open: ["packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"])
+        }
     }
 
     /// Terminal `t1` as its record, with a made-up session.
@@ -67,16 +81,20 @@ enum TerminalsPagePreview {
         guard let pane = model.panes.values.first(where: { $0.session?.id == "t1" }), let info = pane.session?.info else { return }
         let ago = { (seconds: Int64) in Int64(Date().timeIntervalSince1970 * 1000) - seconds * 1000 }
         // The pictures sent with the first message, and the reply being written with a file and a picture of its own.
-        let source = RecordPictureSource(harness: info.harness, session: info.agentSessionId ?? "preview", client: { DaemonClient(port: 1) })
+        let source = RecordSource(harness: info.harness, session: info.agentSessionId ?? "preview", client: { DaemonClient(port: 1) })
         RecordPictureStore.shared.stage(source.key("100", 0), picture(wide: true))
         RecordPictureStore.shared.stage(source.key("100", 1), picture(wide: false))
         pane.record.stageDraft("对照 [Image #1] 看，日志在 [File #2] ", files: [("截屏 2026-10-07 14.02.11.png", picture(wide: true)), ("daemon.log", nil)])
+        PaneRecord.previewOpenStep = "200/2"
+        RecordStepStore.shared.stage("\(source.key("200", 2))/\(printed.count)", RecordStepDetail(text: command, note: "Run the Agents tests and keep the last lines", out: printed))
         pane.record.stage(terminal: info, items: [
             RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 2),
+            // What it thought on the way, a command with what it said it is for, and that command opened: whole, in colour.
+            RecordItem(id: "150", kind: .answer, at: ago(895), text: "选的版本存下来了，但服务只在启动时读它。先看页面上哪里提示了要重启。", thinking: true),
             RecordItem(id: "200", kind: .work, at: ago(890), seconds: 72, steps: [
                 RecordStep(kind: .read, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"),
                 RecordStep(kind: .search, text: "pendingRestart"),
-                RecordStep(kind: .run, text: "swift test --filter AgentsTests", out: "Executed 41 tests, with 0 failures (0 unexpected) in 0.412 seconds"),
+                RecordStep(kind: .run, text: command.replacingOccurrences(of: "\n", with: " ⏎ "), note: "Run the Agents tests and keep the last lines", out: printed),
                 RecordStep(kind: .edit, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 12, removed: 1),
                 RecordStep(kind: .edit, text: "docs/agents-v0.md", added: 2, removed: 1),
             ]),
@@ -89,8 +107,11 @@ enum TerminalsPagePreview {
             RecordItem(id: "550", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。正在重新构建。"),
         ], plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done), PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
         usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: "acceptEdits",
-        activity: working ? TerminalActivity(tool: "Bash", target: "swift build -c release") : nil, since: working ? Date().addingTimeInterval(-41) : nil)
+        activity: working ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil, since: working ? Date().addingTimeInterval(-41) : nil)
     }
+
+    private static let command = "cd packages/mac-app && swift test --filter AgentsTests 2>&1 \\\n  | grep -E \"error:|Executed [0-9]+ tests\" | tail -2   # the totals\ngit status --short"
+    private static let printed = "\t Executed 41 tests, with 0 failures (0 unexpected) in 0.412 (0.418) seconds\n M packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"
 
     /// A made-up screenshot: a window with a list and a few lines.
     private static func picture(wide: Bool) -> NSImage {

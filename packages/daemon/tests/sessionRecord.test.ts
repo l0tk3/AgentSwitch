@@ -11,7 +11,7 @@ import { mountSessions } from "../src/api/sessions.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { watchRecord } from "../src/api/terminals.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
-import { DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, recordFromMessages, shortPath, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
+import { DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, readStep, recordFromMessages, shortPath, STEP_TEXT_CHARS, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
 import type { TerminalHost } from "../src/terminals/host.js";
 
 const REPO = "/Users/u/code/site";
@@ -64,18 +64,22 @@ const kinds = (items: readonly RecordItem[]) => items.map((it) => it.type);
 describe("a Claude Code session's record", () => {
   it("is what was said, and the work between as one run with its steps: what each read, searched, ran, edited", () => {
     const record = readRecord("claude-code", claudeFile(turn))!;
-    expect(kinds(record.items)).toEqual(["user", "work", "answer"]);
-    const [said, work, answer] = record.items;
+    expect(kinds(record.items)).toEqual(["user", "answer", "work", "answer"]);
+    const [said, thought, work, answer] = record.items;
     expect(said).toMatchObject({ type: "user", text: "delete 应该标红才对" });
+    // What it thought on the way, where it wrote that down (2026-10-07, user: 怎么少了思考细节呢): said like an answer,
+    // marked, whole. Thinking it kept to itself leaves nothing.
+    expect(thought).toEqual({ type: "answer", id: thought!.id, ts: thought!.ts, text: "The delete button uses the system style.\nLook for the shared one.", thinking: true });
+    expect(answer).not.toHaveProperty("thinking");
     expect(answer).toMatchObject({ type: "answer", text: "改好了：换成应用里已有的红字删除按钮。" });
     if (work?.type !== "work") throw new Error("no work");
     // From its first step to the answer after it.
-    expect(work.secs).toBe(70);
+    expect(work.secs).toBe(69);
     expect(work.steps).toEqual([
-      { kind: "think", text: "The delete button uses the system style." },
       { kind: "read", text: "Sources/AgentsView.swift" },
       { kind: "search", text: "SettingsDeleteButton" },
-      { kind: "run", text: "swift build -c release ⏎ 2>&1 | tail -3", out: "Compiling…\nBuild complete! (31.20s)" },
+      // A command with what the agent said it is for, in its own words.
+      { kind: "run", text: "swift build -c release ⏎ 2>&1 | tail -3", note: "Build", out: "Compiling…\nBuild complete! (31.20s)" },
       { kind: "edit", text: "Sources/AgentsView.swift", added: 2, removed: 1 },
       { kind: "write", text: "notes.md", added: 2, removed: 0 },
       { kind: "tool", tool: "browser · navigate", text: "http://127.0.0.1:8765/", failed: true, out: "Error: page crashed" },
@@ -243,11 +247,13 @@ describe("a Codex session's record", () => {
   it("is its thread's items: what a command was for when it only looked, each file of a change, the plan and the usage", () => {
     const path = codexFile(rollout);
     const record = readRecord("codex", path, { cwd: API })!;
-    expect(kinds(record.items)).toEqual(["user", "work", "answer", "work", "answer", "note"]);
+    expect(kinds(record.items)).toEqual(["user", "answer", "work", "answer", "work", "answer", "note"]);
     expect(record.items[0]).toMatchObject({ text: "把重试次数改成 3" });
-    expect(record.items[1]).toMatchObject({ steps: [{ kind: "think", text: "Looking at the retry helper" }, { kind: "read", text: "src/retry.ts" }, { kind: "search", text: "retries · src" }] });
+    // Its reasoning, as far as it sums it up; one with nothing in it leaves nothing.
+    expect(record.items[1]).toMatchObject({ type: "answer", thinking: true, text: "**Looking at the retry helper**" });
+    expect(record.items[2]).toMatchObject({ steps: [{ kind: "read", text: "src/retry.ts" }, { kind: "search", text: "retries · src" }] });
     // From its first step's start (0:08) to the end of the answer after it (0:37).
-    expect(record.items[3]).toMatchObject({ secs: 29, steps: [
+    expect(record.items[4]).toMatchObject({ secs: 29, steps: [
       { kind: "edit", text: "src/retry.ts", added: 1, removed: 1 },
       { kind: "write", text: "CHANGES.md", added: 1, removed: 0 },
       { kind: "run", text: "npm test", out: "1 failed", failed: true },
@@ -255,7 +261,7 @@ describe("a Codex session's record", () => {
       { kind: "web", text: "node retry backoff" },
       { kind: "agent", text: "reviewer" },
     ] });
-    expect(record.items[5]).toMatchObject({ type: "note", text: "Interrupted" });
+    expect(record.items[6]).toMatchObject({ type: "note", text: "Interrupted" });
     expect(record.plan).toEqual([{ text: "改重试次数", state: "done" }, { text: "跑测试", state: "doing" }]);
     expect(record.usage).toEqual({ model: "gpt-6-luna", effort: "high", used: 51_000, window: 272_000 });
     expect(record.mode).toBe("on-request");
@@ -264,7 +270,7 @@ describe("a Codex session's record", () => {
       { path: "CHANGES.md", added: 1, removed: 0, hunks: [{ header: "", lines: ["+retries: 5 → 3"] }] },
     ]);
     // By the run's id, with only the session's folder to go by (the lines before it are not read again).
-    expect(readChanges("codex", path, { work: record.items[3]!.id, cwd: API })!.map((f) => f.path)).toEqual(["src/retry.ts", "CHANGES.md"]);
+    expect(readChanges("codex", path, { work: record.items[4]!.id, cwd: API })!.map((f) => f.path)).toEqual(["src/retry.ts", "CHANGES.md"]);
   });
 
   it("an older rollout carries no items: no record from the file, and the coarse one stands in", () => {
@@ -310,12 +316,12 @@ describe("the record over the API", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { session: { id: string; cwd: string }; items: RecordItem[]; rev: string; plan: unknown[] };
     expect(body.session).toMatchObject({ id: "c1", cwd: REPO });
-    expect(kinds(body.items)).toEqual(["user", "work", "answer"]);
+    expect(kinds(body.items)).toEqual(["user", "answer", "work", "answer"]);
     expect(body.plan).toHaveLength(3);
     const again = await app.request("/sessions/claude-code/c1/record", { headers: { "if-none-match": res.headers.get("etag")! } });
     expect(again.status).toBe(304);
 
-    const work = body.items[1]!.id;
+    const work = body.items[2]!.id;
     const changed = await (await app.request(`/sessions/claude-code/c1/changes?work=${work}`)).json() as { files: { path: string }[] };
     expect(changed.files.map((f) => f.path)).toEqual(["Sources/AgentsView.swift", "notes.md"]);
     expect((await (await app.request("/sessions/claude-code/c1/changes")).json() as { files: unknown[] }).files).toHaveLength(2);
@@ -332,6 +338,74 @@ describe("the record over the API", () => {
     expect(kinds(body.items)).toEqual(["user", "work", "answer"]);
     expect(body.items[1]).toMatchObject({ steps: [{ kind: "run", text: "ls" }] });
     expect((await app.request("/sessions/pi/p1/changes")).status).toBe(404);
+  });
+});
+
+describe("one step, whole (2026-10-07, user: 官方的代码执行块里看没有省略)", () => {
+  const script = "cd repo && python3 - <<'EOF'\n" + Array.from({ length: 40 }, (_, i) => `print("line ${i}")`).join("\n") + "\nEOF";
+  const printed = Array.from({ length: 200 }, (_, i) => `line ${i}`).join("\n");
+
+  it("the record carries one line of a command and the end of what it printed; the step itself is read whole", () => {
+    const path = claudeFile([
+      c.user(0, "跑一下"),
+      c.tool(1, "t1", "Read", { file_path: `${REPO}/a.ts` }),
+      c.result(2, "t1", {}),
+      c.tool(3, "t2", "Bash", { command: script, description: "Print the lines\nwith a script" }),
+      c.result(9, "t2", { stdout: `${printed}\n`, stderr: "", interrupted: false }),
+      c.text(10, "好了"),
+    ]);
+    const work = readRecord("claude-code", path)!.items[1]!;
+    if (work.type !== "work") throw new Error("no work");
+    const run = work.steps[1]!;
+    expect(run.note).toBe("Print the lines");
+    expect(run.text.length).toBeLessThanOrEqual(300);
+    expect(run.text).toContain(" ⏎ ");
+    expect(run.out!.length).toBeLessThanOrEqual(OUTPUT_CHARS);
+    expect(run).not.toHaveProperty("cmd");
+    expect(run).not.toHaveProperty("printed");
+
+    expect(readStep("claude-code", path, { work: work.id, n: 1 })).toEqual({ kind: "run", text: script, note: "Print the lines", out: printed });
+    // A step that is not a command is what the record says of it.
+    expect(readStep("claude-code", path, { work: work.id, n: 0, cwd: REPO })).toEqual({ kind: "read", text: "a.ts" });
+    // No such step, no such run, not a run's id.
+    expect(readStep("claude-code", path, { work: work.id, n: 2 })).toBeNull();
+    expect(readStep("claude-code", path, { work: String(Number(work.id) + 3), n: 0 })).toBeNull();
+    expect(readStep("claude-code", path, { work: readRecord("claude-code", path)!.items[0]!.id, n: 0 })).toBeNull();
+    expect(readStep("claude-code", path, { work: "x", n: 0 })).toBeNull();
+  });
+
+  it("a very long command keeps its start, a very long output its end, and says so", () => {
+    const long = `echo ${"a".repeat(STEP_TEXT_CHARS + 50)}`;
+    const much = `${"b".repeat(STEP_TEXT_CHARS)}\nthe end`;
+    const path = claudeFile([c.user(0, "跑"), c.tool(1, "t1", "Bash", { command: long }), c.result(2, "t1", { stdout: much, stderr: "" })]);
+    const work = readRecord("claude-code", path)!.items[1]!;
+    const step = readStep("claude-code", path, { work: work.id, n: 0 })!;
+    expect(step.clipped).toBe(true);
+    expect(step.text).toHaveLength(STEP_TEXT_CHARS);
+    expect(step.text.startsWith("echo aaa")).toBe(true);
+    expect(step.out).toHaveLength(STEP_TEXT_CHARS);
+    expect(step.out!.endsWith("the end")).toBe(true);
+  });
+
+  it("Codex's command whole too; over the API by the run and the step's place in it", async () => {
+    const path = codexFile([
+      line({ timestamp: at(0), type: "session_meta", payload: { id: "x1", cwd: API } }),
+      x.item(1, { type: "UserMessage", id: "u1", content: [{ type: "text", text: "跑测试" }] }),
+      x.item(2, { type: "CommandExecution", id: "c1", command: ["bash", "-lc", "npm test\n  -- --run"], parsed_cmd: [{ type: "unknown", cmd: "npm test\n  -- --run" }], aggregated_output: `${printed}\n`, exit_code: 1, status: "failed" }),
+    ]);
+    const work = readRecord("codex", path, { cwd: API })!.items[1]!;
+    expect(readStep("codex", path, { work: work.id, n: 0, cwd: API })).toEqual({ kind: "run", text: "npm test\n  -- --run", out: printed, failed: true });
+
+    const { app } = monitored();
+    const record = (await (await app.request("/sessions/claude-code/c1/record")).json()) as { items: RecordItem[] };
+    const run = record.items.find((it) => it.type === "work")!;
+    const res = await app.request(`/sessions/claude-code/c1/steps/${run.id}/2`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ kind: "run", text: "swift build -c release\n  2>&1 | tail -3", note: "Build", out: "Compiling…\nBuild complete! (31.20s)" });
+    expect((await app.request(`/sessions/claude-code/c1/steps/${run.id}/99`)).status).toBe(404);
+    expect((await app.request(`/sessions/claude-code/c1/steps/abc/0`)).status).toBe(400);
+    expect((await app.request(`/sessions/claude-code/nope/steps/${run.id}/0`)).status).toBe(404);
+    expect((await app.request(`/sessions/pi/p1/steps/0/0`)).status).toBe(404);
   });
 });
 
@@ -420,7 +494,7 @@ describe("the session of a terminal of ours, wherever it runs (2026-10-07: a ter
     expect(monitor.record("claude-code", "s9")).toBeNull();
     const own = monitor.record("claude-code", "s9", {}, true)!;
     expect(own.session).toMatchObject({ id: "s9", cwd: scratch });
-    expect(kinds(own.record.items)).toEqual(["user", "work", "answer"]);
+    expect(kinds(own.record.items)).toEqual(["user", "answer", "work", "answer"]);
     expect(monitor.changes("claude-code", "s9", undefined, true)!.map((f) => f.path)).toEqual(["Sources/AgentsView.swift", "notes.md"]);
     expect(monitor.changes("claude-code", "s9")).toBeNull();
     expect(monitor.locate("claude-code", "s9")).toBe(join(dir, "s9.jsonl"));

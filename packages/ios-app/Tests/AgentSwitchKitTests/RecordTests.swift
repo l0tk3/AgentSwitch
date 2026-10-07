@@ -245,6 +245,37 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(RecordDisplay.pictureExtension(Data("RIFF....WAVE".utf8)), "png")
     }
 
+    /// 2026-10-07, user: 怎么少了思考细节呢 / 官方的代码执行块里看没有省略而且有高亮显示.
+    func testThoughtsNotesAndAStepWhole() async throws {
+        let page = #"[{"type":"answer","id":"5","ts":1,"text":"先看列表的底色。","thinking":true},{"type":"work","id":"9","ts":2,"secs":3,"steps":[{"kind":"run","text":"git status","note":"Check the tree"},{"kind":"run","text":"ls","note":""}]},{"type":"answer","id":"20","ts":6,"text":"好了"}]"#
+        let items = try JSONDecoder().decode([RecordItem].self, from: Data(page.utf8))
+        XCTAssertEqual(items.map(\.thinking), [true, false, false])
+        XCTAssertEqual(items[1].steps.map(\.note), ["Check the tree", nil])
+        let busy = try JSONDecoder().decode(TerminalActivity.self, from: Data(#"{"tool":"Bash","target":"cat > x","note":"Write the patch"}"#.utf8))
+        XCTAssertEqual(busy, TerminalActivity(tool: "Bash", target: "cat > x", note: "Write the patch"))
+        XCTAssertNil(try JSONDecoder().decode(TerminalActivity.self, from: Data(#"{"tool":"Bash","target":"ls"}"#.utf8)).note)
+
+        let transport = FakeTransport { req, _ in
+            req.url?.path == "/sessions/claude-code/c7/steps/1024/2"
+                ? (Data(#"{"kind":"run","text":"a\nb","note":"Two lines","out":"x","clipped":true}"#.utf8), httpResponse(req.url))
+                : (json(["error": "no such step"]), httpResponse(req.url, status: 404))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(APIEndpoint(host: "192.168.1.5", port: 4400, kind: .lan)), transport: transport, token: "tok")
+        let step = try await api.sessionStep(harness: "claude-code", id: "c7", work: "1024", n: 2)
+        XCTAssertEqual(step, RecordStepDetail(text: "a\nb", note: "Two lines", out: "x", clipped: true))
+        // An older Mac: no such route, the record's own line stays.
+        let none = try await api.sessionStep(harness: "claude-code", id: "c7", work: "1024", n: 9)
+        XCTAssertNil(none)
+
+        typealias R = ShellHighlight.Run
+        XCTAssertEqual(ShellHighlight.runs("cd /a && git commit -F - <<'EOF'\nfix: it\nEOF\ngit log 2>&1 | head -1 # last"),
+                       [R("cd", .command), R(" /a && ", .plain), R("git", .command), R(" commit -F - <<", .plain), R("'EOF'", .string), R("\n", .plain), R("fix: it\nEOF", .string), R("\n", .plain),
+                        R("git", .command), R(" log 2>&1 | ", .plain), R("head", .command), R(" -1 ", .plain), R("# last", .comment)])
+        for source in ["echo \"never closed", "cat <<EOF\nno end", "", "FOO=1 make 'a b'"] {
+            XCTAssertEqual(ShellHighlight.runs(source).map(\.text).joined(), source)
+        }
+    }
+
     func testChangesDecode() throws {
         let list = try JSONDecoder().decode(FileDiffList.self, from: Data(#"""
         {"files":[{"path":"src/retry.ts","added":1,"removed":1,"hunks":[{"header":"@@ -3,1 +3,1 @@","lines":["-const RETRIES = 5;","+const RETRIES = 3;"]}]},

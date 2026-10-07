@@ -67,7 +67,7 @@ enum TerminalProbe {
             say("reply: draft '\(record.draft)' error \(record.error ?? "none")")
             // The picture sent with the first message, as its thumbnail is asked for.
             if let first = record.items.first(where: { $0.images > 0 }), let session = record.sessionId {
-                let source = RecordPictureSource(harness: record.agent, session: session, client: model.client)
+                let source = RecordSource(harness: record.agent, session: session, client: model.client)
                 let small = await RecordPictureStore.shared.thumbnail(source, item: first.id, n: 0)
                 say("picture: item \(first.id) images \(first.images) thumbnail \(small.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "none")")
             } else {

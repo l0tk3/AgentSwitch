@@ -81,7 +81,7 @@ export type TerminalInfo = {
   readonly permissions: readonly PermissionAsk[];
   /** The tool it is using now (the last one it reported before use, PreToolUse / pi's tool_call) and what on, until
    *  it is idle again; null when it has reported none (the Live Activity's step, assistant-v0 §4). */
-  readonly activity: { readonly tool: string; readonly target: string } | null;
+  readonly activity: { readonly tool: string; readonly target: string; readonly note?: string } | null;
   /** Its sub-agents at work (Claude Code's SubagentStart … SubagentStop), in the order they started: the tree shows
    *  them under the terminal (docs/terminal-v0.md §1). */
   readonly subagents: readonly Subagent[];
@@ -97,7 +97,7 @@ export type Subagent = {
   /** What it was sent to do (the Agent tool's `description`), else its kind. */
   readonly name: string;
   /** The tool it uses now and what on, as the terminal's own `activity`; null before its first. */
-  readonly activity: { readonly tool: string; readonly target: string } | null;
+  readonly activity: { readonly tool: string; readonly target: string; readonly note?: string } | null;
   readonly since: number;
 };
 
@@ -218,6 +218,8 @@ const HOLD_MS = 50;
 const REDRAW_MS = 60;
 const HOLD_LIMIT = 4096;
 const MAX_NAME = 80;
+/** What the agent says a step is for: a sentence. */
+const MAX_NOTE = 200;
 /** An Agent tool call starts its sub-agent at once; one not started by then was refused. */
 const LAUNCH_MS = 60_000;
 const MAX_LAUNCHES = 8;
@@ -302,6 +304,14 @@ function sequenceEnd(data: string, at: number): number {
 }
 
 /** The one thing a request works on: the command, else the file, page, pattern or path, else the input as JSON. */
+/** What the agent says a tool call is for, in its own words (Claude Code's `description` of a command), on one line:
+ *  the screens say that where they say what it is doing, as its own app does, with the command under it. */
+function said(input: unknown): { note?: string } {
+  const description = input && typeof input === "object" ? (input as Record<string, unknown>).description : undefined;
+  const note = typeof description === "string" ? description.replace(/\s+/g, " ").trim().slice(0, MAX_NOTE) : "";
+  return note ? { note } : {};
+}
+
 export function permissionTarget(tool: string, input: unknown): string {
   const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const pick = (k: string) => (typeof i[k] === "string" ? (i[k] as string) : null);
@@ -392,7 +402,7 @@ class Session {
   proc: pty.IPty | null = null;
   status: TerminalStatus = "idle";
   statusSince: number;
-  activity: { tool: string; target: string } | null = null;
+  activity: { tool: string; target: string; note?: string } | null = null;
   /** The folder the agent last said it works in (a hook call's `cwd`); null before it says. */
   agentCwd: string | null = null;
   /** The model the agent says it is on now (PostModelSwitch); and one a screen asked for a moment ago. */
@@ -401,7 +411,7 @@ class Session {
   effort: string | null = null;
   modelAsked: { readonly model: string; readonly at: number } | null = null;
   /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
-  readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string } | null; since: number }>();
+  readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string; note?: string } | null; since: number }>();
   launches: { type: string; name: string; at: number }[] = [];
   /** How the last turn ended (assistant-v0 §4 "结果要提示"): the agent said it ended, or it failed (an API error the
    *  agent reported, the program exiting with an error). `line`: what to read — kept in memory only. */
@@ -1005,7 +1015,7 @@ export class TerminalHost {
   private using(s: Session, tool: string, input: unknown): void {
     if (!tool) return;
     const target = permissionTarget(tool, input).replace(/\s+/g, " ").trim();
-    s.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target };
+    s.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target, ...said(input) };
     this.doing(s);
   }
 
@@ -1026,7 +1036,7 @@ export class TerminalHost {
     if (agentId) {
       if (!s.subagents.has(agentId)) this.subagentStarted(s, agentId, agentType);
       const target = permissionTarget(tool, input).replace(/\s+/g, " ").trim();
-      s.subagents.get(agentId)!.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target };
+      s.subagents.get(agentId)!.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target, ...said(input) };
       this.doing(s);
       return;
     }

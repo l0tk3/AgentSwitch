@@ -124,6 +124,16 @@ public struct AgentSwitchAPI: Sendable {
         try await bytes(["sessions", harness, id, "images", item, String(n)])
     }
 
+    /// The `n`-th step of the run of work `work` of a session, whole (docs/simple-view-v0.md §4). Nil when the Mac has
+    /// none (an older Mac, an agent read coarsely): the record's own line stays.
+    public func sessionStep(harness: String, id: String, work: String, n: Int) async throws -> RecordStepDetail? {
+        do {
+            return try await get(["sessions", harness, id, "steps", work, String(n)])
+        } catch APIError.http(status: 404, message: _) {
+            return nil
+        }
+    }
+
     /// A file's bytes as they are.
     func bytes(_ segments: [String]) async throws -> Data {
         let endpoint = try await endpoints.endpoint()

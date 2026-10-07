@@ -64,6 +64,16 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
     const files = monitor.changes(harness as SessionHarness, c.req.param("id"), work, ours(c.req.param("id")));
     return files ? c.json({ files }) : c.json({ error: "no changes recorded" }, 404);
   });
+  // One step of a run of work, whole (docs/simple-view-v0.md §4): the command as it was written and all it printed, for
+  // the step a screen opens. The record carries one line of it and the end of the output.
+  app.get("/sessions/:harness/:id/steps/:item/:n", (c) => {
+    const harness = c.req.param("harness");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    const item = c.req.param("item"), n = c.req.param("n");
+    if (!/^\d{1,15}(\.\d{1,4})?$/.test(item) || !/^\d{1,4}$/.test(n)) return c.json({ error: "no such step" }, 400);
+    const step = monitor.step(harness as SessionHarness, c.req.param("id"), item, Number(n), ours(c.req.param("id")));
+    return step ? c.json(step) : c.json({ error: "no such step" }, 404);
+  });
   // A picture the user sent with a message (docs/simple-view-v0.md §4): the `n`-th of the record's item, as the agent
   // kept it. It never changes (an item's id is its place in a file that only grows): the screens keep it.
   app.get("/sessions/:harness/:id/images/:item/:n", (c) => {

@@ -144,6 +144,13 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .diffstat { flex: none; display: inline-flex; gap: 5px; font: 12px var(--mono); padding: 1px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); }
 .diffstat em, .stat em, .files em { font-style: normal; color: var(--green); } .diffstat s, .stat s, .files s, .call s.del { text-decoration: none; color: var(--red); }
 .call.think { color: var(--ink3); font-family: var(--ui); }
+.md.quiet { color: var(--ink2); }
+.call .said { font-family: var(--ui); color: var(--ink); } .call .sub { display: block; font-family: var(--mono); font-size: 11px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call button.stepfold { color: inherit; font: inherit; text-align: left; } .call button.stepfold i { font-style: normal; color: var(--ink3); margin-left: 4px; }
+.cmd { margin-top: 4px; background: var(--raise); border: 1px solid var(--ink4); border-radius: var(--r-key); padding: 7px 9px; display: flex; gap: 7px; align-items: baseline; font: 11.5px/1.55 var(--mono); color: var(--ink); }
+.cmd pre { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; } .cmd .ps { color: var(--ink3); }
+.cmd .c { color: var(--accent); } .cmd .q { color: var(--green); } .cmd .rem { color: var(--ink3); } .cmd button { font: 11px var(--short); color: var(--ink2); }
+.cmdout { margin-top: 4px; background: var(--raise); border-radius: var(--r-key); padding: 6px 9px; font: 11px/1.5 var(--mono); color: var(--ink2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .u.queued .bub { opacity: .55; } .u.queued time { color: var(--amber); }
 .always { align-self: flex-start; margin: -4px 12px 12px; font: 12px var(--short); color: var(--ink2); text-decoration: underline; text-underline-offset: 3px; display: block; }
 .always code { font: 12px var(--mono); }
@@ -439,7 +446,7 @@ textarea#field::placeholder { color: var(--ink3); }
 .phd.focus { box-shadow: inset 0 2px 0 var(--accent); }
 .phd .vseg { margin: 0; } .phd .vseg button { height: 18px; padding: 0 6px; }
 /* the record in a pane: one column in the middle, the reply box under it at the same width */
-.surf.mac .body { padding: 22px max(22px, calc((100% - 700px) / 2)) 20px; gap: 14px; font-size: 13.5px; }
+.surf.mac .body { padding: 22px max(22px, calc((100% - 780px) / 2)) 34px; gap: 14px; font-size: 13.5px; }
 .surf.mac .hdr h3 { font-size: 18px; }
 .surf.mac .u { padding-left: 120px; } .surf.mac .u .bub { padding: 7px 12px; }
 .surf.mac .md code { font-size: 12px; } .surf.mac .md pre code { font-size: 12px; }
@@ -447,7 +454,14 @@ textarea#field::placeholder { color: var(--ink3); }
 .surf.mac .card .q { font-size: 13.5px; } .surf.mac .btn { padding: 6px 0; font-size: 13px; flex: none; min-width: 96px; } .surf.mac .card .ft { justify-content: flex-end; }
 .surf.mac .card .ft kbd, .hintk kbd { font: 10.5px var(--short); color: var(--ink3); border: 1px solid var(--ink4); border-radius: 4px; padding: 0 4px; margin-left: 6px; }
 .surf.mac .btn.pri kbd { color: inherit; border-color: currentColor; opacity: .6; }
-.surf.mac .dock { padding: 0 max(22px, calc((100% - 700px) / 2)) 10px; border-top: 1px solid var(--ink4); }
+/* the reply box floats: no bar across the pane, the record runs out under it (2026-10-07) */
+.surf.mac .dock { position: relative; z-index: 2; border-top: 0; margin-top: -22px; padding: 22px calc(max(22px, (100% - 780px) / 2) + 12px) 22px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 22px); }
+.surf.mac .dock::before { content: ""; position: absolute; left: max(22px, calc((100% - 780px) / 2)); right: max(22px, calc((100% - 780px) / 2)); top: 14px; bottom: 12px;
+  border: 1px solid var(--ink4); border-radius: var(--r-card); background: var(--bg); }
+.surf.mac.classic .dock::before { border-radius: 14px; box-shadow: 0 4px 14px rgba(0, 0, 0, .12); }
+.surf.mac .dock > * { position: relative; }
+.surf.mac .dock .tasks { border-bottom: 1px solid var(--ink4); margin: 0 -12px; padding: 4px 12px 6px; }
 .surf.mac .comp { margin: 10px 0 0; } .surf.mac .comp.sealed { margin-right: 8px; }
 .surf.mac .sqb { width: 34px; height: 32px; font-size: 16px; } .surf.mac .sqb.go { font-size: 15px; }
 .surf.mac textarea#field { min-height: 32px; font-size: 13.5px; padding: 6px 10px; }
@@ -461,7 +475,7 @@ textarea#field::placeholder { color: var(--ink3); }
 .chiprow .hintk { padding: 0; margin-right: 10px; white-space: nowrap; }
 .hintk kbd { margin: 0 4px 0 0; }
 .surf.mac .veil { padding: 0; align-items: center; } .surf.mac .veil .box { width: 340px; }
-.surf.mac .veil.low { align-items: flex-start; justify-content: flex-end; padding: 0 0 84px max(22px, calc((100% - 700px) / 2)); } .surf.mac .veil.low .box { width: 220px; }
+.surf.mac .veil.low { align-items: flex-start; justify-content: flex-end; padding: 0 0 84px max(22px, calc((100% - 780px) / 2)); } .surf.mac .veil.low .box { width: 220px; }
 .surf.mac .veil.top { align-items: flex-start; justify-content: flex-start; padding: 40px 0 0 60px; } .surf.mac .veil.top .box { width: 230px; }
 .mmain.nolist .veil.top { align-items: flex-end; padding: 8px 12px 0 0; }
 .surf.mac .toast { bottom: 96px; }
@@ -648,10 +662,15 @@ const EARLIER = [
 const BASE = () => [
   { t: "user", time: "10:31", text: "codex 我选了测试版，怎么好像没生效" },
   { t: "md", html: `<p>选择已经存下来了，但<b>换版本要重启服务才生效</b>。正在运行的服务拿到的仍是 ChatGPT App 里那一份：</p><pre><code>CODEX_BIN=/Applications/ChatGPT.app/…/bin/codex</code></pre><ul><li>测试版已装好，<code>codex-beta</code> 在命令行里可用。</li><li>页面顶部有 <code>Restart Service…</code>，但你是在下面那一组里选的，看不到它。</li></ul>` },
+  // What it thought on the way, where it wrote that down: said like an answer, quieter.
+  { t: "md", quiet: true, html: "<p>提示只在页面顶部，选择发生在下面的组里。把同一条提示放到那个 agent 自己的组末尾，并写明现在用的和将要用的。</p>" },
   { t: "work", secs: 72, steps: [
-    { k: "think", text: "提示只在页面顶部，选择发生在下面的组里。把同一条提示放到那个 agent 自己的组末尾，并写明现在用的和将要用的。" },
-    { k: "read", text: "AppModel+Agents.swift" }, { k: "search", text: "agentsNeedRestart" }, { k: "run", text: "ps eww -p 64277 | grep CODEX_BIN", out: "CODEX_BIN=/Applications/ChatGPT.app/…/bin/codex" },
-    { k: "edit", text: "AgentsView.swift", add: 14, del: 2 }, { k: "run", text: "swift test --filter AgentsTests", out: "580 tests, 0 failures" }] },
+    { k: "read", text: "AppModel+Agents.swift" }, { k: "search", text: "agentsNeedRestart" },
+    { k: "run", note: "See which Codex the running service has", text: "ps eww -p 64277 | grep CODEX_BIN", out: "CODEX_BIN=/Applications/ChatGPT.app/…/bin/codex" },
+    { k: "edit", text: "AgentsView.swift", add: 14, del: 2 },
+    { k: "run", note: "Run the Agents tests and keep the last lines", text: "cd packages/mac-app && swift test --filter AgentsTests 2>&1 ⏎ | grep -E …", out: "580 tests, 0 failures",
+      full: 'cd packages/mac-app && swift test --filter AgentsTests 2>&1 \\\n  | grep -E "error:|Executed [0-9]+ tests" | tail -2   # the totals\ngit status --short',
+      outFull: "\t Executed 580 tests, with 0 failures (0 unexpected) in 23.3 (23.4) seconds\n M packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift" }] },
   { t: "md", clip: true, html: `<p>已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 <a data-link="docs/agents-v0.md">docs/agents-v0.md</a> §8。演示页：<a data-link="http://127.0.0.1:8765/concepts/agents.html">http://127.0.0.1:8765/concepts/agents.html</a></p>`,
     rest: `<p>顶部那一行留着作为整页的提要；两处是同一个按钮，点了先问一次，因为重启会中断正在跑的任务和已打开的终端。</p>` },
   { t: "user", time: "10:44", text: "delete 应该标红才对", images: [1] },
@@ -764,7 +783,7 @@ function load(preset) {
     draft: "", files: [], sealed: false, keys: false, over: null, error: null, toast: null, earlier: false, sel: 0, unseen: 0, title: "AgentSwitch", view: "simple",
     plan: null, planOpen: false, ctx: 62 });
   if (["live", "away", "permission", "question"].includes(preset)) S.plan = PLAN();
-  if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
+  if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", note: "Build the release app", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
   if (preset === "away") S.away = isMac() ? "iPhone" : "Mac";
   if (preset === "permission") { S.status = "waiting"; S.card = { kind: "permission", tool: "Bash", detail: "git push origin main" }; }
   if (preset === "question") { S.status = "waiting"; S.card = { kind: "question", q: "PATH 里没有 ~/.opencode/bin 时，安装正式版要怎么处理？",
@@ -809,6 +828,12 @@ const statusKind = () => (S.card ? "waiting" : S.status);
 const since = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 const lockIcon = (px = 2) => (S.classic ? icon("lock", px * 9) : P.sprite(["..###..", ".#...#.", ".#...#.", "#######", "###.###", "###.###", "#######"], { px }));
 
+/** A shell command in colour, as far as the demo needs: the word each command begins with, what is quoted, comments. */
+function shell(text) {
+  return esc(text).replace(/(#[^\n]*$)|(&quot;[^\n]*?&quot;|'[^'\n]*')|((?:^|&amp;&amp;\s*|\|\s*|;\s*|\n\s*)(?!\|))([A-Za-z_.\/-]+)/gm,
+    (all, rem, quoted, lead, word) => rem ? `<span class="rem">${rem}</span>` : quoted ? `<span class="q">${quoted}</span>` : `${lead}<span class="c">${word}</span>`);
+}
+
 function item(it, i) {
   if (it.t === "user") {
     const pics = it.images ? `<div class="pics">${it.images.map((n) => `<span class="pic"><i>#${n}</i></span>`).join("")}</div>` : "";
@@ -816,7 +841,7 @@ function item(it, i) {
   }
   if (it.t === "md") {
     const html = it.html.replace(/<pre>/g, '<div class="code"><button data-a="copy">Copy</button><pre>').replace(/<\/pre>/g, "</pre></div>") + (it.clip ? (it.open ? it.rest : "") : "");
-    return `<div class="md">${html}${it.clip && !it.open ? `<button class="more" data-a="more" data-i="${i}">Show More</button>` : ""}</div>`;
+    return `<div class="md ${it.quiet ? "quiet" : ""}">${html}${it.clip && !it.open ? `<button class="more" data-a="more" data-i="${i}">Show More</button>` : ""}</div>`;
   }
   if (it.t === "work") {
     // Collapsed to one line of what was done and what changed (both desktop apps do: Claude's Normal transcript,
@@ -828,9 +853,13 @@ function item(it, i) {
     const took = it.secs >= 60 ? `${Math.floor(it.secs / 60)}m ${it.secs % 60}s` : `${it.secs}s`;
     const stat = add || del ? `<button class="diffstat" data-a="changes" aria-label="查看改动"><em>+${add}</em><s>−${del}</s></button>` : "";
     const verb = { read: "Read", search: "Searched", run: "Ran", edit: "Edited", write: "Created" };
-    const step = (st) => st.k === "think" ? `<div class="call think">${esc(st.text)}</div>`
+    // A command says what the agent said it is for, the command itself under it; opened, the command whole — its
+    // lines kept, in colour — and all it printed.
+    const step = (st, n) => st.k === "think" ? `<div class="call think">${esc(st.text)}</div>`
+      : st.note ? `<div class="call"><button class="stepfold" data-a="step" data-i="${i}" data-n="${n}" aria-expanded="${!!st.open}"><b>Run</b> <span class="said">${esc(st.note)}</span><i>${G(st.open ? "down" : "right", st.open ? "▾" : "▸", 11)}</i></button>${
+          st.open ? `<div class="cmd"><span class="ps">$</span><pre>${shell(st.full ?? st.text)}</pre><button data-a="copy">Copy</button></div>${st.out ? `<div class="cmdout">${esc(st.outFull ?? st.out)}</div>` : ""}` : `<span class="sub">${esc(st.text)}</span>`}</div>`
       : `<div class="call"><b>${verb[st.k]}</b> <code>${esc(st.text)}</code>${st.add != null ? ` <em>+${st.add}</em> <s class="del">−${st.del}</s>` : ""}${st.out ? `<br><s>${S.classic ? "" : "⎿ "}${esc(st.out)}</s>` : ""}</div>`;
-    const steps = open ? it.steps.filter((st) => S.verbose || st.k !== "think").map(step).join("") : "";
+    const steps = open ? it.steps.map((st, n) => (S.verbose || st.k !== "think" ? step(st, n) : "")).join("") : "";
     return `<div class="tools"><div class="wrow"><button class="fold" data-a="fold" data-i="${i}" aria-expanded="${!!open}"><i>${G(open ? "down" : "right", open ? "▾" : "▸", 12)}</i><span>Worked ${took} · ${parts.join(" · ")}</span></button>${stat}</div>${steps}</div>`;
   }
   if (it.t === "said") {
@@ -873,7 +902,7 @@ function body() {
     <div class="meta">${busy ? `<span style="color:var(--cyan);display:inline-flex;gap:6px;align-items:center">${spinner()}${W("Busy")}</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
     <div class="meta path">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>`;
   const earlier = S.earlier ? EARLIER.map((it, i) => item(it, "e" + i)).join("") : `<button class="earlier" data-a="earlier">${S.classic ? `${icon("upc", 13)}Earlier` : "· · ·  Earlier"}</button>`;
-  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${spinner()}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub ? "" : "cmd"}">${esc(l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
+  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${spinner()}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
   const live = S.joined && !S.card ? (S.live ? now(S.live) : "") + (S.sub ? now(S.sub, true) : "") : "";
   return meta + earlier + S.items.map(item).join("") + live + card();
 }
@@ -1179,6 +1208,7 @@ document.addEventListener("click", (e) => {
   const at = (j) => (String(j).startsWith("e") ? EARLIER[+String(j).slice(1)] : S.items[+j]);
   switch (a) {
     case "fold": at(i).open = !at(i).open; return render();
+    case "step": { const st = at(i).steps[Number(el.dataset.n)]; st.open = !st.open; return render(); }
     case "plan": S.planOpen = !S.planOpen; return render();
     case "opentask": S.dview = "task"; return render(true);
     case "backhome": S.dview = "home"; S.over = null; return render(true);

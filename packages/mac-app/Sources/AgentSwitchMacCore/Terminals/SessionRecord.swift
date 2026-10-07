@@ -16,23 +16,26 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     public let text: String
     /// The tool's own name, for a step that is none of the kinds.
     public let tool: String?
+    /// What the agent said the step is for, in its own words (Claude Code's description of a command).
+    public let note: String?
     /// The end of what a command printed.
     public let out: String?
     public let failed: Bool
     public let added: Int?
     public let removed: Int?
 
-    public init(kind: Kind, text: String, tool: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil) {
+    public init(kind: Kind, text: String, tool: String? = nil, note: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil) {
         self.kind = kind
         self.text = text
         self.tool = tool
+        self.note = note
         self.out = out
         self.failed = failed
         self.added = added
         self.removed = removed
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, out, failed, added, removed }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -40,6 +43,7 @@ public struct RecordStep: Decodable, Sendable, Hashable {
         kind = Kind(rawValue: raw) ?? .tool
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
         tool = (try? c.decodeIfPresent(String.self, forKey: .tool)) ?? (Kind(rawValue: raw) == nil && !raw.isEmpty ? raw : nil)
+        note = (try? c.decodeIfPresent(String.self, forKey: .note)).flatMap { $0.isEmpty ? nil : $0 }
         out = try? c.decodeIfPresent(String.self, forKey: .out)
         failed = (try? c.decodeIfPresent(Bool.self, forKey: .failed)) ?? false
         added = try? c.decodeIfPresent(Int.self, forKey: .added)
@@ -65,6 +69,8 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
     public let queued: Bool
     /// The service cut a very long text.
     public let clipped: Bool
+    /// An answer that is what the agent thought on the way (where it wrote that down), not what it has to say to you.
+    public let thinking: Bool
     /// A run of work: how long it took, and what it did.
     public let seconds: Int
     public let steps: [RecordStep]
@@ -72,7 +78,8 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
 
     public init(id: String, kind: Kind, at: Int64 = 0, text: String = "", images: Int = 0, queued: Bool = false, clipped: Bool = false,
-                seconds: Int = 0, steps: [RecordStep] = []) {
+                thinking: Bool = false, seconds: Int = 0, steps: [RecordStep] = []) {
+        self.thinking = thinking
         self.id = id
         self.kind = kind
         self.at = at
@@ -84,7 +91,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         self.steps = steps
     }
 
-    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, secs, steps }
+    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, thinking, secs, steps }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -98,6 +105,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         images = (try? c.decodeIfPresent(Int.self, forKey: .images)) ?? 0
         queued = (try? c.decodeIfPresent(Bool.self, forKey: .queued)) ?? false
         clipped = (try? c.decodeIfPresent(Bool.self, forKey: .clipped)) ?? false
+        thinking = (try? c.decodeIfPresent(Bool.self, forKey: .thinking)) ?? false
         seconds = (try? c.decodeIfPresent(Int.self, forKey: .secs)) ?? 0
         steps = (try? c.decodeIfPresent([RecordStep].self, forKey: .steps)) ?? []
     }
@@ -243,10 +251,35 @@ public struct FileDiff: Decodable, Sendable, Hashable, Identifiable {
 public struct TerminalActivity: Decodable, Sendable, Hashable {
     public let tool: String
     public let target: String
+    /// What the agent says this is for, in its own words; said in place of the command, as its own app does.
+    public let note: String?
 
-    public init(tool: String, target: String) {
+    public init(tool: String, target: String, note: String? = nil) {
         self.tool = tool
         self.target = target
+        self.note = note
+    }
+
+    /// What is said after the tool's word: the agent's own sentence where it gave one, else what it works on.
+    public var words: String { note.flatMap { $0.isEmpty ? nil : $0 } ?? target }
+}
+
+/// One step of a run of work, whole (`GET /sessions/:harness/:id/steps/:item/:n`): a command as it was written, its
+/// lines kept, and all it printed — the record itself carries one line and the end of the output.
+public struct RecordStepDetail: Decodable, Sendable, Hashable {
+    public let text: String
+    public let note: String?
+    public let out: String?
+    public let failed: Bool?
+    /// Longer than is sent: the command's start, the output's end.
+    public let clipped: Bool?
+
+    public init(text: String, note: String? = nil, out: String? = nil, failed: Bool? = nil, clipped: Bool? = nil) {
+        self.text = text
+        self.note = note
+        self.out = out
+        self.failed = failed
+        self.clipped = clipped
     }
 }
 
@@ -279,6 +312,43 @@ public enum TerminalRecordEvent: Equatable, Sendable {
 
 /// How the simple view words a session's record (docs/simple-view-v0.md §2, §5): a run of work as one line, each step's
 /// label, how full the context is, the mode. Short English words in title case (ui-v0 §7.2.7).
+/// How a pane's simple view is laid out by its width (docs/simple-view-v0.md §5.2): one reading column, and beside it —
+/// where there is room for both — a side for the task list and the changed files.
+public enum RecordLayout {
+    /// The reading column at its widest.
+    public static let column: Double = 780
+    /// The narrowest pane that has a side: the column stays readable next to it.
+    public static let sideFrom: Double = 980
+
+    /// The side's width in a pane this wide; nil for a pane too narrow to have one.
+    public static func side(pane: Double) -> Double? {
+        pane >= sideFrom ? min(max((pane * 0.3).rounded(), 300), 440) : nil
+    }
+}
+
+/// A file some runs of work changed.
+public struct RecordChangedFile: Sendable, Hashable, Identifiable {
+    public let path: String
+    public let added: Int
+    public let removed: Int
+    /// How many runs of work touched it, in what is loaded.
+    public let runs: Int
+    /// The latest of them (its item's id): its diff is the one shown.
+    public let work: String
+    public var id: String { path }
+    /// The file's own name, and the folder it is in (empty at the top).
+    public var name: String { (path as NSString).lastPathComponent }
+    public var folder: String { (path as NSString).deletingLastPathComponent }
+
+    public init(path: String, added: Int, removed: Int, runs: Int, work: String) {
+        self.path = path
+        self.added = added
+        self.removed = removed
+        self.runs = runs
+        self.work = work
+    }
+}
+
 public enum RecordDisplay {
     /// A run of work on one line: `Worked 1m 12s · Read 1 · Searched 1 · Ran 2 · Edited 1`, the kinds in the order they
     /// first came. Thinking and updates of the task list are not counted. `running`: it is the one still going.
@@ -357,6 +427,37 @@ public enum RecordDisplay {
         guard let used = usage?.used, used > 0 else { return nil }
         if let window = usage?.window, window > 0 { return "\(min(100, Int((Double(used) / Double(window) * 100).rounded())))%" }
         return used >= 1_000_000 ? String(format: "%.1fM", Double(used) / 1_000_000) : "\(max(1, Int((Double(used) / 1000).rounded())))k"
+    }
+
+    /// How full its context is, as a part and in words (`124k / 200k`); nil when the agent does not say how large it is.
+    public static func contextMeter(_ usage: RecordUsage?) -> (part: Double, words: String)? {
+        guard let used = usage?.used, used > 0, let window = usage?.window, window > 0 else { return nil }
+        return (min(1, Double(used) / Double(window)), "\(tokens(used)) / \(tokens(window))")
+    }
+
+    private static func tokens(_ n: Int) -> String {
+        n >= 1_000_000 ? (n % 1_000_000 == 0 ? "\(n / 1_000_000)M" : String(format: "%.1fM", Double(n) / 1_000_000)) : "\(max(1, Int((Double(n) / 1000).rounded())))k"
+    }
+
+    /// The files the runs of work in `items` changed, the latest touched first: each with its lines in and out summed
+    /// over those runs (the Mac's side pane, docs/simple-view-v0.md §5.2). Only what is loaded of the record: an earlier
+    /// page adds what it holds. A step that failed changed nothing.
+    public static func changedFiles(_ items: [RecordItem]) -> [RecordChangedFile] {
+        var order: [String] = []
+        var files: [String: RecordChangedFile] = [:]
+        for item in items where item.kind == .work {
+            var touched = Set<String>()
+            for step in item.steps where (step.kind == .edit || step.kind == .write) && !step.failed && !step.text.isEmpty {
+                let held = files[step.text]
+                files[step.text] = RecordChangedFile(path: step.text, added: (held?.added ?? 0) + (step.added ?? 0), removed: (held?.removed ?? 0) + (step.removed ?? 0),
+                                                     runs: (held?.runs ?? 0) + (touched.contains(step.text) ? 0 : 1), work: item.id)
+                touched.insert(step.text)
+            }
+            // The latest touched last in `order`.
+            for path in touched { order.removeAll { $0 == path } }
+            order.append(contentsOf: item.steps.map(\.text).filter { touched.contains($0) }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } })
+        }
+        return order.reversed().compactMap { files[$0] }
     }
 
     /// The agent's own word for how it asks, as the screens say it; nil for one this app does not know.
@@ -442,6 +543,13 @@ extension DaemonClient {
     public func typeIntoTerminal(id: String, text: String, files: [TerminalReplyFile] = []) async throws {
         struct Body: Encodable { let text: String; let seal = false; let attachments: [TerminalReplyFile] }
         _ = try await call("POST", "/terminals/\(Self.segment(id))/input", body: try JSONEncoder().encode(Body(text: text, attachments: files)))
+    }
+
+    /// The `n`-th step of the run of work `work`, whole. Nil when the service has none (an agent read coarsely, an older
+    /// service): the record's own line stays.
+    public func sessionStep(harness: String, id: String, work: String, n: Int) async -> RecordStepDetail? {
+        guard let data = try? await call("GET", "/sessions/\(Self.segment(harness))/\(Self.segment(id))/steps/\(Self.segment(work))/\(n)") else { return nil }
+        return try? JSONDecoder().decode(RecordStepDetail.self, from: data)
     }
 
     /// A picture the user sent with a message: the `n`-th of the record's item `item`, as the agent kept it.

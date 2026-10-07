@@ -21,7 +21,7 @@ struct RecordItemRow: View {
         switch item.kind {
         case .user: UserRow(item: item, pictures: pictures)
         case .answer: AnswerRow(item: item)
-        case .work: WorkRow(item: item, verbose: verbose, running: running, changes: changes)
+        case .work: WorkRow(item: item, verbose: verbose, running: running, changes: changes, source: pictures)
         case .note:
             LookWord(item.text).mono(11).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .center)
         }
@@ -59,7 +59,8 @@ private struct AnswerRow: View {
     var body: some View {
         let head = whole ? nil : RecordDisplay.preview(item.text)
         VStack(alignment: .leading, spacing: 8) {
-            MarkdownView(text: head ?? item.text).textSelection(.enabled).linkMenu(for: item.text)
+            // What it thought on the way reads quieter than what it has to say to you.
+            MarkdownView(text: head ?? item.text).textSelection(.enabled).linkMenu(for: item.text).opacity(item.thinking ? 0.62 : 1)
             if head != nil {
                 Button { whole = true } label: { Text("Show More").mono(13, weight: .medium) }
                     .buttonStyle(.plain).foregroundStyle(Theme.signal)
@@ -77,10 +78,13 @@ private struct WorkRow: View {
     let verbose: Bool
     let running: Bool
     let changes: (() -> Void)?
+    /// Where a step is read whole (absent before the session is known).
+    let source: RecordPictureSource?
     @State private var open = false
 
     var body: some View {
-        let steps = RecordDisplay.shown(item.steps, verbose: verbose)
+        // Each with its place among the run's steps: that is how one is asked for whole.
+        let steps = Array(item.steps.enumerated()).filter { verbose || $0.element.kind != .think }
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Button { withAnimation(.snappy(duration: 0.2)) { open.toggle() } } label: {
@@ -101,7 +105,7 @@ private struct WorkRow: View {
                 }
             }
             if open || verbose {
-                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in StepRow(step: step, verbose: verbose) }
+                ForEach(steps, id: \.offset) { index, step in StepRow(step: step, verbose: verbose, source: source, work: item.id, index: index) }
             }
         }
         #if DEBUG
@@ -110,35 +114,128 @@ private struct WorkRow: View {
     }
 }
 
+/// One step: on its line what the agent said it is for, where it said; a command opens into itself — as it was
+/// written, whole, in colour — and all it printed.
 private struct StepRow: View {
     let step: RecordStep
     let verbose: Bool
+    let source: RecordPictureSource?
+    let work: String
+    let index: Int
+    @Environment(AppModel.self) private var model
     @Environment(\.interfaceLook) private var look
+    @State private var whole = false
+    @State private var detail: RecordStepDetail?
 
     private var isFile: Bool { [.read, .edit, .write, .list].contains(step.kind) }
+    private var opens: Bool { step.kind == .run && source != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(RecordDisplay.label(step)).mono(12, weight: .medium).foregroundStyle(step.failed ? Theme.failed : Theme.ink.opacity(0.72)).lineLimit(1)
-                    .layoutPriority(1)
-                // A file by the end of its path (its name); a command or a query from its start.
-                Text(MessageDisplay.readable(step.text)).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    .lineLimit(verbose ? 6 : isFile ? 1 : 2).truncationMode(isFile ? .head : .tail).textSelection(.enabled)
-                Spacer(minLength: 0)
-                if step.added != nil || step.removed != nil {
-                    DiffStat(added: step.added ?? 0, removed: step.removed ?? 0, plain: true)
-                }
+            if opens {
+                Button { withAnimation(.snappy(duration: 0.18)) { whole.toggle() } } label: { head.contentShape(Rectangle()) }.buttonStyle(.plain)
+            } else {
+                head
             }
-            if let out = step.out, !out.isEmpty {
-                Text(out).font(.caption2.monospaced()).foregroundStyle(step.failed ? Theme.failed : .secondary)
-                    .lineLimit(verbose ? 14 : 4).textSelection(.enabled)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.code, in: RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0, style: .continuous))
+            if whole, opens {
+                CommandBlock(command: detail?.text ?? step.text)
+                if let out = detail?.out ?? step.out, !out.isEmpty { output(out, lines: nil) }
+                if detail?.clipped == true { Text("很长：只有命令的开头和输出的末尾。").font(.caption2).foregroundStyle(.tertiary) }
+            } else {
+                // Under what it is for, the command itself on a line.
+                if step.note != nil, step.kind == .run {
+                    Text(MessageDisplay.readable(step.text)).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(verbose ? 6 : 1)
+                }
+                // What it printed, at a glance: where nothing says what the step was for, or it failed.
+                if let out = step.out, !out.isEmpty, step.note == nil || step.failed || verbose { output(out, lines: verbose ? 14 : 4) }
             }
         }
         .padding(.leading, 18)
+        // Asked again once it has printed (a command still running has not).
+        .task(id: whole && opens ? "\(work)/\(index)/\(step.out?.count ?? -1)" : "") {
+            guard whole, opens, let source else { return }
+            guard let api = model.api else {
+                #if DEBUG
+                detail = DemoData.stepDetail
+                #endif
+                return
+            }
+            if let read = try? await api.sessionStep(harness: source.harness, id: source.session, work: work, n: index) { detail = read }
+        }
+        #if DEBUG
+        .onAppear { if opens, step.note != nil, UserDefaults.standard.bool(forKey: "uiDemoOpenTools") { whole = true } }
+        #endif
+    }
+
+    private var head: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(RecordDisplay.label(step)).mono(12, weight: .medium).foregroundStyle(step.failed ? Theme.failed : Theme.ink.opacity(0.72)).lineLimit(1)
+                .layoutPriority(1)
+            if let note = step.note {
+                Text(note).font(.footnote).foregroundStyle(Theme.ink.opacity(0.85)).lineLimit(2)
+            } else if opens {
+                Text(MessageDisplay.readable(step.text)).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(verbose ? 6 : 2)
+            } else {
+                // A file by the end of its path (its name); a command or a query from its start.
+                Text(MessageDisplay.readable(step.text)).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(verbose ? 6 : isFile ? 1 : 2).truncationMode(isFile ? .head : .tail).textSelection(.enabled)
+            }
+            if opens { LookGlyph.fold(open: whole).foregroundStyle(.tertiary) }
+            Spacer(minLength: 0)
+            if step.added != nil || step.removed != nil {
+                DiffStat(added: step.added ?? 0, removed: step.removed ?? 0, plain: true)
+            }
+        }
+    }
+
+    private func output(_ out: String, lines: Int?) -> some View {
+        Text(out).font(.caption2.monospaced()).foregroundStyle(step.failed ? Theme.failed : .secondary)
+            .lineLimit(lines).textSelection(.enabled)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.code, in: RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0, style: .continuous))
+    }
+}
+
+/// A command as it was written: its lines kept and wrapped where the block ends, the word each command begins with,
+/// what is quoted and comments in colour, `Copy` under it.
+private struct CommandBlock: View {
+    let command: String
+    @State private var copied = false
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("$").font(.caption.monospaced()).foregroundStyle(.tertiary)
+                Text(Self.coloured(command)).font(.caption.monospaced()).lineSpacing(2).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Button {
+                UIPasteboard.general.string = command
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(1.6)); copied = false }
+            } label: { LookWord(copied ? "Copied" : "Copy").mono(11, weight: .medium) }
+                .buttonStyle(.plain).foregroundStyle(copied ? Theme.done : Theme.signal)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 7)
+        .background(Theme.code, in: RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
+    }
+
+    static func coloured(_ command: String) -> AttributedString {
+        var text = AttributedString()
+        for run in ShellHighlight.runs(command) {
+            var part = AttributedString(run.text)
+            switch run.kind {
+            case .command: part.foregroundColor = Theme.signal
+            case .string: part.foregroundColor = Theme.done
+            case .comment: part.foregroundColor = Theme.ink.opacity(0.4)
+            case .plain: part.foregroundColor = Theme.ink
+            }
+            text += part
+        }
+        return text
     }
 }
 
@@ -174,7 +271,11 @@ struct NowLine: View {
                 BrailleSpinner()
                 if let activity {
                     Text(ToolDisplay.word(activity.tool)).mono(12, weight: .semibold).foregroundStyle(Theme.ink)
-                    Text(MessageDisplay.readable(activity.target)).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    if let note = activity.note, !note.isEmpty {
+                        Text(note).font(.footnote).foregroundStyle(Theme.ink.opacity(0.85)).lineLimit(1)
+                    } else {
+                        Text(MessageDisplay.readable(activity.target)).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
                 } else {
                     LookWord("Busy").mono(12, weight: .semibold).foregroundStyle(Theme.busy)
                 }

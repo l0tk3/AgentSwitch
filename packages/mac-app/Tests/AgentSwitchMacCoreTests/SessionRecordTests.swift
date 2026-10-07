@@ -129,6 +129,84 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(wire, #"{"attachments":[{"path":"/Users/u/a b.png","token":"[Image #1]"},{"token":"[Image #2]","upload":"u_9"}]}"#)
     }
 
+    /// The Mac's side pane (2026-10-07, user: mac中的空间浪费太严重了): the files the loaded runs of work changed, and
+    /// how full the context is in words.
+    func testTheFilesTheRecordChangedAndHowFullItsContextIs() {
+        let items = [
+            RecordItem(id: "10", kind: .user, at: 1, text: "改一下"),
+            RecordItem(id: "20", kind: .work, at: 2, seconds: 9, steps: [
+                RecordStep(kind: .read, text: "src/a.ts"),
+                RecordStep(kind: .edit, text: "src/a.ts", added: 3, removed: 1),
+                RecordStep(kind: .write, text: "docs/notes.md", added: 12, removed: 0),
+                RecordStep(kind: .edit, text: "src/a.ts", added: 2, removed: 2),
+                RecordStep(kind: .edit, text: "src/broken.ts", failed: true, added: 9, removed: 9),
+                RecordStep(kind: .run, text: "npm test"),
+            ]),
+            RecordItem(id: "30", kind: .answer, at: 3, text: "好了"),
+            RecordItem(id: "40", kind: .work, at: 4, seconds: 4, steps: [
+                RecordStep(kind: .edit, text: "src/a.ts", added: 1, removed: 0),
+                RecordStep(kind: .edit, text: "README.md"),
+            ]),
+        ]
+        let files = RecordDisplay.changedFiles(items)
+        // The latest touched first; within a run, in the order it touched them.
+        XCTAssertEqual(files.map(\.path), ["README.md", "src/a.ts", "docs/notes.md"])
+        XCTAssertEqual(files[1], RecordChangedFile(path: "src/a.ts", added: 6, removed: 3, runs: 2, work: "40"))
+        XCTAssertEqual(files[2], RecordChangedFile(path: "docs/notes.md", added: 12, removed: 0, runs: 1, work: "20"))
+        XCTAssertEqual(files[0], RecordChangedFile(path: "README.md", added: 0, removed: 0, runs: 1, work: "40"))
+        XCTAssertEqual(files[1].name, "a.ts")
+        XCTAssertEqual(files[1].folder, "src")
+        XCTAssertEqual(files[0].folder, "")
+        XCTAssertTrue(RecordDisplay.changedFiles([items[0], items[2]]).isEmpty)
+
+        // A pane too narrow has no side; a wide one gives it three tenths, within bounds.
+        XCTAssertNil(RecordLayout.side(pane: 979))
+        XCTAssertEqual(RecordLayout.side(pane: 980), 300)
+        XCTAssertEqual(RecordLayout.side(pane: 1200), 360)
+        XCTAssertEqual(RecordLayout.side(pane: 1700), 440)
+
+        let meter = RecordDisplay.contextMeter(RecordUsage(model: "m", used: 124_000, window: 200_000, effort: nil))
+        XCTAssertEqual(meter?.words, "124k / 200k")
+        XCTAssertEqual(meter?.part ?? 0, 0.62, accuracy: 0.001)
+        XCTAssertEqual(RecordDisplay.contextMeter(RecordUsage(model: "m", used: 239_400, window: 1_000_000, effort: nil))?.words, "239k / 1M")
+        XCTAssertEqual(RecordDisplay.contextMeter(RecordUsage(model: "m", used: 1_300_000, window: 1_000_000, effort: nil))?.part, 1)
+        // An agent that does not say how large its context is has no meter (the count alone is said elsewhere).
+        XCTAssertNil(RecordDisplay.contextMeter(RecordUsage(model: "m", used: 9000, window: nil, effort: nil)))
+        XCTAssertNil(RecordDisplay.contextMeter(nil))
+    }
+
+    /// 2026-10-07, user: 怎么少了思考细节呢 / 官方的代码执行块里看没有省略而且有高亮显示.
+    func testThoughtsNotesAndACommandInColour() throws {
+        let page = #"[{"type":"answer","id":"5","ts":1,"text":"先看列表的底色。","thinking":true},{"type":"work","id":"9","ts":2,"secs":3,"steps":[{"kind":"run","text":"git status","note":"Check the tree"},{"kind":"run","text":"ls","note":""}]},{"type":"answer","id":"20","ts":6,"text":"好了"}]"#
+        let items = try JSONDecoder().decode([RecordItem].self, from: Data(page.utf8))
+        XCTAssertEqual(items.map(\.thinking), [true, false, false])
+        XCTAssertEqual(items[1].steps.map(\.note), ["Check the tree", nil])
+        let busy = TerminalRecordEvent.decode(event: "activity", data: #"{"activity":{"tool":"Bash","target":"cat > x <<'EOF' …","note":"Write the patch"},"subagents":[]}"#)
+        XCTAssertEqual(busy, .activity(TerminalActivity(tool: "Bash", target: "cat > x <<'EOF' …", note: "Write the patch"), []))
+        XCTAssertEqual(TerminalActivity(tool: "Bash", target: "npm test", note: "Run the tests").words, "Run the tests")
+        XCTAssertEqual(TerminalActivity(tool: "Bash", target: "npm test").words, "npm test")
+        let detail = try JSONDecoder().decode(RecordStepDetail.self, from: Data(#"{"kind":"run","text":"a\nb","note":"Two lines","out":"x","clipped":true}"#.utf8))
+        XCTAssertEqual(detail, RecordStepDetail(text: "a\nb", note: "Two lines", out: "x", clipped: true))
+
+        typealias R = ShellHighlight.Run
+        // The word each command begins with, what is quoted, a here-document's body, a comment.
+        XCTAssertEqual(ShellHighlight.runs("cd /a/b && git add -A"), [R("cd", .command), R(" /a/b && ", .plain), R("git", .command), R(" add -A", .plain)])
+        XCTAssertEqual(ShellHighlight.runs(#"FOO=1 make "all targets" | tee 'a b.log' # done"#),
+                       [R("FOO=1 ", .plain), R("make", .command), R(" ", .plain), R(#""all targets""#, .string), R(" | ", .plain), R("tee", .command), R(" ", .plain), R("'a b.log'", .string), R(" ", .plain), R("# done", .comment)])
+        XCTAssertEqual(ShellHighlight.runs("git commit -F - <<'EOF'\nfix: it\n\nwhy && how\nEOF\ngit log | head -1"),
+                       [R("git", .command), R(" commit -F - <<", .plain), R("'EOF'", .string), R("\n", .plain), R("fix: it\n\nwhy && how\nEOF", .string), R("\n", .plain),
+                        R("git", .command), R(" log | ", .plain), R("head", .command), R(" -1", .plain)])
+        XCTAssertEqual(ShellHighlight.runs("if test -f a; then echo $(date +%s); fi"),
+                       [R("if ", .plain), R("test", .command), R(" -f a; then ", .plain), R("echo", .command), R(" $(", .plain), R("date", .command), R(" +%s); fi", .plain)])
+        // Where output goes is not a command's end; `&` alone is.
+        XCTAssertEqual(ShellHighlight.runs("make 2>&1 &>log & wait"), [R("make", .command), R(" 2>&1 &>log & ", .plain), R("wait", .command)])
+        // A line carried on is one command; an unfinished quote runs to the end; nothing is lost either way.
+        XCTAssertEqual(ShellHighlight.runs("swift build \\\n  -c release"), [R("swift", .command), R(" build \\\n  -c release", .plain)])
+        for source in ["echo \"never closed", "cat <<EOF\nno end", "", "   ", "a=$(b 'c' \"d\")\n\t<<-X\n\tbody\n\tX\n"] {
+            XCTAssertEqual(ShellHighlight.runs(source).map(\.text).joined(), source)
+        }
+    }
+
     func testChangesDecode() throws {
         struct Reply: Decodable { let files: [FileDiff] }
         let list = try JSONDecoder().decode(Reply.self, from: Data(#"""

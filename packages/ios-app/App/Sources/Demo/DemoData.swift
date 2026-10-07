@@ -183,7 +183,7 @@ enum DemoData {
                          permissions: screen == "terminallink" || busy || prompt || idle ? []
                                       : [screen == "terminalquestion" || screen == "simplequestion" ? question
                                          : TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
-                         activity: busy ? TerminalActivity(tool: "Bash", target: "swift build -c release") : nil,
+                         activity: busy ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
                          statusSince: busy ? ago(41) : nil,
                          subagents: prompt || idle ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
                                                    TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
@@ -245,6 +245,12 @@ enum DemoData {
         return (withLinks ? Array(lines.dropLast(3)) + links : lines).joined(separator: "\r\n")
     }()
 
+    /// A command opened whole: as it was written, and all it printed.
+    static let stepDetail = RecordStepDetail(
+        text: "cd packages/mac-app && swift test --filter AgentsTests 2>&1 \\\n  | grep -E \"error:|Executed [0-9]+ tests\" | tail -2   # the totals\ngit status --short",
+        note: "Run the Agents tests and keep the last lines",
+        out: "\t Executed 41 tests, with 0 failures (0 unexpected) in 0.412 (0.418) seconds\n M packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift")
+
     /// A made-up screenshot sent with a message: a window with a few lines, wide or tall.
     static func picture(_ n: Int) -> Data? {
         let wide = n % 2 == 0
@@ -271,11 +277,13 @@ enum DemoData {
         let busy = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplebusy"
         var items: [RecordItem] = [
             RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 2),
+            // What it thought on the way, where it wrote that down.
+            RecordItem(id: "150", kind: .answer, at: ago(895), text: "选的版本存下来了，但服务只在启动时读它。先看页面上哪里提示了要重启。", thinking: true),
             RecordItem(id: "200", kind: .work, at: ago(890), seconds: 72, steps: [
-                RecordStep(kind: .think, text: "The choice is saved, but the service reads it only when it starts."),
                 RecordStep(kind: .read, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"),
                 RecordStep(kind: .search, text: "pendingRestart"),
-                RecordStep(kind: .run, text: "swift test --filter AgentsTests", out: "Executed 41 tests, with 0 failures (0 unexpected) in 0.412 seconds"),
+                RecordStep(kind: .run, text: "cd packages/mac-app && swift test --filter AgentsTests 2>&1 ⏎ | grep -E \"error:|Executed [0-9]+ tests\" | tail -2 ⏎ git status --short",
+                           note: "Run the Agents tests and keep the last lines", out: "Executed 41 tests, with 0 failures (0 unexpected) in 0.412 seconds"),
                 RecordStep(kind: .edit, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 12, removed: 1),
                 RecordStep(kind: .edit, text: "docs/agents-v0.md", added: 2, removed: 1),
             ]),

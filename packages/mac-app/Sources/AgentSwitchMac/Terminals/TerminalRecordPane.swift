@@ -16,9 +16,12 @@ struct TerminalRecordPane: View {
     @State private var changes: ChangesRequest?
     @State private var atEnd = true
     @State private var dropping = false
+    /// The side beside the record (its task list, the files it changed), where the pane is wide enough for one: out
+    /// when the user asks for it (the reply box's menu, `Show Side Pane`).
+    @AppStorage("terminals.recordSide") private var sideShown = false
 
-    /// The reading column (the demo page's 700 pt).
-    static let column: CGFloat = 700
+    /// The reading column at its widest (a pane with room to spare puts a side beside it, `RecordLayout`).
+    static let column = CGFloat(RecordLayout.column)
     private static let end = "end"
 
     struct ChangesRequest: Identifiable {
@@ -33,88 +36,105 @@ struct TerminalRecordPane: View {
         let info = state.session?.info
         let working = info?.status == "working"
         let requests = state.session?.requests ?? []
-        let pictures = record.sessionId.map { RecordPictureSource(harness: record.agent, session: $0, client: model.client) }
-        VStack(spacing: 0) {
-            ScrollViewReader { scroller in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        if let info { header(info, record) }
-                        if record.more {
-                            Button { record.earlier() } label: {
-                                HStack(spacing: 6) {
-                                    if record.loadingEarlier { BrailleSpinner() }
-                                    Text("Earlier").mono(12, weight: .medium)
+        let source = record.sessionId.map { RecordSource(harness: record.agent, session: $0, client: model.client) }
+        let files = RecordDisplay.changedFiles(record.items)
+        GeometryReader { geo in
+            // With room for both, the task list and the changed files stand beside the record (nothing to put there:
+            // no side, the column alone).
+            let side = sideShown && (!record.plan.isEmpty || !files.isEmpty) ? RecordLayout.side(pane: geo.size.width) : nil
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    ScrollViewReader { scroller in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 14) {
+                                if let info { header(info, record) }
+                                if record.more {
+                                    Button { record.earlier() } label: {
+                                        HStack(spacing: 6) {
+                                            if record.loadingEarlier { BrailleSpinner() }
+                                            Text("Earlier").mono(12, weight: .medium)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.plain).foregroundStyle(Color.signal)
                                 }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.plain).foregroundStyle(Color.signal)
-                        }
-                        if !record.loaded {
-                            BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 24)
-                        } else if record.items.isEmpty, !working, requests.isEmpty {
-                            Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端视图。")
-                                .font(.system(size: 12.5)).foregroundStyle(Look.faint)
-                        }
-                        ForEach(record.items) { item in
-                            RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, pictures: pictures) {
-                                if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: item.id) }
-                            }
-                        }
-                        if working, requests.isEmpty {
-                            RecordNowLine(activity: record.activity, subagents: record.subagents, since: record.activitySince)
-                        }
-                        if let session = state.session {
-                            ForEach(requests) { request in
-                                Group {
-                                    if request.isQuestion {
-                                        TerminalQuestionCard(request: request, model: session, keys: focused && request.id == session.first?.id)
-                                    } else {
-                                        TerminalApprovalCard(request: request, model: session, keys: focused && request.id == session.first?.id)
+                                if !record.loaded {
+                                    BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 24)
+                                } else if record.items.isEmpty, !working, requests.isEmpty {
+                                    Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端视图。")
+                                        .font(.system(size: 12.5)).foregroundStyle(Look.faint)
+                                }
+                                ForEach(record.items) { item in
+                                    RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, source: source) {
+                                        if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: item.id) }
                                     }
                                 }
-                                .frame(maxWidth: 480, alignment: .leading)
+                                if working, requests.isEmpty {
+                                    RecordNowLine(activity: record.activity, subagents: record.subagents, since: record.activitySince)
+                                }
+                                if let session = state.session {
+                                    ForEach(requests) { request in
+                                        Group {
+                                            if request.isQuestion {
+                                                TerminalQuestionCard(request: request, model: session, keys: focused && request.id == session.first?.id)
+                                            } else {
+                                                TerminalApprovalCard(request: request, model: session, keys: focused && request.id == session.first?.id)
+                                            }
+                                        }
+                                        .frame(maxWidth: 480, alignment: .leading)
+                                    }
+                                }
+                                if info?.status == "waiting", requests.isEmpty { RecordPromptNote(openTerminal: { model.setSimple(false, pane: state.id) }) }
+                                if info?.status == "exited" {
+                                    Text("Exited").mono(11).foregroundStyle(Look.faint).frame(maxWidth: .infinity)
+                                }
+                                Color.clear.frame(height: 1).id(Self.end)
+                                    .onAppear { atEnd = true }
+                                    .onDisappear { atEnd = false }
+                            }
+                            .frame(maxWidth: Self.column, alignment: .leading)
+                            .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 14)
+                            .frame(maxWidth: .infinity)
+                        }
+                        // The end is what matters: there when it opens, and following it while the reader is there.
+                        .onChange(of: record.loaded) { scroller.scrollTo(Self.end, anchor: .bottom) }
+                        .onChange(of: record.items.last) { if atEnd { scroller.scrollTo(Self.end, anchor: .bottom) } }
+                        .onChange(of: requests.count) { scroller.scrollTo(Self.end, anchor: .bottom) }
+                        // What floats over the record's end; the record scrolls under it, and ends above it.
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            VStack(spacing: 0) {
+                                if !atEnd {
+                                    Button { withAnimation(.snappy(duration: 0.2)) { scroller.scrollTo(Self.end, anchor: .bottom) } } label: {
+                                        Text("↓ Latest").mono(11.5, weight: .medium).foregroundStyle(Look.ink)
+                                            .padding(.horizontal, 10).padding(.vertical, 5)
+                                            .grounded(Look.panel, radius: look.isClassic ? 13 : 0)
+                                            .framed(Look.line, radius: look.isClassic ? 13 : 0)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                // The sealed reply (⌘⇧V, the status bar's lock) and the page's word about it, as over a terminal's screen.
+                                if focused, let session = state.session, session.composing || session.notice != nil {
+                                    VStack(spacing: 8) {
+                                        if let notice = session.notice { NoticeLine(text: notice) }
+                                        if session.composing { SealBox(model: session) }
+                                    }
+                                    .frame(maxWidth: Self.column)
+                                    .padding(.horizontal, 24).padding(.top, 8)
+                                }
+                                RecordDock(state: state, model: model, focused: focused, working: working, waiting: !requests.isEmpty || info?.status == "waiting",
+                                           beside: side != nil, sideShown: $sideShown) {
+                                    if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: nil) }
+                                }
                             }
                         }
-                        if info?.status == "waiting", requests.isEmpty { RecordPromptNote(openTerminal: { model.setSimple(false, pane: state.id) }) }
-                        if info?.status == "exited" {
-                            Text("Exited").mono(11).foregroundStyle(Look.faint).frame(maxWidth: .infinity)
-                        }
-                        Color.clear.frame(height: 1).id(Self.end)
-                            .onAppear { atEnd = true }
-                            .onDisappear { atEnd = false }
-                    }
-                    .frame(maxWidth: Self.column, alignment: .leading)
-                    .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 14)
-                    .frame(maxWidth: .infinity)
-                }
-                // The end is what matters: there when it opens, and following it while the reader is there.
-                .onChange(of: record.loaded) { scroller.scrollTo(Self.end, anchor: .bottom) }
-                .onChange(of: record.items.last) { if atEnd { scroller.scrollTo(Self.end, anchor: .bottom) } }
-                .onChange(of: requests.count) { scroller.scrollTo(Self.end, anchor: .bottom) }
-                .overlay(alignment: .bottom) {
-                    if !atEnd {
-                        Button { withAnimation(.snappy(duration: 0.2)) { scroller.scrollTo(Self.end, anchor: .bottom) } } label: {
-                            Text("↓ Latest").mono(11.5, weight: .medium).foregroundStyle(Look.ink)
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .grounded(Look.panel, radius: look.isClassic ? 13 : 0)
-                                .framed(Look.line, radius: look.isClassic ? 13 : 0)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.bottom, 8)
                     }
                 }
-            }
-            // The sealed reply (⌘⇧V, the status bar's lock) and the page's word about it, as over a terminal's screen.
-            if focused, let session = state.session, session.composing || session.notice != nil {
-                VStack(spacing: 8) {
-                    if let notice = session.notice { NoticeLine(text: notice) }
-                    if session.composing { SealBox(model: session) }
+                if let side {
+                    HairRule(color: Look.line, vertical: true)
+                    RecordSidePane(record: record, files: files)
+                        .frame(width: side)
+                        .contextMenu { Button("Hide Side Pane") { sideShown = false } }
                 }
-                .frame(maxWidth: Self.column)
-                .padding(.horizontal, 24).padding(.bottom, 8)
-            }
-            RecordDock(state: state, model: model, focused: focused, working: working, waiting: !requests.isEmpty || info?.status == "waiting") {
-                if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: nil) }
             }
         }
         .background(Look.ground)
@@ -152,8 +172,8 @@ private struct RecordRow: View {
     let item: RecordItem
     let verbose: Bool
     let running: Bool
-    /// Where the pictures sent with a message are asked for (absent before the session is known).
-    let pictures: RecordPictureSource?
+    /// Where a message's pictures and a step whole are asked for (absent before the session is known).
+    let source: RecordSource?
     let showChanges: () -> Void
     @State private var open = false
     @State private var whole = false
@@ -168,7 +188,7 @@ private struct RecordRow: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 if !item.text.isEmpty { UserBox(text: item.text, faded: item.queued) }
                 if item.images > 0 {
-                    if let pictures { RecordPictures(source: pictures, item: item.id, count: item.images) }
+                    if let source { RecordPictures(source: source, item: item.id, count: item.images) }
                     else { Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(10.5).foregroundStyle(Look.ink2) }
                 }
             }
@@ -176,7 +196,8 @@ private struct RecordRow: View {
         case .answer:
             let head = whole ? nil : RecordDisplay.preview(item.text)
             VStack(alignment: .leading, spacing: 6) {
-                MarkdownBlocks(text: head ?? item.text, size: 13.5)
+                // What it thought on the way reads quieter than what it has to say to you.
+                MarkdownBlocks(text: head ?? item.text, size: item.thinking ? 13 : 13.5, color: item.thinking ? Look.ink2 : Look.ink)
                 if head != nil {
                     Button { whole = true } label: { Text("Show More").mono(12, weight: .medium) }.buttonStyle(.plain).foregroundStyle(Color.signal)
                 } else if item.clipped {
@@ -193,8 +214,9 @@ private struct RecordRow: View {
     /// A run of work: one line (`Worked 1m 12s · Read 1 · Ran 2 · Edited 1`) with the lines it added and took away
     /// beside it; opened, each step on a line.
     private var work: some View {
-        let steps = RecordDisplay.shown(item.steps, verbose: verbose)
-        let shown = open || verbose
+        // Each with its place among the run's steps: that is how one is asked for whole.
+        let steps = Array(item.steps.enumerated()).filter { verbose || $0.element.kind != .think }
+        let shown = open || verbose || PaneRecord.previewOpenStep?.hasPrefix("\(item.id)/") == true
         return VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
                 Button { open.toggle() } label: {
@@ -214,14 +236,16 @@ private struct RecordRow: View {
                 }
             }
             if shown {
-                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in RecordStepLine(step: step, verbose: verbose) }
+                ForEach(steps, id: \.offset) { index, step in
+                    RecordStepLine(step: step, verbose: verbose, source: source, work: item.id, index: index, opened: PaneRecord.previewOpenStep == "\(item.id)/\(index)")
+                }
             }
         }
     }
 }
 
 /// A part that folds: `▸ ▾`, the system's chevrons in the classic look.
-private struct RecordFold: View {
+struct RecordFold: View {
     let open: Bool
     @Environment(\.interfaceLook) private var look
 
@@ -235,37 +259,8 @@ private struct RecordFold: View {
     }
 }
 
-private struct RecordStepLine: View {
-    let step: RecordStep
-    let verbose: Bool
-    @Environment(\.interfaceLook) private var look
-
-    var body: some View {
-        let file = RecordDisplay.namesFile(step)
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(RecordDisplay.label(step)).mono(11.5, weight: .medium).foregroundStyle(step.failed ? Color.failed : Look.ink.opacity(0.75)).lineLimit(1)
-                    .layoutPriority(1)
-                // A file by the end of its path (its name); a command or a query from its start.
-                Text(step.text).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2)
-                    .lineLimit(verbose ? 6 : file ? 1 : 2).truncationMode(file ? .head : .tail).textSelection(.enabled)
-                Spacer(minLength: 0)
-                if step.added != nil || step.removed != nil { RecordDiffStat(added: step.added ?? 0, removed: step.removed ?? 0, plain: true) }
-            }
-            if let out = step.out, !out.isEmpty {
-                Text(out).font(.system(size: 11, design: .monospaced)).foregroundStyle(step.failed ? Color.failed : Look.ink2)
-                    .lineLimit(verbose ? 14 : 4).textSelection(.enabled)
-                    .padding(.horizontal, 8).padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Look.code, in: RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0, style: .continuous))
-            }
-        }
-        .padding(.leading, 17)
-    }
-}
-
 /// Lines in and out: `+14 −2`.
-private struct RecordDiffStat: View {
+struct RecordDiffStat: View {
     let added: Int
     let removed: Int
     /// Without its ground (inside a row that has one).
@@ -295,7 +290,11 @@ private struct RecordNowLine: View {
                 BrailleSpinner().foregroundStyle(Color.busy)
                 if let activity {
                     Text(RecordDisplay.toolWord(activity.tool)).mono(11.5, weight: .semibold).foregroundStyle(Look.ink)
-                    Text(activity.target).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle)
+                    if let note = activity.note, !note.isEmpty {
+                        Text(note).font(.system(size: 12.5)).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(1)
+                    } else {
+                        Text(activity.target).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle)
+                    }
                 } else {
                     Text("Working").mono(11.5, weight: .semibold).foregroundStyle(Color.busy)
                 }
@@ -338,8 +337,11 @@ private struct RecordPromptNote: View {
     }
 }
 
-/// Under the record: the agent's task list on a line, the reply box, and a line saying how it asks, its model and how
-/// full its context is. ↩ sends, ⇧↩ starts a new line; while it works and nothing is typed, the button stops it.
+/// Over the record's end: the reply in a box of its own, floating — the record runs out under it, no bar across the
+/// pane (2026-10-07, user: 下面这个对话框横跨了一整条太突兀了，官方app都是悬浮的). In the box: the agent's task list
+/// on a line (while the pane has no side for it), the reply's files, the reply, and a foot with `+`, how it asks, its
+/// model, how full its context is and the send key. ↩ sends, ⇧↩ starts a new line; while it works and nothing is
+/// typed, the key stops it.
 private struct RecordDock: View {
     let state: TerminalPaneState
     let model: TerminalsModel
@@ -347,19 +349,28 @@ private struct RecordDock: View {
     let focused: Bool
     let working: Bool
     let waiting: Bool
+    /// The pane has its side out: the task list and the context's fill are there, not here.
+    let beside: Bool
+    @Binding var sideShown: Bool
     let lastTurnChanges: () -> Void
     @State private var planOpen = false
     @Environment(\.interfaceLook) private var look
+
+    /// The ground fades in over this much above the box.
+    static let fade: CGFloat = 22
 
     var body: some View {
         @Bindable var record = state.record
         let info = state.session?.info
         let stops = working && !waiting && record.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !record.sending
-        VStack(spacing: 0) {
-            HairRule(color: Look.line)
-            VStack(alignment: .leading, spacing: 7) {
-                if let line = RecordDisplay.plan(record.plan) {
-                    VStack(alignment: .leading, spacing: 4) {
+        let radius: CGFloat = look.isClassic ? 14 : 0
+        VStack(alignment: .leading, spacing: 6) {
+            if let error = record.error {
+                Text(error).font(.system(size: 12)).foregroundStyle(Color.failed).lineLimit(2).textSelection(.enabled).padding(.horizontal, 4)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                if !beside, let line = RecordDisplay.plan(record.plan) {
+                    VStack(alignment: .leading, spacing: 5) {
                         Button { planOpen.toggle() } label: {
                             HStack(spacing: 6) {
                                 RecordFold(open: planOpen)
@@ -370,74 +381,72 @@ private struct RecordDock: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        if planOpen {
-                            ForEach(Array(record.plan.enumerated()), id: \.offset) { _, entry in
-                                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                                    Text(entry.state == .done ? "[x]" : entry.state == .doing ? "[>]" : "[ ]").mono(11)
-                                        .foregroundStyle(entry.state == .doing ? Color.busy : entry.state == .done ? Color.ok : Look.faint)
-                                    Text(entry.text).font(.system(size: 12)).foregroundStyle(entry.state == .done ? Look.ink2 : Look.ink)
-                                        .strikethrough(entry.state == .done, color: Look.ink2)
-                                }
-                                .padding(.leading, 17)
-                            }
+                        if planOpen { RecordPlanRows(plan: record.plan).padding(.leading, 17) }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    HairRule(color: Look.line)
+                }
+                if !record.draftFiles.isEmpty { RecordDraftStrip(record: record).padding(.horizontal, 10).padding(.top, 9) }
+                ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
+                             takesFocusAtFirst: focused, label: "Reply", onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
+                             onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
+                    .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
+                    .overlay(alignment: .topLeading) {
+                        if record.draft.isEmpty {
+                            Text(stops ? "Reply · esc to Stop" : "Reply").font(.system(size: 14)).foregroundStyle(Look.faint).padding(.leading, 5).allowsHitTesting(false)
                         }
                     }
-                }
-                if let error = record.error {
-                    Text(error).font(.system(size: 12)).foregroundStyle(Color.failed).lineLimit(2).textSelection(.enabled)
-                }
-                if !record.draftFiles.isEmpty { RecordDraftStrip(record: record) }
-                HStack(alignment: .bottom, spacing: 8) {
+                    .padding(.horizontal, 12).padding(.top, 11).padding(.bottom, 7)
+                HStack(spacing: 8) {
                     MenuButton(entries: {
                         [MenuEntry(title: "Files…", symbol: "folder", action: { record.chooseFiles() }),
                          MenuEntry(title: "Paste Image", symbol: "doc.on.clipboard", key: "v", action: { record.pasteFromClipboard() })]
                     }, above: true, help: "Attach") {
-                        PlusSquare(side: look.isClassic ? 28 : ComposeField.minHeight + 16)
+                        LookGlyph(glyph: "+", symbol: "plus", size: 16).foregroundStyle(Look.ink2).frame(width: 26, height: 26).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(info?.status == "exited")
-                    ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
-                                 takesFocusAtFirst: focused, label: "Reply", onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
-                                 onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
-                        .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))
-                        .padding(.horizontal, look.isClassic ? 11 : 10).padding(.vertical, 8)
-                        .grounded(look.isClassic ? Look.raised : Color.clear, radius: look.isClassic ? 12 : 0)
-                        .framed(look.isClassic ? Color.clear : Look.line, radius: look.isClassic ? 12 : 0)
-                        .overlay(alignment: .leading) {
-                            if record.draft.isEmpty { Text("Reply").font(.system(size: 14)).foregroundStyle(Look.faint).padding(.leading, look.isClassic ? 16 : 15).allowsHitTesting(false) }
-                        }
+                    Text(sessionWords(info, record)).mono(10.5).foregroundStyle(Look.faint).lineLimit(1)
+                    Spacer(minLength: 8)
+                    if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
+                        Text("Context \(context)").mono(10.5).foregroundStyle(Look.faint).lineLimit(1)
+                    }
                     Button { if stops { record.interrupt() } else { record.send() } } label: {
                         Group {
                             if record.sending { BrailleSpinner() }
-                            else if look.isClassic { Image(systemName: stops ? "stop.fill" : "arrow.up").font(.system(size: stops ? 10 : 13, weight: .bold)) }
-                            else { Text(stops ? "■" : "↑").font(.system(size: stops ? 13 : 17, weight: .bold, design: .monospaced)) }
+                            else if look.isClassic { Image(systemName: stops ? "stop.fill" : "arrow.up").font(.system(size: stops ? 9 : 12, weight: .bold)) }
+                            else { Text(stops ? "■" : "↑").font(.system(size: stops ? 12 : 15, weight: .bold, design: .monospaced)) }
                         }
                         .foregroundStyle(record.canSend || stops ? (look.isClassic ? Color.white : Look.ground) : Look.faint)
-                        .frame(width: look.isClassic ? 28 : 34, height: look.isClassic ? 28 : ComposeField.minHeight + 16)
+                        .frame(width: look.isClassic ? 26 : 30, height: 26)
                         .background(sendGround(active: record.canSend || stops))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(!record.canSend && !stops)
-                    .help(stops ? "Stop esc" : "Send ↩")
+                    .help(stops ? "Stop esc" : "Send ↩ · New Line ⇧↩")
                 }
-                HStack(spacing: 6) {
-                    Text(sessionWords(info, record)).lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(working ? "↩ Send · esc Stop" : "↩ Send · ⇧↩ New Line").lineLimit(1)
-                    if let context = RecordDisplay.context(record.usage) { Text("· Context \(context)").lineLimit(1) }
-                }
-                .mono(10.5).foregroundStyle(Look.faint)
+                .padding(.leading, 7).padding(.trailing, 8).padding(.bottom, 8)
             }
-            .frame(maxWidth: TerminalRecordPane.column, alignment: .leading)
-            .padding(.horizontal, 24).padding(.top, 9).padding(.bottom, 9)
-            .frame(maxWidth: .infinity)
+            .grounded(Look.panel, radius: radius)
+            .framed(Look.line, radius: radius)
+            .shadow(color: .black.opacity(look.isClassic ? 0.12 : 0), radius: 12, y: 4)
         }
-        .background(Look.ground)
+        .frame(maxWidth: TerminalRecordPane.column, alignment: .leading)
+        .padding(.horizontal, 24).padding(.top, Self.fade - 8).padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
+        // No bar: the record fades out under the box's top, and below that the pane's own ground.
+        .background {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Look.ground.opacity(0), Look.ground], startPoint: .top, endPoint: .bottom).frame(height: Self.fade)
+                Look.ground
+            }
+        }
         .onChange(of: record.draft) { record.keepDraftFiles() }
         .contextMenu {
             Button(record.verbose ? "Transcript: Normal" : "Transcript: Verbose") { record.verbose.toggle() }
             if record.hasSession, record.agent == "claude-code" || record.agent == "codex" { Button("Changes of the Last Turn", action: lastTurnChanges) }
+            Button(sideShown ? "Hide Side Pane" : "Show Side Pane") { sideShown.toggle() }
         }
     }
 
@@ -490,19 +499,23 @@ private struct RecordChangesSheet: View {
     }
 }
 
-private struct RecordFileDiff: View {
+struct RecordFileDiff: View {
     let file: FileDiff
+    /// Its path and lines in and out above the hunks (not under a row that already says them).
+    var header = true
     @Environment(\.interfaceLook) private var look
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(file.path).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.head)
-                Spacer(minLength: 4)
-                RecordDiffStat(added: file.added, removed: file.removed, plain: true)
+            if header {
+                HStack(spacing: 8) {
+                    Text(file.path).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.head)
+                    Spacer(minLength: 4)
+                    RecordDiffStat(added: file.added, removed: file.removed, plain: true)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                HairRule(color: Look.line)
             }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            HairRule(color: Look.line)
             // Code keeps its lines: a long one scrolls sideways, with the whole file's hunks.
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {

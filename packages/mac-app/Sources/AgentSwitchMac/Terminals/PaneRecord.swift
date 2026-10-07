@@ -54,6 +54,13 @@ final class PaneRecord {
     }
     /// The transcript in full: every run of work open, thinking shown.
     var verbose = false
+    /// The side's files shown with their diff.
+    var openFiles: Set<String> = []
+    /// What a run of work changed, by its item's id, once asked for.
+    private(set) var diffs: [String: [FileDiff]] = [:]
+
+    /// The design preview's: the step (`<run's id>/<its place>`) drawn opened.
+    static var previewOpenStep: String?
 
     @ObservationIgnored private var terminal: String?
     @ObservationIgnored private var harness = ""
@@ -94,6 +101,7 @@ final class PaneRecord {
         harness = info.harness
         session = info.agentSessionId
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; error = nil
+        openFiles = []; diffs = [:]
         loaded = session == nil
         refresh()
     }
@@ -108,6 +116,15 @@ final class PaneRecord {
         draft = ""
         draftFiles = []
         insert = nil
+        openFiles = []; diffs = [:]
+    }
+
+    /// What the run of work `work` changed, read again (it may still be going).
+    func loadChanges(work: String) async {
+        guard !staged, let id = session else { return }
+        let files = (try? await client().sessionChanges(harness: harness, id: id, work: work)) ?? []
+        guard id == session else { return }
+        if diffs[work] != files { diffs[work] = files }
     }
 
     private func took(_ event: String, _ data: String) {
@@ -312,6 +329,12 @@ final class PaneRecord {
         activitySince = since
         more = true
         loaded = true
+    }
+
+    /// The design preview's: the side with a file open on its diff.
+    func stageChanges(_ diffs: [String: [FileDiff]], open: Set<String>) {
+        self.diffs = diffs
+        openFiles = open
     }
 
     /// The design preview's: a reply being written, with files.

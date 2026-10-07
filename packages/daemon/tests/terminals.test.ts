@@ -426,6 +426,11 @@ describe("terminal host", () => {
     now = 6_000;
     await host.hook(info.id, token, { event: "PreToolUse", payload: { tool_name: "Edit", tool_input: { file_path: "/w/a.ts", old_string: "x" } } });
     expect(host.get(info.id)).toMatchObject({ statusSince: 5_000, activity: { tool: "Edit", target: "/w/a.ts" } });
+    expect(host.get(info.id)!.activity).not.toHaveProperty("note");
+    // What the agent says the command is for, in its own words (2026-10-07: its own app says that, not the command):
+    // one line, with the activity.
+    await host.hook(info.id, token, { event: "PreToolUse", payload: { tool_name: "Bash", tool_input: { command: "cat > x <<'EOF'\n…", description: "Write the patch\n  and run it" } } });
+    expect(host.get(info.id)!.activity).toEqual({ tool: "Bash", target: "cat > x <<'EOF' …", note: "Write the patch and run it" });
     now = 9_000;
     await host.hook(info.id, token, { event: "Stop", payload: {} });
     expect(host.get(info.id)).toMatchObject({ status: "idle", statusSince: 9_000, activity: null });

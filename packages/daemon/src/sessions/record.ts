@@ -18,6 +18,8 @@ export type RecordStep = {
   readonly text: string;
   /** The tool's own name, for a step that is none of the kinds (`tool`), e.g. `browser · navigate`. */
   readonly tool?: string;
+  /** What the agent said the step is for, in its own words (Claude Code's `description` of a command). */
+  readonly note?: string;
   /** The end of what a command printed. */
   readonly out?: string;
   readonly failed?: boolean;
@@ -28,6 +30,8 @@ export type RecordStep = {
 
 export type RecordItem =
   | { readonly type: "user"; readonly id: string; readonly ts: number; readonly text: string; readonly images?: number; readonly queued?: boolean; readonly clipped?: boolean }
+  // `thinking`: what the agent thought on the way, where it wrote that down — said like an answer, quieter (a screen
+  // that does not know the mark shows it as an answer, which is how the agents' own apps show it).
   | { readonly type: "answer"; readonly id: string; readonly ts: number; readonly text: string; readonly clipped?: boolean }
   | { readonly type: "work"; readonly id: string; readonly ts: number; readonly secs: number; readonly steps: readonly RecordStep[] }
   | { readonly type: "note"; readonly id: string; readonly ts: number; readonly text: string };
@@ -101,10 +105,12 @@ function readLines(path: string, start: number, end: number): { lines: Line[]; f
 // ---------------------------------------------------------------------------------------------------------------------
 
 type Patch = { path: string; added: number; removed: number; hunks: DiffHunk[] };
-type Step = { kind: StepKind; text: string; tool?: string; out?: string; failed?: boolean; added?: number; removed?: number; patches?: Patch[] };
+type Step = { kind: StepKind; text: string; tool?: string; note?: string; out?: string; failed?: boolean; added?: number; removed?: number; patches?: Patch[];
+  /** A command and what it printed, whole: for the one step a screen opens (`readStep`), never in the record. */
+  cmd?: string; printed?: string };
 type Built =
   | { type: "user"; at: number; ts: number; text: string; images: number; queued?: boolean }
-  | { type: "answer"; at: number; ts: number; text: string }
+  | { type: "answer"; at: number; ts: number; text: string; thinking?: boolean }
   | { type: "work"; at: number; ts: number; end: number; steps: Step[] }
   | { type: "note"; at: number; ts: number; text: string };
 
@@ -120,13 +126,14 @@ class Builder {
     this.items.push({ type: "user", at, ts, text, images, ...(queued ? { queued } : {}) });
   }
 
-  /** The agent's words. A run of work before them ends when they come. */
-  answer(at: number, ts: number, text: string): void {
+  /** The agent's words. A run of work before them ends when they come. `thinking`: what it thought on the way. */
+  answer(at: number, ts: number, text: string, thinking = false): void {
     this.close(ts);
     const last = this.items[this.items.length - 1];
-    // One answer written as several lines in a row (Claude Code writes a line per block) reads as one.
-    if (last?.type === "answer" && ts - last.ts < 2000 && last.at !== at) { last.text = `${last.text}\n\n${text}`; return; }
-    this.items.push({ type: "answer", at, ts, text });
+    // One answer written as several lines in a row (Claude Code writes a line per block) reads as one; a thought and
+    // an answer stay two.
+    if (last?.type === "answer" && !last.thinking === !thinking && ts - last.ts < 2000 && last.at !== at) { last.text = `${last.text}\n\n${text}`; return; }
+    this.items.push({ type: "answer", at, ts, text, ...(thinking ? { thinking } : {}) });
   }
 
   note(at: number, ts: number, text: string): void {
@@ -230,7 +237,7 @@ function claudeStep(name: string, input: Json, cwd: string): Step {
     case "Grep": return { kind: "search", text: clip(str(input.pattern), STEP_CHARS) };
     case "Glob": return { kind: "search", text: clip(str(input.pattern), STEP_CHARS) };
     case "LS": return { kind: "list", text: file };
-    case "Bash": return { kind: "run", text: commandLine(str(input.command)) };
+    case "Bash": return { kind: "run", text: commandLine(str(input.command)), cmd: str(input.command), ...(firstLine(str(input.description)) ? { note: firstLine(str(input.description)) } : {}) };
     case "Edit": case "MultiEdit": case "NotebookEdit": return { kind: "edit", text: file };
     case "Write": return { kind: "write", text: file };
     case "WebFetch": return { kind: "web", text: clip(str(input.url), STEP_CHARS) };
@@ -252,7 +259,7 @@ function claudeResult(step: Step, part: Json, result: unknown, cwd: string): voi
   if (part.is_error === true) { step.failed = true; step.out = tail(typeof result === "string" ? result : said); return; }
   if (step.kind === "run") {
     const out = [str(r.stdout), str(r.stderr)].filter((s) => s.trim()).join("\n");
-    if (out.trim()) step.out = tail(out);
+    if (out.trim()) { step.out = tail(out); step.printed = out; }
     if (r.interrupted === true) step.failed = true;
     return;
   }
@@ -326,7 +333,8 @@ function claudeBuild(lines: readonly Line[]): Builder {
     }
     for (const part of parts(line)) {
       if (part.type === "text" && str(part.text).trim()) b.answer(at, ts, str(part.text).trim());
-      else if (part.type === "thinking" && str(part.thinking).trim()) b.step(at, ts, { kind: "think", text: firstLine(str(part.thinking)) });
+      // Thinking it wrote down (most of it is kept sealed: only what has words): said on the way, as its own app does.
+      else if (part.type === "thinking" && str(part.thinking).trim()) b.answer(at, ts, str(part.thinking).trim(), true);
       else if (part.type === "tool_use") {
         const input = obj(part.input);
         const step = b.step(at, ts, claudeStep(str(part.name), input, cwd));
@@ -376,7 +384,7 @@ function codexItem(b: Builder, at: number, ts: number, payload: Json, cwd: strin
       return;
     }
     case "AgentMessage": { const text = texts(item.content); if (text) b.answer(at, ended, text); return; }
-    case "Reasoning": { const text = texts(item.summary_text); if (text) b.step(at, began, { kind: "think", text: firstLine(text.replace(/^\*\*(.+?)\*\*$/m, "$1")) }, ended); return; }
+    case "Reasoning": { const text = texts(item.summary_text); if (text) b.answer(at, ended, text, true); return; }
     case "CommandExecution": {
       const parsed = Array.isArray(item.parsed_cmd) ? item.parsed_cmd.map(obj) : [];
       const failed = (typeof item.exit_code === "number" && item.exit_code !== 0) || item.status === "failed";
@@ -392,7 +400,8 @@ function codexItem(b: Builder, at: number, ts: number, payload: Json, cwd: strin
       }
       const command = Array.isArray(item.command) ? str(item.command[item.command.length - 1]) : str(item.command);
       const out = str(item.aggregated_output) || [str(item.stdout), str(item.stderr)].filter(Boolean).join("\n");
-      b.step(at, began, { kind: "run", text: commandLine(str(parsed[0]?.cmd) && parsed.length === 1 ? str(parsed[0]?.cmd) : command), ...(out.trim() ? { out: tail(out) } : {}), ...(failed ? { failed } : {}) }, ended);
+      const shown = str(parsed[0]?.cmd) && parsed.length === 1 ? str(parsed[0]?.cmd) : command;
+      b.step(at, began, { kind: "run", text: commandLine(shown), cmd: shown, ...(out.trim() ? { out: tail(out), printed: out } : {}), ...(failed ? { failed } : {}) }, ended);
       return;
     }
     case "FileChange": {
@@ -474,11 +483,11 @@ function shown(it: Built, id: string): RecordItem {
   const long = (text: string) => (text.length > TEXT_CHARS ? { text: text.slice(0, TEXT_CHARS), clipped: true as const } : { text });
   switch (it.type) {
     case "user": return { type: "user", id, ts: it.ts, ...long(it.text), ...(it.images ? { images: it.images } : {}), ...(it.queued ? { queued: true } : {}) };
-    case "answer": return { type: "answer", id, ts: it.ts, ...long(it.text) };
+    case "answer": return { type: "answer", id, ts: it.ts, ...long(it.text), ...(it.thinking ? { thinking: true } : {}) };
     case "note": return { type: "note", id, ts: it.ts, text: it.text };
     case "work": return {
       type: "work", id, ts: it.ts, secs: Math.max(0, Math.round((it.end - it.ts) / 1000)),
-      steps: it.steps.map(({ patches: _patches, ...step }) => step),
+      steps: it.steps.map(({ patches: _patches, cmd: _cmd, printed: _printed, ...step }) => step),
     };
   }
 }
@@ -558,6 +567,38 @@ export function readChanges(harness: RecordHarness, path: string, o: { work?: st
     }
     return { path, added: f.added, removed: f.removed, hunks, ...(left < 0 || hunks.length < f.hunks.length ? { clipped: true } : {}) };
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// one step, whole
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** A command as it was written and what it printed: this much of each. */
+export const STEP_TEXT_CHARS = 20000;
+export type StepDetail = { readonly kind: StepKind; readonly text: string; readonly note?: string; readonly out?: string; readonly failed?: boolean;
+  /** The command, or what it printed, is longer than is sent: the command's start, the output's end. */
+  readonly clipped?: boolean };
+
+/** The `n`-th step of the run of work `work`, with its command whole (its lines kept) and all it printed — the record
+ *  itself carries one line and the end of the output. Null: no such run, no such step. */
+export function readStep(harness: RecordHarness, path: string, o: { work: string; n: number; cwd?: string }): StepDetail | null {
+  const { size } = fileRev(path);
+  const at = Number(o.work.split(".")[0]);
+  if (!Number.isInteger(at) || at < 0 || at >= size || !Number.isInteger(o.n) || o.n < 0) return null;
+  const built = build(harness, readLines(path, at, Math.min(size, at + WINDOWS[1]!)).lines.filter((l) => l.at >= at), o.cwd ?? "");
+  const all = built?.items ?? [];
+  const hit = all[ids(all).indexOf(o.work)];
+  if (!hit || hit.type !== "work" || hit.at !== at) return null;
+  const step = hit.steps[o.n];
+  if (!step) return null;
+  const text = (step.cmd ?? step.text).replace(/\r\n?/g, "\n").trim();
+  const out = (step.printed ?? step.out ?? "").replace(/\r\n?/g, "\n").replace(/\s+$/, "");
+  const long = text.length > STEP_TEXT_CHARS || out.length > STEP_TEXT_CHARS;
+  return {
+    kind: step.kind, text: text.slice(0, STEP_TEXT_CHARS), ...(step.note ? { note: step.note } : {}),
+    ...(out ? { out: out.length > STEP_TEXT_CHARS ? out.slice(out.length - STEP_TEXT_CHARS) : out } : {}),
+    ...(step.failed ? { failed: true } : {}), ...(long ? { clipped: true } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
