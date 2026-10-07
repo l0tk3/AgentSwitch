@@ -208,8 +208,8 @@ extension TerminalsModel {
         starting = true
         createError = ""
         let agent = pickedAgent
-        let model = pickedModels[agent].flatMap { id in (models[agent] ?? []).contains { $0.id == id } ? id : nil }
-        let body = NewTerminalRequest(harness: agent, cwd: cwd, model: model, mode: pickedMode, cols: gridHere?.cols, rows: gridHere?.rows)
+        let model = pickedModel
+        let body = NewTerminalRequest(harness: agent, cwd: cwd, model: model, effort: pickedEffort, mode: pickedMode, cols: gridHere?.cols, rows: gridHere?.rows)
         let c = client()
         Task {
             defer { starting = false }

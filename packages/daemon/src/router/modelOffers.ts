@@ -7,9 +7,19 @@
 
 import { realpathSync, statSync } from "node:fs";
 import { claudeIds, codexIds, listClaudeModels, listCodexModels, type ClaudeModelInfo, type CodexModelInfo, type Discovered } from "./discovery.js";
+import { ordered } from "../harness/efforts.js";
 
-export type ModelOffer = { readonly id: string; readonly name: string; readonly description?: string; readonly older?: true };
-export type AgentOffer = { readonly models: readonly ModelOffer[]; /** What "default" is today, when the agent says. */ readonly defaultName?: string };
+export type ModelOffer = {
+  readonly id: string; readonly name: string; readonly description?: string; readonly older?: true;
+  /** How hard it can be asked to think, lowest first (harness/efforts.ts): none for a model that takes no level;
+   *  absent when the agent does not say. And the level it uses unless told, when the agent says. */
+  readonly efforts?: readonly string[]; readonly defaultEffort?: string;
+};
+export type AgentOffer = {
+  readonly models: readonly ModelOffer[]; /** What "default" is today, when the agent says. */ readonly defaultName?: string;
+  /** The levels of the agent's own default model (no model chosen), and the one it uses unless told. */
+  readonly efforts?: readonly string[]; readonly defaultEffort?: string;
+};
 export type Offers = Partial<Record<"claude-code" | "codex", AgentOffer>>;
 
 /** "Opus 5.5" → opus / [5, 5]; "GPT-6-Sol" → gpt sol / [6]; "GPT-5.5" → gpt / [5, 5]. Null without a version. */
@@ -28,7 +38,7 @@ const newer = (a: number[], b: number[]): boolean => {
   return false;
 };
 
-type Entry = { id: string; name: string; description?: string; upgrade?: string };
+type Entry = { id: string; name: string; description?: string; upgrade?: string; efforts?: readonly string[]; defaultEffort?: string };
 
 /** Older: the agent names an upgrade that it also lists, or another entry of the same family has a higher version. */
 export function markOlder(entries: readonly Entry[]): ModelOffer[] {
@@ -38,7 +48,10 @@ export function markOlder(entries: readonly Entry[]): ModelOffer[] {
     const f = parsed[i] ?? null;
     const superseded = (e.upgrade !== undefined && e.upgrade !== e.id && ids.has(e.upgrade))
       || (f !== null && parsed.some((g, j) => j !== i && g !== null && g.family === f.family && newer(g.version, f.version)));
-    return { id: e.id, name: e.name, ...(e.description ? { description: e.description } : {}), ...(superseded ? { older: true as const } : {}) };
+    return {
+      id: e.id, name: e.name, ...(e.description ? { description: e.description } : {}), ...(superseded ? { older: true as const } : {}),
+      ...(e.efforts ? { efforts: ordered(e.efforts) } : {}), ...(e.defaultEffort ? { defaultEffort: e.defaultEffort } : {}),
+    };
   });
 }
 
@@ -47,17 +60,21 @@ export function claudeOffer(list: readonly ClaudeModelInfo[]): AgentOffer {
   const byDefault = list.find((m) => m.value === "default");
   const defaultName = byDefault?.description.split(" · ")[0]?.trim();
   const seen = new Set<string>();
+  // It says the levels of each model that takes them: once it says any, a model it gives none takes none (Haiku).
+  const says = list.some((m) => m.efforts?.length);
   const entries = list.filter((m) => m.value !== "default" && !seen.has(m.value) && seen.add(m.value))
-    .map((m): Entry => ({ id: m.value, name: m.displayName, ...(m.description ? { description: m.description } : {}) }));
-  return { models: markOlder(entries), ...(defaultName ? { defaultName } : {}) };
+    .map((m): Entry => ({ id: m.value, name: m.displayName, ...(m.description ? { description: m.description } : {}), ...(m.efforts ? { efforts: m.efforts } : says ? { efforts: [] } : {}) }));
+  return { models: markOlder(entries), ...(defaultName ? { defaultName } : {}), ...(byDefault?.efforts ? { efforts: ordered(byDefault.efforts) } : {}) };
 }
 
 /** Codex's list without the entries it hides. */
 export function codexOffer(list: readonly CodexModelInfo[]): AgentOffer {
   const entries = list.filter((m) => !m.hidden).map((m): Entry => ({
     id: m.id, name: m.displayName ?? m.id, ...(m.description ? { description: m.description } : {}), ...(m.upgrade ? { upgrade: m.upgrade } : {}),
+    ...(m.efforts ? { efforts: m.efforts } : {}), ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}),
   }));
-  return { models: markOlder(entries) };
+  const own = list.find((m) => m.isDefault);
+  return { models: markOlder(entries), ...(own?.efforts ? { efforts: ordered(own.efforts) } : {}), ...(own?.defaultEffort ? { defaultEffort: own.defaultEffort } : {}) };
 }
 
 export type ModelOffersOptions = {
@@ -69,6 +86,8 @@ export type ModelOffersOptions = {
   readonly listCodex?: () => Promise<CodexModelInfo[]>;
   /** Tests: what identifies a binary's build (its real path and modification time). */
   readonly signature?: (path: string) => string;
+  /** OpenCode's models with their variants (`provider/id` → the variants), from a server of ours that is up. */
+  readonly openCodeVariants?: () => Promise<Record<string, string[]>>;
 };
 
 export const OFFERS_REFRESH_MS = 6 * 60 * 60_000;
@@ -80,6 +99,8 @@ const fileSignature = (path: string): string => {
 
 export class ModelOffers {
   private offers: Offers = {};
+  private variantsNow: Record<string, string[]> = {};
+  private lookVariants: (() => Promise<Record<string, string[]>>) | null = null;
   private signatures = new Map<string, string>();
   private running: Promise<Discovered> | null = null;
 
@@ -88,6 +109,25 @@ export class ModelOffers {
   }
 
   current(): Offers { return this.offers; }
+
+  /** OpenCode's variants per model (`provider/id`), as last read; none until a server of ours has listed its models. */
+  variants(): Readonly<Record<string, readonly string[]>> { return this.variantsNow; }
+
+  /** Where OpenCode's variants are read from, once a server of ours is up; read at once and with every refresh. */
+  watchOpenCode(look: () => Promise<Record<string, string[]>>): void {
+    this.lookVariants = look;
+    void this.readVariants();
+  }
+
+  private async readVariants(): Promise<void> {
+    const look = this.lookVariants ?? this.o.openCodeVariants;
+    if (!look) return;
+    try {
+      const found = await look();
+      // A server that has not loaded its models yet lists none: what was read before stands.
+      if (Object.keys(found).length) this.variantsNow = found;
+    } catch (e) { (this.o.log ?? ((l: string) => console.error(l)))(`model discovery (opencode variants): ${(e as Error).message}`); }
+  }
 
   /** Ask both agents (one at a time per call; a call made while one runs waits for it). A failed answer keeps what
    *  that agent offered before. Returns the ids found, for the router's catalog. */
@@ -133,6 +173,7 @@ export class ModelOffers {
     if (claude?.length) next["claude-code"] = claudeOffer(claude);
     if (codex?.length) next.codex = codexOffer(codex);
     this.offers = next;
+    await this.readVariants();
     return { "claude-code": claude ? claudeIds(claude) : [], codex: codex ? codexIds(codex) : [] };
   }
 }

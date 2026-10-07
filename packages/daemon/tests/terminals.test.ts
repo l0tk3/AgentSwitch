@@ -544,6 +544,29 @@ describe("terminals over HTTP", () => {
     expect((await call("GET", `/terminals/${id}`)).json.terminal.sizedBy ?? null).toBeNull();
   });
 
+  it("a screen changes how hard Claude Code thinks: its own command typed, also while it works; not for an agent with a picker of its own", async () => {
+    const { home, cwd, base, token, call } = await start();
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd, effort: "medium" })).json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    await until(() => screen().includes("fake agent ready"));
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.effort).toBe("medium");
+    expect((await call("POST", `/terminals/${id}/effort`, { effort: "high" })).json).toEqual({ ok: true });
+    await until(() => screen().includes("got: /effort high"));
+    expect((await call("POST", `/terminals/${id}/effort`, { effort: "ultra" })).status).toBe(400);
+    expect((await call("POST", `/terminals/${id}/effort`, { effort: "high; rm" })).status).toBe(400);
+    expect((await call("POST", "/terminals/nope/effort", { effort: "high" })).status).toBe(404);
+    // While it works: Claude Code takes it for the next request of the turn.
+    expect((await call("POST", `/terminals/${id}/input`, { text: "tool" })).status).toBe(200);
+    await until(() => screen().includes("tool used"));
+    expect((await call("POST", `/terminals/${id}/effort`, { effort: "max" })).status).toBe(200);
+    await until(() => screen().includes("got: /effort max"));
+    const audit = readFileSync(join(home, "terminals", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.filter((a) => a.action === "effort").map((a) => a.detail.effort)).toEqual(["high", "max"]);
+    const codex = (await call("POST", "/terminals", { harness: "codex", cwd })).json.terminal.id as string;
+    expect((await call("POST", `/terminals/${codex}/effort`, { effort: "high" })).status).toBe(400);
+  });
+
   it("a screen changes the agent's model: its own command typed, Claude Code's question skipped for that one change, the new model told (simple-view-v0 §5.4)", async () => {
     const { home, cwd, base, token, call } = await start();
     const id = (await call("POST", "/terminals", { harness: "claude-code", cwd, model: "opus" })).json.terminal.id as string;
@@ -948,6 +971,10 @@ describe("terminal pieces", () => {
     const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, gate: null, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin", SECRET_GATE_REPAIR_KEY: "k" } });
     const claude = launch({ id: "t1", harness: "claude-code", cwd: "/tmp", model: "claude-opus-5-5", mode: "manual", hookToken: "tok" });
     expect(claude.args).toEqual(["--settings", join(stateDir, "t1", "settings.json"), "--model", "claude-opus-5-5", "--permission-mode", "manual"]);
+    // How hard it thinks, in each agent's own argument (harness/efforts.ts).
+    expect(launch({ id: "t9", harness: "claude-code", cwd: "/tmp", model: "opus", effort: "xhigh", mode: "manual", hookToken: "tok" }).args.slice(2))
+      .toEqual(["--model", "opus", "--effort", "xhigh", "--permission-mode", "manual"]);
+    expect(launch({ id: "t10", harness: "codex", cwd: "/tmp", model: "gpt-6-sol", effort: "high", mode: "bypass", hookToken: "tok" }).args.join(" ")).toContain('-m gpt-6-sol -c model_reasoning_effort="high"');
     expect(launch({ id: "t5", harness: "claude-code", cwd: "/tmp", mode: "auto", hookToken: "tok" }).args.slice(-2)).toEqual(["--permission-mode", "auto"]);
     expect(launch({ id: "t6", harness: "claude-code", cwd: "/tmp", mode: "bypass", hookToken: "tok" }).args.slice(-1)).toEqual(["--dangerously-skip-permissions"]);
     expect(launch({ id: "t8", harness: "claude-code", cwd: "/tmp", mode: "auto", allowBypass: true, hookToken: "tok" }).args.slice(-3)).toEqual(["--permission-mode", "auto", "--allow-dangerously-skip-permissions"]);

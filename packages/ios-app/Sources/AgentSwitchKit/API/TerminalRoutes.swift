@@ -23,6 +23,7 @@ public struct TerminalAttachmentRef: Encodable, Sendable, Equatable {
 }
 private struct CommandList: Decodable { let commands: [SlashCommand] }
 private struct ModelBody: Encodable { let model: String }
+private struct EffortBody: Encodable { let effort: String }
 private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int; let screen: String? }
 private struct ClickBody: Encodable { let keys: [String] }
@@ -109,6 +110,19 @@ extension AgentSwitchAPI {
             return .asked
         } catch APIError.http(status: 404, message: _) {
             _ = try await sendTerminalInput(id, text: RecordDisplay.modelCommand(model), sealed: false)
+            return .typed
+        }
+    }
+
+    /// Another thinking level for the agent in a terminal (Claude Code: `/effort <level>`, which it also keeps as that
+    /// model's default, `max` excepted). Refused while it waits for an answer (409), and for an agent that chooses in a
+    /// picker of its own (400).
+    public func setTerminalEffort(_ id: String, effort: String) async throws -> ModelChange {
+        do {
+            let _: OKReply = try await post(["terminals", id, "effort"], body: EffortBody(effort: effort))
+            return .asked
+        } catch APIError.http(status: 404, message: _) {
+            _ = try await sendTerminalInput(id, text: EffortDisplay.command(effort), sealed: false)
             return .typed
         }
     }

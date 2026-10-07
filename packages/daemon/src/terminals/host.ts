@@ -52,6 +52,9 @@ export type TerminalInfo = {
   /** The model the agent says it is on now (Claude Code, each time it changes: a `/model` in the terminal, one a
    *  screen asked for, a fallback of its own); null until it has said. `model` is what the terminal was started with. */
   readonly modelNow: string | null;
+  /** The thinking level it was started at, in the agent's own word; null: the agent's default. What it is at now is
+   *  in its session's record (Claude Code and Codex write it with every turn). */
+  readonly effort: string | null;
   readonly mode: PermissionMode;
   /** What the screens call it: the user's own name for it, else a meaningful title the agent set (its current task),
    *  else the folder's name. */
@@ -124,6 +127,8 @@ export type TerminalEvent =
 /** What a launcher gets: the new terminal's id and hook token go into the agent's env. */
 export type LaunchRequest = {
   readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; readonly model?: string; readonly resume?: string;
+  /** How hard it thinks, in the agent's own word for the level (harness/efforts.ts); absent: the agent's default. */
+  readonly effort?: string;
   /** Continue `resume` as a new session with its history, instead of the same session. */
   readonly fork?: boolean;
   readonly mode: PermissionMode;
@@ -392,6 +397,8 @@ class Session {
   agentCwd: string | null = null;
   /** The model the agent says it is on now (PostModelSwitch); and one a screen asked for a moment ago. */
   modelNow: string | null = null;
+  /** The level it was started at; null: the agent's own default. */
+  effort: string | null = null;
   modelAsked: { readonly model: string; readonly at: number } | null = null;
   /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
   readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string } | null; since: number }>();
@@ -489,19 +496,20 @@ export class TerminalHost {
 
   /** Starts an agent. The terminal is listed from the moment it is made (a second resume of the same session finds it),
    *  while a companion starts; the program follows. */
-  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number }): Promise<TerminalInfo> {
+  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number }): Promise<TerminalInfo> {
     if (!this.helperChecked) { ensureSpawnHelper(); this.helperChecked = true; }
     const id = randomUUID().slice(0, 8);
     const hookToken = randomBytes(24).toString("base64url");
     let plan: LaunchPlan;
     try {
-      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
+      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
     } catch (err) {
       this.ended(id, true);
       throw new TerminalError("unavailable", (err as Error).message);
     }
     const s = new Session(id, req.harness, req.cwd, req.model ?? null, req.mode ?? "manual", hookToken, this.o.now(), req.cols ?? 120, req.rows ?? 36, this.o.scrollback);
     s.hooks = plan.hooks;
+    s.effort = req.effort ?? null;
     s.resumedFrom = req.resume ?? null;
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
     // Continued in place, the agent writes the session it was given (its hooks say the same once they run).
@@ -666,6 +674,18 @@ export class TerminalHost {
     if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
     s.modelAsked = { model, at: this.o.now() };
     this.write(id, replyBytes(`/model ${model}`, this.bracketedPaste(id), true));
+  }
+
+  /** A screen asks the agent in terminal `id` to think at another level: Claude Code's own command (`/effort <level>`),
+   *  which it also takes while it works (the next request of the turn runs at it). Claude Code alone: Codex chooses in
+   *  its `/model` picker, OpenCode in `/variants`, pi by a key. Not while something waits for an answer (the keys
+   *  would go to that prompt). Claude Code keeps the level as that model's default for later sessions, `max` excepted. */
+  askEffort(id: string, effort: string): void {
+    const s = this.need(id);
+    if (s.harness !== "claude-code") throw new TerminalError("invalid", "this agent chooses its level in its own picker");
+    if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
+    if (s.status === "waiting" || s.pending.size) throw new TerminalError("busy", "the agent waits for an answer");
+    this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
   }
 
   /** A hook call from the agent in terminal `id`, proven by its hook token. Permission requests wait for a screen, or
@@ -1051,7 +1071,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

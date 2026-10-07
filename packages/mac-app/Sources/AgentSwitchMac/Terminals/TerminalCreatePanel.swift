@@ -21,6 +21,12 @@ struct TerminalCreatePanel: View {
                 agents
                 PanelLabel("Model").padding(.top, 16).padding(.bottom, 8)
                 modelMenu
+                // How hard it thinks, under the agent's own word and with the levels the model picked takes; nothing
+                // where there is nothing to choose (a model with no levels, OpenCode before a model is picked).
+                if !model.effortLevels.isEmpty {
+                    PanelLabel(TerminalEffort.word(model.pickedAgent)).padding(.top, 16).padding(.bottom, 8)
+                    effortMenu
+                }
                 PanelLabel("Folder").padding(.top, 16).padding(.bottom, 8)
                 folder
                 PanelLabel("Permissions").padding(.top, 16).padding(.bottom, 8)
@@ -121,6 +127,35 @@ struct TerminalCreatePanel: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .disabled(all.isEmpty)
+    }
+
+    /// `Default · Medium`, then the levels the model takes, lowest first.
+    private var effortMenu: some View {
+        let levels = model.effortLevels
+        let own = TerminalEffort.defaultLevel(models: model.models, defaults: model.effortDefaults, harness: model.pickedAgent, model: model.pickedModel)
+        let fallback = own.map { "Default · \(TerminalEffort.name($0))" } ?? "Default"
+        return Menu {
+            Button(fallback) { model.pickedEfforts = model.pickedEfforts.filter { $0.key != model.pickedAgent } }
+            ForEach(levels, id: \.self) { level in
+                Button(TerminalEffort.name(level)) { model.pickedEfforts = model.pickedEfforts.merging([model.pickedAgent: level]) { _, new in new } }
+            }
+        } label: {
+            HStack {
+                Text(model.pickedEffort.map(TerminalEffort.name) ?? fallback)
+                    .font(look.isClassic ? .system(size: 13) : .system(size: 12.5, design: .monospaced))
+                    .foregroundStyle(Look.ink).lineLimit(1)
+                Spacer()
+                Text("▾").font(.system(size: 12, design: .monospaced)).foregroundStyle(Look.faint)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: look.isClassic ? 30 : 28)
+            .background(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).fill(look.isClassic ? Look.ink.opacity(0.07) : Color.clear))
+            .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).strokeBorder(look.isClassic ? Color.clear : Look.line, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
     }
 
     private func pick(_ option: TerminalModelOption) {

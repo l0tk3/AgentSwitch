@@ -47,6 +47,9 @@ final class TerminalsModel {
     private(set) var agents: [String] = []
     private(set) var models: [String: [TerminalModelOption]] = [:]
     private(set) var modelDefaults: [String: String] = [:]
+    /// Per agent, the thinking levels of its default model (no model picked), and the one that is its default.
+    private(set) var efforts: [String: [String]] = [:]
+    private(set) var effortDefaults: [String: String] = [:]
     /// The first list has come: from now on a terminal that goes takes its pane with it.
     private(set) var settled = false
     /// A count a terminal, raised each time it starts waiting for you or ends with an error: its row flashes once.
@@ -84,6 +87,9 @@ final class TerminalsModel {
     var creating = false
     var pickedAgent: String { didSet { defaults?.set(pickedAgent, forKey: Keys.agent) } }
     var pickedModels: [String: String] { didSet { defaults?.set(pickedModels, forKey: Keys.models) } }
+    /// Per agent, the thinking level picked for a new terminal (none: the agent's own default). Used only while the
+    /// model picked takes it.
+    var pickedEfforts: [String: String] { didSet { defaults?.set(pickedEfforts, forKey: Keys.efforts) } }
     var pickedMode: String { didSet { defaults?.set(pickedMode, forKey: Keys.mode) } }
     var folderText = ""
     var createError = ""
@@ -126,6 +132,7 @@ final class TerminalsModel {
         static let last = "terminals.last", panes = "terminals.panes", focus = "terminals.focus", collapsed = "terminals.collapsed"
         static let sideWidth = "terminals.sideWidth", sideClosed = "terminals.sideClosed"
         static let agent = "terminals.agent", models = "terminals.models", mode = "terminals.mode", folder = "terminals.folder"
+        static let efforts = "terminals.efforts"
     }
 
     enum Side {
@@ -146,6 +153,7 @@ final class TerminalsModel {
         collapsed = Set(defaults?.stringArray(forKey: Keys.collapsed) ?? [])
         pickedAgent = defaults?.string(forKey: Keys.agent) ?? "claude-code"
         pickedModels = defaults?.dictionary(forKey: Keys.models) as? [String: String] ?? [:]
+        pickedEfforts = defaults?.dictionary(forKey: Keys.efforts) as? [String: String] ?? [:]
         pickedMode = defaults?.string(forKey: Keys.mode) ?? ""
         folderText = defaults?.string(forKey: Keys.folder) ?? ""
         if let root = TerminalPanes.restore(defaults?.data(forKey: Keys.panes)) {
@@ -244,6 +252,8 @@ final class TerminalsModel {
         if agents != list.agents { agents = list.agents }
         if models != list.models { models = list.models }
         if modelDefaults != list.defaults { modelDefaults = list.defaults }
+        if efforts != list.efforts { efforts = list.efforts }
+        if effortDefaults != list.effortDefaults { effortDefaults = list.effortDefaults }
         let next = TerminalPanes.settle(layout, terminals, closing: settled)
         if next != layout { setLayout(next) }
         let first = !settled
@@ -411,6 +421,19 @@ final class TerminalsModel {
         return await withCheckedContinuation { sheetDone = $0 }
     }
 
+    /// The model picked for a new terminal of the agent picked, when the agent still lists it.
+    var pickedModel: String? {
+        pickedModels[pickedAgent].flatMap { id in (models[pickedAgent] ?? []).contains { $0.id == id } ? id : nil }
+    }
+
+    /// The thinking levels a new terminal may be started at: the picked model's, else the agent's default model's.
+    var effortLevels: [String] {
+        TerminalEffort.levels(models: models, any: efforts, harness: pickedAgent, model: pickedModel)
+    }
+
+    /// The level picked, while the model picked takes it.
+    var pickedEffort: String? { TerminalEffort.kept(pickedEfforts[pickedAgent], in: effortLevels) }
+
     func answerSheet(ok: Bool) {
         guard let done = sheetDone else { return }
         sheetDone = nil
@@ -420,10 +443,11 @@ final class TerminalsModel {
 
     #if DEBUG
     /// The design preview's: the page from made-up work, without a service.
-    func stage(terminals: [TerminalInfo], sessions: [SessionSummary], gits: [String: FolderGit], agents: [String], models: [String: [TerminalModelOption]] = [:]) {
+    func stage(terminals: [TerminalInfo], sessions: [SessionSummary], gits: [String: FolderGit], agents: [String], models: [String: [TerminalModelOption]] = [:],
+               efforts: [String: [String]] = [:]) {
         self.sessions = sessions
         self.gits = gits
-        take(TerminalList(terminals: terminals, agents: agents, models: models))
+        take(TerminalList(terminals: terminals, agents: agents, models: models, efforts: efforts))
     }
     #endif
 }

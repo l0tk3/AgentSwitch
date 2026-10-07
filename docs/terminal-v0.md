@@ -174,6 +174,25 @@
 > - **和网页版不一样的地方**：行的右键菜单是系统菜单（原来是页面自己画的像素框）；拖一行到分屏时跟着指针的是系统的拖影。数据每 3 秒取终端、约 20 秒取会话、约 6 秒取 git。
 > - **验证**：MacCore 测试（`TerminalPanesTests` 11、`TerminalTreeTests` 与 `TerminalSearchTests` 15、`TerminalsPageRulesTests` 9），全部 Mac 测试 525 条通过；`-designPreview <目录> -designPreviewOnly terminals` 出两种外观各 8 张（列表、三块分屏带确认卡、新建面板、块内新建、搜索、关闭确认、改名、收起列表）；`-terminalProbe … -probeTerminals <第二个终端>` 对一次性服务（假 agent）在两种外观下把真窗口走了一遍：列表从服务读出、⌘B、⌘F 搜索与 esc、⌘D 分屏、⌘2 把第二个终端放进新块、只有当前块收到输入、⌘⌥← 换焦点、拖分隔线后两块各自的列数、⌘⇧↩、确认卡 ⌘↩（另一块的请求只在标题栏提示）、⌘⇧V 加密发送、手机拿走尺寸后离开 5 秒仍留占位而按键才拿回、列表里改名、⌘T 新建面板与 esc、回车新建出终端、开到单独窗口后再点它只把窗口带到前面、收回、⌘W 询问后关闭。`-probeDetach YES` 那一段（单独窗口）也改成直接问原生页面，两种外观都过；带 `-terminalsPageWeb YES` 时网页版照旧能用。没验证的：真 agent 的权限请求与选择题、续接历史会话的三种分支（已在别处运行、文件夹不在了、OpenCode 的提醒，只按接口写了，没对真会话跑）、把行拖到分屏、真实指针与窗口在最前时的表现。探针这次的截图用窗口自己画的图（显示器休眠或锁屏时，从屏幕取的窗口图是全黑的）。
 
+### 思考强度
+
+2026-10-07 用户：我发现新建终端和当前的模型选择页面都没有思考强度的选择，能不能根据各个 agent 客户端和模型适配一下。
+
+四个 agent 各有各的叫法、各有各的档位，档位还随模型不同。我们不自己编一张表：**档位取自 agent 自己的说法**，界面只列它列出的，服务只放行它列出的（不认识的档位会让 agent 启动失败，OpenCode 则是第一轮就失败）。
+
+| | 叫法 | 档位从哪来 | 新建终端时 | 运行中 |
+|---|---|---|---|---|
+| Claude Code | Effort | 它的模型列表（`supportedModels()` 的 `supportedEffortLevels`）：多数模型 `low … max` 五档，Opus 4.6 / Sonnet 4.6 没有 `xhigh`，Haiku 不支持 | `--effort <档>`（只管这一次） | `/effort <档>`，工作中也能换 |
+| Codex | Reasoning | 它的模型列表（`model/list` 的 `supportedReasoningEfforts` 与 `defaultReasoningEffort`）：各模型不同，有的多一档 `ultra` | `-c model_reasoning_effort="<档>"` | 在它的 `/model` 选择器里和模型一起选 |
+| OpenCode | Variant | 模型的 variant，问它的服务（`GET /api/model`），例如 DeepSeek V4.1 Flash：none、low、high、max | 写进模型名 `-m provider/model#variant`，所以**要先选模型** | `/variants` |
+| pi | Thinking | 它的 `--help`：off、minimal、low、medium、high、xhigh、max，对所有模型一份，它自己按模型取能用的 | `--thinking <档>` | 它自己的按键 |
+
+- **界面**：新建终端（手机的表单、Mac 的面板）在 Model 下面多一栏，标题用这个 agent 自己的叫法。选项是 `Default`（agent 说了默认档时写成 `Default · Medium`）加上所选模型的档位，低的在前；没选模型时是 agent 默认模型的档位。没有可选的就不显示这一栏（Haiku；OpenCode 还没选模型；旧版服务不报档位）。换了模型而新模型没有原来选的那一档，回到 `Default`。
+- **运行中**（手机的简略视图，simple-view-v0 §5.4）：模型菜单里多一节档位，Claude Code 直接切换；Codex 的菜单项写明模型和强度一起在终端里选；OpenCode 多一项在终端里打开 `/variants`。当前档位取自会话记录（Claude Code 每条回答、Codex 每一轮都写着），没有记录时是启动时选的。
+- **Claude Code 的两点**（照它的文档）：`/effort <档>` 会把这一档记成**这个模型以后的默认**（`max` 除外，只管这一次）；新建时的 `--effort` 不记。较旧的模型换档会让缓存失效，它可能先在终端里问一次确认，简略视图里看不到。
+- **接口**：`GET /terminals` 的每个模型带 `efforts`（空 = 不支持）和 `defaultEffort`，顶层 `efforts[agent]`（没选模型时的档位）与 `effortDefaults[agent]`；`POST /terminals` 多一个 `effort`，不在所选模型档位里的回 400；`POST /terminals/:id/effort {effort}` 只对 Claude Code，等你回答时回 409；终端多一个字段 `effort`（启动时选的）；会话记录的 `usage.effort` 是最近一轮实际用的。
+- 实测：服务自己的模型发现在这台 Mac 上问到了 Claude Code 2.1.292 与 Codex 0.160.1 的档位；各家的启动参数取自它们的 `--help` 与文档。**带档位真的启动一个终端还没有跑过**，四家都要装上新版后试一次。
+
 ## 2. 会话宿主（daemon）
 
 ```

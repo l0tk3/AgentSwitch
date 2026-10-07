@@ -363,7 +363,7 @@ const COPY = {
     kNew: "New", kClose: "Close", kHide: "Hide", seal: "Encrypt & Send", sealTip: "Passwords and tokens are encrypted before they reach the agent.",
     perm: "[!] Approval", tool: "Run Command", deny: "Deny", allow: "Allow", ph: "Message", cancel: "Cancel", send: "Send",
     ask: "[?] Question", other: "Other", otherPh: "输入你的答案", submit: "Submit", askHint: "1–4 选择 · ↩ 提交 · esc 回到终端",
-    newT: "// New Terminal", model: "// Model", folder: "// Folder", mode: "// Permissions", modes: ["Ask Each", "Auto", "Bypass"], start: "Start",
+    newT: "// New Terminal", model: "// Model", effort: "// Effort", folder: "// Folder", mode: "// Permissions", modes: ["Ask Each", "Auto", "Bypass"], start: "Start",
     missing: "Not Installed", markWaiting: (n) => `${n} Waiting`, busy: "Busy", idle: "Idle", dflt: "Default", live: "Live", end: "Exit",
     awayHd: "On iPhone", awayLine: "这个终端正在 iPhone 上使用。", awayGo: "Take Over", awayKey: "any key" },
   zh: { waiting: "待处理", exited: "已退出", resume: "恢复", del: "删除记录", delete: "删除", close: "关闭", more: (n) => `另有 ${n} 项`, less: "收起",
@@ -917,6 +917,8 @@ function create() {
       <div class="agents">${["cc", "codex", "oc", "pi"].map((a) => `<div class="agent ${a === pickedAgent ? "on" : ""} ${a === "pi" ? "off" : ""}" data-agent="${a}">${sprite(AGENT_PX[a], { px: 4 })}<span>${AGENT_NAME[a]}${a === "pi" ? ` · ${L("missing")}` : ""}</span></div>`).join("")}</div>
       <div class="label">${L("model")}</div>
       <div class="select"><select id="modelSel">${[`<option value="">${L("dflt")}</option>`, ...models.map((mm) => `<option ${pickedModel[pickedAgent] === mm ? "selected" : ""}>${mm}</option>`)].join("")}</select></div>
+      <div class="label">${L("effort")}</div>
+      <div class="select"><select aria-label="Effort">${["Default", "Low", "Medium", "High", "XHigh", "Max"].map((l) => `<option>${l}</option>`).join("")}</select></div>
       <div class="label">${L("folder")}</div>
       <div class="prompt"><span class="p">❯</span><span>~/Desktop/WorkSpace/Projects/AgentSwitch</span><span class="blink"> </span></div>
       <div class="label">${L("mode")}</div>

@@ -116,6 +116,7 @@
 - **Codex、OpenCode、pi**：它们换模型是自己的选择器（Codex 还要选推理强度），没有查到带参数直接切换的写法。菜单只有一项 `Choose in Terminal…`：切到终端视图，替你打出 `/model`（OpenCode 是 `/models`），在它的界面上选。
 - 接口：`POST /terminals/:id/model {model}`（远程可用，进审计）。Mac 上的服务还是旧版时，手机退回把 `/model <id>` 当一条回复打进去，并提示 Claude Code 可能在终端里要求确认。
 - 显示哪个模型：agent 报的 `modelNow`，没有就用记录里最后一条回答的模型，再没有就是启动时选的。
+- **思考强度**在同一个菜单里（同日，用户：新建终端和当前的模型选择页面都没有思考强度的选择；规则见 terminal-v0 §1 思考强度）：模型名后面写当前档位（`Opus 5.5 · Medium`）；Claude Code 的菜单多一节当前模型的档位，选一个就由 Mac 打出 `/effort <档>`，工作中也能换，等你回答时不行。
 
 ## 6. 安全
 

@@ -628,6 +628,9 @@ function p2draw() {
       <div class="agents">${["cc", "codex", "oc", "pi"].map((a) => `<button type="button" class="agent ${a === agent ? "on" : ""} ${a === "pi" ? "off" : ""}" data-agent="${a}">${P.sprite(P.AGENT_PX[a], { px: 4 })}<span>${P.AGENT_NAME[a]}</span>${a === "pi" ? "<small>Not Installed</small>" : ""}</button>`).join("")}</div>
       <div class="label">// Model</div>
       <div class="select"><select id="p2model" aria-label="Model">${[`<option value="">Default</option>`, ...models.map((m) => `<option ${m === model ? "selected" : ""}>${m}</option>`)].join("")}</select></div>
+      <!-- How hard it thinks, under the agent's own word, with the levels the model takes (terminal-v0 §1 思考强度). -->
+      <div class="label">// ${{ cc: "Effort", codex: "Reasoning", oc: "Variant", pi: "Thinking" }[agent] ?? "Effort"}</div>
+      <div class="select"><select aria-label="Effort">${["Default", "Low", "Medium", "High", "XHigh", "Max"].map((l) => `<option>${l}</option>`).join("")}</select></div>
       <div class="label">// Folder</div>
       <div class="prompt"><span class="p">❯</span><span>${esc(folder)}</span><span class="caret"> </span></div>
       <div class="recent">${FOLDERS.map((f) => `<span class="${f === folder ? "on" : ""}" data-folder="${esc(f)}">${esc(f)}</span>`).join("")}</div>

@@ -459,36 +459,66 @@ struct TerminalPage: View {
         RecordDisplay.model(now: page.modelNow ?? listed.modelNow, record: record.usage?.model, started: listed.model)
     }
 
-    /// The model, and a menu to change it (docs/simple-view-v0.md §5.4). Claude Code takes `/model <id>` as a command:
-    /// the Mac types it. The other agents choose in a picker of their own: the menu opens it in the terminal view.
+    /// How hard it thinks now: the level just asked for here, the last turn's in the record, the one it was started at.
+    private var currentEffort: String? {
+        EffortDisplay.level(asked: page.effortAsked, record: record.usage?.effort, started: listed.effort)
+    }
+
+    /// The model and how hard it thinks, and a menu to change either (docs/simple-view-v0.md §5.4, terminal-v0 §1
+    /// 思考强度). Claude Code takes `/model <id>` and `/effort <level>` as commands: the Mac types them. The other agents
+    /// choose in a picker of their own: the menu opens it in the terminal view.
     private var modelMenu: some View {
         let options = model.terminals.list?.models[page.harness] ?? []
         let resting = page.status == .idle && page.permissions.isEmpty
+        let answering = page.status == .waiting || !page.permissions.isEmpty
+        let levels = EffortDisplay.levels(model.terminals.list, harness: page.harness, current: currentModel)
+        let word = EffortDisplay.word(page.harness)
         return Menu {
             if page.status == .exited {
                 Button("终端已结束") {}.disabled(true)
             } else if page.harness == "claude-code", !options.isEmpty {
                 if resting {
-                    Section("Claude Code 会把它记成新会话的默认模型") {
+                    Section("Model · Claude Code 会把它记成新会话的默认模型") {
                         ForEach(options.filter { !$0.older }) { option in modelButton(option) }
                         let older = options.filter(\.older)
                         if !older.isEmpty { Menu("Older", systemImage: "clock") { ForEach(older) { option in modelButton(option) } } }
                     }
                 } else {
-                    Button("它正在工作或等待回答，结束后再切换") {}.disabled(true)
+                    Section("Model") { Button("它正在工作或等待回答，结束后再切换") {}.disabled(true) }
+                }
+                // It takes a new level while it works too (the next request of the turn runs at it), not while it waits.
+                if !levels.isEmpty {
+                    Section("\(word) · 会记成这个模型的默认，Max 只用于这一次") {
+                        if answering {
+                            Button("它正在等待回答，回答后再调整") {}.disabled(true)
+                        } else {
+                            ForEach(levels, id: \.self) { level in
+                                Button { Task { await page.setEffort(level) } } label: {
+                                    if level == currentEffort { Label(EffortDisplay.name(level), systemImage: "checkmark") } else { Text(EffortDisplay.name(level)) }
+                                }
+                            }
+                        }
+                    }
                 }
             } else {
-                // Its own picker, on its own screen.
-                Button("Choose in Terminal…", systemImage: "terminal") {
+                // Its own picker, on its own screen (Codex chooses the reasoning with the model there).
+                Button(page.harness == "codex" ? "Model and Reasoning in Terminal…" : "Choose in Terminal…", systemImage: "terminal") {
                     show(.terminal)
                     Task { _ = await page.send(RecordDisplay.modelPicker(page.harness), sealed: false) }
                 }
                 .disabled(!resting)
+                if let picker = EffortDisplay.picker(page.harness) {
+                    Button("\(word) in Terminal…", systemImage: "terminal") {
+                        show(.terminal)
+                        Task { _ = await page.send(picker, sealed: false) }
+                    }
+                    .disabled(!resting)
+                }
             }
         } label: {
             HStack(spacing: 3) {
                 if page.changingModel { BrailleSpinner(color: .secondary) }
-                Text(currentModel.map(ModelName.display) ?? "Model").lineLimit(1)
+                Text([currentModel.map(ModelName.display) ?? "Model", currentEffort.map(EffortDisplay.name)].compactMap { $0 }.joined(separator: " · ")).lineLimit(1)
                 LookGlyph(glyph: "▾", symbol: "chevron.down", size: 10)
             }
             .mono(12, weight: .medium)
@@ -498,7 +528,7 @@ struct TerminalPage: View {
             .contentShape(Rectangle())
         }
         .padding(.vertical, -8)
-        .accessibilityLabel("model")
+        .accessibilityLabel("model and \(word.lowercased())")
     }
 
     private func modelButton(_ option: TerminalModelOption) -> some View {

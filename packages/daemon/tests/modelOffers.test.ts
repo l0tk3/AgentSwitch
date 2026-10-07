@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildDaemon, type DaemonConfig } from "../src/daemon.js";
 import type { ClaudeModelInfo, CodexModelInfo } from "../src/router/discovery.js";
 import { claudeOffer, codexOffer, familyOf, ModelOffers } from "../src/router/modelOffers.js";
+import { effortArgs, effortsFor, openCodeVariants, ordered, PI_THINKING, type EffortOffers } from "../src/harness/efforts.js";
 import type { Launcher } from "../src/terminals/host.js";
 import { TARGETS_PATH } from "./helpers.js";
 
@@ -36,6 +37,128 @@ const CODEX: CodexModelInfo[] = [
 
 const closers: (() => void)[] = [];
 afterEach(() => { while (closers.length) closers.pop()!(); });
+
+describe("how hard each model can be asked to think (terminal-v0 §1 思考强度, 2026-10-07)", () => {
+  // What Claude Code 2.1.292 and Codex 0.160.1 answered on 2026-10-07.
+  const FIVE = ["low", "medium", "high", "xhigh", "max"];
+  const claude: ClaudeModelInfo[] = [
+    { value: "default", displayName: "Default (recommended)", description: "Opus 5.5 · Best for everyday, complex tasks", efforts: FIVE },
+    { value: "opus", displayName: "Opus 5.5", description: "", efforts: FIVE },
+    { value: "haiku", displayName: "Haiku 4.5", description: "" },
+    { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "", efforts: ["low", "medium", "high", "max"] },
+  ];
+  const codex: CodexModelInfo[] = [
+    { id: "gpt-6.1-sol", displayName: "GPT-6.1-Sol", efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low", isDefault: true },
+    { id: "gpt-6-luna", displayName: "GPT-6-Luna", efforts: ["medium", "low", "max", "high", "xhigh"], defaultEffort: "medium" },
+  ];
+
+  it("Claude Code: each model's own levels; one it lists without any takes none; no model chosen is its default's", () => {
+    const offer = claudeOffer(claude);
+    expect(offer.efforts).toEqual(FIVE);
+    expect(Object.fromEntries(offer.models.map((m) => [m.id, m.efforts]))).toEqual({ opus: FIVE, haiku: [], "claude-opus-4-6": ["low", "medium", "high", "max"] });
+    // An older Claude Code says nothing of levels: nothing is claimed about any model.
+    expect(claudeOffer(CLAUDE).models.every((m) => m.efforts === undefined)).toBe(true);
+    expect(claudeOffer(CLAUDE).efforts).toBeUndefined();
+  });
+
+  it("Codex: each model's levels lowest first with one it adds of its own last, the level it uses unless told, and its default model's", () => {
+    const offer = codexOffer(codex);
+    expect(offer.models).toEqual([
+      { id: "gpt-6.1-sol", name: "GPT-6.1-Sol", efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low" },
+      { id: "gpt-6-luna", name: "GPT-6-Luna", efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium" },
+    ]);
+    expect(offer).toMatchObject({ efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low" });
+  });
+
+  it("the levels a new terminal may be started at, and each agent's arguments for one", () => {
+    const offers: EffortOffers = {
+      any: { "claude-code": FIVE, pi: PI_THINKING },
+      models: { "claude-code": { opus: FIVE, haiku: [], "claude-opus-4-6": ["low", "medium", "high", "max"] }, opencode: { "deepseek/deepseek-flash": ["none", "low", "high", "max"] } },
+    };
+    expect(effortsFor(offers, "claude-code", undefined)).toEqual(FIVE);
+    expect(effortsFor(offers, "claude-code", "claude-opus-4-6")).toEqual(["low", "medium", "high", "max"]);
+    expect(effortsFor(offers, "claude-code", "haiku")).toBeNull();
+    // Not listed (typed by hand, or the list was not read): the agent's own words, which it fits to the model.
+    expect(effortsFor(offers, "claude-code", "claude-something-new")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(effortsFor(offers, "codex", "gpt-9")).toEqual(["minimal", "low", "medium", "high", "xhigh"]);
+    expect(effortsFor(offers, "pi", "anthropic/claude-sonnet-5-5")).toEqual(PI_THINKING);
+    // OpenCode fails a turn whose variant the model lacks: only a listed one, and none without a model.
+    expect(effortsFor(offers, "opencode", "deepseek/deepseek-flash")).toEqual(["none", "low", "high", "max"]);
+    expect(effortsFor(offers, "opencode", "openai/gpt-9")).toBeNull();
+    expect(effortsFor(offers, "opencode", undefined)).toBeNull();
+
+    expect(effortArgs("claude-code", "xhigh", "opus")).toEqual({ args: ["--effort", "xhigh"], model: "opus" });
+    expect(effortArgs("codex", "high", undefined)).toEqual({ args: ["-c", 'model_reasoning_effort="high"'], model: undefined });
+    expect(effortArgs("opencode", "max", "deepseek/deepseek-flash")).toEqual({ args: [], model: "deepseek/deepseek-flash#max" });
+    expect(effortArgs("opencode", "max", undefined)).toEqual({ args: [], model: undefined });
+    expect(effortArgs("pi", "off", undefined)).toEqual({ args: ["--thinking", "off"], model: undefined });
+    // Nothing that is not a level's name reaches a command line.
+    expect(effortArgs("claude-code", "high --dangerously-skip-permissions", "opus").args).toEqual([]);
+    expect(effortArgs("codex", 'x"; rm', undefined).args).toEqual([]);
+    expect(effortArgs("claude-code", undefined, "opus").args).toEqual([]);
+    expect(ordered(["max", "low", "ultra", "medium", "low", "Not A Level"])).toEqual(["low", "medium", "max", "ultra"]);
+  });
+
+  it("OpenCode's variants are read from its server's model list, per provider/model", async () => {
+    const asked: string[] = [];
+    const call = async (method: string, path: string) => {
+      asked.push(`${method} ${path}`);
+      return { data: [
+        { providerID: "deepseek", id: "deepseek-flash", variants: [{ id: "max" }, { id: "none" }, { id: "low" }, { id: "high" }] },
+        { providerID: "openai", id: "gpt-6-luna", variants: [] },
+        { id: "no-provider" },
+      ] };
+    };
+    expect(await openCodeVariants(call, "/Users/u/Library/Application Support/AgentSwitch/opencode-exec")).toEqual({
+      "deepseek/deepseek-flash": ["none", "low", "high", "max"], "openai/gpt-6-luna": [],
+    });
+    expect(asked).toEqual(["GET /api/model?directory=%2FUsers%2Fu%2FLibrary%2FApplication%20Support%2FAgentSwitch%2Fopencode-exec"]);
+    expect(await openCodeVariants(async () => ({}), "/x")).toEqual({});
+  });
+
+  it("GET /terminals says each model's levels; a new terminal is started at one the model takes, refused at any other", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-efforts-"));
+    const cwd = mkdtempSync(join(tmpdir(), "agentswitch-efforts-cwd-"));
+    const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
+    const modelOffers = new ModelOffers({ log: () => undefined, listClaude: async () => claude, listCodex: async () => codex,
+      openCodeVariants: async () => ({ "deepseek/deepseek-v4.1-flash": ["none", "low", "high", "max"] }) });
+    await modelOffers.refresh();
+    const started: { harness: string; model?: string; effort?: string }[] = [];
+    const launcher: Launcher = (req) => {
+      started.push({ harness: req.harness, ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}) });
+      return { file: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"], env: process.env as Record<string, string>, hooks: false };
+    };
+    const daemon = buildDaemon(cfg, { terminalLauncher: launcher, modelOffers });
+    closers.push(() => daemon.close());
+    const post = (body: unknown) => daemon.api.request("/terminals", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    const listed = (await (await daemon.api.request("/terminals")).json()) as { models: Record<string, { id: string; efforts?: string[]; defaultEffort?: string }[]>; efforts: Record<string, string[]>; effortDefaults: Record<string, string> };
+    expect(listed.efforts).toEqual({ "claude-code": FIVE, codex: ["low", "medium", "high", "xhigh", "max", "ultra"], pi: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] });
+    expect(listed.effortDefaults).toEqual({ codex: "low" });
+    expect(listed.models["claude-code"]!.find((m) => m.id === "haiku")!.efforts).toEqual([]);
+    expect(listed.models.codex!.find((m) => m.id === "gpt-6-luna")).toMatchObject({ efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium" });
+    // OpenCode's menu is the catalog's; a model whose variants its server listed carries them.
+    const flash = listed.models.opencode!.find((m) => m.id === "deepseek/deepseek-v4.1-flash");
+    if (flash) expect(flash.efforts).toEqual(["none", "low", "high", "max"]);
+
+    const ok = await post({ harness: "claude-code", cwd, model: "claude-opus-4-6", effort: "max" });
+    expect(ok.status).toBe(201);
+    expect(((await ok.json()) as { terminal: { effort: string | null } }).terminal.effort).toBe("max");
+    expect((await post({ harness: "codex", cwd, effort: "ultra" })).status).toBe(201);
+    expect((await post({ harness: "pi", cwd, effort: "off" })).status).toBe(201);
+    expect((await post({ harness: "claude-code", cwd })).status).toBe(201);
+    expect(started).toEqual([
+      { harness: "claude-code", model: "claude-opus-4-6", effort: "max" }, { harness: "codex", effort: "ultra" }, { harness: "pi", effort: "off" }, { harness: "claude-code" },
+    ]);
+    // Opus 4.6 has no xhigh; Haiku takes no level; Luna has no ultra; OpenCode's variant needs its model; not a level.
+    for (const body of [
+      { harness: "claude-code", cwd, model: "claude-opus-4-6", effort: "xhigh" }, { harness: "claude-code", cwd, model: "haiku", effort: "low" },
+      { harness: "codex", cwd, model: "gpt-6-luna", effort: "ultra" }, { harness: "opencode", cwd, effort: "max" }, { harness: "pi", cwd, effort: "ultra" },
+      { harness: "claude-code", cwd, effort: "high --dangerously-skip-permissions" },
+    ]) expect((await post(body)).status, JSON.stringify(body)).toBe(400);
+    expect(started).toHaveLength(4);
+  });
+});
 
 describe("model offers: each agent's own list for the terminals' model menus", () => {
   it("reads a family and a version from a model's name", () => {

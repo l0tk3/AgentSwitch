@@ -73,8 +73,10 @@ enum TerminalsPagePreview {
         ]
         let gits = [project: FolderGit(branch: "main", changed: 42, ahead: 2), "\(project)/packages/secret-gate": FolderGit(branch: "main", changed: 5),
                     "\(home)/Desktop/WorkSpace/Projects/MailLab": FolderGit(branch: "main")]
-        let models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5"), TerminalModelOption(id: "sonnet", name: "Sonnet 5.5"), TerminalModelOption(id: "opus-4", name: "Opus 4.5", older: true)]]
-        model.stage(terminals: terminals, sessions: sessions, gits: gits, agents: ["claude-code", "codex", "opencode"], models: models)
+        let five = ["low", "medium", "high", "xhigh", "max"]
+        let models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five),
+                                      TerminalModelOption(id: "opus-4", name: "Opus 4.5", older: true, efforts: ["low", "medium", "high", "max"])]]
+        model.stage(terminals: terminals, sessions: sessions, gits: gits, agents: ["claude-code", "codex", "opencode"], models: models, efforts: ["claude-code": five])
         model.area = CGSize(width: size.width - 291, height: size.height)
         let host = NSHostingView(rootView: TerminalsPageView(model: model))
         host.sizingOptions = []

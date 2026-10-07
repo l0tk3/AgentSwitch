@@ -175,6 +175,7 @@ enum DemoData {
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
         let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle"
+        let five = ["low", "medium", "high", "xhigh", "max"]
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
                          status: busy ? .working : idle ? .idle : .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
@@ -190,11 +191,13 @@ enum DemoData {
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,
                          createdAt: ago(7200), lastOutputAt: ago(3000)),
         ], agents: ["claude-code", "codex", "opencode"], models: [
-            "claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5"), TerminalModelOption(id: "claude-fable-5-1", name: "Fable 5.1"),
-                            TerminalModelOption(id: "sonnet", name: "Sonnet 5.5"), TerminalModelOption(id: "claude-opus-4-8", name: "Opus 4.8", older: true)],
-            "codex": [TerminalModelOption(id: "gpt-6-luna", name: "GPT-6 Luna")],
-            "opencode": [TerminalModelOption(id: "deepseek/deepseek-flash", name: "DeepSeek Flash")],
-        ])
+            "claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "claude-fable-5-1", name: "Fable 5.1", efforts: five),
+                            TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five), TerminalModelOption(id: "haiku", name: "Haiku 4.5", efforts: []),
+                            TerminalModelOption(id: "claude-opus-4-6", name: "Opus 4.6", older: true, efforts: ["low", "medium", "high", "max"])],
+            "codex": [TerminalModelOption(id: "gpt-6-luna", name: "GPT-6 Luna", efforts: five, defaultEffort: "medium")],
+            "opencode": [TerminalModelOption(id: "deepseek/deepseek-flash", name: "DeepSeek Flash", efforts: ["none", "low", "high", "max"])],
+        ], defaults: ["claude-code": "Opus 5.5"],
+           efforts: ["claude-code": five, "codex": five + ["ultra"], "pi": ["off", "minimal", "low", "medium", "high", "xhigh", "max"]], effortDefaults: ["codex": "low"])
     }
 
     /// The agent asking (AskUserQuestion, terminal-v0 §3 "选择题"): `-uiDemoScreen terminalquestion`.
@@ -280,7 +283,7 @@ enum DemoData {
         return SessionRecord(session: summary, items: items, more: true, cursor: 100, rev: "demo",
                              plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done),
                                     PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
-                             usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000), mode: "acceptEdits")
+                             usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: "acceptEdits")
     }
 
     /// What a run of work changed (the simple view's Changes).

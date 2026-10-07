@@ -34,7 +34,7 @@ export type RecordItem =
 
 export type PlanEntry = { readonly text: string; readonly state: "todo" | "doing" | "done" };
 /** `used`: tokens in the context at the last turn; `window`: how many it holds, when the record says. */
-export type RecordUsage = { readonly model?: string; readonly used?: number; readonly window?: number };
+export type RecordUsage = { readonly model?: string; readonly used?: number; readonly window?: number; /** How hard it thought at the last turn, in the agent's word. */ readonly effort?: string };
 
 export type DiffHunk = { readonly header: string; readonly lines: readonly string[] };
 export type FileDiff = { readonly path: string; readonly added: number; readonly removed: number; readonly hunks: readonly DiffHunk[]; readonly clipped?: boolean };
@@ -321,7 +321,8 @@ function claudeBuild(lines: readonly Line[]): Builder {
     const model = str(message.model);
     if (model && !model.startsWith("<")) {
       const used = (Number(usage.input_tokens) || 0) + (Number(usage.cache_read_input_tokens) || 0) + (Number(usage.cache_creation_input_tokens) || 0);
-      b.usage = { model, ...(used > 0 ? { used } : b.usage?.used ? { used: b.usage.used } : {}) };
+      const effort = str(line.effort) || b.usage?.effort;
+      b.usage = { model, ...(used > 0 ? { used } : b.usage?.used ? { used: b.usage.used } : {}), ...(effort ? { effort } : {}) };
     }
     for (const part of parts(line)) {
       if (part.type === "text" && str(part.text).trim()) b.answer(at, ts, str(part.text).trim());
@@ -429,6 +430,7 @@ function codexBuild(lines: readonly Line[], cwd: string): Builder {
     if (line.type === "turn_context") {
       if (str(payload.cwd)) folder = str(payload.cwd);
       if (str(payload.model)) b.usage = { ...(b.usage ?? {}), model: str(payload.model) };
+      if (str(payload.effort)) b.usage = { ...(b.usage ?? {}), effort: str(payload.effort) };
       if (str(payload.approval_policy)) b.mode = str(payload.approval_policy);
       continue;
     }

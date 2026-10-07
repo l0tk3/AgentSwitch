@@ -154,4 +154,43 @@ final class TerminalsPageRulesTests: XCTestCase {
         XCTAssertEqual(key("", code: 53, creating: true), .cancelCreate)
         XCTAssertNil(key("x", creating: true))
     }
+
+    /// How hard a new terminal thinks (docs/terminal-v0.md §1 思考强度, 2026-10-07): each agent's own word, and the levels
+    /// the service lists for the model picked.
+    func testThinkingLevelsByAgentAndModel() throws {
+        let list = try JSONDecoder().decode(TerminalList.self, from: Data(#"""
+        {"terminals":[],"agents":["claude-code","codex","opencode","pi"],
+         "models":{"claude-code":[{"id":"opus","name":"Opus 5.5","efforts":["low","medium","high","xhigh","max"]},{"id":"haiku","name":"Haiku 4.5","efforts":[]},
+                                  {"id":"claude-opus-4-6","name":"Opus 4.6","older":true,"efforts":["low","medium","high","max"]}],
+                   "codex":[{"id":"gpt-6-luna","name":"GPT-6-Luna","efforts":["low","medium","high","xhigh","max"],"defaultEffort":"medium"}],
+                   "opencode":[{"id":"deepseek/deepseek-flash","name":"DeepSeek Flash","efforts":["none","low","high","max"]},{"id":"openai/gpt-6","name":"GPT-6"}]},
+         "efforts":{"claude-code":["low","medium","high","xhigh","max"],"codex":["low","medium","high","xhigh","max","ultra"],"pi":["off","minimal","low","medium","high","xhigh","max"]},
+         "effortDefaults":{"codex":"low"}}
+        """#.utf8))
+        func levels(_ harness: String, _ model: String?) -> [String] { TerminalEffort.levels(models: list.models, any: list.efforts, harness: harness, model: model) }
+        XCTAssertEqual(levels("claude-code", nil), ["low", "medium", "high", "xhigh", "max"])
+        XCTAssertEqual(levels("claude-code", "claude-opus-4-6"), ["low", "medium", "high", "max"])
+        XCTAssertEqual(levels("claude-code", "haiku"), [])
+        XCTAssertEqual(levels("codex", nil).last, "ultra")
+        XCTAssertEqual(levels("pi", nil).count, 7)
+        // OpenCode's variants belong to a model: none without one, none for a model whose variants are not listed.
+        XCTAssertEqual(levels("opencode", nil), [])
+        XCTAssertEqual(levels("opencode", "deepseek/deepseek-flash"), ["none", "low", "high", "max"])
+        XCTAssertEqual(levels("opencode", "openai/gpt-6"), [])
+        XCTAssertEqual(TerminalEffort.defaultLevel(models: list.models, defaults: list.effortDefaults, harness: "codex", model: nil), "low")
+        XCTAssertEqual(TerminalEffort.defaultLevel(models: list.models, defaults: list.effortDefaults, harness: "codex", model: "gpt-6-luna"), "medium")
+        XCTAssertNil(TerminalEffort.defaultLevel(models: list.models, defaults: list.effortDefaults, harness: "claude-code", model: "opus"))
+        // The model changes: a level it does not take is not sent (its default is used).
+        XCTAssertNil(TerminalEffort.kept("xhigh", in: levels("claude-code", "claude-opus-4-6")))
+        XCTAssertEqual(TerminalEffort.kept("max", in: levels("claude-code", "claude-opus-4-6")), "max")
+        XCTAssertNil(TerminalEffort.kept(nil, in: levels("claude-code", nil)))
+        XCTAssertEqual(["low", "xhigh", "max", "minimal", "none", "off", "ultra"].map(TerminalEffort.name), ["Low", "XHigh", "Max", "Minimal", "None", "Off", "Ultra"])
+        XCTAssertEqual(["claude-code", "codex", "opencode", "pi"].map(TerminalEffort.word), ["Effort", "Reasoning", "Variant", "Thinking"])
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(NewTerminalRequest(harness: "codex", cwd: "~/p", model: "gpt-6-luna", effort: "high"))) as? [String: Any]
+        XCTAssertEqual(body?["effort"] as? String, "high")
+        // A service from before this says nothing of levels: nothing to choose, nothing sent.
+        let old = try JSONDecoder().decode(TerminalList.self, from: Data(#"{"terminals":[],"agents":["claude-code"],"models":{"claude-code":[{"id":"opus","name":"Opus 5.5"}]}}"#.utf8))
+        XCTAssertEqual(TerminalEffort.levels(models: old.models, any: old.efforts, harness: "claude-code", model: "opus"), [])
+        XCTAssertEqual(TerminalEffort.levels(models: old.models, any: old.efforts, harness: "claude-code", model: nil), [])
+    }
 }

@@ -118,15 +118,22 @@ public struct TerminalModelOption: Decodable, Sendable, Hashable, Identifiable {
     public let name: String
     public let description: String?
     public let older: Bool
+    /// How hard it can be asked to think, lowest first, in the agent's own words (`low … max`; OpenCode: the model's
+    /// variants). Empty: it takes no level. Nil: the service does not say.
+    public let efforts: [String]?
+    /// The level it uses unless told, when the agent says.
+    public let defaultEffort: String?
 
-    public init(id: String, name: String, description: String? = nil, older: Bool = false) {
+    public init(id: String, name: String, description: String? = nil, older: Bool = false, efforts: [String]? = nil, defaultEffort: String? = nil) {
         self.id = id
         self.name = name
         self.description = description
         self.older = older
+        self.efforts = efforts
+        self.defaultEffort = defaultEffort
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, description, older }
+    private enum CodingKeys: String, CodingKey { case id, name, description, older, efforts, defaultEffort }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -134,7 +141,47 @@ public struct TerminalModelOption: Decodable, Sendable, Hashable, Identifiable {
         name = try c.decode(String.self, forKey: .name)
         description = try c.decodeIfPresent(String.self, forKey: .description)
         older = try c.decodeIfPresent(Bool.self, forKey: .older) ?? false
+        efforts = try? c.decodeIfPresent([String].self, forKey: .efforts)
+        defaultEffort = try? c.decodeIfPresent(String.self, forKey: .defaultEffort)
     }
+}
+
+/// How hard an agent thinks, as the new-terminal panel offers it (docs/terminal-v0.md §1 思考强度, 2026-10-07; the phone has
+/// the same rules in its Kit): each agent's own word for it, and the levels the service lists for the model chosen.
+public enum TerminalEffort {
+    /// The agent's own word, as the control's label: Claude Code's effort, Codex's reasoning, OpenCode's variant of a
+    /// model, pi's thinking.
+    public static func word(_ harness: String) -> String {
+        switch harness {
+        case "codex": "Reasoning"
+        case "opencode": "Variant"
+        case "pi": "Thinking"
+        default: "Effort"
+        }
+    }
+
+    /// A level as people read it: `xhigh` → `XHigh`, `low` → `Low`.
+    public static func name(_ level: String) -> String {
+        if level == "xhigh" { return "XHigh" }
+        return level.split(whereSeparator: { $0 == "-" || $0 == "_" }).map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
+    /// The levels a terminal of this agent may be started at with this model chosen (nil: none chosen, the agent's
+    /// default model). Empty: nothing to choose — the model takes no level, none is listed, or (OpenCode) a variant
+    /// needs its model chosen first.
+    public static func levels(models: [String: [TerminalModelOption]], any: [String: [String]], harness: String, model: String?) -> [String] {
+        guard let model, !model.isEmpty else { return any[harness] ?? [] }
+        return models[harness]?.first { $0.id == model }?.efforts ?? []
+    }
+
+    /// What "default" is, when the agent says: the chosen model's own, else the agent's default model's.
+    public static func defaultLevel(models: [String: [TerminalModelOption]], defaults: [String: String], harness: String, model: String?) -> String? {
+        guard let model, !model.isEmpty else { return defaults[harness] }
+        return models[harness]?.first { $0.id == model }?.defaultEffort
+    }
+
+    /// The level chosen, if the model takes it; nil otherwise (its default).
+    public static func kept(_ level: String?, in levels: [String]) -> String? { level.flatMap { levels.contains($0) ? $0 : nil } }
 }
 
 /// `GET /terminals`: the terminals, the agents this Mac can start, each one's models, and what "default" is today for
@@ -144,15 +191,22 @@ public struct TerminalList: Decodable, Sendable, Equatable {
     public let agents: [String]
     public let models: [String: [TerminalModelOption]]
     public let defaults: [String: String]
+    /// Per agent, the thinking levels when no model is chosen (its default model's; pi's one list).
+    public let efforts: [String: [String]]
+    /// Per agent, the level its default model uses unless told, when the agent says.
+    public let effortDefaults: [String: String]
 
-    public init(terminals: [TerminalInfo], agents: [String], models: [String: [TerminalModelOption]] = [:], defaults: [String: String] = [:]) {
+    public init(terminals: [TerminalInfo], agents: [String], models: [String: [TerminalModelOption]] = [:], defaults: [String: String] = [:],
+                efforts: [String: [String]] = [:], effortDefaults: [String: String] = [:]) {
         self.terminals = terminals
         self.agents = agents
         self.models = models
         self.defaults = defaults
+        self.efforts = efforts
+        self.effortDefaults = effortDefaults
     }
 
-    private enum CodingKeys: String, CodingKey { case terminals, agents, models, defaults }
+    private enum CodingKeys: String, CodingKey { case terminals, agents, models, defaults, efforts, effortDefaults }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -160,6 +214,8 @@ public struct TerminalList: Decodable, Sendable, Equatable {
         agents = (try? c.decodeIfPresent([String].self, forKey: .agents)) ?? []
         models = (try? c.decodeIfPresent([String: [TerminalModelOption]].self, forKey: .models)) ?? [:]
         defaults = (try? c.decodeIfPresent([String: String].self, forKey: .defaults)) ?? [:]
+        efforts = (try? c.decodeIfPresent([String: [String]].self, forKey: .efforts)) ?? [:]
+        effortDefaults = (try? c.decodeIfPresent([String: String].self, forKey: .effortDefaults)) ?? [:]
     }
 }
 
@@ -168,14 +224,17 @@ public struct NewTerminalRequest: Encodable, Sendable, Equatable {
     public let harness: String
     public let cwd: String
     public let model: String?
+    /// How hard it thinks, one of the levels the service lists for the model; nil: the agent's own default.
+    public let effort: String?
     public let mode: String?
     public let cols: Int?
     public let rows: Int?
 
-    public init(harness: String, cwd: String, model: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil) {
+    public init(harness: String, cwd: String, model: String? = nil, effort: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil) {
         self.harness = harness
         self.cwd = cwd
         self.model = model
+        self.effort = effort
         self.mode = mode
         self.cols = cols
         self.rows = rows

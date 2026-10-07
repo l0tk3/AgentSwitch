@@ -14,6 +14,8 @@ struct NewTerminalSheet: View {
     @AppStorage("terminal.mode") private var mode = "manual"
     @AppStorage("terminal.folder") private var folder = ""
     @State private var modelId = ""
+    /// How hard it thinks: one of the levels the chosen model takes, or "" for the agent's own default.
+    @State private var effortId = ""
     @State private var starting = false
     @State private var error: String?
     @State private var confirmBypass = false
@@ -62,6 +64,28 @@ struct NewTerminalSheet: View {
                         }
                         .tint(Theme.ink)
                         .disabled(models.isEmpty)
+                    }
+                    // How hard it thinks, under the agent's own word for it and with the levels the chosen model takes
+                    // (terminal-v0 §1 思考强度). Not shown where there is nothing to choose: a model with no levels, or
+                    // OpenCode before a model is chosen (a variant is a model's).
+                    if !levels.isEmpty {
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            SectionLabel(EffortDisplay.word(agent))
+                            Menu {
+                                Button(effortDefaultLabel) { effortId = "" }
+                                ForEach(levels, id: \.self) { level in Button(EffortDisplay.name(level)) { effortId = level } }
+                            } label: {
+                                HStack {
+                                    Text(effortId.isEmpty ? effortDefaultLabel : EffortDisplay.name(effortId)).mono(14)
+                                    Spacer()
+                                    LookGlyph(glyph: "▾", symbol: "chevron.down").foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                                .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
+                                .framed(look.isClassic ? Color.clear : Theme.line, radius: 10)
+                            }
+                            .tint(Theme.ink)
+                        }
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         SectionLabel("Folder")
@@ -157,7 +181,9 @@ struct NewTerminalSheet: View {
                 }
                 #endif
             }
-            .onChange(of: agent) { modelId = "" }
+            .onChange(of: agent) { modelId = ""; effortId = "" }
+            // Another model may not take the level chosen: then its own default.
+            .onChange(of: modelId) { effortId = EffortDisplay.kept(effortId, in: levels) }
             .pixelBox(isPresented: $confirmBypass) {
                 PixelBox(head: "Bypass", tone: .amber, message: "跳过全部权限确认？\(Self.bypassNote)",
                          actions: [.init(label: "Use Bypass", role: .primary) { mode = "bypass" }])
@@ -168,6 +194,14 @@ struct NewTerminalSheet: View {
     /// `Default`, and what it is today when the Mac knows (`Default · Opus 5.5`).
     private var defaultLabel: String {
         model.terminals.list?.defaults[agent].map { "Default · \($0)" } ?? "Default"
+    }
+
+    /// The levels the chosen model takes (none chosen: the agent's default model's).
+    private var levels: [String] { EffortDisplay.levels(model.terminals.list, harness: agent, model: modelId) }
+
+    /// `Default`, and the level that is when the agent says (`Default · Medium`).
+    private var effortDefaultLabel: String {
+        EffortDisplay.defaultLevel(model.terminals.list, harness: agent, model: modelId).map { "Default · \(EffortDisplay.name($0))" } ?? "Default"
     }
 
     /// What bypass leaves in force, said before it is chosen (here and when a bypass session is continued).
@@ -205,7 +239,8 @@ struct NewTerminalSheet: View {
         defer { starting = false }
         do {
             let terminal = try await api.createTerminal(NewTerminalRequest(harness: agent, cwd: folder.trimmingCharacters(in: .whitespaces),
-                                                                           model: modelId.isEmpty ? nil : modelId, mode: mode))
+                                                                           model: modelId.isEmpty ? nil : modelId,
+                                                                           effort: effortId.isEmpty ? nil : effortId, mode: mode))
             dismiss()
             started(terminal)
         } catch {

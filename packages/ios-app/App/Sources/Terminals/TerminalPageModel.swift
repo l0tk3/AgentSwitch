@@ -84,6 +84,8 @@ final class TerminalPageModel {
     private(set) var modelNow: String?
     /// A change of model is on its way to the agent.
     private(set) var changingModel = false
+    /// The thinking level a screen here asked for, until a turn has run at it (the record then says).
+    private(set) var effortAsked: String?
 
     init(terminal: TerminalInfo, fontSize: CGFloat, showsScreen: Bool = true) {
         id = terminal.id
@@ -230,6 +232,8 @@ final class TerminalPageModel {
                 // A turn begins or ends: the clock starts over, and at rest it is doing nothing.
                 activitySince = Date()
                 if s != .working { activity = nil; subagents = [] }
+                // A turn has run since the level was asked for: its record says what it ran at.
+                if status == .working, s == .idle { effortAsked = nil }
             }
             status = s
         case .activity(let now, let agents):
@@ -399,6 +403,22 @@ final class TerminalPageModel {
             self.error = error.localizedDescription
         }
         return nil
+    }
+
+    /// Another thinking level for the agent (Claude Code: its `/effort <level>`, typed by the Mac).
+    func setEffort(_ level: String) async {
+        guard let api, !changingModel else { return }
+        changingModel = true
+        defer { changingModel = false }
+        do {
+            let how = try await api.setTerminalEffort(id, effort: level)
+            effortAsked = level
+            error = how == .typed ? "已输入 \(EffortDisplay.command(level))。Mac 上的 AgentSwitch 版本较旧：Claude Code 若要求确认，请切到终端查看。" : nil
+        } catch APIError.http(status: 409, message: _) {
+            error = "它正在等待回答，回答后再调整。"
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     // MARK: files in the reply

@@ -164,6 +164,57 @@ final class RecordTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex"}"#.utf8)).modelNow)
     }
 
+    func testThinkingLevelsByAgentAndModel() throws {
+        let list = try JSONDecoder().decode(TerminalList.self, from: Data(#"""
+        {"terminals":[{"id":"t1","harness":"claude-code","model":"opus","effort":"xhigh","status":"idle"}],
+         "agents":["claude-code","codex","opencode","pi"],
+         "models":{"claude-code":[{"id":"opus","name":"Opus 5.5","efforts":["low","medium","high","xhigh","max"]},{"id":"haiku","name":"Haiku 4.5","efforts":[]},
+                                  {"id":"claude-opus-4-6","name":"Opus 4.6","older":true,"efforts":["low","medium","high","max"]}],
+                   "codex":[{"id":"gpt-6-luna","name":"GPT-6-Luna","efforts":["low","medium","high","xhigh","max"],"defaultEffort":"medium"}],
+                   "opencode":[{"id":"deepseek/deepseek-flash","name":"DeepSeek Flash","efforts":["none","low","high","max"]},{"id":"openai/gpt-6","name":"GPT-6"}],
+                   "pi":[]},
+         "defaults":{"claude-code":"Opus 5.5"},
+         "efforts":{"claude-code":["low","medium","high","xhigh","max"],"codex":["low","medium","high","xhigh","max","ultra"],"pi":["off","minimal","low","medium","high","xhigh","max"]},
+         "effortDefaults":{"codex":"low"}}
+        """#.utf8))
+        XCTAssertEqual(list.terminals[0].effort, "xhigh")
+        // A new terminal: the chosen model's levels; none chosen, the agent's default model's.
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "claude-code", model: nil), ["low", "medium", "high", "xhigh", "max"])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "claude-code", model: "claude-opus-4-6"), ["low", "medium", "high", "max"])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "claude-code", model: "haiku"), [])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "codex", model: ""), ["low", "medium", "high", "xhigh", "max", "ultra"])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "pi", model: nil).count, 7)
+        // OpenCode's variants belong to a model: nothing without one, nothing for a model whose variants are not listed.
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "opencode", model: nil), [])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "opencode", model: "deepseek/deepseek-flash"), ["none", "low", "high", "max"])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "opencode", model: "openai/gpt-6"), [])
+        XCTAssertEqual(EffortDisplay.levels(nil, harness: "claude-code", model: nil), [])
+        XCTAssertEqual(EffortDisplay.defaultLevel(list, harness: "codex", model: nil), "low")
+        XCTAssertEqual(EffortDisplay.defaultLevel(list, harness: "codex", model: "gpt-6-luna"), "medium")
+        XCTAssertNil(EffortDisplay.defaultLevel(list, harness: "claude-code", model: "opus"))
+        // A running terminal: the levels of the model it is on, found by the id it reports as by the alias listed.
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "claude-code", current: "claude-opus-4-6"), ["low", "medium", "high", "max"])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "claude-code", current: "claude-opus-5-5"), ["low", "medium", "high", "xhigh", "max"])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "claude-code", current: "claude-haiku-4-5-20251001"), [])
+        XCTAssertEqual(EffortDisplay.levels(list, harness: "claude-code", current: nil), ["low", "medium", "high", "xhigh", "max"])
+        // The model changes: a level it does not take goes back to its default.
+        XCTAssertEqual(EffortDisplay.kept("xhigh", in: ["low", "medium", "high", "max"]), "")
+        XCTAssertEqual(EffortDisplay.kept("max", in: ["low", "medium", "high", "max"]), "max")
+        XCTAssertEqual(["low", "xhigh", "max", "minimal", "none", "off", "ultra"].map(EffortDisplay.name), ["Low", "XHigh", "Max", "Minimal", "None", "Off", "Ultra"])
+        XCTAssertEqual(["claude-code", "codex", "opencode", "pi"].map(EffortDisplay.word), ["Effort", "Reasoning", "Variant", "Thinking"])
+        XCTAssertEqual(EffortDisplay.level(asked: nil, record: "medium", started: "xhigh"), "medium")
+        XCTAssertEqual(EffortDisplay.level(asked: "high", record: "medium", started: nil), "high")
+        XCTAssertEqual(EffortDisplay.command("xhigh"), "/effort xhigh")
+        XCTAssertEqual(EffortDisplay.command("high\n/clear"), "/effort highclear")
+        XCTAssertEqual(EffortDisplay.picker("opencode"), "/variants")
+        XCTAssertNil(EffortDisplay.picker("codex"))
+        let usage = try JSONDecoder().decode(RecordUsage.self, from: Data(#"{"model":"claude-opus-5-5","used":1000,"effort":"xhigh"}"#.utf8))
+        XCTAssertEqual(usage.effort, "xhigh")
+        let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(NewTerminalRequest(harness: "codex", cwd: "~/p", model: "gpt-6-luna", effort: "high"))) as? [String: Any]
+        XCTAssertEqual(body?["effort"] as? String, "high")
+        XCTAssertNil((try JSONSerialization.jsonObject(with: JSONEncoder().encode(NewTerminalRequest(harness: "codex", cwd: "~/p"))) as? [String: Any])?["effort"])
+    }
+
     func testChangesDecode() throws {
         let list = try JSONDecoder().decode(FileDiffList.self, from: Data(#"""
         {"files":[{"path":"src/retry.ts","added":1,"removed":1,"hunks":[{"header":"@@ -3,1 +3,1 @@","lines":["-const RETRIES = 5;","+const RETRIES = 3;"]}]},

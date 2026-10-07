@@ -54,7 +54,9 @@ const turn = [
   c.tool(47, "t7", "TodoWrite", { todos: [{ content: "找出所有用到的地方", status: "completed" }, { content: "删除按钮标红", status: "in_progress", activeForm: "正在把删除按钮标红" }, { content: "重新构建", status: "pending" }] }),
   c.result(48, "t7", { oldTodos: [], newTodos: [] }),
   line({ type: "assistant", isSidechain: true, cwd: REPO, timestamp: at(49), message: { role: "assistant", content: [{ type: "tool_use", id: "s1", name: "Bash", input: { command: "a sub-agent's own" } }] } }),
-  c.text(72, "改好了：换成应用里已有的红字删除按钮。", { input_tokens: 12, cache_read_input_tokens: 120_000, cache_creation_input_tokens: 4000, output_tokens: 300 }),
+  // Claude Code writes the level a turn ran at on its lines.
+  line({ type: "assistant", cwd: REPO, timestamp: at(72), effort: "xhigh", message: { role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text: "改好了：换成应用里已有的红字删除按钮。" }],
+    usage: { input_tokens: 12, cache_read_input_tokens: 120_000, cache_creation_input_tokens: 4000, output_tokens: 300 } } }),
 ];
 
 const kinds = (items: readonly RecordItem[]) => items.map((it) => it.type);
@@ -81,7 +83,7 @@ describe("a Claude Code session's record", () => {
     ]);
     // The session's latest: its own list of tasks, how full its context is, the mode it last named.
     expect(record.plan).toEqual([{ text: "找出所有用到的地方", state: "done" }, { text: "删除按钮标红", state: "doing" }, { text: "重新构建", state: "todo" }]);
-    expect(record.usage).toEqual({ model: "claude-opus-5-5", used: 124_012 });
+    expect(record.usage).toEqual({ model: "claude-opus-5-5", used: 124_012, effort: "xhigh" });
     expect(record.mode).toBe("acceptEdits");
     expect(record.more).toBe(false);
   });
@@ -206,7 +208,7 @@ const x = {
 };
 const rollout = [
   line({ timestamp: at(0), type: "session_meta", payload: { id: "x1", cwd: API, originator: "codex_cli_rs" } }),
-  line({ timestamp: at(0), type: "turn_context", payload: { cwd: API, model: "gpt-6-luna", approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } } }),
+  line({ timestamp: at(0), type: "turn_context", payload: { cwd: API, model: "gpt-6-luna", effort: "high", approval_policy: "on-request", sandbox_policy: { type: "workspace-write" } } }),
   x.item(1, { type: "UserMessage", id: "u1", content: [{ type: "text", text: "<environment_context>cwd</environment_context>" }] }),
   x.item(2, { type: "UserMessage", id: "u2", content: [{ type: "text", text: "# Files mentioned by the user:\n\n## a.md: /x/a.md\n\n## My request for Codex:\n把重试次数改成 3" }] }),
   x.item(3, { type: "Reasoning", id: "r1", summary_text: ["**Looking at the retry helper**"], raw_content: [] }),
@@ -255,7 +257,7 @@ describe("a Codex session's record", () => {
     ] });
     expect(record.items[5]).toMatchObject({ type: "note", text: "Interrupted" });
     expect(record.plan).toEqual([{ text: "改重试次数", state: "done" }, { text: "跑测试", state: "doing" }]);
-    expect(record.usage).toEqual({ model: "gpt-6-luna", used: 51_000, window: 272_000 });
+    expect(record.usage).toEqual({ model: "gpt-6-luna", effort: "high", used: 51_000, window: 272_000 });
     expect(record.mode).toBe("on-request");
     expect(readChanges("codex", path, { cwd: API })).toEqual([
       { path: "src/retry.ts", added: 1, removed: 1, hunks: [{ header: "@@ -3,1 +3,1 @@", lines: ["-const RETRIES = 5;", "+const RETRIES = 3;"] }] },

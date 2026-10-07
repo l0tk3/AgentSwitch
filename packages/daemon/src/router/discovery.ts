@@ -40,7 +40,13 @@ export function mergeDiscovered(targets: Targets, found: Discovered): { targets:
 }
 
 /** One entry of Codex's `model/list`: what its own picker shows. */
-export type CodexModelInfo = { readonly id: string; readonly displayName?: string; readonly description?: string; readonly hidden?: boolean; readonly upgrade?: string | null };
+export type CodexModelInfo = {
+  readonly id: string; readonly displayName?: string; readonly description?: string; readonly hidden?: boolean; readonly upgrade?: string | null;
+  /** The reasoning efforts it takes and the one it uses unless told (`supportedReasoningEfforts`, `defaultReasoningEffort`). */
+  readonly efforts?: readonly string[]; readonly defaultEffort?: string;
+  /** Codex's own default model. */
+  readonly isDefault?: boolean;
+};
 
 /** Codex app-server `model/list`, entries as it gives them; tolerant of the result's shape. */
 export async function listCodexModels(binary: string, timeoutMs = APP_SERVER_REQUEST_TIMEOUT_MS): Promise<CodexModelInfo[]> {
@@ -50,10 +56,15 @@ export async function listCodexModels(binary: string, timeoutMs = APP_SERVER_REQ
   return list.map((m): CodexModelInfo => {
     if (typeof m === "string") return { id: m };
     const displayName = str(m.displayName), description = str(m.description), upgrade = str(m.upgrade);
+    const efforts = Array.isArray(m.supportedReasoningEfforts)
+      ? m.supportedReasoningEfforts.map((e) => (typeof e === "string" ? e : str((e as Record<string, unknown> | null)?.reasoningEffort))).filter((e): e is string => Boolean(e))
+      : undefined;
+    const defaultEffort = str(m.defaultReasoningEffort);
     return {
       id: String(m.id ?? m.model ?? m.name ?? ""),
       ...(displayName ? { displayName } : {}), ...(description ? { description } : {}),
       ...(m.hidden === true ? { hidden: true } : {}), ...(upgrade ? { upgrade } : {}),
+      ...(efforts ? { efforts } : {}), ...(defaultEffort ? { defaultEffort } : {}), ...(m.isDefault === true ? { isDefault: true } : {}),
     };
   }).filter((m) => m.id.length > 0);
 }
@@ -65,7 +76,11 @@ export const codexIds = (list: readonly CodexModelInfo[]): string[] => [...new S
 
 /** One entry of Claude Code's model picker: `value` is what `--model` takes (an alias like "opus" follows new
  *  releases), `resolvedModel` the id it means today. */
-export type ClaudeModelInfo = { readonly value: string; readonly resolvedModel?: string; readonly displayName: string; readonly description: string };
+export type ClaudeModelInfo = {
+  readonly value: string; readonly resolvedModel?: string; readonly displayName: string; readonly description: string;
+  /** The effort levels it takes (`supportedEffortLevels`); none for a model without effort; absent when it does not say. */
+  readonly efforts?: readonly string[];
+};
 
 /** Claude Agent SDK `supportedModels()` without sending a message: canonical ids only (aliases like "default" dropped). */
 export async function discoverClaudeModels(executable?: string, timeoutMs = CLAUDE_DISCOVERY_TIMEOUT_MS): Promise<string[]> {
@@ -84,7 +99,10 @@ export async function listClaudeModels(executable?: string, timeoutMs = CLAUDE_D
   const timer = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`supportedModels timed out after ${timeoutMs} ms`)), timeoutMs); timeout.unref(); });
   try {
     const models = await Promise.race([q.supportedModels(), timer]);
-    return models.map((m) => ({ value: m.value, ...(m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}), displayName: m.displayName, description: m.description }));
+    return models.map((m) => ({
+      value: m.value, ...(m.resolvedModel ? { resolvedModel: m.resolvedModel } : {}), displayName: m.displayName, description: m.description,
+      ...(m.supportsEffort === false ? { efforts: [] } : m.supportedEffortLevels ? { efforts: [...m.supportedEffortLevels] } : {}),
+    }));
   } finally {
     clearTimeout(timeout);
     abortController.abort();  // a CLI stuck at start-up must not outlive the discovery as an orphan

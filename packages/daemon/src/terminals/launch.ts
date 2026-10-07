@@ -3,6 +3,7 @@
  *  executors', and the hooks go into this terminal's own settings — the user's global agent configuration is never
  *  touched, so agents they start in iTerm are unaffected. */
 
+import { effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -186,6 +187,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         }
         if (browser) args.push("--append-system-prompt", BROWSER_GUIDANCE);
         if (req.model) args.push("--model", req.model);
+        args.push(...effortArgs("claude-code", req.effort, req.model).args);
         args.push(...(req.mode === "bypass" ? ["--dangerously-skip-permissions"] : ["--permission-mode", req.mode]));
         // As in iTerm: ⇧Tab can reach bypass later. Only for terminals started on the Mac (not from a paired phone).
         if (req.mode !== "bypass" && req.allowBypass) args.push("--allow-dangerously-skip-permissions");
@@ -206,6 +208,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (browser) args.push(...codexBrowserArgs(browser));
         if (browser && !codexHasOwnInstructions(opts.env ?? process.env)) args.push("-c", `developer_instructions=${JSON.stringify(BROWSER_GUIDANCE)}`);
         if (req.model) args.push("-m", req.model);
+        args.push(...effortArgs("codex", req.effort, req.model).args);
         if (req.mode === "bypass") args.push("--dangerously-bypass-approvals-and-sandbox");
         // Asking is stated, not left to config.toml (which may never ask): it asks before anything outside the sandbox.
         // With the hooks, the read-denied paths are the PreToolUse floor's (as for Claude Code), not the profile's: Codex
@@ -222,7 +225,9 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // A private server — the service's own, which it watches (opencodeTerminal.ts), else the TUI's `--standalone` one:
         // by default OpenCode 2 runs the session in the user's shared background service, where this terminal's
         // environment (its config, the gate) never arrives.
-        const rest = req.model ? ["-m", req.model] : [];
+        // A variant is part of the model's name (`provider/model#variant`): none without a model.
+        const named = effortArgs("opencode", req.effort, req.model).model;
+        const rest = named ? ["-m", named] : [];
         if (req.mode !== "manual") rest.push("--auto");   // OpenCode has one switch: approve what is not denied
         if (req.resume) rest.push("--session", req.resume);   // OpenCode cannot fork: always the same session
         let own = env;
@@ -241,6 +246,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
       case "pi": {
         const args = ["--extension", opts.piExtension ?? PI_EXTENSION];
         if (req.model) args.push("--model", req.model);
+        args.push(...effortArgs("pi", req.effort, req.model).args);
         return { file, args, env, hooks: true };
       }
     }

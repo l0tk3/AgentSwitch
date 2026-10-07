@@ -14,7 +14,8 @@ import type { TerminalAudit } from "../terminals/audit.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
 import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
-import type { Offers } from "../router/modelOffers.js";
+import type { ModelOffer, Offers } from "../router/modelOffers.js";
+import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands } from "../terminals/commands.js";
 import { CLICK, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
@@ -40,6 +41,8 @@ export type Terminals = {
   readonly elsewhere: ElsewhereCheck;
   /** What each agent offers today for the model menu (its own list); the catalog stands in for an agent not asked. */
   readonly offers?: () => Offers;
+  /** OpenCode's variants per model (`provider/id`), as its server lists them. */
+  readonly variants?: () => Readonly<Record<string, readonly string[]>>;
   /** Where a terminal's attached files go (`<dir>/<id>/`); default the system's temporary folder (no spaces). */
   readonly attachDir?: string;
   /** Before an agent starts (Codex: its hooks trusted, codexHooks.ts); whatever happens, the start goes on. */
@@ -62,7 +65,8 @@ const Size = { cols: z.number().int().min(20).max(500), rows: z.number().int().m
 const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not a model id");
 /** A session id goes after `--resume` / `resume` / `--session`: likewise never one that could read as a flag. */
 const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a session id");
-const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), model: ModelId.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
+const Effort = z.string().regex(EFFORT, "not a level");
+const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), model: ModelId.optional(), effort: Effort.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
 /** `attachments`: files staged with POST /uploads, each where its placeholder stands in `text` (terminal-v0 §4). */
 const Input = z.object({
@@ -178,14 +182,32 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   // The agents this Mac can start, and each one's models for the new terminal's model menu: what the agent offers
   // today, in its order and names, the superseded ones marked `older` (else the catalog, targets.yaml after discovery);
   // none chosen = the agent's own default, named in `defaults` when the agent says what it is.
-  app.get("/terminals", (c) => {
+  // With each model, how hard it can be asked to think (`efforts`, lowest first; none: it takes no level) and what it
+  // uses unless told (`defaultEffort`), in the agent's own words (harness/efforts.ts). `efforts[agent]`: the levels
+  // when no model is chosen (the agent's default model; pi's one list); absent: none without a model (OpenCode).
+  const listing = () => {
     const catalog = modelSettings(deps.targets).harnesses;
     const offers = t.offers?.() ?? {};
-    const models = Object.fromEntries(agents.map((a) => [a, offers[a as keyof Offers]?.models
-      ?? (catalog[a]?.models ?? []).map((id) => ({ id, name: modelName(id) }))]));
+    const variants = t.variants?.() ?? {};
+    const models = Object.fromEntries(agents.map((a) => [a, (offers[a as keyof Offers]?.models
+      ?? (catalog[a]?.models ?? []).map((id): ModelOffer => ({ id, name: modelName(id), ...(a === "opencode" && variants[id] ? { efforts: variants[id] } : {}) }))) as readonly ModelOffer[]]));
     const defaults = Object.fromEntries(Object.entries(offers).flatMap(([a, o]) => (o?.defaultName ? [[a, o.defaultName]] : [])));
-    return c.json({ terminals: host.list().map(shown), agents, models, defaults });
-  });
+    const efforts = Object.fromEntries(agents.flatMap((a): [string, readonly string[]][] => {
+      const own = a === "pi" ? PI_THINKING : offers[a as keyof Offers]?.efforts;
+      return own?.length ? [[a, own]] : [];
+    }));
+    const effortDefaults = Object.fromEntries(Object.entries(offers).flatMap(([a, o]) => (o?.defaultEffort ? [[a, o.defaultEffort]] : [])));
+    return { models, defaults, efforts, effortDefaults };
+  };
+  /** What a new terminal may be started at, from the same lists the screens were given. */
+  const effortOffers = (): EffortOffers => {
+    const { models, efforts } = listing();
+    return {
+      any: efforts,
+      models: Object.fromEntries(Object.entries(models).map(([a, list]) => [a, Object.fromEntries(list.flatMap((m) => (m.efforts ? [[m.id, m.efforts]] : [])))])),
+    };
+  };
+  app.get("/terminals", (c) => c.json({ terminals: host.list().map(shown), agents, ...listing() }));
   app.get("/terminals/style", (c) => c.json(t.style()));
 
   const start = async (c: Context, resume: boolean) => {
@@ -193,6 +215,13 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     const typed = expandCwd(body.data.cwd);
     if (!isAbsolute(typed)) return c.json({ error: "cwd must be an absolute path" }, 400);
+    // A level the agent does not list for this model would fail its launch (or, OpenCode, its first turn): refused here.
+    if (body.data.effort) {
+      const takes = effortsFor(effortOffers(), body.data.harness, body.data.model);
+      if (!takes?.includes(body.data.effort)) {
+        return c.json({ error: takes ? `effort: one of ${takes.join(", ")}` : "effort: this model takes no level (OpenCode: choose a model first)" }, 400);
+      }
+    }
     const cwd = resolve(typed);   // `~/proj/` and `~/proj` are one folder
 
     const resumed = resume ? (body.data as z.infer<typeof ResumeTerminal>) : null;
@@ -232,11 +261,11 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       if (raced) return c.json({ terminal: raced, existing: true });
     }
     try {
-      const info = await host.spawn({ harness: body.data.harness, cwd, ...(body.data.model ? { model: body.data.model } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
+      const info = await host.spawn({ harness: body.data.harness, cwd, ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
-      audit.record({ terminal: info.id, action: resume ? "resume" : "create", via: via(c), detail: { harness: info.harness, cwd, model: info.model, mode: info.mode, ...(resume ? { fork } : {}), ...(movedFrom ? { movedFrom } : {}) } });
+      audit.record({ terminal: info.id, action: resume ? "resume" : "create", via: via(c), detail: { harness: info.harness, cwd, model: info.model, effort: info.effort, mode: info.mode, ...(resume ? { fork } : {}), ...(movedFrom ? { movedFrom } : {}) } });
       return c.json({ terminal: info }, 201);
     } catch (err) { return failed(c, err); }
   };
@@ -315,6 +344,20 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     try { host.askModel(id, body.data.model); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "model", via: via(c), detail: { model: body.data.model } });
+    return c.json({ ok: true });
+  });
+
+  // Another thinking level for the agent (terminal-v0 §1 思考强度): Claude Code's own command typed for the screen. One of
+  // the levels its current model takes when that is known (the model it reported, else the one it was started with).
+  app.post("/terminals/:id/effort", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseBody(c, z.object({ effort: Effort }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    const info = host.get(id);
+    if (!info) return c.json({ error: "not found" }, 404);
+    if (!CLAUDE_EFFORTS.includes(body.data.effort as (typeof CLAUDE_EFFORTS)[number])) return c.json({ error: `effort: one of ${CLAUDE_EFFORTS.join(", ")}` }, 400);
+    try { host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
+    audit.record({ terminal: id, action: "effort", via: via(c), detail: { effort: body.data.effort } });
     return c.json({ ok: true });
   });
 

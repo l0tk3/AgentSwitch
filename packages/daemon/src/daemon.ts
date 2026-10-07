@@ -1,6 +1,7 @@
 /** Composition root: config → store, bus, engine, executors, quota, API. `serve()` listens on 127.0.0.1 and, with
  *  AGENTSWITCH_REMOTE=1, on the remote HTTPS port for paired phones (app-v0 §2). */
 
+import { openCodeVariants } from "./harness/efforts.js";
 import { Assistant } from "./assistant/assistant.js";
 import { AssistantLog } from "./assistant/log.js";
 import { announceUpdate, Reporter, type ReporterOptions } from "./assistant/reports.js";
@@ -360,7 +361,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
     ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure({ fresh: true }), 8000); } } : {}),
-    ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current() } : {}),
+    ...(overrides.modelOffers ? { offers: () => overrides.modelOffers!.current(), variants: () => overrides.modelOffers!.variants() } : {}),
   } : undefined;
   // Deleting an OpenCode session goes through the user's own opencode (docs/terminal-v0.md §5, threads-v0 删除): the
   // user's from the session list, the executors' with their tasks. None with a fake launcher, nor when no opencode is
@@ -528,6 +529,8 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
     catch (err) { console.error(`${(err as Error).message}; router-type calls fall back to opencode run --standalone`); }
   }
   const opencodeExec = cfg.executors === "real" && (cfg.opencodeExecutor ?? "serve") === "serve" ? await startOpenCodeExecServer(cfg) : undefined;
+  // OpenCode's variants (its models' thinking levels) for the terminals' menus, from the executors' server.
+  if (modelOffers && opencodeExec) modelOffers.watchOpenCode(() => openCodeVariants((method, path) => opencodeExec.call(method, path), join(cfg.home, "opencode-exec")));
   const daemon = buildDaemon(cfg, { targets, ...(modelOffers ? { modelOffers } : {}), ...(opencode ? { opencode } : {}), ...(opencodeExec ? { opencodeExec } : {}) });
   const remote: RemoteListener | undefined = daemon.remote
     ? await startRemote(daemon, daemon.remote).catch((err: Error) => { daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); throw err; })

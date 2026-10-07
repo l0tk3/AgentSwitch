@@ -134,11 +134,14 @@ public struct RecordUsage: Decodable, Sendable, Hashable {
     public let model: String?
     public let used: Int?
     public let window: Int?
+    /// How hard it thought at the last turn, in the agent's word (Claude Code, Codex).
+    public let effort: String?
 
-    public init(model: String? = nil, used: Int? = nil, window: Int? = nil) {
+    public init(model: String? = nil, used: Int? = nil, window: Int? = nil, effort: String? = nil) {
         self.model = model
         self.used = used
         self.window = window
+        self.effort = effort
     }
 }
 
