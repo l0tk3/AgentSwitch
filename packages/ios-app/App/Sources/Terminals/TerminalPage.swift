@@ -41,17 +41,127 @@ struct TerminalPage: View {
     /// Said over the screen for a moment (`Link Copied`).
     @State private var said: String?
     @State private var saidHides: Task<Void, Never>?
+    /// What the last turn changed, opened from the menu.
+    @State private var lastTurnChanges = false
 
     /// The terminal as it was opened: where its agent worked until the list says otherwise.
     private let opened: TerminalInfo
 
+    /// The session's record (the simple view) or the program's own screen: what this terminal was last shown as here.
+    @State private var viewMode: TerminalViewMode
+    @State private var record = SessionRecordModel()
+    /// The transcript in full: every run of work open, thinking shown.
+    @AppStorage("record.verbose") private var verbose = false
+    /// The key bar under the record (the simple view keeps it away until it is wanted).
+    @State private var showKeys = false
+
     init(terminal: TerminalInfo) {
         opened = terminal
         let size = UserDefaults.standard.object(forKey: "terminal.fontSize") as? Double ?? 10
-        _page = State(initialValue: TerminalPageModel(terminal: terminal, fontSize: CGFloat(size)))
+        let mode = TerminalViewMode.saved(for: terminal.id)
+        _viewMode = State(initialValue: mode)
+        _page = State(initialValue: TerminalPageModel(terminal: terminal, fontSize: CGFloat(size), showsScreen: mode == .terminal))
     }
 
-    var body: some View {
+    private var simple: Bool { viewMode == .simple }
+    /// The terminal as the list has it now (its folder, its session once the agent has said which).
+    private var listed: TerminalInfo { model.terminals.terminals.first { $0.id == page.id } ?? opened }
+    /// The program waits on something it drew itself: the keys come out on their own.
+    private var prompting: Bool { page.status == .waiting && page.permissions.isEmpty }
+
+    private func show(_ mode: TerminalViewMode) {
+        guard mode != viewMode else { return }
+        replying = false
+        viewMode = mode
+        mode.save(for: page.id)
+        page.show(screen: mode == .terminal)
+    }
+
+    var body: some View { chrome(bars) }
+
+    /// The record or the screen, under the page's bar and over its controls.
+    private var bars: some View {
+        Group {
+            if simple {
+                TerminalRecordView(page: page, record: record, terminal: listed, git: model.terminals.git[workdir]?.said, verbose: verbose) { show(.terminal) }
+            } else {
+                screen
+            }
+        }
+        .background { (simple ? Theme.base : Color.black).ignoresSafeArea() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { controls }
+        // The whole height for the screen; back returns to the tabs.
+        .toolbar(.hidden, for: .tabBar)
+        // The screen keeps the Mac's (dark) terminal colours in light mode too: the bar over it reads light on dark. The
+        // record follows the phone's appearance.
+        .toolbarColorScheme(simple ? nil : .dark, for: .navigationBar)
+        .toolbarBackground(simple ? Theme.base : Color.black, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                let status = page.permissions.isEmpty ? page.status : .waiting
+                VStack(spacing: 1) {
+                    // The folder the agent works in now and its git, as the Mac window's title (terminal-v0 §1,
+                    // 2026-10-01, user: 手机上的标题栏没变); the terminal's name stays on its row in the list.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(TerminalTree.lastComponent(workdir)).font(.headline).lineLimit(1)
+                        if let git = model.terminals.git[workdir]?.said { Text(git).mono(12).foregroundStyle(.secondary).lineLimit(1) }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint(page.name)
+                    HStack(spacing: 5) {
+                        TerminalStatusMark(status: status)
+                        LookWord(page.permissions.isEmpty ? page.status.label : "Waiting").mono(11).foregroundStyle(.secondary)
+                    }
+                }
+                .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
+            }
+            // The other view of the same session (simple-view-v0 §1).
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { show(simple ? .terminal : .simple) } label: {
+                    if look.isClassic { Image(systemName: simple ? "terminal" : "text.alignleft") } else { Text(simple ? ">_" : "≡").mono(16, weight: .medium) }
+                }
+                .tint(look.isClassic ? Theme.signal : Theme.ink)
+                .accessibilityLabel(simple ? "terminal view" : "simple view")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button(simple ? "Terminal View" : "Simple View", systemImage: simple ? "terminal" : "text.alignleft") { show(simple ? .terminal : .simple) }
+                    if simple {
+                        Button(verbose ? "Transcript: Normal" : "Transcript: Verbose", systemImage: "list.bullet.indent") { verbose.toggle() }
+                        if record.hasSession, page.harness == "claude-code" || page.harness == "codex" {
+                            Button("Changes", systemImage: "plusminus") { lastTurnChanges = true }
+                        }
+                    }
+                    Divider()
+                    Button("Rename", systemImage: "pencil") { newName = page.name; renaming = true }
+                    Button("Close", systemImage: "xmark", role: .destructive) { if page.status == .exited && !canDeleteRecord { Task { await close() } } else { confirmClose = true } }
+                } label: { if look.isClassic { Image(systemName: "ellipsis.circle") } else { Text("⋯").mono(17) } }
+                .tint(look.isClassic ? Theme.signal : Theme.ink)
+            }
+        }
+        .sheet(isPresented: $lastTurnChanges) {
+            if let session = listed.agentSessionId { ChangesSheet(harness: listed.harness, session: session, work: nil) }
+        }
+        // The record of the terminal's session: read when the page opens in the simple view and when the agent says
+        // which session it is; again whenever the Mac says it changed, and on a timer besides (OpenCode's sessions
+        // share one database, and an older Mac says nothing).
+        .task(id: "\(listed.harness)|\(listed.agentSessionId ?? "")|\(simple)") {
+            guard simple else { return }
+            record.follow(harness: listed.harness, session: listed.agentSessionId)
+            await record.refresh(model.api)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(page.recordRev == nil ? (page.status == .working ? 3 : 10) : 20))
+                guard !Task.isCancelled else { break }
+                await record.refresh(model.api)
+            }
+        }
+        .onChange(of: page.recordRev) { Task { await record.refresh(model.api) } }
+        .onChange(of: page.status) { if simple { Task { await record.refresh(model.api) } } }
+    }
+
+    /// The program's own screen, with what floats over it.
+    private var screen: some View {
         ZStack(alignment: .top) {
             TerminalScreen(controller: page.screen, onPinchEnded: { size in fontSize = Double(size) },
                            onWheel: { up, count in wheel(up: up, count: count) }, onTap: { point in tapped(point) },
@@ -77,41 +187,11 @@ struct TerminalPage: View {
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
         }
-        .background { Color.black.ignoresSafeArea() }
-        .safeAreaInset(edge: .bottom, spacing: 0) { controls }
-        // The whole height for the screen; back returns to the tabs.
-        .toolbar(.hidden, for: .tabBar)
-        // The screen keeps the Mac's (dark) terminal colours in light mode too: the bar over it reads light on dark.
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbarBackground(Color.black, for: .navigationBar)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                let status = page.permissions.isEmpty ? page.status : .waiting
-                VStack(spacing: 1) {
-                    // The folder the agent works in now and its git, as the Mac window's title (terminal-v0 §1,
-                    // 2026-10-01, user: 手机上的标题栏没变); the terminal's name stays on its row in the list.
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(TerminalTree.lastComponent(workdir)).font(.headline).lineLimit(1)
-                        if let git = model.terminals.git[workdir]?.said { Text(git).mono(12).foregroundStyle(.secondary).lineLimit(1) }
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint(page.name)
-                    HStack(spacing: 5) {
-                        TerminalStatusMark(status: status)
-                        LookWord(page.permissions.isEmpty ? page.status.label : "Waiting").mono(11).foregroundStyle(.secondary)
-                    }
-                }
-                .glitch(on: status, when: { $0 == .waiting || $0 == .exited })
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Rename", systemImage: "pencil") { newName = page.name; renaming = true }
-                    Button("Close", systemImage: "xmark", role: .destructive) { if page.status == .exited && !canDeleteRecord { Task { await close() } } else { confirmClose = true } }
-                } label: { if look.isClassic { Image(systemName: "ellipsis.circle") } else { Text("⋯").mono(17) } }
-                .tint(look.isClassic ? Theme.signal : Theme.ink)
-            }
-        }
+    }
+
+    /// The page's boxes, pickers and what it watches: the same in either view.
+    private func chrome(_ content: some View) -> some View {
+        content
         .alert("Rename", isPresented: $renaming) {
             TextField("名称（留空恢复自动命名）", text: $newName)
             Button("Save") { Task { await page.rename(newName) } }
@@ -147,6 +227,8 @@ struct TerminalPage: View {
                 // After the page has slid in, as a tap on the lock would: the box glitches open.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { sealing = true }
             case "terminalslash": reply = "/co"
+            // What the last turn changed, as the menu's Changes would open it.
+            case "simplechanges": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { lastTurnChanges = true }
             case "terminalkeyboard": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { replying = true }
             case "terminalclose": DispatchQueue.main.asyncAfter(deadline: .now() + 2) { confirmClose = true }
             // A link held, as a long press on the address in the demo's screen would open its menu.
@@ -200,7 +282,7 @@ struct TerminalPage: View {
             default: break
             }
         }
-        .onChange(of: page.removed) { if page.removed { model.terminals.remove(page.id); dismiss() } }
+        .onChange(of: page.removed) { if page.removed { TerminalViewMode.forget(page.id); model.terminals.remove(page.id); dismiss() } }
         .onChange(of: fontSize) { page.screen.setFontSize(CGFloat(fontSize)) }
     }
 
@@ -321,6 +403,8 @@ struct TerminalPage: View {
                 .padding(.horizontal, Theme.Space.l).padding(.top, 6)
                 .glitch(on: error, onAppear: true)
             }
+            if simple { TasksRow(plan: record.plan) }
+            if !simple || showKeys || prompting {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     if replying {
@@ -337,18 +421,40 @@ struct TerminalPage: View {
                 .padding(.horizontal, Theme.Space.l)
                 .padding(.vertical, 8)
             }
+            } else {
+                Color.clear.frame(height: 8)
+            }
             composer
             if let note = page.sealedNote {
                 Text(note).mono(11).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
             }
+            if simple { sessionLine }
         }
         // Down to the screen's bottom edge, under the keyboard too: its rounded corners and the gap above it would
         // otherwise show the window's light ground.
-        .background { page.ground.ignoresSafeArea(edges: .bottom) }
+        .background { (simple ? Theme.base : page.ground).ignoresSafeArea(edges: .bottom) }
         // One dark block with the screen whatever the phone's appearance (ui-v0 §7): the keys, the reply box, the
-        // sealed box and its keyboard take the dark palette.
-        .environment(\.colorScheme, .dark)
+        // sealed box and its keyboard take the dark palette. Under the record they follow the phone.
+        .modifier(DarkBlock(on: !simple))
+    }
+
+    /// Under the reply box in the simple view: how it asks, the model, how full its context is.
+    private var sessionLine: some View {
+        let mode = RecordDisplay.mode(record.mode) ?? RecordDisplay.mode(listed.mode) ?? listed.mode.capitalized
+        let modelName = (record.usage?.model ?? listed.model).map(ModelName.display)
+        return HStack(spacing: 6) {
+            Text([mode, modelName].compactMap { $0 }.joined(separator: " · ")).lineLimit(1)
+            Spacer(minLength: 4)
+            if let context = RecordDisplay.context(record.usage) { Text("Context \(context)").lineLimit(1) }
+        }
+        .mono(11).foregroundStyle(.tertiary)
+        .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
+    }
+
+    /// While it works and nothing is typed, the send key stops it (esc).
+    private var stops: Bool {
+        simple && page.status == .working && page.permissions.isEmpty && reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !page.sending
     }
 
     /// One box for both ways of replying, so switching keeps the text and the keyboard as they were (one text field,
@@ -383,6 +489,8 @@ struct TerminalPage: View {
                         Button("Photos", systemImage: "photo.on.rectangle") { replying = false; pickingPhotos = true }
                         Button("Files", systemImage: "folder") { replying = false; pickingFiles = true }
                         Button("Paste Image", systemImage: "doc.on.clipboard") { pasteImages() }
+                        // The keys are out of the way under the record until they are wanted.
+                        if simple { Button(showKeys ? "Hide Keys" : "Keys", systemImage: "keyboard") { showKeys.toggle() } }
                     } label: {
                         if look.isClassic {
                             Image(systemName: "plus.circle").font(.system(size: 26, weight: .light)).foregroundStyle(Theme.ink.opacity(0.72))
@@ -412,10 +520,10 @@ struct TerminalPage: View {
                     .grounded(look.isClassic && !sealing ? Theme.raised : Color.clear, radius: Theme.Radius.bubble)
                     .framed(sealing || look.isClassic ? Color.clear : Theme.line, radius: Theme.Radius.bubble)
                 if !sealing {
-                    Button { Task { await sendDirect() } } label: { sendLabel }
-                        .buttonStyle(SquareIconButtonStyle(active: canSend || page.sending))
-                        .disabled(!canSend)
-                        .accessibilityLabel("send")
+                    Button { Task { if stops { await page.press(.esc) } else { await sendDirect() } } } label: { sendLabel }
+                        .buttonStyle(SquareIconButtonStyle(active: canSend || page.sending || stops))
+                        .disabled(!canSend && !stops)
+                        .accessibilityLabel(stops ? "stop" : "send")
                 }
             }
             .padding(.horizontal, sealing ? 0 : Theme.Space.l)
@@ -508,6 +616,8 @@ struct TerminalPage: View {
     private var sendLabel: some View {
         if page.sending {
             BrailleSpinner(color: Theme.base)
+        } else if stops {
+            if look.isClassic { Image(systemName: "stop.fill").font(.system(size: 13, weight: .bold)) } else { Text("■").font(.system(size: 15, weight: .bold, design: .monospaced)) }
         } else if look.isClassic {
             Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold))
         } else {
@@ -619,5 +729,14 @@ private struct CaretField: View {
                 let caret = text.index(text.startIndex, offsetBy: min(result.caret, text.count))
                 selection = TextSelection(insertionPoint: caret)
             }
+    }
+}
+
+/// The dark palette for what sits with a terminal's screen; nothing under the record, which follows the phone.
+private struct DarkBlock: ViewModifier {
+    let on: Bool
+
+    func body(content: Content) -> some View {
+        if on { content.environment(\.colorScheme, .dark) } else { content }
     }
 }

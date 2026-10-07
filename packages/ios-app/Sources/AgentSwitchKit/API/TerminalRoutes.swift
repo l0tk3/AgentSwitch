@@ -169,14 +169,14 @@ extension AgentSwitchAPI {
     /// new snapshot when that is gone). Ends when the terminal is removed or no longer exists.
     /// `screen`: the drawing screen's id; the size it owns goes back when this stream ends (the page closed, the app
     /// went to the background).
-    public func terminalEvents(_ id: String, screen: String? = nil, policy: ReconnectPolicy = .standard) -> AsyncThrowingStream<TerminalEvent, Error> {
+    public func terminalEvents(_ id: String, screen: String? = nil, record: Bool = false, policy: ReconnectPolicy = .standard) -> AsyncThrowingStream<TerminalEvent, Error> {
         let (stream, sink) = AsyncThrowingStream<TerminalEvent, Error>.makeStream()
         let worker = Task {
             var last: Int64?
             var failures = 0
             while !Task.isCancelled {
                 do {
-                    let (ended, seq, delivered) = try await followTerminalOnce(id, after: last, screen: screen, policy: policy) { sink.yield($0) }
+                    let (ended, seq, delivered) = try await followTerminalOnce(id, after: last, screen: screen, record: record, policy: policy) { sink.yield($0) }
                     if ended { break }
                     last = seq ?? last
                     failures = delivered ? 0 : failures + 1
@@ -200,10 +200,14 @@ extension AgentSwitchAPI {
     }
 
     /// One connection: (removed, last seq delivered, anything delivered).
-    private func followTerminalOnce(_ id: String, after: Int64?, screen: String?, policy: ReconnectPolicy,
+    private func followTerminalOnce(_ id: String, after: Int64?, screen: String?, record: Bool, policy: ReconnectPolicy,
                                     deliver: (TerminalEvent) -> Void) async throws -> (Bool, Int64?, Bool) {
         let endpoint = try await endpoints.endpoint()
-        let query = [after.map { URLQueryItem(name: "after", value: String($0)) }, screen.map { URLQueryItem(name: "screen", value: $0) }].compactMap { $0 }
+        // `view=record`: the stream of a screen that shows the session's record, not the terminal — no screen content, and
+        // what the agent is doing and when its record changed instead. It draws nothing, so it names no screen (the
+        // size is never its own). A Mac from before this still sends the screen: its frames are skipped here.
+        let query = record ? [URLQueryItem(name: "view", value: "record")]
+            : [after.map { URLQueryItem(name: "after", value: String($0)) }, screen.map { URLQueryItem(name: "screen", value: $0) }].compactMap { $0 }
         let req = request("GET", endpoint, ["terminals", id, "stream"], query: query, body: nil, accept: "text/event-stream",
                           timeout: policy.idleTimeout)
         var last = after
@@ -219,6 +223,7 @@ extension AgentSwitchAPI {
             for try await chunk in Self.idleGuarded(body, limit: .milliseconds(Int64(policy.idleTimeout * 1000))) {
                 for message in parser.feed(chunk) {
                     guard let event = TerminalEvent.parse(event: message.event, data: message.data) else { continue }
+                    if record, event.seq != nil { continue }
                     // Output already shown (a replay after a reconnect) is skipped; a snapshot always draws.
                     if case .output(let seq, _) = event, let last, seq <= last { continue }
                     if let seq = event.seq { last = seq }

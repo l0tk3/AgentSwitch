@@ -172,14 +172,19 @@ enum DemoData {
 
     static var terminalList: TerminalList {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
+        let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
+        // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
+        let busy = screen == "simplebusy", prompt = screen == "simpleprompt"
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
-                         status: .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
-                         permissions: UserDefaults.standard.string(forKey: "uiDemoScreen") == "terminallink" ? []
-                                      : [UserDefaults.standard.string(forKey: "uiDemoScreen") == "terminalquestion" ? question
+                         status: busy ? .working : .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
+                         permissions: screen == "terminallink" || busy || prompt ? []
+                                      : [screen == "terminalquestion" || screen == "simplequestion" ? question
                                          : TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
-                         subagents: [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
-                                     TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
+                         activity: busy ? TerminalActivity(tool: "Bash", target: "swift build -c release") : nil,
+                         statusSince: busy ? ago(41) : nil,
+                         subagents: prompt ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
+                                                   TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
                          createdAt: ago(900), lastOutputAt: ago(2)),
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,
@@ -236,22 +241,60 @@ enum DemoData {
         return (withLinks ? Array(lines.dropLast(3)) + links : lines).joined(separator: "\r\n")
     }()
 
-    static func sessionMessages(_ session: SessionSummary) -> [SessionMessage] {
-        let base = session.updatedAt
-        func m(_ role: SessionMessage.Role, _ text: String, _ secondsBefore: Int64, tool: String? = nil) -> SessionMessage {
-            SessionMessage(role: role, text: text, ts: base - secondsBefore * 1000, tool: tool)
-        }
-        return [
-            m(.user, "给 iPhone 端加一个编码会话列表：按目录分组，进行中的要标出来。", 600),
-            m(.assistant, "查看现有的设置页和 Kit 中的 API 模型，然后添加 GET /sessions 的解码和列表页。", 590),
-            m(.tool, "App/Sources/Settings/SettingsView.swift", 580, tool: "Read"),
-            m(.tool, "Sources/AgentSwitchKit/API/AgentSwitchAPI.swift", 575, tool: "Read"),
-            m(.tool, "swift test", 400, tool: "Bash"),
-            m(.assistant, "测试全部通过。列表按目录分组，最近有活动的目录排在前面；进行中的会话前有主色圆点。", 380),
-            m(.user, "进行中的多久刷新一次？", 120),
-            m(.assistant, "列表中有进行中的会话时每 10 秒刷新一次；否则仅在打开和下拉时刷新。", 20),
+    /// A session's record for the simple view (docs/simple-view-v0.md §2): what was said, two runs of work, a message
+    /// typed while it worked; its task list and how full its context is.
+    static func sessionRecord(harness: String, id: String) -> SessionRecord {
+        let summary = decode(SessionSummary.self, ["harness": harness, "id": id, "cwd": "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch", "title": "iPhone 终端标签页",
+                                                   "lastText": "", "updatedAt": ago(20), "startedAt": ago(1800), "active": true, "model": "claude-opus-5-5", "branch": "main"])
+        let busy = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplebusy"
+        var items: [RecordItem] = [
+            RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 1),
+            RecordItem(id: "200", kind: .work, at: ago(890), seconds: 72, steps: [
+                RecordStep(kind: .think, text: "The choice is saved, but the service reads it only when it starts."),
+                RecordStep(kind: .read, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"),
+                RecordStep(kind: .search, text: "pendingRestart"),
+                RecordStep(kind: .run, text: "swift test --filter AgentsTests", out: "Executed 41 tests, with 0 failures (0 unexpected) in 0.412 seconds"),
+                RecordStep(kind: .edit, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 12, removed: 1),
+                RecordStep(kind: .edit, text: "docs/agents-v0.md", added: 2, removed: 1),
+            ]),
+            RecordItem(id: "300", kind: .answer, at: ago(815), text: """
+                生效了，只是还没有用上：
+
+                - 测试版已装好，`codex-beta` 在命令行里可用。
+                - 页面顶部有 `Restart Service…`，但你是在下面那一组里选的，看不到它。
+
+                已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 [docs/agents-v0.md](docs/agents-v0.md) §8。
+                """),
+            RecordItem(id: "400", kind: .user, at: ago(300), text: "delete 应该标红才对"),
+            RecordItem(id: "500", kind: .work, at: ago(290), seconds: busy ? 0 : 38, steps: [
+                RecordStep(kind: .search, text: "SettingsDeleteButton"),
+                RecordStep(kind: .edit, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 3, removed: 3),
+            ]),
         ]
+        if busy {
+            items.insert(RecordItem(id: "450", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。正在重新构建。"), at: 5)
+            items.append(RecordItem(id: "600", kind: .user, at: ago(5), text: "顺便把确认框的文案也看一下", queued: true))
+        } else {
+            items.append(RecordItem(id: "550", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。接下来跑一遍测试确认。"))
+        }
+        return SessionRecord(session: summary, items: items, more: true, cursor: 100, rev: "demo",
+                             plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done),
+                                    PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
+                             usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000), mode: "acceptEdits")
     }
+
+    /// What a run of work changed (the simple view's Changes).
+    static let changes: [FileDiff] = [
+        FileDiff(path: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift", added: 3, removed: 3, hunks: [
+            FileDiff.Hunk(header: "@@ -212,7 +212,7 @@", lines: [
+                "             Spacer()", "-            Button(\"Delete\", role: .destructive) { confirm = row }", "+            SettingsDeleteButton(\"Delete\") { confirm = row }",
+                "+                .disabled(row.locked || busy)", "-                .disabled(row.locked)", "-                .controlSize(.small)", "+                .help(row.locked ? AgentText.locked : \"\")", "         }",
+            ]),
+        ]),
+        FileDiff(path: "docs/agents-v0.md", added: 2, removed: 1, hunks: [
+            FileDiff.Hunk(header: "@@ -88,3 +88,4 @@", lines: [" ## 8. 界面", "-删除用系统的破坏性按钮。", "+删除用设置页自己的红字按钮（`SettingsDeleteButton`），", "+禁用时变淡。"]),
+        ]),
+    ]
 
     /// 设置 › 用量, mirroring a real reading (2026-09-27): Claude Code 20 % of 5 h and 82 % of 7 d, Codex Pro 8 % of 7 d
     /// (no 5 h window), the DeepSeek balance for OpenCode; read a minute and a half ago, resets still ahead.

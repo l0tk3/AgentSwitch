@@ -234,6 +234,7 @@ struct KeyCapStyle: ButtonStyle {
     /// Narrower caps, for a bar that holds a long key too (the browser page's).
     var compact = false
     @Environment(\.interfaceLook) private var look
+    @Environment(\.colorScheme) private var scheme
 
     func makeBody(configuration: Configuration) -> some View {
         let pressed = configuration.isPressed
@@ -243,7 +244,7 @@ struct KeyCapStyle: ButtonStyle {
                 .frame(minWidth: compact ? (solid ? 36 : 26) : (solid ? 46 : 34))
                 .padding(.horizontal, compact ? 5 : 6)
                 .padding(.vertical, 7)
-                .background(solid ? Theme.fill : Color(white: 0.23), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .background(solid ? Theme.fill : scheme == .dark ? Color(white: 0.23) : Theme.raised, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .opacity(pressed ? 0.6 : 1)
         } else {
             configuration.label

@@ -67,13 +67,31 @@ final class TerminalPageModel {
     @ObservationIgnored private var active = true
     private var mine: Bool { owner == screenId }
 
-    init(terminal: TerminalInfo, fontSize: CGFloat) {
+    /// The page draws the terminal's screen. False in the simple view (docs/simple-view-v0.md §1): the stream then
+    /// carries no screen, this phone never takes the size, and the Mac says what the agent is doing and when the
+    /// session's record changed.
+    private(set) var showsScreen: Bool
+    /// What the agent is doing now, as the record's stream says it (the list's reading until it has).
+    private(set) var activity: TerminalActivity?
+    private(set) var subagents: [TerminalSubagent] = []
+    /// The stream has said what it is doing (so "nothing" is known, not unheard).
+    private(set) var activityKnown = false
+    /// When what it is doing now began (the tool, else the turn).
+    private(set) var activitySince: Date?
+    /// Changes when the session's record does: the page reads it again.
+    private(set) var recordRev: String?
+
+    init(terminal: TerminalInfo, fontSize: CGFloat, showsScreen: Bool = true) {
         id = terminal.id
         name = terminal.name
         harness = terminal.harness
         status = terminal.status
         permissions = terminal.permissions
         ownsRecord = terminal.resumedFrom == nil || terminal.forked
+        self.showsScreen = showsScreen
+        activity = terminal.activity
+        subagents = terminal.subagents
+        activitySince = terminal.statusSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
         screen = TerminalScreenController(fontSize: fontSize)
         screen.onSize = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }
     }
@@ -101,15 +119,15 @@ final class TerminalPageModel {
                 self?.commandsUnavailable = true
             }
         }
-        claimOnConnect = true
+        claimOnConnect = showsScreen
         startStream(api)
     }
 
     private func startStream(_ api: AgentSwitchAPI) {
-        let id = id, screen = screenId
+        let id = id, screen = showsScreen ? screenId : nil, record = !showsScreen
         follow = Task { [weak self] in
             do {
-                for try await event in api.terminalEvents(id, screen: screen) {
+                for try await event in api.terminalEvents(id, screen: screen, record: record) {
                     guard let self, !Task.isCancelled else { return }
                     self.handle(event)
                 }
@@ -139,7 +157,26 @@ final class TerminalPageModel {
     func resume() {
         active = true
         guard follow == nil, let api, !removed else { return }
-        claimOnConnect = status != .exited
+        claimOnConnect = showsScreen && status != .exited
+        startStream(api)
+    }
+
+    /// To the terminal's screen, or to the record. The screen comes fresh from the Mac and the size becomes this
+    /// phone's (the user chose to look at it here); leaving it gives the size back a moment later.
+    func show(screen on: Bool) {
+        guard on != showsScreen else { return }
+        showsScreen = on
+        follow?.cancel()
+        follow = nil
+        resizing?.cancel()
+        claimTask?.cancel()
+        claiming = false
+        held = []
+        owner = nil
+        away = nil
+        drawn = false
+        guard active, let api, !removed else { return }
+        claimOnConnect = on && status != .exited
         startStream(api)
     }
 
@@ -156,6 +193,12 @@ final class TerminalPageModel {
     }
 
     func handle(_ event: TerminalEvent) {
+        switch event {
+        case .snapshot, .output, .resize:
+            // The record's stream draws nothing and owns no size (a Mac from before it still sends these).
+            if !showsScreen { return }
+        default: break
+        }
         switch event {
         case .snapshot(_, let cols, let rows, let data):
             if claimOnConnect { held = [event]; return }
@@ -178,7 +221,18 @@ final class TerminalPageModel {
             screen.output(data)
             drawn = true
         case .status(let s):
+            if s != status {
+                // A turn begins or ends: the clock starts over, and at rest it is doing nothing.
+                activitySince = Date()
+                if s != .working { activity = nil; subagents = [] }
+            }
             status = s
+        case .activity(let now, let agents):
+            activityKnown = true
+            if now != activity { activity = now; activitySince = Date() }
+            subagents = agents
+        case .record(let rev):
+            recordRev = rev
         case .name(let n):
             name = n
         case .resize(_, _, let by):
@@ -222,6 +276,9 @@ final class TerminalPageModel {
         case .exit(let code):
             status = .exited
             permissions = []
+            activity = nil
+            subagents = []
+            if !showsScreen { return }
             if away != nil {
                 // Nothing to take any more: the last screen, as the service has it.
                 away = nil
@@ -259,7 +316,7 @@ final class TerminalPageModel {
     }
 
     /// The user acts here: the size is this phone's (nothing is sent when it already is).
-    func userActed() { if !mine { claim() } }
+    func userActed() { if showsScreen, !mine { claim() } }
 
     /// Takes the size: this phone's grid, told with its id (also at the same size: the owner changes). After the
     /// placeholder the screen is drawn afresh at it — what came meanwhile was for another width, and was not drawn.

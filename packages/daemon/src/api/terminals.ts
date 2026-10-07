@@ -290,7 +290,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       try {
         while (open) {
           for (const ev of coalesce(queue.splice(0))) {
-            await stream.writeSSE({ event: ev.type, data: JSON.stringify(ev), ...("seq" in ev ? { id: String(ev.seq) } : {}) });
+            // Sub-agents as the list gives them: each with what it is doing in words.
+            const said = ev.type === "activity" ? { ...ev, subagents: ev.subagents.map((a) => ({ ...a, doing: subagentDoing(a.activity, host.get(id)?.cwd ?? "") })) } : ev;
+            await stream.writeSSE({ event: ev.type, data: JSON.stringify(said), ...("seq" in ev ? { id: String(ev.seq) } : {}) });
             if (ev.type === "removed") open = false;
           }
           if (!open) break;

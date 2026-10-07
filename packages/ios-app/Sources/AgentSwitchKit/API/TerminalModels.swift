@@ -437,6 +437,10 @@ public enum TerminalEvent: Sendable, Equatable {
     case exit(code: Int?)
     /// The terminal was closed: screens leave it.
     case removed
+    /// What it is doing now changed: the tool and its sub-agents (a stream that follows the record, simple-view-v0 §4).
+    case activity(TerminalActivity?, [TerminalSubagent])
+    /// Its session's record changed.
+    case record(rev: String)
 
     /// The SSE frame: the event name, the JSON data. Anything unknown or broken is skipped (nil), not fatal.
     public static func parse(event: String, data: String) -> TerminalEvent? {
@@ -471,6 +475,13 @@ public enum TerminalEvent: Sendable, Equatable {
             return .exit(code: int("code"))
         case "removed":
             return .removed
+        case "activity":
+            let decode = { (key: String) -> Data? in obj[key].flatMap { $0 is NSNull ? nil : try? JSONSerialization.data(withJSONObject: $0) } }
+            let activity = decode("activity").flatMap { try? JSONDecoder().decode(TerminalActivity.self, from: $0) }
+            let subagents = decode("subagents").flatMap { try? JSONDecoder().decode([TerminalSubagent].self, from: $0) } ?? []
+            return .activity(activity, subagents)
+        case "record":
+            return (obj["rev"] as? String).map { .record(rev: $0) }
         default:
             return nil
         }
