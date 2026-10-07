@@ -61,8 +61,8 @@ public struct ShadedSprite: Equatable, Sendable {
     ])
     /// A window: three dots on its title bar, a dark screen, a bright prompt, a cursor.
     public static let terminals = ShadedSprite([
-        ".##############.", "#mkmkmkmmmmmmmm#", "################", "#ssssssssssssss#", "#sWWsssssssssss#", "#sssWWsssssssss#",
-        "#sssssWWsssssss#", "#sssWWsssssssss#", "#sWWssssmmmmsss#", "#ssssssssssssss#", "#ssssssssssssss#", ".##############.",
+        ".##############.", "#mkmkmkmmmmmmmm#", "################", "#ssssssssssssss#", "#sWWsssssssssss#", "#ssWWssssssssss#",
+        "#sssWWsssssssss#", "#ssWWssssssssss#", "#sWWsssmmmmssss#", "#ssssssssssssss#", "#ssssssssssssss#", ".##############.",
     ])
     /// A globe: light land on a dark sea, a highlight at its top left, darker at its bottom right.
     public static let browser = ShadedSprite([
@@ -115,7 +115,7 @@ public struct ShadedSprite: Equatable, Sendable {
             "....d....", ".d..#..d.", "..#.#.#..", "...###...", "d###W###d", "...###...", "..#.#.#..", ".d..#..d.", "....d....",
         ]),
         "codex": ShadedSprite([
-            ".........", "W#.......", ".W#......", "..W#.....", "...W#....", "..W#.....", ".W#..mmmm", "W#...dddd", ".........",
+            ".........", ".........", "W#.......", ".W#......", "..W#.....", ".W#......", "W#...mmmm", ".....dddd", ".........",
         ]),
         "opencode": ShadedSprite([
             "W###.###m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "W#.....#m", "#mmm.mmmd",

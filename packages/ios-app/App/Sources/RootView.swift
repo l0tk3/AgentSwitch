@@ -57,8 +57,6 @@ private struct HomeSheetContent: View {
 
     var body: some View {
         switch sheet {
-        case .settings:
-            SettingsView()
         case .pickCiphertext:
             CiphertextPicker { token in model.insertIntoCompose(token) }
         case .makeCiphertext:
@@ -108,8 +106,14 @@ struct MainTabs: View {
                 .tabItem { Label { Text("Browser") } icon: { look.isClassic ? Image(systemName: "globe") : Image(uiImage: TabIcons.shaded(.browser, on: model.tab == .browser, dark: scheme == .dark)) } }
                 .badge(model.browser.waiting)
                 .tag(MainTab.browser)
+            // Settings is a place of the app like the other three, in the bar with them (2026-10-07, user: 设置也放到下面的
+            // 液态玻璃面板里): it was a sheet behind a gear on the Dispatch page only.
+            SettingsView()
+                .tabItem { Label { Text("Settings") } icon: { look.isClassic ? Image(systemName: "gearshape") : Image(uiImage: TabIcons.shaded(.settings, on: model.tab == .settings, dark: scheme == .dark)) } }
+                .tag(MainTab.settings)
         }
         .tint(look.isClassic ? Theme.signal : Theme.ink)
+        .minimizesTabBarOnScroll()
         .task(id: model.connection.endpoint) {
             while !Task.isCancelled {
                 await model.refreshTerminals()
@@ -142,6 +146,22 @@ struct MainTabs: View {
                 await model.refreshAll()
             }
         }
+    }
+}
+
+extension View {
+    /// The tab bar gets out of the way of a list being read (2026-10-07, user: 是不是应该弄一个自动隐藏？你找一下 Apple 的自动
+    /// 隐藏逻辑规范). Apple's own behaviour for it, not one of ours:
+    /// - `tabBarMinimizeBehavior(.onScrollDown)` (iOS 26): "Minimize the tab bar when downwards scrolling starts", on
+    ///   iPhone only; it "becomes smaller so that the content behind it has more room" and is restored on scrolling back
+    ///   up. The default (`automatic`) on iOS is that it "does not minimize".
+    /// - Human Interface Guidelines, Tab bars: "A person can exit the minimized state by tapping a tab or scrolling to
+    ///   the top of the view", and "Make sure the tab bar is visible when people navigate to different sections of your
+    ///   app. If you hide the tab bar, people can forget which area of the app they're in" — so it is made smaller, never
+    ///   taken away, and a page of one thing (a terminal, a task) still hides it as before.
+    /// Before iOS 26 the bar has no such state and stays as it is.
+    @ViewBuilder func minimizesTabBarOnScroll() -> some View {
+        if #available(iOS 26.0, *) { tabBarMinimizeBehavior(.onScrollDown) } else { self }
     }
 }
 

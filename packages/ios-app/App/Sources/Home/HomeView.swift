@@ -48,10 +48,6 @@ struct HomeView: View {
                         }
                     }
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { Keyboard.dismiss(); model.sheet = .settings } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("设置")
-                }
             }
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: ThreadRoute.self) { route in ThreadView(threadId: route.id) { path.append($0) } }

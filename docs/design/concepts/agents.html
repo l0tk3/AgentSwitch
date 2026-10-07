@@ -120,7 +120,7 @@ button:focus { outline: none; }
 </div>
 <script>
 // Each agent's 5 × 5 mark (the one-colour ones; the shaded pictures are in pixel-icons.html).
-const MARK = { claude: ["#.#.#", ".###.", "#####", ".###.", "#.#.#"], codex: ["#....", ".#...", "..#..", ".#...", "#.###"], opencode: ["##.##", "#...#", "#...#", "#...#", "##.##"], pi: ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"] };
+const MARK = { claude: ["#.#.#", ".###.", "#####", ".###.", "#.#.#"], codex: [".....", "#....", ".#...", "#.###", "....."], opencode: ["##.##", "#...#", "#...#", "#...#", "##.##"], pi: ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"] };
 const mark = (k) => `<span class="mk">${MARK[k].join("").split("").map((c) => `<i style="${c === "#" ? "" : "background:none"}"></i>`).join("")}</span>`;
 const SYS = {
   pair: '<svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5"/><rect x="9" y="2" width="5" height="5"/><rect x="2" y="9" width="5" height="5"/><path d="M9 9h2v2M14 9v5h-5"/></svg>',

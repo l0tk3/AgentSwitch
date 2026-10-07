@@ -17,7 +17,6 @@ enum SettingsRoute: Hashable {
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(AppLock.self) private var lock
-    @Environment(\.dismiss) private var dismiss
     @State private var confirmForget = false
     @State private var addingMac = false
     @State private var path: [SettingsRoute] = SettingsView.initialPath
@@ -105,7 +104,6 @@ struct SettingsView: View {
             // Task pages opened from 任务记录 link on to other tasks (a hand-off) by id.
             .navigationDestination(for: String.self) { id in TaskDetailView(taskId: id) }
             .navigationDestination(for: SettingsRoute.self) { route in destination(route) }
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .confirmationDialog("移除「\(model.profile?.name ?? "Mac")」？", isPresented: $confirmForget, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { model.forget() }
             } message: {

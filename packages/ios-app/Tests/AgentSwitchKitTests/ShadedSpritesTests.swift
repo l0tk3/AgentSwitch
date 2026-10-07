@@ -9,7 +9,7 @@ final class ShadedSpritesTests: XCTestCase {
     /// The same number as the Mac's ShadedSpritesTests and the daemon's uiShaded.test.ts: the three copies of the
     /// pictures are one set. A picture changed here changes it; change the other two copies with it.
     func testThePicturesAreTheOnesTheOtherCopiesHave() {
-        XCTAssertEqual(ShadedSprite.digest, 3_771_827_503)
+        XCTAssertEqual(ShadedSprite.digest, 4_248_886_859)
         XCTAssertEqual(all.count, 15)
         XCTAssertEqual(Set(all.map(\.name)).count, all.count)
     }

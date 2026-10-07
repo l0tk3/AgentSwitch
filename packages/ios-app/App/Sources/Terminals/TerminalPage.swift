@@ -119,7 +119,10 @@ struct TerminalPage: View {
             // The other view of the same session (simple-view-v0 §1).
             ToolbarItem(placement: .topBarTrailing) {
                 Button { show(simple ? .terminal : .simple) } label: {
-                    if look.isClassic { Image(systemName: simple ? "terminal" : "text.alignleft") } else { Text(simple ? ">_" : "≡").mono(16, weight: .medium) }
+                    // The terminal as the tab bar draws it (a framed prompt), not the characters `>_`, whose underscore runs long.
+                    if look.isClassic { Image(systemName: simple ? "terminal" : "text.alignleft") }
+                    else if simple { PixelSprite(rows: PixelArt.terminalWindow, pixel: 2, color: Theme.ink, strength: 1, shadow: false) }
+                    else { Text("≡").mono(16, weight: .medium) }
                 }
                 .tint(look.isClassic ? Theme.signal : Theme.ink)
                 .accessibilityLabel(simple ? "terminal view" : "simple view")

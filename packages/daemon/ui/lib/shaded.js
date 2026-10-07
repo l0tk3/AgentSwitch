@@ -25,7 +25,7 @@ export const SHADED = {
   /** A window: three dots on its title bar, a dark screen, a bright prompt, a cursor. */
   terminals: [
     ".##############.", "#mkmkmkmmmmmmmm#", "################", "#ssssssssssssss#", "#sWWsssssssssss#",
-    "#sssWWsssssssss#", "#sssssWWsssssss#", "#sssWWsssssssss#", "#sWWssssmmmmsss#", "#ssssssssssssss#",
+    "#ssWWssssssssss#", "#sssWWsssssssss#", "#ssWWssssssssss#", "#sWWsssmmmmssss#", "#ssssssssssssss#",
     "#ssssssssssssss#", ".##############.",
   ],
   /** A globe: light land on a dark sea, a highlight at its top left, darker at its bottom right. */
@@ -80,7 +80,7 @@ export const SHADED = {
     "....d....",
   ],
   codex: [
-    ".........", "W#.......", ".W#......", "..W#.....", "...W#....", "..W#.....", ".W#..mmmm", "W#...dddd",
+    ".........", ".........", "W#.......", ".W#......", "..W#.....", ".W#......", "W#...mmmm", ".....dddd",
     ".........",
   ],
   opencode: [

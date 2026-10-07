@@ -25,7 +25,7 @@ describe("the pictures", () => {
   it("are the ones the other copies have", () => {
     // The same number as the Mac's and the phone's ShadedSpritesTests: the three copies are one set. A picture changed
     // here changes it; change the other two copies with it.
-    expect(S.digest()).toBe(3771827503);
+    expect(S.digest()).toBe(4248886859);
     expect(Object.keys(S.SHADED)).toEqual(["dispatch", "terminals", "browser", "settings", "list", "splitRight", "splitDown", "new", "lock",
       "lockSmall", "claude-code", "codex", "opencode", "pi", "stack"]);
   });

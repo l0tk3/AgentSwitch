@@ -128,6 +128,14 @@ iPhone: AgentSwitch (SwiftUI)                        Mac: AgentSwitch.app (菜�
 - 构建环境：Xcode 26.4（iOS 26.4 SDK）；部署目标 iOS 17，可装到 iOS 27 的手机上。用 iOS 27 SDK 构建需要 Xcode 27。模拟器构建需要安装 iOS 模拟器运行时（约 8.5 GB）。
 - **配对**：相机扫码或粘贴链接 → 钉住指纹调 `/pair` → 令牌存 Keychain（仅本机、解锁后可用），服务器信息存本地。
 - **两个标签页（2026-09-28）**：`Dispatch`（调度：现在的对话首页；2026-10-02 由 `Tasks` 改名，dispatch-v0 §0）与 `Terminals`（手动：AgentSwitch 的终端，terminal-v0 §1）。终端屏幕用 SwiftTerm（固定 1.18.x；构建需 Xcode 的 Metal Toolchain）。「设置 › 编码会话」移到 terminals 里。视觉按 ui-v0 §7。2026-10-02 加第三个标签页 `Browser`（Mac 上服务持有的浏览器，browser-v0 §1）：像素地球图标（2026-10-03 重画得更干净），按持有者分组的标签列表与本地服务、新标签、实时画面（点击、滚动、右键、本地缩放）、接手与交还、打字与密文填入；角标是等你的 agent 标签数。
+- **底栏四项，打开先到 Terminals，向下滚动时收起（2026-10-07）**。用户：然后手机默认进入 terminal 页吧，设置也放到下面的液态玻璃面板里，是不是应该弄一个自动隐藏？你找一下 Apple 的自动隐藏逻辑规范。
+  - 应用打开落在 `Terminals`（原来是 `Dispatch`）。实时活动与通知点进来仍去它们指的那一页。
+  - `Settings` 成为底栏的第四项（`Dispatch` · `Terminals` · `Browser` · `Settings`），原来是 Dispatch 页右上角齿轮打开的一张表单；齿轮去掉，设置页不再有 `Done`。
+  - **自动收起照 Apple 的做法，不自己写**。查到的规范（developer.apple.com，SwiftUI `TabBarMinimizeBehavior` 与 HIG「Tab bars」）：
+    - iOS 默认不收起（`automatic`：“On iOS, iPadOS, tvOS, and watchOS, the tab bar does not minimize”）。要收起须写明 `tabBarMinimizeBehavior(.onScrollDown)`（iOS 26 起，只在 iPhone 上生效）：“Minimize the tab bar when downwards scrolling starts”，收起是“becomes smaller so that the content behind it has more room”，往回滚就恢复。另有 `.onScrollUp`（向上滚时收起）和 `.never`。
+    - HIG：“A person can exit the minimized state by tapping a tab or scrolling to the top of the view.”
+    - HIG 同时要求不要把底栏藏掉：“Make sure the tab bar is visible when people navigate to different sections of your app. If you hide the tab bar, people can forget which area of the app they're in.” 例外只有盖住它的模态页。它举的收起的例子是带附件的底栏（音乐的迷你播放器收进底栏一行）。
+  - 所以我们用的是 `.onScrollDown`：列表往下读时底栏**缩小**成当前这一项，往回滚或滚到顶恢复，点它也恢复；不是隐藏。iOS 26 以前没有这个状态，底栏照旧。Dispatch 页是从底部往上读的对话，向下滚的机会少，底栏基本一直在。终端页、任务页这类“进到一件事里”的页面照旧整个不显示底栏（它们本来就占满屏）。
 - **多台 Mac（2026-09-27）**：手机可以配对多台 Mac，同一时间只连“当前 Mac”，在设置顶部切换。
   - 存储：`macs.json` = `{active: <指纹>, servers: [ServerProfile…]}`，按证书指纹区分；令牌仍按指纹存 Keychain，每台一个。旧版的 `server.json` 在首次启动时迁移成只有一台的 `macs.json` 并删掉。
   - 配对：扫到已配对的指纹就更新那一台（新令牌、新地址），扫到新指纹就加一台，两种情况都切到它。配对成功前不动已有的配对。

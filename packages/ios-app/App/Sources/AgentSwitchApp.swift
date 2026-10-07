@@ -27,12 +27,14 @@ struct AgentSwitchApp: App {
             let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
             let model = AppModel.demo(offline: screen == "offline" || screen == "offlinemac")
             switch screen {
-            case "settings", "mac", "offlinemac", "tasks", "search", "sessions", "transcript": model.sheet = .settings
-            case "task": model.openTaskRequest = "t2"
-            case "done": model.openTaskRequest = "t3"
-            case "running": model.openTaskRequest = "t1"
-            case "stale": model.openTaskRequest = "t4"
-            case "interrupted": model.openTaskRequest = "t6"
+            case "settings", "mac", "offlinemac", "tasks", "search", "sessions", "transcript": model.tab = .settings
+            case "task": model.tab = .tasks; model.openTaskRequest = "t2"
+            case "done": model.tab = .tasks; model.openTaskRequest = "t3"
+            case "running": model.tab = .tasks; model.openTaskRequest = "t1"
+            case "stale": model.tab = .tasks; model.openTaskRequest = "t4"
+            case "interrupted": model.tab = .tasks; model.openTaskRequest = "t6"
+            // The Dispatch page itself (the app opens on the terminals).
+            case "home", "offline": model.tab = .tasks
             case "terminals", "terminalmenu", "terminaldelete", "terminalsearch": model.tab = .terminals
             case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion", "terminallink",
                  "simple", "simplebusy", "simpleidle", "simplequestion", "simpleprompt", "simplechanges":

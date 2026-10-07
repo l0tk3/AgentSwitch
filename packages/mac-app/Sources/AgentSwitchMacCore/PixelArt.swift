@@ -110,7 +110,7 @@ public enum PixelArt {
     /// Each agent's mark, from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π.
     public static let agents: [String: [String]] = [
         "claude-code": ["#.#.#", ".###.", "#####", ".###.", "#.#.#"],
-        "codex": ["#....", ".#...", "..#..", ".#...", "#.###"],
+        "codex": [".....", "#....", ".#...", "#.###", "....."],
         "opencode": ["##.##", "#...#", "#...#", "#...#", "##.##"],
         "pi": ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"],
     ]

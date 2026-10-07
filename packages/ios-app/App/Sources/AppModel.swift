@@ -6,11 +6,11 @@ import UIKit
 /// The entries (docs/terminal-v0.md §1, browser-v0 §1): tasks (Dispatch, the conversation), terminals (manual), and
 /// the browser on the Mac.
 enum MainTab: Hashable {
-    case tasks, terminals, browser
+    case tasks, terminals, browser, settings
 }
 
 enum HomeSheet: String, Identifiable {
-    case settings, pickCiphertext, makeCiphertext, approvals, addMac
+    case pickCiphertext, makeCiphertext, approvals, addMac
     var id: String { rawValue }
 }
 
@@ -83,7 +83,8 @@ final class AppModel {
     private var cues = CueTracker()
     private var terminalCues = TerminalCueTracker()
     var sheet: HomeSheet?
-    var tab: MainTab = .tasks
+    /// The app opens on the terminals (2026-10-07, user: 手机默认进入 terminal 页吧): what the phone is used for most.
+    var tab: MainTab = .terminals
     /// The terminals tab (its list, the Mac's other sessions, the colours).
     let terminals = TerminalsStore()
     /// A terminal to open on the terminals tab (a demo screen); the tab takes it.
