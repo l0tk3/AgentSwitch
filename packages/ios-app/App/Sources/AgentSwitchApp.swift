@@ -37,7 +37,7 @@ struct AgentSwitchApp: App {
             case "home", "offline": model.tab = .tasks
             case "terminals", "terminalmenu", "terminaldelete", "terminalsearch": model.tab = .terminals
             case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion", "terminallink",
-                 "simple", "simplebusy", "simpleidle", "simpleeffort", "simplepaste", "simplestep", "simplesuggest", "simplequestion", "simpleprompt", "simplechanges":
+                 "simple", "simplebusy", "simplecompact", "simpleidle", "simpleeffort", "simplepaste", "simplestep", "simplesuggest", "simplequestion", "simpleprompt", "simplechanges":
                 model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
             case "newterminal", "newterminalbypass": model.tab = .terminals; model.openTerminalRequest = "new"
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)

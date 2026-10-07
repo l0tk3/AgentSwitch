@@ -74,6 +74,10 @@ async function handle(line) {
     return;
   }
   if (line === "answered") { clearInterval(blink); process.stdout.write("\x1b]0;查看进程 | Codex\x07\r\nallowed\r\n"); return; }
+  // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.
+  if (line === "compacting") { process.stdout.write("\r\x1b[2K✻ Compacting conversation… (1s)"); return; }
+  // (What was typed to say so was echoed onto that row: it is the one above by now.)
+  if (line === "compacted") { process.stdout.write("\x1b[1A\r\x1b[2K  ⎿  Compacted (ctrl+o to see full summary)\r\n"); return; }
   // Claude Code's input line as it rests: empty, with dim words it offers as the next message, or with typing in it.
   if (line.startsWith("suggest ")) { process.stdout.write(`❯ \x1b[2m${line.slice(8)}\x1b[22m\r\n`); return; }
   if (line.startsWith("typed ")) { process.stdout.write(`❯ ${line.slice(6)}\r\n`); return; }

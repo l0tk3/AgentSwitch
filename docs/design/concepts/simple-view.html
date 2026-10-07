@@ -757,6 +757,8 @@ const PRESETS = {
                 m: "<b>回复。</b><code>+</code>、粘贴或把文件拖到这一块上，输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令。" },
   suggest:    { w: "Suggestion", n: "<b>它猜你下一句。</b>Claude Code 歇下来时有时会在自己的输入行里用暗色字写一句它猜的话。这里把它写在回复框上面一行，点一下填进回复框，可以改了再发。",
                 m: "<b>它猜你下一句。</b>Claude Code 歇下来时有时会在自己的输入行里用暗色字写一句它猜的话。这里把它写在空的回复框里，按 <code>tab</code> 填进去，可以改了再发；一打字它就让开。" },
+  compact:    { w: "Compact", n: "<b>它在压缩上下文。</b>你打了 <code>/compact</code>，或者上下文满了它自己压缩：这段时间“正在做什么”写 <code>Compact</code> 和已用时间，回复框和它工作时一样。压缩完，记录里留一行，写着前后各有多少。",
+                m: "<b>它在压缩上下文。</b>你打了 <code>/compact</code>，或者上下文满了它自己压缩：这段时间“正在做什么”写 <code>Compact</code> 和已用时间，空着的回复框按 <code>esc</code> 是取消。压缩完，记录里留一行，写着前后各有多少。" },
   files:      { w: "Files", n: "<b>提到文件。</b>打 <code>@</code> 列出这个文件夹里的文件，按名字找，点一下填进去。行首的 <code>!</code> 是在它的 shell 里运行这一行，上面写一句。记录里读了图片的那一步可以点开看图。",
                 m: "<b>提到文件。</b>打 <code>@</code> 列出这个文件夹里的文件，按名字找；<code>↑</code> <code>↓</code> 选，<code>tab</code> 或 <code>↩</code> 填进去，<code>esc</code> 收起。<code>/</code> 的命令列表同样。行首的 <code>!</code> 是在它的 shell 里运行这一行。记录里读了图片的那一步可以点开看图。" },
   sealed:     { w: "Sealed", n: "<b>加密发送。</b>点锁，输入框被加密框围住，Mac 先把其中的凭据换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。",
@@ -850,6 +852,7 @@ function load(preset) {
     opts: [["让官方脚本自己加", "和手动安装完全一样，会往 shell 配置里加一行"], ["只在页面上提示", "AgentSwitch 不动 shell 配置，写出要加的那一行"]], pick: -1, other: "" }; }
   if (preset === "prompt") { S.status = "waiting"; S.items.push({ t: "user", time: "10:51", text: "/model" }); S.card = { kind: "prompt" }; S.keys = true; }
   if (preset === "reply") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.files = [1]; S.draft = "[Image #1] 这一行的间距再收一点"; }
+  if (preset === "compact") { S.items.push({ t: "said", text: "Compacted · 899k → 15k", time: "10:49" }); S.live = { tool: "Compact", text: "", t0: Date.now() - 65000 }; S.ctx = 91; }
   if (preset === "suggest") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.suggest = "跑一遍测试确认"; }
   if (preset === "files") {
     S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.draft = "看一下 @host";
@@ -865,6 +868,7 @@ function load(preset) {
 
 /* ---------- the two looks' marks: line icons in the classic look (SF Symbols in the app), characters and sprites in the pixel one ---------- */
 const PATHS = {
+  compact: '<path d="M4 4l4.500 4.500M8.500 5v3.500H5M16 16l-4.500-4.500M11.500 15v-3.500H15"/>',
   branch: '<circle cx="6" cy="4.500" r="1.800"/><circle cx="6" cy="15.500" r="1.800"/><circle cx="14" cy="8" r="1.800"/><path d="M6 6.300v7.400M14 9.800c0 2.700-3 3.200-8 3.700"/>',
   // a kind of step, before its line in the classic look: a page read, a search, an edit, a page made
   read: '<path d="M6 2.500h5.500L15 6v11.500H6z"/><path d="M11.500 2.500V6H15M8.500 10h4M8.500 13h4"/>', search: '<circle cx="8.700" cy="8.700" r="5"/><path d="M12.500 12.500L17 17"/>',
@@ -979,7 +983,7 @@ function body() {
     <div class="meta">${busy ? `<span style="color:var(--cyan);display:inline-flex;gap:6px;align-items:center">${spinner()}${W("Busy")}</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
     <div class="meta path">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>`;
   const earlier = S.earlier ? EARLIER.map((it, i) => item(it, "e" + i)).join("") : `<button class="earlier" data-a="earlier">${S.classic ? `${icon("upc", 13)}Earlier` : "· · ·  Earlier"}</button>`;
-  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${S.classic ? `<i class="ki">${icon(sub ? "branch" : "term", 14, 1.4)}</i>` : ""}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
+  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${S.classic ? `<i class="ki">${icon(sub ? "branch" : l.tool === "Compact" ? "compact" : "term", 14, 1.4)}</i>` : ""}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note || !l.text ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
   const live = S.joined && !S.card ? (S.live ? now(S.live) : "") + (S.sub ? now(S.sub, true) : "") : "";
   return meta + earlier + S.items.map(item).join("") + live + card();
 }

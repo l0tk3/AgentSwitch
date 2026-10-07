@@ -189,6 +189,26 @@
 - **没做**：`↩` 直接发出预测（空框回车现在什么都不做，怕误发）；其他 agent（Codex 等）没有这个功能或没看过它们的屏幕。
 - 验证：服务的测试（按真实屏幕的样子造的行：暗色的算、打了字的不算、示例不算、取最靠下的输入行；假 agent 画出同样的输入行——出现、被打字取代、再出现、开始工作时清掉、工作中不读、别的 agent 不读）；上面那个脚本的最后一行是服务自己的读法对着真屏幕读出的结果（`suggestion "add both" · mode default`）；Mac 连临时服务的实测（空框里写着 `run the tests again  ·  tab`，从窗口送一个 `tab` 后回复框里是这句话，它开始工作后占位字变回 `Reply · esc to Stop`）；手机模拟器里演示数据的那一行。**没验证**：装好的应用连着你真的会话时的样子——读法对真屏幕核对过，但“应用 → 服务 → 真的 Claude Code”这一整条没有连起来跑过。
 
+### 5.7 压缩上下文
+
+2026-10-07 用户贴终端里的一幕（`/compact` 之后 `Compacting conversation… (1m 5s · ↓ 3.3k tokens)`）：compact。那段时间简略视图什么都没有——终端的状态是空闲，没有“正在做什么”的一行；压缩完才多出一行 `Compacted`。同一段会话自己的记录里写着这次压缩用了 122 秒。
+
+- **从哪知道：读它的屏幕**。你打的 `/compact` 是本地命令，不触发 `UserPromptSubmit`；压缩期间主 agent 没有任何 hook 到服务（它自己的几个辅助子代理会 `SubagentStop`，带 `agent_id`，不算）。Claude Code 压缩时在输入框上方画一行：转动的符号、`Compacting conversation…`、稍后跟一个计时——`✻ Compacting conversation… (1m 5s · ↓ 3.3k tokens)`。服务读这一行（`compactingOnScreen`，同读模式、读预测一样读屏幕）：屏幕有输出后 0.4 秒看一遍当前这一屏，一行的最开头（不缩进）是它转圈用的那几个符号之一（`·` `✢` `✳` `✶` `✻` `✽` `*`，从程序里读到的）、后面正好是这句话（可带括号里的计时，括号后不再有别的字）才算。回答里提到或原样引用这一行（回答的行以它的圆点开头或缩进两格）、你在输入框里打这句话（以 `❯` 开头）、`/compact` 命令本身、压缩完的 `Compacted (…)` 都不算——否则记录里引用了这一行的终端，只要那段字还在屏幕上就会一直显示成在压缩。只读 Claude Code 的屏幕。
+- **为什么不用它的 hook**。Claude Code 有 `PreCompact` / `PostCompact`，同日在 2.1.292 上接上试过，状态完全对；但它在每次压缩后把每个 hook 的命令打进终端——`PreCompact ["…/node" "…/hookClient.js"] completed successfully`，`PostCompact` 同样，两条带长路径的字各折成三行，留在终端视图里（程序里读到：只要 hook 跑了就写这一句，没有不写的办法）。为了简略视图里的一行而在终端里多六行，不值，所以**不加这两个 hook**。
+- **服务怎么记**（`TerminalHost`）：
+  - 屏幕上出现那一行：状态变成进行中，“正在做什么”是 `{tool: "Compact", target: ""}`。有东西等你时不动。
+  - 结束，两种都认：那一行从屏幕上消失（取消、失败、正常结束都是这样）；或主 agent 来了任何 hook 事件——压缩完紧跟着一次 `SessionStart {source: "compact"}`（已有的 hook，不用新加），或它接着干活了。之后回到压缩前的状态：歇着时你叫它压缩的回到空闲；一轮中途它自己压缩的（上下文满了）仍是进行中。hook 说结束之后的 1.5 秒内，屏幕上还没擦掉的那一行不再算数（否则会闪一下）。
+  - 顺带改掉一处旧错：`SessionStart` 原来一律把终端标成空闲并清掉子代理。一轮中途自动压缩后的那一次 `SessionStart {source: "compact"}` 会让还在工作的终端显示成空闲，直到它下一次用工具。现在这一种不动状态、不清子代理。
+  - 压缩不是一轮：不记“这一轮怎么结束”，实时活动不报结果，只是这段时间显示在做什么。
+  - 读法跟着 Claude Code 的措辞。它改了这句话，这里就读不到，退回原来的样子（压缩时显示空闲、压缩完多一行），不会错别的。
+- **记录**：`compact_boundary` 那一行原来只写 `Compacted`。会话文件里带着前后的大小（`compactMetadata.preTokens` / `postTokens`），有就写成 `Compacted · 899k → 15k`；上下文用量随之改成压缩后的数（原来要等它下一次回答才变，其间一直显示压缩前的九成满）。你打的 `/compact` 本来就作为你的一句话排在它前面。
+- **两端**：“正在做什么”的一行写 `Compact`，后面照旧是已用时间，带流光；经典外观行首是两个相向的箭头（`arrow.down.right.and.arrow.up.left`，只表示压缩），像素外观只有字。实时活动的那个词也是 `Compact`，说成话是“压缩上下文”。这段时间回复框和它工作时一样：空着时发送键是停止（`esc`，在 Claude Code 里就是取消压缩），打了字发出去标 `Queued`；模型与强度照 §5.4 的规则。演示页的 `Compact` 预设。
+- **没做**：Codex、pi、OpenCode——没看过它们压缩时屏幕上写什么、各自的服务报什么（Codex 0.162 的程序里有同名的 hook，但新加 hook 要在你的 Codex 配置里多记信任哈希，而且它是否也往终端里打字没试过）。
+- **验证**：
+  - 服务的测试：按真实屏幕造的行（算的几种、只是提到它的几种、窄屏截断的计时）；假 agent 画出同一行——歇着时出现即进行中且在做 `Compact`、`SessionStart {source: "compact"}` 立刻回到空闲且那一行还在屏幕上时不闪、没有 hook 时那一行消失即空闲、一轮中途前后都是进行中且子代理还在、辅助子代理停下不算结束、别的 agent 的屏幕不读；记录的那一行与用量。
+  - `packages/daemon/scripts/claude_compact_probe.ts`（打真模型的脚本，不进测试；Haiku，几句很小的话）用服务自己的代码对真的 Claude Code 2.1.292 跑：`/compact` 发出 0.4 秒后服务报进行中、在做 `Compact`（屏幕上是 `✢ Compacting conversation… (0s)`）；18 秒后 `SessionStart(compact)` 到，回到空闲，中间没有别的状态变化；终端里只有它自己的一行 `Compacted (ctrl+o to see full summary)`；记录末尾是 `/compact`、`Compacted · 39k → 4k`，用量 3661。再压缩一次、1.5 秒后按 `esc`：0.2 秒后回到空闲，主 agent 没有任何 hook；之后再说一句话照常。`PROBE_HOOKS=compact` 是加上那两个 hook 的对照。
+  - 两端的样子：Mac 的 `-designPreviewOnly terminals` 多一张 `terminals-record-compact-light`（两种外观都看过）；手机的演示屏 `simplecompact` 在模拟器里看过像素外观；演示页在浏览器里看过。**没验证**：装好的应用连着你真的会话压缩一次（“应用 → 服务 → 真的 Claude Code”这一整条没有连起来跑；各段分别跑过）；一轮中途的自动压缩在真的 Claude Code 上（只用假 agent 走过，真的要把上下文填满才会发生）；手机的经典外观。
+
 ## 6. 安全
 
 - 记录是 agent 自己写下的会话，原来就经 `/sessions/:harness/:id` 给到已配对的手机；新接口是同一份内容的更细的读法，同一道门（远程只给已配对的设备，路由表里登记）。

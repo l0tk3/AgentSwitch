@@ -175,7 +175,9 @@ enum DemoData {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
-        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep" || screen == "simplesuggest"
+        // `simplecompact`: while it compacts its context (docs/simple-view-v0.md §5.7).
+        let compact = screen == "simplecompact"
+        let busy = screen == "simplebusy" || compact, prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep" || screen == "simplesuggest"
         let five = ["low", "medium", "high", "xhigh", "max"]
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
@@ -183,9 +185,9 @@ enum DemoData {
                          permissions: screen == "terminallink" || busy || prompt || idle ? []
                                       : [screen == "terminalquestion" || screen == "simplequestion" ? question
                                          : TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
-                         activity: busy ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
-                         statusSince: busy ? ago(41) : nil,
-                         subagents: prompt || idle ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
+                         activity: compact ? TerminalActivity(tool: "Compact", target: "") : busy ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
+                         statusSince: busy ? ago(compact ? 65 : 41) : nil,
+                         subagents: prompt || idle || compact ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
                                                    TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")],
                          suggestion: screen == "simplesuggest" ? "跑一遍测试确认" : nil),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
@@ -283,6 +285,7 @@ enum DemoData {
     static func sessionRecord(harness: String, id: String) -> SessionRecord {
         let summary = decode(SessionSummary.self, ["harness": harness, "id": id, "cwd": "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch", "title": "iPhone 终端标签页",
                                                    "lastText": "", "updatedAt": ago(20), "startedAt": ago(1800), "active": true, "model": "claude-opus-5-5", "branch": "main"])
+        let compact = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplecompact"
         let busy = UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplebusy"
         var items: [RecordItem] = [
             RecordItem(id: "100", kind: .user, at: ago(900), text: "我选了这个 codex 的版本，怎么好像没生效", images: 2),
@@ -317,6 +320,8 @@ enum DemoData {
         } else {
             items.append(RecordItem(id: "550", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。接下来跑一遍测试确认。"))
         }
+        // An earlier compaction, a line in the record.
+        if compact { items.append(RecordItem(id: "560", kind: .note, at: ago(200), text: "Compacted · 899k → 15k")) }
         // The first run of work alone, so a step opened on its picture is in view.
         if UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplestep" { items = Array(items.prefix(3)) }
         return SessionRecord(session: summary, items: items, more: true, cursor: 100, rev: "demo",

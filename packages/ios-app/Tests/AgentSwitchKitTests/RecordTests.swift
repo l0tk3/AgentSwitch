@@ -288,6 +288,11 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(RecordDisplay.toolSymbol("mcp__browser__browser_click"), "globe")
         XCTAssertEqual(RecordDisplay.toolSymbol("mcp__github__create_issue"), RecordDisplay.symbol(.tool))
         XCTAssertEqual(RecordDisplay.toolSymbol(nil), RecordDisplay.symbol(.think))
+        // Compacting its context is no tool: a word and a picture of its own, like no step's.
+        XCTAssertEqual(ToolDisplay.word("Compact"), "Compact")
+        XCTAssertEqual(ToolDisplay.label("Compact"), "压缩上下文")
+        XCTAssertEqual(RecordDisplay.toolSymbol("Compact"), RecordDisplay.compactSymbol)
+        XCTAssertFalse(kinds.map(RecordDisplay.symbol).contains(RecordDisplay.compactSymbol))
 
         typealias R = ShellHighlight.Run
         XCTAssertEqual(ShellHighlight.runs("cd /a && git commit -F - <<'EOF'\nfix: it\nEOF\ngit log 2>&1 | head -1 # last"),

@@ -19,6 +19,7 @@ import SwiftUI
 ///   terminal that stays dark, a request's card at the record's end; the pictures sent with a message small under it,
 ///   a thought of the agent's said quietly, a command with what it is for opened whole and in colour, and a reply
 ///   being written with a picture and a file in its floating box.
+///   `terminals-record-compact-light`: while it compacts its context.
 @MainActor
 enum TerminalsPagePreview {
     static let size = NSSize(width: 1235, height: 764)
@@ -112,6 +113,12 @@ enum TerminalsPagePreview {
             model.focused?.record.stageDraft("", files: [])
             model.focused?.record.stageSuggestion("跑一遍测试确认")
         }
+        // It compacts its context (docs/simple-view-v0.md §5.7): at work on that, the earlier one a line in the record.
+        try await shot(to: file("terminals-record-compact-light"), light: true) { model in
+            stageRecord(model, working: true, compacting: true)
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+        }
         try await shot(to: file("terminals-record-shell-light"), light: true) { model in
             stageRecord(model, working: false)
             PaneRecord.previewOpenStep = nil
@@ -133,7 +140,7 @@ enum TerminalsPagePreview {
     }
 
     /// Terminal `t1` as its record, with a made-up session.
-    private static func stageRecord(_ model: TerminalsModel, working: Bool, terminal: String = "t1") {
+    private static func stageRecord(_ model: TerminalsModel, working: Bool, terminal: String = "t1", compacting: Bool = false) {
         model.setSimple(true, pane: TerminalPanes.paneShowing(model.layout, terminal)?.id)
         guard let pane = model.panes.values.first(where: { $0.session?.id == terminal }), let info = pane.session?.info else { return }
         let ago = { (seconds: Int64) in Int64(Date().timeIntervalSince1970 * 1000) - seconds * 1000 }
@@ -156,6 +163,7 @@ enum TerminalsPagePreview {
                 RecordStep(kind: .edit, text: "docs/agents-v0.md", added: 2, removed: 1),
             ]),
             RecordItem(id: "300", kind: .answer, at: ago(815), text: "生效了，只是还没有用上：\n\n- 测试版已装好，`codex-beta` 在命令行里可用。\n- 页面顶部有 `Restart Service…`，但你是在下面那一组里选的，看不到它。\n\n已在 Codex 自己那一组的末尾加上同一条提示，写明服务现在用哪个、重启后改用哪个，见 [docs/agents-v0.md](docs/agents-v0.md) §8。"),
+        ] + (compacting ? [RecordItem(id: "350", kind: .note, at: ago(600), text: "Compacted · 899k → 15k")] : []) + [
             RecordItem(id: "400", kind: .user, at: ago(300), text: "delete 应该标红才对"),
             RecordItem(id: "500", kind: .work, at: ago(290), seconds: 38, steps: [
                 RecordStep(kind: .search, text: "SettingsDeleteButton"),
@@ -164,7 +172,8 @@ enum TerminalsPagePreview {
             RecordItem(id: "550", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。正在重新构建。"),
         ], plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done), PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
         usage: RecordUsage(model: "claude-opus-5-5", used: 124_000, window: 200_000, effort: "medium"), mode: "acceptEdits",
-        activity: working ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil, since: working ? Date().addingTimeInterval(-41) : nil)
+        activity: compacting ? TerminalActivity(tool: "Compact", target: "") : working ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
+        since: working ? Date().addingTimeInterval(compacting ? -65 : -41) : nil)
     }
 
     private static let command = "cd packages/mac-app && swift test --filter AgentsTests 2>&1 \\\n  | grep -E \"error:|Executed [0-9]+ tests\" | tail -2   # the totals\ngit status --short"

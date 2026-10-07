@@ -200,6 +200,9 @@ export type TerminalHostOptions = {
   readonly snapshotScrollback?: number;
   /** Without hooks: silence after output that counts as idle (default 3 s). */
   readonly idleAfterMs?: number;
+  /** Claude Code's screen is read for its compacting line this long after it drew (default 400 ms;
+   *  docs/simple-view-v0.md §5.7). */
+  readonly compactLookMs?: number;
   /** How long a permission request waits for a screen before the agent asks in the terminal itself (default 30 min). */
   readonly permissionTimeoutMs?: number;
   /** After SIGHUP, how long before SIGKILL (default 3 s). */
@@ -235,7 +238,11 @@ const ECHO_MS = 600;
 const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi"]);   // OpenCode: through its companion's server (`Companion.setModel`)
 /** The screen is read for a suggestion once nothing has been drawn for this long. */
 const SUGGEST_MS = 200;
-const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
+/** What a terminal is doing while its agent compacts its context: the tool its `activity` names. */
+const COMPACT_TOOL = "Compact";
+/** After a hook said a compaction is over, a compacting line still on the screen is not believed for this long. */
+const COMPACT_GRACE_MS = 1500;
+const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, compactLookMs: 400, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
 const MAX_TITLE = 200;
 /** A split escape sequence is held this long at most, and never more than this much of it. */
 const HOLD_MS = 50;
@@ -358,6 +365,15 @@ export function modeOnScreen(lines: readonly string[]): ClaudeMode {
 
 /** One row of a screen for `suggestionOnScreen`: its text, and for each character whether it is drawn dim. */
 export type ScreenRow = { readonly text: string; readonly dim: readonly boolean[] };
+
+/** Claude Code's own line while it compacts its context, as its screen draws it: at the row's start one of the
+ *  glyphs its spinner turns through, the words, and soon a clock — `✻ Compacting conversation… (1m 5s · ↓ 3.3k tokens)`
+ *  (seen on 2.1.292, scripts/claude_compact_probe.ts; the glyphs are its program's). The words anywhere else are not
+ *  it: an answer's lines begin with its bullet or are indented, as what you typed begins with `❯` — a terminal whose
+ *  record quotes this line must not look as if it compacted for as long as the quote is on its screen. */
+export function compactingOnScreen(lines: readonly string[]): boolean {
+  return lines.some((line) => /^[·✢✳✶✻✽*]\s+Compacting conversation(?:…|\.{3})?(?:\s+\([^)]*\)?)?\s*$/u.test(line));
+}
 
 /** Claude Code's prompt suggestion, read off the last rows of its screen (docs/simple-view-v0.md §5.6). Its input is
  *  the line that begins `❯ `; empty, it shows what it offers as your next message in dim letters (seen on 2.1.292,
@@ -529,6 +545,12 @@ class Session {
    *  question); until it goes on (a hook event) or, without hooks, until you type. */
   attention = false;
   idleTimer: NodeJS.Timeout | null = null;
+  /** It compacts its context (its screen says so): what it was before — at rest (you asked for it) or at work (its
+   *  context filled up in the middle of a turn) — and goes back to after; null when it does not. */
+  compactFrom: "idle" | "working" | null = null;
+  /** When a hook last said a compaction was over. */
+  compactEndedAt = 0;
+  compactTimer: NodeJS.Timeout | null = null;
   /** Output until then answers what was just sent (an agent without hooks is not busy for it). */
   quietUntil = 0;
   killTimer: NodeJS.Timeout | null = null;
@@ -588,6 +610,7 @@ export class TerminalHost {
       scrollback: opts.scrollback ?? DEFAULTS.scrollback,
       snapshotScrollback: opts.snapshotScrollback ?? DEFAULTS.snapshotScrollback,
       idleAfterMs: opts.idleAfterMs ?? DEFAULTS.idleAfterMs,
+      compactLookMs: opts.compactLookMs ?? DEFAULTS.compactLookMs,
       permissionTimeoutMs: opts.permissionTimeoutMs ?? DEFAULTS.permissionTimeoutMs,
       sizeReleaseMs: opts.sizeReleaseMs ?? DEFAULTS.sizeReleaseMs,
       killGraceMs: opts.killGraceMs ?? DEFAULTS.killGraceMs,
@@ -908,12 +931,19 @@ export class TerminalHost {
       if (to && to.length <= 200 && to !== s.modelNow) { s.modelNow = to; s.emit({ type: "model", model: to }); }
       return null;
     }
+    // It was compacting its context (docs/simple-view-v0.md §5.7): anything the main agent says means that is over —
+    // the SessionStart that follows a compaction, or it going on with its turn. (Sub-agents stop meanwhile: not that.)
+    if (s.compactFrom && !agentId) { this.compacts(s, false); s.compactEndedAt = this.o.now(); }
     // The agent goes on: what waited for you on its screen was answered.
     if (call.event !== "SessionStart" && s.attention) { s.attention = false; if (s.status === "waiting" && !s.pending.size) this.setStatus(s, "working"); }
     switch (call.event) {
       // A request answered in the terminal itself leaves its hook waiting here (Claude Code does not end it): what the
       // agent does next tells us — the tool ran (PostToolUse), the turn ended (Stop), or the user typed on (UserPromptSubmit).
-      case "SessionStart": this.noSubagents(s); this.setStatus(s, "idle"); return null;
+      case "SessionStart":
+        // The one after a compaction is the same session going on: in the middle of a turn it is still at work, and
+        // its sub-agents with it.
+        if (p.source === "compact") return null;
+        this.noSubagents(s); this.setStatus(s, "idle"); return null;
       case "UserPromptSubmit": this.settleAll(s, "working"); this.setStatus(s, "working"); return null;
       case "Stop": this.settleAll(s, "idle"); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); return null;
       case "SubagentStart": if (agentId) this.subagentStarted(s, agentId, String(p.agent_type ?? "")); return null;
@@ -1094,7 +1124,7 @@ export class TerminalHost {
     s.chunks.push({ seq, data });
     s.bytes += data.length;
     while (s.bytes > this.o.bufferBytes && s.chunks.length > 1) s.bytes -= s.chunks.shift()!.data.length;
-    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); });
+    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); this.compactLooks(s); });
     s.lastOutputAt = this.o.now();
     s.emit({ type: "output", seq, data });
     // Waiting for you, it waits whatever it draws.
@@ -1190,11 +1220,47 @@ export class TerminalHost {
     for (const id of [...s.pending.keys()]) this.settle(s, id, null, after);
   }
 
+  /** It begins compacting its context, or that is over. While it lasts the terminal is at work on `Compact`; after,
+   *  it is what it was before. Not a turn: no result is kept. */
+  private compacts(s: Session, on: boolean): void {
+    if (on) {
+      if (s.status === "exited" || s.status === "waiting") return;
+      s.compactFrom ??= s.status === "working" ? "working" : "idle";
+      s.activity = { tool: COMPACT_TOOL, target: "" };
+      if (s.status === "working") this.doing(s); else this.setStatus(s, "working");
+      return;
+    }
+    const from = s.compactFrom;
+    s.compactFrom = null;
+    if (!from) return;
+    const doing = s.activity?.tool === COMPACT_TOOL;
+    if (doing) s.activity = null;
+    if (from === "idle" && s.status === "working") this.setStatus(s, "idle");
+    else if (doing) this.doing(s);
+  }
+
+  /** Claude Code's screen drew: a moment later it is read for its compacting line. No hook says a compaction began
+   *  without Claude Code printing the hook's command into the terminal afterwards, and none says one was cancelled
+   *  or failed; the line on its screen says both (docs/simple-view-v0.md §5.7). */
+  private compactLooks(s: Session): void {
+    if (s.harness !== "claude-code" || !s.hooks || s.compactTimer || s.status === "exited") return;
+    s.compactTimer = setTimeout(() => {
+      s.compactTimer = null;
+      if (!this.sessions.has(s.id) || s.status === "exited") return;
+      const on = compactingOnScreen(this.screenTail(s.id, s.rows));
+      if (on === (s.compactFrom !== null)) return;
+      // A hook has just said it is over: the line may stay a moment longer.
+      if (on && this.o.now() - s.compactEndedAt < COMPACT_GRACE_MS) return;
+      this.compacts(s, on);
+    }, this.o.compactLookMs);
+    s.compactTimer.unref();
+  }
+
   private setStatus(s: Session, status: TerminalStatus): void {
     if (s.status === status || s.status === "exited") return;
     s.status = status;
     s.statusSince = this.o.now();
-    if (status === "idle" || status === "exited") s.activity = null;
+    if (status === "idle" || status === "exited") { s.activity = null; s.compactFrom = null; }
     s.emit({ type: "status", status });
     this.suggests(s);
     this.doing(s);

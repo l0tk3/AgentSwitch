@@ -261,6 +261,8 @@ const VERBS: Readonly<Record<string, string>> = {
   WebFetch: "打开网页", webfetch: "打开网页", WebSearch: "网页搜索", webSearch: "网页搜索", websearch: "网页搜索",
   Task: "子任务", Agent: "子任务", task: "子任务", subagent: "子任务",
   TodoWrite: "更新计划", todowrite: "更新计划", update_plan: "更新计划", Skill: "使用技能", skill: "使用技能",
+  // Not a tool: what a terminal is doing while its agent compacts its context (terminals/host.ts, COMPACT_TOOL).
+  Compact: "压缩上下文", compact: "压缩上下文",
 };
 const BROWSER: Readonly<Record<string, string>> = {
   navigate: "打开", navigate_back: "后退", click: "点击", type: "输入", fill_form: "填写表单", press_key: "按键",
@@ -277,7 +279,7 @@ const WORDS: Readonly<Record<string, string>> = {
   grep: "Search", glob: "Search", list: "Search", ls: "Search",
   webfetch: "Web", websearch: "Web", web_search: "Web",
   task: "Agents", agent: "Agents", subagent: "Agents",
-  todowrite: "Plan", update_plan: "Plan", skill: "Skill", askuserquestion: "Answer",
+  todowrite: "Plan", update_plan: "Plan", skill: "Skill", askuserquestion: "Answer", compact: "Compact",
 };
 
 /** The tool in one short word (the phone's ToolDisplay.word): title case as ui-v0 §7.2.7. */

@@ -238,6 +238,12 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(RecordDisplay.toolSymbol("TodoWrite"), RecordDisplay.symbol(.todo))
         XCTAssertEqual(RecordDisplay.toolSymbol("mcp__browser__browser_click"), RecordDisplay.symbol(.tool))
         XCTAssertEqual(RecordDisplay.toolSymbol(nil), RecordDisplay.symbol(.think))
+        // Compacting its context is no tool: a word and a picture of its own, like no step's.
+        XCTAssertEqual(RecordDisplay.toolWord("Compact"), "Compact")
+        XCTAssertEqual(RecordDisplay.toolSymbol("Compact"), RecordDisplay.compactSymbol)
+        XCTAssertFalse(kinds.map(RecordDisplay.symbol).contains(RecordDisplay.compactSymbol))
+        XCTAssertEqual(DispatchToolDisplay.word("Compact"), "Compact")
+        XCTAssertEqual(DispatchToolDisplay.label("Compact"), "压缩上下文")
 
         typealias R = ShellHighlight.Run
         // The word each command begins with, what is quoted, a here-document's body, a comment.

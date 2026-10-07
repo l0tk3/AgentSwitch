@@ -459,9 +459,13 @@ public enum RecordDisplay {
         case "Web": return symbol(.web)
         case "Agent": return symbol(.agent)
         case "Tasks": return symbol(.todo)
+        case "Compact": return compactSymbol
         default: return symbol(.tool)
         }
     }
+
+    /// It compacts its context (docs/simple-view-v0.md §5.7): two arrows meeting, for that alone.
+    public static let compactSymbol = "arrow.down.right.and.arrow.up.left"
 
     /// A step that names a file (shown by the end of its path) rather than a command or a query.
     public static func namesFile(_ step: RecordStep) -> Bool { [.read, .edit, .write, .list].contains(step.kind) }
@@ -625,6 +629,7 @@ public enum RecordDisplay {
         case "webfetch", "websearch", "web_search": "Web"
         case "agent", "task": "Agent"
         case "todowrite": "Tasks"
+        case "compact": "Compact"   // not a tool: the agent compacts its context
         default: tool.hasPrefix("mcp__") ? (tool.split(separator: "_").filter { !$0.isEmpty }.dropFirst().first.map { String($0).capitalized } ?? "Tool") : tool
         }
     }

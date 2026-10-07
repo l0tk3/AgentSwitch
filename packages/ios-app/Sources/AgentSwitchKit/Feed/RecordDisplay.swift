@@ -112,9 +112,13 @@ public enum RecordDisplay {
         case "Web": return symbol(.web)
         case "Agents": return symbol(.agent)
         case "Plan": return symbol(.todo)
+        case "Compact": return compactSymbol
         default: return symbol(.tool)
         }
     }
+
+    /// It compacts its context (docs/simple-view-v0.md §5.7): two arrows meeting, for that alone.
+    public static let compactSymbol = "arrow.down.right.and.arrow.up.left"
 
     /// The steps a run shows when opened: its thinking only in the verbose transcript.
     public static func shown(_ steps: [RecordStep], verbose: Bool) -> [RecordStep] {

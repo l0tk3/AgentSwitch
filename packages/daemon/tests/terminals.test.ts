@@ -14,7 +14,7 @@ import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
 import { folderFiles, matchFiles } from "../src/terminals/files.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -419,6 +419,86 @@ describe("terminal host", () => {
     await hook("Stop");   // after the failure: no turn was running
     expect(host.lastTurn(info.id)).toMatchObject({ ok: false });
     expect(host.get(info.id)!.status).toBe("idle");
+  });
+
+  it("reads Claude Code's compacting line off its screen, and nothing that only mentions it (2026-10-07)", () => {
+    // As 2.1.292 draws it (scripts/claude_compact_probe.ts; the user's screenshot): a glyph that turns, the words, a clock.
+    expect(compactingOnScreen(["❯ /compact", "✻ Compacting conversation… (1s)", "────", "❯ "])).toBe(true);
+    expect(compactingOnScreen(["· Compacting conversation… (1m 5s · ↓ 3.3k tokens)", "  └ Tip: Use /btw to ask a quick side question"])).toBe(true);
+    expect(compactingOnScreen(["✢ Compacting conversation…"])).toBe(true);
+    // Said in an answer, quoted in a list, the command itself, what it prints when done: not it.
+    expect(compactingOnScreen(["⏺ Compacting conversation… is what its screen says meanwhile."])).toBe(false);
+    expect(compactingOnScreen(["  - `Compacting conversation… (1m 5s · ↓ 3.3k tokens)`"])).toBe(false);
+    expect(compactingOnScreen(["❯ /compact", "  ⎿  Compacted (ctrl+o to see full summary)", "✻ Thinking… (3s)"])).toBe(false);
+    expect(compactingOnScreen(["✻ Compacting conversation… (1s) and more after it"])).toBe(false);
+    // The line itself quoted in an answer (indented under its bullet, or right after it) or typed into the input.
+    expect(compactingOnScreen(["⏺ Its screen says:", "  ✻ Compacting conversation… (1s)"])).toBe(false);
+    expect(compactingOnScreen(["⏺ Compacting conversation… (1s)"])).toBe(false);
+    expect(compactingOnScreen(["❯ Compacting conversation…"])).toBe(false);
+    // A narrow screen cuts the clock short.
+    expect(compactingOnScreen(["✻ Compacting conversation… (1m 5s · ↓ 3.3k tok"])).toBe(true);
+    expect(compactingOnScreen([])).toBe(false);
+  });
+
+  it("is at work on Compact while Claude Code's screen says it compacts, and what it was before afterwards (2026-10-07)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), compactLookMs: 40 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown> = {}) => host.hook(info.id, token, { event, payload });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    const now = () => { const t = host.get(info.id)!; return [t.status, t.activity?.tool ?? null]; };
+    const is = (status: string, tool: string | null) => until(() => now()[0] === status && now()[1] === tool);
+    await until(() => host.get(info.id)!.title === "fake agent");
+    await hook("SessionStart", { source: "startup" });
+    // You asked for it at rest (`/compact` is a local command: no hook says it began).
+    host.write(info.id, "compacting\r");
+    await is("working", "Compact");
+    expect(host.get(info.id)!.activity).toEqual({ tool: "Compact", target: "" });
+    expect(events.some((e) => e.type === "activity" && e.activity?.tool === "Compact")).toBe(true);
+    // Done: the SessionStart that follows a compaction says so at once, before its line has left the screen.
+    await hook("SessionStart", { source: "compact" });
+    expect(now()).toEqual(["idle", null]);
+    host.write(info.id, "compacted\r");
+    await new Promise((r) => setTimeout(r, 250));
+    expect(now()).toEqual(["idle", null]);
+    expect(host.lastTurn(info.id)).toBeNull();   // not a turn: nothing to report
+    // Cancelled or failed, no hook says anything: its line leaving the screen does.
+    await new Promise((r) => setTimeout(r, 1500));   // (the line of the one before is believed again after a moment)
+    host.write(info.id, "compacting\r");
+    await is("working", "Compact");
+    host.write(info.id, "compacted\r");
+    await is("idle", null);
+    expect(host.lastTurn(info.id)).toBeNull();
+    // Its context fills up in the middle of a turn: at work before, at work after, its sub-agents kept — the
+    // SessionStart that follows a compaction no longer puts a working terminal at rest.
+    await hook("UserPromptSubmit");
+    await hook("SubagentStart", { agent_id: "a1", agent_type: "Explore" });
+    await hook("PreToolUse", { tool_name: "Bash", tool_input: { command: "npm test" } });
+    host.write(info.id, "compacting\r");
+    await is("working", "Compact");
+    await hook("SubagentStop", { agent_id: "a9", agent_type: "summary" });   // a helper of its own stops meanwhile: not the end
+    expect(now()).toEqual(["working", "Compact"]);
+    await hook("SessionStart", { source: "compact" });
+    expect(now()).toEqual(["working", null]);
+    expect(host.get(info.id)!.subagents.map((a) => a.id)).toEqual(["a1"]);
+    host.write(info.id, "compacted\r");
+    await hook("PreToolUse", { tool_name: "Read", tool_input: { file_path: "/w/a.ts" } });
+    expect(now()).toEqual(["working", "Read"]);
+    await hook("Stop", { last_assistant_message: "好了" });
+    expect(now()).toEqual(["idle", null]);
+    expect(host.lastTurn(info.id)).toMatchObject({ ok: true, line: "好了" });
+    // No hook is added for it: Claude Code prints a hook's command into the terminal after every compaction.
+    expect(Object.keys(claudeHookSettings("hook").hooks as object)).not.toContain("PreCompact");
+    // Another agent's screen is not read for Claude Code's words.
+    const other = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    await until(() => host.get(other.id)!.title === "fake agent");
+    const otherToken = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(other.id)!.hookToken;
+    await host.hook(other.id, otherToken, { event: "Stop", payload: {} });
+    host.write(other.id, "compacting\r");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(host.get(other.id)!.activity).toBeNull();
   });
 
   it("a program that ends on an error by itself is a failed turn; one the service ended is not", async () => {

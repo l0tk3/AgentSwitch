@@ -283,6 +283,12 @@ function claudeResult(step: Step, part: Json, result: unknown, cwd: string): voi
   step.patches = [p]; step.added = p.added; step.removed = p.removed;
 }
 
+/** A number of tokens as the screens write it: `899k`, `1.2M`. */
+function tokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  return `${Math.max(1, Math.round(n / 1000))}k`;
+}
+
 function claudeBuild(lines: readonly Line[]): Builder {
   const b = new Builder();
   const waiting = new Map<string, Step>();
@@ -300,7 +306,14 @@ function claudeBuild(lines: readonly Line[]): Builder {
       continue;
     }
     if (line.type === "system") {
-      if (line.subtype === "compact_boundary") b.note(at, ts, "Compacted");
+      if (line.subtype === "compact_boundary") {
+        // How much it held before and holds now, where the file says (Claude Code 2.1.292: `compactMetadata`); the
+        // context is as full as the latter until its next answer says otherwise.
+        const meta = obj(line.compactMetadata);
+        const pre = Number(meta.preTokens) || 0, post = Number(meta.postTokens) || 0;
+        b.note(at, ts, pre > 0 && post > 0 ? `Compacted · ${tokens(pre)} → ${tokens(post)}` : "Compacted");
+        if (post > 0 && b.usage) b.usage = { ...b.usage, used: post };
+      }
       continue;
     }
     // A message typed while it worked and taken in mid-turn is written as an attachment, not as a user line.

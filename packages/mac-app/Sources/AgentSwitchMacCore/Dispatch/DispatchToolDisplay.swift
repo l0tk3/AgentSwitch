@@ -43,6 +43,8 @@ public enum DispatchToolDisplay {
         "webfetch": "Web", "websearch": "Web", "web_search": "Web",
         "task": "Agents", "agent": "Agents", "subagent": "Agents",
         "todowrite": "Plan", "update_plan": "Plan", "skill": "Skill", "askuserquestion": "Answer",
+        // Not a tool: what a terminal is doing while its agent compacts its context (docs/simple-view-v0.md §5.7).
+        "compact": "Compact",
     ]
 
     /// The one thing a call works on: its command (without Codex's shell wrapper), page, file, pattern or query.
@@ -81,6 +83,7 @@ public enum DispatchToolDisplay {
         "WebFetch": "打开网页", "webfetch": "打开网页", "WebSearch": "网页搜索", "webSearch": "网页搜索", "websearch": "网页搜索",
         "Task": "子任务", "Agent": "子任务", "task": "子任务", "subagent": "子任务",
         "TodoWrite": "更新计划", "todowrite": "更新计划", "update_plan": "更新计划", "Skill": "使用技能", "skill": "使用技能",
+        "Compact": "压缩上下文", "compact": "压缩上下文",
     ]
 
     private static let browser: [String: String] = [

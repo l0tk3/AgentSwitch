@@ -5,7 +5,7 @@ import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { liveSnapshot, plainLine, splitAction, toolLine, toolWord } from "../src/api/live.js";
+import { liveSnapshot, plainLine, splitAction, toolLine, toolPhrase, toolWord } from "../src/api/live.js";
 import { encodeEvidence } from "../src/core/questions.js";
 import { Store } from "../src/engine/store.js";
 import type { TaskEvent } from "../src/engine/types.js";
@@ -208,6 +208,8 @@ describe("live lines", () => {
     expect(toolWord("mcp__playwright__browser_click")).toBe("Web");
     expect(toolWord("browser_navigate")).toBe("Web");
     expect(toolWord("mcp__secret-gate__secret_fill")).toBe("Sealed");
+    expect(toolWord("Compact")).toBe("Compact");   // not a tool: a terminal whose agent compacts its context
+    expect(toolPhrase("Compact", "")).toBe("压缩上下文");
     expect(toolWord("linear.create_issue")).toBe("Tool");
 
     const f = build();

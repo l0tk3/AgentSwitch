@@ -134,6 +134,26 @@ describe("a Claude Code session's record", () => {
     expect(record.items[1]).toMatchObject({ images: 1 });
   });
 
+  it("says how much a compaction freed, and the context is as full as it left it (2026-10-07)", () => {
+    const boundary = (s: number, compactMetadata: object) => line({ type: "system", subtype: "compact_boundary", timestamp: at(s), content: "Conversation compacted", compactMetadata });
+    const lines = [
+      c.user(0, "go"),
+      c.text(1, "好。", { input_tokens: 259, cache_read_input_tokens: 899_000 }),
+      boundary(2, { trigger: "manual", preTokens: 899_259, postTokens: 14_783, durationMs: 122_765 }),
+      c.user(2, "This session is being continued…", { isCompactSummary: true, isVisibleInTranscriptOnly: true }),
+      c.user(2, "<command-name>/compact</command-name>\n<command-message>compact</command-message>"),
+      c.user(3, "<local-command-stdout>Compacted (ctrl+o to see full summary)</local-command-stdout>"),
+    ];
+    const record = readRecord("claude-code", claudeFile(lines))!;
+    expect(record.items.map((it) => (it.type === "work" ? "work" : `${it.type}:${it.text}`))).toEqual(["user:go", "answer:好。", "note:Compacted · 899k → 15k"]);
+    expect(record.usage).toMatchObject({ model: "claude-opus-5-5", used: 14_783 });
+    // Its next answer says how full it is from then on; millions are written as such.
+    const later = readRecord("claude-code", claudeFile([...lines, c.user(4, "继续"), c.text(5, "好。", { input_tokens: 21_000 }),
+      boundary(6, { trigger: "auto", preTokens: 1_240_000, postTokens: 600 })]))!;
+    expect(later.items.at(-1)).toMatchObject({ type: "note", text: "Compacted · 1.2M → 1k" });
+    expect(later.usage).toMatchObject({ used: 600 });
+  });
+
   it("clips a very long answer and a command's output to its end", () => {
     const record = readRecord("claude-code", claudeFile([
       c.user(0, "go"),
