@@ -30,7 +30,7 @@ struct RecordSidePane: View {
     }
 
     private func title(_ text: String) -> some View {
-        Text(text).mono(11.5, weight: .semibold).foregroundStyle(Look.ink)
+        Text(text).mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Look.ink)
     }
 
     private func context(_ meter: (part: Double, words: String)) -> some View {
@@ -38,7 +38,7 @@ struct RecordSidePane: View {
             HStack(spacing: 8) {
                 title("Context")
                 Spacer(minLength: 4)
-                Text(meter.words).mono(11).foregroundStyle(Look.ink2)
+                Text(meter.words).mono(Look.size(11, look)).foregroundStyle(Look.ink2)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -57,7 +57,7 @@ struct RecordSidePane: View {
                 title("Changes")
                 RecordDiffStat(added: files.reduce(0) { $0 + $1.added }, removed: files.reduce(0) { $0 + $1.removed }, plain: true)
                 Spacer(minLength: 4)
-                Text(files.count == 1 ? "1 file" : "\(files.count) files").mono(11).foregroundStyle(Look.faint)
+                Text(files.count == 1 ? "1 file" : "\(files.count) files").mono(Look.size(11, look)).foregroundStyle(Look.faint)
             }
             .padding(.bottom, 4)
             ForEach(files) { file in
@@ -65,8 +65,8 @@ struct RecordSidePane: View {
                 Button { if open { record.openFiles.remove(file.path) } else { record.openFiles.insert(file.path) } } label: {
                     HStack(spacing: 6) {
                         RecordFold(open: open)
-                        Text(file.name).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).layoutPriority(1)
-                        Text(file.folder).font(.system(size: 11, design: .monospaced)).foregroundStyle(Look.faint).lineLimit(1).truncationMode(.head)
+                        Text(file.name).font(.system(size: Look.size(12, look), weight: .medium, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).layoutPriority(1)
+                        Text(file.folder).font(.system(size: Look.size(11, look), design: .monospaced)).foregroundStyle(Look.faint).lineLimit(1).truncationMode(.head)
                         Spacer(minLength: 4)
                         RecordDiffStat(added: file.added, removed: file.removed, plain: true)
                     }
@@ -86,9 +86,9 @@ struct RecordSidePane: View {
             if let all = record.diffs[file.work] {
                 if let found = all.first(where: { $0.path == file.path }) {
                     RecordFileDiff(file: found, header: false)
-                    if file.runs > 1 { Text("最近一次的改动；这个文件一共改了 \(file.runs) 次。").font(.system(size: 11)).foregroundStyle(Look.faint) }
+                    if file.runs > 1 { Text("最近一次的改动；这个文件一共改了 \(file.runs) 次。").font(.system(size: Look.size(11, look))).foregroundStyle(Look.faint) }
                 } else {
-                    Text("没有记录到这次改动的内容。").font(.system(size: 11.5)).foregroundStyle(Look.faint)
+                    Text("没有记录到这次改动的内容。").font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint)
                 }
             } else {
                 BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.vertical, 8)
@@ -101,13 +101,14 @@ struct RecordSidePane: View {
 
 /// The agent's task list, one on a line: done, the one it is on, and what is left.
 struct RecordPlanRows: View {
+    @Environment(\.interfaceLook) private var look
     let plan: [PlanEntry]
     var size: CGFloat = 12
 
     var body: some View {
         ForEach(Array(plan.enumerated()), id: \.offset) { _, entry in
             HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(entry.state == .done ? "[x]" : entry.state == .doing ? "[>]" : "[ ]").mono(11)
+                Text(entry.state == .done ? "[x]" : entry.state == .doing ? "[>]" : "[ ]").mono(Look.size(11, look))
                     .foregroundStyle(entry.state == .doing ? Color.busy : entry.state == .done ? Color.ok : Look.faint)
                 Text(entry.text).font(.system(size: size)).foregroundStyle(entry.state == .done ? Look.ink2 : Look.ink)
                     .strikethrough(entry.state == .done, color: Look.ink2)

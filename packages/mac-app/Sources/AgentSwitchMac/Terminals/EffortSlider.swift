@@ -53,7 +53,7 @@ struct EffortSlider: View {
                 Spacer(minLength: 8)
                 Text(levels.last.map(TerminalEffort.name) ?? "")
             }
-            .mono(10.5).foregroundStyle(Look.faint)
+            .mono(Look.size(10.5, look)).foregroundStyle(Look.faint)
         }
         .opacity(enabled ? 1 : 0.45)
         .allowsHitTesting(enabled)
@@ -154,6 +154,7 @@ struct EffortSlider: View {
 /// The slider with its words: the agent's own word for it and the level over the line, a sentence about the level
 /// under it; `Default` puts the choice back where there is one to put back.
 struct EffortPicker: View {
+    @Environment(\.interfaceLook) private var look
     let word: String
     let levels: [String]
     let level: String?
@@ -171,21 +172,21 @@ struct EffortPicker: View {
         let shown = level ?? fallback
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let heading { heading } else { Text(word).mono(11.5, weight: .semibold).foregroundStyle(Look.ink) }
+                if let heading { heading } else { Text(word).mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Look.ink) }
                 Spacer(minLength: 8)
                 if level != nil, let reset {
-                    Button(action: reset) { Text("Default").mono(11) }.buttonStyle(QuietButtonStyle())
+                    Button(action: reset) { Text("Default").mono(Look.size(11, look)) }.buttonStyle(QuietButtonStyle())
                 }
                 Text(level.map(TerminalEffort.name) ?? fallback.map { "Default · \(TerminalEffort.name($0))" } ?? "Default")
-                    .mono(11.5, weight: .medium).foregroundStyle(level == nil ? Look.ink2 : Color.signal)
+                    .mono(Look.size(11.5, look), weight: .medium).foregroundStyle(level == nil ? Look.ink2 : Color.signal)
                     .contentTransition(.opacity)
             }
             EffortSlider(levels: levels, level: level, fallback: fallback, enabled: enabled, choose: choose)
             if let hint = shown.flatMap(EffortScale.hint) {
-                Text(hint).font(.system(size: 12)).foregroundStyle(Look.ink2).fixedSize(horizontal: false, vertical: true)
+                Text(hint).font(.system(size: Look.size(12, look))).foregroundStyle(Look.ink2).fixedSize(horizontal: false, vertical: true)
             }
             if let note {
-                Text(note).font(.system(size: 11.5)).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
+                Text(note).font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
             }
         }
     }

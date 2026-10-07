@@ -21,6 +21,23 @@ enum Look {
     /// What you said: a raised box (the signal colour is not for text backgrounds).
     static let raised = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xF0F0F2, classicDark: 0x232326, name: "AgentSwitchDispatchRaised"))
     static let hover = Color(nsColor: .dynamic(light: 0xE9E5DC, dark: 0x121212, classicLight: 0xEDEDEF, classicDark: 0x18181B, name: "AgentSwitchDispatchHover"))
+    /// What you said, as its ground: the raised box of the pixel look; in the classic look a wash of the ink under
+    /// ink text — as both agents' own desktop apps set a user's message (about 5% of the text's colour), no longer the
+    /// accent's bubble with white text (docs/ui-v0.md §8, 2026-10-07).
+    static let said = Color(nsColor: .dynamic(light: 0xE4DFD4, dark: 0x151515, classicLight: 0xE8E8EB, classicDark: 0x1F1F22, name: "AgentSwitchDispatchSaid"))
+
+    /// A size of the conversation's text in this look (docs/ui-v0.md §8 “对话的字号”, 2026-10-07): the pixel look's own,
+    /// set in its fixed-width letters; in the classic look no smaller than both agents' own desktop apps set theirs —
+    /// text 14, code and the small words 12.
+    static func size(_ pixel: CGFloat, _ look: InterfaceLook) -> CGFloat {
+        guard look.isClassic else { return pixel }
+        switch pixel {
+        case ..<11.75: return 12
+        case ..<12.75: return 13
+        case ..<13.75: return 14
+        default: return pixel
+        }
+    }
     /// Code's ground (2026-10-03): a wash of ink, so a block or a span stands out on the page, a card and your raised
     /// box alike.
     static let code = ink.opacity(0.07)

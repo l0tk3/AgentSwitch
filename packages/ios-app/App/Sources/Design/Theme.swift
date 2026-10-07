@@ -40,7 +40,8 @@ enum Theme {
     static let secondaryInk = Color(light: 0x5F5B54, dark: 0x8D8A84, classicLight: 0x6E6E73, classicDark: 0xA2A2A8)
     /// 1 px lines: card frames, rules.
     static let line = Color(light: 0xD3CEC3, dark: 0x262524, classicLight: 0xDCDCE0, classicDark: 0x38383A)
-    /// What you said: a raised box, not a coloured bubble (the signal colour is not for text backgrounds).
+    /// What you said: a raised box, not a coloured bubble (the signal colour is not for text backgrounds) — in the
+    /// classic look too, since 2026-10-07: a quiet grey under ink text, as both agents' own apps set a user's message.
     static let raised = Color(light: 0xE6E2D8, dark: 0x161514, classicLight: 0xE9E9EB, classicDark: 0x2C2C2E)
     /// A card's or a floating layer's own ground in the classic look (the pixel look frames them on the page's).
     static let panel = Color(light: 0xF3F1EA, dark: 0x000000, classicLight: 0xFFFFFF, classicDark: 0x1C1C1E)

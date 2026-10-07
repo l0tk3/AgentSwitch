@@ -52,7 +52,7 @@ struct TerminalRecordPane: View {
                                     Button { record.earlier() } label: {
                                         HStack(spacing: 6) {
                                             if record.loadingEarlier { BrailleSpinner() }
-                                            Text("Earlier").mono(12, weight: .medium)
+                                            Text("Earlier").mono(Look.size(12, look), weight: .medium)
                                         }
                                         .frame(maxWidth: .infinity)
                                     }
@@ -62,7 +62,7 @@ struct TerminalRecordPane: View {
                                     BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 24)
                                 } else if record.items.isEmpty, !working, requests.isEmpty {
                                     Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端视图。")
-                                        .font(.system(size: 12.5)).foregroundStyle(Look.faint)
+                                        .font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.faint)
                                 }
                                 ForEach(record.items) { item in
                                     RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, source: source) {
@@ -86,7 +86,7 @@ struct TerminalRecordPane: View {
                                 }
                                 if info?.status == "waiting", requests.isEmpty { RecordPromptNote(openTerminal: { model.setSimple(false, pane: state.id) }) }
                                 if info?.status == "exited" {
-                                    Text("Exited").mono(11).foregroundStyle(Look.faint).frame(maxWidth: .infinity)
+                                    Text("Exited").mono(Look.size(11, look)).foregroundStyle(Look.faint).frame(maxWidth: .infinity)
                                 }
                                 Color.clear.frame(height: 1).id(Self.end)
                                     .onAppear { atEnd = true }
@@ -105,7 +105,7 @@ struct TerminalRecordPane: View {
                             VStack(spacing: 0) {
                                 if !atEnd {
                                     Button { withAnimation(.snappy(duration: 0.2)) { scroller.scrollTo(Self.end, anchor: .bottom) } } label: {
-                                        Text("↓ Latest").mono(11.5, weight: .medium).foregroundStyle(Look.ink)
+                                        Text("↓ Latest").mono(Look.size(11.5, look), weight: .medium).foregroundStyle(Look.ink)
                                             .padding(.horizontal, 10).padding(.vertical, 5)
                                             .grounded(Look.panel, radius: look.isClassic ? 13 : 0)
                                             .framed(Look.line, radius: look.isClassic ? 13 : 0)
@@ -158,8 +158,8 @@ struct TerminalRecordPane: View {
         return VStack(alignment: .leading, spacing: 5) {
             Text(info.name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Look.ink).textSelection(.enabled).lineLimit(2)
             Text([TerminalListText.agentName(info.harness), modelName, state.session?.gitWords].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                .mono(11.5).foregroundStyle(Look.ink2).lineLimit(1)
-            Text(DisplayPath.short(info.workdir, home: NSHomeDirectory())).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2)
+                .mono(Look.size(11.5, look)).foregroundStyle(Look.ink2).lineLimit(1)
+            Text(DisplayPath.short(info.workdir, home: NSHomeDirectory())).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2)
                 .lineLimit(1).truncationMode(.middle)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,12 +184,12 @@ private struct RecordRow: View {
         case .user:
             VStack(alignment: .trailing, spacing: 3) {
                 // Typed while it worked: it has not read it yet.
-                Text(item.queued ? "Queued" : TerminalListText.age(since: item.at, classic: look.isClassic)).mono(10.5).foregroundStyle(Look.faint)
+                Text(item.queued ? "Queued" : TerminalListText.age(since: item.at, classic: look.isClassic)).mono(Look.size(10.5, look)).foregroundStyle(Look.faint)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 if !item.text.isEmpty { UserBox(text: item.text, faded: item.queued) }
                 if item.images > 0 {
                     if let source { RecordPictures(source: source, item: item.id, count: item.images) }
-                    else { Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(10.5).foregroundStyle(Look.ink2) }
+                    else { Text(item.images == 1 ? "1 image" : "\(item.images) images").mono(Look.size(10.5, look)).foregroundStyle(Look.ink2) }
                 }
             }
             .padding(.top, 4)
@@ -197,17 +197,17 @@ private struct RecordRow: View {
             let head = whole ? nil : RecordDisplay.preview(item.text)
             VStack(alignment: .leading, spacing: 6) {
                 // What it thought on the way reads quieter than what it has to say to you.
-                MarkdownBlocks(text: head ?? item.text, size: item.thinking ? 13 : 13.5, color: item.thinking ? Look.ink2 : Look.ink)
+                MarkdownBlocks(text: head ?? item.text, size: Look.size(13.5, look), color: item.thinking ? Look.ink2 : Look.ink)
                 if head != nil {
-                    Button { whole = true } label: { Text("Show More").mono(12, weight: .medium) }.buttonStyle(.plain).foregroundStyle(Color.signal)
+                    Button { whole = true } label: { Text("Show More").mono(Look.size(12, look), weight: .medium) }.buttonStyle(.plain).foregroundStyle(Color.signal)
                 } else if item.clipped {
-                    Text("这条回答很长，只读入了开头。").font(.system(size: 11.5)).foregroundStyle(Look.faint)
+                    Text("这条回答很长，只读入了开头。").font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint)
                 }
             }
         case .work:
             work
         case .note:
-            Text(item.text).mono(10.5).foregroundStyle(Look.faint).frame(maxWidth: .infinity)
+            Text(item.text).mono(Look.size(10.5, look)).foregroundStyle(Look.faint).frame(maxWidth: .infinity)
         }
     }
 
@@ -222,7 +222,7 @@ private struct RecordRow: View {
                 Button { open.toggle() } label: {
                     HStack(spacing: 6) {
                         RecordFold(open: shown)
-                        Text(RecordDisplay.summary(item, running: running)).mono(11.5).foregroundStyle(Look.ink2).lineLimit(1)
+                        Text(RecordDisplay.summary(item, running: running)).mono(Look.size(11.5, look)).foregroundStyle(Look.ink2).lineLimit(1)
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
@@ -252,7 +252,7 @@ struct RecordFold: View {
     var body: some View {
         Group {
             if look.isClassic { Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .semibold)) }
-            else { Text(open ? "▾" : "▸").font(.system(size: 11, design: .monospaced)) }
+            else { Text(open ? "▾" : "▸").font(.system(size: Look.size(11, look), design: .monospaced)) }
         }
         .foregroundStyle(Look.faint)
         .frame(width: 11)
@@ -272,7 +272,7 @@ struct RecordDiffStat: View {
             Text("+\(added)").foregroundStyle(Color.ok)
             Text("−\(removed)").foregroundStyle(Color.failed)
         }
-        .font(.system(size: 11, weight: .medium, design: .monospaced))
+        .font(.system(size: Look.size(11, look), weight: .medium, design: .monospaced))
         .padding(.horizontal, plain ? 0 : 6).padding(.vertical, plain ? 0 : 2)
         .background(plain ? Color.clear : Look.code, in: RoundedRectangle(cornerRadius: look.isClassic ? 5 : 0, style: .continuous))
     }
@@ -280,6 +280,7 @@ struct RecordDiffStat: View {
 
 /// What it is doing now: the tool, what on, and for how long; each sub-agent on a line of its own under it.
 private struct RecordNowLine: View {
+    @Environment(\.interfaceLook) private var look
     let activity: TerminalActivity?
     let subagents: [TerminalSubagent]
     let since: Date?
@@ -289,27 +290,27 @@ private struct RecordNowLine: View {
             HStack(spacing: 7) {
                 BrailleSpinner().foregroundStyle(Color.busy)
                 if let activity {
-                    Text(RecordDisplay.toolWord(activity.tool)).mono(11.5, weight: .semibold).foregroundStyle(Look.ink)
+                    Text(RecordDisplay.toolWord(activity.tool)).mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Look.ink)
                     if let note = activity.note, !note.isEmpty {
-                        Text(note).font(.system(size: 12.5)).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(1)
+                        Text(note).font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(1)
                     } else {
-                        Text(activity.target).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle)
+                        Text(activity.target).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle)
                     }
                 } else {
-                    Text("Working").mono(11.5, weight: .semibold).foregroundStyle(Color.busy)
+                    Text("Working").mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Color.busy)
                 }
                 Spacer(minLength: 4)
                 if let since {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(RecordDisplay.clock(Int(context.date.timeIntervalSince(since)))).mono(10.5).foregroundStyle(Look.faint).monospacedDigit()
+                        Text(RecordDisplay.clock(Int(context.date.timeIntervalSince(since)))).mono(Look.size(10.5, look)).foregroundStyle(Look.faint).monospacedDigit()
                     }
                 }
             }
             ForEach(subagents) { agent in
                 HStack(spacing: 7) {
                     BrailleSpinner().foregroundStyle(Look.ink2)
-                    Text(agent.name).mono(11.5, weight: .medium).foregroundStyle(Look.ink.opacity(0.8)).lineLimit(1)
-                    Text(agent.doing).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1)
+                    Text(agent.name).mono(Look.size(11.5, look), weight: .medium).foregroundStyle(Look.ink.opacity(0.8)).lineLimit(1)
+                    Text(agent.doing).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 17)
@@ -325,8 +326,8 @@ private struct RecordPromptNote: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Waiting").mono(12, weight: .semibold).foregroundStyle(Color.waiting)
-            Text("程序在等你操作。这是它自己画的界面，记录里没有：切到终端视图回答。").font(.system(size: 12.5)).foregroundStyle(Look.ink2)
+            Text("Waiting").mono(Look.size(12, look), weight: .semibold).foregroundStyle(Color.waiting)
+            Text("程序在等你操作。这是它自己画的界面，记录里没有：切到终端视图回答。").font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink2)
                 .fixedSize(horizontal: false, vertical: true)
             Button(action: openTerminal) { BracketLabel(word: "Open Terminal", key: "⌘⇧E") }.buttonStyle(.plain)
         }
@@ -367,7 +368,7 @@ private struct RecordDock: View {
         let radius: CGFloat = look.isClassic ? 14 : 0
         VStack(alignment: .leading, spacing: 6) {
             if let error = record.error {
-                Text(error).font(.system(size: 12)).foregroundStyle(Color.failed).lineLimit(2).textSelection(.enabled).padding(.horizontal, 4)
+                Text(error).font(.system(size: Look.size(12, look))).foregroundStyle(Color.failed).lineLimit(2).textSelection(.enabled).padding(.horizontal, 4)
             }
             VStack(alignment: .leading, spacing: 0) {
                 if !beside, let line = RecordDisplay.plan(record.plan) {
@@ -375,8 +376,8 @@ private struct RecordDock: View {
                         Button { planOpen.toggle() } label: {
                             HStack(spacing: 6) {
                                 RecordFold(open: planOpen)
-                                Text("Tasks \(line.done)/\(line.total)").mono(11.5, weight: .semibold).foregroundStyle(Look.ink)
-                                Text(line.now).font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1)
+                                Text("Tasks \(line.done)/\(line.total)").mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Look.ink)
+                                Text(line.now).font(.system(size: Look.size(12, look))).foregroundStyle(Look.ink2).lineLimit(1)
                                 Spacer(minLength: 0)
                             }
                             .contentShape(Rectangle())
@@ -410,7 +411,7 @@ private struct RecordDock: View {
                     session(info, record)
                     Spacer(minLength: 8)
                     if !beside || RecordDisplay.contextMeter(record.usage) == nil, let context = RecordDisplay.context(record.usage) {
-                        Text("Context \(context)").mono(10.5).foregroundStyle(Look.faint).lineLimit(1)
+                        Text("Context \(context)").mono(Look.size(10.5, look)).foregroundStyle(Look.faint).lineLimit(1)
                     }
                     Button { if stops { record.interrupt() } else { record.send() } } label: {
                         Group {
@@ -512,7 +513,7 @@ private struct RecordDock: View {
                 Text(TerminalEffort.name(effort)).foregroundStyle(Look.faint).lineLimit(1)
             }
         }
-        .mono(10.5)
+        .mono(Look.size(10.5, look))
     }
 
     private func modelEntries(harness: String, current: String?, resting: Bool, ended: Bool) -> [MenuEntry] {
@@ -563,7 +564,7 @@ private struct RecordChangesSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     if let files {
-                        if files.isEmpty { Text("没有记录到改动。").font(.system(size: 12.5)).foregroundStyle(Look.faint) }
+                        if files.isEmpty { Text("没有记录到改动。").font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.faint) }
                         ForEach(files) { file in RecordFileDiff(file: file) }
                     } else {
                         BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 20)
@@ -588,7 +589,7 @@ struct RecordFileDiff: View {
         VStack(alignment: .leading, spacing: 0) {
             if header {
                 HStack(spacing: 8) {
-                    Text(file.path).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.head)
+                    Text(file.path).font(.system(size: Look.size(12, look), weight: .medium, design: .monospaced)).foregroundStyle(Look.ink).lineLimit(1).truncationMode(.head)
                     Spacer(minLength: 4)
                     RecordDiffStat(added: file.added, removed: file.removed, plain: true)
                 }
@@ -609,7 +610,7 @@ struct RecordFileDiff: View {
             }
             if file.clipped {
                 HairRule(color: Look.line)
-                Text("改动很长，只显示开头。").font(.system(size: 11.5)).foregroundStyle(Look.faint).padding(.horizontal, 10).padding(.vertical, 5)
+                Text("改动很长，只显示开头。").font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint).padding(.horizontal, 10).padding(.vertical, 5)
             }
         }
         .grounded(Look.panel, radius: Look.cardRadius)
@@ -618,7 +619,7 @@ struct RecordFileDiff: View {
     }
 
     private func line(_ text: String, color: Color, ground: Color) -> some View {
-        Text(text.isEmpty ? " " : text).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(color).lineLimit(1).fixedSize()
+        Text(text.isEmpty ? " " : text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(color).lineLimit(1).fixedSize()
             .padding(.horizontal, 10).padding(.vertical, 1.5)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(ground)

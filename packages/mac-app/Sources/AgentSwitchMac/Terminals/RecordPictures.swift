@@ -66,6 +66,7 @@ final class RecordPictureStore {
 
 /// The pictures sent with a message, small, in a row under it; a click shows one whole.
 struct RecordPictures: View {
+    @Environment(\.interfaceLook) private var look
     let source: RecordSource
     let item: String
     let count: Int
@@ -82,7 +83,7 @@ struct RecordPictures: View {
             ForEach(0..<min(count, 6), id: \.self) { n in
                 RecordPicture(source: source, item: item, n: n) { shown = Shown(n: n) }
             }
-            if count > 6 { Text("+\(count - 6)").mono(11).foregroundStyle(Look.ink2).frame(height: RecordPicture.height) }
+            if count > 6 { Text("+\(count - 6)").mono(Look.size(11, look)).foregroundStyle(Look.ink2).frame(height: RecordPicture.height) }
         }
         .sheet(item: $shown) { shown in RecordPictureSheet(source: source, item: item, n: shown.n, count: count) }
     }
@@ -115,7 +116,7 @@ private struct RecordPicture: View {
             } else {
                 // Not read yet, or not there to read (its file was moved, an agent read coarsely): its place is kept.
                 ZStack {
-                    if failed { Text("Image").mono(10.5).foregroundStyle(Look.faint) } else { BrailleSpinner().foregroundStyle(Look.ink2) }
+                    if failed { Text("Image").mono(Look.size(10.5, look)).foregroundStyle(Look.faint) } else { BrailleSpinner().foregroundStyle(Look.ink2) }
                 }
                 .frame(width: Self.height, height: Self.height)
             }
@@ -138,6 +139,7 @@ private struct RecordPicture: View {
 
 /// One picture whole.
 private struct RecordPictureSheet: View {
+    @Environment(\.interfaceLook) private var look
     let source: RecordSource
     let item: String
     @State var n: Int
@@ -167,7 +169,7 @@ private struct RecordPictureSheet: View {
                 if let image {
                     Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
                 } else if failed {
-                    Text("这张图片读不到了。").font(.system(size: 12.5)).foregroundStyle(Look.faint)
+                    Text("这张图片读不到了。").font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.faint)
                 } else {
                     BrailleSpinner().foregroundStyle(Look.ink2)
                 }
@@ -201,8 +203,8 @@ struct RecordDraftStrip: View {
                             .clipShape(RoundedRectangle(cornerRadius: look.isClassic ? 4 : 0))
                             .framed(Look.line, radius: look.isClassic ? 4 : 0)
                     }
-                    Text("#\(file.number)").mono(11.5, weight: .semibold).foregroundStyle(Look.ink).padding(.leading, file.thumbnail == nil ? 5 : 0)
-                    Text(file.name).mono(11.5).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle).frame(maxWidth: 200, alignment: .leading)
+                    Text("#\(file.number)").mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Look.ink).padding(.leading, file.thumbnail == nil ? 5 : 0)
+                    Text(file.name).mono(Look.size(11.5, look)).foregroundStyle(Look.ink2).lineLimit(1).truncationMode(.middle).frame(maxWidth: 200, alignment: .leading)
                     Button { record.remove(file) } label: { LookGlyph(glyph: "×", symbol: "xmark", size: 11.5) }
                         .buttonStyle(QuietButtonStyle())
                         .help("Remove")

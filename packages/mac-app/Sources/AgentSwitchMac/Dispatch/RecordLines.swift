@@ -24,13 +24,13 @@ struct UserBox: View {
         HStack(spacing: 0) {
             Spacer(minLength: 140)
             VStack(alignment: .trailing, spacing: 4) {
-                // The classic look's bubble: the accent's colour, round (docs/ui-v0.md §8); the pixel look keeps its
-                // signal off text grounds.
+                // Ink on a quiet ground in both looks: the classic look's bubble is a wash of the ink, round (it was
+                // the accent's colour with white text until 2026-10-07, docs/ui-v0.md §8); the pixel look's a raised box.
                 TypedText(text: text, size: 14, lineSpacing: 5)
-                    .foregroundStyle(look.isClassic ? Color.white : Look.ink)
+                    .foregroundStyle(Look.ink)
                     .padding(.horizontal, 13)
                     .padding(.vertical, look.isClassic ? 8 : 9)
-                    .grounded(look.isClassic ? Color.signal : Look.raised, radius: Look.bubbleRadius)
+                    .grounded(Look.said, radius: Look.bubbleRadius)
                     .framed(look.isClassic ? Color.clear : Look.line, radius: Look.bubbleRadius)
                     .opacity(faded ? 0.55 : 1)
                 if attached > 0 { Text("\(attached) attached").mono(11).foregroundStyle(Look.ink2) }

@@ -117,7 +117,11 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .u { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-left: 56px; }
 .u time { font: 11px var(--short); color: var(--ink3); }
 .u .bub { background: var(--raise); border: 1px solid var(--ink4); border-radius: var(--r-bubble); padding: 10px 14px; max-width: 100%; overflow-wrap: anywhere; }
-.surf.classic .u .bub { background: var(--accent); border-color: transparent; color: #fff; }
+/* what you said, classic: a wash of the ink under ink text (2026-10-07; it was the accent's bubble with white text) */
+.surf.classic .u .bub { background: color-mix(in srgb, var(--ink) 7%, transparent); border-color: transparent; color: var(--ink); }
+/* the conversation's sizes on the Mac, classic: text 14, code and the small words 12 (docs/ui-v0.md §8 “对话的字号”) */
+.surf.classic.mac .body { font-size: 14px; } .surf.classic.mac .md code, .surf.classic.mac .md pre code, .surf.classic.mac .cmd, .surf.classic.mac .cmdout, .surf.classic.mac .call code { font-size: 12px; }
+.surf.classic.mac .u time, .surf.classic.mac .call .sub, .surf.classic.mac .chiprow, .surf.classic.mac .pchip, .surf.classic.mac .hintk { font-size: 12px; }
 .u .pics { display: flex; gap: 6px; }
 .pic { width: 54px; height: 54px; border: 1px solid var(--ink4); border-radius: calc(var(--r-key) + 2px); position: relative; overflow: hidden;
   background: linear-gradient(135deg, var(--ink4) 0 50%, var(--raise) 50%); }

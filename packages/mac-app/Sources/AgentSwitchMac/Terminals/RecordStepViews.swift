@@ -56,11 +56,11 @@ struct RecordStepLine: View {
             if shown, opens {
                 RecordCommandBlock(command: detail?.text ?? step.text)
                 if let out = detail?.out ?? step.out, !out.isEmpty { output(out, lines: nil) }
-                if detail?.clipped == true { Text("很长：只有命令的开头和输出的末尾。").font(.system(size: 11)).foregroundStyle(Look.faint) }
+                if detail?.clipped == true { Text("很长：只有命令的开头和输出的末尾。").font(.system(size: Look.size(11, look))).foregroundStyle(Look.faint) }
             } else {
                 // Under what it is for, the command itself on a line.
                 if step.note != nil, step.kind == .run {
-                    Text(step.text).font(.system(size: 11, design: .monospaced)).foregroundStyle(Look.faint).lineLimit(verbose ? 6 : 1).truncationMode(.tail)
+                    Text(step.text).font(.system(size: Look.size(11, look), design: .monospaced)).foregroundStyle(Look.faint).lineLimit(verbose ? 6 : 1).truncationMode(.tail)
                 }
                 // What it printed, at a glance: where nothing says what the step was for, or it failed.
                 if let out = step.out, !out.isEmpty, step.note == nil || step.failed || verbose { output(out, lines: verbose ? 14 : 4) }
@@ -77,15 +77,15 @@ struct RecordStepLine: View {
     private func head(open: Bool) -> some View {
         let file = RecordDisplay.namesFile(step)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(RecordDisplay.label(step)).mono(11.5, weight: .medium).foregroundStyle(step.failed ? Color.failed : Look.ink.opacity(0.75)).lineLimit(1)
+            Text(RecordDisplay.label(step)).mono(Look.size(11.5, look), weight: .medium).foregroundStyle(step.failed ? Color.failed : Look.ink.opacity(0.75)).lineLimit(1)
                 .layoutPriority(1)
             if let note = step.note {
-                Text(note).font(.system(size: 12.5)).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(2)
+                Text(note).font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(2)
             } else if opens {
-                Text(step.text).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(verbose ? 6 : 2).truncationMode(.tail)
+                Text(step.text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(verbose ? 6 : 2).truncationMode(.tail)
             } else {
                 // A file by the end of its path (its name); a command or a query from its start.
-                Text(step.text).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.ink2)
+                Text(step.text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2)
                     .lineLimit(verbose ? 6 : file ? 1 : 2).truncationMode(file ? .head : .tail).textSelection(.enabled)
             }
             if opens { RecordFold(open: open) }
@@ -95,7 +95,7 @@ struct RecordStepLine: View {
     }
 
     private func output(_ out: String, lines: Int?) -> some View {
-        Text(out).font(.system(size: 11, design: .monospaced)).foregroundStyle(step.failed ? Color.failed : Look.ink2)
+        Text(out).font(.system(size: Look.size(11, look), design: .monospaced)).foregroundStyle(step.failed ? Color.failed : Look.ink2)
             .lineSpacing(2).lineLimit(lines).textSelection(.enabled)
             .padding(.horizontal, 9).padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,12 +112,12 @@ struct RecordCommandBlock: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text("$").font(.system(size: 11.5, design: .monospaced)).foregroundStyle(Look.faint)
-            Text(Self.coloured(command)).font(.system(size: 11.5, design: .monospaced)).lineSpacing(3).textSelection(.enabled)
+            Text("$").font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.faint)
+            Text(Self.coloured(command)).font(.system(size: Look.size(11.5, look), design: .monospaced)).lineSpacing(3).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: copy) { Text(copied ? "Copied" : "Copy") }
                 .buttonStyle(QuietButtonStyle(active: copied))
-                .mono(10.5)
+                .mono(Look.size(10.5, look))
         }
         .padding(.horizontal, 9).padding(.vertical, 7)
         .background(Look.code, in: RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0, style: .continuous))

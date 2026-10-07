@@ -485,14 +485,15 @@ td.nowrap { white-space: nowrap; }
 .classic .usage .ul { grid-template-columns: 5ch minmax(0, 1fr) auto; }
 .classic .side-foot { padding: 6px 8px 12px; }
 
-/* the middle: cards, your words as a bubble in the accent */
+/* the middle: cards, your words in a round bubble — a wash of the ink under ink text (2026-10-07, as both agents' own
+   desktop apps set a user's message; it was the accent's colour with white text) */
 .classic .strip .card, .classic .card, .classic .pane, .classic .fb, .classic .attach, .classic .warnbox { border-radius: 10px; }
 .classic .strip .card { border: 0; box-shadow: 0 0 0 .5px var(--ink4), 0 1px 3px rgba(0, 0, 0, .07); }
 .classic .strip .card:hover { box-shadow: 0 0 0 .5px var(--ink3), 0 1px 3px rgba(0, 0, 0, .07); }
 .classic .strip .card.on { box-shadow: 0 0 0 1.5px var(--signal); }
 .classic .strip .card.wait { box-shadow: 0 0 0 1px var(--amber); }
-.classic .me div { border: 0; border-radius: 17px; background: var(--signal); color: #fff; padding: 8px 13px; }
-.classic .me div code, .classic .me div pre { background: rgba(255, 255, 255, .18); color: #fff; border: 0; }
+.classic .me div { border: 0; border-radius: 17px; background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); padding: 8px 13px; }
+.classic .me div code, .classic .me div pre { border: 0; }
 .classic .entry.sel { box-shadow: none; background: var(--hover); border-radius: 8px; padding: 6px 8px; margin: 0 -8px 12px; }
 .classic .md code, .classic .say code, .classic .qt code, .classic .sum code, .classic .entry code, .classic .asked code { border-radius: 4px; }
 .classic .md pre, .classic .asked pre { border-radius: 8px; }
