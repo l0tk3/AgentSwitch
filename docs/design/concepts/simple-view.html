@@ -170,29 +170,36 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .chiprow .sp { flex: 1; }
 .pchip { font: 12px var(--short); color: var(--ink2); padding: 2px 6px; border: 1px solid var(--ink4); border-radius: var(--r-key); display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
 .pchip.bad { color: var(--red); border-color: var(--red); }
-/* the effort slider (docs/terminal-v0.md §1 思考强度 “滑块”): stops on a line, livelier the higher */
-.box.effort { width: 300px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
-.box.effort p { margin: 0; font: 12px var(--ui); color: var(--ink2); } .box.effort p.q { color: var(--ink3); font-size: 11.5px; }
+/* the effort slider (docs/terminal-v0.md §1 思考强度 “滑块”): a thick pill filled up to a round knob inside its end, stars
+   twinkling in the filled part; the highest level in its own colour (violet). No sentence about a level. */
+.box.effort { width: 300px; padding: 14px; display: flex; flex-direction: column; gap: 8px; --top: #8e5cf7; --top-deep: #2f3dc8; }
+.box.effort p { margin: 0; font: 11.5px var(--ui); color: var(--ink3); }
 .eh, .ee { display: flex; justify-content: space-between; align-items: baseline; }
-.eh { font: 600 12px var(--short); color: var(--ink); } .eh span { color: var(--accent); font-weight: 500; } .ee { font: 11px var(--short); color: var(--ink3); }
-.eslider { position: relative; height: 26px; margin: 0 9px; }
-.eslider::before { content: ""; position: absolute; left: -4px; right: -4px; top: 10px; height: 6px; background: var(--ink4); border-radius: 3px; }
-.eslider .fill { position: absolute; left: -4px; top: 10px; height: 6px; width: calc(var(--at) * 100% + 4px); background: var(--accent); border-radius: 3px; overflow: hidden; opacity: calc(.5 + .5 * var(--at)); }
-.eslider .fill::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 54px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .8), transparent); animation: sheen calc(2.8s - 1.9s * var(--at)) linear infinite; }
+.eh { font: 600 12px var(--short); color: var(--ink); } .eh span { color: var(--accent); font-weight: 500; } .eh.top span { color: var(--top); } .ee { font: 11px var(--short); color: var(--ink3); }
+.eslider { position: relative; height: 24px; border-radius: 12px; background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.eslider .fill { position: absolute; left: 0; top: 0; height: 24px; width: calc(24px + var(--at) * (100% - 24px)); border-radius: 12px; overflow: hidden;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, transparent), var(--accent)); }
+.eslider.top .fill { background: linear-gradient(90deg, var(--top-deep), var(--top) 60%, color-mix(in srgb, var(--top) 82%, #fff)); }
+.eslider .fill::after { content: ""; position: absolute; inset: 0; opacity: calc(.35 + .65 * var(--at)); animation: twinkle 2.4s ease-in-out infinite alternate;
+  background: radial-gradient(1.5px 1.5px at 12% 30%, #fff, transparent), radial-gradient(1px 1px at 27% 68%, #fff, transparent), radial-gradient(1.5px 1.5px at 41% 40%, #fff, transparent),
+    radial-gradient(1px 1px at 55% 72%, #fff, transparent), radial-gradient(1.5px 1.5px at 66% 26%, #fff, transparent), radial-gradient(1px 1px at 78% 58%, #fff, transparent), radial-gradient(1px 1px at 88% 34%, #fff, transparent); }
 .eslider.still .fill::after { display: none; }
-@keyframes sheen { from { transform: translateX(-54px); } to { transform: translateX(300px); } }
-.eslider button { position: absolute; top: 0; width: 24px; height: 26px; margin-left: -12px; }
-.eslider button::after { content: ""; position: absolute; left: 10.5px; top: 11.5px; width: 3px; height: 3px; border-radius: 50%; background: var(--ink3); }
-.eslider .knob { position: absolute; left: calc(var(--at) * 100%); top: 5px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #fff; border: 1.5px solid var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, .25); pointer-events: none; transition: left .12s; }
-.eslider.top .knob { animation: breath 2s ease-in-out infinite; }
-@keyframes breath { 0%, 100% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent), 0 1px 3px rgba(0, 0, 0, .25); } 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent) 8%, transparent), 0 1px 3px rgba(0, 0, 0, .25); } }
-@media (prefers-reduced-motion: reduce) { .eslider .fill::after, .eslider.top .knob { animation: none; } }
-/* the pixel look: the same in cells, the knob a bar */
-.surf:not(.classic) .eslider::before { border-radius: 0; height: 12px; top: 7px; background: repeating-linear-gradient(90deg, var(--ink4) 0 5px, transparent 5px 7px); }
-.surf:not(.classic) .eslider .fill { border-radius: 0; height: 12px; top: 7px; background: repeating-linear-gradient(90deg, var(--accent) 0 5px, transparent 5px 7px); }
-.surf:not(.classic) .eslider .fill::after { width: 5px; background: var(--ink); animation-timing-function: steps(24); }
-.surf:not(.classic) .eslider .knob { border-radius: 0; width: 3px; margin-left: -1.5px; height: 18px; top: 4px; background: var(--ink); border: 0; box-shadow: none; animation: none; }
-.surf:not(.classic) .eslider button::after { top: 21px; left: 11.5px; width: 1px; height: 3px; border-radius: 0; }
+@keyframes twinkle { from { opacity: .2; } to { opacity: 1; } }
+.eslider button { position: absolute; top: 0; width: 28px; height: 24px; margin-left: -2px; left: calc(var(--k) * (100% - 24px)); }
+.eslider button::after { content: ""; position: absolute; left: 12.5px; top: 10.5px; width: 3px; height: 3px; border-radius: 50%; background: color-mix(in srgb, var(--ink) 28%, transparent); }
+.eslider button.on::after { display: none; }
+.eslider .knob { position: absolute; left: calc(2px + var(--at) * (100% - 24px)); top: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .28); pointer-events: none; transition: left .12s; }
+@media (prefers-reduced-motion: reduce) { .eslider .fill::after { animation: none; } }
+/* the pixel look: the same in cells, the knob a bar, the top level in the pixel look's own violet */
+.surf:not(.classic) .box.effort { --top: #7a3cf0; }
+.surf:not(.classic) .eslider { border-radius: 0; height: 18px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--ink) 13%, transparent) 0 6px, transparent 6px 8px); }
+.surf:not(.classic) .eslider .fill { border-radius: 0; height: 18px; width: calc(12px + var(--at) * (100% - 24px)); background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 8px); }
+.surf:not(.classic) .eslider.top .fill { background: repeating-linear-gradient(90deg, var(--top) 0 6px, transparent 6px 8px); }
+.surf:not(.classic) .eslider .fill::after { background: var(--ink); width: 6px; inset: 0 auto 0 0; opacity: 1; animation: run calc(2.8s - 1.9s * var(--at)) steps(24) infinite; }
+@keyframes run { from { transform: translateX(0); } to { transform: translateX(280px); } }
+.surf:not(.classic) .eslider .knob { border-radius: 0; width: 4px; height: 24px; top: -3px; left: calc(10px + var(--at) * (100% - 24px)); background: var(--ink); box-shadow: none; }
+.surf:not(.classic) .eslider button::after { top: 20px; left: 13.5px; width: 1px; height: 3px; border-radius: 0; background: color-mix(in srgb, var(--ink) 40%, transparent); }
+.surf:not(.classic) .eslider button.on::after { display: block; }
 .ctx { font-variant-numeric: tabular-nums; color: var(--ink3); }
 .box.menu.wide { min-width: 258px; } .two { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; } .two b { font-weight: 500; } .two small { font: 12px var(--ui); color: var(--ink2); }
 /* what the turn changed: the files, and the lines of the one picked */
@@ -861,7 +868,7 @@ function shell(text) {
     (all, rem, quoted, lead, word) => rem ? `<span class="rem">${rem}</span>` : quoted ? `<span class="q">${quoted}</span>` : `${lead}<span class="c">${word}</span>`);
 }
 
-const EFFORTS = [["Low", "想得少，快，适合简单的事。"], ["Medium", "均衡。"], ["High", "想得更深，慢一些。"], ["XHigh", "深入推理，明显更慢。"], ["Max", "想到底：最慢，也最费额度。"]];
+const EFFORTS = ["Low", "Medium", "High", "XHigh", "Max"];
 
 function item(it, i) {
   if (it.t === "user") {
@@ -989,13 +996,13 @@ function over() {
     ${MODES.map(([m, d]) => `<button class="${m === "Bypass" ? "bad" : ""}" data-a="mode" data-m="${m}"><span class="two"><b>${m}</b><small>${d}</small></span><span>${S.mode === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;
   // How hard it thinks, on a line: the model's levels are its stops; the line is livelier the higher the level.
   if (o.kind === "effort") {
-    const at = Math.max(0, EFFORTS.findIndex(([e]) => e === S.effort)), last = EFFORTS.length - 1;
+    const at = Math.max(0, EFFORTS.indexOf(S.effort)), last = EFFORTS.length - 1;
     return `<div class="veil low" data-a="shut"><div class="box effort" style="align-self:flex-start" data-a="noop">
-      <div class="eh"><b>Effort</b><span>${S.effort}</span></div>
+      <div class="eh ${at === last ? "top" : ""}"><b>Effort</b><span>${S.effort}</span></div>
       <div class="eslider ${at === 0 ? "still" : ""} ${at === last ? "top" : ""}" style="--at:${at / last}"><i class="fill"></i>
-        ${EFFORTS.map(([e], k) => `<button data-a="seteffort" data-e="${e}" style="left:${(k / last) * 100}%" aria-label="${e}"></button>`).join("")}<i class="knob"></i></div>
-      <div class="ee"><span>${EFFORTS[0][0]}</span><span>${EFFORTS[last][0]}</span></div>
-      <p>${EFFORTS[at][1]}</p><p class="q">会记成这个模型的默认；Max 只用于这一次。</p></div></div>`;
+        ${EFFORTS.map((e, k) => `<button data-a="seteffort" data-e="${e}" class="${k <= at ? "on" : ""}" style="--k:${k / last}" aria-label="${e}"></button>`).join("")}<i class="knob"></i></div>
+      <div class="ee"><span>${EFFORTS[0]}</span><span>${EFFORTS[last]}</span></div>
+      <p>会记成这个模型的默认；Max 只用于这一次。</p></div></div>`;
   }
   if (o.kind === "models") return `<div class="veil low" data-a="shut"><div class="box menu" style="align-self:flex-start"><div class="ba">
     ${MODELS.map(([m]) => `<button data-a="model" data-m="${m}">${m}<span>${S.model === m ? G("check", "<x>", 15) : ""}</span></button>`).join("")}</div></div></div>`;

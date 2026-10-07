@@ -49,6 +49,10 @@ enum Theme {
     /// alike.
     static let code = ink.opacity(0.07)
     static let pixelShadow = Color(light: 0xCFC9BC, dark: 0x2C2A28)
+    /// The highest thinking level's own colour (docs/terminal-v0.md §1 “滑块”, 2026-10-07): violet, and the deeper blue
+    /// its line begins in. Nothing else is this colour.
+    static let top = Color(light: 0x7A3CF0, dark: 0xA98BFF, classicLight: 0x8E5CF7, classicDark: 0xA58BFF)
+    static let topDeep = Color(light: 0x3B3FD8, dark: 0x4B4FE0, classicLight: 0x2F3DC8, classicDark: 0x3D4BE0)
     /// The primary button's fill: ink, with the page's colour on it; the signal colour only while pressed (§7.2.3, as
     /// the web page's hover). In the classic look the accent, with white on it.
     static let fill = Color(light: 0x151413, dark: 0xE9E6DF, classicLight: 0x007AFF, classicDark: 0x0A84FF)

@@ -30,18 +30,4 @@ public enum EffortScale {
         guard let index else { return min(max(start ?? 0, 0), count - 1) }
         return min(max(index + delta, 0), count - 1)
     }
-
-    /// A sentence for a level the agents share a word for; nil for a word of an agent's own (OpenCode's variants).
-    public static func hint(_ level: String) -> String? {
-        switch level {
-        case "off", "none": "不思考，直接回答。"
-        case "minimal": "几乎不思考，最快。"
-        case "low": "想得少，快，适合简单的事。"
-        case "medium": "均衡。"
-        case "high": "想得更深，慢一些。"
-        case "xhigh": "深入推理，明显更慢。"
-        case "max", "ultra": "想到底：最慢，也最费额度。"
-        default: nil
-        }
-    }
 }

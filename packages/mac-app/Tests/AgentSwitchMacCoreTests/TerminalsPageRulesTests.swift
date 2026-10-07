@@ -25,9 +25,6 @@ final class TerminalsPageRulesTests: XCTestCase {
         XCTAssertEqual(EffortScale.step(from: nil, by: 1, start: 1, count: 5), 1)
         XCTAssertEqual(EffortScale.step(from: nil, by: -1, start: nil, count: 5), 0)
         XCTAssertNil(EffortScale.step(from: nil, by: 1, start: nil, count: 0))
-        XCTAssertNotNil(EffortScale.hint("xhigh"))
-        XCTAssertEqual(EffortScale.hint("max"), EffortScale.hint("ultra"))
-        XCTAssertNil(EffortScale.hint("thinking-32k"))
 
         let models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: levels, defaultEffort: "medium"),
                                       TerminalModelOption(id: "haiku", name: "Haiku 4.5", efforts: [])]]

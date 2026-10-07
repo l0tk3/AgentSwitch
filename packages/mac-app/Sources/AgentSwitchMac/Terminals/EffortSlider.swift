@@ -2,10 +2,12 @@ import AgentSwitchMacCore
 import SwiftUI
 
 // How hard the agent thinks, chosen on a line (docs/terminal-v0.md §1 思考强度; 2026-10-07, user: 思考强度改成滑块调节
-// 加上和官方差不多的特效，新建的时候也这样选): the levels its model takes are the line's stops, lowest first. The line
-// is livelier the higher the level — a sheen running along its filled part, faster and brighter stop by stop, and at
-// the highest a glow around the knob with sparks off it; in the pixel look the same in cells, a bright one running
-// along the lit ones and the row flickering at the top. Nothing moves under Reduce Motion.
+// 加上和官方差不多的特效，新建的时候也这样选; then, shown Codex's own: 太细了，而且描述没有必要，而且最高档最好换个颜色
+// … 就像这样): the levels its model takes are the line's stops, lowest first. The line is a thick pill, filled up to a
+// round knob that sits inside its end; stars twinkle in the filled part, more of them the higher the level; the
+// highest level has a colour of its own (violet), drifting stars, and its name in that colour. In the pixel look the
+// same in cells: a bright one running along the lit ones, and at the top the row in violet, twinkling. Nothing moves
+// under Reduce Motion.
 
 /// The line itself.
 struct EffortSlider: View {
@@ -22,9 +24,11 @@ struct EffortSlider: View {
     @State private var dragging: Int?
     @FocusState private var focused: Bool
 
+    /// The pill's thickness, and the room it is drawn in (its knob's shadow below).
+    static let thick: CGFloat = 24
     private static let height: CGFloat = 30
-    /// The first and last stops stand this far inside the ends: the knob stays whole.
-    private static let inset: CGFloat = 10
+    /// The first and last stops stand half the pill's thickness inside its ends: the knob sits inside the pill there.
+    private static let inset: CGFloat = thick / 2
 
     var body: some View {
         let chosen = EffortScale.index(of: level, in: levels)
@@ -77,82 +81,82 @@ struct EffortSlider: View {
     private func draw(_ g: inout GraphicsContext, size: CGSize, at: Int?, firm: Bool, time: Double) {
         let count = levels.count
         let width = Double(size.width - Self.inset * 2)
-        let mid = size.height / 2 + 3
+        let mid = size.height / 2 - 1
         func x(_ index: Int) -> CGFloat { Self.inset + CGFloat(EffortScale.place(of: index, width: width, count: count)) }
         let knob = at.map(x)
         let heat = at.map { EffortScale.heat($0, count: count) } ?? 0
         let moving = !still && enabled && heat > 0
         let top = heat >= 1 && count > 1
-        // The sheen's lap: quicker the higher.
-        let lap = 2.8 - 1.9 * heat
-        let phase = time.truncatingRemainder(dividingBy: lap) / lap
-        let strength = firm ? 0.5 + 0.5 * heat : 0.28
+        let colour = top ? Look.top : Color.signal
+        /// A number in 0 ..< 1 that is always the same for the same star.
+        func chance(_ seed: Double) -> Double { let v = sin(seed) * 43758.5453; return v - v.rounded(.down) }
 
         if look.isClassic {
-            let track = CGRect(x: Self.inset - 4, y: mid - 3, width: CGFloat(width) + 8, height: 6)
-            g.fill(Path(roundedRect: track, cornerRadius: 3), with: .color(Look.ink.opacity(0.10)))
-            if let knob {
-                let fill = CGRect(x: track.minX, y: track.minY, width: knob - track.minX, height: track.height)
-                var inner = g
-                inner.clip(to: Path(roundedRect: fill, cornerRadius: 3))
-                inner.fill(Path(fill), with: .color(Color.signal.opacity(strength)))
-                if moving {
-                    let band: CGFloat = 54
-                    let from = fill.minX - band + (fill.width + band) * CGFloat(phase)
-                    inner.fill(Path(CGRect(x: from, y: fill.minY, width: band, height: fill.height)),
-                               with: .linearGradient(Gradient(colors: [.white.opacity(0), .white.opacity(0.3 + 0.55 * heat), .white.opacity(0)]),
-                                                     startPoint: CGPoint(x: from, y: mid), endPoint: CGPoint(x: from + band, y: mid)))
-                }
-            }
-            for index in 0..<count {
-                let on = at.map { index <= $0 } ?? false
-                g.fill(Path(ellipseIn: CGRect(x: x(index) - 1.5, y: mid - 1.5, width: 3, height: 3)), with: .color(on ? Color.white.opacity(0.9) : Look.ink.opacity(0.3)))
+            let thick = Self.thick
+            let track = CGRect(x: 0, y: mid - thick / 2, width: size.width, height: thick)
+            g.fill(Path(roundedRect: track, cornerRadius: thick / 2), with: .color(Look.ink.opacity(0.09)))
+            // The stops still ahead, faintly: where a level is.
+            for index in 0..<count where at.map({ index > $0 }) ?? true {
+                g.fill(Path(ellipseIn: CGRect(x: x(index) - 1.5, y: mid - 1.5, width: 3, height: 3)), with: .color(Look.ink.opacity(0.28)))
             }
             guard let knob else { return }
-            if top, moving {
-                // At the highest: a glow breathing around the knob, and sparks off it.
-                let breath = 0.5 + 0.5 * sin(time * 3.2)
-                g.fill(Path(ellipseIn: CGRect(x: knob - 14, y: mid - 14, width: 28, height: 28)), with: .color(Color.signal.opacity(0.10 + 0.14 * breath)))
-                for spark in 0..<6 {
-                    let life = (time * 0.85 + Double(spark) * 0.167).truncatingRemainder(dividingBy: 1)
-                    let lean = sin(Double(spark) * 2.4) * 11
-                    let point = CGPoint(x: knob + CGFloat(lean * life), y: mid - 9 - CGFloat(life) * 11)
-                    g.fill(Path(ellipseIn: CGRect(x: point.x - 1.2, y: point.y - 1.2, width: 2.4, height: 2.4)), with: .color(Color.signal.opacity((1 - life) * 0.9)))
+            // Filled up to the knob, which sits inside the fill's round end.
+            let fill = CGRect(x: 0, y: track.minY, width: knob + thick / 2, height: thick)
+            let shape = Path(roundedRect: fill, cornerRadius: thick / 2)
+            var inner = g
+            inner.opacity = firm ? 1 : 0.38
+            inner.fill(shape, with: .linearGradient(Gradient(colors: top ? [Look.topDeep, Look.top, Look.top.opacity(0.82)] : [colour.opacity(0.72), colour]),
+                                                    startPoint: CGPoint(x: 0, y: mid), endPoint: CGPoint(x: fill.maxX, y: mid)))
+            if moving, fill.width > thick + 6 {
+                // Stars in the filled part: more of them the higher, each twinkling at its own pace; at the highest they drift.
+                inner.clip(to: shape)
+                let room = Double(fill.width - thick - 2)
+                for star in 0..<Int((3 + 13 * heat).rounded()) {
+                    let seed = Double(star) * 12.9898 + 4.1
+                    var px = chance(seed) * room
+                    if top { px = (px + time * (3 + 5 * chance(seed * 2.3))).truncatingRemainder(dividingBy: room) }
+                    let py = 4 + chance(seed * 1.7 + 3.1) * Double(thick - 8)
+                    let twinkle = 0.5 + 0.5 * sin(time * (1.1 + 2.4 * chance(seed * 0.61)) + seed)
+                    let radius = 0.6 + 0.9 * chance(seed * 0.37)
+                    inner.fill(Path(ellipseIn: CGRect(x: 4 + px - radius, y: Double(track.minY) + py - radius, width: radius * 2, height: radius * 2)),
+                               with: .color(.white.opacity(0.2 + 0.75 * twinkle)))
                 }
             }
-            let circle = Path(ellipseIn: CGRect(x: knob - 8, y: mid - 8, width: 16, height: 16))
+            let across = thick - 4
+            let circle = Path(ellipseIn: CGRect(x: knob - across / 2, y: mid - across / 2, width: across, height: across))
             var shaded = g
-            shaded.addFilter(.shadow(color: .black.opacity(0.22), radius: 2.5, y: 1))
-            shaded.fill(circle, with: .color(firm ? .white : Look.panel))
-            g.stroke(circle, with: .color(firm ? Color.signal.opacity(0.9) : Look.ink.opacity(0.35)), lineWidth: firm ? 1.5 : 1)
+            shaded.addFilter(.shadow(color: .black.opacity(0.25), radius: 2.5, y: 1))
+            shaded.fill(circle, with: .color(.white.opacity(firm ? 1 : 0.85)))
         } else {
             // A row of cells; the lit ones up to the knob, a bright one running along them.
-            let cell: CGFloat = 5, gap: CGFloat = 2, tall: CGFloat = 12
-            let start = Self.inset - 3
-            let cells = max(1, Int((CGFloat(width) + 6 + gap) / (cell + gap)))
-            let lit = knob.map { min(cells, Int(($0 - start) / (cell + gap)) + 1) } ?? 0
-            let runner = moving && lit > 1 ? Int(phase * Double(lit)) : -1
-            let frame = Int(time * 14)
+            let cell: CGFloat = 6, gap: CGFloat = 2, tall: CGFloat = 18
+            let cells = max(1, Int((size.width + gap) / (cell + gap)))
+            let lit = knob.map { min(cells, Int($0 / (cell + gap)) + 1) } ?? 0
+            let lap = 2.8 - 1.9 * heat
+            let runner = moving && !top && lit > 1 ? Int(time.truncatingRemainder(dividingBy: lap) / lap * Double(lit)) : -1
+            let frame = Int(time * 9)
+            let strength = firm ? 0.55 + 0.45 * heat : 0.3
             for index in 0..<cells {
-                let rect = CGRect(x: start + CGFloat(index) * (cell + gap), y: mid - tall / 2, width: cell, height: tall)
+                let rect = CGRect(x: CGFloat(index) * (cell + gap), y: mid - tall / 2, width: cell, height: tall)
                 guard index < lit else { g.fill(Path(rect), with: .color(Look.ink.opacity(0.13))); continue }
                 if index == runner { g.fill(Path(rect), with: .color(Look.ink)); continue }
-                // At the highest the row flickers, a few cells dimmer each frame.
-                let flicker = top && moving && (index &* 7919 &+ frame &* 104729) % 9 == 0
-                g.fill(Path(rect), with: .color(Color.signal.opacity(flicker ? strength * 0.45 : strength)))
+                // At the highest the row twinkles: a cell or two dim for a moment.
+                let dim = top && moving && chance(Double(index) * 7.31 + Double(frame) * 1.93) > 0.9
+                g.fill(Path(rect), with: .color(colour.opacity(dim ? strength * 0.4 : strength)))
             }
             for index in 0..<count {
                 g.fill(Path(CGRect(x: x(index) - 0.5, y: mid + tall / 2 + 2, width: 1, height: 3)), with: .color(Look.ink.opacity(0.4)))
             }
             guard let knob else { return }
-            let bar = CGRect(x: knob - 1.5, y: mid - tall / 2 - 3, width: 3, height: tall + 6)
+            let bar = CGRect(x: knob - 2, y: mid - tall / 2 - 3, width: 4, height: tall + 6)
             if firm { g.fill(Path(bar), with: .color(Look.ink)) } else { g.stroke(Path(bar.insetBy(dx: 0.5, dy: 0.5)), with: .color(Look.ink.opacity(0.6)), lineWidth: 1) }
         }
     }
 }
 
-/// The slider with its words: the agent's own word for it and the level over the line, a sentence about the level
-/// under it; `Default` puts the choice back where there is one to put back.
+/// The slider with its words: the agent's own word for it and the level over the line — the highest level in its own
+/// colour; `Default` puts the choice back where there is one to put back. No sentence about what a level is (2026-10-07,
+/// user: 描述没有必要): only a line the caller has to say (what choosing does, why it cannot be chosen now).
 struct EffortPicker: View {
     @Environment(\.interfaceLook) private var look
     let word: String
@@ -169,7 +173,7 @@ struct EffortPicker: View {
     var heading: AnyView?
 
     var body: some View {
-        let shown = level ?? fallback
+        let highest = level != nil && level == levels.last && levels.count > 1
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let heading { heading } else { Text(word).mono(Look.size(11.5, look), weight: .semibold).foregroundStyle(Look.ink) }
@@ -178,13 +182,10 @@ struct EffortPicker: View {
                     Button(action: reset) { Text("Default").mono(Look.size(11, look)) }.buttonStyle(QuietButtonStyle())
                 }
                 Text(level.map(TerminalEffort.name) ?? fallback.map { "Default · \(TerminalEffort.name($0))" } ?? "Default")
-                    .mono(Look.size(11.5, look), weight: .medium).foregroundStyle(level == nil ? Look.ink2 : Color.signal)
+                    .mono(Look.size(11.5, look), weight: .medium).foregroundStyle(level == nil ? Look.ink2 : highest ? Look.top : Color.signal)
                     .contentTransition(.opacity)
             }
             EffortSlider(levels: levels, level: level, fallback: fallback, enabled: enabled, choose: choose)
-            if let hint = shown.flatMap(EffortScale.hint) {
-                Text(hint).font(.system(size: Look.size(12, look))).foregroundStyle(Look.ink2).fixedSize(horizontal: false, vertical: true)
-            }
             if let note {
                 Text(note).font(.system(size: Look.size(11.5, look))).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
             }

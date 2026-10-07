@@ -290,8 +290,6 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(EffortScale.step(from: 4, by: 1, start: nil, count: 5), 4)
         XCTAssertEqual(EffortScale.step(from: nil, by: 1, start: 1, count: 5), 1)
         XCTAssertNil(EffortScale.step(from: nil, by: 1, start: nil, count: 0))
-        XCTAssertNotNil(EffortScale.hint("medium"))
-        XCTAssertNil(EffortScale.hint("thinking-32k"))
     }
 
     func testChangesDecode() throws {
