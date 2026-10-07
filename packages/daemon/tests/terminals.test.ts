@@ -544,6 +544,42 @@ describe("terminals over HTTP", () => {
     expect((await call("GET", `/terminals/${id}`)).json.terminal.sizedBy ?? null).toBeNull();
   });
 
+  it("a screen changes the agent's model: its own command typed, Claude Code's question skipped for that one change, the new model told (simple-view-v0 §5.4)", async () => {
+    const { home, cwd, base, token, call } = await start();
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd, model: "opus" })).json.terminal.id as string;
+    const events = follow(base, token, id);
+    const screen = () => events.filter((e) => e.event === "snapshot" || e.event === "output").map((e) => e.data.data).join("");
+    await until(() => screen().includes("fake agent ready"));
+    expect((await call("GET", `/terminals/${id}`)).json.terminal).toMatchObject({ model: "opus", modelNow: null });
+    // Nothing that reads as a flag or a second command; a terminal that is not there.
+    expect((await call("POST", `/terminals/${id}/model`, { model: "--help" })).status).toBe(400);
+    expect((await call("POST", `/terminals/${id}/model`, { model: "sonnet; rm -rf" })).status).toBe(400);
+    expect((await call("POST", "/terminals/nope/model", { model: "sonnet" })).status).toBe(404);
+
+    // Typed in the terminal itself: Claude Code's own question stands (the hook says nothing).
+    expect((await call("POST", `/terminals/${id}/input`, { text: "/model haiku" })).status).toBe(200);
+    await until(() => screen().includes("confirm switch to haiku?"));
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.modelNow).toBeNull();
+
+    // Asked for by a screen: the command is typed, goes through at once, and the terminal says which model it is on.
+    expect((await call("POST", `/terminals/${id}/model`, { model: "sonnet" })).json).toEqual({ ok: true });
+    await until(() => screen().includes("model set: sonnet"));
+    await until(() => events.some((e) => e.event === "model" && e.data.model === "sonnet"));
+    expect((await call("GET", `/terminals/${id}`)).json.terminal).toMatchObject({ model: "opus", modelNow: "sonnet" });
+    // The leave is for that one change: the next one typed in the terminal is asked about again.
+    expect((await call("POST", `/terminals/${id}/input`, { text: "/model fable" })).status).toBe(200);
+    await until(() => screen().includes("confirm switch to fable?"));
+    const audit = readFileSync(join(home, "terminals", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(audit.find((a) => a.action === "model")).toMatchObject({ terminal: id, detail: { model: "sonnet" } });
+
+    // While it works the command would wait in its queue as a message: refused. An agent with a picker of its own: refused.
+    expect((await call("POST", `/terminals/${id}/input`, { text: "tool" })).status).toBe(200);
+    await until(() => screen().includes("tool used"));
+    expect((await call("POST", `/terminals/${id}/model`, { model: "opus" })).status).toBe(409);
+    const codex = (await call("POST", "/terminals", { harness: "codex", cwd })).json.terminal.id as string;
+    expect((await call("POST", `/terminals/${codex}/model`, { model: "gpt-6-luna" })).status).toBe(400);
+  });
+
   it("start, stream, reply, a permission request through the hook answered from the API, audit, delete", async () => {
     const { home, cwd, base, token, call } = await start();
     expect((await call("GET", "/terminals", undefined, false)).status).toBe(401);

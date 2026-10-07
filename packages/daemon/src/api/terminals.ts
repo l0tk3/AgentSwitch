@@ -87,7 +87,7 @@ const Rename = z.object({ name: z.string().max(200).nullable() });
 const HookBody = z.object({ event: z.string().min(1).max(64), payload: z.record(z.string(), z.unknown()) });
 const Raw = z.object({ data: z.string().min(1).max(MAX_INPUT) });
 
-const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403, invalid: 400 };
+const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403, invalid: 400, busy: 409 };
 /** Agents that can go on with a session, and those that can fork one (docs/terminal-v0.md §5). */
 const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode"]);
 const FORKS: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex"]);
@@ -305,6 +305,17 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         unsubscribe();
       }
     });
+  });
+
+  // Another model for the agent (docs/simple-view-v0.md §5.4): its own command typed for the screen, Claude Code only.
+  // 409 while it works or waits for an answer; 400 for an agent that chooses in a picker of its own.
+  app.post("/terminals/:id/model", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseBody(c, z.object({ model: ModelId }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try { host.askModel(id, body.data.model); } catch (err) { return failed(c, err); }
+    audit.record({ terminal: id, action: "model", via: via(c), detail: { model: body.data.model } });
+    return c.json({ ok: true });
   });
 
   // A sealed reply goes through the sealer first, like a task (router-v0 §9): credentials in it reach the agent as

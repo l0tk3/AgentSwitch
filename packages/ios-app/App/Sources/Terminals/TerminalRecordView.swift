@@ -135,7 +135,9 @@ struct TerminalRecordView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(MessageDisplay.readable(page.name)).font(.title3.weight(.semibold)).textSelection(.enabled)
-            Text([ModelName.harness(terminal.harness), (record.usage?.model ?? terminal.model).map(ModelName.display), git].compactMap { $0 }.joined(separator: " · "))
+            Text([ModelName.harness(terminal.harness),
+                  RecordDisplay.model(now: page.modelNow ?? terminal.modelNow, record: record.usage?.model, started: terminal.model).map(ModelName.display),
+                  git].compactMap { $0 }.joined(separator: " · "))
                 .mono(12).foregroundStyle(.secondary).lineLimit(1)
             Text(PathDisplay.short(terminal.workdir)).mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }

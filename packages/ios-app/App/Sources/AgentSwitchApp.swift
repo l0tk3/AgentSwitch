@@ -35,7 +35,7 @@ struct AgentSwitchApp: App {
             case "interrupted": model.openTaskRequest = "t6"
             case "terminals", "terminalmenu", "terminaldelete", "terminalsearch": model.tab = .terminals
             case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion", "terminallink",
-                 "simple", "simplebusy", "simplequestion", "simpleprompt", "simplechanges":
+                 "simple", "simplebusy", "simpleidle", "simplequestion", "simpleprompt", "simplechanges":
                 model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
             case "newterminal", "newterminalbypass": model.tab = .terminals; model.openTerminalRequest = "new"
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)

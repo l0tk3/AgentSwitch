@@ -143,6 +143,10 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
       // Sub-agents at work, for the tree (docs/terminal-v0.md §1).
       SubagentStart: hook(QUICK_HOOK_TIMEOUT_S),
       SubagentStop: hook(QUICK_HOOK_TIMEOUT_S),
+      // A change of model (docs/simple-view-v0.md §5.4): one a screen of ours asked for goes through without Claude
+      // Code's own question, and the model it is on afterwards is what the screens show.
+      PreModelSwitch: hook(QUICK_HOOK_TIMEOUT_S),
+      PostModelSwitch: hook(QUICK_HOOK_TIMEOUT_S),
       PermissionRequest: hook(PERMISSION_HOOK_TIMEOUT_S),
     },
   };

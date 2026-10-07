@@ -153,6 +153,9 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     /// folder for the others and from services before 2026-10-01.
     public let workdir: String
     public let model: String?
+    /// The model the agent says it is on now (Claude Code, each time it changes); nil until it has said, and from a Mac
+    /// that does not ask it. `model` is what the terminal was started with.
+    public let modelNow: String?
     /// manual · auto · bypass
     public let mode: String
     public let name: String
@@ -178,7 +181,8 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
-                subagents: [TerminalSubagent] = []) {
+                subagents: [TerminalSubagent] = [], modelNow: String? = nil) {
+        self.modelNow = modelNow
         self.id = id
         self.harness = harness
         self.cwd = cwd
@@ -203,7 +207,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, harness, cwd, workdir, model, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
+        case id, harness, cwd, workdir, model, modelNow, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
              agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents
     }
 
@@ -214,6 +218,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         cwd = (try? c.decodeIfPresent(String.self, forKey: .cwd)) ?? ""
         workdir = (try? c.decodeIfPresent(String.self, forKey: .workdir)).flatMap { $0 } ?? cwd
         model = try? c.decodeIfPresent(String.self, forKey: .model)
+        modelNow = try? c.decodeIfPresent(String.self, forKey: .modelNow)
         mode = (try? c.decodeIfPresent(String.self, forKey: .mode)) ?? "manual"
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         customName = (try? c.decodeIfPresent(Bool.self, forKey: .customName)) ?? false
@@ -441,6 +446,8 @@ public enum TerminalEvent: Sendable, Equatable {
     case activity(TerminalActivity?, [TerminalSubagent])
     /// Its session's record changed.
     case record(rev: String)
+    /// The agent is on another model now.
+    case model(String)
 
     /// The SSE frame: the event name, the JSON data. Anything unknown or broken is skipped (nil), not fatal.
     public static func parse(event: String, data: String) -> TerminalEvent? {
@@ -482,6 +489,8 @@ public enum TerminalEvent: Sendable, Equatable {
             return .activity(activity, subagents)
         case "record":
             return (obj["rev"] as? String).map { .record(rev: $0) }
+        case "model":
+            return (obj["model"] as? String).map { .model($0) }
         default:
             return nil
         }

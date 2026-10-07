@@ -174,16 +174,16 @@ enum DemoData {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
-        let busy = screen == "simplebusy", prompt = screen == "simpleprompt"
+        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle"
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
-                         status: busy ? .working : .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
-                         permissions: screen == "terminallink" || busy || prompt ? []
+                         status: busy ? .working : idle ? .idle : .waiting, cols: 52, rows: 30, createdAt: ago(1800), lastOutputAt: ago(20), agentSessionId: "c9",
+                         permissions: screen == "terminallink" || busy || prompt || idle ? []
                                       : [screen == "terminalquestion" || screen == "simplequestion" ? question
                                          : TerminalPermission(id: "p1", tool: "Bash", summary: "Bash: swift test --filter TerminalTests")],
                          activity: busy ? TerminalActivity(tool: "Bash", target: "swift build -c release") : nil,
                          statusSince: busy ? ago(41) : nil,
-                         subagents: prompt ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
+                         subagents: prompt || idle ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
                                                    TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")]),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
                          createdAt: ago(900), lastOutputAt: ago(2)),

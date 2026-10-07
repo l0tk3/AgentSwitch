@@ -11,7 +11,7 @@ import { basename, dirname, join } from "node:path";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
-import type { KeyContext } from "./keys.js";
+import { replyBytes, type KeyContext } from "./keys.js";
 import { screenView } from "./screenView.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
@@ -49,6 +49,9 @@ export type TerminalInfo = {
   /** Where the agent works now: the `cwd` its hook calls carry (it changes as the agent `cd`s), else `cwd`. */
   readonly workdir: string;
   readonly model: string | null;
+  /** The model the agent says it is on now (Claude Code, each time it changes: a `/model` in the terminal, one a
+   *  screen asked for, a fallback of its own); null until it has said. `model` is what the terminal was started with. */
+  readonly modelNow: string | null;
   readonly mode: PermissionMode;
   /** What the screens call it: the user's own name for it, else a meaningful title the agent set (its current task),
    *  else the folder's name. */
@@ -110,6 +113,8 @@ export type TerminalEvent =
   | { readonly type: "exit"; readonly code: number | null }
   /** The terminal was deleted: screens close. */
   | { readonly type: "removed" }
+  /** The agent is on another model now (Claude Code's PostModelSwitch). */
+  | { readonly type: "model"; readonly model: string }
   /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
    *  (docs/simple-view-v0.md §4). */
   | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
@@ -188,7 +193,7 @@ export type TerminalHostOptions = {
 };
 
 export class TerminalError extends Error {
-  constructor(readonly code: "not_found" | "exited" | "unavailable" | "forbidden" | "invalid", message: string) { super(message); }
+  constructor(readonly code: "not_found" | "exited" | "unavailable" | "forbidden" | "invalid" | "busy", message: string) { super(message); }
 }
 
 type Listener = (ev: TerminalEvent) => void;
@@ -239,6 +244,8 @@ export function terminalName(custom: string | null, title: string, harness: Term
   return custom ?? meaningfulTitle(title, harness) ?? given ?? (basename(cwd) || AGENT_LABELS[harness]);
 }
 const MAX_SUMMARY = 400;
+/** How long after a screen asked for a model its change goes through without Claude Code's own question. */
+const MODEL_ASK_MS = 20_000;
 
 /** node-pty ships its macOS spawn helper without the execute bit when npm skips install scripts (npm ≥ 11 does by
  *  default); without it every spawn fails with "posix_spawnp failed". Set it once, before the first spawn. */
@@ -383,6 +390,9 @@ class Session {
   activity: { tool: string; target: string } | null = null;
   /** The folder the agent last said it works in (a hook call's `cwd`); null before it says. */
   agentCwd: string | null = null;
+  /** The model the agent says it is on now (PostModelSwitch); and one a screen asked for a moment ago. */
+  modelNow: string | null = null;
+  modelAsked: { readonly model: string; readonly at: number } | null = null;
   /** Sub-agents at work, by their id; and the Agent tool calls not yet started as one (what each was sent to do). */
   readonly subagents = new Map<string, { id: string; type: string; name: string; activity: { tool: string; target: string } | null; since: number }>();
   launches: { type: string; name: string; at: number }[] = [];
@@ -645,6 +655,19 @@ export class TerminalHost {
     };
   }
 
+  /** A screen asks the agent in terminal `id` to change its model: typed as the agent's own command (`/model <id>`,
+   *  which Claude Code takes without opening its picker). Claude Code alone: the other agents choose a model in a
+   *  picker of their own. Not while it works (the command would wait in its queue as a message), nor while something
+   *  waits for an answer. Claude Code keeps the choice as its default for new sessions, as its picker's Enter does. */
+  askModel(id: string, model: string): void {
+    const s = this.need(id);
+    if (s.harness !== "claude-code") throw new TerminalError("invalid", "this agent chooses its model in its own picker");
+    if (s.status === "exited") throw new TerminalError("exited", `terminal ${id} has ended`);
+    if (s.status !== "idle" || s.pending.size) throw new TerminalError("busy", "the agent is at work or waits for an answer");
+    s.modelAsked = { model, at: this.o.now() };
+    this.write(id, replyBytes(`/model ${model}`, this.bracketedPaste(id), true));
+  }
+
   /** A hook call from the agent in terminal `id`, proven by its hook token. Permission requests wait for a screen, or
    *  until `signal` aborts: the hook command went away, which happens when the request was answered in the terminal. */
   async hook(id: string, token: string, call: HookCall, signal?: AbortSignal): Promise<HookAnswer> {
@@ -656,6 +679,19 @@ export class TerminalHost {
     if (typeof p.cwd === "string" && p.cwd.startsWith("/") && p.cwd.length < 4096) s.agentCwd = p.cwd;
     // Claude Code says in every hook call made inside a sub-agent which one it is.
     const agentId = typeof p.agent_id === "string" && p.agent_id ? p.agent_id : null;
+    // A change of model is not the agent going on: it says nothing of what waits on its screen.
+    if (call.event === "PreModelSwitch") {
+      const asked = s.modelAsked;
+      s.modelAsked = null;
+      // One a screen of ours asked for a moment ago: the user chose it there, so Claude Code does not ask again. Any
+      // other (typed in the terminal) is Claude Code's to ask about or not.
+      return asked && this.o.now() - asked.at < MODEL_ASK_MS ? { hookSpecificOutput: { hookEventName: "PreModelSwitch", permissionDecision: "allow" } } : null;
+    }
+    if (call.event === "PostModelSwitch") {
+      const to = typeof p.to_model === "string" ? p.to_model.trim() : "";
+      if (to && to.length <= 200 && to !== s.modelNow) { s.modelNow = to; s.emit({ type: "model", model: to }); }
+      return null;
+    }
     // The agent goes on: what waited for you on its screen was answered.
     if (call.event !== "SessionStart" && s.attention) { s.attention = false; if (s.status === "waiting" && !s.pending.size) this.setStatus(s, "working"); }
     switch (call.event) {
@@ -1015,7 +1051,7 @@ export class TerminalHost {
 
   private info(s: Session): TerminalInfo {
     return {
-      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
+      id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),

@@ -39,6 +39,15 @@ async function handle(line) {
     process.stdout.write(`answer: ${out || "(none)"}\r\n`);
     return;
   }
+  // Claude Code's `/model <name>`: asks first unless the hook lets it through, then says which model it is on.
+  if (line.startsWith("/model ")) {
+    const to = line.slice(7).trim();
+    const out = await hook({ hook_event_name: "PreModelSwitch", from_model: "claude-opus-5-5", to_model: to });
+    const allowed = /"permissionDecision":"allow"/.test(out ?? "");
+    process.stdout.write(allowed ? `model set: ${to}\r\n` : `confirm switch to ${to}?\r\n`);
+    if (allowed) await hook({ hook_event_name: "PostModelSwitch", from_model: "claude-opus-5-5", to_model: to });
+    return;
+  }
   // A turn that uses a tool: what the screens that show the record are told it is doing.
   if (line === "tool") {
     await hook({ hook_event_name: "UserPromptSubmit" });

@@ -80,6 +80,10 @@ final class TerminalPageModel {
     private(set) var activitySince: Date?
     /// Changes when the session's record does: the page reads it again.
     private(set) var recordRev: String?
+    /// The model the agent says it is on now (Claude Code), as the stream last said; nil until it has.
+    private(set) var modelNow: String?
+    /// A change of model is on its way to the agent.
+    private(set) var changingModel = false
 
     init(terminal: TerminalInfo, fontSize: CGFloat, showsScreen: Bool = true) {
         id = terminal.id
@@ -89,6 +93,7 @@ final class TerminalPageModel {
         permissions = terminal.permissions
         ownsRecord = terminal.resumedFrom == nil || terminal.forked
         self.showsScreen = showsScreen
+        modelNow = terminal.modelNow
         activity = terminal.activity
         subagents = terminal.subagents
         activitySince = terminal.statusSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
@@ -233,6 +238,8 @@ final class TerminalPageModel {
             subagents = agents
         case .record(let rev):
             recordRev = rev
+        case .model(let model):
+            modelNow = model
         case .name(let n):
             name = n
         case .resize(_, _, let by):
@@ -374,6 +381,24 @@ final class TerminalPageModel {
             self.error = error.localizedDescription
             return false
         }
+    }
+
+    /// Another model for the agent (Claude Code: its `/model <id>`, typed by the Mac). Says how it went: nil when it
+    /// was refused (the page shows why).
+    func setModel(_ model: String) async -> AgentSwitchAPI.ModelChange? {
+        guard let api, !changingModel else { return nil }
+        changingModel = true
+        defer { changingModel = false }
+        do {
+            let how = try await api.setTerminalModel(id, model: model)
+            error = how == .typed ? "已输入 \(RecordDisplay.modelCommand(model))。Mac 上的 AgentSwitch 版本较旧：Claude Code 若要求确认，请切到终端查看。" : nil
+            return how
+        } catch APIError.http(status: 409, message: _) {
+            error = "它正在工作或等待回答，结束后再切换模型。"
+        } catch {
+            self.error = error.localizedDescription
+        }
+        return nil
     }
 
     // MARK: files in the reply

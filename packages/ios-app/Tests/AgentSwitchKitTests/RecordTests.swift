@@ -143,6 +143,27 @@ final class RecordTests: XCTestCase {
         XCTAssertEqual(cut.components(separatedBy: "```").count - 1, 2)
     }
 
+    func testChangingTheModel() throws {
+        XCTAssertEqual(RecordDisplay.modelCommand("opus"), "/model opus")
+        XCTAssertEqual(RecordDisplay.modelCommand("claude-opus-5-5[1m]"), "/model claude-opus-5-5[1m]")
+        // Nothing that would read as a second line or a flag's value.
+        XCTAssertEqual(RecordDisplay.modelCommand("sonnet\nrm -rf ~"), "/model sonnetrm-rf")
+        XCTAssertEqual(RecordDisplay.modelPicker("codex"), "/model")
+        XCTAssertEqual(RecordDisplay.modelPicker("opencode"), "/models")
+        XCTAssertEqual(RecordDisplay.model(now: "claude-sonnet-5-5", record: "claude-opus-5-5", started: "opus"), "claude-sonnet-5-5")
+        XCTAssertEqual(RecordDisplay.model(now: nil, record: "claude-opus-5-5", started: "opus"), "claude-opus-5-5")
+        XCTAssertEqual(RecordDisplay.model(now: nil, record: nil, started: "opus"), "opus")
+        let opus = TerminalModelOption(id: "opus", name: "Opus 5.5"), sonnet = TerminalModelOption(id: "sonnet", name: "Sonnet 5.5")
+        XCTAssertTrue(RecordDisplay.isCurrent(opus, model: "opus"))
+        XCTAssertTrue(RecordDisplay.isCurrent(opus, model: "claude-opus-5-5"))
+        XCTAssertFalse(RecordDisplay.isCurrent(sonnet, model: "claude-opus-5-5"))
+        XCTAssertFalse(RecordDisplay.isCurrent(opus, model: nil))
+        XCTAssertEqual(TerminalEvent.parse(event: "model", data: #"{"type":"model","model":"claude-sonnet-5-5"}"#), .model("claude-sonnet-5-5"))
+        let info = try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","model":"opus","modelNow":"claude-sonnet-5-5","status":"idle"}"#.utf8))
+        XCTAssertEqual(info.modelNow, "claude-sonnet-5-5")
+        XCTAssertNil(try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex"}"#.utf8)).modelNow)
+    }
+
     func testChangesDecode() throws {
         let list = try JSONDecoder().decode(FileDiffList.self, from: Data(#"""
         {"files":[{"path":"src/retry.ts","added":1,"removed":1,"hunks":[{"header":"@@ -3,1 +3,1 @@","lines":["-const RETRIES = 5;","+const RETRIES = 3;"]}]},

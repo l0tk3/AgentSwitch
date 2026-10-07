@@ -442,14 +442,76 @@ struct TerminalPage: View {
     /// Under the reply box in the simple view: how it asks, the model, how full its context is.
     private var sessionLine: some View {
         let mode = RecordDisplay.mode(record.mode) ?? RecordDisplay.mode(listed.mode) ?? listed.mode.capitalized
-        let modelName = (record.usage?.model ?? listed.model).map(ModelName.display)
         return HStack(spacing: 6) {
-            Text([mode, modelName].compactMap { $0 }.joined(separator: " · ")).lineLimit(1)
+            Text(mode).lineLimit(1)
+            Text("·")
+            modelMenu
             Spacer(minLength: 4)
             if let context = RecordDisplay.context(record.usage) { Text("Context \(context)").lineLimit(1) }
         }
         .mono(11).foregroundStyle(.tertiary)
         .padding(.horizontal, Theme.Space.l).padding(.bottom, 6)
+    }
+
+    /// The model it is on, as far as anything says: what the agent last reported, the model of its last answer, the one
+    /// it was started with.
+    private var currentModel: String? {
+        RecordDisplay.model(now: page.modelNow ?? listed.modelNow, record: record.usage?.model, started: listed.model)
+    }
+
+    /// The model, and a menu to change it (docs/simple-view-v0.md §5.4). Claude Code takes `/model <id>` as a command:
+    /// the Mac types it. The other agents choose in a picker of their own: the menu opens it in the terminal view.
+    private var modelMenu: some View {
+        let options = model.terminals.list?.models[page.harness] ?? []
+        let resting = page.status == .idle && page.permissions.isEmpty
+        return Menu {
+            if page.status == .exited {
+                Button("终端已结束") {}.disabled(true)
+            } else if page.harness == "claude-code", !options.isEmpty {
+                if resting {
+                    Section("Claude Code 会把它记成新会话的默认模型") {
+                        ForEach(options.filter { !$0.older }) { option in modelButton(option) }
+                        let older = options.filter(\.older)
+                        if !older.isEmpty { Menu("Older", systemImage: "clock") { ForEach(older) { option in modelButton(option) } } }
+                    }
+                } else {
+                    Button("它正在工作或等待回答，结束后再切换") {}.disabled(true)
+                }
+            } else {
+                // Its own picker, on its own screen.
+                Button("Choose in Terminal…", systemImage: "terminal") {
+                    show(.terminal)
+                    Task { _ = await page.send(RecordDisplay.modelPicker(page.harness), sealed: false) }
+                }
+                .disabled(!resting)
+            }
+        } label: {
+            HStack(spacing: 3) {
+                if page.changingModel { BrailleSpinner(color: .secondary) }
+                Text(currentModel.map(ModelName.display) ?? "Model").lineLimit(1)
+                LookGlyph(glyph: "▾", symbol: "chevron.down", size: 10)
+            }
+            .mono(12, weight: .medium)
+            .foregroundStyle(.secondary)
+            // A line of small words is hard to hit: the menu takes the room around its own.
+            .padding(.vertical, 8).padding(.trailing, 10)
+            .contentShape(Rectangle())
+        }
+        .padding(.vertical, -8)
+        .accessibilityLabel("model")
+    }
+
+    private func modelButton(_ option: TerminalModelOption) -> some View {
+        Button {
+            Task {
+                guard await page.setModel(option.id) != nil else { return }
+                // The list says which model it is on once the agent has said (the stream does at once, where it can).
+                try? await Task.sleep(for: .seconds(1))
+                await model.terminals.refreshList(model.api)
+            }
+        } label: {
+            if RecordDisplay.isCurrent(option, model: currentModel) { Label(option.name, systemImage: "checkmark") } else { Text(option.name) }
+        }
     }
 
     /// While it works and nothing is typed, the send key stops it (esc).

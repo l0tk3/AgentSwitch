@@ -171,8 +171,9 @@ Demo screens (Debug, `-uiDemo YES -uiDemoScreen <name>`): `terminals`, `terminal
 permission), `terminalsealed` (the sealed box opens 3 s in, with its glitch), `terminalslash` (`/co` and its
 suggestions), the same terminal's simple view (docs/simple-view-v0.md) as `simple` (a permission card at the end of
 the record), `simplebusy` (at work: what it is doing, its sub-agents, a queued message, the stop key),
-`simplequestion`, `simpleprompt` (waiting on a screen of its own: the keys come out) and `simplechanges` (what the
-last turn changed), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
+`simpleidle` (at rest: the model under the reply box opens the menu that changes it), `simplequestion`,
+`simpleprompt` (waiting on a screen of its own: the keys come out) and `simplechanges` (what the last turn
+changed), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
 `interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
 `transcript`; the Browser tab's `browser` (the list), `browserpage` (watching codex, its last action outlined),
 `browsertook` (taken over, the keyboard and key bar up), `browserfile`, `browserlocal`, `browserdenied`, `browsernew`,

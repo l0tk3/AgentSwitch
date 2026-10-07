@@ -22,6 +22,7 @@ public struct TerminalAttachmentRef: Encodable, Sendable, Equatable {
     public init(token: String, upload: String) { self.token = token; self.upload = upload }
 }
 private struct CommandList: Decodable { let commands: [SlashCommand] }
+private struct ModelBody: Encodable { let model: String }
 private struct KeysBody: Encodable { let keys: [TerminalKey] }
 private struct SizeBody: Encodable { let cols: Int; let rows: Int; let screen: String? }
 private struct ClickBody: Encodable { let keys: [String] }
@@ -89,6 +90,27 @@ extension AgentSwitchAPI {
                                   attachments: [TerminalAttachmentRef] = []) async throws -> TerminalInputResult {
         try await send("POST", ["terminals", id, "input"], body: InputBody(text: text, submit: submit, seal: sealed, attachments: attachments.isEmpty ? nil : attachments),
                        timeout: sealed ? Self.createTaskTimeout : requestTimeout)
+    }
+
+    /// How a change of model reached the agent.
+    public enum ModelChange: Sendable, Equatable {
+        /// The Mac typed the agent's command and lets the change through.
+        case asked
+        /// A Mac from before the route: the command was typed as a reply. Claude Code may ask about it on its screen.
+        case typed
+    }
+
+    /// Another model for the agent in a terminal (docs/simple-view-v0.md §5.4; Claude Code: `/model <id>`, which also
+    /// becomes its default for new sessions). Refused while it works or waits for an answer (409), and for an agent that
+    /// chooses in a picker of its own (400).
+    public func setTerminalModel(_ id: String, model: String) async throws -> ModelChange {
+        do {
+            let _: OKReply = try await post(["terminals", id, "model"], body: ModelBody(model: model))
+            return .asked
+        } catch APIError.http(status: 404, message: _) {
+            _ = try await sendTerminalInput(id, text: RecordDisplay.modelCommand(model), sealed: false)
+            return .typed
+        }
     }
 
     /// Files staged with `upload` into the terminal: their paths are pasted into the agent's prompt, nothing is sent

@@ -142,3 +142,25 @@ extension RecordDisplay {
         return fences % 2 == 1 ? head + "\n```" : head
     }
 }
+
+extension RecordDisplay {
+    /// Claude Code's command for another model, typed as a reply: `/model opus`. A model id is letters, digits and
+    /// `. _ : / [ ] -` (what the Mac lists); anything else is left out, so nothing after it reads as more input.
+    public static func modelCommand(_ model: String) -> String {
+        "/model " + String(model.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) && $0.isASCII || "._:/[]-".unicodeScalars.contains($0) })
+    }
+
+    /// The command that opens an agent's own model picker, typed for the user who then chooses on its screen.
+    public static func modelPicker(_ harness: String) -> String { harness == "opencode" ? "/models" : "/model" }
+
+    /// The model a terminal is on, as far as anything says: what the agent last reported, else the model of its last
+    /// answer in the record, else the one it was started with.
+    public static func model(now: String?, record: String?, started: String?) -> String? { now ?? record ?? started }
+
+    /// Which of the listed models is the one in use: by its id, else by the name people read (`opus` is listed for
+    /// `claude-opus-5-5`, both read "Opus 5.5").
+    public static func isCurrent(_ option: TerminalModelOption, model: String?) -> Bool {
+        guard let model else { return false }
+        return option.id == model || option.name == ModelName.display(model)
+    }
+}
