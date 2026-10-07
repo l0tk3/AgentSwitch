@@ -1,6 +1,9 @@
 import AgentSwitchMacCore
 import AppKit
+import OSLog
 import SwiftUI
+
+private let presentationLog = Logger(subsystem: "com.agentswitch.mac", category: "presentation")
 
 @main
 struct AgentSwitchApp: App {
@@ -225,10 +228,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The look at the app's presentation options under way (watchPresentation).
+    private var presentationTask: Task<Void, Never>?
+
     /// Back from Terminal after 登录, or from installing something: check the environment again (AppModel).
     func applicationDidBecomeActive(_ notification: Notification) {
         guard running else { return }
         model.appBecameActive()
+        watchPresentation()
+    }
+
+    /// A request to hide the menu bar that outlived full screen is taken back (StalePresentation): looked at twice, a
+    /// moment apart, each time the app comes to the front.
+    private func watchPresentation() {
+        presentationTask?.cancel()
+        presentationTask = Task { @MainActor in
+            var watch = StalePresentation.Watch()
+            for _ in 0..<2 {
+                try? await Task.sleep(for: .seconds(StalePresentation.interval))
+                guard !Task.isCancelled, NSApp.isActive else { return }
+                let options = NSApp.presentationOptions
+                let fullScreen = NSApp.windows.contains { $0.styleMask.contains(.fullScreen) }
+                if watch.shouldReset(options: options.rawValue, anyWindowFullScreen: fullScreen) {
+                    presentationLog.error("presentation options \(options.rawValue, privacy: .public) with no window full screen (system: \(NSApp.currentSystemPresentationOptions.rawValue, privacy: .public)); taken back")
+                    NSApp.presentationOptions = []
+                }
+            }
+        }
     }
 
     /// One copy per AGENTSWITCH_HOME (InstanceLock), taken before any pid file, port or child is touched. A second

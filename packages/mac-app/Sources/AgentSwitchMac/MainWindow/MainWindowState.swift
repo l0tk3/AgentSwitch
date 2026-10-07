@@ -171,6 +171,9 @@ final class MainWindowState {
         showsBack = false
         openTask = nil
         browserTitle = nil
+        // A window closed while full screen is not heard leaving it (its observers go as it closes); the next window
+        // opens as an ordinary one, with the system's own traffic lights.
+        fullScreen = false
         windowChanged(key: false, visible: false)
         editingChanged(false)
     }
