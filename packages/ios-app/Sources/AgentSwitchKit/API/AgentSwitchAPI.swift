@@ -124,6 +124,12 @@ public struct AgentSwitchAPI: Sendable {
         try await bytes(["sessions", harness, id, "images", item, String(n)])
     }
 
+    /// A picture a step brought back (a picture file it read, a screenshot a tool took): the `k`-th of the `n`-th step
+    /// of the run of work `work`. 404 from a Mac from before this route.
+    public func sessionStepImage(harness: String, id: String, work: String, n: Int, k: Int) async throws -> Data {
+        try await bytes(["sessions", harness, id, "steps", work, String(n), "images", String(k)])
+    }
+
     /// The `n`-th step of the run of work `work` of a session, whole (docs/simple-view-v0.md §4). Nil when the Mac has
     /// none (an older Mac, an agent read coarsely): the record's own line stays.
     public func sessionStep(harness: String, id: String, work: String, n: Int) async throws -> RecordStepDetail? {

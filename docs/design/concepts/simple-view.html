@@ -378,6 +378,11 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .quiet { padding: 7px 16px 0; font-size: 12px; color: var(--ink2); }
 .sugs { background: var(--raise); border-bottom: 1px solid var(--ink4); }
 .sugs button { display: flex; gap: 10px; align-items: baseline; padding: 7px 16px; width: 100%; text-align: left; font-size: 12px; }
+.sugs button.on { background: color-mix(in srgb, var(--ink) 7%, transparent); } .sugs kbd { font: 10.5px var(--mono); color: var(--ink3); }
+.sugs .mark { display: flex; gap: 8px; align-items: baseline; padding: 7px 16px; font-size: 12px; } .sugs .mark b:first-child { color: var(--signal); } .sugs .dir { color: var(--ink3); direction: rtl; text-align: left; }
+.shot { display: block; width: 236px; height: 148px; margin: 6px 0 2px; border: 1px solid var(--ink4); border-radius: calc(var(--r-key) + 3px);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ink) 14%, var(--bg)) 0 27%, transparent 27%),
+    repeating-linear-gradient(180deg, transparent 0 13px, color-mix(in srgb, var(--ink) 72%, var(--bg)) 13px 16px, transparent 16px 20px) 34% 12px / 52% 104px no-repeat, color-mix(in srgb, var(--ink) 5%, var(--bg)); }
 .sugs b { font: 600 13px var(--mono); white-space: nowrap; } .sugs span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
 .keys { display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px 0; scrollbar-width: none; }
 .keys::-webkit-scrollbar { display: none; }
@@ -706,7 +711,7 @@ const BASE = () => [
   // What it thought on the way, where it wrote that down: said like an answer, quieter.
   { t: "md", quiet: true, html: "<p>提示只在页面顶部，选择发生在下面的组里。把同一条提示放到那个 agent 自己的组末尾，并写明现在用的和将要用的。</p>" },
   { t: "work", secs: 72, steps: [
-    { k: "read", text: "AppModel+Agents.swift" }, { k: "search", text: "agentsNeedRestart" },
+    { k: "read", text: "AppModel+Agents.swift" }, { k: "read", text: "docs/design/agents-page.png", shot: true }, { k: "search", text: "agentsNeedRestart" },
     { k: "run", note: "See which Codex the running service has", text: "ps eww -p 64277 | grep CODEX_BIN", out: "CODEX_BIN=/Applications/ChatGPT.app/…/bin/codex" },
     { k: "edit", text: "AgentsView.swift", add: 14, del: 2 },
     { k: "run", note: "Run the Agents tests and keep the last lines", text: "cd packages/mac-app && swift test --filter AgentsTests 2>&1 ⏎ | grep -E …", out: "580 tests, 0 failures",
@@ -724,6 +729,7 @@ const CHANGES = [
 ];
 const PLAN = () => [{ s: "done", t: "查清为什么没生效" }, { s: "done", t: "在 Codex 那一组里加提示" }, { s: "doing", t: "删除按钮标红" }, { s: "todo", t: "重新构建并出图" }];
 const MODES = [["Ask", "每次改文件、跑命令前都问"], ["Edits", "改文件不问，跑命令仍然问"], ["Plan", "只读，先出方案"], ["Auto", "不逐条问，由分类器把关"], ["Bypass", "一律不问"]];
+const FILES = ["packages/daemon/src/terminals/host.ts", "packages/daemon/tests/hostKeys.test.ts", "packages/mac-app/Sources/AgentSwitchMac/Terminals/PaneStageHost.swift", "docs/terminal-v0.md", "README.md"];
 const COMMANDS = [["compact", "压缩上下文，留下摘要"], ["clear", "清空对话"], ["model", "换模型"], ["review", "审查当前改动"], ["init", "为项目写 CLAUDE.md"]];
 const KEYS = ["⏎", "⌫", "↑", "↓", "1", "2", "3", "y", "n", "esc", "tab", "⇧tab", "←", "→", "pgup", "pgdn", "^C"];
 const MODELS = [["Opus 5.5", "most capable"], ["Sonnet 5.5", "everyday tasks"], ["Haiku 4.5", "fastest"]];
@@ -740,6 +746,8 @@ const PRESETS = {
                 m: "<b>程序自己画的界面。</b>这里是 <code>/model</code> 的菜单。卡片里是屏幕最后几行，键盘这时直接给程序：点一下页面空白处，按 <code>↑</code> <code>↓</code> <code>↩</code> 试试，或者 <code>Open Terminal</code>。" },
   reply:      { w: "Reply", n: "<b>回复。</b><code>+</code> 选图后在输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令；<code>+</code> 的最后一项取出按键条。",
                 m: "<b>回复。</b><code>+</code>、粘贴或把文件拖到这一块上，输入框里留 <code>[Image #1]</code>，上面一排缩略图；打 <code>/</code> 列出命令。" },
+  files:      { w: "Files", n: "<b>提到文件。</b>打 <code>@</code> 列出这个文件夹里的文件，按名字找，点一下填进去。行首的 <code>!</code> 是在它的 shell 里运行这一行，上面写一句。记录里读了图片的那一步可以点开看图。",
+                m: "<b>提到文件。</b>打 <code>@</code> 列出这个文件夹里的文件，按名字找；<code>↑</code> <code>↓</code> 选，<code>tab</code> 或 <code>↩</code> 填进去，<code>esc</code> 收起。<code>/</code> 的命令列表同样。行首的 <code>!</code> 是在它的 shell 里运行这一行。记录里读了图片的那一步可以点开看图。" },
   sealed:     { w: "Sealed", n: "<b>加密发送。</b>点锁，输入框被加密框围住，Mac 先把其中的凭据换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。",
                 m: "<b>加密发送。</b>输入框旁的锁和状态栏右边的锁是同一个：输入框被加密框围住，凭据先换成密文再交给 agent。不点锁直接发一段像密码的字，会先问你。" },
   away:       { w: "On Mac", wm: "On iPhone", n: "<b>终端正在 Mac 上用着。</b>看记录、回复都不占它的窗口大小，所以这里没有占位和 <code>Take Over</code>，标题里写一句 On Mac。切到终端视图时照旧要接手。",
@@ -831,6 +839,12 @@ function load(preset) {
     opts: [["让官方脚本自己加", "和手动安装完全一样，会往 shell 配置里加一行"], ["只在页面上提示", "AgentSwitch 不动 shell 配置，写出要加的那一行"]], pick: -1, other: "" }; }
   if (preset === "prompt") { S.status = "waiting"; S.items.push({ t: "user", time: "10:51", text: "/model" }); S.card = { kind: "prompt" }; S.keys = true; }
   if (preset === "reply") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.files = [1]; S.draft = "[Image #1] 这一行的间距再收一点"; }
+  if (preset === "files") {
+    S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.draft = "看一下 @host";
+    // The run of work that read a picture, open on it.
+    const work = S.items.find((it) => it.steps?.some((st) => st.shot));
+    if (work) { work.open = true; work.steps.find((st) => st.shot).open = true; }
+  }
   if (preset === "sealed") { S.status = "idle"; S.sealed = true; S.draft = "部署用的密码是 hunter2"; }
   if (preset === "exited") { S.status = "exited"; S.joined = false; S.items.push({ t: "said", text: "Exited · 0", time: "10:52" }); }
   render(true);
@@ -906,6 +920,9 @@ function item(it, i) {
     const step = (st, n) => st.k === "think" ? `<div class="call think">${esc(st.text)}</div>`
       : st.note ? `<div class="call"><button class="stepfold" data-a="step" data-i="${i}" data-n="${n}" aria-expanded="${!!st.open}">${kindIcon("run")}<b>Run</b> <span class="said">${esc(st.note)}</span><i>${G(st.open ? "down" : "right", st.open ? "▾" : "▸", 11)}</i></button>${
           st.open ? `<div class="cmd"><span class="ps">$</span><pre>${shell(st.full ?? st.text)}</pre><button data-a="copy">Copy</button></div>${st.out ? `<div class="cmdout">${esc(st.outFull ?? st.out)}</div>` : ""}` : `<span class="sub">${esc(st.text)}</span>`}</div>`
+      // A step that brought a picture back (a picture file read, a screenshot taken) opens on it.
+      : st.shot ? `<div class="call"><button class="stepfold" data-a="step" data-i="${i}" data-n="${n}" aria-expanded="${!!st.open}">${kindIcon(st.k)}<b>${verb[st.k]}</b> <code>${esc(st.text)}</code><i>${G(st.open ? "down" : "right", st.open ? "▾" : "▸", 11)}</i></button>${
+          st.open ? `<span class="shot" role="img" aria-label="Image 1"></span>` : ""}</div>`
       : `<div class="call">${kindIcon(st.k)}<b>${verb[st.k]}</b> <code>${esc(st.text)}</code>${st.add != null ? ` <em>+${st.add}</em> <s class="del">−${st.del}</s>` : ""}${st.out ? `<br><s>${S.classic ? "" : "⎿ "}${esc(st.out)}</s>` : ""}</div>`;
     const steps = open ? it.steps.map((st, n) => (S.verbose || st.k !== "think" ? step(st, n) : "")).join("") : "";
     return `<div class="tools"><div class="wrow"><button class="fold" data-a="fold" data-i="${i}" aria-expanded="${!!open}"><i>${G(open ? "down" : "right", open ? "▾" : "▸", 12)}</i><span>Worked ${took} · ${parts.join(" · ")}</span></button>${stat}</div>${steps}</div>`;
@@ -971,7 +988,13 @@ function dock(noKeys) {
     ${S.planOpen ? `<div class="tlist">${S.plan.map((x) => `<div class="${x.s}"><i>${pmark(x.s)}</i><span>${esc(x.t)}</span></div>`).join("")}</div>` : ""}</div>` : "";
   const hints = !isMac() || S.split ? "" : S.classic ? `<span class="hintk"><span>Return to send</span><span>Esc to stop</span></span>` : `<span class="hintk"><span><kbd>↩</kbd>Send</span><span><kbd>⇧↩</kbd>New Line</span><span><kbd>esc</kbd>Stop</span></span>`;
   const chips = noKeys ? "" : `<div class="chiprow"><button class="pchip ${S.mode === "Bypass" ? "bad" : ""}" data-a="modes">${S.mode}${G("down", " ▾", 11)}</button><button class="pchip" data-a="models">${S.model}${G("down", " ▾", 11)}</button><button class="pchip" data-a="effort">${S.effort}${G("down", " ▾", 11)}</button><span class="sp"></span>${hints}<span class="ctx" title="上下文用量">${S.ctx}%</span></div>`;
-  const sugList = sugs.length ? `<div class="sugs">${sugs.map(([n, d]) => `<button data-a="sug" data-n="${n}"><b>/${n}</b><span>${d}</span></button>`).join("")}</div>` : "";
+  // Files of the folder after an `@` (the word the caret is in), a line on what another first character does.
+  const word = S.sealed ? "" : S.draft.split(/\s/).pop();
+  const files = /^@[^@]*$/.test(word) ? FILES.filter((f) => f.toLowerCase().includes(word.slice(1).toLowerCase())).slice(0, 5) : [];
+  const mark = !S.sealed && S.draft.startsWith("!") ? `<div class="sugs"><div class="mark"><b>!</b><b>Shell</b><span>这一行作为命令在它的 shell 里运行，输出进入对话。</span></div></div>` : "";
+  const sugList = sugs.length ? `<div class="sugs">${sugs.map(([n, d], k) => `<button data-a="sug" data-n="${n}" class="${k ? "" : "on"}"><b>/${n}</b><span>${d}</span>${k || !isMac() ? "" : "<kbd>tab</kbd>"}</button>`).join("")}</div>`
+    : files.length ? `<div class="sugs">${files.map((f, k) => `<button data-a="sugfile" data-n="${f}" class="${k ? "" : "on"}"><b>${esc(f.split("/").pop())}</b><span class="dir">${esc(f.split("/").slice(0, -1).join("/"))}</span>${k || !isMac() ? "" : "<kbd>tab</kbd>"}</button>`).join("")}</div>`
+    : mark;
   return `${isMac() ? "" : sugList}
     ${S.error ? `<div class="err"><span>${esc(S.error)}</span><button data-a="errx" aria-label="关闭">${G("x", "×", 14)}</button></div>` : ""}
     ${S.away && S.view === "simple" ? `<div class="quiet">这个终端正在 ${S.away} 上使用。在这里回复不会改变它的窗口大小。</div>` : ""}
@@ -1312,7 +1335,8 @@ document.addEventListener("click", (e) => {
     case "keysoff": S.keys = false; return render();
     case "file": { const n = (Math.max(0, ...S.files) || 0) + 1; S.files.push(n); S.draft = `${S.draft}${S.draft && !S.draft.endsWith(" ") ? " " : ""}[Image #${n}] `; S.over = null; render(); return $("field")?.focus(); }
     case "unfile": S.files = S.files.filter((n) => n !== +el.dataset.n); S.draft = S.draft.replace(`[Image #${el.dataset.n}] `, "").replace(`[Image #${el.dataset.n}]`, ""); return render();
-    case "sug": S.draft = `/${el.dataset.n}`; render(); return $("field")?.focus();
+    case "sug": S.draft = `/${el.dataset.n} `; render(); return $("field")?.focus();
+    case "sugfile": S.draft = S.draft.replace(/@[^@\s]*$/, `@${el.dataset.n} `); render(); return $("field")?.focus();
     case "lock": if (!S.joined) return; S.view = "simple"; S.sealed = !S.sealed; render(); if (S.sealed) glitch("comp"); return $("field")?.focus();
     case "errx": S.error = null; return render();
     case "stop": return stop();

@@ -17,6 +17,7 @@ import type { TerminalStyle } from "../terminals/style.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands } from "../terminals/commands.js";
+import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { GitStatus } from "../terminals/gitStatus.js";
@@ -469,6 +470,16 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const info = host.get(c.req.param("id"));
     if (!info) return c.json({ error: "not found" }, 404);
     return c.json({ commands: slashCommands(info.harness, info.cwd) });
+  });
+
+  // What `@` offers in a reply (docs/simple-view-v0.md §5.5): the files of the folder the agent works in, by name.
+  // The folder is the terminal's own, never the caller's; `q` is what was typed after the `@`.
+  app.get("/terminals/:id/files", async (c) => {
+    const info = host.get(c.req.param("id"));
+    if (!info) return c.json({ error: "not found" }, 404);
+    const q = (c.req.query("q") ?? "").slice(0, 200);
+    if (/[\x00-\x1f]/.test(q)) return c.json({ error: "q: not a name" }, 400);
+    return c.json({ files: matchFiles(await folderFiles(info.workdir ?? info.cwd), q) });
   });
 
   app.post("/terminals/:id/keys", async (c) => {

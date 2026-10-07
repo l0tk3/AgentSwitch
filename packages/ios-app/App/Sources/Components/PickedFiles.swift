@@ -38,9 +38,11 @@ enum PickedFiles {
     /// Images on the clipboard, as JPEG (a pasted photo as PNG would be many times larger; ImagePrep then shrinks it and
     /// turns it upright).
     @MainActor
-    static func pastedImages() -> [UploadFile] {
-        let images = UIPasteboard.general.images ?? []
-        return images.enumerated().compactMap { i, image in
+    static func pastedImages() -> [UploadFile] { files(from: UIPasteboard.general.images ?? []) }
+
+    /// Pictures pasted, as the files they are sent as.
+    static func files(from images: [UIImage]) -> [UploadFile] {
+        images.enumerated().compactMap { i, image in
             image.jpegData(compressionQuality: 0.9).map { UploadFile(name: images.count == 1 ? "pasted.jpg" : "pasted-\(i + 1).jpg", type: "image/jpeg", data: $0) }
         }
     }

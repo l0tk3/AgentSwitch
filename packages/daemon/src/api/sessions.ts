@@ -74,6 +74,17 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
     const step = monitor.step(harness as SessionHarness, c.req.param("id"), item, Number(n), ours(c.req.param("id")));
     return step ? c.json(step) : c.json({ error: "no such step" }, 404);
   });
+  // A picture a step brought back (a picture file it read, a screenshot a tool took): the `k`-th of that step. As
+  // unchanging as the step, and served as a picture only (never a type a browser would run).
+  app.get("/sessions/:harness/:id/steps/:item/:n/images/:k", (c) => {
+    const harness = c.req.param("harness");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    const item = c.req.param("item"), n = c.req.param("n"), k = c.req.param("k");
+    if (!/^\d{1,15}(\.\d{1,4})?$/.test(item) || !/^\d{1,4}$/.test(n) || !/^\d{1,2}$/.test(k)) return c.json({ error: "no such picture" }, 400);
+    const picture = monitor.stepImage(harness as SessionHarness, c.req.param("id"), item, Number(n), Number(k), ours(c.req.param("id")));
+    if (!picture) return c.json({ error: "no such picture" }, 404);
+    return c.body(new Uint8Array(picture.data), 200, { "Content-Type": picture.type, "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" });
+  });
   // A picture the user sent with a message (docs/simple-view-v0.md §4): the `n`-th of the record's item, as the agent
   // kept it. It never changes (an item's id is its place in a file that only grows): the screens keep it.
   app.get("/sessions/:harness/:id/images/:item/:n", (c) => {

@@ -138,7 +138,7 @@ let gitPath: string | null | undefined;
 
 /** git on the PATH. On macOS `/usr/bin/git` is only a stub without the developer tools, and running it asks the user to
  *  install them: it is used only when they are there. */
-function gitBinary(): string | null {
+export function gitBinary(): string | null {
   if (gitPath !== undefined) return gitPath;
   const found = (process.env.PATH ?? "").split(delimiter).filter(Boolean).map((dir) => join(dir, "git")).find((p) => existsSync(p)) ?? null;
   if (found === "/usr/bin/git" && process.platform === "darwin") {

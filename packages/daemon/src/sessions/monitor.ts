@@ -11,7 +11,7 @@ import { claudeFacts, claudeMessages } from "./claude.js";
 import { codexFacts, codexMessages } from "./codex.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
-import { MAX_RECORD_LIMIT, readChanges, readImage, readRecord, readStep, recordFromMessages, type FileDiff, type RecordImage, type SessionRecord, type StepDetail } from "./record.js";
+import { MAX_RECORD_LIMIT, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, type FileDiff, type RecordImage, type SessionRecord, type StepDetail } from "./record.js";
 import { ACTIVE_MS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
@@ -113,6 +113,13 @@ export class SessionMonitor {
     const found = this.open(harness, id, ours);
     if (!found?.path || (harness !== "claude-code" && harness !== "codex")) return null;
     try { return readStep(harness, found.path, { work, n, cwd: found.session.cwd }); } catch { return null; }
+  }
+
+  /** A picture a step brought back: the `k`-th of the `n`-th step of the run of work `work`. */
+  stepImage(harness: SessionHarness, id: string, work: string, n: number, k: number, ours = false): RecordImage | null {
+    const found = this.open(harness, id, ours);
+    if (!found?.path || (harness !== "claude-code" && harness !== "codex")) return null;
+    try { return readStepImage(harness, found.path, { work, n, k, cwd: found.session.cwd }); } catch { return null; }
   }
 
   /** A picture the user sent with a message of the session: the `n`-th of the record's item `item`. */

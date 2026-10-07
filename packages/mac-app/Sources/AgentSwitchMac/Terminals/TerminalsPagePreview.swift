@@ -65,6 +65,37 @@ enum TerminalsPagePreview {
             stageRecord(model, working: false)
             model.focused?.session?.received(event: "permission", data: #"{"request":{"id":"r1","tool":"Bash","summary":"Bash: git push origin main"}}"#)
         }
+        // The reply box offering what is typed for (docs/simple-view-v0.md §5.5): commands after a `/`, files after an `@`.
+        try await shot(to: file("terminals-record-hints-light"), light: true) { model in
+            stageRecord(model, working: false)
+            PaneRecord.previewOpenStep = nil
+            let range = NSRange(location: 0, length: 3)
+            model.focused?.record.stageDraft("/co", files: [])
+            model.focused?.record.stageHints([
+                ReplyHintRow(kind: .command, title: "compact", detail: "Free up context by summarizing the conversation so far", range: range, typed: "/compact "),
+                ReplyHintRow(kind: .command, title: "config", detail: "Open settings", range: range, typed: "/config "),
+                ReplyHintRow(kind: .command, title: "context", detail: "Visualize current context usage as a colored grid", range: range, typed: "/context "),
+                ReplyHintRow(kind: .command, title: "copy", detail: "Copy Claude's last response to clipboard", range: range, typed: "/copy "),
+                ReplyHintRow(kind: .command, title: "code-review", detail: "Review the current diff or a PR for bugs and cleanups", tag: "project", range: range, typed: "/code-review "),
+            ], pick: 1)
+        }
+        try await shot(to: file("terminals-record-files-light"), light: true) { model in
+            stageRecord(model, working: false)
+            PaneRecord.previewOpenStep = nil
+            let range = NSRange(location: 4, length: 5)
+            model.focused?.record.stageDraft("看一下 @host", files: [])
+            model.focused?.record.stageHints([
+                ReplyHintRow(kind: .file, title: "host.ts", detail: "packages/daemon/src/terminals", range: range, typed: "@packages/daemon/src/terminals/host.ts "),
+                ReplyHintRow(kind: .file, title: "hostKeys.test.ts", detail: "packages/daemon/tests", range: range, typed: "@packages/daemon/tests/hostKeys.test.ts "),
+                ReplyHintRow(kind: .file, title: "PaneStageHost.swift", detail: "packages/mac-app/Sources/AgentSwitchMac/Terminals", range: range, typed: "@packages/mac-app/Sources/AgentSwitchMac/Terminals/PaneStageHost.swift "),
+            ])
+        }
+        try await shot(to: file("terminals-record-shell-light"), light: true) { model in
+            stageRecord(model, working: false)
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("!git status", files: [])
+            model.focused?.record.stageHints([], mark: ReplyHints.Mark(sign: "!", word: "Shell", says: "这一行作为命令在它的 shell 里运行，输出进入对话。"))
+        }
         // The side asked for (`Show Side Pane`): the context's fill, the task list and the changed files beside the
         // record, one file open on its diff. The preview's own setting, put back after.
         UserDefaults.standard.set(true, forKey: "terminals.recordSide")

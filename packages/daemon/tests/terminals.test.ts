@@ -13,6 +13,7 @@ import { ensureLocalToken, LocalAuth } from "../src/api/localAuth.js";
 import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
+import { folderFiles, matchFiles } from "../src/terminals/files.js";
 import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, modeOnScreen } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
@@ -547,6 +548,30 @@ describe("terminals over HTTP", () => {
     expect(terminal.some((e) => e.event === "activity" || e.event === "record")).toBe(false);
     // It draws no terminal, so it never owns the size.
     expect((await call("GET", `/terminals/${id}`)).json.terminal.sizedBy ?? null).toBeNull();
+  });
+
+  it("a reply's @: the files of the terminal's folder by name, a name that starts with what was typed first", async () => {
+    // 2026-10-07, user: 我输入/的时候输入框应该给我提示应有的选项，包括其他cli里应有的特殊符号也一样.
+    const files = ["README.md", "src/api/terminals.ts", "src/terminals/host.ts", "tests/terminals.test.ts", "docs/terminal-v0.md", "src/term.ts"];
+    expect(matchFiles(files, "term")).toEqual(["src/term.ts", "docs/terminal-v0.md", "src/api/terminals.ts", "tests/terminals.test.ts", "src/terminals/host.ts"]);
+    expect(matchFiles(files, "HOST")).toEqual(["src/terminals/host.ts"]);
+    // Nothing typed: the files nearest the folder's top first.
+    expect(matchFiles(files, "")).toEqual(["README.md", "docs/terminal-v0.md", "src/term.ts", "tests/terminals.test.ts", "src/api/terminals.ts", "src/terminals/host.ts"]);
+    expect(matchFiles(files, "", 2)).toHaveLength(2);
+    expect(matchFiles(files, "nothing-like-it")).toEqual([]);
+
+    const { cwd, call } = await start();
+    mkdirSync(join(cwd, "src", "deep"), { recursive: true });
+    mkdirSync(join(cwd, "node_modules", "left-pad"), { recursive: true });
+    mkdirSync(join(cwd, ".cache"), { recursive: true });
+    for (const f of ["src/retry.ts", "src/deep/retry-policy.ts", "notes.md", "node_modules/left-pad/retry.js", ".cache/retry.tmp"]) writeFileSync(join(cwd, f), "x");
+    // Not a repository: walked, without what nobody mentions.
+    expect(await folderFiles(cwd, () => 1)).toEqual(expect.arrayContaining(["src/retry.ts", "src/deep/retry-policy.ts", "notes.md"]));
+    expect((await folderFiles(cwd, () => 2)).some((f) => f.includes("node_modules") || f.startsWith("."))).toBe(false);
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
+    expect((await call("GET", `/terminals/${id}/files?q=retry`)).json).toEqual({ files: ["src/retry.ts", "src/deep/retry-policy.ts"] });
+    expect((await call("GET", `/terminals/${id}/files?q=notes`)).json).toEqual({ files: ["notes.md"] });
+    expect((await call("GET", "/terminals/nope/files?q=x")).status).toBe(404);
   });
 
   it("a screen changes how Claude Code asks: ⇧Tab pressed and its screen read until it names the mode; not one the session does not offer", async () => {

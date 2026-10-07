@@ -43,6 +43,20 @@ final class PaneRecord {
     /// Placeholders to type at the box's caret, once.
     private(set) var insert: InsertRequest?
 
+    // What the box offers for what is being typed (docs/simple-view-v0.md §5.5): rows to take, or a line on what a
+    // first character does.
+    private(set) var hints: [ReplyHintRow] = []
+    private(set) var hintPick = 0
+    private(set) var hintMark: ReplyHints.Mark?
+    /// A row taken: typed in place of what asked for it, once.
+    private(set) var replace: ReplaceRequest?
+    var hintsOpen: Bool { !hints.isEmpty || hintMark != nil }
+    /// The agent's commands, asked for once per terminal (a list is narrowed here as the name is typed).
+    @ObservationIgnored private var commands: (terminal: String, all: [SlashCommand])?
+    @ObservationIgnored private var hinting: Task<Void, Never>?
+    /// The text at which esc put the list away: it stays away until the text is another.
+    @ObservationIgnored private var hintsPutAway: String?
+
     /// One file of the reply being written.
     struct DraftFile: Identifiable, Equatable {
         let id = UUID()
@@ -233,12 +247,91 @@ final class PaneRecord {
                 }
                 try await client().typeIntoTerminal(id: terminal, text: text, files: refs)
                 guard let self else { return }
-                if self.draft == text { self.draft = ""; self.draftFiles = [] }
+                if self.draft == text { self.draft = ""; self.draftFiles = []; self.hinting?.cancel(); self.closeHints() }
                 self.error = nil
             } catch {
                 self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription
             }
         }
+    }
+
+    // MARK: what the box offers
+
+    /// The reply's text or its caret changed: what it asks for now.
+    func typing(_ text: String, caret: Int) {
+        hinting?.cancel()
+        guard let terminal, !staged else { return }
+        if text == hintsPutAway { return closeHints() }
+        hintsPutAway = nil
+        switch ReplyHints.ask(text: text, caret: caret, harness: harness) {
+        case nil:
+            closeHints()
+        case .mark(let mark):
+            hints = []; hintPick = 0
+            hintMark = mark
+        case .commands(let typed):
+            hintMark = nil
+            let range = NSRange(location: 0, length: caret)
+            let rows = { (all: [SlashCommand]) in
+                ReplyHints.matching(typed, in: all).map { c in
+                    ReplyHintRow(kind: .command, title: c.name, detail: c.description, tag: c.source == "builtin" ? nil : c.source, range: range, typed: ReplyHints.typed(command: c))
+                }
+            }
+            if let commands, commands.terminal == terminal { return offer(rows(commands.all)) }
+            let client = client
+            hinting = Task { [weak self] in
+                guard let all = try? await client().terminalCommands(id: terminal), !Task.isCancelled, let self else { return }
+                self.commands = (terminal, all)
+                self.offer(rows(all))
+            }
+        case .files(let query, let at):
+            hintMark = nil
+            let range = NSRange(location: at, length: caret - at)
+            let harness = harness, client = client
+            hinting = Task { [weak self] in
+                // Not a request per key: the list is asked for once the typing has paused a moment.
+                try? await Task.sleep(for: .milliseconds(90))
+                guard !Task.isCancelled, let files = try? await client().terminalFiles(id: terminal, query: query), !Task.isCancelled else { return }
+                self?.offer(files.prefix(ReplyHints.shown).map { path in
+                    let parts = ReplyHints.parts(of: path)
+                    return ReplyHintRow(kind: .file, title: parts.name, detail: parts.folder, range: range, typed: ReplyHints.typed(file: path, harness: harness))
+                })
+            }
+        }
+    }
+
+    private func offer(_ rows: [ReplyHintRow]) {
+        if rows != hints { hints = rows }
+        hintPick = min(hintPick, max(0, rows.count - 1))
+    }
+
+    private func closeHints() {
+        if !hints.isEmpty { hints = [] }
+        if hintMark != nil { hintMark = nil }
+        hintPick = 0
+    }
+
+    /// A key while the list is open: ↑ ↓ move, tab or return takes the row picked, esc puts the list away. False: the
+    /// key is the field's own.
+    func hintKey(_ key: ComposeKey) -> Bool {
+        guard !hints.isEmpty else {
+            if key == .escape, hintMark != nil { hintsPutAway = draft; closeHints(); return true }
+            return false
+        }
+        switch key {
+        case .up: hintPick = (hintPick + hints.count - 1) % hints.count
+        case .down: hintPick = (hintPick + 1) % hints.count
+        case .tab, .enter: take(hints[min(hintPick, hints.count - 1)])
+        case .escape: hintsPutAway = draft; closeHints()
+        }
+        return true
+    }
+
+    func take(_ row: ReplyHintRow) {
+        hinting?.cancel()
+        replace = ReplaceRequest(range: row.range, text: row.typed)
+        closeHints()
+        focusRequests += 1
     }
 
     // MARK: the reply's files
@@ -415,6 +508,13 @@ final class PaneRecord {
         activitySince = since
         more = true
         loaded = true
+    }
+
+    /// The design preview's: the box offering rows for what is typed.
+    func stageHints(_ rows: [ReplyHintRow], pick: Int = 0, mark: ReplyHints.Mark? = nil) {
+        hints = rows
+        hintPick = pick
+        hintMark = mark
     }
 
     /// The design preview's: the side with a file open on its diff.

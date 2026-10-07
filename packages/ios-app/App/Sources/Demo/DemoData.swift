@@ -175,7 +175,7 @@ enum DemoData {
         let repo = "/Users/me/Desktop/WorkSpace/Projects/AgentSwitch"
         let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
         // `simplebusy`, `simpleprompt`: the simple view while it works, and while it waits on a screen of its own.
-        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort"
+        let busy = screen == "simplebusy", prompt = screen == "simpleprompt", idle = screen == "simpleidle" || screen == "simpleeffort" || screen == "simplepaste" || screen == "simplestep"
         let five = ["low", "medium", "high", "xhigh", "max"]
         return TerminalList(terminals: [
             TerminalInfo(id: "a1b2c3d4", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", mode: "auto", name: "iPhone 终端标签页",
@@ -251,6 +251,14 @@ enum DemoData {
         note: "Run the Agents tests and keep the last lines",
         out: "\t Executed 41 tests, with 0 failures (0 unexpected) in 0.412 (0.418) seconds\n M packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift")
 
+    /// A clipboard of the check's own with one made-up picture on it: what the reply box's Paste is tried against, so
+    /// nothing of the phone's (or, in the simulator, the Mac's) clipboard is read or written.
+    static let pasteBoard: UIPasteboard = {
+        let board = UIPasteboard.withUniqueName()
+        if let data = picture(0), let image = UIImage(data: data) { board.image = image }
+        return board
+    }()
+
     /// A made-up screenshot sent with a message: a window with a few lines, wide or tall.
     static func picture(_ n: Int) -> Data? {
         let wide = n % 2 == 0
@@ -281,6 +289,7 @@ enum DemoData {
             RecordItem(id: "150", kind: .answer, at: ago(895), text: "选的版本存下来了，但服务只在启动时读它。先看页面上哪里提示了要重启。", thinking: true),
             RecordItem(id: "200", kind: .work, at: ago(890), seconds: 72, steps: [
                 RecordStep(kind: .read, text: "packages/mac-app/Sources/AgentSwitchMac/Agents/AgentsView.swift"),
+                RecordStep(kind: .read, text: "docs/design/agents-page.png", images: 1),
                 RecordStep(kind: .search, text: "pendingRestart"),
                 RecordStep(kind: .run, text: "cd packages/mac-app && swift test --filter AgentsTests 2>&1 ⏎ | grep -E \"error:|Executed [0-9]+ tests\" | tail -2 ⏎ git status --short",
                            note: "Run the Agents tests and keep the last lines", out: "Executed 41 tests, with 0 failures (0 unexpected) in 0.412 seconds"),
@@ -307,6 +316,8 @@ enum DemoData {
         } else {
             items.append(RecordItem(id: "550", kind: .answer, at: ago(250), text: "改好了：换成应用里已有的红字删除按钮，禁用时变淡。接下来跑一遍测试确认。"))
         }
+        // The first run of work alone, so a step opened on its picture is in view.
+        if UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplestep" { items = Array(items.prefix(3)) }
         return SessionRecord(session: summary, items: items, more: true, cursor: 100, rev: "demo",
                              plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done),
                                     PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],

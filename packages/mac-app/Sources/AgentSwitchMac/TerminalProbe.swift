@@ -106,6 +106,62 @@ enum TerminalProbe {
             await pause(1500)
             say("model: now \(record.modelNow ?? "-") error \(record.error ?? "none")")
         }
+        // What the reply box offers (2026-10-07, user: 我输入/的时候输入框应该给我提示应有的选项): typed into the real field,
+        // the keys through the window — a `/` lists commands, ↓ and tab take the second; an `@` lists the folder's files.
+        if let record = model.focused?.record {
+            func field(_ view: NSView?) -> ComposeTextView? {
+                guard let view else { return nil }
+                if let field = view as? ComposeTextView, field.window != nil, !field.isHiddenOrHasHiddenAncestor { return field }
+                for child in view.subviews { if let found = field(child) { return found } }
+                return nil
+            }
+            func key(_ code: UInt16, _ chars: String) {
+                if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: code) {
+                    window.sendEvent(e)
+                }
+            }
+            if let box = field(window.contentView) {
+                window.makeFirstResponder(box)
+                box.insertText("/", replacementRange: box.selectedRange())
+                await pause(900)
+                say("hints /: draft '\(record.draft)' rows \(record.hints.count) first \(record.hints.prefix(3).map(\.title)) pick \(record.hintPick)")
+                picture("simple-hints")
+                key(125, "\u{F701}")   // ↓
+                await pause(200)
+                let second = record.hints.count > 1 ? record.hints[1].title : "-"
+                say("hints ↓: pick \(record.hintPick) (\(second))")
+                key(48, "\t")
+                await pause(400)
+                say("hints tab: draft '\(record.draft)' rows \(record.hints.count) field '\(box.string)'")
+                box.selectAll(nil); box.insertText("", replacementRange: box.selectedRange())
+                box.insertText("看 @retry", replacementRange: box.selectedRange())
+                await pause(900)
+                say("hints @: rows \(record.hints.map { "\($0.title) · \($0.detail)" })")
+                key(36, "\r")
+                await pause(400)
+                say("hints return: draft '\(record.draft)' sending \(record.sending) rows \(record.hints.count)")
+                box.selectAll(nil); box.insertText("", replacementRange: box.selectedRange())
+                box.insertText("!ls", replacementRange: box.selectedRange())
+                await pause(400)
+                say("hints !: mark \(record.hintMark?.word ?? "-") rows \(record.hints.count)")
+                key(53, "\u{1b}")
+                await pause(300)
+                say("hints esc: open \(record.hintsOpen) draft '\(record.draft)' status \(model.focused?.session?.info?.status ?? "-")")
+                box.selectAll(nil); box.insertText("", replacementRange: box.selectedRange())
+                await pause(200)
+            } else {
+                say("hints: no reply field found")
+            }
+            // A step that brought a picture back (2026-10-07, user: 这种readpng能不能展开后看到真的png内容呢).
+            if let work = record.items.first(where: { $0.steps.contains { $0.images > 0 } }), let n = work.steps.firstIndex(where: { $0.images > 0 }), let session = record.sessionId {
+                let source = RecordSource(harness: record.agent, session: session, client: model.client)
+                let small = await RecordPictureStore.shared.thumbnail(source, item: work.id, step: n, n: 0)
+                say("step picture: run \(work.id) step \(n) images \(work.steps[n].images) thumbnail \(small.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "none")")
+            } else {
+                say("step picture: no step with one")
+            }
+        }
         // How it asks, as the reply box's menu sets it (2026-10-07, user: Bypass权限那一块要可以调整): the turn ended and
         // its keys one at a time first (as Claude Code's screen takes them), then a mode its round has and one it has not.
         if let record = model.focused?.record, let id = model.focused?.session?.id {

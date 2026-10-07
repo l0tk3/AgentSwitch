@@ -33,7 +33,8 @@ struct TerminalPage: View {
     @State private var pendingTokens: [String] = []
     /// A direct reply that looks like it holds a secret, asked about before it goes.
     @State private var secretCheck: String?
-    @FocusState private var replying: Bool
+    /// The reply box has the keyboard (UIKit's text view under it says so, and is told).
+    @State private var replying = false
     /// Wheel notches sent in this drag (up positive), shown at the screen's right while it goes on.
     @State private var wheeled = 0
     @State private var wheelChipHides: Task<Void, Never>?
@@ -629,12 +630,8 @@ struct TerminalPage: View {
                         .buttonStyle(SquareIconButtonStyle(active: false))
                         .accessibilityLabel("sealed reply")
                 }
-                ReplyField(prompt: sealing ? "Message" : "回复", text: $reply, pending: $pendingTokens)
-                    .font(sealing ? .system(size: 14, design: .monospaced) : .body)
-                    .lineLimit(sealing ? 2...6 : 1...5)
-                    .focused($replying)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+                // The system's Paste takes a picture here (not into a sealed reply, which is text).
+                replyText
                     .padding(.horizontal, look.isClassic && !sealing ? 14 : 12)
                     .padding(.vertical, 9)
                     // A framed line; a round field on its own ground in the classic look.
@@ -672,6 +669,15 @@ struct TerminalPage: View {
         .padding(.leading, sealing ? Theme.Space.l : 0)
         .padding(.trailing, sealing ? Theme.Space.l + 6 : 0)
         .padding(.bottom, sealing ? Theme.Space.m + 6 : Theme.Space.s)
+    }
+
+    private var replyText: ReplyTextView {
+        var field = ReplyTextView(prompt: sealing ? "Message" : "回复", text: $reply, pending: $pendingTokens, focused: $replying, monospaced: sealing,
+                                  lines: sealing ? 2...6 : 1...5, onImages: sealing ? nil : { addFiles(PickedFiles.files(from: $0)) })
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "uiDemoScreen") == "simplepaste" { field.demoBoard = DemoData.pasteBoard }
+        #endif
+        return field
     }
 
     private func pasteImages() {
@@ -805,51 +811,6 @@ struct TerminalPage: View {
             model.terminals.remove(page.id)
             dismiss()
         }
-    }
-}
-
-/// The reply box: a multi-line field that puts placeholders (`[Image #1]`) where the caret is — on iOS 18 and later,
-/// where the field says where its caret is; at the end before that.
-private struct ReplyField: View {
-    let prompt: String
-    @Binding var text: String
-    @Binding var pending: [String]
-
-    var body: some View {
-        if #available(iOS 18.0, *) {
-            CaretField(prompt: prompt, text: $text, pending: $pending)
-        } else {
-            TextField(prompt, text: $text, axis: .vertical)
-                .onChange(of: pending) {
-                    guard !pending.isEmpty else { return }
-                    text = TerminalDraft.insert(pending, into: text, at: nil).text
-                    pending = []
-                }
-        }
-    }
-}
-
-@available(iOS 18.0, *)
-private struct CaretField: View {
-    let prompt: String
-    @Binding var text: String
-    @Binding var pending: [String]
-    @State private var selection: TextSelection?
-
-    var body: some View {
-        TextField(prompt, text: $text, selection: $selection, axis: .vertical)
-            .onChange(of: pending) {
-                guard !pending.isEmpty else { return }
-                var at: Int?
-                if case .selection(let range)? = selection?.indices, range.lowerBound <= text.endIndex {
-                    at = text.distance(from: text.startIndex, to: range.lowerBound)
-                }
-                let result = TerminalDraft.insert(pending, into: text, at: at)
-                text = result.text
-                pending = []
-                let caret = text.index(text.startIndex, offsetBy: min(result.caret, text.count))
-                selection = TextSelection(insertionPoint: caret)
-            }
     }
 }
 

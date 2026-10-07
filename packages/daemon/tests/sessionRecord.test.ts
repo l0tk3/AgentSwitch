@@ -11,7 +11,7 @@ import { mountSessions } from "../src/api/sessions.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { watchRecord } from "../src/api/terminals.js";
 import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js";
-import { DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, readStep, recordFromMessages, shortPath, STEP_TEXT_CHARS, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
+import { DIFF_LINES, OUTPUT_CHARS, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, shortPath, STEP_TEXT_CHARS, TEXT_CHARS, unifiedHunks, type RecordItem } from "../src/sessions/record.js";
 import type { TerminalHost } from "../src/terminals/host.js";
 
 const REPO = "/Users/u/code/site";
@@ -434,6 +434,17 @@ describe("a picture the user sent with a message", () => {
     expect(readImage("claude-code", path, String(Number(first!.id) + 5), 0)).toBeNull();
     expect(readImage("claude-code", path, "abc", 0)).toBeNull();
     expect(readImage("claude-code", path, first!.id, -1)).toBeNull();
+    // A picture a step brought back (2026-10-07, user: 这种readpng能不能展开后看到真的png内容呢): the step says how many, each
+    // is read by the step and its place, and the record carries nothing of where it is kept.
+    const work = record.items.find((it) => it.type === "work")!;
+    if (work.type !== "work") throw new Error("no work");
+    expect(work.steps[0]).toEqual({ kind: "read", text: "shot.png", images: 1 });
+    expect(readStep("claude-code", path, { work: work.id, n: 0, cwd: REPO })).toEqual({ kind: "read", text: "shot.png", images: 1 });
+    expect(readStepImage("claude-code", path, { work: work.id, n: 0, k: 0 })).toEqual({ type: "image/png", data: Buffer.from("a tool's own") });
+    expect(readStepImage("claude-code", path, { work: work.id, n: 0, k: 1 })).toBeNull();
+    expect(readStepImage("claude-code", path, { work: work.id, n: 1, k: 0 })).toBeNull();
+    expect(readStepImage("claude-code", path, { work: first!.id, n: 0, k: 0 })).toBeNull();
+    expect(readStepImage("claude-code", path, { work: work.id, n: 0, k: -1 })).toBeNull();
     // What a browser would run is not a picture here, whatever the record calls it.
     const drawn = claudeFile([c.user(0, [image("image/svg+xml", Buffer.from("<svg onload=alert(1)/>").toString("base64"))])]);
     expect(readImage("claude-code", drawn, readRecord("claude-code", drawn)!.items[0]!.id, 0)).toBeNull();

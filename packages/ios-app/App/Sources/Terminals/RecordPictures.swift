@@ -13,6 +13,9 @@ struct RecordPictureSource: Equatable {
     let session: String
 
     func key(_ item: String, _ n: Int) -> String { "\(harness)/\(session)/\(item)/\(n)" }
+    /// The `n`-th picture of `item`: one sent with a message, or — `step` given — one the step of that place in a run
+    /// of work brought back.
+    func key(_ item: String, step: Int?, _ n: Int) -> String { step.map { "\(harness)/\(session)/\(item)/s\($0)/\(n)" } ?? key(item, n) }
 }
 
 /// The pictures read so far, small: a message's pictures never change (an item's id is its place in a file that only
@@ -28,11 +31,11 @@ final class RecordPictureStore {
     func held(_ key: String) -> UIImage? { small.object(forKey: key as NSString) }
 
     /// The picture small, read once; nil when the Mac has none (an older Mac, an agent read coarsely, a file moved).
-    func thumbnail(_ api: AgentSwitchAPI?, _ source: RecordPictureSource, item: String, n: Int) async -> UIImage? {
-        let key = source.key(item, n)
+    func thumbnail(_ api: AgentSwitchAPI?, _ source: RecordPictureSource, item: String, step: Int? = nil, n: Int) async -> UIImage? {
+        let key = source.key(item, step: step, n)
         if let image = held(key) { return image }
         if missing.contains(key) { return nil }
-        switch await read(api, source, item: item, n: n) {
+        switch await read(api, source, item: item, step: step, n: n) {
         case .picture(let data):
             guard let image = Self.image(data, side: 480) else { missing.insert(key); return nil }
             small.setObject(image, forKey: key as NSString)
@@ -47,8 +50,8 @@ final class RecordPictureStore {
     }
 
     /// The picture whole, in a file for the system's viewer (named by what it is).
-    func file(_ api: AgentSwitchAPI?, _ source: RecordPictureSource, item: String, n: Int) async -> URL? {
-        guard case .picture(let data) = await read(api, source, item: item, n: n) else { return nil }
+    func file(_ api: AgentSwitchAPI?, _ source: RecordPictureSource, item: String, step: Int? = nil, n: Int) async -> URL? {
+        guard case .picture(let data) = await read(api, source, item: item, step: step, n: n) else { return nil }
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("record-pictures", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("Image \(n + 1).\(RecordDisplay.pictureExtension(data))")
@@ -63,7 +66,7 @@ final class RecordPictureStore {
         case unreachable
     }
 
-    private func read(_ api: AgentSwitchAPI?, _ source: RecordPictureSource, item: String, n: Int) async -> Read {
+    private func read(_ api: AgentSwitchAPI?, _ source: RecordPictureSource, item: String, step: Int?, n: Int) async -> Read {
         guard let api else {
             #if DEBUG
             return DemoData.picture(n).map(Read.picture) ?? .none
@@ -72,6 +75,7 @@ final class RecordPictureStore {
             #endif
         }
         do {
+            if let step { return .picture(try await api.sessionStepImage(harness: source.harness, id: source.session, work: item, n: step, k: n)) }
             return .picture(try await api.sessionImage(harness: source.harness, id: source.session, item: item, n: n))
         } catch APIError.http {
             return .none
@@ -88,11 +92,15 @@ final class RecordPictureStore {
     }
 }
 
-/// The pictures sent with a message, small, in a row under it; a tap opens one whole.
+/// The pictures sent with a message — or, `step` given, the ones a step brought back — small, in a row under it; a
+/// tap opens one whole.
 struct RecordPictures: View {
     let source: RecordPictureSource
     let item: String
     let count: Int
+    var step: Int? = nil
+    /// A step's pictures are what was opened to see: larger than a message's.
+    var height: CGFloat = RecordPicture.height
     @Environment(AppModel.self) private var model
     @State private var preview: URL?
     @State private var opening: Int?
@@ -103,9 +111,9 @@ struct RecordPictures: View {
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             ForEach(0..<min(count, Self.shown), id: \.self) { n in
-                RecordPicture(source: source, item: item, n: n, opening: opening == n) { open(n) }
+                RecordPicture(source: source, item: item, step: step, n: n, height: height, opening: opening == n) { open(n) }
             }
-            if count > Self.shown { Text("+\(count - Self.shown)").mono(11).foregroundStyle(.secondary).frame(height: RecordPicture.height) }
+            if count > Self.shown { Text("+\(count - Self.shown)").mono(11).foregroundStyle(.secondary).frame(height: height) }
         }
         .quickLookPreview($preview)
     }
@@ -114,16 +122,18 @@ struct RecordPictures: View {
         guard opening == nil else { return }
         opening = n
         Task {
-            preview = await RecordPictureStore.shared.file(model.api, source, item: item, n: n)
+            preview = await RecordPictureStore.shared.file(model.api, source, item: item, step: step, n: n)
             opening = nil
         }
     }
 }
 
-private struct RecordPicture: View {
+struct RecordPicture: View {
     let source: RecordPictureSource
     let item: String
+    var step: Int? = nil
     let n: Int
+    var height: CGFloat = RecordPicture.height
     let opening: Bool
     let open: () -> Void
     @Environment(AppModel.self) private var model
@@ -132,7 +142,6 @@ private struct RecordPicture: View {
     @State private var failed = false
 
     static let height: CGFloat = 96
-    private static let maxWidth: CGFloat = 168
 
     var body: some View {
         let radius: CGFloat = look.isClassic ? 9 : 0
@@ -140,7 +149,7 @@ private struct RecordPicture: View {
             if let image {
                 Button(action: open) {
                     Image(uiImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
-                        .frame(width: width(of: image), height: Self.height)
+                        .frame(width: width(of: image), height: height)
                         .clipShape(RoundedRectangle(cornerRadius: radius))
                         .overlay { if opening { ZStack { Color.black.opacity(0.35); BrailleSpinner(color: .white) }.clipShape(RoundedRectangle(cornerRadius: radius)) } }
                         .contentShape(Rectangle())
@@ -152,19 +161,19 @@ private struct RecordPicture: View {
                 ZStack {
                     if failed { LookWord("Image").mono(11).foregroundStyle(.tertiary) } else { BrailleSpinner(color: .secondary) }
                 }
-                .frame(width: Self.height, height: Self.height)
+                .frame(width: height, height: height)
             }
         }
         .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(Theme.line, lineWidth: 1))
-        .task(id: source.key(item, n)) {
-            image = await RecordPictureStore.shared.thumbnail(model.api, source, item: item, n: n)
+        .task(id: source.key(item, step: step, n)) {
+            image = await RecordPictureStore.shared.thumbnail(model.api, source, item: item, step: step, n: n)
             failed = image == nil
         }
     }
 
     /// As wide as the picture is at this height, within reason: a tall screenshot is not a sliver, a wide one not a banner.
     private func width(of image: UIImage) -> CGFloat {
-        guard image.size.height > 0 else { return Self.height }
-        return min(max(Self.height * image.size.width / image.size.height, 54), Self.maxWidth)
+        guard image.size.height > 0 else { return height }
+        return min(max(height * image.size.width / image.size.height, 54), height * 1.75)
     }
 }

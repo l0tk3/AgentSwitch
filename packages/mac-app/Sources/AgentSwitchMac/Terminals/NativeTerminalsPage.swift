@@ -207,7 +207,8 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
         // A record in the pane in focus: esc stops the agent while it works, as it does in the terminal (a card's keys
         // and a composition come first).
         if model.focusedSimple, press.keyCode == 53, !press.command, !press.option, !press.shift, !plain, !marking,
-           session?.info?.status == "working", !(session?.cardHasKeys ?? false), !(session?.composing ?? false) {
+           session?.info?.status == "working", !(session?.cardHasKeys ?? false), !(session?.composing ?? false),
+           !(model.focused?.record.hintsOpen ?? false) {   // a list open over the reply box is put away first
             model.focused?.record.interrupt()
             return true
         }

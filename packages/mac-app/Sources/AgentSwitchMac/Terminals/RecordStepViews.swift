@@ -40,8 +40,10 @@ struct RecordStepLine: View {
     @State private var detail: RecordStepDetail?
     @Environment(\.interfaceLook) private var look
 
-    /// A command opens into itself whole; the other steps say all there is on their line.
-    private var opens: Bool { step.kind == .run && source != nil }
+    /// A command opens into itself whole, a step that brought pictures back into them (2026-10-07, user: 这种readpng
+    /// 能不能展开后看到真的png内容呢); the other steps say all there is on their line.
+    private var opens: Bool { (step.kind == .run || step.images > 0) && source != nil }
+    private var isCommand: Bool { step.kind == .run }
     /// Asked again once it has printed (a command still running has not).
     private var key: String { "\(source?.key(work, index) ?? "")/\(step.out?.count ?? -1)" }
 
@@ -54,9 +56,12 @@ struct RecordStepLine: View {
                 head(open: false)
             }
             if shown, opens {
-                RecordCommandBlock(command: detail?.text ?? step.text)
-                if let out = detail?.out ?? step.out, !out.isEmpty { output(out, lines: nil) }
-                if detail?.clipped == true { Text("很长：只有命令的开头和输出的末尾。").font(.system(size: Look.size(11, look))).foregroundStyle(Look.faint) }
+                if isCommand {
+                    RecordCommandBlock(command: detail?.text ?? step.text)
+                    if let out = detail?.out ?? step.out, !out.isEmpty { output(out, lines: nil) }
+                    if detail?.clipped == true { Text("很长：只有命令的开头和输出的末尾。").font(.system(size: Look.size(11, look))).foregroundStyle(Look.faint) }
+                }
+                if step.images > 0, let source { RecordPictures(source: source, item: work, count: step.images, step: index, height: 150).padding(.top, 2) }
             } else {
                 // Under what it is for, the command itself on a line.
                 if step.note != nil, step.kind == .run {
@@ -67,8 +72,8 @@ struct RecordStepLine: View {
             }
         }
         .padding(.leading, 17)
-        .task(id: shown && opens ? key : "") {
-            guard shown, opens, let source else { return }
+        .task(id: shown && opens && isCommand ? key : "") {
+            guard shown, opens, isCommand, let source else { return }
             detail = RecordStepStore.shared.held(key)
             if detail == nil { detail = await RecordStepStore.shared.detail(source, work: work, n: index, key: key) }
         }
@@ -86,7 +91,7 @@ struct RecordStepLine: View {
                 .layoutPriority(1)
             if let note = step.note {
                 Text(note).font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(2)
-            } else if opens {
+            } else if opens, isCommand {
                 Text(step.text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(verbose ? 6 : 2).truncationMode(.tail)
             } else {
                 // A file by the end of its path (its name); a command or a query from its start.

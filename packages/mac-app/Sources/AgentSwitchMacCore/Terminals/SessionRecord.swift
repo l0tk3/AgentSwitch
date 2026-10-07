@@ -23,8 +23,12 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     public let failed: Bool
     public let added: Int?
     public let removed: Int?
+    /// Pictures the step brought back (a picture file read, a screenshot taken): how many.
+    public let images: Int
 
-    public init(kind: Kind, text: String, tool: String? = nil, note: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil) {
+    public init(kind: Kind, text: String, tool: String? = nil, note: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil,
+                images: Int = 0) {
+        self.images = max(0, images)
         self.kind = kind
         self.text = text
         self.tool = tool
@@ -35,10 +39,11 @@ public struct RecordStep: Decodable, Sendable, Hashable {
         self.removed = removed
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed, images }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        images = max(0, (try? c.decodeIfPresent(Int.self, forKey: .images)) ?? 0)
         let raw = (try? c.decode(String.self, forKey: .kind)) ?? ""
         kind = Kind(rawValue: raw) ?? .tool
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
@@ -617,6 +622,11 @@ extension DaemonClient {
     /// A picture the user sent with a message: the `n`-th of the record's item `item`, as the agent kept it.
     public func sessionImage(harness: String, id: String, item: String, n: Int) async throws -> Data {
         try await call("GET", "/sessions/\(Self.segment(harness))/\(Self.segment(id))/images/\(Self.segment(item))/\(n)")
+    }
+
+    /// A picture a step brought back: the `k`-th of the `n`-th step of the run of work `work`.
+    public func sessionStepImage(harness: String, id: String, work: String, n: Int, k: Int) async throws -> Data {
+        try await call("GET", "/sessions/\(Self.segment(harness))/\(Self.segment(id))/steps/\(Self.segment(work))/\(n)/images/\(k)")
     }
 
     /// Another model, or another thinking level, for the Claude Code in a terminal (docs/simple-view-v0.md §5.4).

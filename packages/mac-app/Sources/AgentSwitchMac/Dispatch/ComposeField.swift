@@ -23,6 +23,12 @@ struct ComposeField: NSViewRepresentable {
     /// being composed — an input method's letters are in the field before they are in `text`, and words drawn over it
     /// from outside sat on top of them (2026-10-07, user: 打字的时候这个占位的字体会覆盖我的字体).
     var placeholder = ""
+    /// Put in place of a range once (a completion taken from a list over the field).
+    var replace: ReplaceRequest? = nil
+    /// A list open over the field takes these keys first: true when it took the key.
+    var onKey: ((ComposeKey) -> Bool)? = nil
+    /// What is in the field and where its caret is (UTF-16), as either changes.
+    var onCaret: ((String, Int) -> Void)? = nil
     var onSubmit: () -> Void
     var onFiles: ([URL]) -> Void
     /// The clipboard holds files or an image: attach them instead of pasting text.
@@ -103,6 +109,13 @@ struct ComposeField: NSViewRepresentable {
                 ? (view.string as NSString).substring(with: NSRange(location: range.location - 1, length: 1)).first : nil
             view.insertText(insert.tokens.isEmpty ? insert.text : TerminalDraft.typed(insert.tokens, after: before), replacementRange: range)
         }
+        if let replace, replace.id != coordinator.replaced {
+            coordinator.replaced = replace.id
+            if NSMaxRange(replace.range) <= (view.string as NSString).length {
+                view.window?.makeFirstResponder(view)
+                view.insertText(replace.text, replacementRange: replace.range)
+            }
+        }
         if !active {
             if view.window?.firstResponder === view { view.window?.makeFirstResponder(nil) }
         } else if focusRequests != coordinator.focused {
@@ -117,6 +130,7 @@ struct ComposeField: NSViewRepresentable {
         var parent: ComposeField
         weak var view: ComposeTextView?
         var inserted: UUID?
+        var replaced: UUID?
         /// The focus request last acted on; -1: the field takes the keyboard as it first shows.
         var focused = -1
 
@@ -126,6 +140,17 @@ struct ComposeField: NSViewRepresentable {
             guard let view else { return }
             if parent.text != view.string { parent.text = view.string }
             measure()
+            caretMoved()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) { caretMoved() }
+
+        /// Told a moment later: the text is also set from the model (while the views are being brought up to date),
+        /// and what is told changes what is shown.
+        private func caretMoved() {
+            guard let view, let tell = parent.onCaret else { return }
+            let text = view.string, caret = view.selectedRange().location
+            DispatchQueue.main.async { tell(text, caret) }
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -133,15 +158,22 @@ struct ComposeField: NSViewRepresentable {
             case #selector(NSResponder.insertNewline(_:)):
                 if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
                     textView.insertNewlineIgnoringFieldEditor(nil)
-                } else {
+                } else if parent.onKey?(.enter) != true {
                     parent.onSubmit()
                 }
                 return true
+            case #selector(NSResponder.moveUp(_:)):
+                return parent.onKey?(.up) ?? false
+            case #selector(NSResponder.moveDown(_:)):
+                return parent.onKey?(.down) ?? false
+            case #selector(NSResponder.insertTab(_:)):
+                return parent.onKey?(.tab) ?? false
             case #selector(NSResponder.insertLineBreak(_:)):
                 textView.insertNewlineIgnoringFieldEditor(nil)
                 return true
             case #selector(NSResponder.cancelOperation(_:)), #selector(NSResponder.complete(_:)):
-                return true   // no completion list on Esc
+                _ = parent.onKey?(.escape)
+                return true   // no completion list of the system's on Esc
             default:
                 return false
             }
@@ -174,6 +206,16 @@ struct ComposeField: NSViewRepresentable {
             return !types.contains(.string) && (types.contains(.png) || types.contains(.tiff))
         }
     }
+}
+
+/// A key a list over the field may take before the field does.
+enum ComposeKey { case up, down, tab, enter, escape }
+
+/// Text put in place of a range of the field, once.
+struct ReplaceRequest: Equatable {
+    let id = UUID()
+    let range: NSRange
+    let text: String
 }
 
 /// The input's text view: paste and drop take files, focus is reported.

@@ -406,9 +406,15 @@ private struct RecordDock: View {
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     HairRule(color: Look.line)
                 }
+                // What the box offers for what is being typed: commands after a `/`, files after an `@`.
+                if record.hintsOpen {
+                    ReplyHintList(record: record)
+                    HairRule(color: Look.line)
+                }
                 if !record.draftFiles.isEmpty { RecordDraftStrip(record: record).padding(.horizontal, 10).padding(.top, 9) }
                 ComposeField(text: $record.draft, height: $record.draftHeight, focusRequests: record.focusRequests, insert: record.insert, active: info?.status != "exited",
                              takesFocusAtFirst: focused, label: "Reply", placeholder: stops ? "Reply · esc to Stop" : "Reply",
+                             replace: record.replace, onKey: { record.hintKey($0) }, onCaret: { record.typing($0, caret: $1) },
                              onSubmit: { record.send() }, onFiles: { record.attach(urls: $0) },
                              onPasteAttachments: { record.pasteFromClipboard() }, onFocus: { on in if on { model.focus(pane: state.id) } })
                     .frame(height: min(max(record.draftHeight, ComposeField.minHeight), ComposeField.maxHeight))

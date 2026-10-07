@@ -129,7 +129,10 @@ private struct StepRow: View {
     @State private var detail: RecordStepDetail?
 
     private var isFile: Bool { [.read, .edit, .write, .list].contains(step.kind) }
-    private var opens: Bool { step.kind == .run && source != nil }
+    /// A command opens into itself whole, a step that brought pictures back into them (2026-10-07, user: 这种readpng
+    /// 能不能展开后看到真的png内容呢).
+    private var opens: Bool { (step.kind == .run || step.images > 0) && source != nil }
+    private var isCommand: Bool { step.kind == .run }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -139,9 +142,12 @@ private struct StepRow: View {
                 head
             }
             if whole, opens {
-                CommandBlock(command: detail?.text ?? step.text)
-                if let out = detail?.out ?? step.out, !out.isEmpty { output(out, lines: nil) }
-                if detail?.clipped == true { Text("很长：只有命令的开头和输出的末尾。").font(.caption2).foregroundStyle(.tertiary) }
+                if isCommand {
+                    CommandBlock(command: detail?.text ?? step.text)
+                    if let out = detail?.out ?? step.out, !out.isEmpty { output(out, lines: nil) }
+                    if detail?.clipped == true { Text("很长：只有命令的开头和输出的末尾。").font(.caption2).foregroundStyle(.tertiary) }
+                }
+                if step.images > 0, let source { RecordPictures(source: source, item: work, count: step.images, step: index, height: 140).padding(.top, 2) }
             } else {
                 // Under what it is for, the command itself on a line.
                 if step.note != nil, step.kind == .run {
@@ -153,8 +159,8 @@ private struct StepRow: View {
         }
         .padding(.leading, 18)
         // Asked again once it has printed (a command still running has not).
-        .task(id: whole && opens ? "\(work)/\(index)/\(step.out?.count ?? -1)" : "") {
-            guard whole, opens, let source else { return }
+        .task(id: whole && opens && isCommand ? "\(work)/\(index)/\(step.out?.count ?? -1)" : "") {
+            guard whole, opens, isCommand, let source else { return }
             guard let api = model.api else {
                 #if DEBUG
                 detail = DemoData.stepDetail
@@ -164,7 +170,7 @@ private struct StepRow: View {
             if let read = try? await api.sessionStep(harness: source.harness, id: source.session, work: work, n: index) { detail = read }
         }
         #if DEBUG
-        .onAppear { if opens, step.note != nil, UserDefaults.standard.bool(forKey: "uiDemoOpenTools") { whole = true } }
+        .onAppear { if opens, step.note != nil || step.images > 0, UserDefaults.standard.bool(forKey: "uiDemoOpenTools") { whole = true } }
         #endif
     }
 
@@ -179,7 +185,7 @@ private struct StepRow: View {
                 .layoutPriority(1)
             if let note = step.note {
                 Text(note).font(.footnote).foregroundStyle(Theme.ink.opacity(0.85)).lineLimit(2)
-            } else if opens {
+            } else if opens, isCommand {
                 Text(MessageDisplay.readable(step.text)).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(verbose ? 6 : 2)
             } else {
                 // A file by the end of its path (its name); a command or a query from its start.

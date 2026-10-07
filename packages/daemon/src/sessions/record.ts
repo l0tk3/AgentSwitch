@@ -26,6 +26,8 @@ export type RecordStep = {
   /** Lines an edit added and took away. */
   readonly added?: number;
   readonly removed?: number;
+  /** Pictures the step brought back (a picture file read, a screenshot taken): how many, each read by its place. */
+  readonly images?: number;
 };
 
 export type RecordItem =
@@ -107,7 +109,11 @@ function readLines(path: string, start: number, end: number): { lines: Line[]; f
 type Patch = { path: string; added: number; removed: number; hunks: DiffHunk[] };
 type Step = { kind: StepKind; text: string; tool?: string; note?: string; out?: string; failed?: boolean; added?: number; removed?: number; patches?: Patch[];
   /** A command and what it printed, whole: for the one step a screen opens (`readStep`), never in the record. */
-  cmd?: string; printed?: string };
+  cmd?: string; printed?: string;
+  images?: number;
+  /** Where the step's pictures are, never in the record: the line its result is on and the result's id (Claude Code
+   *  keeps them there), or the file it looked at (Codex). */
+  shots?: { at: number; id: string } | { file: string } };
 type Built =
   | { type: "user"; at: number; ts: number; text: string; images: number; queued?: boolean }
   | { type: "answer"; at: number; ts: number; text: string; thinking?: boolean }
@@ -312,7 +318,12 @@ function claudeBuild(lines: readonly Line[]): Builder {
       for (const part of ps) {
         if (part.type !== "tool_result") continue;
         const step = waiting.get(str(part.tool_use_id));
-        if (step) { claudeResult(step, part, line.toolUseResult, cwd); waiting.delete(str(part.tool_use_id)); }
+        if (step) {
+          claudeResult(step, part, line.toolUseResult, cwd);
+          const shots = Array.isArray(part.content) ? part.content.filter((p) => obj(p).type === "image").length : 0;
+          if (shots) { step.images = shots; step.shots = { at, id: str(part.tool_use_id) }; }
+          waiting.delete(str(part.tool_use_id));
+        }
         b.touch(ts);
       }
       if (line.isMeta || line.isCompactSummary || line.isVisibleInTranscriptOnly) continue;
@@ -423,7 +434,12 @@ function codexItem(b: Builder, at: number, ts: number, payload: Json, cwd: strin
       return;
     }
     case "SubAgentActivity": if (item.kind === "started") b.step(at, began, { kind: "agent", text: firstLine(str(item.agent_path).split("/").pop() ?? "") }, ended); return;
-    case "ImageView": b.step(at, began, { kind: "read", text: shortPath(str(item.path), cwd) }, ended); return;
+    case "ImageView": {
+      const file = str(item.path);
+      const shown = file.startsWith("/") && IMAGE_TYPES[file.split(".").pop()?.toLowerCase() ?? ""];
+      b.step(at, began, { kind: "read", text: shortPath(file, cwd), ...(shown ? { images: 1, shots: { file } } : {}) }, ended);
+      return;
+    }
     case "ContextCompaction": b.note(at, ended, "Compacted"); return;
     default: return;
   }
@@ -487,7 +503,7 @@ function shown(it: Built, id: string): RecordItem {
     case "note": return { type: "note", id, ts: it.ts, text: it.text };
     case "work": return {
       type: "work", id, ts: it.ts, secs: Math.max(0, Math.round((it.end - it.ts) / 1000)),
-      steps: it.steps.map(({ patches: _patches, cmd: _cmd, printed: _printed, ...step }) => step),
+      steps: it.steps.map(({ patches: _patches, cmd: _cmd, printed: _printed, shots: _shots, ...step }) => step),
     };
   }
 }
@@ -576,20 +592,14 @@ export function readChanges(harness: RecordHarness, path: string, o: { work?: st
 /** A command as it was written and what it printed: this much of each. */
 export const STEP_TEXT_CHARS = 20000;
 export type StepDetail = { readonly kind: StepKind; readonly text: string; readonly note?: string; readonly out?: string; readonly failed?: boolean;
+  readonly images?: number;
   /** The command, or what it printed, is longer than is sent: the command's start, the output's end. */
   readonly clipped?: boolean };
 
 /** The `n`-th step of the run of work `work`, with its command whole (its lines kept) and all it printed — the record
  *  itself carries one line and the end of the output. Null: no such run, no such step. */
 export function readStep(harness: RecordHarness, path: string, o: { work: string; n: number; cwd?: string }): StepDetail | null {
-  const { size } = fileRev(path);
-  const at = Number(o.work.split(".")[0]);
-  if (!Number.isInteger(at) || at < 0 || at >= size || !Number.isInteger(o.n) || o.n < 0) return null;
-  const built = build(harness, readLines(path, at, Math.min(size, at + WINDOWS[1]!)).lines.filter((l) => l.at >= at), o.cwd ?? "");
-  const all = built?.items ?? [];
-  const hit = all[ids(all).indexOf(o.work)];
-  if (!hit || hit.type !== "work" || hit.at !== at) return null;
-  const step = hit.steps[o.n];
+  const step = stepOf(harness, path, o);
   if (!step) return null;
   const text = (step.cmd ?? step.text).replace(/\r\n?/g, "\n").trim();
   const out = (step.printed ?? step.out ?? "").replace(/\r\n?/g, "\n").replace(/\s+$/, "");
@@ -597,8 +607,19 @@ export function readStep(harness: RecordHarness, path: string, o: { work: string
   return {
     kind: step.kind, text: text.slice(0, STEP_TEXT_CHARS), ...(step.note ? { note: step.note } : {}),
     ...(out ? { out: out.length > STEP_TEXT_CHARS ? out.slice(out.length - STEP_TEXT_CHARS) : out } : {}),
-    ...(step.failed ? { failed: true } : {}), ...(long ? { clipped: true } : {}),
+    ...(step.failed ? { failed: true } : {}), ...(step.images ? { images: step.images } : {}), ...(long ? { clipped: true } : {}),
   };
+}
+
+function stepOf(harness: RecordHarness, path: string, o: { work: string; n: number; cwd?: string }): Step | null {
+  const { size } = fileRev(path);
+  const at = Number(o.work.split(".")[0]);
+  if (!Number.isInteger(at) || at < 0 || at >= size || !Number.isInteger(o.n) || o.n < 0) return null;
+  const built = build(harness, readLines(path, at, Math.min(size, at + WINDOWS[1]!)).lines.filter((l) => l.at >= at), o.cwd ?? "");
+  const all = built?.items ?? [];
+  const hit = all[ids(all).indexOf(o.work)];
+  if (!hit || hit.type !== "work" || hit.at !== at) return null;
+  return hit.steps[o.n] ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -634,7 +655,26 @@ export function readImage(harness: RecordHarness, path: string, item: string, n:
   const url = str(picture.image_url) || str(picture.url);
   const inline = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(url);
   if (inline) return decoded(inline[1]!, inline[2]!);
-  const file = str(picture.path);
+  return pictureFile(str(picture.path));
+}
+
+/** The `k`-th picture a step brought back (2026-10-07, user: 这种readpng能不能展开后看到真的png内容呢): of the `n`-th step of
+ *  the run of work `work`. Claude Code keeps it in the line of the tool's result; for Codex the file it looked at is
+ *  read, if it is still there and a picture by its name. Null: no such step, no such picture, or one too large. */
+export function readStepImage(harness: RecordHarness, path: string, o: { work: string; n: number; k: number; cwd?: string }): RecordImage | null {
+  if (!Number.isInteger(o.k) || o.k < 0) return null;
+  const shots = stepOf(harness, path, o)?.shots;
+  if (!shots) return null;
+  if ("file" in shots) return o.k === 0 ? pictureFile(shots.file) : null;
+  const line = readLines(path, shots.at, Math.min(fileRev(path).size, shots.at + IMAGE_LINE_BYTES)).lines.find((l) => l.at === shots.at)?.value;
+  const result = line && parts(line).find((p) => p.type === "tool_result" && str(p.tool_use_id) === shots.id);
+  const picture = (Array.isArray(result?.content) ? result.content.map(obj) : []).filter((p) => p.type === "image")[o.k];
+  const source = obj(picture?.source);
+  return source.type === "base64" && str(source.data) ? decoded(str(source.media_type), str(source.data)) : null;
+}
+
+/** A picture file on this Mac, by its name a picture and no larger than is shown. */
+function pictureFile(file: string): RecordImage | null {
   const type = IMAGE_TYPES[file.split(".").pop()?.toLowerCase() ?? ""];
   if (!file.startsWith("/") || !type) return null;
   try {
