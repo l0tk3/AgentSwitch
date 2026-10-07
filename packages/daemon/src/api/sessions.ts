@@ -4,6 +4,7 @@
 import type { Hono } from "hono";
 import type { SessionMonitor } from "../sessions/monitor.js";
 import type { SessionHarness } from "../sessions/types.js";
+import { MAX_RECORD_LIMIT, RECORD_LIMIT } from "../sessions/record.js";
 import { SessionSearch } from "../sessions/search.js";
 import { join } from "node:path";
 import { remoteCaller } from "../core/caller.js";
@@ -40,6 +41,25 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
     if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
     const found = monitor.read(harness as SessionHarness, c.req.param("id"), limitParam(c, MESSAGE_LIMIT, MAX_MESSAGES));
     return found ? c.json(found) : c.json({ error: "no such session" }, 404);
+  });
+  // The simple view's record (docs/simple-view-v0.md §4): what was said and each run of work as its steps, the last
+  // `limit` items before `before` (a page's `cursor`). Asked again with the version it has, an unchanged one is a 304.
+  app.get("/sessions/:harness/:id/record", (c) => {
+    const harness = c.req.param("harness");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    const before = c.req.query("before");
+    if (before !== undefined && !/^\d{1,15}$/.test(before)) return c.json({ error: "before: a page's cursor" }, 400);
+    const found = monitor.record(harness as SessionHarness, c.req.param("id"), { limit: limitParam(c, RECORD_LIMIT, MAX_RECORD_LIMIT), ...(before !== undefined ? { before: Number(before) } : {}) });
+    return found ? versionedJson(c, { session: found.session, ...found.record }) : c.json({ error: "no such session" }, 404);
+  });
+  // What it changed, file by file: in one run of work (`work`, the item's id), else in the last turn.
+  app.get("/sessions/:harness/:id/changes", (c) => {
+    const harness = c.req.param("harness");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    const work = c.req.query("work");
+    if (work !== undefined && !/^\d{1,15}(\.\d{1,4})?$/.test(work)) return c.json({ error: "work: an item's id" }, 400);
+    const files = monitor.changes(harness as SessionHarness, c.req.param("id"), work);
+    return files ? c.json({ files }) : c.json({ error: "no changes recorded" }, 404);
   });
   // Deleting a session's record (docs/terminal-v0.md §5): not one in use (just active, open in a terminal here, or held
   // by another program); always audited, terminals on or off.

@@ -496,11 +496,11 @@ describe("terminals over HTTP", () => {
   }
 
   /** The SSE stream read into `events` until `stop()`. */
-  function follow(base: string, token: string, id: string) {
+  function follow(base: string, token: string, id: string, query = "") {
     const events: { event: string; data: any }[] = [];
     const ctl = new AbortController();
     void (async () => {
-      const res = await fetch(`${base}/terminals/${id}/stream`, { headers: { authorization: `Bearer ${token}` }, signal: ctl.signal });
+      const res = await fetch(`${base}/terminals/${id}/stream${query}`, { headers: { authorization: `Bearer ${token}` }, signal: ctl.signal });
       const reader = res.body!.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -521,6 +521,28 @@ describe("terminals over HTTP", () => {
     closers.push(() => ctl.abort());
     return events;
   }
+
+  it("a screen that shows the record, not the terminal, gets no screen content and is told what the agent is doing (simple-view-v0 §4)", async () => {
+    const { cwd, base, token, call } = await start();
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
+    const terminal = follow(base, token, id);
+    const record = follow(base, token, id, "?view=record");
+    await until(() => terminal.some((e) => e.event === "snapshot"));
+    // At once: what it is doing now (nothing yet), its status, the requests waiting.
+    await until(() => record.some((e) => e.event === "activity") && record.some((e) => e.event === "permissions"));
+    expect(record.find((e) => e.event === "activity")!.data).toMatchObject({ activity: null, subagents: [] });
+
+    expect((await call("POST", `/terminals/${id}/input`, { text: "tool" })).status).toBe(200);
+    await until(() => record.some((e) => e.event === "activity" && e.data.activity?.tool === "Bash"));
+    expect(record.findLast((e) => e.event === "activity")!.data.activity).toEqual({ tool: "Bash", target: "npm test" });
+    expect(record.some((e) => e.event === "status" && e.data.status === "working")).toBe(true);
+    await until(() => terminal.some((e) => e.event === "output" && String(e.data.data).includes("tool used")));
+    // Neither sees the other's: no screen for the record, no `activity` for a terminal's screen (older apps do not know it).
+    expect(record.some((e) => e.event === "snapshot" || e.event === "output")).toBe(false);
+    expect(terminal.some((e) => e.event === "activity" || e.event === "record")).toBe(false);
+    // It draws no terminal, so it never owns the size.
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.sizedBy ?? null).toBeNull();
+  });
 
   it("start, stream, reply, a permission request through the hook answered from the API, audit, delete", async () => {
     const { home, cwd, base, token, call } = await start();

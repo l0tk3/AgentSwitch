@@ -61,6 +61,8 @@ export type ApiDeps = {
   readonly models?: { readonly path: string; readonly base: Targets };
   /** Tests: the SSE heartbeat period (default SSE_HEARTBEAT_MS). */
   readonly sseHeartbeatMs?: number;
+  /** How often a record's stream looks at the session's file (tests: sooner). */
+  readonly recordWatchMs?: number;
   /** The router as the user's assistant (assistant-v0 §1.1). */
   readonly assistant?: Assistant;
 };

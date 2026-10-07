@@ -46,6 +46,8 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["DELETE", "/history"],
   ["GET", "/sessions"],
   ["GET", "/sessions/:harness/:id"],
+  ["GET", "/sessions/:harness/:id/record"],
+  ["GET", "/sessions/:harness/:id/changes"],
   ["GET", "/sessions/search"],
   ["DELETE", "/sessions/:harness/:id"],
   ["GET", "/terminals"],

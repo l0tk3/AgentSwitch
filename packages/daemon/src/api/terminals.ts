@@ -26,6 +26,8 @@ import { modelName } from "../util/modelName.js";
 import { checkTerminalCwd } from "./cwdPolicy.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 import { whereNow } from "../sessions/moved.js";
+import type { SessionMonitor } from "../sessions/monitor.js";
+import { fileRev } from "../sessions/record.js";
 
 export type Terminals = {
   readonly host: TerminalHost;
@@ -100,6 +102,35 @@ function expandCwd(cwd: string): string {
 }
 
 /** Consecutive output events as one (a busy agent writes in many small pieces). */
+/** How often a record's stream looks at the session's file, and how often it looks for the file while there is none
+ *  yet (a terminal just started has no session until the agent says which). */
+const RECORD_WATCH_MS = 300;
+const RECORD_FIND_MS = 2000;
+
+/** Calls `changed` with the version of the terminal's session file, now and each time the file changes. OpenCode keeps
+ *  its sessions in one database, which says nothing of one session: its screens ask again on their own. Returns the
+ *  stop. */
+export function watchRecord(host: TerminalHost, sessions: SessionMonitor, id: string, changed: (rev: string) => void, everyMs = RECORD_WATCH_MS): () => void {
+  let path: string | null = null, of: string | null = null, last: string | null = null, looked = 0;
+  const look = () => {
+    const t = host.get(id);
+    const session = t?.agentSessionId;
+    if (!t || !session || t.harness === "opencode") return;
+    if (of !== session) { of = session; path = null; last = null; looked = 0; }
+    if (!path) {
+      if (Date.now() - looked < RECORD_FIND_MS) return;
+      looked = Date.now();
+      path = sessions.source(t.harness, session) ?? (sessions.find(t.harness, session), sessions.source(t.harness, session));
+      if (!path) return;
+    }
+    try { const { rev } = fileRev(path); if (rev !== last) { last = rev; changed(rev); } } catch { path = null; }
+  };
+  look();
+  const timer = setInterval(look, everyMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 function coalesce(events: TerminalEvent[]): TerminalEvent[] {
   const out: TerminalEvent[] = [];
   for (const ev of events) {
@@ -238,17 +269,24 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     // The drawing screen's id (terminal-v0 §1 "尺寸有主"); the page beside a native screen follows without one.
     const screen = c.req.query("screen");
     const by = screen && SCREEN_ID.test(screen) ? screen : null;
+    // `view=record`: a screen that shows the session's record instead of the terminal (docs/simple-view-v0.md §4). It
+    // gets no screen content, and is told what the agent is doing now and when its record changed. It draws no
+    // terminal, so it owns no size.
+    const record = c.req.query("view") === "record";
     return streamSSE(c, async (stream) => {
       const queue: TerminalEvent[] = [];
       let wake: (() => void) | null = null;
       let open = true;
-      const unsubscribe = host.subscribe(id, after, (ev) => {
+      const unsubscribe = host.subscribe(id, record ? null : after, (ev) => {
+        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity") return;
         queue.push(ev);
         if (queue.length > MAX_QUEUED) open = false;
         wake?.();
       }, by);
       stream.onAbort(() => { open = false; wake?.(); });
       const heartbeat = setInterval(() => { void stream.write(": ping\n\n").catch(() => undefined); }, deps.sseHeartbeatMs ?? SSE_HEARTBEAT_MS);
+      const watch = record && deps.sessions ? watchRecord(host, deps.sessions, id, (rev) => { queue.push({ type: "record", rev }); wake?.(); }, deps.recordWatchMs ?? RECORD_WATCH_MS) : null;
+      if (record) { const now = host.get(id); if (now) queue.push({ type: "activity", activity: now.activity, subagents: now.subagents }); }
       try {
         while (open) {
           for (const ev of coalesce(queue.splice(0))) {
@@ -261,6 +299,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         }
       } finally {
         clearInterval(heartbeat);
+        watch?.();
         unsubscribe();
       }
     });

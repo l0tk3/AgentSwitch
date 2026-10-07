@@ -11,6 +11,7 @@ import { claudeFacts, claudeMessages } from "./claude.js";
 import { codexFacts, codexMessages } from "./codex.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
+import { MAX_RECORD_LIMIT, readChanges, readRecord, recordFromMessages, type FileDiff, type SessionRecord } from "./record.js";
 import { ACTIVE_MS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
@@ -91,6 +92,29 @@ export class SessionMonitor {
     const path = this.files.get(`${harness}:${id}`);
     if (!path) return null;
     return { session, messages: harness === "claude-code" ? claudeMessages(path, limit) : harness === "pi" ? piMessages(path, limit) : codexMessages(path, limit) };
+  }
+
+  /** A session's record for the simple view (docs/simple-view-v0.md §2): Claude Code's and Codex's from their files,
+   *  step by step; the others' (and an older Codex rollout's) from the coarse messages, one line per tool. */
+  record(harness: SessionHarness, id: string, o: { limit?: number; before?: number } = {}): { session: SessionSummary; record: SessionRecord } | null {
+    const session = this.find(harness, id);
+    if (!session) return null;
+    const path = this.files.get(`${harness}:${id}`);
+    if (path && (harness === "claude-code" || harness === "codex")) {
+      const record = readRecord(harness, path, { ...o, cwd: session.cwd });
+      if (record) return { session, record };
+    }
+    const coarse = this.read(harness, id, MAX_RECORD_LIMIT);
+    return coarse && { session, record: recordFromMessages(coarse.messages, `u${session.updatedAt.toString(36)}`) };
+  }
+
+  /** What a session changed, file by file: in one run of work, else in its last turn. Null when it is not listed, the
+   *  run is not there, or the agent's record carries no changes (OpenCode, pi). */
+  changes(harness: SessionHarness, id: string, work?: string): FileDiff[] | null {
+    const session = this.find(harness, id);
+    const path = this.files.get(`${harness}:${id}`);
+    if (!session || !path || (harness !== "claude-code" && harness !== "codex")) return null;
+    return readChanges(harness, path, { ...(work !== undefined ? { work } : {}), cwd: session.cwd });
   }
 
   private scan(refs: FileRef[], harness: "claude-code" | "codex" | "pi", now: number): (SessionSummary | null)[] {

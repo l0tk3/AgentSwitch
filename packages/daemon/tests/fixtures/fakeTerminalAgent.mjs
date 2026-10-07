@@ -39,6 +39,13 @@ async function handle(line) {
     process.stdout.write(`answer: ${out || "(none)"}\r\n`);
     return;
   }
+  // A turn that uses a tool: what the screens that show the record are told it is doing.
+  if (line === "tool") {
+    await hook({ hook_event_name: "UserPromptSubmit" });
+    await hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test" } });
+    process.stdout.write("tool used\r\n");
+    return;
+  }
   // Busy a while, as an agent at work: a spinner frame every 150 ms for 1.2 s.
   if (line === "work") {
     for (let i = 0; i < 8; i++) { process.stdout.write(`\rworking ${"|/-\\"[i % 4]}`); await new Promise((r) => setTimeout(r, 150)); }

@@ -109,7 +109,12 @@ export type TerminalEvent =
   | { readonly type: "permissions"; readonly requests: readonly PermissionAsk[] }
   | { readonly type: "exit"; readonly code: number | null }
   /** The terminal was deleted: screens close. */
-  | { readonly type: "removed" };
+  | { readonly type: "removed" }
+  /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
+   *  (docs/simple-view-v0.md §4). */
+  | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
+  /** Its session's record changed (the stream's own, not the host's: it watches the agent's file). */
+  | { readonly type: "record"; readonly rev: string };
 
 /** What a launcher gets: the new terminal's id and hook token go into the agent's env. */
 export type LaunchRequest = {
@@ -660,7 +665,7 @@ export class TerminalHost {
       case "UserPromptSubmit": this.settleAll(s, "working"); this.setStatus(s, "working"); return null;
       case "Stop": this.settleAll(s, "idle"); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); return null;
       case "SubagentStart": if (agentId) this.subagentStarted(s, agentId, String(p.agent_type ?? "")); return null;
-      case "SubagentStop": if (agentId) s.subagents.delete(agentId); return null;
+      case "SubagentStop": if (agentId && s.subagents.delete(agentId)) this.doing(s); return null;
       // Claude Code: the turn ended on an API error (a rate limit, overload, authentication…), which Stop does not say.
       case "StopFailure": {
         const error = [p.error, p.error_details].filter((x) => typeof x === "string" && x.trim()).join(": ");
@@ -932,6 +937,12 @@ export class TerminalHost {
     s.statusSince = this.o.now();
     if (status === "idle" || status === "exited") s.activity = null;
     s.emit({ type: "status", status });
+    this.doing(s);
+  }
+
+  /** Tells the screens what it is doing now. */
+  private doing(s: Session): void {
+    s.emit({ type: "activity", activity: s.activity, subagents: [...s.subagents.values()] });
   }
 
   /** The tool the agent reports it is about to use, and what on (a command, a file, a page). */
@@ -939,6 +950,7 @@ export class TerminalHost {
     if (!tool) return;
     const target = permissionTarget(tool, input).replace(/\s+/g, " ").trim();
     s.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target };
+    this.doing(s);
   }
 
   /** A sub-agent at work: named by what the Agent tool call that started it was sent to do (the oldest waiting one of
@@ -949,6 +961,7 @@ export class TerminalHost {
     const i = Math.max(s.launches.findIndex((l) => l.type === type), s.launches.length ? 0 : -1);
     const [launch] = i >= 0 ? s.launches.splice(i, 1) : [];
     s.subagents.set(id, { id, type: type || launch?.type || "agent", name: launch?.name || type || "agent", activity: null, since: now });
+    this.doing(s);
   }
 
   /** A tool call: a sub-agent's own (what it is doing now; one not seen starting is taken in by its kind), or the
@@ -958,6 +971,7 @@ export class TerminalHost {
       if (!s.subagents.has(agentId)) this.subagentStarted(s, agentId, agentType);
       const target = permissionTarget(tool, input).replace(/\s+/g, " ").trim();
       s.subagents.get(agentId)!.activity = { tool, target: target.length > MAX_SUMMARY ? `${target.slice(0, MAX_SUMMARY - 1)}…` : target };
+      this.doing(s);
       return;
     }
     if (tool !== "Agent" && tool !== "Task") return;
