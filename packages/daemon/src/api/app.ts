@@ -2,7 +2,7 @@
 
 import { Hono } from "hono";
 import { mountAssistant } from "./assistant.js";
-import { mountBrowser } from "./browser.js";
+import { mountBrowser, mountProfileBrowsers } from "./browser.js";
 import { mountBrowserEngine } from "./browserEngine.js";
 import { mountBrowserIdentity } from "./browserIdentity.js";
 import { mountUpdate } from "./update.js";
@@ -38,6 +38,7 @@ export function createApp(deps: ApiDeps): Hono {
   mountProfiles(app, deps);
   mountClash(app, deps);
   mountBrowser(app, deps);
+  mountProfileBrowsers(app, deps);
   mountBrowserEngine(app, deps);
   mountBrowserIdentity(app, deps);
   mountLive(app, deps);

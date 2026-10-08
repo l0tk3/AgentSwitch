@@ -46,7 +46,8 @@ export function bridgeArgs(argv: readonly string[], env: NodeJS.ProcessEnv = pro
   if (file) {
     try { token = readFileSync(file, "utf8").trim(); } catch { throw new Error(`cannot read the token file ${file}`); }
   }
-  if (!/^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(url)) throw new Error("--url must be the daemon's local address (http://127.0.0.1:<port>)");
+  // With `/profile-browser/<key>` after it: a profile's own browser rather than the shared one (docs/profiles-v0.md §5.1).
+  if (!/^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+(\/profile-browser\/[a-z0-9.-]+)?$/.test(url)) throw new Error("--url must be the daemon's local address (http://127.0.0.1:<port>)");
   if (!/^[\w-]{1,64}$/.test(session)) throw new Error("--session is required");
   if (!token) throw new Error("no token (--token-file or AGENTSWITCH_BROWSER_TOKEN)");
   return { url, session, token };

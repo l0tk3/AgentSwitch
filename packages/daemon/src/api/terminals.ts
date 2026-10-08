@@ -17,6 +17,7 @@ import type { TerminalStyle } from "../terminals/style.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
+import { BrowserError, YOU } from "../browser/types.js";
 import { DEFAULT_PROFILE } from "../profiles/store.js";
 import { exitFor } from "./profiles.js";
 import { folderFiles, matchFiles } from "../terminals/files.js";
@@ -214,6 +215,29 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     } catch (err) { return failed(c, err); }
   });
 
+  // A web address the agent in a terminal asked the system to open (launch.ts `openInProfileBrowser`): opened in its
+  // profile's own browser. Let through the local token check like the hook, and proven the same way. Refused when the
+  // terminal has no browser of its own, or that browser shows nothing on this Mac (nobody could sign in there).
+  app.post("/terminals/open", async (c) => {
+    const id = c.req.header("x-agentswitch-terminal") ?? "";
+    const token = /^Bearer\s+(\S+)\s*$/.exec(c.req.header("authorization") ?? "")?.[1];
+    const url = String((await c.req.parseBody().catch(() => ({})) as Record<string, unknown>).url ?? "");
+    if (!token || !/^https?:\/\/\S{1,4000}$/.test(url)) return c.json({ error: "bad open call" }, 400);
+    try {
+      const key = host.browserOf(id, token);
+      const browser = key ? deps.profileBrowsers?.of(key) ?? null : null;
+      if (!browser) return c.json({ error: "this terminal has no browser of its own" }, 409);
+      if (!browser.visible()) return c.json({ error: "this terminal's browser shows no window on this Mac" }, 409);
+      const tab = await browser.host.open(YOU, url);
+      browser.audit.record({ tab: tab.id, action: "open", via: `terminal ${id}`, detail: { url: new URL(url).origin } });
+      void browser.host.show(tab.id).catch(() => undefined);
+      return c.json({ tab: tab.id });
+    } catch (err) {
+      if (err instanceof BrowserError) return c.json({ error: err.message }, 502);
+      return failed(c, err);
+    }
+  });
+
   // The agents this Mac can start, and each one's models for the new terminal's model menu: what the agent offers
   // today, in its order and names, the superseded ones marked `older` (else the catalog, targets.yaml after discovery);
   // none chosen = the agent's own default, named in `defaults` when the agent says what it is.
@@ -303,7 +327,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const wanted = body.data.profile ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
     const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     if (wanted !== DEFAULT_PROFILE && !profileHome) return c.json({ error: "no such profile" }, 400);
-    let profile: { id: string; name: string; home: string; proxy?: string; exit?: { ip: string; place: string | null } } | null =
+    let profile: { id: string; name: string; home: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string } | null =
       profileHome ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, home: profileHome } : null;
     // A profile with a proxy of its own: before anything is started under it, the proxy is asked where it lets
     // traffic out. One that does not answer starts nothing — the agent is not let out another way (§4).

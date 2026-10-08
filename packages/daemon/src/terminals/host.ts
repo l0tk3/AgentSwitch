@@ -178,6 +178,9 @@ export type LaunchRequest = {
   /** The proxy what the agent sends is to leave through: a forwarder of this service on this Mac (docs/profiles-v0.md
    *  §4), as an address with its name and password; absent: this Mac's own way out. */
   readonly proxy?: string;
+  /** The profile's own browser, by its key, for the agent's browser tool and for the pages it asks the system to
+   *  open (docs/profiles-v0.md §5.1); absent: the shared browser, and the system's own for those pages. */
+  readonly browserKey?: string;
   readonly hookToken: string;
 };
 export type LaunchPlan = { readonly file: string; readonly args: readonly string[]; readonly env: Record<string, string>; readonly hooks: boolean; readonly companion?: Companion };
@@ -731,6 +734,8 @@ class Session {
   compactEndedAt = 0;
   compactTimer: NodeJS.Timeout | null = null;
   profile: { id: string; name: string; exit?: { ip: string; place: string | null } } | null = null;
+  /** Its profile's own browser, by its key (docs/profiles-v0.md §5.1); null: the shared one. */
+  browserKey: string | null = null;
   /** What its screen said to commands sent from a screen (`commanded`). */
   notices: ScreenNotice[] = [];
   /** The program it runs (the launcher's), for what is learned of that program (`learnCommands`). */
@@ -823,13 +828,13 @@ export class TerminalHost {
 
   /** Starts an agent. The terminal is listed from the moment it is made (a second resume of the same session finds it),
    *  while a companion starts; the program follows. */
-  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number; profile?: { id: string; name: string; home: string; proxy?: string; exit?: { ip: string; place: string | null } } }): Promise<TerminalInfo> {
+  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number; profile?: { id: string; name: string; home: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string } }): Promise<TerminalInfo> {
     if (!this.helperChecked) { ensureSpawnHelper(); this.helperChecked = true; }
     const id = randomUUID().slice(0, 8);
     const hookToken = randomBytes(24).toString("base64url");
     let plan: LaunchPlan;
     try {
-      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.profile ? { configHome: req.profile.home, ...(req.profile.proxy ? { proxy: req.profile.proxy } : {}) } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
+      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.profile ? { configHome: req.profile.home, ...(req.profile.proxy ? { proxy: req.profile.proxy } : {}), ...(req.profile.browserKey ? { browserKey: req.profile.browserKey } : {}) } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
     } catch (err) {
       this.ended(id, true);
       throw new TerminalError("unavailable", (err as Error).message);
@@ -837,6 +842,7 @@ export class TerminalHost {
     const s = new Session(id, req.harness, req.cwd, req.model ?? null, req.mode ?? "manual", hookToken, this.o.now(), req.cols ?? 120, req.rows ?? 36, this.o.scrollback);
     s.hooks = plan.hooks;
     s.profile = req.profile ? { id: req.profile.id, name: req.profile.name, ...(req.profile.exit ? { exit: req.profile.exit } : {}) } : null;
+    s.browserKey = req.profile?.browserKey ?? null;
     s.effort = req.effort ?? null;
     s.resumedFrom = req.resume ?? null;
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
@@ -1162,6 +1168,14 @@ export class TerminalHost {
     this.modeIs(s, now);
     if (now !== mode) throw new TerminalError("invalid", `this session does not offer ${mode}`);
     return now;
+  }
+
+  /** The browser of its own that terminal `id` runs with (its key), for a call proven by the terminal's hook token;
+   *  null: it has none. Throws for a terminal or a token that is not there. */
+  browserOf(id: string, token: string): string | null {
+    const s = this.sessions.get(id);
+    if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
+    return s.browserKey;
   }
 
   /** A hook call from the agent in terminal `id`, proven by its hook token. Permission requests wait for a screen, or

@@ -242,7 +242,7 @@ struct ProfileProxySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("\(profile.name) · Proxy").font(.headline)
-            Text("在这个配置名下开的终端，agent 和它运行的命令发出去的流量都从这个代理走；这台 Mac 自己的地址不走。开终端之前会先查一次这个代理，不通就不开，不会改成直连。可以把整条代理地址（http://用户名:密码@主机:端口）直接粘进 Server，用户名和密码会自己分到下面两栏。密码在这台 Mac 上加密后才保存。")
+            Text("在这个配置名下开的终端，agent 和它运行的命令发出去的流量都从这个代理走，它的浏览器（一个单独的窗口，/login 的登录页也开在里面）也是；这台 Mac 自己的地址不走。开终端之前会先查一次这个代理，不通就不开，不会改成直连。可以把整条代理地址（http://用户名:密码@主机:端口）直接粘进 Server，用户名和密码会自己分到下面两栏。密码在这台 Mac 上加密后才保存。")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Form {
                 TextField("Server", text: $draft.server, prompt: Text("http://user:pass@host:port"))
@@ -333,7 +333,7 @@ private struct ProfilesSection: View {
             Text("\(agent.title) Profiles")
         } footer: {
             if profiles.creatable {
-                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，运行 /login 登录。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次从哪里出去，查不到就不开；查到的出口写在终端底栏的配置名后面。")
+                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，运行 /login 登录。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次通不通、从哪里出去，不通就不开；查到的出口写在终端底栏的配置名后面。有代理的配置还有它自己的浏览器——一个单独的浏览器窗口，agent 的浏览器工具和 /login 打开的登录页都在里面，和 agent 从同一个代理出去。")
             }
         }
     }

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { checkedProxy, ExitError, ExitPool } from "../browser/exits.js";
 import { proxyPlace } from "../browser/identity.js";
 import { remoteCaller } from "../core/caller.js";
-import { PROFILE_AGENTS, ProfileError, type ProfileAgent } from "../profiles/store.js";
+import { PROFILE_AGENTS, ProfileError, type ProfileAgent, type ProfileProxy } from "../profiles/store.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 const Agent = z.enum(PROFILE_AGENTS);
@@ -49,6 +49,7 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     try {
       if (body.data.server === null || !body.data.server.trim()) {
         store.setProxy(agent.data, id, null);
+        await deps.profileBrowsers?.drop(key);
         await deps.exits.drop(key);
         return c.json({ agents: store.all() });
       }
@@ -57,9 +58,7 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
       const password = body.data.password?.trim() || (body.data.keepPassword && before?.username === body.data.username?.trim() ? before?.password : undefined);
       const proxy = checkedProxy({ server: body.data.server, username: body.data.username, password });
       store.setProxy(agent.data, id, proxy);   // refuses one that is not there before anything listens for it
-      let problem: string | null = null;
-      try { store.setExit(agent.data, id, { ...(await deps.exits.check(key, proxy)), checkedAt: Date.now() }); }
-      catch (err) { problem = err instanceof ExitError ? err.message : "没有查到出口。"; }
+      const problem = await checked(store, deps.exits, agent.data, id, proxy);
       // With Clash's TUN on, the way to the proxy itself must not be through another node (docs/clash-v0.md §3).
       const place = proxyPlace(proxy.server);
       if (place) await deps.clash?.addDirect(place.host).catch(() => undefined);
@@ -76,13 +75,8 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const id = c.req.param("id"), proxy = store.proxyOf(agent.data, id);
     if (!proxy || !deps.exits) return c.json({ error: "这个配置没有自己的代理。" }, 404);
-    try {
-      store.setExit(agent.data, id, { ...(await deps.exits.check(exitKey(agent.data, id), proxy)), checkedAt: Date.now() });
-      return c.json({ agents: store.all() });
-    } catch (err) {
-      store.setExit(agent.data, id, null);
-      return c.json({ agents: store.all(), problem: err instanceof ExitError ? err.message : "没有查到出口。" });
-    }
+    const problem = await checked(store, deps.exits, agent.data, id, proxy);
+    return c.json({ agents: store.all(), ...(problem ? { problem } : {}) });
   });
 
   app.delete("/profiles/:agent/:id", (c) => {
@@ -93,27 +87,50 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     // A terminal still running under it keeps its folder in use.
     if (deps.terminals?.host.list().some((t) => t.harness === agent.data && t.profile?.id === id && t.status !== "exited")) return c.json({ error: "有终端还在用这个配置：先结束它们。" }, 409);
     try { store.remove(agent.data, id); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+    void deps.profileBrowsers?.drop(exitKey(agent.data, id));
     void deps.exits?.drop(exitKey(agent.data, id));
     return c.json({ agents: store.all() });
   });
 }
 
+/** A profile's proxy asked where it lets traffic out, and the answer kept with the profile. What to say when it is
+ *  not known: that nothing got out, or that it did but no lookup would name the address; null when it is known. */
+async function checked(store: NonNullable<ApiDeps["profiles"]>, exits: ExitPool, agent: ProfileAgent, id: string, proxy: ProfileProxy): Promise<string | null> {
+  try {
+    const exit = await exits.check(exitKey(agent, id), proxy);
+    store.setExit(agent, id, exit.ip ? { ...exit, checkedAt: Date.now() } : null);
+    return exit.ip ? null : "代理是通的，但几个出口查询都没有给出地址，所以不知道从哪里出去。";
+  } catch (err) {
+    store.setExit(agent, id, null);
+    return err instanceof ExitError ? err.message : "没有查到出口。";
+  }
+}
+
 /** A profile's exit in the pool. */
-export function exitKey(agent: string, id: string): string { return `${agent}/${id}`; }
+export function exitKey(agent: string, id: string): string { return `${agent}.${id}`; }
+
+/** The profile a key stands for; null for what is not a key. */
+export function profileOfKey(key: string): { agent: ProfileAgent; id: string } | null {
+  const at = key.lastIndexOf(".");
+  const agent = PROFILE_AGENTS.find((a) => a === key.slice(0, at));
+  return agent && at > 0 ? { agent, id: key.slice(at + 1) } : null;
+}
 
 /** What something about to start under profile `id` is given of its way out: nothing for a profile without a proxy
  *  of its own; else — once the proxy has just said where it lets traffic out — the forwarder to send everything
  *  through and that place. A proxy that does not answer starts nothing: `refused` says why (docs/profiles-v0.md §4). */
 export async function exitFor(deps: Pick<ApiDeps, "profiles" | "exits">, agent: ProfileAgent, id: string, name: string,
-                              now: () => number = Date.now): Promise<{ proxy?: string; exit?: { ip: string; place: string | null } } | { refused: string; status: 502 | 503 }> {
+                              now: () => number = Date.now): Promise<{ proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string } | { refused: string; status: 502 | 503 }> {
   const proxy = deps.profiles?.proxyOf(agent, id) ?? null;
   if (!proxy) return {};
   if (!deps.exits) return { refused: `配置 ${name} 有自己的代理，这个服务用不了它。`, status: 503 };
   const key = exitKey(agent, id);
   try {
     const exit = await deps.exits.check(key, proxy);
-    deps.profiles!.setExit(agent, id, { ...exit, checkedAt: now() });
-    return { proxy: ExitPool.url(await deps.exits.address(key, proxy)), exit: { ip: exit.ip, place: exit.place } };
+    // The proxy lets traffic out; where, when a lookup would say (none saying does not keep the terminal shut).
+    deps.profiles!.setExit(agent, id, exit.ip ? { ...exit, checkedAt: now() } : null);
+    // With a proxy of its own it has a browser of its own too, through the same forwarder (§5.1).
+    return { proxy: ExitPool.url(await deps.exits.address(key, proxy)), ...(exit.ip ? { exit: { ip: exit.ip, place: exit.place } } : {}), browserKey: key };
   } catch (err) {
     deps.profiles!.setExit(agent, id, null);
     return { refused: `配置 ${name} 的代理没有通，终端没有开：${err instanceof ExitError ? err.message : (err as Error).message}`, status: 502 };

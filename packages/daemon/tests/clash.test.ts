@@ -662,6 +662,22 @@ describe("Clash Integration over HTTP", () => {
     expect((await call("GET", "/clash")).json.settings.claude.nodes).toHaveLength(2);
   });
 
+  it("sends an address direct when asked to (a profile's proxy server), once, and the core has it at once", async () => {
+    const { call, calls, clash } = await served();
+    await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
+    await call("PUT", "/clash/settings", chosen);
+    calls.length = 0;
+    await clash.addDirect(" Proxy.Example.com ");
+    await clash.addDirect("proxy.example.com");
+    await clash.addDirect("5.102.107.254");                    // there already
+    expect((await call("GET", "/clash")).json.settings.direct).toEqual(["5.102.107.254", "proxy.example.com"]);
+    expect(calls.filter((c) => c === "PUT /providers/rules/as-direct")).toHaveLength(1);
+    const k = clash.token();
+    expect(parse((await call("GET", `/clash/rules/as-direct.yaml?k=${k}`)).text)).toEqual({ payload: ["IP-CIDR,5.102.107.254/32,no-resolve", "DOMAIN,proxy.example.com"] });
+    await clash.addDirect("");
+    expect((await call("GET", "/clash")).json.settings.direct).toHaveLength(2);
+  });
+
   it("checks that each kind of traffic goes where its rule sends it, and says which does not", async () => {
     const { call, routes } = await served();
     await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });

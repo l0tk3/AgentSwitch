@@ -4,7 +4,7 @@
  *  bridge (browserAgents.ts, local only). Refusals answer 403 with the reason in words; opening, closing, taking, handing
  *  back and filling are audited. */
 
-import type { Context, Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { remoteCaller } from "../core/caller.js";
@@ -101,6 +101,24 @@ function asked(target: OpenTarget, url: string | null): Record<string, unknown> 
   if ("port" in target) return { kind: "port", target: target.port };
   if ("path" in target) return { kind: "path", target: url ? auditUrl(url) : target.path };
   return { kind: "url", target: url ? auditUrl(url) : "invalid" };
+}
+
+/** A profile's own browser (docs/profiles-v0.md §5.1) is served exactly as the shared one is, under
+ *  `/profile-browser/<key>`: every route below, and the agents' bridge. Only a browser that has been started is there. */
+export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
+  const fleet = deps.profileBrowsers;
+  if (!fleet) return;
+  const served = new WeakMap<object, Hono>();
+  app.all("/profile-browser/:key/*", (c) => {
+    const at = /^\/profile-browser\/([a-z0-9.-]+)(\/.*)$/.exec(new URL(c.req.url).pathname);
+    const browser = at ? fleet.get(at[1]!) : null;
+    if (!at || !browser) return c.json({ error: "no such browser" }, 404);
+    let sub = served.get(browser);
+    if (!sub) { sub = new Hono(); mountBrowser(sub, { ...deps, browser }); served.set(browser, sub); }
+    const url = new URL(c.req.url);
+    url.pathname = at[2]!;
+    return sub.fetch(new Request(url, c.req.raw), c.env);
+  });
 }
 
 export function mountBrowser(app: Hono, deps: ApiDeps): void {

@@ -19,12 +19,18 @@ export type ExitPoolOptions = {
   readonly resolve?: FillResolver | undefined;
   /** The public lookup an exit is checked against (exit.ts); null: none, an exit cannot be checked. */
   readonly lookup: string | null;
+  /** The lookups asked after the first (tests; default: `OTHER_LOOKUPS`). */
+  readonly others?: readonly string[];
   /** Another way to ask where an exit comes out (tests). */
   readonly probe?: (via: ForwarderAddress) => Promise<ExitInfo>;
   readonly log?: (line: string) => void;
 };
 
 type Exit = { readonly setting: string; readonly upstream: string; readonly forwarder: Forwarder };
+/** Asked when the first lookup answers but will not say (it limits how often one address may ask — seen 2026-10-09:
+ *  `429` from an exit many people share): a trace that names the address and the country, then one that names the
+ *  address alone. */
+const OTHER_LOOKUPS = ["https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org/?format=json"];
 
 /** A proxy as it is to be kept: its address in order, a password only as a ciphertext and only with a user name. */
 export function checkedProxy(proxy: ProxySetting): ProxySetting {
@@ -56,17 +62,29 @@ export class ExitPool {
     return exit.forwarder.start();
   }
 
-  /** Where traffic through `key`'s proxy comes out, asked now. Throws with the reason when it does not come out. */
+  /** Where traffic through `key`'s proxy comes out, asked now. Throws with the reason when it does not come out.
+   *  When it does come out but no lookup would say where — each answered, none with an address — the proxy works and
+   *  the place is not known: `ip` is empty. A lookup's refusal is not the proxy's failure. */
   async check(key: string, proxy: ProxySetting): Promise<ExitInfo> {
     const via = await this.address(key, proxy);
-    try {
-      if (this.opts.probe) return await this.opts.probe(via);
-      if (!this.opts.lookup) throw new ExitError("没有可用的出口查询。");
-      return await exitProbe({ forwarder: async () => via, url: this.opts.lookup })();
-    } catch (err) {
-      if (err instanceof ExitError) throw err;
-      throw new ExitError(`经这个代理连不出去（${(err as Error).message}）。`);
+    if (this.opts.probe) {
+      try { return await this.opts.probe(via); } catch (err) { throw err instanceof ExitError ? err : new ExitError(`经这个代理连不出去（${(err as Error).message}）。`); }
     }
+    if (!this.opts.lookup) throw new ExitError("没有可用的出口查询。");
+    let answered = false, last = "";
+    for (const url of [this.opts.lookup, ...(this.opts.others ?? OTHER_LOOKUPS).filter((u) => u !== this.opts.lookup)]) {
+      try { return await exitProbe({ forwarder: async () => via, url })(); }
+      catch (err) {
+        last = (err as Error).message;
+        // The far end answered — a refusal of its own (4xx: too many asked), or nothing of use: the way through the
+        // proxy is open; ask another. A 5xx may be the forwarder's own word for a proxy that is down: not counted.
+        if (/^the lookup answered 4\d\d$|^the lookup's answer/.test(last)) { answered = true; continue; }
+        // The forwarder or the proxy said no: no other lookup will fare better.
+        if (/^the proxy answered/.test(last)) break;
+      }
+    }
+    if (answered) return { ip: "", place: null, timezone: null };
+    throw new ExitError(`经这个代理连不出去（${last}）。`);
   }
 
   /** As an environment's proxy: the forwarder with its name and password in the address. */

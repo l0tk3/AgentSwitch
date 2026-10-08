@@ -58,7 +58,7 @@ export type LauncherOptions = {
    *  terminal `id`, made when it starts (a session of its own). It is the `browser` MCP server as it is: a terminal is
    *  not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08), so its agent sees a page as the page is.
    *  Codex, Claude Code and OpenCode; absent or null: no browser tool. */
-  readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string }) => readonly string[] | null;
+  readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; /** The profile's own browser rather than the shared one (docs/profiles-v0.md §5.1). */ readonly browserKey?: string }) => readonly string[] | null;
 };
 
 /** The agents that take MCP servers, and so the browser tool. */
@@ -135,6 +135,35 @@ const shq = (s: string): string => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
 /** Claude Code's hooks for one terminal: status events and the permission request, all through the hook command. With
  *  the protected paths, also its own deny rules for them (`//` = from the filesystem root): they hold for the built-in
  *  file tools even when the service does not answer the hook (which then lets the call through). */
+/** `open` and `BROWSER` for a terminal whose profile has a browser of its own: a small program put first on the PATH
+ *  under the name `open` (what Claude Code calls to show a page) and named as `BROWSER` (what other tools call). Given
+ *  a web address and nothing else to do with it, it asks this service to open the address in the profile's browser;
+ *  anything else it hands to the system's own `open`. If the service does not take the address it fails, saying so —
+ *  it does not fall back to the user's browser. */
+export function openInProfileBrowser(dir: string, path: string): Record<string, string> {
+  const bin = join(dir, "bin"), file = join(bin, "open");
+  mkdirSync(bin, { recursive: true, mode: 0o700 });
+  writeFileSync(file, `#!/bin/sh
+# AgentSwitch: a web address is opened in this terminal's profile's own browser (docs/profiles-v0.md §5.1).
+url=""
+for a in "$@"; do
+  case "$a" in
+    http://*|https://*) url="$a" ;;
+    -*) ;;
+    *) exec /usr/bin/open "$@" ;;
+  esac
+done
+[ -n "$url" ] || exec /usr/bin/open "$@"
+code=$(/usr/bin/curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST "$AGENTSWITCH_TERMINAL_URL/terminals/open" \\
+  -H "x-agentswitch-terminal: $AGENTSWITCH_TERMINAL_ID" -H "authorization: Bearer $AGENTSWITCH_TERMINAL_HOOK_TOKEN" \\
+  --data-urlencode "url=$url")
+[ "$code" = "200" ] && exit 0
+echo "AgentSwitch: this address was not opened in the profile's browser ($code). Open it yourself in a browser that leaves this Mac the same way." >&2
+exit 1
+`, { mode: 0o755 });
+  return { PATH: `${bin}:${path}`, BROWSER: file };
+}
+
 /** The environment that sends a process's traffic through `proxy`, in both spellings tools read; what is on this
  *  Mac goes straight. */
 export function proxyEnv(proxy: string): Record<string, string> {
@@ -195,7 +224,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     // leaves through it. What stays on this Mac — the hook, the browser bridge, a local server — does not.
     const proxied = req.proxy ? proxyEnv(req.proxy) : null;
     if (proxied) Object.assign(env, proxied);
-    const bridge = opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd }) : null;
+    const bridge = opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd, ...(req.browserKey ? { browserKey: req.browserKey } : {}) }) : null;
+    // A profile with a browser of its own: a web address the agent asks the system to open — its sign-in page — is
+    // opened there, not in the user's own browser, which leaves this Mac another way (§5.1).
+    if (req.browserKey) Object.assign(env, openInProfileBrowser(dir, env.PATH ?? ""));
     const browser = bridge ? browserServer(bridge) : null;
     switch (req.harness) {
       case "claude-code": {

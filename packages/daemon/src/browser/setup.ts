@@ -42,6 +42,8 @@ export type SharedBrowser = {
   readonly engine: () => "camoufox" | "chrome";
   /** Its tabs have windows of their own (Camoufox, not headless). */
   readonly windows: () => boolean;
+  /** What it shows can be seen on this Mac as it is — windows of its own (Camoufox's, or a profile's Chrome). */
+  readonly visible: () => boolean;
   /** Stops what the browser was given besides itself (the forwarder). */
   readonly stop: () => Promise<void>;
   /** The fingerprint Camoufox is started with and the proxy its traffic leaves through (§7.2 第 5 条). */
@@ -75,24 +77,34 @@ export type SharedBrowserOptions = {
   readonly afterExit?: () => void;
   readonly holdIdleMs?: number;
   readonly idleCloseMs?: number;
+  /** A browser of a profile's own rather than the shared one (fleet.ts): `name` is its folder beside `main` and its
+   *  state's; everything it sends goes through `forwarder` — the profile's, which is not this browser's to stop. */
+  readonly own?: { readonly name: string; readonly forwarder: Pick<Forwarder, "start"> };
 };
 
 export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
   const userHome = canonicalPath(opts.userHome);
-  const audit = new BrowserAudit(join(opts.home, BROWSER_STATE_DIR, "audit.jsonl"));
+  // A profile's own browser keeps what it keeps apart from the shared one's: its audit, its fingerprint, its agents.
+  const state = opts.own ? join(opts.home, BROWSER_STATE_DIR, "of", opts.own.name) : join(opts.home, BROWSER_STATE_DIR);
+  if (opts.own) mkdirSync(state, { recursive: true, mode: 0o700 });
+  const audit = new BrowserAudit(join(state, "audit.jsonl"));
   const real = !opts.driver;
-  const lookup = real ? exitLookup() : null;
+  const lookup = real && !opts.own ? exitLookup() : null;
   const identity: BrowserIdentity = new BrowserIdentity({
-    file: join(opts.home, BROWSER_STATE_DIR, "identity.json"), ...(opts.fill ? { resolve: opts.fill } : {}),
+    file: join(state, "identity.json"), ...(opts.fill && !opts.own ? { resolve: opts.fill } : {}),
     ...(lookup ? { probe: () => exitProbe({ forwarder: () => forwarder.start(), url: lookup })() } : {}),
     firefox: () => opts.kit?.store.installed("camoufox")?.version.split(".")[0] ?? opts.kit?.status().playwright.firefox?.split(".")[0] ?? null,
   });
-  const forwarder: Forwarder = new Forwarder({ ownPorts: opts.ownPorts, upstream: () => identity.upstream(), log: (line) => console.error(line) });
-  void identity.start();
-  const chosen = opts.driver ? null : engineDriver({ ...(opts.kit ? { kit: opts.kit } : {}), identity, chrome: playwrightDriver(opts.kit ? { playwright: () => opts.kit!.playwright() } : {}), forwarder, headless: opts.headless ?? true });
+  const shared = opts.own ? null : new Forwarder({ ownPorts: opts.ownPorts, upstream: () => identity.upstream(), log: (line) => console.error(line) });
+  const forwarder: Pick<Forwarder, "start"> = opts.own?.forwarder ?? shared!;
+  if (!opts.own) void identity.start();
+  // A profile's Chrome goes through the profile's forwarder too (the shared Chrome goes straight, as before), and has
+  // a window where the service is asked for windows: a sign-in under the profile is done in it by hand.
+  const chrome = playwrightDriver({ ...(opts.kit ? { playwright: () => opts.kit!.playwright() } : {}), ...(opts.own ? { proxy: () => opts.own!.forwarder.start(), window: opts.headless === false } : {}) });
+  const chosen = opts.driver ? null : engineDriver({ ...(opts.kit ? { kit: opts.kit } : {}), identity, chrome, forwarder, headless: opts.headless ?? true });
   const host = new BrowserHost({
     driver: opts.driver ?? chosen!,
-    profileDir: join(opts.home, BROWSER_PROFILES_DIR, MAIN_PROFILE),
+    profileDir: join(opts.home, BROWSER_PROFILES_DIR, opts.own?.name ?? MAIN_PROFILE),
     files: { protected: opts.protected, home: userHome, ownFolders: [opts.home, ...(opts.gateHome ? [opts.gateHome] : [])] },
     ownPorts: opts.ownPorts,
     prepareProfile: (dir) => {
@@ -107,14 +119,15 @@ export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
     ...(opts.idleCloseMs !== undefined ? { idleCloseMs: opts.idleCloseMs } : {}),
   });
   const agents = new BrowserAgents({
-    host, audit, dir: join(opts.home, BROWSER_STATE_DIR), engine: opts.engine ?? playwrightEngine(host),
+    host, audit, dir: state, engine: opts.engine ?? playwrightEngine(host),
     ...(opts.holdWaitMs !== undefined ? { holdWaitMs: opts.holdWaitMs } : {}),
   });
   return {
     host, audit, agents, home: userHome, ...(opts.fill ? { fill: opts.fill } : {}),
     engine: () => chosen?.engine() ?? "chrome",
     windows: () => chosen?.engine() === "camoufox" && opts.headless === false,
-    stop: () => forwarder.stop(),
+    visible: () => opts.headless === false && (chosen?.engine() === "camoufox" || !!opts.own),
+    stop: async () => { await shared?.stop(); },
     identity,
     servers: () => listLocalServers({ ports: opts.ownPorts(), pid: process.pid, home: userHome }, ...(opts.exec ? [opts.exec] : [])),
   };
@@ -123,7 +136,7 @@ export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
 /** The driver that starts whichever browser there is to start: Camoufox when the engine has one installed — on a
  *  profile of its own beside Chrome's (the two cannot share one), its traffic through the forwarder — else Chrome.
  *  Asked at every launch, so a Camoufox installed while Chrome runs is used from the next start. */
-export function engineDriver(opts: { readonly kit?: EngineKit; readonly chrome: BrowserDriver; readonly forwarder: Forwarder; readonly headless: boolean; readonly identity?: BrowserIdentity }): BrowserDriver & { engine(): "camoufox" | "chrome" } {
+export function engineDriver(opts: { readonly kit?: EngineKit; readonly chrome: BrowserDriver; readonly forwarder: Pick<Forwarder, "start">; readonly headless: boolean; readonly identity?: BrowserIdentity }): BrowserDriver & { engine(): "camoufox" | "chrome" } {
   const executable = () => opts.kit?.executable() ?? null;
   return {
     engine: () => executable() ? "camoufox" : "chrome",

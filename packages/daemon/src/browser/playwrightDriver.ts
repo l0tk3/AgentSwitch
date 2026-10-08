@@ -419,6 +419,11 @@ export type PlaywrightDriverOptions = {
   readonly log?: (line: string) => void;
   /** The Playwright to start Chrome with (docs/browser-v0.md §7.3): the engine's, else the bundled one. */
   readonly playwright?: () => PlaywrightCopy;
+  /** The proxy everything this Chrome sends goes through — a profile's forwarder (docs/profiles-v0.md §5.1); asked
+   *  at every launch. Absent: this Mac's own way out. */
+  readonly proxy?: () => Promise<{ readonly server: string; readonly username: string; readonly password: string }>;
+  /** With a window of its own on this Mac (a profile's browser, where a sign-in is done by hand); default: none. */
+  readonly window?: boolean;
 };
 
 export function playwrightDriver(opts: PlaywrightDriverOptions = {}): BrowserDriver {
@@ -429,9 +434,11 @@ export function playwrightDriver(opts: PlaywrightDriverOptions = {}): BrowserDri
       const copy = (opts.playwright ?? bundledPlaywright)();
       notePlaywrightInUse(copy);
       const { chromium } = copy.require("playwright-core") as typeof import("playwright-core");
+      const proxy = await opts.proxy?.();
       const context = await chromium.launchPersistentContext(profileDir, {
         channel: "chrome",
-        headless: true,
+        headless: !opts.window,
+        ...(proxy ? { proxy: { server: proxy.server, username: proxy.username, password: proxy.password, bypass: "<-loopback>" } } : {}),
         // The host sets every page's size itself (Emulation on its own session); Playwright leaves it alone.
         viewport: null,
         args: [`--window-size=${size.width},${size.height}`],

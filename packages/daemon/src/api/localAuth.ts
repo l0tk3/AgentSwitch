@@ -74,6 +74,10 @@ export class LocalAuth {
     // What Clash Verge and its core fetch (docs/clash-v0.md §6): let through here, held to their own token there.
     if (method === "GET" && /^\/clash\/(?:sub\.yaml|(?:rules|nodes|providers)\/[\w-]{1,200}\.yaml)$/.test(path)) return null;
     if ((method === "GET" && path === "/browser/agent/mcp") || (method === "POST" && /^\/browser\/agent\/mcp\/[\w-]+$/.test(path))) return null;
+    // The same bridge to a profile's own browser, and a terminal's "open this address in my browser" (its hook token
+    // is checked there) — docs/profiles-v0.md §5.1.
+    if ((method === "GET" && /^\/profile-browser\/[a-z0-9.-]+\/browser\/agent\/mcp$/.test(path)) || (method === "POST" && /^\/profile-browser\/[a-z0-9.-]+\/browser\/agent\/mcp\/[\w-]+$/.test(path))) return null;
+    if (method === "POST" && path === "/terminals/open") return null;
     if (method === "POST" && path === "/local/console-link") {
       if (!this.bearer(request)) return this.refuse();
       const next = url.searchParams.get("next");

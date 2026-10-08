@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { afterEach } from "vitest";
 import { exitFor, mountProfiles } from "../src/api/profiles.js";
+import { parseExit } from "../src/browser/exit.js";
 import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
@@ -21,12 +22,13 @@ afterEach(async () => { for (const c of closers.splice(0)) await c(); });
 
 /** A proxy somewhere else, made up: it answers whatever it is asked for with where it "lets traffic out", and keeps
  *  who asked (the name and password it was given). `down()`: it stops listening. */
-async function upstream() {
+async function upstream(answer?: (url: string) => { status: number; body: string }) {
   const seen: { url: string; auth: string | null }[] = [];
   const server = createServer((req, res) => {
     const auth = req.headers["proxy-authorization"];
     seen.push({ url: String(req.url), auth: typeof auth === "string" ? Buffer.from(auth.replace(/^Basic /, ""), "base64").toString("utf8") : null });
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ip: "203.0.113.9", city: "Tokyo", country: "JP", timezone: "Asia/Tokyo" }));
+    const said = answer?.(String(req.url)) ?? { status: 200, body: JSON.stringify({ ip: "203.0.113.9", city: "Tokyo", country: "JP", timezone: "Asia/Tokyo" }) };
+    res.writeHead(said.status, { "content-type": "application/json" }).end(said.body);
   });
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
   const port = (server.address() as import("node:net").AddressInfo).port;
@@ -35,7 +37,7 @@ async function upstream() {
   return { server: `http://127.0.0.1:${port}`, seen, down };
 }
 const pool = (resolve?: ConstructorParameters<typeof ExitPool>[0]["resolve"]) => {
-  const p = new ExitPool({ ownPorts: () => [4711], lookup: "http://lookup.test/json", ...(resolve ? { resolve } : {}) });
+  const p = new ExitPool({ ownPorts: () => [4711], lookup: "http://lookup.test/json", others: ["http://trace.test/cdn-cgi/trace"], ...(resolve ? { resolve } : {}) });
   closers.push(() => p.stop());
   return p;
 };
@@ -138,6 +140,7 @@ describe("a profile's own proxy", () => {
     expect(ExitPool.url(via)).toBe(`http://agentswitch:${via.password}@${new URL(via.server).host}`);
     expect(await exits.check("claude-code/abc123", { server: far.server })).toEqual({ ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo" });
     expect(far.seen).toEqual([{ url: "http://lookup.test/json", auth: null }]);
+    expect(parseExit("fl=1\nip=203.0.113.9\nloc=SG\n")).toEqual({ ip: "203.0.113.9", place: "SG", timezone: null });
     expect(exits.requests("claude-code/abc123")).toBe(1);
     // The same proxy again: the same forwarder. With a name and a password: the gate gives the password for the
     // proxy's own host, and the forwarder shows it to the proxy.
@@ -160,6 +163,23 @@ describe("a profile's own proxy", () => {
     await expect(pool().address("k", sealed)).rejects.toThrow(/凭据网关不可用/);
   });
 
+  it("is not held to be down because a lookup will not say where it lets traffic out", async () => {
+    // The first lookup limits how often an address may ask (seen for real, 2026-10-09): the next one is asked.
+    const limited = await upstream((url) => (url.startsWith("http://lookup.test") ? { status: 429, body: "slow down" } : { status: 200, body: "fl=1\nip=203.0.113.9\nts=1.2\nloc=SG\n" }));
+    const exits = pool();
+    expect(await exits.check("k", { server: limited.server })).toEqual({ ip: "203.0.113.9", place: "SG", timezone: null });
+    expect(limited.seen.map((s) => new URL(s.url).host)).toEqual(["lookup.test", "trace.test"]);
+    // Every lookup answers and none says: the proxy works, the place is not known — a terminal still starts.
+    const mute = await upstream(() => ({ status: 429, body: "slow down" }));
+    const { store } = world();
+    const work = store.create("claude-code", "Work", "subscription");
+    store.setProxy("claude-code", work.id, { server: mute.server });
+    const none = pool();
+    expect(await none.check(`claude-code.${work.id}`, { server: mute.server })).toEqual({ ip: "", place: null, timezone: null });
+    expect(await exitFor({ profiles: store, exits: none }, "claude-code", work.id, "Work")).toEqual({ proxy: expect.stringContaining("@127.0.0.1:"), browserKey: `claude-code.${work.id}` });
+    expect(store.all()["claude-code"].profiles[1]!.exit).toBeUndefined();
+  });
+
   it("is checked before anything starts under the profile; one that does not answer starts nothing", async () => {
     const { store } = world();
     const far = await upstream();
@@ -171,7 +191,8 @@ describe("a profile's own proxy", () => {
     expect(await exitFor(deps, "claude-code", plain.id, "Plain")).toEqual({});
     expect(far.seen).toHaveLength(0);
     const way = await exitFor(deps, "claude-code", work.id, "Work", () => 5_000);
-    expect(way).toEqual({ proxy: expect.stringMatching(/^http:\/\/agentswitch:[\w-]+@127\.0\.0\.1:\d+$/), exit: { ip: "203.0.113.9", place: "Tokyo" } });
+    // With a proxy of its own it has a browser of its own too, by the same key.
+    expect(way).toEqual({ proxy: expect.stringMatching(/^http:\/\/agentswitch:[\w-]+@127\.0\.0\.1:\d+$/), exit: { ip: "203.0.113.9", place: "Tokyo" }, browserKey: `claude-code.${work.id}` });
     expect(far.seen).toHaveLength(1);
     expect(store.all()["claude-code"].profiles[1]!.exit).toEqual({ ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo", checkedAt: 5_000 });
     await far.down();

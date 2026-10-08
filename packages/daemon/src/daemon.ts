@@ -95,6 +95,8 @@ import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
 import { exitLookup } from "./browser/exit.js";
 import { ExitPool } from "./browser/exits.js";
+import { ProfileBrowsers } from "./browser/fleet.js";
+import { profileOfKey } from "./api/profiles.js";
 import type { BrowserHost } from "./browser/host.js";
 import { sharedBrowser } from "./browser/setup.js";
 import { newEngineKit } from "./browser/engine/setup.js";
@@ -350,10 +352,17 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // left is cleared now; nothing is downloaded until asked.
   const engineKit = cfg.browserHost ? newEngineKit(cfg.home) : undefined;
   engineKit?.start();
-  const browser = cfg.browserHost || overrides.browserDriver
-    ? sharedBrowser({ home: cfg.home, userHome: process.env.HOME ?? homedir(), protected: prot, ownPorts, ...(engineKit ? { kit: engineKit } : {}), headless: !cfg.browserWindow, ...(gate ? { gateHome: gate.home } : {}), ...(overrides.browserDriver ? { driver: overrides.browserDriver } : {}),
+  const browserOptions = { home: cfg.home, userHome: process.env.HOME ?? homedir(), protected: prot, ownPorts, ...(engineKit ? { kit: engineKit } : {}), headless: !cfg.browserWindow, ...(gate ? { gateHome: gate.home } : {}), ...(overrides.browserDriver ? { driver: overrides.browserDriver } : {}),
       ...(overrides.browserEngine ? { engine: overrides.browserEngine } : {}), ...(gate ? { fill: gateFill(gate) } : {}),
-      ...(clones ? { afterExit: () => clones.schedule() } : {}) })
+      ...(clones ? { afterExit: () => clones.schedule() } : {}) };
+  const browser = cfg.browserHost || overrides.browserDriver ? sharedBrowser(browserOptions) : undefined;
+  // Profiles' own proxies (docs/profiles-v0.md §4): a forwarder each, checked before anything starts under one. And
+  // their own browsers (§5.1): one for each profile that has a proxy, through that forwarder, made when first needed.
+  const profiles = new ProfileStore({ home: cfg.home });
+  const exits = new ExitPool({ ownPorts, ...(gate ? { resolve: gateFill(gate) } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
+  const profileBrowsers = browser
+    ? new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...browserOptions, own: { name: key, forwarder } }), exits,
+        (key) => { const p = profileOfKey(key); return p ? profiles.proxyOf(p.agent, p.id) : null; })
     : undefined;
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
   if (browser && engineKit) engineKit.aroundSwitch((apply) => browser.host.restart(apply));
@@ -362,7 +371,12 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   // tabs close when the terminal is deleted.
   const agents = browser?.agents;
   const terminalBrowser = agents
-    ? (req: { id: string; harness: string; cwd: string }) => bridgeCommand(agents.mint(terminalOwner(req.id, req.harness, req.cwd)), `http://127.0.0.1:${localPort}`)
+    ? (req: { id: string; harness: string; cwd: string; browserKey?: string }) => {
+        // Under a profile with a browser of its own, the agent's browser tool is that browser's (§5.1).
+        const own = req.browserKey ? profileBrowsers?.of(req.browserKey) ?? null : null, base = `http://127.0.0.1:${localPort}`;
+        return own ? bridgeCommand(own.agents.mint(terminalOwner(req.id, req.harness, req.cwd)), `${base}/profile-browser/${req.browserKey}`)
+          : bridgeCommand(agents.mint(terminalOwner(req.id, req.harness, req.cwd)), base);
+      }
     : undefined;
   // Terminals are used like any terminal: only the credentials at rest stay closed there (docs/terminal-v0.md §3).
   const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
@@ -412,9 +426,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   forgetDeletedTasks(conversation, store);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
   const clash = new ClashIntegration({ store: new ClashStore(cfg.home), source: new ClashSource(cfg.home), base: () => `http://127.0.0.1:${localPort}` });
-  // Profiles' own proxies (docs/profiles-v0.md §4): a forwarder each, checked before anything starts under one.
-  const exits = new ExitPool({ ownPorts, ...(gate ? { resolve: gateFill(gate) } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
-  const apiDeps: ApiDeps = { exits, profiles: new ProfileStore({ home: cfg.home }), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { exits, profiles, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -428,8 +440,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
   return { app, api, remote, engine, store, quota, targets, clash, terminals: terminalHost, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
-    stopBrowser: async () => { await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
-    close: () => { terminalHost?.closeAll(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
+    stopBrowser: async () => { await profileBrowsers?.stop(); await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
+    close: () => { terminalHost?.closeAll(); void profileBrowsers?.stop(); void exits.stop(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
 
 /** The planner as a text-only Router (loop-v0 §6): the router's pick when it named a usable one, else targets.yaml

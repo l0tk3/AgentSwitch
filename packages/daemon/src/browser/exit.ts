@@ -24,8 +24,11 @@ function zone(v: unknown): string | null {
   try { new Intl.DateTimeFormat("en-US", { timeZone: name }); return name; } catch { return null; }
 }
 
-/** A lookup's answer (`{ip, city, country, timezone}`; the zone may be `{id}`): throws when it names no address. */
+/** A lookup's answer (`{ip, city, country, timezone}`; the zone may be `{id}`), or a trace's lines (`ip=…`, `loc=…`,
+ *  as Cloudflare's `/cdn-cgi/trace` gives them): throws when it names no address. */
 export function parseExit(body: string): ExitInfo {
+  const traced = /^ip=(\S+)\s*$/m.exec(body)?.[1];
+  if (traced && isIP(traced)) return { ip: traced, place: /^loc=([A-Z]{2})\s*$/m.exec(body)?.[1] ?? null, timezone: null };
   let raw: unknown;
   try { raw = JSON.parse(body); } catch { throw new Error("the lookup's answer is not JSON"); }
   const o = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
