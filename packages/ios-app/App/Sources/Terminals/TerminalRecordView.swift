@@ -67,7 +67,26 @@ struct TerminalRecordView: View {
                     if !record.loaded {
                         BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
                     } else if record.items.isEmpty && page.sent.isEmpty && page.notices.isEmpty && page.status != .working && page.permissions.isEmpty {
-                        Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端。").font(.footnote).foregroundStyle(.tertiary)
+                        if !record.hasSession && page.status == .exited {
+                            // It ended before it had a session: it did not start. What it said is on its own screen.
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("没有启动起来就结束了。它最后说了什么在终端里。").font(.footnote).foregroundStyle(.secondary)
+                                Button(action: openTerminal) { ButtonWord("Open Terminal") }.buttonStyle(SquareButtonStyle(prominent: false))
+                            }
+                        } else {
+                            // A terminal seconds old with no session yet is still starting (2026-10-08).
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                if !record.hasSession && context.date.timeIntervalSince1970 * 1000 - Double(terminal.createdAt) < 8000 {
+                                    VStack(spacing: 8) {
+                                        BrailleSpinner(color: .secondary)
+                                        Text("Starting…").mono(11).foregroundStyle(.tertiary)
+                                    }
+                                    .frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
+                                } else {
+                                    Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端。").font(.footnote).foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
                     }
                     // What was sent and is not in the record yet stands at its end (2026-10-08).
                     ForEach(SentReply.appended(to: ScreenNotice.placed(in: record.items, notices: page.notices), sent: page.sent, working: working)) { item in

@@ -61,8 +61,30 @@ struct TerminalRecordPane: View {
                                 if !record.loaded {
                                     BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 24)
                                 } else if record.items.isEmpty, record.sent.isEmpty, record.notices.isEmpty, !working, requests.isEmpty {
-                                    Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端视图。")
-                                        .font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.faint)
+                                    if !record.hasSession, info?.status == "exited" {
+                                        // It ended before it had a session: it did not start (a sign-in that timed out, a
+                                        // missing program). What it said is on its own screen.
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text("没有启动起来就结束了。它最后说了什么在终端视图里。").font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink2)
+                                            Button { model.setSimple(false, pane: state.id) } label: { BracketLabel(word: "Open Terminal", key: "⌘⇧E") }.buttonStyle(.plain)
+                                        }
+                                    } else {
+                                        // A terminal seconds old with no session yet is still starting: said so, as a
+                                        // record being read is (2026-10-08, user: cc进入的时候会有转圈加载的画面，codex没有).
+                                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                                            let starting = !record.hasSession && (info.map { context.date.timeIntervalSince1970 * 1000 - Double($0.createdAt) < RecordDisplay.startingMs } ?? false)
+                                            if starting {
+                                                VStack(spacing: 8) {
+                                                    BrailleSpinner().foregroundStyle(Look.ink2)
+                                                    Text("Starting…").mono(Look.size(11, look)).foregroundStyle(Look.faint)
+                                                }
+                                                .frame(maxWidth: .infinity).padding(.top, 24)
+                                            } else {
+                                                Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端视图。")
+                                                    .font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.faint)
+                                            }
+                                        }
+                                    }
                                 }
                                 ForEach(record.shown(working: working)) { item in
                                     RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, source: source) {

@@ -553,6 +553,9 @@ public enum RecordDisplay {
     }
 
     /// A clock for what is going on now: `0:41`, `12:05`, `1:02:25`.
+    /// How long a new terminal with no session yet is shown as starting (its agent draws its first screen, signs in).
+    public static let startingMs: Double = 8000
+
     /// The turn's tokens as its line says them: `↓ 250 tokens`, `↓ 1.3k tokens`, `↑ 12k tokens`. Nil for none.
     public static func turnTokens(_ progress: TurnProgress?) -> String? {
         guard let progress, progress.tokens > 0 else { return nil }
