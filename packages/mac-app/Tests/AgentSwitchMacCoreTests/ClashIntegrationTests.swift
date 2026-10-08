@@ -78,6 +78,20 @@ final class ClashIntegrationTests: XCTestCase {
         XCTAssertTrue(ClashSettings.updateHours.contains(ClashSettings().autoUpdateHours))
     }
 
+    func testARoutingChecksLinesSayWhatHappenedAndWhatShouldHave() throws {
+        let rows = try JSONDecoder().decode([ClashCheckRow].self, from: Data(#"""
+        [{"id":"claude","title":"Claude","host":"claude.ai","expect":{"kind":"group","group":"Claude"},"ok":true,
+          "observed":{"outcome":"proxied","rule":"RuleSet as-claude","path":["Claude","Claude自动选择","日本家宽-02"],"exit":{"ip":"126.36.1.2","loc":"JP"},"ms":362}},
+         {"id":"openai","title":"OpenAI","host":"chatgpt.com","expect":{"kind":"group","group":"OpenAI"},"ok":false,"observed":{"outcome":"proxied","rule":"Match","path":["Manual","新加坡-01"]}},
+         {"id":"domestic","title":"Domestic","host":"www.baidu.com","expect":{"kind":"direct"},"ok":false,"observed":{"outcome":"unknown","rule":null,"path":[]}},
+         {"id":"block","title":"Ads","host":"ad.doubleclick.net","expect":{"kind":"reject"},"ok":true,"observed":{"outcome":"rejected","rule":null,"path":[]}},
+         {"id":"other","title":"Everything Else","host":"www.google.com","expect":null,"ok":null,"observed":{"outcome":"direct","rule":"Match","path":["DIRECT"]}}]
+        """#.utf8))
+        XCTAssertEqual(rows.map(\.route), ["RuleSet as-claude → Claude → Claude自动选择 → 日本家宽-02", "Match → Manual → 新加坡-01", "No Answer", "Rejected", "Match → DIRECT"])
+        XCTAssertEqual(rows.map(\.seen), ["JP 126.36.1.2 · 362 ms", nil, nil, nil, nil])
+        XCTAssertEqual(rows.map(\.problem), [nil, "应该走 OpenAI 这一组，实际不是。", "应该直连，但内核没有列出这条连接（节点没有回应，或没有连上）。", nil, nil])
+    }
+
     func testShortWords() {
         XCTAssertEqual([ClashText.delay(.some(428)), ClashText.delay(.some(nil)), ClashText.delay(nil)], ["428 ms", "Timeout", ""])
         XCTAssertEqual(ClashSettings.updateHours.map(ClashText.interval), ["Off", "1 h", "6 h", "12 h", "24 h"])

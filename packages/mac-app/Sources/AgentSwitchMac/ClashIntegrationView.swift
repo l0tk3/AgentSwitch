@@ -32,6 +32,8 @@ private struct ClashActions {
     var edit: (ClashTemplate) -> Void = { _ in }
     /// The same for the DNS template's text.
     var editDNS: () -> Void = {}
+    /// The routing check is run.
+    var check: () -> Void = {}
 }
 
 /// What is being edited in the sheet — a rule template's rules or the DNS template's text — as it was when the sheet
@@ -69,12 +71,16 @@ struct ClashIntegrationView: View {
     @State private var delays: [ClashService: [String: Int?]] = [:]
     @State private var testing: Set<ClashService> = []
     @State private var editing: ClashEditing?
+    /// The last routing check's lines; nil: none run yet.
+    @State private var checked: [ClashCheckRow]?
+    @State private var checking = false
     private var view: ClashView? { loaded ?? demo }
 
     var body: some View {
         Form {
             if let view {
                 ClashStatusSection(view: view, error: error)
+                if view.running { ClashCheckSection(rows: checked ?? demoCheck, checking: checking, actions: actions) }
                 if view.found {
                     // What is used day to day comes first; the subscription, once given, is at the foot.
                     if view.source != nil {
@@ -103,6 +109,14 @@ struct ClashIntegrationView: View {
         }
     }
 
+    private var demoCheck: [ClashCheckRow]? {
+        #if DEBUG
+        demo == nil ? nil : ClashView.demoCheck
+        #else
+        nil
+        #endif
+    }
+
     private func demoDelays(_ service: ClashService) -> [String: Int?] {
         #if DEBUG
         demo == nil ? [:] : ClashView.demoDelays
@@ -122,7 +136,19 @@ struct ClashIntegrationView: View {
             select: { service, node in run { try await $0.selectClash(service, node: node) } },
             test: test,
             edit: edit,
-            editDNS: editDNS)
+            editDNS: editDNS,
+            check: check)
+    }
+
+    private func check() {
+        guard !checking else { return }
+        checking = true
+        let client = model.client
+        Task {
+            do { checked = try await client.checkClash(); error = nil }
+            catch { self.error = said(error) }
+            checking = false
+        }
     }
 
     private func edit(_ template: ClashTemplate) {
@@ -238,6 +264,44 @@ private struct ClashStatusSection: View {
             Text("Clash Verge")
         } footer: {
             Footer("AgentSwitch 把订阅原样拿来，加上 Claude 和 OpenAI 的分组与规则，在本机提供给 Clash Verge（只有这台 Mac 读得到）。不改 Clash Verge 的任何文件；不想用了，切回原来的订阅或删掉 AgentSwitch 这一个即可。换节点、调顺序、改直连都立刻生效；只有多出或少掉一组分组时要 Clash Verge 重新取一次，它每小时会自己来取——想更快，在 Clash Verge 里编辑 AgentSwitch 订阅，把更新间隔改成几分钟。")
+        }
+    }
+}
+
+// MARK: - the routing check
+
+/// Whether each kind of traffic goes where its rule sends it, seen on the running core (docs/clash-v0.md §7.9).
+private struct ClashCheckSection: View {
+    let rows: [ClashCheckRow]?
+    let checking: Bool
+    let actions: ClashActions
+
+    var body: some View {
+        Section {
+            ForEach(rows ?? []) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: row.ok == true ? "checkmark.circle" : row.ok == false ? "xmark.circle" : "circle.dotted")
+                        .foregroundStyle(row.ok == true ? AnyShapeStyle(.green) : row.ok == false ? AnyShapeStyle(.red) : AnyShapeStyle(.tertiary))
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(row.title)
+                            Text(row.host).foregroundStyle(.secondary)
+                            Spacer()
+                            if let seen = row.seen { Text(seen).monospacedDigit().foregroundStyle(.secondary) }
+                        }
+                        Text(row.route).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                        if let problem = row.problem { Text(problem).font(.callout).foregroundStyle(.red) }
+                    }
+                }
+            }
+            HStack {
+                Button(rows == nil ? "Check Routing" : "Check Again", action: actions.check).disabled(checking)
+                if checking { ProgressView().controlSize(.small) }
+            }
+        } header: {
+            Text("Routing Check")
+        } footer: {
+            Footer("从这台 Mac 经 Clash 发几条普通的连接出去，再问内核每一条命中了哪条规则、从哪个分组的哪个节点出去；Claude 和 OpenAI 还会问对方看到的来源地址。打勾的是照规则走了，打叉的没有；灰点是这里没有要求（那一项没开），只是告诉你它现在怎么走。不改 Clash 的任何设置。")
         }
     }
 }
@@ -613,5 +677,16 @@ extension ClashView {
     """.utf8))
 
     static let demoDelays: [String: Int?] = ["JP Tokyo 01": 392, "SG Singapore 01": 428, "US Seattle 02": nil, "US Los Angeles 01": 330]
+
+    /// A made-up routing check: Claude as it should be, OpenAI leaving by the wrong group, an ad getting through.
+    static let demoCheck: [ClashCheckRow] = try! JSONDecoder().decode([ClashCheckRow].self, from: Data("""
+    [{"id":"claude","title":"Claude","host":"claude.ai","expect":{"kind":"group","group":"Claude"},"ok":true,
+      "observed":{"outcome":"proxied","rule":"RuleSet as-claude","path":["Claude","Claude自动选择","SG Singapore 01"],"exit":{"ip":"203.0.113.9","loc":"SG"},"ms":362}},
+     {"id":"openai","title":"OpenAI","host":"chatgpt.com","expect":{"kind":"group","group":"OpenAI"},"ok":false,
+      "observed":{"outcome":"proxied","rule":"Match","path":["Manual","HK Hong Kong 03"],"exit":{"ip":"198.51.100.4","loc":"HK"},"ms":552}},
+     {"id":"domestic","title":"Domestic","host":"www.baidu.com","expect":{"kind":"direct"},"ok":true,"observed":{"outcome":"direct","rule":"RuleSet as-domestic","path":["DIRECT"]}},
+     {"id":"block","title":"Ads","host":"ad.doubleclick.net","expect":null,"ok":null,"observed":{"outcome":"proxied","rule":"Match","path":["Manual","HK Hong Kong 03"]}},
+     {"id":"other","title":"Everything Else","host":"www.google.com","expect":null,"ok":null,"observed":{"outcome":"proxied","rule":"DomainKeyword google","path":["Manual","HK Hong Kong 03"]}}]
+    """.utf8))
 }
 #endif

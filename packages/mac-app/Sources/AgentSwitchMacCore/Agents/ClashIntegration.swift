@@ -193,6 +193,63 @@ public struct ClashTemplateRules: Decodable, Equatable, Sendable {
     }
 }
 
+/// One line of the routing check (docs/clash-v0.md §7.9): a kind of traffic, the name tried for it, what it should do
+/// and what the running core did with it.
+public struct ClashCheckRow: Decodable, Equatable, Sendable, Identifiable {
+    public struct Expect: Decodable, Equatable, Sendable {
+        /// `group`, `direct` or `reject`.
+        public let kind: String
+        public let group: String?
+    }
+
+    public struct Exit: Decodable, Equatable, Sendable {
+        public let ip: String
+        public let loc: String
+    }
+
+    public struct Observed: Decodable, Equatable, Sendable {
+        /// `proxied`, `direct`, `rejected`, or `unknown` (the core listed nothing: the node did not answer).
+        public let outcome: String
+        /// The rule that matched, as the core names it.
+        public let rule: String?
+        /// The way out, from the group the rule names down to the node.
+        public let path: [String]
+        /// Where the far end saw it come from, where that was asked.
+        public let exit: Exit?
+        public let ms: Int?
+    }
+
+    public let id: String
+    public let title: String
+    public let host: String
+    /// nil: nothing is asked of this kind here (its template is off); it is shown for what it is.
+    public let expect: Expect?
+    public let observed: Observed
+    public let ok: Bool?
+
+    /// What happened, in a line: `RuleSet as-claude → Claude → Claude自动选择 → 日本家宽-02`, `Rejected`, `No Answer`.
+    public var route: String {
+        switch observed.outcome {
+        case "rejected": return "Rejected"
+        case "unknown": return "No Answer"
+        default: return ([observed.rule].compactMap { $0 } + observed.path).joined(separator: " → ")
+        }
+    }
+
+    /// Where the far end saw it come from and how long it took: `JP 126.36.1.2 · 362 ms`; nil where it was not asked.
+    public var seen: String? {
+        guard let exit = observed.exit else { return nil }
+        return ([exit.loc, exit.ip].filter { !$0.isEmpty }.joined(separator: " ")) + (observed.ms.map { " · \($0) ms" } ?? "")
+    }
+
+    /// What it should have done, said when it did not; nil when it did, or nothing was asked.
+    public var problem: String? {
+        guard ok == false, let expect else { return nil }
+        let should = expect.kind == "group" ? "应该走 \(expect.group ?? "") 这一组" : expect.kind == "direct" ? "应该直连" : "应该被拦截"
+        return observed.outcome == "unknown" ? "\(should)，但内核没有列出这条连接（节点没有回应，或没有连上）。" : "\(should)，实际不是。"
+    }
+}
+
 public struct ClashProfile: Decodable, Equatable, Sendable, Identifiable {
     public let uid: String
     public let name: String
@@ -298,6 +355,12 @@ extension DaemonClient {
 
     /// Take one of Clash Verge's own subscriptions in.
     public func setClashSource(verge uid: String) async throws -> ClashView { try await clashSource(["verge": uid]) }
+
+    /// The routing check: a connection of each kind through the running core, and what the core did with it.
+    public func checkClash() async throws -> [ClashCheckRow] {
+        struct Answer: Decodable { let rows: [ClashCheckRow] }
+        return try decode(Answer.self, try await call("POST", "/clash/check", timeout: 40)).rows
+    }
 
     /// The DNS template's text as it is in use.
     public func clashDNS() async throws -> ClashDNSText { try decode(ClashDNSText.self, try await call("GET", "/clash/dns")) }
