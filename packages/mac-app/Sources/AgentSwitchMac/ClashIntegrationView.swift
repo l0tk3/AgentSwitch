@@ -28,6 +28,15 @@ private struct ClashActions {
     var remove: () -> Void = {}
     var select: (ClashService, String?) -> Void = { _, _ in }
     var test: (ClashService, Bool) -> Void = { _, _ in }
+    /// A template's rules are to be edited: they are fetched, then its sheet opens.
+    var edit: (ClashTemplate) -> Void = { _ in }
+}
+
+/// A template whose rules are being edited, with the rules it had when its sheet opened.
+private struct ClashEditing: Identifiable {
+    let template: ClashTemplate
+    let rules: ClashTemplateRules
+    var id: String { template.rawValue }
 }
 
 /// Clash Integration (docs/clash-v0.md §7): the subscription AgentSwitch works from, the nodes for Claude and for
@@ -44,6 +53,7 @@ struct ClashIntegrationView: View {
     @State private var fetching = false
     @State private var delays: [ClashService: [String: Int?]] = [:]
     @State private var testing: Set<ClashService> = []
+    @State private var editing: ClashEditing?
     private var view: ClashView? { loaded ?? demo }
 
     var body: some View {
@@ -56,6 +66,7 @@ struct ClashIntegrationView: View {
                         ForEach(ClashService.allCases, id: \.self) { service in
                             ClashServiceSection(service: service, view: view, delays: delays[service] ?? demoDelays(service), testing: testing.contains(service), actions: actions)
                         }
+                        ClashRulesSection(view: view, actions: actions)
                         ClashDirectSection(view: view, actions: actions)
                     }
                     ClashSubscriptionSection(view: view, fetching: fetching, actions: actions)
@@ -65,6 +76,9 @@ struct ClashIntegrationView: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(item: $editing) { item in
+            ClashTemplateEditor(template: item.template, initial: item.rules) { rules in await saveTemplate(item.template, rules: rules) }
+        }
         .task(id: shown) {
             // What Clash Verge runs changes there, not here: looked at again every few seconds while the page shows.
             while shown, !Task.isCancelled {
@@ -91,7 +105,28 @@ struct ClashIntegrationView: View {
             update: { fetch { try await $0.updateClash() } },
             remove: { run { try await $0.removeClashSource() } },
             select: { service, node in run { try await $0.selectClash(service, node: node) } },
-            test: test)
+            test: test,
+            edit: edit)
+    }
+
+    private func edit(_ template: ClashTemplate) {
+        let client = model.client
+        Task {
+            do { editing = ClashEditing(template: template, rules: try await client.clashTemplate(template)); error = nil }
+            catch { self.error = said(error) }
+        }
+    }
+
+    /// A template's own rules kept (nil: the built-in ones again). What the service says of a line that is not a rule
+    /// is the answer: the sheet stays open on it.
+    private func saveTemplate(_ template: ClashTemplate, rules: [String]?) async -> String? {
+        guard var next = view?.settings else { return "还没有读到设置。" }
+        next.templates[template].rules = rules
+        do {
+            loaded = try await model.client.saveClash(next)
+            error = nil
+            return nil
+        } catch { return said(error) }
     }
 
     private func load() async {
@@ -224,6 +259,13 @@ private struct ClashSubscriptionSection: View {
         if let error = source.error { Label("上次没有取到：\(error)。现在用的是之前那一份。", systemImage: "exclamationmark.circle").foregroundStyle(.orange) }
         ForEach(source.providers.filter { $0.error != nil }, id: \.name) { set in
             Label("节点集 \(set.name) 没有取到：\(set.error ?? "")。", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+        }
+        if let group = view.defaultGroup {
+            Toggle("Rename “\(group)” to Manual", isOn: Binding(get: { view.settings.renameDefault }, set: { on in
+                var next = view.settings
+                next.renameDefault = on
+                actions.save(next)
+            }))
         }
         Picker("Auto Update", selection: Binding(get: { view.settings.autoUpdateHours }, set: { hours in
             var next = view.settings
@@ -376,6 +418,91 @@ private struct ClashRadio: View {
     }
 }
 
+// MARK: - the rule templates
+
+private struct ClashRulesSection: View {
+    let view: ClashView
+    let actions: ClashActions
+
+    var body: some View {
+        Section {
+            ForEach(ClashTemplate.allCases, id: \.self) { template in
+                HStack {
+                    Toggle(isOn: Binding(get: { view.settings.templates[template].on }, set: { on in
+                        var next = view.settings
+                        next.templates[template].on = on
+                        actions.save(next)
+                    })) {
+                        Text(template.title)
+                        Text(detail(template)).monospacedDigit()
+                    }
+                    Button("Edit…") { actions.edit(template) }
+                }
+            }
+        } header: {
+            Text("Rules")
+        } footer: {
+            Footer("打开就把这一套规则加进 Clash，关掉就拿走，都立刻生效。Domestic & Local Direct：国内常用域名、微信这类国内应用、局域网，直接连出去。Block Ads & Trackers：拦截广告和统计的域名；它排在订阅自己的规则之后，前面已经有规则管的流量不受它影响。")
+        }
+    }
+
+    private func detail(_ template: ClashTemplate) -> String {
+        guard let state = view.state(template) else { return "" }
+        return ClashText.rules(state.count) + (state.custom ? " · Edited" : "")
+    }
+}
+
+/// A template's rules, a line each (docs/clash-v0.md §7.7). `save` answers with what the service said of a line that
+/// is not a rule, or nil when the rules were kept — the sheet closes only then.
+struct ClashTemplateEditor: View {
+    let template: ClashTemplate
+    let initial: ClashTemplateRules
+    let save: ([String]?) async -> String?
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var problem: String?
+    @State private var saving = false
+
+    /// `problem`: what is said under the text from the start (the design preview's).
+    init(template: ClashTemplate, initial: ClashTemplateRules, problem: String? = nil, save: @escaping ([String]?) async -> String?) {
+        self.template = template
+        self.initial = initial
+        self.save = save
+        _problem = State(initialValue: problem)
+        _text = State(initialValue: initial.rules.joined(separator: "\n"))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(template.title).font(.headline)
+            Text("一行一条规则，写成“类型,内容”，例如 DOMAIN-SUFFIX,cn 或 PROCESS-NAME,WeChat；不写去向（\(template == .domestic ? "这里的都直连" : "这里的都拦截")）。从 Clash 的 yaml 里整行粘过来也可以，多余的部分会去掉；空行和 # 开头的行不算。")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            TextEditor(text: $text)
+                .font(.system(.body, design: .monospaced))
+                .frame(minWidth: 520, minHeight: 360)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            if let problem { Text(problem).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                Button("Reset to Template") { commit(nil) }.disabled(saving || !initial.custom)
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { commit(ClashText.lines(text)) }.keyboardShortcut(.defaultAction).disabled(saving)
+            }
+        }
+        .padding(20)
+        .frame(width: 600)
+    }
+
+    private func commit(_ rules: [String]?) {
+        saving = true
+        Task {
+            problem = await save(rules)
+            saving = false
+            if problem == nil { dismiss() }
+        }
+    }
+}
+
 // MARK: - direct
 
 private struct ClashDirectSection: View {
@@ -428,9 +555,11 @@ extension ClashView {
      "nodes":["JP Tokyo 01","JP Tokyo 02","SG Singapore 01","US Los Angeles 01","US Seattle 02","HK Hong Kong 03"],
      "profiles":[{"uid":"Lbw7BJYzpand","name":"my-subscription.yaml","type":"local"}],
      "settings":{"claude":{"nodes":["JP Tokyo 01","SG Singapore 01","US Seattle 02"]},"openai":{"nodes":["US Los Angeles 01","JP Tokyo 02"]},
-                 "direct":["203.0.113.7"],"autoUpdateHours":24},
+                 "direct":["203.0.113.7"],"autoUpdateHours":24,"renameDefault":true,
+                 "templates":{"domestic":{"on":true,"rules":null},"block":{"on":false,"rules":["DOMAIN-SUFFIX,doubleclick.net"]}}},
      "services":{"claude":{"group":"Claude","auto":"Claude自动选择","live":true,"now":"SG Singapore 01","autoNow":"JP Tokyo 01","missing":[]},
                  "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":[]}},
+     "templates":{"domestic":{"on":true,"custom":false,"count":169},"block":{"on":false,"custom":true,"count":31}},"defaultGroup":"Candy",
      "install":"clash://install-config?url=x"}
     """.utf8))
 

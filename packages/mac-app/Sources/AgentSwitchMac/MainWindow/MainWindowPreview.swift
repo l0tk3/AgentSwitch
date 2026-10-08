@@ -77,9 +77,14 @@ enum MainWindowPreview {
 
     /// The rail put away, and out again under the pointer.
     /// `main-clash`, `main-clash-full`: the Clash page (docs/clash-v0.md §7) from a made-up Clash Verge — what is still
-    /// to do at its top, each service's nodes with what its group uses, the subscription at its foot.
+    /// to do at its top, each service's nodes with what its group uses, the rule templates, the subscription at its
+    /// foot. `main-clash-rules`: a template's rules being edited (§7.7).
     static func renderClash(model: AppModel, into directory: URL) async throws {
         try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), to: directory.appendingPathComponent("main-clash.png"))
+        // A template's rules being edited, the service's word on a line that is not a rule under them.
+        let rules = ClashTemplateRules(rules: ["DOMAIN-SUFFIX,doubleclick.net", "DOMAIN-KEYWORD,adservice", "DOMAIN-SUFFIX,appsflyer.com", "DOMAIN-KEYWORD,umeng", "MATCH,DIRECT"], custom: true)
+        try await DesignPreview.renderSheet(ClashTemplateEditor(template: .block, initial: rules, problem: "第 5 行不是一条规则（这里不收 MATCH 这种规则）：MATCH,DIRECT") { _ in nil },
+                                            model: model, appearance: NSAppearance(named: .darkAqua), to: directory.appendingPathComponent("main-clash-rules.png"))
         // The same in a window tall enough for all of it.
         try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1000, height: 1560), to: directory.appendingPathComponent("main-clash-full.png"))
     }

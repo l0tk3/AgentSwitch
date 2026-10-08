@@ -16,21 +16,71 @@ public struct ClashServiceNodes: Codable, Equatable, Sendable {
     public init(nodes: [String] = []) { self.nodes = nodes }
 }
 
+/// A rule template (docs/clash-v0.md §7.7): a set of rules that go one way, put on with a switch.
+public enum ClashTemplate: String, CaseIterable, Sendable {
+    /// Domestic and local traffic goes direct.
+    case domestic
+    /// Ads and trackers are rejected.
+    case block
+
+    public var title: String { self == .domestic ? "Domestic & Local Direct" : "Block Ads & Trackers" }
+}
+
+public struct ClashTemplateSetting: Codable, Equatable, Sendable {
+    public var on: Bool
+    /// The user's own rules, a line each; nil: the template as it is built in.
+    public var rules: [String]?
+
+    public init(on: Bool = false, rules: [String]? = nil) {
+        self.on = on
+        self.rules = rules
+    }
+
+    private enum CodingKeys: String, CodingKey { case on, rules }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(on, forKey: .on)
+        try c.encode(rules, forKey: .rules)   // null is said, not left out
+    }
+}
+
+public struct ClashTemplates: Codable, Equatable, Sendable {
+    public var domestic: ClashTemplateSetting
+    public var block: ClashTemplateSetting
+
+    public init(domestic: ClashTemplateSetting = .init(), block: ClashTemplateSetting = .init()) {
+        self.domestic = domestic
+        self.block = block
+    }
+
+    public subscript(template: ClashTemplate) -> ClashTemplateSetting {
+        get { template == .domestic ? domestic : block }
+        set { if template == .domestic { domestic = newValue } else { block = newValue } }
+    }
+}
+
 public struct ClashSettings: Codable, Equatable, Sendable {
     public var claude: ClashServiceNodes
     public var openai: ClashServiceNodes
     public var direct: [String]
     /// The subscription is fetched again after this many hours; 0: only when asked.
     public var autoUpdateHours: Int
+    public var templates: ClashTemplates
+    /// The subscription's default group is called `Manual` in what Clash Verge is handed.
+    public var renameDefault: Bool
 
     /// The intervals offered (the service takes no other).
     public static let updateHours = [0, 1, 6, 12, 24]
 
-    public init(claude: ClashServiceNodes = .init(), openai: ClashServiceNodes = .init(), direct: [String] = [], autoUpdateHours: Int = 24) {
+    public init(claude: ClashServiceNodes = .init(), openai: ClashServiceNodes = .init(), direct: [String] = [], autoUpdateHours: Int = 24,
+                templates: ClashTemplates = .init(), renameDefault: Bool = false) {
         self.claude = claude
         self.openai = openai
         self.direct = direct
         self.autoUpdateHours = autoUpdateHours
+        self.templates = templates
+        self.renameDefault = renameDefault
     }
 
     public subscript(service: ClashService) -> ClashServiceNodes {
@@ -84,6 +134,24 @@ public struct ClashServiceState: Decodable, Equatable, Sendable {
     public var automatic: Bool { live && now == auto }
 }
 
+/// A rule template as it stands: on or off, whether its rules are the user's own, how many are in use.
+public struct ClashTemplateState: Decodable, Equatable, Sendable {
+    public let on: Bool
+    public let custom: Bool
+    public let count: Int
+}
+
+/// A template's rules as they are in use, to edit them.
+public struct ClashTemplateRules: Decodable, Equatable, Sendable {
+    public let rules: [String]
+    public let custom: Bool
+
+    public init(rules: [String], custom: Bool) {
+        self.rules = rules
+        self.custom = custom
+    }
+}
+
 public struct ClashProfile: Decodable, Equatable, Sendable, Identifiable {
     public let uid: String
     public let name: String
@@ -104,6 +172,9 @@ public struct ClashView: Decodable, Equatable, Sendable {
     public let profiles: [ClashProfile]
     public let settings: ClashSettings
     private let services: [String: ClashServiceState]
+    private let templates: [String: ClashTemplateState]
+    /// The subscription's default group, which can be called `Manual`; nil: it has none such, or has a `Manual`.
+    public let defaultGroup: String?
     /// The core runs the subscription AgentSwitch makes; it is the one made now (else Clash Verge fetches it again).
     public let active: Bool
     public let upToDate: Bool
@@ -114,6 +185,8 @@ public struct ClashView: Decodable, Equatable, Sendable {
 
     public func state(_ service: ClashService) -> ClashServiceState? { services[service.rawValue] }
 
+    public func state(_ template: ClashTemplate) -> ClashTemplateState? { templates[template.rawValue] }
+
     /// What is still to do, in order; empty when nothing is.
     public var todo: [String] {
         guard found else { return ["这台 Mac 上没有找到 Clash Verge。"] }
@@ -121,7 +194,7 @@ public struct ClashView: Decodable, Equatable, Sendable {
         var steps: [String] = []
         if source == nil { steps.append("先在下面给一个订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
         else if !active { steps.append("在 Clash Verge 里添加并切换到 AgentSwitch 订阅。") }
-        else if !upToDate { steps.append("多了或少了一组分组：在 Clash Verge 里更新一次 AgentSwitch 订阅，或者等它自己来取（每小时一次）。") }
+        else if !upToDate { steps.append("订阅的正文变了（分组或规则集多了、少了或改了名）：在 Clash Verge 里更新一次 AgentSwitch 订阅，或者等它自己来取（每小时一次）。") }
         if tun == false { steps.append("打开 Clash Verge 的 TUN 模式。") }
         return steps
     }
@@ -156,6 +229,12 @@ public enum ClashText {
     /// `1 h`, `24 h`; `Off` for never.
     public static func interval(hours: Int) -> String { hours == 0 ? "Off" : "\(hours) h" }
 
+    /// `169 Rules`, `1 Rule`.
+    public static func rules(_ count: Int) -> String { count == 1 ? "1 Rule" : "\(count) Rules" }
+
+    /// The lines of an edited template, as they go to the service (which says which of them is not a rule).
+    public static func lines(_ text: String) -> [String] { text.components(separatedBy: .newlines) }
+
     /// Where the subscription comes from, in a line: a link's host, a file's name.
     public static func origin(_ source: ClashSource) -> String {
         source.kind == "link" ? (source.host ?? source.name) : source.name
@@ -177,6 +256,11 @@ extension DaemonClient {
 
     /// Take one of Clash Verge's own subscriptions in.
     public func setClashSource(verge uid: String) async throws -> ClashView { try await clashSource(["verge": uid]) }
+
+    /// A template's rules as they are in use.
+    public func clashTemplate(_ template: ClashTemplate) async throws -> ClashTemplateRules {
+        try decode(ClashTemplateRules.self, try await call("GET", "/clash/templates/\(template.rawValue)"))
+    }
 
     public func removeClashSource() async throws -> ClashView { try decode(ClashView.self, try await call("DELETE", "/clash/source")) }
 

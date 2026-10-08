@@ -8,7 +8,9 @@ final class ClashIntegrationTests: XCTestCase {
         let kept = #"{"kind":"file","name":"tgyun_config.yaml","updatedAt":1791462000000,"nodes":42,"providers":[{"name":"tgyun","host":"sub.example:9888","updatedAt":1791462000000,"nodes":42}],"traffic":{"used":13207024435,"total":107374182400,"expire":1798675200000}}"#
         let json = """
         {\(fields),"source":\(source ? kept : "null"),"nodes":["A","B","C"],"profiles":[{"uid":"Lbw7BJYzpand","name":"mine.yaml","type":"local","file":"Lbw7BJYzpand.yaml"}],
-         "settings":{"claude":{"nodes":["B","A"]},"openai":{"nodes":[]},"direct":["5.102.107.254"],"autoUpdateHours":6},
+         "settings":{"claude":{"nodes":["B","A"]},"openai":{"nodes":[]},"direct":["5.102.107.254"],"autoUpdateHours":6,"renameDefault":true,
+                     "templates":{"domestic":{"on":true,"rules":null},"block":{"on":false,"rules":["DOMAIN,ads.example"]}}},
+         "templates":{"domestic":{"on":true,"custom":false,"count":169},"block":{"on":false,"custom":true,"count":1}},"defaultGroup":"Candy",
          "services":{"claude":{"group":"Claude","auto":"Claude自动选择","live":true,"now":"Claude自动选择","autoNow":"B","missing":[]},
                      "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":["gone"]}},
          "install":"clash://install-config?url=x","fetchedAt":null}
@@ -18,7 +20,11 @@ final class ClashIntegrationTests: XCTestCase {
 
     func testWhatTheServiceSaysIsReadAsItIs() throws {
         let seen = try view(#""found":true,"running":true,"version":"v1.19.31","tun":true,"active":true,"upToDate":true"#)
-        XCTAssertEqual(seen.settings, ClashSettings(claude: .init(nodes: ["B", "A"]), openai: .init(), direct: ["5.102.107.254"], autoUpdateHours: 6))
+        XCTAssertEqual(seen.settings, ClashSettings(claude: .init(nodes: ["B", "A"]), openai: .init(), direct: ["5.102.107.254"], autoUpdateHours: 6,
+                                                    templates: .init(domestic: .init(on: true), block: .init(on: false, rules: ["DOMAIN,ads.example"])), renameDefault: true))
+        XCTAssertEqual(seen.state(.domestic), ClashTemplateState(on: true, custom: false, count: 169))
+        XCTAssertEqual(seen.state(.block).map { ClashText.rules($0.count) }, "1 Rule")
+        XCTAssertEqual(seen.defaultGroup, "Candy")
         XCTAssertEqual(seen.settings[.claude].nodes, ["B", "A"])
         XCTAssertEqual(seen.source?.providers, [ClashSourceProvider(name: "tgyun", host: "sub.example:9888", nodes: 42, error: nil)])
         XCTAssertEqual(seen.source.map(ClashText.origin), "tgyun_config.yaml")
@@ -50,6 +56,16 @@ final class ClashIntegrationTests: XCTestCase {
         XCTAssertEqual((sent?["openai"] as? [String: Any])?["nodes"] as? [String], ["US 01"])
         XCTAssertEqual(sent?["direct"] as? [String], [])
         XCTAssertEqual(sent?["autoUpdateHours"] as? Int, 0)
+        // A template that was not edited says so (`null`), one that was sends its lines; the rename is a plain yes or no.
+        settings.templates[.block] = ClashTemplateSetting(on: true, rules: ClashText.lines("DOMAIN,ads.example\n\n# mine\n"))
+        let again = try JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any]
+        let templates = again?["templates"] as? [String: [String: Any]]
+        XCTAssertTrue(templates?["domestic"]?["rules"] is NSNull)
+        XCTAssertEqual(templates?["domestic"]?["on"] as? Bool, false)
+        XCTAssertEqual(templates?["block"]?["rules"] as? [String], ["DOMAIN,ads.example", "", "# mine", ""])
+        XCTAssertEqual(again?["renameDefault"] as? Bool, false)
+        XCTAssertEqual(ClashTemplate.allCases.map(\.title), ["Domestic & Local Direct", "Block Ads & Trackers"])
+        XCTAssertEqual([ClashText.rules(169), ClashText.rules(1)], ["169 Rules", "1 Rule"])
         XCTAssertTrue(ClashSettings.updateHours.contains(ClashSettings().autoUpdateHours))
     }
 
