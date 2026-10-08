@@ -263,6 +263,7 @@ extension MainPage {
         case .dispatch: PixelArt.railDispatch
         case .terminals: PixelArt.railTerminals
         case .browser: PixelArt.railBrowser
+        case .clash: PixelArt.railClash
         }
     }
 }

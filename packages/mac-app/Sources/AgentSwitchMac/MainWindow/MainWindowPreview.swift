@@ -76,6 +76,11 @@ enum MainWindowPreview {
     }
 
     /// The rail put away, and out again under the pointer.
+    /// `main-clash`: the Clash page (docs/clash-v0.md §6) from a made-up Clash Verge, what is still to do at its top.
+    static func renderClash(model: AppModel, into directory: URL) async throws {
+        try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), to: directory.appendingPathComponent("main-clash.png"))
+    }
+
     static func renderRail(model: AppModel, into directory: URL) async throws {
         func file(_ base: String) -> URL { directory.appendingPathComponent("\(base).png") }
         let dark = NSAppearance(named: .darkAqua)
@@ -268,7 +273,8 @@ enum MainWindowPreview {
             .environment(\.dispatchService, DispatchDemoService())
             .environment(\.dispatchPreviewRoute, open))
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: NSHostingView(rootView: TerminalPageStandIn(list: rail != .bare)),
-                                              .browser: BrowserPage.host(browser)])
+                                              .browser: BrowserPage.host(browser),
+                                              .clash: NSHostingView(rootView: ClashPage(state: state, demo: .demo).environment(model))])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: head(list: rail != .bare), model: model, content: container,
                                                                 actions: MainBarActions(), browser: browser))
         host.sizingOptions = []

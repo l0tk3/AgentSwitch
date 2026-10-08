@@ -31,6 +31,11 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (Browser) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "clash" {
+                    try await MainWindowPreview.renderClash(model: model, into: directory)
+                    FileHandle.standardError.write(Data("design preview (Clash) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "rail" {
                     try await MainWindowPreview.renderRail(model: model, into: directory)
                     FileHandle.standardError.write(Data("design preview (the rail put away) written to \(directory.path)\n".utf8))

@@ -1,12 +1,32 @@
 import AgentSwitchMacCore
 import SwiftUI
 
-/// Settings › Clash Integration (docs/clash-v0.md §6): which of Clash Verge's subscriptions AgentSwitch works from, the
+/// The main window's Clash page (docs/clash-v0.md §6; 2026-10-08, user: 可以不在设置里吗，弄成浏览器 terminal dispatch并列的):
+/// the form in a column of its own on the window's dark ground, looked at again only while the page is the one shown.
+struct ClashPage: View {
+    let state: MainWindowState
+    /// A made-up Clash for the design preview: shown as it is, the service never asked.
+    var demo: ClashView?
+
+    var body: some View {
+        ClashIntegrationView(shown: demo == nil && state.page == .clash && state.windowVisible, demo: demo)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
+    }
+}
+
+/// Clash Integration (docs/clash-v0.md §6): which of Clash Verge's subscriptions AgentSwitch works from, the
 /// nodes for Claude and for OpenAI in their order, the addresses that go direct — and, until Clash Verge runs the
 /// subscription AgentSwitch makes with TUN on, what is still to do there.
 struct ClashIntegrationView: View {
     @Environment(AppModel.self) private var model
-    @State private var view: ClashView?
+    /// The page is on screen: what Clash Verge runs is asked for only then.
+    var shown = true
+    var demo: ClashView?
+    @State private var loaded: ClashView?
+    private var view: ClashView? { loaded ?? demo }
     @State private var error: String?
     @State private var address = ""
 
@@ -25,9 +45,9 @@ struct ClashIntegrationView: View {
             }
         }
         .formStyle(.grouped)
-        .task {
+        .task(id: shown) {
             // What Clash Verge runs changes there, not here: looked at again every few seconds while the page shows.
-            while !Task.isCancelled {
+            while shown, !Task.isCancelled {
                 await load()
                 try? await Task.sleep(for: .seconds(3))
             }
@@ -128,7 +148,7 @@ struct ClashIntegrationView: View {
     }
 
     private func load() async {
-        do { view = try await model.client.clash(); error = nil }
+        do { loaded = try await model.client.clash(); error = nil }
         catch { if view == nil { self.error = (error as? DaemonError)?.reason ?? error.localizedDescription } }
     }
 
@@ -139,8 +159,23 @@ struct ClashIntegrationView: View {
         guard next != view.settings else { return }
         let client = model.client
         Task {
-            do { self.view = try await client.saveClash(next); error = nil }
+            do { loaded = try await client.saveClash(next); error = nil }
             catch { self.error = (error as? DaemonError)?.reason ?? error.localizedDescription }
         }
     }
 }
+
+#if DEBUG
+extension ClashView {
+    /// A made-up Clash Verge for the design preview: a subscription chosen, three nodes for Claude picked by hand, two
+    /// for OpenAI, one address direct, and Clash Verge not yet on AgentSwitch's subscription.
+    static let demo: ClashView = try! JSONDecoder().decode(ClashView.self, from: Data("""
+    {"found":true,"running":true,"version":"v1.19.31","tun":false,"active":false,"upToDate":false,
+     "nodes":["JP Tokyo 01","JP Tokyo 02","SG Singapore 01","US Los Angeles 01","US Seattle 02","HK Hong Kong 03"],
+     "profiles":[{"uid":"Lbw7BJYzpand","name":"my-subscription.yaml","type":"local"}],"currentProfile":"Lbw7BJYzpand",
+     "settings":{"source":"Lbw7BJYzpand","claude":{"nodes":["JP Tokyo 01","SG Singapore 01","US Seattle 02"],"mode":"manual","picked":"SG Singapore 01"},
+                 "openai":{"nodes":["US Los Angeles 01","JP Tokyo 02"],"mode":"auto"},"direct":["203.0.113.7"]},
+     "install":"clash://install-config?url=x"}
+    """.utf8))
+}
+#endif

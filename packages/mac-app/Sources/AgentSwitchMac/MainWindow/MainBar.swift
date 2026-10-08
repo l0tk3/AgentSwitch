@@ -95,7 +95,7 @@ struct MainWindowRoot: View {
         let list: CGFloat = switch state.page {
         case .terminals: head.sideWidth
         case .browser: browser.map { CGFloat($0.side.shown(pageWidth: Double(windowWidth - rail))) } ?? 0
-        case .dispatch: 0
+        case .dispatch, .clash: 0
         }
         return rail + list
     }
@@ -188,7 +188,7 @@ struct MainBar: View {
                         ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Terminal ⌘T", action: actions.newTerminal)
                     case .browser:
                         ToolbarPixelButton(rows: PixelArt.toolbarNew, help: "New Tab ⌘T", action: actions.newTab)
-                    case .dispatch:
+                    case .dispatch, .clash:
                         EmptyView()
                     }
                 }
@@ -202,6 +202,8 @@ struct MainBar: View {
                 DispatchTitleView(title: state.dispatchTitle, back: state.showsBack, action: actions.back)
             case .browser:
                 DispatchTitleView(title: state.browserTitle, back: false, action: {})
+            case .clash:
+                DispatchTitleView(title: BarTitle("Clash Integration"), back: false, action: {})
             }
         }
     }

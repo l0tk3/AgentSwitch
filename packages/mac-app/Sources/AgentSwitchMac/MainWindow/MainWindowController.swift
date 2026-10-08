@@ -175,7 +175,8 @@ final class MainWindowController: NSObject {
             model.browserFront.asked()
             BrowserFront.activate(agentswitchHome: model.paths.agentswitchHome)
         }
-        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.pageView, .browser: BrowserPage.host(browser)])
+        let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.pageView, .browser: BrowserPage.host(browser),
+                                              .clash: NSHostingView(rootView: ClashPage(state: state).environment(model))])
         let host = NSHostingController(rootView: MainWindowRoot(state: state, head: terminals.head, model: model,
                                                                 content: container, actions: barActions, browser: browser))
         host.sizingOptions = []
@@ -286,7 +287,7 @@ final class MainWindowController: NSObject {
         let page: String? = switch state.page {
         case .terminals: terminals?.title
         case .browser: browser?.current.map(BrowserTabText.title)
-        case .dispatch: nil
+        case .dispatch, .clash: nil
         }
         window?.title = page.flatMap { $0.isEmpty ? nil : $0 } ?? "AgentSwitch"
     }
@@ -353,6 +354,8 @@ final class MainWindowController: NSObject {
             if let browser, !window.makeFirstResponder(browser.screen) { window.makeFirstResponder(nil) }
         case .terminals:
             break
+        case .clash:
+            window.makeFirstResponder(nil)
         }
         updateTitle()
     }

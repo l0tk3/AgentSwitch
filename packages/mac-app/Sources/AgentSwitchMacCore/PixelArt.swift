@@ -174,6 +174,13 @@ public enum PixelArt {
         "..#..#...#..#..", "...##.....##...", ".....#####.....",
     ]
 
+    /// Clash (docs/clash-v0.md): one way in, two ways out — traffic sent to one node or another.
+    public static let railClash = [
+        "...........###.", "......######.#.", "......#....###.", "......#........", "......#........", "......#........",
+        "###...#........", "#.#####........", "###...#........", "......#........", "......#........", "......#........",
+        "......#....###.", "......######.#.", "...........###.",
+    ]
+
     /// The lit cells of a sprite.
     public static func sprite(_ rows: [String]) -> [(x: Int, y: Int)] {
         rows.enumerated().flatMap { y, row in row.enumerated().compactMap { x, c in c == "#" ? (x, y) : nil } }

@@ -103,6 +103,7 @@ final class MainWindowState {
         case .dispatch: dispatchActivity
         case .terminals: terminalsActivity
         case .browser: browserActivity
+        case .clash: .none
         }
     }
 

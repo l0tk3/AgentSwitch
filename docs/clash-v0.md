@@ -104,7 +104,7 @@
 - 底本不是“把订阅链接交给 AgentSwitch”，而是**在 Clash Verge 已有的订阅里选一个**：AgentSwitch 每次被取时去读 Clash Verge 存着的那份文件，再加工。这样订阅链接、节点的地址和口令都不进 AgentSwitch 的库，订阅的更新仍由 Clash Verge 做。代价：底本更新后，AgentSwitch 这一个要再更新一次才跟上。
 - 节点顺序写在订阅正文的分组里（`AgentSwitch Claude` 手选组 + `AgentSwitch Claude Auto` 自动组），没有用节点集：节点集要把节点的地址与口令经手一遍，而且那种刷新没测过。所以**改顺序、增删节点要在 Clash Verge 里更新一次这个订阅**，界面会一直提示到更新为止；直连地址和手选哪个节点立刻生效。
 - 这台 Mac 的节点全部来自订阅里的节点集（42 个，`/proxies` 里一个都没有，要读 `/providers/proxies`）。这种节点在分组里不能直接点名，所以每个选中的节点各包一层只筛出它自己的小组（`AS · <节点名>`）。用当前订阅做出来的那份，内核 `-t` 检查通过。
-- 服务端：`src/clash/`、`/clash`、`/clash/settings`（只在 Mac 上）、`/clash/sub.yaml`、`/clash/rules/<名字>.yaml`（只认地址里的口令，只在本机回环）。Mac：设置里的 `Clash Integration` 页。`scripts/clash_probe.ts` 只读地看这台 Mac 上的 Clash。
+- 服务端：`src/clash/`、`/clash`、`/clash/settings`（只在 Mac 上）、`/clash/sub.yaml`、`/clash/rules/<名字>.yaml`（只认地址里的口令，只在本机回环）。Mac：主窗口左边栏的第四页 `Clash`（⌘⇧K），与 Dispatch、Terminals、Browser 并列（用户：可以不在设置里吗，弄成浏览器 terminal dispatch并列的；起先放在设置里）。`-designPreview <目录> -designPreviewOnly clash` 画出 `main-clash`。`scripts/clash_probe.ts` 只读地看这台 Mac 上的 Clash。
 - **还没做**：演示页；配置（profile）里填的代理自动进直连表（现在手填）；真的在 Clash Verge 里切到这个订阅走一遍。
 
 ## 7. 分步

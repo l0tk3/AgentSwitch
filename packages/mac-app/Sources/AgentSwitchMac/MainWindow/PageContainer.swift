@@ -51,7 +51,7 @@ extension MainPage {
     var ground: NSColor {
         switch self {
         case .dispatch: .dispatchGround
-        case .terminals, .browser: .black
+        case .terminals, .browser, .clash: .black
         }
     }
 }

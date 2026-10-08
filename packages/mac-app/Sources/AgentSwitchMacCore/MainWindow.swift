@@ -1,14 +1,14 @@
 import Foundation
 
 // The Mac's main window (docs/dispatch-v0.md §1): one window `AgentSwitch`, its pages — Dispatch (the phone's home on a
-// desk), Terminals (terminal-v0 §1) and Browser (the shared browser, browser-v0 §1) — chosen in the rail on the left,
+// desk), Terminals (terminal-v0 §1), Browser (the shared browser, browser-v0 §1) and Clash (clash-v0 §6) — chosen in the rail on the left,
 // under one 32 pt bar that is the page's own, over one status bar across the window (2026-10-03, proposal B,
 // `implemented/window-bars.html`; its words are MainStatus.swift). What the window decides without AppKit is here: the
 // pages, what each has going on (from `GET /live`, the browser's tab list), the refresh that draws a page in, its
 // shortcuts and the trouble word.
 
 public enum MainPage: String, CaseIterable, Sendable {
-    case dispatch, terminals, browser
+    case dispatch, terminals, browser, clash
 
     /// The page's name (the rail's, the menus').
     public var title: String {
@@ -16,6 +16,7 @@ public enum MainPage: String, CaseIterable, Sendable {
         case .dispatch: "Dispatch"
         case .terminals: "Terminals"
         case .browser: "Browser"
+        case .clash: "Clash"
         }
     }
 
@@ -37,12 +38,13 @@ public enum MainPage: String, CaseIterable, Sendable {
         case .dispatch: "Dispatch ⌘0"
         case .terminals: "Terminals ⌘1–9"
         case .browser: "Browser ⌘⇧B"
+        case .clash: "Clash ⌘⇧K"
         }
     }
 
     /// The page has a list beside it (Terminals' terminals, Browser's tabs): the bar's list button acts there, and is
     /// dimmed in place elsewhere.
-    public var hasList: Bool { self != .dispatch }
+    public var hasList: Bool { self == .terminals || self == .browser }
 
     /// The pages drawn dark whatever the system's look: the terminal window's dark block, the browser's screen, and
     /// since 2026-10-03 Dispatch too (user: 首页白色的，其他地方黑色的太突兀了，这个dispatcher也改成默认黑色的) — a
@@ -83,7 +85,7 @@ public struct PageActivity: Equatable, Sendable {
         switch page {
         case .dispatch: kind = .task
         case .terminals: kind = .terminal
-        case .browser: return .none
+        case .browser, .clash: return .none
         }
         let rows = snapshot?.rows.filter { $0.kind == kind } ?? []
         let waiting = rows.filter(\.needsYou).count
@@ -267,6 +269,7 @@ public enum MainShortcut: Equatable, Sendable {
         }
         if press.command, press.option, !press.control, !press.shift, press.key == "b" { return .toggleRail }
         if press.command, press.shift, !press.control, !press.option, press.key == "b" { return .page(.browser) }
+        if press.command, press.shift, !press.control, !press.option, press.key == "k" { return .page(.clash) }
         if press.command, press.shift, !press.control, !press.option, press.key == "t" { return page == .browser ? .browser(.hold) : nil }
         // With shift or without: `+` is ⇧= on most layouts and a key of its own on others and on the keypad.
         if page == .browser, press.command, !press.control, !press.option, let zoom = zoom(press.key) { return .browser(zoom) }
@@ -284,7 +287,7 @@ public enum MainShortcut: Equatable, Sendable {
         case "b": return page == .browser ? .browser(.toggleList) : nil
         case "t":
             switch page {
-            case .dispatch: return .newTerminal
+            case .dispatch, .clash: return .newTerminal
             case .browser: return .browser(.newTab)
             case .terminals: return nil
             }
