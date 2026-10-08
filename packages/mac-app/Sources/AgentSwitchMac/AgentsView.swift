@@ -16,6 +16,8 @@ struct AgentsView: View {
     @State private var naming: AgentCLI?
     @State private var newName = ""
     @State private var removing: (agent: AgentCLI, profile: AgentProfile)?
+    /// The profile whose own proxy is being set (docs/profiles-v0.md §4).
+    @State private var proxying: ProfileProxyTarget?
     /// The install asked to be deleted, until answered.
     @State private var deleting: AgentInstall?
     /// The agent whose old versions were asked to be cleared, until answered.
@@ -94,6 +96,9 @@ struct AgentsView: View {
         .modifier(ProfileDialogs(naming: namingShown, name: $newName, create: create, removing: removingShown, removingName: removing?.profile.name ?? "",
                                  remove: { if let target = removing { delete(target.agent, target.profile) } }))
         .task { profiles = (try? await model.client.profiles()) ?? profiles }
+        .sheet(item: $proxying) { target in
+            ProfileProxySheet(agent: target.agent, profile: target.profile) { agents in profiles = agents }
+        }
         .confirmationDialog("重启服务？", isPresented: $confirmRestart) {
             Button("Restart Service") { model.restartDaemon() }
         } message: {
@@ -156,7 +161,8 @@ struct AgentsView: View {
             ProfilesSection(agent: agent, profiles: list, error: profileError[agent.rawValue],
                             pick: { id in pick(agent, id) },
                             add: { naming = agent; newName = "" },
-                            remove: { profile in removing = (agent, profile) })
+                            remove: { profile in removing = (agent, profile) },
+                            proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) })
         }
     }
 
@@ -203,6 +209,87 @@ private struct ProfileDialogs: ViewModifier {
     }
 }
 
+/// The profile whose proxy is being set.
+struct ProfileProxyTarget: Identifiable {
+    let agent: AgentCLI
+    let profile: AgentProfile
+    var id: String { "\(agent.rawValue)/\(profile.id)" }
+}
+
+/// A profile's own proxy (docs/profiles-v0.md §4): its address, a user name, a password — sealed by this Mac's gate for
+/// the proxy's own host before anything is sent, as the browser's is. Applied, it is checked at once: where it lets
+/// traffic out is shown, or why it let nothing out (it is kept all the same: it may be down for now).
+struct ProfileProxySheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let agent: AgentCLI
+    let profile: AgentProfile
+    let done: ([String: AgentProfiles]) -> Void
+    @State private var draft: BrowserProxyDraft
+    @State private var exit: ProfileExit?
+    @State private var problem: String?
+    @State private var busy = false
+
+    init(agent: AgentCLI, profile: AgentProfile, problem: String? = nil, done: @escaping ([String: AgentProfiles]) -> Void) {
+        self.agent = agent
+        self.profile = profile
+        self.done = done
+        _draft = State(initialValue: BrowserProxyDraft(profile.proxy))
+        _exit = State(initialValue: profile.exit)
+        _problem = State(initialValue: problem)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\(profile.name) · Proxy").font(.headline)
+            Text("在这个配置名下开的终端，agent 和它运行的命令发出去的流量都从这个代理走；这台 Mac 自己的地址不走。开终端之前会先查一次这个代理，不通就不开，不会改成直连。密码在这台 Mac 上加密后才保存。")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Form {
+                TextField("Server", text: $draft.server, prompt: Text("http://host:port"))
+                TextField("User Name", text: $draft.username)
+                SecureField("Password", text: $draft.password, prompt: Text(profile.proxy?.sealed == true ? "Kept" : ""))
+                if let exit { LabeledContent("Exit") { Text(exit.text).monospacedDigit().textSelection(.enabled) } }
+            }
+            .formStyle(.columns)
+            if let said = draft.problem ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                Button("No Proxy") { apply(nil) }.disabled(busy || profile.proxy == nil)
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Apply & Check") { apply(draft) }.keyboardShortcut(.defaultAction).disabled(busy || !draft.canApply)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    /// The proxy set (nil: none) and checked. With a problem the sheet stays, saying it; without, the exit is shown and
+    /// the sheet stays for it to be read (nil closes).
+    private func apply(_ draft: BrowserProxyDraft?) {
+        let client = model.client, gate = model.gateCLI, agent = agent.rawValue, id = profile.id, current = profile.proxy
+        busy = true
+        problem = nil
+        Task {
+            do {
+                var request: BrowserProxyRequest?
+                if let draft, let site = BrowserIdentityText.proxySite(draft.server) {
+                    var ciphertext: String?
+                    if !draft.password.isEmpty { ciphertext = try await gate.seal(GateSealRequest(label: "profile/proxy", sites: site, value: draft.password)) }
+                    request = draft.request(ciphertext: ciphertext, current: current)
+                }
+                let reply = try await client.setProfileProxy(agent: agent, id: id, proxy: request)
+                done(reply.agents)
+                exit = reply.agents[agent]?.profiles.first { $0.id == id }?.exit
+                problem = reply.problem
+                self.draft.password = ""
+                if request == nil { dismiss() }
+            } catch { problem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+            busy = false
+        }
+    }
+}
+
 /// One agent's profiles: a row each, the current one marked; a new one, and one removed (not `Default`).
 private struct ProfilesSection: View {
     let agent: AgentCLI
@@ -211,6 +298,7 @@ private struct ProfilesSection: View {
     let pick: (String) -> Void
     let add: () -> Void
     let remove: (AgentProfile) -> Void
+    let proxy: (AgentProfile) -> Void
 
     var body: some View {
         Section {
@@ -225,8 +313,12 @@ private struct ProfilesSection: View {
                     Text(profile.name)
                     Text(profile.account ?? (profile.isDefault ? "This Mac’s own" : "Not Signed In")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer()
-                    Text("This Mac").font(.callout).foregroundStyle(.tertiary)
-                    if !profile.isDefault { Button("Delete…") { remove(profile) }.controlSize(.small) }
+                    // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
+                    Text(profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)
+                    if !profile.isDefault {
+                        Button("Proxy…") { proxy(profile) }.controlSize(.small)
+                        Button("Delete…") { remove(profile) }.controlSize(.small)
+                    }
                 }
             }
             if profiles.creatable { Button("New Profile…", action: add) }
@@ -235,7 +327,7 @@ private struct ProfilesSection: View {
             Text("\(agent.title) Profiles")
         } footer: {
             if profiles.creatable {
-                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，运行 /login 登录。")
+                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，运行 /login 登录。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次从哪里出去，查不到就不开；查到的出口写在终端底栏的配置名后面。")
             }
         }
     }

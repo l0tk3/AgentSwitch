@@ -105,8 +105,11 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   suggestion: (try? c.decodeIfPresent(String.self, forKey: .suggestion)) ?? nil,
                   sets: (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil,
                   daybreak: (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil)
-        struct Profile: Decodable { let name: String }
-        profileName = ((try? c.decodeIfPresent(Profile.self, forKey: .profile)) ?? nil)?.name
+        struct Profile: Decodable { let name: String; let exit: ProfileExit? }
+        let profile = (try? c.decodeIfPresent(Profile.self, forKey: .profile)) ?? nil
+        // A profile with a proxy of its own: where that proxy let traffic out when the terminal started goes with its
+        // name wherever the name is shown (docs/profiles-v0.md §4: 代理标注在底栏).
+        profileName = profile.map { [$0.name, $0.exit?.text].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ") }
     }
 
     public var running: Bool { status != "exited" }

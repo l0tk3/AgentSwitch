@@ -31,6 +31,18 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (Browser) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "profiles" {
+                    // A profile's own proxy (docs/profiles-v0.md §4): the sheet once it was applied and checked, and
+                    // one whose proxy let nothing out.
+                    let dark = NSAppearance(named: .darkAqua)
+                    let checked = AgentProfile(id: "abc123def0", name: "cwork1", proxy: BrowserProxy(server: "http://proxy.example:8080", username: "me", sealed: true), exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"))
+                    try await renderSheet(ProfileProxySheet(agent: .claude, profile: checked) { _ in }, model: model, appearance: dark, to: directory.appendingPathComponent("profile-proxy.png"))
+                    let down = AgentProfile(id: "abc123def0", name: "cwork1", proxy: BrowserProxy(server: "socks5://10.0.0.2:1080"))
+                    try await renderSheet(ProfileProxySheet(agent: .claude, profile: down, problem: "经这个代理连不出去（the proxy answered 502）。") { _ in }, model: model, appearance: dark,
+                                          to: directory.appendingPathComponent("profile-proxy-down.png"))
+                    FileHandle.standardError.write(Data("design preview (a profile's proxy) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "clash" {
                     try await MainWindowPreview.renderClash(model: model, into: directory)
                     FileHandle.standardError.write(Data("design preview (Clash) written to \(directory.path)\n".utf8))
