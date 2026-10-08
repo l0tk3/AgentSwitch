@@ -60,7 +60,7 @@ struct TerminalRecordPane: View {
                                 }
                                 if !record.loaded {
                                     BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 24)
-                                } else if record.items.isEmpty, record.sent.isEmpty, !working, requests.isEmpty {
+                                } else if record.items.isEmpty, record.sent.isEmpty, record.notices.isEmpty, !working, requests.isEmpty {
                                     Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端视图。")
                                         .font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.faint)
                                 }

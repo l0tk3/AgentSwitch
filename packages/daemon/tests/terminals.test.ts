@@ -14,7 +14,7 @@ import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
 import { folderFiles, matchFiles } from "../src/terminals/files.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, choicesOnScreen, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, choicesOnScreen, printedSince, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -586,6 +586,32 @@ describe("terminal host", () => {
     await until(() => host.get(info.id)!.choices === null);
     expect(events.filter((e) => e.type === "choices").pop()).toEqual({ type: "choices", choices: null });
     expect(() => host.choose(info.id, 0, "gpt-6-sol (current)")).toThrow(/no longer shows/);
+  });
+
+  it("says what the agent's screen printed for a command: the new lines above its input line (2026-10-08)", () => {
+    const before = ["› 你好", "", "• 你好！有什么我可以帮你处理的？", "", "› Ask Codex to do anything", "  GPT-6-Sol high · ~/w"];
+    expect(printedSince(before, ["› 你好", "", "• 你好！有什么我可以帮你处理的？", "", "• Daybreak off. Applies to new turns.", "", "› Ask Codex to do anything", "  GPT-6-Sol high · ~/w"]))
+      .toBe("Daybreak off. Applies to new turns.");
+    // Claude Code: the echo of what was typed is not it; its answer under it is.
+    expect(printedSince(["❯ ", "────"], ["❯ /model opus", "  ⎿  Set model to Opus 5.5", "────────", "❯ ", "────────"])).toBe("Set model to Opus 5.5");
+    expect(printedSince(before, before)).toBe("");
+    // What changed under the input line (its status row) is not something said.
+    expect(printedSince(before, [...before.slice(0, 5), "  GPT-6-Luna low · ~/w"])).toBe("");
+  });
+
+  it("tells the record's screens what a command printed on the agent's screen (2026-10-08)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    await until(() => host.get(info.id)!.title === "fake agent");
+    await new Promise((r) => setTimeout(r, 200));
+    host.commanded(info.id);
+    host.write(info.id, "/daybreak\r");
+    await until(() => host.get(info.id)!.notices.length === 1, 4000);
+    expect(host.get(info.id)!.notices[0]!.text).toContain("Daybreak on. Applies to new turns.");
+    expect(events.filter((e) => e.type === "notices")).toHaveLength(1);
   });
 
   it("keeps a reply a screen sent until the agent's record holds it, or it turns out not to have been a message (2026-10-08)", async () => {

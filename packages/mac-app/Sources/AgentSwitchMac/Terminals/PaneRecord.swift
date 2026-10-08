@@ -28,6 +28,11 @@ final class PaneRecord {
     private(set) var sent: [SentReply] = []
     /// The list the agent's own screen shows to choose from (nil: none).
     private(set) var choices: ScreenChoices?
+    /// What its screen said to commands sent from a screen.
+    private(set) var notices: [ScreenNotice] = []
+    /// The reply being written to each terminal, kept while the pane shows something else (its other view, another
+    /// terminal): coming back finds it (2026-10-08, user: 我切过去切回来聊天框内容就没了).
+    @ObservationIgnored private static var kept: [String: (text: String, files: [DraftFile])] = [:]
     /// The model the agent says it is on now (Claude Code), once it has said.
     private(set) var modelNow: String?
     /// Codex's Daybreak switch as its stream said last (nil: nothing said yet — the terminal's own word stands).
@@ -117,6 +122,7 @@ final class PaneRecord {
             stop()
             terminal = info.id
             harness = info.harness
+            if let kept = Self.kept.removeValue(forKey: info.id) { draft = kept.text; draftFiles = kept.files }
             let id = info.id
             following = Task { [weak self] in
                 for await message in client().recordEvents(id: id) {
@@ -138,13 +144,14 @@ final class PaneRecord {
     }
 
     func stop() {
+        if !staged, let terminal { Self.kept[terminal] = draft.isEmpty && draftFiles.isEmpty ? nil : (draft, draftFiles) }
         following?.cancel()
         following = nil
         terminal = nil
         session = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
         activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil; daybreakNow = nil
-        progress = nil; sent = []; choices = nil
+        progress = nil; sent = []; choices = nil; notices = []
         draft = ""
         draftFiles = []
         insert = nil
@@ -170,6 +177,8 @@ final class PaneRecord {
             if sent != replies { sent = replies }
         case .choices(let now):
             if choices != now { choices = now }
+        case .notices(let now):
+            if notices != now { notices = now }
         case .record:
             refresh()
         case .model(let model):
@@ -212,7 +221,7 @@ final class PaneRecord {
     }
 
     /// What the record shows: its items, and at their end what was sent and is not in them yet.
-    func shown(working: Bool) -> [RecordItem] { SessionRecord.withSent(items: items, sent: sent, working: working) }
+    func shown(working: Bool) -> [RecordItem] { SessionRecord.withSent(items: SessionRecord.withNotices(items: items, notices: notices), sent: sent, working: working) }
 
     private func stillNow() {
         if progress != nil { progress = nil }

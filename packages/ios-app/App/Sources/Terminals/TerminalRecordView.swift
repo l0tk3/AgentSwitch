@@ -66,11 +66,11 @@ struct TerminalRecordView: View {
                     }
                     if !record.loaded {
                         BrailleSpinner(color: .secondary).frame(maxWidth: .infinity).padding(.top, Theme.Space.xl)
-                    } else if record.items.isEmpty && page.sent.isEmpty && page.status != .working && page.permissions.isEmpty {
+                    } else if record.items.isEmpty && page.sent.isEmpty && page.notices.isEmpty && page.status != .working && page.permissions.isEmpty {
                         Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端。").font(.footnote).foregroundStyle(.tertiary)
                     }
                     // What was sent and is not in the record yet stands at its end (2026-10-08).
-                    ForEach(SentReply.appended(to: record.items, sent: page.sent, working: working)) { item in
+                    ForEach(SentReply.appended(to: ScreenNotice.placed(in: record.items, notices: page.notices), sent: page.sent, working: working)) { item in
                         RecordItemRow(item: item, verbose: verbose, running: working && item.id == record.items.last?.id && item.kind == .work,
                                       changes: canShowChanges ? { changes = ChangesRequest(work: item.id) } : nil,
                                       pictures: terminal.agentSessionId.map { RecordPictureSource(harness: terminal.harness, session: $0) })

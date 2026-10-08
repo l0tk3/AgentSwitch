@@ -55,6 +55,32 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     }
 }
 
+/// What the agent's own screen said to a command sent from a screen (`/daybreak` → `Daybreak off. Applies to new
+/// turns.`): it is in no record, so the service reads it off the screen.
+public struct ScreenNotice: Decodable, Hashable, Sendable {
+    public let id: String
+    public let text: String
+    public let at: Int64
+
+    public init(id: String, text: String, at: Int64) {
+        self.id = id
+        self.text = text
+        self.at = at
+    }
+
+    /// The record with these, each a note where its time puts it.
+    public static func placed(in items: [RecordItem], notices: [ScreenNotice]) -> [RecordItem] {
+        guard !notices.isEmpty else { return items }
+        var out = items
+        for notice in notices {
+            let note = RecordItem(id: "notice-\(notice.id)", kind: .note, at: notice.at, text: notice.text)
+            let index = out.lastIndex { $0.at <= notice.at }.map { $0 + 1 } ?? (out.isEmpty ? 0 : out.count)
+            out.insert(note, at: min(index, out.count))
+        }
+        return out
+    }
+}
+
 /// A question at the end of an answer and the answers it offers.
 public struct RecordQuestion: Decodable, Sendable, Hashable {
     public let title: String

@@ -344,7 +344,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       let wake: (() => void) | null = null;
       let open = true;
       const unsubscribe = host.subscribe(id, record ? null : after, (ev) => {
-        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity" || ev.type === "progress" || ev.type === "sent" || ev.type === "choices") return;
+        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity" || ev.type === "progress" || ev.type === "sent" || ev.type === "choices" || ev.type === "notices") return;
         queue.push(ev);
         if (queue.length > MAX_QUEUED) open = false;
         wake?.();
@@ -359,6 +359,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
           if (now.progress) queue.push({ type: "progress", progress: now.progress });
           if (now.sent.length) queue.push({ type: "sent", replies: now.sent });
           if (now.choices) queue.push({ type: "choices", choices: now.choices });
+          if (now.notices.length) queue.push({ type: "notices", notices: now.notices });
         }
       }
       try {
@@ -477,6 +478,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     // Typed as a terminal types a dropped file: one word, whatever is in its name.
     const path = new Map([...staged.map((t, i): [string, string] => [t, moved[i]!.path]), ...local.map((t): [string, string] => [t, droppedPath(byToken.get(t)!.path!)])]);
     try {
+      // One of the agent's own commands: what its screen says to it is told to the record's screens (it is in no record).
+      if (body.data.submit && /^\s*\//.test(text)) host.commanded(id);
       const bracketed = host.bracketedPaste(id);
       if (!files.length) {
         host.write(id, replyBytes(text, bracketed, body.data.submit));

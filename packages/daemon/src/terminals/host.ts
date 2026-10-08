@@ -102,6 +102,8 @@ export type TerminalInfo = {
   readonly subagents: readonly Subagent[];
   /** When the status last changed (the Live Activity's clock: working since, waiting since). */
   readonly statusSince: number;
+  /** What the agent's own screen said to commands sent from a screen (`commanded`), the latest last. */
+  readonly notices: readonly ScreenNotice[];
   /** A list to choose from that the agent's own screen shows now (`choicesOnScreen`); null when it shows none. */
   readonly choices: ScreenChoices | null;
   /** Replies a screen sent that the agent's record does not hold yet (`replied`): shown at once, as said. */
@@ -145,6 +147,8 @@ export type TerminalEvent =
   /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
    *  (docs/simple-view-v0.md §4). */
   | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
+  /** Its screen answered a command sent from a screen: all that it has said to such commands, the latest last. */
+  | { readonly type: "notices"; readonly notices: readonly ScreenNotice[] }
   /** The list its own screen shows to choose from changed (null: it shows none now). */
   | { readonly type: "choices"; readonly choices: ScreenChoices | null }
   /** The replies sent and not yet in the agent's record changed (one sent, one found there, one given up). */
@@ -413,6 +417,26 @@ export function compactingOnScreen(lines: readonly string[]): boolean {
   return lines.some((line) => /^[·✢✳✶✻✽*]\s+Compacting conversation(?:…|\.{3})?(?:\s+\([^)]*\)?)?\s*$/u.test(line));
 }
 
+/** What an agent's screen said to one of its own commands (`/daybreak` → `Daybreak off. Applies to new turns.`,
+ *  `/model` → `Model changed to gpt-6-sol high`). The agent writes such lines on its screen and not into its record,
+ *  so a screen that shows the record had nothing to show for the command (2026-10-08, user: 我输入/daybreak都没反应
+ *  然后cli有回应 简略界面没反应). */
+export type ScreenNotice = { readonly id: string; readonly text: string; readonly at: number };
+const MAX_NOTICES = 8;
+const NOTICE_LOOKS_MS = [500, 1500];
+
+/** The lines `after` has that `before` had not, above the agent's input line: what a command printed. Each without
+ *  its bullet; rules, the echo of what was typed and blank lines left out. */
+export function printedSince(before: readonly string[], after: readonly string[]): string {
+  const had = new Set(before.map((l) => l.trim()));
+  let end = after.length;
+  for (let i = after.length - 1; i >= 0; i--) if (/^\s*(?:[│|]\s*)?[›❯>](?:\s|$)/u.test(after[i]!)) { end = i; break; }
+  return after.slice(0, end)
+    .filter((l) => l.trim() && !had.has(l.trim()) && !/^[\s─━╭╮╰╯│|]+$/u.test(l) && !/^\s*[›❯>]\s/u.test(l))
+    .map((l) => l.replace(/^\s*(?:[•⏺●]|⎿)\s*/u, "").trim())
+    .filter(Boolean).slice(-6).join("\n").slice(0, 600);
+}
+
 /** A list the agent draws on its own screen and waits on — Codex's `/model` (its models, then how hard each thinks),
  *  Claude Code's or Codex's question whether to trust a folder, any menu of theirs: numbered rows, one of them marked
  *  as where the selection stands. A screen that shows the record offers the same rows; taking one moves the selection
@@ -667,6 +691,8 @@ class Session {
   /** When a hook last said a compaction was over. */
   compactEndedAt = 0;
   compactTimer: NodeJS.Timeout | null = null;
+  /** What its screen said to commands sent from a screen (`commanded`). */
+  notices: ScreenNotice[] = [];
   /** The list its screen shows to choose from (`choiceLooks`). */
   choices: ScreenChoices | null = null;
   choiceTimer: NodeJS.Timeout | null = null;
@@ -1518,6 +1544,29 @@ export class TerminalHost {
     s.sentTimer.unref();
   }
 
+  /** A screen is about to send terminal `id` one of the agent's own commands: what its screen says to it in the next
+   *  moments is told to the record's screens as a notice. Call before the command is typed. */
+  commanded(id: string): void {
+    const s = this.need(id);
+    if (s.status === "exited") return;
+    const before = this.screenTail(id, s.rows);
+    let told = "";
+    for (const ms of NOTICE_LOOKS_MS) {
+      setTimeout(() => {
+        if (!this.sessions.has(id) || s.status === "exited") return;
+        const after = this.screenTail(id, s.rows);
+        // A list it opened is offered as one (`choices`), not said as a notice.
+        const text = choicesOnScreen(after) ? "" : printedSince(before, after);
+        if (!text || text === told) return;
+        const again = told !== "";
+        told = text;
+        const notice = { id: randomUUID().slice(0, 8), text, at: this.o.now() };
+        s.notices = [...(again ? s.notices.slice(0, -1) : s.notices), notice].slice(-MAX_NOTICES);
+        s.emit({ type: "notices", notices: [...s.notices] });
+      }, ms).unref();
+    }
+  }
+
   /** Its screen drew: a moment later it is read for a list to choose from, and the screens are told when that changed. */
   private choiceLooks(s: Session): void {
     if (s.choiceTimer || s.status === "exited") return;
@@ -1639,7 +1688,7 @@ export class TerminalHost {
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),
-      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], choices: s.choices, seq: s.seq,
+      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], choices: s.choices, notices: [...s.notices], seq: s.seq,
     };
   }
 }

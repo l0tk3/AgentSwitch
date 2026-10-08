@@ -16,6 +16,7 @@ struct TerminalPage: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.interfaceLook) private var look
     @AppStorage("terminal.fontSize") private var fontSize: Double = 10
+    @AppStorage(RecordTextSize.key) private var textStep = 0
     @State private var page: TerminalPageModel
     @State private var reply = ""
     @State private var renaming = false
@@ -63,6 +64,8 @@ struct TerminalPage: View {
         let mode = TerminalViewMode.saved(for: terminal.id)
         _viewMode = State(initialValue: mode)
         _page = State(initialValue: TerminalPageModel(terminal: terminal, fontSize: CGFloat(size), showsScreen: mode == .terminal))
+        // The reply being written to this terminal when the page was last left (2026-10-08, user: 我切过去切回来聊天框内容就没了).
+        _reply = State(initialValue: ReplyDrafts.shared.text[terminal.id] ?? "")
     }
 
     private var simple: Bool { viewMode == .simple }
@@ -86,6 +89,7 @@ struct TerminalPage: View {
         Group {
             if simple {
                 TerminalRecordView(page: page, record: record, terminal: listed, git: model.terminals.git[workdir]?.said, verbose: verbose) { show(.terminal) }
+                    .recordTextSize(textStep)
             } else {
                 screen
             }
@@ -290,6 +294,7 @@ struct TerminalPage: View {
         }
         .onChange(of: page.removed) { if page.removed { TerminalViewMode.forget(page.id); model.terminals.remove(page.id); dismiss() } }
         .onChange(of: fontSize) { page.screen.setFontSize(CGFloat(fontSize)) }
+        .onChange(of: reply) { ReplyDrafts.shared.text[opened.id] = reply.isEmpty ? nil : reply }
     }
 
     /// Where the agent is now, from the list as last read (it follows a `cd`).
@@ -905,4 +910,34 @@ private struct DarkBlock: ViewModifier {
     func body(content: Content) -> some View {
         if on { content.environment(\.colorScheme, .dark) } else { content }
     }
+}
+
+/// The reply being written to each terminal, kept while its page is closed (for as long as the app runs).
+@MainActor final class ReplyDrafts {
+    static let shared = ReplyDrafts()
+    var text: [String: String] = [:]
+}
+
+/// The conversation's text size on this iPhone (Settings › Appearance › Text Size): steps up or down from the size
+/// iOS is set to. The terminal's own size is its pinch.
+enum RecordTextSize {
+    static let key = "record.textStep"
+    static let steps = -3...4
+
+    static func shifted(_ system: DynamicTypeSize, by step: Int) -> DynamicTypeSize {
+        let all = DynamicTypeSize.allCases
+        let at = all.firstIndex(of: system) ?? 3
+        return all[min(max(at + step, 0), all.count - 1)]
+    }
+}
+
+private struct RecordTextSizeModifier: ViewModifier {
+    let step: Int
+    @Environment(\.dynamicTypeSize) private var system
+
+    func body(content: Content) -> some View { content.dynamicTypeSize(RecordTextSize.shifted(system, by: step)) }
+}
+
+extension View {
+    func recordTextSize(_ step: Int) -> some View { modifier(RecordTextSizeModifier(step: step)) }
 }

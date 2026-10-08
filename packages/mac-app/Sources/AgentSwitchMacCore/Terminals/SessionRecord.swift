@@ -214,6 +214,18 @@ public struct SessionRecord: Decodable, Sendable, Hashable {
     /// the service's word that it is there do not arrive together. Held: a message of yours no older than the reply
     /// (a moment's slack) that begins with the same words; one that went with files reads otherwise in the record, so
     /// for it the time decides.
+    /// The record with what the agent's screen said to commands, each a note where its time puts it.
+    public static func withNotices(items: [RecordItem], notices: [ScreenNotice]) -> [RecordItem] {
+        guard !notices.isEmpty else { return items }
+        var out = items
+        for notice in notices {
+            let note = RecordItem(id: "notice-\(notice.id)", kind: .note, at: notice.at, text: notice.text)
+            let index = out.lastIndex { $0.at <= notice.at }.map { $0 + 1 } ?? (out.isEmpty ? 0 : out.count)
+            out.insert(note, at: min(index, out.count))
+        }
+        return out
+    }
+
     /// The questions still open at the record's end: those of its last answer, while nothing of yours comes after it
     /// (in the record, or sent and not there yet).
     public static func openQuestions(items: [RecordItem], sent: [SentReply]) -> [RecordQuestion] {
@@ -314,6 +326,20 @@ public struct RecordStepDetail: Decodable, Sendable, Hashable {
     }
 }
 
+/// What the agent's own screen said to a command sent from a screen (`/daybreak` → `Daybreak off. Applies to new
+/// turns.`): it is in no record, so the service reads it off the screen.
+public struct ScreenNotice: Decodable, Equatable, Sendable {
+    public let id: String
+    public let text: String
+    public let at: Int64
+
+    public init(id: String, text: String, at: Int64) {
+        self.id = id
+        self.text = text
+        self.at = at
+    }
+}
+
 /// A question at the end of an answer and the answers it offers.
 public struct RecordQuestion: Decodable, Sendable, Hashable {
     public let title: String
@@ -397,6 +423,8 @@ public enum TerminalRecordEvent: Equatable, Sendable {
     case sent([SentReply])
     /// The list its own screen shows to choose from changed (nil: none now).
     case choices(ScreenChoices?)
+    /// What its screen said to commands sent from a screen, the latest last.
+    case notices([ScreenNotice])
     /// What it is doing now changed.
     case activity(TerminalActivity?, [TerminalSubagent])
     /// Its session's record changed.
@@ -440,6 +468,9 @@ public enum TerminalRecordEvent: Equatable, Sendable {
         case "choices":
             struct Body: Decodable { let choices: ScreenChoices? }
             return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .choices($0.choices) }
+        case "notices":
+            struct Body: Decodable { let notices: [ScreenNotice] }
+            return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .notices($0.notices) }
         default:
             return nil
         }

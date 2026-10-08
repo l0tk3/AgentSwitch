@@ -84,6 +84,8 @@ final class TerminalPageModel {
     private(set) var sent: [SentReply] = []
     /// The list the agent's own screen shows to choose from (nil: none).
     private(set) var choices: ScreenChoices?
+    /// What its screen said to commands sent from a screen.
+    private(set) var notices: [ScreenNotice] = []
     /// Changes when the session's record does: the page reads it again.
     private(set) var recordRev: String?
     /// The model the agent says it is on now (Claude Code), as the stream last said; nil until it has.
@@ -112,6 +114,7 @@ final class TerminalPageModel {
         progress = terminal.progress
         sent = terminal.sent
         choices = terminal.choices
+        notices = terminal.notices
         activitySince = terminal.statusSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
         screen = TerminalScreenController(fontSize: fontSize)
         screen.onSize = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }
@@ -260,6 +263,8 @@ final class TerminalPageModel {
             sent = replies
         case .choices(let now):
             choices = now
+        case .notices(let now):
+            notices = now
         case .record(let rev):
             recordRev = rev
         case .model(let model):

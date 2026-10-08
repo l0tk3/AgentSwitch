@@ -195,13 +195,16 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let sent: [SentReply]
     /// The list its own screen shows to choose from (nil: none, or an older service).
     public let choices: ScreenChoices?
+    /// What its screen said to commands sent from a screen (older services: none).
+    public let notices: [ScreenNotice]
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String = "manual", name: String,
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
                 subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil, daybreak: Bool? = nil, sets: Bool? = nil,
-                progress: TurnProgress? = nil, sent: [SentReply] = [], choices: ScreenChoices? = nil) {
+                progress: TurnProgress? = nil, sent: [SentReply] = [], choices: ScreenChoices? = nil, notices: [ScreenNotice] = []) {
+        self.notices = notices
         self.choices = choices
         self.progress = progress
         self.sent = sent
@@ -235,7 +238,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, workdir, model, modelNow, suggestion, daybreak, sets, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
-             agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents, progress, sent, choices
+             agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents, progress, sent, choices, notices
     }
 
     public init(from decoder: Decoder) throws {
@@ -269,6 +272,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         progress = try? c.decodeIfPresent(TurnProgress.self, forKey: .progress)
         sent = (try? c.decodeIfPresent([SentReply].self, forKey: .sent)) ?? []
         choices = try? c.decodeIfPresent(ScreenChoices.self, forKey: .choices)
+        notices = (try? c.decodeIfPresent([ScreenNotice].self, forKey: .notices)) ?? []
     }
 
     public var created: Date { Date(milliseconds: createdAt) }
@@ -571,6 +575,8 @@ public enum TerminalEvent: Sendable, Equatable {
     case sent([SentReply])
     /// The list its own screen shows to choose from changed (nil: none now).
     case choices(ScreenChoices?)
+    /// What its screen said to commands sent from a screen, the latest last.
+    case notices([ScreenNotice])
     /// Its session's record changed.
     case record(rev: String)
     /// The agent is on another model now.
@@ -630,6 +636,9 @@ public enum TerminalEvent: Sendable, Equatable {
         case "choices":
             let choices = obj["choices"].flatMap { $0 is NSNull ? nil : try? JSONSerialization.data(withJSONObject: $0) }.flatMap { try? JSONDecoder().decode(ScreenChoices.self, from: $0) }
             return .choices(choices)
+        case "notices":
+            let notices = obj["notices"].flatMap { try? JSONSerialization.data(withJSONObject: $0) }.flatMap { try? JSONDecoder().decode([ScreenNotice].self, from: $0) } ?? []
+            return .notices(notices)
         case "record":
             return (obj["rev"] as? String).map { .record(rev: $0) }
         case "model":

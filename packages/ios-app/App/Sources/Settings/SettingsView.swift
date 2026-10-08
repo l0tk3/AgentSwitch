@@ -158,6 +158,7 @@ struct SettingsView: View {
 /// again in the look chosen (Look.swift), this sheet staying open.
 private struct AppearanceSection: View {
     @AppStorage(InterfaceLook.key) private var raw = InterfaceLook.pixel.rawValue
+    @AppStorage(RecordTextSize.key) private var textStep = 0
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -168,10 +169,14 @@ private struct AppearanceSection: View {
             .pickerStyle(.segmented)
             // The Live Activity showing now is drawn again in the look chosen.
             .onChange(of: raw) { model.syncLive() }
+            // The conversation's text (2026-10-08, user: 手机上没有调整字体大小的地方).
+            Stepper(value: $textStep, in: RecordTextSize.steps) {
+                LabeledContent("Text Size", value: textStep == 0 ? "Default" : (textStep > 0 ? "+\(textStep)" : "\(textStep)"))
+            }
         } header: {
             SectionLabel("Appearance")
         } footer: {
-            Text("只换外观：图标、字体、按钮和提示的写法。功能、位置和操作不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。")
+            Text("只换外观：图标、字体、按钮和提示的写法。功能、位置和操作不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Text Size 调整简略视图里对话文字的大小；终端里的字用两指捏合缩放。")
         }
     }
 }
