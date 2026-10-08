@@ -687,9 +687,7 @@ struct TerminalPage: View {
                     .tint(Theme.ink)
                     .disabled(page.sending || page.status == .exited)
                     .accessibilityLabel("attach")
-                    Button { toggleSealing() } label: { PixelSprite(rows: PixelArt.lock, pixel: 3, color: Theme.signal, strength: 1) }
-                        .buttonStyle(SquareIconButtonStyle(active: false))
-                        .accessibilityLabel("sealed reply")
+                    // (The lock — a sealed reply — is gone with the gate from terminals, docs/profiles-v0.md §8.)
                 }
                 // The system's Paste takes a picture here (not into a sealed reply, which is text).
                 replyText
@@ -879,7 +877,7 @@ struct TerminalPage: View {
     /// Typed straight in, unless it looks like a secret: then asked which way.
     private func sendDirect() async {
         guard canSend else { return }
-        if SecretHint.looksSecret(reply) { secretCheck = reply; return }
+        // (No question about text that looks like a secret: a terminal's reply is typed as written, 2026-10-08.)
         await send(reply, sealed: false)
     }
 

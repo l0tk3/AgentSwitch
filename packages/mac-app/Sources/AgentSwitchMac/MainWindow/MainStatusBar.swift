@@ -84,6 +84,7 @@ struct MainStatusBar: View {
 struct TerminalStatusItems: View {
     let context: TerminalContext
     let seal: () -> Void
+    private static let sealOffered = false
     @State private var hovering = false
     @Environment(\.interfaceLook) private var look
 
@@ -95,7 +96,9 @@ struct TerminalStatusItems: View {
             }
             if let mode = context.mode { Text(ClassicWords.word(mode, in: look)) }
             Text(context.size(in: look))
-            Button(action: seal) {
+            // The lock (Encrypt & Send) is gone with the gate from terminals (docs/profiles-v0.md §8, 2026-10-08: a
+            // terminal's reply is typed as written). Its place is the browser's, when profiles bring one.
+            if Self.sealOffered { Button(action: seal) {
                 Group {
                     if look.isClassic {
                         // The bar's buttons' size and weight.
@@ -115,6 +118,7 @@ struct TerminalStatusItems: View {
             .onHover { hovering = $0 }
             .help(look.isClassic ? "Encrypt & Send (⌘⇧V)：密码与令牌在发送前加密，agent 仅接收密文。" : "Encrypt & Send ⌘⇧V：密码与令牌在发送前加密，agent 仅接收密文。")
             .accessibilityLabel("Encrypt & Send")
+            }
         }
     }
 }

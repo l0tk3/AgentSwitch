@@ -285,11 +285,10 @@ final class TerminalWindowModel {
     // MARK: the sealed reply
 
     /// The lock, ⌘⇧V: the box opens over the screen's foot, or closes. Nothing for a terminal that has ended.
+    /// Encrypt & Send is no longer offered (docs/profiles-v0.md §8, 2026-10-08: the gate left terminals, a reply is
+    /// typed as written): its key and its menu open nothing; a box still open closes.
     func toggleSeal() {
-        if composing { return closeSeal() }
-        guard info?.running == true else { return }
-        composing = true
-        sealFocus += 1
+        if composing { closeSeal() }
     }
 
     func closeSeal() {

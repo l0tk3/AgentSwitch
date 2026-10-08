@@ -360,12 +360,6 @@ private struct TerminalRow: View {
         } else {
             Button("Open in New Window") { model.onDetach(terminal.id) }
         }
-        Button("Encrypt & Send…") {
-            model.select(terminal.id)
-            model.focused?.session?.toggleSeal()
-        }
-        .keyboardShortcut("v", modifiers: [.command, .shift])
-        .disabled(!terminal.running || out)
         Divider()
         Button("Close", role: .destructive) { model.close(terminal) }
             .keyboardShortcut("w", modifiers: .command)
