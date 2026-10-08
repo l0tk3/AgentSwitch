@@ -407,6 +407,34 @@ describe("one step, whole (2026-10-07, user: 官方的代码执行块里看没�
     expect(step.out!.endsWith("the end")).toBe(true);
   });
 
+  it("Codex's question at the end of a message keeps its options; an answer in Codex's own envelope reads as the answer (0.162, 2026-10-08)", () => {
+    const asks = "我看了一下目录。你想先从哪一步开始？";
+    const path = codexFile([
+      line({ timestamp: at(0), type: "session_meta", payload: { id: "x1", cwd: API } }),
+      x.item(1, { type: "UserMessage", id: "u1", content: [{ type: "text", text: "帮我整理剧本" }] }),
+      // As its rollout has it: the question's words are in the message, its options beside it.
+      x.item(2, { type: "AgentMessage", id: "a1", phase: "final_answer", delivery: "async", content: [{ type: "Text", text: asks }],
+        questions: [{ title: "你想先从哪一步开始？", options: ["我先描述一个剧本和问题", "我会提供报错或运行日志", "  先盘点现有剧本\n再决定 "] }] }),
+      // Answered from Codex's own app: the envelope its TUI recognises, alone or after the IDE's context.
+      x.item(3, { type: "UserMessage", id: "u2", content: [{ type: "text", text: `<send_user_message_question_reply>${JSON.stringify({ questionItemId: '["request_user_input_async","a1",0]', question: "你想先从哪一步开始？", answer: "先盘点现有剧本再决定" })}</send_user_message_question_reply>` }] }),
+      // A question the message does not say, and one without options: written out; nothing is added for none.
+      x.item(4, { type: "AgentMessage", id: "a2", content: [{ type: "Text", text: "好。" }], questions: [{ title: "要不要顺便跑一遍测试？", options: ["要", "不要"] }, { title: "还有别的吗？" }] }),
+      x.item(5, { type: "AgentMessage", id: "a3", content: [{ type: "Text", text: "那我开始了。" }], questions: [] }),
+      x.item(6, { type: "UserMessage", id: "u3", content: [{ type: "text", text: `<send_user_message_question_reply>${JSON.stringify([{ questionItemId: "q1", question: "a", answer: "要" }, { questionItemId: "q2", question: "b", answer: "没有了" }])}</send_user_message_question_reply>` }] }),
+      x.item(7, { type: "UserMessage", id: "u4", content: [{ type: "text", text: "<send_user_message_question_reply>not json</send_user_message_question_reply>" }] }),
+    ]);
+    const said = readRecord("codex", path, { cwd: API })!.items.map((it) => (it.type === "user" || it.type === "answer" ? `${it.type}: ${it.text}` : it.type));
+    expect(said).toEqual([
+      "user: 帮我整理剧本",
+      `answer: ${asks}\n\n1. 我先描述一个剧本和问题\n2. 我会提供报错或运行日志\n3. 先盘点现有剧本 再决定`,
+      "user: 先盘点现有剧本再决定",
+      // (Two messages one after the other read as one answer, as everywhere in a record.)
+      "answer: 好。\n\n要不要顺便跑一遍测试？\n\n1. 要\n2. 不要\n\n还有别的吗？\n\n那我开始了。",
+      "user: 要\n没有了",
+      // An envelope that holds no answers is not something you typed: left out, as the agent's other machinery is.
+    ]);
+  });
+
   it("Codex's command whole too; over the API by the run and the step's place in it", async () => {
     const path = codexFile([
       line({ timestamp: at(0), type: "session_meta", payload: { id: "x1", cwd: API } }),

@@ -310,4 +310,48 @@ final class SessionRecordTests: XCTestCase {
         XCTAssertEqual(TerminalRecordEvent.decode(event: "daybreak", data: #"{"type":"daybreak","on":true}"#), .daybreak(true))
         XCTAssertNil(TerminalRecordEvent.decode(event: "daybreak", data: #"{"type":"daybreak"}"#))
     }
+
+    // MARK: how far a turn has come, and what was sent (2026-10-08)
+
+    func testTurnProgressAndSentRepliesDecode() {
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "progress", data: #"{"type":"progress","progress":{"tokens":1300,"way":"down"}}"#), .progress(TurnProgress(tokens: 1300)))
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "progress", data: #"{"type":"progress","progress":null}"#), .progress(nil))
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "sent", data: #"{"type":"sent","replies":[{"id":"r1","text":"你好","at":1700000000000,"files":1}]}"#),
+                       .sent([SentReply(id: "r1", text: "你好", at: 1_700_000_000_000, files: 1)]))
+        XCTAssertEqual(TerminalRecordEvent.decode(event: "sent", data: #"{"type":"sent","replies":[]}"#), .sent([]))
+    }
+
+    func testTurnTokensReadAsTheAgentsOwnLine() {
+        XCTAssertNil(RecordDisplay.turnTokens(nil))
+        XCTAssertNil(RecordDisplay.turnTokens(TurnProgress(tokens: 0)))
+        XCTAssertEqual(RecordDisplay.turnTokens(TurnProgress(tokens: 1)), "↓ 1 token")
+        XCTAssertEqual(RecordDisplay.turnTokens(TurnProgress(tokens: 250)), "↓ 250 tokens")
+        XCTAssertEqual(RecordDisplay.turnTokens(TurnProgress(tokens: 1300)), "↓ 1.3k tokens")
+        XCTAssertEqual(RecordDisplay.turnTokens(TurnProgress(tokens: 2000)), "↓ 2k tokens")
+        XCTAssertEqual(RecordDisplay.turnTokens(TurnProgress(tokens: 12_500, way: "up")), "↑ 12.5k tokens")
+        XCTAssertEqual(RecordDisplay.turnTokens(TurnProgress(tokens: 123_456)), "↓ 123k tokens")
+        XCTAssertEqual(RecordDisplay.turnTokens(TurnProgress(tokens: 1_200_000)), "↓ 1.2M tokens")
+    }
+
+    func testSentRepliesStandAtTheRecordsEndUntilItHoldsThem() {
+        let said = RecordItem(id: "10", kind: .user, at: 1_000, text: "把重试次数改成 3")
+        let answer = RecordItem(id: "20", kind: .answer, at: 2_000, text: "改好了。")
+        let reply = SentReply(id: "r1", text: "顺便把测试也跑一遍", at: 10_000)
+        // Not in the record yet: at its end, as a message of yours; `Queued` while it works.
+        let waiting = SessionRecord.withSent(items: [said, answer], sent: [reply], working: true)
+        XCTAssertEqual(waiting.map(\.id), ["10", "20", "sent-r1"])
+        XCTAssertEqual(waiting.last.map { [$0.kind == .user, $0.queued, $0.text == reply.text, $0.at == 10_000] }, [true, true, true, true])
+        XCTAssertEqual(SessionRecord.withSent(items: [said, answer], sent: [reply], working: false).last?.queued, false)
+        // The record holds it (its page came before the service's word that it does): shown once.
+        let held = RecordItem(id: "30", kind: .user, at: 10_400, text: "顺便把测试也跑一遍")
+        XCTAssertEqual(SessionRecord.withSent(items: [said, answer, held], sent: [reply], working: true).map(\.id), ["10", "20", "30"])
+        // The same words said before it was sent are another message; an answer with those words is not yours.
+        let before = RecordItem(id: "5", kind: .user, at: 1_000, text: "顺便把测试也跑一遍")
+        XCTAssertEqual(SessionRecord.withSent(items: [before, answer], sent: [reply], working: false).map(\.id), ["5", "20", "sent-r1"])
+        XCTAssertEqual(SessionRecord.withSent(items: [RecordItem(id: "40", kind: .answer, at: 10_400, text: reply.text)], sent: [reply], working: false).count, 2)
+        // One that went with files reads otherwise in the record: the time decides.
+        let withFile = SentReply(id: "r2", text: "看这张 /tmp/a.png", at: 20_000, files: 1)
+        XCTAssertEqual(SessionRecord.withSent(items: [RecordItem(id: "50", kind: .user, at: 20_300, text: "看这张 [Image #1]", images: 1)], sent: [withFile], working: false).map(\.id), ["50"])
+        XCTAssertEqual(SessionRecord.withSent(items: [said], sent: [], working: true), [said])
+    }
 }

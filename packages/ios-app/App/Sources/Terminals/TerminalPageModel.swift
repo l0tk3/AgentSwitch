@@ -78,6 +78,10 @@ final class TerminalPageModel {
     private(set) var activityKnown = false
     /// When what it is doing now began (the tool, else the turn).
     private(set) var activitySince: Date?
+    /// How far the turn has come, as the agent's own screen counts it (nil: it says nothing).
+    private(set) var progress: TurnProgress?
+    /// Replies sent that the record does not hold yet: shown at its end meanwhile.
+    private(set) var sent: [SentReply] = []
     /// Changes when the session's record does: the page reads it again.
     private(set) var recordRev: String?
     /// The model the agent says it is on now (Claude Code), as the stream last said; nil until it has.
@@ -103,6 +107,8 @@ final class TerminalPageModel {
         suggestion = terminal.suggestion
         activity = terminal.activity
         subagents = terminal.subagents
+        progress = terminal.progress
+        sent = terminal.sent
         activitySince = terminal.statusSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
         screen = TerminalScreenController(fontSize: fontSize)
         screen.onSize = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }
@@ -236,7 +242,7 @@ final class TerminalPageModel {
             if s != status {
                 // A turn begins or ends: the clock starts over, and at rest it is doing nothing.
                 activitySince = Date()
-                if s != .working { activity = nil; subagents = [] }
+                if s != .working { activity = nil; subagents = []; progress = nil }
                 // A turn has run since the level was asked for: its record says what it ran at.
                 if status == .working, s == .idle { effortAsked = nil }
             }
@@ -245,6 +251,10 @@ final class TerminalPageModel {
             activityKnown = true
             if now != activity { activity = now; activitySince = Date() }
             subagents = agents
+        case .progress(let now):
+            progress = now
+        case .sent(let replies):
+            sent = replies
         case .record(let rev):
             recordRev = rev
         case .model(let model):
@@ -298,6 +308,8 @@ final class TerminalPageModel {
             permissions = []
             activity = nil
             subagents = []
+            progress = nil
+            sent = []
             if !showsScreen { return }
             if away != nil {
                 // Nothing to take any more: the last screen, as the service has it.

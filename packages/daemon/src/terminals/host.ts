@@ -95,11 +95,15 @@ export type TerminalInfo = {
   /** The tool it is using now (the last one it reported before use, PreToolUse / pi's tool_call) and what on, until
    *  it is idle again; null when it has reported none (the Live Activity's step, assistant-v0 §4). */
   readonly activity: { readonly tool: string; readonly target: string; readonly note?: string } | null;
+  /** The turn so far, as the agent's own screen counts it (`workingOnScreen`); null when it says nothing. */
+  readonly progress: TurnProgress | null;
   /** Its sub-agents at work (Claude Code's SubagentStart … SubagentStop), in the order they started: the tree shows
    *  them under the terminal (docs/terminal-v0.md §1). */
   readonly subagents: readonly Subagent[];
   /** When the status last changed (the Live Activity's clock: working since, waiting since). */
   readonly statusSince: number;
+  /** Replies a screen sent that the agent's record does not hold yet (`replied`): shown at once, as said. */
+  readonly sent: readonly SentReply[];
   readonly seq: number;
 };
 
@@ -139,6 +143,11 @@ export type TerminalEvent =
   /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
    *  (docs/simple-view-v0.md §4). */
   | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
+  /** The replies sent and not yet in the agent's record changed (one sent, one found there, one given up). */
+  | { readonly type: "sent"; readonly replies: readonly SentReply[] }
+  /** How far the turn has come changed (the count on the agent's own screen), or there is none now: for a screen that
+   *  shows the record, beside what it is doing. */
+  | { readonly type: "progress"; readonly progress: TurnProgress | null }
   /** Its session's record changed (the stream's own, not the host's: it watches the agent's file). */
   | { readonly type: "record"; readonly rev: string };
 
@@ -211,6 +220,10 @@ export type TerminalHostOptions = {
   /** Claude Code's screen is read for its compacting line this long after it drew (default 400 ms;
    *  docs/simple-view-v0.md §5.7). */
   readonly compactLookMs?: number;
+  /** How often at most a working Claude Code's screen is read for its token count. */
+  readonly progressLookMs?: number;
+  /** How long a reply its record never took is still shown once the terminal is at rest. */
+  readonly sentRestMs?: number;
   /** How long Codex is given to turn its Daybreak switch after its command was typed (default 5 s). */
   readonly daybreakWaitMs?: number;
   /** How long a permission request waits for a screen before the agent asks in the terminal itself (default 30 min). */
@@ -236,7 +249,8 @@ export class TerminalError extends Error {
 type Listener = (ev: TerminalEvent) => void;
 /** How a terminal's turn ended: `line` is the agent's last answer (its start), the error, or the exit. */
 export type TurnEnd = { readonly at: number; readonly ok: boolean; readonly line: string };
-type Pending = { readonly ask: PermissionAsk; readonly resolve: (r: PermissionReply | null) => void; readonly timer: NodeJS.Timeout };
+/** `call`: the agent's own id of the tool call the request is for, where its hooks gave one (`Session.calls`). */
+type Pending = { readonly ask: PermissionAsk; readonly resolve: (r: PermissionReply | null) => void; readonly timer: NodeJS.Timeout; readonly call?: string };
 type Chunk = { readonly seq: number; readonly data: string };
 
 const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
@@ -260,7 +274,7 @@ const DAYBREAK_POLL_MS = 250;
 const DAYBREAK_WAIT_MS = 5000;
 /** After a hook said a compaction is over, a compacting line still on the screen is not believed for this long. */
 const COMPACT_GRACE_MS = 1500;
-const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, compactLookMs: 400, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
+const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, compactLookMs: 400, progressLookMs: 1000, sentRestMs: 5000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
 const MAX_TITLE = 200;
 /** A split escape sequence is held this long at most, and never more than this much of it. */
 const HOLD_MS = 50;
@@ -393,6 +407,42 @@ export function compactingOnScreen(lines: readonly string[]): boolean {
   return lines.some((line) => /^[·✢✳✶✻✽*]\s+Compacting conversation(?:…|\.{3})?(?:\s+\([^)]*\)?)?\s*$/u.test(line));
 }
 
+/** A reply a screen sent, kept until the agent's own record holds it. The record is what the screens show, and a
+ *  message reaches it late: the agent writes it down only as its turn begins — seconds after, for a session's first —
+ *  and one sent while it works is not written down until it is taken (Codex). Meanwhile it is at work with nothing
+ *  on the screens of what it was told (2026-10-08, user: 有的时候简略视图我发送一个消息对方开始working了我的消息还没渲染出来).
+ *  `files`: how many files went with it (their places in its text read otherwise in the record). */
+export type SentReply = { readonly id: string; readonly text: string; readonly at: number; readonly files: number };
+/** Kept at most this many, each for at most this long, and not past this long at rest: what never became a message
+ *  (an answer typed into a question on the agent's own screen) leaves with the turn. */
+const MAX_SENT = 6;
+/** Tool calls remembered as begun, at most (each turn's end forgets them all). */
+const MAX_OPEN_CALLS = 200;
+const SENT_KEEP_MS = 15 * 60_000;
+const MAX_SENT_CHARS = 4_000;
+
+/** How far a turn has come, as the agent's own screen counts it: the tokens that have come from the model (`down`) or
+ *  gone to it (`up`). The screens show it beside "Working": a number that moves says it is not stuck (2026-10-08, user:
+ *  working 建议加上token数量，不然都不知道是不是卡死了). */
+export type TurnProgress = { readonly tokens: number; readonly way: "down" | "up" };
+
+/** Claude Code's line while it works, as its screen draws it: one of its spinner's glyphs at the row's start, a word
+ *  of its own, and in brackets how long and how many tokens — `✻ Pondering… (1m 5s · ↓ 3.3k tokens · esc to interrupt)`
+ *  (seen on 2.1.292, scripts/claude_working_probe.ts). Read for the tokens alone: the count and its arrow. Null when
+ *  no such line is on screen or it names no tokens yet (the first seconds of a turn). As with `compactingOnScreen`,
+ *  only a row that begins with the glyph: an answer that quotes such a line is indented or begins with its bullet. */
+export function workingOnScreen(lines: readonly string[]): TurnProgress | null {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const row = /^[·✢✳✶✻✽*]\s+\S[^()]*\((.*)\)\s*$/u.exec(lines[i]!);
+    if (!row) continue;
+    const said = /(?:^|[\s·])([↑↓])\s*(\d+(?:\.\d+)?)\s*([kKmM])?\s+tokens?\b/u.exec(row[1]!);
+    if (!said) return null;
+    const scale = said[3] ? (said[3].toLowerCase() === "k" ? 1_000 : 1_000_000) : 1;
+    return { tokens: Math.round(Number(said[2]) * scale), way: said[1] === "↑" ? "up" : "down" };
+  }
+  return null;
+}
+
 /** Claude Code's prompt suggestion, read off the last rows of its screen (docs/simple-view-v0.md §5.6). Its input is
  *  the line that begins `❯ `; empty, it shows what it offers as your next message in dim letters (seen on 2.1.292,
  *  scripts/claude_suggestion_probe.ts: `❯ ⟦add both⟧`). What you typed there is not dim, so it is never taken for one;
@@ -514,6 +564,10 @@ class Session {
   readonly ser: InstanceType<typeof serialize.SerializeAddon>;
   readonly listeners = new Set<Listener>();
   readonly pending = new Map<string, Pending>();
+  /** Tool calls begun and not yet done, by the agent's own id for each (Claude Code's `tool_use_id`, in PreToolUse
+   *  and PostToolUse but not in PermissionRequest — seen on 2.1.293, scripts/claude_working_probe.ts): which call a
+   *  request is for, so that another call of the same tool ending does not answer it. */
+  readonly calls = new Map<string, { tool: string; input: string }>();
   chunks: Chunk[] = [];
   bytes = 0;
   seq = 0;
@@ -569,6 +623,12 @@ class Session {
   /** When a hook last said a compaction was over. */
   compactEndedAt = 0;
   compactTimer: NodeJS.Timeout | null = null;
+  /** Replies sent and not yet in its record (`replied`), the oldest first; the timer that gives them up at rest. */
+  sent: SentReply[] = [];
+  sentTimer: NodeJS.Timeout | null = null;
+  /** The turn so far, off its screen (`progressLooks`). */
+  progress: TurnProgress | null = null;
+  progressTimer: NodeJS.Timeout | null = null;
   /** Codex's Daybreak switch as last read from its server; null: no switch, or not read yet. */
   daybreak: boolean | null = null;
   daybreakTimer: NodeJS.Timeout | null = null;
@@ -632,6 +692,8 @@ export class TerminalHost {
       snapshotScrollback: opts.snapshotScrollback ?? DEFAULTS.snapshotScrollback,
       idleAfterMs: opts.idleAfterMs ?? DEFAULTS.idleAfterMs,
       compactLookMs: opts.compactLookMs ?? DEFAULTS.compactLookMs,
+      progressLookMs: opts.progressLookMs ?? DEFAULTS.progressLookMs,
+      sentRestMs: opts.sentRestMs ?? DEFAULTS.sentRestMs,
       daybreakWaitMs: opts.daybreakWaitMs ?? DAYBREAK_WAIT_MS,
       permissionTimeoutMs: opts.permissionTimeoutMs ?? DEFAULTS.permissionTimeoutMs,
       sizeReleaseMs: opts.sizeReleaseMs ?? DEFAULTS.sizeReleaseMs,
@@ -1020,8 +1082,8 @@ export class TerminalHost {
         // its sub-agents with it.
         if (p.source === "compact") return null;
         this.noSubagents(s); this.setStatus(s, "idle"); return null;
-      case "UserPromptSubmit": this.settleAll(s, "working"); this.setStatus(s, "working"); return null;
-      case "Stop": this.settleAll(s, "idle"); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); this.daybreakLooks(s); return null;
+      case "UserPromptSubmit": this.settleAll(s, "working"); s.calls.clear(); this.progressed(s, null); this.setStatus(s, "working"); return null;
+      case "Stop": this.settleAll(s, "idle"); s.calls.clear(); this.noSubagents(s); this.turnEnded(s, true, p.last_assistant_message); this.setStatus(s, "idle"); this.daybreakLooks(s); return null;
       case "SubagentStart": if (agentId) this.subagentStarted(s, agentId, String(p.agent_type ?? "")); return null;
       case "SubagentStop": if (agentId && s.subagents.delete(agentId)) this.doing(s); return null;
       // Claude Code: the turn ended on an API error (a rate limit, overload, authentication…), which Stop does not say.
@@ -1035,9 +1097,14 @@ export class TerminalHost {
       }
       case "PreToolUse": {
         const input = (p.tool_input && typeof p.tool_input === "object" ? p.tool_input : {}) as Record<string, unknown>;
+        if (typeof p.tool_use_id === "string" && p.tool_use_id) {
+          if (s.calls.size >= MAX_OPEN_CALLS) s.calls.clear();
+          s.calls.set(p.tool_use_id, { tool: String(p.tool_name ?? ""), input: JSON.stringify(p.tool_input ?? null) });
+        }
         this.using(s, String(p.tool_name ?? ""), input);
         this.subagentUsing(s, agentId, String(p.agent_type ?? ""), String(p.tool_name ?? ""), input);
-        this.setStatus(s, "working");
+        // A sub-agent going on beside a request that waits for you leaves the terminal waiting for you.
+        if (!(agentId && s.pending.size)) this.setStatus(s, "working");
         const refused = this.opts.floor?.(String(p.tool_name ?? ""), input, s.cwd) ?? null;
         return refused ? { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: refused } } : null;
       }
@@ -1045,8 +1112,17 @@ export class TerminalHost {
         this.workDone(s);
         const tool = String(p.tool_name ?? "");
         const input = JSON.stringify(p.tool_input ?? null);
+        const call = typeof p.tool_use_id === "string" ? p.tool_use_id : "";
+        if (call) s.calls.delete(call);
         const same = [...s.pending.values()].filter((x) => x.ask.tool === tool);
-        const exact = same.find((x) => JSON.stringify(x.ask.input) === input) ?? (same.length === 1 ? same[0] : undefined);
+        // The call that ended says which it was: only the request for that call was answered. Several calls of one
+        // tool run at once (two commands, a sub-agent's beside the main agent's), and one of them ending is not the
+        // answer to another's request — its card stayed on the agent's own screen and left ours (2026-10-08). A
+        // request tied to no call is known by what it was for; without ids at all, as before: by that, else by being
+        // the only one of its tool.
+        const exact = call
+          ? same.find((x) => x.call === call) ?? same.find((x) => !x.call && JSON.stringify(x.ask.input) === input)
+          : same.find((x) => JSON.stringify(x.ask.input) === input) ?? (same.length === 1 ? same[0] : undefined);
         if (exact) this.settle(s, exact.ask.id, null, "working");
         return null;
       }
@@ -1083,7 +1159,11 @@ export class TerminalHost {
       case "PermissionRequest": {
         const tool = String(p.tool_name ?? "tool");
         const input = p.tool_input ?? null;
-        const reply = await this.ask(s, tool, input, signal);
+        // The call it is for: the latest begun with this tool and this input that no request is tied to yet.
+        const tied = new Set([...s.pending.values()].map((x) => x.call));
+        const wanted = JSON.stringify(input);
+        const call = [...s.calls].reverse().find(([id, c]) => c.tool === tool && c.input === wanted && !tied.has(id))?.[0];
+        const reply = await this.ask(s, tool, input, signal, call);
         if (!reply) return null;   // nobody answered: the agent asks in the terminal
         if (reply.decision === "deny") return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "在 AgentSwitch 上被拒绝。" } } };
         // A question's answers go back in the call's own input, as Claude Code's dialog puts them: an allow without
@@ -1200,7 +1280,7 @@ export class TerminalHost {
     s.chunks.push({ seq, data });
     s.bytes += data.length;
     while (s.bytes > this.o.bufferBytes && s.chunks.length > 1) s.bytes -= s.chunks.shift()!.data.length;
-    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); this.compactLooks(s); });
+    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); this.compactLooks(s); this.progressLooks(s); });
     // Codex names its Daybreak switch on its screen when it is turned there and when a session begins with it on:
     // the word is only the cue, its server says how it stands.
     if (s.companion?.daybreak && data.includes("Daybreak")) this.daybreakLooks(s);
@@ -1265,7 +1345,7 @@ export class TerminalHost {
     return this.sessions.get(id)?.lastTurn ?? null;
   }
 
-  private ask(s: Session, tool: string, input: unknown, signal?: AbortSignal): Promise<PermissionReply | null> {
+  private ask(s: Session, tool: string, input: unknown, signal?: AbortSignal, call?: string): Promise<PermissionReply | null> {
     if (s.status === "exited" || signal?.aborted) return Promise.resolve(null);
     const id = randomUUID().slice(0, 8);
     const questions = askQuestions(tool, input);
@@ -1275,7 +1355,7 @@ export class TerminalHost {
       timer.unref();
       const gone = () => { if (s.pending.has(id)) this.settle(s, id, null, "working"); };
       signal?.addEventListener("abort", gone, { once: true });
-      s.pending.set(id, { ask, resolve: (d) => { signal?.removeEventListener("abort", gone); resolve(d); }, timer });
+      s.pending.set(id, { ask, resolve: (d) => { signal?.removeEventListener("abort", gone); resolve(d); }, timer, ...(call ? { call } : {}) });
       this.setStatus(s, "waiting");
       s.emit({ type: "permission", request: ask });
     });
@@ -1335,12 +1415,74 @@ export class TerminalHost {
     s.compactTimer.unref();
   }
 
+  /** Claude Code's screen drew while it works: at most once a second it is read for how far the turn has come (the
+   *  tokens on its working line), and the screens are told when the count moved. Its spinner redraws many times a
+   *  second; the count is what says the model is still answering. */
+  private progressLooks(s: Session): void {
+    if (s.harness !== "claude-code" || s.progressTimer || s.status !== "working") return;
+    s.progressTimer = setTimeout(() => {
+      s.progressTimer = null;
+      if (!this.sessions.has(s.id) || s.status !== "working") return;
+      const now = workingOnScreen(this.screenTail(s.id, s.rows));
+      // A row without a count (a turn's first seconds, a tool running) leaves the last one standing: it only grows.
+      if (!now || (now.tokens === s.progress?.tokens && now.way === s.progress?.way)) return;
+      this.progressed(s, now);
+    }, this.o.progressLookMs);
+    s.progressTimer.unref();
+  }
+
+  /** A screen sent `text` to terminal `id` as a message (typed and entered): it is shown on the record's screens at
+   *  once, until the record holds it (`confirmSent`) or it turns out not to have been a message. A command of the
+   *  agent's own (`/…`, `!…`) is not one. */
+  replied(id: string, text: string, files = 0): void {
+    const s = this.need(id);
+    const said = text.trim();
+    if (!said || /^[/!]/.test(said) || s.status === "exited") return;
+    const now = this.o.now();
+    s.sent = [...s.sent.filter((r) => now - r.at < SENT_KEEP_MS), { id: randomUUID().slice(0, 8), text: said.slice(0, MAX_SENT_CHARS), at: now, files }].slice(-MAX_SENT);
+    s.emit({ type: "sent", replies: [...s.sent] });
+    this.sentRests(s);
+  }
+
+  /** The agent's record holds these now. */
+  confirmSent(id: string, replies: readonly string[]): void {
+    const s = this.sessions.get(id);
+    if (!s) return;
+    const left = s.sent.filter((r) => !replies.includes(r.id));
+    if (left.length === s.sent.length) return;
+    s.sent = left;
+    s.emit({ type: "sent", replies: [...s.sent] });
+  }
+
+  /** At rest for a while with replies its record never took: they were not messages (or it ended first). A turn that
+   *  begins meanwhile keeps them — one sent while it worked is taken as the next turn starts. */
+  private sentRests(s: Session): void {
+    if (s.sentTimer) { clearTimeout(s.sentTimer); s.sentTimer = null; }
+    if (!s.sent.length || s.status === "working" || s.status === "waiting") return;
+    s.sentTimer = setTimeout(() => {
+      s.sentTimer = null;
+      if (!this.sessions.has(s.id) || s.status === "working" || s.status === "waiting") return;
+      const now = this.o.now();
+      const left = s.status === "exited" ? [] : s.sent.filter((r) => now - r.at < this.o.sentRestMs);
+      if (left.length !== s.sent.length) { s.sent = left; s.emit({ type: "sent", replies: [...left] }); }
+      if (left.length) this.sentRests(s);
+    }, this.o.sentRestMs);
+    s.sentTimer.unref();
+  }
+
+  private progressed(s: Session, now: TurnProgress | null): void {
+    if (now?.tokens === s.progress?.tokens && now?.way === s.progress?.way) return;
+    s.progress = now;
+    s.emit({ type: "progress", progress: now });
+  }
+
   private setStatus(s: Session, status: TerminalStatus): void {
     if (s.status === status || s.status === "exited") return;
     s.status = status;
     s.statusSince = this.o.now();
-    if (status === "idle" || status === "exited") { s.activity = null; s.compactFrom = null; }
+    if (status === "idle" || status === "exited") { s.activity = null; s.compactFrom = null; this.progressed(s, null); }
     s.emit({ type: "status", status });
+    this.sentRests(s);
     this.suggests(s);
     this.doing(s);
   }
@@ -1424,7 +1566,7 @@ export class TerminalHost {
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),
-      activity: s.activity, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, seq: s.seq,
+      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], seq: s.seq,
     };
   }
 }

@@ -84,6 +84,8 @@ async function handle(line) {
     process.stdout.write(`• Daybreak ${daybreak ? "on" : "off"}. Applies to new turns.\r\n`);
     return;
   }
+  // Claude Code while it works: its line with a clock and the tokens so far, on a row it redraws (`working 1.3k`).
+  if (line.startsWith("working ")) { process.stdout.write(`\r\x1b[2K✻ Pondering… (12s · ↓ ${line.slice(8)} tokens · thought for 2s)`); return; }
   // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.
   if (line === "compacting") { process.stdout.write("\r\x1b[2K✻ Compacting conversation… (1s)"); return; }
   // (What was typed to say so was echoed onto that row: it is the one above by now.)

@@ -189,12 +189,19 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let statusSince: Int64?
     /// Its sub-agents at work, in the order they started (docs/terminal-v0.md §1; older services: none).
     public let subagents: [TerminalSubagent]
+    /// How far its turn has come, as its own screen counts it (nil: it says nothing, or an older service).
+    public let progress: TurnProgress?
+    /// Replies sent to it that its record does not hold yet (older services: none).
+    public let sent: [SentReply]
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String = "manual", name: String,
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
-                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil, daybreak: Bool? = nil, sets: Bool? = nil) {
+                subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil, daybreak: Bool? = nil, sets: Bool? = nil,
+                progress: TurnProgress? = nil, sent: [SentReply] = []) {
+        self.progress = progress
+        self.sent = sent
         self.suggestion = suggestion
         self.daybreak = daybreak
         self.sets = sets
@@ -225,7 +232,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, workdir, model, modelNow, suggestion, daybreak, sets, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
-             agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents
+             agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents, progress, sent
     }
 
     public init(from decoder: Decoder) throws {
@@ -256,6 +263,8 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         activity = try? c.decodeIfPresent(TerminalActivity.self, forKey: .activity)
         statusSince = try? c.decodeIfPresent(Int64.self, forKey: .statusSince)
         subagents = (try? c.decodeIfPresent([TerminalSubagent].self, forKey: .subagents)) ?? []
+        progress = try? c.decodeIfPresent(TurnProgress.self, forKey: .progress)
+        sent = (try? c.decodeIfPresent([SentReply].self, forKey: .sent)) ?? []
     }
 
     public var created: Date { Date(milliseconds: createdAt) }
@@ -552,6 +561,10 @@ public enum TerminalEvent: Sendable, Equatable {
     case removed
     /// What it is doing now changed: the tool and its sub-agents (a stream that follows the record, simple-view-v0 §4).
     case activity(TerminalActivity?, [TerminalSubagent])
+    /// How far the turn has come changed, as the agent's own screen counts it (nil: it says nothing now).
+    case progress(TurnProgress?)
+    /// The replies sent and not yet in the record changed.
+    case sent([SentReply])
     /// Its session's record changed.
     case record(rev: String)
     /// The agent is on another model now.
@@ -599,6 +612,15 @@ public enum TerminalEvent: Sendable, Equatable {
             let activity = decode("activity").flatMap { try? JSONDecoder().decode(TerminalActivity.self, from: $0) }
             let subagents = decode("subagents").flatMap { try? JSONDecoder().decode([TerminalSubagent].self, from: $0) } ?? []
             return .activity(activity, subagents)
+        case "progress":
+            let progress = (obj["progress"] as? [String: Any]).flatMap { p in (p["tokens"] as? Int).map { TurnProgress(tokens: $0, way: p["way"] as? String ?? "down") } }
+            return .progress(progress)
+        case "sent":
+            let replies = (obj["replies"] as? [[String: Any]] ?? []).compactMap { r -> SentReply? in
+                guard let id = r["id"] as? String, let text = r["text"] as? String else { return nil }
+                return SentReply(id: id, text: text, at: (r["at"] as? NSNumber)?.int64Value ?? 0, files: r["files"] as? Int ?? 0)
+            }
+            return .sent(replies)
         case "record":
             return (obj["rev"] as? String).map { .record(rev: $0) }
         case "model":

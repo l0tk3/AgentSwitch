@@ -21,7 +21,7 @@ import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { GitStatus } from "../terminals/gitStatus.js";
-import type { TerminalInfo } from "../terminals/host.js";
+import type { SentReply, TerminalInfo } from "../terminals/host.js";
 import { subagentDoing } from "./live.js";
 import { modelSettings } from "../router/modelOverlay.js";
 import { modelName } from "../util/modelName.js";
@@ -29,7 +29,7 @@ import { checkTerminalCwd } from "./cwdPolicy.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 import { whereNow } from "../sessions/moved.js";
 import type { SessionMonitor } from "../sessions/monitor.js";
-import { fileRev } from "../sessions/record.js";
+import { fileRev, type RecordItem } from "../sessions/record.js";
 
 export type Terminals = {
   readonly host: TerminalHost;
@@ -122,6 +122,27 @@ function expandCwd(cwd: string): string {
  *  yet (a terminal just started has no session until the agent says which). */
 const RECORD_WATCH_MS = 300;
 const RECORD_FIND_MS = 2000;
+
+/** A record's user entry stands for a reply sent at `at` when it is no older than that (a moment's slack for the two
+ *  clocks' rounding) and says the same — its first words, since a long one is cut short in the record; one that went
+ *  with files reads otherwise there (a placeholder where a path was typed), so the time alone decides. */
+const SENT_SLACK_MS = 3_000;
+const SENT_SAME_CHARS = 24;
+const words = (text: string): string => text.replace(/\s+/g, " ").trim().slice(0, SENT_SAME_CHARS);
+export function holdsReply(items: readonly RecordItem[], reply: SentReply): boolean {
+  return items.some((item) => item.type === "user" && item.ts >= reply.at - SENT_SLACK_MS && (reply.files > 0 || words(item.text) === words(reply.text)));
+}
+
+/** The terminal's record changed: the replies sent to it that the record now holds are no longer shown beside it. */
+function confirmSent(host: TerminalHost, sessions: SessionMonitor, id: string): void {
+  const t = host.get(id);
+  if (!t?.sent.length || !t.agentSessionId) return;
+  try {
+    const items = sessions.record(t.harness, t.agentSessionId, { limit: 40 }, true)?.record.items ?? [];
+    const held = t.sent.filter((reply) => holdsReply(items, reply)).map((reply) => reply.id);
+    if (held.length) host.confirmSent(id, held);
+  } catch { /* unreadable just now: the next change looks again */ }
+}
 
 /** Calls `changed` with the version of the terminal's session file, now and each time the file changes. OpenCode keeps
  *  its sessions in one database, which says nothing of one session: its screens ask again on their own. Returns the
@@ -323,15 +344,22 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       let wake: (() => void) | null = null;
       let open = true;
       const unsubscribe = host.subscribe(id, record ? null : after, (ev) => {
-        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity") return;
+        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity" || ev.type === "progress" || ev.type === "sent") return;
         queue.push(ev);
         if (queue.length > MAX_QUEUED) open = false;
         wake?.();
       }, by);
       stream.onAbort(() => { open = false; wake?.(); });
       const heartbeat = setInterval(() => { void stream.write(": ping\n\n").catch(() => undefined); }, deps.sseHeartbeatMs ?? SSE_HEARTBEAT_MS);
-      const watch = record && deps.sessions ? watchRecord(host, deps.sessions, id, (rev) => { queue.push({ type: "record", rev }); wake?.(); }, deps.recordWatchMs ?? RECORD_WATCH_MS) : null;
-      if (record) { const now = host.get(id); if (now) queue.push({ type: "activity", activity: now.activity, subagents: now.subagents }); }
+      const watch = record && deps.sessions ? watchRecord(host, deps.sessions, id, (rev) => { queue.push({ type: "record", rev }); wake?.(); confirmSent(host, deps.sessions!, id); }, deps.recordWatchMs ?? RECORD_WATCH_MS) : null;
+      if (record) {
+        const now = host.get(id);
+        if (now) {
+          queue.push({ type: "activity", activity: now.activity, subagents: now.subagents });
+          if (now.progress) queue.push({ type: "progress", progress: now.progress });
+          if (now.sent.length) queue.push({ type: "sent", replies: now.sent });
+        }
+      }
       try {
         while (open) {
           for (const ev of coalesce(queue.splice(0))) {
@@ -463,6 +491,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         }
       }
     } catch (err) { return failed(c, err); }
+    // What was typed and entered (as the agent got it: a sealed reply's ciphertext, never its words) shows on the
+    // record's screens until the record itself holds it.
+    if (body.data.submit) host.replied(id, text, files.length);
     audit.record({ terminal: id, action: "input", via: via(c), detail: { length: body.data.text.length, sealed, direct: !body.data.seal, files: files.length, bytes: files.reduce((n, f) => n + f.size, 0) } });
     return c.json({ ok: true, sealed, attached: files.length });
   });

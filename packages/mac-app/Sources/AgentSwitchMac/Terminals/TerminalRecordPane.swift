@@ -60,17 +60,17 @@ struct TerminalRecordPane: View {
                                 }
                                 if !record.loaded {
                                     BrailleSpinner().foregroundStyle(Look.ink2).frame(maxWidth: .infinity).padding(.top, 24)
-                                } else if record.items.isEmpty, !working, requests.isEmpty {
+                                } else if record.items.isEmpty, record.sent.isEmpty, !working, requests.isEmpty {
                                     Text(record.hasSession ? "还没有记录。" : "还没有开始对话。在下面回复，或切到终端视图。")
                                         .font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.faint)
                                 }
-                                ForEach(record.items) { item in
+                                ForEach(record.shown(working: working)) { item in
                                     RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, source: source) {
                                         if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: item.id) }
                                     }
                                 }
                                 if working, requests.isEmpty {
-                                    RecordNowLine(activity: record.activity, subagents: record.subagents, since: record.activitySince)
+                                    RecordNowLine(activity: record.activity, subagents: record.subagents, since: record.activitySince, progress: record.progress)
                                 }
                                 if let session = state.session {
                                     ForEach(requests) { request in
@@ -286,6 +286,9 @@ private struct RecordNowLine: View {
     let activity: TerminalActivity?
     let subagents: [TerminalSubagent]
     let since: Date?
+    /// How far the turn has come, as the agent's own screen counts it: the number moves while it thinks, which a
+    /// clock alone does not say (2026-10-08, user: working 建议加上token数量，不然都不知道是不是卡死了).
+    var progress: TurnProgress? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -311,6 +314,10 @@ private struct RecordNowLine: View {
                 .foregroundStyle(Look.ink2)
                 .shimmer()
                 Spacer(minLength: 4)
+                if let tokens = RecordDisplay.turnTokens(progress) {
+                    Text(tokens).mono(Look.size(10.5, look)).foregroundStyle(Look.faint).monospacedDigit().lineLimit(1).fixedSize()
+                        .contentTransition(.numericText())
+                }
                 if let since {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(RecordDisplay.clock(Int(context.date.timeIntervalSince(since)))).mono(Look.size(10.5, look)).foregroundStyle(Look.faint).monospacedDigit()

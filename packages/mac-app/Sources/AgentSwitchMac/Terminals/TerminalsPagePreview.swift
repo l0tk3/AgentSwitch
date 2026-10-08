@@ -196,7 +196,11 @@ enum TerminalsPagePreview {
         ], plan: [PlanEntry(text: "找出所有用到删除按钮的地方", state: .done), PlanEntry(text: "删除按钮标红", state: .done), PlanEntry(text: "重新构建", state: .doing), PlanEntry(text: "跑测试", state: .todo)],
         usage: RecordUsage(model: usageModel ?? "claude-opus-5-5", used: 124_000, window: 200_000, effort: usageModel == nil ? "medium" : "high"), mode: usageModel == nil ? "acceptEdits" : nil,
         activity: compacting ? TerminalActivity(tool: "Compact", target: "") : working && !bare ? TerminalActivity(tool: "Bash", target: "swift build -c release", note: "Build the release app") : nil,
-        since: working ? Date().addingTimeInterval(compacting ? -65 : -41) : nil)
+        since: working ? Date().addingTimeInterval(compacting ? -65 : -41) : nil,
+        // Thinking, with no tool to name: the count on its own screen, and a message sent a moment ago that it has
+        // not taken yet.
+        progress: working && bare ? TurnProgress(tokens: 3300) : nil,
+        sent: working && bare ? [SentReply(id: "s1", text: "顺便把测试也跑一遍", at: Int64(Date().timeIntervalSince1970 * 1000))] : [])
     }
 
     private static let command = "cd packages/mac-app && swift test --filter AgentsTests 2>&1 \\\n  | grep -E \"error:|Executed [0-9]+ tests\" | tail -2   # the totals\ngit status --short"

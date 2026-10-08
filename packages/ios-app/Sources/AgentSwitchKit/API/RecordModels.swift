@@ -55,6 +55,69 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     }
 }
 
+/// How far a turn has come, as the agent's own screen counts it (the service reads Claude Code's working line): the
+/// tokens come from the model (`down`) or gone to it (`up`). Beside "Working": a number that moves says it is not stuck.
+public struct TurnProgress: Decodable, Hashable, Sendable {
+    public let tokens: Int
+    public let way: String
+
+    public init(tokens: Int, way: String = "down") {
+        self.tokens = tokens
+        self.way = way
+    }
+
+    private enum CodingKeys: String, CodingKey { case tokens, way }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tokens = try c.decode(Int.self, forKey: .tokens)
+        way = try c.decodeIfPresent(String.self, forKey: .way) ?? "down"
+    }
+}
+
+/// A reply a screen sent that the agent's record does not hold yet: the service keeps it, and it is shown at the
+/// record's end meanwhile (the agent writes a message down only as its turn begins, and one sent while it works not
+/// until it is taken).
+public struct SentReply: Decodable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let text: String
+    public let at: Int64
+    /// Files that went with it (their places in its text read otherwise in the record).
+    public let files: Int
+
+    public init(id: String, text: String, at: Int64, files: Int = 0) {
+        self.id = id
+        self.text = text
+        self.at = at
+        self.files = files
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, text, at, files }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        at = try c.decodeIfPresent(Int64.self, forKey: .at) ?? 0
+        files = try c.decodeIfPresent(Int.self, forKey: .files) ?? 0
+    }
+
+    /// The record with the replies sent and not yet in it at its end, each as a message of yours — said `Queued`
+    /// while the agent works (it has not taken it yet). One the items already hold is left out: the record's page and
+    /// the service's word that it is there do not arrive together. Held: a message of yours no older than the reply
+    /// (a moment's slack) that begins with the same words; one that went with files reads otherwise in the record, so
+    /// for it the time decides.
+    public static func appended(to items: [RecordItem], sent: [SentReply], working: Bool) -> [RecordItem] {
+        guard !sent.isEmpty else { return items }
+        let recent = items.suffix(12).filter { $0.kind == .user }
+        let words = { (text: String) -> String in String(text.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(24)) }
+        let waiting = sent.filter { reply in
+            !recent.contains { $0.at >= reply.at - 3000 && (reply.files > 0 || words($0.text) == words(reply.text)) }
+        }
+        return items + waiting.map { RecordItem(id: "sent-\($0.id)", kind: .user, at: $0.at, text: $0.text, queued: working) }
+    }
+}
+
 /// One item of the record, oldest first on the screen.
 public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable {

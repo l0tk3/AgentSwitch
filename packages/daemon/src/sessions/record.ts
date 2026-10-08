@@ -378,11 +378,44 @@ function claudeBuild(lines: readonly Line[]): Builder {
 // Codex
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** Codex desktop puts the files the user attached ahead of the request: the request is what the user typed. */
+/** Codex desktop puts the files the user attached ahead of the request: the request is what the user typed. An
+ *  answer to one of its questions (below) travels in an envelope of Codex's own; what you answered is what is shown. */
 function codexTyped(text: string): string | null {
   const marker = /^##\s*My request[^:\n]*:\s*$/im.exec(text);
   const typed = marker ? text.slice(marker.index + marker[0].length).trim() : text.trim();
+  const answered = codexAnswers(typed);
+  if (answered !== null) return answered;
   return isTypedText(typed) && !typed.startsWith("# Files mentioned") ? typed : null;
+}
+
+/** `<send_user_message_question_reply>{"questionItemId":…,"question":…,"answer":…}</send_user_message_question_reply>`
+ *  (one object or a list; Codex 0.162, its TUI's `async_question_reply.rs`): the answers, a line each; null for
+ *  anything else. */
+function codexAnswers(text: string): string | null {
+  const m = /^<send_user_message_question_reply>([\s\S]*)<\/send_user_message_question_reply>$/.exec(text.trim());
+  if (!m) return null;
+  try {
+    const parsed: unknown = JSON.parse(m[1]!);
+    const answers = (Array.isArray(parsed) ? parsed : [parsed]).map((r) => str(obj(r).answer).trim()).filter(Boolean);
+    return answers.length ? answers.join("\n") : null;
+  } catch { return null; }
+}
+
+/** What Codex offers as answers to a question it puts at the end of a message (`questions`, each a title and options;
+ *  Codex 0.162). It does not wait for one: its own screen shows them for half a minute, or until the turn ends, and
+ *  goes on (2026-10-08, user: codex里的对话回复也不太管用，直接跳过去了). In the record they stay under the message,
+ *  numbered as its screen numbers them — to answer is to say one in your reply. A question whose words the message
+ *  does not already say is written out above its options. */
+function codexQuestions(text: string, questions: unknown): string {
+  if (!Array.isArray(questions)) return text;
+  const blocks: string[] = [];
+  for (const q of questions.map(obj)) {
+    const title = str(q.title).trim();
+    const options = (Array.isArray(q.options) ? q.options : []).filter((o): o is string => typeof o === "string" && !!o.trim()).slice(0, 12);
+    if (!options.length) { if (title && !text.includes(title)) blocks.push(title); continue; }
+    blocks.push([...(title && !text.includes(title) ? [title, ""] : []), ...options.map((o, i) => `${i + 1}. ${o.trim().replace(/\s+/g, " ")}`)].join("\n"));
+  }
+  return blocks.length ? [text, ...blocks].filter(Boolean).join("\n\n") : text;
 }
 
 /** One file of a Codex change: added whole, deleted whole, or a unified diff. */
@@ -407,7 +440,7 @@ function codexItem(b: Builder, at: number, ts: number, payload: Json, cwd: strin
       if (typed !== null || images) b.user(at, ended, typed ?? "", images);
       return;
     }
-    case "AgentMessage": { const text = texts(item.content); if (text) b.answer(at, ended, text); return; }
+    case "AgentMessage": { const text = codexQuestions(texts(item.content), item.questions); if (text) b.answer(at, ended, text); return; }
     case "Reasoning": { const text = texts(item.summary_text); if (text) b.answer(at, ended, text, true); return; }
     case "CommandExecution": {
       const parsed = Array.isArray(item.parsed_cmd) ? item.parsed_cmd.map(obj) : [];

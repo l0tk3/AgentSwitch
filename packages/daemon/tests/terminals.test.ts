@@ -14,7 +14,7 @@ import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
 import { folderFiles, matchFiles } from "../src/terminals/files.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -22,6 +22,8 @@ import { agentLauncher, claudeHookSettings, CODEX_ATTENTION, HOOK_SCRIPT, withou
 import { deleteTranscript } from "../src/terminals/transcripts.js";
 import { elsewhereCheck, type ElsewhereCheck, type Proc } from "../src/terminals/elsewhere.js";
 import { TARGETS_PATH } from "./helpers.js";
+import { holdsReply } from "../src/api/terminals.js";
+import type { RecordItem } from "../src/sessions/record.js";
 
 const FAKE = resolve(import.meta.dirname, "fixtures", "fakeTerminalAgent.mjs");
 const closers: (() => void)[] = [];
@@ -438,6 +440,157 @@ describe("terminal host", () => {
     // A narrow screen cuts the clock short.
     expect(compactingOnScreen(["✻ Compacting conversation… (1m 5s · ↓ 3.3k tok"])).toBe(true);
     expect(compactingOnScreen([])).toBe(false);
+  });
+
+  it("reads the turn's tokens off Claude Code's working line (rows seen on 2.1.293, 2026-10-08)", () => {
+    expect(workingOnScreen(["✻ Hashing… (4s · ↓ 25 tokens · thought for 2s)"])).toEqual({ tokens: 25, way: "down" });
+    expect(workingOnScreen(["· Hashing… (running Stop hook · 9s · ↓ 1.3k tokens)"])).toEqual({ tokens: 1300, way: "down" });
+    expect(workingOnScreen(["✢ Beboppin'… (11s · ↓ 1.1k tokens · thought for 7s)", "────", "❯ "])).toEqual({ tokens: 1100, way: "down" });
+    expect(workingOnScreen(["✶ Sending… (3s · ↑ 12.5k tokens)"])).toEqual({ tokens: 12500, way: "up" });
+    expect(workingOnScreen(["✻ Pondering… (2h 3m 5s · ↓ 1.2m tokens)"])).toEqual({ tokens: 1_200_000, way: "down" });
+    expect(workingOnScreen(["✻ Pondering… (1s · ↓ 1 token)"])).toEqual({ tokens: 1, way: "down" });
+    // No count yet, or not its working line at all.
+    expect(workingOnScreen(["✽ Hashing… (2s · thinking)"])).toBeNull();
+    expect(workingOnScreen(["✽ Smooshing… (running UserPromptSubmit hook · 0s)"])).toBeNull();
+    expect(workingOnScreen(["✽ Smooshing…"])).toBeNull();
+    expect(workingOnScreen(["✻ Crunched for 9s · done 9:12 AM"])).toBeNull();
+    expect(workingOnScreen([])).toBeNull();
+    // The line quoted in an answer or typed by you is not it: those rows begin otherwise.
+    expect(workingOnScreen(["  ✻ Hashing… (4s · ↓ 25 tokens)"])).toBeNull();
+    expect(workingOnScreen(["⏺ ✻ Hashing… (4s · ↓ 25 tokens)"])).toBeNull();
+    expect(workingOnScreen(["❯ ✻ Hashing… (4s · ↓ 25 tokens)"])).toBeNull();
+    // The lowest such row is the live one.
+    expect(workingOnScreen(["✻ Old… (4s · ↓ 25 tokens)", "text", "✶ New… (9s · ↓ 300 tokens)"])).toEqual({ tokens: 300, way: "down" });
+  });
+
+  it("tells the screens how far a Claude Code turn has come: the count on its working line, gone when it rests (2026-10-08)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), progressLookMs: 30 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown> = {}) => host.hook(info.id, token, { event, payload });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    const told = () => events.flatMap((e) => (e.type === "progress" ? [e.progress?.tokens ?? null] : []));
+    await until(() => host.get(info.id)!.title === "fake agent");
+    await hook("SessionStart", { source: "startup" });
+    expect(host.get(info.id)!.progress).toBeNull();
+    // At rest its screen is not read for it (a line left over from before says nothing of now).
+    host.write(info.id, "working 999\r");
+    await new Promise((r) => setTimeout(r, 150));
+    expect(host.get(info.id)!.progress).toBeNull();
+    await hook("UserPromptSubmit");
+    host.write(info.id, "working 25\r");
+    await until(() => host.get(info.id)!.progress?.tokens === 25);
+    host.write(info.id, "working 1.3k\r");
+    await until(() => host.get(info.id)!.progress?.tokens === 1300);
+    expect(host.get(info.id)!.progress).toEqual({ tokens: 1300, way: "down" });
+    expect(told()).toEqual([25, 1300]);   // told when it moved, not with every redraw
+    // A tool call leaves it standing; the turn's end takes it away.
+    await hook("PreToolUse", { tool_name: "Bash", tool_input: { command: "ls" } });
+    expect(host.get(info.id)!.progress).toEqual({ tokens: 1300, way: "down" });
+    await hook("Stop");
+    expect(host.get(info.id)).toMatchObject({ status: "idle", progress: null });
+    expect(told()).toEqual([25, 1300, null]);
+    // The next turn starts from nothing, whatever is still on its screen.
+    await hook("UserPromptSubmit");
+    expect(host.get(info.id)!.progress).toBeNull();
+  });
+
+  it("a request is answered by its own tool call ending, not by another call of the same tool (2026-10-08)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown> = {}) => host.hook(info.id, token, { event, payload });
+    const pending = () => host.get(info.id)!.permissions.map((p) => p.summary);
+    await until(() => host.get(info.id)!.title === "fake agent");
+    await hook("UserPromptSubmit");
+    // Two commands at once, as Claude Code's hooks say them (2.1.293: an id on PreToolUse and PostToolUse, none on
+    // PermissionRequest): one runs by itself, the other has to be asked about.
+    await hook("PreToolUse", { tool_name: "Bash", tool_use_id: "toolu_ls", tool_input: { command: "ls" } });
+    await hook("PreToolUse", { tool_name: "Bash", tool_use_id: "toolu_rm", tool_input: { command: "rm -rf build" } });
+    const asked = hook("PermissionRequest", { tool_name: "Bash", tool_input: { command: "rm -rf build" } });
+    await until(() => pending().length === 1);
+    // The other command ends, and a sub-agent's of the same tool: the request is still the user's to answer.
+    await hook("PostToolUse", { tool_name: "Bash", tool_use_id: "toolu_ls", tool_input: { command: "ls" } });
+    await hook("PreToolUse", { tool_name: "Bash", tool_use_id: "toolu_sub", agent_id: "a1", agent_type: "Explore", tool_input: { command: "rg x" } });
+    await hook("PostToolUse", { tool_name: "Bash", tool_use_id: "toolu_sub", agent_id: "a1", agent_type: "Explore", tool_input: { command: "rg x" } });
+    expect(pending()).toEqual(["Bash: rm -rf build"]);
+    expect(host.get(info.id)!.status).toBe("waiting");
+    // Its own call ends (answered in the terminal itself, even with the command changed there): now it is gone.
+    await hook("PostToolUse", { tool_name: "Bash", tool_use_id: "toolu_rm", tool_input: { command: "rm -rf ./build" } });
+    expect(pending()).toEqual([]);
+    expect(await asked).toBeNull();
+    // Two requests for the same command, each for its own call: the first call ending leaves the second's.
+    await hook("PreToolUse", { tool_name: "Bash", tool_use_id: "toolu_a", tool_input: { command: "make" } });
+    const first = hook("PermissionRequest", { tool_name: "Bash", tool_input: { command: "make" } });
+    await hook("PreToolUse", { tool_name: "Bash", tool_use_id: "toolu_b", tool_input: { command: "make" } });
+    const second = hook("PermissionRequest", { tool_name: "Bash", tool_input: { command: "make" } });
+    await until(() => pending().length === 2);
+    const ids = host.get(info.id)!.permissions.map((p) => p.id);
+    await hook("PostToolUse", { tool_name: "Bash", tool_use_id: "toolu_a", tool_input: { command: "make" } });
+    expect(host.get(info.id)!.permissions.map((p) => p.id)).toEqual([ids[1]]);
+    await hook("Stop");
+    expect(await first).toBeNull();
+    expect(await second).toBeNull();
+    // An agent whose hooks give no ids: as before, by what the request was for, else by being the only one of its tool.
+    await hook("UserPromptSubmit");
+    const plain = hook("PermissionRequest", { tool_name: "Edit", tool_input: { file_path: "/w/a.ts" } });
+    await until(() => pending().length === 1);
+    await hook("PostToolUse", { tool_name: "Edit", tool_input: { file_path: "/w/other.ts" } });
+    expect(pending()).toEqual([]);
+    expect(await plain).toBeNull();
+  });
+
+  it("keeps a reply a screen sent until the agent's record holds it, or it turns out not to have been a message (2026-10-08)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), sentRestMs: 120 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown> = {}) => host.hook(info.id, token, { event, payload });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    const sent = () => host.get(info.id)!.sent.map((r) => r.text);
+    await until(() => host.get(info.id)!.title === "fake agent");
+    await hook("SessionStart", { source: "startup" });
+    // Sent, and its turn begins: shown from the moment it was sent, through the turn, until the record has it.
+    host.replied(info.id, "  把重试次数改成 3 \n", 0);
+    expect(sent()).toEqual(["把重试次数改成 3"]);
+    expect(events.filter((e) => e.type === "sent").pop()).toMatchObject({ replies: [{ text: "把重试次数改成 3", files: 0 }] });
+    await hook("UserPromptSubmit");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(sent()).toEqual(["把重试次数改成 3"]);   // at work: not given up
+    // One more while it works (it waits its turn), then the record holds the first.
+    host.replied(info.id, "顺便跑一下测试", 1);
+    const [first, second] = host.get(info.id)!.sent;
+    host.confirmSent(info.id, [first!.id]);
+    expect(sent()).toEqual(["顺便跑一下测试"]);
+    host.confirmSent(info.id, ["nope"]);
+    expect(events.filter((e) => e.type === "sent")).toHaveLength(3);   // nothing told for nothing changed
+    // The turn ends and the next begins at once with what waited: kept across the moment at rest.
+    await hook("Stop");
+    await new Promise((r) => setTimeout(r, 40));
+    await hook("UserPromptSubmit");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(sent()).toEqual(["顺便跑一下测试"]);
+    host.confirmSent(info.id, [second!.id]);
+    expect(sent()).toEqual([]);
+    // The agent's own commands are not messages; nor is what was typed while it rests and began no turn (an answer
+    // to a question on its own screen): that one leaves after a moment.
+    await hook("Stop");
+    host.replied(info.id, "/model opus");
+    host.replied(info.id, "!ls");
+    host.replied(info.id, "   ");
+    expect(sent()).toEqual([]);
+    host.replied(info.id, "2");
+    expect(sent()).toEqual(["2"]);
+    await until(() => sent().length === 0);
+    expect(events.filter((e) => e.type === "sent").pop()).toEqual({ type: "sent", replies: [] });
+    // No more than a few are kept.
+    await hook("UserPromptSubmit");
+    for (let i = 0; i < 9; i++) host.replied(info.id, `message ${i}`);
+    expect(sent()).toEqual(["message 3", "message 4", "message 5", "message 6", "message 7", "message 8"]);
   });
 
   it("is at work on Compact while Claude Code's screen says it compacts, and what it was before afterwards (2026-10-07)", async () => {
@@ -995,6 +1148,15 @@ describe("terminals over HTTP", () => {
     expect((await call("GET", `/terminals/${id}`)).status).toBe(404);
   });
 
+  it("the hook program waits with node's plain HTTP request: its fetch gives up after five minutes, whatever it is told (2026-10-08)", () => {
+    // Measured on the service's node (24.21): fetch → UND_ERR_HEADERS_TIMEOUT after 301 s under AbortSignal.timeout(29 min);
+    // the same program with http.request held a 330 s wait and printed the answer. A card that waited five minutes
+    // was dropped: the program ended with nothing, the agent asked in its terminal, the service took the card away.
+    const source = readFileSync(HOOK_SCRIPT, "utf8");
+    expect(source).toContain('import { request } from "node:http"');
+    expect(source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")).not.toMatch(/\bfetch\s*\(/);
+  });
+
   it("a question through the real hook command: answered from the API, checked, Other's words sealed, never in the audit", async () => {
     const TOKEN = "enc:v1:" + "Q".repeat(40);
     const sealer: Sealer = async (t) => ({ ok: true, text: t.split("hunter2").join(TOKEN), sealed: t.includes("hunter2") ? [{ label: "db/pw", field: "password", kind: "secret", hosts: ["db"], uses: ["exec"], token: TOKEN }] : [], ms: 1 });
@@ -1153,6 +1315,41 @@ describe("terminals over HTTP", () => {
     expect(((await fromPhone.json()) as { terminal: { mode: string } }).terminal.mode).toBe("bypass");
     const fromMac = await post({ harness: "claude-code", cwd, mode: "bypass" });
     expect(((await fromMac.json()) as { terminal: { mode: string } }).terminal.mode).toBe("bypass");
+  });
+
+  it("says whether a record's entry is the reply that was sent: by when and by its first words (2026-10-08)", () => {
+    const reply = { id: "r1", text: "把重试次数改成 3，然后把所有测试跑一遍，失败的列出来", at: 100_000, files: 0 };
+    const user = (ts: number, text: string): RecordItem => ({ type: "user", id: `u${ts}`, ts, text });
+    expect(holdsReply([user(100_400, reply.text)], reply)).toBe(true);
+    expect(holdsReply([user(98_500, reply.text)], reply)).toBe(true);    // the two clocks' rounding
+    expect(holdsReply([user(90_000, reply.text)], reply)).toBe(false);   // the same words said before: not this one
+    expect(holdsReply([user(100_400, "把重试次数改成 3，然后把所有测试跑一遍，失败的…")], reply)).toBe(true);   // cut short in the record
+    expect(holdsReply([user(100_400, "  第一行\n\n第二行 ")], { ...reply, text: "第一行\n第二行" })).toBe(true);   // however its blank space is kept
+    expect(holdsReply([user(100_400, "另一句话")], reply)).toBe(false);
+    expect(holdsReply([{ type: "answer", id: "a", ts: 100_400, text: reply.text }], reply)).toBe(false);
+    // One that went with files reads otherwise in the record: the time decides.
+    expect(holdsReply([user(100_400, "看这张 [Image #1]")], { ...reply, text: "看这张 /tmp/a.png", files: 1 })).toBe(true);
+    expect(holdsReply([user(90_000, "看这张 [Image #1]")], { ...reply, files: 1 })).toBe(false);
+  });
+
+  it("shows what was sent on the record's screens, over the API: on the terminal, in the stream, typed without entering not (2026-10-08)", async () => {
+    const { cwd, base, token, call } = await start();
+    const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
+    const terminal = follow(base, token, id);
+    const record = follow(base, token, id, "?view=record");
+    await until(() => terminal.some((e) => e.event === "snapshot" && String(e.data.data).includes("fake agent ready")) || terminal.some((e) => e.event === "output" && String(e.data.data).includes("fake agent ready")));
+    expect((await call("POST", `/terminals/${id}/input`, { text: "half a thought", submit: false, seal: false })).status).toBe(200);
+    expect((await call("GET", `/terminals/${id}`)).json.terminal.sent).toEqual([]);
+    expect((await call("POST", `/terminals/${id}/input`, { text: "hello there", seal: false })).status).toBe(200);
+    const sent = (await call("GET", `/terminals/${id}`)).json.terminal.sent as { text: string; files: number }[];
+    expect(sent.map((r) => [r.text, r.files])).toEqual([["hello there", 0]]);
+    await until(() => record.some((e) => e.event === "sent"));
+    expect(record.find((e) => e.event === "sent")!.data.replies).toMatchObject([{ text: "hello there" }]);
+    expect(terminal.some((e) => e.event === "sent" || e.event === "progress")).toBe(false);   // a screen that draws the terminal sees it typed there
+    // A screen that opens later is told what is still waiting.
+    const late = follow(base, token, id, "?view=record");
+    await until(() => late.some((e) => e.event === "sent"));
+    expect(late.find((e) => e.event === "sent")!.data.replies).toMatchObject([{ text: "hello there" }]);
   });
 
   it("a reply is sealed unless sent directly, as typed", async () => {

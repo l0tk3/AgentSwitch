@@ -246,6 +246,8 @@ td a { color: var(--board-ink); text-decoration: underline; text-underline-offse
 .line .w { color: var(--ink); white-space: nowrap; }
 .line .x { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .line .tm { color: var(--ink3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The turn's tokens, as the agent's own screen counts them (2026-10-08): a number that moves says it is not stuck. */
+.line .tk { color: var(--ink3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .line.now .spin { color: var(--cyan); width: 10px; }
 .line.sub { padding-left: 16px; }
 .line.said .sq { align-self: center; }
@@ -868,7 +870,7 @@ function load(preset) {
   // Codex with its Daybreak switch on, on a model that runs under it (turn it off, pick GPT-6.1 Sol, turn it on: the caution).
   if (preset === "daybreak") { S.status = "idle"; S.items.push({ t: "said", text: "Idle", time: "10:49" }); S.daybreak = true; S.mode = "Ask"; S.model = "GPT-6 Sol"; S.effort = "High"; }
   if (["live", "away", "permission", "question"].includes(preset)) S.plan = PLAN();
-  if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", note: "Build the release app", t0: Date.now() - 12000 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
+  if (preset === "live" || preset === "away") { S.live = { tool: "Bash", text: "swift build -c release", note: "Build the release app", t0: Date.now() - 12000, tokens: 3300 }; S.sub = { name: "Explore", doing: "找出所有用到 SettingsDeleteButton 的页面", t0: Date.now() - 41000 }; }
   if (preset === "away") S.away = isMac() ? "iPhone" : "Mac";
   if (preset === "permission") { S.status = "waiting"; S.card = { kind: "permission", tool: "Bash", detail: "git push origin main" }; }
   if (preset === "question") { S.status = "waiting"; S.card = { kind: "question", q: "PATH 里没有 ~/.opencode/bin 时，安装正式版要怎么处理？",
@@ -923,6 +925,7 @@ const mark = (kind) => (S.classic && kind === "busy" ? `<span class="ring"></spa
 const agentMark = () => (S.classic ? icon("spark", 13, 1.8) : P.sprite(P.AGENT_PX.cc, { px: 2 }));
 const statusWord = () => (S.card ? "Waiting" : { busy: "Busy", waiting: "Waiting", idle: "Idle", exited: "Exited", done: "Done", failed: "Incomplete" }[S.status]);
 const statusKind = () => (S.card ? "waiting" : S.status);
+const tokens = (n) => (n < 1000 ? String(n) : `${(Math.round(n / 100) / 10).toString().replace(/\.0$/, "")}k`);
 const since = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 const lockIcon = (px = 2) => (S.classic ? icon("lock", px * 9) : P.sprite(["..###..", ".#...#.", ".#...#.", "#######", "###.###", "###.###", "#######"], { px }));
 
@@ -1006,7 +1009,7 @@ function body() {
     <div class="meta">${busy ? `<span style="color:var(--cyan);display:inline-flex;gap:6px;align-items:center">${spinner()}${W("Busy")}</span><span>·</span>` : ""}${agentMark()}<span>Claude Code · Opus 5.5 · main · Now</span></div>
     <div class="meta path">~/Desktop/WorkSpace/Projects/AgentSwitch</div></div>`;
   const earlier = S.earlier ? EARLIER.map((it, i) => item(it, "e" + i)).join("") : `<button class="earlier" data-a="earlier">${S.classic ? `${icon("upc", 13)}Earlier` : "· · ·  Earlier"}</button>`;
-  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${S.classic && (sub || l.tool !== "Working") ? `<i class="ki">${icon(sub ? "branch" : l.tool === "Compact" ? "compact" : "term", 14, 1.4)}</i>` : ""}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note || !l.text ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span><span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
+  const now = (l, sub) => `<div class="line now ${sub ? "sub" : ""}">${S.classic && (sub || l.tool !== "Working") ? `<i class="ki">${icon(sub ? "branch" : l.tool === "Compact" ? "compact" : "term", 14, 1.4)}</i>` : ""}<span class="w">${l.tool ?? l.name}</span><span class="x ${sub || l.note || !l.text ? "" : "cmd"}">${esc(l.note ?? l.text ?? l.doing)}</span>${!sub && l.tokens ? `<span class="tk">↓ ${tokens(l.tokens)} tokens</span>` : ""}<span class="tm" data-t0="${l.t0}">${since(l.t0)}</span></div>`;
   const live = S.joined && !S.card ? (S.live ? now(S.live) : "") + (S.sub ? now(S.sub, true) : "") : "";
   return meta + earlier + S.items.map(item).join("") + live + card();
 }
@@ -1283,6 +1286,9 @@ function send(sealed) {
   const answer = () => {
     mine.queued = false; S.status = "busy"; S.sub = null; S.live = { tool: "Working", text: "", t0: Date.now() };
     render(true);
+    // While it thinks, the count on its own screen grows: about once a second the line says so.
+    const live = S.live;
+    const counting = setInterval(() => { if (S.live !== live) return clearInterval(counting); live.tokens = (live.tokens ?? 0) + 180 + Math.floor(Math.random() * 240); render(true); }, 700);
     setTimeout(() => {
       if (S.status !== "busy" || S.live?.tool !== "Working") return;
       S.live = null; S.status = "idle"; if (S.plan) S.plan.forEach((x) => { x.s = "done"; });

@@ -54,6 +54,23 @@ public enum RecordDisplay {
     }
 
     /// A clock for what is going on now: `0:41`, `12:05`, `1:02:25`.
+    /// The turn's tokens as its line says them: `↓ 250 tokens`, `↓ 1.3k tokens`, `↑ 12k tokens`. Nil for none.
+    public static func turnTokens(_ progress: TurnProgress?) -> String? {
+        guard let progress, progress.tokens > 0 else { return nil }
+        let n = progress.tokens
+        let count: String
+        if n < 1000 { count = "\(n)" }
+        else if n < 100_000 {
+            let k = (Double(n) / 100).rounded() / 10
+            count = k == k.rounded() ? "\(Int(k))k" : String(format: "%.1fk", k)
+        } else if n < 1_000_000 { count = "\(Int((Double(n) / 1000).rounded()))k" }
+        else {
+            let m = (Double(n) / 100_000).rounded() / 10
+            count = m == m.rounded() ? "\(Int(m))M" : String(format: "%.1fM", m)
+        }
+        return "\(progress.way == "up" ? "↑" : "↓") \(count) \(n == 1 ? "token" : "tokens")"
+    }
+
     public static func clock(_ seconds: Int) -> String {
         let s = max(0, seconds)
         return s < 3600 ? "\(s / 60):\(String(format: "%02d", s % 60))" : "\(s / 3600):\(String(format: "%02d", s % 3600 / 60)):\(String(format: "%02d", s % 60))"

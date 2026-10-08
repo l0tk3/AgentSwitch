@@ -277,6 +277,9 @@ struct NowLine: View {
     let subagents: [TerminalSubagent]
     /// When this began (the activity, else the turn).
     let since: Date?
+    /// How far the turn has come, as the agent's own screen counts it: the number moves while it thinks, which a
+    /// clock alone does not say (2026-10-08, user: working 建议加上token数量，不然都不知道是不是卡死了).
+    var progress: TurnProgress? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -302,6 +305,10 @@ struct NowLine: View {
                 .foregroundStyle(Theme.secondaryInk)
                 .shimmer()
                 Spacer(minLength: 4)
+                if let tokens = RecordDisplay.turnTokens(progress) {
+                    Text(tokens).mono(11).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1).fixedSize()
+                        .contentTransition(.numericText())
+                }
                 if let since {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         Text(RecordDisplay.clock(Int(context.date.timeIntervalSince(since)))).mono(11).foregroundStyle(.tertiary).monospacedDigit()

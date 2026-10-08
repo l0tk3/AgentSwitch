@@ -22,6 +22,10 @@ final class PaneRecord {
     private(set) var subagents: [TerminalSubagent] = []
     /// When what it is doing now began.
     private(set) var activitySince: Date?
+    /// How far the turn has come, as the agent's own screen counts it (nil: it says nothing).
+    private(set) var progress: TurnProgress?
+    /// Replies sent that the record does not hold yet: shown at its end meanwhile (`shown`).
+    private(set) var sent: [SentReply] = []
     /// The model the agent says it is on now (Claude Code), once it has said.
     private(set) var modelNow: String?
     /// Codex's Daybreak switch as its stream said last (nil: nothing said yet — the terminal's own word stands).
@@ -138,6 +142,7 @@ final class PaneRecord {
         session = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
         activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil; daybreakNow = nil
+        progress = nil; sent = []
         draft = ""
         draftFiles = []
         insert = nil
@@ -157,6 +162,10 @@ final class PaneRecord {
         case .activity(let now, let agents):
             if now != activity { activity = now; activitySince = Date() }
             if subagents != agents { subagents = agents }
+        case .progress(let now):
+            if progress != now { progress = now }
+        case .sent(let replies):
+            if sent != replies { sent = replies }
         case .record:
             refresh()
         case .model(let model):
@@ -173,7 +182,11 @@ final class PaneRecord {
         }
     }
 
+    /// What the record shows: its items, and at their end what was sent and is not in them yet.
+    func shown(working: Bool) -> [RecordItem] { SessionRecord.withSent(items: items, sent: sent, working: working) }
+
     private func stillNow() {
+        if progress != nil { progress = nil }
         if activity != nil { activity = nil }
         if !subagents.isEmpty { subagents = [] }
     }
@@ -526,7 +539,8 @@ final class PaneRecord {
 
     #if DEBUG
     /// The design preview's: a record from made-up work, without a service.
-    func stage(terminal: TerminalInfo, items: [RecordItem], plan: [PlanEntry], usage: RecordUsage?, mode: String?, activity: TerminalActivity?, since: Date?) {
+    func stage(terminal: TerminalInfo, items: [RecordItem], plan: [PlanEntry], usage: RecordUsage?, mode: String?, activity: TerminalActivity?, since: Date?,
+               progress: TurnProgress? = nil, sent: [SentReply] = []) {
         following?.cancel()
         following = nil
         staged = true
@@ -539,6 +553,8 @@ final class PaneRecord {
         self.mode = mode
         self.activity = activity
         activitySince = since
+        self.progress = progress
+        self.sent = sent
         more = true
         loaded = true
     }

@@ -192,7 +192,10 @@ enum DemoData {
                          statusSince: busy ? ago(compact ? 65 : 41) : nil,
                          subagents: prompt || idle || compact ? [] : [TerminalSubagent(id: "s1", type: "code-reviewer", name: "审查改动", doing: "运行 git diff"),
                                                    TerminalSubagent(id: "s2", type: "Explore", name: "查终端路由", doing: "读取 src/api/terminals.ts")],
-                         suggestion: screen == "simplesuggest" ? "跑一遍测试确认" : nil, daybreak: daybreak ? true : nil, sets: daybreak ? true : nil),
+                         suggestion: screen == "simplesuggest" ? "跑一遍测试确认" : nil, daybreak: daybreak ? true : nil, sets: daybreak ? true : nil,
+                         // `simplebusy`: the tokens its own screen counts, and a message sent a moment ago that it has not taken yet.
+                         progress: screen == "simplebusy" ? TurnProgress(tokens: 3300) : nil,
+                         sent: screen == "simplebusy" ? [SentReply(id: "s1", text: "顺便把测试也跑一遍", at: ago(3))] : []),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
                          createdAt: ago(900), lastOutputAt: ago(2)),
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,

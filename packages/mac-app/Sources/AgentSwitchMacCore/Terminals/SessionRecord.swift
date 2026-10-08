@@ -205,6 +205,21 @@ public struct SessionRecord: Decodable, Sendable, Hashable {
     /// The latest page laid over what a screen holds: earlier pages it asked for stay, the page's own stretch is
     /// replaced (its last run of work may have grown, a queued message may have been read). Nothing earlier held, a gap
     /// between the two, or a record without places in a file: the page is the record.
+    /// The record with the replies sent and not yet in it at its end, each as a message of yours — said `Queued`
+    /// while the agent works (it has not taken it yet). One the items already hold is left out: the record's page and
+    /// the service's word that it is there do not arrive together. Held: a message of yours no older than the reply
+    /// (a moment's slack) that begins with the same words; one that went with files reads otherwise in the record, so
+    /// for it the time decides.
+    public static func withSent(items: [RecordItem], sent: [SentReply], working: Bool) -> [RecordItem] {
+        guard !sent.isEmpty else { return items }
+        let recent = items.suffix(12).filter { $0.kind == .user }
+        let words = { (text: String) -> String in String(text.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(24)) }
+        let waiting = sent.filter { reply in
+            !recent.contains { $0.at >= reply.at - 3000 && (reply.files > 0 || words($0.text) == words(reply.text)) }
+        }
+        return items + waiting.map { RecordItem(id: "sent-\($0.id)", kind: .user, at: $0.at, text: $0.text, queued: working) }
+    }
+
     public static func merged(held: [RecordItem], page: [RecordItem]) -> (items: [RecordItem], replaced: Bool) {
         guard let first = page.first?.offset, let earliest = held.first?.offset, earliest < first,
               let last = held.last(where: { $0.offset != nil })?.offset, last >= first else { return (page, true) }
@@ -288,8 +303,52 @@ public struct RecordStepDetail: Decodable, Sendable, Hashable {
     }
 }
 
+/// How far a turn has come, as the agent's own screen counts it (the service reads Claude Code's working line): the
+/// tokens come from the model (`down`) or gone to it (`up`). Beside "Working": a number that moves says it is not stuck.
+public struct TurnProgress: Decodable, Equatable, Sendable {
+    public let tokens: Int
+    public let way: String
+
+    public init(tokens: Int, way: String = "down") {
+        self.tokens = tokens
+        self.way = way
+    }
+}
+
+/// A reply a screen sent that the agent's record does not hold yet: the service keeps it, and it is shown at the
+/// record's end meanwhile (the agent writes a message down only as its turn begins, and one sent while it works not
+/// until it is taken).
+public struct SentReply: Decodable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let text: String
+    public let at: Int64
+    /// Files that went with it (their places in its text read otherwise in the record).
+    public let files: Int
+
+    public init(id: String, text: String, at: Int64, files: Int = 0) {
+        self.id = id
+        self.text = text
+        self.at = at
+        self.files = files
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, text, at, files }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        at = try c.decodeIfPresent(Int64.self, forKey: .at) ?? 0
+        files = try c.decodeIfPresent(Int.self, forKey: .files) ?? 0
+    }
+}
+
 /// What a terminal's record stream says besides the terminal's own events (`GET /terminals/:id/stream?view=record`).
 public enum TerminalRecordEvent: Equatable, Sendable {
+    /// How far the turn has come changed (nil: its screen says nothing now).
+    case progress(TurnProgress?)
+    /// The replies sent and not yet in the record changed.
+    case sent([SentReply])
     /// What it is doing now changed.
     case activity(TerminalActivity?, [TerminalSubagent])
     /// Its session's record changed.
@@ -324,6 +383,12 @@ public enum TerminalRecordEvent: Equatable, Sendable {
         case "daybreak":
             struct Body: Decodable { let on: Bool }
             return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .daybreak($0.on) }
+        case "progress":
+            struct Body: Decodable { let progress: TurnProgress? }
+            return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .progress($0.progress) }
+        case "sent":
+            struct Body: Decodable { let replies: [SentReply] }
+            return (try? JSONDecoder().decode(Body.self, from: bytes)).map { .sent($0.replies) }
         default:
             return nil
         }
@@ -406,6 +471,23 @@ public enum RecordDisplay {
     }
 
     /// A clock for what is going on now: `0:41`, `12:05`, `1:02:25`.
+    /// The turn's tokens as its line says them: `↓ 250 tokens`, `↓ 1.3k tokens`, `↑ 12k tokens`. Nil for none.
+    public static func turnTokens(_ progress: TurnProgress?) -> String? {
+        guard let progress, progress.tokens > 0 else { return nil }
+        let n = progress.tokens
+        let count: String
+        if n < 1000 { count = "\(n)" }
+        else if n < 100_000 {
+            let k = (Double(n) / 100).rounded() / 10
+            count = k == k.rounded() ? "\(Int(k))k" : String(format: "%.1fk", k)
+        } else if n < 1_000_000 { count = "\(Int((Double(n) / 1000).rounded()))k" }
+        else {
+            let m = (Double(n) / 100_000).rounded() / 10
+            count = m == m.rounded() ? "\(Int(m))M" : String(format: "%.1fM", m)
+        }
+        return "\(progress.way == "up" ? "↑" : "↓") \(count) \(n == 1 ? "token" : "tokens")"
+    }
+
     public static func clock(_ seconds: Int) -> String {
         let s = max(0, seconds)
         return s < 3600 ? "\(s / 60):\(String(format: "%02d", s % 60))" : "\(s / 3600):\(String(format: "%02d", s % 3600 / 60)):\(String(format: "%02d", s % 60))"
