@@ -31,6 +31,8 @@ export type ApiDeps = {
   readonly sealer?: Sealer;
   /** Clash Integration (docs/clash-v0.md). */
   readonly clash?: import("../clash/integration.js").ClashIntegration;
+  /** The exits of profiles that have a proxy of their own (docs/profiles-v0.md §4). */
+  readonly exits?: import("../browser/exits.js").ExitPool;
   /** Each agent's profiles (docs/profiles-v0.md). */
   readonly profiles?: import("../profiles/store.js").ProfileStore;
   readonly store: Store;

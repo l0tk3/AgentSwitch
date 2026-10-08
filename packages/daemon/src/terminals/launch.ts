@@ -135,6 +135,13 @@ const shq = (s: string): string => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
 /** Claude Code's hooks for one terminal: status events and the permission request, all through the hook command. With
  *  the protected paths, also its own deny rules for them (`//` = from the filesystem root): they hold for the built-in
  *  file tools even when the service does not answer the hook (which then lets the call through). */
+/** The environment that sends a process's traffic through `proxy`, in both spellings tools read; what is on this
+ *  Mac goes straight. */
+export function proxyEnv(proxy: string): Record<string, string> {
+  const local = "127.0.0.1,localhost,::1";
+  return { HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ALL_PROXY: proxy, https_proxy: proxy, http_proxy: proxy, all_proxy: proxy, NO_PROXY: local, no_proxy: local };
+}
+
 export function claudeHookSettings(command: string, prot?: ProtectedPaths): Record<string, unknown> {
   const hook = (timeout: number) => [{ matcher: "*", hooks: [{ type: "command", command, timeout }] }];
   const rule = (tool: string, path: string) => [`${tool}(/${path})`, `${tool}(/${path}/**)`];
@@ -184,6 +191,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
       AGENTSWITCH_TERMINAL_URL: opts.hookUrl(),
       AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken,
     };
+    // A profile with a proxy of its own (docs/profiles-v0.md §4): what the agent and the commands it runs send
+    // leaves through it. What stays on this Mac — the hook, the browser bridge, a local server — does not.
+    const proxied = req.proxy ? proxyEnv(req.proxy) : null;
+    if (proxied) Object.assign(env, proxied);
     const bridge = opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd }) : null;
     const browser = bridge ? browserServer(bridge) : null;
     switch (req.harness) {
@@ -191,7 +202,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // A profile other than the Mac's own: its sign-in and its identifiers are in a folder of its own.
         if (req.configHome) env.CLAUDE_CONFIG_DIR = req.configHome;
         const settings = join(dir, "settings.json");
-        writeFileSync(settings, JSON.stringify(claudeHookSettings(hookCommand, opts.protected), null, 2), { mode: 0o600 });
+        // In the settings laid over the user's too: an `env` of the user's own settings would win over the process's.
+        writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected), ...(proxied ? { env: proxied } : {}) }, null, 2), { mode: 0o600 });
         const args = ["--settings", settings];
         if (browser) {
           const mcp = join(dir, "mcp.json");

@@ -18,6 +18,7 @@ import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
 import { DEFAULT_PROFILE } from "../profiles/store.js";
+import { exitFor } from "./profiles.js";
 import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
@@ -302,7 +303,15 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const wanted = body.data.profile ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
     const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     if (wanted !== DEFAULT_PROFILE && !profileHome) return c.json({ error: "no such profile" }, 400);
-    const profile = profileHome ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, home: profileHome } : null;
+    let profile: { id: string; name: string; home: string; proxy?: string; exit?: { ip: string; place: string | null } } | null =
+      profileHome ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, home: profileHome } : null;
+    // A profile with a proxy of its own: before anything is started under it, the proxy is asked where it lets
+    // traffic out. One that does not answer starts nothing — the agent is not let out another way (§4).
+    if (profile) {
+      const way = await exitFor(deps, body.data.harness, wanted, profile.name);
+      if ("refused" in way) return c.json({ error: way.refused }, way.status);
+      profile = { ...profile, ...way };
+    }
     try {
       const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),

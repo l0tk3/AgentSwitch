@@ -111,6 +111,15 @@ export class ClashIntegration {
     return this.shown(await this.status());
   }
 
+  /** `address` goes direct from now on, if it did not already (a profile's proxy server, docs/clash-v0.md §3): the
+   *  way to it is not to be through another node. The core has it at once. */
+  async addDirect(address: string): Promise<void> {
+    const settings = this.o.store.settings(), a = address.trim().toLowerCase();
+    if (!a || settings.direct.some((d) => d.toLowerCase() === a) || settings.direct.length >= 64) return;
+    this.o.store.save({ ...settings, direct: [...settings.direct, a] });
+    await this.push(await this.status(), false);
+  }
+
   /** A template's rules as they are in use, for editing: the user's own if it was edited, else the built-in ones. */
   template(template: ClashTemplate): { readonly rules: readonly string[]; readonly custom: boolean } {
     const settings = this.o.store.settings();

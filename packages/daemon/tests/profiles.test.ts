@@ -3,15 +3,42 @@
  *  Mac's own folder is never written to. */
 
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
-import { mountProfiles } from "../src/api/profiles.js";
+import { afterEach } from "vitest";
+import { exitFor, mountProfiles } from "../src/api/profiles.js";
+import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
 import { DEFAULT_PROFILE, ProfileError, ProfileStore } from "../src/profiles/store.js";
-import { agentLauncher } from "../src/terminals/launch.js";
+import { agentLauncher, proxyEnv } from "../src/terminals/launch.js";
+
+const closers: (() => unknown)[] = [];
+afterEach(async () => { for (const c of closers.splice(0)) await c(); });
+
+/** A proxy somewhere else, made up: it answers whatever it is asked for with where it "lets traffic out", and keeps
+ *  who asked (the name and password it was given). `down()`: it stops listening. */
+async function upstream() {
+  const seen: { url: string; auth: string | null }[] = [];
+  const server = createServer((req, res) => {
+    const auth = req.headers["proxy-authorization"];
+    seen.push({ url: String(req.url), auth: typeof auth === "string" ? Buffer.from(auth.replace(/^Basic /, ""), "base64").toString("utf8") : null });
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ip: "203.0.113.9", city: "Tokyo", country: "JP", timezone: "Asia/Tokyo" }));
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  const port = (server.address() as import("node:net").AddressInfo).port;
+  const down = () => new Promise<void>((ok) => { server.closeAllConnections(); server.close(() => ok()); });
+  closers.push(down);
+  return { server: `http://127.0.0.1:${port}`, seen, down };
+}
+const pool = (resolve?: ConstructorParameters<typeof ExitPool>[0]["resolve"]) => {
+  const p = new ExitPool({ ownPorts: () => [4711], lookup: "http://lookup.test/json", ...(resolve ? { resolve } : {}) });
+  closers.push(() => p.stop());
+  return p;
+};
 
 function world() {
   const root = mkdtempSync(join(tmpdir(), "agentswitch-profiles-"));
@@ -81,17 +108,136 @@ describe("the profile store", () => {
   });
 });
 
+describe("a profile's own proxy", () => {
+  it("is kept with the profile; the screens are told it has a password, never the password", () => {
+    const { store } = world();
+    const work = store.create("claude-code", "Work", "subscription");
+    expect(store.proxyOf("claude-code", work.id)).toBeNull();
+    store.setProxy("claude-code", work.id, { server: "http://proxy.example:8080", username: "me", password: "enc:v1:abcdefghijklmnopqrstuvwx" });
+    store.setExit("claude-code", work.id, { ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo", checkedAt: 2_000 });
+    expect(store.proxyOf("claude-code", work.id)).toEqual({ server: "http://proxy.example:8080", username: "me", password: "enc:v1:abcdefghijklmnopqrstuvwx" });
+    const shown = store.all()["claude-code"].profiles[1]!;
+    expect(shown).toMatchObject({ name: "Work", proxy: { server: "http://proxy.example:8080", username: "me", sealed: true }, exit: { ip: "203.0.113.9", place: "Tokyo" } });
+    expect(JSON.stringify(store.all())).not.toContain("enc:v1:");
+    // Another proxy: what was known of the old one's exit goes. None: both go. The Mac's own profile has none here.
+    store.setProxy("claude-code", work.id, { server: "socks5://127.0.0.1:1080" });
+    expect(store.all()["claude-code"].profiles[1]).toMatchObject({ proxy: { server: "socks5://127.0.0.1:1080", sealed: false } });
+    expect(store.all()["claude-code"].profiles[1]!.exit).toBeUndefined();
+    store.setProxy("claude-code", work.id, null);
+    expect(store.all()["claude-code"].profiles[1]!.proxy).toBeUndefined();
+    expect(() => store.setProxy("claude-code", DEFAULT_PROFILE, { server: "http://x:1" })).toThrow(ProfileError);
+    expect(() => store.setExit("claude-code", "nope12", null)).toThrow(ProfileError);
+  });
+
+  it("is reached through a forwarder on this Mac, checked by asking where it lets traffic out", async () => {
+    const far = await upstream();
+    const exits = pool(async (token, frames) => ({ value: `pw-of-${token.slice(7, 11)}@${new URL(frames[0]!).host}`, label: "proxy" }));
+    const via = await exits.address("claude-code/abc123", { server: far.server });
+    expect(via).toMatchObject({ server: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/), username: "agentswitch" });
+    // What a process is given: the forwarder, with its own name and a password made for this run — not the proxy's.
+    expect(ExitPool.url(via)).toBe(`http://agentswitch:${via.password}@${new URL(via.server).host}`);
+    expect(await exits.check("claude-code/abc123", { server: far.server })).toEqual({ ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo" });
+    expect(far.seen).toEqual([{ url: "http://lookup.test/json", auth: null }]);
+    expect(exits.requests("claude-code/abc123")).toBe(1);
+    // The same proxy again: the same forwarder. With a name and a password: the gate gives the password for the
+    // proxy's own host, and the forwarder shows it to the proxy.
+    expect((await exits.address("claude-code/abc123", { server: far.server })).server).toBe(via.server);
+    const sealed = { server: far.server, username: "me", password: "enc:v1:abcdefghijklmnopqrstuvwx" };
+    await exits.check("claude-code/abc123", sealed);
+    expect(far.seen.at(-1)).toEqual({ url: "http://lookup.test/json", auth: `me:pw-of-abcd@${new URL(far.server).host}` });
+    // Nothing gets out past the forwarder without its password.
+    const now = new URL((await exits.address("claude-code/abc123", sealed)).server);
+    const answered = await new Promise<number>((ok) => { request({ host: now.hostname, port: now.port, path: "http://lookup.test/json" }, (res) => { res.resume(); ok(res.statusCode ?? 0); }).end(); });
+    expect(answered).toBe(407);
+    // The proxy down: said, with the reason; nothing is asked straight instead.
+    await far.down();
+    await expect(exits.check("claude-code/abc123", sealed)).rejects.toThrow(ExitError);
+    await expect(exits.check("claude-code/abc123", sealed)).rejects.toThrow(/经这个代理连不出去/);
+    // A proxy that is not written as one, a password that is not a ciphertext or has no name, no gate to ask.
+    await expect(exits.address("k", { server: "proxy.example" })).rejects.toThrow(/scheme:\/\/host:port/);
+    await expect(exits.address("k", { server: far.server, username: "me", password: "hunter2" })).rejects.toThrow(/密文/);
+    await expect(exits.address("k", { server: far.server, password: "enc:v1:abcdefghijklmnopqrstuvwx" })).rejects.toThrow(/用户名/);
+    await expect(pool().address("k", sealed)).rejects.toThrow(/凭据网关不可用/);
+  });
+
+  it("is checked before anything starts under the profile; one that does not answer starts nothing", async () => {
+    const { store } = world();
+    const far = await upstream();
+    const exits = pool();
+    const work = store.create("claude-code", "Work", "subscription"), plain = store.create("claude-code", "Plain", "subscription");
+    store.setProxy("claude-code", work.id, { server: far.server });
+    const deps = { profiles: store, exits };
+    // No proxy of its own: nothing is set, nothing is asked.
+    expect(await exitFor(deps, "claude-code", plain.id, "Plain")).toEqual({});
+    expect(far.seen).toHaveLength(0);
+    const way = await exitFor(deps, "claude-code", work.id, "Work", () => 5_000);
+    expect(way).toEqual({ proxy: expect.stringMatching(/^http:\/\/agentswitch:[\w-]+@127\.0\.0\.1:\d+$/), exit: { ip: "203.0.113.9", place: "Tokyo" } });
+    expect(far.seen).toHaveLength(1);
+    expect(store.all()["claude-code"].profiles[1]!.exit).toEqual({ ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo", checkedAt: 5_000 });
+    await far.down();
+    expect(await exitFor(deps, "claude-code", work.id, "Work")).toEqual({ refused: expect.stringMatching(/^配置 Work 的代理没有通，终端没有开：经这个代理连不出去/), status: 502 });
+    expect(store.all()["claude-code"].profiles[1]!.exit).toBeUndefined();
+    expect(await exitFor({ profiles: store }, "claude-code", work.id, "Work")).toMatchObject({ status: 503 });
+  });
+
+  it("is the agent's way out: its environment and, for Claude Code, the settings laid over the user's", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-profile-proxy-"));
+    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, env: { PATH: "/usr/bin", HOME: "/Users/u", HTTPS_PROXY: "http://old:1" } });
+    const via = "http://agentswitch:pw@127.0.0.1:50123";
+    const own = launch({ id: "c1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", proxy: via });
+    expect(own.env).toMatchObject({ HTTPS_PROXY: via, HTTP_PROXY: via, ALL_PROXY: via, https_proxy: via, NO_PROXY: "127.0.0.1,localhost,::1", no_proxy: "127.0.0.1,localhost,::1" });
+    const settings = JSON.parse(readFileSync(join(stateDir, "c1", "settings.json"), "utf8")) as { env?: Record<string, string>; hooks: object };
+    expect(settings.env).toEqual(proxyEnv(via));
+    expect(settings.hooks).toBeTruthy();
+    // Without a proxy of its own nothing is set or laid over: what the user's environment has stays.
+    const plain = launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
+    expect(plain.env.HTTPS_PROXY).toBe("http://old:1");
+    expect(JSON.parse(readFileSync(join(stateDir, "c2", "settings.json"), "utf8")).env).toBeUndefined();
+  });
+});
+
 describe("profiles over HTTP", () => {
   function served() {
     const w = world();
     const app = new Hono();
-    mountProfiles(app, { profiles: w.store } as unknown as ApiDeps);
+    const exits = pool(), direct: string[] = [];
+    mountProfiles(app, { profiles: w.store, exits, clash: { addDirect: async (address: string) => { direct.push(address); } } } as unknown as ApiDeps);
     const call = async (method: string, path: string, body?: unknown, env: object = {}) => {
       const res = await app.request(path, { method, ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) }, env);
       return { status: res.status, json: (await res.json()) as Record<string, any> };
     };
-    return { ...w, call };
+    return { ...w, call, direct };
   }
+
+  it("sets a profile's proxy on the Mac, checks it at once, and has Clash send its host direct", async () => {
+    const { call, direct, store } = served();
+    const far = await upstream();
+    const id = (await call("POST", "/profiles", { agent: "claude-code", name: "Work" })).json.profile.id as string;
+    const set = await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server });
+    expect(set.status).toBe(200);
+    expect(set.json.agents["claude-code"].profiles[1]).toMatchObject({ proxy: { server: far.server, sealed: false }, exit: { ip: "203.0.113.9", place: "Tokyo" } });
+    expect(set.json.problem).toBeUndefined();
+    expect(direct).toEqual(["127.0.0.1"]);
+    // Asked again from any screen; a paired device may check, not set.
+    const phone = markRemote({}, { deviceId: "phone" });
+    expect((await call("POST", `/profiles/claude-code/${id}/check`, undefined, phone)).json.agents["claude-code"].profiles[1].exit.ip).toBe("203.0.113.9");
+    expect((await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server }, phone)).status).toBe(403);
+    // What is not a proxy is refused and nothing changes; a password must be a ciphertext.
+    expect(await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: "proxy.example" })).toMatchObject({ status: 400, json: { error: expect.stringContaining("scheme://host:port") } });
+    expect((await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server, username: "me", password: "hunter2" })).status).toBe(400);
+    expect(store.proxyOf("claude-code", id)).toEqual({ server: far.server });
+    expect((await call("PUT", "/profiles/claude-code/nope12/proxy", { server: far.server })).status).toBe(404);
+    // A proxy that is down is kept all the same, and said to be: it may be back later.
+    await far.down();
+    const down = await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server, username: "me" });
+    expect(down.json).toMatchObject({ problem: expect.stringContaining("连不出去"), agents: { "claude-code": { profiles: [{}, { proxy: { server: far.server, username: "me", sealed: false } }] } } });
+    expect(down.json.agents["claude-code"].profiles[1].exit).toBeUndefined();
+    expect((await call("POST", `/profiles/claude-code/${id}/check`)).json.problem).toContain("连不出去");
+    // Taken away: this Mac's own way out again.
+    const none = await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: null });
+    expect(none.json.agents["claude-code"].profiles[1].proxy).toBeUndefined();
+    expect((await call("POST", `/profiles/claude-code/${id}/check`)).status).toBe(404);
+  });
 
   it("lists, makes, makes current and removes; a paired device may look and switch, not make or remove", async () => {
     const { call } = served();

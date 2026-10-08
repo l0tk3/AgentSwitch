@@ -17,12 +17,19 @@ export const PROFILE_AGENTS = ["claude-code", "codex", "opencode", "pi"] as cons
 export type ProfileAgent = (typeof PROFILE_AGENTS)[number];
 export type ProfileKind = "subscription" | "api";
 export const DEFAULT_PROFILE = "default";
+/** A profile's own proxy (§4): where what runs under it leaves this Mac. The password is a ciphertext of the gate's. */
+export type ProfileProxy = { readonly server: string; readonly username?: string | undefined; readonly password?: string | undefined };
+/** Where a profile's proxy let traffic out when it was last checked. */
+export type ProfileExit = { readonly ip: string; readonly place: string | null; readonly timezone: string | null; readonly checkedAt: number };
 export type Profile = { readonly id: string; readonly name: string; readonly kind: ProfileKind; readonly createdAt: number;
   /** Who is signed in, as the agent's own files say (absent: nobody yet, or the agent does not say). */
-  readonly account?: string };
+  readonly account?: string;
+  /** Its proxy as the screens are told of it (`sealed`: it has a password, never shown); absent: this Mac's own way out. */
+  readonly proxy?: { readonly server: string; readonly username?: string; readonly sealed: boolean };
+  readonly exit?: ProfileExit };
 export type AgentProfiles = { readonly current: string; readonly profiles: readonly Profile[]; /** More than `Default` can be made for this agent. */ readonly creatable: boolean };
 
-type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number }[] };
+type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number; proxy?: ProfileProxy; exit?: ProfileExit }[] };
 type File = { agents?: Partial<Record<ProfileAgent, Stored>> };
 
 export class ProfileError extends Error {
@@ -74,6 +81,28 @@ export class ProfileStore {
     return this.of(agent, this.read()).profiles.find((p) => p.id === id)?.name ?? null;
   }
 
+  /** The proxy `id` has of its own, whole (for the forwarder); null: none, or no such profile. */
+  proxyOf(agent: ProfileAgent, id: string): ProfileProxy | null {
+    return this.read().agents?.[agent]?.profiles?.find((p) => p.id === id)?.proxy ?? null;
+  }
+
+  /** `id`'s proxy from now on (null: none); what was known of the old one's exit goes with it. */
+  setProxy(agent: ProfileAgent, id: string, proxy: ProfileProxy | null): void {
+    this.change(agent, id, (p) => { const { proxy: _old, exit: _was, ...rest } = p; return proxy ? { ...rest, proxy } : rest; });
+  }
+
+  /** Where `id`'s proxy let traffic out, as just checked (null: it did not). */
+  setExit(agent: ProfileAgent, id: string, exit: ProfileExit | null): void {
+    this.change(agent, id, (p) => { const { exit: _was, ...rest } = p; return exit ? { ...rest, exit } : rest; });
+  }
+
+  private change(agent: ProfileAgent, id: string, edit: (p: NonNullable<Stored["profiles"]>[number]) => NonNullable<Stored["profiles"]>[number]): void {
+    const file = this.read();
+    const stored = file.agents?.[agent];
+    if (id === DEFAULT_PROFILE || !stored?.profiles?.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
+    this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: stored.profiles.map((p) => (p.id === id ? edit(p) : p)) } } });
+  }
+
   setCurrent(agent: ProfileAgent, id: string): void {
     const file = this.read();
     if (!this.of(agent, file).profiles.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
@@ -114,7 +143,10 @@ export class ProfileStore {
 
   private of(agent: ProfileAgent, file: File): AgentProfiles {
     const stored = file.agents?.[agent] ?? {};
-    const own: Profile[] = (stored.profiles ?? []).map((p) => ({ ...p, ...this.account(agent, join(this.dir, agent, p.id, "home", ".claude.json")) }));
+    // A proxy's password, a ciphertext, is not for the screens: they are told only that it has one.
+    const own: Profile[] = (stored.profiles ?? []).map(({ proxy, ...p }) => ({ ...p,
+      ...(proxy ? { proxy: { server: proxy.server, ...(proxy.username ? { username: proxy.username } : {}), sealed: Boolean(proxy.password) } } : {}),
+      ...this.account(agent, join(this.dir, agent, p.id, "home", ".claude.json")) }));
     const profiles: Profile[] = [{ id: DEFAULT_PROFILE, name: "Default", kind: "subscription", createdAt: 0, ...this.account(agent, join(this.userHome, ".claude.json")) }, ...own];
     return { current: profiles.some((p) => p.id === stored.current) ? stored.current! : DEFAULT_PROFILE, profiles, creatable: agent === "claude-code" };
   }
