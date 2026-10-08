@@ -229,7 +229,7 @@ describe("OpenCode terminal companion", () => {
   });
 
   it("the launcher gives an OpenCode terminal the companion, still able to start standalone", () => {
-    const launch = agentLauncher({ binaries: { opencode: "/bin/opencode" }, gate: null, hookUrl: () => "http://127.0.0.1:1", stateDir: tmpdir(), env: {}, opencodeServer: true });
+    const launch = agentLauncher({ binaries: { opencode: "/bin/opencode" }, hookUrl: () => "http://127.0.0.1:1", stateDir: tmpdir(), env: {}, opencodeServer: true });
     const plan = launch({ id: "o1", harness: "opencode", cwd: tmpdir(), mode: "manual", hookToken: "tok", model: "m1" });
     expect(plan.companion).toBeInstanceOf(OpenCodeCompanion);
     expect(plan.args).toEqual(["--standalone", "-m", "m1"]);

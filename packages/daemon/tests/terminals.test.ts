@@ -1253,7 +1253,8 @@ describe("terminals over HTTP", () => {
 
     const audit = readFileSync(join(home, "terminals", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     expect(audit.map((a) => a.action)).toEqual(["create", "input", "keys", "input", "permission", "rename"]);
-    expect(audit[1]).toMatchObject({ via: "local", detail: { length: 17, sealed: 0 } });
+    expect(audit[1]).toMatchObject({ via: "local", detail: { length: 17 } });
+    expect(audit[1].detail).not.toHaveProperty("sealed");   // nothing of a terminal's is sealed (2026-10-08)
     expect(JSON.stringify(audit)).not.toContain("hi from the phone");
 
     expect((await call("DELETE", `/terminals/${id}`)).status).toBe(200);
@@ -1270,9 +1271,12 @@ describe("terminals over HTTP", () => {
     expect(source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")).not.toMatch(/\bfetch\s*\(/);
   });
 
-  it("a question through the real hook command: answered from the API, checked, Other's words sealed, never in the audit", async () => {
+  it("a question through the real hook command: answered from the API, checked, Other's words as written, never in the audit", async () => {
+    // A terminal is not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08): the service's sealer, there for
+    // Dispatch, is never asked about what is typed into a terminal — not even when an older screen says `seal`.
     const TOKEN = "enc:v1:" + "Q".repeat(40);
-    const sealer: Sealer = async (t) => ({ ok: true, text: t.split("hunter2").join(TOKEN), sealed: t.includes("hunter2") ? [{ label: "db/pw", field: "password", kind: "secret", hosts: ["db"], uses: ["exec"], token: TOKEN }] : [], ms: 1 });
+    let sealerAsked = 0;
+    const sealer: Sealer = async (t) => { sealerAsked += 1; return { ok: true, text: t.split("hunter2").join(TOKEN), sealed: [], ms: 1 }; };
     const { home, cwd, base, token, call } = await start(undefined, sealer);
     const id = (await call("POST", "/terminals", { harness: "claude-code", cwd })).json.terminal.id as string;
     const events = follow(base, token, id);
@@ -1289,15 +1293,16 @@ describe("terminals over HTTP", () => {
     expect((await answer({ decision: "allow", answers: { "日期格式化用哪个库？": { labels: ["Moment"] } } })).status).toBe(400);
     expect((await answer({ decision: "allow", answers: { "别的问题？": { labels: ["Luxon"] } } })).status).toBe(400);
     expect((await call("GET", `/terminals/${id}`)).json.terminal.permissions).toHaveLength(1);
-    const ok = await answer({ decision: "allow", answers: { "日期格式化用哪个库？": { labels: ["Luxon"] }, "发布前跑哪些检查？": { labels: ["单元测试"], other: "先连 db（密码 hunter2）跑迁移" } } });
-    expect(ok).toEqual({ status: 200, json: { ok: true, sealed: 1 } });
+    const ok = await answer({ decision: "allow", seal: true, answers: { "日期格式化用哪个库？": { labels: ["Luxon"] }, "发布前跑哪些检查？": { labels: ["单元测试"], other: "先连 db（密码 hunter2）跑迁移" } } });
+    expect(ok).toEqual({ status: 200, json: { ok: true, sealed: 0 } });
     await until(() => screen().includes("answer: "));
     const said = JSON.parse(screen().split("answer: ")[1]!.split("\r\n")[0]!.replace(/\r?\n/g, ""));
     expect(said.hookSpecificOutput.decision).toMatchObject({ behavior: "allow", updatedInput: {
       questions: [expect.objectContaining({ question: "日期格式化用哪个库？" }), expect.objectContaining({ question: "发布前跑哪些检查？" })],
-      answers: { "日期格式化用哪个库？": "Luxon", "发布前跑哪些检查？": `单元测试, 先连 db（密码 ${TOKEN}）跑迁移` },
+      answers: { "日期格式化用哪个库？": "Luxon", "发布前跑哪些检查？": "单元测试, 先连 db（密码 hunter2）跑迁移" },
     } });
-    expect(screen()).not.toContain("hunter2");
+    expect(sealerAsked).toBe(0);
+    expect(screen()).not.toContain(TOKEN);
     expect((await answer({ decision: "deny" })).status).toBe(404);
     const audit = readFileSync(join(home, "terminals", "audit.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     expect(audit.filter((a) => a.action === "permission")).toEqual([expect.objectContaining({ detail: { decision: "allow", tool: "AskUserQuestion" } })]);
@@ -1465,12 +1470,13 @@ describe("terminals over HTTP", () => {
     expect(late.find((e) => e.event === "sent")!.data.replies).toMatchObject([{ text: "hello there" }]);
   });
 
-  it("a reply is sealed unless sent directly, as typed", async () => {
+  it("a reply is typed as written, whatever an older screen asks for: nothing of a terminal's goes through the sealer", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-terminals-"));
     const cwd = mkdtempSync(join(tmpdir(), "agentswitch-terminal-cwd-"));
     const cfg: DaemonConfig = { home, targetsPath: TARGETS_PATH, port: 0, router: "echo", executors: "echo", browser: false, quotaTtlMs: 1000, maxTasks: 4, opencodePort: 0, opencodeBinary: "" };
     const TOKEN = "enc:v1:" + "S".repeat(40);
-    const sealer: Sealer = async (text) => ({ ok: true, text: text.split("hunter2").join(TOKEN), sealed: text.includes("hunter2") ? [{ label: "x/pw", field: "password", kind: "secret", hosts: ["x.com"], uses: ["http"], token: TOKEN }] : [], ms: 1 });
+    let sealerAsked = 0;
+    const sealer: Sealer = async (text) => { sealerAsked += 1; return { ok: true, text: text.split("hunter2").join(TOKEN), sealed: [], ms: 1 }; };
     const daemon = buildDaemon(cfg, { terminalLauncher: fakeLauncher(() => "http://127.0.0.1:9", false), sealer });
     closers.push(() => daemon.close());
     const req = (path: string, body: unknown) => daemon.api.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, markRemote({}, { deviceId: "phone" }));
@@ -1479,13 +1485,17 @@ describe("terminals over HTTP", () => {
     const events: TerminalEvent[] = [];
     daemon.terminals!.subscribe(id, null, (e) => events.push(e));
     await until(() => text(events).includes("fake agent ready"));
-    expect(await (await req(`/terminals/${id}/input`, { text: "pw hunter2" })).json()).toEqual({ ok: true, sealed: 1, attached: 0 });
+    // Until 2026-10-08 this went through the sealer (the default); an older phone still says `seal`, which is not read.
+    expect(await (await req(`/terminals/${id}/input`, { text: "pw hunter2" })).json()).toEqual({ ok: true, sealed: 0, attached: 0 });
+    expect(await (await req(`/terminals/${id}/input`, { text: "again hunter2", seal: true })).json()).toEqual({ ok: true, sealed: 0, attached: 0 });
     // A phone sends its files; it does not point at the Mac's.
     writeFileSync(join(cwd, "notes.txt"), "x");
     expect((await req(`/terminals/${id}/input`, { text: "看 [File #1]", seal: false, attachments: [{ token: "[File #1]", path: join(cwd, "notes.txt") }] })).status).toBe(403);
-    await until(() => text(events).includes(`got: pw ${TOKEN}`));
+    await until(() => text(events).includes("got: pw hunter2") && text(events).includes("got: again hunter2"));
     expect(await (await req(`/terminals/${id}/input`, { text: "ls -la", seal: false })).json()).toEqual({ ok: true, sealed: 0, attached: 0 });
     await until(() => text(events).includes("got: ls -la"));
+    expect(sealerAsked).toBe(0);
+    expect(text(events)).not.toContain(TOKEN);
   });
 
   it("continues a session in place, once: the same terminal again, a session open elsewhere refused unless forked", async () => {
@@ -1632,7 +1642,7 @@ describe("terminal pieces", () => {
 
   it("launches Claude Code with this terminal's own hooks and Codex with notify; a missing agent cannot start", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-launch-"));
-    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, gate: null, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin", SECRET_GATE_REPAIR_KEY: "k" } });
+    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin", SECRET_GATE_REPAIR_KEY: "k" } });
     const claude = launch({ id: "t1", harness: "claude-code", cwd: "/tmp", model: "claude-opus-5-5", mode: "manual", hookToken: "tok" });
     expect(claude.args).toEqual(["--settings", join(stateDir, "t1", "settings.json"), "--model", "claude-opus-5-5", "--permission-mode", "manual"]);
     // How hard it thinks, in each agent's own argument (harness/efforts.ts).
@@ -1662,33 +1672,32 @@ describe("terminal pieces", () => {
     // Codex's Daybreak switch (docs/simple-view-v0.md §5.8): the feature it is kept under, for a terminal started
     // where Codex and the account have it — and its companion then says how the switch stands. Otherwise neither.
     expect(codex.args.join(" ")).not.toContain("cli_daybreak");
-    const offered = agentLauncher({ binaries: { codex: "/bin/codex" }, gate: null, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin" }, codexServer: true, codexDaybreak: () => true });
+    const offered = agentLauncher({ binaries: { codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin" }, codexServer: true, codexDaybreak: () => true });
     const withSwitch = offered({ id: "t11", harness: "codex", cwd: "/tmp", resume: "abc", mode: "manual", hookToken: "tok" });
     expect(withSwitch.args.join(" ")).toContain("-c features.cli_daybreak=true");
     expect(withSwitch.args.slice(0, 4)).toEqual(["resume", "-C", "/tmp", "abc"]);
     expect(withSwitch.companion?.daybreak).toBeTypeOf("function");
-    const without = agentLauncher({ binaries: { codex: "/bin/codex" }, gate: null, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin" }, codexServer: true, codexDaybreak: () => false });
+    const without = agentLauncher({ binaries: { codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: { PATH: "/usr/bin" }, codexServer: true, codexDaybreak: () => false });
     expect(without({ id: "t12", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).companion?.daybreak).toBeUndefined();
   });
 
   it("refuses the protected paths each agent's own way: Claude's deny rules, Codex's profile, OpenCode's config, pi's extension", () => {
     const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-launch-"));
     const prot = { roots: ["/as/home", "/as/gate"], exempt: [], readDenied: ["/as/gate", "/as/home/local-token"] };
-    const gate = { bin: "/g/bin", home: "/as/gate", proxy: "http://127.0.0.1:8080", playwrightVersion: "1", allowedOrigins: [] };
-    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex", opencode: "/bin/opencode", pi: "/bin/pi" }, gate, protected: prot,
+    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude", codex: "/bin/codex", opencode: "/bin/opencode", pi: "/bin/pi" }, protected: prot,
       hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", piExtension: "/h/pi.ts", env: { PATH: "/usr/bin", HOME: "/Users/u" } });
     // Claude Code: its own deny rules besides the PreToolUse floor ("//" = from the filesystem root).
     launch({ id: "c1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     const settings = JSON.parse(readFileSync(join(stateDir, "c1", "settings.json"), "utf8"));
     expect(settings.permissions.deny).toEqual(expect.arrayContaining(["Read(//as/home/local-token)", "Read(//as/gate/**)", "Edit(//as/home/**)"]));
-    // Codex: a profile its sandbox enforces; the gate's proxy only for the commands it runs, not for Codex itself.
+    // Codex: a profile its sandbox enforces. No proxy of the gate, for Codex or for the commands it runs (2026-10-08).
     const codex = launch({ id: "x1", harness: "codex", cwd: "/tmp", mode: "auto", hookToken: "tok" });
     expect(codex.args).toContain('permissions.agentswitch={ extends = ":workspace", filesystem = { "/as/home" = "read", "/as/gate" = "deny", "/as/home/local-token" = "deny" } }');
     // With its hooks the reads are the PreToolUse floor's: a deny entry would keep an approved command sandboxed.
-    const hooked = agentLauncher({ binaries: { codex: "/bin/codex" }, gate, protected: prot, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: {}, codexHooks: () => true });
+    const hooked = agentLauncher({ binaries: { codex: "/bin/codex" }, protected: prot, hookUrl: () => "http://127.0.0.1:4711", stateDir, node: "/n/node", hookScript: "/h/hook.js", env: {}, codexHooks: () => true });
     expect(hooked({ id: "x2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args).toContain('permissions.agentswitch={ extends = ":read-only", filesystem = { "/as/home" = "read", "/as/gate" = "read" } }');
     expect(codex.args).not.toContain("-s");
-    expect(codex.args.find((a) => a.startsWith("shell_environment_policy.set="))).toContain('"HTTPS_PROXY" = "http://127.0.0.1:8080"');
+    expect(codex.args.find((a) => a.startsWith("shell_environment_policy"))).toBeUndefined();
     expect(codex.env.HTTPS_PROXY).toBeUndefined();
     expect(codex.env.AGENTSWITCH_TERMINAL_ID).toBe("x1");
     // OpenCode: only refusals, the user's other permission settings untouched.

@@ -25,7 +25,6 @@ import { fileURLToPath } from "node:url";
 import headless from "@xterm/headless";
 import { ensureLocalToken, LocalAuth } from "../src/api/localAuth.js";
 import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
-import { defaultGate } from "../src/executors/gate.js";
 import { terminalProtected } from "../src/executors/protected.js";
 import { AppServerClient } from "../src/harness/appserver.js";
 import { connectWsLines } from "../src/harness/wsLines.js";
@@ -73,7 +72,7 @@ const relayPort = (relay.address() as AddressInfo).port;
 // One service, two ways of starting a Codex terminal: on its own (as today), and through its own app-server.
 let remote = false;
 const launcher = (codexServer: boolean) => agentLauncher({
-  binaries: { codex: CODEX } as never, gate: defaultGate(env), hookUrl: () => `http://127.0.0.1:${relayPort}`, stateDir: join(home, "terminals"),
+  binaries: { codex: CODEX } as never, hookUrl: () => `http://127.0.0.1:${relayPort}`, stateDir: join(home, "terminals"),
   node: NODE, hookScript: HOOK, env, protected: terminalProtected({ ...env, AGENTSWITCH_HOME: home }), codexHooks: () => true, codexServer });
 const direct = launcher(false), through = launcher(true);
 const daemon = buildDaemon(cfg, { terminalLauncher: (req) => (remote ? through : direct)(req) });

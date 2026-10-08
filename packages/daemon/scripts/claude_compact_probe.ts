@@ -67,7 +67,7 @@ const relay = createHttpServer(async (req, res) => {
 await new Promise<void>((ok) => relay.listen(0, "127.0.0.1", ok));
 const relayPort = (relay.address() as AddressInfo).port;
 
-const launch = agentLauncher({ binaries: { "claude-code": CLAUDE } as never, gate: null, hookUrl: () => `http://127.0.0.1:${relayPort}`, stateDir: join(home, "terminals"), env });
+const launch = agentLauncher({ binaries: { "claude-code": CLAUDE } as never, hookUrl: () => `http://127.0.0.1:${relayPort}`, stateDir: join(home, "terminals"), env });
 const daemon = buildDaemon(cfg, { terminalLauncher: (req) => {
   const plan = launch(req);
   if (process.env.PROBE_HOOKS !== "compact") return plan;

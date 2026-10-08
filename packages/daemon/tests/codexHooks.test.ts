@@ -54,7 +54,7 @@ describe("Codex hooks in AgentSwitch's terminals", () => {
   it("a Codex terminal gets the hooks, and its status from them, only once they are trusted", () => {
     const dir = mkdtempSync(join(tmpdir(), "agentswitch-codex-launch-"));
     let trusted = false;
-    const launch = agentLauncher({ binaries: { codex: "/bin/codex" }, gate: null, hookUrl: () => "http://127.0.0.1:1", stateDir: dir, node: "/n", hookScript: "/h.js", env: {}, codexHooks: () => trusted });
+    const launch = agentLauncher({ binaries: { codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:1", stateDir: dir, node: "/n", hookScript: "/h.js", env: {}, codexHooks: () => trusted });
     const req = { id: "t1", harness: "codex" as const, cwd: dir, hookToken: "tok", mode: "manual" as const, cols: 80, rows: 24 };
     const before = launch(req);
     expect(before.hooks).toBe(false);

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { BrowserAgents, bridgeCommand, describeCall, FILES_REFUSED, HELD_LOGS_REFUSED, RESIZE_REFUSED, terminalOwner, USER_HOLDS_TAB, type AgentConnection, type EngineConnection, type EngineOptions, type JsonRpcMessage } from "../src/browser/agents.js";
+import { BrowserAgents, bridgeCommand, describeCall, FILES_REFUSED, HELD_LOGS_REFUSED, RESIZE_REFUSED, terminalOwner, USER_HOLDS_TAB, type AgentConnection, type EngineConnection, type EngineOptions, type JsonRpcMessage, directTools, withoutFileLinks } from "../src/browser/agents.js";
 import { BrowserAudit } from "../src/browser/audit.js";
 import { BrowserHost } from "../src/browser/host.js";
 import { YOU, type TabOwner } from "../src/browser/types.js";
@@ -305,7 +305,7 @@ describe("the MCP connection", () => {
   // `browser_run_code_unsafe`.
   it("a picture of the page is taken on the CSS size too: Playwright's screenshot, and the gate's own code, its masked screenshot among it", async () => {
     const { agents, host, engines, driver } = setup(5_000, 40);
-    const c = await connect(agents, agents.mint(CODEX));
+    const c = await connect(agents, agents.mint(CODEX, { gate: true }));
     await c.call("browser_navigate", { url: "https://github.com/" });
     const page = driver.page(0);
     host.subscribe(engines[0]!.current!, { quality: 80, fps: 15, scale: 2 }, () => undefined);
@@ -557,5 +557,44 @@ describe("the overlay", () => {
     for (const tool of ["browser_type", "browser_fill_form", "browser_select_option"]) {
       expect(describeCall(tool, { text: "hunter2-plaintext", fields: [{ value: "hunter2-plaintext" }], values: ["hunter2-plaintext"] }), tool).not.toContain("hunter2");
     }
+  });
+});
+
+describe("a session with no gate in front (a terminal's agent, 2026-10-08)", () => {
+  it("lists Playwright MCP's tools without the ones refused here and without parameters that name files", () => {
+    const listed = directTools({ jsonrpc: "2.0", id: 1, result: { tools: [
+      { name: "browser_navigate", inputSchema: { type: "object", properties: { url: {} }, required: ["url"] } },
+      { name: "browser_take_screenshot", inputSchema: { type: "object", properties: { type: {}, filename: {}, scale: {} }, required: ["scale"] } },
+      { name: "browser_file_upload", description: "Upload one or multiple files", inputSchema: { type: "object", properties: { paths: {} } } },
+      { name: "browser_resize" }, { name: "browser_evaluate" }, { name: "browser_run_code_unsafe" },
+    ] } });
+    const tools = (listed.result as { tools: { name: string; description?: string; inputSchema?: { properties?: object; required?: string[] } }[] }).tools;
+    expect(tools.map((t) => t.name)).toEqual(["browser_navigate", "browser_take_screenshot", "browser_file_upload"]);
+    expect(Object.keys(tools[1]!.inputSchema!.properties!)).toEqual(["type", "scale"]);
+    expect(tools[1]!.inputSchema!.required).toEqual(["scale"]);
+    expect(tools[2]!.description).toContain("Dismiss the file chooser");
+    expect(Object.keys(tools[2]!.inputSchema!.properties!)).toEqual([]);
+  });
+
+  it("takes the links to Playwright MCP's own files out of an answer (as the real program writes them)", () => {
+    const answer = (text: string) => ({ jsonrpc: "2.0" as const, id: 1, result: { content: [{ type: "text", text }, { type: "image", data: "x" }] } });
+    const text = (m: unknown) => ((m as { result: { content: { text?: string }[] } }).result.content[0]!.text ?? "");
+    expect(text(withoutFileLinks(answer("### Result\n- [Screenshot of viewport](./page-2026-10-08T06-17-16-991Z.png)\n### Ran Playwright code\nx"), "/as/agents/c1")))
+      .toBe("### Result\n### Ran Playwright code\nx");
+    expect(text(withoutFileLinks(answer("### Page\n- Page URL: http://a/\n### Snapshot\n- [Snapshot](./page-1.yml)"), "/as/agents/c1")))
+      .toBe("### Page\n- Page URL: http://a/\n### Snapshot\nCall browser_snapshot to read the page.");
+    expect(text(withoutFileLinks(answer("saved to /as/agents/c1/log.txt"), "/as/agents/c1"))).toBe("saved to (not kept)/log.txt");
+    const same = answer("- [a link on the page](https://example.com/x)\n- button \"Go\" [ref=e2]");
+    expect(withoutFileLinks(same, "/as/agents/c1")).toBe(same);
+  });
+
+  it("runs no code and no page script for it, not even the gate's own checks", async () => {
+    const { agents } = setup();
+    const c = await connect(agents, agents.mint(CODEX));
+    const run = await c.call("browser_run_code_unsafe", { code: "async (page) => 1" });
+    expect(run.result).toMatchObject({ isError: true });
+    expect(JSON.stringify(run.result)).toContain("runs no code");
+    const evaluated = await c.call("browser_evaluate", { function: "() => location.href" });
+    expect(JSON.stringify(evaluated.result)).toContain("no page scripts");
   });
 });

@@ -9,6 +9,12 @@
  *  page links or embeds it; AgentSwitch's own port is refused; a popup becomes a tab of the same owner; the holder's
  *  size applies and goes back on release; Chrome quits on shutdown.
  *
+ *  A terminal's agent (2026-10-08, docs/profiles-v0.md §8: no gate in front; `BROWSER_SMOKE_ONLY=direct` runs this part
+ *  alone): an MCP client speaks to the bridge itself. Its list is Playwright MCP's without the tools and parameters the
+ *  bridge refuses; navigate, snapshot (the page as it is), type, click; a screenshot comes as a picture; no code, no
+ *  page script, no file named; a held tab's call waits; nothing left in Playwright MCP's folder and no link to it in an
+ *  answer.
+ *
  *  Then the agent bridge (step 3), through the real gate (the repo's secret-gate, with a throw-away key in the temporary
  *  folder and no gate service): an MCP client speaks to `secret-gate browser -- <bridge>`, the bridge to a local
  *  listener with the session's token, Playwright MCP runs in this process on the agent's own tabs. Navigate and
@@ -321,7 +327,7 @@ async function bridgeRoundTrip(): Promise<void> {
   let listener: ReturnType<typeof listenLocal> | null = null;
   const port = await new Promise<number>((r) => { listener = listenLocal({ app }, 0, (info) => r(info.port), new LocalAuth(localToken)); });
   const owner = terminalOwner("smoke1", "codex", "/Users/me/AgentSwitch");
-  const session = api.agents.mint(owner);
+  const session = api.agents.mint(owner, { gate: true });
   const mine = await host.open(YOU, `${siteUrl}?mine=1`);
 
   const gate = spawn(VENV_GATE_BIN, ["browser", "--", ...bridgeCommand(session, `http://127.0.0.1:${port}`)], { env: gateEnv, stdio: ["pipe", "pipe", "pipe"] }) as ChildProcessWithoutNullStreams;
@@ -482,10 +488,139 @@ async function bridgeRoundTrip(): Promise<void> {
   }
 }
 
+/** A terminal's agent: the bridge itself as its MCP server, no gate in front (docs/profiles-v0.md §8). */
+async function directRoundTrip(): Promise<void> {
+  const bhome = join(root, "direct-home");
+  mkdirSync(bhome, { recursive: true });
+  const site = createServer((_req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(`<!doctype html><title>Portal</title><style>body{margin:0}</style>
+<button id="m" onclick="document.title='merged'">Merge pull request</button>
+<input id="user" type="text" aria-label="User" oninput="document.title='user:'+this.value">
+<input id="file" type="file" aria-label="Attachment">
+<script>console.log('page ready')</script>`);
+  });
+  const sitePort = await new Promise<number>((r) => site.listen(0, "127.0.0.1", () => r((site.address() as AddressInfo).port)));
+  const siteUrl = `http://127.0.0.1:${sitePort}/login`;
+  const api = sharedBrowser({ home: bhome, userHome, protected: defaultProtected({ ...process.env, HOME: userHome, AGENTSWITCH_HOME: bhome }), ownPorts: () => (own ? [own.port] : []),
+    holdWaitMs: 1_500, ...engineOption() });
+  const host = api.host;
+  const app = new Hono();
+  mountBrowser(app, { browser: api } as unknown as ApiDeps);
+  let listener: ReturnType<typeof listenLocal> | null = null;
+  const port = await new Promise<number>((r) => { listener = listenLocal({ app }, 0, (info) => r(info.port), new LocalAuth("smoke-local-token-0123456789abcdefghijklmnop")); });
+  const owner = terminalOwner("direct1", "claude-code", "/Users/me/AgentSwitch");
+  const session = api.agents.mint(owner);
+  const mine = await host.open(YOU, `${siteUrl}?mine=1`);
+  const [node, ...bridgeArgs] = bridgeCommand(session, `http://127.0.0.1:${port}`);
+  const bridge = spawn(node!, bridgeArgs, { env: process.env, stdio: ["pipe", "pipe", "pipe"] }) as ChildProcessWithoutNullStreams;
+  let bridgeErr = "";
+  bridge.stderr.on("data", (d: Buffer) => { bridgeErr += d.toString(); });
+  const mcp = mcpClient(bridge);
+  const show = (label: string, text: string) => { if (process.env.BROWSER_SMOKE_SHOW) console.log(`--- ${label}\n${text}\n---`); };
+  const agentsDir = join(bhome, "browser", "agents");
+  try {
+    const init = await mcp.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "smoke-direct", version: "1" } });
+    check(!!init.result, "the bridge itself answers initialize");
+    mcp.notify("notifications/initialized");
+    const listed = ((await mcp.request("tools/list")).result as { tools: { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown> } }[] }).tools;
+    const names = listed.map((t) => t.name);
+    check(names.includes("browser_navigate") && names.includes("browser_take_screenshot") && names.includes("browser_snapshot") && names.includes("browser_click"), `the list is Playwright MCP's (${names.length} tools)`);
+    check(!names.some((n) => ["browser_run_code_unsafe", "browser_evaluate", "browser_resize"].includes(n)) && !names.some((n) => n.startsWith("secret_")),
+      "without the code tools and resize (refused here), and with none of the gate's");
+    const withFiles = listed.filter((t) => ["filename", "paths"].some((p) => p in (t.inputSchema?.properties ?? {}))).map((t) => t.name);
+    check(withFiles.length === 0, `no tool offers a parameter that names a file (${withFiles.join(", ") || "none"})`);
+    check(/Dismiss the file chooser/.test(listed.find((t) => t.name === "browser_file_upload")?.description ?? ""), "the upload tool says what it does here");
+
+    const nav = await mcp.call("browser_navigate", { url: siteUrl });
+    show("navigate", nav.text);
+    check(!nav.error && nav.text.includes("Opened in tab \"claude · AgentSwitch\""), `navigate opens the agent's own tab (${nav.text.split("\n")[0]})`);
+    const tab = host.tabsOf(owner)[0];
+    check(!!tab && tab.owner.label === "claude · AgentSwitch", "the tab is listed under the agent's name");
+    if (!tab) return;
+    await until(() => host.get(tab.id)?.title === "Portal", "the agent's page loads in the shared browser");
+    const snap = await mcp.call("browser_snapshot");
+    show("snapshot", snap.text);
+    const ref = /button "Merge pull request" \[ref=(e\d+)\]/.exec(snap.text)?.[1];
+    const userRef = /textbox "User" \[ref=(e\d+)\]/.exec(snap.text)?.[1];
+    check(!!ref && !!userRef, "a snapshot shows the page");
+    const list = await mcp.call("browser_tabs", { action: "list" });
+    check(!list.text.includes("mine=1") && list.text.includes("/login"), "the person's tab is not in the agent's list");
+    const typed = await mcp.call("browser_type", { target: userRef, element: "User", text: "plain words" });
+    show("type", typed.text);
+    await until(() => host.get(tab.id)?.title === "user:plain words", "what the agent types reaches the page as it is");
+    const after = await mcp.call("browser_snapshot");
+    check(after.text.includes("plain words"), "and the snapshot shows it: nothing is masked for a terminal's agent");
+    await mcp.call("browser_click", { target: ref, element: "Merge pull request" });
+    await until(() => host.get(tab.id)?.title === "merged", "a click reaches the page");
+    check(host.get(tab.id)?.action?.description === 'click "Merge pull request"', "the overlay says what it did");
+
+    const shot = await mcp.call("browser_take_screenshot", { scale: "css" });
+    show("screenshot", shot.text);
+    const picture = shot.result.content?.find((c) => c.type === "image");
+    check(!shot.error && pngSize(picture?.data) === "1280x800", `a screenshot comes as a picture (${pngSize(picture?.data)}; ${shot.text.replace(/\s+/g, " ").slice(0, 120)})`);
+    const logs = await mcp.call("browser_console_messages", { level: "info" });
+    show("console", logs.text);
+    check(!logs.error && logs.text.includes("page ready"), "the console log is read");
+    const requests = await mcp.call("browser_network_requests", { static: true });
+    show("network", requests.text);
+    check(!requests.error && requests.text.includes("/login"), "the network log is read");
+    for (const [label, answer] of [["navigate", nav], ["snapshot", snap], ["type", typed], ["screenshot", shot], ["console", logs], ["network", requests]] as const) {
+      check(!answer.text.includes(agentsDir) && !answer.text.includes(bhome), `the ${label} answer points at no file of the service's`);
+    }
+    const leftovers = existsSync(agentsDir) ? readdirSync(agentsDir).flatMap((d) => readdirSync(join(agentsDir, d))) : [];
+    check(leftovers.length === 0, `Playwright MCP's files are swept after each call (${leftovers.join(", ") || "none left"})`);
+
+    // No code, no page script, no file: whatever the arguments (the gate's own checks are not a model's to run).
+    const mask = `async (page) => { const locate = (t) => page.locator(/^(?:f\\d+)?e\\d+$/.test(t) ? 'aria-ref=' + t : t); const field = locate(${JSON.stringify(userRef)}); try { if (await field.count() !== 1) return 'unknown'; const value = await field.inputValue({ timeout: 2000 }); return value.length ? 'nonempty' : 'empty'; } catch { return 'unknown'; } }`;
+    const code = await mcp.call("browser_run_code_unsafe", { code: mask });
+    check(code.error && code.text.includes("runs no code"), `the gate's own probe is refused from a model (${code.text.replace(/\s+/g, " ").slice(0, 90)})`);
+    const evaluated = await mcp.call("browser_evaluate", { function: "() => location.href" });
+    check(evaluated.error && evaluated.text.includes("no page scripts"), "a page script is refused");
+    const named = await mcp.call("browser_take_screenshot", { scale: "css", filename: join(userHome, "shot.png") });
+    check(named.error && named.text.includes("no files") && !existsSync(join(userHome, "shot.png")), "a screenshot to a named file is refused and not written");
+    const uploaded = await mcp.call("browser_file_upload", { paths: [join(userHome, ".ssh", "id_ed25519")] });
+    check(uploaded.error && uploaded.text.includes("no files"), "an upload by path is refused");
+    const resized = await mcp.call("browser_resize", { width: 300, height: 300 });
+    check(resized.error && resized.text.includes("browser_resize is not available"), "resizing is refused");
+    const file = await mcp.call("browser_navigate", { url: pathToFileURL(join(userHome, "site", "index.html")).href });
+    check(file.error && file.text.includes("Not opened"), `a file: address is refused (${file.text.replace(/\s+/g, " ").slice(0, 90)})`);
+
+    // A file chooser a page opens holds up every other call until it is dismissed: the one thing the upload tool does.
+    const fileRef = /button "Attachment" \[ref=(e\d+)\]/.exec((await mcp.call("browser_snapshot")).text)?.[1];
+    if (fileRef) {
+      const opened = await mcp.call("browser_click", { target: fileRef, element: "Attachment" });
+      show("chooser", opened.text);
+      const dismissed = await mcp.call("browser_file_upload", {});
+      show("dismissed", dismissed.text);
+      check(!dismissed.error && !(await mcp.call("browser_snapshot")).error, `a file chooser is dismissed and the tab works on (${dismissed.text.replace(/\s+/g, " ").slice(0, 90)})`);
+    } else skipped("a file chooser is dismissed (no file button in the snapshot)");
+
+    host.take(tab.id, "phone-1");
+    const waited = Date.now();
+    const held = await mcp.call("browser_snapshot");
+    check(held.error && held.text.includes("The user is using this tab") && Date.now() - waited >= 1_400, "a call on a held tab waits, then fails in words");
+    host.release(tab.id, "phone-1");
+    check(!(await mcp.call("browser_snapshot")).error, "and runs once the tab is handed back");
+  } catch (err) {
+    check(false, `direct round trip: ${(err as Error).message}\n${bridgeErr.slice(-2000)}`);
+  } finally {
+    bridge.stdin.end();
+    await new Promise((r) => { bridge.once("exit", r); setTimeout(r, 5_000); });
+    api.agents.revoke(session.id);
+    await host.close(mine.id).catch(() => undefined);
+    (listener as ReturnType<typeof listenLocal> | null)?.close();
+    site.close();
+    await api.agents.shutdown();
+    await host.shutdown();
+  }
+}
+
 let own: { server: Server; port: number; hits: string[] };
 let redirect: { server: Server; port: number };
 
-main().then(() => bridgeRoundTrip()).catch((err) => { failures.push(String(err)); console.error(err); }).finally(() => {
+const ONLY = process.env.BROWSER_SMOKE_ONLY;
+(ONLY === "direct" ? directRoundTrip() : main().then(() => directRoundTrip()).then(() => bridgeRoundTrip())).catch((err) => { failures.push(String(err)); console.error(err); }).finally(() => {
   own?.server.close();
   redirect?.server.close();
   rmSync(root, { recursive: true, force: true });

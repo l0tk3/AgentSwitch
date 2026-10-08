@@ -11,7 +11,7 @@ import { OpenCodeCompanion } from "./opencodeTerminal.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { claudeMcpServers, gateEnv, withoutCredentialRepair, type GateOptions } from "../executors/gate.js";
+import { withoutCredentialRepair } from "../executors/gate.js";
 import { protectedDeny } from "../executors/opencodeShared.js";
 import { rootSpellings, type ProtectedPaths } from "../executors/protected.js";
 import type { LaunchPlan, LaunchRequest, Launcher, TerminalHarness } from "./host.js";
@@ -29,7 +29,6 @@ export const QUICK_HOOK_TIMEOUT_S = 10;
 export type LauncherOptions = {
   /** Agent executables; a missing one cannot be started. */
   readonly binaries: Partial<Record<TerminalHarness, string>>;
-  readonly gate: GateOptions | null;
   /** The service's local URL the hook command calls (http://127.0.0.1:<port>). */
   readonly hookUrl: () => string;
   /** Per-terminal files (settings, MCP config) go under here: `<dir>/<id>/`. The managed executors may not read it. */
@@ -56,8 +55,9 @@ export type LauncherOptions = {
    *  (docs/simple-view-v0.md §5.8). */
   readonly codexDaybreak?: () => boolean;
   /** The shared browser for the agent (docs/browser-v0.md §2 给 agent, terminal-v0 §3): the agent bridge's command for
-   *  terminal `id`, made when it starts (a session of its own); the gate wraps it as the `browser` MCP server. Codex,
-   *  Claude Code and OpenCode; only with the gate (no ungated browser for an agent); absent or null: no browser tool. */
+   *  terminal `id`, made when it starts (a session of its own). It is the `browser` MCP server as it is: a terminal is
+   *  not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08), so its agent sees a page as the page is.
+   *  Codex, Claude Code and OpenCode; absent or null: no browser tool. */
   readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string }) => readonly string[] | null;
 };
 
@@ -94,11 +94,13 @@ export function codexHasOwnInstructions(env: NodeJS.ProcessEnv): boolean {
 /** Codex gives an MCP tool call 60 s by default: a call waits up to two minutes while a person holds its tab. */
 const BROWSER_TOOL_TIMEOUT_S = 300;
 
-/** The browser tool as an MCP server: `secret-gate browser -- <the bridge>`, with the gate's home (its rules and keys). */
+/** The browser tool as an MCP server: the agent bridge itself (browser/agents.ts), which carries MCP to the service.
+ *  Until 2026-10-08 the gate stood in front (`secret-gate browser -- <the bridge>`); Dispatch's tasks still have it. */
 export type BrowserServer = { readonly command: string; readonly args: readonly string[]; readonly env: Record<string, string> };
 
-export function browserServer(gate: GateOptions, bridge: readonly string[]): BrowserServer {
-  return { command: gate.bin, args: ["browser", "--", ...bridge], env: { SECRET_GATE_HOME: gate.home } };
+export function browserServer(bridge: readonly string[]): BrowserServer | null {
+  const [command, ...args] = bridge;
+  return command ? { command, args, env: {} } : null;
 }
 
 /** Codex's `-c` overrides for the browser server (its session config, never the user's config.toml). */
@@ -171,8 +173,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     if (!file) throw new Error(`${req.harness} is not installed on this Mac`);
     const dir = join(opts.stateDir, req.id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const gated = opts.gate ? gateEnv(opts.gate) : {};
-    const own: Record<string, string> = {
+    // A terminal is a terminal: the agent and what it runs have the service's own environment and this terminal's
+    // three variables — no proxy and no certificate of the credential gate, none of its tools (docs/profiles-v0.md §8,
+    // 2026-10-08: the gate stays in Dispatch). What stays closed is the credentials at rest (`protected`).
+    const env: Record<string, string> = {
       ...withoutParentSession(withoutCredentialRepair(opts.env ?? process.env)),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
@@ -180,18 +184,16 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
       AGENTSWITCH_TERMINAL_URL: opts.hookUrl(),
       AGENTSWITCH_TERMINAL_HOOK_TOKEN: req.hookToken,
     };
-    const env = { ...own, ...gated };
-    const bridge = opts.gate && opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd }) : null;
-    const browser = opts.gate && bridge ? browserServer(opts.gate, bridge) : null;
+    const bridge = opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd }) : null;
+    const browser = bridge ? browserServer(bridge) : null;
     switch (req.harness) {
       case "claude-code": {
         const settings = join(dir, "settings.json");
         writeFileSync(settings, JSON.stringify(claudeHookSettings(hookCommand, opts.protected), null, 2), { mode: 0o600 });
         const args = ["--settings", settings];
-        if (opts.gate) {
+        if (browser) {
           const mcp = join(dir, "mcp.json");
-          const servers = { ...claudeMcpServers(opts.gate, join(dir, "profile"), false), ...(browser ? { [BROWSER_SERVER]: { type: "stdio", ...browser } } : {}) };
-          writeFileSync(mcp, JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });
+          writeFileSync(mcp, JSON.stringify({ mcpServers: { [BROWSER_SERVER]: { type: "stdio", ...browser } } }, null, 2), { mode: 0o600 });
           args.push("--mcp-config", mcp);
         }
         if (browser) args.push("--append-system-prompt", BROWSER_GUIDANCE);
@@ -212,8 +214,6 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // Codex's own "needs you" notifications, as terminal notifications (OSC 9) whether or not its window has focus:
         // the host reads them as waiting. They cover what no hook does (an app tool's approval form, a question).
         args.push(...CODEX_ATTENTION);
-        // The gate's proxy and CA reach the commands Codex runs, never Codex's own traffic (as the managed executor).
-        if (opts.gate) args.push("-c", `shell_environment_policy.set=${tomlInline(gated)}`);
         if (browser) args.push(...codexBrowserArgs(browser));
         if (browser && !codexHasOwnInstructions(opts.env ?? process.env)) args.push("-c", `developer_instructions=${JSON.stringify(BROWSER_GUIDANCE)}`);
         // Its Daybreak switch, where it has one: the feature it is kept under is off unless enabled (0.162), and
@@ -232,8 +232,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // The folder is named (`-C`, the terminal's own): Codex does not ask whether to use the one the session ran in,
         // which may be gone (docs/terminal-v0.md §5).
         if (req.resume) args.unshift(req.fork ? "fork" : "resume", "-C", req.cwd, req.resume);
-        const companion = opts.codexServer ? new CodexCompanion({ binary: file, cwd: req.cwd, env: own, args, dir, daybreak }) : undefined;
-        return { file, args, env: own, hooks: hooked, ...(companion ? { companion } : {}) };
+        const companion = opts.codexServer ? new CodexCompanion({ binary: file, cwd: req.cwd, env, args, dir, daybreak }) : undefined;
+        return { file, args, env, hooks: hooked, ...(companion ? { companion } : {}) };
       }
       case "opencode": {
         // A private server — the service's own, which it watches (opencodeTerminal.ts), else the TUI's `--standalone` one:

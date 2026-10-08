@@ -58,7 +58,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([k]) =>
 // No hooks (they need the installed app's own command, which this does not use): the switch does not depend on them.
 // `PROBE_FEATURE=off`: as a terminal is started where Codex has no such switch, to compare.
 const offered = process.env.PROBE_FEATURE !== "off";
-const launch = agentLauncher({ binaries: { codex: CODEX } as never, gate: null, hookUrl: () => `http://127.0.0.1:${port}`, stateDir: join(home, "terminals"), env,
+const launch = agentLauncher({ binaries: { codex: CODEX } as never, hookUrl: () => `http://127.0.0.1:${port}`, stateDir: join(home, "terminals"), env,
   codexHooks: () => false, codexServer: true, codexDaybreak: () => offered });
 // The same terminal with one thing more, for the probe's eyes only: Codex's own status line with its Daybreak item,
 // which says how the TUI itself holds the switch ("Daybreak on" / "Daybreak off") without a key being pressed.

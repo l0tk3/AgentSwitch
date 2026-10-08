@@ -21,6 +21,9 @@ export const HREF_PROBE = "() => location.href";
 
 export const CODE_REFUSED = "AgentSwitch's shared browser runs no code for agents: browser_run_code_unsafe takes only secret-gate's own checks.";
 export const EVALUATE_REFUSED = "AgentSwitch's shared browser runs no page scripts for agents: browser_evaluate takes only secret-gate's URL check.";
+/** With no gate in front of the session there are no checks of the gate's to take: none of either. */
+export const CODE_UNAVAILABLE = "AgentSwitch's shared browser runs no code for agents: browser_run_code_unsafe is not available.";
+export const EVALUATE_UNAVAILABLE = "AgentSwitch's shared browser runs no page scripts for agents: browser_evaluate is not available. Read the page with browser_snapshot, browser_find or browser_take_screenshot.";
 
 const LOCATE = "const locate = (t) => page.locator(/^(?:f\\d+)?e\\d+$/.test(t) ? 'aria-ref=' + t : t);";
 const OPEN = `async (page) => { ${LOCATE}`;
@@ -99,8 +102,11 @@ export function probeTemplate(code: string): string | null {
 type Args = Record<string, unknown>;
 
 /** Why a call of the code tools is refused, or null: `browser_run_code_unsafe` only with a template's code (no file),
- *  `browser_evaluate` only as the URL probe (no element, no file). */
-export function codeRefusal(tool: string, args: Args): string | null {
+ *  `browser_evaluate` only as the URL probe (no element, no file) — and both only from a session with the gate in
+ *  front (`gate`): the templates are the gate's to call, never a model's (the masked screenshot's writes a file where
+ *  its caller says). */
+export function codeRefusal(tool: string, args: Args, gate = true): string | null {
+  if (!gate) return tool === RUN_CODE_TOOL ? CODE_UNAVAILABLE : tool === EVALUATE_TOOL ? EVALUATE_UNAVAILABLE : null;
   if (tool === RUN_CODE_TOOL) {
     const keys = Object.keys(args);
     const ok = keys.length === 1 && keys[0] === "code" && typeof args.code === "string" && probeTemplate(args.code) !== null;

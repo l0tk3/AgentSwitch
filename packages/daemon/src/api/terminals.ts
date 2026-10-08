@@ -77,7 +77,7 @@ const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.
  *  Mac by where it is (`path`, the Mac app's: a file dragged into its reply box is not copied, its path is typed as a
  *  terminal would type it). */
 const Input = z.object({
-  text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true), seal: z.boolean().default(true),
+  text: z.string().min(1).max(MAX_INPUT), submit: z.boolean().default(true),
   attachments: z.array(z.object({
     token: z.string().regex(/^\[(Image|File) #\d{1,3}\]$/),
     upload: z.string().min(1).max(64).optional(),
@@ -93,11 +93,10 @@ const Keys = z.object({ keys: z.array(z.union([z.enum(KEY_NAMES), z.string().reg
 const SCREEN_ID = /^[\w-]{1,64}$/;
 const Resize = z.object({ ...Size, screen: z.string().regex(SCREEN_ID).optional() });
 /** `answers`: a question's (AskUserQuestion, terminal-v0 §3 "选择题"), by its text: the options picked, Other's words.
- *  `seal`: Other's words go through the sealer first (default, as a reply does). */
+ *  Other's words are typed as written. */
 const Decide = z.object({
   decision: z.enum(["allow", "deny"]),
   answers: z.record(z.string().max(2000), z.object({ labels: z.array(z.string().max(2000)).max(16).optional(), other: z.string().max(MAX_OTHER).optional() })).optional(),
-  seal: z.boolean().default(true),
 });
 const Rename = z.object({ name: z.string().max(200).nullable() });
 const HookBody = z.object({ event: z.string().min(1).max(64), payload: z.record(z.string(), z.unknown()) });
@@ -439,8 +438,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     return c.json({ ok: true, on });
   });
 
-  // A sealed reply goes through the sealer first, like a task (router-v0 §9): credentials in it reach the agent as
-  // ciphertext. `seal: false` types it as it is, as a keyboard on the Mac would (the phone checks for secrets first).
+  // A reply is typed as it is, as a keyboard on the Mac would type it. Until 2026-10-08 it could go through the sealer
+  // first (`seal`, the default): a terminal is not behind the credential gate now (docs/profiles-v0.md §8), and a
+  // `seal` an older screen still sends is not read.
   app.post("/terminals/:id/input", async (c) => {
     const id = c.req.param("id");
     const body = await parseBody(c, Input);
@@ -448,14 +448,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
     if (info.status === "exited") return c.json({ error: `terminal ${id} has ended` }, 409);
-    let text = body.data.text;
-    let sealed = 0;
-    if (deps.sealer && body.data.seal) {
-      const r = await deps.sealer(text);
-      if (!r.ok) return c.json({ error: r.error }, r.code === "unroutable" ? 400 : 503);
-      text = r.text;
-      sealed = r.sealed.length;
-    }
+    const text = body.data.text;
     // The placeholders in the text that have a file, in order: the text is pasted between them, each file's path on its
     // own (as a file dragged into a Mac terminal), then Enter.
     const byToken = new Map(body.data.attachments.map((a) => [a.token, a]));
@@ -495,11 +488,11 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         }
       }
     } catch (err) { return failed(c, err); }
-    // What was typed and entered (as the agent got it: a sealed reply's ciphertext, never its words) shows on the
-    // record's screens until the record itself holds it.
+    // What was typed and entered shows on the record's screens until the record itself holds it.
     if (body.data.submit) host.replied(id, text, files.length);
-    audit.record({ terminal: id, action: "input", via: via(c), detail: { length: body.data.text.length, sealed, direct: !body.data.seal, files: files.length, bytes: files.reduce((n, f) => n + f.size, 0) } });
-    return c.json({ ok: true, sealed, attached: files.length });
+    audit.record({ terminal: id, action: "input", via: via(c), detail: { length: body.data.text.length, files: files.length, bytes: files.reduce((n, f) => n + f.size, 0) } });
+    // `sealed`: always none now; older screens read the field.
+    return c.json({ ok: true, sealed: 0, attached: files.length });
   });
 
   // Files for the agent (docs/terminal-v0.md §4; the phone's picture button): staged with POST /uploads, moved out of the
@@ -606,7 +599,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   });
 
   // Allow or deny; a question is answered instead (terminal-v0 §3 "选择题"): checked against the request, Other's words
-  // through the sealer as a reply's are. The audit says what it said before: the decision and the tool, never answers.
+  // as they were written (as a reply's are). The audit says the decision and the tool, never answers.
   app.post("/terminals/:id/permissions/:pid", async (c) => {
     const id = c.req.param("id");
     const pid = c.req.param("pid");
@@ -614,26 +607,14 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
       const request = host.get(id)?.permissions.find((p) => p.id === pid);
-      let picks: Record<string, QuestionPick> | undefined = body.data.answers;
-      let sealed = 0;
+      const picks: Record<string, QuestionPick> | undefined = body.data.answers;
       if (picks && request?.questions && body.data.decision === "allow") {
         const wrong = checkPicks(request.questions, picks);
         if (wrong) return c.json({ error: wrong }, 400);
-        if (deps.sealer && body.data.seal) {
-          const out: Record<string, QuestionPick> = {};
-          for (const [question, pick] of Object.entries(picks)) {
-            if (!pick.other?.trim()) { out[question] = pick; continue; }
-            const r = await deps.sealer(pick.other);
-            if (!r.ok) return c.json({ error: r.error }, r.code === "unroutable" ? 400 : 503);
-            out[question] = { ...pick, other: r.text };
-            sealed += r.sealed.length;
-          }
-          picks = out;
-        }
       }
       if (!host.decide(id, pid, body.data.decision, picks)) return c.json({ error: "no such request (answered already?)" }, 404);
       audit.record({ terminal: id, action: "permission", via: via(c), detail: { decision: body.data.decision, tool: request?.tool ?? null } });
-      return c.json(picks ? { ok: true, sealed } : { ok: true });
+      return c.json(picks ? { ok: true, sealed: 0 } : { ok: true });
     } catch (err) { return failed(c, err); }
   });
 

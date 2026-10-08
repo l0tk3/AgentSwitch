@@ -1,7 +1,8 @@
 /** The shared browser as a tool of the terminals' agents (docs/terminal-v0.md §3, browser-v0 §2 给 agent): each
- *  harness's own session config carries the `browser` MCP server — `secret-gate browser -- <the bridge>` — Codex in its
- *  `-c mcp_servers.browser.*`, Claude Code in its `--mcp-config`, OpenCode in its `OPENCODE_CONFIG`; pi and an ungated
- *  terminal get none; the session made for the terminal ends with its program and its tabs close with the terminal. */
+ *  harness's own session config carries the `browser` MCP server — the agent bridge itself, with no gate in front
+ *  since 2026-10-08 (docs/profiles-v0.md §8: the gate stays in Dispatch) — Codex in its `-c mcp_servers.browser.*`,
+ *  Claude Code in its `--mcp-config`, OpenCode in its `OPENCODE_CONFIG`; pi gets none; the session made for the
+ *  terminal ends with its program and its tabs close with the terminal. */
 
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,16 +12,15 @@ import { TerminalHost, type Launcher } from "../src/terminals/host.js";
 import { agentLauncher, BROWSER_GUIDANCE, BROWSER_SERVER, HOOK_SCRIPT } from "../src/terminals/launch.js";
 
 const FAKE = resolve(import.meta.dirname, "fixtures", "fakeTerminalAgent.mjs");
-const GATE = { bin: "/g/bin/secret-gate", home: "/g/home", proxy: "http://127.0.0.1:8080", playwrightVersion: "0.0.82", allowedOrigins: [] };
 const BRIDGE = ["/n/node", "/d/bridgeClient.js", "--url", "http://127.0.0.1:4711", "--session", "s1", "--token-file", "/as/browser/sessions/s1.token"];
 const closers: (() => void)[] = [];
 afterEach(() => { for (const c of closers.splice(0)) c(); });
 
-function launcher(browser: ((req: { id: string; harness: string; cwd: string }) => readonly string[] | null) | undefined, gate: typeof GATE | null = GATE) {
+function launcher(browser: ((req: { id: string; harness: string; cwd: string }) => readonly string[] | null) | undefined) {
   const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-term-browser-"));
   const asked: { id: string; harness: string; cwd: string }[] = [];
   const launch = agentLauncher({
-    binaries: { "claude-code": "/bin/claude", codex: "/bin/codex", opencode: "/bin/opencode", pi: "/bin/pi" }, gate, hookUrl: () => "http://127.0.0.1:4711", stateDir,
+    binaries: { "claude-code": "/bin/claude", codex: "/bin/codex", opencode: "/bin/opencode", pi: "/bin/pi" }, hookUrl: () => "http://127.0.0.1:4711", stateDir,
     node: "/n/node", hookScript: "/h/hook.js", piExtension: "/h/pi.ts", env: { PATH: "/usr/bin", HOME: "/Users/u" },
     ...(browser ? { browser: (req) => { asked.push(req); return browser(req); } } : {}),
   });
@@ -28,15 +28,20 @@ function launcher(browser: ((req: { id: string; harness: string; cwd: string }) 
 }
 
 describe("the browser tool in a terminal's session config", () => {
-  it("Codex: mcp_servers.browser runs the bridge behind the gate, with time for a held tab", () => {
+  it("Codex: mcp_servers.browser runs the bridge itself, with time for a held tab; nothing of the gate in the terminal", () => {
     const { launch, asked } = launcher(() => BRIDGE);
     const plan = launch({ id: "x1", harness: "codex", cwd: "/Users/u/Projects/AgentSwitch", mode: "auto", hookToken: "tok" });
     expect(asked).toEqual([{ id: "x1", harness: "codex", cwd: "/Users/u/Projects/AgentSwitch" }]);
     const args = plan.args.join("\n");
-    expect(args).toContain(`mcp_servers.${BROWSER_SERVER}.command="/g/bin/secret-gate"`);
-    expect(args).toContain(`mcp_servers.browser.args=${JSON.stringify(["browser", "--", ...BRIDGE])}`);
-    expect(args).toContain('mcp_servers.browser.env={ "SECRET_GATE_HOME" = "/g/home" }');
+    expect(args).toContain(`mcp_servers.${BROWSER_SERVER}.command="/n/node"`);
+    expect(args).toContain(`mcp_servers.browser.args=${JSON.stringify(BRIDGE.slice(1))}`);
+    expect(args).toContain("mcp_servers.browser.env={}");
     expect(args).toContain("mcp_servers.browser.tool_timeout_sec=300");
+    // No gate in a terminal (2026-10-08): not in front of the browser, not as a proxy for the commands it runs, not in
+    // its own environment.
+    expect(args).not.toContain("secret-gate");
+    expect(args).not.toContain("shell_environment_policy");
+    expect(Object.keys(plan.env).filter((k) => /proxy|SECRET_GATE|CERT|CA_BUNDLE/i.test(k))).toEqual([]);
     // The token file's path, never a token; nothing of it in Codex's own environment.
     expect(Object.keys(plan.env).some((k) => /BROWSER/.test(k))).toBe(false);
     // Told which browser to use (2026-10-03): its own Chrome DevTools or computer use start a browser of their own.
@@ -47,7 +52,7 @@ describe("the browser tool in a terminal's session config", () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-term-home-"));
     mkdirSync(join(home, ".codex"));
     writeFileSync(join(home, ".codex", "config.toml"), 'model = "gpt-6-sol"\ndeveloper_instructions = "Answer in Chinese."\n\n[mcp_servers.chrome-devtools]\ncommand = "npx"\n');
-    const own = agentLauncher({ binaries: { codex: "/bin/codex" }, gate: GATE, hookUrl: () => "", stateDir: mkdtempSync(join(tmpdir(), "agentswitch-term-browser-")), env: { HOME: home }, browser: () => BRIDGE });
+    const own = agentLauncher({ binaries: { codex: "/bin/codex" }, hookUrl: () => "", stateDir: mkdtempSync(join(tmpdir(), "agentswitch-term-browser-")), env: { HOME: home }, browser: () => BRIDGE });
     const args = own({ id: "x5", harness: "codex", cwd: "/tmp", mode: "auto", hookToken: "tok" }).args.join("\n");
     expect(args).toContain("mcp_servers.browser.command");
     expect(args).not.toContain("developer_instructions");
@@ -56,14 +61,15 @@ describe("the browser tool in a terminal's session config", () => {
     expect(own({ id: "x6", harness: "codex", cwd: "/tmp", mode: "auto", hookToken: "tok" }).args.join("\n")).toContain("developer_instructions");
   });
 
-  it("Claude Code: the browser server beside secret-gate's own in its --mcp-config", () => {
+  it("Claude Code: the browser server alone in its --mcp-config (the gate's own tools are Dispatch's)", () => {
     const { launch, stateDir } = launcher(() => BRIDGE);
     const plan = launch({ id: "c1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     const config = plan.args[plan.args.indexOf("--mcp-config") + 1]!;
     expect(config).toBe(join(stateDir, "c1", "mcp.json"));
     const servers = JSON.parse(readFileSync(config, "utf8")).mcpServers;
-    expect(Object.keys(servers)).toEqual(["secret-gate", "browser"]);
-    expect(servers.browser).toEqual({ type: "stdio", command: "/g/bin/secret-gate", args: ["browser", "--", ...BRIDGE], env: { SECRET_GATE_HOME: "/g/home" } });
+    expect(Object.keys(servers)).toEqual(["browser"]);
+    expect(servers.browser).toEqual({ type: "stdio", command: "/n/node", args: BRIDGE.slice(1), env: {} });
+    expect(Object.keys(plan.env).filter((k) => /proxy|SECRET_GATE|CERT|CA_BUNDLE/i.test(k))).toEqual([]);
     expect(plan.args[plan.args.indexOf("--append-system-prompt") + 1]).toBe(BROWSER_GUIDANCE);
   });
 
@@ -71,31 +77,26 @@ describe("the browser tool in a terminal's session config", () => {
     const { launch } = launcher(() => BRIDGE);
     const plan = launch({ id: "o1", harness: "opencode", cwd: "/tmp", mode: "auto", hookToken: "tok" });
     const config = JSON.parse(readFileSync(plan.env.OPENCODE_CONFIG!, "utf8"));
-    expect(config.mcp.browser).toEqual({ type: "local", command: ["/g/bin/secret-gate", "browser", "--", ...BRIDGE], enabled: true, environment: { SECRET_GATE_HOME: "/g/home" } });
+    expect(config.mcp.browser).toEqual({ type: "local", command: BRIDGE, enabled: true, environment: {} });
     expect(config.instructions).toHaveLength(1);
     expect(readFileSync(config.instructions[0], "utf8").trim()).toBe(BROWSER_GUIDANCE);
     const prot = { roots: ["/as/gate"], exempt: [], readDenied: ["/as/gate"] };
-    const withRules = agentLauncher({ binaries: { opencode: "/bin/opencode" }, gate: GATE, protected: prot, hookUrl: () => "", stateDir: mkdtempSync(join(tmpdir(), "agentswitch-term-browser-")), env: {}, browser: () => BRIDGE });
+    const withRules = agentLauncher({ binaries: { opencode: "/bin/opencode" }, protected: prot, hookUrl: () => "", stateDir: mkdtempSync(join(tmpdir(), "agentswitch-term-browser-")), env: {}, browser: () => BRIDGE });
     const both = JSON.parse(readFileSync(withRules({ id: "o2", harness: "opencode", cwd: "/tmp", mode: "auto", hookToken: "tok" }).env.OPENCODE_CONFIG!, "utf8"));
-    expect(both.mcp.browser.command[1]).toBe("browser");
+    expect(both.mcp.browser.command[1]).toBe("/d/bridgeClient.js");
     expect(both.permission.read).toMatchObject({ "/as/gate": "deny" });
   });
 
-  it("none for pi (no MCP), none without the gate (no ungated browser for an agent), none when the browser is off", () => {
+  it("none for pi (no MCP), none when the browser is off or gives no bridge", () => {
     const { launch, asked } = launcher(() => BRIDGE);
     const pi = launch({ id: "p1", harness: "pi", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(pi.args.join(" ")).not.toContain("browser");
     expect(asked).toEqual([]);   // no session minted for it
-    const ungated = launcher(() => BRIDGE, null);
-    const ungatedCodex = ungated.launch({ id: "x2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ");
-    expect(ungatedCodex).not.toContain("mcp_servers.browser");
-    expect(ungatedCodex).not.toContain("developer_instructions");
-    expect(ungated.asked).toEqual([]);
     const off = launcher(undefined);
     expect(off.launch({ id: "x3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).not.toContain("mcp_servers.browser");
     const claude = off.launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(claude.args).not.toContain("--append-system-prompt");
-    expect(Object.keys(JSON.parse(readFileSync(claude.args[claude.args.indexOf("--mcp-config") + 1]!, "utf8")).mcpServers)).toEqual(["secret-gate"]);
+    expect(claude.args).not.toContain("--mcp-config");   // nothing to configure: the gate's tools are not a terminal's
     const refused = launcher(() => null);
     expect(refused.launch({ id: "x4", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args.join(" ")).not.toContain("mcp_servers.browser");
   });

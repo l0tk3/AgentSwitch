@@ -348,17 +348,18 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     : undefined;
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
   if (browser && engineKit) engineKit.aroundSwitch((apply) => browser.host.restart(apply));
-  // The terminals' agents use it through the gate (docs/terminal-v0.md §3): a session of their own per terminal, ended
-  // with the program; the terminal's tabs close when the terminal is deleted.
+  // The terminals' agents use it through the agent bridge (docs/terminal-v0.md §3; with no gate in front since
+  // 2026-10-08, docs/profiles-v0.md §8): a session of their own per terminal, ended with the program; the terminal's
+  // tabs close when the terminal is deleted.
   const agents = browser?.agents;
-  const terminalBrowser = agents && gate
+  const terminalBrowser = agents
     ? (req: { id: string; harness: string; cwd: string }) => bridgeCommand(agents.mint(terminalOwner(req.id, req.harness, req.cwd)), `http://127.0.0.1:${localPort}`)
     : undefined;
   // Terminals are used like any terminal: only the credentials at rest stay closed there (docs/terminal-v0.md §3).
   const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
-      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
+      launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
         codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true,
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is

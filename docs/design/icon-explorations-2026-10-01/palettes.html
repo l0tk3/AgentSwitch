@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 配色对比</title>
+<style>
+  :root { --page:#101113; --surface:#191b1f; --canvas:#22252a; --ink:#f0eee9; --muted:#93969e; --line:#303238; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+  .wrap { width: min(1180px, calc(100% - 32px)); margin: auto; padding: 40px 0 60px; }
+  .eyebrow { font: 11px ui-monospace, Menlo, monospace; letter-spacing: .12em; color: var(--muted); margin: 0 0 10px; }
+  h1 { font-size: 30px; letter-spacing: -.03em; margin: 0; font-weight: 620; }
+  .intro { color: var(--muted); max-width: 760px; margin: 12px 0 30px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .stage { background: var(--canvas); padding: 24px; display: flex; justify-content: center; }
+  .big { width: 180px; height: 180px; border-radius: 22%; display: block; }
+  .sizes { display: flex; align-items: center; gap: 14px; padding: 14px 18px 0; }
+  .sizes svg { display: block; }
+  .meta { padding: 12px 18px 18px; }
+  .meta b { font-size: 15px; }
+  .meta .n { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); margin-right: 8px; }
+  .meta p { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
+  .chips { display: flex; gap: 6px; margin-top: 10px; }
+  .chips i { width: 18px; height: 18px; border-radius: 4px; border: 1px solid #ffffff22; }
+  .ref { outline: 1px dashed #ff2e8866; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">ICON 04 / PALETTES / 2026.10.01</p>
+  <h1>04 像素接力 · 换配色</h1>
+  <p class="intro">“像抖音”来自两件事：黑底上青色和洋红并排，加上红青错位的故障描边。这里直接在 04 原图上换色：形状一像素不改，只把底、白块、粉块、青块换成新颜色，并去掉两处故障描边（那两段的斜边按上方干净的一行接上）。每组只留一个强调色或换掉底色。下排是 64 / 32 / 16 px 实际显示尺寸。</p>
+  <div class="grid" id="grid"></div>
+</div>
+<script>
+// The original 04, its shape untouched: the two glitch bands repaired (the 45° edge continued from the clean row above),
+// every pixel repainted as ground + coverage × its part's new colour (palettes/04-*.png, 627 × 627).
+const P = [
+  { f: "00-original-clean", n: "00", name: "原配色（去掉故障描边）", bg: "#03030A", left: "#E9E6DF", right: "#FF2E88", core: "#18E4FF", note: "形状和配色都是原图，只去掉了红青错位的描边。青 + 洋红在黑底上并排，仍然有抖音感。", ref: true },
+  { f: "01-pink-only", n: "01", name: "只留粉色", bg: "#000000", left: "#E9E6DF", right: "#FF2E88", core: "#E9E6DF", note: "去掉青色，中间改成墨白。和应用现在的信号粉一致，改动最小。" },
+  { f: "02-paper", n: "02", name: "纸白底", bg: "#F3F1EA", left: "#151413", right: "#E0106E", core: "#151413", note: "应用浅色模式那套：浅底深墨一点粉。和抖音的黑底彻底分开，Dock 里很醒目。" },
+  { f: "03-amber", n: "03", name: "琥珀终端", bg: "#0B0A08", left: "#E9E6DF", right: "#FFB000", core: "#E9E6DF", note: "老式琥珀单色显示器的味道。注意：应用里琥珀色表示“等你处理”。" },
+  { f: "04-phosphor", n: "04", name: "磷绿 CRT", bg: "#050805", left: "#D8E6CF", right: "#9BE22D", core: "#D8E6CF", note: "终端磷光绿，开发工具感强。注意：应用里绿色表示“完成”。" },
+  { f: "05-graphite-vermilion", n: "05", name: "石墨朱红", bg: "#17181B", left: "#E9E6DF", right: "#FF4A1C", core: "#E9E6DF", note: "深灰底 + 朱红，偏工业、偏硬件。" },
+  { f: "06-navy-orange", n: "06", name: "深蓝暖橙", bg: "#0E1A2B", left: "#F3EDE2", right: "#FF8A3D", core: "#F3EDE2", note: "深蓝底 + 暖白 + 橙，和常见的黑底霓虹拉开距离。" },
+  { f: "07-mono", n: "07", name: "单色", bg: "#000000", left: "#E9E6DF", right: "#7A7671", core: "#E9E6DF", note: "不用强调色，只靠形状和明暗。最克制，也最不像任何一家。" },
+];
+const icon = (p, size) => `<img src="palettes/04-${p.f}.png" width="${size}" height="${size}" alt="" style="display:block;border-radius:22%">`;
+document.getElementById("grid").innerHTML = P.map((p) => `
+  <figure class="card ${p.ref ? "ref" : ""}" style="margin:0">
+    <div class="stage"><div class="big">${icon(p, 180)}</div></div>
+    <div class="sizes">${icon(p, 64)}${icon(p, 32)}${icon(p, 16)}</div>
+    <figcaption class="meta"><span class="n">${p.n}</span><b>${p.name}</b><p>${p.note}</p>
+      <div class="chips"><i style="background:${p.bg}"></i><i style="background:${p.left}"></i><i style="background:${p.right}"></i><i style="background:${p.core}"></i></div>
+    </figcaption>
+  </figure>`).join("");
+</script>
+</body>
+</html>

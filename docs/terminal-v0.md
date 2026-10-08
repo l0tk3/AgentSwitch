@@ -14,7 +14,7 @@
 - **终端进程归服务所有**：daemon 启动并持有每个会话的伪终端（像 tmux 的服务端），Mac 和手机都只是显示端。关掉窗口、手机断线，会话照跑；任一端连上都看到当前屏幕。
 - **不做终端模拟器内核**：显示用 SwiftTerm（macOS 与 iOS 同一套），服务端用 `node-pty` 起进程、`@xterm/headless` 维护屏幕与回滚。
 - **只能开 agent，不能开 shell**：可启动的程序限定为 `claude`、`codex`、`opencode`、`pi`（及它们的参数），手机上没有“开一个终端”这种能力。
-- **会话同样在凭据网关后面**：环境与托管执行器相同（代理、CA、secret-gate MCP、禁区），所以密文在手动会话里也能用；加密发送的回话先过 sealer（或本地前台，local-model-v0），直接发送的同在 Mac 上敲键盘。
+- ~~**会话同样在凭据网关后面**：环境与托管执行器相同（代理、CA、secret-gate MCP、禁区），所以密文在手动会话里也能用；加密发送的回话先过 sealer（或本地前台，local-model-v0），直接发送的同在 Mac 上敲键盘。~~ **2026-10-08 起终端不在凭据网关后面**（用户：安全网关功能可以只留在dispatch里，感觉正常session里用不到；dispatch里留着全套网关能力）：终端里的 agent 和在普通终端里一样——进程没有网关的代理与证书，没有 secret-gate 的工具，回话就是敲键盘，没有加密发送；浏览器工具直接连 agent 桥。只剩禁区（凭据文件不给读，§3）。凡下文写到终端里的“加密发送”“锁”“过 sealer”“像密码时先问”“网关环境”的，都是这之前的样子。细目在 `docs/profiles-v0.md` §8。
 - **权限请求直接给你**：手动入口里不经调度模型代批；按钮来自 agent 的 hook，不靠识别屏幕。
 
 ## 1. 界面
@@ -267,7 +267,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
   - OpenCode：会话专用配置里的 `permission` 拒绝规则（读按路径、bash 按命令文本、写与外部目录按路径），与托管执行器同一份禁区表；只加拒绝，不改用户其余的权限设置；`--auto` 下同样生效。终端里的 OpenCode 用私有服务（AgentSwitch 起的；退回时是 `--standalone` 起的）：2.x 默认把会话放进用户共用的后台服务（`opencode serve --service`）里跑，终端进程的环境（这份配置、gate 代理）到不了那里（2026-09-28 实测：私有服务的 agent 权限里有这些拒绝规则，后台服务里没有）。
   - pi：没有权限层；AgentSwitch 自带扩展在 `tool_call` 时把工具与参数交给服务，按 `decideTool` 判断，拒绝即 `block`。扩展出错或服务无响应时拦截（pi 的约定：处理出错即拦截）。
   - 除 Codex 外都是按字符串比对工具参数，挡直接的读取，挡不住有意绕过（BOUNDARY.md）；同一系统账户下真正的隔离只有网关的独立账户。
-- **浏览器工具**（2026-10-02，browser-v0 §6）：Codex、Claude Code、OpenCode 的终端会话多一个 MCP 服务器 `browser` = `secret-gate browser -- <agent 桥>`，在 AgentSwitch 服务持有的共享浏览器里开标签，你在 App 的 Browser 页看得到、可接手（标签归在 `codex · <文件夹>` 名下，Claude Code 写作 `claude`）。注入方式同上表，不改用户的全局配置：Codex 是 `-c mcp_servers.browser.{command,args,env,tool_timeout_sec}`（工具超时 300 秒：你接手时它的调用最多等 2 分钟），Claude Code 是 `--mcp-config` 里 secret-gate 旁边的一项，OpenCode 是 `OPENCODE_CONFIG` 里的 `mcp.browser`。终端启动时服务为它发一个浏览器会话，令牌在 `$AGENTSWITCH_HOME/browser/sessions/` 下的 0600 文件里，桥从文件读（不进命令行、环境和模型上下文）；程序退出即作废，删除终端时它的标签一并关闭。只在网关可用时加（不给 agent 未经网关的浏览器）；pi 没有 MCP，不加；`AGENTSWITCH_BROWSER_HOST=0` 时不加。与你共用 `main` 配置的登录态（browser-v0 决定 3）；同一 uid 的 agent 读得到令牌文件，这只挡随手直连，不是边界（同 hook 令牌）。
+- **浏览器工具**（2026-10-02，browser-v0 §6；2026-10-08 起不经网关：`browser` 就是 agent 桥本身，Claude Code 的 `--mcp-config` 里只有它这一项，页面内容原样给 agent，没有 `secret_fill` 等工具，见 profiles-v0 §8）：Codex、Claude Code、OpenCode 的终端会话多一个 MCP 服务器 `browser` = `secret-gate browser -- <agent 桥>`，在 AgentSwitch 服务持有的共享浏览器里开标签，你在 App 的 Browser 页看得到、可接手（标签归在 `codex · <文件夹>` 名下，Claude Code 写作 `claude`）。注入方式同上表，不改用户的全局配置：Codex 是 `-c mcp_servers.browser.{command,args,env,tool_timeout_sec}`（工具超时 300 秒：你接手时它的调用最多等 2 分钟），Claude Code 是 `--mcp-config` 里 secret-gate 旁边的一项，OpenCode 是 `OPENCODE_CONFIG` 里的 `mcp.browser`。终端启动时服务为它发一个浏览器会话，令牌在 `$AGENTSWITCH_HOME/browser/sessions/` 下的 0600 文件里，桥从文件读（不进命令行、环境和模型上下文）；程序退出即作废，删除终端时它的标签一并关闭。只在网关可用时加（不给 agent 未经网关的浏览器）；pi 没有 MCP，不加；`AGENTSWITCH_BROWSER_HOST=0` 时不加。与你共用 `main` 配置的登录态（browser-v0 决定 3）；同一 uid 的 agent 读得到令牌文件，这只挡随手直连，不是边界（同 hook 令牌）。
 - 各家 hook 名称与返回格式随版本变化：实现前逐家核实并在测试里固定样例；探测不到 hook 能力的版本退回“按键作答 + 屏幕原文”。
 - 权限按钮的底线同托管：删除、推送、付款、禁区相关的请求在手机上二次确认；禁区照拒（执行器层直接拒，不出按钮）。
 
@@ -326,7 +326,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 
 - 只能启动白名单里的 agent；参数由服务端拼，客户端只给执行器名、目录、模型、续接 id。
 - 只有配对设备和本机能访问；手机的每一次回话、按键、权限决定都进审计。
-- 加密发送的回话过 sealer；终端输出流不入库，只在内存缓冲里，经 TLS 给自己的设备（同 control-v0 §3 的规则）。
+- ~~加密发送的回话过 sealer；~~（2026-10-08：终端里没有加密发送了，回话原样进终端。）终端输出流不入库，只在内存缓冲里，经 TLS 给自己的设备（同 control-v0 §3 的规则）。
 - 会话有 gate 环境与禁区保护（各 agent 的做法与强度见 §3）；手动会话里 agent 的权限模式默认是“逐项问你”。
 
 ## 8. 分阶段

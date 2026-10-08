@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 磷绿 CRT</title>
+<style>
+  :root { --page:#101113; --surface:#191b1f; --canvas:#22252a; --ink:#f0eee9; --muted:#93969e; --line:#303238; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+  .wrap { width: min(1180px, calc(100% - 32px)); margin: auto; padding: 40px 0 60px; }
+  .eyebrow { font: 11px ui-monospace, Menlo, monospace; letter-spacing: .12em; color: var(--muted); margin: 0 0 10px; }
+  h1 { font-size: 30px; letter-spacing: -.03em; margin: 0; font-weight: 620; }
+  .intro { color: var(--muted); max-width: 780px; margin: 12px 0 30px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; }
+  .card { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .stage { background: var(--canvas); padding: 26px; display: flex; justify-content: center; }
+  .stage img { width: 260px; height: 260px; border-radius: 22%; display: block; }
+  .sizes { display: flex; align-items: center; gap: 14px; padding: 14px 18px 0; }
+  .sizes img { display: block; border-radius: 22%; }
+  .meta { padding: 12px 18px 18px; }
+  .meta .n { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); margin-right: 8px; }
+  .meta p { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; }
+  .dock { margin-top: 26px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+  .dock .bar { display: flex; gap: 10px; align-items: end; padding: 10px 14px; border-radius: 18px; background: rgba(255,255,255,.08); width: fit-content; }
+  .dock .bar img, .dock .bar i { width: 56px; height: 56px; border-radius: 22%; display: block; }
+  .dock .bar i { background: linear-gradient(135deg, #3a3d44, #24262b); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">ICON 04 / PHOSPHOR CRT + GLITCH / 2026.10.01</p>
+  <h1>04 磷绿 CRT · 加故障效果</h1>
+  <p class="intro">04 原图的形状和它自己的故障（D、E）：条纹、拖影、切口一像素不改，只把颜色换成绿色一族，红 + 青的错开变成两种绿的错开，抖音感就没了。A、B 是我手工加的故障，不如原图自然，留作对照。下排是 64 / 32 / 16 px 实际尺寸，最下面放进 Dock 看。</p>
+  <div class="grid" id="grid"></div>
+  <div class="dock"><p class="eyebrow">IN THE DOCK</p><div class="bar" id="dock"></div></div>
+</div>
+<script>
+const V = [
+  { f: "04-04-phosphor", n: "00", name: "无故障（对照）", note: "只换成磷绿配色。" },
+  { f: "04-crt-d-own-glitch", n: "D", name: "原图的故障，换成绿色", note: "原图那两处故障一像素不动（条纹、拖影、切口、错位都在），只把粉色换成磷光绿、青色换成薄荷白：红青错开变成两种绿错开。" },
+  { f: "04-crt-e-own-glitch-crt", n: "E", name: "D + 扫描线 + 辉光", note: "D 再加淡扫描线和磷光辉光，像老式单色显示器。" },
+  { f: "04-crt-a-glitch", n: "A", name: "手工故障（对照）", note: "我手工加的切片和亮条，没有原图自然，留作对照。" },
+  { f: "04-crt-b-crt", n: "B", name: "手工故障 + 扫描线 + 辉光（对照）", note: "A 再加淡扫描线和磷光辉光。" },
+];
+const img = (v, s) => `<img src="palettes/${v.f}.png" width="${s}" height="${s}" alt="">`;
+document.getElementById("grid").innerHTML = V.map((v) => `<figure class="card"><div class="stage">${img(v, 260)}</div>
+  <div class="sizes">${img(v, 64)}${img(v, 32)}${img(v, 16)}</div>
+  <figcaption class="meta"><span class="n">${v.n}</span><b>${v.name}</b><p>${v.note}</p></figcaption></figure>`).join("");
+document.getElementById("dock").innerHTML = `<i></i><i></i>${V.map((v) => img(v, 56)).join("")}<i></i>`;
+</script>
+</body>
+</html>

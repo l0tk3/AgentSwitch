@@ -1,9 +1,10 @@
 /** Agents in the shared browser (docs/browser-v0.md §2 给 agent, §5 step 3). An agent session (a terminal's agent; a
  *  dispatched task later) gets a token the daemon mints for it alone, revoked when the session ends. Its browser tool is
- *  `secret-gate browser -- <bridge>`: the bridge (bridgeClient.ts) carries MCP between the gate and the daemon, one
- *  connection per bridge process. Behind each connection runs Playwright MCP, in this process, against the host's Chrome
- *  (agentMcp.ts), seeing only the session's own tabs. Between the two, this module adds what the screens need and what
- *  the gate does not see:
+ *  the bridge (bridgeClient.ts), which carries MCP to the daemon, one connection per bridge process — for a terminal's
+ *  agent the bridge itself (since 2026-10-08: a terminal is not behind the credential gate, docs/profiles-v0.md §8), for
+ *  a session minted with the gate `secret-gate browser -- <bridge>`. Behind each connection runs Playwright MCP, in
+ *  this process, against the host's Chrome (agentMcp.ts), seeing only the session's own tabs. Between the two, this
+ *  module adds what the screens need and what the gate does not see:
  *  - one call at a time per session, in order; a call on a tab a person holds waits for the hand-back (up to two
  *    minutes), then fails with words for the model; the hold is looked at again right before the call is handed over;
  *  - the tab's status (busy while a call runs) and the agent's last action for the screens' overlay, with the box of the
@@ -11,10 +12,15 @@
  *  - refusals of its own, whatever the gate does: no file read or written for an agent (`filename`, `paths`), only
  *    http(s) and about:blank, no resizing of a tab the screens size, `browser_close` closing the agent's own tabs only
  *    (each once handed back), no code but the gate's own probes (probes.ts: `browser_run_code_unsafe` runs in this
- *    process), and no network or console log of a tab whose hold could not be kept out of them (heldTraffic.ts);
+ *    process) and none at all where no gate is in front, and no network or console log of a tab whose hold could not
+ *    be kept out of them (heldTraffic.ts);
+ *  - with no gate in front, the list the model reads: Playwright MCP's own, without the tools refused here and
+ *    without the parameters that name files (`directTools`), and answers without their links to this module's
+ *    private folder (`withoutFileLinks`);
  *  - Playwright MCP's files (unredacted snapshots, console logs) in a private folder per connection under
  *    `$AGENTSWITCH_HOME/browser` (read-denied to the executors), emptied after every call, removed with the connection.
- *  Tool arguments are never logged or audited: after the gate, a fill's text is the plaintext. */
+ *  Tool arguments are never logged or audited: after the gate, a fill's text is the plaintext; with no gate, what a
+ *  model types is whatever it was given. */
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -22,7 +28,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { BrowserAudit } from "./audit.js";
 import type { BrowserHost } from "./host.js";
-import { codeRefusal } from "./probes.js";
+import { codeRefusal, EVALUATE_TOOL, RUN_CODE_TOOL } from "./probes.js";
 import { auditUrl } from "./rules.js";
 import { BrowserError, type Box, type TabOwner } from "./types.js";
 
@@ -112,6 +118,11 @@ export type BrowserAgentsOptions = {
  *  reads it there, so it is in no command line, environment or model context). */
 export type MintedSession = { readonly id: string; readonly token: string; readonly tokenFile: string };
 
+/** Who is at the other end of a session's bridge. `gate`: `secret-gate browser -- <bridge>` — the gate lists the tools
+ *  for the model and calls the code tools itself, for its checks (probes.ts). Without it (the default: a terminal's
+ *  agent) the caller is the model: no code at all, and a list without what it could never use here. */
+export type MintOptions = { readonly gate?: boolean };
+
 /** One bridge process's connection, as the API serves it. */
 export type AgentConnection = {
   readonly id: string;
@@ -120,8 +131,9 @@ export type AgentConnection = {
   close(): Promise<void>;
 };
 
-/** What `secret-gate browser --` runs for one session: the bridge under the service's own node, pointed at the daemon's
- *  local address, with the token's file (never the token) on its command line. */
+/** The browser tool of one session, as a command (a terminal's agent runs it as its `browser` MCP server; the gate, in
+ *  front of a session of its own, as what `secret-gate browser --` runs): the bridge under the service's own node,
+ *  pointed at the daemon's local address, with the token's file (never the token) on its command line. */
 export function bridgeCommand(session: Pick<MintedSession, "id" | "tokenFile">, url: string, node: string = process.execPath, script: string = BRIDGE_SCRIPT): string[] {
   return [node, script, "--url", url, "--session", session.id, "--token-file", session.tokenFile];
 }
@@ -135,6 +147,8 @@ export function terminalOwner(id: string, agent: string, cwd: string): TabOwner 
 type Session = {
   readonly id: string;
   readonly owner: TabOwner;
+  /** The gate is the bridge's client (MintOptions). */
+  readonly gate: boolean;
   readonly digest: Buffer;
   readonly tokenFile: string;
   readonly connections: Map<string, Connection>;
@@ -156,6 +170,8 @@ type Connection = {
   readonly cancelled: Set<JsonRpcId>;
   /** Calls waiting for a hand-back, by id: calling one ends the wait. */
   readonly waits: Map<JsonRpcId, () => void>;
+  /** `tools/list` requests of a session with no gate, by id: their answers are the model's list (`directTools`). */
+  readonly listing: Set<JsonRpcId>;
   closed: boolean;
 };
 
@@ -249,14 +265,14 @@ export class BrowserAgents {
   }
 
   /** A new session for `owner`'s agent: its id, its token and the token's file. */
-  mint(owner: TabOwner): MintedSession {
+  mint(owner: TabOwner, o: MintOptions = {}): MintedSession {
     let id = randomBytes(6).toString("hex");
     while (this.sessions.has(id)) id = randomBytes(6).toString("hex");
     const token = randomBytes(32).toString("base64url");
     const tokenFile = join(this.sessionsDir, `${id}.token`);
     mkdirSync(this.sessionsDir, { recursive: true, mode: 0o700 });
     writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
-    this.sessions.set(id, { id, owner, digest: digest(token), tokenFile, connections: new Map(), queue: Promise.resolve() });
+    this.sessions.set(id, { id, owner, gate: o.gate === true, digest: digest(token), tokenFile, connections: new Map(), queue: Promise.resolve() });
     return { id, token, tokenFile };
   }
 
@@ -280,7 +296,7 @@ export class BrowserAgents {
     while (session.connections.has(connId)) connId = randomBytes(4).toString("hex");
     const outputDir = join(this.agentsDir, `${session.id}-${connId}`);
     mkdirSync(outputDir, { recursive: true, mode: 0o700 });
-    const conn: Connection = { id: connId, session, outputDir, out: send, onEnd, engine: null, pending: new Map(), queued: new Set(), cancelled: new Set(), waits: new Map(), closed: false };
+    const conn: Connection = { id: connId, session, outputDir, out: send, onEnd, engine: null, pending: new Map(), queued: new Set(), cancelled: new Set(), waits: new Map(), listing: new Set(), closed: false };
     session.connections.set(connId, conn);
     try {
       conn.engine = await this.opts.engine({ owner: session.owner, outputDir, send: (m) => this.fromEngine(conn, m) });
@@ -340,6 +356,7 @@ export class BrowserAgents {
     if (conn.closed || !conn.engine) return;
     if (message.method === "tools/call" && isRequest(message)) { this.enqueue(conn, message); return; }
     if (message.method === "initialize" && isRequest(message)) { conn.engine.receive(withRoots(message)); return; }
+    if (message.method === "tools/list" && isRequest(message) && !conn.session.gate) conn.listing.add(message.id!);
     if (message.method === "notifications/cancelled") {
       const id = (message.params as { requestId?: JsonRpcId } | undefined)?.requestId;
       if (id !== undefined && (conn.queued.has(id) || conn.waits.has(id))) { conn.cancelled.add(id); conn.waits.get(id)?.(); }
@@ -357,6 +374,7 @@ export class BrowserAgents {
     if (isAnswer(message)) {
       const waiting = conn.pending.get(message.id!);
       if (waiting) { conn.pending.delete(message.id!); waiting(message); return; }
+      if (conn.listing.delete(message.id!)) { this.send(conn, directTools(message)); return; }
     }
     this.send(conn, message);
   }
@@ -385,7 +403,7 @@ export class BrowserAgents {
     const tool = typeof params.name === "string" ? params.name : "";
     const args = (params.arguments && typeof params.arguments === "object" ? params.arguments : {}) as Args;
     const owner = conn.session.owner;
-    const refused = this.refusal(owner, tool, args);
+    const refused = this.refusal(conn.session, tool, args);
     if (refused) { this.send(conn, failure(id, refused)); return; }
     const engine = conn.engine!;
     const shown = describeCall(tool, args);
@@ -439,14 +457,17 @@ export class BrowserAgents {
       const type = await engine.bodiless?.(after).catch(() => null);
       if (type) answer = withNote(answer, `This page is a ${type} document, not HTML: there is nothing to snapshot. It is open and showing; use browser_take_screenshot to look at it.`);
     }
+    // With no gate in front (which drops them), the answer's links to this connection's folder, emptied above.
+    if (!conn.session.gate) answer = withoutFileLinks(answer, conn.outputDir);
     this.send(conn, !before && after && !failed(answer) ? withNote(answer, `Opened in tab "${owner.label}" of AgentSwitch's shared browser: the user sees it in AgentSwitch and can take it over.`) : answer);
   }
 
   /** The bridge's own refusals (the gate refuses most of them too; these hold whoever calls). */
-  private refusal(owner: TabOwner, tool: string, args: Args): string | null {
+  private refusal(session: Session, tool: string, args: Args): string | null {
+    const owner = session.owner;
     if ("filename" in args || "paths" in args) return FILES_REFUSED;
     if (tool === "browser_resize") return RESIZE_REFUSED;
-    const code = codeRefusal(tool, args);
+    const code = codeRefusal(tool, args, session.gate);
     if (code) return code;
     const url = tool === "browser_navigate" ? args.url : tool === "browser_tabs" && args.action === "new" ? args.url : undefined;
     if (url === undefined || url === null) return null;
@@ -547,6 +568,66 @@ function withRoots(message: JsonRpcMessage): JsonRpcMessage {
   const params = (message.params && typeof message.params === "object" ? message.params : {}) as Args;
   const capabilities = (params.capabilities && typeof params.capabilities === "object" ? params.capabilities : {}) as Args;
   return { ...message, params: { ...params, capabilities: { ...capabilities, roots: {} } } };
+}
+
+/** Tools left out of the list a model reads directly: the ones refused here whatever their arguments. */
+const NOT_LISTED = new Set(["browser_resize", RUN_CODE_TOOL, EVALUATE_TOOL]);
+/** Parameters that name a file to write or to read (`FILES_REFUSED`). */
+const FILE_PARAMETERS = ["filename", "paths"];
+/** `browser_file_upload` with no `paths` dismisses the file chooser a page opened (which holds up every other call). */
+const UPLOAD_TOOL = "browser_file_upload";
+const UPLOAD_DESCRIPTION = "Dismiss the file chooser a page opened. AgentSwitch's shared browser uploads no files for agents: ask the user to choose the file in AgentSwitch (they can take the tab over).";
+
+type ListedTool = { name?: unknown; description?: unknown; inputSchema?: { properties?: Record<string, unknown>; required?: unknown } & Record<string, unknown> } & Record<string, unknown>;
+
+/** Playwright MCP's `tools/list` answer as a model with no gate in front reads it (the gate makes the same cuts for
+ *  its model: BOUNDARY.md 工具与参数): without the tools this module refuses whatever they are given, without the
+ *  parameters that name files — a call with one is refused, so the model is not offered it — and the upload tool
+ *  described as the one thing it does here. Anything else of the answer is as it came. */
+export function directTools(answer: JsonRpcMessage): JsonRpcMessage {
+  const result = answer.result as ({ tools?: unknown } & Record<string, unknown>) | undefined;
+  if (!result || !Array.isArray(result.tools)) return answer;
+  const tools = (result.tools as ListedTool[]).filter((tool) => !(typeof tool?.name === "string" && NOT_LISTED.has(tool.name))).map((tool) => {
+    const schema = tool?.inputSchema;
+    const named = schema?.properties && FILE_PARAMETERS.some((p) => p in schema.properties!);
+    if (!named && tool?.name !== UPLOAD_TOOL) return tool;
+    const properties = Object.fromEntries(Object.entries(schema?.properties ?? {}).filter(([key]) => !FILE_PARAMETERS.includes(key)));
+    const required = Array.isArray(schema?.required) ? (schema.required as unknown[]).filter((key) => !FILE_PARAMETERS.includes(String(key))) : schema?.required;
+    return {
+      ...tool,
+      ...(tool.name === UPLOAD_TOOL ? { description: UPLOAD_DESCRIPTION } : {}),
+      ...(schema ? { inputSchema: { ...schema, properties, ...(required !== undefined ? { required } : {}) } } : {}),
+    };
+  });
+  return { ...answer, result: { ...result, tools } };
+}
+
+/** An answer's text without Playwright MCP's links to the files it also wrote (a snapshot or a log as `./page-….yml`,
+ *  the file of a screenshot whose picture is in the answer; seen with the real program, scripts/browser_smoke.ts): they
+ *  are in the connection's own folder `dir`, emptied after every call and not the agent's to read. Where a snapshot
+ *  was only such a link, the answer says how to read the page instead. */
+export function withoutFileLinks(answer: JsonRpcMessage, dir: string): JsonRpcMessage {
+  const result = answer.result as ({ content?: unknown } & Record<string, unknown>) | undefined;
+  if (!result || !Array.isArray(result.content)) return answer;
+  const link = /^\s*-?\s*\[[^\]\n]*\]\((?:\.\/|file:\/\/|\/)[^)\n]*\)\s*$/;
+  let changed = false;
+  const content = (result.content as ({ type?: unknown; text?: unknown } & Record<string, unknown>)[]).map((block) => {
+    if (block?.type !== "text" || typeof block.text !== "string") return block;
+    const lines = block.text.split("\n");
+    const kept: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (link.test(line)) {
+        if (/^###\s+Snapshot\s*$/.test(kept[kept.length - 1] ?? "")) kept.push("Call browser_snapshot to read the page.");
+        continue;
+      }
+      kept.push(dir && line.includes(dir) ? line.split(dir).join("(not kept)") : line);
+    }
+    const text = kept.join("\n");
+    if (text !== block.text) changed = true;
+    return text === block.text ? block : { ...block, text };
+  });
+  return changed ? { ...answer, result: { ...result, content } } : answer;
 }
 
 function failed(answer: JsonRpcMessage): boolean {

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>AgentSwitch · 图标候选方案</title>
+  <style>
+    :root { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif; color-scheme: dark; --page:#101113; --surface:#191b1f; --canvas:#22252a; --ink:#f0eee9; --muted:#93969e; --line:#303238; --signal:#ff2e88; --button:#eeeeec; --button-ink:#151619; }
+    :root[data-theme="light"] { color-scheme:light; --page:#f3f2ef; --surface:#fcfbf8; --canvas:#e7e6e3; --ink:#222328; --muted:#6e7077; --line:#deddd9; --signal:#d71a67; --button:#292b30; --button-ink:#fff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--page); color:var(--ink); -webkit-font-smoothing:antialiased; }
+    a { color:inherit; text-underline-offset:4px; }
+    button, a { -webkit-tap-highlight-color:transparent; }
+    button:focus-visible, a:focus-visible { outline:3px solid var(--signal); outline-offset:5px; }
+    .wrap { width:min(1120px, calc(100% - 64px)); margin:auto; }
+    .topline { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:30px 0; border-bottom:1px solid var(--line); }
+    .brand, .eyebrow, .number, .size-label, .meta { font-family:ui-monospace, "SFMono-Regular", Menlo, monospace; }
+    .brand { display:flex; align-items:center; gap:10px; font-size:13px; letter-spacing:.08em; }
+    .brand::before { content:""; width:9px; height:9px; background:var(--signal); box-shadow:3px 3px 0 color-mix(in srgb, var(--signal), transparent 75%); }
+    .meta { color:var(--muted); font-size:11px; letter-spacing:.02em; }
+    header { display:flex; align-items:flex-end; justify-content:space-between; gap:32px; padding:60px 0 36px; }
+    .eyebrow { color:var(--signal); font-size:11px; letter-spacing:.13em; margin:0 0 16px; }
+    h1 { font-size:clamp(32px, 4vw, 48px); line-height:1.2; letter-spacing:-.045em; font-weight:620; margin:0; }
+    .intro { max-width:620px; color:var(--muted); line-height:1.75; font-size:14px; margin:18px 0 0; }
+    .theme-controls { display:flex; flex-shrink:0; align-items:center; padding:4px; border:1px solid var(--line); border-radius:11px; background:var(--surface); }
+    .theme-controls button { border:0; background:transparent; color:var(--muted); padding:9px 14px; border-radius:7px; font:inherit; font-size:12px; cursor:pointer; white-space:nowrap; }
+    .theme-controls button[aria-pressed="true"] { background:var(--button); color:var(--button-ink); }
+    .gallery { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; }
+    .card { margin:0; overflow:hidden; background:var(--surface); border:1px solid var(--line); border-radius:18px; }
+    .stage { height:326px; padding:30px; display:flex; justify-content:center; align-items:center; background:var(--canvas); position:relative; }
+    .number { position:absolute; top:23px; left:24px; color:var(--muted); font-size:11px; letter-spacing:.06em; }
+    .icon-link { display:block; width:240px; max-width:100%; aspect-ratio:1; border-radius:22%; }
+    .icon { display:block; width:100%; height:100%; object-fit:cover; clip-path:inset(0 round 22%); }
+    .details { padding:25px 27px 23px; }
+    .title-row { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+    h2 { font-size:20px; letter-spacing:-.025em; font-weight:600; margin:0; }
+    .english { font-family:ui-monospace, "SFMono-Regular", Menlo, monospace; color:var(--muted); font-size:10px; letter-spacing:.025em; }
+    .description { margin:12px 0 23px; color:var(--muted); font-size:13px; line-height:1.75; min-height:46px; }
+    .bottom { border-top:1px solid var(--line); padding-top:20px; display:flex; justify-content:space-between; align-items:flex-end; gap:12px; }
+    .sizes { display:flex; gap:20px; align-items:flex-end; }
+    .sample { display:flex; flex-direction:column; align-items:center; gap:10px; }
+    .small-frame { height:64px; display:flex; align-items:center; justify-content:center; }
+    .size-label { font-size:10px; line-height:1; color:var(--muted); }
+    .download { font-size:12px; text-decoration:none; padding-bottom:1px; white-space:nowrap; }
+    .download:hover { color:var(--signal); }
+    .note { display:flex; gap:22px; padding:26px 0 28px; margin-top:26px; border-top:1px solid var(--line); }
+    .note-label { color:var(--signal); font-family:ui-monospace, "SFMono-Regular", Menlo, monospace; font-size:11px; line-height:1.9; flex-shrink:0; }
+    .note p { color:var(--muted); font-size:12px; line-height:1.85; margin:0; max-width:830px; }
+    footer { display:flex; justify-content:space-between; gap:20px; padding:0 0 34px; color:var(--muted); font-size:10px; letter-spacing:.03em; }
+    @media (max-width:720px) { .wrap { width:calc(100% - 32px); } .topline { padding:24px 0; } header { display:block; padding:38px 0 28px; } .theme-controls { width:max-content; margin-top:22px; } .gallery { grid-template-columns:1fr; gap:18px; } .stage { height:312px; } .details { padding:23px; } .note { display:block; margin-top:24px; } .note-label { display:block; margin-bottom:8px; } footer { flex-wrap:wrap; } }
+    @media (prefers-reduced-motion:no-preference) { body, .card, .stage, .theme-controls { transition:background-color .18s, color .18s, border-color .18s; } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="topline"><span class="brand">AGENTSWITCH</span><span class="meta">ICON STUDIES / 2026.10.01</span></div>
+    <header>
+      <div>
+        <p class="eyebrow">CYBER · GLITCH · SIGNAL</p>
+        <h1>一个开关，多个可能。</h1>
+        <p class="intro">围绕远程调度与信号切换，探索四种应用图标方向。保留清晰轮廓，用像素错位与轻微色差留下 cyber glitch 的痕迹。</p>
+      </div>
+      <div class="theme-controls" aria-label="预览背景">
+        <button type="button" data-theme-choice="light" aria-pressed="false">浅色背景</button>
+        <button type="button" data-theme-choice="dark" aria-pressed="true">深色背景</button>
+      </div>
+    </header>
+    <section class="gallery" aria-label="四款图标候选方案">
+      <figure class="card">
+        <div class="stage"><span class="number">01 / FORK</span><a class="icon-link" href="01-signal-fork.png" target="_blank" rel="noopener" aria-label="查看信号分路原图"><img class="icon" src="01-signal-fork.png" alt="信号分路图标候选方案" width="1024" height="1024"></a></div>
+        <figcaption class="details"><div class="title-row"><h2>信号分路</h2><span class="english">SIGNAL FORK</span></div><p class="description">延续一源三路的品牌语义。让点亮的支路成为视觉重心，以细微故障偏移表现信号正在切换。</p><div class="bottom"><div class="sizes" data-src="01-signal-fork.png" aria-label="信号分路小尺寸预览"></div><a class="download" href="01-signal-fork.png" download>下载原图 ↗</a></div></figcaption>
+      </figure>
+      <figure class="card">
+        <div class="stage"><span class="number">02 / SWITCH</span><a class="icon-link" href="02-glitch-switch.png" target="_blank" rel="noopener" aria-label="查看切换 S 原图"><img class="icon" src="02-glitch-switch.png" alt="切换 S 图标候选方案" width="1024" height="1024"></a></div>
+        <figcaption class="details"><div class="title-row"><h2>切换 S</h2><span class="english">GLITCH SWITCH</span></div><p class="description">将 Switch 收束为一个有转折的 S。紧凑轮廓与局部错位，让字母、线路和切换动作融为一体。</p><div class="bottom"><div class="sizes" data-src="02-glitch-switch.png" aria-label="切换 S 小尺寸预览"></div><a class="download" href="02-glitch-switch.png" download>下载原图 ↗</a></div></figcaption>
+      </figure>
+      <figure class="card">
+        <div class="stage"><span class="number">03 / CORE</span><a class="icon-link" href="03-relay-core.png" target="_blank" rel="noopener" aria-label="查看信号中枢原图"><img class="icon" src="03-relay-core.png" alt="信号中枢图标候选方案" width="1024" height="1024"></a></div>
+        <figcaption class="details"><div class="title-row"><h2>信号中枢</h2><span class="english">RELAY CORE</span></div><p class="description">从中央核心向外连接，把多个 agent 的协同浓缩为一个中枢。浅色底与粉色支路突出选择，局部色差保留故障质感。</p><div class="bottom"><div class="sizes" data-src="03-relay-core.png" aria-label="信号中枢小尺寸预览"></div><a class="download" href="03-relay-core.png" download>下载原图 ↗</a></div></figcaption>
+      </figure>
+      <figure class="card">
+        <div class="stage"><span class="number">04 / HANDOFF</span><a class="icon-link" href="04-pixel-handoff.png" target="_blank" rel="noopener" aria-label="查看像素接力原图"><img class="icon" src="04-pixel-handoff.png" alt="像素接力图标候选方案" width="1024" height="1024"></a></div>
+        <figcaption class="details"><div class="title-row"><h2>像素接力</h2><span class="english">PIXEL HANDOFF</span></div><p class="description">用有方向感的像素形体表达任务交接。将复古数字质感与简洁的应用图标轮廓结合。</p><div class="bottom"><div class="sizes" data-src="04-pixel-handoff.png" aria-label="像素接力小尺寸预览"></div><a class="download" href="04-pixel-handoff.png" download>下载原图 ↗</a></div></figcaption>
+      </figure>
+    </section>
+    <aside class="note"><span class="note-label">// 预览说明</span><p>以上为候选方案。PNG 是 1254 × 1254 的未裁圆角概念母图，正式导出需按 Apple 规范制作 1024 × 1024 图标。页面圆角仅通过 CSS 模拟；64 / 32 / 16 px 按 CSS 像素原尺寸显示。系统圆角与多层材质效果仍需在 macOS、iOS 原生环境中验证。点击大图可查看完整母图。通过内置 image_gen 生成，<a href="prompts.json">完整提示词</a>已随图保存。<a href="https://developer.apple.com/design/human-interface-guidelines/app-icons" target="_blank" rel="noopener">Apple 图标规范 ↗</a></p></aside>
+    <footer><span>AgentSwitch · macOS + iOS</span><span>四个方向 / 同一套信号语言</span></footer>
+  </main>
+  <script>
+    document.querySelectorAll('[data-theme-choice]').forEach(button => {
+      button.addEventListener('click', () => {
+        const theme = button.dataset.themeChoice;
+        document.documentElement.dataset.theme = theme;
+        document.querySelectorAll('[data-theme-choice]').forEach(item => item.setAttribute('aria-pressed', String(item.dataset.themeChoice === theme)));
+      });
+    });
+    document.querySelectorAll('.sizes').forEach(group => {
+      [64, 32, 16].forEach(size => {
+        const sample = document.createElement('div');
+        sample.className = 'sample';
+        const frame = document.createElement('div');
+        frame.className = 'small-frame';
+        const img = document.createElement('img');
+        img.src = group.dataset.src;
+        img.className = 'icon';
+        img.alt = `${size} 像素预览`;
+        img.width = size;
+        img.height = size;
+        img.style.width = `${size}px`;
+        img.style.height = `${size}px`;
+        frame.append(img);
+        const label = document.createElement('span');
+        label.className = 'size-label';
+        label.textContent = `${size}px`;
+        sample.append(frame, label);
+        group.append(sample);
+      });
+    });
+  </script>
+</body>
+</html>

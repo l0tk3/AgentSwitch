@@ -119,7 +119,7 @@ describe("through the bridge", () => {
       currentTab: () => null, tabAt: () => null, box: async () => null, close: async () => undefined,
     });
     const agents = new BrowserAgents({ host, engine, dir: join(root, "browser"), log: () => undefined });
-    const s = agents.mint(CODEX);
+    const s = agents.mint(CODEX, { gate: true });
     const answers = new Map<number, JsonRpcMessage>();
     const conn = await agents.connect(s.id, s.token, (m) => { if (typeof m.id === "number") answers.set(m.id, m); });
     const ask = async (id: number, name: string, args: Record<string, unknown>) => {
