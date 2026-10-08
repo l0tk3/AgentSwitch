@@ -2,7 +2,7 @@
 
 2026-10-08 用户：可以和clash进行interactive吗；也就是理论上我可以直接用agentswitch修改配置文件？；需要加一栏 clash-intergration……当前我的clash配置文件中有关于Claude和openai的配置，clash-intergration中要有 “为Claude单独配置代理” 和 “为openai单独配置代理“的功能；可以读取当前订阅文件的所有节点，然后”为Claude配置单独代理” 可以单独按照优先级拖进来几个节点，根据优先级fallback（可以选择自动fallback也可以手动选择节点） openai的同理；设置之后就和我现在的配置文件差不多；然后可以设置claude code profile中添加的代理直接直连（通过agent switch添加的规则必须可逆）然后以后也可以手动删除。
 
-**草案，还没有代码。** 界面上的名字是 `Clash Integration`。
+**草案；第二版（§7）已做**，在用户的 Clash Verge 上真切换过去走一遍还没有。界面上的名字是 `Clash Integration`。§2–§6 是走到这一版的经过，以 §7 为准。
 
 ## 0. 要点
 
@@ -107,7 +107,7 @@
 - 服务端：`src/clash/`、`/clash`、`/clash/settings`（只在 Mac 上）、`/clash/sub.yaml`、`/clash/rules/<名字>.yaml`（只认地址里的口令，只在本机回环）。Mac：主窗口左边栏的第四页 `Clash`（⌘⇧K），与 Dispatch、Terminals、Browser 并列（用户：可以不在设置里吗，弄成浏览器 terminal dispatch并列的；起先放在设置里）。`-designPreview <目录> -designPreviewOnly clash` 画出 `main-clash`。`scripts/clash_probe.ts` 只读地看这台 Mac 上的 Clash。
 - **还没做**：演示页；配置（profile）里填的代理自动进直连表（现在手填）；真的在 Clash Verge 里切到这个订阅走一遍。
 
-## 7. 第二版（2026-10-08，用户看过第一版之后；**设计，未动代码**）
+## 7. 第二版（2026-10-08，用户看过第一版之后；已做，见 §7.6）
 
 用户：应该可以接受一个代理链接；然后我为Claude和openai选好节点之后应该在Claude中出现相应的 “Claude 自动选择”和“openAI 自动选择”组，按照我选的优先级自动fallback；然后还有对应的Claude组和openAI组（这俩组是真正决定Claude和openai流量走向的）在Claude组里可以选择Claude自动选择或者其他我为Claude选择的节点，OpenAI同理；如果给的订阅文件/链接中有对应的Claude规则和OpenAI规则的话让我Agentswitch上设置的规则优先级最高；然后不要弄出来一堆没用的 AS. 什么节点；还有就是最好能在AgentSwitch里控制切换哪些节点（比如当前选中的Claude节点直接在AgentSwitch里改一下）；然后要能测节点的延迟（在AS里）；要能帮clash更新订阅（从AS拉新的订阅更新）；如果把订阅链接放到AS里管理了或者yaml里有供应商链接要可以设置自动更新；能做到吗
 
@@ -179,9 +179,29 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 - `Claude` / `OpenAI` 各一块：节点按优先级排，每行有延迟；最上面一行是 `Automatic`（旁边写着它此刻用的是哪个）；点哪一行，`Claude` 组就用哪一行——读的是内核里的实情，在 Clash Verge 里改了这里也跟着变；`Test` 测这一组。
 - `Go Direct`、顶上的待办提示同第一版。
 
+### 7.6 做了的（2026-10-08，用户：可以，先实现一下吧）
+
+- 服务端 `packages/daemon/src/clash/`：`source.ts`（底本：链接或文件，连同它点名的节点集，存在 `$AGENTSWITCH_HOME/clash/source/`，目录 0700、文件 0600；出错信息只带主机名）、`build.ts`（交给 Clash Verge 的那一份、节点集、规则集）、`controller.ts`（控制接口：状态、选成员、刷新一个节点集或规则集、单个节点的延迟）、`integration.ts`（把它们串起来；每分钟看一次到没到自动更新的间隔）、`verge.ts`、`store.ts`。
+- 接口（都只在 Mac 上；手机来的回 403）：`GET /clash`、`PUT /clash/settings`、`POST /clash/source`（`{link}`、`{yaml,name}`、`{verge}`）、`DELETE /clash/source`、`POST /clash/update`、`POST /clash/select`、`POST /clash/delays`。给 Clash Verge 和内核取的（只认地址里的口令，只在本机回环）：`/clash/sub.yaml`、`/clash/rules/<名>.yaml`、`/clash/nodes/<名>.yaml`、`/clash/providers/<节点集名的 base64url>.yaml`。
+- Mac：主窗口的 `Clash` 页——每项的节点（排序、延迟、点选当前用哪个）在前，`Go Direct`，底本在最下面（链接 / 文件 / 从 Clash Verge 导入、`Auto Update`、`Update Now`、`Remove…`）。
+- 给 Clash Verge 的间隔是 1 小时（§7.3）；AgentSwitch 自己去取底本的间隔默认 24 小时。
+- 没有的：某个节点集自己带 `filter` / `override` 的，这里没有照做（列出来的是它取回的全部节点、原名）；不是 Clash 格式的订阅（一串 `vless://` 之类）不收。
+
+**真跑了一遍**（`scripts/clash_probe.ts`：在临时目录里把用户 Clash Verge 的当前订阅导入、照内核的方式取了一次它的节点集链接、经真的本机监听提供出去，再另起一份不开 TUN 的内核去取；用户自己的 Clash 只读）：
+
+- 导入：`tgyun_config.yaml`，42 个节点，流量信息有。带口令取到 200，不带 404；回应里的间隔是 1；机场的链接不在交出去的内容里。
+- 交出去的分组：`Claude自动选择 | Claude | OpenAI自动选择 | OpenAI | Manual | Auto`——四个是 AgentSwitch 的，站在原来的位置上，没有多出别的组；内核 `-t` 通过。
+- 另起的内核：`as-claude(2) as-openai(3) tgyun(42)`；`Claude` = `[Claude自动选择, 日本家宽-02, 日本家宽-01]`，自动组当前用 `日本家宽-02`。
+- 经服务自己的代码改顺序并拿掉一个节点：自动组当即变成 `[日本家宽-01]`；直连规则 1 → 2；点选一个节点再点回自动，都生效。
+- 延迟：Claude `401 ms`；OpenAI 三个节点 `330 / 403 / 472 ms`；全部 42 个里 33 个有回应。
+- 结束后用户自己的内核：7 个分组、没有规则集、TUN 开着，和之前一样。
+- **它查出一个单元测试测不到的错**：经真的本机监听提供规则集、节点集时，第二次请求回 500（`v is not iterable`）——回应头用了同一个对象，监听往里面写了东西。改成每次新造，并补了一条走真监听的测试（把错放回去它会红）。
+
+**仍然没做的验证**：在用户的 Clash Verge 里真的加上、切过去；Clash Verge 是否照回应里的间隔记下了 60 分钟；它自动更新时连接断不断；页面上的按钮在装好的应用里点一遍（现在只有编造数据画出来的 `main-clash`、`main-clash-full`）；列表里拖动排序在这种表单里是否可用（所以每行另有上下箭头）。
+
 ## 8. 分步
 
 1. （做了）第一版：§6 末尾。
-2. 第二版（§7，等用户说做）：底本归 AgentSwitch 管与自动更新；两个节点集与四个分组；页面上选当前节点、测延迟、`Update Now`。
+2. （做了）第二版：§7.6。接着是在用户的 Clash Verge 上走一遍（§7.6 末尾那几条）。
 3. 配置（profile）里填的代理自动进直连表；配置页里出口那一栏可以直接选 Clash 的节点（profiles-v0 §4）。
 4. 演示页。

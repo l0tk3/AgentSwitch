@@ -193,9 +193,12 @@ public struct DaemonClient: Sendable {
         return request
     }
 
-    func call(_ method: String, _ path: String, body: Data? = nil) async throws -> Data {
+    /// `timeout`: for a call the service answers only after work of its own (a subscription fetched, nodes tried);
+    /// otherwise the session's short one.
+    func call(_ method: String, _ path: String, body: Data? = nil, timeout: TimeInterval? = nil) async throws -> Data {
         guard URL(string: baseURL.absoluteString + path) != nil else { throw DaemonError.unreachable("无效路径 \(path)") }
         var request = request(method, path)
+        if let timeout { request.timeoutInterval = timeout }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

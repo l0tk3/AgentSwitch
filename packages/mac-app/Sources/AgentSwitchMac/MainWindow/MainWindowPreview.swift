@@ -76,9 +76,12 @@ enum MainWindowPreview {
     }
 
     /// The rail put away, and out again under the pointer.
-    /// `main-clash`: the Clash page (docs/clash-v0.md §6) from a made-up Clash Verge, what is still to do at its top.
+    /// `main-clash`, `main-clash-full`: the Clash page (docs/clash-v0.md §7) from a made-up Clash Verge — what is still
+    /// to do at its top, each service's nodes with what its group uses, the subscription at its foot.
     static func renderClash(model: AppModel, into directory: URL) async throws {
         try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), to: directory.appendingPathComponent("main-clash.png"))
+        // The same in a window tall enough for all of it.
+        try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1000, height: 1560), to: directory.appendingPathComponent("main-clash-full.png"))
     }
 
     static func renderRail(model: AppModel, into directory: URL) async throws {

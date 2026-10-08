@@ -1,44 +1,87 @@
 import Foundation
 
-/// Clash Integration (docs/clash-v0.md §6): what the service found of Clash Verge and what its core runs, and what
-/// AgentSwitch is set to add — the nodes for Claude and for OpenAI in their order, the addresses that go direct.
-public struct ClashServiceProxy: Codable, Equatable, Sendable {
+/// Clash Integration (docs/clash-v0.md §7): the subscription AgentSwitch works from, the nodes chosen for Claude and
+/// for OpenAI in their order, the addresses that go direct — and what the service found of Clash Verge and of the
+/// core it runs: whether it is on AgentSwitch's subscription, and what each service's group uses now.
+public enum ClashService: String, CaseIterable, Sendable {
+    case claude, openai
+
+    public var title: String { self == .claude ? "Claude" : "OpenAI" }
+}
+
+public struct ClashServiceNodes: Codable, Equatable, Sendable {
     /// Nodes by name, the first preferred.
     public var nodes: [String]
-    /// `auto`: the first that answers; `manual`: the one picked.
-    public var mode: String
-    public var picked: String?
 
-    public init(nodes: [String] = [], mode: String = "auto", picked: String? = nil) {
-        self.nodes = nodes
-        self.mode = mode
-        self.picked = picked
-    }
+    public init(nodes: [String] = []) { self.nodes = nodes }
 }
 
 public struct ClashSettings: Codable, Equatable, Sendable {
-    /// The subscription of Clash Verge's it works from (its uid); nil: none chosen yet.
-    public var source: String?
-    public var claude: ClashServiceProxy
-    public var openai: ClashServiceProxy
+    public var claude: ClashServiceNodes
+    public var openai: ClashServiceNodes
     public var direct: [String]
+    /// The subscription is fetched again after this many hours; 0: only when asked.
+    public var autoUpdateHours: Int
 
-    public init(source: String? = nil, claude: ClashServiceProxy = .init(), openai: ClashServiceProxy = .init(), direct: [String] = []) {
-        self.source = source
+    /// The intervals offered (the service takes no other).
+    public static let updateHours = [0, 1, 6, 12, 24]
+
+    public init(claude: ClashServiceNodes = .init(), openai: ClashServiceNodes = .init(), direct: [String] = [], autoUpdateHours: Int = 24) {
         self.claude = claude
         self.openai = openai
         self.direct = direct
+        self.autoUpdateHours = autoUpdateHours
     }
 
-    private enum CodingKeys: String, CodingKey { case source, claude, openai, direct }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(source, forKey: .source)   // null is said, not left out
-        try c.encode(claude, forKey: .claude)
-        try c.encode(openai, forKey: .openai)
-        try c.encode(direct, forKey: .direct)
+    public subscript(service: ClashService) -> ClashServiceNodes {
+        get { service == .claude ? claude : openai }
+        set { if service == .claude { claude = newValue } else { openai = newValue } }
     }
+}
+
+/// A node set the subscription names by link, which AgentSwitch fetches too.
+public struct ClashSourceProvider: Decodable, Equatable, Sendable {
+    public let name: String
+    public let host: String
+    public let nodes: Int
+    public let error: String?
+}
+
+public struct ClashTraffic: Decodable, Equatable, Sendable {
+    /// Bytes used, of how many; when it ends (ms), if the subscription service says.
+    public let used: Double
+    public let total: Double
+    public let expire: Double?
+}
+
+public struct ClashSource: Decodable, Equatable, Sendable {
+    /// `link` or `file`.
+    public let kind: String
+    public let name: String
+    /// Where a link goes (its host; the rest is never told).
+    public let host: String?
+    public let updatedAt: Double
+    public let nodes: Int
+    public let providers: [ClashSourceProvider]
+    /// The last fetch did not work; what is kept is the one before.
+    public let error: String?
+    public let traffic: ClashTraffic?
+}
+
+public struct ClashServiceState: Decodable, Equatable, Sendable {
+    /// Its two groups by the names they have in Clash.
+    public let group: String
+    public let auto: String
+    /// The core has this service's groups from AgentSwitch: what its group uses can be picked from here.
+    public let live: Bool
+    /// What its group uses now (a node, or the automatic group's name), and what the automatic one uses.
+    public let now: String?
+    public let autoNow: String?
+    /// Chosen nodes the subscription no longer has.
+    public let missing: [String]
+
+    /// The group follows the automatic one.
+    public var automatic: Bool { live && now == auto }
 }
 
 public struct ClashProfile: Decodable, Equatable, Sendable, Identifiable {
@@ -54,26 +97,68 @@ public struct ClashView: Decodable, Equatable, Sendable {
     public let running: Bool
     public let version: String?
     public let tun: Bool?
-    public let nodes: [String]?
+    public let source: ClashSource?
+    /// Every node of the subscription, by name.
+    public let nodes: [String]
+    /// Clash Verge's own subscriptions, to import one.
     public let profiles: [ClashProfile]
-    public let currentProfile: String?
     public let settings: ClashSettings
-    /// The core runs the subscription AgentSwitch makes; its groups are the ones asked for now.
+    private let services: [String: ClashServiceState]
+    /// The core runs the subscription AgentSwitch makes; it is the one made now (else Clash Verge fetches it again).
     public let active: Bool
     public let upToDate: Bool
     /// The link Clash Verge takes the subscription by.
     public let install: String
+    /// When Clash Verge last fetched it (ms); nil: not since the service started.
+    public let fetchedAt: Double?
 
-    /// What is still to do in Clash Verge, in order; empty when nothing is.
+    public func state(_ service: ClashService) -> ClashServiceState? { services[service.rawValue] }
+
+    /// What is still to do, in order; empty when nothing is.
     public var todo: [String] {
         guard found else { return ["这台 Mac 上没有找到 Clash Verge。"] }
         guard running else { return ["Clash Verge 没有在运行：打开它。"] }
         var steps: [String] = []
-        if settings.source == nil { steps.append("先在下面选一个订阅作为底本。") }
+        if source == nil { steps.append("先在下面给一个订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
         else if !active { steps.append("在 Clash Verge 里添加并切换到 AgentSwitch 订阅。") }
-        else if !upToDate { steps.append("节点的顺序改过了：在 Clash Verge 里更新一次 AgentSwitch 订阅。") }
+        else if !upToDate { steps.append("多了或少了一组分组：在 Clash Verge 里更新一次 AgentSwitch 订阅，或者等它自己来取（每小时一次）。") }
         if tun == false { steps.append("打开 Clash Verge 的 TUN 模式。") }
         return steps
+    }
+}
+
+/// The page's short words (docs/ui-v0.md §7.2.7: a unit that starts with a digit is written as it is).
+public enum ClashText {
+    /// How long a call that fetches from the subscription service may take (the service gives each fetch 30 s).
+    static let fetchTimeout: TimeInterval = 100
+
+    /// `428 ms`; `Timeout` for a node that did not answer; nothing for one not tried.
+    public static func delay(_ tried: Int??) -> String {
+        guard let tried else { return "" }
+        return tried.map { "\($0) ms" } ?? "Timeout"
+    }
+
+    /// `12.3 / 100 GB`, and when it ends if that is said.
+    public static func traffic(_ traffic: ClashTraffic, calendar: Calendar = .current) -> String {
+        let gb = 1_073_741_824.0
+        let number = { (bytes: Double) -> String in
+            let value = bytes / gb
+            return value >= 100 || value == value.rounded() ? String(Int(value.rounded())) : String(format: "%.1f", value)
+        }
+        var text = "\(number(traffic.used)) / \(number(traffic.total)) GB"
+        if let expire = traffic.expire {
+            let day = calendar.dateComponents([.year, .month, .day], from: Date(timeIntervalSince1970: expire / 1000))
+            text += " · Expires \(day.year ?? 0)/\(day.month ?? 0)/\(day.day ?? 0)"
+        }
+        return text
+    }
+
+    /// `1 h`, `24 h`; `Off` for never.
+    public static func interval(hours: Int) -> String { hours == 0 ? "Off" : "\(hours) h" }
+
+    /// Where the subscription comes from, in a line: a link's host, a file's name.
+    public static func origin(_ source: ClashSource) -> String {
+        source.kind == "link" ? (source.host ?? source.name) : source.name
     }
 }
 
@@ -81,6 +166,37 @@ extension DaemonClient {
     public func clash() async throws -> ClashView { try decode(ClashView.self, try await call("GET", "/clash")) }
 
     public func saveClash(_ settings: ClashSettings) async throws -> ClashView {
-        try decode(ClashView.self, try await call("PUT", "/clash/settings", body: try JSONEncoder().encode(settings)))
+        try decode(ClashView.self, try await call("PUT", "/clash/settings", body: try JSONEncoder().encode(settings), timeout: 20))
+    }
+
+    /// Work from this link from now on (fetched now).
+    public func setClashSource(link: String) async throws -> ClashView { try await clashSource(["link": link]) }
+
+    /// Work from this file's text.
+    public func setClashSource(yaml: String, name: String) async throws -> ClashView { try await clashSource(["yaml": yaml, "name": name]) }
+
+    /// Take one of Clash Verge's own subscriptions in.
+    public func setClashSource(verge uid: String) async throws -> ClashView { try await clashSource(["verge": uid]) }
+
+    public func removeClashSource() async throws -> ClashView { try decode(ClashView.self, try await call("DELETE", "/clash/source")) }
+
+    /// The subscription fetched again now.
+    public func updateClash() async throws -> ClashView { try decode(ClashView.self, try await call("POST", "/clash/update", timeout: ClashText.fetchTimeout)) }
+
+    /// A service's group uses `node` from now on; nil: its automatic group.
+    public func selectClash(_ service: ClashService, node: String?) async throws -> ClashView {
+        let body: [String: Any] = ["service": service.rawValue, "node": node ?? NSNull()]
+        return try decode(ClashView.self, try await call("POST", "/clash/select", body: try JSONSerialization.data(withJSONObject: body), timeout: 20))
+    }
+
+    /// How long each node takes to reach the service, in ms (nil: no answer): the chosen ones, or every node.
+    public func clashDelays(_ service: ClashService, all: Bool) async throws -> [String: Int?] {
+        struct Answer: Decodable { let delays: [String: Int?] }
+        let body = try JSONSerialization.data(withJSONObject: ["service": service.rawValue, "scope": all ? "all" : "chosen"])
+        return try decode(Answer.self, try await call("POST", "/clash/delays", body: body, timeout: 20)).delays
+    }
+
+    private func clashSource(_ body: [String: String]) async throws -> ClashView {
+        try decode(ClashView.self, try await call("POST", "/clash/source", body: try JSONSerialization.data(withJSONObject: body), timeout: ClashText.fetchTimeout))
     }
 }
