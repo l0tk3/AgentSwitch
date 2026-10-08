@@ -237,9 +237,12 @@ const AGENTS = new Map<string, { readonly builtin: Builtin; readonly custom: Cus
 
 /** Project commands first, then the user's, then built-in; each alphabetical, one per name (project beats user beats
  *  built-in). Unknown agent: none. */
-export function slashCommands(harness: string, cwd: string, home: string = homedir()): SlashCommand[] {
+export function slashCommands(harness: string, cwd: string, home: string = homedir(), live: readonly { readonly name: string; readonly description: string }[] | null = null): SlashCommand[] {
   const agent = AGENTS.get(harness);
   if (!agent) return [];
+  // `live`: the agent's own list as read off a terminal running it (TerminalHost.learnCommands) — its custom commands
+  // too, as it names them; the list kept here stands in until then.
+  if (live?.length) return ranked(live.map((c): SlashCommand => ({ name: c.name, description: oneLine(c.description), source: "builtin" })));
   const builtin = agent.builtin.map(([name, description]): SlashCommand => ({ name, description: oneLine(description), source: "builtin" }));
   const abs = (p: unknown) => (typeof p === "string" && isAbsolute(p) ? resolve(p) : null);
   let custom: SlashCommand[] = [];

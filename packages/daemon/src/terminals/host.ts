@@ -417,6 +417,36 @@ export function compactingOnScreen(lines: readonly string[]): boolean {
   return lines.some((line) => /^[·✢✳✶✻✽*]\s+Compacting conversation(?:…|\.{3})?(?:\s+\([^)]*\)?)?\s*$/u.test(line));
 }
 
+/** One of an agent's own commands, as its own list of them names and describes it. */
+export type ListedCommand = { readonly name: string; readonly description: string };
+
+/** The rows of the list an agent pops up when `/` is typed into its empty input: `/model   choose what model…`, the
+ *  selected one with its mark (Codex) or not (Claude Code). The input's own row (`› /`) has no words after the name. */
+export function commandRows(lines: readonly string[]): ListedCommand[] {
+  const out: ListedCommand[] = [];
+  for (const line of lines) {
+    const m = /^\s*(?:[│|]\s*)?(?:[›❯>]\s+)?\/([A-Za-z0-9][\w:.-]{0,60})\s{2,}(\S.*?)\s*(?:[│|]\s*)?$/u.exec(line);
+    if (m) out.push({ name: m[1]!, description: m[2]!.replace(/\s+/g, " ").slice(0, 300) });
+  }
+  return out;
+}
+
+/** The agent's input line is on the screen and holds nothing typed: its mark, then nothing or only its dim words (a
+ *  placeholder, what it suggests). Rows from `screenRows`. */
+export function inputEmpty(rows: readonly ScreenRow[]): boolean {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]!;
+    const m = /^\s*(?:[│|]\s*)?[›❯](?:\s|$)/u.exec(row.text);
+    if (!m) continue;
+    for (let x = m[0].length; x < row.text.length; x++) if (row.text[x]!.trim() && !row.dim[x] && !/[│|]/.test(row.text[x]!)) return false;
+    return true;
+  }
+  return false;
+}
+const COMMAND_STEP_MS = 90;
+const COMMAND_STEPS = 60;
+const COMMAND_STILL = 5;
+
 /** What an agent's screen said to one of its own commands (`/daybreak` → `Daybreak off. Applies to new turns.`,
  *  `/model` → `Model changed to gpt-6-sol high`). The agent writes such lines on its screen and not into its record,
  *  so a screen that shows the record had nothing to show for the command (2026-10-08, user: 我输入/daybreak都没反应
@@ -693,6 +723,9 @@ class Session {
   compactTimer: NodeJS.Timeout | null = null;
   /** What its screen said to commands sent from a screen (`commanded`). */
   notices: ScreenNotice[] = [];
+  /** The program it runs (the launcher's), for what is learned of that program (`learnCommands`). */
+  program = "";
+  learning = false;
   /** The list its screen shows to choose from (`choiceLooks`). */
   choices: ScreenChoices | null = null;
   choiceTimer: NodeJS.Timeout | null = null;
@@ -755,6 +788,8 @@ class Session {
 export class TerminalHost {
   private readonly sessions = new Map<string, Session>();
   private readonly workListeners = new Set<(cwd: string) => void>();
+  /** Each program's own commands, by its kind and path, as read off a terminal running it. */
+  private readonly learned = new Map<string, readonly ListedCommand[]>();
   private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove">> & { now: () => number };
   private helperChecked = false;
 
@@ -821,6 +856,7 @@ export class TerminalHost {
     }
     let proc: pty.IPty;
     try {
+      s.program = plan.file;
       proc = pty.spawn(plan.file, [...args], { name: "xterm-256color", cols: s.cols, rows: s.rows, cwd: req.cwd, env });
     } catch (err) {
       this.sessions.delete(id);
@@ -1542,6 +1578,52 @@ export class TerminalHost {
       if (left.length) this.sentRests(s);
     }, this.o.sentRestMs);
     s.sentTimer.unref();
+  }
+
+  /** The agent's own commands as its own list gives them, learned from a terminal running the same program
+   *  (`learnCommands`); null when not learned yet. */
+  commandsOf(id: string): readonly ListedCommand[] | null {
+    const s = this.sessions.get(id);
+    return (s && this.learned.get(`${s.harness}\n${s.program}`)) ?? null;
+  }
+
+  /** Reads the agent's own list of commands off terminal `id`, once per program: while it rests with an empty input
+   *  and nothing to choose on its screen, `/` is typed into it, the list it pops up is read row by row as the selection
+   *  is walked down it, and the `/` is taken out again. A list of names kept by hand goes stale with every release
+   *  (2026-10-08, user: 命令列表改成动态维护的不就行了，看当前运行的对应的agent是哪个，直接去里面取). Nothing is typed
+   *  when its input is not positively empty; whatever goes wrong, the input is left as it was found. */
+  async learnCommands(id: string): Promise<void> {
+    const s = this.sessions.get(id);
+    if (!s || s.learning || !s.program || this.learned.has(`${s.harness}\n${s.program}`)) return;
+    const ready = () => s.status === "idle" && !s.pending.size && !s.attention && !choicesOnScreen(this.screenTail(id, s.rows)) && inputEmpty(screenRows(s.term, s.rows));
+    if (!ready()) return;
+    s.learning = true;
+    const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const found = new Map<string, string>();
+    const read = () => { let fresh = 0; for (const c of commandRows(this.screenTail(id, s.rows))) if (!found.has(c.name)) { found.set(c.name, c.description); fresh += 1; } return fresh; };
+    try {
+      this.write(id, "/");
+      await pause(350);
+      if (!read()) return;
+      const down = keySequence("down", this.keyContext(id)).repeat(3);
+      for (let step = 0, still = 0; step < COMMAND_STEPS && still < COMMAND_STILL; step++) {
+        if (s.status !== "idle") return;
+        this.write(id, down);
+        await pause(COMMAND_STEP_MS);
+        still = read() ? 0 : still + 1;
+      }
+      if (found.size >= 5) this.learned.set(`${s.harness}\n${s.program}`, [...found].map(([name, description]) => ({ name, description })));
+    } catch { /* the terminal went away */ } finally {
+      // The `/` out again; once more if its list is still up.
+      try {
+        for (let i = 0; i < 2 && this.sessions.has(id) && s.status !== "exited"; i++) {
+          if (i > 0 && inputEmpty(screenRows(s.term, s.rows))) break;
+          this.write(id, "\x7f");
+          await pause(200);
+        }
+      } catch { /* gone */ }
+      s.learning = false;
+    }
   }
 
   /** A screen is about to send terminal `id` one of the agent's own commands: what its screen says to it in the next

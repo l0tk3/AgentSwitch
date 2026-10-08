@@ -112,9 +112,27 @@ const MENU = ["gpt-6-sol (current)   Frontier model", "gpt-6-luna            Fas
 function drawMenu() {
   process.stdout.write("\r\n  Select Model and Effort\r\n" + MENU.map((row, i) => `${i === menu ? "› " : "  "}${i + 1}. ${row}`).join("\r\n") + "\r\n  Press enter to confirm or esc to go back\r\n");
 }
+// Its own list of commands (`FAKE_SLASH=1`): `/` typed into the empty input pops it up, three rows at a time; the
+// arrow keys walk it, a backspace takes the `/` out.
+const SLASH = [["model", "choose what model and reasoning effort to use"], ["daybreak", "turn Daybreak on or off"], ["new", "start a new chat"], ["compact", "summarize the conversation"],
+  ["status", "show current session configuration"], ["diff", "show git diff"], ["quit", "exit Codex"]];
+let slash = null;
+function drawSlash() {
+  const top = Math.min(Math.max(0, slash - 1), SLASH.length - 3);
+  process.stdout.write("\x1b[2J\x1b[H" + SLASH.slice(top, top + 3).map(([n, d], i) => `${top + i === slash ? "› " : "  "}/${n.padEnd(10)}  ${d}`).join("\r\n") + "\r\n\r\n› /\r\n");
+}
 let buf = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => {
+  if (process.env.FAKE_SLASH && slash === null && String(d) === "/" && !buf) { slash = 0; drawSlash(); return; }
+  if (slash !== null) {
+    for (const key of String(d).match(/\x1b[\[O][AB]|\x7f/g) ?? []) {
+      if (slash === null) break;
+      if (key === "\x7f") { slash = null; process.stdout.write("\x1b[2J\x1b[H› \x1b[2mAsk anything\x1b[22m\r\n"); }
+      else { slash = (slash + (key.endsWith("B") ? 1 : SLASH.length - 1)) % SLASH.length; drawSlash(); }
+    }
+    return;
+  }
   if (menu !== null) {
     // Arrow keys move the mark (either cursor-key mode); enter takes the row and the list is gone.
     for (const key of String(d).match(/\x1b[\[O][AB]|\r|\n/g) ?? []) {

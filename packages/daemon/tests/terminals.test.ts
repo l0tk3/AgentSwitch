@@ -14,7 +14,7 @@ import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
 import { folderFiles, matchFiles } from "../src/terminals/files.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, choicesOnScreen, printedSince, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, choicesOnScreen, printedSince, commandRows, inputEmpty, screenRows, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -613,6 +613,48 @@ describe("terminal host", () => {
     expect(host.get(info.id)!.notices[0]!.text).toContain("Daybreak on. Applies to new turns.");
     expect(events.filter((e) => e.type === "notices")).toHaveLength(1);
   });
+
+  it("reads an agent's own list of commands off its screen, and whether its input is empty (2026-10-08)", () => {
+    // Codex 0.162's own snapshot of the list, above its input; Claude Code's, below it.
+    expect(commandRows(["› /model     choose what model and reasoning effort to use", "  /memories  configure memory use and generation", "  /mcp       list MCP tools; use /mcp verbose or /mcp login <name>", "", "› /m", "", "  gpt-test default · /tmp/project"]))
+      .toEqual([{ name: "model", description: "choose what model and reasoning effort to use" }, { name: "memories", description: "configure memory use and generation" }, { name: "mcp", description: "list MCP tools; use /mcp verbose or /mcp login <name>" }]);
+    expect(commandRows(["❯ /", "────", "  /add-dir          Add a new working directory", "  /prompts:fix      Fix it"]).map((c) => c.name)).toEqual(["add-dir", "prompts:fix"]);
+    expect(commandRows(["• see /usr/local/bin  for more", "text /model  x"])).toEqual([]);
+    const row = (text: string, dimFrom = Infinity) => ({ text, dim: [...text].map((_, i) => i >= dimFrom) });
+    expect(inputEmpty([row("• hello"), row("› Ask Codex to do anything", 2), row("  GPT-6-Sol high")])).toBe(true);
+    expect(inputEmpty([row("❯ "), row("────")])).toBe(true);
+    expect(inputEmpty([row("› half a thought")])).toBe(false);
+    expect(inputEmpty([row("no input line here")])).toBe(false);
+  });
+
+  it("learns an agent's own commands from a terminal running it: types `/`, walks its list, takes the `/` out (2026-10-08)", async () => {
+    const launcher = fakeLauncher(() => "http://127.0.0.1:9", true);
+    const host = new TerminalHost({ launcher: (req) => { const plan = launcher(req); return { ...plan, env: { ...plan.env, FAKE_SLASH: "1" } }; } });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    await until(() => host.get(info.id)!.title === "fake agent");
+    expect(host.commandsOf(info.id)).toBeNull();
+    // Its input is not on the screen yet: nothing is typed, nothing learned.
+    await host.learnCommands(info.id);
+    expect(host.commandsOf(info.id)).toBeNull();
+    // At work: not now either.
+    host.write(info.id, "raw\r");   // keys reach it one by one, as they reach a real agent
+    await new Promise((r) => setTimeout(r, 100));
+    host.write(info.id, "suggest try this\r");   // draws an input line with only its dim words in it
+    await new Promise((r) => setTimeout(r, 150));
+    await host.hook(info.id, token, { event: "UserPromptSubmit", payload: {} });
+    await host.learnCommands(info.id);
+    expect(host.commandsOf(info.id)).toBeNull();
+    await host.hook(info.id, token, { event: "Stop", payload: {} });
+    await host.learnCommands(info.id);
+    expect(host.commandsOf(info.id)!.map((c) => c.name).sort()).toEqual(["compact", "daybreak", "diff", "model", "new", "quit", "status"]);
+    expect(host.commandsOf(info.id)!.find((c) => c.name === "daybreak")!.description).toBe("turn Daybreak on or off");
+    // The `/` is out of its input again, and another terminal of the same program has the list without being read.
+    await until(() => inputEmpty(screenRows((host as unknown as { sessions: Map<string, { term: Parameters<typeof screenRows>[0] }> }).sessions.get(info.id)!.term, 30)));
+    const other = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    expect(host.commandsOf(other.id)!.length).toBe(7);
+  }, 20_000);
 
   it("keeps a reply a screen sent until the agent's record holds it, or it turns out not to have been a message (2026-10-08)", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), sentRestMs: 120 });

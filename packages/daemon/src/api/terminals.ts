@@ -529,7 +529,11 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!info) return c.json({ error: "not found" }, 404);
     // Codex's `/daybreak` is a command only where its feature is on: this terminal has the switch, or this Codex and
     // this account offer it (the feature is then enabled at each Codex terminal's start, launch.ts).
-    const commands = slashCommands(info.harness, info.cwd);
+    // The agent's own list where a terminal running this program has been read; reading starts now if not (it takes
+    // a few seconds and types into the terminal only while it rests with an empty input).
+    const live = host.commandsOf(info.id);
+    if (!live && (info.harness === "codex" || info.harness === "claude-code")) void host.learnCommands(info.id).catch(() => undefined);
+    const commands = slashCommands(info.harness, info.cwd, undefined, live);
     const daybreak = info.harness === "codex" && (info.daybreak !== null || t.offers?.().codex?.daybreak !== undefined);
     return c.json({ commands: daybreak ? withCommand(commands, { name: "daybreak", description: "turn Daybreak on or off" }) : commands });
   });
