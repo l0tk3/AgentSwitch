@@ -527,9 +527,11 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   app.get("/terminals/:id/commands", (c) => {
     const info = host.get(c.req.param("id"));
     if (!info) return c.json({ error: "not found" }, 404);
-    // Codex's `/daybreak` is a command only where this terminal has the switch (its feature enabled at its start).
+    // Codex's `/daybreak` is a command only where its feature is on: this terminal has the switch, or this Codex and
+    // this account offer it (the feature is then enabled at each Codex terminal's start, launch.ts).
     const commands = slashCommands(info.harness, info.cwd);
-    return c.json({ commands: info.daybreak === null ? commands : withCommand(commands, { name: "daybreak", description: "turn Daybreak on or off" }) });
+    const daybreak = info.harness === "codex" && (info.daybreak !== null || t.offers?.().codex?.daybreak !== undefined);
+    return c.json({ commands: daybreak ? withCommand(commands, { name: "daybreak", description: "turn Daybreak on or off" }) : commands });
   });
 
   // What `@` offers in a reply (docs/simple-view-v0.md §5.5): the files of the folder the agent works in, by name.

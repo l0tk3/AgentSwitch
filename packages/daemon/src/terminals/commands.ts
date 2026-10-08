@@ -80,16 +80,20 @@ const CLAUDE: Builtin = [
 ];
 
 /** Codex 0.158.0-alpha.2.1 (ChatGPT.app's codex-cli), read 2026-09-29 from the slash-command names and descriptions in
- *  the binary. Debug-only, Windows-only and unconfirmed names (approve, btw, tui, subagents, rollout, …) are left out. */
+ *  the binary; brought up to 0.162.0-alpha.18 on 2026-10-08 from its source (`tui/src/slash_command.rs`: cwd for pwd,
+ *  pet for pets, and auto-review, clean, subagents, tui added; `daybreak` is added where the feature is on, api/terminals.ts). Debug-only, Windows-only and unconfirmed names (approve, btw, tui, subagents, rollout, …) are left out. */
 const CODEX: Builtin = [
   ["agents", "open the agent command center"],
   ["app", "continue this session in the Desktop app"],
   ["apps", "manage apps"],
   ["archive", "archive this session"],
+  ["auto-review", "approve one retry of a recent auto-review denial"],
   ["cd", "change the current working directory"],
+  ["clean", "stop all background terminals"],
   ["clear", "clear the terminal and start a new chat"],
   ["compact", "summarize conversation to prevent hitting the context limit"],
   ["copy", "copy the last response or part of it"],
+  ["cwd", "show the current working directory"],
   ["daemon", "Manage the local background server"],
   ["debug-config", "show config layers and requirement sources for debugging"],
   ["delete", "permanently delete this session"],
@@ -112,11 +116,10 @@ const CODEX: Builtin = [
   ["model", "choose what model and reasoning effort to use"],
   ["new", "start a new chat during a conversation"],
   ["permissions", "choose what Codex is allowed to do"],
-  ["pets", "choose or hide the terminal pet"],
+  ["pet", "choose or hide the terminal pet"],
   ["plan", "switch to Plan mode"],
   ["plugins", "browse plugins"],
   ["ps", "list background terminals"],
-  ["pwd", "show the current working directory"],
   ["quit", "exit Codex"],
   ["raw", "toggle raw scrollback mode for copy-friendly terminal selection"],
   ["recap", "summarize the current conversation now"],
@@ -128,8 +131,10 @@ const CODEX: Builtin = [
   ["status", "show current session configuration and token usage"],
   ["statusline", "configure which items appear in the status line"],
   ["stop", "stop all background terminals"],
+  ["subagents", "switch between this session's subagents"],
   ["theme", "choose a syntax highlighting theme"],
   ["title", "configure which items appear in the terminal title"],
+  ["tui", "choose the TUI mode for the next launch"],
   ["usage", "view account usage or use a usage limit reset"],
   ["vim", "toggle Vim mode for the composer"],
   ["voice", "start or stop voice; use /voice settings to choose a voice"],
