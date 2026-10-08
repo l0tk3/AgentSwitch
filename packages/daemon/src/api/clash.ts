@@ -58,6 +58,9 @@ export function mountClash(app: Hono<any>, deps: ApiDeps): void {
     return name ? c.json(clash.template(name)) : c.notFound();
   });
 
+  // The routing check: a connection of each kind through the core, and what the core did with it.
+  app.post("/clash/check", async (c) => mac(c) ?? said(c, () => clash.check()));
+
   // The DNS template's text as it is in use, to edit it.
   app.get("/clash/dns", (c) => mac(c) ?? c.json(clash.dns()));
 

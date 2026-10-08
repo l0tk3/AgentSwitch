@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { stringify } from "yaml";
 import { buildConfig, chosen, CLASH_SERVICES, CLASH_TEMPLATES, defaultGroup, DIRECT_SET, dnsSection, dnsText, groupNames, groupsIn, nodeSet, RULE_SETS, ruleSet, running, SERVICE, templateRules, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings, type ClashTemplate } from "./build.js";
 import { rulesFrom } from "./rules.js";
+import { observe, type CheckDeps, type Observed } from "./check.js";
 import { ClashController, type ClashStatus } from "./controller.js";
 import { ClashSourceError, type ClashSource, type SourceInfo } from "./source.js";
 import { cleanSettings, type ClashStore } from "./store.js";
@@ -49,6 +50,16 @@ export type ClashView = {
   readonly fetchedAt: number | null;
 };
 
+/** One line of the routing check (§7.9): a kind of traffic, the name tried for it, what it should do and what the
+ *  core did with it. `expect` null: nothing is asked of it here (a template that is off), it is shown for what it is;
+ *  `ok` null likewise. */
+export type ClashCheckRow = {
+  readonly id: string; readonly title: string; readonly host: string;
+  readonly expect: { readonly kind: "group"; readonly group: string } | { readonly kind: "direct" } | { readonly kind: "reject" } | null;
+  readonly observed: Observed;
+  readonly ok: boolean | null;
+};
+
 export class ClashRefused extends Error {}
 
 export type ClashOptions = {
@@ -60,6 +71,8 @@ export type ClashOptions = {
   readonly dir?: string;
   readonly socket?: () => string | null;
   readonly now?: () => number;
+  /** The routing check's ways of looking (tests give their own). */
+  readonly check?: Partial<CheckDeps>;
 };
 
 const DELAY_MS = 5_000;
@@ -120,13 +133,53 @@ export class ClashIntegration {
       if (!profile || (link === null && text === null)) throw new ClashRefused("Clash Verge 里没有这个订阅");
       if (link !== null) await this.o.source.setLink(link, profile.name); else await this.o.source.setFile(text!, profile.name);
     }
+    this.forgetNodes();
     await this.push(await this.status(), true);
     return this.shown(await this.status());
   }
 
   async removeSource(): Promise<ClashView> {
     this.o.source.remove();
+    this.forgetNodes();
     return this.view();
+  }
+
+  /** The nodes chosen were chosen in the subscription that was there: with another in its place, or none, they are
+   *  forgotten — a node of the same name in another subscription is not the same node (user, 2026-10-08: 还是别记住
+   *  节点了，不然会一直堆积，而且其他订阅链接里如果有重名的不就弄错了). One that goes missing from the same
+   *  subscription when it is fetched again stays, marked. */
+  private forgetNodes(): void {
+    const settings = this.o.store.settings();
+    if (settings.claude.nodes.length || settings.openai.nodes.length) this.o.store.save({ ...settings, claude: { nodes: [] }, openai: { nodes: [] } });
+  }
+
+  /** The routing check: a connection of each kind sent through the core, and what the core did with it. */
+  async check(): Promise<{ readonly rows: readonly ClashCheckRow[] }> {
+    const controller = this.controller(), status = await this.status();
+    if (!controller || !status) throw new ClashRefused("Clash Verge 没有在运行");
+    const port = this.o.check?.port ?? status.proxyPort;
+    if (!port) throw new ClashRefused("Clash 没有开代理端口，没法从这里发连接去试");
+    const settings = this.o.store.settings(), enabled = this.enabled(), document = this.o.source.document() ?? {};
+    const deps: CheckDeps = { port, connections: () => controller.connections(), ...this.o.check };
+    const has = (template: ClashTemplate, rule: string): boolean => settings.templates[template].on && templateRules(template, settings).includes(rule);
+    const service = (s: ClashService, host: string) => ({ id: s, title: s === "claude" ? "Claude" : "OpenAI", host, far: true,
+      expect: enabled[s] ? { kind: "group" as const, group: groupNames(document, s).group } : null });
+    const wanted: { id: string; title: string; host: string; far?: boolean; expect: ClashCheckRow["expect"] }[] = [
+      service("claude", "claude.ai"), service("openai", "chatgpt.com"),
+      { id: "domestic", title: "Domestic", host: "www.baidu.com", expect: has("domestic", "DOMAIN-KEYWORD,baidu") ? { kind: "direct" } : null },
+      { id: "china", title: "China by Address", host: "www.163.com", expect: has("domestic", "GEOIP,CN") ? { kind: "direct" } : null },
+      { id: "block", title: "Ads", host: "ad.doubleclick.net", expect: has("block", "DOMAIN-SUFFIX,doubleclick.net") ? { kind: "reject" } : null },
+      ...settings.direct.slice(0, 8).map((address) => ({ id: `direct:${address}`, title: address, host: address, expect: { kind: "direct" as const } })),
+      { id: "other", title: "Everything Else", host: "www.google.com", expect: null },
+    ];
+    const rows = await Promise.all(wanted.map(async ({ far, ...row }): Promise<ClashCheckRow> => {
+      const observed = await observe(deps, row.host, 443, far === true);
+      const ok = row.expect === null ? null
+        : row.expect.kind === "group" ? observed.outcome === "proxied" && observed.path[0] === row.expect.group
+        : row.expect.kind === "direct" ? observed.outcome === "direct" : observed.outcome === "rejected";
+      return { ...row, observed, ok };
+    }));
+    return { rows };
   }
 
   /** The subscription fetched again now, and the core told to take what came. */

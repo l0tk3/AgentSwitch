@@ -10,7 +10,8 @@
  *     private core what its groups and rule sets became;
  *  5. takes the subscription service's own link in as well (the one the user's file names for its nodes) and has the
  *     core's program check what is made of it with its default group called Manual, the rule templates and the DNS
- *     template on.
+ *     template on;
+ *  6. runs the routing check on the user's own running core: a few ordinary connections through its proxy port.
  *
  *  Nothing of Clash Verge's is written and its core is only read. Real nodes are tried (step 8), as Clash Verge's own
  *  delay test does.   npx tsx scripts/clash_probe.ts [path to mihomo]   (CLASH_PROBE_TMP: a short folder for the socket) */
@@ -149,6 +150,14 @@ async function main(): Promise<void> {
         say(`    the core's own check of it: ${/test is successful/.test(check2.stdout + check2.stderr) ? "passes" : `FAILS: ${(check2.stdout + check2.stderr).split("\n").filter((l) => /error|fatal/i.test(l)).slice(0, 3).join(" / ")}`}`);
       } finally { rmSync(second, { recursive: true, force: true }); }
     }
+    // The routing check on the user's own running core: a connection of each kind through its proxy port, and what it
+    // made of each. Whatever subscription it runs, the same kinds are tried; what should happen is what these settings ask.
+    const live = new ClashIntegration({ store: new ClashStore(work), source: new ClashSource(work), base: () => `http://127.0.0.1:${port}`, socket: () => real });
+    await live.saveSettings({ claude: { nodes: claude }, openai: { nodes: openai }, direct: [], autoUpdateHours: 24, renameDefault: false, templates: { domestic: { on: true, rules: null }, block: { on: true, rules: null } }, dns: { on: false, text: null } });
+    const t0 = Date.now();
+    const checked = await live.check();
+    say(`12) the routing check on the user's own core (${Date.now() - t0} ms):`);
+    for (const r of checked.rows) say(`    ${r.ok === null ? "·" : r.ok ? "✓" : "✗"} ${r.title} (${r.host}): ${r.observed.outcome}${r.observed.rule ? ` by ${r.observed.rule}` : ""}${r.observed.path.length ? ` → ${r.observed.path.join(" → ")}` : ""}${r.observed.exit ? ` · seen from ${r.observed.exit.loc} ${r.observed.exit.ip.replace(/\d+\.\d+$/, "x.x")} · ${r.observed.ms} ms` : ""}${r.expect ? `   [should: ${r.expect.kind === "group" ? r.expect.group : r.expect.kind}]` : ""}`);
     const after = await new ClashController(real).status();
     say(`9) the user's own core afterwards: ${after.groups.length} groups, rule sets ${JSON.stringify(Object.keys(after.ruleSets))}, tun ${after.tun} — ${JSON.stringify(after.groups.map((g) => [g.name, g.now])) === JSON.stringify(before.groups.map((g) => [g.name, g.now])) ? "as it was" : "CHANGED"}`);
   } finally {

@@ -15,7 +15,13 @@ export type ClashStatus = {
   readonly nodeSets: Readonly<Record<string, readonly string[]>>;
   /** The rule sets it has, each with how many rules it holds. */
   readonly ruleSets: Readonly<Record<string, number>>;
+  /** Its proxy port on this Mac (`mixed-port`, else `port`); null: it listens on none. */
+  readonly proxyPort: number | null;
 };
+/** A connection the core has open: where to, the rule it matched, and the way out it took — the node first, then
+ *  each group above it. */
+export type ClashConnection = { readonly host: string; readonly port: number; /** The port it came from on this Mac. */ readonly sourcePort: number;
+  readonly rule: string; readonly payload: string; readonly chains: readonly string[]; readonly started: number };
 
 const BUILT_IN = new Set(["Direct", "Reject", "RejectDrop", "Pass", "PassRule", "Compatible", "Dns"]);
 const TIMEOUT_MS = 5_000;
@@ -48,7 +54,18 @@ export class ClashController {
       }
     }
     const ruleSets = Object.fromEntries(Object.entries(obj(obj(sets).providers)).map(([name, v]) => [name, Number(obj(v).ruleCount) || 0]));
-    return { version: String(obj(version).version ?? ""), mode: String(obj(configs).mode ?? ""), tun: obj(obj(configs).tun).enable === true, groups, nodes, nodeSets, ruleSets };
+    const port = Number(obj(configs)["mixed-port"]) || Number(obj(configs).port) || 0;
+    return { version: String(obj(version).version ?? ""), mode: String(obj(configs).mode ?? ""), tun: obj(obj(configs).tun).enable === true, groups, nodes, nodeSets, ruleSets, proxyPort: port > 0 ? port : null };
+  }
+
+  /** What the core has open now. */
+  async connections(): Promise<ClashConnection[]> {
+    const list = obj(await this.get("/connections")).connections;
+    return (Array.isArray(list) ? list : []).map((c) => {
+      const o = obj(c), m = obj(o.metadata);
+      return { host: String(m.host || m.destinationIP || ""), port: Number(m.destinationPort) || 0, sourcePort: Number(m.sourcePort) || 0, rule: String(o.rule ?? ""), payload: String(o.rulePayload ?? ""),
+        chains: Array.isArray(o.chains) ? o.chains.filter((x): x is string => typeof x === "string") : [], started: Date.parse(String(o.start ?? "")) || 0 };
+    });
   }
 
   /** `group` uses `node` from now on (a group one chooses in by hand). */

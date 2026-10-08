@@ -14,6 +14,7 @@ import { LocalAuth } from "../src/api/localAuth.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { BUILT_IN, buildSubscription, defaultGroup, directRule, dnsSection, dnsText, EMPTY_SETTINGS, groupNames, nodeSet, RULE_SETS, ruleSet, running, type ClashSettings } from "../src/clash/build.js";
 import { looksUp, ruleLine, rulesFrom } from "../src/clash/rules.js";
+import { observe, parseTrace } from "../src/clash/check.js";
 import { ClashController } from "../src/clash/controller.js";
 import { ClashIntegration, parseTraffic } from "../src/clash/integration.js";
 import { ClashSource, ClashSourceError, providerSlug, type Fetched, type SourceNode } from "../src/clash/source.js";
@@ -365,7 +366,7 @@ async function core(start: { nodeSets?: Record<string, string[]>; ruleSets?: str
   const calls: string[] = [];
   const state = { now: { Claude: "Claude自动选择", "Claude自动选择": "🇯🇵 日本家宽-02" } as Record<string, string>,
     nodeSets: start.nodeSets ?? { tgyun: NODES.map((n) => n.name), "as-claude": ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] },
-    ruleSets: start.ruleSets ?? [...RULE_SETS], groups: start.groups ?? ["OpenAI自动选择", "OpenAI", "Manual", "Auto"], delays: { "🇯🇵 日本家宽-01": 392, "🇯🇵 日本家宽-02": 428 } as Record<string, number> };
+    ruleSets: start.ruleSets ?? [...RULE_SETS], groups: start.groups ?? ["OpenAI自动选择", "OpenAI", "Manual", "Auto"], connections: [] as unknown[], delays: { "🇯🇵 日本家宽-01": 392, "🇯🇵 日本家宽-02": 428 } as Record<string, number> };
   const server: Server = createServer((req, res) => {
     let body = ""; req.on("data", (c) => (body += c));
     req.on("end", () => {
@@ -380,7 +381,8 @@ async function core(start: { nodeSets?: Record<string, string[]>; ruleSets?: str
       }
       if (req.method === "PUT") return send(null, 204);
       if (url === "/version") return send({ meta: true, version: "v1.19.31" });
-      if (url === "/configs") return send({ mode: "rule", tun: { enable: true } });
+      if (url === "/configs") return send({ mode: "rule", tun: { enable: true }, port: 0, "mixed-port": 7897 });
+      if (url === "/connections") return send({ downloadTotal: 0, uploadTotal: 0, connections: state.connections });
       if (url === "/providers/rules") return send({ providers: Object.fromEntries(state.ruleSets.map((n) => [n, { ruleCount: 2 }])) });
       const check = /^\/providers\/proxies\/([^/]+)\/([^/]+)\/healthcheck\?url=(.+)&timeout=5000$/.exec(url);
       if (check) return state.nodeSets[check[1]!]?.includes(check[2]!) && state.delays[check[2]!] ? send({ delay: state.delays[check[2]!] }) : send({ message: "Timeout" }, 504);
@@ -405,7 +407,7 @@ describe("the core's controller", () => {
     const { socket, calls } = await core();
     const ctl = new ClashController(socket);
     const status = await ctl.status();
-    expect(status).toMatchObject({ version: "v1.19.31", mode: "rule", tun: true, ruleSets: { "as-direct": 2 },
+    expect(status).toMatchObject({ version: "v1.19.31", mode: "rule", tun: true, proxyPort: 7897, ruleSets: { "as-direct": 2 },
       nodes: ["Inline SG", "🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇺🇸 美国-01"],
       nodeSets: { tgyun: ["🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇺🇸 美国-01"], "as-claude": ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] } });
     expect(status.groups.slice(0, 2).map((g) => [g.name, g.type, g.now])).toEqual([["Claude", "Selector", "Claude自动选择"], ["Claude自动选择", "Fallback", "🇯🇵 日本家宽-02"]]);
@@ -419,6 +421,61 @@ describe("the core's controller", () => {
     expect(await ctl.delay("as-claude", "🇺🇸 美国-01", "https://api.anthropic.com/", 5000)).toBeNull();
     await expect(new ClashController(join(tmpdir(), "no-such.sock")).status()).rejects.toThrow();
   });
+
+  it("lists what the core has open: where to, the rule matched, the way out from the node up", async () => {
+    const { socket, state } = await core();
+    state.connections = [{ id: "a", start: "2026-10-08T22:50:00.5+08:00", rule: "RuleSet", rulePayload: "as-claude", chains: ["🇯🇵 日本家宽-02", "Claude自动选择", "Claude"], metadata: { host: "claude.ai", destinationIP: "", destinationPort: "443", sourceIP: "127.0.0.1", sourcePort: "51234" } },
+      { id: "b", start: "2026-10-08T22:50:01+08:00", rule: "Match", rulePayload: "", chains: ["DIRECT"], metadata: { host: "", destinationIP: "203.0.113.7", destinationPort: "8443" } }];
+    expect(await new ClashController(socket).connections()).toEqual([
+      { host: "claude.ai", port: 443, sourcePort: 51234, rule: "RuleSet", payload: "as-claude", chains: ["🇯🇵 日本家宽-02", "Claude自动选择", "Claude"], started: Date.parse("2026-10-08T22:50:00.5+08:00") },
+      { host: "203.0.113.7", port: 8443, sourcePort: 0, rule: "Match", payload: "", chains: ["DIRECT"], started: Date.parse("2026-10-08T22:50:01+08:00") }]);
+  });
+});
+
+/** The core's proxy port, made up: every CONNECT is answered `200` as the real one answers it; then, by the name
+ *  asked for — listed among the core's connections with a rule and a way out, cut off at once (rejected), or left
+ *  open and never listed (a node that does not answer). */
+async function proxyPort(state: { connections: unknown[] }, routes: Record<string, { rule: string; payload: string; chains: string[] } | "reject" | "silent">) {
+  const sockets = new Set<import("node:stream").Duplex>();
+  const server = createServer();
+  server.on("connect", (req, socket) => {
+    sockets.add(socket);
+    socket.on("error", () => undefined);
+    socket.write("HTTP/1.1 200 Connection established\r\n\r\n");
+    const [host, port] = String(req.url).split(":");
+    const route = routes[host!] ?? { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] };
+    if (route === "reject") { socket.destroy(); return; }
+    // An older one to the same name, as an app of the user's would have open, and then this one.
+    if (route !== "silent") state.connections.push({ id: "theirs", start: "2026-10-08T10:00:00+08:00", rule: "Match", rulePayload: "", chains: ["DIRECT"], metadata: { host, destinationIP: "", destinationPort: port, sourcePort: "1" } },
+      { id: `${host}`, start: new Date().toISOString(), rule: route.rule, rulePayload: route.payload, chains: route.chains, metadata: { host, destinationIP: "", destinationPort: port, sourcePort: String((socket as import("node:net").Socket).remotePort) } });
+  });
+  await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+  closers.push(() => { for (const s of sockets) s.destroy(); server.close(); });
+  return (server.address() as import("node:net").AddressInfo).port;
+}
+
+describe("the routing check", () => {
+  it("sends a connection through the core and reads what the core made of it", async () => {
+    const { socket, state } = await core();
+    const port = await proxyPort(state, { "claude.ai": { rule: "RuleSet", payload: "as-claude", chains: ["🇯🇵 日本家宽-02", "Claude自动选择", "Claude"] },
+      "www.baidu.com": { rule: "RuleSet", payload: "as-domestic", chains: ["DIRECT"] }, "ad.doubleclick.net": "reject", "dead.example": "silent" });
+    const ctl = new ClashController(socket);
+    const deps = { port, connections: () => ctl.connections(), listMs: 500, trace: async (_s: unknown, host: string) => (host === "claude.ai" ? { ip: "203.0.113.9", loc: "JP" } : null) };
+    // The way out reads from the group the rule names down to the node; the far end says where it saw it come from.
+    expect(await observe(deps, "claude.ai", 443, true)).toEqual({ outcome: "proxied", rule: "RuleSet as-claude", path: ["Claude", "Claude自动选择", "🇯🇵 日本家宽-02"], exit: { ip: "203.0.113.9", loc: "JP" }, ms: expect.any(Number) });
+    expect(await observe(deps, "www.baidu.com", 443, false)).toEqual({ outcome: "direct", rule: "RuleSet as-domestic", path: ["DIRECT"] });
+    // Cut off at once and never listed: rejected. Left open and never listed: nothing can be said.
+    expect(await observe(deps, "ad.doubleclick.net", 443, false)).toEqual({ outcome: "rejected", rule: null, path: [] });
+    expect(await observe(deps, "dead.example", 443, false)).toEqual({ outcome: "unknown", rule: null, path: [] });
+    // No proxy port there at all.
+    expect(await observe({ ...deps, port: 1 }, "claude.ai", 443, false)).toEqual({ outcome: "unknown", rule: null, path: [] });
+  });
+
+  it("reads where a connection came from out of the far end's answer", () => {
+    expect(parseTrace("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nfl=1f2\nh=claude.ai\nip=203.0.113.9\nts=1.2\nloc=JP\ntls=TLSv1.3\n")).toEqual({ ip: "203.0.113.9", loc: "JP" });
+    expect(parseTrace("ip=2001:db8::1\nwarp=off\n")).toEqual({ ip: "2001:db8::1", loc: "" });
+    expect(parseTrace("HTTP/1.1 403 Forbidden\r\n\r\nblocked")).toBeNull();
+  });
 });
 
 describe("Clash Integration over HTTP", () => {
@@ -428,7 +485,10 @@ describe("Clash Integration over HTTP", () => {
     let body = PROVIDED, t = 1_000;
     const upstream = service({ [LINK]: () => ({ body, headers: { "subscription-userinfo": "upload=1; download=2; total=100; expire=1893456000" } }) });
     const at = home();
-    const clash = new ClashIntegration({ store: new ClashStore(at), source: new ClashSource(at, upstream.fetcher, () => t), dir, socket: () => running.socket, base: () => "http://127.0.0.1:4711", now: () => t });
+    const routes: Parameters<typeof proxyPort>[1] = {};
+    const port = await proxyPort(running.state, routes);
+    const clash = new ClashIntegration({ store: new ClashStore(at), source: new ClashSource(at, upstream.fetcher, () => t), dir, socket: () => running.socket, base: () => "http://127.0.0.1:4711", now: () => t,
+      check: { port, listMs: 500, trace: async (_s, host) => ({ ip: host === "claude.ai" ? "203.0.113.9" : "198.51.100.4", loc: host === "claude.ai" ? "JP" : "US" }) } });
     const app = new Hono();
     mountClash(app, { clash } as unknown as ApiDeps);
     const call = async (method: string, path: string, json?: unknown, env: object = {}) => {
@@ -437,7 +497,7 @@ describe("Clash Integration over HTTP", () => {
       let parsed: any = null; try { parsed = JSON.parse(text); } catch { /* yaml */ }
       return { status: res.status, text, json: parsed, headers: res.headers };
     };
-    return { call, clash, ...running, asked: upstream.asked, upstream: { set body(v: string) { body = v; } }, clock: { add(ms: number) { t += ms; } } };
+    return { call, clash, ...running, routes, asked: upstream.asked, upstream: { set body(v: string) { body = v; } }, clock: { add(ms: number) { t += ms; } } };
   }
   const chosen = { claude: { nodes: ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] }, openai: { nodes: [] }, direct: ["5.102.107.254"], autoUpdateHours: 6,
     templates: { domestic: { on: false, rules: null as string[] | null }, block: { on: false, rules: null as string[] | null } }, renameDefault: false,
@@ -579,6 +639,55 @@ describe("Clash Integration over HTTP", () => {
     }
     expect((await fetch(`http://127.0.0.1:${port}/clash/sub.yaml`)).status).toBe(404);
     expect((await fetch(`http://127.0.0.1:${port}/clash`)).status).toBe(401);
+  });
+
+  it("forgets the nodes chosen when another subscription takes the place of the one they were chosen in", async () => {
+    const { call } = await served();
+    await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
+    const kept = { ...chosen, openai: { nodes: ["🇺🇸 美国-01"] }, direct: ["5.102.107.254"], templates: { domestic: { on: true, rules: null }, block: { on: false, rules: null } } };
+    expect((await call("PUT", "/clash/settings", kept)).json.settings).toMatchObject({ claude: { nodes: ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] }, openai: { nodes: ["🇺🇸 美国-01"] } });
+    // Fetched again, it is the same subscription: what was chosen stays.
+    expect((await call("POST", "/clash/update")).json.settings.claude.nodes).toHaveLength(2);
+    // Another one in its place — here one with nodes of the very same names: none is taken for chosen. What is not
+    // of a subscription (the direct addresses, the templates) stays.
+    const other = await call("POST", "/clash/source", { link: LINK });
+    expect(other.json.settings).toMatchObject({ claude: { nodes: [] }, openai: { nodes: [] }, direct: ["5.102.107.254"], templates: { domestic: { on: true } } });
+    expect(other.json.nodes).toContain("🇯🇵 日本家宽-02");
+    await call("PUT", "/clash/settings", kept);
+    expect((await call("DELETE", "/clash/source")).json.settings).toMatchObject({ claude: { nodes: [] }, openai: { nodes: [] }, direct: ["5.102.107.254"] });
+    // A link that cannot be taken in changes nothing.
+    await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
+    await call("PUT", "/clash/settings", kept);
+    expect((await call("POST", "/clash/source", { link: "https://nowhere.example/x" })).status).toBe(400);
+    expect((await call("GET", "/clash")).json.settings.claude.nodes).toHaveLength(2);
+  });
+
+  it("checks that each kind of traffic goes where its rule sends it, and says which does not", async () => {
+    const { call, routes } = await served();
+    await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
+    await call("PUT", "/clash/settings", { ...chosen, templates: { domestic: { on: true, rules: null }, block: { on: true, rules: null } } });
+    Object.assign(routes, { "claude.ai": { rule: "RuleSet", payload: "as-claude", chains: ["🇯🇵 日本家宽-02", "Claude自动选择", "Claude"] },
+      "chatgpt.com": { rule: "DomainSuffix", payload: "chatgpt.com", chains: ["🇺🇸 美国-01", "OpenAI自动选择", "OpenAI"] },
+      "www.baidu.com": { rule: "RuleSet", payload: "as-domestic", chains: ["DIRECT"] }, "www.163.com": { rule: "RuleSet", payload: "as-domestic-ip", chains: ["DIRECT"] },
+      "ad.doubleclick.net": "reject", "5.102.107.254": { rule: "RuleSet", payload: "as-direct", chains: ["DIRECT"] } });
+    const rows = (await call("POST", "/clash/check")).json.rows as { id: string; title: string; host: string; expect: unknown; observed: Record<string, unknown>; ok: boolean | null }[];
+    expect(rows.map((r) => [r.id, r.title, r.host, r.ok])).toEqual([["claude", "Claude", "claude.ai", true], ["openai", "OpenAI", "chatgpt.com", null], ["domestic", "Domestic", "www.baidu.com", true],
+      ["china", "China by Address", "www.163.com", true], ["block", "Ads", "ad.doubleclick.net", true], ["direct:5.102.107.254", "5.102.107.254", "5.102.107.254", true], ["other", "Everything Else", "www.google.com", null]]);
+    expect(rows[0]).toMatchObject({ expect: { kind: "group", group: "Claude" }, observed: { outcome: "proxied", rule: "RuleSet as-claude", path: ["Claude", "Claude自动选择", "🇯🇵 日本家宽-02"], exit: { ip: "203.0.113.9", loc: "JP" } } });
+    // No node chosen for OpenAI: nothing is asked of it, and how it goes is shown all the same.
+    expect(rows[1]).toMatchObject({ expect: null, observed: { outcome: "proxied", rule: "DomainSuffix chatgpt.com", path: ["OpenAI", "OpenAI自动选择", "🇺🇸 美国-01"], exit: { loc: "US" } } });
+    expect(rows[4]).toMatchObject({ expect: { kind: "reject" }, observed: { outcome: "rejected" } });
+    expect(rows[6]).toMatchObject({ expect: null, observed: { outcome: "proxied", rule: "Match", path: ["Manual", "🇸🇬 新加坡-01"] } });
+    // Rules that do not do their work: Claude leaves by another group, an ad gets through, a direct address is proxied.
+    Object.assign(routes, { "claude.ai": { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] }, "ad.doubleclick.net": { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] },
+      "5.102.107.254": { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] }, "www.baidu.com": "silent" });
+    const bad = (await call("POST", "/clash/check")).json.rows as { id: string; ok: boolean | null; observed: { outcome: string } }[];
+    expect(Object.fromEntries(bad.map((r) => [r.id, r.ok]))).toMatchObject({ claude: false, domestic: false, china: true, block: false, "direct:5.102.107.254": false });
+    expect(bad.find((r) => r.id === "domestic")!.observed.outcome).toBe("unknown");
+    // With the templates off nothing is asked of those kinds.
+    await call("PUT", "/clash/settings", chosen);
+    expect(Object.fromEntries(((await call("POST", "/clash/check")).json.rows as { id: string; expect: unknown }[]).map((r) => [r.id, r.expect]))).toMatchObject({ domestic: null, china: null, block: null });
+    expect((await call("POST", "/clash/check", undefined, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
   });
 
   it("turns a rule template on and takes the user's own rules for it, at once and by the line", async () => {
