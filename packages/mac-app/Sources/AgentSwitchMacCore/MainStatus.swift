@@ -70,6 +70,8 @@ public struct TerminalContext: Equatable, Sendable {
     /// The pane shows the terminal's record, not its screen (docs/simple-view-v0.md §5.2): it holds no size here, and
     /// the bar says `Simple` where the size was.
     public var simple = false
+    /// The profile it runs under, when it is not the Mac's own (docs/profiles-v0.md §3): said between agent and model.
+    public var profile: String?
 
     public init(harness: String, model: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil,
                 away: String? = nil, running: Bool = true) {
@@ -107,7 +109,7 @@ public struct TerminalContext: Equatable, Sendable {
 
     /// `claude · Opus 5.5`; the agent alone without a model (its default).
     public var agent: String {
-        let name = harness == "claude-code" ? "claude" : harness
+        let name = [harness == "claude-code" ? "claude" : harness, profile].compactMap { $0 }.joined(separator: " · ")
         guard let model else { return name }
         return "\(name) · \(ModelName.display(model))"
     }
@@ -116,7 +118,7 @@ public struct TerminalContext: Equatable, Sendable {
     /// docs/ui-v0.md §8).
     public func agent(in look: InterfaceLook) -> String {
         guard look.isClassic else { return agent }
-        let name = HarnessName.display(harness)
+        let name = [HarnessName.display(harness), profile].compactMap { $0 }.joined(separator: " · ")
         guard let model else { return name }
         return "\(name) · \(ModelName.display(model))"
     }

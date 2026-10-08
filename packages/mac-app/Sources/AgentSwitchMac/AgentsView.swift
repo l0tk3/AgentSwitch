@@ -9,6 +9,13 @@ import SwiftUI
 struct AgentsView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmRestart = false
+    /// Each agent's profiles, as the service has them; what went wrong with the last change, by agent.
+    @State private var profiles: [String: AgentProfiles] = [:]
+    @State private var profileError: [String: String] = [:]
+    /// The agent a new profile is being named for; the name; the profile asked to be removed.
+    @State private var naming: AgentCLI?
+    @State private var newName = ""
+    @State private var removing: (agent: AgentCLI, profile: AgentProfile)?
     /// The install asked to be deleted, until answered.
     @State private var deleting: AgentInstall?
     /// The agent whose old versions were asked to be cleared, until answered.
@@ -46,6 +53,7 @@ struct AgentsView: View {
             ForEach(model.agents) { report in
                 AgentSection(report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
                              restart: { confirmRestart = true })
+                profilesSection(report.agent)
             }
 
             Section {
@@ -83,6 +91,9 @@ struct AgentsView: View {
             model.refreshAgents()
             model.checkAgentUpdates()
         }
+        .modifier(ProfileDialogs(naming: namingShown, name: $newName, create: create, removing: removingShown, removingName: removing?.profile.name ?? "",
+                                 remove: { if let target = removing { delete(target.agent, target.profile) } }))
+        .task { profiles = (try? await model.client.profiles()) ?? profiles }
         .confirmationDialog("重启服务？", isPresented: $confirmRestart) {
             Button("Restart Service") { model.restartDaemon() }
         } message: {
@@ -138,9 +149,98 @@ struct AgentsView: View {
     private var storeBytes: Int64 {
         model.agents.flatMap(\.installs).filter { $0.source == .beta || $0.source == .pinned }.reduce(0) { $0 + ($1.bytes ?? 0) }
     }
+
+    /// Its sign-ins (docs/profiles-v0.md §3): the one new terminals start under, and others to switch to.
+    @ViewBuilder private func profilesSection(_ agent: AgentCLI) -> some View {
+        if let list = profiles[agent.rawValue] {
+            ProfilesSection(agent: agent, profiles: list, error: profileError[agent.rawValue],
+                            pick: { id in pick(agent, id) },
+                            add: { naming = agent; newName = "" },
+                            remove: { profile in removing = (agent, profile) })
+        }
+    }
+
+    private func pick(_ agent: AgentCLI, _ id: String) { change(agent) { try await $0.setCurrentProfile(agent: agent.rawValue, id: id) } }
+    private func create() { if let agent = naming { let name = newName; change(agent) { try await $0.createProfile(agent: agent.rawValue, name: name) } } }
+    private func delete(_ agent: AgentCLI, _ profile: AgentProfile) { change(agent) { try await $0.deleteProfile(agent: agent.rawValue, id: profile.id) } }
+    private var namingShown: Binding<Bool> { Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }) }
+    private var removingShown: Binding<Bool> { Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }) }
+
+    /// One change to an agent's profiles, and what the service has afterwards (or why it did not take it).
+    private func change(_ agent: AgentCLI, _ call: @escaping (DaemonClient) async throws -> [String: AgentProfiles]) {
+        let client = model.client
+        Task {
+            do { profiles = try await call(client); profileError[agent.rawValue] = nil }
+            catch { profileError[agent.rawValue] = (error as? DaemonError)?.reason ?? error.localizedDescription }
+        }
+    }
 }
 
 /// One agent's group: a line per install, the radio on the left saying which one AgentSwitch runs.
+/// The two questions of the profiles sections: a new one's name, and whether to remove one.
+private struct ProfileDialogs: ViewModifier {
+    let naming: Binding<Bool>
+    let name: Binding<String>
+    let create: () -> Void
+    let removing: Binding<Bool>
+    let removingName: String
+    let remove: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert("New Profile", isPresented: naming) {
+                TextField("Name", text: name)
+                Button("Create", action: create)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("一份新的登录，放在它自己的目录里。建好后在它名下开一个终端，运行 /login。")
+            }
+            .confirmationDialog("删除这个配置？", isPresented: removing) {
+                Button("Delete \(removingName)", role: .destructive, action: remove)
+            } message: {
+                Text("它的登录和它自己的目录会被删除；会话记录是共用的，会留着。")
+            }
+    }
+}
+
+/// One agent's profiles: a row each, the current one marked; a new one, and one removed (not `Default`).
+private struct ProfilesSection: View {
+    let agent: AgentCLI
+    let profiles: AgentProfiles
+    let error: String?
+    let pick: (String) -> Void
+    let add: () -> Void
+    let remove: (AgentProfile) -> Void
+
+    var body: some View {
+        Section {
+            ForEach(profiles.profiles) { profile in
+                HStack(spacing: 10) {
+                    Button { pick(profile.id) } label: {
+                        Image(systemName: profile.id == profiles.current ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(profile.id == profiles.current ? Color.accentColor : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(profile.id == profiles.current ? "Current" : "Use \(profile.name)")
+                    Text(profile.name)
+                    Text(profile.account ?? (profile.isDefault ? "This Mac’s own" : "Not Signed In")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Text("This Mac").font(.callout).foregroundStyle(.tertiary)
+                    if !profile.isDefault { Button("Delete…") { remove(profile) }.controlSize(.small) }
+                }
+            }
+            if profiles.creatable { Button("New Profile…", action: add) }
+            if let error { Text(error).font(.callout).foregroundStyle(.red) }
+        } header: {
+            Text("\(agent.title) Profiles")
+        } footer: {
+            if profiles.creatable {
+                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，运行 /login 登录。")
+            }
+        }
+    }
+}
+
 private struct AgentSection: View {
     @Environment(AppModel.self) private var model
     let report: AgentReport

@@ -283,7 +283,7 @@ Codex
 
 0. §11 的查实。
 1. 网关从终端里拿掉（§8）。**已做（2026-10-08）**：服务（启动环境、Claude Code 的网关工具、Codex 给命令的那份环境、回复的加密、浏览器工具直连 agent 桥并用真 Chrome 验证过）；Mac 与 iPhone 去掉了 `Encrypt & Send`、锁和“像密码时先问”的入口（里面的旧代码还在，不再打得开）。
-2. Claude Code 的配置：家目录、启动、登录、列表与当前配置、新建终端里选、终端上标名字、`Continue As`。只在终端里，身份都用这台 Mac 的——这一步不需要 Camoufox。
+2. Claude Code 的配置。**已做一部分（2026-10-08）**：服务（`src/profiles/store.ts`：每个配置一个家目录——你的设置与会话链接到这台 Mac 的那份，`.claude.json` 里只带不认人的部分；当前配置；`GET/POST/DELETE /profiles`；新终端按当前配置带 `CLAUDE_CONFIG_DIR` 启动）、Mac（设置 › Agents 里每个 agent 一段 Profiles：切换、新建、删除；状态栏写配置名）。真的 Claude Code 2.1.293 在这样一个目录下启动：显示未登录、不走引导、自己生成新的标识，链接仍是链接。**还没做**：真的登录一次并续接会话、新建终端面板里选配置、`Continue As`、手机上显示、API 供应商类的地址与密钥。原定：家目录、启动、登录、列表与当前配置、新建终端里选、终端上标名字、`Continue As`。只在终端里，身份都用这台 Mac 的——这一步不需要 Camoufox。
 3. 配置自己的身份：每个一个转发口与一个浏览器；agent 进程的出口；状态栏的浏览器图标；`Browser` 页分组。
 4. Codex 的配置。
 5. OpenCode、pi。

@@ -42,10 +42,12 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let permissions: [TerminalRequest]
     /// Its sub-agents at work, a row each under it.
     public let subagents: [TerminalSubagent]
+    /// The name of the profile it runs under (docs/profiles-v0.md); nil: the Mac's own (`Default`).
+    public private(set) var profileName: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, workdir, model, effort, modeNow, suggestion, sets, daybreak, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
-             permissions, subagents
+             permissions, subagents, profile
     }
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String? = nil,
@@ -103,6 +105,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   suggestion: (try? c.decodeIfPresent(String.self, forKey: .suggestion)) ?? nil,
                   sets: (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil,
                   daybreak: (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil)
+        struct Profile: Decodable { let name: String }
+        profileName = ((try? c.decodeIfPresent(Profile.self, forKey: .profile)) ?? nil)?.name
     }
 
     public var running: Bool { status != "exited" }
@@ -110,15 +114,19 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
 
     /// The same terminal with what its stream just said: its status, its name.
     public func with(status: String? = nil, name: String? = nil, exitCode: Int? = nil) -> TerminalInfo {
-        TerminalInfo(id: id, harness: harness, cwd: cwd, workdir: workdir, model: model, mode: mode, name: name ?? self.name,
+        var copy = TerminalInfo(id: id, harness: harness, cwd: cwd, workdir: workdir, model: model, mode: mode, name: name ?? self.name,
                      customName: customName, status: status ?? self.status, cols: cols, rows: rows, createdAt: createdAt,
                      exitCode: exitCode ?? self.exitCode, agentSessionId: agentSessionId, resumedFrom: resumedFrom, forked: forked,
                      permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow, suggestion: suggestion, sets: sets, daybreak: daybreak)
+        copy.profileName = profileName
+        return copy
     }
 
     /// The status bar's words for it (MainStatus.swift): agent and model, mode, grid; the lock acts while it runs.
     public var context: TerminalContext {
-        TerminalContext(harness: harness, model: model, mode: mode, cols: cols, rows: rows, away: nil, running: running)
+        var context = TerminalContext(harness: harness, model: model, mode: mode, cols: cols, rows: rows, away: nil, running: running)
+        context.profile = profileName
+        return context
     }
 }
 
