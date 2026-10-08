@@ -361,7 +361,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const profiles = new ProfileStore({ home: cfg.home });
   const exits = new ExitPool({ ownPorts, ...(gate ? { resolve: gateFill(gate) } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
   const profileBrowsers = browser
-    ? new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...browserOptions, own: { name: key, forwarder } }), exits,
+    ? new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...browserOptions, own: { name: key, forwarder,
+          zone: () => { const p = profileOfKey(key); return p ? profiles.all()[p.agent].profiles.find((x) => x.id === p.id)?.exit?.timezone ?? null : null; } } }), exits,
         (key) => { const p = profileOfKey(key); return p ? profiles.proxyOf(p.agent, p.id) : null; })
     : undefined;
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).

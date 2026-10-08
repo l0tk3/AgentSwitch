@@ -104,6 +104,9 @@ export type BrowserIdentityOptions = {
   readonly resolve?: FillResolver | undefined;
   /** Where the proxy in force lets traffic out (exit.ts); absent: not looked up. */
   readonly probe?: ExitProbe | undefined;
+  /** The time zone where this browser's traffic comes out, when its proxy is not this identity's own to keep — a
+   *  profile's browser, whose proxy is the profile's (docs/profiles-v0.md §5.1). Asked at every launch. */
+  readonly zone?: (() => string | null) | undefined;
   readonly platform?: string;
   readonly now?: () => number;
   readonly random?: () => number;
@@ -166,6 +169,7 @@ export class BrowserIdentity {
   }
 
   private exitZone(): string | null {
+    if (this.opts.zone) return this.opts.zone();
     const { proxy, exit } = this.read();
     return proxy && exit ? exit.timezone : null;
   }

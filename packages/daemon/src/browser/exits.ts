@@ -28,9 +28,10 @@ export type ExitPoolOptions = {
 
 type Exit = { readonly setting: string; readonly upstream: string; readonly forwarder: Forwarder };
 /** Asked when the first lookup answers but will not say (it limits how often one address may ask — seen 2026-10-09:
- *  `429` from an exit many people share): a trace that names the address and the country, then one that names the
- *  address alone. */
-const OTHER_LOOKUPS = ["https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org/?format=json"];
+ *  `429` from an exit many people share): another that names the place and the time zone too (a profile's Camoufox
+ *  is started in that zone), then a trace that names the address and the country, then one that names the address
+ *  alone. */
+const OTHER_LOOKUPS = ["https://ipwho.is/", "https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org/?format=json"];
 
 /** A proxy as it is to be kept: its address in order, a password only as a ciphertext and only with a user name. */
 export function checkedProxy(proxy: ProxySetting): ProxySetting {

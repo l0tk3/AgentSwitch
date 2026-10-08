@@ -80,6 +80,24 @@ describe("a profile's own browser", () => {
     expect(windowed.visible()).toBe(true);
   });
 
+  it("has a fingerprint of its own, in the time zone where the profile's proxy lets traffic out", () => {
+    const { home, driver, shared } = world();
+    let zone: string | null = "Asia/Tokyo";
+    const make = (name: string) => sharedBrowser({ home, userHome: home, driver, ownPorts: () => [], protected: { roots: [], exempt: [] },
+      own: { name, forwarder: { start: async () => ({ server: "http://127.0.0.1:1", username: "a", password: "b" }) }, zone: () => zone } });
+    const one = make("claude-code.aaaaaaaaaa"), two = make("claude-code.bbbbbbbbbb");
+    // What Camoufox would be started with: each profile's own, kept in its own state, and not the shared browser's.
+    expect(one.identity.config().timezone).toBe("Asia/Tokyo");
+    expect(JSON.stringify(one.identity.config())).not.toBe(JSON.stringify(two.identity.config()));
+    expect(existsSync(join(home, "browser", "of", "claude-code.aaaaaaaaaa", "identity.json"))).toBe(true);
+    expect(shared.identity.config().timezone).toBeUndefined();
+    // The exit found elsewhere now, or not known: the next start is in that zone, or in this Mac's own.
+    zone = "America/Los_Angeles";
+    expect(one.identity.launchConfig().timezone).toBe("America/Los_Angeles");
+    zone = null;
+    expect(one.identity.config().timezone).toBeUndefined();
+  });
+
   it("is served like the shared one under its own address, the agents' bridge included", async () => {
     const { fleet, shared } = world();
     const key = "claude-code.abc123def0";

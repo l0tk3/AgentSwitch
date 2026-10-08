@@ -10,6 +10,8 @@ import type { ProxySetting } from "./identity.js";
 import type { SharedBrowser } from "./setup.js";
 
 export type ProfileBrowserMaker = (key: string, forwarder: { start(): Promise<ForwarderAddress> }) => SharedBrowser;
+// Which browser it is — Camoufox when the engine has one installed, else Chrome — is the maker's choice, the same as
+// for the shared browser (setup.ts `engineDriver`); with Camoufox it has a fingerprint of its own too.
 
 export class ProfileBrowsers {
   private readonly made = new Map<string, { readonly setting: string; readonly browser: SharedBrowser }>();

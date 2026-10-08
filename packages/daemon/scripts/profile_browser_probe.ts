@@ -10,6 +10,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { homedir } from "node:os";
+import { EngineKit, engineRoot } from "../src/browser/engine/kit.js";
 import { exitLookup } from "../src/browser/exit.js";
 import { ExitPool } from "../src/browser/exits.js";
 import { sharedBrowser } from "../src/browser/setup.js";
@@ -30,19 +32,27 @@ async function main(): Promise<void> {
   const home = mkdtempSync(join(tmpdir(), "as-profile-browser-"));
   const local = createServer((_req, res) => res.writeHead(200, { "content-type": "text/html" }).end("<title>on this Mac</title><p>local page</p>"));
   await new Promise<void>((ok) => local.listen(0, "127.0.0.1", ok));
+  // The engine the service itself would use: the Camoufox installed in AgentSwitch's own folder, when there is one
+  // (only its program is used; nothing in that folder is written, and the browser's own folder is the temporary one).
+  // `PROBE_ENGINE=chrome`: Chrome all the same.
+  const kit = process.env.PROBE_ENGINE === "chrome" ? null : new EngineKit({ root: engineRoot(process.env.AGENTSWITCH_HOME ?? join(homedir(), "Library", "Application Support", "AgentSwitch")) });
+  let zone: string | null = null;
   // `PROBE_WINDOW=1`: with a window, as the service starts a profile's browser on a Mac (it shows for a few seconds).
-  const browser = sharedBrowser({ home, userHome: home, protected: { roots: [], exempt: [] }, ownPorts: () => [], headless: process.env.PROBE_WINDOW !== "1",
-    own: { name: "claude-code.probe00000", forwarder: { start: () => exits.address("probe", proxy) } } });
+  const browser = sharedBrowser({ home, userHome: home, protected: { roots: [], exempt: [] }, ownPorts: () => [], headless: process.env.PROBE_WINDOW !== "1", ...(kit?.executable() ? { kit } : {}),
+    own: { name: "claude-code.probe00000", forwarder: { start: () => exits.address("probe", proxy) }, zone: () => zone } });
   try {
     const exit = await exits.check("probe", proxy);
-    say(`1) the profile's exit, by the check: ${mask(exit.ip)} · ${exit.place}`);
+    zone = exit.timezone ?? (process.env.PROBE_ZONE || null);
+    say(`1) the profile's exit, by the check: ${mask(exit.ip)} · ${exit.place}${zone ? ` · ${zone}` : ""}`);
     const before = exits.requests("probe");
     const tab = await browser.host.open(YOU, "https://www.cloudflare.com/cdn-cgi/trace");
-    const page = browser.host.page(tab.id)?.playwright?.() as { innerText(selector: string): Promise<string>; waitForLoadState(state: string, o: { timeout: number }): Promise<void> } | undefined;
+    const page = browser.host.page(tab.id)?.playwright?.() as { innerText(selector: string): Promise<string>; waitForLoadState(state: string, o: { timeout: number }): Promise<void>; evaluate<T>(fn: string): Promise<T> } | undefined;
     await page?.waitForLoadState("load", { timeout: 20_000 }).catch(() => undefined);
     let seen = "";
     for (let i = 0; i < 20 && !seen; i += 1) { seen = /^ip=(\S+)$/m.exec(await page?.innerText("body").catch(() => "") ?? "")?.[1] ?? ""; if (!seen) await sleep(500); }
-    say(`2) the real Chrome (engine ${browser.engine()}, ${browser.visible() ? "with a window" : "no window"}), through the forwarder: a page sees ${seen ? mask(seen) : "nothing"} — ${seen === exit.ip ? "the same as the exit" : "NOT the exit"}; the forwarder was asked ${exits.requests("probe") - before} time(s)`);
+    const told = await page?.evaluate<{ zone: string; agent: string }>("({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone, agent: navigator.userAgent })").catch(() => null);
+    say(`   the page is told: time zone ${told?.zone}; browser ${told?.agent.replace(/^.*?(Firefox\/[\d.]+|Chrome\/[\d.]+).*$/, "$1")}`);
+    say(`2) the real browser (engine ${browser.engine()}, ${browser.visible() ? "with a window" : "no window"}), through the forwarder: a page sees ${seen ? mask(seen) : "nothing"} — ${seen === exit.ip ? "the same as the exit" : "NOT the exit"}; the forwarder was asked ${exits.requests("probe") - before} time(s)`);
     const mid = exits.requests("probe");
     const here = await browser.host.open(YOU, `http://127.0.0.1:${(local.address() as AddressInfo).port}/`);
     await sleep(1500);

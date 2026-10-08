@@ -79,7 +79,10 @@ export type SharedBrowserOptions = {
   readonly idleCloseMs?: number;
   /** A browser of a profile's own rather than the shared one (fleet.ts): `name` is its folder beside `main` and its
    *  state's; everything it sends goes through `forwarder` — the profile's, which is not this browser's to stop. */
-  readonly own?: { readonly name: string; readonly forwarder: Pick<Forwarder, "start"> };
+  readonly own?: { readonly name: string; readonly forwarder: Pick<Forwarder, "start">;
+    /** The time zone where the profile's proxy lets traffic out, as last found (null: not known): Camoufox is
+     *  started in it, as the shared one is in its own proxy's. */
+    readonly zone?: () => string | null };
 };
 
 export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
@@ -91,7 +94,7 @@ export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
   const real = !opts.driver;
   const lookup = real && !opts.own ? exitLookup() : null;
   const identity: BrowserIdentity = new BrowserIdentity({
-    file: join(state, "identity.json"), ...(opts.fill && !opts.own ? { resolve: opts.fill } : {}),
+    file: join(state, "identity.json"), ...(opts.fill && !opts.own ? { resolve: opts.fill } : {}), ...(opts.own?.zone ? { zone: opts.own.zone } : {}),
     ...(lookup ? { probe: () => exitProbe({ forwarder: () => forwarder.start(), url: lookup })() } : {}),
     firefox: () => opts.kit?.store.installed("camoufox")?.version.split(".")[0] ?? opts.kit?.status().playwright.firefox?.split(".")[0] ?? null,
   });
