@@ -26,6 +26,8 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   /** control-v0 §3: reads the Mac's own Claude Code / Codex / OpenCode session stores; a leaf like files. */
   sessions: ["util", "core"],
   threads: ["util", "core"],
+  /** clash-v0: Clash Verge as it is found, its core's controller, the subscription made for it; a leaf. */
+  clash: ["util", "core"],
   /** profiles-v0: each agent's sign-ins and their folders; a leaf like sessions. */
   profiles: ["util", "core"],
   router: ["util", "core", "harness"],
@@ -37,10 +39,10 @@ const ALLOWED: Readonly<Record<string, readonly string[]>> = {
   terminals: [...UPPER, "executors"],
   /** browser-v0: the shared browser the daemon holds; the executors' protected table and browser profiles, below the API. */
   browser: [...UPPER, "executors"],
-  api: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles"],
+  api: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash"],
   /** app-v0 §2: the remote listener, device tokens and pairing; a peer of api, which it reaches only over fetch. */
   remote: [...UPPER, "threads", "router", "executors", "engine"],
-  [ROOT]: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "api", "remote"],
+  [ROOT]: [...UPPER, "threads", "router", "executors", "engine", "assistant", "terminals", "browser", "profiles", "clash", "api", "remote"],
 };
 
 const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+)(["'])(\.{1,2}\/[^"']+)\1/gm;

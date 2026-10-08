@@ -71,6 +71,8 @@ export class LocalAuth {
     if (method === "GET" && path === "/ui/login") return this.login(url);
     if (method === "GET" && (path === "/healthz" || path === "/" || path === "/ui" || path.startsWith("/ui/"))) return null;
     if (method === "POST" && path === "/terminals/hook") return null;
+    // What Clash Verge and its core fetch (docs/clash-v0.md §6): let through here, held to their own token there.
+    if (method === "GET" && /^\/clash\/(?:sub\.yaml|rules\/[a-z-]{1,40}\.yaml)$/.test(path)) return null;
     if ((method === "GET" && path === "/browser/agent/mcp") || (method === "POST" && /^\/browser\/agent\/mcp\/[\w-]+$/.test(path))) return null;
     if (method === "POST" && path === "/local/console-link") {
       if (!this.bearer(request)) return this.refuse();
