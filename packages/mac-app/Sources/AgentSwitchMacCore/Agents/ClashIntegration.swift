@@ -60,6 +60,45 @@ public struct ClashTemplates: Codable, Equatable, Sendable {
     }
 }
 
+/// The DNS template (docs/clash-v0.md §7.8): on, the subscription handed over has it under `dns:` in place of its own.
+public struct ClashDNSSetting: Codable, Equatable, Sendable {
+    public var on: Bool
+    /// The user's own text (YAML, what goes under `dns:`); nil: the built-in one.
+    public var text: String?
+
+    public init(on: Bool = false, text: String? = nil) {
+        self.on = on
+        self.text = text
+    }
+
+    private enum CodingKeys: String, CodingKey { case on, text }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(on, forKey: .on)
+        try c.encode(text, forKey: .text)   // null is said, not left out
+    }
+}
+
+/// The DNS template as it stands: on or off, whether its text is the user's own, and whether Clash Verge has its own
+/// DNS settings on — the core then takes those, and this changes nothing.
+public struct ClashDNSState: Decodable, Equatable, Sendable {
+    public let on: Bool
+    public let custom: Bool
+    public let overridden: Bool
+}
+
+/// The DNS template's text as it is in use, to edit it.
+public struct ClashDNSText: Decodable, Equatable, Sendable {
+    public let text: String
+    public let custom: Bool
+
+    public init(text: String, custom: Bool) {
+        self.text = text
+        self.custom = custom
+    }
+}
+
 public struct ClashSettings: Codable, Equatable, Sendable {
     public var claude: ClashServiceNodes
     public var openai: ClashServiceNodes
@@ -69,18 +108,20 @@ public struct ClashSettings: Codable, Equatable, Sendable {
     public var templates: ClashTemplates
     /// The subscription's default group is called `Manual` in what Clash Verge is handed.
     public var renameDefault: Bool
+    public var dns: ClashDNSSetting
 
     /// The intervals offered (the service takes no other).
     public static let updateHours = [0, 1, 6, 12, 24]
 
     public init(claude: ClashServiceNodes = .init(), openai: ClashServiceNodes = .init(), direct: [String] = [], autoUpdateHours: Int = 24,
-                templates: ClashTemplates = .init(), renameDefault: Bool = false) {
+                templates: ClashTemplates = .init(), renameDefault: Bool = false, dns: ClashDNSSetting = .init()) {
         self.claude = claude
         self.openai = openai
         self.direct = direct
         self.autoUpdateHours = autoUpdateHours
         self.templates = templates
         self.renameDefault = renameDefault
+        self.dns = dns
     }
 
     public subscript(service: ClashService) -> ClashServiceNodes {
@@ -175,6 +216,7 @@ public struct ClashView: Decodable, Equatable, Sendable {
     private let templates: [String: ClashTemplateState]
     /// The subscription's default group, which can be called `Manual`; nil: it has none such, or has a `Manual`.
     public let defaultGroup: String?
+    public let dns: ClashDNSState
     /// The core runs the subscription AgentSwitch makes; it is the one made now (else Clash Verge fetches it again).
     public let active: Bool
     public let upToDate: Bool
@@ -194,7 +236,7 @@ public struct ClashView: Decodable, Equatable, Sendable {
         var steps: [String] = []
         if source == nil { steps.append("先在下面给一个订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
         else if !active { steps.append("在 Clash Verge 里添加并切换到 AgentSwitch 订阅。") }
-        else if !upToDate { steps.append("订阅的正文变了（分组或规则集多了、少了或改了名）：在 Clash Verge 里更新一次 AgentSwitch 订阅，或者等它自己来取（每小时一次）。") }
+        else if !upToDate { steps.append("订阅的正文变了（分组、规则集或 DNS）：在 Clash Verge 里更新一次 AgentSwitch 订阅，或者等它自己来取（每小时一次）。") }
         if tun == false { steps.append("打开 Clash Verge 的 TUN 模式。") }
         return steps
     }
@@ -256,6 +298,9 @@ extension DaemonClient {
 
     /// Take one of Clash Verge's own subscriptions in.
     public func setClashSource(verge uid: String) async throws -> ClashView { try await clashSource(["verge": uid]) }
+
+    /// The DNS template's text as it is in use.
+    public func clashDNS() async throws -> ClashDNSText { try decode(ClashDNSText.self, try await call("GET", "/clash/dns")) }
 
     /// A template's rules as they are in use.
     public func clashTemplate(_ template: ClashTemplate) async throws -> ClashTemplateRules {

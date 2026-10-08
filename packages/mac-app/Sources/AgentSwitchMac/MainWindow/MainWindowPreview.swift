@@ -82,8 +82,9 @@ enum MainWindowPreview {
     static func renderClash(model: AppModel, into directory: URL) async throws {
         try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), to: directory.appendingPathComponent("main-clash.png"))
         // A template's rules being edited, the service's word on a line that is not a rule under them.
-        let rules = ClashTemplateRules(rules: ["DOMAIN-SUFFIX,doubleclick.net", "DOMAIN-KEYWORD,adservice", "DOMAIN-SUFFIX,appsflyer.com", "DOMAIN-KEYWORD,umeng", "MATCH,DIRECT"], custom: true)
-        try await DesignPreview.renderSheet(ClashTemplateEditor(template: .block, initial: rules, problem: "第 5 行不是一条规则（这里不收 MATCH 这种规则）：MATCH,DIRECT") { _ in nil },
+        let rules = ["DOMAIN-SUFFIX,doubleclick.net", "DOMAIN-KEYWORD,adservice", "DOMAIN-SUFFIX,appsflyer.com", "DOMAIN-KEYWORD,umeng", "MATCH,DIRECT"].joined(separator: "\n")
+        try await DesignPreview.renderSheet(ClashTextEditor(title: ClashTemplate.block.title, help: "一行一条规则，写成“类型,内容”；不写去向（这里的都拦截）。", initial: rules, custom: true,
+                                                            problem: "第 5 行不是一条规则（这里不收 MATCH 这种规则）：MATCH,DIRECT") { _ in nil },
                                             model: model, appearance: NSAppearance(named: .darkAqua), to: directory.appendingPathComponent("main-clash-rules.png"))
         // The same in a window tall enough for all of it.
         try await shot(model: model, page: .clash, system: NSAppearance(named: .darkAqua), size: NSSize(width: 1000, height: 1560), to: directory.appendingPathComponent("main-clash-full.png"))

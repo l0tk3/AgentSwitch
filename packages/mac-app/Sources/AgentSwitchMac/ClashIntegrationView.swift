@@ -30,13 +30,28 @@ private struct ClashActions {
     var test: (ClashService, Bool) -> Void = { _, _ in }
     /// A template's rules are to be edited: they are fetched, then its sheet opens.
     var edit: (ClashTemplate) -> Void = { _ in }
+    /// The same for the DNS template's text.
+    var editDNS: () -> Void = {}
 }
 
-/// A template whose rules are being edited, with the rules it had when its sheet opened.
+/// What is being edited in the sheet — a rule template's rules or the DNS template's text — as it was when the sheet
+/// opened.
 private struct ClashEditing: Identifiable {
-    let template: ClashTemplate
-    let rules: ClashTemplateRules
-    var id: String { template.rawValue }
+    /// nil: the DNS template.
+    let template: ClashTemplate?
+    let text: String
+    let custom: Bool
+    var id: String { template?.rawValue ?? "dns" }
+
+    var title: String { template?.title ?? "DNS" }
+
+    var help: String {
+        switch template {
+        case .domestic?: "一行一条规则，写成“类型,内容”，例如 DOMAIN-SUFFIX,cn 或 PROCESS-NAME,WeChat；不写去向（这里的都直连）。从 Clash 的 yaml 里整行粘过来也可以，多余的部分会去掉；空行和 # 开头的行不算。"
+        case .block?: "一行一条规则，写成“类型,内容”，例如 DOMAIN-SUFFIX,doubleclick.net；不写去向（这里的都拦截）。从 Clash 的 yaml 里整行粘过来也可以，多余的部分会去掉；空行和 # 开头的行不算。"
+        case nil: "这是订阅里 dns: 下面的整段内容（YAML，不含 dns: 这一行），打开开关后它会替换掉订阅自带的那一段。改完要等 Clash Verge 重新取一次订阅才生效。"
+        }
+    }
 }
 
 /// Clash Integration (docs/clash-v0.md §7): the subscription AgentSwitch works from, the nodes for Claude and for
@@ -77,7 +92,7 @@ struct ClashIntegrationView: View {
         }
         .formStyle(.grouped)
         .sheet(item: $editing) { item in
-            ClashTemplateEditor(template: item.template, initial: item.rules) { rules in await saveTemplate(item.template, rules: rules) }
+            ClashTextEditor(title: item.title, help: item.help, initial: item.text, custom: item.custom) { text in await saveEdited(item.template, text: text) }
         }
         .task(id: shown) {
             // What Clash Verge runs changes there, not here: looked at again every few seconds while the page shows.
@@ -106,22 +121,37 @@ struct ClashIntegrationView: View {
             remove: { run { try await $0.removeClashSource() } },
             select: { service, node in run { try await $0.selectClash(service, node: node) } },
             test: test,
-            edit: edit)
+            edit: edit,
+            editDNS: editDNS)
     }
 
     private func edit(_ template: ClashTemplate) {
         let client = model.client
         Task {
-            do { editing = ClashEditing(template: template, rules: try await client.clashTemplate(template)); error = nil }
-            catch { self.error = said(error) }
+            do {
+                let rules = try await client.clashTemplate(template)
+                editing = ClashEditing(template: template, text: rules.rules.joined(separator: "\n"), custom: rules.custom)
+                error = nil
+            } catch { self.error = said(error) }
         }
     }
 
-    /// A template's own rules kept (nil: the built-in ones again). What the service says of a line that is not a rule
-    /// is the answer: the sheet stays open on it.
-    private func saveTemplate(_ template: ClashTemplate, rules: [String]?) async -> String? {
+    private func editDNS() {
+        let client = model.client
+        Task {
+            do {
+                let dns = try await client.clashDNS()
+                editing = ClashEditing(template: nil, text: dns.text, custom: dns.custom)
+                error = nil
+            } catch { self.error = said(error) }
+        }
+    }
+
+    /// What was edited is kept — a rule template's own rules, or the DNS template's own text (`template` nil); `text`
+    /// nil: the built-in one again. What the service says is wrong with it is the answer: the sheet stays open on it.
+    private func saveEdited(_ template: ClashTemplate?, text: String?) async -> String? {
         guard var next = view?.settings else { return "还没有读到设置。" }
-        next.templates[template].rules = rules
+        if let template { next.templates[template].rules = text.map(ClashText.lines) } else { next.dns.text = text }
         do {
             loaded = try await model.client.saveClash(next)
             error = nil
@@ -336,6 +366,8 @@ private struct ClashServiceSection: View {
     private var footer: String {
         guard let state else { return "" }
         if nodes.isEmpty { return "没有选节点：\(service.title) 的流量照订阅里原有的规则走。" }
+        // Chosen for another subscription, none of them in this one: as good as none chosen.
+        if nodes.allSatisfy(state.missing.contains) { return "选的节点在现在这个订阅里一个都没有（标着 Gone）：\(service.title) 的流量照订阅里原有的规则走。从 Add Node… 里重新选几个；用不着的点减号拿掉。" }
         let groups = "Clash 里是两组：\(state.auto) 按从上到下的顺序用第一个连得上的节点；\(state.group) 决定 \(service.title) 的流量走哪里。"
         return live ? groups + "点一行就改用那一个。" : groups + "Clash Verge 用上之后，可以在这里点选用哪一个。"
     }
@@ -439,10 +471,24 @@ private struct ClashRulesSection: View {
                     Button("Edit…") { actions.edit(template) }
                 }
             }
+            HStack {
+                Toggle(isOn: Binding(get: { view.settings.dns.on }, set: { on in
+                    var next = view.settings
+                    next.dns.on = on
+                    actions.save(next)
+                })) {
+                    Text("DNS")
+                    Text(view.dns.custom ? "Edited" : "Template")
+                }
+                Button("Edit…", action: actions.editDNS)
+            }
+            if view.dns.on, view.dns.overridden {
+                Label("Clash Verge 自己的“DNS 覆写”开着：内核用的是它那一份，这里的 DNS 不起作用。", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+            }
         } header: {
             Text("Rules")
         } footer: {
-            Footer("打开就把这一套规则加进 Clash，关掉就拿走，都立刻生效。Domestic & Local Direct：国内常用域名、微信这类国内应用、局域网，直接连出去。Block Ads & Trackers：拦截广告和统计的域名；它排在订阅自己的规则之后，前面已经有规则管的流量不受它影响。")
+            Footer("打开就把这一套规则加进 Clash，关掉就拿走，都立刻生效。Domestic & Local Direct：国内常用域名、微信这类国内应用、局域网，直接连出去。Block Ads & Trackers：拦截广告和统计的域名；它排在订阅自己的规则之后，前面已经有规则管的流量不受它影响。DNS：用这里的 DNS 设置替换订阅自带的那一段（国内域名用国内 DNS 解析，Claude 的域名只认境外 DNS 的结果）；这一项改的是订阅正文，要 Clash Verge 重新取一次才生效。")
         }
     }
 
@@ -452,51 +498,53 @@ private struct ClashRulesSection: View {
     }
 }
 
-/// A template's rules, a line each (docs/clash-v0.md §7.7). `save` answers with what the service said of a line that
-/// is not a rule, or nil when the rules were kept — the sheet closes only then.
-struct ClashTemplateEditor: View {
-    let template: ClashTemplate
-    let initial: ClashTemplateRules
-    let save: ([String]?) async -> String?
+/// The sheet a template is edited in: a rule template's rules, a line each (docs/clash-v0.md §7.7), or the DNS
+/// template's text (§7.8). `save` answers with what the service says is wrong with it, or nil when it was kept — the
+/// sheet closes only then; `save(nil)` is the built-in one again.
+struct ClashTextEditor: View {
+    let title: String
+    let help: String
+    let custom: Bool
+    let save: (String?) async -> String?
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
+    @State private var text: String
     @State private var problem: String?
     @State private var saving = false
 
     /// `problem`: what is said under the text from the start (the design preview's).
-    init(template: ClashTemplate, initial: ClashTemplateRules, problem: String? = nil, save: @escaping ([String]?) async -> String?) {
-        self.template = template
-        self.initial = initial
+    init(title: String, help: String, initial: String, custom: Bool, problem: String? = nil, save: @escaping (String?) async -> String?) {
+        self.title = title
+        self.help = help
+        self.custom = custom
         self.save = save
         _problem = State(initialValue: problem)
-        _text = State(initialValue: initial.rules.joined(separator: "\n"))
+        _text = State(initialValue: initial)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(template.title).font(.headline)
-            Text("一行一条规则，写成“类型,内容”，例如 DOMAIN-SUFFIX,cn 或 PROCESS-NAME,WeChat；不写去向（\(template == .domestic ? "这里的都直连" : "这里的都拦截")）。从 Clash 的 yaml 里整行粘过来也可以，多余的部分会去掉；空行和 # 开头的行不算。")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.headline)
+            Text(help).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             TextEditor(text: $text)
                 .font(.system(.body, design: .monospaced))
                 .frame(minWidth: 520, minHeight: 360)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             if let problem { Text(problem).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
-                Button("Reset to Template") { commit(nil) }.disabled(saving || !initial.custom)
+                Button("Reset to Template") { commit(nil) }.disabled(saving || !custom)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") { commit(ClashText.lines(text)) }.keyboardShortcut(.defaultAction).disabled(saving)
+                Button("Save") { commit(text) }.keyboardShortcut(.defaultAction).disabled(saving)
             }
         }
         .padding(20)
         .frame(width: 600)
     }
 
-    private func commit(_ rules: [String]?) {
+    private func commit(_ edited: String?) {
         saving = true
         Task {
-            problem = await save(rules)
+            problem = await save(edited)
             saving = false
             if problem == nil { dismiss() }
         }
@@ -555,11 +603,12 @@ extension ClashView {
      "nodes":["JP Tokyo 01","JP Tokyo 02","SG Singapore 01","US Los Angeles 01","US Seattle 02","HK Hong Kong 03"],
      "profiles":[{"uid":"Lbw7BJYzpand","name":"my-subscription.yaml","type":"local"}],
      "settings":{"claude":{"nodes":["JP Tokyo 01","SG Singapore 01","US Seattle 02"]},"openai":{"nodes":["US Los Angeles 01","JP Tokyo 02"]},
-                 "direct":["203.0.113.7"],"autoUpdateHours":24,"renameDefault":true,
+                 "direct":["203.0.113.7"],"autoUpdateHours":24,"renameDefault":true,"dns":{"on":true,"text":null},
                  "templates":{"domestic":{"on":true,"rules":null},"block":{"on":false,"rules":["DOMAIN-SUFFIX,doubleclick.net"]}}},
      "services":{"claude":{"group":"Claude","auto":"Claude自动选择","live":true,"now":"SG Singapore 01","autoNow":"JP Tokyo 01","missing":[]},
                  "openai":{"group":"OpenAI","auto":"OpenAI自动选择","live":false,"now":null,"autoNow":null,"missing":[]}},
      "templates":{"domestic":{"on":true,"custom":false,"count":169},"block":{"on":false,"custom":true,"count":31}},"defaultGroup":"Candy",
+     "dns":{"on":true,"custom":false,"overridden":false},
      "install":"clash://install-config?url=x"}
     """.utf8))
 
