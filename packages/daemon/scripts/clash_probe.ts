@@ -6,13 +6,16 @@
  *  3. serves what AgentSwitch would serve on a loopback port, behind the local listener's own gate;
  *  4. has the core's own program check the subscription made (`-t`), then starts a second, private core on it (no
  *     TUN, no DNS, no ports; its own folder and control socket) and, through the same code the service uses, changes
- *     the nodes' order, picks a node, asks for delays — reading back from the private core what its groups became.
+ *     the nodes' order, picks a node, asks for delays, turns the rule templates on and off — reading back from the
+ *     private core what its groups and rule sets became;
+ *  5. takes the subscription service's own link in as well (the one the user's file names for its nodes) and has the
+ *     core's program check what is made of it with its default group called Manual.
  *
  *  Nothing of Clash Verge's is written and its core is only read. Real nodes are tried (step 8), as Clash Verge's own
  *  delay test does.   npx tsx scripts/clash_probe.ts [path to mihomo]   (CLASH_PROBE_TMP: a short folder for the socket) */
 
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +26,7 @@ import { LocalAuth } from "../src/api/localAuth.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { ClashController } from "../src/clash/controller.js";
 import { ClashIntegration } from "../src/clash/integration.js";
-import { ClashSource } from "../src/clash/source.js";
+import { ClashSource, linkedProviders } from "../src/clash/source.js";
 import { ClashStore } from "../src/clash/store.js";
 import { vergeDir, vergeProfiles, vergeSocket } from "../src/clash/verge.js";
 import { listenLocal } from "../src/daemon.js";
@@ -34,7 +37,9 @@ const say = (line: string) => console.log(line);
 
 async function main(): Promise<void> {
   const profiles = vergeProfiles(), real = vergeSocket();
-  if (!profiles?.current || !real) { say("Clash Verge not found or not running"); return; }
+  // The user's own subscription: the first of Clash Verge's that is not AgentSwitch's (served from this Mac).
+  const own = profiles?.profiles.find((p) => !/^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(p.from ?? ""));
+  if (!profiles || !own || !real) { say("Clash Verge not found or not running, or it has no subscription of its own"); return; }
   const before = await new ClashController(real).status();
   say(`1) Clash Verge: ${profiles.profiles.length} subscription(s); core ${before.version}, tun ${before.tun}, ${before.nodes.length} nodes, ${before.groups.length} groups`);
   const used = (group: string): readonly string[] => before.groups.find((g) => g.name === group)?.members ?? [];
@@ -53,7 +58,7 @@ async function main(): Promise<void> {
     mountClash(app, { clash } as unknown as ApiDeps);
     await new Promise<void>((ok) => { server = listenLocal({ app }, 0, (info: AddressInfo) => { port = info.port; ok(); }, new LocalAuth("probe-token-0123456789abcdefghijklmnopqrstuvwxyz")); });
 
-    const taken = await clash.setSource({ verge: profiles.current });
+    const taken = await clash.setSource({ verge: own.uid });
     say(`2) taken in: ${taken.source?.kind} "${taken.source?.name}", ${taken.nodes.length} nodes; node sets ${JSON.stringify(taken.source?.providers.map((p) => `${p.name}: ${p.nodes} nodes${p.error ? ` (${p.error})` : ""}`))}; traffic ${taken.source?.traffic ? "known" : "not said"}`);
     if (!taken.nodes.length) { say("   no nodes: stopping"); return; }
 
@@ -85,7 +90,8 @@ async function main(): Promise<void> {
     for (const key of ["tun", "dns", "port", "socks-port", "redir-port", "tproxy-port", "external-controller", "external-controller-unix", "external-controller-tls", "secret", "external-ui", "hosts", "sniffer"]) delete made[key];
     Object.assign(made, { "mixed-port": 0, "allow-lan": false, "log-level": "warning", "geo-auto-update": false });
     writeFileSync(join(homeDir, "config.yaml"), stringify(made, { lineWidth: 0 }));
-    core = spawn(MIHOMO, ["-d", homeDir, "-f", join(homeDir, "config.yaml"), "-ext-ctl-unix", socket], { stdio: "ignore" });
+    const log = openSync(join(work, "core.log"), "w");
+    core = spawn(MIHOMO, ["-d", homeDir, "-f", join(homeDir, "config.yaml"), "-ext-ctl-unix", socket], { stdio: ["ignore", log, log] });
     for (let i = 0; i < 50 && !existsSync(socket); i += 1) await sleep(200);
     const mine = new ClashController(socket);
     let status = await mine.status();
@@ -109,6 +115,37 @@ async function main(): Promise<void> {
     say(`   delays to OpenAI: ${JSON.stringify(await clash.delays("openai", "chosen"))}`);
     const all = await clash.delays("claude", "all");
     say(`   every node tried for Claude: ${Object.values(all).filter((d) => d !== null).length} of ${Object.keys(all).length} answered`);
+    // The rule templates: on, the user's own lines, off — each a change of a rule set's content alone.
+    const counts = async () => { const r = (await mine.status()).ruleSets; return `as-domestic ${r["as-domestic"]}, as-domestic-ip ${r["as-domestic-ip"]}, as-block ${r["as-block"]}`; };
+    const base = { claude: { nodes: turned }, openai: { nodes: openai }, direct: ["203.0.113.7"], autoUpdateHours: 24, renameDefault: false };
+    say(`10) templates off: ${await counts()}`);
+    const on = await clash.saveSettings({ ...base, templates: { domestic: { on: true, rules: null }, block: { on: true, rules: null } } });
+    say(`    both on: ${await counts()} (the page: ${JSON.stringify(on.templates)}, up to date ${on.upToDate})`);
+    await clash.saveSettings({ ...base, templates: { domestic: { on: true, rules: ["DOMAIN-SUFFIX,cn", "PROCESS-NAME-WILDCARD,*DingTalk*", "IP-CIDR,192.168.0.0/16", "GEOIP,CN"] }, block: { on: false, rules: null } } });
+    say(`    the user's own four lines, blocking off: ${await counts()}`);
+    const complaints = readFileSync(join(work, "core.log"), "utf8").split("\n").filter((l) => /level=(error|warning)/.test(l) && /rule|provider|as-/i.test(l));
+    say(`    the private core's complaints about rules or sets: ${complaints.length ? complaints.slice(0, 4).map((l) => l.replace(/^.*msg=/, "")).join(" / ") : "none"}`);
+
+    // The subscription service's own link as the thing to work from (the link the user's file names for its nodes):
+    // its default group called Manual.
+    const link = Object.values(linkedProviders(parse(readFileSync(join(work, "clash", "source", "main.yaml"), "utf8")) as Record<string, unknown>))[0];
+    if (link) {
+      const second = mkdtempSync(join(tmpdir(), "as-clash-probe2-"));
+      try {
+        const raw = new ClashIntegration({ store: new ClashStore(second), source: new ClashSource(second, undefined, undefined, () => `clash.meta/${before.version}`), base: () => `http://127.0.0.1:${port}`, socket: () => null });
+        const got2 = await raw.setSource({ link });
+        say(`11) the service's own link taken in: ${got2.nodes.length} nodes, default group ${JSON.stringify(got2.defaultGroup)}`);
+        await raw.saveSettings({ claude: { nodes: claude }, openai: { nodes: openai }, direct: [], autoUpdateHours: 24, renameDefault: true, templates: { domestic: { on: true, rules: null }, block: { on: true, rules: null } } });
+        const text2 = raw.subscription()!.text;
+        const made2 = parse(text2) as Record<string, any>;
+        say(`    groups: ${made2["proxy-groups"].map((g: { name: string; type: string }) => `${g.name}(${g.type})`).join(" | ")}`);
+        say(`    rules: ${made2.rules.length}; first ${made2.rules.slice(0, 5).join(" | ")}; last ${made2.rules.slice(-5).join(" | ")}`);
+        say(`    rules that still name the old group: ${made2.rules.filter((r: string) => got2.defaultGroup && r.split(",").includes(got2.defaultGroup)).length}`);
+        writeFileSync(join(homeDir, "as-made-2.yaml"), text2);
+        const check2 = spawnSync(MIHOMO, ["-t", "-d", homeDir, "-f", join(homeDir, "as-made-2.yaml")], { encoding: "utf8", timeout: 30_000 });
+        say(`    the core's own check of it: ${/test is successful/.test(check2.stdout + check2.stderr) ? "passes" : `FAILS: ${(check2.stdout + check2.stderr).split("\n").filter((l) => /error|fatal/i.test(l)).slice(0, 3).join(" / ")}`}`);
+      } finally { rmSync(second, { recursive: true, force: true }); }
+    }
     const after = await new ClashController(real).status();
     say(`9) the user's own core afterwards: ${after.groups.length} groups, rule sets ${JSON.stringify(Object.keys(after.ruleSets))}, tun ${after.tun} — ${JSON.stringify(after.groups.map((g) => [g.name, g.now])) === JSON.stringify(before.groups.map((g) => [g.name, g.now])) ? "as it was" : "CHANGED"}`);
   } finally {

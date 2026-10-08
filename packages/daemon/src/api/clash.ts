@@ -6,7 +6,8 @@
 import type { Context, Hono } from "hono";
 import { z } from "zod";
 import { remoteCaller } from "../core/caller.js";
-import { CLASH_SERVICES, UPDATE_HOURS } from "../clash/build.js";
+import { CLASH_SERVICES, CLASH_TEMPLATES, UPDATE_HOURS } from "../clash/build.js";
+import { MAX_RULES } from "../clash/rules.js";
 import { ClashRefused, ClashSourceError, type ClashIntegration } from "../clash/integration.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
@@ -14,8 +15,12 @@ import { parseBody, type ApiDeps } from "./shared.js";
 export const CLASH_FETCHED = /^\/clash\/(?:sub\.yaml|(?:rules|nodes|providers)\/[\w-]{1,200}\.yaml)$/;
 
 const Service = z.object({ nodes: z.array(z.string().min(1).max(200)).max(32) });
+/** A template: on or off, and its rules if they are the user's own (lines as written; which of them is not a rule
+ *  is said by the service). */
+const Template = z.object({ on: z.boolean(), rules: z.array(z.string().max(1000)).max(MAX_RULES * 2).nullable() });
 const Settings = z.object({ claude: Service, openai: Service, direct: z.array(z.string().min(1).max(200)).max(64),
-  autoUpdateHours: z.number().refine((n) => (UPDATE_HOURS as readonly number[]).includes(n)) });
+  autoUpdateHours: z.number().refine((n) => (UPDATE_HOURS as readonly number[]).includes(n)),
+  templates: z.object({ domestic: Template, block: Template }), renameDefault: z.boolean() });
 const Source = z.union([
   z.object({ link: z.string().min(8).max(4000) }).strict(),
   z.object({ yaml: z.string().min(1).max(8_000_000), name: z.string().max(200) }).strict(),
@@ -43,6 +48,13 @@ export function mountClash(app: Hono<any>, deps: ApiDeps): void {
     const no = mac(c); if (no) return no;
     const body = await parseBody(c, Settings);
     return body.ok ? said(c, () => clash.saveSettings(body.data)) : c.json({ error: body.error }, 400);
+  });
+
+  // A template's rules as they are in use, to edit them.
+  app.get("/clash/templates/:name", (c) => {
+    const no = mac(c); if (no) return no;
+    const name = CLASH_TEMPLATES.find((t) => t === c.req.param("name"));
+    return name ? c.json(clash.template(name)) : c.notFound();
   });
 
   app.post("/clash/source", async (c) => {

@@ -1,11 +1,13 @@
 /** What AgentSwitch keeps of its Clash Integration's settings (docs/clash-v0.md §7): the nodes for Claude and for
- *  OpenAI in their order, the addresses that go direct, how often the subscription is fetched again, and the token
- *  the addresses it serves carry. The subscription itself is kept beside it (source.ts). */
+ *  OpenAI in their order, the addresses that go direct, the rule templates (on or off, and the user's own rules for
+ *  one that was edited), how often the subscription is fetched again, and the token the addresses it serves carry.
+ *  The subscription itself is kept beside it (source.ts). */
 
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { EMPTY_SETTINGS, UPDATE_HOURS, type ClashSettings } from "./build.js";
+import { CLASH_TEMPLATES, EMPTY_SETTINGS, UPDATE_HOURS, type ClashSettings, type TemplateSetting } from "./build.js";
+import { rulesFrom } from "./rules.js";
 
 const MAX_NODES = 32, MAX_DIRECT = 64;
 type State = { settings: ClashSettings; token?: string };
@@ -54,5 +56,13 @@ export function cleanSettings(raw: unknown): ClashSettings {
   const strings = (v: unknown, max: number, trim: boolean): string[] => (Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string" && !!x.trim() && x.length <= 200).map((x) => (trim ? x.trim() : x)))].slice(0, max) : []);
   const service = (v: unknown): { nodes: string[] } => ({ nodes: strings((v && typeof v === "object" ? v as { nodes?: unknown } : {}).nodes, MAX_NODES, false) });
   const hours = (UPDATE_HOURS as readonly number[]).includes(o.autoUpdateHours as number) ? o.autoUpdateHours as number : EMPTY_SETTINGS.autoUpdateHours;
-  return { claude: service(o.claude), openai: service(o.openai), direct: strings(o.direct, MAX_DIRECT, true), autoUpdateHours: hours };
+  // A template's own rules are kept as rules (a line that is not one is dropped here; the API refuses it before).
+  const template = (v: unknown): TemplateSetting => {
+    const t = (v && typeof v === "object" ? v : {}) as { on?: unknown; rules?: unknown };
+    const own = Array.isArray(t.rules) ? t.rules.filter((x): x is string => typeof x === "string").flatMap((line) => { const r = rulesFrom([line]); return "rules" in r ? r.rules : []; }) : null;
+    return { on: t.on === true, rules: own ? [...new Set(own)] : null };
+  };
+  const templates = (o.templates && typeof o.templates === "object" ? o.templates : {}) as Record<string, unknown>;
+  return { claude: service(o.claude), openai: service(o.openai), direct: strings(o.direct, MAX_DIRECT, true), autoUpdateHours: hours,
+    templates: Object.fromEntries(CLASH_TEMPLATES.map((name) => [name, template(templates[name])])) as ClashSettings["templates"], renameDefault: o.renameDefault === true };
 }

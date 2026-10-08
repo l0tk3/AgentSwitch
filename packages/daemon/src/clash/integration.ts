@@ -3,7 +3,8 @@
  *  through its controller — a node set or a rule set read again, a group's member picked — and nothing of Clash
  *  Verge's is written; only when a group appears or goes does Clash Verge have to fetch the subscription again. */
 
-import { buildSubscription, chosen, CLASH_SERVICES, DIRECT_SET, groupNames, nodeSet, ruleSet, running, SERVICE, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings } from "./build.js";
+import { buildConfig, buildSubscription, chosen, CLASH_SERVICES, CLASH_TEMPLATES, defaultGroup, DIRECT_SET, groupNames, groupsIn, nodeSet, RULE_SETS, ruleSet, running, SERVICE, templateRules, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings, type ClashTemplate } from "./build.js";
+import { rulesFrom } from "./rules.js";
 import { ClashController, type ClashStatus } from "./controller.js";
 import { ClashSourceError, type ClashSource, type SourceInfo } from "./source.js";
 import { cleanSettings, type ClashStore } from "./store.js";
@@ -31,6 +32,10 @@ export type ClashView = {
   readonly profiles: readonly VergeProfile[];
   readonly settings: ClashSettings;
   readonly services: Readonly<Record<ClashService, ClashServiceView>>;
+  /** Each rule template: on or off, whether its rules are the user's own, how many are in use. */
+  readonly templates: Readonly<Record<ClashTemplate, { readonly on: boolean; readonly custom: boolean; readonly count: number }>>;
+  /** The subscription's default group, which can be called `Manual` (null: it has none such, or has a `Manual`). */
+  readonly defaultGroup: string | null;
   /** The core runs the subscription AgentSwitch makes; it is the one made now (else Clash Verge fetches it again). */
   readonly active: boolean; readonly upToDate: boolean;
   /** The link Clash Verge takes the subscription by. */
@@ -69,10 +74,23 @@ export class ClashIntegration {
 
   /** The nodes, the direct addresses, the update interval: kept, and what lives in sets is the core's at once. */
   async saveSettings(next: unknown): Promise<ClashView> {
+    // A template's own rules are rules or nothing is kept: the line that is not one is said.
+    const given = (next && typeof next === "object" ? (next as { templates?: unknown }).templates : null) as Record<string, { rules?: unknown } | undefined> | null;
+    for (const template of CLASH_TEMPLATES) {
+      const lines = given?.[template]?.rules;
+      const read = Array.isArray(lines) ? rulesFrom(lines.map(String)) : null;
+      if (read && "error" in read) throw new ClashRefused(read.error);
+    }
     this.o.store.save(cleanSettings(next));
     const status = await this.status();
     await this.push(status, false);
     return this.shown(await this.status());
+  }
+
+  /** A template's rules as they are in use, for editing: the user's own if it was edited, else the built-in ones. */
+  template(template: ClashTemplate): { readonly rules: readonly string[]; readonly custom: boolean } {
+    const settings = this.o.store.settings();
+    return { rules: templateRules(template, settings), custom: settings.templates[template].rules !== null };
   }
 
   /** Work from this from now on: a link, a file's text, or one of Clash Verge's subscriptions (copied in). */
@@ -189,9 +207,8 @@ export class ClashIntegration {
     const controller = this.controller();
     if (!controller || !status || !(DIRECT_SET in status.ruleSets)) return;
     const quiet = (p: Promise<void>): Promise<void> => p.catch(() => undefined);
-    const sets = CLASH_SERVICES.map((s) => SERVICE[s].set);
     await Promise.all([
-      ...[DIRECT_SET, ...sets].filter((name) => name in status.ruleSets).map((name) => quiet(controller.refreshRuleSet(name))),
+      ...RULE_SETS.filter((name) => name in status.ruleSets).map((name) => quiet(controller.refreshRuleSet(name))),
       // A service with no node left has nothing to hand over: the core keeps the set it had until its groups go.
       ...CLASH_SERVICES.filter((s) => SERVICE[s].set in status.nodeSets && this.nodeSet(SERVICE[s].set) !== null).map((s) => quiet(controller.refreshNodeSet(SERVICE[s].set))),
       ...(fetched ? this.o.source.held().filter((name) => name in status.nodeSets).map((name) => quiet(controller.refreshNodeSet(name))) : []),
@@ -203,7 +220,10 @@ export class ClashIntegration {
     const settings = this.o.store.settings(), nodes = this.o.source.nodes(), info = this.o.source.info();
     const document = this.o.source.document() ?? {};
     const enabled = this.enabled();
-    const state = status ? running(enabled, status) : { active: false, current: false };
+    const base = this.o.base();
+    // The groups of what would be handed over now: the core has to have each by its name.
+    const built = info ? groupsIn(buildConfig(structuredClone(document), nodes, this.o.source.held(), settings, `${base}/clash`, "")) : [];
+    const state = status ? running({ enabled, groups: built }, status) : { active: false, current: false };
     const service = (s: ClashService): ClashServiceView => {
       const names = groupNames(document, s);
       const live = !!status && state.active && SERVICE[s].set in status.nodeSets;
@@ -211,7 +231,6 @@ export class ClashIntegration {
       const have = new Set(nodes.map((n) => n.name));
       return { ...names, live, now: now(names.group), autoNow: now(names.auto), missing: info ? settings[s].nodes.filter((n) => !have.has(n)) : [] };
     };
-    const base = this.o.base();
     const install = `clash://install-config?url=${encodeURIComponent(`${base}/clash/sub.yaml?k=${this.token()}`)}&name=${encodeURIComponent("AgentSwitch")}`;
     const traffic = info?.userinfo ? parseTraffic(info.userinfo) : null;
     return {
@@ -221,6 +240,8 @@ export class ClashIntegration {
       nodes: nodes.map((n) => n.name),
       profiles: (profiles?.profiles ?? []).filter((p) => p.from !== base),
       settings, services: { claude: service("claude"), openai: service("openai") },
+      templates: Object.fromEntries(CLASH_TEMPLATES.map((t) => [t, { on: settings.templates[t].on, custom: settings.templates[t].rules !== null, count: templateRules(t, settings).length }])) as ClashView["templates"],
+      defaultGroup: info ? defaultGroup(document) : null,
       active: state.active, upToDate: state.current, install, fetchedAt: this.fetchedAt,
     };
   }
