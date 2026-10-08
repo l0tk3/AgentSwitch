@@ -31,6 +31,11 @@ enum DesignPreview {
                     FileHandle.standardError.write(Data("design preview (Browser) written to \(directory.path)\n".utf8))
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "browsers" {
+                    try await MainWindowPreview.renderBrowsers(model: model, into: directory)
+                    FileHandle.standardError.write(Data("design preview (the browsers) written to \(directory.path)\n".utf8))
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "profiles" {
                     // A profile's own proxy (docs/profiles-v0.md §4): the sheet once it was applied and checked, and
                     // one whose proxy let nothing out.

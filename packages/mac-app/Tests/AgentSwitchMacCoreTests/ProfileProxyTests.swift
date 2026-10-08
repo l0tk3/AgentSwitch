@@ -59,3 +59,33 @@ final class ProfileProxyTests: XCTestCase {
         XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":null}}"#).context.profile, "cwork1 · 203.0.113.9")
     }
 }
+
+/// A profile's own browser on the Browser page (docs/profiles-v0.md §5.2): the browsers there are, and the browser
+/// routes asked of the one chosen.
+final class ProfileBrowserTests: XCTestCase {
+    func testTheBrowserRoutesAreAskedOfTheBrowserChosen() async throws {
+        let transport = StubTransport { request in
+            request.url?.path == "/browsers"
+                ? (200, #"{"browsers":[{"key":null,"name":"Shared","running":true},{"key":"claude-code.abc123def0","name":"cwork1","agent":"claude-code","exit":{"ip":"203.0.113.9","place":"Tokyo"},"running":false}]}"#)
+                : (200, #"{"running":false,"groups":[],"engine":"camoufox","windows":true}"#)
+        }
+        let client = DaemonClient(port: 4711, transport: transport)
+        let browsers = try await client.browsers()
+        XCTAssertEqual(browsers, [BrowserChoice(key: nil, name: "Shared", running: true),
+                                  BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", agent: "claude-code", exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"))])
+        XCTAssertEqual(browsers.map(\.id), ["", "claude-code.abc123def0"])
+        // The shared browser's routes as they are; a profile's own under its address; the engine is one for all.
+        _ = try await client.browserTabs()
+        let own = client.forBrowser("claude-code.abc123def0")
+        _ = try await own.browserTabs()
+        _ = try? await own.browserIdentity()
+        _ = try? await own.browserEngine()
+        _ = try? await own.profiles()
+        _ = try await own.forBrowser(nil).browserTabs()
+        XCTAssertEqual(transport.requests.dropFirst().map { $0.url!.path }, [
+            "/browser/tabs", "/profile-browser/claude-code.abc123def0/browser/tabs", "/profile-browser/claude-code.abc123def0/browser/identity",
+            "/browser/engine", "/profiles", "/browser/tabs"])
+        XCTAssertEqual(own.browserPrefix, "/profile-browser/claude-code.abc123def0")
+        XCTAssertEqual(client.browserPrefix, "")
+    }
+}

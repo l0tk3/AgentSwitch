@@ -131,6 +131,8 @@ private struct BrowserTabListView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                // Which browser the list is of, when there is more than the shared one (docs/profiles-v0.md §5.2).
+                if model.browsers.count > 1 { BrowserChooser(model: model) }
                 ForEach(model.list.groups, id: \.owner.key) { group in
                     BrowserGroupLabel(owner: group.owner)
                     ForEach(group.tabs) { tab in
@@ -145,6 +147,52 @@ private struct BrowserTabListView: View {
             .padding(.vertical, 4)
         }
         .scrollIndicators(.never)
+    }
+}
+
+/// The browsers there are, at the head of the tab list: the shared one and each profile's own, the one on the page
+/// marked. A click shows that browser's tabs.
+private struct BrowserChooser: View {
+    let model: BrowserPageModel
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(model.browsers) { choice in
+                BrowserChoiceRow(choice: choice, selected: choice.key == model.browserKey) { model.show(browser: choice.key) }
+            }
+            Rectangle().fill(Look.line).frame(height: 1).padding(.horizontal, look.isClassic ? 8 : 16).padding(.top, 6)
+        }
+        .padding(.top, 2)
+    }
+}
+
+private struct BrowserChoiceRow: View {
+    let choice: BrowserChoice
+    let selected: Bool
+    let pick: () -> Void
+    @State private var hovering = false
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // The one on the page, a filled square; the others hollow.
+            Text(selected ? "■" : "□").mono(11).foregroundStyle(selected ? Color.signal : Look.faint).frame(width: 12)
+            Text(choice.name).font(.system(size: 12.5, weight: selected ? .semibold : .regular)).foregroundStyle(selected ? Look.ink : Look.ink2).lineLimit(1)
+            Spacer(minLength: 0)
+            // Where a profile's browser leaves this Mac from.
+            if let exit = choice.exit { Text(exit.text).mono(11).foregroundStyle(Look.faint).lineLimit(1).truncationMode(.middle) }
+        }
+        .padding(.horizontal, look.isClassic ? 8 : 16)
+        .padding(.vertical, 5)
+        .grounded(hovering && !selected ? Look.hover : Color.clear, radius: 8)
+        .padding(.horizontal, look.isClassic ? 8 : 0)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: pick)
+        .onHover { hovering = $0 }
+        .help(choice.key == nil ? "The browser every agent without a proxy of its own shares" : "\(choice.name)’s own browser")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

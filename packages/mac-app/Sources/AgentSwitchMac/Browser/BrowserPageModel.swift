@@ -108,7 +108,9 @@ final class BrowserPageModel {
     /// The browser's identity and engine: the status bar's right end and its box.
     @ObservationIgnored let identity: BrowserIdentityModel
     @ObservationIgnored let screen = BrowserScreenView(frame: NSRect(x: 0, y: 0, width: 960, height: 640))
-    @ObservationIgnored private let service: () -> any BrowserService
+    /// The service as it was given; `service()` is it for the browser chosen.
+    @ObservationIgnored private let baseService: () -> any BrowserService
+    @ObservationIgnored private let scope: BrowserScope
     /// Seals a value with this Mac's gate (`GateCLI.seal`, the value on stdin); nil where sealing is not offered.
     @ObservationIgnored private let sealer: BrowserSealer?
     /// The fill under way; nil once its sheet is closed (a token still being sealed then fills nothing).
@@ -155,9 +157,11 @@ final class BrowserPageModel {
     /// preview). `sealer`: this Mac's gate, for `New…` in Fill Ciphertext.
     init(service: @escaping () -> any BrowserService, state: MainWindowState?, defaults: UserDefaults? = .standard, recents: [String]? = nil,
          sealer: BrowserSealer? = nil) {
-        self.service = service
+        let scope = BrowserScope()
+        self.scope = scope
+        baseService = service
         self.sealer = sealer
-        identity = BrowserIdentityModel(service: { service() as? any BrowserIdentityService }, sealer: sealer)
+        identity = BrowserIdentityModel(service: { scope.scoped(service()) as? any BrowserIdentityService }, sealer: sealer)
         self.state = state
         self.defaults = defaults
         self.recents = recents ?? defaults?.stringArray(forKey: BrowserRecents.storeKey) ?? []
@@ -172,6 +176,50 @@ final class BrowserPageModel {
         screen.onDisplayChange = { [weak self] in self?.displayChanged() }
     }
 
+    // MARK: which browser
+
+    /// The service's routes for the browser chosen: the shared one's, or a profile's own.
+    private func service() -> any BrowserService { scope.scoped(baseService()) }
+
+    /// The browsers there are to show, the shared one first; more than one only when a profile has a proxy of its own.
+    private(set) var browsers: [BrowserChoice] = [.shared]
+    /// The one the page shows: nil, the shared one; else a profile's own, by its key.
+    private(set) var browserKey: String?
+
+    /// Another browser on the page (docs/profiles-v0.md §5.2): the tabs this Mac held in the one before are handed
+    /// back, then the list, the screen and the identity are the new one's.
+    func show(browser key: String?) {
+        guard key != browserKey else { return }
+        let (wasShown, wasVisible) = (shown, visible)
+        stop()
+        scope.key = key
+        browserKey = key
+        list = .empty
+        selectedID = nil
+        loaded = false
+        problem = nil
+        hasFrame = false
+        publish()
+        setActive(shown: wasShown, visible: wasVisible)
+        Task { await identity.refresh() }
+    }
+
+    /// The browsers the service has now. One that was on the page and is gone (its profile's proxy taken away) gives
+    /// the page back to the shared one.
+    private func refreshBrowsers() async {
+        guard let client = baseService() as? DaemonClient, let fresh = try? await client.browsers(), !fresh.isEmpty else { return }
+        if fresh != browsers { browsers = fresh }
+        if let browserKey, !fresh.contains(where: { $0.key == browserKey }) { show(browser: nil) }
+    }
+
+    #if DEBUG
+    /// The design preview's: the browsers there are and the one on the page, as if the service had said.
+    func preview(browsers: [BrowserChoice], key: String?) {
+        self.browsers = browsers
+        browserKey = key
+    }
+    #endif
+
     // MARK: the tab list's column
 
     /// The bar's list button and ⌘B.
@@ -184,7 +232,7 @@ final class BrowserPageModel {
         guard shown != self.shown || visible != self.visible || (visible && pollTask == nil) else { return }
         let polling = shown != self.shown || visible != self.visible || pollTask == nil
         // The page comes into view: its identity and engine are read once (they change only from its own box).
-        if shown, visible, !(self.shown && self.visible) { Task { await identity.refresh() } }
+        if shown, visible, !(self.shown && self.visible) { Task { await identity.refresh(); await refreshBrowsers() } }
         if !shown { identity.open = false }
         self.shown = shown
         self.visible = visible
@@ -882,4 +930,15 @@ struct BrowserFillTarget: Identifiable, Equatable {
     let tabId: String
     let site: String
     var id: String { tabId }
+}
+
+/// Which browser a Browser page's calls are for, shared by the page's model and its identity's.
+final class BrowserScope: @unchecked Sendable {
+    /// nil: the shared browser; else a profile's own, by its key. Changed on the main actor only.
+    var key: String?
+
+    /// `service` for the browser chosen: the daemon's client with that browser's routes; anything else (a demo) as it is.
+    func scoped(_ service: any BrowserService) -> any BrowserService {
+        (service as? DaemonClient)?.forBrowser(key) ?? service
+    }
 }

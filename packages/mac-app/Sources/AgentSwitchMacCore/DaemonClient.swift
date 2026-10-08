@@ -67,6 +67,17 @@ public struct DaemonClient: Sendable {
     /// The local API's token (daemon api/localAuth.ts): `$AGENTSWITCH_HOME/local-token`, written by the daemon on
     /// start-up. Read on every call, so a client made before the daemon's first start still gets it.
     private let tokenFile: URL?
+    /// Which browser the browser routes are asked of (docs/profiles-v0.md §5.2): empty for the shared one; for a
+    /// profile's own, `/profile-browser/<key>`, put before every `/browser/…` address (the engine's aside: it is one
+    /// for all of them).
+    public private(set) var browserPrefix = ""
+
+    /// The same client, its browser routes those of profile `key`'s own browser; nil: the shared browser's.
+    public func forBrowser(_ key: String?) -> DaemonClient {
+        var copy = self
+        copy.browserPrefix = key.map { "/profile-browser/\(Self.segment($0))" } ?? ""
+        return copy
+    }
 
     public init(port: Int, transport: HTTPTransport = URLSessionTransport.shared, tokenFile: URL? = nil) {
         baseURL = URL(string: "http://127.0.0.1:\(port)")!
@@ -184,7 +195,8 @@ public struct DaemonClient: Sendable {
 
     /// A request to `path` with the local token (read afresh: the daemon may have written it since).
     func request(_ method: String, _ path: String) -> URLRequest {
-        var request = URLRequest(url: URL(string: baseURL.absoluteString + path) ?? baseURL)
+        let scoped = !browserPrefix.isEmpty && path.hasPrefix("/browser/") && !path.hasPrefix("/browser/engine")
+        var request = URLRequest(url: URL(string: baseURL.absoluteString + (scoped ? browserPrefix : "") + path) ?? baseURL)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let tokenFile, let token = try? String(contentsOf: tokenFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {

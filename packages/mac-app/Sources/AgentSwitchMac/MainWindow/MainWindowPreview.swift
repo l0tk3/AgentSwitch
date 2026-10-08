@@ -106,6 +106,14 @@ enum MainWindowPreview {
     enum Rail { case shown, hidden, quiet, bare, out }
 
     /// The Browser page's pictures (always dark: one look).
+    /// `main-browser-profiles`: the Browser page with more than one browser (docs/profiles-v0.md §5.2) — the shared one
+    /// and a profile's own at the head of the list, the profile's on the page.
+    static func renderBrowsers(model: AppModel, into directory: URL) async throws {
+        try await shot(model: model, page: .browser, system: NSAppearance(named: .darkAqua), browser: BrowserDemoService(),
+                       browsers: [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", agent: "claude-code", exit: ProfileExit(ip: "203.0.113.9", place: "Tokyo"), running: true)],
+                       to: directory.appendingPathComponent("main-browser-profiles.png"))
+    }
+
     static func renderBrowser(model: AppModel, into directory: URL) async throws {
         func file(_ base: String) -> URL { directory.appendingPathComponent("\(base).png") }
         let dark = NSAppearance(named: .darkAqua)
@@ -182,7 +190,7 @@ enum MainWindowPreview {
     private static func shot(model: AppModel, page: MainPage, system: NSAppearance?, size: NSSize = size, open: DispatchRoute? = nil,
                              browser service: BrowserDemoService? = nil, select: String? = nil, compose: Bool = false,
                              note: String? = nil, zoom: Int? = nil, identity: BrowserIdentityDemo? = nil, fullScreen: Bool = false, rail: Rail = .shown,
-                             to file: URL) async throws {
+                             browsers: [BrowserChoice]? = nil, to file: URL) async throws {
         let state = state(on: page, rail: rail)
         let browser = BrowserPageModel(service: { service ?? BrowserDemoService(empty: true) }, state: state, defaults: nil,
                                        recents: BrowserDemoService.recents)
@@ -199,6 +207,8 @@ enum MainWindowPreview {
             if compose { browser.composeNew() }
             if let note { browser.say(note) }
             if let zoom { try await zoomIn(browser, to: zoom) }
+            // A profile's own browser on the page, chosen at the head of the list (docs/profiles-v0.md §5.2).
+            if let browsers { browser.preview(browsers: browsers, key: browsers.last?.key) }
             // The status bar's right end, and its box where a picture is of it.
             let shown = identity ?? (browser.windows ? .closed : .chrome)
             browser.identity.preview(identity: shown.identity, engine: shown.engine, inUse: shown.inUse, open: shown.open)

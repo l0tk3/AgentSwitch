@@ -62,6 +62,40 @@ public struct BrowserStreamOptions: Sendable, Equatable {
 /// api/browser.ts). The page depends on this protocol only: `DaemonClient` (this Mac's local API, local token) conforms;
 /// the design preview has a made-up one. `screen` is the screen the call comes from (`BrowserDefaults.screen`): a held
 /// tab takes input and navigation only from its holder (409 otherwise), an agent's tab only once taken over.
+/// A browser the service holds, to choose which one the Browser page shows (docs/profiles-v0.md §5.2): the one
+/// everybody shares (`key` nil), or the own browser of a profile that has a proxy.
+public struct BrowserChoice: Decodable, Equatable, Sendable, Identifiable {
+    public let key: String?
+    /// `Shared`, or the profile's name.
+    public let name: String
+    /// The agent whose profile it is (`claude-code`); nil for the shared one.
+    public let agent: String?
+    /// Where its profile's proxy lets traffic out, as last found.
+    public let exit: ProfileExit?
+    public let running: Bool
+
+    public var id: String { key ?? "" }
+
+    public init(key: String?, name: String, agent: String? = nil, exit: ProfileExit? = nil, running: Bool = false) {
+        self.key = key
+        self.name = name
+        self.agent = agent
+        self.exit = exit
+        self.running = running
+    }
+
+    /// The shared one alone: what is shown before the service has said, and when it cannot say.
+    public static let shared = BrowserChoice(key: nil, name: "Shared")
+}
+
+extension DaemonClient {
+    /// `GET /browsers`: the shared browser, then each profile's own.
+    public func browsers() async throws -> [BrowserChoice] {
+        struct Reply: Decodable { let browsers: [BrowserChoice] }
+        return try decode(Reply.self, try await call("GET", "/browsers")).browsers
+    }
+}
+
 public protocol BrowserService: Sendable {
     /// `GET /browser/tabs`: whether Chrome is up and the tabs by owner.
     func browserTabs() async throws -> BrowserTabList

@@ -15,6 +15,7 @@ import { DEFAULT_STREAM, MAX_FPS, MAX_SCALE, MAX_VIEW_PIXELS, type StreamOptions
 import { speedBody, speedSize } from "../browser/speed.js";
 import { BrowserError, YOU, type BrowserEvent } from "../browser/types.js";
 import { mountBrowserAgents } from "./browserAgents.js";
+import { mountBrowserIdentity } from "./browserIdentity.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 const MAX_URL = 8192;
@@ -103,18 +104,34 @@ function asked(target: OpenTarget, url: string | null): Record<string, unknown> 
   return { kind: "url", target: url ? auditUrl(url) : "invalid" };
 }
 
-/** A profile's own browser (docs/profiles-v0.md §5.1) is served exactly as the shared one is, under
- *  `/profile-browser/<key>`: every route below, and the agents' bridge. Only a browser that has been started is there. */
+/** A profile's own browser (docs/profiles-v0.md §5.1, §5.2) is served exactly as the shared one is, under
+ *  `/profile-browser/<key>`: every route below, its identity, and the agents' bridge. Any profile that has a proxy of
+ *  its own has one — it is made when first asked for, and started when a tab is first opened in it. `GET /browsers`
+ *  lists them after the shared one, for a screen to choose which to show. */
 export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
   const fleet = deps.profileBrowsers;
   if (!fleet) return;
+  app.get("/browsers", (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "not available from a paired device" }, 403);
+    const all: Record<string, import("../profiles/store.js").AgentProfiles> = deps.profiles?.all() ?? {};
+    const own = Object.entries(all).flatMap(([agent, list]) => list.profiles.filter((p) => p.proxy).map((p) => {
+      const key = `${agent}.${p.id}`;
+      return { key, name: p.name, agent, ...(p.exit ? { exit: { ip: p.exit.ip, place: p.exit.place } } : {}), running: fleet.get(key)?.host.running ?? false };
+    }));
+    return c.json({ browsers: [{ key: null, name: "Shared", running: deps.browser?.host.running ?? false }, ...own] });
+  });
   const served = new WeakMap<object, Hono>();
-  app.all("/profile-browser/:key/*", (c) => {
+  app.all("/profile-browser/:key/*", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "not available from a paired device" }, 403);
     const at = /^\/profile-browser\/([a-z0-9.-]+)(\/.*)$/.exec(new URL(c.req.url).pathname);
-    const browser = at ? fleet.get(at[1]!) : null;
+    const browser = at ? fleet.get(at[1]!) ?? fleet.of(at[1]!) : null;
     if (!at || !browser) return c.json({ error: "no such browser" }, 404);
+    // Its proxy is the profile's, set where the profile is: not something this browser's own identity keeps.
+    if (c.req.method === "PUT" && at[2] === "/browser/identity" && "proxy" in ((await c.req.raw.clone().json().catch(() => ({}))) as object)) {
+      return c.json({ error: "这个浏览器走的是配置的代理：在 Settings › Agents 里这个配置的 Proxy… 里改。" }, 409);
+    }
     let sub = served.get(browser);
-    if (!sub) { sub = new Hono(); mountBrowser(sub, { ...deps, browser }); served.set(browser, sub); }
+    if (!sub) { sub = new Hono(); mountBrowser(sub, { ...deps, browser }); mountBrowserIdentity(sub, { ...deps, browser }); served.set(browser, sub); }
     const url = new URL(c.req.url);
     url.pathname = at[2]!;
     return sub.fetch(new Request(url, c.req.raw), c.env);

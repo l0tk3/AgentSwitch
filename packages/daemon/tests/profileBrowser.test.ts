@@ -13,6 +13,7 @@ import { mountBrowser, mountProfileBrowsers } from "../src/api/browser.js";
 import { LocalAuth } from "../src/api/localAuth.js";
 import { exitKey, profileOfKey } from "../src/api/profiles.js";
 import type { ApiDeps } from "../src/api/shared.js";
+import { markRemote } from "../src/core/caller.js";
 import { ProfileBrowsers } from "../src/browser/fleet.js";
 import type { ProxySetting } from "../src/browser/identity.js";
 import { sharedBrowser, type SharedBrowser } from "../src/browser/setup.js";
@@ -102,11 +103,21 @@ describe("a profile's own browser", () => {
     const { fleet, shared } = world();
     const key = "claude-code.abc123def0";
     const app = new Hono();
-    const deps = { browser: shared, profileBrowsers: fleet, sseHeartbeatMs: 20 } as unknown as ApiDeps;
+    const profiles = { all: () => ({ "claude-code": { current: "default", creatable: true, profiles: [
+      { id: "default", name: "Default", kind: "subscription", createdAt: 0 },
+      { id: "abc123def0", name: "cwork1", kind: "subscription", createdAt: 1, proxy: { server: "http://proxy.example:8080", sealed: true }, exit: { ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo", checkedAt: 2 } },
+      { id: "plain00000", name: "Plain", kind: "subscription", createdAt: 3 }] }, codex: { current: "default", creatable: false, profiles: [{ id: "default", name: "Default", kind: "subscription", createdAt: 0 }] } }) };
+    const deps = { browser: shared, profileBrowsers: fleet, profiles, sseHeartbeatMs: 20 } as unknown as ApiDeps;
     mountBrowser(app, deps);
     mountProfileBrowsers(app, deps);
-    // Not started yet: nothing is there under its address.
-    expect((await app.request(`/profile-browser/${key}/browser/tabs`)).status).toBe(404);
+    // The browsers there are: the shared one, then one for each profile with a proxy of its own — not yet started.
+    const listedFirst = await (await app.request("/browsers")).json() as { browsers: unknown[] };
+    expect(listedFirst.browsers).toEqual([{ key: null, name: "Shared", running: false },
+      { key, name: "cwork1", agent: "claude-code", exit: { ip: "203.0.113.9", place: "Tokyo" }, running: false }]);
+    expect((await app.request("/browsers", {}, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    // Asked for by its address it is there (made, not started): an empty list, as the shared one's before its first tab.
+    expect(await (await app.request(`/profile-browser/${key}/browser/tabs`)).json()).toMatchObject({ running: false, groups: [] });
+    expect((await app.request(`/profile-browser/${key}/browser/tabs`, {}, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
     const own = fleet.of(key)!;
     await own.host.open({ kind: "you", id: "you", label: "You" }, "https://claude.ai/login");
     const listed = await (await app.request(`/profile-browser/${key}/browser/tabs`)).json() as { running: boolean; groups: { tabs: { url: string }[] }[] };
@@ -118,6 +129,12 @@ describe("a profile's own browser", () => {
     expect(own.host.list()).toHaveLength(2);
     expect(shared.host.list()).toHaveLength(0);
     expect((await app.request("/profile-browser/claude-code.nope000000/browser/tabs")).status).toBe(404);
+    expect(((await (await app.request("/browsers")).json()) as { browsers: { running: boolean }[] }).browsers[1]!.running).toBe(true);
+    // Its identity is its own (a fingerprint); its proxy is the profile's and is not changed from here.
+    expect((await (await app.request(`/profile-browser/${key}/browser/identity`)).json()) as { proxy: unknown }).toMatchObject({ proxy: null });
+    const put = (body: unknown) => app.request(`/profile-browser/${key}/browser/identity`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect(await (await put({ proxy: { server: "http://other.example:1" } })).json()).toEqual({ error: expect.stringContaining("配置的代理") });
+    expect((await put({ proxy: null })).status).toBe(409);
     expect((await app.request("/profile-browser/Bad Key/browser/tabs")).status).toBe(404);
     // The local listener lets its agents' bridge through as it does the shared browser's — and nothing else of it.
     const auth = new LocalAuth("local-token-0123456789abcdefghijklmnopqrstuv");
