@@ -201,7 +201,7 @@ final class SessionRecordTests: XCTestCase {
         // A terminal says itself whether a screen can set them: a Codex started without its server cannot.
         XCTAssertNil(RecordDisplay.locked(harness: "codex", status: "idle", waiting: false))
         XCTAssertNil(RecordDisplay.locked(harness: "codex", status: "idle", waiting: false, sets: true))
-        XCTAssertEqual(RecordDisplay.locked(harness: "codex", status: "idle", waiting: false, sets: false), "Codex 的这个终端只能在它自己的界面里选：切到终端视图操作。")
+        XCTAssertEqual(RecordDisplay.locked(harness: "codex", status: "idle", waiting: false, sets: false), "在回复框里用 /model 切换（Codex 在它自己的列表里选模型和思考强度）。")
         XCTAssertNil(RecordDisplay.locked(harness: "claude-code", status: "idle", waiting: false, sets: nil))
         XCTAssertNil(RecordDisplay.locked(harness: "opencode", status: "idle", waiting: false))
         XCTAssertEqual(RecordDisplay.locked(harness: "opencode", status: "working", waiting: false), "它正在工作，结束后再调整。")

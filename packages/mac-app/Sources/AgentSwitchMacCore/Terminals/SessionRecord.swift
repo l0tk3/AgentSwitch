@@ -675,7 +675,7 @@ public enum RecordDisplay {
     public static func locked(harness: String, status: String?, waiting: Bool, whileWorking: Bool = false, sets: Bool? = nil) -> String? {
         if status == "exited" { return "终端已结束。" }
         // What the terminal says of itself first (it knows whether its agent's server is there); else by its kind.
-        if !(sets ?? setsDirectly(harness)) { return "\(agentName(harness)) 的这个终端只能在它自己的界面里选：切到终端视图操作。" }
+        if !(sets ?? setsDirectly(harness)) { return harness == "codex" ? "在回复框里用 /model 切换（Codex 在它自己的列表里选模型和思考强度）。" : "\(agentName(harness)) 的这个终端只能在它自己的界面里选：切到终端视图操作。" }
         if waiting || status == "waiting" { return "它正在等待回答，回答后再调整。" }
         if status != "idle", !whileWorking { return "它正在工作，结束后再调整。" }
         return nil

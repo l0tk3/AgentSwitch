@@ -360,9 +360,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ? new TerminalHost({
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, gate, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
         codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true,
-        // Codex through an app-server of the terminal's own, so a screen can set its model and effort (codexTerminal.ts);
-        // `AGENTSWITCH_CODEX_TERMINAL=direct` starts it on its own as before.
-        codexServer: process.env.AGENTSWITCH_CODEX_TERMINAL !== "direct",
+        // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
+        // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
+        // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's
+        // desktop app no longer lists it under its project. `AGENTSWITCH_CODEX_TERMINAL=server` starts it that way.
+        codexServer: process.env.AGENTSWITCH_CODEX_TERMINAL === "server",
         // Its Daybreak switch, where this Codex and this account have one (router/modelOffers.ts; simple-view-v0 §5.8).
         codexDaybreak: () => overrides.modelOffers?.current().codex?.daybreak !== undefined,
         ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
