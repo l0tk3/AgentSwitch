@@ -8,7 +8,7 @@ export type ClashGroup = { readonly name: string; readonly type: string; readonl
 export type ClashStatus = {
   readonly version: string; readonly mode: string; readonly tun: boolean;
   readonly groups: readonly ClashGroup[];
-  /** Every node (not a group, not a built-in like DIRECT), by name. */
+  /** Every node (not a group, not a built-in like DIRECT), by name: the subscription's own list, then its node sets'. */
   readonly nodes: readonly string[];
   /** The rule sets it has, each with how many rules it holds. */
   readonly ruleSets: Readonly<Record<string, number>>;
@@ -21,13 +21,25 @@ export class ClashController {
   constructor(private readonly socket: string) {}
 
   async status(): Promise<ClashStatus> {
-    const [version, configs, proxies, sets] = await Promise.all([this.get("/version"), this.get("/configs"), this.get("/proxies"), this.get("/providers/rules").catch(() => ({}))]);
+    const [version, configs, proxies, sets, sources] = await Promise.all([this.get("/version"), this.get("/configs"), this.get("/proxies"), this.get("/providers/rules").catch(() => ({})), this.get("/providers/proxies").catch(() => ({}))]);
     const all = obj(obj(proxies).proxies);
     const groups: ClashGroup[] = [], nodes: string[] = [];
     for (const [name, value] of Object.entries(all)) {
       const p = obj(value);
       if (Array.isArray(p.all)) groups.push({ name, type: String(p.type ?? ""), now: typeof p.now === "string" && p.now ? p.now : null, members: p.all.filter((m): m is string => typeof m === "string") });
       else if (!BUILT_IN.has(String(p.type ?? ""))) nodes.push(name);
+    }
+    // A node that comes from a node set of the subscription is listed there, not among the proxies (seen on
+    // 2026-10-08: 42 nodes, none of them in /proxies). `Compatible` sets are the groups over again.
+    const seen = new Set(nodes);
+    for (const provider of Object.values(obj(obj(sources).providers))) {
+      const p = obj(provider);
+      if (p.vehicleType === "Compatible" || !Array.isArray(p.proxies)) continue;
+      for (const node of p.proxies) {
+        const n = obj(node);
+        if (typeof n.name !== "string" || Array.isArray(n.all) || BUILT_IN.has(String(n.type ?? "")) || seen.has(n.name)) continue;
+        seen.add(n.name); nodes.push(n.name);
+      }
     }
     const ruleSets = Object.fromEntries(Object.entries(obj(obj(sets).providers)).map(([name, v]) => [name, Number(obj(v).ruleCount) || 0]));
     return { version: String(obj(version).version ?? ""), mode: String(obj(configs).mode ?? ""), tun: obj(obj(configs).tun).enable === true, groups, nodes, ruleSets };

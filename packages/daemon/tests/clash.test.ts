@@ -102,7 +102,10 @@ async function core() {
       if (req.url === "/version") return send({ meta: true, version: "v1.19.31" });
       if (req.url === "/configs") return send({ mode: "rule", tun: { enable: true } });
       if (req.url === "/providers/rules") return send({ providers: { "as-direct": { ruleCount: 2 } } });
-      if (req.url === "/proxies") return send({ proxies: { DIRECT: { type: "Direct" }, "Inline SG": { type: "Shadowsocks" }, "🇯🇵 Tokyo (1.5x)": { type: "Trojan" },
+      if (req.url === "/providers/proxies") return send({ providers: {
+        default: { vehicleType: "Compatible", proxies: [{ name: "DIRECT", type: "Direct" }, { name: "AgentSwitch Claude", type: "Selector", all: [] }] },
+        tgyun: { vehicleType: "HTTP", proxies: [{ name: "🇯🇵 Tokyo (1.5x)", type: "Trojan" }] } } });
+      if (req.url === "/proxies") return send({ proxies: { DIRECT: { type: "Direct" }, COMPATIBLE: { type: "Compatible" }, "Inline SG": { type: "Shadowsocks" },
         "AgentSwitch Claude": { type: "Selector", now: state.now, all: ["AgentSwitch Claude Auto", "AS · 🇯🇵 Tokyo (1.5x)", "Inline SG"] },
         "AgentSwitch Claude Auto": { type: "Fallback", now: "Inline SG", all: ["AS · 🇯🇵 Tokyo (1.5x)", "Inline SG"] } } });
       send({}, 404);
