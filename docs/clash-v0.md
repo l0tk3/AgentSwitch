@@ -107,9 +107,81 @@
 - 服务端：`src/clash/`、`/clash`、`/clash/settings`（只在 Mac 上）、`/clash/sub.yaml`、`/clash/rules/<名字>.yaml`（只认地址里的口令，只在本机回环）。Mac：主窗口左边栏的第四页 `Clash`（⌘⇧K），与 Dispatch、Terminals、Browser 并列（用户：可以不在设置里吗，弄成浏览器 terminal dispatch并列的；起先放在设置里）。`-designPreview <目录> -designPreviewOnly clash` 画出 `main-clash`。`scripts/clash_probe.ts` 只读地看这台 Mac 上的 Clash。
 - **还没做**：演示页；配置（profile）里填的代理自动进直连表（现在手填）；真的在 Clash Verge 里切到这个订阅走一遍。
 
-## 7. 分步
+## 7. 第二版（2026-10-08，用户看过第一版之后；**设计，未动代码**）
 
-1. 只读：认出 Clash Verge、连上控制接口、列出节点与分组、认出已有的 `Claude` / `OpenAI` 设置。
-2. §5 的两条实测（在你点头之后，加一条再撤掉）。
-3. 写：两组分组与规则、直连规则、清单、撤销。
-4. 配置页里出口那一栏可以直接选 Clash 的节点（profiles-v0 §4）。
+用户：应该可以接受一个代理链接；然后我为Claude和openai选好节点之后应该在Claude中出现相应的 “Claude 自动选择”和“openAI 自动选择”组，按照我选的优先级自动fallback；然后还有对应的Claude组和openAI组（这俩组是真正决定Claude和openai流量走向的）在Claude组里可以选择Claude自动选择或者其他我为Claude选择的节点，OpenAI同理；如果给的订阅文件/链接中有对应的Claude规则和OpenAI规则的话让我Agentswitch上设置的规则优先级最高；然后不要弄出来一堆没用的 AS. 什么节点；还有就是最好能在AgentSwitch里控制切换哪些节点（比如当前选中的Claude节点直接在AgentSwitch里改一下）；然后要能测节点的延迟（在AS里）；要能帮clash更新订阅（从AS拉新的订阅更新）；如果把订阅链接放到AS里管理了或者yaml里有供应商链接要可以设置自动更新；能做到吗
+
+（“在Claude中出现”读作“在 Clash 中出现”。）
+
+### 7.1 底本归 AgentSwitch 管
+
+- 底本可以是**一条订阅链接**、**一份 yaml 文件**，或者从 Clash Verge 现有的订阅里**导入**（抄一份过来，之后 Clash Verge 里那一个删掉也不影响）。
+- yaml 里带 `proxy-providers` 的链接（用户现在这份就是：一个 `tgyun` 节点集，链接回的是整份 Clash 配置，42 个 vless 节点），AgentSwitch 也去取，因为要用里面节点的完整信息。
+- 自动更新：关 / 每 1、6、12、24 小时，另有 `Update Now`。取链接时自报 `clash.meta/<版本>`（内核自己取时就是这样报的），否则有的订阅不回 Clash 格式。回来的不是带 `proxies` 或 `proxy-providers` 的 yaml 就报错，不猜别的格式。
+- **AgentSwitch 因此存着订阅原文（含节点的地址与口令）和链接**：放在它自己的目录 `clash/` 下，只有本人可读，和 Clash Verge 在它自己目录里的存法一样；不进任务库、不进日志、不进任何 agent 的上下文；对外只在本机回环上、凭地址里的口令提供。第一版为了不经手这些才读 Clash Verge 的文件，现在用户要它管链接，这一条就换了。
+
+### 7.2 交给 Clash Verge 的那一份
+
+底本原样，加上：
+
+- **两个节点集** `as-claude`、`as-openai`，由 AgentSwitch 在本机提供：用户为这一项选的节点，按优先级排好，带完整信息、**用它们原来的名字**。
+- **每项两个分组**（名字照用户现有文件；底本里已有同名的——不计空格与大小写——就取代它、沿用它的写法，别处引用它的不用改）：
+  - `Claude自动选择`：`fallback`，成员来自 `as-claude`，按顺序用第一个连得上的；探测地址 `https://api.anthropic.com/`，间隔 180 秒（用户现有文件的写法）。
+  - `Claude`：`select`，成员是 `Claude自动选择` 加 `as-claude` 里的每个节点。真正决定 Claude 流量去向的是它。
+  - OpenAI 同理（`https://api.openai.com/`）。
+- **规则**：最前面是 `RULE-SET,as-direct,DIRECT`、`RULE-SET,as-claude,Claude`、`RULE-SET,as-openai,OpenAI`，所以底本里就算有自己的 Claude / OpenAI 规则，也是 AgentSwitch 的先中。
+- 没为某一项选节点时：不出它的分组，它的规则集是空的，这类流量照底本原有的走。
+- 第一版的 `AS · <节点>` 小组不再有。那是因为节点集里的节点不能在分组里直接点名，当时又不想经手节点信息；现在节点集由 AgentSwitch 自己提供，就不需要了。
+- 底本里 `http` 的节点集，链接改成指向 AgentSwitch 存的那一份（原样转交）：只有 AgentSwitch 一处去找机场，它取到新的之后能让内核立刻换上。
+
+### 7.3 哪些立刻生效，哪些要 Clash Verge 重新取
+
+**立刻（AgentSwitch 经控制接口自己做，不经过 Clash Verge）**
+
+| 做什么 | 怎么做 |
+| --- | --- |
+| 增删节点、调优先级 | 改 `as-claude` / `as-openai` 的内容，只刷新这一个节点集 |
+| `Claude` / `OpenAI` 用自动还是某个节点 | 直接在分组里选 |
+| 直连地址 | 改规则集，只刷新这一个 |
+| 机场的节点更新了 | AgentSwitch 取到新的，刷新底本的节点集和自己的两个 |
+| 测延迟 | 一组一次测完，或单测一个节点 |
+
+**要 Clash Verge 重新取一次的**（它是“订阅正文”的事）：某一项从没有节点到有节点（多出分组）或反过来；机场改了它自己的分组或规则。
+
+Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接只有 `clash://install-config`，每次都是新建一个；它的更新命令只有它自己的界面能调。所以这一类只能等它自己按间隔来取（AgentSwitch 在回应里给间隔，现在是 24 小时，和机场给的一样），或者用户在 Clash Verge 里点一次更新；在那之前 AgentSwitch 的页面一直挂着提示。**没有采用**直接把整份配置推给内核：能立刻生效，但 Clash Verge 不知情，下次它自己生成配置时会盖回去，而且要 AgentSwitch 复刻它生成配置的全过程。
+
+### 7.4 查实的（2026-10-08）
+
+在临时目录里另起了一份同版本内核（应用包里的 `verge-mihomo`，不开 TUN、不开端口、节点是编的），与用户的 Clash 无关，试完已删：
+
+- 分组成员与顺序就是节点集内容的顺序；`select` 组是“自动组在前，节点在后”。
+- 改节点集内容后 `PUT /providers/proxies/as-claude`：回 204，两个分组的成员与顺序当即跟着变。
+- `PUT /proxies/Claude {name}` 选中某个节点；之后把它从节点集里拿掉并刷新，`Claude` 自己退回自动组。
+- **空的节点集内核不收**（刷新回 503，保留上一份）——所以没选节点时不能出分组，而不是出一个空的。
+- 两个节点集里有同名节点没有问题。
+- 用户现有文件用的“反引号分隔多个正则、按正则顺序排节点”也试了，成立；但那样节点写在订阅正文里，改一次要 Clash Verge 重新取一次，所以不用。
+
+在用户正在跑的内核上（只测延迟，不改设置）：
+
+- 节点集里的节点不在 `/proxies/<名字>` 下（回 `Resource not found`），所以单个节点的延迟要走 `GET /providers/proxies/<节点集>/<节点>/healthcheck?url=…&timeout=…`（回 `{"delay":904}`）；一组一起测是 `GET /group/<组名>/delay`（回 `{"🇯🇵 日本家宽-01":392,"🇯🇵 日本家宽-02":428}`）。
+
+别的：
+
+- 用户节点集的链接取了一次（照内核的方式自报）：回的是 yaml 的整份 Clash 配置，带 `subscription-userinfo` 和 `profile-update-interval: 24`。内容没有留。
+- Clash Verge 的程序里只有 `install-config` 这一种导入链接和 `/commands/visible`、`/commands/pac` 两个本机入口；它认 `profile-update-interval`。
+- 服务在本机的端口是设置里固定的那个，重启不变；改了端口，Clash Verge 里那条订阅地址就要重加。
+
+**还没查实的**：Clash Verge 按间隔自动更新当前订阅时会不会让连接断一下（这决定间隔能不能设短）；回应里的间隔它是不是照着记下了（加订阅时看它的 `profiles.yaml`）。
+
+### 7.5 页面
+
+- `Subscription`：来源（链接只显示主机名）、节点数、上次更新、剩余流量与到期；`Paste Link…`、`Choose File…`、`Import from Clash Verge`；`Auto Update`；`Update Now`。
+- `Claude` / `OpenAI` 各一块：节点按优先级排，每行有延迟；最上面一行是 `Automatic`（旁边写着它此刻用的是哪个）；点哪一行，`Claude` 组就用哪一行——读的是内核里的实情，在 Clash Verge 里改了这里也跟着变；`Test` 测这一组。
+- `Go Direct`、顶上的待办提示同第一版。
+
+## 8. 分步
+
+1. （做了）第一版：§6 末尾。
+2. 第二版（§7，等用户说做）：底本归 AgentSwitch 管与自动更新；两个节点集与四个分组；页面上选当前节点、测延迟、`Update Now`。
+3. 配置（profile）里填的代理自动进直连表；配置页里出口那一栏可以直接选 Clash 的节点（profiles-v0 §4）。
+4. 演示页。
