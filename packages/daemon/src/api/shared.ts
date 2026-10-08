@@ -29,6 +29,8 @@ const MAX_LIST_LIMIT = 500;
 export type ApiDeps = {
   /** Turns plaintext credentials in a submission into tokens before anything is stored (router-v0 §9); absent in echo mode. */
   readonly sealer?: Sealer;
+  /** Each agent's profiles (docs/profiles-v0.md). */
+  readonly profiles?: import("../profiles/store.js").ProfileStore;
   readonly store: Store;
   readonly bus: Bus;
   readonly engine: Engine;

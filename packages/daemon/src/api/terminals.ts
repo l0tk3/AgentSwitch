@@ -17,6 +17,7 @@ import type { TerminalStyle } from "../terminals/style.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
+import { DEFAULT_PROFILE } from "../profiles/store.js";
 import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
@@ -70,7 +71,7 @@ const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not
 /** A session id goes after `--resume` / `resume` / `--session`: likewise never one that could read as a flag. */
 const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a session id");
 const Effort = z.string().regex(EFFORT, "not a level");
-const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), model: ModelId.optional(), effort: Effort.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
+const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), profile: z.string().regex(/^[a-z0-9]{6,16}$|^default$/).optional(), model: ModelId.optional(), effort: Effort.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
 /** `attachments`: a reply's files, each where its placeholder stands in `text` (terminal-v0 §4): one staged with
  *  POST /uploads (`upload`, a phone's, or a picture pasted on the Mac with no file behind it), or one already on this
@@ -296,8 +297,14 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       const raced = openHere();
       if (raced) return c.json({ terminal: raced, existing: true });
     }
+    // The profile it starts under: the one named, else the agent's current one (docs/profiles-v0.md §3). `Default`
+    // is the Mac's own: nothing is set for it.
+    const wanted = body.data.profile ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
+    const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
+    if (wanted !== DEFAULT_PROFILE && !profileHome) return c.json({ error: "no such profile" }, 400);
+    const profile = profileHome ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, home: profileHome } : null;
     try {
-      const info = await host.spawn({ harness: body.data.harness, cwd, ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
+      const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });

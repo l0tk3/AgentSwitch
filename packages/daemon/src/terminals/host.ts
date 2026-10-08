@@ -102,6 +102,9 @@ export type TerminalInfo = {
   readonly subagents: readonly Subagent[];
   /** When the status last changed (the Live Activity's clock: working since, waiting since). */
   readonly statusSince: number;
+  /** The profile it runs under (docs/profiles-v0.md): its id and its name as it was at the start; null: the
+   *  Mac's own (`Default`). */
+  readonly profile: { readonly id: string; readonly name: string } | null;
   /** What the agent's own screen said to commands sent from a screen (`commanded`), the latest last. */
   readonly notices: readonly ScreenNotice[];
   /** A list to choose from that the agent's own screen shows now (`choicesOnScreen`); null when it shows none. */
@@ -169,6 +172,9 @@ export type LaunchRequest = {
   readonly mode: PermissionMode;
   /** Bypass may be switched on later from inside the terminal (Claude Code's ⇧Tab): started from the Mac only. */
   readonly allowBypass?: boolean;
+  /** The folder the agent keeps its sign-in in, for a profile other than the Mac's own (docs/profiles-v0.md §2);
+   *  absent: the agent's default. */
+  readonly configHome?: string;
   readonly hookToken: string;
 };
 export type LaunchPlan = { readonly file: string; readonly args: readonly string[]; readonly env: Record<string, string>; readonly hooks: boolean; readonly companion?: Companion };
@@ -721,6 +727,7 @@ class Session {
   /** When a hook last said a compaction was over. */
   compactEndedAt = 0;
   compactTimer: NodeJS.Timeout | null = null;
+  profile: { id: string; name: string } | null = null;
   /** What its screen said to commands sent from a screen (`commanded`). */
   notices: ScreenNotice[] = [];
   /** The program it runs (the launcher's), for what is learned of that program (`learnCommands`). */
@@ -813,19 +820,20 @@ export class TerminalHost {
 
   /** Starts an agent. The terminal is listed from the moment it is made (a second resume of the same session finds it),
    *  while a companion starts; the program follows. */
-  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number }): Promise<TerminalInfo> {
+  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number; profile?: { id: string; name: string; home: string } }): Promise<TerminalInfo> {
     if (!this.helperChecked) { ensureSpawnHelper(); this.helperChecked = true; }
     const id = randomUUID().slice(0, 8);
     const hookToken = randomBytes(24).toString("base64url");
     let plan: LaunchPlan;
     try {
-      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
+      plan = this.opts.launcher({ id, harness: req.harness, cwd: req.cwd, hookToken, mode: req.mode ?? "manual", ...(req.profile ? { configHome: req.profile.home } : {}), ...(req.allowBypass ? { allowBypass: true } : {}), ...(req.model ? { model: req.model } : {}), ...(req.effort ? { effort: req.effort } : {}), ...(req.resume ? { resume: req.resume, ...(req.fork ? { fork: true } : {}) } : {}) });
     } catch (err) {
       this.ended(id, true);
       throw new TerminalError("unavailable", (err as Error).message);
     }
     const s = new Session(id, req.harness, req.cwd, req.model ?? null, req.mode ?? "manual", hookToken, this.o.now(), req.cols ?? 120, req.rows ?? 36, this.o.scrollback);
     s.hooks = plan.hooks;
+    s.profile = req.profile ? { id: req.profile.id, name: req.profile.name } : null;
     s.effort = req.effort ?? null;
     s.resumedFrom = req.resume ?? null;
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
@@ -1770,7 +1778,7 @@ export class TerminalHost {
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),
-      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], choices: s.choices, notices: [...s.notices], seq: s.seq,
+      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], choices: s.choices, notices: [...s.notices], profile: s.profile, seq: s.seq,
     };
   }
 }

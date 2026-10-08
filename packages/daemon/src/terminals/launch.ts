@@ -188,6 +188,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     const browser = bridge ? browserServer(bridge) : null;
     switch (req.harness) {
       case "claude-code": {
+        // A profile other than the Mac's own: its sign-in and its identifiers are in a folder of its own.
+        if (req.configHome) env.CLAUDE_CONFIG_DIR = req.configHome;
         const settings = join(dir, "settings.json");
         writeFileSync(settings, JSON.stringify(claudeHookSettings(hookCommand, opts.protected), null, 2), { mode: 0o600 });
         const args = ["--settings", settings];

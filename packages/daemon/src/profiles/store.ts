@@ -1,0 +1,163 @@
+/** Profiles (docs/profiles-v0.md): several sign-ins per agent, each a home folder of its own that the agent is started
+ *  with (`CLAUDE_CONFIG_DIR` …), so the Mac's own `~/.claude` is never rewritten and the agents' own apps and other
+ *  terminals are untouched. Every agent has `Default` — the Mac's own, with no folder here — and a current profile that
+ *  new terminals start under. Claude Code first (step 2); the others have `Default` alone for now.
+ *
+ *  A profile's folder holds what is the account's and the device's (its `.claude.json` with identifiers Claude Code
+ *  makes itself on first run, its credentials); what is the user's — instructions, skills, commands, settings — and the
+ *  sessions are the Mac's own, linked in, so any profile continues any session and nothing is set up twice. Of the
+ *  Mac's `.claude.json` only what names no account is carried over once (trusted folders, MCP servers, the theme). */
+
+import { randomBytes } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+export const PROFILE_AGENTS = ["claude-code", "codex", "opencode", "pi"] as const;
+export type ProfileAgent = (typeof PROFILE_AGENTS)[number];
+export type ProfileKind = "subscription" | "api";
+export const DEFAULT_PROFILE = "default";
+export type Profile = { readonly id: string; readonly name: string; readonly kind: ProfileKind; readonly createdAt: number;
+  /** Who is signed in, as the agent's own files say (absent: nobody yet, or the agent does not say). */
+  readonly account?: string };
+export type AgentProfiles = { readonly current: string; readonly profiles: readonly Profile[]; /** More than `Default` can be made for this agent. */ readonly creatable: boolean };
+
+type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number }[] };
+type File = { agents?: Partial<Record<ProfileAgent, Stored>> };
+
+export class ProfileError extends Error {
+  constructor(readonly code: "invalid" | "not_found" | "conflict", message: string) { super(message); }
+}
+
+/** What of the Mac's own Claude Code folder a profile shares by a link: the user's own set-up, and the sessions with
+ *  what goes with them (docs/profiles-v0.md §2). The session folders are made in the Mac's own when missing. */
+const CLAUDE_LINKED = ["CLAUDE.md", "skills", "commands", "agents", "plugins", "keybindings.json", "output-styles", "settings.json"] as const;
+const CLAUDE_SESSIONS = ["projects", "file-history", "todos", "plans"] as const;
+/** What of the Mac's `.claude.json` names no account or device: carried into a new profile once. */
+const CLAUDE_CARRIED = ["theme", "editorMode", "hasCompletedOnboarding", "lastOnboardingVersion", "autoUpdates", "verbose", "preferredNotifChannel", "mcpServers"] as const;
+const CLAUDE_PROJECT_CARRIED = ["hasTrustDialogAccepted", "hasCompletedProjectOnboarding", "allowedTools", "mcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"] as const;
+const MAX_PROFILES = 24;
+
+export type ProfileStoreOptions = { /** `$AGENTSWITCH_HOME`. */ readonly home: string; readonly userHome?: string; readonly now?: () => number };
+
+export class ProfileStore {
+  private readonly dir: string;
+  private readonly file: string;
+  private readonly userHome: string;
+  private readonly now: () => number;
+
+  constructor(o: ProfileStoreOptions) {
+    this.dir = join(o.home, "profiles");
+    this.file = join(this.dir, "profiles.json");
+    this.userHome = o.userHome ?? homedir();
+    this.now = o.now ?? Date.now;
+  }
+
+  /** Every agent's profiles, `Default` first. */
+  all(): Record<ProfileAgent, AgentProfiles> {
+    const file = this.read();
+    return Object.fromEntries(PROFILE_AGENTS.map((agent) => [agent, this.of(agent, file)])) as Record<ProfileAgent, AgentProfiles>;
+  }
+
+  /** The profile new terminals of `agent` start under. */
+  current(agent: ProfileAgent): string { return this.of(agent, this.read()).current; }
+
+  /** The folder the agent is started with for `id`; null for `Default` (the Mac's own) and for one that is not there. */
+  homeOf(agent: ProfileAgent, id: string): string | null {
+    if (id === DEFAULT_PROFILE || !/^[a-z0-9]{6,16}$/.test(id)) return null;
+    const home = join(this.dir, agent, id, "home");
+    return this.read().agents?.[agent]?.profiles?.some((p) => p.id === id) && existsSync(home) ? home : null;
+  }
+
+  /** The name the screens show for `id` (null: no such profile). */
+  nameOf(agent: ProfileAgent, id: string): string | null {
+    return this.of(agent, this.read()).profiles.find((p) => p.id === id)?.name ?? null;
+  }
+
+  setCurrent(agent: ProfileAgent, id: string): void {
+    const file = this.read();
+    if (!this.of(agent, file).profiles.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
+    this.write({ ...file, agents: { ...file.agents, [agent]: { ...file.agents?.[agent], current: id } } });
+  }
+
+  create(agent: ProfileAgent, name: string, kind: ProfileKind): Profile {
+    if (agent !== "claude-code") throw new ProfileError("invalid", "profiles are for Claude Code only so far");
+    const said = name.trim().replace(/\s+/g, " ");
+    if (!said || said.length > 40) throw new ProfileError("invalid", "a profile needs a name of 1 to 40 characters");
+    const file = this.read();
+    const known = this.of(agent, file).profiles;
+    if (known.some((p) => p.name.toLowerCase() === said.toLowerCase())) throw new ProfileError("conflict", `there is a profile named ${said} already`);
+    if (known.length >= MAX_PROFILES) throw new ProfileError("conflict", "too many profiles");
+    const profile = { id: randomBytes(5).toString("hex"), name: said, kind, createdAt: this.now() };
+    this.claudeHome(join(this.dir, agent, profile.id, "home"));
+    const stored = file.agents?.[agent] ?? {};
+    this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: [...(stored.profiles ?? []), profile] } } });
+    return profile;
+  }
+
+  /** Removes a profile and its folder (the sessions, linked, stay where they are). `Default` cannot go; the current one
+   *  going makes `Default` current. The agent's own sign-out (its keychain entry) is the caller's to do first. */
+  remove(agent: ProfileAgent, id: string): void {
+    const file = this.read();
+    const stored = file.agents?.[agent];
+    if (id === DEFAULT_PROFILE || !stored?.profiles?.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
+    this.write({ ...file, agents: { ...file.agents, [agent]: { current: stored.current === id ? DEFAULT_PROFILE : stored.current, profiles: stored.profiles.filter((p) => p.id !== id) } } });
+    rmSync(join(this.dir, agent, id), { recursive: true, force: true });
+  }
+
+  /** Every profile folder of `agent` except `keep`'s: what a terminal under one profile is not to read. */
+  othersOf(agent: ProfileAgent, keep: string): string[] {
+    return (this.read().agents?.[agent]?.profiles ?? []).filter((p) => p.id !== keep).map((p) => join(this.dir, agent, p.id));
+  }
+
+  // ---- inside
+
+  private of(agent: ProfileAgent, file: File): AgentProfiles {
+    const stored = file.agents?.[agent] ?? {};
+    const own: Profile[] = (stored.profiles ?? []).map((p) => ({ ...p, ...this.account(agent, join(this.dir, agent, p.id, "home", ".claude.json")) }));
+    const profiles: Profile[] = [{ id: DEFAULT_PROFILE, name: "Default", kind: "subscription", createdAt: 0, ...this.account(agent, join(this.userHome, ".claude.json")) }, ...own];
+    return { current: profiles.some((p) => p.id === stored.current) ? stored.current! : DEFAULT_PROFILE, profiles, creatable: agent === "claude-code" };
+  }
+
+  /** Who Claude Code's own file says is signed in: the plan's organisation and the address, as it shows them itself. */
+  private account(agent: ProfileAgent, claudeJson: string): { account?: string } {
+    if (agent !== "claude-code") return {};
+    try {
+      const o = (JSON.parse(readFileSync(claudeJson, "utf8")) as { oauthAccount?: { emailAddress?: unknown } }).oauthAccount;
+      return typeof o?.emailAddress === "string" && o.emailAddress ? { account: o.emailAddress.slice(0, 120) } : {};
+    } catch { return {}; }
+  }
+
+  /** A Claude Code home for a new profile: the links, and a `.claude.json` with nothing that names an account. */
+  private claudeHome(home: string): void {
+    const own = join(this.userHome, ".claude");
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    for (const name of CLAUDE_SESSIONS) mkdirSync(join(own, name), { recursive: true });
+    for (const name of [...CLAUDE_LINKED, ...CLAUDE_SESSIONS]) {
+      const target = join(own, name);
+      if (!existsSync(target) || present(join(home, name))) continue;
+      symlinkSync(target, join(home, name));
+    }
+    let seed: Record<string, unknown> = {};
+    try {
+      const mine = JSON.parse(readFileSync(join(this.userHome, ".claude.json"), "utf8")) as Record<string, unknown>;
+      for (const key of CLAUDE_CARRIED) if (key in mine) seed[key] = mine[key];
+      const projects = mine.projects && typeof mine.projects === "object" ? mine.projects as Record<string, Record<string, unknown>> : {};
+      seed.projects = Object.fromEntries(Object.entries(projects).map(([path, p]) => [path, Object.fromEntries(CLAUDE_PROJECT_CARRIED.filter((k) => p && k in p).map((k) => [k, p[k]]))]));
+    } catch { seed = {}; }
+    writeFileSync(join(home, ".claude.json"), JSON.stringify(seed, null, 2), { mode: 0o600 });
+  }
+
+  private read(): File {
+    try { const parsed = JSON.parse(readFileSync(this.file, "utf8")) as File; return parsed && typeof parsed === "object" ? parsed : {}; } catch { return {}; }
+  }
+
+  private write(file: File): void {
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
+    renameSync(tmp, this.file);
+  }
+}
+
+const present = (path: string): boolean => { try { lstatSync(path); return true; } catch { return false; } };
