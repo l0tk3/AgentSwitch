@@ -121,6 +121,13 @@ extension AgentSwitchAPI {
     /// picker of its own (400).
     /// Codex's Daybreak switch turned for the session a terminal is on: the Mac types Codex's own command when the
     /// switch stands otherwise, and waits until Codex says so (docs/simple-view-v0.md §5.8). How it stands after.
+    /// Takes row `pick` of the list the agent's own screen shows (it must still read `label` there).
+    public func chooseOnTerminal(_ id: String, pick: Int, label: String) async throws {
+        struct Body: Encodable { let pick: Int; let label: String }
+        struct Reply: Decodable { let ok: Bool? }
+        let _: Reply = try await post(["terminals", id, "choices"], body: Body(pick: pick, label: label))
+    }
+
     public func setTerminalDaybreak(_ id: String, on: Bool) async throws -> Bool {
         let reply: DaybreakReply = try await post(["terminals", id, "daybreak"], body: DaybreakBody(on: on))
         return reply.on ?? on

@@ -11,7 +11,7 @@ import { basename, dirname, join } from "node:path";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
-import { replyBytes, type KeyContext } from "./keys.js";
+import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { screenView } from "./screenView.js";
 
 export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
@@ -102,6 +102,8 @@ export type TerminalInfo = {
   readonly subagents: readonly Subagent[];
   /** When the status last changed (the Live Activity's clock: working since, waiting since). */
   readonly statusSince: number;
+  /** A list to choose from that the agent's own screen shows now (`choicesOnScreen`); null when it shows none. */
+  readonly choices: ScreenChoices | null;
   /** Replies a screen sent that the agent's record does not hold yet (`replied`): shown at once, as said. */
   readonly sent: readonly SentReply[];
   readonly seq: number;
@@ -143,6 +145,8 @@ export type TerminalEvent =
   /** What it is doing now changed (the tool, its sub-agents): for a screen that shows the record, not the terminal
    *  (docs/simple-view-v0.md §4). */
   | { readonly type: "activity"; readonly activity: TerminalInfo["activity"]; readonly subagents: readonly Subagent[] }
+  /** The list its own screen shows to choose from changed (null: it shows none now). */
+  | { readonly type: "choices"; readonly choices: ScreenChoices | null }
   /** The replies sent and not yet in the agent's record changed (one sent, one found there, one given up). */
   | { readonly type: "sent"; readonly replies: readonly SentReply[] }
   /** How far the turn has come changed (the count on the agent's own screen), or there is none now: for a screen that
@@ -222,6 +226,8 @@ export type TerminalHostOptions = {
   readonly compactLookMs?: number;
   /** How often at most a working Claude Code's screen is read for its token count. */
   readonly progressLookMs?: number;
+  /** How long after its screen drew it is read for a list to choose from. */
+  readonly choiceLookMs?: number;
   /** How long a reply its record never took is still shown once the terminal is at rest. */
   readonly sentRestMs?: number;
   /** How long Codex is given to turn its Daybreak switch after its command was typed (default 5 s). */
@@ -274,7 +280,7 @@ const DAYBREAK_POLL_MS = 250;
 const DAYBREAK_WAIT_MS = 5000;
 /** After a hook said a compaction is over, a compacting line still on the screen is not believed for this long. */
 const COMPACT_GRACE_MS = 1500;
-const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, compactLookMs: 400, progressLookMs: 1000, sentRestMs: 5000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
+const DEFAULTS = { scrollback: 5000, snapshotScrollback: 1000, idleAfterMs: 3000, compactLookMs: 400, progressLookMs: 1000, choiceLookMs: 250, sentRestMs: 5000, permissionTimeoutMs: 30 * 60_000, killGraceMs: 3000, sizeReleaseMs: 3000 };
 const MAX_TITLE = 200;
 /** A split escape sequence is held this long at most, and never more than this much of it. */
 const HOLD_MS = 50;
@@ -405,6 +411,44 @@ export type ScreenRow = { readonly text: string; readonly dim: readonly boolean[
  *  record quotes this line must not look as if it compacted for as long as the quote is on its screen. */
 export function compactingOnScreen(lines: readonly string[]): boolean {
   return lines.some((line) => /^[·✢✳✶✻✽*]\s+Compacting conversation(?:…|\.{3})?(?:\s+\([^)]*\)?)?\s*$/u.test(line));
+}
+
+/** A list the agent draws on its own screen and waits on — Codex's `/model` (its models, then how hard each thinks),
+ *  Claude Code's or Codex's question whether to trust a folder, any menu of theirs: numbered rows, one of them marked
+ *  as where the selection stands. A screen that shows the record offers the same rows; taking one moves the selection
+ *  there with the arrow keys and enters it, as in the terminal (2026-10-08, user: /model直接在简略视图里出一个列表让我
+ *  可以点就行了，逻辑和和在cli一致). */
+export type ScreenChoices = { readonly title: string; readonly options: readonly { readonly label: string; readonly detail?: string }[]; readonly selected: number };
+
+const CHOICE_ROW = /^\s*(?:[│|]\s*)?(?:([›❯>▶])\s+)?(\d{1,2})[.)]\s+(\S.*?)\s*(?:[│|]\s*)?$/u;
+const MAX_CHOICES = 40;
+
+/** The list on the screen's last rows, if it shows one: rows numbered 1, 2, 3… in order (a row between two of them
+ *  that has no number continues the one above), exactly one with the selection's mark before its number, and the
+ *  nearest line above them as what is asked. Numbered lines in an answer have no such mark: not a list to choose from. */
+export function choicesOnScreen(lines: readonly string[]): ScreenChoices | null {
+  let end = -1;
+  for (let i = lines.length - 1; i >= 0 && end < 0; i--) if (CHOICE_ROW.test(lines[i]!)) end = i;
+  if (end < 0) return null;
+  const rows: { at: number; n: number; marked: boolean; text: string }[] = [];
+  for (let i = end; i >= 0 && end - i < 4 * MAX_CHOICES; i--) {
+    const m = CHOICE_ROW.exec(lines[i]!);
+    if (!m) { if (!lines[i]!.trim()) break; continue; }
+    rows.unshift({ at: i, n: Number(m[2]), marked: !!m[1], text: m[3]! });
+    if (Number(m[2]) === 1) break;
+  }
+  if (!rows.length || rows.length > MAX_CHOICES || rows.some((r, i) => r.n !== i + 1) || rows.filter((r) => r.marked).length !== 1) return null;
+  // A single row is a list only where the screen says under it how to take it (Codex: `enter select · esc back`);
+  // by itself it may be what you typed after your own prompt mark.
+  if (rows.length === 1 && !lines.slice(end + 1, end + 5).some((l) => /\benter\b.*\b(select|confirm)|\besc\b.*\b(back|cancel)/i.test(l))) return null;
+  let title = "";
+  for (let i = rows[0]!.at - 1; i >= 0 && i >= rows[0]!.at - 4 && !title; i--) title = lines[i]!.replace(/^[\s│|╭╰─]+|[\s│|╮╯─]+$/gu, "").trim();
+  const options = rows.map((r) => {
+    const [label, ...rest] = r.text.split(/\s{2,}/);
+    const detail = rest.join(" ").trim();
+    return { label: label!.trim().slice(0, 200), ...(detail ? { detail: detail.slice(0, 300) } : {}) };
+  });
+  return { title: title.slice(0, 300), options, selected: rows.findIndex((r) => r.marked) };
 }
 
 /** A reply a screen sent, kept until the agent's own record holds it. The record is what the screens show, and a
@@ -623,6 +667,9 @@ class Session {
   /** When a hook last said a compaction was over. */
   compactEndedAt = 0;
   compactTimer: NodeJS.Timeout | null = null;
+  /** The list its screen shows to choose from (`choiceLooks`). */
+  choices: ScreenChoices | null = null;
+  choiceTimer: NodeJS.Timeout | null = null;
   /** Replies sent and not yet in its record (`replied`), the oldest first; the timer that gives them up at rest. */
   sent: SentReply[] = [];
   sentTimer: NodeJS.Timeout | null = null;
@@ -694,6 +741,7 @@ export class TerminalHost {
       compactLookMs: opts.compactLookMs ?? DEFAULTS.compactLookMs,
       progressLookMs: opts.progressLookMs ?? DEFAULTS.progressLookMs,
       sentRestMs: opts.sentRestMs ?? DEFAULTS.sentRestMs,
+      choiceLookMs: opts.choiceLookMs ?? DEFAULTS.choiceLookMs,
       daybreakWaitMs: opts.daybreakWaitMs ?? DAYBREAK_WAIT_MS,
       permissionTimeoutMs: opts.permissionTimeoutMs ?? DEFAULTS.permissionTimeoutMs,
       sizeReleaseMs: opts.sizeReleaseMs ?? DEFAULTS.sizeReleaseMs,
@@ -1280,7 +1328,7 @@ export class TerminalHost {
     s.chunks.push({ seq, data });
     s.bytes += data.length;
     while (s.bytes > this.o.bufferBytes && s.chunks.length > 1) s.bytes -= s.chunks.shift()!.data.length;
-    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); this.compactLooks(s); this.progressLooks(s); });
+    s.term.write(data, () => { if (seq > s.parsedSeq) s.parsedSeq = seq; this.suggests(s); this.compactLooks(s); this.progressLooks(s); this.choiceLooks(s); });
     // Codex names its Daybreak switch on its screen when it is turned there and when a session begins with it on:
     // the word is only the cue, its server says how it stands.
     if (s.companion?.daybreak && data.includes("Daybreak")) this.daybreakLooks(s);
@@ -1470,6 +1518,31 @@ export class TerminalHost {
     s.sentTimer.unref();
   }
 
+  /** Its screen drew: a moment later it is read for a list to choose from, and the screens are told when that changed. */
+  private choiceLooks(s: Session): void {
+    if (s.choiceTimer || s.status === "exited") return;
+    s.choiceTimer = setTimeout(() => {
+      s.choiceTimer = null;
+      if (!this.sessions.has(s.id)) return;
+      const now = s.status === "exited" ? null : choicesOnScreen(this.screenTail(s.id, s.rows));
+      if (JSON.stringify(now) === JSON.stringify(s.choices)) return;
+      s.choices = now;
+      s.emit({ type: "choices", choices: now });
+    }, this.o.choiceLookMs);
+    s.choiceTimer.unref();
+  }
+
+  /** A screen takes row `pick` (from 0) of the list on the agent's screen, which must still read `label` there: the
+   *  selection is moved to it with the arrow keys and entered. TerminalError "busy" when the list is gone or changed. */
+  choose(id: string, pick: number, label: string): void {
+    const s = this.need(id);
+    const now = s.status === "exited" ? null : choicesOnScreen(this.screenTail(id, s.rows));
+    if (!now || now.options[pick]?.label !== label) throw new TerminalError("busy", "its screen no longer shows that choice");
+    const ctx = this.keyContext(id);
+    const step = keySequence(pick > now.selected ? "down" : "up", ctx);
+    this.write(id, step.repeat(Math.abs(pick - now.selected)) + "\r");
+  }
+
   private progressed(s: Session, now: TurnProgress | null): void {
     if (now?.tokens === s.progress?.tokens && now?.way === s.progress?.way) return;
     s.progress = now;
@@ -1566,7 +1639,7 @@ export class TerminalHost {
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),
-      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], seq: s.seq,
+      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], choices: s.choices, seq: s.seq,
     };
   }
 }

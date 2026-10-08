@@ -81,7 +81,18 @@ struct TerminalRecordView: View {
                     ForEach(page.permissions) { p in
                         if p.isQuestion { TerminalQuestionCard(page: page, permission: p) } else { TerminalPermissionCard(page: page, permission: p) }
                     }
-                    if prompting { promptCard }
+                    // A list of its own on its screen (Codex's `/model`, a question of its own): the same rows here.
+                    if let choices = page.choices, page.permissions.isEmpty {
+                        choiceCard(title: choices.title, rows: choices.options.map { ($0.label, $0.detail) }, selected: choices.selected,
+                                   foot: "这是它自己屏幕上的列表：点一行，等于在终端里选中并回车。") { pick in Task { await page.choose(pick) } }
+                    } else if prompting { promptCard }
+                    else if !working && page.permissions.isEmpty {
+                        // What its last message asks, with the answers it offers (Codex): one of them as your reply.
+                        ForEach(Array(RecordQuestion.open(items: record.items, sent: page.sent).enumerated()), id: \.offset) { _, question in
+                            choiceCard(title: question.title, rows: question.options.map { ($0, nil) }, selected: nil,
+                                       foot: "点一个作为回复发出；也可以在下面自己写。") { pick in Task { _ = await page.send(question.options[pick], sealed: false) } }
+                        }
+                    }
                     if page.status == .exited {
                         LookWord("Exited").mono(11).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .center)
                     }
@@ -148,6 +159,38 @@ struct TerminalRecordView: View {
             Text(PathDisplay.short(terminal.workdir)).mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Rows to take one of: a list the agent's own screen shows, or the answers its last message offers.
+    private func choiceCard(title: String, rows: [(label: String, detail: String?)], selected: Int?, foot: String, take: @escaping (Int) -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !title.isEmpty { Text(title).font(.subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true) }
+            VStack(spacing: 6) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    Button { take(index) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text("\(index + 1)").mono(12, weight: .medium).foregroundStyle(index == selected ? Theme.signal : Color.secondary).frame(width: 20, alignment: .trailing)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.label).font(.subheadline).foregroundStyle(.primary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                                if let detail = row.detail, !detail.isEmpty {
+                                    Text(detail).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 9)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .background(Color.primary.opacity(index == selected ? 0.10 : 0.05), in: RoundedRectangle(cornerRadius: look.isClassic ? 10 : 0, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Text(foot).font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .grounded(Theme.panel, radius: Theme.Radius.card)
+        .framed(look.isClassic ? Theme.line : Theme.ink, radius: Theme.Radius.card)
     }
 
     /// The program drew something of its own and waits: the keys are under the record now; its screen is one tap away.

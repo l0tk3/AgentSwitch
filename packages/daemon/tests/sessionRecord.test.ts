@@ -423,15 +423,23 @@ describe("one step, whole (2026-10-07, user: 官方的代码执行块里看没�
       x.item(6, { type: "UserMessage", id: "u3", content: [{ type: "text", text: `<send_user_message_question_reply>${JSON.stringify([{ questionItemId: "q1", question: "a", answer: "要" }, { questionItemId: "q2", question: "b", answer: "没有了" }])}</send_user_message_question_reply>` }] }),
       x.item(7, { type: "UserMessage", id: "u4", content: [{ type: "text", text: "<send_user_message_question_reply>not json</send_user_message_question_reply>" }] }),
     ]);
-    const said = readRecord("codex", path, { cwd: API })!.items.map((it) => (it.type === "user" || it.type === "answer" ? `${it.type}: ${it.text}` : it.type));
-    expect(said).toEqual([
+    const items = readRecord("codex", path, { cwd: API })!.items;
+    expect(items.map((it) => (it.type === "user" || it.type === "answer" ? `${it.type}: ${it.text}` : it.type))).toEqual([
       "user: 帮我整理剧本",
-      `answer: ${asks}\n\n1. 我先描述一个剧本和问题\n2. 我会提供报错或运行日志\n3. 先盘点现有剧本 再决定`,
+      `answer: ${asks}`,
       "user: 先盘点现有剧本再决定",
-      // (Two messages one after the other read as one answer, as everywhere in a record.)
-      "answer: 好。\n\n要不要顺便跑一遍测试？\n\n1. 要\n2. 不要\n\n还有别的吗？\n\n那我开始了。",
+      "answer: 好。\n\n要不要顺便跑一遍测试？\n\n还有别的吗？",
+      "answer: 那我开始了。",
       "user: 要\n没有了",
-      // An envelope that holds no answers is not something you typed: left out, as the agent's other machinery is.
+    ]);
+    // The questions stay with their message, for a screen to offer: taking one sends it as your reply.
+    expect(items.map((it) => (it.type === "answer" ? it.questions ?? null : null))).toEqual([
+      null,
+      [{ title: "你想先从哪一步开始？", options: ["我先描述一个剧本和问题", "我会提供报错或运行日志", "先盘点现有剧本 再决定"] }],
+      null,
+      [{ title: "要不要顺便跑一遍测试？", options: ["要", "不要"] }, { title: "还有别的吗？", options: [] }],
+      null,
+      null,
     ]);
   });
 

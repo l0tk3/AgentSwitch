@@ -26,7 +26,7 @@ function terminal(over: Partial<TerminalInfo>): TerminalInfo {
   return {
     id: "t1", harness: "claude-code", cwd: join(homedir(), "Projects/web"), workdir: join(homedir(), "Projects/web"), model: null, modelNow: null, modeNow: null, suggestion: null, sets: true, daybreak: null, effort: null, mode: "manual", name: "fix-login", customName: false,
     title: "", status: "working", pid: 1, cols: 80, rows: 24, createdAt: 0, lastOutputAt: 0, exitCode: null, agentSessionId: null,
-    resumedFrom: null, forked: false, hooks: true, permissions: [], activity: null, progress: null, subagents: [], statusSince: 0, sent: [], seq: 0, ...over,
+    resumedFrom: null, forked: false, hooks: true, permissions: [], activity: null, progress: null, subagents: [], statusSince: 0, sent: [], choices: null, seq: 0, ...over,
   };
 }
 const host = (list: TerminalInfo[], turns: Record<string, TurnEnd> = {}) =>

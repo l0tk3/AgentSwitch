@@ -55,6 +55,48 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     }
 }
 
+/// A question at the end of an answer and the answers it offers.
+public struct RecordQuestion: Decodable, Sendable, Hashable {
+    public let title: String
+    public let options: [String]
+
+    public init(title: String, options: [String]) {
+        self.title = title
+        self.options = options
+    }
+
+    /// The questions still open at the record's end: those of its last answer, while nothing of yours comes after it
+    /// (in the record, or sent and not there yet).
+    public static func open(items: [RecordItem], sent: [SentReply]) -> [RecordQuestion] {
+        guard sent.isEmpty, let last = items.last(where: { $0.kind == .user || $0.kind == .answer }), last.kind == .answer else { return [] }
+        return last.questions.filter { !$0.options.isEmpty }
+    }
+}
+
+/// A list the agent draws on its own screen and waits on (Codex's `/model`, a question whether to trust a folder):
+/// its rows, and where the selection stands. Taking a row moves the selection there and enters it, as in the terminal.
+public struct ScreenChoices: Decodable, Hashable, Sendable {
+    public struct Option: Decodable, Hashable, Sendable {
+        public let label: String
+        public let detail: String?
+
+        public init(label: String, detail: String? = nil) {
+            self.label = label
+            self.detail = detail
+        }
+    }
+
+    public let title: String
+    public let options: [Option]
+    public let selected: Int
+
+    public init(title: String, options: [Option], selected: Int) {
+        self.title = title
+        self.options = options
+        self.selected = selected
+    }
+}
+
 /// How far a turn has come, as the agent's own screen counts it (the service reads Claude Code's working line): the
 /// tokens come from the model (`down`) or gone to it (`up`). Beside "Working": a number that moves says it is not stuck.
 public struct TurnProgress: Decodable, Hashable, Sendable {
@@ -141,11 +183,14 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
     /// A run of work: how long it took, and what it did.
     public let seconds: Int
     public let steps: [RecordStep]
+    /// What an answer asks at its end, each with the answers it offers (Codex): taking one sends it as your reply.
+    public let questions: [RecordQuestion]
 
     public var date: Date { Date(timeIntervalSince1970: TimeInterval(at) / 1000) }
 
     public init(id: String, kind: Kind, at: Int64 = 0, text: String = "", images: Int = 0, queued: Bool = false, clipped: Bool = false,
-                thinking: Bool = false, seconds: Int = 0, steps: [RecordStep] = []) {
+                thinking: Bool = false, seconds: Int = 0, steps: [RecordStep] = [], questions: [RecordQuestion] = []) {
+        self.questions = questions
         self.thinking = thinking
         self.id = id
         self.kind = kind
@@ -158,7 +203,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         self.steps = steps
     }
 
-    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, thinking, secs, steps }
+    private enum CodingKeys: String, CodingKey { case id, type, ts, text, images, queued, clipped, thinking, secs, steps, questions }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -176,6 +221,7 @@ public struct RecordItem: Decodable, Sendable, Hashable, Identifiable {
         thinking = (try? c.decodeIfPresent(Bool.self, forKey: .thinking)) ?? false
         seconds = (try? c.decodeIfPresent(Int.self, forKey: .secs)) ?? 0
         steps = (try? c.decodeIfPresent([RecordStep].self, forKey: .steps)) ?? []
+        questions = (try? c.decodeIfPresent([RecordQuestion].self, forKey: .questions)) ?? []
     }
 
     /// Where it begins in the agent's file, when its id says (a record read coarsely numbers its items instead).

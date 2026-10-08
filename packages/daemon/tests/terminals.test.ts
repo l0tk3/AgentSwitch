@@ -14,7 +14,7 @@ import { buildDaemon, listenLocal, type DaemonConfig } from "../src/daemon.js";
 import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
 import { folderFiles, matchFiles } from "../src/terminals/files.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, choicesOnScreen, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -541,6 +541,51 @@ describe("terminal host", () => {
     await hook("PostToolUse", { tool_name: "Edit", tool_input: { file_path: "/w/other.ts" } });
     expect(pending()).toEqual([]);
     expect(await plain).toBeNull();
+  });
+
+  it("reads a list to choose from off the agent's screen: numbered rows with the selection's mark (2026-10-08)", () => {
+    // Codex's `/model`, as its screen draws it.
+    expect(choicesOnScreen(["• Working", "", "  Select Model and Effort", "› 1. gpt-6-sol (current)   Frontier model", "  2. gpt-6-luna            Fast and light", "  3. gpt-5.6-codex", "", "  Press enter to confirm or esc to go back"])).toEqual({
+      title: "Select Model and Effort", selected: 0,
+      options: [{ label: "gpt-6-sol (current)", detail: "Frontier model" }, { label: "gpt-6-luna", detail: "Fast and light" }, { label: "gpt-5.6-codex" }],
+    });
+    // Claude Code's question in its box, the mark on the second row; a row's second line continues it.
+    expect(choicesOnScreen(["│ Do you trust the files in this folder?   │", "│   1. Yes, proceed                        │", "│ ❯ 2. No, exit                            │", "│      (nothing is run)                    │"]))
+      .toMatchObject({ title: "Do you trust the files in this folder?", selected: 1, options: [{ label: "Yes, proceed" }, { label: "No, exit" }] });
+    // As Codex 0.162's own snapshots draw them: the title two rows up, a row's words wrapped onto the next; and a
+    // list of one row, known by the line under it.
+    expect(choicesOnScreen(["  Select Model and Effort", "", "", "› 1. gpt-5.1-codex (current)  Optimized for Codex. Balance of reasoning quality", "                              and coding ability.", "  2. gpt-5.1-codex-mini       Optimized for Codex. Cheaper, faster, but less", "                              capable."]))
+      .toMatchObject({ title: "Select Model and Effort", selected: 0, options: [{ label: "gpt-5.1-codex (current)" }, { label: "gpt-5.1-codex-mini" }] });
+    expect(choicesOnScreen(["  Select Reasoning Level for GPT-5.5", "", "", "› 1. More reasoning…  Ultra consumes usage limits faster", "", "  enter select · esc back"]))
+      .toEqual({ title: "Select Reasoning Level for GPT-5.5", selected: 0, options: [{ label: "More reasoning…", detail: "Ultra consumes usage limits faster" }] });
+    // A numbered list in an answer has no mark; one row is no list; numbers out of order are not one list.
+    expect(choicesOnScreen(["Here is the plan:", "1. Read the file", "2. Change it", "3. Run the tests"])).toBeNull();
+    expect(choicesOnScreen(["❯ 1. only one"])).toBeNull();
+    expect(choicesOnScreen(["› 1. a", "  3. c"])).toBeNull();
+    expect(choicesOnScreen(["› 1. a", "› 2. b"])).toBeNull();
+    expect(choicesOnScreen([])).toBeNull();
+  });
+
+  it("offers the list on the agent's screen to the screens and takes a row as the terminal would: arrows, then enter (2026-10-08)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), choiceLookMs: 30 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    const events: TerminalEvent[] = [];
+    host.subscribe(info.id, null, (e) => events.push(e));
+    await until(() => host.get(info.id)!.title === "fake agent");
+    expect(host.get(info.id)!.choices).toBeNull();
+    host.write(info.id, "menu\r");
+    await until(() => host.get(info.id)!.choices !== null);
+    expect(host.get(info.id)!.choices).toMatchObject({ title: "Select Model and Effort", selected: 0, options: [{ label: "gpt-6-sol (current)" }, { label: "gpt-6-luna", detail: "Fast and light" }, { label: "gpt-5.6-codex" }] });
+    expect(events.some((e) => e.type === "choices" && e.choices?.options.length === 3)).toBe(true);
+    // What the screen had is no longer there: refused, nothing typed.
+    expect(() => host.choose(info.id, 1, "something else")).toThrow(/no longer shows/);
+    expect(() => host.choose(info.id, 9, "gpt-6-luna")).toThrow(/no longer shows/);
+    host.choose(info.id, 2, "gpt-5.6-codex");
+    await until(() => text(events).includes("Model changed to gpt-5.6-codex"));
+    await until(() => host.get(info.id)!.choices === null);
+    expect(events.filter((e) => e.type === "choices").pop()).toEqual({ type: "choices", choices: null });
+    expect(() => host.choose(info.id, 0, "gpt-6-sol (current)")).toThrow(/no longer shows/);
   });
 
   it("keeps a reply a screen sent until the agent's record holds it, or it turns out not to have been a message (2026-10-08)", async () => {

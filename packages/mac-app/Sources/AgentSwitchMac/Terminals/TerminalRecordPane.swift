@@ -84,7 +84,19 @@ struct TerminalRecordPane: View {
                                         .frame(maxWidth: 480, alignment: .leading)
                                     }
                                 }
-                                if info?.status == "waiting", requests.isEmpty { RecordPromptNote(openTerminal: { model.setSimple(false, pane: state.id) }) }
+                                // A list of its own on its screen (Codex's `/model`, a question of its own): the same rows here.
+                                if let choices = record.choices, requests.isEmpty {
+                                    RecordChoiceCard(title: choices.title, rows: choices.options.map { ($0.label, $0.detail) }, selected: choices.selected,
+                                                     foot: "这是它自己屏幕上的列表：点一行，等于在终端里选中并回车。", openTerminal: { model.setSimple(false, pane: state.id) }) { record.choose($0) }
+                                } else if info?.status == "waiting", requests.isEmpty {
+                                    RecordPromptNote(openTerminal: { model.setSimple(false, pane: state.id) })
+                                } else if !working, requests.isEmpty {
+                                    // What its last message asks, with the answers it offers (Codex): one of them as your reply.
+                                    ForEach(Array(record.openQuestions.enumerated()), id: \.offset) { _, question in
+                                        RecordChoiceCard(title: question.title, rows: question.options.map { ($0, nil) }, selected: nil,
+                                                         foot: "点一个作为回复发出；也可以在下面自己写。", openTerminal: nil) { record.answer(question.options[$0]) }
+                                    }
+                                }
                                 if info?.status == "exited" {
                                     Text("Exited").mono(Look.size(11, look)).foregroundStyle(Look.faint).frame(maxWidth: .infinity)
                                 }
@@ -340,6 +352,59 @@ private struct RecordNowLine: View {
                 .padding(.leading, 17)
             }
         }
+    }
+}
+
+/// Rows to take one of: a list the agent's own screen shows, or the answers its last message offers. As the question
+/// card of a Claude Code question reads: what is asked, the rows numbered, a line on what taking one does.
+private struct RecordChoiceCard: View {
+    let title: String
+    let rows: [(label: String, detail: String?)]
+    /// Where the selection stands on its screen (nil: nothing is selected, the rows are answers to send).
+    let selected: Int?
+    let foot: String
+    let openTerminal: (() -> Void)?
+    let take: (Int) -> Void
+    @Environment(\.interfaceLook) private var look
+    @State private var hovered: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !title.isEmpty {
+                Text(title).font(.system(size: Look.size(12.5, look), weight: .semibold)).foregroundStyle(Look.ink).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    Button { take(index) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(index + 1)").mono(Look.size(11, look), weight: .medium).foregroundStyle(index == selected ? Color.signal : Look.faint).frame(width: 18, alignment: .trailing)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.label).font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink).fixedSize(horizontal: false, vertical: true)
+                                if let detail = row.detail, !detail.isEmpty {
+                                    Text(detail).font(.system(size: Look.size(11, look))).foregroundStyle(Look.ink2).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(hovered == index || index == selected ? Look.code : Color.clear, in: RoundedRectangle(cornerRadius: look.isClassic ? 6 : 0, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { hovered = $0 ? index : (hovered == index ? nil : hovered) }
+                }
+            }
+            HStack(spacing: 10) {
+                Text(foot).font(.system(size: Look.size(11, look))).foregroundStyle(Look.faint).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if let openTerminal { Button(action: openTerminal) { BracketLabel(word: "Open Terminal", key: "⌘⇧E") }.buttonStyle(.plain) }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: 520, alignment: .leading)
+        .grounded(Look.panel, radius: Look.cardRadius)
+        .framed(look.isClassic ? Look.line : Look.ink2, radius: Look.cardRadius)
     }
 }
 

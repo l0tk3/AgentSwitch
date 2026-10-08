@@ -82,6 +82,8 @@ final class TerminalPageModel {
     private(set) var progress: TurnProgress?
     /// Replies sent that the record does not hold yet: shown at its end meanwhile.
     private(set) var sent: [SentReply] = []
+    /// The list the agent's own screen shows to choose from (nil: none).
+    private(set) var choices: ScreenChoices?
     /// Changes when the session's record does: the page reads it again.
     private(set) var recordRev: String?
     /// The model the agent says it is on now (Claude Code), as the stream last said; nil until it has.
@@ -109,6 +111,7 @@ final class TerminalPageModel {
         subagents = terminal.subagents
         progress = terminal.progress
         sent = terminal.sent
+        choices = terminal.choices
         activitySince = terminal.statusSince.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
         screen = TerminalScreenController(fontSize: fontSize)
         screen.onSize = { [weak self] cols, rows in self?.sizeChanged(cols: cols, rows: rows) }
@@ -255,6 +258,8 @@ final class TerminalPageModel {
             progress = now
         case .sent(let replies):
             sent = replies
+        case .choices(let now):
+            choices = now
         case .record(let rev):
             recordRev = rev
         case .model(let model):
@@ -310,6 +315,7 @@ final class TerminalPageModel {
             subagents = []
             progress = nil
             sent = []
+            choices = nil
             if !showsScreen { return }
             if away != nil {
                 // Nothing to take any more: the last screen, as the service has it.
@@ -382,6 +388,12 @@ final class TerminalPageModel {
 
     /// A reply, pasted in and entered: as typed, or sealed on the Mac first (credentials become ciphertext). Its files go
     /// where their placeholders stand: sent to the Mac first, then the reply says where each goes.
+    /// A row of the list on the agent's own screen, taken as the terminal would take it.
+    func choose(_ pick: Int) async {
+        guard let api, let choices, choices.options.indices.contains(pick) else { return }
+        do { try await api.chooseOnTerminal(id, pick: pick, label: choices.options[pick].label) } catch { self.error = error.localizedDescription }
+    }
+
     func send(_ text: String, sealed: Bool) async -> Bool {
         guard let api, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         sending = true

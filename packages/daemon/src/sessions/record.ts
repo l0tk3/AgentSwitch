@@ -34,10 +34,13 @@ export type RecordItem =
   | { readonly type: "user"; readonly id: string; readonly ts: number; readonly text: string; readonly images?: number; readonly queued?: boolean; readonly clipped?: boolean }
   // `thinking`: what the agent thought on the way, where it wrote that down — said like an answer, quieter (a screen
   // that does not know the mark shows it as an answer, which is how the agents' own apps show it).
-  | { readonly type: "answer"; readonly id: string; readonly ts: number; readonly text: string; readonly clipped?: boolean }
+  // `questions`: what it asks at the end of the message, each with the answers it offers (Codex): to answer is to
+  // send one as your reply.
+  | { readonly type: "answer"; readonly id: string; readonly ts: number; readonly text: string; readonly clipped?: boolean; readonly thinking?: boolean; readonly questions?: readonly RecordQuestion[] }
   | { readonly type: "work"; readonly id: string; readonly ts: number; readonly secs: number; readonly steps: readonly RecordStep[] }
   | { readonly type: "note"; readonly id: string; readonly ts: number; readonly text: string };
 
+export type RecordQuestion = { readonly title: string; readonly options: readonly string[] };
 export type PlanEntry = { readonly text: string; readonly state: "todo" | "doing" | "done" };
 /** `used`: tokens in the context at the last turn; `window`: how many it holds, when the record says. */
 export type RecordUsage = { readonly model?: string; readonly used?: number; readonly window?: number; /** How hard it thought at the last turn, in the agent's word. */ readonly effort?: string };
@@ -116,7 +119,7 @@ type Step = { kind: StepKind; text: string; tool?: string; note?: string; out?: 
   shots?: { at: number; id: string } | { file: string } };
 type Built =
   | { type: "user"; at: number; ts: number; text: string; images: number; queued?: boolean }
-  | { type: "answer"; at: number; ts: number; text: string; thinking?: boolean }
+  | { type: "answer"; at: number; ts: number; text: string; thinking?: boolean; questions?: readonly RecordQuestion[] }
   | { type: "work"; at: number; ts: number; end: number; steps: Step[] }
   | { type: "note"; at: number; ts: number; text: string };
 
@@ -133,12 +136,13 @@ class Builder {
   }
 
   /** The agent's words. A run of work before them ends when they come. `thinking`: what it thought on the way. */
-  answer(at: number, ts: number, text: string, thinking = false): void {
+  answer(at: number, ts: number, text: string, thinking = false, questions: readonly RecordQuestion[] = []): void {
     this.close(ts);
     const last = this.items[this.items.length - 1];
+    if (questions.length) { this.items.push({ type: "answer", at, ts, text, questions }); return; }
     // One answer written as several lines in a row (Claude Code writes a line per block) reads as one; a thought and
     // an answer stay two.
-    if (last?.type === "answer" && !last.thinking === !thinking && ts - last.ts < 2000 && last.at !== at) { last.text = `${last.text}\n\n${text}`; return; }
+    if (last?.type === "answer" && !last.questions && !last.thinking === !thinking && ts - last.ts < 2000 && last.at !== at) { last.text = `${last.text}\n\n${text}`; return; }
     this.items.push({ type: "answer", at, ts, text, ...(thinking ? { thinking } : {}) });
   }
 
@@ -401,21 +405,16 @@ function codexAnswers(text: string): string | null {
   } catch { return null; }
 }
 
-/** What Codex offers as answers to a question it puts at the end of a message (`questions`, each a title and options;
- *  Codex 0.162). It does not wait for one: its own screen shows them for half a minute, or until the turn ends, and
- *  goes on (2026-10-08, user: codex里的对话回复也不太管用，直接跳过去了). In the record they stay under the message,
- *  numbered as its screen numbers them — to answer is to say one in your reply. A question whose words the message
- *  does not already say is written out above its options. */
-function codexQuestions(text: string, questions: unknown): string {
-  if (!Array.isArray(questions)) return text;
-  const blocks: string[] = [];
-  for (const q of questions.map(obj)) {
-    const title = str(q.title).trim();
-    const options = (Array.isArray(q.options) ? q.options : []).filter((o): o is string => typeof o === "string" && !!o.trim()).slice(0, 12);
-    if (!options.length) { if (title && !text.includes(title)) blocks.push(title); continue; }
-    blocks.push([...(title && !text.includes(title) ? [title, ""] : []), ...options.map((o, i) => `${i + 1}. ${o.trim().replace(/\s+/g, " ")}`)].join("\n"));
-  }
-  return blocks.length ? [text, ...blocks].filter(Boolean).join("\n\n") : text;
+/** What Codex asks at the end of a message and the answers it offers (`questions`, each a title and options; Codex
+ *  0.162). It does not wait for one: its own screen shows them for half a minute, or until the turn ends, and goes on
+ *  (2026-10-08, user: codex里的对话回复也不太管用，直接跳过去了). In the record they stay with the message, for a screen
+ *  to offer as answers: taking one sends it as your reply. */
+function codexQuestions(questions: unknown): RecordQuestion[] {
+  if (!Array.isArray(questions)) return [];
+  return questions.map(obj).map((q) => ({
+    title: str(q.title).trim().slice(0, 600),
+    options: (Array.isArray(q.options) ? q.options : []).filter((o): o is string => typeof o === "string" && !!o.trim()).slice(0, 12).map((o) => o.trim().replace(/\s+/g, " ").slice(0, 400)),
+  })).filter((q) => q.title || q.options.length).slice(0, 6);
 }
 
 /** One file of a Codex change: added whole, deleted whole, or a unified diff. */
@@ -440,7 +439,13 @@ function codexItem(b: Builder, at: number, ts: number, payload: Json, cwd: strin
       if (typed !== null || images) b.user(at, ended, typed ?? "", images);
       return;
     }
-    case "AgentMessage": { const text = codexQuestions(texts(item.content), item.questions); if (text) b.answer(at, ended, text); return; }
+    case "AgentMessage": {
+      const text = texts(item.content), questions = codexQuestions(item.questions);
+      // A question the message does not already say is written out with it.
+      const said = [text, ...questions.map((q) => q.title).filter((title) => title && !text.includes(title))].filter(Boolean).join("\n\n");
+      if (said || questions.length) b.answer(at, ended, said, false, questions);
+      return;
+    }
     case "Reasoning": { const text = texts(item.summary_text); if (text) b.answer(at, ended, text, true); return; }
     case "CommandExecution": {
       const parsed = Array.isArray(item.parsed_cmd) ? item.parsed_cmd.map(obj) : [];
@@ -545,7 +550,7 @@ function shown(it: Built, id: string): RecordItem {
   const long = (text: string) => (text.length > TEXT_CHARS ? { text: text.slice(0, TEXT_CHARS), clipped: true as const } : { text });
   switch (it.type) {
     case "user": return { type: "user", id, ts: it.ts, ...long(it.text), ...(it.images ? { images: it.images } : {}), ...(it.queued ? { queued: true } : {}) };
-    case "answer": return { type: "answer", id, ts: it.ts, ...long(it.text), ...(it.thinking ? { thinking: true } : {}) };
+    case "answer": return { type: "answer", id, ts: it.ts, ...long(it.text), ...(it.thinking ? { thinking: true } : {}), ...(it.questions?.length ? { questions: it.questions } : {}) };
     case "note": return { type: "note", id, ts: it.ts, text: it.text };
     case "work": return {
       type: "work", id, ts: it.ts, secs: Math.max(0, Math.round((it.end - it.ts) / 1000)),

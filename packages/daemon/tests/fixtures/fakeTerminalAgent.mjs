@@ -84,6 +84,9 @@ async function handle(line) {
     process.stdout.write(`• Daybreak ${daybreak ? "on" : "off"}. Applies to new turns.\r\n`);
     return;
   }
+  // A list of its own to choose from (Codex's `/model`): numbered rows, the selection's mark on one; the keys it gets
+  // while the list is up move the mark and enter it.
+  if (line === "menu") { menu = 0; drawMenu(); return; }
   // Claude Code while it works: its line with a clock and the tokens so far, on a row it redraws (`working 1.3k`).
   if (line.startsWith("working ")) { process.stdout.write(`\r\x1b[2K✻ Pondering… (12s · ↓ ${line.slice(8)} tokens · thought for 2s)`); return; }
   // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.
@@ -103,9 +106,24 @@ const FOOT = { default: "? for shortcuts", acceptEdits: "⏵⏵ accept edits on 
 const round = (process.env.FAKE_MODES ?? "default,acceptEdits,plan").split(",");
 let mode = 0;
 
+// The list to choose from (`menu`): where its mark stands, or null when none is up.
+let menu = null;
+const MENU = ["gpt-6-sol (current)   Frontier model", "gpt-6-luna            Fast and light", "gpt-5.6-codex         Older"];
+function drawMenu() {
+  process.stdout.write("\r\n  Select Model and Effort\r\n" + MENU.map((row, i) => `${i === menu ? "› " : "  "}${i + 1}. ${row}`).join("\r\n") + "\r\n  Press enter to confirm or esc to go back\r\n");
+}
 let buf = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => {
+  if (menu !== null) {
+    // Arrow keys move the mark (either cursor-key mode); enter takes the row and the list is gone.
+    for (const key of String(d).match(/\x1b[\[O][AB]|\r|\n/g) ?? []) {
+      if (menu === null) break;
+      if (key === "\r" || key === "\n") { process.stdout.write(`\x1b[2J\x1b[H• Model changed to ${MENU[menu].split(" ")[0]}\r\n`); menu = null; }
+      else { menu = Math.max(0, Math.min(MENU.length - 1, menu + (key.endsWith("B") ? 1 : -1))); process.stdout.write("\x1b[2J\x1b[H"); drawMenu(); }
+    }
+    return;
+  }
   if (String(d).includes("\x1b[Z") && process.env.FAKE_MODES !== "none") {
     for (const _ of String(d).split("\x1b[Z").slice(1)) { mode = (mode + 1) % round.length; process.stdout.write(`${FOOT[round[mode]]}\r\n`); }
     d = String(d).split("\x1b[Z").join("");

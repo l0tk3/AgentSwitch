@@ -344,7 +344,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       let wake: (() => void) | null = null;
       let open = true;
       const unsubscribe = host.subscribe(id, record ? null : after, (ev) => {
-        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity" || ev.type === "progress" || ev.type === "sent") return;
+        if (record ? ev.type === "snapshot" || ev.type === "output" : ev.type === "activity" || ev.type === "progress" || ev.type === "sent" || ev.type === "choices") return;
         queue.push(ev);
         if (queue.length > MAX_QUEUED) open = false;
         wake?.();
@@ -358,6 +358,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
           queue.push({ type: "activity", activity: now.activity, subagents: now.subagents });
           if (now.progress) queue.push({ type: "progress", progress: now.progress });
           if (now.sent.length) queue.push({ type: "sent", replies: now.sent });
+          if (now.choices) queue.push({ type: "choices", choices: now.choices });
         }
       }
       try {
@@ -536,6 +537,17 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const q = (c.req.query("q") ?? "").slice(0, 200);
     if (/[\x00-\x1f]/.test(q)) return c.json({ error: "q: not a name" }, 400);
     return c.json({ files: matchFiles(await folderFiles(info.workdir ?? info.cwd), q) });
+  });
+
+  // One row of the list the agent's own screen shows, taken from a screen that shows the record: by its place and its
+  // words as that screen had them (409 when the terminal's screen has moved on).
+  app.post("/terminals/:id/choices", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseBody(c, z.object({ pick: z.number().int().min(0).max(60), label: z.string().min(1).max(200) }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try { host.choose(id, body.data.pick, body.data.label); } catch (err) { return failed(c, err); }
+    audit.record({ terminal: id, action: "keys", via: via(c), detail: { choice: body.data.pick } });
+    return c.json({ ok: true });
   });
 
   app.post("/terminals/:id/keys", async (c) => {

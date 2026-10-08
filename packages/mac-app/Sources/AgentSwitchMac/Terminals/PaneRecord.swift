@@ -26,6 +26,8 @@ final class PaneRecord {
     private(set) var progress: TurnProgress?
     /// Replies sent that the record does not hold yet: shown at its end meanwhile (`shown`).
     private(set) var sent: [SentReply] = []
+    /// The list the agent's own screen shows to choose from (nil: none).
+    private(set) var choices: ScreenChoices?
     /// The model the agent says it is on now (Claude Code), once it has said.
     private(set) var modelNow: String?
     /// Codex's Daybreak switch as its stream said last (nil: nothing said yet — the terminal's own word stands).
@@ -142,7 +144,7 @@ final class PaneRecord {
         session = nil
         items = []; plan = []; usage = nil; mode = nil; more = false; cursor = 0; loaded = false; error = nil
         activity = nil; subagents = []; activitySince = nil; modelNow = nil; effortAsked = nil; modeNow = nil; suggestion = nil; daybreakNow = nil
-        progress = nil; sent = []
+        progress = nil; sent = []; choices = nil
         draft = ""
         draftFiles = []
         insert = nil
@@ -166,6 +168,8 @@ final class PaneRecord {
             if progress != now { progress = now }
         case .sent(let replies):
             if sent != replies { sent = replies }
+        case .choices(let now):
+            if choices != now { choices = now }
         case .record:
             refresh()
         case .model(let model):
@@ -179,6 +183,31 @@ final class PaneRecord {
         case nil:
             // A turn began or ended: its clock starts over, and what the record holds may have moved on.
             if event == "status" { activitySince = Date(); refresh() }
+        }
+    }
+
+    /// The questions its last answer still asks (Codex), for the screen to offer.
+    var openQuestions: [RecordQuestion] { SessionRecord.openQuestions(items: items, sent: sent) }
+
+    /// One of the answers a question offers, sent as your reply.
+    func answer(_ option: String) {
+        guard let terminal, !sending else { return }
+        sending = true
+        let client = client
+        Task { [weak self] in
+            defer { self?.sending = false }
+            do { try await client().typeIntoTerminal(id: terminal, text: option); self?.error = nil }
+            catch { self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription }
+        }
+    }
+
+    /// A row of the list on the agent's own screen, taken as the terminal would take it.
+    func choose(_ pick: Int) {
+        guard let terminal, let option = choices?.options[safe: pick] else { return }
+        let client = client
+        Task { [weak self] in
+            do { try await client().chooseOnTerminal(id: terminal, pick: pick, label: option.label); self?.error = nil }
+            catch { self?.error = (error as? DaemonError)?.reason ?? error.localizedDescription }
         }
     }
 
@@ -540,7 +569,7 @@ final class PaneRecord {
     #if DEBUG
     /// The design preview's: a record from made-up work, without a service.
     func stage(terminal: TerminalInfo, items: [RecordItem], plan: [PlanEntry], usage: RecordUsage?, mode: String?, activity: TerminalActivity?, since: Date?,
-               progress: TurnProgress? = nil, sent: [SentReply] = []) {
+               progress: TurnProgress? = nil, sent: [SentReply] = [], choices: ScreenChoices? = nil) {
         following?.cancel()
         following = nil
         staged = true
@@ -555,6 +584,7 @@ final class PaneRecord {
         activitySince = since
         self.progress = progress
         self.sent = sent
+        self.choices = choices
         more = true
         loaded = true
     }
@@ -584,4 +614,8 @@ final class PaneRecord {
         draft = text
     }
     #endif
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
