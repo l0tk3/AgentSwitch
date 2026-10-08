@@ -62,3 +62,144 @@ export const BLOCK_TEMPLATE: readonly string[] = [
   "DOMAIN-KEYWORD,supersonicads", "DOMAIN-KEYWORD,uedas", "DOMAIN-KEYWORD,umeng", "DOMAIN-KEYWORD,usage", "DOMAIN-SUFFIX,vungle.com",
   "DOMAIN-KEYWORD,wlmonitor", "DOMAIN-KEYWORD,zjtoolbar",
 ];
+
+/** DNS (§7.8): what goes under `dns:` in the subscription handed over, in place of its own, when the DNS template is
+ *  on — the user's own section of 2026-10-08 with its notes, less two names that were that user's own. Names in China,
+ *  Apple's and ByteDance's are resolved by DNS servers in China (so a nearby CDN answers); everything else over HTTPS
+ *  abroad, following the rules; Claude's names take only the answer from abroad; the listed names get their real
+ *  addresses instead of made-up ones. */
+export const DNS_TEMPLATE = `enable: true
+listen: 0.0.0.0:53
+ipv6: false
+respect-rules: true
+enhanced-mode: fake-ip
+fake-ip-range: 198.18.0.1/16
+nameserver:
+  - https://1.1.1.1/dns-query
+  - https://dns.google/dns-query
+# 国内域名用国内 DNS 解析,避免拿到海外 CDN IP 导致直连很慢
+nameserver-policy:
+  "geosite:cn,private":
+    - 223.5.5.5
+    - 119.29.29.29
+  "+.doubao.com,+.volces.com,+.volcengine.com,+.byteimg.com,+.bytedanceapi.com,+.bytedance.com,+.byted-static.com,+.pstatp.com,+.snssdk.com":
+    - 223.5.5.5
+    - 119.29.29.29
+  # Apple 下载/更新/iCloud 用国内 DNS,拿到国内 CDN 节点
+  "+.apple.com,+.mzstatic.com,+.aaplimg.com,+.cdn-apple.com,+.apple-cloudkit.com,+.apple-mapkit.com,+.apple-dns.net,+.icloud.com,+.icloud-content.com,+.me.com":
+    - 223.5.5.5
+    - 119.29.29.29
+fallback:
+  - https://cloudflare-dns.com/dns-query
+  - https://dns.google/dns-query
+  - tls://1.1.1.1:853
+  - tls://dns.google:853
+fallback-filter:
+  geoip: false
+  ipcidr:
+    - 240.0.0.0/4
+  domain:
+    - +.anthropic.com
+    - +.claude.ai
+    - +.claude.com
+    - +.claudeusercontent.com
+default-nameserver:
+  - 223.5.5.5
+  - 119.29.29.29
+proxy-server-nameserver:
+  - 223.5.5.5
+  - 119.29.29.29
+fake-ip-filter:
+  - "*.lan"
+  - "*.localdomain"
+  - "*.local"
+  - "*.home.arpa"
+  - "localhost.ptlogin2.qq.com"
+  - "+.msftconnecttest.com"
+  - "+.msftncsi.com"
+  - "connectivitycheck.gstatic.com"
+  - "detectportal.firefox.com"
+  - "localhost"
+  - "localhost.work.weixin.qq.com"
+  - "+.baidu.com"
+  - "+.bing.com"
+  - "+.bilibili.com"
+  - "+.bilivideo.com"
+  - "+.bilivideo.cn"
+  - "+.biliapi.com"
+  - "+.biliapi.net"
+  - "+.hdslb.com"
+  - "+.biliimg.com"
+  - "+.qq.com"
+  - "+.tencent.com"
+  - "+.gtimg.com"
+  - "+.qpic.cn"
+  - "+.tenpay.com"
+  - "+.weixin.qq.com"
+  - "+.wx.qq.com"
+  - "+.wechat.com"
+  - "+.xiaohongshu.com"
+  - "+.xhscdn.com"
+  - "+.xiaohongshu.cn"
+  - "+.apple.com"
+  - "+.apple-cloudkit.com"
+  - "+.apple-mapkit.com"
+  - "+.apple-dns.net"
+  - "+.icloud.com"
+  - "+.icloud-content.com"
+  - "+.me.com"
+  - "+.mzstatic.com"
+  - "+.itunes.apple.com"
+  - "+.cdn-apple.com"
+  - "+.aaplimg.com"
+  - "+.douyin.com"
+  - "+.douyinpic.com"
+  - "+.douyincdn.com"
+  - "+.douyinvod.com"
+  - "+.toutiao.com"
+  - "+.toutiaoimg.com"
+  - "+.toutiaoimg.cn"
+  - "+.toutiaovod.com"
+  - "+.bytedance.com"
+  - "+.byteimg.com"
+  - "+.bytcdn.com"
+  - "+.bytegoofy.com"
+  - "+.byted-static.com"
+  - "+.snssdk.com"
+  - "+.amemv.com"
+  - "+.ixigua.com"
+  - "+.pstatp.com"
+  - "+.taobao.com"
+  - "+.tmall.com"
+  - "+.alicdn.com"
+  - "+.aliyuncs.com"
+  - "+.alibabacloud.com"
+  - "+.alipay.com"
+  - "+.alipayobjects.com"
+  - "+.alibaba.com"
+  - "+.1688.com"
+  - "+.mmstat.com"
+  - "+.tbcache.com"
+  - "+.cainiao.com"
+  - "+.dingtalk.com"
+  - "+.jd.com"
+  - "+.jd.hk"
+  - "+.360buyimg.com"
+  - "+.jdcloud.com"
+  - "+.jcloudcdn.com"
+  - "+.pinduoduo.com"
+  - "+.yangkeduo.com"
+  - "+.pddpic.com"
+  - "+.meituan.com"
+  - "+.meituan.net"
+  - "+.dianping.com"
+  - "+.dpfile.com"
+  - "+.163.com"
+  - "+.126.com"
+  - "+.netease.com"
+  - "+.neteasemusic.com"
+  - "+.music.126.net"
+  - "+.ydstatic.com"
+  - "+.nosdn.127.net"
+  - "+.ye.163.com"
+`;

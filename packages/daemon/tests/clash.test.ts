@@ -12,13 +12,13 @@ import { parse } from "yaml";
 import { mountClash } from "../src/api/clash.js";
 import { LocalAuth } from "../src/api/localAuth.js";
 import type { ApiDeps } from "../src/api/shared.js";
-import { BUILT_IN, buildSubscription, defaultGroup, directRule, EMPTY_SETTINGS, groupNames, nodeSet, RULE_SETS, ruleSet, running, type ClashSettings } from "../src/clash/build.js";
+import { BUILT_IN, buildSubscription, defaultGroup, directRule, dnsSection, dnsText, EMPTY_SETTINGS, groupNames, nodeSet, RULE_SETS, ruleSet, running, type ClashSettings } from "../src/clash/build.js";
 import { looksUp, ruleLine, rulesFrom } from "../src/clash/rules.js";
 import { ClashController } from "../src/clash/controller.js";
 import { ClashIntegration, parseTraffic } from "../src/clash/integration.js";
 import { ClashSource, ClashSourceError, providerSlug, type Fetched, type SourceNode } from "../src/clash/source.js";
 import { ClashStore } from "../src/clash/store.js";
-import { vergeProfileLink, vergeProfileText, vergeProfiles } from "../src/clash/verge.js";
+import { vergeOwnDns, vergeProfileLink, vergeProfileText, vergeProfiles } from "../src/clash/verge.js";
 import { markRemote } from "../src/core/caller.js";
 import { listenLocal } from "../src/daemon.js";
 
@@ -203,6 +203,28 @@ describe("the subscription AgentSwitch makes", () => {
       .toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-domestic,DIRECT,no-resolve", "RULE-SET,as-block,REJECT", "RULE-SET,as-domestic-ip,DIRECT"]);
   });
 
+  it("puts the DNS template under dns: in place of the subscription's own when it is on", () => {
+    const source = "dns: { enable: true, nameserver: [ 8.8.8.8 ] }\n" + PLAIN;
+    const dnsOf = (s: ClashSettings) => (parse(buildSubscription(parse(source) as Record<string, unknown>, [], [], s, "http://x/clash", "t")) as Record<string, any>).dns;
+    expect(dnsOf(EMPTY_SETTINGS)).toEqual({ enable: true, nameserver: ["8.8.8.8"] });
+    const built = dnsOf(settings({ dns: { on: true, text: null } }));
+    // The built-in one: names in China by DNS servers in China, Claude's only by the answer from abroad, real
+    // addresses for the listed names — and nothing of the subscription's own left.
+    expect(built).toMatchObject({ enable: true, "enhanced-mode": "fake-ip", "respect-rules": true, nameserver: ["https://1.1.1.1/dns-query", "https://dns.google/dns-query"],
+      "nameserver-policy": { "geosite:cn,private": ["223.5.5.5", "119.29.29.29"] }, "fallback-filter": { domain: expect.arrayContaining(["+.claude.ai"]) } });
+    expect(built["fake-ip-filter"]).toEqual(expect.arrayContaining(["*.lan", "+.qq.com", "+.apple.com"]));
+    expect(dnsText(EMPTY_SETTINGS)).toContain("# 国内域名用国内 DNS 解析");
+    expect(dnsText(EMPTY_SETTINGS)).not.toMatch(/cworkspace|netbird/);
+    // The user's own text takes its place; a subscription with no dns of its own gets one all the same.
+    expect(dnsOf(settings({ dns: { on: true, text: "enable: true\nnameserver:\n  - 223.5.5.5\n" } }))).toEqual({ enable: true, nameserver: ["223.5.5.5"] });
+    expect((parse(buildSubscription(parse(PLAIN) as Record<string, unknown>, [], [], settings({ dns: { on: true, text: "enable: false\n" } }), "http://x/clash", "t")) as Record<string, any>).dns).toEqual({ enable: false });
+    // What is not a section is said, with where.
+    expect(dnsSection("enable: true\nnameserver:\n  - 1.1.1.1\n")).toEqual({ section: { enable: true, nameserver: ["1.1.1.1"] } });
+    expect(dnsSection("- a\n- b\n")).toEqual({ error: "DNS 这一段要是一组“键: 值”（dns: 下面的内容）" });
+    expect(dnsSection("dns:\n  enable: true\n")).toEqual({ error: "不用写 dns: 这一行，只写它下面的内容" });
+    expect(dnsSection("enable: true\nnameserver: [1.1.1.1\n")).toEqual({ error: expect.stringMatching(/^DNS 这一段不是合法的 YAML（第 \d+ 行附近）$/) });
+  });
+
   it("calls the subscription's default group Manual when asked, everywhere it is named", () => {
     const airport = `proxies:
   - ${JSON.stringify(node("HK 01"))}
@@ -330,6 +352,10 @@ describe("Clash Verge as it is found", () => {
     expect(vergeProfileText("Merge", dir)).toBeNull();
     expect([vergeProfileLink("Ro3yUVdr9kT1", dir), vergeProfileLink("Lbw7BJYzpand", dir), vergeProfileLink("Merge", dir)]).toEqual([LINK, null, null]);
     expect(vergeProfiles(join(dir, "nowhere"))).toBeNull();
+    // Its own DNS settings: off unless its settings say they are on.
+    expect(vergeOwnDns(dir)).toBe(false);
+    writeFileSync(join(dir, "verge.yaml"), "enable_tun_mode: true\nenable_dns_settings: true\n");
+    expect(vergeOwnDns(dir)).toBe(true);
   });
 });
 
@@ -414,13 +440,15 @@ describe("Clash Integration over HTTP", () => {
     return { call, clash, ...running, asked: upstream.asked, upstream: { set body(v: string) { body = v; } }, clock: { add(ms: number) { t += ms; } } };
   }
   const chosen = { claude: { nodes: ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] }, openai: { nodes: [] }, direct: ["5.102.107.254"], autoUpdateHours: 6,
-    templates: { domestic: { on: false, rules: null as string[] | null }, block: { on: false, rules: null as string[] | null } }, renameDefault: false };
+    templates: { domestic: { on: false, rules: null as string[] | null }, block: { on: false, rules: null as string[] | null } }, renameDefault: false,
+    dns: { on: false, text: null as string | null } };
 
   it("shows what was found; takes a subscription of Clash Verge's in; what is saved is the core's at once", async () => {
     const { call, calls, asked } = await served();
     const first = (await call("GET", "/clash")).json;
     expect(first).toMatchObject({ found: true, running: true, version: "v1.19.31", tun: true, source: null, nodes: [], active: true, fetchedAt: null,
-      settings: { claude: { nodes: [] }, openai: { nodes: [] }, direct: [], autoUpdateHours: 24, templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false },
+      settings: { claude: { nodes: [] }, openai: { nodes: [] }, direct: [], autoUpdateHours: 24, templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false, dns: { on: false, text: null } },
+      dns: { on: false, custom: false, overridden: false },
       templates: { domestic: { on: false, custom: false, count: 169 }, block: { on: false, custom: false, count: 27 } }, defaultGroup: null });
     // Clash Verge's own subscriptions to import; the one that is AgentSwitch's is not among them.
     expect(first.profiles.map((p: { name: string }) => p.name)).toEqual(["mine.yaml", "Other"]);
@@ -521,7 +549,7 @@ describe("Clash Integration over HTTP", () => {
     expect(made["proxy-providers"]["as-claude"].url).toBe(`http://127.0.0.1:4711/clash/nodes/as-claude.yaml?k=${k}`);
     // The subscription service's own link is nowhere in what Clash Verge is handed.
     expect(sub.text).not.toContain("secret");
-    expect((await call("GET", "/clash")).json.fetchedAt).toBe(1_000);
+    expect((await call("GET", "/clash")).json).toMatchObject({ fetchedAt: 1_000, upToDate: true });
     expect(parse((await call("GET", `/clash/nodes/as-claude.yaml?k=${k}`)).text)).toEqual({ proxies: [node("🇯🇵 日本家宽-02"), node("🇯🇵 日本家宽-01")] });
     expect(parse((await call("GET", `/clash/rules/as-direct.yaml?k=${k}`)).text)).toEqual({ payload: ["IP-CIDR,5.102.107.254/32,no-resolve"] });
     const copy = await call("GET", `/clash/providers/${providerSlug("tgyun")}.yaml?k=${k}`);
@@ -581,6 +609,35 @@ describe("Clash Integration over HTTP", () => {
     expect((await call("GET", "/clash")).json.templates).toMatchObject({ domestic: { on: true, custom: false }, block: { on: true, custom: true } });
     // Back to the built-in ones.
     expect((await call("PUT", "/clash/settings", { ...chosen, templates: { domestic: { on: false, rules: null }, block: { on: true, rules: null } } })).json.templates.block).toEqual({ on: true, custom: false, count: 27 });
+  });
+
+  it("takes the DNS template and the user's own text for it; Clash Verge has to fetch the subscription for it to count", async () => {
+    const { call, clash, clock } = await served();
+    await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
+    await call("PUT", "/clash/settings", chosen);
+    expect((await call("GET", "/clash/dns")).json).toMatchObject({ custom: false, text: expect.stringContaining("enhanced-mode: fake-ip") });
+    expect((await call("GET", "/clash/dns", undefined, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    // Clash Verge fetches: from then on what it has is known by its fingerprint.
+    const k = clash.token();
+    const before = parse((await call("GET", `/clash/sub.yaml?k=${k}`)).text) as Record<string, any>;
+    expect(before.dns).toBeUndefined();
+    expect((await call("GET", "/clash")).json).toMatchObject({ upToDate: true, dns: { on: false, custom: false, overridden: false } });
+    // The template on: nothing the core shows has changed, yet what would be handed over has — it is to be fetched.
+    clock.add(60_000);
+    const on = await call("PUT", "/clash/settings", { ...chosen, dns: { on: true, text: null } });
+    expect(on.json).toMatchObject({ upToDate: false, dns: { on: true, custom: false }, fetchedAt: 1_000 });
+    const after = parse((await call("GET", `/clash/sub.yaml?k=${k}`)).text) as Record<string, any>;
+    expect(after.dns).toMatchObject({ "enhanced-mode": "fake-ip", "proxy-server-nameserver": ["223.5.5.5", "119.29.29.29"] });
+    expect((await call("GET", "/clash")).json).toMatchObject({ upToDate: true, fetchedAt: 61_000 });
+    // The user's own text; one that is not a section is said and nothing is kept.
+    const own = await call("PUT", "/clash/settings", { ...chosen, dns: { on: true, text: "enable: true\nnameserver:\n  - 223.5.5.5\n" } });
+    expect(own.json).toMatchObject({ upToDate: false, dns: { on: true, custom: true } });
+    expect((await call("GET", "/clash/dns")).json).toEqual({ text: "enable: true\nnameserver:\n  - 223.5.5.5\n", custom: true });
+    expect(await call("PUT", "/clash/settings", { ...chosen, dns: { on: true, text: "- not\n- a section\n" } })).toMatchObject({ status: 400, json: { error: "DNS 这一段要是一组“键: 值”（dns: 下面的内容）" } });
+    expect((await call("GET", "/clash")).json.dns).toMatchObject({ on: true, custom: true });
+    // A change that lives in a set leaves the subscription as fetched: still the newest once it is fetched again.
+    await call("GET", `/clash/sub.yaml?k=${k}`);
+    expect((await call("PUT", "/clash/settings", { ...chosen, dns: { on: true, text: "enable: true\nnameserver:\n  - 223.5.5.5\n" }, direct: ["1.2.3.4"], templates: { domestic: { on: true, rules: null }, block: { on: false, rules: null } } })).json.upToDate).toBe(true);
   });
 
   it("offers to call a subscription's default group Manual, which Clash Verge has to fetch", async () => {

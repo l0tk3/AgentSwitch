@@ -6,11 +6,13 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CLASH_TEMPLATES, EMPTY_SETTINGS, UPDATE_HOURS, type ClashSettings, type TemplateSetting } from "./build.js";
+import { CLASH_TEMPLATES, dnsSection, EMPTY_SETTINGS, UPDATE_HOURS, type ClashSettings, type TemplateSetting } from "./build.js";
 import { rulesFrom } from "./rules.js";
 
 const MAX_NODES = 32, MAX_DIRECT = 64;
-type State = { settings: ClashSettings; token?: string };
+/** `served`: the subscription as Clash Verge last fetched it — its fingerprint and when. */
+type State = { settings: ClashSettings; token?: string; served?: { hash: string; at: number } };
+const MAX_DNS = 64 * 1024;
 
 export class ClashStore {
   private readonly dir: string;
@@ -29,6 +31,10 @@ export class ClashStore {
     return token;
   }
 
+  served(): { readonly hash: string; readonly at: number } | null { return this.read().served ?? null; }
+
+  setServed(hash: string, at: number): void { this.write({ ...this.read(), served: { hash, at } }); }
+
   save(next: ClashSettings): ClashSettings {
     const settings = cleanSettings(next);
     this.write({ ...this.read(), settings });
@@ -37,8 +43,9 @@ export class ClashStore {
 
   private read(): State {
     try {
-      const o = JSON.parse(readFileSync(this.file, "utf8")) as { settings?: unknown; token?: unknown };
-      return { settings: cleanSettings(o.settings), ...(typeof o.token === "string" && /^[\w-]{16,64}$/.test(o.token) ? { token: o.token } : {}) };
+      const o = JSON.parse(readFileSync(this.file, "utf8")) as { settings?: unknown; token?: unknown; served?: { hash?: unknown; at?: unknown } };
+      const served = typeof o.served?.hash === "string" && typeof o.served.at === "number" ? { hash: o.served.hash, at: o.served.at } : null;
+      return { settings: cleanSettings(o.settings), ...(typeof o.token === "string" && /^[\w-]{16,64}$/.test(o.token) ? { token: o.token } : {}), ...(served ? { served } : {}) };
     } catch { return { settings: EMPTY_SETTINGS }; }
   }
 
@@ -48,6 +55,13 @@ export class ClashStore {
     writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 });
     renameSync(tmp, this.file);
   }
+}
+
+/** The DNS template: its own text is kept only if it is a section (the API says so before; this is the last guard). */
+function dns(raw: unknown): ClashSettings["dns"] {
+  const d = (raw && typeof raw === "object" ? raw : {}) as { on?: unknown; text?: unknown };
+  const text = typeof d.text === "string" && d.text.trim() && d.text.length <= MAX_DNS && "section" in dnsSection(d.text) ? d.text : null;
+  return { on: d.on === true, text };
 }
 
 export function cleanSettings(raw: unknown): ClashSettings {
@@ -64,5 +78,6 @@ export function cleanSettings(raw: unknown): ClashSettings {
   };
   const templates = (o.templates && typeof o.templates === "object" ? o.templates : {}) as Record<string, unknown>;
   return { claude: service(o.claude), openai: service(o.openai), direct: strings(o.direct, MAX_DIRECT, true), autoUpdateHours: hours,
-    templates: Object.fromEntries(CLASH_TEMPLATES.map((name) => [name, template(templates[name])])) as ClashSettings["templates"], renameDefault: o.renameDefault === true };
+    templates: Object.fromEntries(CLASH_TEMPLATES.map((name) => [name, template(templates[name])])) as ClashSettings["templates"], renameDefault: o.renameDefault === true,
+    dns: dns(o.dns) };
 }

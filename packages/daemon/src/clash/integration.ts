@@ -3,12 +3,14 @@
  *  through its controller — a node set or a rule set read again, a group's member picked — and nothing of Clash
  *  Verge's is written; only when a group appears or goes does Clash Verge have to fetch the subscription again. */
 
-import { buildConfig, buildSubscription, chosen, CLASH_SERVICES, CLASH_TEMPLATES, defaultGroup, DIRECT_SET, groupNames, groupsIn, nodeSet, RULE_SETS, ruleSet, running, SERVICE, templateRules, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings, type ClashTemplate } from "./build.js";
+import { createHash } from "node:crypto";
+import { stringify } from "yaml";
+import { buildConfig, chosen, CLASH_SERVICES, CLASH_TEMPLATES, defaultGroup, DIRECT_SET, dnsSection, dnsText, groupNames, groupsIn, nodeSet, RULE_SETS, ruleSet, running, SERVICE, templateRules, VERGE_UPDATE_HOURS, type ClashService, type ClashSettings, type ClashTemplate } from "./build.js";
 import { rulesFrom } from "./rules.js";
 import { ClashController, type ClashStatus } from "./controller.js";
 import { ClashSourceError, type ClashSource, type SourceInfo } from "./source.js";
 import { cleanSettings, type ClashStore } from "./store.js";
-import { vergeProfileLink, vergeProfileText, vergeProfiles, vergeSocket, type VergeProfile } from "./verge.js";
+import { vergeOwnDns, vergeProfileLink, vergeProfileText, vergeProfiles, vergeSocket, type VergeProfile } from "./verge.js";
 
 export type ClashServiceView = {
   /** Its two groups by the names they have in Clash. */
@@ -36,11 +38,14 @@ export type ClashView = {
   readonly templates: Readonly<Record<ClashTemplate, { readonly on: boolean; readonly custom: boolean; readonly count: number }>>;
   /** The subscription's default group, which can be called `Manual` (null: it has none such, or has a `Manual`). */
   readonly defaultGroup: string | null;
+  /** The DNS template: on or off, whether its text is the user's own; and whether Clash Verge has its own DNS
+   *  settings on, which the core then takes instead. */
+  readonly dns: { readonly on: boolean; readonly custom: boolean; readonly overridden: boolean };
   /** The core runs the subscription AgentSwitch makes; it is the one made now (else Clash Verge fetches it again). */
   readonly active: boolean; readonly upToDate: boolean;
   /** The link Clash Verge takes the subscription by. */
   readonly install: string;
-  /** When Clash Verge last fetched it; null: not since this service started. */
+  /** When Clash Verge last fetched it; null: never. */
   readonly fetchedAt: number | null;
 };
 
@@ -60,8 +65,9 @@ export type ClashOptions = {
 const DELAY_MS = 5_000;
 
 export class ClashIntegration {
-  private fetchedAt: number | null = null;
   private updating: Promise<void> | null = null;
+  /** What would be handed over now, kept until something it is made of changes. */
+  private made: { readonly key: string; readonly config: Record<string, unknown>; readonly text: string; readonly hash: string } | null = null;
 
   constructor(private readonly o: ClashOptions) {}
 
@@ -81,6 +87,11 @@ export class ClashIntegration {
       const read = Array.isArray(lines) ? rulesFrom(lines.map(String)) : null;
       if (read && "error" in read) throw new ClashRefused(read.error);
     }
+    const dns = (next && typeof next === "object" ? (next as { dns?: { text?: unknown } }).dns?.text : null);
+    if (typeof dns === "string" && dns.trim()) {
+      const read = dnsSection(dns);
+      if ("error" in read) throw new ClashRefused(read.error);
+    }
     this.o.store.save(cleanSettings(next));
     const status = await this.status();
     await this.push(status, false);
@@ -91,6 +102,12 @@ export class ClashIntegration {
   template(template: ClashTemplate): { readonly rules: readonly string[]; readonly custom: boolean } {
     const settings = this.o.store.settings();
     return { rules: templateRules(template, settings), custom: settings.templates[template].rules !== null };
+  }
+
+  /** The DNS template's text as it is in use, for editing. */
+  dns(): { readonly text: string; readonly custom: boolean } {
+    const settings = this.o.store.settings();
+    return { text: dnsText(settings), custom: settings.dns.text !== null };
   }
 
   /** Work from this from now on: a link, a file's text, or one of Clash Verge's subscriptions (copied in). */
@@ -153,15 +170,14 @@ export class ClashIntegration {
 
   token(): string { return this.o.store.token(); }
 
+  /** The subscription, fetched: what was handed over is remembered by its fingerprint, to tell later whether Clash
+   *  Verge has the one made now. */
   subscription(): { readonly text: string; readonly headers: Record<string, string> } | null {
-    const document = this.o.source.document();
-    if (!document) return null;
-    this.fetchedAt = (this.o.now ?? Date.now)();
+    const made = this.build();
+    if (!made) return null;
+    this.o.store.setServed(made.hash, (this.o.now ?? Date.now)());
     const info = this.o.source.info();
-    return {
-      text: buildSubscription(document, this.o.source.nodes(), this.o.source.held(), this.o.store.settings(), `${this.o.base()}/clash`, this.token()),
-      headers: { "profile-update-interval": String(VERGE_UPDATE_HOURS), ...(info?.userinfo ? { "subscription-userinfo": info.userinfo } : {}) },
-    };
+    return { text: made.text, headers: { "profile-update-interval": String(VERGE_UPDATE_HOURS), ...(info?.userinfo ? { "subscription-userinfo": info.userinfo } : {}) } };
   }
 
   ruleSet(name: string): string | null { return ruleSet(name, this.o.store.settings(), this.o.source.nodes()); }
@@ -174,6 +190,19 @@ export class ClashIntegration {
   provider(slug: string): { readonly text: string; readonly userinfo?: string } | null { return this.o.source.provider(slug); }
 
   // ---- inside
+
+  /** What would be handed over now; null without a subscription to work from. */
+  private build(): { readonly config: Record<string, unknown>; readonly text: string; readonly hash: string } | null {
+    const info = this.o.source.info(), settings = this.o.store.settings(), base = `${this.o.base()}/clash`, token = this.token();
+    if (!info) return null;
+    const key = JSON.stringify([info.updatedAt, info.providers.map((p) => p.updatedAt), info.nodes, settings, base, token]);
+    if (this.made?.key !== key) {
+      const config = buildConfig(this.o.source.document()!, this.o.source.nodes(), this.o.source.held(), settings, base, token);
+      const text = stringify(config, { lineWidth: 0 });
+      this.made = { key, config, text, hash: createHash("sha256").update(text).digest("hex").slice(0, 16) };
+    }
+    return this.made;
+  }
 
   private controller(): ClashController | null {
     const socket = this.o.socket ? this.o.socket() : vergeSocket(this.o.dir);
@@ -221,9 +250,11 @@ export class ClashIntegration {
     const document = this.o.source.document() ?? {};
     const enabled = this.enabled();
     const base = this.o.base();
-    // The groups of what would be handed over now: the core has to have each by its name.
-    const built = info ? groupsIn(buildConfig(structuredClone(document), nodes, this.o.source.held(), settings, `${base}/clash`, "")) : [];
-    const state = status ? running({ enabled, groups: built }, status) : { active: false, current: false };
+    // The groups of what would be handed over now: the core has to have each by its name. And what Clash Verge
+    // last fetched has to be that very text — a part the core does not show (DNS) is told only so.
+    const made = this.build(), served = this.o.store.served();
+    const seen = status ? running({ enabled, groups: made ? groupsIn(made.config) : [] }, status) : { active: false, current: false };
+    const state = { active: seen.active, current: seen.current && (!made || !served || served.hash === made.hash) };
     const service = (s: ClashService): ClashServiceView => {
       const names = groupNames(document, s);
       const live = !!status && state.active && SERVICE[s].set in status.nodeSets;
@@ -242,7 +273,8 @@ export class ClashIntegration {
       settings, services: { claude: service("claude"), openai: service("openai") },
       templates: Object.fromEntries(CLASH_TEMPLATES.map((t) => [t, { on: settings.templates[t].on, custom: settings.templates[t].rules !== null, count: templateRules(t, settings).length }])) as ClashView["templates"],
       defaultGroup: info ? defaultGroup(document) : null,
-      active: state.active, upToDate: state.current, install, fetchedAt: this.fetchedAt,
+      dns: { on: settings.dns.on, custom: settings.dns.text !== null, overridden: vergeOwnDns(this.o.dir) },
+      active: state.active, upToDate: state.current, install, fetchedAt: served?.at ?? null,
     };
   }
 }

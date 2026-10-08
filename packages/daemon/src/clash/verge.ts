@@ -39,6 +39,12 @@ export function vergeProfileText(uid: string, dir: string = vergeDir()): string 
   try { return readFileSync(join(dir, "profiles", profile.file), "utf8"); } catch { return null; }
 }
 
+/** Clash Verge has its own DNS settings switched on (`enable_dns_settings`): the core then takes those, not the
+ *  subscription's `dns:` — a DNS template of AgentSwitch's would change nothing (docs/clash-v0.md §7.8). */
+export function vergeOwnDns(dir: string = vergeDir()): boolean {
+  try { return (parse(readFileSync(join(dir, "verge.yaml"), "utf8")) as { enable_dns_settings?: unknown } | null)?.enable_dns_settings === true; } catch { return false; }
+}
+
 /** The link a fetched subscription of Clash Verge's is updated from, whole (it may hold a token: it goes nowhere but
  *  into AgentSwitch's own keeping, when the user imports that subscription). Null for one that is a file. */
 export function vergeProfileLink(uid: string, dir: string = vergeDir()): string | null {

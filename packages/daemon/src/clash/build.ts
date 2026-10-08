@@ -7,10 +7,10 @@
  *  What changes from day to day is not in this text but in the sets it names — the node sets, the rule sets — which the
  *  core reads again one at a time. The text itself changes only when a group appears, goes or is renamed. */
 
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { looksUp } from "./rules.js";
 import { providerSlug, type SourceNode } from "./source.js";
-import { BLOCK_TEMPLATE, DOMESTIC_TEMPLATE } from "./templates.js";
+import { BLOCK_TEMPLATE, DNS_TEMPLATE, DOMESTIC_TEMPLATE } from "./templates.js";
 
 export const CLASH_SERVICES = ["claude", "openai"] as const;
 export type ClashService = (typeof CLASH_SERVICES)[number];
@@ -29,9 +29,12 @@ export type ClashSettings = {
   /** The subscription's default group — the hand-picked one its last rule sends everything else to — is called
    *  `Manual` in what is handed over. */
   readonly renameDefault: boolean;
+  /** The DNS template (§7.8): on, what is handed over has it under `dns:` in place of the subscription's own.
+   *  `text`: the user's own (YAML, what goes under `dns:`); null: the built-in one. */
+  readonly dns: { readonly on: boolean; readonly text: string | null };
 };
 export const EMPTY_SETTINGS: ClashSettings = { claude: { nodes: [] }, openai: { nodes: [] }, direct: [], autoUpdateHours: 24,
-  templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false };
+  templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false, dns: { on: false, text: null } };
 export const UPDATE_HOURS = [0, 1, 6, 12, 24] as const;
 export const BUILT_IN: Readonly<Record<ClashTemplate, readonly string[]>> = { domestic: DOMESTIC_TEMPLATE, block: BLOCK_TEMPLATE };
 
@@ -63,6 +66,21 @@ export function chosen(service: ClashService, settings: ClashSettings, nodes: re
 /** A template's rules as they are in use: the user's own, else the built-in ones. */
 export function templateRules(template: ClashTemplate, settings: ClashSettings): readonly string[] {
   return settings.templates[template].rules ?? BUILT_IN[template];
+}
+
+/** The DNS template's text as it is in use: the user's own, else the built-in one. */
+export function dnsText(settings: ClashSettings): string { return settings.dns.text ?? DNS_TEMPLATE; }
+
+/** What a DNS template's text holds: a set of keys, as `dns:` takes. Or why it is not one. */
+export function dnsSection(text: string): { readonly section: Record<string, unknown> } | { readonly error: string } {
+  let doc: unknown;
+  try { doc = parse(text); } catch (err) {
+    const at = (err as { linePos?: { line: number }[] }).linePos?.[0]?.line;
+    return { error: `DNS 这一段不是合法的 YAML${at ? `（第 ${at} 行附近）` : ""}` };
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return { error: "DNS 这一段要是一组“键: 值”（dns: 下面的内容）" };
+  if ("dns" in doc && Object.keys(doc).length === 1) return { error: "不用写 dns: 这一行，只写它下面的内容" };
+  return { section: doc as Record<string, unknown> };
 }
 
 /** A service's two groups by the names they have in this subscription: its own spelling of them where it has such
@@ -117,6 +135,10 @@ export function directRule(address: string): string[] {
  *  (`http://127.0.0.1:<port>/clash`); `token`: what each address has to carry. */
 export function buildConfig(document: Record<string, unknown>, nodes: readonly SourceNode[], held: readonly string[], settings: ClashSettings, base: string, token: string): Record<string, unknown> {
   const config = document;
+  if (settings.dns.on) {
+    const dns = dnsSection(dnsText(settings));
+    if ("section" in dns) config.dns = dns.section;   // one that is not a section was refused when it was saved
+  }
   const renamed = settings.renameDefault ? defaultGroup(config) : null;
   if (renamed) rename(config, renamed, DEFAULT_GROUP);
   const at = (path: string): string => `${base}/${path}?k=${token}`;

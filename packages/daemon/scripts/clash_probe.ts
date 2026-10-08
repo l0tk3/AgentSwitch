@@ -9,7 +9,8 @@
  *     the nodes' order, picks a node, asks for delays, turns the rule templates on and off — reading back from the
  *     private core what its groups and rule sets became;
  *  5. takes the subscription service's own link in as well (the one the user's file names for its nodes) and has the
- *     core's program check what is made of it with its default group called Manual.
+ *     core's program check what is made of it with its default group called Manual, the rule templates and the DNS
+ *     template on.
  *
  *  Nothing of Clash Verge's is written and its core is only read. Real nodes are tried (step 8), as Clash Verge's own
  *  delay test does.   npx tsx scripts/clash_probe.ts [path to mihomo]   (CLASH_PROBE_TMP: a short folder for the socket) */
@@ -135,9 +136,11 @@ async function main(): Promise<void> {
         const raw = new ClashIntegration({ store: new ClashStore(second), source: new ClashSource(second, undefined, undefined, () => `clash.meta/${before.version}`), base: () => `http://127.0.0.1:${port}`, socket: () => null });
         const got2 = await raw.setSource({ link });
         say(`11) the service's own link taken in: ${got2.nodes.length} nodes, default group ${JSON.stringify(got2.defaultGroup)}`);
-        await raw.saveSettings({ claude: { nodes: claude }, openai: { nodes: openai }, direct: [], autoUpdateHours: 24, renameDefault: true, templates: { domestic: { on: true, rules: null }, block: { on: true, rules: null } } });
+        const theirs = (parse(raw.subscription()!.text) as Record<string, any>).dns;
+        const all = await raw.saveSettings({ claude: { nodes: claude }, openai: { nodes: openai }, direct: [], autoUpdateHours: 24, renameDefault: true, templates: { domestic: { on: true, rules: null }, block: { on: true, rules: null } }, dns: { on: true, text: null } });
         const text2 = raw.subscription()!.text;
         const made2 = parse(text2) as Record<string, any>;
+        say(`    dns: the service's own had ${theirs ? `${Object.keys(theirs).length} keys (${theirs["enhanced-mode"] ?? "no mode"}, ${Object.keys(theirs["nameserver-policy"] ?? {}).length} policies)` : "none"}; with the template ${Object.keys(made2.dns).length} keys (${made2.dns["enhanced-mode"]}, ${Object.keys(made2.dns["nameserver-policy"]).length} policies, ${made2.dns["fake-ip-filter"].length} names kept real); Clash Verge's own DNS settings on: ${all.dns.overridden}`);
         say(`    groups: ${made2["proxy-groups"].map((g: { name: string; type: string }) => `${g.name}(${g.type})`).join(" | ")}`);
         say(`    rules: ${made2.rules.length}; first ${made2.rules.slice(0, 5).join(" | ")}; last ${made2.rules.slice(-5).join(" | ")}`);
         say(`    rules that still name the old group: ${made2.rules.filter((r: string) => got2.defaultGroup && r.split(",").includes(got2.defaultGroup)).length}`);
