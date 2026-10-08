@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch · Profiles</title>
+<style>
+/* Profiles (docs/profiles-v0.md, prototype of 2026-10-08; user: 要集成类似于cc switch的功能，几个agent分开管理，要做到可以
+   一键切换不同设备指纹的另一套配置 … 不同的profile绑定不同的camufox 浏览器指纹，如果指定代理那对应的camufox也跟着走
+   对应的代理；右下角加一个浏览器小图标点击可以打开对应浏览器 … 这几个agent的profile需要分开，不能一个身份把他们全包起来
+   … 不指定指纹/代理的agent默认使用 默认指纹和无代理 浏览器，指定了指纹和代理的agent使用指定指纹和代理的浏览器；不同
+   session（包括不同agent）的浏览器标签页管理按照codex的来). Nothing here is built: it is the shape to agree on.
+   ?look=pixel|classic  #agents|terminal|browser|signin */
+:root { --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace; --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #1b1b1d; color: #d8d4cc; font: 13px var(--ui); }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.ctl { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center; padding: 16px 16px 6px; }
+.ctl .seg b { font: 400 12px var(--mono); color: #8d8a84; margin-right: 8px; }
+.ctl button { border: 1px solid #3a3a3e; color: #b5b1aa; font: 12px var(--mono); padding: 4px 10px; margin-left: -1px; }
+.ctl button.on { background: #e9e6df; color: #111; }
+.note { max-width: 900px; margin: 6px auto 14px; color: #8f8b84; font-size: 12.5px; line-height: 1.7; text-align: center; padding: 0 16px; min-height: 44px; }
+.note b { color: #d8d4cc; font-weight: 600; }
+.stagewrap { overflow-x: auto; padding: 0 16px; }
+.stage { position: relative; width: 900px; height: 560px; margin: 0 auto; }
+.say { max-width: 900px; margin: 16px auto 60px; padding: 0 16px; color: #a9a59e; font-size: 12.5px; line-height: 1.8; }
+.say h2 { font: 600 12px var(--mono); letter-spacing: .08em; color: #8d8a84; margin: 18px 0 8px; }
+.say b { color: #e9e6df; font-weight: 600; }
+.say ul { margin: 4px 0; padding-left: 18px; }
+
+.s-pixel { --bg: #000; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --line: #262524; --sel: #1a1a1a; --panel: #0b0b0b;
+  --signal: #ff2e88; --amber: #ffb000; --green: #9be22d; --red: #ff4a3d; --f: var(--mono); --r: 0px; }
+.s-classic { --bg: #000; --ink: #ededf0; --ink2: #a2a2a8; --ink3: #6c6c72; --line: #2a2a2d; --sel: #232326; --panel: #141416;
+  --signal: #0a84ff; --amber: #ff9f0a; --green: #30d158; --red: #ff453a; --f: var(--ui); --r: 6px; }
+
+.win { position: absolute; inset: 0; background: var(--bg); color: var(--ink); font: 13px var(--f); border-radius: 10px; overflow: hidden;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.2), 0 26px 70px rgba(0,0,0,.6); display: grid; grid-template-rows: 28px minmax(0, 1fr) 26px; }
+.bar { display: flex; align-items: center; padding: 0 12px; position: relative; border-bottom: 1px solid var(--line); }
+.lights { display: flex; gap: 8px; } .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.title { position: absolute; left: 50%; transform: translateX(-50%); font: 600 13px var(--ui); white-space: nowrap; }
+.status { display: flex; align-items: center; gap: 10px; padding: 0 10px 0 12px; border-top: 1px solid var(--line); font: 12px var(--f); color: var(--ink2); white-space: nowrap; }
+.status .grow { flex: 1; } .status .sep { color: var(--ink3); }
+.sq { width: 8px; height: 8px; display: inline-block; background: var(--green); border-radius: calc(var(--r) * 1.4); }
+.sq.off { background: var(--ink3); } .sq.wait { background: var(--amber); }
+.body { min-height: 0; overflow: hidden; }
+.word { font: 12px var(--mono); } .s-classic .word { font: 600 12px var(--ui); }
+.btn { border: 1px solid var(--ink3); padding: 3px 10px; border-radius: var(--r); font: 12px var(--f); color: var(--ink); }
+.btn.pri { border-color: var(--signal); color: var(--signal); } .btn:hover { background: var(--sel); }
+.s-pixel .btn::before { content: "[ "; color: var(--ink3); } .s-pixel .btn::after { content: " ]"; color: var(--ink3); } .s-pixel .btn { border: 0; padding: 3px 2px; }
+.faint { color: var(--ink3); } .dim { color: var(--ink2); }
+
+/* ---------- Settings › Agents ---------- */
+.settings { display: grid; grid-template-columns: 170px minmax(0, 1fr); height: 100%; }
+.side { border-right: 1px solid var(--line); padding: 10px 0; color: var(--ink2); }
+.side div { padding: 5px 14px; } .side .on { background: var(--sel); color: var(--ink); box-shadow: inset 3px 0 0 var(--signal); }
+.page { padding: 14px 20px; overflow: auto; }
+.group { margin-bottom: 18px; } .group h3 { margin: 0 0 6px; font: 600 13px var(--ui); display: flex; gap: 8px; align-items: baseline; }
+.group h3 small { font: 400 11.5px var(--f); color: var(--ink2); }
+.cap { font: 11px var(--mono); color: var(--ink3); padding: 6px 0 3px; letter-spacing: .04em; }
+.prow { display: grid; grid-template-columns: 18px 110px minmax(0, 1fr) 170px 60px; gap: 10px; align-items: center; padding: 6px 8px; border-top: 1px solid var(--line); cursor: pointer; }
+.prow:hover { background: var(--sel); } .prow.cur { background: var(--sel); }
+.radio { width: 12px; height: 12px; border: 1.5px solid var(--ink3); border-radius: 50%; display: block; } .s-pixel .radio { border-radius: 0; }
+.cur .radio { border-color: var(--signal); background: radial-gradient(var(--signal) 0 45%, transparent 50%); } .s-pixel .cur .radio { background: linear-gradient(var(--signal), var(--signal)) center / 6px 6px no-repeat; }
+.prow .who { color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow .id { font: 11.5px var(--mono); color: var(--ink2); white-space: nowrap; } .prow .id b { color: var(--ink); font-weight: 400; }
+.prow .more { color: var(--ink3); text-align: right; font: 11.5px var(--mono); }
+.add { padding: 7px 8px; border-top: 1px solid var(--line); color: var(--signal); cursor: pointer; }
+.sheet { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: 460px; background: var(--panel); border: 1px solid var(--ink3); border-radius: calc(var(--r) * 2); padding: 16px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.7); }
+.sheet h4 { margin: 0 0 12px; font: 600 13px var(--ui); }
+.field { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; padding: 5px 0; }
+.field label { color: var(--ink2); } .in { border: 1px solid var(--line); background: var(--bg); padding: 4px 8px; border-radius: var(--r); font: 12.5px var(--f); color: var(--ink); min-height: 26px; }
+.pick { display: flex; } .pick button { border: 1px solid var(--line); padding: 4px 10px; margin-left: -1px; color: var(--ink2); font: 12px var(--f); } .pick button.on { background: var(--sel); color: var(--ink); border-color: var(--ink3); z-index: 1; }
+.sheet .foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; } .sheet p { margin: 8px 0 0; color: var(--ink2); font-size: 12px; line-height: 1.6; }
+
+/* ---------- a terminal (simple view) ---------- */
+.term { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 100%; }
+.list { border-right: 1px solid var(--line); padding: 6px 0; color: var(--ink2); overflow: hidden; }
+.list .g { padding: 9px 12px 3px; color: var(--ink3); font: 11.5px var(--mono); display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+.list .g b { color: var(--ink2); font-weight: 400; } .list .g .st { margin-left: auto; }
+.trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 12px 5px 14px; cursor: pointer; }
+.trow.sel { background: var(--sel); color: var(--ink); box-shadow: inset 3px 0 0 var(--signal); }
+.trow .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .trow .tag { font: 11px var(--mono); color: var(--ink2); }
+.rec { position: relative; padding: 18px 26px 0; display: flex; flex-direction: column; gap: 12px; height: 100%; }
+.rec h1 { margin: 0; font: 600 16px var(--ui); } .rec .sub { color: var(--ink2); font-size: 12px; margin-top: -8px; }
+.me { align-self: flex-end; background: var(--sel); padding: 6px 12px; border-radius: calc(var(--r) * 2.5 + 2px); max-width: 70%; }
+.ans { line-height: 1.65; max-width: 86%; }
+.box { margin-top: auto; margin-bottom: 14px; border: 1px solid var(--line); background: var(--panel); border-radius: calc(var(--r) * 2 + 2px); padding: 10px 12px; }
+.box .ph { color: var(--ink3); padding-bottom: 14px; } .box .foot { display: flex; gap: 10px; color: var(--ink2); font: 12px var(--f); align-items: center; } .box .foot .grow { flex: 1; }
+.menu { position: absolute; background: var(--panel); border: 1px solid var(--ink3); border-radius: calc(var(--r) + 2px); padding: 4px 0; min-width: 210px; box-shadow: 0 14px 40px rgba(0,0,0,.7); z-index: 5; font: 12.5px var(--f); }
+.menu div { padding: 5px 12px; display: flex; gap: 14px; cursor: pointer; } .menu div:hover { background: var(--sel); } .menu div span { margin-left: auto; color: var(--ink3); font: 11px var(--mono); }
+.menu .h { color: var(--ink3); font: 11px var(--mono); cursor: default; } .menu .h:hover { background: none; }
+.globe { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 4px; border-radius: var(--r); } .globe:hover { background: var(--sel); color: var(--ink); }
+.globe svg { display: block; } .globe.lit { color: var(--ink); } .globe.lit svg { color: var(--signal); }
+
+/* ---------- Browser page ---------- */
+.brow { display: grid; grid-template-columns: 400px minmax(0, 1fr); height: 100%; }
+.bgroup { padding: 9px 12px 4px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; cursor: pointer; }
+.bgroup.sel { background: var(--sel); box-shadow: inset 3px 0 0 var(--signal); }
+.bgroup .n { color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .s-pixel .bgroup .n { font-weight: 400; }
+.bgroup .x { grid-column: 1 / 3; font: 11px var(--mono); color: var(--ink2); }
+.bgroup .st { font: 11px var(--mono); color: var(--ink2); white-space: nowrap; }
+.tab { display: grid; grid-template-columns: 136px minmax(0, 1fr) auto; gap: 8px; padding: 4px 12px 4px 22px; cursor: pointer; align-items: baseline; }
+.tab.sel { background: var(--sel); color: var(--ink); box-shadow: inset 3px 0 0 var(--signal); }
+.tab .o { font: 11.5px var(--mono); color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .tab .o.you { color: var(--signal); }
+.tab .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .k { font: 10.5px var(--mono); color: var(--ink3); white-space: nowrap; } .tab .k.keep { color: var(--green); } .tab .k.hand { color: var(--amber); }
+.tab.gone { opacity: .25; text-decoration: line-through; }
+.pane { padding: 18px 22px; display: flex; flex-direction: column; gap: 10px; }
+.pane h1 { margin: 0; font: 600 15px var(--ui); } .kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 5px 12px; font-size: 12.5px; } .kv span:nth-child(odd) { color: var(--ink2); }
+.pane .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; } .pane p { margin: 0; color: var(--ink2); line-height: 1.65; font-size: 12.5px; }
+.shot { border: 1px solid var(--line); height: 150px; display: grid; place-items: center; color: var(--ink3); font: 11.5px var(--mono); border-radius: var(--r); background: repeating-linear-gradient(45deg, transparent 0 9px, rgba(255,255,255,.02) 9px 10px); }
+
+/* ---------- sign in ---------- */
+.signin { display: grid; grid-template-columns: 1fr 1fr; height: 100%; }
+.tty { border-right: 1px solid var(--line); padding: 16px 18px; font: 12.5px/1.7 var(--mono); color: var(--ink2); white-space: pre-wrap; } .tty b { color: var(--ink); font-weight: 400; } .tty i { color: var(--amber); font-style: normal; }
+.cam { padding: 0; display: grid; grid-template-rows: 30px 1fr; background: #17171a; }
+.cam .chrome { display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid #2c2c30; font: 12px var(--ui); color: #a2a2a8; }
+.cam .chrome .idn { font: 11px var(--mono); color: #ededf0; border: 1px solid #3a3a3e; padding: 1px 7px; border-radius: 3px; } .cam .chrome .url { flex: 1; background: #232326; padding: 3px 10px; border-radius: 5px; font: 11.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam .pg { display: grid; place-items: center; text-align: center; color: #a2a2a8; font: 13px var(--ui); padding: 20px; } .cam .pg b { display: block; color: #ededf0; font: 600 16px var(--ui); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="ctl">
+  <span class="seg" id="scenes"><b>Scene</b></span>
+  <span class="seg" id="looks"><b>Look</b></span>
+</div>
+<p class="note" id="note"></p>
+<div class="stagewrap"><div class="stage" id="stage"></div></div>
+<div class="say">
+  <h2>WHAT THIS PAGE IS</h2>
+  <p>docs/profiles-v0.md 的原型：<b>都还没做</b>，是用来对样子和规则的。四个场景上面可以点；场景里凡是看起来能点的也能点（切换当前配置、新建、右下角的浏览器图标、结束一轮、把标签留下）。</p>
+  <h2>THE RULES IT SHOWS</h2>
+  <ul>
+    <li><b>配置属于一个 agent</b>，各管各的；行首的单选就是“当前配置”，换了之后新开的终端用它，开着的不动。</li>
+    <li><b>没指定指纹和代理的配置用 <code>This Mac</code></b>（真实指纹、不走代理、现在那个浏览器）；<b>指定了的有自己的浏览器</b>，只属于这一个配置，不和别的配置、别的 agent 共用。</li>
+    <li><b>右下角的浏览器图标</b>在状态栏最右端（原来锁的位置），点一下把这个终端所用的浏览器叫到前面；机器上不止一个浏览器时旁边写明是哪个。</li>
+    <li><b>标签页按 Codex 客户端的办法管</b>：每个终端只管自己开的；agent 开的标签这一轮结束就关，除非标了 <code>Kept</code>（给你的结果）或 <code>Handoff</code>（等你操作，下一轮接着做）；你接手过的也留下。</li>
+    <li><b>登录走配套的浏览器</b>：这个终端里要打开的网页都落到它自己的浏览器里，不碰你的默认浏览器。</li>
+  </ul>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const q = new URLSearchParams(location.search);
+const SCENES = [["agents", "Agents"], ["terminal", "Terminal"], ["browser", "Browser"], ["signin", "Sign In"]];
+const NOTES = {
+  agents: "设置 › <b>Agents</b>：每个 agent 一段 Profiles。点行首换“当前配置”；点 <b>New Profile…</b> 看新建时填什么。",
+  terminal: "一个终端的简略视图。状态栏写着它的配置；<b>右下角的浏览器图标</b>点一下去它的浏览器。点配置名可以 <b>Continue As</b>。左边换一个终端看 Codex 的。",
+  browser: "<b>Browser</b> 页按“哪个浏览器”分组。点 <b>End Turn</b> 看 agent 的标签在一轮结束时怎么清；点标签右边的字把它留下。",
+  signin: "给 <b>Work</b> 这个配置登录：登录页开在它自己的浏览器里，带着它的代理和指纹，不碰默认浏览器。",
+};
+const S = {
+  scene: SCENES.some(([k]) => k === location.hash.slice(1)) ? location.hash.slice(1) : "agents",
+  look: q.get("look") === "classic" ? "classic" : "pixel",
+  current: { "Claude Code": "Work", Codex: "Default", OpenCode: "Default" },
+  profiles: {
+    "Claude Code": [
+      { name: "Default", who: "Max · you@example.com", own: false },
+      { name: "Work", who: "Max · work@example.com", own: true, exit: "http · Tokyo" },
+      { name: "Relay", who: "api.example.com", own: false, api: true },
+    ],
+    Codex: [{ name: "Default", who: "Pro · you@example.com", own: false }],
+    OpenCode: [{ name: "Default", who: "3 providers", own: false }],
+  },
+  sheet: null, menu: null,
+  term: "t1",
+  terms: {
+    t1: { agent: "Claude Code", short: "claude", profile: "Work", model: "Opus 5.5", folder: "AgentSwitch", name: "Agents 页的更新提示" },
+    t2: { agent: "Codex", short: "codex", profile: "Default", model: "GPT-6 Sol", folder: "AgentSwitch", name: "daemon 审计修复" },
+    t3: { agent: "Claude Code", short: "claude", profile: "Default", model: "Opus 5.5", folder: "api-server", name: "健康检查接口" },
+  },
+  bsel: "g:work",
+  running: { mac: true, work: true },
+  tabs: [
+    { id: "a", b: "mac", owner: "You", url: "github.com/l0tk3/AgentSwitch" },
+    { id: "b", b: "mac", owner: "codex · AgentSwitch", url: "localhost:8765/concepts/profiles.html", keep: null },
+    { id: "c", b: "mac", owner: "claude · api-server", url: "localhost:3000/health", keep: null },
+    { id: "d", b: "work", owner: "You", url: "claude.ai/settings" },
+    { id: "e", b: "work", owner: "claude · AgentSwitch", url: "console.anthropic.com/settings/usage", keep: "hand" },
+    { id: "f", b: "work", owner: "claude · AgentSwitch", url: "docs.anthropic.com/en/release-notes", keep: null },
+  ],
+  ended: false,
+};
+const browserOf = (t) => { const p = S.profiles[t.agent].find((x) => x.name === t.profile); return p?.own ? { key: "work", name: `${t.agent} · ${t.profile}`, exit: p.exit ?? "Direct" } : { key: "mac", name: "This Mac", exit: "Direct" }; };
+const globe = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="7" r="5.6"/><path d="M1.4 7h11.2M7 1.4c2 1.6 2 9.6 0 11.2M7 1.4c-2 1.6-2 9.6 0 11.2"/></svg>`;
+
+function agents() {
+  const groups = Object.entries(S.profiles).map(([agent, list]) => `
+    <div class="group"><h3>${agent}<small>${list.length === 1 ? "只有 Default：别处不出现配置的东西" : ""}</small></h3>
+      <div class="cap">PROFILES</div>
+      ${list.map((p) => `<div class="prow ${S.current[agent] === p.name ? "cur" : ""}" data-a="cur" data-agent="${agent}" data-name="${p.name}">
+        <i class="radio"></i><span>${p.name}</span><span class="who">${esc(p.who)}</span>
+        <span class="id">${p.own ? `<b>Own</b> · ${p.exit}` : "This Mac"}</span><span class="more">${p.name === "Default" ? "" : "▸"}</span></div>`).join("")}
+      <div class="add" data-a="new" data-agent="${agent}">New Profile…</div>
+    </div>`).join("");
+  const sh = S.sheet;
+  const sheet = !sh ? "" : `<div class="sheet"><h4>New Profile · ${sh.agent}</h4>
+    <div class="field"><label>Name</label><div class="in">${esc(sh.name)}</div></div>
+    <div class="field"><label>Sign-In</label><div class="pick"><button class="${sh.kind === "sub" ? "on" : ""}" data-a="kind" data-v="sub">Subscription</button><button class="${sh.kind === "api" ? "on" : ""}" data-a="kind" data-v="api">API Provider</button></div></div>
+    ${sh.kind === "api" ? `<div class="field"><label>Base URL</label><div class="in faint">https://…</div></div><div class="field"><label>API Key</label><div class="in faint">存成密文</div></div>` : ""}
+    <div class="field"><label>Identity</label><div class="pick"><button class="${!sh.own ? "on" : ""}" data-a="own" data-v="0">This Mac</button><button class="${sh.own ? "on" : ""}" data-a="own" data-v="1">Own</button></div></div>
+    ${sh.own ? `<div class="field"><label>Exit</label><div class="in">http://proxy.example:8080 <span class="faint">· user · ••••</span></div></div>
+    <div class="field"><label>Fingerprint</label><div class="in">macOS · Firefox 156 · 2560×1440 <span class="faint">generated</span></div></div>
+    <p>它有自己的浏览器：这份指纹、这个代理、它自己的登录态。只属于这个配置。</p>`
+    : `<p>用这台 Mac 的：真实指纹、不走代理、现在那个浏览器。${sh.kind === "sub" ? "登录照 agent 原来的做法开在你自己的浏览器里。" : ""}</p>`}
+    <div class="foot"><button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="create">Create</button></div></div>`;
+  return `<div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="title">Settings</div></div>
+    <div class="body"><div class="settings"><div class="side"><div>General</div><div class="on">Agents</div><div>Environment</div><div>Devices</div><div>Models</div></div>
+    <div class="page">${groups}</div></div></div>
+    <div class="status"><span class="sq"></span><span>Gateway</span><span class="sep">│</span><span>iPhone Online</span><span class="grow"></span></div>${sheet}`;
+}
+
+function terminal() {
+  const t = S.terms[S.term], b = browserOf(t), many = S.profiles[t.agent].length > 1;
+  const lit = S.tabs.some((x) => x.owner === `${t.short} · ${t.folder}` && !x.gone);
+  const rows = Object.entries(S.terms).map(([id, x]) => `<div class="trow ${id === S.term ? "sel" : ""}" data-a="term" data-id="${id}"><i class="sq"></i><span class="t">${esc(x.name)}</span><span class="tag">${S.profiles[x.agent].length > 1 ? x.profile : x.short}</span></div>`);
+  const menu = S.menu === "profile" ? `<div class="menu" style="right:230px;bottom:30px"><div class="h">Continue As</div>${S.profiles[t.agent].filter((p) => p.name !== t.profile).map((p) => `<div data-a="continue" data-name="${p.name}">${p.name}<span>${p.own ? p.exit : "This Mac"}</span></div>`).join("")}<div class="h">关掉这个 agent，用另一个配置续接同一段会话</div></div>` : "";
+  return `<div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="title">${esc(t.name)}</div></div>
+    <div class="body"><div class="term"><div class="list"><div class="g"><b>AgentSwitch</b> main</div>${rows[0]}${rows[1]}<div class="g"><b>api-server</b> feat/health</div>${rows[2]}</div>
+    <div class="rec"><h1>${esc(t.name)}</h1><div class="sub">${t.agent}${many ? ` · ${t.profile}` : ""} · ${t.model} · ~/Projects/${t.folder}</div>
+      <div class="me">看一下这个月的用量</div><div class="ans">我在浏览器里打开了用量页，需要你先登录一下：页面在 ${b.name === "This Mac" ? "这台 Mac 的浏览器" : `<b>${b.name}</b> 的浏览器`}里等你。</div>
+      <div class="box"><div class="ph">Reply</div><div class="foot"><span>+</span><span>Ask Each Time</span><span>·</span><span>${t.model}</span><span class="grow"></span><span>Context 31%</span></div></div>${menu}
+    </div></div></div>
+    <div class="status"><span class="sq"></span><span>Gateway</span><span class="sep">│</span><span>iPhone Online</span><span class="grow"></span>
+      <span>${t.short} · ${many ? `<span class="globe" data-a="menu" style="display:inline">${t.profile} ▾</span> · ` : ""}${t.model}</span><span class="sep">·</span><span>manual</span><span class="sep">·</span><span>On Mac · 139×46</span>
+      <span class="globe ${lit ? "lit" : ""}" data-a="globe" title="Show Browser">${globe}${S.running.work || b.key !== "mac" ? `<span>${b.key === "mac" ? "This Mac" : t.profile}</span>` : ""}</span></div>`;
+}
+
+function browser() {
+  const groups = [{ key: "mac", name: "This Mac", exit: "Direct" }, { key: "work", name: "Claude Code · Work", exit: "http · Tokyo" }, { key: "team", name: "Codex · Team", exit: "socks5 · Osaka", ghost: true }];
+  const list = groups.map((g) => {
+    const tabs = S.tabs.filter((t) => t.b === g.key);
+    const run = !!S.running[g.key];
+    return `<div class="bgroup ${S.bsel === `g:${g.key}` ? "sel" : ""}" data-a="bsel" data-id="g:${g.key}"><span class="n">${g.name}</span><span class="st">${run ? "Running" : "Not Running"}</span><span class="x">${g.exit}${g.ghost ? " · 示意：再建一个配置之后" : ""}</span></div>
+      ${run ? tabs.map((t) => `<div class="tab ${S.bsel === t.id ? "sel" : ""} ${t.gone ? "gone" : ""}" data-a="bsel" data-id="${t.id}"><span class="o ${t.owner === "You" ? "you" : ""}">${t.owner}</span><span class="u">${t.url}</span>
+        ${t.owner === "You" ? "" : `<span class="k ${t.keep === "keep" ? "keep" : t.keep === "hand" ? "hand" : ""}" data-a="keep" data-id="${t.id}">${t.keep === "keep" ? "Kept" : t.keep === "hand" ? "Handoff" : "This Turn"}</span>`}</div>`).join("") : ""}`;
+  }).join("");
+  const g = S.bsel.startsWith("g:") ? groups.find((x) => `g:${x.key}` === S.bsel) : null;
+  const tab = S.tabs.find((t) => t.id === S.bsel);
+  const pane = g ? `<h1>${g.name}</h1><div class="kv"><span>Fingerprint</span><span>${g.key === "mac" ? "这台 Mac 真实的那份" : "macOS · Firefox 156 · generated"}</span><span>Exit</span><span>${g.exit}${g.key === "mac" ? "" : " · 203.0.113.7"}</span><span>Used By</span><span>${g.key === "mac" ? "没有自己身份的配置：Claude Code · Default、Relay，Codex · Default" : g.name + "（只有它）"}</span></div>
+      <div class="acts">${S.running[g.key] ? `<button class="btn" data-a="run" data-id="${g.key}">Stop</button><button class="btn">Restart Browser</button>` : `<button class="btn pri" data-a="run" data-id="${g.key}">Start</button>`}${g.key === "mac" ? "" : `<button class="btn">New Fingerprint</button><button class="btn">Check Exit</button>`}</div>
+      <p>${g.key === "mac" ? "今天的那一个浏览器。各 agent 的 Default 起初都用它，各自的标签仍然分开。" : "只属于这一个配置。别的配置、别的 agent 的终端进不来；删掉这个配置时它连同里面的登录态一起删。"}</p>`
+    : tab ? `<h1>${tab.url}</h1><div class="kv"><span>Whose</span><span>${tab.owner}</span><span>Browser</span><span>${groups.find((x) => x.key === tab.b).name}</span><span>Kept</span><span>${tab.owner === "You" ? "你的标签，不会被清" : tab.keep === "keep" ? "Kept：这是给你的结果，留着" : tab.keep === "hand" ? "Handoff：等你操作，下一轮接着做" : tab.gone ? "这一轮结束时关掉了" : "这一轮结束时关掉"}</span></div>
+      <div class="shot">still preview</div><div class="acts"><button class="btn pri">Show Window</button><button class="btn">Take Over</button><button class="btn">Clear Site Data</button><button class="btn">Close Tab</button></div>` : "";
+  return `<div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="title">Browser</div></div>
+    <div class="body"><div class="brow"><div class="list">${list}</div><div class="pane">${pane}
+      <div class="acts" style="margin-top:auto"><button class="btn ${S.ended ? "" : "pri"}" data-a="end">${S.ended ? "Next Turn" : "End Turn"}</button></div>
+      <p>${S.ended ? "这一轮结束了：agent 开的、没标记的标签关掉了；标了 Handoff 的留着等你，下一轮要留得再标。" : "一轮进行中。标签右边的字可以点：This Turn → Kept → Handoff。"}</p></div></div></div>
+    <div class="status"><span class="sq"></span><span>Gateway</span><span class="sep">│</span><span>iPhone Online</span><span class="grow"></span><span>${g ? g.name : groups.find((x) => x.key === tab?.b)?.name ?? ""}</span></div>`;
+}
+
+function signin() {
+  return `<div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="title">Sign In · Claude Code · Work</div></div>
+    <div class="body"><div class="signin"><div class="tty"><b>❯ /login</b>
+
+Opening your browser to sign in…
+<i>→ opened in the browser of Claude Code · Work</i>
+
+Browser didn't open? Use the url below to sign in
+https://claude.ai/oauth/authorize?code=true&amp;client_id=…
+
+<span class="faint">这个终端里要开的网页都落到它自己的浏览器；
+你的默认浏览器不会被打开，也不留这个账号的登录。</span></div>
+    <div class="cam"><div class="chrome"><span class="idn">Claude Code · Work</span><span class="url">claude.ai/oauth/authorize?code=true&amp;client_id=…</span><span>http · Tokyo</span></div>
+      <div class="pg"><div><b>Sign in to Claude</b>在这里登录 work@example.com。<br>页面走的是这个配置的代理和指纹；<br>登录好之后跳回本机，终端接着往下走。</div></div></div></div></div>
+    <div class="status"><span class="sq"></span><span>Gateway</span><span class="sep">│</span><span>iPhone Online</span><span class="grow"></span><span>claude · Work</span><span class="globe lit">${globe}<span>Work</span></span></div>`;
+}
+
+function render() {
+  $("#scenes").innerHTML = `<b>Scene</b>` + SCENES.map(([k, n]) => `<button class="${S.scene === k ? "on" : ""}" data-a="scene" data-id="${k}">${n}</button>`).join("");
+  $("#looks").innerHTML = `<b>Look</b>` + ["pixel", "classic"].map((k) => `<button class="${S.look === k ? "on" : ""}" data-a="look" data-id="${k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join("");
+  $("#note").innerHTML = NOTES[S.scene];
+  $("#stage").innerHTML = `<div class="win s-${S.look}">${{ agents, terminal, browser, signin }[S.scene]()}</div>`;
+}
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-a]"); if (!el) { if (S.menu) { S.menu = null; render(); } return; }
+  const { a, id, agent, name, v } = el.dataset;
+  if (a === "scene") { S.scene = id; S.menu = null; history.replaceState(null, "", `#${id}`); }
+  else if (a === "look") S.look = id;
+  else if (a === "cur") S.current[agent] = name;
+  else if (a === "new") S.sheet = { agent, name: agent === "Codex" ? "Team" : "Second", kind: "sub", own: true };
+  else if (a === "kind") { S.sheet.kind = v; S.sheet.own = v === "sub"; }
+  else if (a === "own") S.sheet.own = v === "1";
+  else if (a === "close") S.sheet = null;
+  else if (a === "create") { const s = S.sheet; S.profiles[s.agent].push({ name: s.name, who: s.kind === "api" ? "api.example.com" : "Not Signed In", own: s.own, exit: s.own ? "http · Tokyo" : undefined }); S.sheet = null; }
+  else if (a === "term") { S.term = id; S.menu = null; }
+  else if (a === "menu") S.menu = S.menu ? null : "profile";
+  else if (a === "continue") { S.terms[S.term].profile = name; S.menu = null; }
+  else if (a === "globe") { const b = browserOf(S.terms[S.term]); S.running[b.key] = true; S.scene = "browser"; S.bsel = S.tabs.find((t) => t.b === b.key && t.owner.startsWith(S.terms[S.term].short) && !t.gone)?.id ?? `g:${b.key}`; history.replaceState(null, "", "#browser"); }
+  else if (a === "bsel") S.bsel = id;
+  else if (a === "run") S.running[id] = !S.running[id];
+  else if (a === "keep") { const t = S.tabs.find((x) => x.id === id); t.keep = t.keep === null ? "keep" : t.keep === "keep" ? "hand" : null; t.gone = false; e.stopPropagation(); }
+  else if (a === "end") { S.ended = !S.ended; for (const t of S.tabs) if (t.owner !== "You") { if (S.ended) t.gone = t.keep === null; else { t.gone = false; t.keep = null; } } }
+  render();
+});
+render();
+</script>
+</body>
+</html>
