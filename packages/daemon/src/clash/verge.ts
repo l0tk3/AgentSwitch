@@ -1,5 +1,6 @@
-/** Clash Verge Rev as it is found on this Mac (docs/clash-v0.md §1, §6): where it keeps its subscriptions, which one is
- *  in use, and the socket its core (mihomo) is controlled through. Read only: nothing of Clash Verge's is written. */
+/** Clash Verge Rev as it is found on this Mac (docs/clash-v0.md §1, §6): where it keeps its subscriptions (one of them
+ *  can be imported, §7.1), which one is in use, and the socket its core (mihomo) is controlled through. Read only:
+ *  nothing of Clash Verge's is written. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
@@ -36,6 +37,16 @@ export function vergeProfileText(uid: string, dir: string = vergeDir()): string 
   const profile = vergeProfiles(dir)?.profiles.find((p) => p.uid === uid);
   if (!profile || !/^[\w.-]+$/.test(profile.file)) return null;
   try { return readFileSync(join(dir, "profiles", profile.file), "utf8"); } catch { return null; }
+}
+
+/** The link a fetched subscription of Clash Verge's is updated from, whole (it may hold a token: it goes nowhere but
+ *  into AgentSwitch's own keeping, when the user imports that subscription). Null for one that is a file. */
+export function vergeProfileLink(uid: string, dir: string = vergeDir()): string | null {
+  let doc: unknown;
+  try { doc = parse(readFileSync(join(dir, "profiles.yaml"), "utf8")); } catch { return null; }
+  const items = Array.isArray((doc as { items?: unknown } | null)?.items) ? (doc as { items: unknown[] }).items : [];
+  const item = items.find((it) => (it as { uid?: unknown } | null)?.uid === uid) as { type?: unknown; url?: unknown } | undefined;
+  return item?.type === "remote" && typeof item.url === "string" && /^https?:\/\//.test(item.url) ? item.url : null;
 }
 
 /** The socket Clash Verge's core is controlled through: the one its service gives the core for this user, else the

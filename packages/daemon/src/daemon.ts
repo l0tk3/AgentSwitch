@@ -20,6 +20,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import { ProfileStore } from "./profiles/store.js";
+import { ClashIntegration } from "./clash/integration.js";
+import { ClashSource } from "./clash/source.js";
 import { ClashStore } from "./clash/store.js";
 import { defaultCwdRules } from "./api/cwdPolicy.js";
 import { guardLocal } from "./api/localGuard.js";
@@ -100,6 +102,8 @@ export const VERSION = "0.1.0";
 export const DEFAULT_PORT = 4711;
 /** Expired archived threads are deleted at start-up and then this often. */
 const THREAD_SWEEP_INTERVAL_MS = 3600_000;
+/** How often Clash Integration looks whether its subscription is due to be fetched again. */
+const CLASH_TICK_MS = 60_000;
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const MAX_PORT = 65_535;
 
@@ -194,6 +198,7 @@ export type Daemon = {
   stopBrowser(): Promise<void>;
   /** The port the 127.0.0.1 listener got: the terminals' hook command calls it. */
   setLocalPort(port: number): void;
+  readonly clash: ClashIntegration;
   close(): void;
 };
 
@@ -404,7 +409,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   sweepThreads(store, Date.now(), engine);
   forgetDeletedTasks(conversation, store);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const apiDeps: ApiDeps = { profiles: new ProfileStore({ home: cfg.home }), clash: { store: new ClashStore(cfg.home), base: () => `http://127.0.0.1:${localPort}` }, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const clash = new ClashIntegration({ store: new ClashStore(cfg.home), source: new ClashSource(cfg.home), base: () => `http://127.0.0.1:${localPort}` });
+  const apiDeps: ApiDeps = { profiles: new ProfileStore({ home: cfg.home }), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);
@@ -417,7 +423,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const api = createApp({ ...apiDeps, assistant });
   const remote = overrides.remote !== undefined ? overrides.remote : cfg.remote ? remoteRuntime({ home: cfg.home, port: cfg.remote.port, ...(cfg.remote.name ? { name: cfg.remote.name } : {}), gate: () => defaultGate() }) : null;
   const app = mountRemoteAdmin(new Hono().route("/", api), { store, remote });
-  return { app, api, remote, engine, store, quota, targets, terminals: terminalHost, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
+  return { app, api, remote, engine, store, quota, targets, clash, terminals: terminalHost, browser: browser?.host ?? null, setLocalPort: (port) => { localPort = port; },
     stopBrowser: async () => { await browser?.agents.shutdown(); await browser?.host.shutdown(); await browser?.stop(); },
     close: () => { terminalHost?.closeAll(); void browser?.agents.shutdown(); void browser?.host.shutdown(); reporter.stop(); store.close(); routingLog.close(); conversation.close(); } };
 }
@@ -567,7 +573,10 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   void daemon.quota.refresh();
   const sweeper = setInterval(() => sweepThreads(daemon.store, Date.now(), daemon.engine), THREAD_SWEEP_INTERVAL_MS);
   sweeper.unref();
-  const close = () => { clearInterval(sweeper); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); };
+  // Clash Integration's subscription, fetched again when its interval has passed (docs/clash-v0.md §7.1).
+  const clashTimer = setInterval(() => { void daemon.clash.tick(); }, CLASH_TICK_MS);
+  clashTimer.unref();
+  const close = () => { clearInterval(sweeper); clearInterval(clashTimer); stopOffers?.(); server.close(); void remote?.close(); daemon.close(); void opencode?.stop(); void opencodeExec?.stop(); };
   // A signal: Chrome is let quit on its own first (a killed one leaves its code-sign clone behind), then the rest.
   return { daemon, close, stop: async () => { await daemon.stopBrowser().catch(() => undefined); close(); } };
 }

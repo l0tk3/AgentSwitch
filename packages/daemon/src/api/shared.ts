@@ -30,7 +30,7 @@ export type ApiDeps = {
   /** Turns plaintext credentials in a submission into tokens before anything is stored (router-v0 §9); absent in echo mode. */
   readonly sealer?: Sealer;
   /** Clash Integration (docs/clash-v0.md). */
-  readonly clash?: import("./clash.js").ClashDeps;
+  readonly clash?: import("../clash/integration.js").ClashIntegration;
   /** Each agent's profiles (docs/profiles-v0.md). */
   readonly profiles?: import("../profiles/store.js").ProfileStore;
   readonly store: Store;
