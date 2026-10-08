@@ -242,22 +242,28 @@ struct ProfileProxySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("\(profile.name) · Proxy").font(.headline)
-            Text("在这个配置名下开的终端，agent 和它运行的命令发出去的流量都从这个代理走；这台 Mac 自己的地址不走。开终端之前会先查一次这个代理，不通就不开，不会改成直连。密码在这台 Mac 上加密后才保存。")
+            Text("在这个配置名下开的终端，agent 和它运行的命令发出去的流量都从这个代理走；这台 Mac 自己的地址不走。开终端之前会先查一次这个代理，不通就不开，不会改成直连。可以把整条代理地址（http://用户名:密码@主机:端口）直接粘进 Server，用户名和密码会自己分到下面两栏。密码在这台 Mac 上加密后才保存。")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Form {
-                TextField("Server", text: $draft.server, prompt: Text("http://host:port"))
+                TextField("Server", text: $draft.server, prompt: Text("http://user:pass@host:port"))
+                    // A whole proxy pasted in is taken apart at once: its name and password go to their own fields.
+                    // (Typed letter by letter it is left alone until `Apply`, so nothing moves under the cursor.)
+                    .onChange(of: draft.server) { old, new in
+                        let parted = draft.split()
+                        if new.count - old.count > 1, parted != draft, parted.username != draft.username || parted.password != draft.password { draft = parted }
+                    }
                 TextField("User Name", text: $draft.username)
                 SecureField("Password", text: $draft.password, prompt: Text(profile.proxy?.sealed == true ? "Kept" : ""))
                 if let exit { LabeledContent("Exit") { Text(exit.text).monospacedDigit().textSelection(.enabled) } }
             }
             .formStyle(.columns)
-            if let said = draft.problem ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            if let said = draft.split().problem ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 Button("No Proxy") { apply(nil) }.disabled(busy || profile.proxy == nil)
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Apply & Check") { apply(draft) }.keyboardShortcut(.defaultAction).disabled(busy || !draft.canApply)
+                Button("Apply & Check") { draft = draft.split(); apply(draft) }.keyboardShortcut(.defaultAction).disabled(busy || !draft.split().canApply)
             }
         }
         .padding(20)

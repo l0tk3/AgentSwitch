@@ -149,6 +149,37 @@ public struct BrowserProxyDraft: Sendable, Equatable {
         password.isEmpty && !user.isEmpty && current?.sealed == true
     }
 
+    /// The same with a proxy written whole in the server field taken apart (user, 2026-10-09: 这个代理要支持直接输入一个
+    /// http代理（http 开头 带用户名密码 服务器的那种）): `http://user:pass@host:port` — the name and the password go
+    /// to their own fields and the server keeps `http://host:port`. Also taken: the same without a scheme (`http` is
+    /// meant), `host:port` alone, and the `host:port:user:pass` that proxy sellers hand out. A name or a password
+    /// written with `%` escapes is read as what it stands for. Anything else is left as it is.
+    public func split() -> BrowserProxyDraft {
+        var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        while text.hasSuffix("/") { text.removeLast() }
+        let place = /(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.\-]+):(\d{1,5})/
+        if let sold = text.wholeMatch(of: /(\[[0-9a-fA-F:]+\]|[A-Za-z0-9.\-]+):(\d{1,5}):([^:\s]+):(\S+)/) {
+            return BrowserProxyDraft(server: "http://\(sold.1):\(sold.2)", username: String(sold.3), password: String(sold.4))
+        }
+        var scheme = "http", rest = Substring(text)
+        if let named = text.prefixMatch(of: /(?i)(https?|socks4|socks5):\/\//) {
+            scheme = named.1.lowercased()
+            rest = text[named.range.upperBound...]
+        } else if text.contains("://") { return self }
+        // What stands before the last `@` is who asks; the first `:` in it parts the name from the password.
+        var name: String?, word: String?
+        if let at = rest.lastIndex(of: "@") {
+            let who = rest[..<at]
+            let colon = who.firstIndex(of: ":")
+            name = String(who[..<(colon ?? who.endIndex)])
+            word = colon.map { String(who[who.index(after: $0)...]) }
+            rest = rest[rest.index(after: at)...]
+        }
+        guard rest.wholeMatch(of: place) != nil else { return self }
+        let plain = { (s: String?) -> String? in s.flatMap { $0.isEmpty ? nil : ($0.removingPercentEncoding ?? $0) } }
+        return BrowserProxyDraft(server: "\(scheme)://\(rest)", username: plain(name) ?? username, password: plain(word) ?? password)
+    }
+
     /// The request, with `ciphertext` for a typed password (nil: none was typed).
     public func request(ciphertext: String?, current: BrowserProxy?) -> BrowserProxyRequest {
         BrowserProxyRequest(server: server, username: user, password: ciphertext, keepPassword: ciphertext == nil && keepsPassword(of: current))

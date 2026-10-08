@@ -24,6 +24,30 @@ final class ProfileProxyTests: XCTestCase {
         XCTAssertEqual(draft.request(ciphertext: nil, current: list[1].proxy), BrowserProxyRequest(server: "http://proxy.example:8080", username: "me", keepPassword: true))
     }
 
+    func testAProxyWrittenWholeIsTakenApart() {
+        let parts = { (text: String) -> [String] in let d = BrowserProxyDraft(server: text).split(); return [d.server, d.username, d.password] }
+        XCTAssertEqual(parts("http://alice:s3cret@proxy.example:8080"), ["http://proxy.example:8080", "alice", "s3cret"])
+        XCTAssertEqual(parts("  HTTP://alice:s3cret@proxy.example:8080/ \n"), ["http://proxy.example:8080", "alice", "s3cret"])
+        XCTAssertEqual(parts("socks5://alice:s3cret@10.0.0.2:1080"), ["socks5://10.0.0.2:1080", "alice", "s3cret"])
+        // Without a scheme `http` is meant; the sellers' `host:port:user:pass`; a bare `host:port`.
+        XCTAssertEqual(parts("alice:s3cret@proxy.example:8080"), ["http://proxy.example:8080", "alice", "s3cret"])
+        XCTAssertEqual(parts("proxy.example:8080:alice:s3cret"), ["http://proxy.example:8080", "alice", "s3cret"])
+        XCTAssertEqual(parts("203.0.113.7:3128"), ["http://203.0.113.7:3128", "", ""])
+        // A password with `@` or `:` in it, or written with escapes; a name alone; an IPv6 host.
+        XCTAssertEqual(parts("http://alice:p@ss:w0rd@proxy.example:8080"), ["http://proxy.example:8080", "alice", "p@ss:w0rd"])
+        XCTAssertEqual(parts("http://alice%40corp:p%3Ass%2F1@proxy.example:8080"), ["http://proxy.example:8080", "alice@corp", "p:ss/1"])
+        XCTAssertEqual(parts("http://alice@proxy.example:8080"), ["http://proxy.example:8080", "alice", ""])
+        XCTAssertEqual(parts("http://alice:s3cret@[2001:db8::1]:8080"), ["http://[2001:db8::1]:8080", "alice", "s3cret"])
+        // What is already in its fields stays where the address says nothing of it; what is not a proxy is left as it is.
+        let kept = BrowserProxyDraft(server: "http://proxy.example:8080", username: "bob", password: "typed").split()
+        XCTAssertEqual([kept.server, kept.username, kept.password], ["http://proxy.example:8080", "bob", "typed"])
+        for text in ["", "proxy.example", "http://proxy.example", "ftp://alice:s3cret@proxy.example:21", "http://alice:s3cret@proxy.example:port"] { XCTAssertEqual(parts(text)[0], text) }
+        // Taken apart, it can be applied; whole, the strict form could not.
+        XCTAssertFalse(BrowserProxyDraft(server: "http://alice:s3cret@proxy.example:8080").canApply)
+        XCTAssertTrue(BrowserProxyDraft(server: "http://alice:s3cret@proxy.example:8080").split().canApply)
+        XCTAssertNil(BrowserProxyDraft(server: "proxy.example:8080:alice:s3cret").split().problem)
+    }
+
     func testATerminalCarriesItsProfilesExitBesideItsName() throws {
         let terminal = { (profile: String) throws -> TerminalInfo in
             try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","cwd":"/w","name":"n","status":"working","model":"claude-opus-5-5","mode":"manual","cols":120,"rows":36,"profile":\#(profile)}"#.utf8))
