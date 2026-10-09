@@ -116,7 +116,7 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
     const all: Record<string, import("../profiles/store.js").AgentProfiles> = deps.profiles?.all() ?? {};
     const own = Object.entries(all).flatMap(([agent, list]) => list.profiles.filter((p) => p.proxy).map((p) => {
       const key = `${agent}.${p.id}`;
-      return { key, name: p.name, agent, ...(p.exit ? { exit: { ip: p.exit.ip, place: p.exit.place } } : {}), running: fleet.get(key)?.host.running ?? false };
+      return { key, name: p.name, agent, ...(p.color ? { color: p.color } : {}), ...(p.exit ? { exit: { ip: p.exit.ip, place: p.exit.place } } : {}), running: fleet.get(key)?.host.running ?? false };
     }));
     return c.json({ browsers: [{ key: null, name: "Shared", running: deps.browser?.host.running ?? false }, ...own] });
   });

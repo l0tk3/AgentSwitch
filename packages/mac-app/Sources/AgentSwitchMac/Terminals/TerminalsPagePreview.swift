@@ -261,12 +261,16 @@ enum TerminalsPagePreview {
         }
         let terminals = [
             TerminalInfo(id: "t1", harness: "claude-code", cwd: project, model: "claude-opus-5-5", mode: "auto", name: "修登录页的跳转", status: "working", cols: 104, rows: 33, createdAt: 10,
-                         subagents: [TerminalSubagent(id: "a1", type: "Explore", name: "找登录入口", doing: "读 login.js"), TerminalSubagent(id: "a2", type: "general-purpose", name: "跑测试")]),
+                         subagents: [TerminalSubagent(id: "a1", type: "Explore", name: "找登录入口", doing: "读 login.js"), TerminalSubagent(id: "a2", type: "general-purpose", name: "跑测试")])
+                // Under a profile with a proxy of its own (docs/profiles-v0.md §3.2): its lit dot while it runs.
+                .under(profile: "cwork1 · Tokyo 203.0.113.9", color: .violet),
             TerminalInfo(id: "t2", harness: "codex", cwd: "\(project)/packages/secret-gate", model: "gpt-5.5", mode: "manual", name: "网关的引用过期", status: "waiting", cols: 80, rows: 24, createdAt: 20,
                          permissions: [TerminalRequest(id: "r1", tool: "Bash", summary: "Bash: npm test")]),
             TerminalInfo(id: "t3", harness: "opencode", cwd: "\(home)/Desktop/WorkSpace/Projects/MailLab", name: "解析退信", status: "idle", createdAt: 30),
-            TerminalInfo(id: "t4", harness: "claude-code", cwd: "\(home)/Desktop/WorkSpace/Projects/MailLab", name: "旧的导出", status: "exited", createdAt: 5, exitCode: 1),
+            // One that ended keeps no dot: the dot says what runs under the profile now.
+            TerminalInfo(id: "t4", harness: "claude-code", cwd: "\(home)/Desktop/WorkSpace/Projects/MailLab", name: "旧的导出", status: "exited", createdAt: 5, exitCode: 1).under(profile: "side", color: .sand),
             TerminalInfo(id: "t5", harness: "codex", cwd: project, model: "gpt-6-sol", mode: "manual", name: "查一处越界读", status: "idle", createdAt: 40, effort: "high", sets: true, daybreak: true),
+            TerminalInfo(id: "t6", harness: "claude-code", cwd: project, model: "claude-opus-5-5", mode: "auto", name: "看一遍改动", status: "idle", createdAt: 50).under(profile: "side", color: .sand),
         ]
         let sessions = [
             session("s1", project, "完成未完成的部分 gate-next", ago: 0, active: true), session("s2", project, "简单看一下项目内容", "codex", ago: 13),

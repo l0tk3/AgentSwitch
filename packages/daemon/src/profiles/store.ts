@@ -21,7 +21,13 @@ export const DEFAULT_PROFILE = "default";
 export type ProfileProxy = { readonly server: string; readonly username?: string | undefined; readonly password?: string | undefined };
 /** Where a profile's proxy let traffic out when it was last checked. */
 export type ProfileExit = { readonly ip: string; readonly place: string | null; readonly timezone: string | null; readonly checkedAt: number };
+/** The colours a profile can have (§3.2), by name; the screens know what each looks like. None of them is a colour
+ *  the screens use for a state (waiting, working, failed, done, the signal). */
+export const PROFILE_COLORS = ["violet", "sand", "mint", "orchid", "olive", "slate"] as const;
+export type ProfileColor = (typeof PROFILE_COLORS)[number];
 export type Profile = { readonly id: string; readonly name: string; readonly kind: ProfileKind; readonly createdAt: number;
+  /** Its colour: the dot its terminals are marked with. `Default` has none. */
+  readonly color?: ProfileColor;
   /** Who is signed in, as the agent's own files say (absent: nobody yet, or the agent does not say). */
   readonly account?: string;
   /** Its proxy as the screens are told of it (`sealed`: it has a password, never shown); absent: this Mac's own way out. */
@@ -29,7 +35,7 @@ export type Profile = { readonly id: string; readonly name: string; readonly kin
   readonly exit?: ProfileExit };
 export type AgentProfiles = { readonly current: string; readonly profiles: readonly Profile[]; /** More than `Default` can be made for this agent. */ readonly creatable: boolean };
 
-type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number; proxy?: ProfileProxy; exit?: ProfileExit }[] };
+type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number; color?: ProfileColor; proxy?: ProfileProxy; exit?: ProfileExit }[] };
 type File = { agents?: Partial<Record<ProfileAgent, Stored>> };
 
 export class ProfileError extends Error {
@@ -81,6 +87,21 @@ export class ProfileStore {
     return this.of(agent, this.read()).profiles.find((p) => p.id === id)?.name ?? null;
   }
 
+  /** How `id` signs in; null for `Default` and for one that is not there. */
+  kindOf(agent: ProfileAgent, id: string): ProfileKind | null {
+    return this.read().agents?.[agent]?.profiles?.find((p) => p.id === id)?.kind ?? null;
+  }
+
+  /** `id`'s colour; null for `Default` and for one that is not there. */
+  colorOf(agent: ProfileAgent, id: string): ProfileColor | null {
+    return this.read().agents?.[agent]?.profiles?.find((p) => p.id === id)?.color ?? null;
+  }
+
+  setColor(agent: ProfileAgent, id: string, color: ProfileColor): void {
+    if (!PROFILE_COLORS.includes(color)) throw new ProfileError("invalid", "no such colour");
+    this.change(agent, id, (p) => ({ ...p, color }));
+  }
+
   /** The proxy `id` has of its own, whole (for the forwarder); null: none, or no such profile. */
   proxyOf(agent: ProfileAgent, id: string): ProfileProxy | null {
     return this.read().agents?.[agent]?.profiles?.find((p) => p.id === id)?.proxy ?? null;
@@ -117,7 +138,10 @@ export class ProfileStore {
     const known = this.of(agent, file).profiles;
     if (known.some((p) => p.name.toLowerCase() === said.toLowerCase())) throw new ProfileError("conflict", `there is a profile named ${said} already`);
     if (known.length >= MAX_PROFILES) throw new ProfileError("conflict", "too many profiles");
-    const profile = { id: randomBytes(5).toString("hex"), name: said, kind, createdAt: this.now() };
+    // A colour no other profile of this agent has, while there is one left; then they come round again.
+    const taken = new Set((file.agents?.[agent]?.profiles ?? []).map((p) => p.color));
+    const color = PROFILE_COLORS.find((c) => !taken.has(c)) ?? PROFILE_COLORS[known.length % PROFILE_COLORS.length]!;
+    const profile = { id: randomBytes(5).toString("hex"), name: said, kind, createdAt: this.now(), color };
     this.claudeHome(join(this.dir, agent, profile.id, "home"));
     const stored = file.agents?.[agent] ?? {};
     this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: [...(stored.profiles ?? []), profile] } } });
@@ -181,7 +205,21 @@ export class ProfileStore {
   }
 
   private read(): File {
-    try { const parsed = JSON.parse(readFileSync(this.file, "utf8")) as File; return parsed && typeof parsed === "object" ? parsed : {}; } catch { return {}; }
+    let file: File;
+    try { const parsed = JSON.parse(readFileSync(this.file, "utf8")) as File; file = parsed && typeof parsed === "object" ? parsed : {}; } catch { return {}; }
+    // A profile made before profiles had colours is given one now, and keeps it.
+    let coloured = false;
+    for (const stored of Object.values(file.agents ?? {})) {
+      const taken = new Set((stored?.profiles ?? []).map((p) => p.color));
+      for (const [i, p] of (stored?.profiles ?? []).entries()) {
+        if (p.color && PROFILE_COLORS.includes(p.color)) continue;
+        p.color = PROFILE_COLORS.find((c) => !taken.has(c)) ?? PROFILE_COLORS[i % PROFILE_COLORS.length]!;
+        taken.add(p.color);
+        coloured = true;
+      }
+    }
+    if (coloured) this.write(file);
+    return file;
   }
 
   private write(file: File): void {

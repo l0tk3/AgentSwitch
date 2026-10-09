@@ -56,6 +56,8 @@ export type Terminals = {
   readonly prepare?: (harness: TerminalHarness) => Promise<unknown>;
   /** The tree's git status (default: `git status` itself, gitStatus.ts). */
   readonly git?: GitStatus;
+  /** Whether `harness` is signed in, in the folder a profile gives it (signIn.ts); null or absent: not known. */
+  readonly signedIn?: (harness: TerminalHarness, configHome: string) => Promise<boolean | null>;
 };
 
 /** A terminal as the screens list it: each sub-agent with what it is doing in words (`doing`, as the Live Activity). */
@@ -332,8 +334,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const wanted = body.data.profile ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
     const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     if (wanted !== DEFAULT_PROFILE && !profileHome) return c.json({ error: "no such profile" }, 400);
-    let profile: { id: string; name: string; home: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string } | null =
-      profileHome ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, home: profileHome } : null;
+    const color = profileHome ? deps.profiles!.colorOf(body.data.harness, wanted) : null;
+    let profile: { id: string; name: string; home: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string; color?: string } | null =
+      profileHome ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, home: profileHome, ...(color ? { color } : {}) } : null;
     // A profile with a proxy of its own: before anything is started under it, the proxy is asked where it lets
     // traffic out. One that does not answer starts nothing — the agent is not let out another way (§4).
     if (profile) {
@@ -341,8 +344,13 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       if ("refused" in way) return c.json({ error: way.refused }, way.status);
       profile = { ...profile, ...way };
     }
+    // A profile nobody is signed in to starts at its sign-in (docs/profiles-v0.md §3.1), not at a prompt that cannot
+    // answer. Asked of the agent itself; when it does not say, nothing is assumed.
+    // Only one that signs in with an account: one that pays by a key has nobody to sign in.
+    const account = profile && deps.profiles!.kindOf(body.data.harness, wanted) === "subscription";
+    const firstInput = profile && account && (await t.signedIn?.(body.data.harness, profile.home).catch(() => null)) === false ? "/login" : null;
     try {
-      const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
+      const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(firstInput ? { firstInput } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(fork ? { fork } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });

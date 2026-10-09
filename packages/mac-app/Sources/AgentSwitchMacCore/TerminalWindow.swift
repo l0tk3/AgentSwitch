@@ -44,6 +44,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let subagents: [TerminalSubagent]
     /// The name of the profile it runs under (docs/profiles-v0.md); nil: the Mac's own (`Default`).
     public private(set) var profileName: String?
+    /// That profile's colour (docs/profiles-v0.md §3.2): the lit dot this terminal is marked with while it runs.
+    public private(set) var profileColor: ProfileColor?
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, workdir, model, effort, modeNow, suggestion, sets, daybreak, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
@@ -105,15 +107,25 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   suggestion: (try? c.decodeIfPresent(String.self, forKey: .suggestion)) ?? nil,
                   sets: (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil,
                   daybreak: (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil)
-        struct Profile: Decodable { let name: String; let exit: ProfileExit? }
+        struct Profile: Decodable { let name: String; let exit: ProfileExit?; let color: String? }
         let profile = (try? c.decodeIfPresent(Profile.self, forKey: .profile)) ?? nil
         // A profile with a proxy of its own: where that proxy let traffic out when the terminal started goes with its
         // name wherever the name is shown (docs/profiles-v0.md §4: 代理标注在底栏).
         profileName = profile.map { [$0.name, $0.exit?.text].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ") }
+        profileColor = profile?.color.flatMap(ProfileColor.init(rawValue:))
     }
 
     public var running: Bool { status != "exited" }
     public var isRunning: Bool { running }
+
+    /// The same terminal as one that runs under a profile (what the service says of it when it does): the profile's
+    /// words and its colour.
+    public func under(profile words: String, color: ProfileColor?) -> TerminalInfo {
+        var copy = self
+        copy.profileName = words
+        copy.profileColor = color
+        return copy
+    }
 
     /// The same terminal with what its stream just said: its status, its name.
     public func with(status: String? = nil, name: String? = nil, exitCode: Int? = nil) -> TerminalInfo {
@@ -122,6 +134,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                      exitCode: exitCode ?? self.exitCode, agentSessionId: agentSessionId, resumedFrom: resumedFrom, forked: forked,
                      permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow, suggestion: suggestion, sets: sets, daybreak: daybreak)
         copy.profileName = profileName
+        copy.profileColor = profileColor
         return copy
     }
 
@@ -129,6 +142,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public var context: TerminalContext {
         var context = TerminalContext(harness: harness, model: model, mode: mode, cols: cols, rows: rows, away: nil, running: running)
         context.profile = profileName
+        context.profileColor = profileColor
         return context
     }
 }

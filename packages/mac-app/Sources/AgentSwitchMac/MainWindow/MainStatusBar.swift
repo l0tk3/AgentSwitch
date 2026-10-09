@@ -96,6 +96,7 @@ struct TerminalStatusItems: View {
         HStack(spacing: 14) {
             HStack(spacing: 7) {
                 AgentSprite(harness: context.harness)
+                if context.running, let color = context.profileColor { ProfileDot(color: color) }
                 Text(context.agent(in: look)).truncationMode(.tail)
             }
             if let mode = context.mode { Text(ClassicWords.word(mode, in: look)) }

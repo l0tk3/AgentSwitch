@@ -30,6 +30,8 @@ enum Theme {
     /// At work: cyan; the accent in the classic look (one colour for what is yours to see moving).
     static let busy = Color(light: 0x0086A8, dark: 0x2EE6FF, classicLight: 0x007AFF, classicDark: 0x0A84FF)
     static let waiting = Color(light: 0xC27400, dark: 0xFFB000, classicLight: 0xFF9500, classicDark: 0xFF9F0A)
+    /// A profile's colour (docs/profiles-v0.md §3.2): who a terminal runs as, never a state.
+    static func profile(_ color: ProfileColor) -> Color { Color(light: color.light, dark: color.dark) }
     static let done = Color(light: 0x3F8F00, dark: 0x9BE22D, classicLight: 0x34C759, classicDark: 0x30D158)
     static let failed = Color(light: 0xD7261B, dark: 0xFF4A3D, classicLight: 0xFF3B30, classicDark: 0xFF453A)
     /// The page under the conversation and a task: black, or paper in light mode.

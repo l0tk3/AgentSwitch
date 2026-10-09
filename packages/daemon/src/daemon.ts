@@ -95,6 +95,7 @@ import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
 import { exitLookup } from "./browser/exit.js";
 import { ExitPool } from "./browser/exits.js";
+import { claudeSignedIn } from "./terminals/signIn.js";
 import { ProfileBrowsers } from "./browser/fleet.js";
 import { profileOfKey } from "./api/profiles.js";
 import type { BrowserHost } from "./browser/host.js";
@@ -403,6 +404,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     host: terminalHost,
     audit: new TerminalAudit(join(cfg.home, "terminals", "audit.jsonl")),
     agents: overrides.terminalLauncher ? [...TERMINAL_HARNESSES] : TERMINAL_HARNESSES.filter((h) => agentBinaries[h]),
+    // Claude Code says itself whether it is signed in, in a profile's folder (terminals/signIn.ts).
+    ...(agentBinaries["claude-code"] ? { signedIn: (harness: TerminalHarness, home: string) => (harness === "claude-code" ? claudeSignedIn(agentBinaries["claude-code"]!, home) : Promise.resolve(null)) } : {}),
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
     ...(codexTrust ? { prepare: async (harness: string) => { if (harness === "codex") await withTimeout(codexTrust.ensure({ fresh: true }), 8000); } } : {}),

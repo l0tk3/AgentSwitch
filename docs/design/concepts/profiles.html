@@ -65,6 +65,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .prow .who { color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prow .id { font: 11.5px var(--mono); color: var(--ink2); white-space: nowrap; } .prow .id b { color: var(--ink); font-weight: 400; }
 .prow .more { color: var(--ink3); text-align: right; font: 11.5px var(--mono); }
+/* A profile's colour (profiles-v0 §3.2, ui-v0 §7.2.11): who, never a state — small, flat, lit, at the row's end. */
+.pdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 5px currentColor; vertical-align: 1px; } .s-pixel .pdot { border-radius: 0; }
+.pslot { display: inline-block; width: 15px; }
 .add { padding: 7px 8px; border-top: 1px solid var(--line); color: var(--signal); cursor: pointer; }
 .sheet { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: 460px; background: var(--panel); border: 1px solid var(--ink3); border-radius: calc(var(--r) * 2); padding: 16px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.7); }
 .sheet h4 { margin: 0 0 12px; font: 600 13px var(--ui); }
@@ -136,6 +139,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
     <li><b>没指定指纹和代理的配置用 <code>This Mac</code></b>（真实指纹、不走代理、现在那个浏览器）；<b>指定了的有自己的浏览器</b>，只属于这一个配置，不和别的配置、别的 agent 共用。</li>
     <li><b>右下角的浏览器图标</b>在状态栏最右端（原来锁的位置），点一下把这个终端所用的浏览器叫到前面；机器上不止一个浏览器时旁边写明是哪个。</li>
     <li><b>标签页按 Codex 客户端的办法管</b>：每个终端只管自己开的；agent 开的标签这一轮结束就关，除非标了 <code>Kept</code>（给你的结果）或 <code>Handoff</code>（等你操作，下一轮接着做）；你接手过的也留下。</li>
+    <li><b>配置有颜色</b>（<code>Default</code> 没有）：Agents 页里名字前的圆点；在它名下<b>运行着</b>的终端，列表行尾和状态栏里带一颗同色的亮点。颜色说的是“谁”，不是状态——都避开状态色，位置和样子也和状态标记不同（已做，profiles-v0 §3.2）。</li>
+    <li><b>没登录的配置，开终端就从登录开始</b>（已做，§3.1）。</li>
     <li><b>登录走配套的浏览器</b>：这个终端里要打开的网页都落到它自己的浏览器里，不碰你的默认浏览器。</li>
   </ul>
 </div>
@@ -157,8 +162,8 @@ const S = {
   profiles: {
     "Claude Code": [
       { name: "Default", who: "Max · you@example.com", own: false },
-      { name: "Work", who: "Max · work@example.com", own: true, exit: "http · Tokyo" },
-      { name: "Relay", who: "api.example.com", own: false, api: true },
+      { name: "Work", who: "Max · work@example.com", own: true, exit: "http · Tokyo", color: "#b18cff" },
+      { name: "Relay", who: "api.example.com", own: false, api: true, color: "#e2c48d" },
     ],
     Codex: [{ name: "Default", who: "Pro · you@example.com", own: false }],
     OpenCode: [{ name: "Default", who: "3 providers", own: false }],
@@ -183,6 +188,8 @@ const S = {
   ended: false,
 };
 const browserOf = (t) => { const p = S.profiles[t.agent].find((x) => x.name === t.profile); return p?.own ? { key: "work", name: `${t.agent} · ${t.profile}`, exit: p.exit ?? "Direct" } : { key: "mac", name: "This Mac", exit: "Direct" }; };
+/** The lit dot of the profile a terminal runs under; none under Default. */
+const dotOf = (t) => { const c = S.profiles[t.agent].find((x) => x.name === t.profile)?.color; return c ? `<i class="pdot" style="color:${c}"></i>&nbsp;` : ""; };
 const globe = `<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="7" r="5.6"/><path d="M1.4 7h11.2M7 1.4c2 1.6 2 9.6 0 11.2M7 1.4c-2 1.6-2 9.6 0 11.2"/></svg>`;
 
 function agents() {
@@ -190,7 +197,7 @@ function agents() {
     <div class="group"><h3>${agent}<small>${list.length === 1 ? "只有 Default：别处不出现配置的东西" : ""}</small></h3>
       <div class="cap">PROFILES</div>
       ${list.map((p) => `<div class="prow ${S.current[agent] === p.name ? "cur" : ""}" data-a="cur" data-agent="${agent}" data-name="${p.name}">
-        <i class="radio"></i><span>${p.name}</span><span class="who">${esc(p.who)}</span>
+        <i class="radio"></i><span><span class="pslot">${p.color ? `<i class="pdot" style="color:${p.color}" title="Color"></i>` : ""}</span>${p.name}</span><span class="who">${esc(p.who)}</span>
         <span class="id">${p.own ? `<b>Own</b> · ${p.exit}` : "This Mac"}</span><span class="more">${p.name === "Default" ? "" : "▸"}</span></div>`).join("")}
       <div class="add" data-a="new" data-agent="${agent}">New Profile…</div>
     </div>`).join("");
@@ -214,7 +221,7 @@ function agents() {
 function terminal() {
   const t = S.terms[S.term], b = browserOf(t), many = S.profiles[t.agent].length > 1;
   const lit = S.tabs.some((x) => x.owner === `${t.short} · ${t.folder}` && !x.gone);
-  const rows = Object.entries(S.terms).map(([id, x]) => `<div class="trow ${id === S.term ? "sel" : ""}" data-a="term" data-id="${id}"><i class="sq"></i><span class="t">${esc(x.name)}</span><span class="tag">${S.profiles[x.agent].length > 1 ? x.profile : x.short}</span></div>`);
+  const rows = Object.entries(S.terms).map(([id, x]) => `<div class="trow ${id === S.term ? "sel" : ""}" data-a="term" data-id="${id}"><i class="sq"></i><span class="t">${esc(x.name)}</span><span class="tag">${dotOf(x)}${S.profiles[x.agent].length > 1 ? x.profile : x.short}</span></div>`);
   const menu = S.menu === "profile" ? `<div class="menu" style="right:230px;bottom:30px"><div class="h">Continue As</div>${S.profiles[t.agent].filter((p) => p.name !== t.profile).map((p) => `<div data-a="continue" data-name="${p.name}">${p.name}<span>${p.own ? p.exit : "This Mac"}</span></div>`).join("")}<div class="h">关掉这个 agent，用另一个配置续接同一段会话</div></div>` : "";
   return `<div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="title">${esc(t.name)}</div></div>
     <div class="body"><div class="term"><div class="list"><div class="g"><b>AgentSwitch</b> main</div>${rows[0]}${rows[1]}<div class="g"><b>api-server</b> feat/health</div>${rows[2]}</div>
@@ -223,7 +230,7 @@ function terminal() {
       <div class="box"><div class="ph">Reply</div><div class="foot"><span>+</span><span>Ask Each Time</span><span>·</span><span>${t.model}</span><span class="grow"></span><span>Context 31%</span></div></div>${menu}
     </div></div></div>
     <div class="status"><span class="sq"></span><span>Gateway</span><span class="sep">│</span><span>iPhone Online</span><span class="grow"></span>
-      <span>${t.short} · ${many ? `<span class="globe" data-a="menu" style="display:inline">${t.profile} ▾</span> · ` : ""}${t.model}</span><span class="sep">·</span><span>manual</span><span class="sep">·</span><span>On Mac · 139×46</span>
+      <span>${dotOf(t)}${t.short} · ${many ? `<span class="globe" data-a="menu" style="display:inline">${t.profile} ▾</span> · ` : ""}${t.model}</span><span class="sep">·</span><span>manual</span><span class="sep">·</span><span>On Mac · 139×46</span>
       <span class="globe ${lit ? "lit" : ""}" data-a="globe" title="Show Browser">${globe}${S.running.work || b.key !== "mac" ? `<span>${b.key === "mac" ? "This Mac" : t.profile}</span>` : ""}</span></div>`;
 }
 

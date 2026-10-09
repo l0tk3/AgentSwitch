@@ -35,7 +35,7 @@ struct AgentSwitchApp: App {
             case "interrupted": model.tab = .tasks; model.openTaskRequest = "t6"
             // The Dispatch page itself (the app opens on the terminals).
             case "home", "offline": model.tab = .tasks
-            case "terminals", "terminalmenu", "terminaldelete", "terminalsearch": model.tab = .terminals
+            case "terminals", "terminalmenu", "terminaldelete", "terminalsearch", "terminalprofiles": model.tab = .terminals
             case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion", "terminallink",
                  "simple", "simplebusy", "simplecompact", "simpledaybreak", "simpledaybreakclash", "simpleidle", "simpleeffort", "simplepaste", "simplestep", "simplesuggest", "simplequestion", "simpleprompt", "simplechanges":
                 model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"

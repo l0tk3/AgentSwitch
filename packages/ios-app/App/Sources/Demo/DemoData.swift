@@ -195,9 +195,15 @@ enum DemoData {
                          suggestion: screen == "simplesuggest" ? "跑一遍测试确认" : nil, daybreak: daybreak ? true : nil, sets: daybreak ? true : nil,
                          // `simplebusy`: the tokens its own screen counts, and a message sent a moment ago that it has not taken yet.
                          progress: screen == "simplebusy" ? TurnProgress(tokens: 3300) : nil,
-                         sent: screen == "simplebusy" ? [SentReply(id: "s1", text: "顺便把测试也跑一遍", at: ago(3))] : []),
+                         sent: screen == "simplebusy" ? [SentReply(id: "s1", text: "顺便把测试也跑一遍", at: ago(3))] : [],
+                         // `terminalprofiles`: under a profile other than the Mac's own (docs/profiles-v0.md §3.2) — its lit dot.
+                         profile: screen == "terminalprofiles" ? TerminalProfile(name: "cwork1", color: .violet) : nil),
             TerminalInfo(id: "e5f6a7b8", harness: "codex", cwd: repo, model: "gpt-6-luna", name: "daemon 审计修复", status: .working,
                          createdAt: ago(900), lastOutputAt: ago(2)),
+        ] + (screen == "terminalprofiles" ? [
+            TerminalInfo(id: "d4e5f6a7", harness: "claude-code", cwd: repo, model: "claude-opus-5-5", name: "看一遍改动", status: .idle,
+                         createdAt: ago(600), lastOutputAt: ago(90), profile: TerminalProfile(name: "side", color: .sand)),
+        ] : []) + [
             TerminalInfo(id: "c3d4e5f6", harness: "opencode", cwd: "/Users/me/Blog", name: "Blog", status: .idle,
                          createdAt: ago(7200), lastOutputAt: ago(3000)),
         ], agents: ["claude-code", "codex", "opencode"], models: [

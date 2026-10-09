@@ -154,6 +154,23 @@ struct StatusMark: View {
     }
 }
 
+/// A profile's mark (docs/profiles-v0.md §3.2, ui-v0 §7.2.11): a small lit dot in the profile's colour on what runs
+/// under it. Told from a state's mark by more than its colour: it is smaller, flat, has a glow, and sits at the
+/// row's end beside the agent, where a state's mark leads the row. A square in the pixel look.
+struct ProfileDot: View {
+    let color: ProfileColor
+    var side: CGFloat = 6
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        let fill = Color.profile(color)
+        Group { if look.isClassic { Circle().fill(fill) } else { Rectangle().fill(fill) } }
+            .frame(width: side, height: side)
+            .shadow(color: fill.opacity(0.8), radius: side * 0.45)
+            .accessibilityHidden(true)
+    }
+}
+
 /// In progress, everywhere the same (web page, Mac, phone): ⠋⠙⠹…; a still first frame under Reduce Motion. It turns
 /// only while seen, every spinner on the same beat (ui-v0 §7.4, 2026-10-03).
 struct BrailleSpinner: View {

@@ -162,7 +162,8 @@ struct AgentsView: View {
                             pick: { id in pick(agent, id) },
                             add: { naming = agent; newName = "" },
                             remove: { profile in removing = (agent, profile) },
-                            proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) })
+                            proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) },
+                            color: { profile, color in change(agent) { try await $0.setProfileColor(agent: agent.rawValue, id: profile.id, color: color) } })
         }
     }
 
@@ -296,8 +297,21 @@ struct ProfileProxySheet: View {
     }
 }
 
+/// A colour's swatch for a menu (a menu draws pictures, not views): a filled dot, in the colour as this appearance has it.
+enum ProfileSwatch {
+    static func image(_ color: ProfileColor, side: CGFloat = 10) -> NSImage {
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor(Color.profile(color)).setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+}
+
 /// One agent's profiles: a row each, the current one marked; a new one, and one removed (not `Default`).
-private struct ProfilesSection: View {
+struct ProfilesSection: View {
     let agent: AgentCLI
     let profiles: AgentProfiles
     let error: String?
@@ -305,6 +319,7 @@ private struct ProfilesSection: View {
     let add: () -> Void
     let remove: (AgentProfile) -> Void
     let proxy: (AgentProfile) -> Void
+    let color: (AgentProfile, ProfileColor) -> Void
 
     var body: some View {
         Section {
@@ -316,6 +331,26 @@ private struct ProfilesSection: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(profile.id == profiles.current ? "Current" : "Use \(profile.name)")
+                    // Its colour — the dot on the terminals that run under it — and the menu that changes it. `Default`
+                    // has none; its place is kept so the names line up.
+                    if let tint = profile.tint {
+                        Menu {
+                            Picker("Color", selection: Binding(get: { tint }, set: { color(profile, $0) })) {
+                                ForEach(ProfileColor.allCases) { choice in
+                                    Label { Text(choice.title) } icon: { Image(nsImage: ProfileSwatch.image(choice)) }.tag(choice)
+                                }
+                            }
+                            .pickerStyle(.inline)
+                        } label: {
+                            // A menu's button draws a picture, not a view of ours.
+                            Image(nsImage: ProfileSwatch.image(tint))
+                        }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().frame(width: 16)
+                        .help("Color")
+                        .accessibilityLabel("Color: \(tint.title)")
+                    } else {
+                        Color.clear.frame(width: 16, height: 16)
+                    }
                     Text(profile.name)
                     Text(profile.account ?? (profile.isDefault ? "This Mac’s own" : "Not Signed In")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer()
@@ -333,7 +368,7 @@ private struct ProfilesSection: View {
             Text("\(agent.title) Profiles")
         } footer: {
             if profiles.creatable {
-                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，运行 /login 登录。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次通不通、从哪里出去，不通就不开；查到的出口写在终端底栏的配置名后面。有代理的配置还有它自己的浏览器——一个单独的浏览器窗口，agent 的浏览器工具和 /login 打开的登录页都在里面，和 agent 从同一个代理出去。")
+                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，没登录的配置会直接从登录开始。每个配置有一个颜色（名字前的圆点，点它可以换）：在它名下运行的终端，列表和底栏里带着同色的亮点。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次通不通、从哪里出去，不通就不开；查到的出口写在终端底栏的配置名后面。有代理的配置还有它自己的浏览器——一个单独的浏览器窗口，agent 的浏览器工具和 /login 打开的登录页都在里面，和 agent 从同一个代理出去。")
             }
         }
     }

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { checkedProxy, ExitError, ExitPool } from "../browser/exits.js";
 import { proxyPlace } from "../browser/identity.js";
 import { remoteCaller } from "../core/caller.js";
-import { PROFILE_AGENTS, ProfileError, type ProfileAgent, type ProfileProxy } from "../profiles/store.js";
+import { PROFILE_AGENTS, PROFILE_COLORS, ProfileError, type ProfileAgent, type ProfileProxy } from "../profiles/store.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 const Agent = z.enum(PROFILE_AGENTS);
@@ -67,6 +67,19 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
       if (err instanceof ExitError) return c.json({ error: err.message }, 400);
       const f = failed(err); return c.json({ error: f.error }, f.status);
     }
+  });
+
+  // A profile's colour (§3.2): the dot its terminals are marked with on every screen.
+  app.put("/profiles/:agent/:id/color", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "a profile's colour is set on the Mac" }, 403);
+    const agent = Agent.safeParse(c.req.param("agent"));
+    if (!agent.success) return c.json({ error: "no such agent" }, 404);
+    const body = await parseBody(c, z.object({ color: z.enum(PROFILE_COLORS) }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try { store.setColor(agent.data, c.req.param("id"), body.data.color); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+    // The terminals already open under it change their dot with it.
+    deps.terminals?.host.recolor(agent.data, c.req.param("id"), body.data.color);
+    return c.json({ agents: store.all() });
   });
 
   // Where a profile's proxy lets traffic out, asked now.

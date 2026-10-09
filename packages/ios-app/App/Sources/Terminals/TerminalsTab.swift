@@ -327,6 +327,8 @@ struct TerminalsTab: View {
             Spacer(minLength: 6)
             // The classic look says what its dot means (the pixel look's square blinks).
             if look.isClassic && status == .waiting { NeedsYouPill() }
+            // Under a profile other than the Mac's own, while it runs: that profile's lit dot.
+            if t.isRunning, let profile = t.profile, let color = profile.color { ProfileDot(color: color).accessibilityLabel("配置 \(profile.name)") }
             PixelSprite(rows: PixelArt.agents[t.harness] ?? PixelArt.square, pixel: 2, color: .secondary, strength: 0.8, shadow: false)
             LookGlyph(glyph: "›", symbol: "chevron.right").foregroundStyle(.tertiary)
         }
@@ -682,6 +684,22 @@ private struct SubagentRow: View {
 /// A terminal's state in pixels (§7.2.5: only running terminals carry one): the spinner while busy, a square while
 /// waiting (blinking) or idle, hollow once exited.
 /// In the classic look: the system's spinner, a dot (its ring breathing while it waits), a ring once exited.
+/// A profile's mark (docs/profiles-v0.md §3.2, ui-v0 §7.2.11): a small lit dot in the profile's colour on what runs
+/// under it. Told from a state's mark by more than its colour: it is smaller, flat, has a glow, and sits at the
+/// row's end beside the agent, where a state's mark leads the row. A square in the pixel look.
+struct ProfileDot: View {
+    let color: ProfileColor
+    var side: CGFloat = 7
+    @Environment(\.interfaceLook) private var look
+
+    var body: some View {
+        let fill = Theme.profile(color)
+        Group { if look.isClassic { Circle().fill(fill) } else { Rectangle().fill(fill) } }
+            .frame(width: side, height: side)
+            .shadow(color: fill.opacity(0.8), radius: side * 0.45)
+    }
+}
+
 struct TerminalStatusMark: View {
     let status: TerminalStatus
     @Environment(\.interfaceLook) private var look

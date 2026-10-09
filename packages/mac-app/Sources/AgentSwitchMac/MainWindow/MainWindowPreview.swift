@@ -179,6 +179,9 @@ enum MainWindowPreview {
         head.mark = .waiting
         head.tag = "1 Waiting"
         head.context = TerminalContext(harness: "claude-code", model: "claude-opus-5-5", mode: "bypass", cols: 139, rows: 46)
+        // Under a profile with a proxy of its own (docs/profiles-v0.md §3.2, §4): its lit dot, its name and its exit.
+        head.context?.profile = "cwork1 · Tokyo 203.0.113.9"
+        head.context?.profileColor = .violet
         // The stand-in page's list (TerminalPageStandIn).
         head.sideWidth = list ? 300 : 0
         return head

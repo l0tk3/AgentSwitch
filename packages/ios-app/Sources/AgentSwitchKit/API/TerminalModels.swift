@@ -148,6 +148,57 @@ public struct TerminalActivity: Decodable, Sendable, Hashable {
     }
 }
 
+/// A profile's colour (docs/profiles-v0.md §3.2): the lit dot its terminals are marked with. The Mac keeps it by name;
+/// what each looks like is here. None is a colour a state is said in (busy, waiting, done, failed), the signal or
+/// the accent.
+public enum ProfileColor: String, CaseIterable, Sendable, Hashable {
+    case violet, sand, mint, orchid, olive, slate
+
+    /// On a dark ground.
+    public var dark: UInt32 {
+        switch self {
+        case .violet: 0xB18CFF
+        case .sand: 0xE2C48D
+        case .mint: 0x7FE3C0
+        case .orchid: 0xE08CE8
+        case .olive: 0xC3C95A
+        case .slate: 0x9DB2D9
+        }
+    }
+
+    /// On a light ground.
+    public var light: UInt32 {
+        switch self {
+        case .violet: 0x7A4FE0
+        case .sand: 0x9A7B3F
+        case .mint: 0x1F9A75
+        case .orchid: 0xB043BC
+        case .olive: 0x7C8220
+        case .slate: 0x5A719F
+        }
+    }
+}
+
+/// The profile a terminal runs under, when it is not the Mac's own (docs/profiles-v0.md §3): its name and its colour.
+public struct TerminalProfile: Decodable, Sendable, Hashable {
+    public let name: String
+    /// Nil: it has none, or one this app does not know yet.
+    public let color: ProfileColor?
+
+    public init(name: String, color: ProfileColor? = nil) {
+        self.name = name
+        self.color = color
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, color }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        color = (try? c.decodeIfPresent(String.self, forKey: .color)).flatMap { $0 }.flatMap(ProfileColor.init(rawValue:))
+    }
+}
+
 public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let harness: String
@@ -197,13 +248,16 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
     public let choices: ScreenChoices?
     /// What its screen said to commands sent from a screen (older services: none).
     public let notices: [ScreenNotice]
+    /// The profile it runs under; nil: the Mac's own (and from a Mac that does not say).
+    public let profile: TerminalProfile?
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String = "manual", name: String,
                 customName: Bool = false, status: TerminalStatus, cols: Int = 80, rows: Int = 24, createdAt: Int64,
                 lastOutputAt: Int64, exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil,
                 forked: Bool = false, permissions: [TerminalPermission] = [], activity: TerminalActivity? = nil, statusSince: Int64? = nil,
                 subagents: [TerminalSubagent] = [], modelNow: String? = nil, effort: String? = nil, suggestion: String? = nil, daybreak: Bool? = nil, sets: Bool? = nil,
-                progress: TurnProgress? = nil, sent: [SentReply] = [], choices: ScreenChoices? = nil, notices: [ScreenNotice] = []) {
+                progress: TurnProgress? = nil, sent: [SentReply] = [], choices: ScreenChoices? = nil, notices: [ScreenNotice] = [], profile: TerminalProfile? = nil) {
+        self.profile = profile
         self.notices = notices
         self.choices = choices
         self.progress = progress
@@ -238,7 +292,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, workdir, model, modelNow, suggestion, daybreak, sets, effort, mode, name, customName, status, cols, rows, createdAt, lastOutputAt, exitCode,
-             agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents, progress, sent, choices, notices
+             agentSessionId, resumedFrom, forked, permissions, activity, statusSince, subagents, progress, sent, choices, notices, profile
     }
 
     public init(from decoder: Decoder) throws {
@@ -273,6 +327,7 @@ public struct TerminalInfo: Decodable, Sendable, Hashable, Identifiable {
         sent = (try? c.decodeIfPresent([SentReply].self, forKey: .sent)) ?? []
         choices = try? c.decodeIfPresent(ScreenChoices.self, forKey: .choices)
         notices = (try? c.decodeIfPresent([ScreenNotice].self, forKey: .notices)) ?? []
+        profile = (try? c.decodeIfPresent(TerminalProfile.self, forKey: .profile)) ?? nil
     }
 
     public var created: Date { Date(milliseconds: createdAt) }

@@ -276,6 +276,8 @@ private struct TerminalRow: View {
             }
         } meta: {
             HStack(spacing: look.isClassic ? 6 : 8) {
+                // Under a profile other than the Mac's own, while it runs: that profile's lit dot.
+                if terminal.running, let color = terminal.profileColor { ProfileDot(color: color) }
                 meta
                 if let badge = paneBadge { badge }
                 if out { Text("↗").font(.system(size: 12, design: .monospaced)).foregroundStyle(Look.ink2).help("In Its Own Window") }
@@ -299,7 +301,7 @@ private struct TerminalRow: View {
         // It flashes once as it starts waiting for you or ends with an error, and flickers now and then while it works.
         .glitch(on: model.flashes[terminal.id] ?? 0)
         .flickers(while: terminal.status == "working")
-        .help("\(TerminalListText.agentName(terminal.harness))\(index.flatMap { $0 < 9 ? " · ⌘\($0 + 1)" : nil } ?? "")")
+        .help("\(TerminalListText.agentName(terminal.harness))\(terminal.profileName.map { " · \($0)" } ?? "")\(index.flatMap { $0 < 9 ? " · ⌘\($0 + 1)" : nil } ?? "")")
     }
 
     @ViewBuilder

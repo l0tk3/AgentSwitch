@@ -58,6 +58,43 @@ final class ProfileProxyTests: XCTestCase {
         // The status bar says it between the agent and the model.
         XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":null}}"#).context.profile, "cwork1 · 203.0.113.9")
     }
+
+    // MARK: a profile's colour (docs/profiles-v0.md §3.2)
+
+    func testAProfileHasAColourAndItsTerminalsCarryIt() throws {
+        // The names are the service's (`PROFILE_COLORS` in the daemon's profiles/store.ts), in its order.
+        XCTAssertEqual(ProfileColor.allCases.map(\.rawValue), ["violet", "sand", "mint", "orchid", "olive", "slate"])
+        XCTAssertEqual(ProfileColor.sand.title, "Sand")
+        // No two look alike, in either appearance; none is a colour a state, the signal or the accent is said in.
+        XCTAssertEqual(Set(ProfileColor.allCases.map(\.dark)).count, ProfileColor.allCases.count)
+        XCTAssertEqual(Set(ProfileColor.allCases.map(\.light)).count, ProfileColor.allCases.count)
+        let taken: Set<UInt32> = [0x2EE6FF, 0x0086A8, 0xFFB000, 0xC27400, 0x9BE22D, 0x3F8F00, 0xFF4A3D, 0xD7261B, 0xFF2E88, 0xE0106E, 0x34C759, 0x30D158, 0xFF9500, 0xFF9F0A, 0xFF3B30, 0xFF453A, 0x007AFF, 0x0A84FF]
+        XCTAssertTrue(taken.isDisjoint(with: ProfileColor.allCases.flatMap { [$0.dark, $0.light] }))
+
+        let list = try JSONDecoder().decode(AgentProfiles.self, from: Data(#"""
+        {"current":"abc123def0","creatable":true,"profiles":[
+          {"id":"default","name":"Default","kind":"subscription","account":"me@example.com"},
+          {"id":"abc123def0","name":"cwork1","kind":"subscription","color":"mint"},
+          {"id":"abc123def1","name":"later","kind":"subscription","color":"a-colour-of-a-newer-service"}]}
+        """#.utf8))
+        XCTAssertEqual(list.profiles.map(\.tint), [nil, .mint, nil])
+        XCTAssertEqual(list.profiles[2].color, "a-colour-of-a-newer-service")
+
+        let terminal = { (profile: String, status: String) throws -> TerminalInfo in
+            try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","cwd":"/w","name":"n","status":"\#(status)","profile":\#(profile)}"#.utf8))
+        }
+        let under = try terminal(#"{"id":"abc123def0","name":"cwork1","color":"mint"}"#, "idle")
+        XCTAssertEqual(under.profileColor, .mint)
+        XCTAssertEqual(under.context.profileColor, .mint)
+        // What its stream says of it later does not drop the colour.
+        XCTAssertEqual(under.with(status: "working").profileColor, .mint)
+        XCTAssertNil(try terminal(#"{"id":"abc123def0","name":"cwork1"}"#, "idle").profileColor)
+        XCTAssertNil(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"plaid"}"#, "idle").profileColor)
+        XCTAssertNil(try terminal("null", "idle").profileColor)
+        // A terminal that ended still knows whose it was; the screens draw the dot only while it runs.
+        XCTAssertFalse(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"mint"}"#, "exited").running)
+        XCTAssertEqual(TerminalInfo(id: "t9", harness: "claude-code", cwd: "/w", name: "n", status: "idle", createdAt: 1).under(profile: "side", color: .sand).profileColor, .sand)
+    }
 }
 
 /// A profile's own browser on the Browser page (docs/profiles-v0.md §5.2): the browsers there are, and the browser

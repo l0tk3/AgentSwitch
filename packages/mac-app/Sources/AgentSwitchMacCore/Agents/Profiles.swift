@@ -16,6 +16,41 @@ public struct ProfileExit: Decodable, Equatable, Sendable {
     public var text: String { [place, ip].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ") }
 }
 
+/// A profile's colour (docs/profiles-v0.md §3.2): the lit dot its terminals are marked with. The service keeps it by
+/// name; what each looks like is here. None is a colour a state is said in (busy, waiting, done, failed), the signal
+/// or the accent.
+public enum ProfileColor: String, CaseIterable, Sendable, Identifiable {
+    case violet, sand, mint, orchid, olive, slate
+
+    public var id: String { rawValue }
+    /// `Violet`, in a menu.
+    public var title: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+
+    /// On a dark ground (the terminals' list and bars are dark in both looks).
+    public var dark: UInt32 {
+        switch self {
+        case .violet: 0xB18CFF
+        case .sand: 0xE2C48D
+        case .mint: 0x7FE3C0
+        case .orchid: 0xE08CE8
+        case .olive: 0xC3C95A
+        case .slate: 0x9DB2D9
+        }
+    }
+
+    /// On a light ground (the settings' rows by day).
+    public var light: UInt32 {
+        switch self {
+        case .violet: 0x7A4FE0
+        case .sand: 0x9A7B3F
+        case .mint: 0x1F9A75
+        case .orchid: 0xB043BC
+        case .olive: 0x7C8220
+        case .slate: 0x5A719F
+        }
+    }
+}
+
 public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     public let id: String
     public let name: String
@@ -26,16 +61,21 @@ public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     /// Its own proxy (the password is never told, only that it has one); nil: this Mac's own way out.
     public let proxy: BrowserProxy?
     public let exit: ProfileExit?
+    /// Its colour, by name (`ProfileColor`); nil for `Default`, which has none.
+    public let color: String?
 
     public var isDefault: Bool { id == "default" }
+    /// Its colour as the screens draw it; nil for none, or one this app does not know yet.
+    public var tint: ProfileColor? { color.flatMap(ProfileColor.init(rawValue:)) }
 
-    public init(id: String, name: String, kind: String = "subscription", account: String? = nil, proxy: BrowserProxy? = nil, exit: ProfileExit? = nil) {
+    public init(id: String, name: String, kind: String = "subscription", account: String? = nil, proxy: BrowserProxy? = nil, exit: ProfileExit? = nil, color: String? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.account = account
         self.proxy = proxy
         self.exit = exit
+        self.color = color
     }
 
     /// Where what runs under it leaves from, in a few words: `This Mac`; with a proxy of its own, where that proxy
@@ -73,6 +113,11 @@ extension DaemonClient {
 
     public func createProfile(agent: String, name: String, kind: String = "subscription") async throws -> [String: AgentProfiles] {
         try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(["agent": agent, "name": name, "kind": kind]))).agents
+    }
+
+    /// A profile's colour from now on; the terminals open under it change their dot with it.
+    public func setProfileColor(agent: String, id: String, color: ProfileColor) async throws -> [String: AgentProfiles] {
+        try decode(ProfilesReply.self, try await call("PUT", "/profiles/\(Self.segment(agent))/\(Self.segment(id))/color", body: try JSONEncoder().encode(["color": color.rawValue]))).agents
     }
 
     /// A profile's own proxy from now on (nil: none, this Mac's own way out). It is checked at once: `problem` is why it

@@ -72,6 +72,8 @@ public struct TerminalContext: Equatable, Sendable {
     public var simple = false
     /// The profile it runs under, when it is not the Mac's own (docs/profiles-v0.md §3): said between agent and model.
     public var profile: String?
+    /// That profile's colour: a lit dot before the words.
+    public var profileColor: ProfileColor?
 
     public init(harness: String, model: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil,
                 away: String? = nil, running: Bool = true) {

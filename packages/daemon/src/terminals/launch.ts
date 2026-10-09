@@ -250,6 +250,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (req.mode !== "bypass" && req.allowBypass) args.push("--allow-dangerously-skip-permissions");
         // The same session goes on (one record, docs/terminal-v0.md §5); a fork is a new session with the whole history.
         if (req.resume) args.push("--resume", req.resume, ...(req.fork ? ["--fork-session"] : []));
+        // Its first input, as if typed: `/login` where nobody is signed in (it opens at the sign-in's choices).
+        if (req.firstInput) args.push(req.firstInput);
         return { file, args, env, hooks: true };
       }
       case "codex": {

@@ -24,6 +24,10 @@ extension Color {
     static let waiting = Color(nsColor: .dynamic(light: 0xC27400, dark: 0xFFB000, classicLight: 0xFF9500, classicDark: 0xFF9F0A, name: "AgentSwitchWaiting"))
     static let ok = Color(nsColor: .dynamic(light: 0x3F8F00, dark: 0x9BE22D, classicLight: 0x34C759, classicDark: 0x30D158, name: "AgentSwitchOK"))
     static let failed = Color(nsColor: .dynamic(light: 0xD7261B, dark: 0xFF4A3D, classicLight: 0xFF3B30, classicDark: 0xFF453A, name: "AgentSwitchFailed"))
+    /// A profile's colour (docs/profiles-v0.md §3.2): who a terminal runs as, never a state.
+    static func profile(_ color: ProfileColor) -> Color {
+        Color(nsColor: .dynamic(light: color.light, dark: color.dark, name: "AgentSwitchProfile\(color.title)"))
+    }
     /// Waiting on the user (the old name for it).
     static let attention = waiting
     /// Faint ink: dim lanes, hollow squares, the empty part of a meter, solid rules.

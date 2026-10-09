@@ -409,6 +409,25 @@ final class RecordTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex","cwd":"/w","name":"a","status":"idle","createdAt":1}"#.utf8)).sets)
     }
 
+    // MARK: the profile a terminal runs under, and its colour (docs/profiles-v0.md §3.2)
+
+    func testATerminalCarriesItsProfileAndItsColour() throws {
+        // The names are the Mac's (`PROFILE_COLORS` in the daemon's profiles/store.ts), in its order.
+        XCTAssertEqual(ProfileColor.allCases.map(\.rawValue), ["violet", "sand", "mint", "orchid", "olive", "slate"])
+        XCTAssertEqual(Set(ProfileColor.allCases.map(\.dark)).count, ProfileColor.allCases.count)
+        XCTAssertEqual(Set(ProfileColor.allCases.map(\.light)).count, ProfileColor.allCases.count)
+        let terminal = { (profile: String) throws -> TerminalInfo in
+            try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","cwd":"/w","name":"a","status":"idle","createdAt":1,"profile":\#(profile)}"#.utf8))
+        }
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":"Tokyo"},"color":"violet"}"#).profile, TerminalProfile(name: "cwork1", color: .violet))
+        // No colour, or one this app does not know yet: the profile all the same, without a dot.
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1"}"#).profile, TerminalProfile(name: "cwork1"))
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"plaid"}"#).profile, TerminalProfile(name: "cwork1"))
+        // The Mac's own, and a Mac that does not say.
+        XCTAssertNil(try terminal("null").profile)
+        XCTAssertNil(try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex"}"#.utf8)).profile)
+    }
+
     // MARK: how far a turn has come, and what was sent (2026-10-08)
 
     func testTurnProgressAndSentRepliesParse() {

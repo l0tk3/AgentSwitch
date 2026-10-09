@@ -15,7 +15,11 @@ import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
 import { DEFAULT_PROFILE, ProfileError, ProfileStore } from "../src/profiles/store.js";
+import { mountTerminals } from "../src/api/terminals.js";
+import { TerminalHost, type LaunchRequest } from "../src/terminals/host.js";
 import { agentLauncher, proxyEnv } from "../src/terminals/launch.js";
+import { claudeSignedIn } from "../src/terminals/signIn.js";
+import { chmodSync } from "node:fs";
 
 const closers: (() => unknown)[] = [];
 afterEach(async () => { for (const c of closers.splice(0)) await c(); });
@@ -289,5 +293,111 @@ describe("a terminal under a profile", () => {
     expect(plain.env.CLAUDE_CONFIG_DIR).toBeUndefined();
     // Another agent is not given Claude Code's folder.
     expect(launch({ id: "x1", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/x" }).env.CLAUDE_CONFIG_DIR).toBeUndefined();
+  });
+
+  it("is given its first input as Claude Code's last argument, after everything else", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "agentswitch-profile-first-"));
+    const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, env: { PATH: "/usr/bin", HOME: "/Users/u" } });
+    const args = launch({ id: "c1", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok", configHome: "/as/p/home", resume: "s-1", firstInput: "/login" }).args;
+    expect(args.slice(-3)).toEqual(["--resume", "s-1", "/login"]);
+    expect(launch({ id: "c2", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" }).args).not.toContain("/login");
+  });
+});
+
+describe("a profile nobody is signed in to", () => {
+  /** A stand-in for Claude Code that answers `auth status` as the real one does (JSON, exit 1 when signed out), from
+   *  what the folder it is pointed at holds; it writes down the folder and whether a session of another was around it. */
+  function standIn(dir: string) {
+    const file = join(dir, "claude"), seen = join(dir, "seen");
+    writeFileSync(file, `#!/bin/sh
+printf '%s|%s|%s\n' "$*" "$CLAUDE_CONFIG_DIR" "\${CLAUDECODE:-none}" >> "${seen}"
+case "$(cat "$CLAUDE_CONFIG_DIR/state" 2>/dev/null)" in
+  in) printf '{"loggedIn": true, "authMethod": "claude.ai"}'; exit 0 ;;
+  out) printf '{"loggedIn": false, "authMethod": "none"}'; exit 1 ;;
+  old) echo "error: unknown command 'auth'" >&2; exit 1 ;;
+  *) /bin/sleep 30 ;;
+esac
+`);
+    chmodSync(file, 0o755);
+    return { file, seen };
+  }
+
+  it("is told apart by asking Claude Code itself, in that folder; when it does not say, nothing is assumed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-signin-"));
+    const { file, seen } = standIn(dir);
+    const folder = (state: string) => { const d = mkdtempSync(join(dir, "home-")); writeFileSync(join(d, "state"), state); return d; };
+    process.env.CLAUDECODE = "1";
+    closers.push(() => { delete process.env.CLAUDECODE; });
+    const out = folder("out");
+    expect(await claudeSignedIn(file, folder("in"))).toBe(true);
+    expect(await claudeSignedIn(file, out)).toBe(false);
+    expect(await claudeSignedIn(file, folder("old"))).toBeNull();
+    expect(await claudeSignedIn(join(dir, "nothing-here"), out)).toBeNull();
+    // Asked in the profile's folder, and not as a session inside another Claude Code.
+    expect(readFileSync(seen, "utf8").split("\n")[1]).toBe(`auth status|${out}|none`);
+  });
+
+  /** The start route over a host with a made-up agent: what the launcher was asked, per terminal. */
+  function served(signedIn: (harness: string, home: string) => Promise<boolean | null>) {
+    const w = world();
+    const asked: LaunchRequest[] = [];
+    const host = new TerminalHost({ launcher: (req) => { asked.push(req); return { file: "/bin/sh", args: ["-c", "/bin/sleep 30"], env: { PATH: "/usr/bin:/bin" }, hooks: false }; } });
+    closers.push(() => host.closeAll());
+    const app = new Hono();
+    const questions: string[] = [];
+    mountTerminals(app, { profiles: w.store, terminals: { host, audit: { record() { /* not looked at */ } }, agents: ["claude-code"], style: () => ({}), elsewhere: async () => null,
+      signedIn: (harness: string, home: string) => { questions.push(home); return signedIn(harness, home); } } } as unknown as ApiDeps);
+    mountProfiles(app, { profiles: w.store, terminals: { host } } as unknown as ApiDeps);
+    const call = async (method: string, path: string, body?: unknown) => {
+      const res = await app.request(path, { method, ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
+      return { status: res.status, json: (await res.json()) as Record<string, any> };
+    };
+    return { ...w, host, asked, questions, call };
+  }
+
+  it("starts at its sign-in; one that is signed in, the Mac's own, and one that pays by a key start at the prompt", async () => {
+    const said = new Map<string, boolean | null>();
+    const { store, asked, questions, call, root } = served(async (_h, home) => said.get(home) ?? null);
+    const fresh = store.create("claude-code", "Fresh", "subscription"), work = store.create("claude-code", "Work", "subscription");
+    const unsure = store.create("claude-code", "Unsure", "subscription"), key = store.create("claude-code", "Key", "api");
+    said.set(store.homeOf("claude-code", fresh.id)!, false).set(store.homeOf("claude-code", work.id)!, true).set(store.homeOf("claude-code", key.id)!, false);
+    const start = async (profile?: string) => (await call("POST", "/terminals", { harness: "claude-code", cwd: root, ...(profile ? { profile } : {}) })).status;
+    expect(await start(fresh.id)).toBe(201);
+    expect(asked.at(-1)).toMatchObject({ configHome: store.homeOf("claude-code", fresh.id), firstInput: "/login" });
+    for (const id of [work.id, unsure.id, key.id, "default"]) {
+      expect(await start(id)).toBe(201);
+      expect(asked.at(-1)!.firstInput).toBeUndefined();
+    }
+    // Asked of those that sign in with an account, each in its own folder; never of the Mac's own or of one with a key.
+    expect(questions).toEqual([fresh.id, work.id, unsure.id].map((id) => store.homeOf("claude-code", id)));
+    // A session continued under it starts at the sign-in too: it could not go on otherwise.
+    expect((await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: "0f8fad5b-d9cb-469f-a165-70867728950e", profile: fresh.id })).status).toBe(201);
+    expect(asked.at(-1)).toMatchObject({ resume: "0f8fad5b-d9cb-469f-a165-70867728950e", firstInput: "/login" });
+  });
+
+  it("has a colour of its own, which its terminals carry — also after it is changed", async () => {
+    const { store, call, root } = served(async () => true);
+    const a = store.create("claude-code", "A", "subscription"), b = store.create("claude-code", "B", "subscription");
+    // No two alike while there are colours left; none for the Mac's own.
+    expect(store.all()["claude-code"].profiles.map((p) => p.color)).toEqual([undefined, "violet", "sand"]);
+    const started = await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: b.id });
+    expect(started.json.terminal.profile).toEqual({ id: b.id, name: "B", color: "sand" });
+    expect((await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: "default" })).json.terminal.profile).toBeNull();
+    expect((await call("PUT", `/profiles/claude-code/${b.id}/color`, { color: "mint" })).json.agents["claude-code"].profiles[2].color).toBe("mint");
+    expect((await call("GET", `/terminals/${started.json.terminal.id}`)).json.terminal.profile.color).toBe("mint");
+    expect((await call("PUT", `/profiles/claude-code/${a.id}/color`, { color: "red" })).status).toBe(400);
+    expect((await call("PUT", "/profiles/claude-code/default/color", { color: "mint" })).status).toBe(404);
+  });
+
+  it("gives one made before profiles had colours a colour, once, and keeps it", () => {
+    const { store, home } = world();
+    const a = store.create("claude-code", "A", "subscription"), b = store.create("claude-code", "B", "subscription");
+    const file = join(home, "profiles", "profiles.json");
+    const kept = JSON.parse(readFileSync(file, "utf8")) as { agents: Record<string, { profiles: { color?: string }[] }> };
+    for (const p of kept.agents["claude-code"]!.profiles) delete p.color;
+    kept.agents["claude-code"]!.profiles[1]!.color = "violet";
+    writeFileSync(file, JSON.stringify(kept));
+    expect([store.colorOf("claude-code", a.id), store.colorOf("claude-code", b.id)]).toEqual(["sand", "violet"]);
+    expect((JSON.parse(readFileSync(file, "utf8")) as typeof kept).agents["claude-code"]!.profiles.map((p) => p.color)).toEqual(["sand", "violet"]);
   });
 });
