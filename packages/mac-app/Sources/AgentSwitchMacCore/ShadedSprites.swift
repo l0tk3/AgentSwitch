@@ -71,10 +71,10 @@ public struct ShadedSprite: Equatable, Sendable {
         ".#kkkmdkkkssss#.", "..#kkkdkkssss#..", "...##kkksss##...", ".....######.....",
     ])
     /// Clash's page, on the Mac alone (so not in `all`, which the phone and the web share): a cat's face — its ears
-    /// and brow lit from above and left, the face a dark ground, two bright eyes, the chin in shade.
+    /// and brow lit from above and left, the face a dark ground, two bright eyes that slant down towards the nose (as the eyes of Clash's own mark do), the chin in shade.
     public static let clash = ShadedSprite([
         ".W............#.", ".W#..........#m.", ".Wk#........#km.", ".Wkk########kkm.", ".Wkkkkkkkkkkkkm.", "W#kkkkkkkkkkkkmd",
-        "W#kWWkkkkkkWWkmd", "W#kW#kkkkkkW#kmd", "W#kkkkkkkkkkkkmd", "W#kkkkkmmkkkksmd", "##kkkkdkkdkkssmd", ".#kkkkkkkkksssd.",
+        "W#kWWkkkkkkWWkmd", "W#kkW#kkkk#Wkkmd", "W#kkkkkkkkkkkkmd", "W#kkkkkmmkkkksmd", "##kkkkdkkdkkssmd", ".#kkkkkkkkksssd.",
         ".#mkkkkkkksssdd.", "..mmkkkkkssssd..", "...mmdddddddd...",
     ])
     /// Three sliders: the part each has travelled lighter, the rest dark, their knobs raised.

@@ -7,18 +7,21 @@ import SwiftUI
 // icons, dots, the system's spinner, thin bars. Nothing here is used by a page directly: the pages keep asking for the
 // shared parts, which decide.
 
-/// What stands for a pixel sprite: a system symbol, the Dispatch page's lanes, an agent's mark (the only ones drawn by
-/// hand).
+/// What stands for a pixel sprite: a system symbol, the Dispatch page's lanes, an agent's mark, Clash's cat (the only
+/// ones drawn by hand).
 enum ClassicIcon {
     case symbol(String)
     case lanes
     case agent(String)
+    case cat
 
     init?(rows: [String]) {
         if let name = PixelArt.symbol(for: rows) {
             self = .symbol(name)
         } else if rows == PixelArt.markRows || rows == PixelArt.railDispatch {
             self = .lanes
+        } else if rows == PixelArt.railClash {
+            self = .cat
         } else if let agent = PixelArt.agents.first(where: { $0.value == rows })?.key {
             self = .agent(agent)
         } else {
@@ -42,7 +45,52 @@ enum ClassicIcon {
             Canvas { context, canvas in ClassicLanes.draw(&context, in: CGRect(origin: .zero, size: canvas), lit: color, dim: color.opacity(0.5)) }
         case .agent(let harness):
             Canvas { context, canvas in ClassicAgent.draw(harness, &context, in: CGRect(origin: .zero, size: canvas), color: color) }
+        case .cat:
+            // A little larger than the sprite's frame, as a system symbol is drawn.
+            Canvas { context, canvas in ClassicCat.draw(&context, in: CGRect(origin: .zero, size: canvas).insetBy(dx: -1, dy: -1), color: color) }
+                .frame(width: size.width + 2, height: size.height + 2)
         }
+    }
+}
+
+/// Clash's page: a cat's head as Clash's own mark has it (2026-10-09, user, of the system's whole cat: 你应该画个clash
+/// 一样的猫头) — two ears pointing up and out, round cheeks, a chin, slanted eyes and a small nose; drawn in the one
+/// colour the rail's icons have.
+enum ClassicCat {
+    static func draw(_ context: inout GraphicsContext, in rect: CGRect, color: Color) {
+        // 16 × 14 cells.
+        let u = min(rect.width / 16, rect.height / 14)
+        let origin = CGPoint(x: rect.midX - 8 * u, y: rect.midY - 7 * u)
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: origin.x + x * u, y: origin.y + y * u) }
+        var head = Path()
+        head.move(to: p(2.2, 0.7))
+        head.addLine(to: p(5.7, 3.3))
+        head.addQuadCurve(to: p(10.3, 3.3), control: p(8, 2.6))
+        head.addLine(to: p(13.8, 0.7))
+        head.addCurve(to: p(15.1, 7.4), control1: p(14.6, 2.7), control2: p(15.3, 5.2))
+        head.addCurve(to: p(8, 13.3), control1: p(14.9, 10.7), control2: p(11.2, 13.3))
+        head.addCurve(to: p(0.9, 7.4), control1: p(4.8, 13.3), control2: p(1.1, 10.7))
+        head.addCurve(to: p(2.2, 0.7), control1: p(0.7, 5.2), control2: p(1.4, 2.7))
+        head.closeSubpath()
+        // Its eyes slant down towards the nose.
+        func eye(_ mirror: Bool) -> Path {
+            func q(_ x: CGFloat, _ y: CGFloat) -> CGPoint { p(mirror ? 16 - x : x, y) }
+            var eye = Path()
+            eye.move(to: q(3.3, 7.0))
+            eye.addQuadCurve(to: q(6.9, 8.9), control: q(6.3, 6.5))
+            eye.addQuadCurve(to: q(3.3, 7.0), control: q(3.9, 9.6))
+            eye.closeSubpath()
+            return eye
+        }
+        var nose = Path()
+        nose.move(to: p(7.2, 10.3))
+        nose.addLine(to: p(8.8, 10.3))
+        nose.addLine(to: p(8, 11.3))
+        nose.closeSubpath()
+        let features = eye(false).union(eye(true)).union(nose)
+        // The head whole, as Clash's mark is, its eyes and nose cut out of it; its corners a little round.
+        let round = StrokeStyle(lineWidth: max(0.6, 0.5 * u), lineJoin: .round)
+        context.fill(head.union(head.strokedPath(round)).subtracting(features), with: .color(color))
     }
 }
 

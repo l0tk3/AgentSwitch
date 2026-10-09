@@ -52,7 +52,8 @@ final class ShadedSpritesTests: XCTestCase {
         // Clash's page is the Mac's alone: its cat is a picture here and not one of those the phone and the web share.
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.railClash), .clash)
         XCTAssertFalse(ShadedSprite.all.contains { $0.sprite == .clash })
-        XCTAssertEqual(PixelArt.symbol(for: PixelArt.railClash), "cat")
+        // In the classic look it is drawn by hand too (Clash's own cat's head; the system has only a whole cat).
+        XCTAssertNil(PixelArt.symbol(for: PixelArt.railClash))
         XCTAssertTrue(ShadedSprite.clash.rows.allSatisfy { $0.count == 16 } && ShadedSprite.clash.height <= 16)
         XCTAssertTrue(Set(ShadedSprite.clash.rows.joined()).subtracting(["."]).allSatisfy { ShadedSprite.color($0, dark: true) != nil && ShadedSprite.color($0, dark: false) != nil })
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.toolbarSettings), .settings)
