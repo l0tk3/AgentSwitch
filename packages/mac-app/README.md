@@ -148,6 +148,31 @@ Codex, OpenCode and pi. All of it is the app's: the daemon only takes the four p
   `AGENTSWITCH_AGENTS_LIVE=native swift test --filter AgentNativeTests/testLiveNative` (the four vendors' installers:
   install, update, uninstall; some 600 MB; `AGENTSWITCH_AGENTS_ONLY=opencode,pi` for some of them).
 
+## Profiles, proxies and Clash
+
+docs/profiles-v0.md, docs/clash-v0.md. All of it is the service's (`packages/daemon`); the app is the screens.
+
+- **Profiles** (Settings › Agents, a `Profiles` part under each agent; Claude Code first): `New Profile…`, `Delete…`,
+  a colour from six, and `Proxy…` — `Server`, `User Name`, `Password` (sealed by this Mac's gate before it is sent;
+  `Kept` when one is stored), the exit, `Apply & Check`, `No Proxy`. A whole `http://user:pass@host:port` pasted into
+  `Server` is taken apart.
+- **Where a profile is chosen**: the new-terminal panel has a `Profile` row when the agent has more than one (the one
+  last used is offered); a conversation's context menu has `Resume As`. A plain resume goes back under the profile
+  the conversation last ran under. A running terminal under a profile carries its colour as a lit dot — in the list
+  and in the status bar — round in the classic look, square in the pixel one.
+- **A profile's browser**: every profile but `Default` has its own Camoufox window. The Browser page has a short list
+  of browsers above the tabs (`Shared`, then one a profile); picking one makes the page that browser's; a sign-in page opened from a terminal lands there and the window is brought forward, as `Show Window`
+  does (`Browser/BrowserFront.swift` looks for the browser itself, not one of its helper programs).
+- **Clash** (the rail's fourth page, a cat's head): what was found of Clash Verge, the routing check, the
+  subscription AgentSwitch works from, a separate proxy for Claude and for OpenAI (nodes in their order, what each
+  group uses now, delays), rule templates and DNS, the addresses that go direct. Until Clash Verge runs
+  AgentSwitch's subscription the page says what is still to do, with `Add to Clash Verge…`.
+- The same proxies are a paired iPhone's to manage (Settings › Proxies there); the fingerprint, and making or
+  removing a profile, are not.
+
+Design previews: `-designPreview <dir> -designPreviewOnly clash|profiles|browsers|terminals|window|rail`
+(`-appearance classic` for the other look).
+
 ## Credential gate as a system service
 
 docs/gate-service-v0.md §4 (Mac 应用). The gate runs as two LaunchDaemons under the role account `_agentswitchgate`

@@ -343,6 +343,58 @@ disk. Opt-in checks against a real Camoufox, none part of `npm test`:
 (opens real windows for half a minute), `scripts/browser_identity_smoke.ts <program>` (no windows; a stand-in proxy,
 exit lookup and gate), `scripts/browser_engine_check.ts <folder>` (the engine's self-check alone).
 
+## Profiles (profiles-v0)
+
+`src/profiles/store.ts`: several sign-ins for one agent. Every agent has `Default`, the Mac's own, with no folder
+here; any other profile is a home folder under `$AGENTSWITCH_HOME/profiles/` that the agent is started with
+(`CLAUDE_CONFIG_DIR`), so `~/.claude` is never rewritten. The folder holds what is the account's (credentials, the
+identifiers Claude Code makes on first run); instructions, skills, commands, settings and the sessions are the Mac's
+own, linked in, so any profile continues any session. Claude Code first; the other agents have `Default` alone.
+
+- **Chosen where a terminal is made** (§3.3): `POST /terminals {profile}`; `POST /terminals/resume` goes back under
+  the profile the conversation last ran under (kept by session id in `profiles/sessions.json`, only for what is not
+  `Default`) unless it names another. The profile last chosen for a new terminal is the one offered next (`current`).
+- **Not signed in** (§3.1): `src/terminals/signIn.ts` asks `claude auth status` in the profile's folder; a
+  subscription profile nobody is signed in to starts its terminal on `/login`.
+- **Its own proxy** (§4): `PUT /profiles/:agent/:id/proxy {server, username?, password?, keepPassword?}` — `server`
+  null takes it away; a password is taken only as an `enc:v1:` ciphertext for the proxy's own `host:port`. Each such
+  profile gets a forwarder on loopback (`src/browser/exits.ts`); what starts under the profile is given
+  `HTTPS_PROXY` to that forwarder, never the proxy's own password. Before a terminal starts the proxy is asked where
+  it lets traffic out; one that does not answer starts nothing (502), it is not swapped for a direct connection.
+  `POST …/check` asks again.
+- **Its own browser** (§5): every profile but `Default` has one (`src/browser/fleet.ts`), with or without a proxy,
+  served by the shared browser's routes under `/profile-browser/<agent>.<id>/…`; `GET /browsers` lists them. A
+  terminal under a profile gets an `open` on its PATH that hands URLs to `/terminals/open`, so `/login` opens in that
+  profile's browser and not the system's.
+- **Its colour** (§3.2): one of six names (`PROFILE_COLORS`); terminals carry it (`TerminalInfo.profile.color`).
+- Made, removed and coloured on this Mac only (403 for a paired device); listed, chosen, its proxy set and checked
+  from a phone too.
+
+## Clash Integration (clash-v0)
+
+`src/clash/`: a separate way out for Claude and for OpenAI on top of the user's own Clash subscription, without
+editing Clash Verge's files. AgentSwitch keeps the subscription it works from (`source.ts`: a link, a file, or one of
+Clash Verge's own), builds the one Clash Verge is handed (`build.ts`: per service a node set, an automatic group and
+the group that decides; rule templates for domestic-direct and blocking; an optional DNS section) and serves it on
+loopback, by a token in the address and nothing else: `/clash/sub.yaml`, `/clash/rules/<name>.yaml`,
+`/clash/nodes/<name>.yaml`, `/clash/providers/<slug>.yaml`. What needs no reload goes to the running core over its
+unix socket (`controller.ts`): which node a group uses, a set read again, delays.
+
+| method | path | what |
+|---|---|---|
+| GET | `/clash` | what was found of Clash Verge and its core, the subscription, the settings, each service's groups |
+| PUT | `/clash/settings` | `{claude:{nodes}, openai:{nodes}, direct, autoUpdateHours, templates, renameDefault, dns}` |
+| POST, DELETE | `/clash/source` | `{link}` \| `{yaml,name}` \| `{verge}`; remove |
+| POST | `/clash/update` | fetch the subscription again now |
+| POST | `/clash/select` | `{service, node}` — `node` null: the automatic group |
+| POST | `/clash/delays` | `{service, scope: "chosen"\|"all"}` → ms per node, null for no answer |
+| POST | `/clash/check` | the routing check: one connection of each kind through the core, and what it did with it (`check.ts`) |
+| GET | `/clash/templates/:name`, `/clash/dns` | a template's rules, the DNS text, as in use |
+
+A paired phone has all of these (clash-v0 §9); its page comes without `install`, the link Clash Verge takes the
+subscription by. The four served addresses answer on loopback alone. A profile's proxy is added to the direct list
+when it is set, so with TUN on the way to it is not through another node.
+
 ## MCP servers and skills
 
 Managed in the UI's 扩展 tab (or `GET /mcp`, `GET /skills`), stored under `$AGENTSWITCH_HOME`:
@@ -429,7 +481,11 @@ is taken fails start-up (exit 1, the port named in the error), so the Mac app se
 - **TLS**: `$AGENTSWITCH_HOME/remote/{cert.pem,key.pem}`, made once with `/usr/bin/openssl` (EC P-256, CN=AgentSwitch,
   10 years, serverAuth), directory 0700, key 0600. A pair that does not parse or match is regenerated with a warning
   (phones must pair again). Fingerprint = SHA-256 of the DER, lowercase hex; phones trust nothing else.
-- **Routes**: exactly the doc's list (`src/remote/routes.ts`); anything else is 404, with or without a token. `GET
+- **Routes**: exactly the doc's list (`src/remote/routes.ts`); anything else is 404, with or without a token. Proxies
+  are on it (2026-10-09): Clash Integration's page routes, a profile's proxy and its check, and the shared browser's
+  `/browser/identity` — where a phone is told the fingerprint in a line, not its text, and a `PUT` that names a
+  fingerprint is 403. Not on it: what Clash Verge fetches, a profile browser's identity, the browser engine, and
+  making, removing or colouring a profile. `GET
   /healthz` (`{ok:true}`) and `POST /pair` need no token; everything else `Authorization: Bearer <token>`, including
   the SSE stream. Allowed routes other than `/healthz`, `/pair`, `/me`, `/gate/pubkey` are forwarded to the API
   unchanged, marked as a paired device's in the Hono env (`src/core/caller.ts`; no header can set or clear it). The web
@@ -511,12 +567,14 @@ import only those listed for it (and itself):
 | `core/` | util |
 | `harness/`, `files/`, `extensions/`, `secrets/` | util, core |
 | `quota/` | util, core, harness |
-| `threads/` | util, core |
+| `sessions/`, `threads/`, `clash/`, `profiles/` | util, core |
 | `router/` (incl. `routers/`) | util, core, harness |
-| `executors/` | util, core, harness, files, extensions, secrets, quota |
-| `engine/` | everything above |
-| `api/` | everything above and engine |
-| `remote/` | same as `api/` (a peer: it reaches the API only through `fetch`) |
+| `executors/` | the lower ones: util, core, harness, files, extensions, secrets, quota, sessions |
+| `engine/` | the lower ones, threads, router, executors |
+| `assistant/` | the lower ones, router, engine |
+| `terminals/`, `browser/` | the lower ones, executors |
+| `api/` | the lower ones, threads, router, executors, engine, assistant, terminals, browser, profiles, clash |
+| `remote/` | the lower ones, threads, router, executors, engine (a peer of `api/`: it reaches the API only through `fetch`) |
 | `daemon.ts`, `cli.ts`, `client.ts` | everything |
 
 | path | what |
@@ -540,7 +598,10 @@ import only those listed for it (and itself):
 | `src/api/{cwdPolicy,localGuard,files}.ts` | where a task may run, the 127.0.0.1 listener's browser guard, task file listing/download |
 | `src/remote/{address,tailscale,tls,devices,pairing,gateKey,routes,app,admin,server,runtime}.ts` | remote access: source filter + LAN addresses, Tailscale discovery, certificate, device tokens + presence, pairing codes + payload, gate public key, route allowlist, remote pipeline, local management routes, HTTPS listener, per-daemon state |
 | `src/router/modelOverlay.ts`, `src/api/models.ts` | models.json over targets.yaml, `/settings/models` |
-| `tests/` | 213 tests; API tests run in-process via Hono `request()` |
+| `src/profiles/store.ts`, `src/api/profiles.ts`, `src/terminals/signIn.ts` | profiles: the folders and the list, their routes, whether somebody is signed in |
+| `src/clash/{store,source,build,rules,templates,controller,check,verge,integration}.ts`, `src/api/clash.ts` | Clash Integration: settings and token, the subscription kept, the one made, rule templates, the core's controller, the routing check, Clash Verge as found, the whole; its routes |
+| `src/browser/{exits,fleet}.ts` | a forwarder per profile and where its proxy lets traffic out; each profile's own browser |
+| `tests/` | API tests run in-process via Hono `request()`; `listenLocal` where the 127.0.0.1 guard matters |
 | `scripts/router_eval.ts`, `tests/fixtures/routing/v0.jsonl` | routing evaluation with the real router (costs tokens) |
 | `scripts/resume_experiment.ts`, `scripts/executor_resume_smoke.ts` | real-model checks that Claude / Codex resume from a thread's private home (costs cents) |
 

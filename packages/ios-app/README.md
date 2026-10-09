@@ -43,6 +43,14 @@ AgentSwitchKit, by folder:
   `SessionModels` (the Mac's Claude Code / Codex / OpenCode sessions, grouped by folder), `ControlRoutes`
   (`/approvals/policy`, `/settings/workdir`, `/sessions`, `/tasks/:id/ack`, `/search`); the event stream drops a
   connection that has sent no byte for 30 s (the daemon pings every 10 s) and resumes from the last seq.
+  Terminals and what goes with them: `TerminalModels` / `TerminalRoutes` (terminals and their events;
+  the profiles to choose between and the one a terminal runs under, `ProfileChoice`, `TerminalProfile`).
+  Proxies (docs/clash-v0.md §9, profiles-v0 §4.2, browser-v0 §7.6): `ClashModels` (the Mac's Clash page, the same
+  models as the Mac app's), `ProxyModels` (`ProxySetting`, `ProxyExit`, `ProxyDraft` — the form's rules, a proxy
+  written whole in one field taken apart, and a typed password as the payload to seal: for the proxy's own
+  `host:port`, uses `http` + `fill` — `BrowserProxyState`), `ProxyRoutes` (`/clash…`, `/profiles/:agent/:id/proxy`
+  and `/check`, `/browser/identity`; a Mac from before these were a phone's answers 403 or 404, read as nothing to
+  show).
 - `Connection/` — `EndpointSelector` (Bonjour with matching `fp` prefix → LAN addresses → Tailscale; probe `/healthz`
   then `/me`), `ConnectionManager` (actor; re-selects on failure and on `NWPathMonitor` changes, checks the address
   in use with `/healthz` on returning to the foreground, retries on its own while unreachable — 2 s doubling to
@@ -166,6 +174,18 @@ Signing & Capabilities and press Run — but `xcodegen generate` (also run by th
   transcript each, refreshed every 10 s while one runs); 权限 (the mode, changed on the Mac); Mac › 排障 and the
   default work folder. Opening a task marks it read; unread tasks carry an accent dot; the process folds tool calls
   in a row and ends with how long the task took.
+  Proxies (2026-10-09): a section with one row for `Clash` (its state in a word), one for the shared `Browser` and
+  one for each profile that is not the Mac's own (its colour, and where it leaves from). `Clash` is the Mac's Clash
+  page: status, the subscription (a link pasted in, one of Clash Verge's own, a file; update, replace, remove), the
+  nodes for Claude and for OpenAI with what each group uses now (a tap changes it; `Nodes` chooses and orders them,
+  `Test` times them), rule templates and DNS with their text, the addresses that go direct, the routing check. A
+  proxy's form is one for both: `Server`, `User Name`, `Password`, its exit; the password is sealed on the phone
+  with the Mac's gate key as it is now and never leaves in the clear. Adding AgentSwitch's subscription to Clash
+  Verge, a browser's fingerprint, and making or removing a profile stay on the Mac.
+- **Terminals** and **Browser** (tabs) — docs/terminal-v0.md, docs/simple-view-v0.md, docs/browser-v0.md. A terminal
+  under a profile carries its colour as a lit dot; the new-terminal sheet has a `Profile` row when the agent has more
+  than one, and a conversation's menu has `Resume As <name>` (profiles-v0 §3.2, §3.3). The Browser tab lists the
+  shared browser and each profile's own (§5.4).
 
 Demo screens (Debug, `-uiDemo YES -uiDemoScreen <name>`): `terminals`, `terminal` (a terminal waiting for a
 permission), `terminalsealed` (the sealed box opens 3 s in, with its glitch), `terminalslash` (`/co` and its
@@ -177,7 +197,10 @@ the record), `simplebusy` (at work: what it is doing, its sub-agents, a queued m
 `simpleprompt` (waiting on a screen of its own: the keys come out) and `simplechanges` (what the last turn
 changed), `newterminal`, `settings`, `task`, `done`, `running`, `stale`,
 `interrupted`, `onboarding`, `mac`, `offline` (home, Mac unreachable), `offlinemac`, `tasks`, `search`, `sessions`,
-`transcript`; the Browser tab's `browser` (the list), `browserpage` (watching codex, its last action outlined),
+`transcript`; profiles as `terminalprofiles` (a terminal's dot), `newterminalprofile` and `terminalmenuprofile`
+(`Resume As`); proxies as `proxies` (Settings scrolled to the section), `clash`, `clashservice`, `clashrules`,
+`clashcheck` (parts of the Clash page), `clashnodes`, `clashtext`, `clashsource` (the pages behind it),
+`proxybrowser` and `proxyprofile` (the form); the Browser tab's `browser` (the list), `browserpage` (watching codex, its last action outlined),
 `browsertook` (taken over, the keyboard and key bar up), `browserfile`, `browserlocal`, `browserdenied`, `browsernew`,
 `browserclose`, `browserzoom` (your dev server's page at 50%, the zoom row open; its `−` `+` draw the mock page
 again) and `browserzoomwatch` (watching codex, the row stepping the picture on the phone, at 150%) — mock pages drawn
