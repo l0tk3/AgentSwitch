@@ -190,6 +190,22 @@ const R = {
     "..#kkkdkkssss#..",
     "...##kkksss##...",
     ".....######....."] },
+  clash: { name: "Clash", note: "一只小猫的脸（Clash 自己的标志是猫）：耳朵和额头受光，脸是暗底，两只亮眼睛，下巴压暗；只在 Mac 上（Clash 页只有 Mac 有）", rows: [
+    ".W............#.",
+    ".W#..........#m.",
+    ".Wk#........#km.",
+    ".Wkk########kkm.",
+    ".Wkkkkkkkkkkkkm.",
+    "W#kkkkkkkkkkkkmd",
+    "W#kWWkkkkkkWWkmd",
+    "W#kW#kkkkkkW#kmd",
+    "W#kkkkkkkkkkkkmd",
+    "W#kkkkkmmkkkksmd",
+    "##kkkkdkkdkkssmd",
+    ".#kkkkkkkkksssd.",
+    ".#mkkkkkkksssdd.",
+    "..mmkkkkkssssd..",
+    "...mmdddddddd..."] },
   settings: { name: "Settings", note: "三根滑杆：走过的一段亮，没走的暗，钮是凸起的", rows: [
     "...WWW#.........",
     "mmmW##mkkkkkkkkk",
@@ -303,6 +319,7 @@ const NOW = {
   terminals: ["################", "#..............#", "################", "#..............#", "#.#............#", "#..#...........#", "#...#..........#", "#..#...........#", "#.#...######...#", "#..............#", "#..............#", "################"],
   browser: [".....#####.....", "...##.....##...", "..#..#...#..#..", ".#..#.....#..#.", ".#..#.....#..#.", "#...#.....#...#", "#...#.....#...#", "###############", "#...#.....#...#", "#...#.....#...#", ".#..#.....#..#.", ".#..#.....#..#.", "..#..#...#..#..", "...##.....##...", ".....#####....."],
   lock: [".###.", "#...#", "#####", "##.##", "#####"],
+  clash: [".#...........#.", ".##.........##.", ".#.#.......#.#.", ".#..#######..#.", ".#...........#.", "#.............#", "#..##.....##..#", "#..##.....##..#", "#.............#", "#......#......#", "#.....#.#.....#", ".#...........#.", ".#...........#.", "..##.......##..", "....#######...."],
 };
 const now = (k, zoom = 1) => (k === "dispatch" ? P.mark({ px: zoom, mono: true }) : P.sprite(NOW[k === "lockSmall" ? "lock" : k], { px: (k === "lock" || k === "lockSmall" ? 2 : 1) * zoom }));
 
@@ -330,7 +347,7 @@ function strips() {
     return `<div class="strip bg-${S.bg}"><div class="cap">// Mac 主窗口 · ${refined ? "精致" : "现在"}</div><div class="winbit">
       <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="tb">${ic("list")}</span><span class="title">AgentSwitch<small>main ±5 ↑2</small></span>
         <span class="tb">${ic("splitRight")}</span><span class="tb">${ic("splitDown")}</span><span class="tb">${ic("plus")}</span></div>
-      <div class="rail">${ri("dispatch", "on")}${ri("terminals", "dim")}${ri("browser", "dim")}<span class="sp"></span>${ri("settings", "dim")}</div>
+      <div class="rail">${ri("dispatch", "on")}${ri("terminals", "dim")}${ri("browser", "dim")}${ri("clash", "dim")}<span class="sp"></span>${ri("settings", "dim")}</div>
       <div class="body"><div class="row">${st("waiting")}<span style="color:var(--ink)">发布前检查</span><span style="margin-left:auto;display:flex;gap:8px;align-items:center">${agent}</span></div>
         <div class="row">${st("idle")}<span>整理工作目录</span></div><div class="row" style="margin-top:10px">${ic("lock")}<span>Encrypt &amp; Send</span></div></div></div></div>`;
   };

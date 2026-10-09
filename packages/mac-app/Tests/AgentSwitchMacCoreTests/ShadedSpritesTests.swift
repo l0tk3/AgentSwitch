@@ -49,6 +49,12 @@ final class ShadedSpritesTests: XCTestCase {
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.railDispatch), .dispatch)
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.railTerminals), .terminals)
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.railBrowser), .browser)
+        // Clash's page is the Mac's alone: its cat is a picture here and not one of those the phone and the web share.
+        XCTAssertEqual(ShadedSprite.standing(for: PixelArt.railClash), .clash)
+        XCTAssertFalse(ShadedSprite.all.contains { $0.sprite == .clash })
+        XCTAssertEqual(PixelArt.symbol(for: PixelArt.railClash), "cat")
+        XCTAssertTrue(ShadedSprite.clash.rows.allSatisfy { $0.count == 16 } && ShadedSprite.clash.height <= 16)
+        XCTAssertTrue(Set(ShadedSprite.clash.rows.joined()).subtracting(["."]).allSatisfy { ShadedSprite.color($0, dark: true) != nil && ShadedSprite.color($0, dark: false) != nil })
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.toolbarSettings), .settings)
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.toolbarList), .list)
         XCTAssertEqual(ShadedSprite.standing(for: PixelArt.toolbarSplitRight), .splitRight)

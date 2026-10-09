@@ -70,6 +70,13 @@ public struct ShadedSprite: Equatable, Sendable {
         "#Wkkkkkkkkmmmmk#", "#kkmmkkkkkkmmkk#", "#kmmmmkkkkkkmks#", "#kmmmmmkkkkkkss#", "#kkmmmmdkkkksss#", ".#kkmmmdkkksss#.",
         ".#kkkmdkkkssss#.", "..#kkkdkkssss#..", "...##kkksss##...", ".....######.....",
     ])
+    /// Clash's page, on the Mac alone (so not in `all`, which the phone and the web share): a cat's face — its ears
+    /// and brow lit from above and left, the face a dark ground, two bright eyes, the chin in shade.
+    public static let clash = ShadedSprite([
+        ".W............#.", ".W#..........#m.", ".Wk#........#km.", ".Wkk########kkm.", ".Wkkkkkkkkkkkkm.", "W#kkkkkkkkkkkkmd",
+        "W#kWWkkkkkkWWkmd", "W#kW#kkkkkkW#kmd", "W#kkkkkkkkkkkkmd", "W#kkkkkmmkkkksmd", "##kkkkdkkdkkssmd", ".#kkkkkkkkksssd.",
+        ".#mkkkkkkksssdd.", "..mmkkkkkssssd..", "...mmdddddddd...",
+    ])
     /// Three sliders: the part each has travelled lighter, the rest dark, their knobs raised.
     public static let settings = ShadedSprite([
         "...WWW#.........", "mmmW##mkkkkkkkkk", "dddW##msssssssss", "...#mmd.........", "................", ".........WWW#...",
@@ -148,7 +155,7 @@ public struct ShadedSprite: Equatable, Sendable {
     }
 
     static let stands: [(rows: [String], sprite: ShadedSprite)] = [
-        (PixelArt.railDispatch, dispatch), (PixelArt.railTerminals, terminals), (PixelArt.railBrowser, browser),
+        (PixelArt.railDispatch, dispatch), (PixelArt.railTerminals, terminals), (PixelArt.railBrowser, browser), (PixelArt.railClash, clash),
         (PixelArt.toolbarSettings, settings), (PixelArt.toolbarList, list), (PixelArt.toolbarSplitRight, splitRight),
         (PixelArt.toolbarSplitDown, splitDown), (PixelArt.toolbarNew, new), (PixelArt.lock, lock),
     ] + PixelArt.agents.keys.sorted().compactMap { harness in agents[harness].map { (PixelArt.agents[harness]!, $0) } }
