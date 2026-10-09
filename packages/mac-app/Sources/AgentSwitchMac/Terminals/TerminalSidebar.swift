@@ -451,7 +451,32 @@ private struct SessionRow: View {
             return NSItemProvider(object: session.sessionId as NSString)
         }
         .allowsHitTesting(!opening)
-        .help("\(TerminalListText.agentName(session.harness)) · \(TerminalTree.tilde(session.cwd))")
+        .contextMenu { menu }
+        .help("\(TerminalListText.agentName(session.harness)) · \(TerminalTree.tilde(session.cwd))\(own.map { " · \($0.name)" } ?? "")")
+    }
+
+    /// The agent's profiles, when there is more than the Mac's own, and the one this session last ran under.
+    private var choices: [AgentProfile] { model.profiles[session.harness].flatMap { $0.several ? $0.profiles : nil } ?? [] }
+    private var own: AgentProfile? { session.profile.flatMap { id in choices.first { $0.id == id } } }
+
+    /// `Resume` goes on under the profile it last ran under; `Resume As` under another (docs/profiles-v0.md §3.3).
+    @ViewBuilder
+    private var menu: some View {
+        if resumable {
+            Button("Resume") { model.resume(session) }
+            if !choices.isEmpty {
+                Menu("Resume As") {
+                    Picker("Resume As", selection: Binding(get: { own?.id ?? "default" }, set: { model.resume(session, as: $0) })) {
+                        ForEach(choices) { profile in
+                            Label { Text(ProfileWords.line(profile)) } icon: { if let tint = profile.tint { Image(nsImage: ProfileSwatch.image(tint)) } }.tag(profile.id)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                }
+            }
+            Divider()
+        }
+        Button("Delete", role: .destructive) { model.delete(session) }
     }
 }
 

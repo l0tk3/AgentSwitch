@@ -263,6 +263,9 @@ export type TerminalHostOptions = {
   readonly floor?: (tool: string, input: Record<string, unknown>, cwd: string) => string | null;
   /** The program ended (or never started): what was made for this terminal's agent ends too (its browser session). */
   readonly onExit?: (id: string) => void;
+  /** A terminal's agent writes this conversation now — one it was started on, or one it says it is in: under which
+   *  profile (null: the Mac's own). Kept so the conversation goes on under the same one (docs/profiles-v0.md §3.3). */
+  readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
   /** The terminal is forgotten (deleted, or its start failed): what it left goes too (its browser tabs). */
   readonly onRemove?: (id: string) => void;
   readonly now?: () => number;
@@ -809,7 +812,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onSession">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -851,7 +854,7 @@ export class TerminalHost {
     s.resumedFrom = req.resume ?? null;
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
     // Continued in place, the agent writes the session it was given (its hooks say the same once they run).
-    if (req.resume && !s.forked) s.agentSessionId = req.resume;
+    if (req.resume && !s.forked) { s.agentSessionId = req.resume; this.opts.onSession?.(s.harness, req.resume, s.profile?.id ?? null); }
     s.givenName = req.name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     // Codex's notifications (OSC 9) are only those for what waits for you (launch.ts CODEX_ATTENTION).
     if (req.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
@@ -1322,6 +1325,7 @@ export class TerminalHost {
   /** The agent says which session it writes. A new terminal's or a fork's first one is its own; a later one (`/resume`
    *  typed inside it) is followed, never owned, so closing the terminal cannot delete a record it did not start. */
   private reported(s: Session, sessionId: string): void {
+    if (s.agentSessionId !== sessionId) this.opts.onSession?.(s.harness, sessionId, s.profile?.id ?? null);
     s.agentSessionId = sessionId;
     if (!s.ownSessionId && (!s.resumedFrom || s.forked) && sessionId !== s.resumedFrom) s.ownSessionId = sessionId;
   }

@@ -35,11 +35,11 @@ struct AgentSwitchApp: App {
             case "interrupted": model.tab = .tasks; model.openTaskRequest = "t6"
             // The Dispatch page itself (the app opens on the terminals).
             case "home", "offline": model.tab = .tasks
-            case "terminals", "terminalmenu", "terminaldelete", "terminalsearch", "terminalprofiles": model.tab = .terminals
+            case "terminals", "terminalmenu", "terminalmenuprofile", "terminaldelete", "terminalsearch", "terminalprofiles": model.tab = .terminals
             case "terminal", "terminalsealed", "terminalslash", "terminalclose", "terminalkeyboard", "terminalquestion", "terminallink",
                  "simple", "simplebusy", "simplecompact", "simpledaybreak", "simpledaybreakclash", "simpleidle", "simpleeffort", "simplepaste", "simplestep", "simplesuggest", "simplequestion", "simpleprompt", "simplechanges":
                 model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
-            case "newterminal", "newterminalbypass": model.tab = .terminals; model.openTerminalRequest = "new"
+            case "newterminal", "newterminalbypass", "newterminalprofile": model.tab = .terminals; model.openTerminalRequest = "new"
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)
             // A link tapped on a terminal's screen: its page over the terminal, `Done` back to it.
             case "linkedpage":

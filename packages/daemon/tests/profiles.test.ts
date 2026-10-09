@@ -15,6 +15,7 @@ import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
 import { DEFAULT_PROFILE, ProfileError, ProfileStore } from "../src/profiles/store.js";
+import { mountSessions } from "../src/api/sessions.js";
 import { mountTerminals } from "../src/api/terminals.js";
 import { TerminalHost, type LaunchRequest } from "../src/terminals/host.js";
 import { agentLauncher, proxyEnv } from "../src/terminals/launch.js";
@@ -374,7 +375,9 @@ esac
   function served(signedIn: (harness: string, home: string) => Promise<boolean | null>) {
     const w = world();
     const asked: LaunchRequest[] = [];
-    const host = new TerminalHost({ launcher: (req) => { asked.push(req); return { file: "/bin/sh", args: ["-c", "/bin/sleep 30"], env: { PATH: "/usr/bin:/bin" }, hooks: false }; } });
+    const host = new TerminalHost({ launcher: (req) => { asked.push(req); return { file: "/bin/sh", args: ["-c", "/bin/sleep 30"], env: { PATH: "/usr/bin:/bin" }, hooks: false }; },
+      // As the service wires it: which profile each conversation runs under is kept.
+      onSession: (harness, sessionId, profile) => w.store.noteSession(harness as "claude-code", sessionId, profile) });
     closers.push(() => host.closeAll());
     const app = new Hono();
     const questions: string[] = [];
@@ -406,6 +409,77 @@ esac
     // A session continued under it starts at the sign-in too: it could not go on otherwise.
     expect((await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: "0f8fad5b-d9cb-469f-a165-70867728950e", profile: fresh.id })).status).toBe(201);
     expect(asked.at(-1)).toMatchObject({ resume: "0f8fad5b-d9cb-469f-a165-70867728950e", firstInput: "/login" });
+  });
+
+  it("is chosen where a terminal is made: a new one under the one named, a conversation under the one it last ran under", async () => {
+    const { store, asked, call, root, host } = served(async () => true);
+    const a = store.create("claude-code", "A", "subscription"), b = store.create("claude-code", "B", "subscription");
+    const home = (id: string) => store.homeOf("claude-code", id);
+    const fresh = async (profile?: string) => { const r = await call("POST", "/terminals", { harness: "claude-code", cwd: root, ...(profile ? { profile } : {}) }); expect(r.status).toBe(201); return r.json.terminal.id as string; };
+    const resume = async (session: string, profile?: string) => { const r = await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: session, ...(profile ? { profile } : {}) }); expect(r.status).toBe(201); return r.json.terminal.id as string; };
+    const s1 = "11111111-d9cb-469f-a165-70867728950e", s2 = "22222222-d9cb-469f-a165-70867728950e", s3 = "33333333-d9cb-469f-a165-70867728950e";
+
+    // A new terminal: under the one named, which is what the next one is offered first; not named, under that one.
+    await fresh();
+    expect(asked.at(-1)!.configHome).toBeUndefined();
+    await fresh(a.id);
+    expect(asked.at(-1)!.configHome).toBe(home(a.id));
+    expect(store.current("claude-code")).toBe(a.id);
+    await fresh();
+    expect(asked.at(-1)!.configHome).toBe(home(a.id));
+    await fresh("default");
+    expect(asked.at(-1)!.configHome).toBeUndefined();
+    expect(store.current("claude-code")).toBe("default");
+    await fresh(a.id);
+
+    // A conversation nothing is known of (started outside AgentSwitch): the Mac's own, whatever was chosen last.
+    const first = await resume(s1);
+    expect(asked.at(-1)!.configHome).toBeUndefined();
+    expect(store.sessionProfile("claude-code", s1)).toBeNull();
+    host.remove(first);
+    // Continued as B: it runs under B, and that is where it goes on the next time — not where the last new terminal went.
+    const asB = await resume(s1, b.id);
+    expect(asked.at(-1)!.configHome).toBe(home(b.id));
+    expect(store.sessionProfile("claude-code", s1)).toBe(b.id);
+    expect(store.current("claude-code")).toBe(a.id);
+    host.remove(asB);
+    host.remove(await resume(s1));
+    expect(asked.at(-1)!.configHome).toBe(home(b.id));
+    // Taken back to the Mac's own: forgotten, and it stays there.
+    host.remove(await resume(s1, "default"));
+    expect(asked.at(-1)!.configHome).toBeUndefined();
+    expect(store.sessionProfile("claude-code", s1)).toBeNull();
+    host.remove(await resume(s1));
+    expect(asked.at(-1)!.configHome).toBeUndefined();
+
+    // What is kept outlives the service, in AgentSwitch's own folder; the conversations' list says it.
+    host.remove(await resume(s2, a.id));
+    const later = new ProfileStore({ home: join(root, "as"), userHome: join(root, "user") });
+    expect(later.sessionProfile("claude-code", s2)).toBe(a.id);
+    expect([...later.sessionProfiles("claude-code")]).toEqual([[s2, a.id]]);
+    expect(later.sessionProfile("codex", s2)).toBeNull();
+    // Its profile removed: the conversation goes on under the Mac's own.
+    host.remove(await resume(s3, b.id));
+    for (const t of host.list()) if (t.profile?.id === b.id) host.remove(t.id);
+    expect((await call("DELETE", `/profiles/claude-code/${b.id}`)).status).toBe(200);
+    expect(store.sessionProfile("claude-code", s3)).toBeNull();
+    await resume(s3);
+    expect(asked.at(-1)!.configHome).toBeUndefined();
+    // A profile that is not there is not started under, new or continued.
+    expect((await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: "nosuch0000" })).status).toBe(400);
+    expect((await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: s2, profile: "nosuch0000" })).status).toBe(400);
+  });
+
+  it("is said with each conversation in the list, when it is not the Mac's own", async () => {
+    const w = world();
+    const a = w.store.create("claude-code", "A", "subscription");
+    w.store.noteSession("claude-code", "s-under-a", a.id);
+    w.store.noteSession("claude-code", "s-back-home", a.id);
+    w.store.noteSession("claude-code", "s-back-home", null);
+    const app = new Hono();
+    const sessions = [{ harness: "claude-code", id: "s-under-a", cwd: "/w" }, { harness: "claude-code", id: "s-back-home", cwd: "/w" }, { harness: "codex", id: "s-under-a", cwd: "/w" }];
+    mountSessions(app, { profiles: w.store, sessions: { list: () => sessions } } as unknown as ApiDeps);
+    expect(((await (await app.request("/sessions")).json()) as { sessions: unknown[] }).sessions).toEqual([{ ...sessions[0], profile: a.id }, sessions[1], sessions[2]]);
   });
 
   it("has a colour of its own, which its terminals carry — also after it is changed", async () => {

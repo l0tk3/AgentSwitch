@@ -189,6 +189,21 @@ extension TerminalsModel {
         if !agents.contains(pickedAgent), let first = agents.first { pickedAgent = first }
         if !TerminalListText.modes.contains(where: { $0.id == pickedMode }) { pickedMode = "manual" }
         if let folder { folderText = TerminalTree.tilde(folder) } else if folderText.isEmpty { folderText = "~" }
+        // The profiles to choose between, as they are now; the panel offers the one last chosen until another is.
+        pickedProfiles = [:]
+        Task { await refreshProfiles() }
+    }
+
+    /// Each agent's profiles (docs/profiles-v0.md §3.3): what the new-terminal panel and `Resume As` choose between.
+    func refreshProfiles() async {
+        guard let all = try? await client().profiles() else { return }
+        if profiles != all { profiles = all }
+    }
+
+    /// The profile the panel has chosen for the agent picked: nil when the agent has only the Mac's own.
+    var pickedProfile: AgentProfile? {
+        guard let list = profiles[pickedAgent], list.several else { return nil }
+        return pickedProfiles[pickedAgent].flatMap { id in list.profiles.first { $0.id == id } } ?? list.offered
     }
 
     func cancelCreate() {
@@ -212,7 +227,7 @@ extension TerminalsModel {
         createError = ""
         let agent = pickedAgent
         let model = pickedModel
-        let body = NewTerminalRequest(harness: agent, cwd: cwd, model: model, effort: pickedEffort, mode: pickedMode, cols: gridHere?.cols, rows: gridHere?.rows)
+        let body = NewTerminalRequest(harness: agent, cwd: cwd, model: model, effort: pickedEffort, mode: pickedMode, cols: gridHere?.cols, rows: gridHere?.rows, profile: pickedProfile?.id)
         let c = client()
         Task {
             defer { starting = false }
@@ -232,7 +247,8 @@ extension TerminalsModel {
 
     /// Continues a session in the pane in focus. Open here already: that terminal. Open in another program: asked
     /// whether to fork (one writer at a time). Its folder gone: asked where to go on (docs/terminal-v0.md §5).
-    func resume(_ session: SessionSummary) {
+    /// `profile`: `Resume As` — under that one; nil: under the one it last ran under.
+    func resume(_ session: SessionSummary, as profile: String? = nil) {
         guard TerminalListText.resumable.contains(session.harness), opening == nil else { return }
         if let open = openedAs(session) { return select(open.id) }
         let name = session.title.isEmpty ? "会话" : session.title
@@ -249,7 +265,7 @@ extension TerminalsModel {
             do {
                 var body = ResumeTerminalRequest(harness: session.harness, cwd: session.cwd, agentSessionId: session.sessionId,
                                                  title: session.title.isEmpty ? nil : session.title, mode: session.mode ?? pickedMode,
-                                                 cols: gridHere?.cols, rows: gridHere?.rows)
+                                                 cols: gridHere?.cols, rows: gridHere?.rows, profile: profile)
                 var first: (cwd: String, alike: [String], near: String?)?
                 while true {
                     switch try await c.resumeTerminal(body) {
@@ -267,8 +283,7 @@ extension TerminalsModel {
                                                              body: "同一会话同时只能由一个程序写入，否则记录会分叉。请先在 \(app) 中退出该会话后再继续，或创建分支：新会话包含全部历史，原会话保持不变。",
                                                              confirm: "Fork"))
                         guard answer.ok, body.fork != true else { return left() }
-                        body = ResumeTerminalRequest(harness: body.harness, cwd: body.cwd, agentSessionId: body.agentSessionId, title: body.title,
-                                                     mode: body.mode, fork: true, cols: body.cols, rows: body.rows)
+                        body = body.forking()
                     case .folderGone(let cwd, let alike, let near):
                         let was = first ?? (cwd, alike, near)
                         first = was

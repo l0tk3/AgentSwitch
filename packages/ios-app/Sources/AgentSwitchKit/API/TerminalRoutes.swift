@@ -49,6 +49,13 @@ public struct AttachedFile: Decodable, Sendable, Equatable {
 
 extension AgentSwitchAPI {
     public func terminals() async throws -> TerminalList { try await get(["terminals"]) }
+
+    /// Each agent's profiles, by the agent's id (`GET /profiles`); none from a Mac that has no profiles (an older one).
+    public func profiles() async throws -> [String: ProfileChoices] {
+        struct Reply: Decodable { let agents: [String: ProfileChoices] }
+        do { return (try await get(["profiles"]) as Reply).agents }
+        catch APIError.http(status: 404, message: _) { return [:] }
+    }
     public func terminalStyle() async throws -> TerminalStyle { try await get(["terminals", "style"]) }
 
     /// The tree's folders' git (`GET /folders/git`); none from a Mac that does not say.

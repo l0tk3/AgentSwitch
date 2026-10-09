@@ -19,6 +19,11 @@ struct TerminalCreatePanel: View {
                 if !compact { Wordmark().padding(.bottom, 20) }
                 PanelLabel("New Terminal").padding(.bottom, 8)
                 agents
+                // Whose sign-in it runs under, where the agent has more than the Mac's own (docs/profiles-v0.md §3.3).
+                if model.pickedProfile != nil {
+                    PanelLabel("Profile").padding(.top, 16).padding(.bottom, 8)
+                    profileMenu
+                }
                 PanelLabel("Model").padding(.top, 16).padding(.bottom, 8)
                 modelMenu
                 // How hard it thinks, under the agent's own word and with the levels the model picked takes; nothing
@@ -90,6 +95,40 @@ struct TerminalCreatePanel: View {
     }
 
     // MARK: its model
+
+    /// The agent's profiles, the one last chosen first offered; each with its colour and who is signed in.
+    private var profileMenu: some View {
+        let list = model.profiles[model.pickedAgent]?.profiles ?? []
+        let picked = model.pickedProfile
+        return Menu {
+            Picker("Profile", selection: Binding(get: { picked?.id ?? "default" }, set: { id in model.pickedProfiles = model.pickedProfiles.merging([model.pickedAgent: id]) { _, new in new } })) {
+                ForEach(list) { profile in
+                    Label { Text(ProfileWords.line(profile)) } icon: { if let tint = profile.tint { Image(nsImage: ProfileSwatch.image(tint)) } }.tag(profile.id)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 8) {
+                if let tint = picked?.tint { ProfileDot(color: tint) }
+                Text(picked?.name ?? "Default")
+                    .font(look.isClassic ? .system(size: 13) : .system(size: 12.5, design: .monospaced))
+                    .foregroundStyle(Look.ink).lineLimit(1)
+                Text(picked.map(ProfileWords.who) ?? "")
+                    .font(look.isClassic ? .system(size: 12) : .system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Look.faint).lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Text("▾").font(.system(size: 12, design: .monospaced)).foregroundStyle(Look.faint)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: look.isClassic ? 30 : 28)
+            .background(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).fill(look.isClassic ? Look.ink.opacity(0.07) : Color.clear))
+            .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 7 : 0).strokeBorder(look.isClassic ? Color.clear : Look.line, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+    }
 
     /// `Default · Opus 5.5`, the agent's current models, then the ones a newer model superseded under `Older`.
     private var modelMenu: some View {

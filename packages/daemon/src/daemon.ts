@@ -19,7 +19,7 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
-import { DEFAULT_PROFILE, ProfileStore } from "./profiles/store.js";
+import { DEFAULT_PROFILE, PROFILE_AGENTS, ProfileStore } from "./profiles/store.js";
 import { ClashIntegration } from "./clash/integration.js";
 import { ClashSource } from "./clash/source.js";
 import { ClashStore } from "./clash/store.js";
@@ -385,6 +385,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
+      // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
+      onSession: (harness, sessionId, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
         codexHooks: () => codexTrust?.trusted ?? false, opencodeServer: true,
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of

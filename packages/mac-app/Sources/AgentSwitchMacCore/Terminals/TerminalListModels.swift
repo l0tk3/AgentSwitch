@@ -26,9 +26,14 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
     public let mode: String?
     /// The session this one was forked from.
     public let forkedFrom: String?
+    /// The profile it last ran under, by its id, when that is not the Mac's own (docs/profiles-v0.md §3.3): where it
+    /// goes on unless another is chosen.
+    public let profile: String?
 
     public init(harness: String, id: String, cwd: String, title: String, lastText: String = "", updatedAt: Int64, startedAt: Int64? = nil,
-                active: Bool = false, origin: String? = nil, branch: String? = nil, model: String? = nil, mode: String? = nil, forkedFrom: String? = nil) {
+                active: Bool = false, origin: String? = nil, branch: String? = nil, model: String? = nil, mode: String? = nil, forkedFrom: String? = nil,
+                profile: String? = nil) {
+        self.profile = profile
         self.harness = harness
         self.sessionId = id
         self.cwd = cwd
@@ -59,7 +64,7 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         return last.isEmpty ? "未命名会话" : last
     }
 
-    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, startedAt, active, origin, branch, model, mode, forkedFrom }
+    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, startedAt, active, origin, branch, model, mode, forkedFrom, profile }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -77,6 +82,7 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         mode = try? c.decodeIfPresent(String.self, forKey: .mode)
         forkedFrom = try? c.decodeIfPresent(String.self, forKey: .forkedFrom)
+        profile = (try? c.decodeIfPresent(String.self, forKey: .profile)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
@@ -277,8 +283,12 @@ public struct NewTerminalRequest: Encodable, Sendable, Equatable {
     public let mode: String?
     public let cols: Int?
     public let rows: Int?
+    /// The profile it starts under, by its id (`default`: the Mac's own); nil: the one last chosen for a new terminal
+    /// (docs/profiles-v0.md §3.3).
+    public let profile: String?
 
-    public init(harness: String, cwd: String, model: String? = nil, effort: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil) {
+    public init(harness: String, cwd: String, model: String? = nil, effort: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil, profile: String? = nil) {
+        self.profile = profile
         self.harness = harness
         self.cwd = cwd
         self.model = model
@@ -299,9 +309,12 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let fork: Bool?
     public let cols: Int?
     public let rows: Int?
+    /// The profile it goes on under, by its id (`Resume As`); nil: the one it last ran under.
+    public let profile: String?
 
     public init(harness: String, cwd: String, agentSessionId: String, title: String? = nil, mode: String? = nil, fork: Bool? = nil,
-                cols: Int? = nil, rows: Int? = nil) {
+                cols: Int? = nil, rows: Int? = nil, profile: String? = nil) {
+        self.profile = profile
         self.harness = harness
         self.cwd = cwd
         self.agentSessionId = agentSessionId
@@ -314,7 +327,12 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
 
     /// The same, going on in `folder` (the session's own folder is gone).
     public func continuing(in folder: String) -> ResumeTerminalRequest {
-        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows)
+        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile)
+    }
+
+    /// The same as a fork: a new session with the whole history, the first left as it is.
+    public func forking() -> ResumeTerminalRequest {
+        ResumeTerminalRequest(harness: harness, cwd: cwd, agentSessionId: agentSessionId, title: title, mode: mode, fork: true, cols: cols, rows: rows, profile: profile)
     }
 }
 

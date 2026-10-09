@@ -428,6 +428,40 @@ final class RecordTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex"}"#.utf8)).profile)
     }
 
+    // MARK: the profile is chosen where a terminal is made (docs/profiles-v0.md §3.3)
+
+    func testTheProfileGoesWithTheRequestThatStartsOrContinuesATerminal() throws {
+        func sent(_ body: some Encodable) throws -> [String: Any] { try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? [String: Any]) }
+        XCTAssertEqual(try sent(NewTerminalRequest(harness: "claude-code", cwd: "~/p", profile: "abc123def0"))["profile"] as? String, "abc123def0")
+        XCTAssertNil(try sent(NewTerminalRequest(harness: "codex", cwd: "~/p"))["profile"])
+        XCTAssertNil(try sent(ResumeTerminalRequest(harness: "claude-code", cwd: "/w", agentSessionId: "s1"))["profile"])
+        let named = ResumeTerminalRequest(harness: "claude-code", cwd: "/w", agentSessionId: "s1", profile: "default")
+        XCTAssertEqual(try sent(named)["profile"] as? String, "default")
+        XCTAssertEqual(named.continuing(in: "/elsewhere").profile, "default")
+
+        // The list says which profile a conversation last ran under, when it is not the Mac's own.
+        let listed = try JSONDecoder().decode([SessionSummary].self, from: Data(#"[{"harness":"claude-code","id":"s1","cwd":"/w","profile":"abc123def0"},{"harness":"claude-code","id":"s2","cwd":"/w"}]"#.utf8))
+        XCTAssertEqual(listed.map(\.profile), ["abc123def0", nil])
+
+        // The profiles as the Mac lists them (`GET /profiles`): what is needed to choose between them, the rest left.
+        struct Reply: Decodable { let agents: [String: ProfileChoices] }
+        let agents = try JSONDecoder().decode(Reply.self, from: Data(#"""
+        {"agents":{"claude-code":{"current":"abc123def0","creatable":true,"profiles":[
+            {"id":"default","name":"Default","kind":"subscription","createdAt":0,"account":"me@example.com"},
+            {"id":"abc123def0","name":"cwork1","kind":"subscription","createdAt":1,"color":"violet","proxy":{"server":"http://proxy.example:8080","sealed":true},"exit":{"ip":"203.0.113.9","place":"Tokyo"}},
+            {"id":"abc123def1","name":"later","kind":"subscription","createdAt":2,"color":"a-colour-of-a-newer-mac"}]},
+          "codex":{"current":"default","creatable":false,"profiles":[{"id":"default","name":"Default","kind":"subscription","createdAt":0}]}}}
+        """#.utf8)).agents
+        let claude = try XCTUnwrap(agents["claude-code"])
+        XCTAssertTrue(claude.several)
+        XCTAssertEqual(claude.offered, ProfileChoice(id: "abc123def0", name: "cwork1", color: .violet))
+        XCTAssertEqual(claude.profiles.map(\.who), ["me@example.com", "Not Signed In", "Not Signed In"])
+        XCTAssertNil(claude.profiles[2].color)
+        XCTAssertEqual(agents["codex"]?.several, false)
+        XCTAssertEqual(agents["codex"]?.profiles.first?.who, "This Mac’s own")
+        XCTAssertEqual(ProfileChoices(current: "gone000000", profiles: claude.profiles).offered?.id, "default")
+    }
+
     // MARK: how far a turn has come, and what was sent (2026-10-08)
 
     func testTurnProgressAndSentRepliesParse() {

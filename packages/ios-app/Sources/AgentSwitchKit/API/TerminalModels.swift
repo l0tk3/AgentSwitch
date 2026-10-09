@@ -179,6 +179,53 @@ public enum ProfileColor: String, CaseIterable, Sendable, Hashable {
     }
 }
 
+/// One of an agent's profiles, as much as choosing between them takes (docs/profiles-v0.md §3.3): its name, who is
+/// signed in to it, its colour. The Mac's own is `default`.
+public struct ProfileChoice: Decodable, Sendable, Hashable, Identifiable {
+    public let id: String
+    public let name: String
+    /// Who is signed in, as the agent's own files say; nil: nobody yet (or the Mac does not say).
+    public let account: String?
+    public let color: ProfileColor?
+
+    public init(id: String, name: String, account: String? = nil, color: ProfileColor? = nil) {
+        self.id = id
+        self.name = name
+        self.account = account
+        self.color = color
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, account, color }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? id
+        account = (try? c.decodeIfPresent(String.self, forKey: .account)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
+        color = (try? c.decodeIfPresent(String.self, forKey: .color)).flatMap { $0 }.flatMap(ProfileColor.init(rawValue:))
+    }
+
+    public var isDefault: Bool { id == "default" }
+    /// `This Mac’s own` for the Mac's own, the account once somebody is signed in, `Not Signed In` till then.
+    public var who: String { account ?? (isDefault ? "This Mac’s own" : "Not Signed In") }
+}
+
+/// An agent's profiles and the one last chosen for a new terminal.
+public struct ProfileChoices: Decodable, Sendable, Hashable {
+    public let current: String
+    public let profiles: [ProfileChoice]
+
+    public init(current: String, profiles: [ProfileChoice]) {
+        self.current = current
+        self.profiles = profiles
+    }
+
+    /// There is something to choose between: more than the Mac's own.
+    public var several: Bool { profiles.count > 1 }
+    /// What a new terminal is offered first: the one last chosen, while it is still there.
+    public var offered: ProfileChoice? { profiles.first { $0.id == current } ?? profiles.first }
+}
+
 /// The profile a terminal runs under, when it is not the Mac's own (docs/profiles-v0.md §3): its name and its colour.
 public struct TerminalProfile: Decodable, Sendable, Hashable {
     public let name: String
@@ -483,8 +530,12 @@ public struct NewTerminalRequest: Encodable, Sendable, Equatable {
     public let mode: String?
     public let cols: Int?
     public let rows: Int?
+    /// The profile it starts under, by its id (`default`: the Mac's own); nil: the one last chosen for a new terminal
+    /// (docs/profiles-v0.md §3.3).
+    public let profile: String?
 
-    public init(harness: String, cwd: String, model: String? = nil, effort: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil) {
+    public init(harness: String, cwd: String, model: String? = nil, effort: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil, profile: String? = nil) {
+        self.profile = profile
         self.harness = harness
         self.cwd = cwd
         self.model = model
@@ -505,9 +556,12 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let fork: Bool?
     public let cols: Int?
     public let rows: Int?
+    /// The profile it goes on under, by its id (`Resume As`); nil: the one it last ran under.
+    public let profile: String?
 
     public init(harness: String, cwd: String, agentSessionId: String, title: String? = nil, mode: String? = nil, fork: Bool? = nil,
-                cols: Int? = nil, rows: Int? = nil) {
+                cols: Int? = nil, rows: Int? = nil, profile: String? = nil) {
+        self.profile = profile
         self.harness = harness
         self.cwd = cwd
         self.agentSessionId = agentSessionId
@@ -520,7 +574,7 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
 
     /// The same, going on in `folder` (the session's own folder is gone).
     public func continuing(in folder: String) -> ResumeTerminalRequest {
-        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows)
+        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile)
     }
 }
 

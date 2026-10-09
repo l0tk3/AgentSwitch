@@ -44,6 +44,15 @@ enum TerminalsPagePreview {
         // Every level chosen in turn, at the popover's own width: how one level differs from the next.
         try await sliders(to: file("effort-levels"), light: false, each: true)
         try await shot(to: file("terminals-create")) { $0.showCreate(folder: project) }
+        // Where the agent has more than the Mac's own sign-in: a `Profile` row, the one last chosen offered (docs/
+        // profiles-v0.md §3.3).
+        try await shot(to: file("terminals-create-profile")) { model in
+            model.showCreate(folder: project)
+            model.profiles = ["claude-code": AgentProfiles(current: "abc123def0", profiles: [
+                AgentProfile(id: "default", name: "Default", account: "me@example.com"),
+                AgentProfile(id: "abc123def0", name: "cwork1", account: "work@example.com", color: "violet"),
+                AgentProfile(id: "abc123def1", name: "side", color: "sand")], creatable: true)]
+        }
         try await shot(to: file("terminals-create-pane")) { model in
             model.split(.right)
             model.showCreate(folder: project)

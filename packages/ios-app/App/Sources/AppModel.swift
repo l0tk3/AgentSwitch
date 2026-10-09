@@ -773,7 +773,13 @@ extension AppModel {
         model.conversation = ConversationLog(DemoData.messages)
         model.hasAssistant = true
         model.quota = DemoData.quota
-        model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git)
+        // `terminalprofiles`, `newterminalprofile`, `terminalmenuprofile`: Claude Code with more than the Mac's own
+        // sign-in (docs/profiles-v0.md §3.3) — a `Profile` row in the new-terminal sheet, `Resume As` in a session's menu.
+        let screen = UserDefaults.standard.string(forKey: "uiDemoScreen") ?? ""
+        let profiles: [String: ProfileChoices] = screen.contains("profile") ? ["claude-code": ProfileChoices(current: "abc123def0", profiles: [
+            ProfileChoice(id: "default", name: "Default", account: "me@example.com"), ProfileChoice(id: "abc123def0", name: "cwork1", account: "work@example.com", color: .violet),
+            ProfileChoice(id: "abc123def1", name: "side", color: .sand)])] : [:]
+        model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git, profiles: profiles)
         model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent, zoom: DemoBrowser.zoom,
                               browsers: UserDefaults.standard.string(forKey: "uiDemoScreen") == "browserprofiles"
                                 ? [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", exit: .init(ip: "203.0.113.9", place: "Tokyo"), running: true)] : nil)

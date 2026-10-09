@@ -99,6 +99,10 @@ final class TerminalsModel {
     /// model picked takes it.
     var pickedEfforts: [String: String] { didSet { defaults?.set(pickedEfforts, forKey: Keys.efforts) } }
     var pickedMode: String { didSet { defaults?.set(pickedMode, forKey: Keys.mode) } }
+    /// Each agent's profiles, as the service has them, and the one chosen in the panel for an agent this time
+    /// (docs/profiles-v0.md §3.3); not kept here — the service remembers the one last started under.
+    var profiles: [String: AgentProfiles] = [:]
+    var pickedProfiles: [String: String] = [:]
     var folderText = ""
     var createError = ""
     var starting = false
@@ -285,6 +289,8 @@ final class TerminalsModel {
         var seen: Set<String> = []
         let all = listed.value.filter { seen.insert($0.recordID).inserted }
         if sessions != all { sessions = all }
+        // With them, the profiles a session can be continued as.
+        await refreshProfiles()
     }
 
     func refreshGit() async {

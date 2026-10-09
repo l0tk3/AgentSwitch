@@ -36,6 +36,8 @@ struct TerminalsTab: View {
     @State private var gone: Set<String> = []
     /// A session last run in bypass, asked about before it goes on.
     @State private var bypassResume: SessionSummary?
+    /// The profile named for a session being continued (`Resume As`), by the session's id.
+    @State private var resumeAs: [String: String] = [:]
     /// Why continuing or deleting a session failed: a box over whatever page is open.
     @State private var failure: String?
     /// A session to continue whose folder is gone: a folder is picked for it (docs/terminal-v0.md §5).
@@ -113,6 +115,9 @@ struct TerminalsTab: View {
                 if let first = folders.flatMap(\.allSessions).first {
                     switch UserDefaults.standard.string(forKey: "uiDemoScreen") {
                     case "terminalmenu": menuFor = SessionMenu(session: first, anchor: CGRect(x: 16, y: 210, width: 360, height: 36))
+                    // A Claude Code session where the agent has more than the Mac's own sign-in: `Resume As`.
+                    case "terminalmenuprofile":
+                        if let one = folders.flatMap(\.allSessions).first(where: { $0.harness == "claude-code" }) { menuFor = SessionMenu(session: one, anchor: CGRect(x: 16, y: 210, width: 360, height: 36)) }
                     case "terminalsearch": query = "终端"
                     case "terminaldelete": deletingSession = first
                     default: break
@@ -147,7 +152,13 @@ struct TerminalsTab: View {
             }
             .pixelBox(item: $menuFor) { m in
                 var items: [PixelBox.Action] = []
-                if TerminalsTab.resumable.contains(m.session.harness) { items.append(.init(label: "Resume") { Task { await resume(m.session) } }) }
+                if TerminalsTab.resumable.contains(m.session.harness) {
+                    items.append(.init(label: "Resume") { Task { await resume(m.session) } })
+                    // Under another profile than the one it last ran under (docs/profiles-v0.md §3.3), where the agent has more than the Mac's own.
+                    if let choices = model.terminals.profiles[m.session.harness], choices.several {
+                        for p in choices.profiles where p.id != (m.session.profile ?? "default") { items.append(.init(label: "Resume As \(p.name)") { Task { await resume(m.session, as: p.id) } }) }
+                    }
+                }
                 if TerminalsTab.deletable.contains(m.session.harness) { items.append(.init(label: "Delete", role: .destructive) { deletingSession = m.session }) }
                 return PixelBox(cancel: nil, actions: items, anchor: m.anchor)
             }
@@ -492,14 +503,18 @@ struct TerminalsTab: View {
     /// Continue a session in place (one record, one writer): the terminal that has it already, a new one, or — open in
     /// another program — the choice to fork. It goes on in the mode it last had; bypass is asked about first. Its folder
     /// gone, a folder is picked and it goes on `in` that one (`after` the box it was picked in).
-    private func resume(_ s: SessionSummary, fork: Bool = false, mode chosen: String? = nil, in folder: String? = nil, after picking: MovedFolder? = nil) async {
+    private func resume(_ s: SessionSummary, as profile: String? = nil, fork: Bool = false, mode chosen: String? = nil, in folder: String? = nil, after picking: MovedFolder? = nil) async {
         guard let api = model.api else { return }
+        // `Resume As`: the profile named is kept through the questions that may come in between (its mode, a fork,
+        // another folder), each of which comes back here; asked afresh, what was named before is let go.
+        if chosen == nil, !fork, folder == nil { resumeAs[s.id] = profile }
+        let named = resumeAs[s.id]
         if s.mode == "bypass" && chosen == nil { bypassResume = s; return }
         opening = s.id
         defer { opening = nil }
         let mode = chosen ?? s.mode
         let request = ResumeTerminalRequest(harness: s.harness, cwd: s.cwd, agentSessionId: s.sessionId,
-                                            title: s.title.isEmpty ? nil : s.title, mode: mode, fork: fork ? true : nil)
+                                            title: s.title.isEmpty ? nil : s.title, mode: mode, fork: fork ? true : nil, profile: named)
         do {
             switch try await api.resumeTerminal(folder.map(request.continuing) ?? request) {
             case .started(let t), .existing(let t):

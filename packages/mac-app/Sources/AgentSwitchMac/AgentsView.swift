@@ -159,7 +159,6 @@ struct AgentsView: View {
     @ViewBuilder private func profilesSection(_ agent: AgentCLI) -> some View {
         if let list = profiles[agent.rawValue] {
             ProfilesSection(agent: agent, profiles: list, error: profileError[agent.rawValue],
-                            pick: { id in pick(agent, id) },
                             add: { naming = agent; newName = "" },
                             remove: { profile in removing = (agent, profile) },
                             proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) },
@@ -167,7 +166,6 @@ struct AgentsView: View {
         }
     }
 
-    private func pick(_ agent: AgentCLI, _ id: String) { change(agent) { try await $0.setCurrentProfile(agent: agent.rawValue, id: id) } }
     private func create() { if let agent = naming { let name = newName; change(agent) { try await $0.createProfile(agent: agent.rawValue, name: name) } } }
     private func delete(_ agent: AgentCLI, _ profile: AgentProfile) { change(agent) { try await $0.deleteProfile(agent: agent.rawValue, id: profile.id) } }
     private var namingShown: Binding<Bool> { Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }) }
@@ -315,7 +313,6 @@ struct ProfilesSection: View {
     let agent: AgentCLI
     let profiles: AgentProfiles
     let error: String?
-    let pick: (String) -> Void
     let add: () -> Void
     let remove: (AgentProfile) -> Void
     let proxy: (AgentProfile) -> Void
@@ -325,12 +322,8 @@ struct ProfilesSection: View {
         Section {
             ForEach(profiles.profiles) { profile in
                 HStack(spacing: 10) {
-                    Button { pick(profile.id) } label: {
-                        Image(systemName: profile.id == profiles.current ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(profile.id == profiles.current ? Color.accentColor : Color.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(profile.id == profiles.current ? "Current" : "Use \(profile.name)")
+                    // No "current" one to pick here (docs/profiles-v0.md §3.3): a profile is chosen where a terminal
+                    // is made or a conversation continued.
                     // Its colour — the dot on the terminals that run under it — and the menu that changes it. `Default`
                     // has none; its place is kept so the names line up.
                     if let tint = profile.tint {
@@ -368,7 +361,7 @@ struct ProfilesSection: View {
             Text("\(agent.title) Profiles")
         } footer: {
             if profiles.creatable {
-                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。选中的是新终端使用的配置；已经开着的终端不变。新建之后在它名下开一个终端，没登录的配置会直接从登录开始。每个配置有一个颜色（名字前的圆点，点它可以换）：在它名下运行的终端，列表和底栏里带着同色的亮点。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次通不通、从哪里出去，不通就不开；查到的出口写在终端底栏的配置名后面。每个配置还有它自己的浏览器——一个单独的浏览器窗口，登录态和指纹都是它自己的，agent 的浏览器工具和 /login 打开的登录页都在里面；有代理的配置，浏览器和 agent 从同一个代理出去。")
+                Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。用哪个配置在开终端的地方选：新建终端的面板里有一行 Profile，默认是上次用的；恢复一段对话默认回到它上次所在的配置，要换就用右键菜单里的 Resume As。新建之后在它名下开一个终端，没登录的配置会直接从登录开始。每个配置有一个颜色（名字前的圆点，点它可以换）：在它名下运行的终端，列表和底栏里带着同色的亮点。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次通不通、从哪里出去，不通就不开；查到的出口写在终端底栏的配置名后面。每个配置还有它自己的浏览器——一个单独的浏览器窗口，登录态和指纹都是它自己的，agent 的浏览器工具和 /login 打开的登录页都在里面；有代理的配置，浏览器和 agent 从同一个代理出去。")
             }
         }
     }

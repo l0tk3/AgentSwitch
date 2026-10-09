@@ -95,6 +95,39 @@ final class ProfileProxyTests: XCTestCase {
         XCTAssertFalse(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"mint"}"#, "exited").running)
         XCTAssertEqual(TerminalInfo(id: "t9", harness: "claude-code", cwd: "/w", name: "n", status: "idle", createdAt: 1).under(profile: "side", color: .sand).profileColor, .sand)
     }
+
+    // MARK: the profile is chosen where a terminal is made (docs/profiles-v0.md §3.3)
+
+    func testTheProfileGoesWithTheRequestThatStartsOrContinuesATerminal() throws {
+        func sent(_ body: some Encodable) throws -> [String: Any] { try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? [String: Any]) }
+        // A new terminal under the one chosen in the panel; nothing said where the agent has only the Mac's own.
+        XCTAssertEqual(try sent(NewTerminalRequest(harness: "claude-code", cwd: "~/p", profile: "abc123def0"))["profile"] as? String, "abc123def0")
+        XCTAssertNil(try sent(NewTerminalRequest(harness: "codex", cwd: "~/p"))["profile"])
+        // A conversation: under the one it last ran under unless `Resume As` names another — which a fork and a folder
+        // picked later keep.
+        let plain = ResumeTerminalRequest(harness: "claude-code", cwd: "/w", agentSessionId: "s1")
+        XCTAssertNil(try sent(plain)["profile"])
+        let named = ResumeTerminalRequest(harness: "claude-code", cwd: "/w", agentSessionId: "s1", profile: "default")
+        XCTAssertEqual(try sent(named)["profile"] as? String, "default")
+        XCTAssertEqual(named.forking().profile, "default")
+        XCTAssertEqual(named.forking().fork, true)
+        XCTAssertEqual(named.continuing(in: "/elsewhere").profile, "default")
+
+        // The list says which profile a conversation last ran under, when it is not the Mac's own.
+        let listed = try JSONDecoder().decode([SessionSummary].self, from: Data(#"[{"harness":"claude-code","id":"s1","cwd":"/w","profile":"abc123def0"},{"harness":"claude-code","id":"s2","cwd":"/w"},{"harness":"claude-code","id":"s3","cwd":"/w","profile":""}]"#.utf8))
+        XCTAssertEqual(listed.map(\.profile), ["abc123def0", nil, nil])
+
+        // What the panel offers: only where there is something to choose between; first the one last chosen, while it is there.
+        let own = AgentProfile(id: "default", name: "Default", account: "me@example.com"), work = AgentProfile(id: "abc123def0", name: "cwork1", color: "violet")
+        XCTAssertFalse(AgentProfiles(current: "default", profiles: [own], creatable: true).several)
+        let two = AgentProfiles(current: "abc123def0", profiles: [own, work], creatable: true)
+        XCTAssertTrue(two.several)
+        XCTAssertEqual(two.offered, work)
+        XCTAssertEqual(AgentProfiles(current: "gone000000", profiles: [own, work], creatable: true).offered, own)
+        XCTAssertEqual(ProfileWords.line(own), "Default — me@example.com")
+        XCTAssertEqual(ProfileWords.line(work), "cwork1 — Not Signed In")
+        XCTAssertEqual(ProfileWords.who(AgentProfile(id: "default", name: "Default")), "This Mac’s own")
+    }
 }
 
 /// A profile's own browser on the Browser page (docs/profiles-v0.md §5.2): the browsers there are, and the browser

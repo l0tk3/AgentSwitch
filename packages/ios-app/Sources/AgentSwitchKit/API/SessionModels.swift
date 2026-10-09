@@ -22,9 +22,14 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
     public let mode: String?
     /// The session this one was forked from.
     public let forkedFrom: String?
+    /// The profile it last ran under, by its id, when that is not the Mac's own (docs/profiles-v0.md §3.3): where it
+    /// goes on unless another is chosen.
+    public let profile: String?
 
     public init(harness: String, id: String, cwd: String, title: String, lastText: String = "", updatedAt: Int64, startedAt: Int64? = nil,
-                active: Bool = false, origin: String? = nil, branch: String? = nil, model: String? = nil, mode: String? = nil, forkedFrom: String? = nil) {
+                active: Bool = false, origin: String? = nil, branch: String? = nil, model: String? = nil, mode: String? = nil, forkedFrom: String? = nil,
+                profile: String? = nil) {
+        self.profile = profile
         self.harness = harness
         self.sessionId = id
         self.cwd = cwd
@@ -57,7 +62,7 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         return last.isEmpty ? "未命名会话" : last
     }
 
-    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, startedAt, active, origin, branch, model, mode, forkedFrom }
+    private enum CodingKeys: String, CodingKey { case harness, id, cwd, title, lastText, updatedAt, startedAt, active, origin, branch, model, mode, forkedFrom, profile }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -75,6 +80,7 @@ public struct SessionSummary: Decodable, Sendable, Hashable, Identifiable {
         model = try? c.decodeIfPresent(String.self, forKey: .model)
         mode = try? c.decodeIfPresent(String.self, forKey: .mode)
         forkedFrom = try? c.decodeIfPresent(String.self, forKey: .forkedFrom)
+        profile = (try? c.decodeIfPresent(String.self, forKey: .profile)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 

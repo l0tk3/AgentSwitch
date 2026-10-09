@@ -11,6 +11,7 @@ import SwiftUI
 @Observable
 final class TerminalsStore {
     private(set) var list: TerminalList?
+    private(set) var profiles: [String: ProfileChoices] = [:]
     private(set) var sessions: [SessionSummary] = []
     /// The folders' git, after their names in the tree.
     private(set) var git: [String: GitSummary] = [:]
@@ -55,6 +56,15 @@ final class TerminalsStore {
         guard let api else { return }
         let asked = generation
         if let fresh = try? await api.sessions(limit: Self.everySession), asked == generation { sessions = fresh }
+        await refreshProfiles(api)
+    }
+
+    /// Each agent's profiles (docs/profiles-v0.md §3.3): what the new-terminal sheet and `Resume As` choose between.
+    /// A failed read keeps the last.
+    func refreshProfiles(_ api: AgentSwitchAPI?) async {
+        guard let api else { return }
+        let asked = generation
+        if let fresh = try? await api.profiles(), asked == generation, fresh != profiles { profiles = fresh }
     }
 
     /// The folders' git; a failed read keeps the last.
@@ -86,10 +96,11 @@ final class TerminalsStore {
     }
 
     #if DEBUG
-    func setDemo(_ list: TerminalList, sessions: [SessionSummary], git: [String: GitSummary] = [:]) {
+    func setDemo(_ list: TerminalList, sessions: [SessionSummary], git: [String: GitSummary] = [:], profiles: [String: ProfileChoices] = [:]) {
         self.list = list
         self.sessions = sessions
         self.git = git
+        self.profiles = profiles
     }
     #endif
 }

@@ -341,9 +341,11 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       const raced = openHere();
       if (raced) return c.json({ terminal: raced, existing: true });
     }
-    // The profile it starts under: the one named, else the agent's current one (docs/profiles-v0.md §3). `Default`
-    // is the Mac's own: nothing is set for it.
-    const wanted = body.data.profile ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
+    // The profile it starts under (docs/profiles-v0.md §3.3): the one named. Not named — a conversation goes on under
+    // the one it last ran under (the Mac's own when none is known, or that one is gone); a new terminal starts under
+    // the one last chosen for a new terminal. `Default` is the Mac's own: nothing is set for it.
+    const recorded = resumed ? deps.profiles?.sessionProfile(resumed.harness, resumed.agentSessionId) ?? DEFAULT_PROFILE : null;
+    const wanted = body.data.profile ?? recorded ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
     const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     if (wanted !== DEFAULT_PROFILE && !profileHome) return c.json({ error: "no such profile" }, 400);
     const color = profileHome ? deps.profiles!.colorOf(body.data.harness, wanted) : null;
@@ -366,6 +368,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
+      // What a new terminal was started under is what the next one is offered first.
+      if (!resume && body.data.profile) { try { deps.profiles?.setCurrent(body.data.harness, body.data.profile); } catch { /* it started all the same */ } }
       audit.record({ terminal: info.id, action: resume ? "resume" : "create", via: via(c), detail: { harness: info.harness, cwd, model: info.model, effort: info.effort, mode: info.mode, ...(resume ? { fork } : {}), ...(movedFrom ? { movedFrom } : {}) } });
       return c.json({ terminal: info }, 201);
     } catch (err) { return failed(c, err); }

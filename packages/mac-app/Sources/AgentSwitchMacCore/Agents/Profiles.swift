@@ -86,9 +86,25 @@ public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// A profile in a line of a menu, and who is signed in to it.
+public enum ProfileWords {
+    /// `This Mac’s own` for `Default`, the account once somebody is signed in, `Not Signed In` till then.
+    public static func who(_ profile: AgentProfile) -> String {
+        profile.account ?? (profile.isDefault ? "This Mac’s own" : "Not Signed In")
+    }
+
+    /// `cwork1 — work@example.com`.
+    public static func line(_ profile: AgentProfile) -> String { "\(profile.name) — \(who(profile))" }
+}
+
 public struct AgentProfiles: Decodable, Equatable, Sendable {
+    /// The one last chosen for a new terminal: what the next new terminal is offered first (docs/profiles-v0.md §3.3).
     public let current: String
     public let profiles: [AgentProfile]
+    /// There is something to choose between: more than the Mac's own.
+    public var several: Bool { profiles.count > 1 }
+    /// What a new terminal is offered first: the one last chosen, while it is still there.
+    public var offered: AgentProfile? { profiles.first { $0.id == current } ?? profiles.first }
     /// More than `Default` can be made for this agent.
     public let creatable: Bool
 

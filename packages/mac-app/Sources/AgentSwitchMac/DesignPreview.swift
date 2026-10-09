@@ -53,7 +53,7 @@ enum DesignPreview {
                         AgentProfile(id: "abc123def2", name: "lab", account: "lab@example.com", color: "mint"),
                     ], creatable: true)
                     for (name, appearance) in [("profiles-rows", dark), ("profiles-rows-light", NSAppearance(named: .aqua))] {
-                        try await renderSheet(Form { ProfilesSection(agent: .claude, profiles: list, error: nil, pick: { _ in }, add: {}, remove: { _ in }, proxy: { _ in }, color: { _, _ in }) }
+                        try await renderSheet(Form { ProfilesSection(agent: .claude, profiles: list, error: nil, add: {}, remove: { _ in }, proxy: { _ in }, color: { _, _ in }) }
                             .formStyle(.grouped).frame(width: 640), model: model, appearance: appearance, to: directory.appendingPathComponent("\(name).png"))
                     }
                     FileHandle.standardError.write(Data("design preview (a profile's proxy) written to \(directory.path)\n".utf8))

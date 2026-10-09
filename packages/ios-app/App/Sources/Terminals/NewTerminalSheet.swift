@@ -13,6 +13,8 @@ struct NewTerminalSheet: View {
     @AppStorage("terminal.agent") private var agent = "claude-code"
     @AppStorage("terminal.mode") private var mode = "manual"
     @AppStorage("terminal.folder") private var folder = ""
+    /// The profile chosen this time, by its id; "": the one the Mac offers (the one last chosen).
+    @State private var profileId = ""
     @State private var modelId = ""
     /// How hard it thinks: one of the levels the chosen model takes, or "" for the agent's own default.
     @State private var effortId = ""
@@ -41,6 +43,30 @@ struct NewTerminalSheet: View {
                             ForEach(Self.agents, id: \.id) { a in
                                 agentTile(a.id, a.name, installed: installed.contains(a.id))
                             }
+                        }
+                    }
+                    // Whose sign-in it runs under, where the agent has more than the Mac's own (docs/profiles-v0.md §3.3).
+                    if let choices = store.profiles[agent], choices.several {
+                        let picked = choices.profiles.first { $0.id == profileId } ?? choices.offered
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            SectionLabel("Profile")
+                            Menu {
+                                Picker("Profile", selection: Binding(get: { picked?.id ?? "default" }, set: { profileId = $0 })) {
+                                    ForEach(choices.profiles) { p in Text("\(p.name) — \(p.who)").tag(p.id) }
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if let color = picked?.color { ProfileDot(color: color) }
+                                    Text(picked?.name ?? "Default").mono(14)
+                                    Text(picked?.who ?? "").mono(12).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    Spacer()
+                                    LookGlyph(glyph: "▾", symbol: "chevron.down").foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                                .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
+                                .framed(look.isClassic ? Color.clear : Theme.line, radius: 10)
+                            }
+                            .tint(Theme.ink)
                         }
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -218,6 +244,12 @@ struct NewTerminalSheet: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
+    /// The profile to start under: the one picked, else the one offered; nil where the agent has only the Mac's own.
+    private var chosenProfile: String? {
+        guard let choices = model.terminals.profiles[agent], choices.several else { return nil }
+        return (choices.profiles.first { $0.id == profileId } ?? choices.offered)?.id
+    }
+
     private func start() async {
         guard let api = model.api else { return }
         starting = true
@@ -225,7 +257,7 @@ struct NewTerminalSheet: View {
         do {
             let terminal = try await api.createTerminal(NewTerminalRequest(harness: agent, cwd: folder.trimmingCharacters(in: .whitespaces),
                                                                            model: modelId.isEmpty ? nil : modelId,
-                                                                           effort: effortId.isEmpty ? nil : effortId, mode: mode))
+                                                                           effort: effortId.isEmpty ? nil : effortId, mode: mode, profile: chosenProfile))
             dismiss()
             started(terminal)
         } catch {

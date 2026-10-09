@@ -50,18 +50,26 @@ const CLAUDE_SESSIONS = ["projects", "file-history", "todos", "plans"] as const;
 const CLAUDE_CARRIED = ["theme", "editorMode", "hasCompletedOnboarding", "lastOnboardingVersion", "autoUpdates", "verbose", "preferredNotifChannel", "mcpServers"] as const;
 const CLAUDE_PROJECT_CARRIED = ["hasTrustDialogAccepted", "hasCompletedProjectOnboarding", "allowedTools", "mcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"] as const;
 const MAX_PROFILES = 24;
+/** How many conversations' profiles are remembered for one agent (§3.3); the oldest go first. */
+const MAX_SESSIONS = 4000;
+type SessionNotes = Record<string, Record<string, { p: string; at: number }>>;
 
 export type ProfileStoreOptions = { /** `$AGENTSWITCH_HOME`. */ readonly home: string; readonly userHome?: string; readonly now?: () => number };
 
 export class ProfileStore {
   private readonly dir: string;
   private readonly file: string;
+  /** Which profile each conversation last ran under (§3.3): `profiles/sessions.json`, AgentSwitch's own note — nothing
+   *  is written into the agent's own files (a conversation stays what its own CLI made). */
+  private readonly sessionsFile: string;
+  private sessions: SessionNotes | null = null;
   private readonly userHome: string;
   private readonly now: () => number;
 
   constructor(o: ProfileStoreOptions) {
     this.dir = join(o.home, "profiles");
     this.file = join(this.dir, "profiles.json");
+    this.sessionsFile = join(this.dir, "sessions.json");
     this.userHome = o.userHome ?? homedir();
     this.now = o.now ?? Date.now;
   }
@@ -72,7 +80,43 @@ export class ProfileStore {
     return Object.fromEntries(PROFILE_AGENTS.map((agent) => [agent, this.of(agent, file)])) as Record<ProfileAgent, AgentProfiles>;
   }
 
-  /** The profile new terminals of `agent` start under. */
+  /** A conversation of `agent` runs under `profile` now (null or `Default`: the Mac's own). Only what is not the
+   *  Mac's own is written down; one that went back to the Mac's own is forgotten. */
+  noteSession(agent: ProfileAgent, sessionId: string, profile: string | null): void {
+    if (!sessionId || sessionId.length > 200) return;
+    const notes = this.sessionNotes(), mine = (notes[agent] ??= {});
+    const id = profile && profile !== DEFAULT_PROFILE ? profile : null;
+    if ((mine[sessionId]?.p ?? null) === id) return;
+    if (id) mine[sessionId] = { p: id, at: this.now() }; else delete mine[sessionId];
+    const kept = Object.entries(mine);
+    if (kept.length > MAX_SESSIONS) notes[agent] = Object.fromEntries(kept.sort((a, b) => b[1].at - a[1].at).slice(0, MAX_SESSIONS));
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    const tmp = `${this.sessionsFile}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(notes), { mode: 0o600 });
+    renameSync(tmp, this.sessionsFile);
+  }
+
+  /** The profile a conversation of `agent` last ran under, when it is one that is still there; null: the Mac's own
+   *  (it ran there, was started outside AgentSwitch, or its profile has since been removed). */
+  sessionProfile(agent: ProfileAgent, sessionId: string): string | null {
+    return this.sessionProfiles(agent).get(sessionId) ?? null;
+  }
+
+  /** The same for every conversation of `agent` that has one (the conversations' list). */
+  sessionProfiles(agent: ProfileAgent): ReadonlyMap<string, string> {
+    const mine = this.sessionNotes()[agent];
+    if (!mine) return new Map();
+    const there = new Set((this.read().agents?.[agent]?.profiles ?? []).map((p) => p.id));
+    return new Map(Object.entries(mine).flatMap(([id, note]) => (there.has(note.p) ? [[id, note.p] as const] : [])));
+  }
+
+  private sessionNotes(): SessionNotes {
+    if (this.sessions) return this.sessions;
+    try { const parsed = JSON.parse(readFileSync(this.sessionsFile, "utf8")) as SessionNotes; this.sessions = parsed && typeof parsed === "object" ? parsed : {}; } catch { this.sessions = {}; }
+    return this.sessions;
+  }
+
+  /** The profile last chosen for a new terminal of `agent`: what the next new terminal is offered first (§3.3). */
   current(agent: ProfileAgent): string { return this.of(agent, this.read()).current; }
 
   /** The folder the agent is started with for `id`; null for `Default` (the Mac's own) and for one that is not there. */

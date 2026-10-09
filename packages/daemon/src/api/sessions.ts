@@ -5,6 +5,7 @@ import type { Hono } from "hono";
 import type { SessionMonitor } from "../sessions/monitor.js";
 import type { SessionHarness } from "../sessions/types.js";
 import { MAX_RECORD_LIMIT, RECORD_LIMIT } from "../sessions/record.js";
+import { PROFILE_AGENTS } from "../profiles/store.js";
 import { SessionSearch } from "../sessions/search.js";
 import { join } from "node:path";
 import { remoteCaller } from "../core/caller.js";
@@ -28,7 +29,20 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
   // left older sessions out of their folders, and deleting one let the next one in (2026-10-03, user: 有的目录下面的
   // session显示不完全，经常是有的时候我删除一个session之后又蹦出来几个).
   // The Mac's Terminals page reads it every twenty seconds or so: unchanged, it is not sent again (versionedJson).
-  app.get("/sessions", (c) => versionedJson(c, { sessions: monitor.list(c.req.query("limit") === undefined ? Infinity : limitParam(c, LIST_LIMIT, Infinity)) }));
+  // With each, the profile it last ran under when that is not the Mac's own (docs/profiles-v0.md §3.3): where it goes
+  // on unless another is chosen.
+  const withProfiles = <T extends { readonly harness: string; readonly id: string }>(list: readonly T[]): (T & { profile?: string })[] => {
+    const by = new Map<string, ReadonlyMap<string, string>>();
+    return list.map((s) => {
+      const agent = PROFILE_AGENTS.find((a) => a === s.harness);
+      if (!agent || !deps.profiles) return s;
+      const known = by.get(agent) ?? deps.profiles.sessionProfiles(agent);
+      by.set(agent, known);
+      const profile = known.get(s.id);
+      return profile ? { ...s, profile } : s;
+    });
+  };
+  app.get("/sessions", (c) => versionedJson(c, { sessions: withProfiles(monitor.list(c.req.query("limit") === undefined ? Infinity : limitParam(c, LIST_LIMIT, Infinity))) }));
   // What was said in them (docs/terminal-v0.md §1 搜索): the tree's search, for the words only the Mac has.
   const search = new SessionSearch(monitor);
   app.get("/sessions/search", async (c) => {
