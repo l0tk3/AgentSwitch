@@ -10,6 +10,21 @@ its own CLI had made it: you can stop using AgentSwitch at any point and carry o
 Early stage, one person's project. The design notes in `docs/` are in Chinese and most are marked as drafts; start
 with `docs/design-v0.md`.
 
+<p align="center">
+  <img src="docs/readme/mac-terminals.jpg" width="100%" alt="The Terminals page on the Mac: a folder tree of sessions on the left, one session shown as a conversation on the right">
+</p>
+<p align="center">
+  <img src="docs/readme/phone-dispatch.jpg" width="19%" alt="iPhone: the Dispatch tab">
+  <img src="docs/readme/phone-terminals.jpg" width="19%" alt="iPhone: the Terminals tab, sessions by folder">
+  <img src="docs/readme/phone-simple.jpg" width="19%" alt="iPhone: a session in the simple view, a permission card at its end">
+  <img src="docs/readme/phone-browser.jpg" width="19%" alt="iPhone: watching Codex in the browser">
+  <img src="docs/readme/phone-clash.jpg" width="19%" alt="iPhone: the nodes for Claude and for OpenAI on the Clash page">
+</p>
+<p align="center"><sub>
+  The Mac's Terminals page; on the iPhone: Dispatch, Terminals, a session waiting for a permission, the browser, Clash.
+  Every picture here is the apps' own demo data.
+</sub></p>
+
 ## What is in it
 
 | | on the Mac | on the iPhone |
@@ -24,6 +39,37 @@ with `docs/design-v0.md`.
 
 Also: a Live Activity on the lock screen and in the Dynamic Island, the same card in the Mac's menu bar, usage of
 each agent's quota, a web console, and two looks for every screen (`Pixel`, `Classic`; `docs/ui-v0.md`).
+
+## A closer look
+
+**Terminals.** The picture at the top: every session of every agent, filed by the folder it runs in — running ones
+first, with their state, their sub-agents, and a lit dot in the colour of the profile they run under. A session opens
+as its real terminal or, as here, in the simple view: what you said, the answer set as Markdown, a run of tool calls
+folded into one line that opens onto the command and its output, what the turn changed, and a reply box that takes
+pictures and files. The same session can be picked up on the phone.
+
+**Dispatch.** One input box. The router hands each request to an agent and a model and says which; the task runs in
+the background, and what needs you — a question, a command to approve — is answered in place, from either screen.
+
+<p align="center">
+  <img src="docs/readme/mac-dispatch.jpg" width="100%" alt="The Dispatch page on the Mac: two tasks, one waiting on a question from Codex, one on an approval for Claude Code">
+</p>
+
+**Browser.** A browser the service holds. An agent's tab shows what it has just done, outlined on the page; `Take
+Over` makes the tab yours until you hand it back. A profile has a browser of its own, with its own
+sign-ins, leaving through its own proxy — the list on the left switches between them.
+
+<p align="center">
+  <img src="docs/readme/mac-browser.jpg" width="100%" alt="The Browser page on the Mac: Codex's last action outlined in a tab of a profile's own browser">
+</p>
+
+**Clash.** Claude and OpenAI each get their own group of nodes on top of the subscription you already have, handed
+to Clash Verge without editing its files. The routing check sends one connection of each kind through the running
+core and says where it went — here, OpenAI is not going through its group yet.
+
+<p align="center">
+  <img src="docs/readme/mac-clash.jpg" width="100%" alt="The Clash page on the Mac: the routing check, one row per kind of traffic">
+</p>
 
 ## How it fits together
 
