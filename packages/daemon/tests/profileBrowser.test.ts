@@ -167,6 +167,9 @@ describe("a profile's own browser", () => {
     expect(await (await app.request(`/profile-browser/${key}/browser/tabs`)).json()).toMatchObject({ running: false, groups: [] });
     expect((await app.request(`/profile-browser/${key}/browser/tabs`, {}, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
     expect((await app.request(`/profile-browser/${key}/browser/identity`, {}, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    // The shared browser's proxy is a phone's to set (browser-v0 §7.6); this one's follows its profile, and none of its identity is.
+    expect((await app.request(`/profile-browser/${key}/browser/identity/restart`, { method: "POST" }, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await app.request(`/profile-browser/${key}/browser/identity`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ fingerprint: "new" }) }, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
     const own = fleet.of(key)!;
     await own.host.open({ kind: "you", id: "you", label: "You" }, "https://claude.ai/login");
     const listed = await (await app.request(`/profile-browser/${key}/browser/tabs`)).json() as { running: boolean; groups: { tabs: { url: string }[] }[] };

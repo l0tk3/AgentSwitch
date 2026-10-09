@@ -277,10 +277,14 @@ describe("profiles over HTTP", () => {
     expect(set.json.agents["claude-code"].profiles[1]).toMatchObject({ proxy: { server: far.server, sealed: false }, exit: { ip: "203.0.113.9", place: "Tokyo" } });
     expect(set.json.problem).toBeUndefined();
     expect(direct).toEqual(["127.0.0.1"]);
-    // Asked again from any screen; a paired device may check, not set.
+    // Asked again from any screen; a paired device checks and sets as the Mac does (§4.2) — a password still only
+    // as a ciphertext.
     const phone = markRemote({}, { deviceId: "phone" });
     expect((await call("POST", `/profiles/claude-code/${id}/check`, undefined, phone)).json.agents["claude-code"].profiles[1].exit.ip).toBe("203.0.113.9");
-    expect((await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server }, phone)).status).toBe(403);
+    expect((await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server, username: "me", password: "hunter2" }, phone)).status).toBe(400);
+    expect((await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: null }, phone)).json.agents["claude-code"].profiles[1].proxy).toBeUndefined();
+    expect(store.proxyOf("claude-code", id)).toBeNull();
+    expect((await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server }, phone)).json.agents["claude-code"].profiles[1]).toMatchObject({ proxy: { server: far.server, sealed: false }, exit: { ip: "203.0.113.9" } });
     // What is not a proxy is refused and nothing changes; a password must be a ciphertext.
     expect(await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: "proxy.example" })).toMatchObject({ status: 400, json: { error: expect.stringContaining("scheme://host:port") } });
     expect((await call("PUT", `/profiles/claude-code/${id}/proxy`, { server: far.server, username: "me", password: "hunter2" })).status).toBe(400);

@@ -138,7 +138,7 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
       if (problem) return c.json({ error: problem }, 502);
     }
     let sub = served.get(browser);
-    if (!sub) { sub = new Hono(); mountBrowser(sub, { ...deps, browser }); mountBrowserIdentity(sub, { ...deps, browser }); served.set(browser, sub); }
+    if (!sub) { sub = new Hono(); mountBrowser(sub, { ...deps, browser }); mountBrowserIdentity(sub, { ...deps, browser }, { shared: false }); served.set(browser, sub); }
     const url = new URL(c.req.url);
     url.pathname = at[2]!;
     return sub.fetch(new Request(url, c.req.raw), c.env);

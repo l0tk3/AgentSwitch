@@ -6,11 +6,14 @@ import SwiftUI
 enum SettingsRoute: Hashable {
     case mac, tasks, sessions
     case session(SessionSummary)
+    /// Proxies: the Clash page, and a proxy's form (the shared browser's or a profile's).
+    case clash
+    case proxy(ProxyTarget)
 }
 
 /// Everything behind the gear (app-v0 §5, docs/ui-v0.md): the Mac and its connection on top, then the executors' usage
 /// (§4.2); the look (Appearance, docs/ui-v0.md §8); what every task reads (CONTEXT.md, ciphertexts); sounds and reading;
-/// the Mac app's new version; the
+/// the proxies (Clash, the browser's, each profile's; docs/clash-v0.md §9); the Mac app's new version; the
 /// history (every task; clear history deletes it all) and the models; the permission mode
 /// (changed on the Mac); the Face ID lock; re-pairing. Rows carry no icons (the usage rows' tiles are content, not
 /// row icons); footers are one sentence. Pull to refresh re-reads the usage.
@@ -21,6 +24,8 @@ struct SettingsView: View {
     @State private var addingMac = false
     @State private var path: [SettingsRoute] = SettingsView.initialPath
     @State private var policy: ApprovalPolicyInfo?
+    /// What the Mac has of proxies; read again when coming back from one of their pages.
+    @State private var proxies = ProxiesOverview()
     /// clear history: confirmed first (DeleteRequest), then done or why not.
     @State private var clearing: DeleteRequest?
     @State private var clearError: String?
@@ -36,6 +41,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
+            ScrollViewReader { reader in
             Form {
                 if let current = model.profile {
                     Section {
@@ -62,6 +68,7 @@ struct SettingsView: View {
                     Text("环境说明记录站点、账号和偏好，供每个任务参考。")
                 }
                 .disabled(!connected)
+                if connected, !proxies.isEmpty { ProxiesSection(overview: proxies).id("proxies") }
                 FeedbackSection()
                 if connected { MacAppSection() }
                 Section {
@@ -98,6 +105,12 @@ struct SettingsView: View {
                     Text("删除此 iPhone 与这台 Mac 的配对，已保存的密文不受影响。")
                 }
             }
+            #if DEBUG
+            .onChange(of: proxies) {
+                if UserDefaults.standard.string(forKey: "uiDemoScreen") == "proxies" { reader.scrollTo("proxies", anchor: .center) }
+            }
+            #endif
+            }
             .tint(.accentColor)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -113,13 +126,21 @@ struct SettingsView: View {
             .deleteConfirmation($clearing, error: $clearError) { _ in cleared = true }
             .task(id: connected) {
                 async let usage: Void = model.refreshQuota()
+                async let ways: Void = loadProxies()
                 await loadPolicy()
                 await usage
+                await ways
             }
             .refreshable {
                 async let usage: Void = model.refreshQuota(force: true)
+                async let ways: Void = loadProxies()
                 await loadPolicy()
                 await usage
+                await ways
+            }
+            // Back from a proxy's page: what it changed is on its row.
+            .onChange(of: path) { old, new in
+                if new.isEmpty, !old.isEmpty { Task { await loadProxies() } }
             }
         }
     }
@@ -132,7 +153,20 @@ struct SettingsView: View {
         case .tasks: TasksManageView()
         case .sessions: SessionsView()
         case .session(let session): SessionTranscriptView(session: session)
+        case .clash: ClashScreen()
+        case .proxy(let target): ProxyFormView(target: target)
         }
+    }
+
+    private func loadProxies() async {
+        guard let api = model.api else {
+            #if DEBUG
+            proxies = DemoData.proxies
+            #endif
+            return
+        }
+        guard connected else { return }
+        proxies = await ProxiesOverview.load(api, keeping: proxies)
     }
 
     /// The permission mode, read-only here (control-v0 §1); a Mac without the route shows no row.

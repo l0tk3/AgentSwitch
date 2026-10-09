@@ -1,5 +1,6 @@
 /** Profiles over HTTP (docs/profiles-v0.md §3): every agent's list with its current one; a new one, one removed, a
- *  profile's own proxy — on this Mac only; which one is current, and a proxy's exit checked — from a paired device too. */
+ *  profile's colour — on this Mac only; which one is current, a profile's own proxy (§4.2: its password a ciphertext,
+ *  as from the Mac) and that proxy's exit checked — from a paired device too. */
 
 import type { Hono } from "hono";
 import { z } from "zod";
@@ -39,7 +40,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   // A profile's own proxy (§4): set, changed or taken away. It is checked at once — where it lets traffic out is
   // kept with the profile, or that it does not is said; the proxy is kept either way (it may be down for now).
   app.put("/profiles/:agent/:id/proxy", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "a profile's proxy is set on the Mac" }, 403);
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const id = c.req.param("id"), key = exitKey(agent.data, id);

@@ -240,7 +240,7 @@
   - 代理：`scheme://host:port`（http、https、socks4、socks5），用户名可无；密码只收 `enc:v1:` 密文，须有用户名。设置时即向凭据网关要一次明文（`secret-gate fill-value`，站点是代理自己的 `host:port`，所以密文要对它有 `fill` 用途），要不到就拒绝、什么都不改。服务启动时再要一次；要不到期间上游不可用，出本机的请求一律 502，不改走直连。只改别的、不重输密码时带 `keepPassword`，沿用已存的密文。
   - 出口：有代理时经转发层（也就经代理）向一个公开的查询服务发一次 GET，取出口地址、地点与时区；默认 `https://ipinfo.io/json`，`AGENTSWITCH_BROWSER_EXIT_LOOKUP` 可换成别的或 `off`。设置代理时与服务带着代理启动时各查一次，没有代理时不查。查不到不影响代理，界面写明。
   - 时区：指纹自己没写时区、出口又已知时，浏览器在出口的时区里启动。正在运行的浏览器若是用另一份配置启动的，`restartNeeded` 为真。
-  - 接口（只在本机）：`GET /browser/identity`（指纹摘要与全文、代理（密码只说有无）、出口、`restartNeeded`）、`PUT /browser/identity`（`fingerprint: "new" | {config}` 会重启浏览器；`proxy: {server, username?, password?, keepPassword?} | null` 立即生效）、`POST /browser/identity/restart`。
+  - 接口（当时只在本机；2026-10-09 起代理的部分手机也够得着，§7.6）：`GET /browser/identity`（指纹摘要与全文、代理（密码只说有无）、出口、`restartNeeded`）、`PUT /browser/identity`（`fingerprint: "new" | {config}` 会重启浏览器；`proxy: {server, username?, password?, keepPassword?} | null` 立即生效）、`POST /browser/identity/restart`。
   - WebRTC：Camoufox 自带的默认设置是“在代理之后只走代理”（`media.peerconnection.ice.proxy_only_if_behind_proxy`、`default_address_only`），而浏览器始终在转发层之后，所以不会绕过代理直接发 UDP；页面里的通话只能靠 TCP 的中继。
 
 ### 7.4 分期
@@ -284,3 +284,13 @@
   - 没走到的：代理带密码时 Mac 上封密文那一步（探测里的应用会用到已安装的网关，没有去碰；服务端与网关各自验过）；agent 的标签在页面上的样子（只在设计预览与服务端的实机检查里看过）；`Show Window` 是从后台的探测进程发的，前台的正式应用里没点过。
 - **还没做的**：iPhone 的文案与 `Open on Mac`；网关大响应流式；命令行里的身份（现在只有接口）；让网关自己去连上游代理（服务不持有代理密码的明文）。
 
+### 7.6 代理也在手机上（2026-10-09）
+
+用户：“手机上没有管理代理的功能吗”“手机上也得放”（经过见 clash-v0 §9）。§7.2 第 5 条里“身份不给手机”改成：**代理给，指纹不给**。
+
+- `GET /browser/identity`、`PUT /browser/identity`、`POST /browser/identity/restart` 进了远程白名单。给手机的身份里**没有指纹的正文**（`fingerprint.config`），只有摘要那一行、生成时间和来源；手机发来的 `PUT` 里只要带了 `fingerprint` 就回 403（“a fingerprint is changed on the Mac”），带不带代理都一样。
+- 代理的规矩不变：`scheme://host:port`，密码只收密文。手机上自己封（同 profiles-v0 §4.2：先要 Mac 现在的公钥，站点是代理自己的 `host:port`，用途 `http` + `fill`，名字 `browser/proxy`）。
+- 重启：代理换了、出口的时区和浏览器启动时的不一样时，手机的表单底下多一个 `Restart Browser`（标签按网址回来）。
+- 配置自己的浏览器没有单独的代理（跟着它的配置，profiles-v0 §4.2），它的身份路由不在白名单里；引擎（`/browser/engine`）也不在。
+- iPhone：`Settings › Proxies › Browser`，右边是 `Direct` 或出口；表单上面 `Exit`、`Fingerprint`（一行摘要，脚注“指纹在 Mac 上更换”），下面 `Server`、`User Name`、`Password`、`Apply`、`Direct`。没有 Camoufox 或 Mac 旧一些时（404 / 403）没有这一行。
+- 测试：服务 `tests/browserIdentity.test.ts`（手机看不到 `config`、改不了指纹、设得了也撤得了代理、明文密码 400、能重启）；Kit `ProxyTests`。看过的：模拟器里的演示（`-uiDemoScreen proxybrowser`）；真机没走过。

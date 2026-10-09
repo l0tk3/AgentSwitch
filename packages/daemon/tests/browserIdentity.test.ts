@@ -258,17 +258,31 @@ describe("the identity over the API (GET, PUT /browser/identity)", () => {
     expect(r.status).toBe(200);
     expect(((await r.json()) as Record<string, unknown>).restartNeeded).toBe(false);
     expect(restarts()).toBe(1);
-    expect((await app.request("/browser/identity/restart", { method: "POST" }, markRemote({}, { deviceId: "dev-phone" }))).status).toBe(403);
+    // From a paired phone too: it is how a proxy set there gets its time zone.
+    expect((await app.request("/browser/identity/restart", { method: "POST" }, markRemote({}, { deviceId: "dev-phone" }))).status).toBe(200);
+    expect(restarts()).toBe(2);
   });
 
-  it("refuses what it cannot take, in words; and is not for a paired phone", async () => {
+  it("refuses what it cannot take, in words; a paired phone has the proxy, not the fingerprint", async () => {
     const { put, app } = setup();
     expect((await put({ proxy: { server: "nonsense" } })).status).toBe(400);
     expect((await put({ proxy: { server: "http://h:1", username: "u", password: "clear" } })).status).toBe(400);
     expect((await put({ fingerprint: "old" })).status).toBe(400);
     expect((await put({})).status).toBe(400);
     const phone = markRemote({}, { deviceId: "dev-phone" });
-    expect((await put({ proxy: null }, phone)).status).toBe(403);
-    expect((await app.request("/browser/identity", {}, phone)).status).toBe(403);
+    // The fingerprint: told in a line, its text kept from the phone, and none changed from there.
+    const seen = (await (await app.request("/browser/identity", {}, phone)).json()) as { fingerprint: Record<string, unknown>; proxy: unknown };
+    expect(Object.keys(seen.fingerprint).sort()).toEqual(["since", "source", "summary"]);
+    expect(Object.keys(((await (await app.request("/browser/identity")).json()) as { fingerprint: Record<string, unknown> }).fingerprint)).toContain("config");
+    expect((await put({ fingerprint: "new" }, phone)).status).toBe(403);
+    expect((await put({ fingerprint: "new", proxy: null }, phone)).status).toBe(403);
+    // The proxy: set and taken away as on the Mac, a password only as a ciphertext.
+    expect((await put({ proxy: { server: "http://h:1", username: "u", password: "clear" } }, phone)).status).toBe(400);
+    const set = await put({ proxy: { server: "http://127.0.0.1:9" } }, phone);
+    expect(set.status).toBe(200);
+    const after = (await set.json()) as { proxy: unknown; fingerprint: Record<string, unknown> };
+    expect(after).toMatchObject({ proxy: { server: "http://127.0.0.1:9", sealed: false } });
+    expect(after.fingerprint.config).toBeUndefined();
+    expect(((await (await put({ proxy: null }, phone)).json()) as { proxy: unknown }).proxy).toBeNull();
   });
 });

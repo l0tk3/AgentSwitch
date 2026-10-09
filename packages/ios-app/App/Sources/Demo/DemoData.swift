@@ -385,9 +385,77 @@ enum DemoData {
         ]
     }
 
+    // MARK: proxies (docs/clash-v0.md §9, docs/profiles-v0.md §4.2, docs/browser-v0.md §7.6)
+
+    private static var clashObject: [String: Any] {
+        ["found": true, "running": true, "version": "v1.19.31", "mode": "rule", "tun": true,
+         "source": ["kind": "link", "name": "Mine", "host": "sub.example.net", "updatedAt": ago(5400), "nodes": 42,
+                    "providers": [], "traffic": ["used": 13_207_024_435.0, "total": 107_374_182_400.0, "expire": 1_793_456_000_000.0]],
+         "nodes": ["🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇯🇵 日本-03", "🇺🇸 美国家宽-01", "🇺🇸 美国-02", "🇸🇬 新加坡-01", "🇸🇬 新加坡-02", "🇬🇧 英国-01", "🇩🇪 德国-01", "🇰🇷 韩国-01"],
+         "profiles": [["uid": "Lbw7BJYzpand", "name": "mine.yaml", "type": "local"], ["uid": "Ro3yUVdr9kT1", "name": "Other", "type": "remote"]],
+         "settings": ["claude": ["nodes": ["🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇺🇸 美国家宽-01"]], "openai": ["nodes": ["🇺🇸 美国家宽-01", "🇸🇬 新加坡-01"]],
+                      "direct": ["5.102.107.254"], "autoUpdateHours": 24,
+                      "templates": ["domestic": ["on": true, "rules": NSNull()], "block": ["on": false, "rules": NSNull()]], "renameDefault": false, "dns": ["on": false, "text": NSNull()]],
+         "services": ["claude": ["group": "Claude", "auto": "Claude自动选择", "live": true, "now": "Claude自动选择", "autoNow": "🇯🇵 日本家宽-01", "missing": []],
+                      "openai": ["group": "OpenAI", "auto": "OpenAI自动选择", "live": true, "now": "🇸🇬 新加坡-01", "autoNow": "🇺🇸 美国家宽-01", "missing": []]],
+         "templates": ["domestic": ["on": true, "custom": false, "count": 169], "block": ["on": false, "custom": false, "count": 27]],
+         "defaultGroup": "节点选择", "dns": ["on": false, "custom": false, "overridden": false], "active": true, "upToDate": true, "install": "", "fetchedAt": ago(1800)]
+    }
+
+    static var clash: ClashView { decode(ClashView.self, clashObject) }
+
+    /// The same page after a setting was changed here (no Mac to keep it).
+    static func clash(with settings: ClashSettings) -> ClashView {
+        var object = clashObject
+        if let data = try? JSONEncoder().encode(settings), let kept = try? JSONSerialization.jsonObject(with: data) { object["settings"] = kept }
+        return decode(ClashView.self, object)
+    }
+
+    static let clashDelays: [ClashService: [String: Int?]] = [
+        .claude: ["🇯🇵 日本家宽-01": 96, "🇯🇵 日本家宽-02": 142, "🇺🇸 美国家宽-01": 428, "🇯🇵 日本-03": 118, "🇺🇸 美国-02": nil, "🇸🇬 新加坡-01": 187],
+        .openai: ["🇺🇸 美国家宽-01": 402, "🇸🇬 新加坡-01": 187],
+    ]
+
+    static var clashChecked: [ClashCheckRow] {
+        decode([ClashCheckRow].self, [
+            ["id": "claude", "title": "Claude", "host": "claude.ai", "expect": ["kind": "group", "group": "Claude"],
+             "observed": ["outcome": "proxied", "rule": "RuleSet as-claude", "path": ["Claude", "Claude自动选择", "🇯🇵 日本家宽-01"], "exit": ["ip": "126.36.1.2", "loc": "JP"], "ms": 362], "ok": true],
+            ["id": "openai", "title": "OpenAI", "host": "chatgpt.com", "expect": ["kind": "group", "group": "OpenAI"],
+             "observed": ["outcome": "proxied", "rule": "RuleSet as-openai", "path": ["OpenAI", "🇸🇬 新加坡-01"], "exit": ["ip": "8.219.4.7", "loc": "SG"], "ms": 418], "ok": true],
+            ["id": "domestic", "title": "Domestic", "host": "www.baidu.com", "expect": ["kind": "direct"],
+             "observed": ["outcome": "direct", "rule": "RuleSet as-domestic", "path": ["DIRECT"], "ms": 41], "ok": true],
+        ])
+    }
+
+    static let clashRules = "DOMAIN-SUFFIX,cn\nDOMAIN-SUFFIX,baidu.com\nDOMAIN-SUFFIX,qq.com\nDOMAIN-KEYWORD,alipay\nPROCESS-NAME,WeChat\nGEOIP,CN\nIP-CIDR,192.168.0.0/16"
+
+    static var proxyProfiles: [String: ProfileChoices] {
+        ["claude-code": ProfileChoices(current: "abc123def0", profiles: [
+            ProfileChoice(id: "default", name: "Default", account: "me@example.com"),
+            ProfileChoice(id: "abc123def0", name: "cwork1", account: "work@example.com", color: .violet,
+                          proxy: ProxySetting(server: "http://proxy.example.net:8080", username: "cwork", sealed: true), exit: ProxyExit(ip: "203.0.113.9", place: "Tokyo")),
+            ProfileChoice(id: "abc123def1", name: "side", color: .mint),
+        ])]
+    }
+
+    static var proxies: ProxiesOverview {
+        ProxiesOverview(clash: clash, browser: BrowserProxyState(fingerprint: "macOS · Firefox 156"), profiles: proxyProfiles)
+    }
+
+    /// A proxy form's state: the profile's own, or the shared browser going direct.
+    static func proxyState(_ target: ProxyTarget) -> BrowserProxyState {
+        switch target {
+        case .browser: return BrowserProxyState(fingerprint: "macOS · Firefox 156")
+        case .profile(_, let profile): return BrowserProxyState(proxy: profile.proxy, exit: profile.exit.map { .found($0) })
+        }
+    }
+
     /// Where 设置 opens for a demo screen.
     static func settingsPath(_ screen: String?) -> [SettingsRoute] {
         switch screen {
+        case "clash", "clashservice", "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource": return [.clash]
+        case "proxybrowser": return [.proxy(.browser)]
+        case "proxyprofile": return proxies.owned.first.map { [.proxy(.profile(agent: $0.agent, profile: $0.profile))] } ?? []
         case "mac", "offlinemac": return [.mac]
         case "tasks", "search": return [.tasks]
         case "sessions": return [.sessions]

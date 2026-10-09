@@ -513,7 +513,15 @@ describe("Clash Integration over HTTP", () => {
     // Clash Verge's own subscriptions to import; the one that is AgentSwitch's is not among them.
     expect(first.profiles.map((p: { name: string }) => p.name)).toEqual(["mine.yaml", "Other"]);
     expect(first.install).toMatch(/^clash:\/\/install-config\?url=http%3A%2F%2F127\.0\.0\.1%3A4711%2Fclash%2Fsub\.yaml%3Fk%3D[\w-]+&name=AgentSwitch$/);
-    expect((await call("GET", "/clash", undefined, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    // A paired phone has the page too (§9), without the address Clash Verge fetches by: that one is this Mac's alone.
+    const phone = markRemote({}, { deviceId: "phone" });
+    const far = await call("GET", "/clash", undefined, phone);
+    expect(far.status).toBe(200);
+    expect(far.json).toMatchObject({ found: true, running: true, install: "" });
+    expect(JSON.stringify(far.json)).not.toContain("sub.yaml");
+    for (const answer of [await call("PUT", "/clash/settings", first.settings, phone), await call("POST", "/clash/select", { service: "claude", node: null }, phone), await call("DELETE", "/clash/source", undefined, phone)]) {
+      expect(answer.json.install, JSON.stringify(answer.json).slice(0, 200)).toBe("");
+    }
 
     const imported = await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
     expect(imported.json).toMatchObject({ source: { kind: "file", name: "mine.yaml", nodes: 3, traffic: { used: 3, total: 100, expire: 1893456000000 }, providers: [{ name: "tgyun", host: "sub.example:9888", nodes: 3 }] },
@@ -703,7 +711,7 @@ describe("Clash Integration over HTTP", () => {
     // With the templates off nothing is asked of those kinds.
     await call("PUT", "/clash/settings", chosen);
     expect(Object.fromEntries(((await call("POST", "/clash/check")).json.rows as { id: string; expect: unknown }[]).map((r) => [r.id, r.expect]))).toMatchObject({ domestic: null, china: null, block: null });
-    expect((await call("POST", "/clash/check", undefined, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await call("POST", "/clash/check", undefined, markRemote({}, { deviceId: "phone" }))).json.rows).toHaveLength(bad.length);
   });
 
   it("turns a rule template on and takes the user's own rules for it, at once and by the line", async () => {
@@ -711,7 +719,7 @@ describe("Clash Integration over HTTP", () => {
     await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
     expect((await call("GET", "/clash/templates/domestic")).json).toMatchObject({ custom: false, rules: expect.arrayContaining(["DOMAIN-SUFFIX,cn", "GEOIP,CN"]) });
     expect((await call("GET", "/clash/templates/nope")).status).toBe(404);
-    expect((await call("GET", "/clash/templates/block", undefined, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await call("GET", "/clash/templates/block", undefined, markRemote({}, { deviceId: "phone" }))).json).toMatchObject({ custom: false });
     const k = (await call("GET", "/clash")).json.install.match(/k%3D([\w-]+)/)[1];
     const payload = async (name: string): Promise<string[]> => parse((await call("GET", `/clash/rules/${name}.yaml?k=${k}`)).text).payload;
     expect(await payload("as-block")).toEqual(["DOMAIN,agentswitch-nothing.invalid"]);
@@ -741,7 +749,7 @@ describe("Clash Integration over HTTP", () => {
     await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
     await call("PUT", "/clash/settings", chosen);
     expect((await call("GET", "/clash/dns")).json).toMatchObject({ custom: false, text: expect.stringContaining("enhanced-mode: fake-ip") });
-    expect((await call("GET", "/clash/dns", undefined, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await call("GET", "/clash/dns", undefined, markRemote({}, { deviceId: "phone" }))).json).toMatchObject({ custom: false });
     // Clash Verge fetches: from then on what it has is known by its fingerprint.
     const k = clash.token();
     const before = parse((await call("GET", `/clash/sub.yaml?k=${k}`)).text) as Record<string, any>;

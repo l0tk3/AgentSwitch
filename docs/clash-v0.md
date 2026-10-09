@@ -182,7 +182,7 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 ### 7.6 做了的（2026-10-08，用户：可以，先实现一下吧）
 
 - 服务端 `packages/daemon/src/clash/`：`source.ts`（底本：链接或文件，连同它点名的节点集，存在 `$AGENTSWITCH_HOME/clash/source/`，目录 0700、文件 0600；出错信息只带主机名）、`build.ts`（交给 Clash Verge 的那一份、节点集、规则集）、`controller.ts`（控制接口：状态、选成员、刷新一个节点集或规则集、单个节点的延迟）、`integration.ts`（把它们串起来；每分钟看一次到没到自动更新的间隔）、`verge.ts`、`store.ts`。
-- 接口（都只在 Mac 上；手机来的回 403）：`GET /clash`、`PUT /clash/settings`、`POST /clash/source`（`{link}`、`{yaml,name}`、`{verge}`）、`DELETE /clash/source`、`POST /clash/update`、`POST /clash/select`、`POST /clash/delays`。给 Clash Verge 和内核取的（只认地址里的口令，只在本机回环）：`/clash/sub.yaml`、`/clash/rules/<名>.yaml`、`/clash/nodes/<名>.yaml`、`/clash/providers/<节点集名的 base64url>.yaml`。
+- 接口（当时都只在 Mac 上、手机来的回 403；2026-10-09 起配对的手机也够得着，见 §9）：`GET /clash`、`PUT /clash/settings`、`POST /clash/source`（`{link}`、`{yaml,name}`、`{verge}`）、`DELETE /clash/source`、`POST /clash/update`、`POST /clash/select`、`POST /clash/delays`。给 Clash Verge 和内核取的（只认地址里的口令，只在本机回环）：`/clash/sub.yaml`、`/clash/rules/<名>.yaml`、`/clash/nodes/<名>.yaml`、`/clash/providers/<节点集名的 base64url>.yaml`。
 - Mac：主窗口的 `Clash` 页——每项的节点（排序、延迟、点选当前用哪个）在前，`Go Direct`，底本在最下面（链接 / 文件 / 从 Clash Verge 导入、`Auto Update`、`Update Now`、`Remove…`）。
 - 给 Clash Verge 的间隔是 1 小时（§7.3）；AgentSwitch 自己去取底本的间隔默认 24 小时。
 - 没有的：某个节点集自己带 `filter` / `override` 的，这里没有照做（列出来的是它取回的全部节点、原名）；不是 Clash 格式的订阅（一串 `vless://` 之类）不收。
@@ -302,3 +302,23 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 2. （做了）第二版：§7.6。接着是在用户的 Clash Verge 上走一遍（§7.6 末尾那几条）。
 3. 配置（profile）里填的代理自动进直连表；配置页里出口那一栏可以直接选 Clash 的节点（profiles-v0 §4）。
 4. 演示页。
+
+## 9. 手机上也管得到（2026-10-09）
+
+用户（2026-10-09）：“手机上没有管理代理的功能吗”——当时没有，三处都把手机挡在外面（Clash 的接口回 403、配置的代理回 403、浏览器的身份回 403）；说明了原来的考虑、提了“看与切放手机，凭据类留 Mac”两档之后：“手机上也得放”。按“代理的管理整个放到手机上”做了，配置的代理见 profiles-v0 §4.2，共用浏览器的代理见 browser-v0 §7.6；这一节是 Clash。
+
+- **放开的接口**（远程白名单 `src/remote/routes.ts`，app-v0 §2）：`GET /clash`、`PUT /clash/settings`、`GET /clash/templates/:name`、`GET /clash/dns`、`POST /clash/check`、`POST /clash/source`、`DELETE /clash/source`、`POST /clash/update`、`POST /clash/select`、`POST /clash/delays`——也就是 Mac 的 Clash 页用的全部十条，语义不变。
+- **仍然只在这台 Mac 上的**：给 Clash Verge 和内核取的四类地址（`/clash/sub.yaml`、`/clash/rules/…`、`/clash/nodes/…`、`/clash/providers/…`）不在白名单里，路由自己也不认配对设备（原有的那一条判断没动）。相应地，**给手机的页面里没有 `install`**（Clash Verge 取订阅用的那条地址，带口令、只在本机回环上有用）：服务对手机一律回空串，`PUT /clash/settings`、`POST /clash/select` 这些回同一个页面的接口也一样。所以“把 AgentSwitch 订阅加进 Clash Verge”这一步手机上做不了——它本来就是在 Mac 的 Clash Verge 里点的，手机上的待办写明“在 Mac 上”。
+- **订阅链接**：手机可以给一条链接（`POST /clash/source {link}`），经配对的那条钉了证书的连接发给服务，由服务保管；服务照旧只把它的主机名回给任何屏幕，手机上不留。远程请求的日志只记方法、路径和状态，不记正文。也可以从 Mac 的 Clash Verge 里已有的订阅挑一个（`{verge}`），或者从“文件”里选一份 yaml（`{yaml,name}`，8 MB 以内）。
+- **为什么放开**：原来留在 Mac 是比照“跳过权限只能在 Mac 上选”。但配对的手机本来就能在这台 Mac 上开终端、派任务并批准它们，换出口并不比这些更重；而人不在电脑前、节点挂了、订阅到期的时候，正是需要在手机上改的时候。设备丢了的办法没变：在 Mac 上移除这台设备。
+- **iPhone**：`Settings › Proxies`（新的一段，在 `Dispatch` 之后）第一行 `Clash`，右边是状态一词（`Running`；有待办时琥珀色 `Set Up`；`Not Running`、`Not Found`）。点进去是 Clash 页，和 Mac 的是同一页、同一套词：
+  - `Status`：`Clash Verge`、`Core`、`TUN`，下面是待办（琥珀色，一句一行）。
+  - `Subscription`：`From`（主机名或文件名）、`Nodes`、`Traffic`、`Updated`、`Auto Update`（`Off`、`1 h`、`6 h`、`12 h`、`24 h`）、`Update Now`、`Replace…`、`Remove`（先确认）；没有订阅时只有 `Add Subscription…`。`Replace…` 是一张表：`Link`（粘贴）、`From Clash Verge`、`Choose File…`。
+  - `Separate Proxy for Claude` / `… for OpenAI`：`Automatic`（右边 `→ 它现在用的节点`）和选中的节点各一行，行首是单选标记（`< >` / `<x>`，经典外观是圆环），点一行就改用那一个；右边是延迟（`428 ms`、`Timeout`）或 `Gone`；向左滑拿掉。`Nodes` 进到选节点的一页：上面 `Chosen`（`Edit` 里拖动排序），下面 `All Nodes`（多选标记 `[ ]` / `[x]`，点一下取舍，可搜），右上 `Test All`。`Test` 测选中的几个。
+  - `Rules`：两个规则模版和 `DNS` 各一个开关，各带一行 `Edit`（右边 `169 Rules`、`Edited`、`Template`）进到文本页改（`Save`；改过的有 `Use Built-In`；服务说哪一行不对就显示在页上、不退出）；订阅有默认组时多一个 `Rename <组名> to Manual`。
+  - `Go Direct`：地址一行一个，向左滑删除，底下一行输入加 `Add`。
+  - `Routing Check`：`Run Check` / `Run Again`，每一类一块：名字、试的域名、内核走的路、对方看到的地址与耗时、`OK` / `Wrong` 和不对时的一句话。
+- **旧一些的 Mac**（`GET /clash` 回 403 或 404）：手机上没有 `Clash` 这一行。
+- 代码：服务 `src/api/clash.ts`（去掉“只在 Mac”的判断，加 `shown()` 给手机去掉 `install`）；Kit `API/ClashModels.swift`（与 Mac 的 `ClashIntegration.swift` 同一套模型，待办的话按“在 Mac 上”改写）、`API/ProxyRoutes.swift`；应用 `Settings/ClashScreen.swift`、`Settings/ProxiesSection.swift`。演示页 `docs/design/implemented/phone-proxies.html`。
+- 测试：服务 `tests/clash.test.ts`（手机读得到页面、`install` 为空、页面里没有 `sub.yaml`；检查、模版、DNS 手机都读得到）、`tests/remoteUnits.test.ts`（白名单逐条；四类本机地址仍不在其中）；Kit `ProxyTests`（页面按服务给的样子读出来、设置回写时 `null` 照写、各接口的方法与正文、旧 Mac 回 403 / 404 时当作没有）。
+- 看过的：模拟器里的演示（`-uiDemoScreen proxies|clash|clashservice|clashrules|clashcheck|clashnodes|clashtext|clashsource`，像素外观全部、经典外观两张）。**没走过的**：真机连着真服务点一遍（换节点、测速、更新订阅、换订阅）；这要先把这一版装到 Mac 上。

@@ -187,15 +187,21 @@ public struct ProfileChoice: Decodable, Sendable, Hashable, Identifiable {
     /// Who is signed in, as the agent's own files say; nil: nobody yet (or the Mac does not say).
     public let account: String?
     public let color: ProfileColor?
+    /// Its own proxy (the password is never told, only that it has one); nil: this Mac's own way out.
+    public let proxy: ProxySetting?
+    /// Where that proxy lets traffic out, as last found.
+    public let exit: ProxyExit?
 
-    public init(id: String, name: String, account: String? = nil, color: ProfileColor? = nil) {
+    public init(id: String, name: String, account: String? = nil, color: ProfileColor? = nil, proxy: ProxySetting? = nil, exit: ProxyExit? = nil) {
         self.id = id
         self.name = name
         self.account = account
         self.color = color
+        self.proxy = proxy
+        self.exit = exit
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, account, color }
+    private enum CodingKeys: String, CodingKey { case id, name, account, color, proxy, exit }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -203,9 +209,14 @@ public struct ProfileChoice: Decodable, Sendable, Hashable, Identifiable {
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? id
         account = (try? c.decodeIfPresent(String.self, forKey: .account)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
         color = (try? c.decodeIfPresent(String.self, forKey: .color)).flatMap { $0 }.flatMap(ProfileColor.init(rawValue:))
+        proxy = (try? c.decodeIfPresent(ProxySetting.self, forKey: .proxy)).flatMap { $0 }
+        exit = (try? c.decodeIfPresent(ProxyExit.self, forKey: .exit)).flatMap { $0 }
     }
 
     public var isDefault: Bool { id == "default" }
+    /// Where what runs under it leaves from, in a few words: `This Mac`; with a proxy of its own, where that proxy
+    /// lets traffic out (`Tokyo 203.0.113.9`), or the proxy's own place while that is not known.
+    public var way: String { ProxyText.way(proxy, exit: exit, none: "This Mac") }
     /// `This Mac’s own` for the Mac's own, the account once somebody is signed in, `Not Signed In` till then.
     public var who: String { account ?? (isDefault ? "This Mac’s own" : "Not Signed In") }
 }

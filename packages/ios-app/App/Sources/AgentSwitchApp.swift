@@ -16,7 +16,8 @@ struct AgentSwitchApp: App {
         // stale|interrupted|mac|offline|offlinemac|tasks|search|sessions|transcript|terminals|terminal|terminalsealed|
         // terminalslash|terminalclose|terminalmenu|terminaldelete|terminalsearch|terminalquestion|terminallink|newterminal|newterminalbypass|
         // browser|browserpage|browsertook|browserfile|browserlocal|browserdenied|browsernew|browserclose|browserzoom|
-        // browserzoomwatch|linkedpage`.
+        // browserzoomwatch|linkedpage|proxies|clash|clashservice|clashrules|clashcheck|clashnodes|clashtext|clashsource|
+        // proxybrowser|proxyprofile`.
         if let hosts = UserDefaults.standard.string(forKey: "tlsProbe"), let pin = UserDefaults.standard.string(forKey: "tlsProbePin") {
             TLSProbe.run(hosts: hosts.split(separator: ",").map(String.init), pin: pin)
         }
@@ -27,7 +28,8 @@ struct AgentSwitchApp: App {
             let screen = UserDefaults.standard.string(forKey: "uiDemoScreen")
             let model = AppModel.demo(offline: screen == "offline" || screen == "offlinemac")
             switch screen {
-            case "settings", "mac", "offlinemac", "tasks", "search", "sessions", "transcript": model.tab = .settings
+            case "settings", "mac", "offlinemac", "tasks", "search", "sessions", "transcript",
+                 "proxies", "clash", "clashservice", "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource", "proxybrowser", "proxyprofile": model.tab = .settings
             case "task": model.tab = .tasks; model.openTaskRequest = "t2"
             case "done": model.tab = .tasks; model.openTaskRequest = "t3"
             case "running": model.tab = .tasks; model.openTaskRequest = "t1"

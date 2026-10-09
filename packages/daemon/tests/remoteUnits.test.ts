@@ -303,10 +303,12 @@ describe("remote route allowlist", () => {
       "GET /targets", "POST /uploads", "GET /context", "PUT /context", "GET /context/example", "POST /assistant", "GET /assistant", "DELETE /assistant/:seq", "DELETE /history",
       "GET /sessions", "GET /sessions/:harness/:id", "GET /sessions/:harness/:id/record", "GET /sessions/:harness/:id/changes", "GET /sessions/:harness/:id/images/:item/:n", "GET /sessions/:harness/:id/steps/:item/:n", "GET /sessions/:harness/:id/steps/:item/:n/images/:k", "GET /sessions/search", "DELETE /sessions/:harness/:id",
       "GET /terminals", "GET /terminals/style", "POST /terminals", "POST /terminals/resume", "GET /terminals/:id", "PATCH /terminals/:id", "GET /terminals/:id/stream", "GET /terminals/:id/commands", "POST /terminals/:id/input",
-      "POST /terminals/:id/attach", "POST /terminals/:id/keys", "POST /terminals/:id/model", "POST /terminals/:id/effort", "POST /terminals/:id/daybreak", "POST /terminals/:id/choices", "GET /profiles", "POST /profiles/current", "POST /terminals/:id/mode", "GET /terminals/:id/files", "POST /terminals/:id/resize", "POST /terminals/:id/redraw", "POST /terminals/:id/permissions/:pid", "POST /terminals/:id/kill", "DELETE /terminals/:id", "GET /folders/git",
+      "POST /terminals/:id/attach", "POST /terminals/:id/keys", "POST /terminals/:id/model", "POST /terminals/:id/effort", "POST /terminals/:id/daybreak", "POST /terminals/:id/choices", "GET /profiles", "POST /profiles/current", "PUT /profiles/:agent/:id/proxy", "POST /profiles/:agent/:id/check", "POST /terminals/:id/mode", "GET /terminals/:id/files", "POST /terminals/:id/resize", "POST /terminals/:id/redraw", "POST /terminals/:id/permissions/:pid", "POST /terminals/:id/kill", "DELETE /terminals/:id", "GET /folders/git",
       "GET /browser/tabs", "POST /browser/tabs", "GET /browser/tabs/:id", "DELETE /browser/tabs/:id", "GET /browser/tabs/:id/stream", "POST /browser/tabs/:id/input",
       "POST /browser/tabs/:id/navigate", "POST /browser/tabs/:id/take", "POST /browser/tabs/:id/release", "POST /browser/tabs/:id/viewport", "POST /browser/tabs/:id/fill", "GET /browser/servers", "GET /browser/speed",
       "GET /browsers", "GET /profile-browser/:key/browser/tabs", "POST /profile-browser/:key/browser/tabs", "GET /profile-browser/:key/browser/tabs/:id", "DELETE /profile-browser/:key/browser/tabs/:id", "GET /profile-browser/:key/browser/tabs/:id/stream", "POST /profile-browser/:key/browser/tabs/:id/input", "POST /profile-browser/:key/browser/tabs/:id/navigate", "POST /profile-browser/:key/browser/tabs/:id/take", "POST /profile-browser/:key/browser/tabs/:id/release", "POST /profile-browser/:key/browser/tabs/:id/viewport", "POST /profile-browser/:key/browser/tabs/:id/fill", "GET /profile-browser/:key/browser/servers", "GET /profile-browser/:key/browser/speed",
+      "GET /browser/identity", "PUT /browser/identity", "POST /browser/identity/restart",
+      "GET /clash", "PUT /clash/settings", "GET /clash/templates/:name", "GET /clash/dns", "POST /clash/check", "POST /clash/source", "DELETE /clash/source", "POST /clash/update", "POST /clash/select", "POST /clash/delays",
       "GET /approvals/policy", "GET /settings/workdir", "GET /update", "POST /update/install",
     ]);
   });
@@ -328,7 +330,10 @@ describe("remote route allowlist", () => {
       ["POST", "/context"], ["DELETE", "/context"], ["GET", "/mcp"], ["GET", "/skills"], ["GET", "/memory"], ["GET", "/records"],
       ["GET", "/routing/log"], ["PUT", "/approvals/policy"], ["PUT", "/settings/workdir"], ["POST", "/pairing"], ["GET", "/devices"], ["DELETE", "/devices/x"], ["GET", "/remote/info"],
       ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/tasks/"], ["GET", "/tasks/a/b"], ["GET", "/tasks/a/files/"], ["POST", "/route/preview"],
-      ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"], ["PUT", "/projects"], ["POST", "/update"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
+      ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"], ["PUT", "/projects"], ["POST", "/update"],
+      // Proxies are a phone's to manage; making, removing and colouring a profile, what Clash Verge fetches, and a profile browser's identity are not.
+      ["POST", "/profiles"], ["DELETE", "/profiles/claude-code/abc"], ["PUT", "/profiles/claude-code/abc/color"], ["GET", "/clash/sub.yaml"], ["GET", "/clash/rules/as-claude.yaml"],
+      ["GET", "/clash/nodes/as-claude.yaml"], ["GET", "/clash/providers/abc.yaml"], ["GET", "/browser/engine"], ["GET", "/profile-browser/claude-code.abc/browser/identity"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
   });
 });
 

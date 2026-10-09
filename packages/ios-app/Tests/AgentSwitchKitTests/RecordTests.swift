@@ -454,7 +454,7 @@ final class RecordTests: XCTestCase {
         """#.utf8)).agents
         let claude = try XCTUnwrap(agents["claude-code"])
         XCTAssertTrue(claude.several)
-        XCTAssertEqual(claude.offered, ProfileChoice(id: "abc123def0", name: "cwork1", color: .violet))
+        XCTAssertEqual(claude.offered, ProfileChoice(id: "abc123def0", name: "cwork1", color: .violet, proxy: ProxySetting(server: "http://proxy.example:8080", sealed: true), exit: ProxyExit(ip: "203.0.113.9", place: "Tokyo")))
         XCTAssertEqual(claude.profiles.map(\.who), ["me@example.com", "Not Signed In", "Not Signed In"])
         XCTAssertNil(claude.profiles[2].color)
         XCTAssertEqual(agents["codex"]?.several, false)

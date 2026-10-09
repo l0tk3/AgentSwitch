@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgentSwitch · iPhone 上的代理</title>
+<style>
+/* The phone's proxies (docs/clash-v0.md §9, docs/profiles-v0.md §4.2, docs/browser-v0.md §7.6): Settings › Proxies,
+   the Clash page with the pages behind it, and a proxy's form. Every phone here can be tapped. */
+:root {
+  color-scheme: light dark;
+  --bg: #f3f1ea; --page: #ebe8df; --card: #f7f5ef; --ink: #151413; --ink2: #5f5b54; --ink3: #a29d93; --ink4: #d3cec3;
+  --signal: #e0106e; --green: #3f8f00; --amber: #c27400; --red: #d7261b;
+  --mono: "MesloLGS NF", "SF Mono", ui-monospace, Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+  --r: 0px; --word: var(--mono);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #000; --page: #000; --card: #0f0f0f; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524;
+    --signal: #ff2e88; --green: #9be22d; --amber: #ffb000; --red: #ff4a3d; }
+}
+body.classic { --page: #f2f2f7; --card: #fff; --ink: #1d1d1f; --ink2: #6e6e73; --ink3: #a6a6ab; --ink4: #dcdce0;
+  --signal: #007aff; --green: #34c759; --amber: #ff9500; --red: #ff3b30; --r: 12px; --word: var(--ui); }
+@media (prefers-color-scheme: dark) {
+  body.classic { --page: #000; --card: #1c1c1e; --ink: #f2f2f7; --ink2: #a2a2a8; --ink3: #6c6c72; --ink4: #38383a;
+    --signal: #0a84ff; --green: #30d158; --amber: #ff9f0a; --red: #ff453a; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--ui); padding-block: 18px 40px; padding-inline: 16px; }
+.ctl { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; max-width: 1180px; margin: 0 auto 6px; font: 12px var(--mono); color: var(--ink2); }
+.ctl button { font: 12px var(--mono); background: none; color: var(--ink2); border: 1px solid var(--ink4); padding: 3px 9px; cursor: pointer; }
+.ctl button.on { color: var(--ink); border-color: var(--ink); }
+.note { max-width: 1180px; margin: 0 auto 14px; color: var(--ink2); font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; gap: 22px; justify-content: center; max-width: 1180px; margin: 0 auto; }
+.col { display: grid; gap: 8px; justify-items: center; }
+.cap { font: 11px var(--mono); color: var(--ink3); letter-spacing: .08em; }
+.phone { width: 300px; height: 620px; background: var(--page); border: 1px solid var(--ink4); border-radius: 30px; overflow: hidden; display: grid; grid-template-rows: 44px 1fr; }
+.nav { display: grid; grid-template-columns: 70px 1fr 70px; align-items: center; font: 600 14px var(--ui); text-align: center; white-space: nowrap; }
+.nav span:first-child { color: var(--ink2); font: 16px var(--mono); }
+.nav span:last-child { color: var(--signal); font: 12px var(--word); }
+.scr { overflow-y: auto; padding: 4px 12px 18px; scrollbar-width: none; }
+.h { font: 11px var(--mono); color: var(--ink3); letter-spacing: .12em; margin: 14px 4px 5px; }
+body.classic .h { font: 600 12px var(--ui); letter-spacing: 0; color: var(--ink2); }
+.h::before { content: "// "; } body.classic .h::before { content: ""; }
+.card { background: var(--card); border: 1px solid var(--ink4); border-radius: var(--r); }
+body.classic .card { border-color: transparent; }
+.r { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 6px 12px; border-top: 1px solid var(--ink4); font-size: 13.5px; }
+.r:first-child { border-top: 0; }
+.r .v { margin-left: auto; font: 11.5px var(--word); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 62%; }
+.r .chev { color: var(--ink3); font: 12px var(--mono); }
+.r.tap { cursor: pointer; } .r.act { color: var(--ink); } .r.red { color: var(--red); } .r.off { color: var(--ink3); }
+.r .mk { font: 12px var(--mono); color: var(--ink2); width: 26px; flex: none; } .r .mk.on { color: var(--ink); }
+body.classic .r .mk { font-size: 0; width: 18px; height: 18px; border: 1.5px solid var(--ink3); border-radius: 50%; }
+body.classic .r .mk.on { border-color: var(--signal); background: radial-gradient(var(--signal) 45%, transparent 50%); }
+body.classic .r .mk.box { border-radius: 4px; } body.classic .r .mk.box.on { background: var(--signal); }
+.r .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { width: 7px; height: 7px; flex: none; box-shadow: 0 0 5px currentColor; background: currentColor; } body.classic .dot { border-radius: 50%; }
+.sw { margin-left: auto; width: 38px; height: 22px; border: 1px solid var(--ink3); border-radius: 11px; position: relative; flex: none; cursor: pointer; }
+.sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--ink3); }
+.sw.on { background: var(--ink); border-color: var(--ink); } .sw.on::after { left: 18px; background: var(--card); }
+body.classic .sw.on { background: var(--green); border-color: var(--green); } body.classic .sw.on::after { background: #fff; }
+.f { font-size: 11.5px; color: var(--ink2); margin: 6px 4px 0; }
+.warn { color: var(--amber); } .ok { color: var(--green); } .bad { color: var(--red); }
+.code { font: 12px var(--mono); }
+.chk { display: grid; gap: 1px; padding: 8px 12px; border-top: 1px solid var(--ink4); font-size: 12px; color: var(--ink2); }
+.chk:first-child { border-top: 0; } .chk b { color: var(--ink); font: 13.5px var(--ui); display: flex; } .chk b i { margin-left: auto; font: normal 11px var(--word); }
+.say { max-width: 760px; margin: 26px auto 0; color: var(--ink2); font-size: 13px; }
+.say h2 { font: 11px var(--mono); letter-spacing: .14em; color: var(--ink3); margin: 22px 0 6px; }
+.say code { font: 12px var(--mono); color: var(--ink); } .say li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="ctl"><span>Look</span><button id="pixel" class="on">Pixel</button><button id="classic">Classic</button></div>
+<p class="note">iPhone 上管理代理的几页（已做，2026-10-09）。能点：Clash 页里点一行换节点、开关规则模版，Nodes 页里勾选节点。</p>
+<div class="row" id="row"></div>
+<div class="say">
+  <h2>WHAT THIS PAGE IS</h2>
+  <p>手机上的代理：<code>Settings › Proxies</code> 一段三类行——<code>Clash</code>、共用的 <code>Browser</code>、每个配置一行（带它的颜色）；右边写它现在的状态或出口。点进去是 Clash 页或代理表单。</p>
+  <h2>THE RULES IT SHOWS</h2>
+  <ul>
+    <li><b>Clash 页和 Mac 上的是同一页</b>：状态、订阅、给 Claude 和 OpenAI 的节点（点一行换用哪个；<code>&lt;x&gt;</code> 是现在用的）、规则模版与 DNS、直连地址、路由检查。少的只有“把 AgentSwitch 订阅加进 Clash Verge”这一步：那是在 Mac 的 Clash Verge 里点的。</li>
+    <li><b>单选是 <code>&lt; &gt;</code> / <code>&lt;x&gt;</code>，多选是 <code>[ ]</code> / <code>[x]</code></b>（ui-v0 §7.2.6）；经典外观是圆环与方框。</li>
+    <li><b>代理表单两处共用</b>：共用浏览器的（<code>Apply</code>、<code>Direct</code>）和配置的（<code>Apply &amp; Check</code>、<code>No Proxy</code>、<code>Check Exit</code>）。整条 <code>http://用户名:密码@主机:端口</code> 粘进 <code>Server</code> 会自己拆开。</li>
+    <li><b>密码不以明文离开手机</b>：在手机上用 Mac 网关的公钥封成密文，只对代理自己的 <code>host:port</code> 有效；已存的密码显示 <code>Kept</code>，不回传。</li>
+    <li><b>留在 Mac 的</b>：新建、删除配置，登录，配置的颜色，浏览器的指纹（手机上只看得到一行摘要）。</li>
+    <li><b>旧一些的 Mac</b> 不给这些接口：这一段里没有的行就不出现，全没有时整段不出现。</li>
+  </ul>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const S = {
+  claude: { now: null, nodes: [["🇯🇵 日本家宽-01", "96 ms"], ["🇯🇵 日本家宽-02", "142 ms"], ["🇺🇸 美国家宽-01", "428 ms"]], auto: "🇯🇵 日本家宽-01" },
+  openai: { now: "🇸🇬 新加坡-01", nodes: [["🇺🇸 美国家宽-01", "402 ms"], ["🇸🇬 新加坡-01", "187 ms"]], auto: "🇺🇸 美国家宽-01" },
+  all: [["🇯🇵 日本家宽-01", "96 ms"], ["🇯🇵 日本家宽-02", "142 ms"], ["🇯🇵 日本-03", "118 ms"], ["🇺🇸 美国家宽-01", "428 ms"], ["🇺🇸 美国-02", "Timeout"], ["🇸🇬 新加坡-01", "187 ms"], ["🇸🇬 新加坡-02", ""], ["🇬🇧 英国-01", ""]],
+  sw: { domestic: true, block: false, dns: false, rename: false },
+};
+const row = (l, v = "", o = {}) => `<div class="r ${o.cls ?? ""}" ${o.act ? `data-act="${o.act}"` : ""}>${o.pre ?? ""}<span class="nm">${l}</span>${v !== null ? `<span class="v ${o.vcls ?? ""}">${v}</span>` : ""}${o.chev ? `<span class="chev">›</span>` : ""}</div>`;
+const sw = (l, key) => `<div class="r"><span class="nm">${l}</span><span class="sw ${S.sw[key] ? "on" : ""}" data-act="sw:${key}"></span></div>`;
+const card = (h, rows, f = "") => `${h ? `<div class="h">${h}</div>` : ""}<div class="card">${rows.join("")}</div>${f ? `<div class="f">${f}</div>` : ""}`;
+const mk = (on, box = false) => `<span class="mk ${on ? "on" : ""} ${box ? "box" : ""}">${box ? (on ? "[x]" : "[ ]") : (on ? "&lt;x&gt;" : "&lt; &gt;")}</span>`;
+const phone = (cap, title, body, right = "") => `<div class="col"><div class="phone"><div class="nav"><span>‹</span><span>${title}</span><span>${right}</span></div><div class="scr">${body}</div></div><div class="cap">${cap}</div></div>`;
+
+function service(key, title) {
+  const s = S[key];
+  return card(`Separate Proxy for ${title}`, [
+    row("Automatic", `→ ${esc(s.auto)}`, { pre: mk(s.now === null), cls: "tap", act: `pick:${key}:` }),
+    ...s.nodes.map(([n, d]) => row(esc(n), d, { pre: mk(s.now === n), cls: "tap", act: `pick:${key}:${n}` })),
+    row("Nodes", String(s.nodes.length), { chev: true }), row("Test", null),
+  ], `Clash 里是两组：${title}自动选择 按从上到下的顺序用第一个连得上的节点；${title} 决定 ${title} 的流量走哪里。点一行就改用那一个。`);
+}
+
+function draw() {
+  const chosen = S.claude.nodes.map(([n]) => n);
+  $("#row").innerHTML = [
+    phone("SETTINGS › PROXIES", "Settings",
+      card("Dispatch", [row("Context", "", { chev: true }), row("Ciphertexts", "", { chev: true })], "环境说明记录站点、账号和偏好，供每个任务参考。")
+      + card("Proxies", [
+        row("Clash", "Running", { chev: true }), row("Browser", "Direct", { chev: true }),
+        row("cwork1", "Tokyo 203.0.113.9", { chev: true, pre: `<i class="dot" style="color:#b18cff"></i>` }),
+        row("side", "This Mac", { chev: true, pre: `<i class="dot" style="color:#7fe3c0"></i>` }),
+      ], "Clash 为 Claude 和 OpenAI 单独选节点；浏览器和每个配置可以各有自己的代理。右边是它现在从哪里出去。")
+      + card("Alerts & Voice", [row("Sound", null), row("Haptics", null)])),
+    phone("CLASH", "Clash",
+      card("Status", [row("Clash Verge", "Running", { vcls: "ok" }), row("Core", "v1.19.31"), row("TUN", "On")])
+      + card("Subscription", [row("From", "sub.example.net"), row("Nodes", "42"), row("Traffic", "12.3 / 100 GB · Expires 2026/10/31"), row("Updated", "Today 14:47"),
+        row("Auto Update", "24 h ⌃"), row("Update Now", null), row("Replace…", null), row("Remove", null, { cls: "red" })], "换一个订阅会忘掉为 Claude 和 OpenAI 选过的节点。")
+      + service("claude", "Claude") + service("openai", "OpenAI")),
+    phone("CLASH · RULES, DIRECT, CHECK", "Clash",
+      card("Rules", [sw("Domestic & Local Direct", "domestic"), row("Edit", "169 Rules", { chev: true }), sw("Block Ads & Trackers", "block"), row("Edit", "27 Rules", { chev: true }),
+        sw("DNS", "dns"), row("Edit", "Template", { chev: true }), sw("Rename 节点选择 to Manual", "rename")], "规则模版打开就加进 Clash，关掉就拿走，都立刻生效。DNS 改的是订阅正文，要 Clash Verge 重新取一次才生效。")
+      + card("Go Direct", [`<div class="r code">5.102.107.254</div>`, row(`<span class="code" style="color:var(--ink3)">host or IP</span>`, "Add")], "这些地址不经任何节点，直接连出去：配置自己的代理的地址会自己加进来。向左滑删除。")
+      + card("Routing Check", [
+        `<div class="chk"><b>Claude<i class="ok">OK</i></b><span class="code">claude.ai</span><span>RuleSet as-claude → Claude → Claude自动选择 → 🇯🇵 日本家宽-01</span><span class="code">JP 126.36.1.2 · 362 ms</span></div>`,
+        `<div class="chk"><b>Domestic<i class="ok">OK</i></b><span class="code">www.baidu.com</span><span>RuleSet as-domestic → DIRECT</span></div>`,
+        row("Run Again", null)], "每一类流量各发一条连接，看 Mac 上的内核把它送去了哪里。")),
+    phone("CLASH › NODES", "Claude Nodes",
+      card("Chosen", S.claude.nodes.map(([n, d]) => row(esc(n), d)), "从上到下，用第一个连得上的。")
+      + card("All Nodes", S.all.map(([n, d]) => row(esc(n), d, { pre: mk(chosen.includes(n), true), cls: "tap", act: `node:${n}`, vcls: d === "Timeout" ? "warn" : "" }))), "Test All"),
+    phone("A PROFILE'S PROXY", "cwork1",
+      card("", [row("Exit", "Tokyo 203.0.113.9"), row("Check Exit", null)])
+      + card("Proxy", [row("Server", `<span class="code">http://proxy.example.net:8080</span>`), row("User Name", `<span style="color:var(--ink)">cwork</span>`), row("Password", `<span style="color:var(--ink3)">Kept</span>`),
+        row("Apply & Check", null), row("No Proxy", null, { cls: "red" })],
+        "可以把整条代理地址（http://用户名:密码@主机:端口）直接粘进 Server，用户名和密码会自己分到下面两栏。这个配置名下的终端和它自己的浏览器都从这个代理出去；已经开着的终端要重新开才换。密码在这台 iPhone 上封成密文再发给 Mac，只能用于这个代理自己的地址；使用时由 Mac 的凭据网关解密。")),
+    phone("THE SHARED BROWSER'S PROXY", "Browser",
+      card("", [row("Exit", "Direct"), row("Fingerprint", "macOS · Firefox 156")], "浏览器现在直接从这台 Mac 出去。指纹在 Mac 上更换。")
+      + card("Proxy", [row("Server", `<span class="code" style="color:var(--ink3)">http://host:port</span>`), row("User Name", `<span style="color:var(--ink3)">None</span>`), row("Password", `<span style="color:var(--ink3)">None</span>`),
+        row("Apply", null, { cls: "off" }), row("Direct", null, { cls: "off" })], "更换代理立即生效，无需重新启动浏览器。")),
+  ].join("");
+}
+
+document.addEventListener("click", (e) => {
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!act) return;
+  const [kind, a, ...rest] = act.split(":"), b = rest.join(":");
+  if (kind === "sw") S.sw[a] = !S.sw[a];
+  if (kind === "pick") S[a].now = b || null;
+  if (kind === "node") {
+    const at = S.claude.nodes.findIndex(([n]) => n === a);
+    if (at >= 0) S.claude.nodes.splice(at, 1); else S.claude.nodes.push(S.all.find(([n]) => n === a));
+    if (S.claude.now && !S.claude.nodes.some(([n]) => n === S.claude.now)) S.claude.now = null;
+  }
+  draw();
+});
+for (const look of ["pixel", "classic"]) $("#" + look).onclick = () => {
+  document.body.classList.toggle("classic", look === "classic");
+  $("#pixel").classList.toggle("on", look === "pixel"); $("#classic").classList.toggle("on", look === "classic");
+};
+if (new URLSearchParams(location.search).get("look") === "classic") $("#classic").click();
+draw();
+</script>
+</body>
+</html>
