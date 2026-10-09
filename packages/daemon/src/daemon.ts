@@ -19,7 +19,7 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
-import { ProfileStore } from "./profiles/store.js";
+import { DEFAULT_PROFILE, ProfileStore } from "./profiles/store.js";
 import { ClashIntegration } from "./clash/integration.js";
 import { ClashSource } from "./clash/source.js";
 import { ClashStore } from "./clash/store.js";
@@ -358,13 +358,14 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       ...(clones ? { afterExit: () => clones.schedule() } : {}) };
   const browser = cfg.browserHost || overrides.browserDriver ? sharedBrowser(browserOptions) : undefined;
   // Profiles' own proxies (docs/profiles-v0.md §4): a forwarder each, checked before anything starts under one. And
-  // their own browsers (§5.1): one for each profile that has a proxy, through that forwarder, made when first needed.
+  // their own browsers (§5.1, §5.5): one for each profile but the Mac's own, made when first needed — through that
+  // forwarder when the profile has a proxy, straight out when it has none.
   const profiles = new ProfileStore({ home: cfg.home });
   const exits = new ExitPool({ ownPorts, ...(gate ? { resolve: gateFill(gate) } : {}), lookup: exitLookup(), log: (line) => console.error(line) });
   const profileBrowsers = browser
     ? new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...browserOptions, own: { name: key, forwarder,
           zone: () => { const p = profileOfKey(key); return p ? profiles.all()[p.agent].profiles.find((x) => x.id === p.id)?.exit?.timezone ?? null : null; } } }), exits,
-        (key) => { const p = profileOfKey(key); return p ? profiles.proxyOf(p.agent, p.id) : null; })
+        (key) => { const p = profileOfKey(key); return p && p.id !== DEFAULT_PROFILE && profiles.homeOf(p.agent, p.id) ? { proxy: profiles.proxyOf(p.agent, p.id) } : null; })
     : undefined;
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
   if (browser && engineKit) engineKit.aroundSwitch((apply) => browser.host.restart(apply));

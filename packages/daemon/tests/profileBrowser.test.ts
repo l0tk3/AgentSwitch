@@ -1,6 +1,7 @@
-/** A profile's own browser (docs/profiles-v0.md §5.1): one beside the shared browser for each profile that has a proxy,
- *  with its own folder and state, everything it sends through the profile's forwarder; served like the shared one
- *  under its own address; the place a web address the agent asks the system to open is opened in. */
+/** A profile's own browser (docs/profiles-v0.md §5.1, §5.5): one beside the shared browser for each profile but the
+ *  Mac's own, with its own folder, state and fingerprint, everything it sends through the profile's forwarder — its
+ *  proxy when it has one, straight out when it has none; served like the shared one under its own address; the place
+ *  a web address the agent asks the system to open is opened in. */
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -34,19 +35,22 @@ function world() {
   const home = mkdtempSync(join(tmpdir(), "agentswitch-profile-browser-"));
   const driver = new FakeDriver();
   const options = { home, userHome: home, driver, ownPorts: () => [4711], protected: { roots: [], exempt: [] } };
-  const proxies: Record<string, ProxySetting | null> = { "claude-code.abc123def0": { server: "http://proxy.example:8080" } };
+  // The profiles there are, by key, each with its proxy (null: it has none of its own).
+  const proxies: Record<string, ProxySetting | null> = { "claude-code.abc123def0": { server: "http://proxy.example:8080" }, "claude-code.plain00000": null };
   const asked: string[] = [];
   const made: SharedBrowser[] = [];
-  const fleet = new ProfileBrowsers((key, forwarder) => { const b = sharedBrowser({ ...options, own: { name: key, forwarder } }); made.push(b); return b; },
-    { address: async (key, proxy) => { asked.push(`${key} ${proxy.server}`); return { server: "http://127.0.0.1:50123", username: "agentswitch", password: "pw" }; } },
-    (key) => proxies[key] ?? null);
+  /** What each browser was given to send its traffic through, by key (the made-up driver does not start it itself). */
+  const through: Record<string, { start(): Promise<unknown> }> = {};
+  const fleet = new ProfileBrowsers((key, forwarder) => { const b = sharedBrowser({ ...options, own: { name: key, forwarder } }); made.push(b); through[key] = forwarder; return b; },
+    { address: async (key, proxy) => { asked.push(`${key} ${proxy?.server ?? "direct"}`); return { server: "http://127.0.0.1:50123", username: "agentswitch", password: "pw" }; } },
+    (key) => (key in proxies ? { proxy: proxies[key]! } : null));
   const shared = sharedBrowser(options);
   closers.push(() => fleet.stop(), () => shared.host.shutdown());
-  return { home, driver, fleet, shared, proxies, asked, made };
+  return { home, driver, fleet, shared, proxies, asked, made, through };
 }
 
 describe("a profile's own browser", () => {
-  it("is made once for a profile with a proxy, anew when the proxy changes, and not at all without one", async () => {
+  it("is made once for a profile, anew when its proxy changes or is taken away, and not at all for what is no profile", async () => {
     const { fleet, proxies, made } = world();
     const key = "claude-code.abc123def0";
     expect(fleet.get(key)).toBeNull();
@@ -60,11 +64,46 @@ describe("a profile's own browser", () => {
     const second = fleet.of(key);
     expect(second).not.toBe(first);
     expect(made).toHaveLength(2);
-    // The proxy taken away: it has no browser of its own any more.
+    // The proxy taken away: its browser is made anew once more — what it sends is not to go the old way.
     proxies[key] = null;
+    const third = fleet.of(key);
+    expect(third).not.toBeNull();
+    expect(third).not.toBe(second);
+    expect(fleet.of(key)).toBe(third);
+    expect(made).toHaveLength(3);
+    // The profile removed: its browser goes with it.
+    delete proxies[key];
     expect(fleet.of(key)).toBeNull();
     expect(fleet.get(key)).toBeNull();
     expect(fleet.keys()).toEqual([]);
+  });
+
+  it("is there for a profile without a proxy too: folder, sign-ins, fingerprint and tabs of its own, straight out", async () => {
+    const { fleet, shared, driver, home, asked, through } = world();
+    const work = fleet.of("claude-code.abc123def0")!, plain = fleet.of("claude-code.plain00000")!;
+    expect(plain).not.toBeNull();
+    expect(plain).not.toBe(work);
+    const you = { kind: "you" as const, id: "you", label: "You" };
+    const mine = await plain.host.open(you, "https://claude.ai/login");
+    await work.host.open(you, "https://claude.ai/login");
+    await shared.host.open(you, "https://claude.ai/");
+    // Three browsers, three folders: what is signed in to in one (cookies, storage) is not in the others.
+    expect(driver.launches.map((l) => l.profileDir.replace(home, ""))).toEqual(["/browser-profiles/claude-code.plain00000", "/browser-profiles/claude-code.abc123def0", "/browser-profiles/main"]);
+    // Each is given its own forwarder: the profile's proxy behind one, nothing behind the other.
+    await through["claude-code.plain00000"]!.start();
+    await through["claude-code.abc123def0"]!.start();
+    expect(asked).toEqual(["claude-code.plain00000 direct", "claude-code.abc123def0 http://proxy.example:8080"]);
+    // A fingerprint each, kept with the profile's own state; none is the shared browser's.
+    const prints = [plain, work, shared].map((b) => JSON.stringify(b.identity.config()));
+    expect(new Set(prints).size).toBe(3);
+    expect(existsSync(join(home, "browser", "of", "claude-code.plain00000", "identity.json"))).toBe(true);
+    expect(existsSync(join(home, "browser", "of", "claude-code.abc123def0", "identity.json"))).toBe(true);
+    // Made once and kept: the same profile is the same browser to a site the next time.
+    expect(JSON.stringify(sharedBrowser({ home, userHome: home, driver, ownPorts: () => [], protected: { roots: [], exempt: [] },
+      own: { name: "claude-code.plain00000", forwarder: { start: async () => ({ server: "http://127.0.0.1:1", username: "a", password: "b" }) } } }).identity.config())).toBe(prints[0]);
+    // Neither knows the other's tabs.
+    expect(work.host.get(mine.id)).toBeNull();
+    expect(shared.host.get(mine.id)).toBeNull();
   });
 
   it("has its own folder and state beside the shared browser's, and is started through the profile's forwarder", async () => {
@@ -115,10 +154,12 @@ describe("a profile's own browser", () => {
     const deps = { browser: shared, profileBrowsers: fleet, profiles, sseHeartbeatMs: 20 } as unknown as ApiDeps;
     mountBrowser(app, deps);
     mountProfileBrowsers(app, deps);
-    // The browsers there are: the shared one, then one for each profile with a proxy of its own — not yet started.
+    // The browsers there are: the shared one, then one for each profile but the Mac's own — not yet started.
     const listedFirst = await (await app.request("/browsers")).json() as { browsers: unknown[] };
     expect(listedFirst.browsers).toEqual([{ key: null, name: "Shared", running: false },
-      { key, name: "cwork1", agent: "claude-code", exit: { ip: "203.0.113.9", place: "Tokyo" }, running: false }]);
+      { key, name: "cwork1", agent: "claude-code", exit: { ip: "203.0.113.9", place: "Tokyo" }, running: false },
+      // One without a proxy has a browser of its own too (§5.5).
+      { key: "claude-code.plain00000", name: "Plain", agent: "claude-code", running: false }]);
     // A paired phone is told too, and may look into a profile's browser as it may into the shared one.
     expect((await app.request("/browsers", {}, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
     // Asked for by its address it is there (made, not started): an empty list, as the shared one's before its first tab.
@@ -140,7 +181,7 @@ describe("a profile's own browser", () => {
     // Its identity is its own (a fingerprint); its proxy is the profile's and is not changed from here.
     expect((await (await app.request(`/profile-browser/${key}/browser/identity`)).json()) as { proxy: unknown }).toMatchObject({ proxy: null });
     const put = (body: unknown) => app.request(`/profile-browser/${key}/browser/identity`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    expect(await (await put({ proxy: { server: "http://other.example:1" } })).json()).toEqual({ error: expect.stringContaining("配置的代理") });
+    expect(await (await put({ proxy: { server: "http://other.example:1" } })).json()).toEqual({ error: expect.stringContaining("跟着它的配置") });
     expect((await put({ proxy: null })).status).toBe(409);
     expect((await app.request("/profile-browser/Bad Key/browser/tabs")).status).toBe(404);
     // The local listener lets its agents' bridge through as it does the shared browser's — and nothing else of it.
@@ -225,7 +266,7 @@ describe("a web address the agent asks the system to open", () => {
     const driver = new FakeDriver();
     const options = { home, userHome: home, driver, ownPorts: () => [4711], protected: { roots: [], exempt: [] } };
     const fleetOf = (headless: boolean) => new ProfileBrowsers((key, forwarder) => sharedBrowser({ ...options, headless, own: { name: key, forwarder } }),
-      { address: async () => ({ server: "http://127.0.0.1:50123", username: "agentswitch", password: "pw" }) }, (key) => (key === "claude-code.abc123def0" ? { server: "http://proxy.example:8080" } : null));
+      { address: async () => ({ server: "http://127.0.0.1:50123", username: "agentswitch", password: "pw" }) }, (key) => (key === "claude-code.abc123def0" ? { proxy: { server: "http://proxy.example:8080" } } : null));
     // The terminals, made up: `t1` runs under the profile with a browser of its own, `t2` under the Mac's own.
     const host = { onWorkDone() { /* not used */ }, list: () => [], browserOf: (id: string, token: string) => {
       if (token !== "hook-token" || (id !== "t1" && id !== "t2")) throw new TerminalError("forbidden", "unknown terminal or hook token");

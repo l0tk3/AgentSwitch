@@ -194,6 +194,12 @@ describe("a profile's own proxy", () => {
     // No proxy of its own: nothing is set, nothing is asked.
     expect(await exitFor(deps, "claude-code", plain.id, "Plain")).toEqual({});
     expect(far.seen).toHaveLength(0);
+    // It has a browser of its own all the same (§5.5), where that browser shows a window on this Mac: its sign-in
+    // is opened there. One nobody could see is not given: things stay as they were.
+    const browsers = (visible: boolean) => ({ of: (key: string) => (key === `claude-code.${plain.id}` ? { visible: () => visible } : null) }) as unknown as NonNullable<ApiDeps["profileBrowsers"]>;
+    expect(await exitFor({ ...deps, profileBrowsers: browsers(true) }, "claude-code", plain.id, "Plain")).toEqual({ browserKey: `claude-code.${plain.id}` });
+    expect(await exitFor({ ...deps, profileBrowsers: browsers(false) }, "claude-code", plain.id, "Plain")).toEqual({});
+    expect(far.seen).toHaveLength(0);
     const way = await exitFor(deps, "claude-code", work.id, "Work", () => 5_000);
     // With a proxy of its own it has a browser of its own too, by the same key.
     expect(way).toEqual({ proxy: expect.stringMatching(/^http:\/\/agentswitch:[\w-]+@127\.0\.0\.1:\d+$/), exit: { ip: "203.0.113.9", place: "Tokyo" }, browserKey: `claude-code.${work.id}` });
@@ -203,6 +209,33 @@ describe("a profile's own proxy", () => {
     expect(await exitFor(deps, "claude-code", work.id, "Work")).toEqual({ refused: expect.stringMatching(/^配置 Work 的代理没有通，终端没有开：经这个代理连不出去/), status: 502 });
     expect(store.all()["claude-code"].profiles[1]!.exit).toBeUndefined();
     expect(await exitFor({ profiles: store }, "claude-code", work.id, "Work")).toMatchObject({ status: 503 });
+  });
+
+  it("is not needed for a profile's browser to have a forwarder: with none it lets traffic straight out, AgentSwitch's own ports still refused", async () => {
+    // Something on this Mac that is not AgentSwitch's, and something that is (its own port, as the pool is told).
+    const seen: string[] = [];
+    const listen = async () => {
+      const server = createServer((req, res) => { seen.push(String(req.url)); res.end("here"); });
+      await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
+      closers.push(() => new Promise<void>((ok) => { server.closeAllConnections(); server.close(() => ok()); }));
+      return (server.address() as import("node:net").AddressInfo).port;
+    };
+    const site = await listen(), own = await listen();
+    const exits = new ExitPool({ ownPorts: () => [own], lookup: "http://lookup.test/json" });
+    closers.push(() => exits.stop());
+    const via = await exits.address("claude-code.plain00000", null);
+    const through = (url: string) => new Promise<{ status: number; body: string }>((ok, fail) => {
+      const at = new URL(via.server);
+      const req = request({ host: at.hostname, port: Number(at.port), method: "GET", path: url, headers: { host: new URL(url).host, "proxy-authorization": `Basic ${Buffer.from(`${via.username}:${via.password}`).toString("base64")}` } }, (res) => {
+        let body = ""; res.on("data", (d) => (body += d)); res.on("end", () => ok({ status: res.statusCode ?? 0, body }));
+      });
+      req.on("error", fail); req.end();
+    });
+    expect(await through(`http://127.0.0.1:${site}/page`)).toEqual({ status: 200, body: "here" });
+    expect((await through(`http://127.0.0.1:${own}/local-token`)).status).not.toBe(200);
+    expect(seen).toEqual(["/page"]);
+    // The same forwarder as long as nothing changes; a proxy set later takes its place.
+    expect(await exits.address("claude-code.plain00000", null)).toEqual(via);
   });
 
   it("is the agent's way out: its environment and, for Claude Code, the settings laid over the user's", () => {

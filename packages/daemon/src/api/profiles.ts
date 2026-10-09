@@ -145,15 +145,18 @@ export function profileOfKey(key: string): { agent: ProfileAgent; id: string } |
   return agent && at > 0 ? { agent, id: key.slice(at + 1) } : null;
 }
 
-/** What something about to start under profile `id` is given of its way out: nothing for a profile without a proxy
- *  of its own; else — once the proxy has just said where it lets traffic out — the forwarder to send everything
+/** What something about to start under profile `id` is given of its way out: for a profile without a proxy of its
+ *  own, its own browser and nothing else; else — once the proxy has just said where it lets traffic out — the forwarder to send everything
  *  through and that place. A proxy that does not answer starts nothing: `refused` says why (docs/profiles-v0.md §4). */
-export async function exitFor(deps: Pick<ApiDeps, "profiles" | "exits">, agent: ProfileAgent, id: string, name: string,
+export async function exitFor(deps: Pick<ApiDeps, "profiles" | "exits" | "profileBrowsers">, agent: ProfileAgent, id: string, name: string,
                               now: () => number = Date.now): Promise<{ proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string } | { refused: string; status: 502 | 503 }> {
   const proxy = deps.profiles?.proxyOf(agent, id) ?? null;
-  if (!proxy) return {};
-  if (!deps.exits) return { refused: `配置 ${name} 有自己的代理，这个服务用不了它。`, status: 503 };
   const key = exitKey(agent, id);
+  // No proxy of its own: it leaves as this Mac does. It has a browser of its own all the same (§5.5) — its sign-in
+  // is not to land in a browser where somebody else is signed in — where that browser shows a window on this Mac
+  // (one nobody can see is no place to sign in: then things stay as they were, the system's browser).
+  if (!proxy) return deps.profileBrowsers?.of(key)?.visible() ? { browserKey: key } : {};
+  if (!deps.exits) return { refused: `配置 ${name} 有自己的代理，这个服务用不了它。`, status: 503 };
   try {
     const exit = await deps.exits.check(key, proxy);
     // The proxy lets traffic out; where, when a lookup would say (none saying does not keep the terminal shut).

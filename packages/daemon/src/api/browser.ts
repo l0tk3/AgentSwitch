@@ -16,6 +16,7 @@ import { speedBody, speedSize } from "../browser/speed.js";
 import { BrowserError, YOU, type BrowserEvent } from "../browser/types.js";
 import { mountBrowserAgents } from "./browserAgents.js";
 import { mountBrowserIdentity } from "./browserIdentity.js";
+import { DEFAULT_PROFILE } from "../profiles/store.js";
 import { browserExitProblem } from "./profiles.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
@@ -114,7 +115,8 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
   if (!fleet) return;
   app.get("/browsers", (c) => {
     const all: Record<string, import("../profiles/store.js").AgentProfiles> = deps.profiles?.all() ?? {};
-    const own = Object.entries(all).flatMap(([agent, list]) => list.profiles.filter((p) => p.proxy).map((p) => {
+    // Every profile but the Mac's own has a browser of its own (§5.5), with or without a proxy.
+    const own = Object.entries(all).flatMap(([agent, list]) => list.profiles.filter((p) => p.id !== DEFAULT_PROFILE).map((p) => {
       const key = `${agent}.${p.id}`;
       return { key, name: p.name, agent, ...(p.color ? { color: p.color } : {}), ...(p.exit ? { exit: { ip: p.exit.ip, place: p.exit.place } } : {}), running: fleet.get(key)?.host.running ?? false };
     }));
@@ -127,7 +129,7 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
     if (!at || !browser) return c.json({ error: "no such browser" }, 404);
     // Its proxy is the profile's, set where the profile is: not something this browser's own identity keeps.
     if (c.req.method === "PUT" && at[2] === "/browser/identity" && "proxy" in ((await c.req.raw.clone().json().catch(() => ({}))) as object)) {
-      return c.json({ error: "这个浏览器走的是配置的代理：在 Settings › Agents 里这个配置的 Proxy… 里改。" }, 409);
+      return c.json({ error: "这个浏览器的代理跟着它的配置：在 Settings › Agents 里这个配置的 Proxy… 里改。" }, 409);
     }
     // The first tab starts the browser: before that its proxy is asked where it lets traffic out, as before a
     // terminal starts — one that does not answer opens nothing.

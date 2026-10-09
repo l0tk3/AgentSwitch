@@ -1,8 +1,9 @@
-/** The browsers of profiles that have a proxy of their own (docs/profiles-v0.md §5.1): beside the browser everyone
- *  shares, one for each such profile, started the first time something under the profile needs it. It is the same
- *  kind of browser — its own folder for cookies and sign-ins, its own tabs and agents' sessions — and everything it
- *  sends leaves through the profile's forwarder (exits.ts), so through the profile's proxy: what an agent under the
- *  profile opens in a browser comes from the same place as what the agent itself sends. */
+/** The profiles' own browsers (docs/profiles-v0.md §5.1, §5.5): beside the browser everyone shares, one for each
+ *  profile other than the Mac's own, started the first time something under the profile needs it. It is the same
+ *  kind of browser — its own folder for cookies and sign-ins, its own tabs and agents' sessions: an account signed
+ *  in there is that profile's, whoever is signed in elsewhere. Everything it sends leaves through the profile's
+ *  forwarder (exits.ts): through the profile's proxy when it has one — what an agent under the profile opens in a
+ *  browser then comes from the same place as what the agent itself sends — and as this Mac does when it has none. */
 
 import type { ExitPool } from "./exits.js";
 import type { ForwarderAddress } from "./forwarder.js";
@@ -17,14 +18,17 @@ export class ProfileBrowsers {
   private readonly made = new Map<string, { readonly setting: string; readonly browser: SharedBrowser }>();
 
   constructor(private readonly make: ProfileBrowserMaker, private readonly exits: Pick<ExitPool, "address">,
-              /** Each profile's proxy now, by its key (null: it has none, or is not there). */ private readonly proxyOf: (key: string) => ProxySetting | null) {}
+              /** Each profile's way out now, by its key: its own proxy, or none (this Mac's own way out). Null:
+               *  no such profile (the Mac's own has no key). */
+              private readonly profile: (key: string) => { readonly proxy: ProxySetting | null } | null) {}
 
-  /** The browser of profile `key`; null for a profile with no proxy of its own (it uses the shared one). One made
-   *  for a proxy that has since been changed is shut down and made anew: its traffic is not to go the old way. */
+  /** The browser of profile `key`; null when there is no such profile. One made for a proxy that has since been
+   *  changed, set or taken away is shut down and made anew: its traffic is not to go the old way. */
   of(key: string): SharedBrowser | null {
-    const proxy = this.proxyOf(key);
-    if (!proxy) { void this.drop(key); return null; }
-    const setting = JSON.stringify(proxy), was = this.made.get(key);
+    const profile = this.profile(key);
+    if (!profile) { void this.drop(key); return null; }
+    const proxy = profile.proxy;
+    const setting = proxy ? JSON.stringify(proxy) : "direct", was = this.made.get(key);
     if (was?.setting === setting) return was.browser;
     if (was) void this.shut(was.browser);
     const browser = this.make(key, { start: () => this.exits.address(key, proxy) });

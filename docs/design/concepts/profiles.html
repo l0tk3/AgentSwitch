@@ -136,7 +136,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   <h2>THE RULES IT SHOWS</h2>
   <ul>
     <li><b>配置属于一个 agent</b>，各管各的；行首的单选就是“当前配置”，换了之后新开的终端用它，开着的不动。</li>
-    <li><b>没指定指纹和代理的配置用 <code>This Mac</code></b>（真实指纹、不走代理、现在那个浏览器）；<b>指定了的有自己的浏览器</b>，只属于这一个配置，不和别的配置、别的 agent 共用。</li>
+    <li><b><code>Default</code> 以外的每个配置都有自己的浏览器</b>，只属于这一个配置，不和别的配置、别的 agent 共用：自己的登录态、自己的指纹；有代理的经代理出去，没代理的照这台 Mac 出去（已做，profiles-v0 §5.5；原来“没代理的用 <code>This Mac</code> 的浏览器”作废）。</li>
     <li><b>右下角的浏览器图标</b>在状态栏最右端（原来锁的位置），点一下把这个终端所用的浏览器叫到前面；机器上不止一个浏览器时旁边写明是哪个。</li>
     <li><b>标签页按 Codex 客户端的办法管</b>：每个终端只管自己开的；agent 开的标签这一轮结束就关，除非标了 <code>Kept</code>（给你的结果）或 <code>Handoff</code>（等你操作，下一轮接着做）；你接手过的也留下。</li>
     <li><b>配置有颜色</b>（<code>Default</code> 没有）：Agents 页里名字前的圆点；在它名下<b>运行着</b>的终端，列表行尾和状态栏里带一颗同色的亮点。颜色说的是“谁”，不是状态——都避开状态色，位置和样子也和状态标记不同（已做，profiles-v0 §3.2）。</li>

@@ -26,7 +26,7 @@ export type ExitPoolOptions = {
   readonly log?: (line: string) => void;
 };
 
-type Exit = { readonly setting: string; readonly upstream: string; readonly forwarder: Forwarder };
+type Exit = { readonly setting: string; readonly upstream: string | null; readonly forwarder: Forwarder };
 /** Asked when the first lookup answers but will not say (it limits how often one address may ask — seen 2026-10-09:
  *  `429` from an exit many people share): another that names the place and the time zone too (a profile's Camoufox
  *  is started in that zone), then a trace that names the address and the country, then one that names the address
@@ -51,12 +51,14 @@ export class ExitPool {
   /** The forwarder for `key`'s proxy, listening: what a process under it is given as its proxy
    *  (`http://agentswitch:<a password made for this run>@127.0.0.1:<port>`). A proxy with a password is asked of the
    *  gate here; one that cannot be had is refused. */
-  async address(key: string, proxy: ProxySetting): Promise<ForwarderAddress> {
-    const setting = JSON.stringify(checkedProxy(proxy));
+  async address(key: string, proxy: ProxySetting | null): Promise<ForwarderAddress> {
+    // Without a proxy of its own (a profile's browser, §5.5): the same forwarder with nothing behind it — what goes
+    // through it leaves as this Mac does, and it keeps the forwarder's rules (AgentSwitch's own ports are refused).
+    const setting = proxy ? JSON.stringify(checkedProxy(proxy)) : "direct";
     let exit = this.exits.get(key);
     if (exit?.setting !== setting) {
       await exit?.forwarder.stop();
-      const upstream = await this.upstream(checkedProxy(proxy));
+      const upstream = proxy ? await this.upstream(checkedProxy(proxy)) : null;
       exit = { setting, upstream, forwarder: new Forwarder({ ownPorts: this.opts.ownPorts, upstream: () => upstream, ...(this.opts.log ? { log: this.opts.log } : {}) }) };
       this.exits.set(key, exit);
     }
