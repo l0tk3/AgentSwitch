@@ -311,13 +311,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastShownAt = shown.at
         model.browserFront.asked()
         let home = model.paths.agentswitchHome
+        // The service says so before it starts the browser: the browser may not be there yet, and one just started
+        // comes forward and is in front only a moment later. Asked until it is in front, for some seconds; once it
+        // has been, whatever comes in front after that is the person's own doing.
         Task { @MainActor [model] in
-            for _ in 0..<12 {
-                if BrowserFront.running(agentswitchHome: home, browser: shown.browser) != nil {
-                    model.browserFront.asked()
-                    BrowserFront.activate(agentswitchHome: home, browser: shown.browser)
-                    return
-                }
+            for _ in 0..<50 {
+                model.browserFront.asked()
+                if BrowserFront.isFront(agentswitchHome: home, browser: shown.browser) { return }
+                if BrowserFront.running(agentswitchHome: home, browser: shown.browser) != nil { BrowserFront.activate(agentswitchHome: home, browser: shown.browser) }
                 try? await Task.sleep(for: .milliseconds(500))
             }
         }

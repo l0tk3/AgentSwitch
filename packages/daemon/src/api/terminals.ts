@@ -239,12 +239,18 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
         const problem = await browserExitProblem(deps, key!);
         if (problem) return refuse(502, problem);
       }
+      // Said before the browser is started (a few seconds for one that was not running): the Mac's app is to know
+      // that this browser's window was asked for by the time it comes up, not after.
+      const at = Date.now();
+      deps.profileBrowsers?.noteShown(key!, "", at);
       const tab = await browser.host.open(YOU, url);
-      deps.profileBrowsers?.noteShown(key!, tab.id);
+      deps.profileBrowsers?.noteShown(key!, tab.id, at);
       browser.audit.record({ tab: tab.id, action: "open", via: `terminal ${id}`, detail: { url: new URL(url).origin } });
       void browser.host.show(tab.id).catch(() => undefined);
       return c.json({ tab: tab.id });
     } catch (err) {
+      // Nothing was opened after all: no window is to be waited for.
+      if (deps.profileBrowsers?.shown?.tab === "") deps.profileBrowsers.shown = null;
       if (err instanceof BrowserError) return refuse(502, err.message);
       console.error(`terminals: a page terminal ${id.slice(0, 16) || "?"} asked to have opened in its own browser was not opened (${(err as Error).message})`);
       return failed(c, err);

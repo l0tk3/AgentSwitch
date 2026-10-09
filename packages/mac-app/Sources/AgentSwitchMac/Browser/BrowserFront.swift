@@ -32,19 +32,31 @@ enum BrowserFront {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
+    /// The browser itself: not one of the helper programs it starts, which macOS lists among the running apps too.
     static func isBrowser(_ app: NSRunningApplication, agentswitchHome: URL) -> Bool {
         let engine = BrowserEngineLocation.camoufoxApp(agentswitchHome: agentswitchHome).resolvingSymlinksInPath().standardizedFileURL
-        if app.bundleURL?.resolvingSymlinksInPath().standardizedFileURL == engine { return true }
-        // Started as a program, not through LaunchServices: known by where its program is.
-        return app.executableURL?.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix(engine.path + "/") ?? false
+        return BrowserEngineLocation.isBrowserItself(bundle: app.bundleURL?.resolvingSymlinksInPath().standardizedFileURL,
+                                                     executable: app.executableURL?.resolvingSymlinksInPath().standardizedFileURL, engine: engine)
+    }
+
+    /// `browser`'s window is the one in front of the Mac.
+    static func isFront(agentswitchHome: URL, browser key: String? = nil) -> Bool {
+        guard let browser = running(agentswitchHome: agentswitchHome, browser: key) else { return false }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == browser.processIdentifier
     }
 
     /// The browser before the other apps, asked for from this app while it is the one in front: the system lets the
     /// app in front hand its place over.
-    static func activate(agentswitchHome: URL, browser key: String? = nil) {
-        guard let browser = running(agentswitchHome: agentswitchHome, browser: key) else { return }
+    @discardableResult
+    static func activate(agentswitchHome: URL, browser key: String? = nil) -> Bool {
+        guard let browser = running(agentswitchHome: agentswitchHome, browser: key) else {
+            frontLog.notice("no running browser found to bring forward (\(key ?? "shared", privacy: .public))")
+            return false
+        }
         NSApp.yieldActivation(to: browser)
-        browser.activate(from: .current, options: [])
+        let asked = browser.activate(from: .current, options: [])
+        frontLog.notice("asked the browser forward (\(key ?? "shared", privacy: .public), pid \(browser.processIdentifier)): \(asked)")
+        return asked
     }
 }
 

@@ -108,19 +108,31 @@ public enum BrowserEngineLocation {
         agentswitchHome.appendingPathComponent("browser-profiles/\(browser ?? "main")-camoufox").path
     }
 
-    /// Of the programs' command lines (`pid` → what `ps` prints), the one started on `browser`'s folder.
+    /// Of the programs' command lines (`pid` → what `ps` prints), the one started on `browser`'s folder: the browser
+    /// itself. The helper programs it starts (its content, graphics and network processes) are given the same folder
+    /// and name their parent (`-parentPid`); macOS lists them as apps too, and none of them can be brought forward.
     public static func process(of browser: String?, among commands: [Int32: String], agentswitchHome: URL) -> Int32? {
         let folder = camoufoxProfile(browser, agentswitchHome: agentswitchHome)
         // The folder as a whole argument — it has spaces of its own (`Application Support`), so the line is not cut at
         // spaces: what follows it is a space or nothing (`…/main-camoufox` is not `…/main-camoufox-2`).
-        return commands.first { _, line in
+        return commands.filter { _, line in
+            guard !line.contains(" -parentPid ") else { return false }
             var from = line.startIndex
             while let found = line.range(of: folder, range: from..<line.endIndex) {
                 if found.upperBound == line.endIndex || line[found.upperBound] == " " { return true }
                 from = found.upperBound
             }
             return false
-        }?.key
+        }.keys.min()
+    }
+
+    /// Whether a running program is the browser itself, by where macOS says it is: the engine's app, or — started as
+    /// a program, not through LaunchServices — a program directly in it. Not a program in an app inside the engine's
+    /// app: those are its helpers (`…/Camoufox.app/Contents/MacOS/plugin-container.app/…`).
+    public static func isBrowserItself(bundle: URL?, executable: URL?, engine: URL) -> Bool {
+        if let bundle, bundle.path == engine.path { return true }
+        guard let executable, executable.path.hasPrefix(engine.path + "/") else { return false }
+        return !executable.path.dropFirst(engine.path.count).contains(".app/")
     }
 }
 

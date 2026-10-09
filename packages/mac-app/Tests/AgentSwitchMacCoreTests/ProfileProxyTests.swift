@@ -116,6 +116,34 @@ final class ProfileBrowserTests: XCTestCase {
         XCTAssertNil(BrowserEngineLocation.process(of: nil, among: [:], agentswitchHome: home))
     }
 
+    func testTheBrowserItselfIsFoundNotOneOfItsHelpers() {
+        // As seen on a Mac with one profile's Camoufox running (2026-10-09): macOS lists the browser and six of its
+        // helper programs as running apps; every one of them was started with the profile's folder in its arguments.
+        let home = URL(fileURLWithPath: "/Users/me/Library/Application Support/AgentSwitch")
+        let engine = URL(fileURLWithPath: "/Users/me/Library/Application Support/AgentSwitch/browser/engine/camoufox/current/Camoufox.app")
+        let folder = "/Users/me/Library/Application Support/AgentSwitch/browser-profiles/claude-code.abc123def0-camoufox"
+        let helper = "\(engine.path)/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container"
+        let commands: [Int32: String] = [
+            50729: "\(engine.path)/Contents/MacOS/camoufox -no-remote -wait-for-browser -foreground -profile \(folder) -juggler-pipe about:blank",
+            50745: "\(engine.path)/Contents/MacOS/gpu-helper.app/Contents/MacOS/Camoufox GPU Helper -parentBuildID 20261006020952 -sbStartup -parentPid 50729 -profile \(folder) gpu",
+            50746: "\(helper) -parentBuildID 20261006020952 -prefsHandle 0:26724 -sbStartup -parentPid 50729 -profile \(folder) socket",
+            50748: "\(helper) -isForBrowser -prefsHandle 0:26978 -jsInitHandle 2:162620 -sbStartup -parentPid 50729 -profile \(folder) tab",
+            50200: "\(helper) -isForBrowser -prefsHandle 0:1 -sbStartup -parentPid 50729 -profile \(folder) tab",
+        ]
+        // Whichever way the list is gone through, it is the browser: a helper cannot be brought forward.
+        for _ in 0..<20 { XCTAssertEqual(BrowserEngineLocation.process(of: "claude-code.abc123def0", among: commands, agentswitchHome: home), 50729) }
+        // Only helpers left (the browser is going away): none.
+        XCTAssertNil(BrowserEngineLocation.process(of: "claude-code.abc123def0", among: commands.filter { $0.key != 50729 }, agentswitchHome: home))
+
+        // What macOS says of each: the browser is the engine's app; a helper is an app inside it.
+        XCTAssertTrue(BrowserEngineLocation.isBrowserItself(bundle: engine, executable: engine.appendingPathComponent("Contents/MacOS/camoufox"), engine: engine))
+        XCTAssertTrue(BrowserEngineLocation.isBrowserItself(bundle: nil, executable: engine.appendingPathComponent("Contents/MacOS/camoufox"), engine: engine))
+        XCTAssertFalse(BrowserEngineLocation.isBrowserItself(bundle: engine.appendingPathComponent("Contents/MacOS/plugin-container.app"), executable: URL(fileURLWithPath: helper), engine: engine))
+        XCTAssertFalse(BrowserEngineLocation.isBrowserItself(bundle: nil, executable: URL(fileURLWithPath: helper), engine: engine))
+        XCTAssertFalse(BrowserEngineLocation.isBrowserItself(bundle: URL(fileURLWithPath: "/Applications/Firefox.app"), executable: URL(fileURLWithPath: "/Applications/Firefox.app/Contents/MacOS/firefox"), engine: engine))
+        XCTAssertFalse(BrowserEngineLocation.isBrowserItself(bundle: nil, executable: nil, engine: engine))
+    }
+
     func testAPageShownInAProfilesBrowserBringsItsWindowForwardOnce() throws {
         let snapshot = try JSONDecoder().decode(LiveSnapshot.self, from: Data(#"{"rows":[],"ended":[],"open":1,"now":1791500010000,"shown":{"browser":"claude-code.abc123def0","tab":"t3","at":1791500008000}}"#.utf8))
         let shown = try XCTUnwrap(snapshot.shown)
