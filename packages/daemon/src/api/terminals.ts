@@ -223,16 +223,21 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   app.post("/terminals/open", async (c) => {
     const id = c.req.header("x-agentswitch-terminal") ?? "";
     const token = /^Bearer\s+(\S+)\s*$/.exec(c.req.header("authorization") ?? "")?.[1];
-    const url = String((await c.req.parseBody().catch(() => ({})) as Record<string, unknown>).url ?? "");
-    if (!token || !/^https?:\/\/\S{1,4000}$/.test(url)) return c.json({ error: "bad open call" }, 400);
+    // JSON, as everything the local listener takes (api/localGuard.ts): the opener sends it so.
+    const said = (await c.req.json().catch(() => null)) as { url?: unknown } | null;
+    const url = typeof said?.url === "string" ? said.url : "";
+    // Why a page was not opened is written down here: the opener's own words go to the agent, which shows none of
+    // them. Never the address — a sign-in's carries what is good for one use.
+    const refuse = (status: 400 | 409 | 502, error: string) => { console.error(`terminals: a page terminal ${id.slice(0, 16) || "?"} asked to have opened in its own browser was not opened (${status}: ${error})`); return c.json({ error }, status); };
+    if (!token || !/^https?:\/\/\S{1,4000}$/.test(url)) return refuse(400, "bad open call");
     try {
       const key = host.browserOf(id, token);
       const browser = key ? deps.profileBrowsers?.of(key) ?? null : null;
-      if (!browser) return c.json({ error: "this terminal has no browser of its own" }, 409);
-      if (!browser.visible()) return c.json({ error: "this terminal's browser shows no window on this Mac" }, 409);
+      if (!browser) return refuse(409, "this terminal has no browser of its own");
+      if (!browser.visible()) return refuse(409, "this terminal's browser shows no window on this Mac");
       if (!browser.host.running) {
         const problem = await browserExitProblem(deps, key!);
-        if (problem) return c.json({ error: problem }, 502);
+        if (problem) return refuse(502, problem);
       }
       const tab = await browser.host.open(YOU, url);
       deps.profileBrowsers?.noteShown(key!, tab.id);
@@ -240,7 +245,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       void browser.host.show(tab.id).catch(() => undefined);
       return c.json({ tab: tab.id });
     } catch (err) {
-      if (err instanceof BrowserError) return c.json({ error: err.message }, 502);
+      if (err instanceof BrowserError) return refuse(502, err.message);
+      console.error(`terminals: a page terminal ${id.slice(0, 16) || "?"} asked to have opened in its own browser was not opened (${(err as Error).message})`);
       return failed(c, err);
     }
   });

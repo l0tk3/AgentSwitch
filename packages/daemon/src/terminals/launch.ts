@@ -154,9 +154,12 @@ for a in "$@"; do
   esac
 done
 [ -n "$url" ] || exec /usr/bin/open "$@"
-code=$(/usr/bin/curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST "$AGENTSWITCH_TERMINAL_URL/terminals/open" \\
-  -H "x-agentswitch-terminal: $AGENTSWITCH_TERMINAL_ID" -H "authorization: Bearer $AGENTSWITCH_TERMINAL_HOOK_TOKEN" \\
-  --data-urlencode "url=$url")
+# As JSON: the service's local listener takes no other body (api/localGuard.ts). Asked of this Mac itself, whatever
+# proxy this terminal has.
+esc=$(printf '%s' "$url" | /usr/bin/sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g')
+code=$(/usr/bin/curl -s -m 40 --noproxy '*' -o /dev/null -w '%{http_code}' -X POST "$AGENTSWITCH_TERMINAL_URL/terminals/open" \\
+  -H "content-type: application/json" -H "x-agentswitch-terminal: $AGENTSWITCH_TERMINAL_ID" -H "authorization: Bearer $AGENTSWITCH_TERMINAL_HOOK_TOKEN" \\
+  --data-binary "{\\"url\\":\\"$esc\\"}")
 [ "$code" = "200" ] && exit 0
 echo "AgentSwitch: this address was not opened in the profile's browser ($code). Open it yourself in a browser that leaves this Mac the same way." >&2
 exit 1

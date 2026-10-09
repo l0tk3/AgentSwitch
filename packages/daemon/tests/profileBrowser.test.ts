@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { mountBrowser, mountProfileBrowsers } from "../src/api/browser.js";
 import { LocalAuth } from "../src/api/localAuth.js";
+import { listenLocal } from "../src/daemon.js";
 import { exitKey, profileOfKey } from "../src/api/profiles.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
@@ -226,10 +227,10 @@ describe("a profile's own browser", () => {
 describe("a web address the agent asks the system to open", () => {
   /** The service, made up: it keeps what it was asked and answers `status`. */
   async function service(status: number) {
-    const asked: { path: string; terminal: string; auth: string; body: string }[] = [];
+    const asked: { path: string; terminal: string; auth: string; type: string; body: string }[] = [];
     const server = createServer((req, res) => {
       let body = ""; req.on("data", (c) => (body += c));
-      req.on("end", () => { asked.push({ path: String(req.url), terminal: String(req.headers["x-agentswitch-terminal"]), auth: String(req.headers.authorization), body }); res.writeHead(status).end("{}"); });
+      req.on("end", () => { asked.push({ path: String(req.url), terminal: String(req.headers["x-agentswitch-terminal"]), auth: String(req.headers.authorization), type: String(req.headers["content-type"]), body }); res.writeHead(status).end("{}"); });
     });
     await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));
     closers.push(() => new Promise<void>((ok) => server.close(() => ok())));
@@ -249,16 +250,55 @@ describe("a web address the agent asks the system to open", () => {
     const mine = { ...env, AGENTSWITCH_TERMINAL_URL: taken.url, AGENTSWITCH_TERMINAL_ID: "t1", AGENTSWITCH_TERMINAL_HOOK_TOKEN: "hook-token" };
     const link = "https://claude.ai/oauth/authorize?code=true&client_id=abc&scope=a+b";
     expect(await run(env.BROWSER!, [link], mine)).toEqual({ code: 0, err: "" });
-    expect(taken.asked).toEqual([{ path: "/terminals/open", terminal: "t1", auth: "Bearer hook-token", body: `url=${encodeURIComponent(link)}` }]);
+    // As JSON: the service's local listener takes no other body.
+    expect(taken.asked).toEqual([{ path: "/terminals/open", terminal: "t1", auth: "Bearer hook-token", type: "application/json", body: JSON.stringify({ url: link }) }]);
     // As Claude Code calls it: by the name `open`, found first on the PATH.
     expect((await run("/bin/sh", ["-c", `open "${link}"`], mine)).code).toBe(0);
     expect(taken.asked).toHaveLength(2);
+    // An address with what JSON has to have written another way: it arrives as it was given.
+    const odd = 'https://example.com/a?q="x"&p=C:\\dir\\f&z=$HOME`id`';
+    expect((await run(env.BROWSER!, [odd], mine)).code).toBe(0);
+    expect(JSON.parse(taken.asked[2]!.body)).toEqual({ url: odd });
     // The service says no (no window to sign in in): it fails and says so; nothing else is opened.
     const refused = await service(409);
     const said = await run(env.BROWSER!, [link], { ...mine, AGENTSWITCH_TERMINAL_URL: refused.url });
     expect(said.code).toBe(1);
     expect(said.err).toContain("was not opened in the profile's browser (409)");
     expect((await run(env.BROWSER!, [link], { ...mine, AGENTSWITCH_TERMINAL_URL: "http://127.0.0.1:1" })).code).toBe(1);
+  });
+
+  it("gets there for real: the opener itself, asking the local listener as the service runs it — its guard and its token in front", async () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-open-real-"));
+    const driver = new FakeDriver();
+    // A profile without a proxy of its own: a browser of its own all the same, with a window.
+    const fleet = new ProfileBrowsers((key, forwarder) => sharedBrowser({ home, userHome: home, driver, ownPorts: () => [4711], protected: { roots: [], exempt: [] }, headless: false, own: { name: key, forwarder } }),
+      { address: async () => ({ server: "http://127.0.0.1:50123", username: "agentswitch", password: "pw" }) }, (key) => (key === "claude-code.plain00000" ? { proxy: null } : null));
+    closers.push(() => fleet.stop());
+    const host = { onWorkDone() { /* not used */ }, list: () => [], browserOf: (id: string, token: string) => {
+      if (token !== "hook-token" || id !== "t1") throw new TerminalError("forbidden", "unknown terminal or hook token");
+      return "claude-code.plain00000";
+    } };
+    const app = new Hono();
+    mountTerminals(app, { terminals: { host, audit: { record() { /* not looked at */ } }, agents: [] }, profileBrowsers: fleet } as unknown as ApiDeps);
+    // The listener as the service has it (daemon.ts `listenLocal`): bodies in JSON only, and the local token — which
+    // the opener does not have and does not need (the terminal's own hook token is what proves the call).
+    const port = await new Promise<number>((ok) => { const server = listenLocal({ app }, 0, (info) => ok(info.port), new LocalAuth("local-token-0123456789abcdefghijklmnopqrstuv")); closers.push(() => new Promise<void>((done) => server.close(() => done()))); });
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-open-"));
+    const env = { ...openInProfileBrowser(dir, "/usr/bin:/bin"), AGENTSWITCH_TERMINAL_URL: `http://127.0.0.1:${port}`, AGENTSWITCH_TERMINAL_ID: "t1", AGENTSWITCH_TERMINAL_HOOK_TOKEN: "hook-token",
+      // A proxy in the terminal's environment is not asked for what is on this Mac.
+      HTTP_PROXY: "http://127.0.0.1:1", http_proxy: "http://127.0.0.1:1", ALL_PROXY: "http://127.0.0.1:1" };
+    const link = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=a+b";
+    expect(await run("/bin/sh", ["-c", `open "${link}"`], env)).toEqual({ code: 0, err: "" });
+    expect(fleet.get("claude-code.plain00000")!.host.list().map((t) => t.url)).toEqual([link]);
+    expect(fleet.shown?.browser).toBe("claude-code.plain00000");
+    // Not this terminal's token: turned away, and said so.
+    const not = await run("/bin/sh", ["-c", `open "${link}"`], { ...env, AGENTSWITCH_TERMINAL_HOOK_TOKEN: "another" });
+    expect(not.code).toBe(1);
+    expect(not.err).toContain("(403)");
+    // A body that is not JSON does not get past the listener (the guard a web page's form meets), whoever sends it.
+    const form = await fetch(`http://127.0.0.1:${port}/terminals/open`, { method: "POST", headers: { "x-agentswitch-terminal": "t1", authorization: "Bearer hook-token", "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ url: link }).toString() });
+    expect(form.status).toBe(415);
+    expect(fleet.get("claude-code.plain00000")!.host.list()).toHaveLength(1);
   });
 
   it("is opened by the service in that terminal's own browser, for a call proven by the terminal's hook token", async () => {
@@ -276,7 +316,7 @@ describe("a web address the agent asks the system to open", () => {
       closers.push(() => fleet.stop());
       const app = new Hono();
       mountTerminals(app, { terminals: { host, audit: { record() { /* not looked at */ } }, agents: [] }, profileBrowsers: fleet } as unknown as ApiDeps);
-      return (terminal: string, token: string, url: string) => app.request("/terminals/open", { method: "POST", headers: { "x-agentswitch-terminal": terminal, authorization: `Bearer ${token}`, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ url }).toString() });
+      return (terminal: string, token: string, url: string) => app.request("/terminals/open", { method: "POST", headers: { "x-agentswitch-terminal": terminal, authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ url }) });
     };
     const link = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A55473%2Fcallback";
     const windows = fleetOf(false), open = served(windows);
