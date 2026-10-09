@@ -128,6 +128,40 @@ final class BrowserTests: XCTestCase {
         XCTAssertEqual(r[7].httpMethod, "DELETE")
     }
 
+    func testAProfilesOwnBrowserIsAskedByTheSameRoutesUnderItsAddress() async throws {
+        let tab = String(data: json(["tab": ["id": "a1", "owner": ["kind": "you", "id": "you", "label": "You"]]]), encoding: .utf8)!
+        let listed = #"{"browsers":[{"key":null,"name":"Shared","running":true},{"key":"claude-code.abc123def0","name":"cwork1","agent":"claude-code","exit":{"ip":"203.0.113.9","place":"Tokyo"},"running":false}]}"#
+        let transport = FakeTransport { req, _ in
+            if req.url?.path == "/browsers" { return (Data(listed.utf8), httpResponse(req.url, status: 200)) }
+            if req.url?.path.hasSuffix("/browser/tabs") == true, req.httpMethod == "GET" { return (Data(#"{"running":false,"groups":[]}"#.utf8), httpResponse(req.url, status: 200)) }
+            return (Data(tab.utf8), httpResponse(req.url, status: req.httpMethod == "POST" && req.url?.path.hasSuffix("/browser/tabs") == true ? 201 : 200))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        // The browsers the Mac holds: the shared one, then each profile's own with where it leaves the Mac from.
+        let browsers = try await api.browsers()
+        XCTAssertEqual(browsers, [BrowserChoice(key: nil, name: "Shared", running: true),
+                                  BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", exit: .init(ip: "203.0.113.9", place: "Tokyo"))])
+        XCTAssertEqual(browsers.map(\.id), ["", "claude-code.abc123def0"])
+        XCTAssertEqual(browsers[1].exit?.text, "Tokyo 203.0.113.9")
+        // The shared browser's routes as they are; a profile's own under its address; other routes untouched.
+        let own = api.forBrowser("claude-code.abc123def0")
+        _ = try await api.browserTabs()
+        _ = try await own.browserTabs()
+        _ = try await own.openBrowserTab(.url("claude.ai"))
+        _ = try await own.takeBrowserTab("a1", screen: "phone-1")
+        try await own.closeBrowserTab("a1")
+        _ = try? await own.browserServers()
+        _ = try await own.forBrowser(nil).browserTabs()
+        XCTAssertEqual(transport.paths, ["/browsers", "/browser/tabs", "/profile-browser/claude-code.abc123def0/browser/tabs", "/profile-browser/claude-code.abc123def0/browser/tabs",
+                                         "/profile-browser/claude-code.abc123def0/browser/tabs/a1/take", "/profile-browser/claude-code.abc123def0/browser/tabs/a1",
+                                         "/profile-browser/claude-code.abc123def0/browser/servers", "/browser/tabs"])
+        XCTAssertEqual([api.browserKey, own.browserKey], [nil, "claude-code.abc123def0"])
+        // A Mac that does not list them (an older one) has the shared one alone.
+        let older = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: FakeTransport { req, _ in (Data(#"{"error":"not found"}"#.utf8), httpResponse(req.url, status: 404)) }, token: "tok")
+        let alone = try await older.browsers()
+        XCTAssertEqual(alone, [.shared])
+    }
+
     func testARefusalCarriesItsReason() async throws {
         let transport = FakeTransport { req, _ in
             (Data(#"{"error":"~/x/.env 属于凭据文件（.env、私钥、证书、令牌配置等），不在浏览器中打开。"}"#.utf8), httpResponse(req.url, status: 403))

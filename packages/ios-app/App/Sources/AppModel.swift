@@ -33,6 +33,8 @@ final class AppModel {
     /// How the attempts went since the last connection: the tiers of the connection line (control-v0 §5).
     private(set) var connectionProgress = ConnectionProgress()
     private(set) var api: AgentSwitchAPI?
+    /// `api` for the Browser tab: its browser routes are those of the browser the tab shows (docs/profiles-v0.md §5.4).
+    var browserAPI: AgentSwitchAPI? { browser.scoped(api) }
     private(set) var me: Me?
     /// How each address fared in the last route choice (settings › Mac), for "why can't it connect".
     private(set) var routeReport: (at: Date, reports: [ProbeReport])?
@@ -772,7 +774,9 @@ extension AppModel {
         model.hasAssistant = true
         model.quota = DemoData.quota
         model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git)
-        model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent, zoom: DemoBrowser.zoom)
+        model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent, zoom: DemoBrowser.zoom,
+                              browsers: UserDefaults.standard.string(forKey: "uiDemoScreen") == "browserprofiles"
+                                ? [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", exit: .init(ip: "203.0.113.9", place: "Tokyo"), running: true)] : nil)
         model.routeReport = (Date().addingTimeInterval(-40), DemoData.routeReport)
         model.connectionProgress = ConnectionProgress().after(model.connection)
         if offline {

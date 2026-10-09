@@ -55,7 +55,7 @@ struct BrowserPage: View {
             page.store = model.browser
             let known = model.browser.knownSpeed(on: model.connection.endpoint) ?? nil
             mbps = known
-            page.start(model.api, options: streamOptions(mbps: known))
+            page.start(model.browserAPI, options: streamOptions(mbps: known))
             measure()
             #if DEBUG
             switch UserDefaults.standard.string(forKey: "uiDemoScreen") {
@@ -130,7 +130,7 @@ struct BrowserPage: View {
         let endpoint = model.connection.endpoint
         guard BrowserStreamPolicy.measures(endpoint?.kind) else { return }
         Task {
-            let measured = await model.browser.speed(model.api, on: endpoint)
+            let measured = await model.browser.speed(model.browserAPI, on: endpoint)
             guard visible, model.connection.endpoint == endpoint else { return }
             mbps = measured
             page.retune(streamOptions(mbps: measured))

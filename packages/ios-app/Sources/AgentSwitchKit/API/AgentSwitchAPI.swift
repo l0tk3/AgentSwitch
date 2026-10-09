@@ -8,6 +8,9 @@ public struct AgentSwitchAPI: Sendable {
     public let transport: any HTTPTransport
     public let token: String?
     public var requestTimeout: TimeInterval = 15
+    /// Which browser the browser routes are asked of (docs/profiles-v0.md §5.4): nil, the shared one; else a profile's
+    /// own, by its key (`forBrowser`).
+    public internal(set) var browserKey: String?
     /// `POST /tasks` answers only after the sealer (up to 30 s on the Mac) has run; give it room so a slow answer is
     /// not taken for a failure and the task sent twice.
     public static let createTaskTimeout: TimeInterval = 60

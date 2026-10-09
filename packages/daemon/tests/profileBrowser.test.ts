@@ -119,10 +119,12 @@ describe("a profile's own browser", () => {
     const listedFirst = await (await app.request("/browsers")).json() as { browsers: unknown[] };
     expect(listedFirst.browsers).toEqual([{ key: null, name: "Shared", running: false },
       { key, name: "cwork1", agent: "claude-code", exit: { ip: "203.0.113.9", place: "Tokyo" }, running: false }]);
-    expect((await app.request("/browsers", {}, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    // A paired phone is told too, and may look into a profile's browser as it may into the shared one.
+    expect((await app.request("/browsers", {}, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
     // Asked for by its address it is there (made, not started): an empty list, as the shared one's before its first tab.
     expect(await (await app.request(`/profile-browser/${key}/browser/tabs`)).json()).toMatchObject({ running: false, groups: [] });
-    expect((await app.request(`/profile-browser/${key}/browser/tabs`, {}, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await app.request(`/profile-browser/${key}/browser/tabs`, {}, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
+    expect((await app.request(`/profile-browser/${key}/browser/identity`, {}, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
     const own = fleet.of(key)!;
     await own.host.open({ kind: "you", id: "you", label: "You" }, "https://claude.ai/login");
     const listed = await (await app.request(`/profile-browser/${key}/browser/tabs`)).json() as { running: boolean; groups: { tabs: { url: string }[] }[] };

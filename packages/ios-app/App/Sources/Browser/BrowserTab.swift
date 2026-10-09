@@ -34,6 +34,8 @@ struct BrowserTab: View {
                     } else if let error = store.error {
                         Text(error).font(.footnote).foregroundStyle(Theme.failed)
                     }
+                    // Which browser the list is of, when the Mac has more than the shared one (docs/profiles-v0.md §5.4).
+                    if store.browsers.count > 1 { chooser(store) }
                     if store.list != nil && store.tabs.isEmpty {
                         Text("还没有打开的标签。").font(.footnote).foregroundStyle(.secondary).padding(.vertical, 24)
                     }
@@ -80,12 +82,16 @@ struct BrowserTab: View {
                 }
             }
             .refreshable {
-                await store.refreshList(model.api)
-                await store.refreshServers(model.api)
+                await store.refreshBrowsers(model.api)
+                await store.refreshList(model.browserAPI)
+                await store.refreshServers(model.browserAPI)
             }
             // The list itself is read from every tab (MainTabs). The servers once as the tab comes on screen (and on
             // pulling down, and in `+`): listing them runs `lsof` on the Mac, not worth a timer.
-            .task(id: model.connection.endpoint) { await store.refreshServers(model.api) }
+            .task(id: model.connection.endpoint) {
+                await store.refreshBrowsers(model.api)
+                await store.refreshServers(model.browserAPI)
+            }
             .onAppear { openRequested() }
             .onChange(of: model.openBrowserRequest) { openRequested() }
             .onChange(of: store.list == nil) { openRequested() }
@@ -109,6 +115,32 @@ struct BrowserTab: View {
         .pixelBox(item: $failure) { message in
             PixelBox(head: "Error", tone: .red, message: message, cancel: nil, actions: [.init(label: "OK", role: .primary) {}])
         }
+    }
+
+    /// The browsers there are, the one shown marked: a tap shows another's tabs.
+    private func chooser(_ store: BrowserStore) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(store.browsers) { choice in
+                let selected = choice.key == store.key
+                Button {
+                    store.show(choice.key)
+                    Task { await store.refreshList(model.browserAPI) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(selected ? "■" : "□").mono(11).foregroundStyle(selected ? Theme.signal : Color.secondary).frame(width: 14)
+                        Text(choice.name).font(.subheadline.weight(selected ? .semibold : .regular)).foregroundStyle(selected ? Theme.ink : Color.secondary).lineLimit(1)
+                        Spacer(minLength: 0)
+                        if let exit = choice.exit { Text(exit.text).mono(11).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+                    }
+                    .padding(.vertical, 9)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+            HairRule()
+        }
+        .padding(.top, Theme.Space.s)
     }
 
     /// `// codex · AgentSwitch` with the agent's mark, `// 登录财务平台下载对账单`, `// You`.
@@ -151,7 +183,7 @@ struct BrowserTab: View {
     }
 
     private func close(_ tab: BrowserTabInfo) async {
-        guard let api = model.api else { return }
+        guard let api = model.browserAPI else { return }
         do {
             try await api.closeBrowserTab(tab.id)
             model.browser.remove(tab.id)
@@ -161,7 +193,7 @@ struct BrowserTab: View {
     }
 
     private func openServer(_ server: BrowserLocalServer) async {
-        guard let api = model.api else { return }
+        guard let api = model.browserAPI else { return }
         opening = server.port
         defer { opening = nil }
         do {

@@ -113,7 +113,6 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
   const fleet = deps.profileBrowsers;
   if (!fleet) return;
   app.get("/browsers", (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "not available from a paired device" }, 403);
     const all: Record<string, import("../profiles/store.js").AgentProfiles> = deps.profiles?.all() ?? {};
     const own = Object.entries(all).flatMap(([agent, list]) => list.profiles.filter((p) => p.proxy).map((p) => {
       const key = `${agent}.${p.id}`;
@@ -123,7 +122,6 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
   });
   const served = new WeakMap<object, Hono>();
   app.all("/profile-browser/:key/*", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "not available from a paired device" }, 403);
     const at = /^\/profile-browser\/([a-z0-9.-]+)(\/.*)$/.exec(new URL(c.req.url).pathname);
     const browser = at ? fleet.get(at[1]!) ?? fleet.of(at[1]!) : null;
     if (!at || !browser) return c.json({ error: "no such browser" }, 404);

@@ -56,64 +56,117 @@ public struct BrowserStreamOptions: Sendable, Equatable {
     }
 }
 
+/// A browser the Mac holds, to choose which one the Browser tab shows (docs/profiles-v0.md §5.4): the one everybody
+/// shares (`key` nil), or the own browser of a profile that has a proxy of its own.
+public struct BrowserChoice: Decodable, Equatable, Sendable, Identifiable {
+    public struct Exit: Decodable, Equatable, Sendable {
+        public let ip: String
+        public let place: String?
+
+        public init(ip: String, place: String? = nil) {
+            self.ip = ip
+            self.place = place
+        }
+
+        /// `Tokyo 203.0.113.9`.
+        public var text: String { [place, ip].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ") }
+    }
+
+    public let key: String?
+    /// `Shared`, or the profile's name.
+    public let name: String
+    /// Where its profile's proxy lets traffic out, as last found.
+    public let exit: Exit?
+    public let running: Bool
+
+    public var id: String { key ?? "" }
+
+    public init(key: String?, name: String, exit: Exit? = nil, running: Bool = false) {
+        self.key = key
+        self.name = name
+        self.exit = exit
+        self.running = running
+    }
+
+    public static let shared = BrowserChoice(key: nil, name: "Shared")
+}
+
 extension AgentSwitchAPI {
+    /// The same client, its browser routes those of profile `key`'s own browser; nil: the shared browser's.
+    public func forBrowser(_ key: String?) -> AgentSwitchAPI {
+        var copy = self
+        copy.browserKey = key
+        return copy
+    }
+
+    /// Where the browser routes start: `browser/…` for the shared one, `profile-browser/<key>/browser/…` for a profile's.
+    var browserPath: [String] { browserKey.map { ["profile-browser", $0, "browser"] } ?? ["browser"] }
+
+    /// The browsers there are: the shared one, then each profile's own. A Mac that does not say (an older one: 404)
+    /// has the shared one alone.
+    public func browsers() async throws -> [BrowserChoice] {
+        struct Reply: Decodable { let browsers: [BrowserChoice] }
+        do { return (try await get(["browsers"]) as Reply).browsers }
+        catch APIError.http(status: 404, message: _) { return [.shared] }
+    }
+
     /// Whether Chrome is up and the tabs by owner. A Mac without the browser (an older one, or `AGENTSWITCH_BROWSER_HOST=0`)
     /// answers 404.
-    public func browserTabs() async throws -> BrowserTabList { try await get(["browser", "tabs"]) }
+    public func browserTabs() async throws -> BrowserTabList { try await get(browserPath + ["tabs"]) }
 
-    public func browserTab(_ id: String) async throws -> BrowserTabInfo { (try await get(["browser", "tabs", id]) as TabEnvelope).tab }
+    public func browserTab(_ id: String) async throws -> BrowserTabInfo { (try await get(browserPath + ["tabs", id]) as TabEnvelope).tab }
 
     /// A new tab of yours; a refusal (403), a missing file (404) or an address the Mac cannot read (400) carries its
     /// reason in words.
     public func openBrowserTab(_ target: BrowserTarget) async throws -> BrowserTabInfo {
-        (try await send("POST", ["browser", "tabs"], body: target) as TabEnvelope).tab
+        (try await send("POST", browserPath + ["tabs"], body: target) as TabEnvelope).tab
     }
 
     public func closeBrowserTab(_ id: String) async throws {
-        let _: OKReply = try await perform("DELETE", ["browser", "tabs", id], query: [], body: nil)
+        let _: OKReply = try await perform("DELETE", browserPath + ["tabs", id], query: [], body: nil)
     }
 
     /// Input, in order (at most 50 events a request). A tab held by another screen, or an agent's tab not taken over,
     /// answers 409.
     public func sendBrowserInput(_ id: String, _ events: [BrowserInput], screen: String?) async throws {
         guard !events.isEmpty else { return }
-        let _: OKReply = try await post(["browser", "tabs", id, "input"], body: InputBody(screen: screen, events: Array(events.prefix(BrowserInputQueue.batch))))
+        let _: OKReply = try await post(browserPath + ["tabs", id, "input"], body: InputBody(screen: screen, events: Array(events.prefix(BrowserInputQueue.batch))))
     }
 
     public func navigateBrowserTab(_ id: String, to target: BrowserTarget, screen: String?) async throws -> BrowserTabInfo {
-        (try await post(["browser", "tabs", id, "navigate"], body: NavigateBody(target: target, screen: screen)) as TabEnvelope).tab
+        (try await post(browserPath + ["tabs", id, "navigate"], body: NavigateBody(target: target, screen: screen)) as TabEnvelope).tab
     }
 
     public func browserHistory(_ id: String, _ action: BrowserHistoryAction, screen: String?) async throws -> BrowserTabInfo {
-        (try await post(["browser", "tabs", id, "navigate"], body: HistoryBody(action: action, screen: screen)) as TabEnvelope).tab
+        (try await post(browserPath + ["tabs", id, "navigate"], body: HistoryBody(action: action, screen: screen)) as TabEnvelope).tab
     }
 
     /// This screen takes the tab over (from whoever had it); an agent's calls on it wait meanwhile.
     public func takeBrowserTab(_ id: String, screen: String?) async throws -> BrowserTabInfo {
-        (try await post(["browser", "tabs", id, "take"], body: HoldBody(screen: screen)) as TabEnvelope).tab
+        (try await post(browserPath + ["tabs", id, "take"], body: HoldBody(screen: screen)) as TabEnvelope).tab
     }
 
     /// Hands it back; the size goes back to the Mac's default. Another screen's hold answers 409.
     public func releaseBrowserTab(_ id: String, screen: String?) async throws -> BrowserTabInfo {
-        (try await post(["browser", "tabs", id, "release"], body: HoldBody(screen: screen)) as TabEnvelope).tab
+        (try await post(browserPath + ["tabs", id, "release"], body: HoldBody(screen: screen)) as TabEnvelope).tab
     }
 
     /// The holder's size for the tab (the phone's: its screen area in points, mobile layout); 409 unless held here.
     public func setBrowserViewport(_ id: String, width: Int, height: Int, scale: Double, mobile: Bool, screen: String?) async throws -> BrowserTabInfo {
         let body = ViewportBody(width: min(max(width, 200), 4096), height: min(max(height, 200), 4096), scale: min(max(scale, 0.5), 4),
                                 mobile: mobile, screen: screen)
-        return (try await post(["browser", "tabs", id, "viewport"], body: body) as TabEnvelope).tab
+        return (try await post(browserPath + ["tabs", id, "viewport"], body: body) as TabEnvelope).tab
     }
 
     /// The servers listening on the Mac, for the new-tab sheet.
-    public func browserServers() async throws -> [BrowserLocalServer] { (try await get(["browser", "servers"]) as ServerList).servers }
+    public func browserServers() async throws -> [BrowserLocalServer] { (try await get(browserPath + ["servers"]) as ServerList).servers }
 
     /// The speed of the link to the Mac in megabits a second (`GET /browser/speed`, browser-v0 §5): `bytes` that do not
     /// compress, timed from the first chunk (BrowserSpeed.Meter), for at most `limit`. Nil when too little came to tell,
     /// or the Mac has no such route (an older one answers 404).
     public func browserSpeed(bytes: Int = BrowserSpeed.bytes, limit: Duration = BrowserSpeed.limit) async -> Double? {
         guard let endpoint = try? await endpoints.endpoint() else { return nil }
-        let req = request("GET", endpoint, ["browser", "speed"], query: [URLQueryItem(name: "bytes", value: String(bytes))], body: nil,
+        let req = request("GET", endpoint, browserPath + ["speed"], query: [URLQueryItem(name: "bytes", value: String(bytes))], body: nil,
                           accept: "application/octet-stream", timeout: Self.seconds(limit) + 5)
         let clock = ContinuousClock()
         let began = clock.now
@@ -151,7 +204,7 @@ extension AgentSwitchAPI {
     @discardableResult
     public func fillBrowserTab(_ id: String, token: String, screen: String?) async throws -> Bool {
         do {
-            let _: OKReply = try await post(["browser", "tabs", id, "fill"], body: FillBody(token: token, screen: screen))
+            let _: OKReply = try await post(browserPath + ["tabs", id, "fill"], body: FillBody(token: token, screen: screen))
             return true
         } catch APIError.http(status: 404, message: _) {
             do {
@@ -206,7 +259,7 @@ extension AgentSwitchAPI {
     private func followBrowserOnce(_ id: String, options: BrowserStreamOptions, policy: ReconnectPolicy,
                                    deliver: (BrowserEvent) -> Void) async throws -> (Bool, Bool) {
         let endpoint = try await endpoints.endpoint()
-        let req = request("GET", endpoint, ["browser", "tabs", id, "stream"], query: options.query, body: nil, accept: "text/event-stream",
+        let req = request("GET", endpoint, browserPath + ["tabs", id, "stream"], query: options.query, body: nil, accept: "text/event-stream",
                           timeout: policy.idleTimeout)
         var delivered = false
         do {

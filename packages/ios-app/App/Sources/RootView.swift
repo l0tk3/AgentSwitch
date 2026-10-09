@@ -135,7 +135,7 @@ struct MainTabs: View {
         }
         .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
             while !Task.isCancelled {
-                await model.browser.refreshList(model.api)
+                await model.browser.refreshList(model.browserAPI)
                 let every = model.browser.unsupported ? BrowserStore.unsupportedInterval
                     : model.tab == .browser ? BrowserStore.pollInterval : BrowserStore.backgroundInterval
                 try? await Task.sleep(for: every)

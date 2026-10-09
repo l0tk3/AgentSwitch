@@ -81,7 +81,7 @@ struct NewBrowserTabSheet: View {
                         .disabled(BrowserAddress.target(for: address) == nil || opening)
                 }
             }
-            .task { await store.refreshServers(model.api) }
+            .task { await store.refreshServers(model.browserAPI) }
             .onAppear {
                 #if DEBUG
                 if UserDefaults.standard.bool(forKey: "uiDemo") { return }
@@ -108,7 +108,7 @@ struct NewBrowserTabSheet: View {
 
     /// Opens it on the Mac; a refusal or a missing file stays here with the Mac's reason.
     private func open(_ target: BrowserTarget?, typed: String?) async {
-        guard let target, let api = model.api, !opening else { return }
+        guard let target, let api = model.browserAPI, !opening else { return }
         opening = true
         defer { opening = false }
         do {

@@ -38,6 +38,31 @@ final class BrowserStore {
     /// A Mac without the browser is asked again now and then (it may be updated meanwhile).
     static let unsupportedInterval: Duration = .seconds(60)
 
+    /// The browsers the Mac holds, the shared one first (docs/profiles-v0.md §5.4); more than one only when a profile
+    /// has a proxy of its own.
+    private(set) var browsers: [BrowserChoice] = [.shared]
+    /// The one this tab shows: nil, the shared one; else a profile's own, by its key.
+    private(set) var key: String?
+
+    /// `api`, its browser routes those of the browser shown.
+    func scoped(_ api: AgentSwitchAPI?) -> AgentSwitchAPI? { api?.forBrowser(key) }
+
+    /// Another browser on the tab: its list is read afresh (the kept one is another browser's).
+    func show(_ key: String?) {
+        guard key != self.key else { return }
+        self.key = key
+        generation += 1
+        list = nil
+        error = nil
+    }
+
+    /// The browsers there are now. One that was shown and is gone gives the tab back to the shared one.
+    func refreshBrowsers(_ api: AgentSwitchAPI?) async {
+        guard let api, let fresh = try? await api.browsers(), !fresh.isEmpty else { return }
+        if fresh != browsers { browsers = fresh }
+        if let key, !fresh.contains(where: { $0.key == key }) { show(nil) }
+    }
+
     var tabs: [BrowserTabInfo] { list?.tabs ?? [] }
     var waiting: Int { list?.waiting ?? 0 }
 
@@ -100,6 +125,8 @@ final class BrowserStore {
         unsupported = false
         error = nil
         fillUnavailable = false
+        browsers = [.shared]
+        key = nil
     }
 
     /// A tab just opened here: listed at once, before the next read.
@@ -136,7 +163,9 @@ final class BrowserStore {
     func server(port: Int) -> BrowserLocalServer? { servers.first { $0.port == port } }
 
     #if DEBUG
-    func setDemo(_ list: BrowserTabList, servers: [BrowserLocalServer], recent: [String], zoom: BrowserZoomMemory) {
+    func setDemo(_ list: BrowserTabList, servers: [BrowserLocalServer], recent: [String], zoom: BrowserZoomMemory, browsers: [BrowserChoice]? = nil) {
+        // `-uiDemoScreen browserprofiles`: a profile's own browser beside the shared one, and the one shown.
+        if let browsers { self.browsers = browsers; key = browsers.last?.key }
         self.list = list
         self.servers = servers
         self.recent = recent
