@@ -63,6 +63,34 @@ final class ProfileProxyTests: XCTestCase {
 /// A profile's own browser on the Browser page (docs/profiles-v0.md §5.2): the browsers there are, and the browser
 /// routes asked of the one chosen.
 final class ProfileBrowserTests: XCTestCase {
+    func testTheSeveralCamoufoxAreToldApartByTheirFolder() {
+        let home = URL(fileURLWithPath: "/Users/me/Library/Application Support/AgentSwitch")
+        let app = "/Users/me/Library/Application Support/AgentSwitch/browser/engine/camoufox/current/Camoufox.app/Contents/MacOS/camoufox"
+        let commands: [Int32: String] = [
+            101: "\(app) -no-remote -headless -profile /Users/me/Library/Application Support/AgentSwitch/browser-profiles/main-camoufox -juggler-pipe",
+            202: "\(app) -no-remote -profile /Users/me/Library/Application Support/AgentSwitch/browser-profiles/claude-code.abc123def0-camoufox -juggler-pipe",
+            303: "\(app) -no-remote -profile /Users/me/Library/Application Support/AgentSwitch/browser-profiles/claude-code.abc123def0-camoufox-2",
+        ]
+        // The folder has spaces in it (`Application Support`): it is looked for as the whole path it is.
+        XCTAssertEqual(BrowserEngineLocation.camoufoxProfile(nil, agentswitchHome: home), "/Users/me/Library/Application Support/AgentSwitch/browser-profiles/main-camoufox")
+        XCTAssertEqual(BrowserEngineLocation.process(of: nil, among: commands, agentswitchHome: home), 101)
+        XCTAssertEqual(BrowserEngineLocation.process(of: "claude-code.abc123def0", among: commands, agentswitchHome: home), 202)
+        XCTAssertNil(BrowserEngineLocation.process(of: "claude-code.0000000000", among: commands, agentswitchHome: home))
+        XCTAssertNil(BrowserEngineLocation.process(of: nil, among: [:], agentswitchHome: home))
+    }
+
+    func testAPageShownInAProfilesBrowserBringsItsWindowForwardOnce() throws {
+        let snapshot = try JSONDecoder().decode(LiveSnapshot.self, from: Data(#"{"rows":[],"ended":[],"open":1,"now":1791500010000,"shown":{"browser":"claude-code.abc123def0","tab":"t3","at":1791500008000}}"#.utf8))
+        let shown = try XCTUnwrap(snapshot.shown)
+        XCTAssertEqual(shown, LiveSnapshot.Shown(browser: "claude-code.abc123def0", tab: "t3", at: 1_791_500_008_000))
+        // Just now and not acted on yet: once. The same one again, or one from long ago (the app was just opened): not.
+        XCTAssertTrue(shown.fresh(after: nil, now: snapshot.now))
+        XCTAssertFalse(shown.fresh(after: shown.at, now: snapshot.now))
+        XCTAssertTrue(shown.fresh(after: shown.at - 1, now: snapshot.now))
+        XCTAssertFalse(shown.fresh(after: nil, now: snapshot.now.addingTimeInterval(60)))
+        XCTAssertNil(try JSONDecoder().decode(LiveSnapshot.self, from: Data(#"{"rows":[],"now":1}"#.utf8)).shown)
+    }
+
     func testTheBrowserRoutesAreAskedOfTheBrowserChosen() async throws {
         let transport = StubTransport { request in
             request.url?.path == "/browsers"

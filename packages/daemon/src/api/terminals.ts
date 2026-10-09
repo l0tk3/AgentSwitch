@@ -19,7 +19,7 @@ import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } fr
 import { slashCommands, withCommand } from "../terminals/commands.js";
 import { BrowserError, YOU } from "../browser/types.js";
 import { DEFAULT_PROFILE } from "../profiles/store.js";
-import { exitFor } from "./profiles.js";
+import { browserExitProblem, exitFor } from "./profiles.js";
 import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
@@ -228,7 +228,12 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       const browser = key ? deps.profileBrowsers?.of(key) ?? null : null;
       if (!browser) return c.json({ error: "this terminal has no browser of its own" }, 409);
       if (!browser.visible()) return c.json({ error: "this terminal's browser shows no window on this Mac" }, 409);
+      if (!browser.host.running) {
+        const problem = await browserExitProblem(deps, key!);
+        if (problem) return c.json({ error: problem }, 502);
+      }
       const tab = await browser.host.open(YOU, url);
+      deps.profileBrowsers?.noteShown(key!, tab.id);
       browser.audit.record({ tab: tab.id, action: "open", via: `terminal ${id}`, detail: { url: new URL(url).origin } });
       void browser.host.show(tab.id).catch(() => undefined);
       return c.json({ tab: tab.id });

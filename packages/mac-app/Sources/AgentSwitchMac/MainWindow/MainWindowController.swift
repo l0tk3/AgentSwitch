@@ -173,7 +173,8 @@ final class MainWindowController: NSObject {
         browser.onTitle = { [weak self] in self?.updateTitle() }
         browser.activateBrowser = { [model] in
             model.browserFront.asked()
-            BrowserFront.activate(agentswitchHome: model.paths.agentswitchHome)
+            // The browser on the page: the shared one, or the profile's own that was chosen (docs/profiles-v0.md §5.2).
+            BrowserFront.activate(agentswitchHome: model.paths.agentswitchHome, browser: browser.browserKey)
         }
         let container = PageContainer(pages: [.dispatch: dispatch, .terminals: terminals.pageView, .browser: BrowserPage.host(browser),
                                               .clash: NSHostingView(rootView: ClashPage(state: state).environment(model))])

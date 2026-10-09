@@ -61,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var openWindows: Set<String> = []
     private var signalSources: [DispatchSourceSignal] = []
     private var lookObserver: NSObjectProtocol?
+    /// The last page shown in a profile's browser that its window was brought forward for (`LiveSnapshot.Shown.at`).
+    private var lastShownAt: Double?
     private var shutdownDone = false
     private var quitting = false
     /// This copy holds the lock and started the runtime (a second copy that hands over never does).
@@ -145,7 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireWindows()
         windows.onVisibilityChange = { [weak self] open in self?.windowVisibility("terminal-windows", open) }
         settings.openTask = { [weak self] id in self?.main.show(task: id) }
-        live.onSnapshot = { [weak self] snapshot in self?.main.liveChanged(snapshot) }
+        live.onSnapshot = { [weak self] snapshot in
+            self?.main.liveChanged(snapshot)
+            self?.bringForward(snapshot?.shown, now: snapshot?.now ?? Date())
+        }
         updateDockPresence(settingsWindowOpen: false)
         // The Dock's icon is the look's (DockIcon): now, and whenever the setting changes.
         DockIcon.follow()
@@ -297,6 +302,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The main window and the terminals' own windows, each told of the other (docs/dispatch-v0.md §1 单独的窗口).
+    /// A terminal had a page opened in its profile's own browser for the person to act on — its sign-in (docs/
+    /// profiles-v0.md §5.3): that browser's window comes to the front, once for each such page. The person asked for
+    /// it (they ran the sign-in in a terminal here), so the keeper leaves it in front. A browser just started takes a
+    /// moment to be there: tried again for a few seconds.
+    private func bringForward(_ shown: LiveSnapshot.Shown?, now: Date) {
+        guard let shown, shown.fresh(after: lastShownAt, now: now) else { return }
+        lastShownAt = shown.at
+        model.browserFront.asked()
+        let home = model.paths.agentswitchHome
+        Task { @MainActor [model] in
+            for _ in 0..<12 {
+                if BrowserFront.running(agentswitchHome: home, browser: shown.browser) != nil {
+                    model.browserFront.asked()
+                    BrowserFront.activate(agentswitchHome: home, browser: shown.browser)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+
     private func wireWindows() {
         main.windows = windows
         windows.onChange = { [weak self] ids in self?.main.detachedChanged(ids) }

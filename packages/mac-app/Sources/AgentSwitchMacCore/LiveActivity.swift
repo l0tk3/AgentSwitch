@@ -135,6 +135,28 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
     public let open: Int
     /// The daemon's clock when it answered.
     public let now: Date
+    /// The page a terminal last had opened in its profile's own browser for a person to act on — a sign-in (docs/
+    /// profiles-v0.md §5.3): that browser's window is brought to the front once. nil: none yet.
+    public var shown: Shown?
+
+    public struct Shown: Decodable, Equatable, Sendable {
+        /// The browser's key (`claude-code.abc123def0`).
+        public let browser: String
+        public let tab: String
+        /// When, ms.
+        public let at: Double
+
+        public init(browser: String, tab: String, at: Double) {
+            self.browser = browser
+            self.tab = tab
+            self.at = at
+        }
+
+        /// It was asked for just now (within `window` of the service's clock) and is not the one already acted on.
+        public func fresh(after last: Double?, now: Date, window: TimeInterval = 20) -> Bool {
+            at > (last ?? 0) && now.timeIntervalSince1970 * 1000 - at < window * 1000
+        }
+    }
 
     public static let cardRows = 3
 
@@ -147,7 +169,7 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         self.now = now
     }
 
-    private enum CodingKeys: String, CodingKey { case rows, running, waiting, ended, open, now }
+    private enum CodingKeys: String, CodingKey { case rows, running, waiting, ended, open, now, shown }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -157,6 +179,7 @@ public struct LiveSnapshot: Decodable, Equatable, Sendable {
         ended = try c.decodeIfPresent([End].self, forKey: .ended) ?? []
         open = try c.decodeIfPresent(Int.self, forKey: .open) ?? 0
         now = try c.decodeIfPresent(Double.self, forKey: .now).map { Date(timeIntervalSince1970: $0 / 1000) } ?? Date()
+        shown = try? c.decodeIfPresent(Shown.self, forKey: .shown)
     }
 }
 

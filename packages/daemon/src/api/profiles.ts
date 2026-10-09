@@ -109,6 +109,22 @@ async function checked(store: NonNullable<ApiDeps["profiles"]>, exits: ExitPool,
 /** A profile's exit in the pool. */
 export function exitKey(agent: string, id: string): string { return `${agent}.${id}`; }
 
+/** Before profile `key`'s own browser is started: its proxy asked where it lets traffic out, as before a terminal is
+ *  (docs/profiles-v0.md §5.3). Null when it does (or the key has no proxy to ask); else why nothing was opened. */
+export async function browserExitProblem(deps: Pick<ApiDeps, "profiles" | "exits">, key: string, now: () => number = Date.now): Promise<string | null> {
+  const p = profileOfKey(key);
+  const proxy = p ? deps.profiles?.proxyOf(p.agent, p.id) ?? null : null;
+  if (!p || !proxy || !deps.exits) return null;
+  try {
+    const exit = await deps.exits.check(key, proxy);
+    deps.profiles!.setExit(p.agent, p.id, exit.ip ? { ...exit, checkedAt: now() } : null);
+    return null;
+  } catch (err) {
+    deps.profiles!.setExit(p.agent, p.id, null);
+    return `配置 ${deps.profiles!.nameOf(p.agent, p.id) ?? p.id} 的代理没有通，浏览器没有开：${err instanceof ExitError ? err.message : (err as Error).message}`;
+  }
+}
+
 /** The profile a key stands for; null for what is not a key. */
 export function profileOfKey(key: string): { agent: ProfileAgent; id: string } | null {
   const at = key.lastIndexOf(".");

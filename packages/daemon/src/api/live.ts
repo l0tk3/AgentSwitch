@@ -15,6 +15,7 @@ import { speakable } from "../threads/speakable.js";
 import { modelName } from "../util/modelName.js";
 import { withoutLegend } from "../assistant/register.js";
 import type { ApiDeps } from "./shared.js";
+import { remoteCaller } from "../core/caller.js";
 
 /** A thing to answer on the card. A terminal's permission request and a task's approval: allow or deny. A task's
  *  question: one of its options when that is a whole answer (one question, one choice, nothing secret), else it is
@@ -66,7 +67,13 @@ export type LiveSnapshot = {
 };
 
 export function mountLive(app: Hono, deps: ApiDeps): void {
-  app.get("/live", (c) => c.json(liveSnapshot(deps.store, deps.terminals?.host, Date.now())));
+  app.get("/live", (c) => {
+    const snapshot = liveSnapshot(deps.store, deps.terminals?.host, Date.now());
+    // For the Mac's own app: the page a terminal last had opened in its own browser for a person to act on, so the
+    // app can bring that window forward (docs/profiles-v0.md §5.3). Not a phone's to know.
+    const shown = remoteCaller(c.env) ? null : deps.profileBrowsers?.shown ?? null;
+    return c.json(shown ? { ...snapshot, shown } : snapshot);
+  });
 }
 
 export const ENDED_MS = 60_000;

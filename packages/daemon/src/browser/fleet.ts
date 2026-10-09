@@ -32,6 +32,12 @@ export class ProfileBrowsers {
     return browser;
   }
 
+  /** The last page a terminal had opened in its own browser for a person to act on (a sign-in): which browser, which
+   *  tab, when. The Mac's app brings that browser's window to the front (docs/profiles-v0.md §5.3); null: none yet. */
+  shown: { readonly browser: string; readonly tab: string; readonly at: number } | null = null;
+
+  noteShown(browser: string, tab: string, at: number = Date.now()): void { this.shown = { browser, tab, at }; }
+
   /** The one already made for `key`, as it is (the routes of a browser that runs). */
   get(key: string): SharedBrowser | null { return this.made.get(key)?.browser ?? null; }
 

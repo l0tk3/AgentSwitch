@@ -47,6 +47,8 @@ struct MainStatusBar: View {
                         BrowserHoldItems(model: browser)
                         BrowserZoomItems(model: browser)
                     }
+                    // Whose browser it is, when it is a profile's own (docs/profiles-v0.md §5.3).
+                    if let own = browser.ownBrowser { Text(own).foregroundStyle(Look.ink) }
                     // Last: the engine's word and the browser's identity, which opens its box (docs/browser-v0.md §7.2).
                     BrowserIdentityItems(model: browser.identity)
                 }

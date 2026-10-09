@@ -16,6 +16,7 @@ import { speedBody, speedSize } from "../browser/speed.js";
 import { BrowserError, YOU, type BrowserEvent } from "../browser/types.js";
 import { mountBrowserAgents } from "./browserAgents.js";
 import { mountBrowserIdentity } from "./browserIdentity.js";
+import { browserExitProblem } from "./profiles.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 const MAX_URL = 8192;
@@ -129,6 +130,12 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
     // Its proxy is the profile's, set where the profile is: not something this browser's own identity keeps.
     if (c.req.method === "PUT" && at[2] === "/browser/identity" && "proxy" in ((await c.req.raw.clone().json().catch(() => ({}))) as object)) {
       return c.json({ error: "这个浏览器走的是配置的代理：在 Settings › Agents 里这个配置的 Proxy… 里改。" }, 409);
+    }
+    // The first tab starts the browser: before that its proxy is asked where it lets traffic out, as before a
+    // terminal starts — one that does not answer opens nothing.
+    if (c.req.method === "POST" && at[2] === "/browser/tabs" && !browser.host.running) {
+      const problem = await browserExitProblem(deps, at[1]!);
+      if (problem) return c.json({ error: problem }, 502);
     }
     let sub = served.get(browser);
     if (!sub) { sub = new Hono(); mountBrowser(sub, { ...deps, browser }); mountBrowserIdentity(sub, { ...deps, browser }); served.set(browser, sub); }

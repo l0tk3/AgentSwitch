@@ -8,9 +8,28 @@ private let frontLog = Logger(subsystem: "com.agentswitch.mac", category: "brows
 /// the browser's other windows; before the other apps is this app's to do, as the person asked for it here.
 @MainActor
 enum BrowserFront {
-    /// The running Camoufox that was started from the engine's folder, if any.
-    static func running(agentswitchHome: URL) -> NSRunningApplication? {
-        NSWorkspace.shared.runningApplications.first { isBrowser($0, agentswitchHome: agentswitchHome) }
+    /// The running Camoufox that was started from the engine's folder for `browser` (nil: the shared one; else a
+    /// profile's own, by its key). With one Camoufox running it is that one; with several — the shared browser and
+    /// profiles' own — the one started on that browser's folder.
+    static func running(agentswitchHome: URL, browser: String? = nil) -> NSRunningApplication? {
+        let all = NSWorkspace.shared.runningApplications.filter { isBrowser($0, agentswitchHome: agentswitchHome) }
+        guard all.count > 1 || browser != nil else { return all.first }
+        let commands = Dictionary(uniqueKeysWithValues: all.map { ($0.processIdentifier, commandLine(of: $0.processIdentifier)) })
+        let pid = BrowserEngineLocation.process(of: browser, among: commands, agentswitchHome: agentswitchHome)
+        return all.first { $0.processIdentifier == pid } ?? (browser == nil ? all.first : nil)
+    }
+
+    /// A program's command line, as `ps` prints it; empty when it cannot be read.
+    private static func commandLine(of pid: pid_t) -> String {
+        let ps = Process(), out = Pipe()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-ww", "-o", "command=", "-p", String(pid)]
+        ps.standardOutput = out
+        ps.standardError = FileHandle.nullDevice
+        do { try ps.run() } catch { return "" }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        ps.waitUntilExit()
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     static func isBrowser(_ app: NSRunningApplication, agentswitchHome: URL) -> Bool {
@@ -22,8 +41,8 @@ enum BrowserFront {
 
     /// The browser before the other apps, asked for from this app while it is the one in front: the system lets the
     /// app in front hand its place over.
-    static func activate(agentswitchHome: URL) {
-        guard let browser = running(agentswitchHome: agentswitchHome) else { return }
+    static func activate(agentswitchHome: URL, browser key: String? = nil) {
+        guard let browser = running(agentswitchHome: agentswitchHome, browser: key) else { return }
         NSApp.yieldActivation(to: browser)
         browser.activate(from: .current, options: [])
     }

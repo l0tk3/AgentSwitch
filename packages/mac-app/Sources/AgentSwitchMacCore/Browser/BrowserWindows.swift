@@ -100,6 +100,28 @@ public enum BrowserEngineLocation {
     public static func camoufoxApp(agentswitchHome: URL) -> URL {
         agentswitchHome.appendingPathComponent("browser/engine/camoufox/current/Camoufox.app")
     }
+
+    /// The folder a browser's Camoufox keeps its cookies in, as it stands in the program's arguments: `main` for the
+    /// shared browser, a profile's key for its own (docs/profiles-v0.md §5.1). Several Camoufox run at once, all the
+    /// same app; this tells them apart.
+    public static func camoufoxProfile(_ browser: String?, agentswitchHome: URL) -> String {
+        agentswitchHome.appendingPathComponent("browser-profiles/\(browser ?? "main")-camoufox").path
+    }
+
+    /// Of the programs' command lines (`pid` → what `ps` prints), the one started on `browser`'s folder.
+    public static func process(of browser: String?, among commands: [Int32: String], agentswitchHome: URL) -> Int32? {
+        let folder = camoufoxProfile(browser, agentswitchHome: agentswitchHome)
+        // The folder as a whole argument — it has spaces of its own (`Application Support`), so the line is not cut at
+        // spaces: what follows it is a space or nothing (`…/main-camoufox` is not `…/main-camoufox-2`).
+        return commands.first { _, line in
+            var from = line.startIndex
+            while let found = line.range(of: folder, range: from..<line.endIndex) {
+                if found.upperBound == line.endIndex || line[found.upperBound] == " " { return true }
+                from = found.upperBound
+            }
+            return false
+        }?.key
+    }
 }
 
 /// The browser's app comes to the front of the Mac by itself when the service starts it (docs/browser-v0.md §7.3 窗口).

@@ -186,6 +186,13 @@ final class BrowserPageModel {
     /// The one the page shows: nil, the shared one; else a profile's own, by its key.
     private(set) var browserKey: String?
 
+    /// The profile's own browser on the page, for the status bar: its profile's name and where it leaves this Mac
+    /// from (`cwork1 · Tokyo 203.0.113.9`); nil for the shared one.
+    var ownBrowser: String? {
+        guard let browserKey, let choice = browsers.first(where: { $0.key == browserKey }) else { return nil }
+        return [choice.name, choice.exit?.text].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
     /// Another browser on the page (docs/profiles-v0.md §5.2): the tabs this Mac held in the one before are handed
     /// back, then the list, the screen and the identity are the new one's.
     func show(browser key: String?) {

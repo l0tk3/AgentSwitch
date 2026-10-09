@@ -17,10 +17,15 @@ import { markRemote } from "../src/core/caller.js";
 import { ProfileBrowsers } from "../src/browser/fleet.js";
 import type { ProxySetting } from "../src/browser/identity.js";
 import { sharedBrowser, type SharedBrowser } from "../src/browser/setup.js";
+import { mountLive } from "../src/api/live.js";
 import { mountTerminals } from "../src/api/terminals.js";
+import { ExitError } from "../src/browser/exits.js";
 import { TerminalError } from "../src/terminals/host.js";
 import { agentLauncher, openInProfileBrowser } from "../src/terminals/launch.js";
 import { FakeDriver } from "./fakeBrowser.js";
+
+/** A store with nothing under way, as the live snapshot reads it. */
+const liveStore = () => ({ pendingApprovals: () => [], unfinishedTasks: () => [], tasksUpdatedSince: () => [] }) as never;
 
 const closers: (() => unknown)[] = [];
 afterEach(async () => { for (const c of closers.splice(0)) await c(); });
@@ -143,6 +148,31 @@ describe("a profile's own browser", () => {
     expect([open(`/profile-browser/${key}/browser/tabs`), open(`/profile-browser/${key}/browser/tabs`, "POST"), open("/terminals/open"), open("/profile-browser/x/../browser/agent/mcp")]).toEqual([false, false, false, false]);
   });
 
+  it("is not started while its profile's proxy lets nothing out", async () => {
+    const { fleet, shared } = world();
+    const key = "claude-code.abc123def0";
+    let down = true;
+    const exits: string[] = [];
+    const deps = { browser: shared, profileBrowsers: fleet, sseHeartbeatMs: 20,
+      exits: { check: async () => { if (down) throw new ExitError("经这个代理连不出去（the proxy answered 502）。"); return { ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo" }; } },
+      profiles: { all: () => ({}), proxyOf: () => ({ server: "http://proxy.example:8080" }), nameOf: () => "cwork1", setExit: (_a: string, _i: string, exit: { ip: string } | null) => { exits.push(exit?.ip ?? "none"); } } } as unknown as ApiDeps;
+    const app = new Hono();
+    mountProfileBrowsers(app, deps);
+    const open = () => app.request(`/profile-browser/${key}/browser/tabs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: "https://claude.ai/" }) });
+    // Its first tab would start it: the proxy is asked first, and says no.
+    const refused = await open();
+    expect([refused.status, await refused.json()]).toEqual([502, { error: "配置 cwork1 的代理没有通，浏览器没有开：经这个代理连不出去（the proxy answered 502）。" }]);
+    expect(fleet.get(key)!.host.running).toBe(false);
+    // The list is still read (nothing is started by reading it).
+    expect((await app.request(`/profile-browser/${key}/browser/tabs`)).status).toBe(200);
+    down = false;
+    expect((await open()).status).toBe(201);
+    expect(exits).toEqual(["none", "203.0.113.9"]);
+    // Running, it is not asked again for every tab.
+    down = true;
+    expect((await open()).status).toBe(201);
+  });
+
   it("is named by a key that says whose it is", () => {
     expect(exitKey("claude-code", "abc123def0")).toBe("claude-code.abc123def0");
     expect(profileOfKey("claude-code.abc123def0")).toEqual({ agent: "claude-code", id: "abc123def0" });
@@ -207,8 +237,15 @@ describe("a web address the agent asks the system to open", () => {
     };
     const link = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A55473%2Fcallback";
     const windows = fleetOf(false), open = served(windows);
+    expect(windows.shown).toBeNull();
     expect((await open("t1", "hook-token", link)).status).toBe(200);
     expect(windows.get("claude-code.abc123def0")!.host.list().map((t) => [t.url, t.owner.kind])).toEqual([[link, "you"]]);
+    // The Mac's app is told which browser's window to bring forward — through the live snapshot, and only there.
+    expect(windows.shown).toMatchObject({ browser: "claude-code.abc123def0", tab: windows.get("claude-code.abc123def0")!.host.list()[0]!.id });
+    const live = new Hono();
+    mountLive(live, { store: liveStore(), profileBrowsers: windows } as unknown as ApiDeps);
+    expect(((await (await live.request("/live")).json()) as { shown?: { browser: string } }).shown?.browser).toBe("claude-code.abc123def0");
+    expect(((await (await live.request("/live", {}, markRemote({}, { deviceId: "phone" }))).json()) as { shown?: unknown }).shown).toBeUndefined();
     // What is kept of it names the site, not the whole address (it carries the sign-in's own secrets).
     expect(readFileSync(join(home, "browser", "of", "claude-code.abc123def0", "audit.jsonl"), "utf8")).toContain('"url":"https://claude.com"');
     expect(readFileSync(join(home, "browser", "of", "claude-code.abc123def0", "audit.jsonl"), "utf8")).not.toContain("client_id");

@@ -29,6 +29,9 @@ async function main(): Promise<void> {
   if (!port) { say("no proxy at hand to try with (Clash is not running, or has no proxy port)"); return; }
   const proxy = { server: `http://127.0.0.1:${port}` };
   const exits = new ExitPool({ ownPorts: () => [], lookup: exitLookup() });
+  // The proxy at hand is Clash, which sends different names out by different nodes: to compare like with like, the
+  // address is asked of the same place the page will ask (a real proxy of one's own has one way out for everything).
+  const same = new ExitPool({ ownPorts: () => [], lookup: "https://www.cloudflare.com/cdn-cgi/trace", others: [] });
   const home = mkdtempSync(join(tmpdir(), "as-profile-browser-"));
   const local = createServer((_req, res) => res.writeHead(200, { "content-type": "text/html" }).end("<title>on this Mac</title><p>local page</p>"));
   await new Promise<void>((ok) => local.listen(0, "127.0.0.1", ok));
@@ -52,7 +55,8 @@ async function main(): Promise<void> {
     for (let i = 0; i < 20 && !seen; i += 1) { seen = /^ip=(\S+)$/m.exec(await page?.innerText("body").catch(() => "") ?? "")?.[1] ?? ""; if (!seen) await sleep(500); }
     const told = await page?.evaluate<{ zone: string; agent: string }>("({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone, agent: navigator.userAgent })").catch(() => null);
     say(`   the page is told: time zone ${told?.zone}; browser ${told?.agent.replace(/^.*?(Firefox\/[\d.]+|Chrome\/[\d.]+).*$/, "$1")}`);
-    say(`2) the real browser (engine ${browser.engine()}, ${browser.visible() ? "with a window" : "no window"}), through the forwarder: a page sees ${seen ? mask(seen) : "nothing"} — ${seen === exit.ip ? "the same as the exit" : "NOT the exit"}; the forwarder was asked ${exits.requests("probe") - before} time(s)`);
+    const there = await same.check("probe", proxy).catch(() => null);
+    say(`2) the real browser (engine ${browser.engine()}, ${browser.visible() ? "with a window" : "no window"}), through the forwarder: a page sees ${seen ? mask(seen) : "nothing"} — ${seen && seen === there?.ip ? "the same as the forwarder's own way out to that place" : `the forwarder's own way out to that place is ${there ? mask(there.ip) : "not known"}`}; the forwarder was asked ${exits.requests("probe") - before} time(s)`);
     const mid = exits.requests("probe");
     const here = await browser.host.open(YOU, `http://127.0.0.1:${(local.address() as AddressInfo).port}/`);
     await sleep(1500);
@@ -62,6 +66,7 @@ async function main(): Promise<void> {
     await browser.agents.shutdown().catch(() => undefined);
     await browser.host.shutdown().catch(() => undefined);
     await exits.stop();
+    await same.stop();
     local.close();
     rmSync(home, { recursive: true, force: true });
   }
