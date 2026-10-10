@@ -131,6 +131,14 @@ struct TerminalRecordPane: View {
                             .frame(maxWidth: .infinity)
                         }
                         // The end is what matters: there when it opens, and following it while the reader is there.
+                        // A record already read when its view comes up (the window opened again, a pane switched back
+                        // to it) has no change to hear of: it starts at its end, and is put there once laid out
+                        // (2026-10-10, user: 打开窗口之后简略视图都会自动拉到最上面).
+                        .defaultScrollAnchor(.bottom)
+                        .onAppear {
+                            guard record.loaded else { return }
+                            DispatchQueue.main.async { scroller.scrollTo(Self.end, anchor: .bottom) }
+                        }
                         .onChange(of: record.loaded) { scroller.scrollTo(Self.end, anchor: .bottom) }
                         .onChange(of: record.items.last) { if atEnd { scroller.scrollTo(Self.end, anchor: .bottom) } }
                         .onChange(of: requests.count) { scroller.scrollTo(Self.end, anchor: .bottom) }

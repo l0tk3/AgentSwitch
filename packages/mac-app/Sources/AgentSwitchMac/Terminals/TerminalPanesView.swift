@@ -107,19 +107,22 @@ private struct DropMark: View {
     }
 }
 
-/// The line between two panes: 1 pt drawn, 7 to take hold of; dragged it resizes (every pane keeping its least size),
-/// a double click evens its two sides.
+/// The line between two panes: 2 pt drawn in a grey that shows on a light record and on a dark terminal alike, 7 to
+/// take hold of (2026-10-10, user: 分屏的分界线看上去不显眼，经常不能一眼看到哪个分屏在哪里; it was 1 pt in the bars'
+/// edge colour); dragged it resizes (every pane keeping its least size), a double click evens its two sides.
 private struct PaneLine: View {
     let line: TerminalPanes.Line
     let model: TerminalsModel
     @State private var hovering = false
     @State private var dragging = false
+    private static let drawn: CGFloat = 2
+    private static let color = Color(white: 0.5).opacity(0.6)
 
     var body: some View {
         let across = line.dir == .row
         Rectangle()
-            .fill(hovering || dragging ? Color.signal : Look.line)
-            .frame(width: across ? 1 : line.rect.width, height: across ? line.rect.height : 1)
+            .fill(hovering || dragging ? Color.signal : Self.color)
+            .frame(width: across ? Self.drawn : line.rect.width, height: across ? line.rect.height : Self.drawn)
             .frame(width: across ? 7 : line.rect.width, height: across ? line.rect.height : 7)
             .contentShape(Rectangle())
             .offset(x: across ? line.rect.minX - 3 : line.rect.minX, y: across ? line.rect.minY : line.rect.minY - 3)
