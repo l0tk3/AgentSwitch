@@ -73,9 +73,12 @@ export type ClashOptions = {
   readonly now?: () => number;
   /** The routing check's ways of looking (tests give their own). */
   readonly check?: Partial<CheckDeps>;
+  /** The port a proxy server listens on, by its host in lower case (the profiles' proxies): a `Go Direct` address is
+   *  tried on the port it is used on, where one is known. */
+  readonly proxyPorts?: () => ReadonlyMap<string, number>;
 };
 
-const DELAY_MS = 5_000;
+const DELAY_MS = 5_000, HTTPS = 443;
 
 export class ClashIntegration {
   private updating: Promise<void> | null = null;
@@ -173,17 +176,19 @@ export class ClashIntegration {
     const has = (template: ClashTemplate, rule: string): boolean => settings.templates[template].on && templateRules(template, settings).includes(rule);
     const service = (s: ClashService, host: string) => ({ id: s, title: s === "claude" ? "Claude" : "OpenAI", host, far: true,
       expect: enabled[s] ? { kind: "group" as const, group: groupNames(document, s).group } : null });
-    const wanted: { id: string; title: string; host: string; far?: boolean; expect: ClashCheckRow["expect"] }[] = [
+    const ports = this.o.proxyPorts?.() ?? new Map<string, number>();
+    const wanted: { id: string; title: string; host: string; port?: number; far?: boolean; expect: ClashCheckRow["expect"] }[] = [
       service("claude", "claude.ai"), service("openai", "chatgpt.com"),
       { id: "domestic", title: "Domestic", host: "www.baidu.com", expect: has("domestic", "DOMAIN-KEYWORD,baidu") ? { kind: "direct" } : null },
       { id: "china", title: "China by Address", host: "www.163.com", expect: has("domestic", "GEOIP,CN") ? { kind: "direct" } : null },
       { id: "block", title: "Ads", host: "ad.doubleclick.net", expect: has("block", "DOMAIN-SUFFIX,doubleclick.net") ? { kind: "reject" } : null },
-      ...settings.direct.slice(0, 8).map((address) => ({ id: `direct:${address}`, title: address, host: address, expect: { kind: "direct" as const } })),
+      ...settings.direct.slice(0, 8).map((address) => ({ id: `direct:${address}`, title: address, host: address, port: ports.get(address.toLowerCase()) ?? HTTPS, expect: { kind: "direct" as const } })),
       { id: "other", title: "Everything Else", host: "www.google.com", expect: null },
     ];
-    const rows = await Promise.all(wanted.map(async ({ far, ...row }): Promise<ClashCheckRow> => {
-      const observed = await observe(deps, row.host, 443, far === true);
-      const ok = row.expect === null ? null
+    const rows = await Promise.all(wanted.map(async ({ far, port: at, ...row }): Promise<ClashCheckRow> => {
+      const observed = await observe(deps, row.host, at ?? HTTPS, far === true);
+      // A `Go Direct` address need not answer on the port tried (a proxy server has its own): nothing seen says nothing.
+      const ok = row.expect === null || (at !== undefined && observed.outcome === "unknown") ? null
         : row.expect.kind === "group" ? observed.outcome === "proxied" && observed.path[0] === row.expect.group
         : row.expect.kind === "direct" ? observed.outcome === "direct" : observed.outcome === "rejected";
       return { ...row, observed, ok };

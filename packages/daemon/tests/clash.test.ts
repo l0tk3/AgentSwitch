@@ -487,7 +487,8 @@ describe("Clash Integration over HTTP", () => {
     const at = home();
     const routes: Parameters<typeof proxyPort>[1] = {};
     const port = await proxyPort(running.state, routes);
-    const clash = new ClashIntegration({ store: new ClashStore(at), source: new ClashSource(at, upstream.fetcher, () => t), dir, socket: () => running.socket, base: () => "http://127.0.0.1:4711", now: () => t,
+    const proxyPorts = new Map<string, number>();
+    const clash = new ClashIntegration({ proxyPorts: () => proxyPorts, store: new ClashStore(at), source: new ClashSource(at, upstream.fetcher, () => t), dir, socket: () => running.socket, base: () => "http://127.0.0.1:4711", now: () => t,
       check: { port, listMs: 500, trace: async (_s, host) => ({ ip: host === "claude.ai" ? "203.0.113.9" : "198.51.100.4", loc: host === "claude.ai" ? "JP" : "US" }) } });
     const app = new Hono();
     mountClash(app, { clash } as unknown as ApiDeps);
@@ -497,7 +498,7 @@ describe("Clash Integration over HTTP", () => {
       let parsed: any = null; try { parsed = JSON.parse(text); } catch { /* yaml */ }
       return { status: res.status, text, json: parsed, headers: res.headers };
     };
-    return { call, clash, ...running, routes, asked: upstream.asked, upstream: { set body(v: string) { body = v; } }, clock: { add(ms: number) { t += ms; } } };
+    return { call, clash, ...running, routes, proxyPorts, asked: upstream.asked, upstream: { set body(v: string) { body = v; } }, clock: { add(ms: number) { t += ms; } } };
   }
   const chosen = { claude: { nodes: ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] }, openai: { nodes: [] }, direct: ["5.102.107.254"], autoUpdateHours: 6,
     templates: { domestic: { on: false, rules: null as string[] | null }, block: { on: false, rules: null as string[] | null } }, renameDefault: false,
@@ -684,6 +685,22 @@ describe("Clash Integration over HTTP", () => {
     expect(parse((await call("GET", `/clash/rules/as-direct.yaml?k=${k}`)).text)).toEqual({ payload: ["IP-CIDR,5.102.107.254/32,no-resolve", "DOMAIN,proxy.example.com"] });
     await clash.addDirect("");
     expect((await call("GET", "/clash")).json.settings.direct).toHaveLength(2);
+  });
+
+  it("tries a proxy server that goes direct on the port it listens on, and says nothing when it does not answer", async () => {
+    const { call, routes, proxyPorts, state } = await served();
+    await call("POST", "/clash/source", { verge: "Lbw7BJYzpand" });
+    await call("PUT", "/clash/settings", { ...chosen, direct: ["Proxy.Example.com", "5.102.107.254"] });
+    proxyPorts.set("proxy.example.com", 9050);
+    Object.assign(routes, { "Proxy.Example.com": { rule: "RuleSet", payload: "as-direct", chains: ["DIRECT"] }, "5.102.107.254": "silent" });
+    const row = async (id: string) => ((await call("POST", "/clash/check")).json.rows as { id: string; ok: boolean | null; observed: { outcome: string } }[]).find((r) => r.id === id)!;
+    expect(await row("direct:Proxy.Example.com")).toMatchObject({ ok: true, observed: { outcome: "direct" } });
+    expect((state.connections as { id: string; metadata: { destinationPort: string } }[]).find((c) => c.id === "Proxy.Example.com")!.metadata.destinationPort).toBe("9050");
+    // Nothing listed for an address that goes direct: it may not answer there at all, so neither right nor wrong.
+    expect(await row("direct:5.102.107.254")).toMatchObject({ ok: null, observed: { outcome: "unknown" } });
+    // Sent through a node all the same: wrong, whatever the port.
+    Object.assign(routes, { "Proxy.Example.com": { rule: "Match", payload: "", chains: ["🇸🇬 新加坡-01", "Manual"] } });
+    expect(await row("direct:Proxy.Example.com")).toMatchObject({ ok: false, observed: { outcome: "proxied" } });
   });
 
   it("checks that each kind of traffic goes where its rule sends it, and says which does not", async () => {
