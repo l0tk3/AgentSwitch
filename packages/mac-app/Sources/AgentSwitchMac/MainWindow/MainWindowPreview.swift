@@ -182,6 +182,7 @@ enum MainWindowPreview {
         // Under a profile with a proxy of its own (docs/profiles-v0.md §3.2, §4): its lit dot, its name and its exit.
         head.context?.profile = "cwork1 · Tokyo 203.0.113.9"
         head.context?.profileColor = .violet
+        head.context?.device = "56967b93c1a04e7d9f20b6a3e85d17c40a9be2f6713d58c4e09a1b7f3c6d2e85"
         // The stand-in page's list (TerminalPageStandIn).
         head.sideWidth = list ? 300 : 0
         return head

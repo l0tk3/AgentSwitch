@@ -82,7 +82,9 @@ export type SharedBrowserOptions = {
   readonly own?: { readonly name: string; readonly forwarder: Pick<Forwarder, "start">;
     /** The time zone where the profile's proxy lets traffic out, as last found (null: not known): Camoufox is
      *  started in it, as the shared one is in its own proxy's. */
-    readonly zone?: () => string | null };
+    readonly zone?: () => string | null;
+    /** Called when this browser has started, before its first page (the profile's sign-in, profiles-v0 §3.4). */
+    readonly launched?: (host: BrowserHost) => Promise<void> };
 };
 
 export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
@@ -105,7 +107,7 @@ export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
   // a window where the service is asked for windows: a sign-in under the profile is done in it by hand.
   const chrome = playwrightDriver({ ...(opts.kit ? { playwright: () => opts.kit!.playwright() } : {}), ...(opts.own ? { proxy: () => opts.own!.forwarder.start(), window: opts.headless === false } : {}) });
   const chosen = opts.driver ? null : engineDriver({ ...(opts.kit ? { kit: opts.kit } : {}), identity, chrome, forwarder, headless: opts.headless ?? true });
-  const host = new BrowserHost({
+  const host: BrowserHost = new BrowserHost({
     driver: opts.driver ?? chosen!,
     profileDir: join(opts.home, BROWSER_PROFILES_DIR, opts.own?.name ?? MAIN_PROFILE),
     files: { protected: opts.protected, home: userHome, ownFolders: [opts.home, ...(opts.gateHome ? [opts.gateHome] : [])] },
@@ -118,6 +120,7 @@ export function sharedBrowser(opts: SharedBrowserOptions): SharedBrowser {
     onIdleRelease: (tab, holder) => audit.record({ tab, action: "release", via: "daemon", detail: { screen: holder, reason: "idle" } }),
     onWindowTake: (tab) => audit.record({ tab, action: "take", via: "daemon", detail: { screen: WINDOW_HOLDER, reason: "input in its window" } }),
     ...(opts.afterExit ? { afterExit: opts.afterExit } : {}),
+    ...(opts.own?.launched ? { afterLaunch: () => opts.own!.launched!(host) } : {}),
     ...(opts.holdIdleMs !== undefined ? { holdIdleMs: opts.holdIdleMs } : {}),
     ...(opts.idleCloseMs !== undefined ? { idleCloseMs: opts.idleCloseMs } : {}),
   });

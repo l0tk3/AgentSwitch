@@ -17,7 +17,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { BrowserContext, Frame, Page, Request, Route } from "playwright-core";
 import { camoufoxEnv, camoufoxSteps, frameSize, releaseAll, type InputStep } from "./camoufoxInput.js";
-import type { BrowserDriver, DriverBrowser, DriverPage, FocusedField, GuardDecision, InputMethod, LaunchOptions, PageEvents, RequestGuard, ScreencastParams } from "./driver.js";
+import type { BrowserDriver, DriverBrowser, DriverCookie, DriverPage, FocusedField, GuardDecision, InputMethod, LaunchOptions, PageEvents, RequestGuard, ScreencastParams } from "./driver.js";
 import { notePlaywrightInUse, type PlaywrightCopy } from "./engine/loader.js";
 import type { ForwarderAddress } from "./forwarder.js";
 import type { Modifier } from "./input.js";
@@ -406,6 +406,12 @@ class CamoufoxBrowser implements DriverBrowser {
     page ??= await this.context.newPage();
     this.ours.add(page);
     return this.wrap(page);
+  }
+
+  async setCookie(cookie: DriverCookie, site: string, keep: boolean): Promise<boolean> {
+    if (keep && (await this.context.cookies(site)).some((c) => c.name === cookie.name)) return false;
+    await this.context.addCookies([cookie]);
+    return true;
   }
 
   onExit(listener: (expected: boolean) => void): void { this.exitListeners.push(listener); }

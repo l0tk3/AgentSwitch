@@ -32,10 +32,16 @@ export type Profile = { readonly id: string; readonly name: string; readonly kin
   readonly account?: string;
   /** Its proxy as the screens are told of it (`sealed`: it has a password, never shown); absent: this Mac's own way out. */
   readonly proxy?: { readonly server: string; readonly username?: string; readonly sealed: boolean };
-  readonly exit?: ProfileExit };
+  readonly exit?: ProfileExit;
+  /** It has a claude.ai session key kept for its own browser (§3.4); the key itself is never told. */
+  readonly sessionKey?: true;
+  /** The device Claude Code says it is under this profile (§3.5): the `userID` of its own file; absent till it has run. */
+  readonly device?: string };
 export type AgentProfiles = { readonly current: string; readonly profiles: readonly Profile[]; /** More than `Default` can be made for this agent. */ readonly creatable: boolean };
 
-type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number; color?: ProfileColor; proxy?: ProfileProxy; exit?: ProfileExit }[] };
+type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number; color?: ProfileColor; proxy?: ProfileProxy; exit?: ProfileExit;
+  /** A claude.ai session key, a ciphertext of the gate's (§3.4), and whether the browser has yet to be given it. */
+  sessionKey?: string; sessionKeyDue?: boolean }[] };
 type File = { agents?: Partial<Record<ProfileAgent, Stored>> };
 
 export class ProfileError extends Error {
@@ -50,6 +56,7 @@ const CLAUDE_SESSIONS = ["projects", "file-history", "todos", "plans"] as const;
 const CLAUDE_CARRIED = ["theme", "editorMode", "hasCompletedOnboarding", "lastOnboardingVersion", "autoUpdates", "verbose", "preferredNotifChannel", "mcpServers"] as const;
 const CLAUDE_PROJECT_CARRIED = ["hasTrustDialogAccepted", "hasCompletedProjectOnboarding", "allowedTools", "mcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"] as const;
 const MAX_PROFILES = 24;
+const DEVICE = /^[0-9a-f]{16,128}$/;
 /** How many conversations' profiles are remembered for one agent (§3.3); the oldest go first. */
 const MAX_SESSIONS = 4000;
 type SessionNotes = Record<string, Record<string, { p: string; at: number }>>;
@@ -156,6 +163,28 @@ export class ProfileStore {
     this.change(agent, id, (p) => { const { proxy: _old, exit: _was, ...rest } = p; return proxy ? { ...rest, proxy } : rest; });
   }
 
+  /** `id`'s claude.ai session key, a ciphertext (§3.4), and whether its browser is still to be given it whatever it
+   *  has; null: none kept, or no such profile. */
+  sessionKeyOf(agent: ProfileAgent, id: string): { readonly sealed: string; readonly due: boolean } | null {
+    const p = this.read().agents?.[agent]?.profiles?.find((x) => x.id === id);
+    return p?.sessionKey ? { sealed: p.sessionKey, due: p.sessionKeyDue === true } : null;
+  }
+
+  /** `id`'s session key from now on (null: forgotten). A new one is due to its browser. */
+  setSessionKey(agent: ProfileAgent, id: string, sealed: string | null): void {
+    this.change(agent, id, (p) => { const { sessionKey: _old, sessionKeyDue: _was, ...rest } = p; return sealed ? { ...rest, sessionKey: sealed, sessionKeyDue: true } : rest; });
+  }
+
+  /** `id`'s browser has been given its session key. */
+  sessionKeyGiven(agent: ProfileAgent, id: string): void {
+    this.change(agent, id, (p) => { const { sessionKeyDue: _was, ...rest } = p; return rest; });
+  }
+
+  /** The device Claude Code says it is under `id` (§3.5); null: it has not run there yet, or another agent. */
+  deviceOf(agent: ProfileAgent, id: string): string | null {
+    return this.account(agent, id === DEFAULT_PROFILE ? join(this.userHome, ".claude.json") : join(this.dir, agent, id, "home", ".claude.json")).device ?? null;
+  }
+
   /** Where `id`'s proxy let traffic out, as just checked (null: it did not). */
   setExit(agent: ProfileAgent, id: string, exit: ProfileExit | null): void {
     this.change(agent, id, (p) => { const { exit: _was, ...rest } = p; return exit ? { ...rest, exit } : rest; });
@@ -212,7 +241,9 @@ export class ProfileStore {
   private of(agent: ProfileAgent, file: File): AgentProfiles {
     const stored = file.agents?.[agent] ?? {};
     // A proxy's password, a ciphertext, is not for the screens: they are told only that it has one.
-    const own: Profile[] = (stored.profiles ?? []).map(({ proxy, ...p }) => ({ ...p,
+    // Nor is a session key: only that there is one.
+    const own: Profile[] = (stored.profiles ?? []).map(({ proxy, sessionKey, sessionKeyDue: _due, ...p }) => ({ ...p,
+      ...(sessionKey ? { sessionKey: true as const } : {}),
       ...(proxy ? { proxy: { server: proxy.server, ...(proxy.username ? { username: proxy.username } : {}), sealed: Boolean(proxy.password) } } : {}),
       ...this.account(agent, join(this.dir, agent, p.id, "home", ".claude.json")) }));
     const profiles: Profile[] = [{ id: DEFAULT_PROFILE, name: "Default", kind: "subscription", createdAt: 0, ...this.account(agent, join(this.userHome, ".claude.json")) }, ...own];
@@ -220,11 +251,14 @@ export class ProfileStore {
   }
 
   /** Who Claude Code's own file says is signed in: the plan's organisation and the address, as it shows them itself. */
-  private account(agent: ProfileAgent, claudeJson: string): { account?: string } {
+  private account(agent: ProfileAgent, claudeJson: string): { account?: string; device?: string } {
     if (agent !== "claude-code") return {};
     try {
-      const o = (JSON.parse(readFileSync(claudeJson, "utf8")) as { oauthAccount?: { emailAddress?: unknown } }).oauthAccount;
-      return typeof o?.emailAddress === "string" && o.emailAddress ? { account: o.emailAddress.slice(0, 120) } : {};
+      const file = JSON.parse(readFileSync(claudeJson, "utf8")) as { oauthAccount?: { emailAddress?: unknown }; userID?: unknown };
+      const o = file.oauthAccount;
+      return { ...(typeof o?.emailAddress === "string" && o.emailAddress ? { account: o.emailAddress.slice(0, 120) } : {}),
+        // The device it reports itself as: made by Claude Code on its first run, a folder's own.
+        ...(typeof file.userID === "string" && DEVICE.test(file.userID) ? { device: file.userID } : {}) };
     } catch { return {}; }
   }
 

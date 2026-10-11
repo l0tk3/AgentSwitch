@@ -209,7 +209,8 @@ function agents() {
     <div class="field"><label>Identity</label><div class="pick"><button class="${!sh.own ? "on" : ""}" data-a="own" data-v="0">This Mac</button><button class="${sh.own ? "on" : ""}" data-a="own" data-v="1">Own</button></div></div>
     ${sh.own ? `<div class="field"><label>Exit</label><div class="in">http://proxy.example:8080 <span class="faint">· user · ••••</span></div></div>
     <div class="field"><label>Fingerprint</label><div class="in">macOS · Firefox 156 · 2560×1440 <span class="faint">generated</span></div></div>
-    <p>它有自己的浏览器：这份指纹、这个代理、它自己的登录态。只属于这个配置。</p>`
+    ${sh.kind === "sub" ? `<div class="field"><label>Session Key</label><div class="in faint">sk-ant-sid… <span class="faint">· 存成密文，写进它自己的浏览器</span></div></div>` : ""}
+    <p>它有自己的浏览器：这份指纹、这个代理、它自己的登录态。只属于这个配置。${sh.kind === "sub" ? "填了 session key，那个浏览器里 claude.ai 即为已登录，/login 只剩点一次授权（已做的界面里是配置那一行的 Session Key…，profiles-v0 §3.4）。" : ""}</p>`
     : `<p>用这台 Mac 的：真实指纹、不走代理、现在那个浏览器。${sh.kind === "sub" ? "登录照 agent 原来的做法开在你自己的浏览器里。" : ""}</p>`}
     <div class="foot"><button class="btn" data-a="close">Cancel</button><button class="btn pri" data-a="create">Create</button></div></div>`;
   return `<div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="title">Settings</div></div>
@@ -217,6 +218,10 @@ function agents() {
     <div class="page">${groups}</div></div></div>
     <div class="status"><span class="sq"></span><span>Gateway</span><span class="sep">│</span><span>iPhone Online</span><span class="grow"></span></div>${sheet}`;
 }
+
+// The device Claude Code says it is (profiles-v0 §3.5): a folder's own, so one per profile; its first eight digits.
+const DEVICES = ["56967b93", "0f3ac2d1", "b81e77a4", "c40a9be2", "713d58c4"];
+function deviceOf(t) { let n = 0; for (const ch of `${t.agent}/${t.profile}`) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return DEVICES[n % DEVICES.length]; }
 
 function terminal() {
   const t = S.terms[S.term], b = browserOf(t), many = S.profiles[t.agent].length > 1;
@@ -230,7 +235,7 @@ function terminal() {
       <div class="box"><div class="ph">Reply</div><div class="foot"><span>+</span><span>Ask Each Time</span><span>·</span><span>${t.model}</span><span class="grow"></span><span>Context 31%</span></div></div>${menu}
     </div></div></div>
     <div class="status"><span class="sq"></span><span>Gateway</span><span class="sep">│</span><span>iPhone Online</span><span class="grow"></span>
-      <span>${dotOf(t)}${t.short} · ${many ? `<span class="globe" data-a="menu" style="display:inline">${t.profile} ▾</span> · ` : ""}${t.model}</span><span class="sep">·</span><span>manual</span><span class="sep">·</span><span>On Mac · 139×46</span>
+      <span>${dotOf(t)}${t.short} · ${many ? `<span class="globe" data-a="menu" style="display:inline">${t.profile} ▾</span> · ` : ""}${t.model}</span><span class="sep">·</span><span>manual</span><span class="sep">·</span><span>On Mac · 139×46</span>${t.agent === "Claude Code" || t.short === "claude" ? `<span class="sep">·</span><span title="Claude Code 在这个配置下上报的设备标识，点击复制">ID ${deviceOf(t)}</span>` : ""}
       <span class="globe ${lit ? "lit" : ""}" data-a="globe" title="Show Browser">${globe}${S.running.work || b.key !== "mac" ? `<span>${b.key === "mac" ? "This Mac" : t.profile}</span>` : ""}</span></div>`;
 }
 

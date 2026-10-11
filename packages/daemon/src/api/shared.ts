@@ -37,6 +37,8 @@ export type ApiDeps = {
   readonly exits?: import("../browser/exits.js").ExitPool;
   /** Each agent's profiles (docs/profiles-v0.md). */
   readonly profiles?: import("../profiles/store.js").ProfileStore;
+  /** Profiles' claude.ai session keys (docs/profiles-v0.md §3.4). */
+  readonly sessionKeys?: import("../browser/sessionKey.js").SessionKeys;
   readonly store: Store;
   readonly bus: Bus;
   readonly engine: Engine;

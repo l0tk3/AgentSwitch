@@ -104,7 +104,14 @@ export interface DriverPage {
 
 export type InputMethod = "Input.dispatchMouseEvent" | "Input.dispatchKeyEvent" | "Input.insertText";
 
+/** A cookie put into the browser by the service (a profile's sign-in to a site, docs/profiles-v0.md §3.4). */
+export type DriverCookie = { readonly name: string; readonly value: string; readonly domain: string; readonly path: string;
+  readonly secure: boolean; readonly httpOnly: boolean; readonly sameSite: "Lax" | "Strict" | "None"; /** Seconds since 1970. */ readonly expires: number };
+
 export interface DriverBrowser {
+  /** Puts `cookie` into the browser. `keep`: one of that name the browser already has for `site` stays, and nothing
+   *  is written (false). Absent: this browser cannot be given one. */
+  setCookie?(cookie: DriverCookie, site: string, keep: boolean): Promise<boolean>;
   /** A new page (the launch's own blank page first). */
   newPage(): Promise<DriverPage>;
   /** Called once when the browser goes away; `expected` when `close()` asked for it. */

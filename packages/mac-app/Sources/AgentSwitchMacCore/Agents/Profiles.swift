@@ -63,12 +63,19 @@ public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     public let exit: ProfileExit?
     /// Its colour, by name (`ProfileColor`); nil for `Default`, which has none.
     public let color: String?
+    /// A claude.ai session key is kept for its own browser (docs/profiles-v0.md §3.4); the key itself is never told.
+    public let sessionKey: Bool?
+    /// The device Claude Code says it is under this profile (§3.5); nil till it has run there.
+    public let device: String?
+    public var hasSessionKey: Bool { sessionKey == true }
 
     public var isDefault: Bool { id == "default" }
     /// Its colour as the screens draw it; nil for none, or one this app does not know yet.
     public var tint: ProfileColor? { color.flatMap(ProfileColor.init(rawValue:)) }
 
-    public init(id: String, name: String, kind: String = "subscription", account: String? = nil, proxy: BrowserProxy? = nil, exit: ProfileExit? = nil, color: String? = nil) {
+    public init(id: String, name: String, kind: String = "subscription", account: String? = nil, proxy: BrowserProxy? = nil, exit: ProfileExit? = nil, color: String? = nil, sessionKey: Bool? = nil, device: String? = nil) {
+        self.sessionKey = sessionKey
+        self.device = device
         self.id = id
         self.name = name
         self.kind = kind
@@ -95,6 +102,35 @@ public enum ProfileWords {
 
     /// `cwork1 — work@example.com`.
     public static func line(_ profile: AgentProfile) -> String { "\(profile.name) — \(who(profile))" }
+}
+
+/// A claude.ai session key as it is typed (docs/profiles-v0.md §3.4): `sk-ant-sid01-…`. Pasted as a cookie
+/// (`sessionKey=sk-ant-sid01-…`) it is taken down to the key.
+public enum SessionKeyText {
+    /// The site it is sealed for.
+    public static let site = "claude.ai"
+
+    public static func cleaned(_ typed: String) -> String {
+        var text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.hasPrefix("sessionKey=") { text.removeFirst("sessionKey=".count) }
+        if let end = text.firstIndex(of: ";") { text = String(text[..<end]) }
+        return text.trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+    }
+
+    public static func valid(_ typed: String) -> Bool {
+        cleaned(typed).range(of: #"^sk-ant-sid\d{2}-[A-Za-z0-9_-]{20,400}$"#, options: .regularExpression) != nil
+    }
+
+    /// What is wrong with what is typed so far; nil: nothing yet, or nothing.
+    public static func problem(_ typed: String) -> String? {
+        let text = cleaned(typed)
+        if text.isEmpty || valid(typed) { return nil }
+        if text.hasPrefix("sk-ant-api") { return "这是 API key，不是 claude.ai 的 session key。" }
+        if text.hasPrefix("sk-ant-oat") { return "这是 claude setup-token 的令牌，不是 claude.ai 的 session key。" }
+        // Still being typed: nothing is said until it could not become one.
+        if "sk-ant-sid".hasPrefix(text) || (text.hasPrefix("sk-ant-sid") && text.count < 40) { return nil }
+        return "Session key 应以 sk-ant-sid 开头。"
+    }
 }
 
 public struct AgentProfiles: Decodable, Equatable, Sendable {
@@ -144,6 +180,15 @@ extension DaemonClient {
             enum Key: String, CodingKey { case server } }
         let body = try proxy.map { try JSONEncoder().encode($0) } ?? JSONEncoder().encode(None())
         return try profileExitReply(try await call("PUT", "/profiles/\(Self.segment(agent))/\(Self.segment(id))/proxy", body: body, timeout: 30))
+    }
+
+    /// A profile's claude.ai session key from now on, a ciphertext sealed for claude.ai (nil: forgotten). Its own
+    /// browser is signed in to claude.ai with it (docs/profiles-v0.md §3.4).
+    public func setProfileSessionKey(agent: String, id: String, ciphertext: String?) async throws -> [String: AgentProfiles] {
+        struct Body: Encodable { let key: String?
+            func encode(to encoder: Encoder) throws { var c = encoder.container(keyedBy: Key.self); try c.encode(key, forKey: .key) }
+            enum Key: String, CodingKey { case key } }
+        return try decode(ProfilesReply.self, try await call("PUT", "/profiles/\(Self.segment(agent))/\(Self.segment(id))/session-key", body: try JSONEncoder().encode(Body(key: ciphertext)), timeout: 30)).agents
     }
 
     /// Where a profile's proxy lets traffic out, asked now.

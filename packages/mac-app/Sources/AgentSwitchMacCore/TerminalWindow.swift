@@ -46,10 +46,13 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public private(set) var profileName: String?
     /// That profile's colour (docs/profiles-v0.md §3.2): the lit dot this terminal is marked with while it runs.
     public private(set) var profileColor: ProfileColor?
+    /// The device Claude Code says it is in this terminal (docs/profiles-v0.md §3.5): its own id for the folder it runs
+    /// with, a profile's own; nil: not known yet, or another agent.
+    public private(set) var device: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, workdir, model, effort, modeNow, suggestion, sets, daybreak, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
-             permissions, subagents, profile
+             permissions, subagents, profile, device
     }
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String? = nil,
@@ -113,6 +116,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
         // name wherever the name is shown (docs/profiles-v0.md §4: 代理标注在底栏).
         profileName = profile.map { [$0.name, $0.exit?.text].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ") }
         profileColor = profile?.color.flatMap(ProfileColor.init(rawValue:))
+        device = ((try? c.decodeIfPresent(String.self, forKey: .device)) ?? nil).flatMap { DeviceID.valid($0) ? $0 : nil }
     }
 
     public var running: Bool { status != "exited" }
@@ -120,10 +124,11 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
 
     /// The same terminal as one that runs under a profile (what the service says of it when it does): the profile's
     /// words and its colour.
-    public func under(profile words: String, color: ProfileColor?) -> TerminalInfo {
+    public func under(profile words: String, color: ProfileColor?, device: String? = nil) -> TerminalInfo {
         var copy = self
         copy.profileName = words
         copy.profileColor = color
+        copy.device = device ?? self.device
         return copy
     }
 
@@ -135,6 +140,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                      permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow, suggestion: suggestion, sets: sets, daybreak: daybreak)
         copy.profileName = profileName
         copy.profileColor = profileColor
+        copy.device = device
         return copy
     }
 
@@ -143,6 +149,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
         var context = TerminalContext(harness: harness, model: model, mode: mode, cols: cols, rows: rows, away: nil, running: running)
         context.profile = profileName
         context.profileColor = profileColor
+        context.device = device
         return context
     }
 }

@@ -23,7 +23,7 @@
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { fileURLToPath } from "node:url";
-import type { BrowserDriver, DriverBrowser, DriverPage, FocusedField, GuardDecision, GuardRequest } from "./driver.js";
+import type { BrowserDriver, DriverBrowser, DriverCookie, DriverPage, FocusedField, GuardDecision, GuardRequest } from "./driver.js";
 import { FillRefused, type FillResolver } from "./fill.js";
 import { inputCalls, NOTHING_PRESSED, type InputEvent, type Pressed } from "./input.js";
 import { AGENT_FILE_REFUSAL, checkLocalFile, checkUrl, isLoopbackAddress, isLoopbackHost, normalHost, OWN_PORT_REFUSAL, placeOf, portOf, type FileRules } from "./rules.js";
@@ -81,6 +81,8 @@ export type BrowserHostOptions = {
   readonly prepareProfile?: (dir: string) => void;
   /** After Chrome went away, by request or not. */
   readonly afterExit?: () => void;
+  /** Called when the browser has started, before any page of it is handed out. */
+  readonly afterLaunch?: () => Promise<void>;
   /** A hold that ran out (for the audit). */
   readonly onIdleRelease?: (tabId: string, holder: string) => void;
   /** The person took an agent's tab over by acting in its window (for the audit). */
@@ -531,8 +533,16 @@ export class BrowserHost {
     // A tab the person opened in a window themselves is a tab of theirs.
     browser.onPage?.((page) => { if (this.browser === browser && !this.idOf(page)) void this.applyViewport(this.register(page, YOU)); });
     this.browser = browser;
+    // What the browser is to have before its first page goes anywhere (a profile's sign-in, docs/profiles-v0.md §3.4).
+    // It starts all the same without it.
+    await this.opts.afterLaunch?.().catch((err) => this.log(`browser: what was to follow the start failed: ${firstLine(err)}`));
     this.scheduleIdleClose();
     return browser;
+  }
+
+  /** Puts `cookie` into the browser that runs (driver.ts `setCookie`); null: none runs, or it cannot be given one. */
+  async setCookie(cookie: DriverCookie, site: string, keep: boolean): Promise<boolean | null> {
+    return this.browser?.setCookie ? this.browser.setCookie(cookie, site, keep) : null;
   }
 
   private exited(browser: DriverBrowser, expected: boolean): void {

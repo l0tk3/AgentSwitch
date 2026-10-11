@@ -82,6 +82,28 @@ struct MainStatusBar: View {
     }
 }
 
+/// `ID 56967b93`: the device Claude Code says it is, a click copies the whole of it.
+private struct DeviceItem: View {
+    let device: String
+    @State private var hovering = false
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(device, forType: .string)
+            copied = true
+            Task { try? await Task.sleep(for: .seconds(1.2)); copied = false }
+        } label: {
+            Text(copied ? "Copied" : DeviceID.label(device)).monospacedDigit().foregroundStyle(hovering ? Color.signal : Look.ink2)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(DeviceID.help(device))
+        .accessibilityLabel("Device ID \(DeviceID.short(device))")
+    }
+}
+
 /// The terminal on screen: `✱ claude · Opus 5.5  bypass  On Mac · 139×46  🔒` — the agent's mark and model, the
 /// permission mode, where its size is and its grid, and the lock that opens the sealed reply's box under the terminal
 /// (the bar that was there, ⌘⇧V); the lock is dimmed while the terminal has ended.
@@ -101,6 +123,9 @@ struct TerminalStatusItems: View {
             }
             if let mode = context.mode { Text(ClassicWords.word(mode, in: look)) }
             Text(context.size(in: look))
+            // The device Claude Code says it is here (docs/profiles-v0.md §3.5): its first digits; the whole of it on
+            // hover, and copied by a click.
+            if let device = context.device { DeviceItem(device: device) }
             // The lock (Encrypt & Send) is gone with the gate from terminals (docs/profiles-v0.md §8, 2026-10-08: a
             // terminal's reply is typed as written). Its place is the browser's, when profiles bring one.
             if Self.sealOffered { Button(action: seal) {

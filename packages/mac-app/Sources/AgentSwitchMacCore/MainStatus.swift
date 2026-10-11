@@ -74,6 +74,8 @@ public struct TerminalContext: Equatable, Sendable {
     public var profile: String?
     /// That profile's colour: a lit dot before the words.
     public var profileColor: ProfileColor?
+    /// The device Claude Code says it is here (docs/profiles-v0.md §3.5); nil: not known, or another agent.
+    public var device: String?
 
     public init(harness: String, model: String? = nil, mode: String? = nil, cols: Int? = nil, rows: Int? = nil,
                 away: String? = nil, running: Bool = true) {
@@ -140,4 +142,21 @@ public struct TerminalContext: Equatable, Sendable {
         guard let cols, let rows, cols > 0, rows > 0 else { return place }
         return "\(place) · \(cols)×\(rows)"
     }
+}
+
+/// The device Claude Code says it is (docs/profiles-v0.md §3.5): a long run of hex digits it made on its first run with
+/// a folder, a profile's own. The bar shows its first digits; the whole of it is a tooltip and a click away.
+public enum DeviceID {
+    public static let shown = 8
+
+    public static func valid(_ id: String) -> Bool {
+        (16...128).contains(id.count) && id.allSatisfy { $0.isASCII && ($0.isNumber || ("a"..."f").contains($0)) }
+    }
+
+    /// `56967b93`.
+    public static func short(_ id: String) -> String { String(id.prefix(shown)) }
+    /// `ID 56967b93`, as the bar says it.
+    public static func label(_ id: String) -> String { "ID \(short(id))" }
+    /// The tooltip: what it is, and the whole of it.
+    public static func help(_ id: String) -> String { "Claude Code 在这个配置下上报的设备标识，点击复制：\(id)" }
 }

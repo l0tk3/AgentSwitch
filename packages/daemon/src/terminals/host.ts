@@ -106,6 +106,9 @@ export type TerminalInfo = {
    *  Mac's own (`Default`). */
   readonly profile: { readonly id: string; readonly name: string; /** Where its own proxy let traffic out when this terminal was about to start (§4); absent: it has none, this Mac's way out. */ readonly exit?: { readonly ip: string; readonly place: string | null };
     /** The profile's colour, by its name in the palette (§3.2): the dot the screens mark this terminal with. */ readonly color?: string } | null;
+  /** The device the agent says it is (Claude Code's own id for the folder it runs with, docs/profiles-v0.md §3.5);
+   *  null: not known (it has not run there yet), or an agent that is not asked. */
+  readonly device: string | null;
   /** What the agent's own screen said to commands sent from a screen (`commanded`), the latest last. */
   readonly notices: readonly ScreenNotice[];
   /** A list to choose from that the agent's own screen shows now (`choicesOnScreen`); null when it shows none. */
@@ -266,6 +269,8 @@ export type TerminalHostOptions = {
   /** A terminal's agent writes this conversation now — one it was started on, or one it says it is in: under which
    *  profile (null: the Mac's own). Kept so the conversation goes on under the same one (docs/profiles-v0.md §3.3). */
   readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
+  /** The device the agent says it is under a profile (null: the Mac's own), as its own files have it (§3.5). */
+  readonly deviceOf?: (harness: TerminalHarness, profile: string | null) => string | null;
   /** The terminal is forgotten (deleted, or its start failed): what it left goes too (its browser tabs). */
   readonly onRemove?: (id: string) => void;
   readonly now?: () => number;
@@ -743,6 +748,7 @@ class Session {
   profile: { id: string; name: string; exit?: { ip: string; place: string | null }; color?: string } | null = null;
   /** Its profile's own browser, by its key (docs/profiles-v0.md §5.1); null: the shared one. */
   browserKey: string | null = null;
+  device: string | null = null;
   /** What its screen said to commands sent from a screen (`commanded`). */
   notices: ScreenNotice[] = [];
   /** The program it runs (the launcher's), for what is learned of that program (`learnCommands`). */
@@ -812,7 +818,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onSession">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onSession" | "deviceOf">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -850,6 +856,7 @@ export class TerminalHost {
     s.hooks = plan.hooks;
     s.profile = req.profile ? { id: req.profile.id, name: req.profile.name, ...(req.profile.exit ? { exit: req.profile.exit } : {}), ...(req.profile.color ? { color: req.profile.color } : {}) } : null;
     s.browserKey = req.profile?.browserKey ?? null;
+    s.device = this.device(s);
     s.effort = req.effort ?? null;
     s.resumedFrom = req.resume ?? null;
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
@@ -1325,6 +1332,8 @@ export class TerminalHost {
   /** The agent says which session it writes. A new terminal's or a fork's first one is its own; a later one (`/resume`
    *  typed inside it) is followed, never owned, so closing the terminal cannot delete a record it did not start. */
   private reported(s: Session, sessionId: string): void {
+    // A profile that had never run had no device of its own when the terminal started; it has one by now.
+    s.device ??= this.device(s);
     if (s.agentSessionId !== sessionId) this.opts.onSession?.(s.harness, sessionId, s.profile?.id ?? null);
     s.agentSessionId = sessionId;
     if (!s.ownSessionId && (!s.resumedFrom || s.forked) && sessionId !== s.resumedFrom) s.ownSessionId = sessionId;
@@ -1802,13 +1811,17 @@ export class TerminalHost {
     return terminalName(s.customName, s.title, s.harness, s.cwd, s.givenName);
   }
 
+  private device(s: Session): string | null {
+    try { return this.opts.deviceOf?.(s.harness, s.profile?.id ?? null) ?? null; } catch { return null; }
+  }
+
   private info(s: Session): TerminalInfo {
     return {
       id: s.id, harness: s.harness, cwd: s.cwd, workdir: s.agentCwd ?? s.cwd, model: s.model, modelNow: s.modelNow, modeNow: s.modeNow, suggestion: s.suggestion, sets: DIRECT.has(s.harness) || !!s.companion?.setModel, daybreak: s.daybreak, effort: s.effort, mode: s.mode, name: this.nameOf(s), customName: s.customName !== null, title: s.title,
       status: s.status, pid: s.proc?.pid ?? null,
       cols: s.cols, rows: s.rows, createdAt: s.createdAt, lastOutputAt: s.lastOutputAt, exitCode: s.exitCode,
       agentSessionId: s.agentSessionId, resumedFrom: s.resumedFrom, forked: s.forked, hooks: s.hooks, permissions: [...s.pending.values()].map((p) => p.ask),
-      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, sent: [...s.sent], choices: s.choices, notices: [...s.notices], profile: s.profile, seq: s.seq,
+      activity: s.activity, progress: s.progress, subagents: [...s.subagents.values()].map((a) => ({ ...a })), statusSince: s.statusSince, device: s.device, sent: [...s.sent], choices: s.choices, notices: [...s.notices], profile: s.profile, seq: s.seq,
     };
   }
 }

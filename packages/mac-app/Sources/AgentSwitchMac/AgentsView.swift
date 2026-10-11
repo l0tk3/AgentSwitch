@@ -18,6 +18,7 @@ struct AgentsView: View {
     @State private var removing: (agent: AgentCLI, profile: AgentProfile)?
     /// The profile whose own proxy is being set (docs/profiles-v0.md §4).
     @State private var proxying: ProfileProxyTarget?
+    @State private var keying: ProfileProxyTarget?
     /// The install asked to be deleted, until answered.
     @State private var deleting: AgentInstall?
     /// The agent whose old versions were asked to be cleared, until answered.
@@ -96,6 +97,9 @@ struct AgentsView: View {
         .modifier(ProfileDialogs(naming: namingShown, name: $newName, create: create, removing: removingShown, removingName: removing?.profile.name ?? "",
                                  remove: { if let target = removing { delete(target.agent, target.profile) } }))
         .task { profiles = (try? await model.client.profiles()) ?? profiles }
+        .sheet(item: $keying) { target in
+            ProfileSessionKeySheet(agent: target.agent, profile: target.profile) { profiles = $0 }
+        }
         .sheet(item: $proxying) { target in
             ProfileProxySheet(agent: target.agent, profile: target.profile) { agents in profiles = agents }
         }
@@ -162,6 +166,7 @@ struct AgentsView: View {
                             add: { naming = agent; newName = "" },
                             remove: { profile in removing = (agent, profile) },
                             proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) },
+                            sessionKey: { profile in keying = ProfileProxyTarget(agent: agent, profile: profile) },
                             color: { profile, color in change(agent) { try await $0.setProfileColor(agent: agent.rawValue, id: profile.id, color: color) } })
         }
     }
@@ -295,6 +300,59 @@ struct ProfileProxySheet: View {
     }
 }
 
+/// A profile's claude.ai session key (docs/profiles-v0.md §3.4): sealed by this Mac's gate for claude.ai before anything
+/// is sent, kept by the service as a ciphertext, and put into the profile's own browser as claude.ai's sign-in cookie.
+struct ProfileSessionKeySheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let agent: AgentCLI
+    let profile: AgentProfile
+    let done: ([String: AgentProfiles]) -> Void
+    @State private var key = ""
+    @State private var problem: String?
+    @State private var busy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\(profile.name) · Session Key").font(.headline)
+            Text("claude.ai 网页的登录凭据（sk-ant-sid 开头）。保存后写进这个配置自己的浏览器，那里的 claude.ai 即为已登录；在这个配置名下开终端时，/login 的页面开在同一个浏览器里，只需点一次授权。它在这台 Mac 上加密后才保存，之后不再显示。浏览器里已有登录时，下次启动不会用保存的这一个去覆盖。")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Form {
+                SecureField("Session Key", text: $key, prompt: Text(profile.hasSessionKey ? "Kept" : "sk-ant-sid…"))
+            }
+            .formStyle(.columns)
+            if let said = SessionKeyText.problem(key) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            HStack {
+                Button("Remove") { apply(nil) }.disabled(busy || !profile.hasSessionKey)
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { apply(SessionKeyText.cleaned(key)) }.keyboardShortcut(.defaultAction).disabled(busy || !SessionKeyText.valid(key))
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    /// The key sealed and kept (nil: forgotten). The sheet closes when the service has taken it; it stays, saying why,
+    /// when it has not.
+    private func apply(_ value: String?) {
+        let client = model.client, gate = model.gateCLI, agent = agent.rawValue, id = profile.id
+        busy = true
+        problem = nil
+        Task {
+            do {
+                var ciphertext: String?
+                if let value { ciphertext = try await gate.seal(GateSealRequest(label: "profile/session-key", sites: SessionKeyText.site, value: value)) }
+                done(try await client.setProfileSessionKey(agent: agent, id: id, ciphertext: ciphertext))
+                key = ""
+                dismiss()
+            } catch { problem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+            busy = false
+        }
+    }
+}
+
 /// A colour's swatch for a menu (a menu draws pictures, not views): a filled dot, in the colour as this appearance has it.
 enum ProfileSwatch {
     static func image(_ color: ProfileColor, side: CGFloat = 10) -> NSImage {
@@ -316,6 +374,7 @@ struct ProfilesSection: View {
     let add: () -> Void
     let remove: (AgentProfile) -> Void
     let proxy: (AgentProfile) -> Void
+    var sessionKey: ((AgentProfile) -> Void)? = nil
     let color: (AgentProfile, ProfileColor) -> Void
 
     var body: some View {
@@ -344,12 +403,18 @@ struct ProfilesSection: View {
                     } else {
                         Color.clear.frame(width: 16, height: 16)
                     }
-                    Text(profile.name)
+                    // The device Claude Code says it is under it (docs/profiles-v0.md §3.5), once it has run there.
+                    Text(profile.name).help(profile.device.map(DeviceID.help) ?? "")
                     Text(profile.account ?? (profile.isDefault ? "This Mac’s own" : "Not Signed In")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
                     Text(profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)
                     if !profile.isDefault {
+                        // Claude Code's profiles only: the key signs its own browser in to claude.ai (§3.4).
+                        if agent == .claude, let sessionKey {
+                            Button("Session Key…") { sessionKey(profile) }.controlSize(.small)
+                                .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
+                        }
                         Button("Proxy…") { proxy(profile) }.controlSize(.small)
                         Button("Delete…") { remove(profile) }.controlSize(.small)
                     }

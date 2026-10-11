@@ -14,7 +14,7 @@
  *  first use only, so a daemon that never opens a tab never loads it. */
 
 import type { BrowserContext, CDPSession, ElementHandle, Frame, Page, Request, Route } from "playwright-core";
-import type { BrowserDriver, DriverBrowser, DriverPage, FocusedField, GuardDecision, LaunchOptions, PageEvents, RequestGuard, ScreencastParams } from "./driver.js";
+import type { BrowserDriver, DriverBrowser, DriverCookie, DriverPage, FocusedField, GuardDecision, LaunchOptions, PageEvents, RequestGuard, ScreencastParams } from "./driver.js";
 import type { InputMethod } from "./driver.js";
 import { bundledPlaywright, notePlaywrightInUse, type PlaywrightCopy } from "./engine/loader.js";
 import { isLoopbackHost } from "./rules.js";
@@ -396,6 +396,12 @@ class PlaywrightBrowser implements DriverBrowser {
     const wrapper = this.wrap(page ?? await this.context.newPage());
     await wrapper.ready;
     return wrapper;
+  }
+
+  async setCookie(cookie: DriverCookie, site: string, keep: boolean): Promise<boolean> {
+    if (keep && (await this.context.cookies(site)).some((c) => c.name === cookie.name)) return false;
+    await this.context.addCookies([cookie]);
+    return true;
   }
 
   onExit(listener: (expected: boolean) => void): void { this.exitListeners.push(listener); }

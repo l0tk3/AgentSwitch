@@ -8,6 +8,7 @@ import { checkedProxy, ExitError, ExitPool } from "../browser/exits.js";
 import { proxyPlace } from "../browser/identity.js";
 import { remoteCaller } from "../core/caller.js";
 import { PROFILE_AGENTS, PROFILE_COLORS, ProfileError, type ProfileAgent, type ProfileProxy } from "../profiles/store.js";
+import { SessionKeyError } from "../browser/sessionKey.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 const Agent = z.enum(PROFILE_AGENTS);
@@ -67,6 +68,24 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
       if (err instanceof ExitError) return c.json({ error: err.message }, 400);
       const f = failed(err); return c.json({ error: f.error }, f.status);
     }
+  });
+
+  // A profile's claude.ai session key (§3.4): a ciphertext sealed for claude.ai, put into the profile's own browser as
+  // that site's sign-in cookie; null forgets it. It is asked of the gate at once, and one that is not a session key
+  // is refused.
+  app.put("/profiles/:agent/:id/session-key", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "a profile's session key is set on the Mac" }, 403);
+    const agent = Agent.safeParse(c.req.param("agent"));
+    if (!agent.success) return c.json({ error: "no such agent" }, 404);
+    const body = await parseBody(c, z.object({ key: z.string().max(4000).nullable() }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    if (!deps.sessionKeys) return c.json({ error: "this service cannot keep a session key" }, 503);
+    try { await deps.sessionKeys.set(agent.data, c.req.param("id"), body.data.key?.trim() || null); }
+    catch (err) {
+      if (err instanceof SessionKeyError) return c.json({ error: err.message }, 400);
+      const f = failed(err); return c.json({ error: f.error }, f.status);
+    }
+    return c.json({ agents: store.all() });
   });
 
   // A profile's colour (§3.2): the dot its terminals are marked with on every screen.

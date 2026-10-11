@@ -1,7 +1,7 @@
 /** A browser for the shared-browser tests (docs/browser-v0.md): pages that record what the host asks of them and emit
  *  what Chrome would (navigations, titles, popups, screencast frames), without Chrome. */
 
-import type { BrowserDriver, DriverBrowser, DriverPage, FocusedField, InputMethod, LaunchOptions, PageEvents, RawFrame, RequestGuard, ScreencastParams } from "../src/browser/driver.js";
+import type { BrowserDriver, DriverBrowser, DriverCookie, DriverPage, FocusedField, InputMethod, LaunchOptions, PageEvents, RawFrame, RequestGuard, ScreencastParams } from "../src/browser/driver.js";
 import type { Viewport } from "../src/browser/types.js";
 
 /** The smallest JPEG header `jpegSize` reads: SOI, a JFIF APP0 segment, a baseline frame header. */
@@ -145,6 +145,14 @@ export class FakeBrowser implements DriverBrowser {
   private readonly pageListeners: ((page: DriverPage) => void)[] = [];
 
   constructor(readonly guard: RequestGuard) {}
+
+  /** The cookies it was given, by name. */
+  readonly cookies = new Map<string, DriverCookie>();
+  async setCookie(cookie: DriverCookie, _site: string, keep: boolean): Promise<boolean> {
+    if (keep && this.cookies.has(cookie.name)) return false;
+    this.cookies.set(cookie.name, cookie);
+    return true;
+  }
 
   async newPage(): Promise<DriverPage> {
     const page = new FakePage();
