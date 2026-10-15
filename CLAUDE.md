@@ -10,7 +10,7 @@
 - `packages/linux/` Linux 节点（无窗口，`docs/mesh-v0.md` §4）：`scripts/build-runtime.sh` 造与 Mac 应用同版本的自包含运行时，`scripts/install.sh` 装进 `~/.local/share/agentswitch` 并交给 systemd 用户服务；看护进程是 daemon 的 `agentswitch node run`（`src/keeper/`）
 - `.github/workflows/ci.yml` GitHub CI：每次推送与 PR 跑各 package 的测试（daemon、secret-gate、mac-app、ios-app、secret-gate-ui），造 Linux 运行时（x86_64、aarch64，各用 `smoke.sh` 起一次）、Mac 应用（临时签名）和 iPhone 模拟器版
 - `packages/ios-app/` iPhone 应用（SwiftUI，iOS 17+，xcodegen）：`AgentSwitchKit` 纯逻辑包（配对、钉证书指纹、本地造密文、事件流）+ 界面；`scripts/e2e-live.sh` 用它连打包后的运行时做端到端（`docs/app-v0.md` §5）
-- `packages/daemon/` TypeScript 守护进程：任务引擎（SQLite + SSE + 审批）、路由器（`docs/router-v0.md`）、HTTP API、额度、CLI `bin/agentswitch`。执行器：echo（开发）+ claude-code（Agent SDK）/ codex（app-server）/ opencode（执行器专用的常驻 serve，不可用时退回 `run --standalone`；`AGENTSWITCH_OPENCODE_EXECUTOR=run` 强制旧路径），`AGENTSWITCH_EXECUTORS=real` 启用；手动入口的终端会话（`src/terminals/`，`docs/terminal-v0.md`）；服务持有的浏览器（`src/browser/`，`docs/browser-v0.md`）
+- `packages/daemon/` TypeScript 守护进程：任务引擎（SQLite + SSE + 审批）、路由器（`docs/router-v0.md`）、HTTP API、额度、CLI `bin/agentswitch`。执行器：echo（开发）+ claude-code（Agent SDK）/ codex（app-server）/ opencode（执行器专用的常驻 serve，不可用时退回 `run --standalone`；`AGENTSWITCH_OPENCODE_EXECUTOR=run` 强制旧路径），`AGENTSWITCH_EXECUTORS=real` 启用；手动入口的终端会话（`src/terminals/`，`docs/terminal-v0.md`；每个终端一个 C 写的持有进程 `native/pty-hold.c`，让终端熬过服务重启，§10）；服务持有的浏览器（`src/browser/`，`docs/browser-v0.md`）
 
 ## 约定
 - 每个 package 自包含：自己的依赖、测试、README；跨 package 只通过进程/网络接口

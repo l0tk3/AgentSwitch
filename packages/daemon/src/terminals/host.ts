@@ -5,12 +5,13 @@
  *  in the terminal). */
 
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
+import { attachHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
 import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { screenView } from "./screenView.js";
 
@@ -195,7 +196,9 @@ export type LaunchRequest = {
   readonly telemetryOff?: true;
   readonly hookToken: string;
 };
-export type LaunchPlan = { readonly file: string; readonly args: readonly string[]; readonly env: Record<string, string>; readonly hooks: boolean; readonly companion?: Companion };
+export type LaunchPlan = { readonly file: string; readonly args: readonly string[]; readonly env: Record<string, string>; readonly hooks: boolean; readonly companion?: Companion;
+  /** The browser session the agent's bridge was given (kept by a held terminal for the next daemon). */
+  readonly browser?: { readonly session: string; readonly token: string; readonly key?: string } };
 export type Launcher = (req: LaunchRequest) => LaunchPlan;
 
 /** Runs beside the program and reports for it, for an agent whose status and permission requests live in a server of
@@ -208,6 +211,11 @@ export type Companion = {
   attach(link: CompanionLink): void;
   /** The program has ended or the terminal is gone (called once or more). */
   stop(): void;
+  /** The service stops and the terminal is held (docs/terminal-v0.md §10): stop reporting, leave the server running. */
+  detach?(): void;
+  /** What the next daemon needs to reach the server again (its `meta.json`); null: it cannot (the terminal is taken up
+   *  without its companion). */
+  keep?(): Record<string, unknown> | null;
   /** False: the companion reports no status (Codex's hooks do, as when it runs on its own), so whether the terminal
    *  has hooks stays as its plan said. Absent: it reports (OpenCode's server). */
   readonly reportsStatus?: boolean;
@@ -285,7 +293,62 @@ export type TerminalHostOptions = {
   readonly deviceOf?: (harness: TerminalHarness, profile: string | null) => string | null;
   /** The terminal is forgotten (deleted, or its start failed): what it left goes too (its browser tabs). */
   readonly onRemove?: (id: string) => void;
+  /** Terminals that outlive the service (docs/terminal-v0.md §10): each program on a pty its own holder holds
+   *  (held.ts), described in `<dir>/<id>/meta.json`, taken up again by the next daemon (`restore`). Absent: node-pty in
+   *  this process, the terminals end with it. */
+  readonly hold?: {
+    readonly holding: Holding;
+    /** The terminals' state folder (the launcher's: each terminal's settings and mcp.json are in `<dir>/<id>`). */
+    readonly dir: string;
+    /** Before a terminal is taken up again: what the service made for it, made again (its profile's forwarder on the
+     *  port its program was given, its browser session's token). */
+    readonly restoring?: (kept: KeptTerminal) => Promise<void> | void;
+    /** Its companion again, connected to the server that kept running (`Companion.keep`). */
+    readonly companion?: (harness: TerminalHarness, kept: Record<string, unknown>, terminal: KeptTerminal) => Companion | null;
+  };
   readonly now?: () => number;
+};
+
+/** A program's pty as the host uses it: node-pty's, or a holder's (held.ts), which can also be let go of. */
+type Pty = {
+  readonly pid: number;
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+  kill(signal?: string): void;
+  onData(cb: (data: string) => void): unknown;
+  onExit(cb: (e: { exitCode: number }) => void): unknown;
+  detach?(): void;
+};
+
+/** A held terminal as `meta.json` keeps it: enough to list it again, to let its agent's hooks in, and to reach its
+ *  holder. Its screen is not kept: the holder sends its output again. */
+export type KeptTerminal = {
+  readonly v: 1;
+  readonly id: string;
+  readonly harness: TerminalHarness;
+  readonly cwd: string;
+  readonly model: string | null;
+  readonly mode: PermissionMode;
+  readonly hookToken: string;
+  readonly createdAt: number;
+  readonly cols: number;
+  readonly rows: number;
+  readonly hooks: boolean;
+  readonly program: string;
+  readonly effort: string | null;
+  readonly customName: string | null;
+  readonly givenName: string | null;
+  readonly resumedFrom: string | null;
+  readonly forked: boolean;
+  readonly agentSessionId: string | null;
+  readonly ownSessionId: string | null;
+  readonly sessionByHook: boolean;
+  readonly profile: Session["profile"];
+  readonly browserKey: string | null;
+  /** What the service gave the program: its profile's forwarder (in `proxy`), its browser session. */
+  readonly given: { readonly proxy?: string; readonly browser?: { readonly session: string; readonly token: string; readonly key?: string } };
+  readonly hold: HoldPlace;
+  readonly companion: Record<string, unknown> | null;
 };
 
 export class TerminalError extends Error {
@@ -326,6 +389,8 @@ const MAX_TITLE = 200;
 const HOLD_MS = 50;
 /** Between the two size changes of a redraw: long enough for the program to notice the first. */
 const REDRAW_MS = 60;
+/** After a held terminal is taken up again: its replayed output has had time to come in before its program redraws. */
+const RESTORE_REDRAW_MS = 500;
 const HOLD_LIMIT = 4096;
 const MAX_NAME = 80;
 /** What the agent says a step is for: a sentence. */
@@ -712,7 +777,10 @@ class Session {
   seq = 0;
   /** Output up to here is in the headless terminal (its writes are asynchronous). */
   parsedSeq = 0;
-  proc: pty.IPty | null = null;
+  proc: Pty | null = null;
+  /** Its holder's place (held.ts) when a holder holds it; null: node-pty in this process. */
+  hold: HoldPlace | null = null;
+  given: KeptTerminal["given"] = {};
   status: TerminalStatus = "idle";
   statusSince: number;
   activity: { tool: string; target: string; note?: string } | null = null;
@@ -835,7 +903,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onSession" | "deviceOf">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onSession" | "deviceOf" | "hold">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -902,10 +970,11 @@ export class TerminalHost {
       if (started) { ({ args, env } = started); if (plan.companion.reportsStatus !== false) s.hooks = true; s.companion = plan.companion; }
       else plan.companion.stop();
     }
-    let proc: pty.IPty;
+    let proc: Pty;
+    s.program = plan.file;
+    s.given = { ...(req.profile?.proxy ? { proxy: req.profile.proxy } : {}), ...(plan.browser ? { browser: plan.browser } : {}) };
     try {
-      s.program = plan.file;
-      proc = pty.spawn(plan.file, [...args], { name: "xterm-256color", cols: s.cols, rows: s.rows, cwd: req.cwd, env });
+      proc = await this.startProgram(s, plan.file, args, env);
     } catch (err) {
       this.sessions.delete(id);
       s.companion?.stop();
@@ -913,15 +982,13 @@ export class TerminalHost {
       this.ended(id, true);
       throw new TerminalError("unavailable", `could not start ${req.harness}: ${(err as Error).message}`);
     }
-    s.proc = proc;
-    proc.onData((data) => this.receive(s, data));
-    proc.onExit(({ exitCode }) => this.exited(s, exitCode));
-    s.companion?.attach({
-      status: (status) => { if (status === "idle") this.turnEnded(s, true, null); this.setStatus(s, status); },
-      ask: async (tool, input, signal) => (await this.ask(s, tool, input, signal))?.decision ?? null,
-      session: (id) => { if (id && id !== s.agentSessionId) this.reported(s, id); },
-      subagents: (list) => this.subagentsAre(s, list),
-    });
+    if (this.sessions.get(id) !== s) {   // deleted while it started
+      proc.kill("SIGHUP");
+      s.companion?.stop();
+      throw new TerminalError("not_found", `terminal ${id} was deleted while it started`);
+    }
+    this.wire(s, proc);
+    this.persist(s);
     const daybreak = s.companion?.daybreak?.bind(s.companion);
     if (daybreak) {
       // How its switch stands as it starts: how its new sessions start, until its TUI has made its thread or loaded
@@ -931,6 +998,115 @@ export class TerminalHost {
       for (const ms of DAYBREAK_AGAIN_MS) setTimeout(() => this.daybreakLooks(s, 0), ms).unref();
     }
     return this.info(s);
+  }
+
+  /** The program on a pty: a holder's when terminals are held (falling back to node-pty when the holder will not
+   *  start, with a line in the log), else node-pty's in this process. */
+  private async startProgram(s: Session, file: string, args: readonly string[], env: Record<string, string>): Promise<Pty> {
+    const hold = this.opts.hold;
+    if (hold) {
+      const place: HoldPlace = { socket: join(hold.dir, s.id, "hold.sock"), token: randomBytes(24).toString("base64url") };
+      try {
+        mkdirSync(join(hold.dir, s.id), { recursive: true, mode: 0o700 });
+        const held = await startHeld(hold.holding, place, { file, args, cwd: s.cwd, env, cols: s.cols, rows: s.rows, ringBytes: hold.holding.ringBytes }, `agentswitch-term-${s.id}`);
+        s.hold = place;
+        return held;
+      } catch (err) {
+        if (!(err instanceof HoldError)) throw err;
+        // The program itself would not start: node-pty would fail the same way, and say so less well.
+        if (/^cannot start /.test(err.message)) throw err;
+        console.error(`terminals: ${s.id} is not held, it ends with the service (${err.message})`);
+      }
+    }
+    return pty.spawn(file, [...args], { name: "xterm-256color", cols: s.cols, rows: s.rows, cwd: s.cwd, env });
+  }
+
+  /** The program's output and end go to the terminal; its companion reports. */
+  private wire(s: Session, proc: Pty): void {
+    s.proc = proc;
+    proc.onData((data) => this.receive(s, data));
+    proc.onExit(({ exitCode }) => this.exited(s, exitCode));
+    s.companion?.attach({
+      status: (status) => { if (status === "idle") this.turnEnded(s, true, null); this.setStatus(s, status); },
+      ask: async (tool, input, signal) => (await this.ask(s, tool, input, signal))?.decision ?? null,
+      session: (id) => { if (id && id !== s.agentSessionId) this.reported(s, id); },
+      subagents: (list) => this.subagentsAre(s, list),
+    });
+  }
+
+  /** A held terminal's `meta.json`, written again (0600: its hook token is in it). Nothing for one that is not held. */
+  private persist(s: Session): void {
+    const hold = this.opts.hold;
+    if (!hold || !s.hold) return;
+    const kept: KeptTerminal = {
+      v: 1, id: s.id, harness: s.harness, cwd: s.cwd, model: s.model, mode: s.mode, hookToken: s.hookToken, createdAt: s.createdAt,
+      cols: s.cols, rows: s.rows, hooks: s.hooks, program: s.program, effort: s.effort, customName: s.customName, givenName: s.givenName,
+      resumedFrom: s.resumedFrom, forked: s.forked, agentSessionId: s.agentSessionId, ownSessionId: s.ownSessionId, sessionByHook: s.sessionByHook,
+      profile: s.profile, browserKey: s.browserKey, given: s.given, hold: s.hold, companion: s.companion?.keep?.() ?? null,
+    };
+    const file = join(hold.dir, s.id, "meta.json");
+    try {
+      writeFileSync(`${file}.part`, JSON.stringify(kept), { mode: 0o600 });
+      renameSync(`${file}.part`, file);
+    } catch (err) { console.error(`terminals: ${s.id}'s meta.json was not written: ${(err as Error).message}`); }
+  }
+
+  /** A held terminal is no longer to be taken up again (it ended, or was deleted). */
+  private unpersist(s: Session): void {
+    if (this.opts.hold && s.hold) rmSync(join(this.opts.hold.dir, s.id, "meta.json"), { force: true });
+  }
+
+  /** The terminals a daemon before this one left to their holders, taken up again (docs/terminal-v0.md §10): listed
+   *  as they were, their output sent again from the holder's buffer, their screens redrawn. One whose holder is gone
+   *  is forgotten. Returns how many were taken up. */
+  async restore(): Promise<number> {
+    const hold = this.opts.hold;
+    if (!hold) return 0;
+    let ids: string[];
+    try { ids = readdirSync(hold.dir).filter((d) => existsSync(join(hold.dir, d, "meta.json"))); } catch { return 0; }
+    let taken = 0;
+    for (const id of ids) {
+      if (this.sessions.has(id)) continue;
+      const file = join(hold.dir, id, "meta.json");
+      let kept: KeptTerminal;
+      try { kept = JSON.parse(readFileSync(file, "utf8")) as KeptTerminal; } catch { rmSync(file, { force: true }); continue; }
+      if (kept.v !== 1 || kept.id !== id || !kept.hold?.socket) { rmSync(file, { force: true }); continue; }
+      try {
+        await this.takeUp(kept);
+        taken += 1;
+      } catch (err) {
+        console.error(`terminals: ${id} was not taken up again (${(err as Error).message}); it is forgotten`);
+        rmSync(file, { force: true });
+      }
+    }
+    return taken;
+  }
+
+  private async takeUp(kept: KeptTerminal): Promise<void> {
+    const hold = this.opts.hold!;
+    // What the service made for it first: its hooks and its browser must find this service as they found the last.
+    await hold.restoring?.(kept);
+    const held = await attachHeld(kept.hold, 0);
+    const s = new Session(kept.id, kept.harness, kept.cwd, kept.model, kept.mode, kept.hookToken, kept.createdAt, kept.cols, kept.rows, this.o.scrollback);
+    s.hooks = kept.hooks; s.program = kept.program; s.effort = kept.effort; s.customName = kept.customName; s.givenName = kept.givenName;
+    s.resumedFrom = kept.resumedFrom; s.forked = kept.forked; s.ownSessionId = kept.ownSessionId; s.sessionByHook = kept.sessionByHook;
+    s.profile = kept.profile; s.browserKey = kept.browserKey; s.given = kept.given; s.hold = kept.hold;
+    s.device = this.device(s);
+    if (kept.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
+    s.term.onTitleChange((t) => {
+      const title = cleanTitle(t);
+      if (title === s.title) return;
+      const before = this.nameOf(s);
+      s.title = title;
+      const after = this.nameOf(s);
+      if (after !== before) s.emit({ type: "name", name: after });
+    });
+    if (kept.agentSessionId) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
+    if (kept.companion && hold.companion) s.companion = hold.companion(kept.harness, kept.companion, kept);
+    this.sessions.set(kept.id, s);
+    this.wire(s, held);
+    // The holder sends what it kept; once that is in, the program draws its screen whole again.
+    if (!held.ended) setTimeout(() => { if (s.proc && s.status !== "exited") try { this.redraw(s.id); } catch { /* ended meanwhile */ } }, RESTORE_REDRAW_MS).unref();
   }
 
   list(): TerminalInfo[] {
@@ -945,7 +1121,7 @@ export class TerminalHost {
   /** The user's own name for the terminal; empty or null goes back to the derived one. */
   /** A profile's colour was changed: the terminals open under it carry the new one (docs/profiles-v0.md §3.2). */
   recolor(harness: TerminalHarness, profile: string, color: string): void {
-    for (const s of this.sessions.values()) if (s.harness === harness && s.profile?.id === profile) s.profile = { ...s.profile, color };
+    for (const s of this.sessions.values()) if (s.harness === harness && s.profile?.id === profile) { s.profile = { ...s.profile, color }; this.persist(s); }
   }
 
   rename(id: string, name: string | null): TerminalInfo {
@@ -953,6 +1129,7 @@ export class TerminalHost {
     const cleaned = name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     s.customName = cleaned;
     s.emit({ type: "name", name: this.nameOf(s) });
+    this.persist(s);
     return this.info(s);
   }
 
@@ -1370,6 +1547,7 @@ export class TerminalHost {
     }
     s.agentSessionId = sessionId;
     if (!s.ownSessionId && (!s.resumedFrom || s.forked) && sessionId !== s.resumedFrom) s.ownSessionId = sessionId;
+    this.persist(s);
   }
 
   /** The session terminal `id` started itself, if its agent has reported one. */
@@ -1401,7 +1579,7 @@ export class TerminalHost {
   kill(id: string): void {
     const s = this.need(id);
     if (!s.proc || s.status === "exited") return;
-    const signal = (proc: pty.IPty, sig: NodeJS.Signals) => {
+    const signal = (proc: Pty, sig: NodeJS.Signals) => {
       try { process.kill(-proc.pid, sig); } catch { try { proc.kill(sig); } catch { /* gone already */ } }
     };
     signal(s.proc, "SIGHUP");
@@ -1434,6 +1612,7 @@ export class TerminalHost {
     this.sessions.delete(id);
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.term.dispose();
+    this.unpersist(s);
     this.ended(id, true);
     return info;
   }
@@ -1446,8 +1625,28 @@ export class TerminalHost {
     } catch (err) { console.error(`terminals: ending ${id}: ${(err as Error).message}`); }
   }
 
+  /** The service stops. A held terminal is let go of — its program and its holder stay for the next daemon
+   *  (`restore`), its companion's server too; every other terminal ends. */
   closeAll(): void {
-    for (const id of [...this.sessions.keys()]) this.remove(id);
+    for (const [id, s] of [...this.sessions]) {
+      if (s.proc?.detach && s.status !== "exited") {
+        this.persist(s);
+        s.companion?.detach?.();
+        for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
+        for (const t of [s.idleTimer, s.killTimer, s.heldTimer, s.suggestTimer, s.compactTimer, s.choiceTimer, s.sentTimer, s.progressTimer, s.daybreakTimer]) if (t) clearTimeout(t);
+        s.proc.detach();
+        s.listeners.clear();
+        this.sessions.delete(id);
+        s.term.dispose();
+        continue;
+      }
+      this.remove(id);
+    }
+  }
+
+  /** Every held terminal ends: its program, its holder, what it kept (Linux `service stop`, the Mac's `Quit`). */
+  endHeld(): void {
+    for (const [id, s] of [...this.sessions]) if (s.hold && s.status !== "exited") this.kill(id);
   }
 
   /** Output from the program, cut only between escape sequences (safeCut); a held tail goes out with the next piece,
@@ -1508,6 +1707,7 @@ export class TerminalHost {
     this.noSubagents(s);
     this.setStatus(s, "exited");
     s.emit({ type: "exit", code });
+    this.unpersist(s);
     this.ended(s.id, false);
   }
 

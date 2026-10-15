@@ -4,13 +4,17 @@
  *  The kernel's OOM killer taking one process of the unit does not stop the rest (`OOMPolicy=continue`; systemd's
  *  default, `stop`, ends the whole unit): the unit holds the terminals and everything their agents run, and on
  *  2026-10-14 one agent's 25 GB job, killed alone by the kernel, took every other terminal down with it. The keeper
- *  starts the gate or the daemon again when it was one of them, and systemd the keeper (`Restart=on-failure`). */
+ *  starts the gate or the daemon again when it was one of them, and systemd the keeper (`Restart=on-failure`).
+ *  The terminals' programs are not in this unit: each is held in a scope of its own in `agentswitch-terminals.slice`
+ *  (terminals/held.ts, docs/terminal-v0.md §10), so a restart of the unit leaves them running. `service stop` and
+ *  `uninstall` stop that slice too: the node off is its terminals off. */
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Layout } from "./plan.js";
+import { SLICE } from "../terminals/held.js";
 
 export const UNIT = "agentswitch.service";
 
@@ -74,13 +78,14 @@ export function service(action: string | undefined, l: Layout, env: NodeJS.Proce
       return 0;
     }
     case "uninstall": {
-      if (existsSync(file)) { systemctl("disable", "--now", UNIT); rmSync(file); systemctl("daemon-reload"); console.log(`removed ${file}`); }
+      if (existsSync(file)) { systemctl("disable", "--now", UNIT); systemctl("stop", SLICE); rmSync(file); systemctl("daemon-reload"); console.log(`removed ${file}`); }
       else console.log("the service is not installed");
       return 0;
     }
     case "status": return systemctl("status", "--no-pager", UNIT) === 0 ? 0 : 1;
     case "restart": return systemctl("restart", UNIT);
-    case "stop": return systemctl("stop", UNIT);
+    // The terminals held outside the unit end with it here; `restart` leaves them running.
+    case "stop": return systemctl("stop", UNIT) || systemctl("stop", SLICE);
     case "start": return systemctl("start", UNIT);
     case "logs": return spawnSync("journalctl", ["--user", "-u", UNIT, "-n", "200", "-f"], { stdio: "inherit" }).status ?? 1;
     default:

@@ -15,7 +15,7 @@ import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
 import { DEFAULT_PROFILE, ProfileError, ProfileStore } from "../src/profiles/store.js";
-import { ApiKeyError, ApiKeys } from "../src/profiles/apiKeys.js";
+import { ApiKeyError, ApiKeys, listModels, unknownModel } from "../src/profiles/apiKeys.js";
 import { mountSessions } from "../src/api/sessions.js";
 import { mountTerminals } from "../src/api/terminals.js";
 import { TerminalHost, type LaunchRequest } from "../src/terminals/host.js";
@@ -552,6 +552,8 @@ esac
 
 describe("a profile that pays by a key (§3.6)", () => {
   const SEALED = "enc:v1:" + "A".repeat(40), OTHER = "enc:v1:" + "B".repeat(40);
+  /** No address lists its models here (no network in tests): a model is not checked. */
+  const NO_LIST = async () => null;
   /** The gate, made up: it opens a ciphertext for the one site it was sealed for. */
   const gate = (sealedFor: Record<string, { site: string; value: string }>) => async (token: string, sites: readonly string[]) => {
     const kept = sealedFor[token];
@@ -561,7 +563,7 @@ describe("a profile that pays by a key (§3.6)", () => {
 
   it("is made with its key, a ciphertext the gate opens for where it is sent; the screens are never told the key", async () => {
     const { store, home } = world();
-    const keys = new ApiKeys({ store, resolve: gate({ [SEALED]: { site: "https://api.anthropic.com/", value: "sk-ant-api03-made-up" }, [OTHER]: { site: "https://relay.example/", value: "sk-relay-made-up" } }) });
+    const keys = new ApiKeys({ store, models: NO_LIST, resolve: gate({ [SEALED]: { site: "https://api.anthropic.com/", value: "sk-ant-api03-made-up" }, [OTHER]: { site: "https://relay.example/", value: "sk-relay-made-up" } }) });
     const own = await keys.create("claude-code", "Key", { key: SEALED });
     expect(own).toMatchObject({ name: "Key", kind: "api", api: {} });
     expect(JSON.stringify(store.all())).not.toContain(SEALED);
@@ -586,7 +588,7 @@ describe("a profile that pays by a key (§3.6)", () => {
 
   it("is Codex's too, with no folder of its own; an account profile of Codex's cannot be made yet", async () => {
     const { store, home } = world();
-    const keys = new ApiKeys({ store, resolve: gate({ [SEALED]: { site: "https://api.openai.com/", value: "sk-proj-made-up" } }) });
+    const keys = new ApiKeys({ store, models: NO_LIST, resolve: gate({ [SEALED]: { site: "https://api.openai.com/", value: "sk-proj-made-up" } }) });
     const own = await keys.create("codex", "Key", { key: SEALED });
     expect(store.homeOf("codex", own.id)).toBeNull();
     expect(store.has("codex", own.id)).toBe(true);
@@ -594,7 +596,44 @@ describe("a profile that pays by a key (§3.6)", () => {
     expect(() => store.create("codex", "Team", "subscription")).toThrow(ProfileError);
     expect(() => store.create("pi", "Key", "api", { key: SEALED })).toThrow(ProfileError);
     // Without the gate no key is handed over.
-    await expect(new ApiKeys({ store }).plain("codex", own.id)).rejects.toThrow(/网关/);
+    await expect(new ApiKeys({ store, models: NO_LIST }).plain("codex", own.id)).rejects.toThrow(/网关/);
+  });
+
+  it("refuses a model the address does not list, saying which it was likely meant to be; keeps it when forced, or when the address lists none", async () => {
+    const { store } = world();
+    const asked: { agent: string; baseUrl: string | undefined; key: string }[] = [];
+    const keys = new ApiKeys({ store, resolve: gate({ [OTHER]: { site: "https://relay.example/", value: "sk-relay-made-up" } }),
+      models: async (agent, baseUrl, key) => { asked.push({ agent, baseUrl, key }); return ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]; } });
+    await expect(keys.create("claude-code", "R", { key: OTHER, baseUrl: "https://relay.example", model: "claude-opus-5.5" })).rejects.toThrow(/没有模型 claude-opus-5\.5，是不是 claude-opus-5-5/);
+    expect(asked).toEqual([{ agent: "claude-code", baseUrl: "https://relay.example", key: "sk-relay-made-up" }]);
+    expect(store.all()["claude-code"].profiles.map((p) => p.name)).toEqual(["Default"]);
+    const r = await keys.create("claude-code", "R", { key: OTHER, baseUrl: "https://relay.example", model: "claude-opus-5-5" });
+    await expect(keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "gpt-9" })).rejects.toThrow(/它列出的有：claude-opus-5-5/);
+    await keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "claude-hidden" }, true);
+    expect(store.apiOf("claude-code", r.id)?.model).toBe("claude-hidden");
+    // No model, nothing to ask; an address that lists none is not checked.
+    asked.length = 0;
+    await keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example" });
+    expect(asked).toEqual([]);
+    const quiet = new ApiKeys({ store, models: NO_LIST, resolve: gate({ [OTHER]: { site: "https://relay.example/", value: "sk-relay-made-up" } }) });
+    await quiet.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "anything" });
+  });
+
+  it("asks Anthropic's and OpenAI's own routes for the models, with the key as each agent sends it", async () => {
+    const calls: { url: string; headers: Record<string, string> }[] = [];
+    const fake = (async (url: string, init: { headers: Record<string, string> }) => {
+      calls.push({ url, headers: init.headers });
+      return new Response(JSON.stringify({ data: [{ id: "m1" }, { id: "m2" }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await listModels("claude-code", "https://relay.example/", "k", fake)).toEqual(["m1", "m2"]);
+    expect(await listModels("codex", undefined, "k", fake)).toEqual(["m1", "m2"]);
+    expect(calls.map((c) => c.url)).toEqual(["https://relay.example/v1/models?limit=1000", "https://api.openai.com/v1/models"]);
+    expect(calls[0]!.headers).toMatchObject({ "x-api-key": "k", authorization: "Bearer k", "anthropic-version": "2023-06-01" });
+    expect(calls[1]!.headers).toEqual({ authorization: "Bearer k" });
+    const down = (async () => new Response("no", { status: 404 })) as unknown as typeof fetch;
+    expect(await listModels("claude-code", undefined, "k", down)).toBeNull();
+    expect(unknownModel("claude-opus-5.5", ["claude-opus-5-5"])).toContain("是不是 claude-opus-5-5");
+    expect(unknownModel("totally-else", ["claude-opus-5-5"])).not.toContain("是不是");
   });
 
   it("starts the agent with a command for the key and the address: nothing of the key in its arguments, environment or files", () => {
@@ -622,7 +661,7 @@ describe("a profile that pays by a key (§3.6)", () => {
 
   it("hands the key to the agent of a terminal under it, proven by the terminal's hook token, and to nobody else", async () => {
     const { store } = world();
-    const keys = new ApiKeys({ store, resolve: gate({ [SEALED]: { site: "https://api.openai.com/", value: "sk-proj-made-up" } }) });
+    const keys = new ApiKeys({ store, models: NO_LIST, resolve: gate({ [SEALED]: { site: "https://api.openai.com/", value: "sk-proj-made-up" } }) });
     const own = await keys.create("codex", "Key", { key: SEALED });
     const asked: LaunchRequest[] = [];
     const host = new TerminalHost({ launcher: (req) => { asked.push(req); return { file: "/bin/sh", args: ["-c", "/bin/sleep 30"], env: { PATH: "/usr/bin:/bin" }, hooks: false }; } });

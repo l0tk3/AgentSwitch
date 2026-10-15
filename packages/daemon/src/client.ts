@@ -2,6 +2,7 @@
 
 import type { EngineStatus, EngineUpdateRequest } from "./browser/engine/kit.js";
 import type { Approval, Task, TaskEvent } from "./engine/types.js";
+import type { AgentProfiles, Profile, ProfileAgent, ProfileKind } from "./profiles/store.js";
 import type { Thread, ThreadState } from "./threads/types.js";
 
 /** Rows the CLI lists by default. */
@@ -49,6 +50,16 @@ export class Client {
   consoleLink() { return this.call<{ path: string }>("POST", "/local/console-link", {}); }
   devices() { return this.call<{ id: string; name: string; platform: string; lastSeenAt: number | null; revokedAt: number | null; online: boolean }[]>("GET", "/devices"); }
   revokeDevice(id: string) { return this.call<{ ok: true }>("DELETE", `/devices/${encodeURIComponent(id)}`); }
+  /** docs/profiles-v0.md: every agent's profiles; one made (an API key a ciphertext, §3.6), changed, removed. */
+  profiles() { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("GET", "/profiles"); }
+  createProfile(agent: ProfileAgent, name: string, kind: ProfileKind, api?: { key: string; baseUrl?: string; model?: string; force?: boolean }) {
+    return this.call<{ profile: Profile; agents: Record<ProfileAgent, AgentProfiles> }>("POST", "/profiles", { agent, name, kind, ...(api ? { api } : {}) });
+  }
+  setProfileApi(agent: ProfileAgent, id: string, api: { key: string | null; baseUrl: string | null; model: string | null; force?: boolean }) {
+    return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("PUT", `/profiles/${agent}/${encodeURIComponent(id)}/api`, api);
+  }
+  setProfileColor(agent: ProfileAgent, id: string, color: string) { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("PUT", `/profiles/${agent}/${encodeURIComponent(id)}/color`, { color }); }
+  removeProfile(agent: ProfileAgent, id: string) { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("DELETE", `/profiles/${agent}/${encodeURIComponent(id)}`); }
   /** docs/browser-v0.md §7: the browser engine as installed; `check` asks what could be. */
   browserEngine(opts: { check?: boolean; prerelease?: boolean } = {}) {
     return this.call<EngineStatus>("GET", `/browser/engine${opts.check ? `?check=1${opts.prerelease ? "&prerelease=1" : ""}` : ""}`);

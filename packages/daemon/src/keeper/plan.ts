@@ -25,6 +25,8 @@ export type NodeSettings = {
   readonly router?: "opencode" | "echo";
   /** The addresses to offer instead of the ones found (`AGENTSWITCH_LAN`, remote/address.ts). */
   readonly lan?: string;
+  /** Terminals outlive a restart of the service, each on a holder of its own (docs/terminal-v0.md §10); on unless false. */
+  readonly holdTerminals?: boolean;
 };
 
 export const SETTINGS_FILE = "node.json";
@@ -113,6 +115,9 @@ export function plan(input: { env: NodeJS.ProcessEnv; home: string; gateHome: st
     ...(remote && settings.name?.trim() ? { AGENTSWITCH_REMOTE_NAME: settings.name.trim() } : {}),
     ...(settings.lan?.trim() ? { AGENTSWITCH_LAN: settings.lan.trim() } : {}),
     AGENTSWITCH_EXECUTORS: settings.executors === "echo" ? "echo" : "real",
+    AGENTSWITCH_HOLD_TERMINALS: settings.holdTerminals === false ? "0" : "1",
+    // A terminal outliving this runtime runs its hooks and its browser bridge through `current` (daemon.ts `stable`).
+    ...(l.runtime ? { AGENTSWITCH_RUNTIME_LINK: join(dirname(l.runtime), "current") } : {}),
     ...(settings.router === "echo" ? { AGENTSWITCH_ROUTER: "echo" } : {}),
     SECRET_GATE_HOME: gateHome,
     SECRET_GATE_BIN: l.gate,

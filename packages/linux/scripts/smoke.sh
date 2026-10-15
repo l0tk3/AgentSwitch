@@ -56,6 +56,9 @@ echo "the daemon answers on 127.0.0.1:$port"
 report="$(as doctor || true)"
 echo "$report"
 missing="$(echo "$report" | grep -E '^✗ (node|node-pty|secret-gate|node\.json|keeper|gate|daemon) ' || true)"
+# The terminals' holder (docs/terminal-v0.md §10) is part of a runtime: without it terminals end with the service.
+echo "$report" | grep -qE '^✓ pty-hold ' || missing="${missing:+$missing
+}✗ pty-hold (not in the runtime)"
 if [ -n "$missing" ]; then
   echo "error: the runtime or the service is not whole:" >&2
   echo "$missing" >&2

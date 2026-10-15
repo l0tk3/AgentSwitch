@@ -222,7 +222,7 @@ SessionHost
   - 进行中 / 等你 / 空闲来自 hook 或伴随进程（§3）；两者都没有时按“最近 N 秒有输出”估计进行中，其余为空闲。估计时不把“对刚发过去的东西的回应”算作工作（2026-09-29，用户：闲置状态经常判定为工作中）：全屏的 agent 在等待时也会重画——回显你敲的字、鼠标在屏幕上移动、焦点变化、改尺寸、服务请求的重画——所以写入、改尺寸、重画之后 600 毫秒内的输出不会把空闲的终端变成进行中（已在进行中的照旧保持）。
   - 伴随进程（`Companion`，2026-09-29）：和程序一起启动、替它报状态和权限请求，先于程序启动，可以改程序的启动参数；启动失败就按原计划启动程序，状态靠估计。终端从创建那一刻就在列表里（`pid` 为空），伴随进程启动期间第二次续接同一会话会找到它；期间被删除则不再启动程序。目前只有 OpenCode 用（§3）。
   - 已结束：进程退出，保留最后屏幕与退出码，直到你删除。
-- 服务重启（含 Mac 应用换新版）时伪终端随之结束。v0 不保存终端列表，重启后列表为空；agent 自己的会话记录仍在，出现在会话列表里，可“继续”（§5）。（原计划标“已中断”，未实现。）让终端熬过重启的提案见 §10（2026-10-14，catop）。Mac 的终端窗口在页面收到 401 或网页进程退出时自动重新登录。
+- 服务重启（含 Mac 应用换新版）时伪终端随之结束。v0 不保存终端列表，重启后列表为空；agent 自己的会话记录仍在，出现在会话列表里，可“继续”（§5）。（原计划标“已中断”，未实现。）让终端熬过重启的提案见 §10（2026-10-14，catop）。**Linux 节点上已经不断**（2026-10-15，§10“实现”）：每个终端的程序由自己的持有进程拿着，服务重启后接回，列表、屏幕、hook、浏览器工具照旧；Mac 上等 ⌘Q 的两种选择做好后再开。Mac 的终端窗口在页面收到 401 或网页进程退出时自动重新登录。
 - 打包：`node-pty` 是原生模块，Mac 应用的运行时要带 darwin-arm64 的预编译产物，`build-app.sh` 加检查。
 
 ## 3. hook：状态与权限
@@ -357,7 +357,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 
 ## 10. 提案：服务重启时终端不断
 
-> 作者：catop（2026-10-14）。状态：方向已定（§9 第 5 条），待实现。
+> 作者：catop（2026-10-14）。状态：方向已定（§9 第 5 条）；第一、二步在 Linux 节点上已做（2026-10-15，见本节末“实现”），Mac 上等 ⌘Q 的确认框。
 
 **已定（2026-10-14，用户）。**
 
@@ -396,3 +396,16 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - 浏览器桥：断开后不退出，带同一会话令牌重连几次；会话令牌今天就存在 `browser/sessions/<id>.token`，daemon 重启后要能认回来。
 - 不在范围内：调度的执行器（Agent SDK、Codex app-server、OpenCode serve）仍随服务结束，任务照旧标“已中断”；那要另一套设计。
 - 测试：单元测试用 §8 的假 agent——启动 → 杀 daemon（不杀持有进程）→ 新 daemon 连回 → 屏幕一致、输入可达、序号连续；持有进程被杀 → 终端标为已结束；协议版本不符 → 标为已结束并说明。实机：Linux 上从节点自己的终端里跑一次 `install.sh`，终端不断。
+
+**实现（2026-10-15，catop；Linux 节点上默认开，Mac 上默认关）。** 照上面“已定”与第二步做，几处具体的：
+
+- 持有进程：`packages/daemon/native/pty-hold.c`，约 400 行，macOS 与 Linux 同一份源码（`forkpty`、Unix 套接字、按字节偏移的环形缓冲，每终端 2 MB），编出来 30 KB 左右；`npm run build` 用本机的 C 编译器编它（`native/build.sh` → `native/build/pty-hold`），`build-runtime.sh` 与 `build-app.sh` 把它带进运行时。启动参数和环境（含 hook 令牌）走 stdin，不上命令行。协议：类型一字节 + 四字节长度的帧，`HELLO`（版本、从哪个偏移起、令牌）→ `WELCOME`，之后 `INPUT`、`RESIZE`、`SIGNAL`、`DATA`（带偏移）、`EXIT`、`COLLECT`；版本 1，只增不改。令牌对了才顶替已连着的 daemon（错的连接踢不掉它）。程序在没有 daemon 时结束，持有进程留着退出码等一天。
+- daemon 一侧：`src/terminals/held.ts`（`startHeld`、`attachHeld`、`HeldPty`，用起来和 node-pty 的一样，多一个 `detach`）。终端主机开终端时交给持有进程（起不来就退回 node-pty，日志里一行）；终端的描述写在 `terminals/<id>/meta.json`（0600：有 hook 令牌）。服务停时被持有的终端只是放手（`closeAll`），下一个 daemon 在本地端口开始监听后接回（`restore`）：同一个 id、同一个 pid，持有进程把缓冲里的输出再发一遍，半秒后让程序重画一次屏幕。持有进程已经不在的，忘掉。
+- Linux 上每个持有进程在自己的 scope 里（`systemd-run --user --scope`，`agentswitch-terminals.slice`），不在 `agentswitch.service` 里：服务重启、更新都碰不到它；`agentswitch service stop`、`uninstall` 连这个 slice 一起停。keeper 给 daemon `AGENTSWITCH_HOLD_TERMINALS=1`（`node.json` 写 `"holdTerminals": false` 关掉）。
+- 一起接回的：hook 令牌（`meta.json`）；hook、取 key、浏览器桥的命令经运行时的 `current`（`AGENTSWITCH_RUNTIME_LINK`），换版删掉旧运行时也不失效，`install.sh` 不删还有持有进程在用的那份；配置代理的转发口按原来的端口和密码重新监听（`ExitPool.address` 的 `pin`）；浏览器会话按原来的 id 和令牌认回（`BrowserAgents.adopt`），桥断开后不退出，退避重连两分钟，连上后自己把 agent 当初的 `initialize` 再发一遍（回答不给 agent），其间的调用立刻得到“服务正在重启”的错误；会话被撤销（401）就不再试。
+- 四种 agent 都覆盖：Claude Code、pi、默认的 Codex 只有程序本身；OpenCode 终端的 `serve --stdio` 和 `AGENTSWITCH_CODEX_TERMINAL=server` 时 Codex 的 `app-server` 各自也在一个持有进程里（`…-serve.scope`），`meta.json` 里记着它们的地址与口令，接回后 companion 照旧轮询、改模型。
+- 第一步：`install.sh` 重启前只等 Dispatch 进行中的任务（`queued`、`routing`、`running`、`waiting_approval`），最多 30 分钟（`AGENTSWITCH_UPDATE_WAIT`），每分钟说一次在等什么；`--now` 不等；到点仍忙就把 `current` 切回去，不重启。终端不等。从被持有的终端里跑 `install.sh`，它已不在服务的 cgroup 里，直接在原地重启、查健康、该回退就回退，终端不断。
+- `doctor` 多两行：`pty-hold` 在不在、现在持有几个终端。
+- 验证：单元测试（`tests/heldTerminals.test.ts`，真的持有进程加假 agent：放手再接回后屏幕、hook 令牌、输入都在；daemon 不在时的输出不丢；其间结束的以退出码出现；持有进程没了就忘掉；删除终端连持有进程一起结束；起不来的程序当场说原因；错令牌踢不掉已连的 daemon。`tests/browserBridge.test.ts`：同一端口换一个 daemon，桥自己连回、重新握手、调用照常）。实机（工作站，一次性节点，真的 `systemd-run` scope）：Claude Code 走 API key 配置加配置自己的代理、OpenCode 带它的 serve，各开一个终端；`node restart` 只重启 daemon、以及整个 keeper 停了再起，两次都“2 个接回”，pid 不变，Claude Code 在重启后照常回答（hook 状态 working → idle、取 key、转发口原端口 46113 都通），OpenCode 的 serve 照常应答，两个浏览器桥各自重连上新的 daemon；删除终端后 scope 一并消失。
+- 没做 / 没验证：Mac（`build-app.sh` 已带上持有进程，CI 在 macOS 上编它；开不开等 ⌘Q 的 `Quit` / `Keep Running`，`TerminalHost.endHeld` 就是 `Quit` 要的那一步）；协议升到 2 的那次换版要先说一句（今天只有 1）；每个 scope 的 `MemoryMax`（scope 已经各自一个，设不设、设多少待定）；真的 `install.sh` 换版（从被持有的终端里跑）还没在工作站上走过——这次部署就是第一次。
+

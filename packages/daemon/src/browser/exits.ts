@@ -51,7 +51,7 @@ export class ExitPool {
   /** The forwarder for `key`'s proxy, listening: what a process under it is given as its proxy
    *  (`http://agentswitch:<a password made for this run>@127.0.0.1:<port>`). A proxy with a password is asked of the
    *  gate here; one that cannot be had is refused. */
-  async address(key: string, proxy: ProxySetting | null): Promise<ForwarderAddress> {
+  async address(key: string, proxy: ProxySetting | null, pin?: { readonly port: number; readonly password: string }): Promise<ForwarderAddress> {
     // Without a proxy of its own (a profile's browser, §5.5): the same forwarder with nothing behind it — what goes
     // through it leaves as this Mac does, and it keeps the forwarder's rules (AgentSwitch's own ports are refused).
     const setting = proxy ? JSON.stringify(checkedProxy(proxy)) : "direct";
@@ -59,7 +59,7 @@ export class ExitPool {
     if (exit?.setting !== setting) {
       await exit?.forwarder.stop();
       const upstream = proxy ? await this.upstream(checkedProxy(proxy)) : null;
-      exit = { setting, upstream, forwarder: new Forwarder({ ownPorts: this.opts.ownPorts, upstream: () => upstream, ...(this.opts.log ? { log: this.opts.log } : {}) }) };
+      exit = { setting, upstream, forwarder: new Forwarder({ ownPorts: this.opts.ownPorts, upstream: () => upstream, ...(pin ? { pin } : {}), ...(this.opts.log ? { log: this.opts.log } : {}) }) };
       this.exits.set(key, exit);
     }
     return exit.forwarder.start();

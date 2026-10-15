@@ -17,6 +17,9 @@ import { RequestError, Server } from "proxy-chain";
 import { isLoopbackAddress, isLoopbackHost, OWN_PORT_REFUSAL } from "./rules.js";
 
 export type ForwarderOptions = {
+  /** The port and password a terminal that outlived the last daemon was given (docs/terminal-v0.md §10): its program
+   *  still sends through them. Absent: a free port and a password made now. */
+  readonly pin?: { readonly port: number; readonly password: string };
   readonly ownPorts: () => readonly number[];
   /** The proxy what leaves this Mac goes to (`http://…`, `socks5://…`), or null: straight out. Asked for every request;
    *  throwing refuses the request (502). */
@@ -49,17 +52,18 @@ export function isLocalDestination(hostname: string): boolean {
 
 export class Forwarder {
   private server: Server | null = null;
-  private readonly password = randomBytes(24).toString("base64url");
+  private readonly password: string;
   private readonly resolve: (hostname: string) => Promise<readonly string[]>;
 
   constructor(private readonly opts: ForwarderOptions) {
     this.resolve = opts.resolve ?? systemResolve;
+    this.password = opts.pin?.password ?? randomBytes(24).toString("base64url");
   }
 
   /** Listens (once) and answers what the browser is to be given. */
   async start(): Promise<ForwarderAddress> {
     if (!this.server) {
-      const server = new Server({ port: 0, host: "127.0.0.1", verbose: false, prepareRequestFunction: (req) => this.prepare(req.hostname, req.port, req.password) });
+      const server = new Server({ port: this.opts.pin?.port ?? 0, host: "127.0.0.1", verbose: false, prepareRequestFunction: (req) => this.prepare(req.hostname, req.port, req.password) });
       await server.listen();
       this.server = server;
     }

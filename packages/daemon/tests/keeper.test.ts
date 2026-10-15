@@ -27,6 +27,8 @@ describe("what the keeper starts, with what", () => {
       AGENTSWITCH_REMOTE: "1", AGENTSWITCH_REMOTE_PORT: "4713", AGENTSWITCH_REMOTE_NAME: "dell", AGENTSWITCH_LAN: "wg0",
       AGENTSWITCH_EXECUTORS: "real", SECRET_GATE_HOME: "/home/u/.secret-gate", SECRET_GATE_BIN: "/rt/python/bin/secret-gate",
       SECRET_GATE_PROXY: "http://127.0.0.1:8080",
+      // Terminals outlive a restart (docs/terminal-v0.md §10), their hooks reached through the runtime's `current`.
+      AGENTSWITCH_HOLD_TERMINALS: "1", AGENTSWITCH_RUNTIME_LINK: "/current",
     });
     // No proxy and no key from the keeper's own environment: the node's traffic goes the machine's way.
     expect(daemonEnv).not.toHaveProperty("HTTPS_PROXY");
@@ -38,6 +40,8 @@ describe("what the keeper starts, with what", () => {
   it("turns remote access off, echo on, and a missing LANG into C.UTF-8 when told", () => {
     const { daemonEnv } = plan({ env: { HOME: "/h" }, home: "/h/.a", gateHome: "/h/.s", settings: { remote: false, executors: "echo", router: "echo", name: "x" }, ports: { ...DEFAULT_PORTS }, layout: LAYOUT, path: "/bin" });
     expect(daemonEnv).toMatchObject({ AGENTSWITCH_REMOTE: "0", AGENTSWITCH_EXECUTORS: "echo", AGENTSWITCH_ROUTER: "echo", LANG: "C.UTF-8" });
+    expect(plan({ env: { HOME: "/h" }, home: "/h/.a", gateHome: "/h/.s", settings: { holdTerminals: false }, ports: { ...DEFAULT_PORTS }, layout: { ...LAYOUT, runtime: null }, path: "/bin" }).daemonEnv)
+      .toMatchObject({ AGENTSWITCH_HOLD_TERMINALS: "0" });
     expect(daemonEnv).not.toHaveProperty("AGENTSWITCH_REMOTE_PORT");
     expect(daemonEnv).not.toHaveProperty("AGENTSWITCH_REMOTE_NAME");
   });

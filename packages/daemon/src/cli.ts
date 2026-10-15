@@ -26,6 +26,10 @@
  *                               app does on a Mac); `name` names it; `restart` restarts the daemon with node.json
  *   service install | uninstall | status | start | stop | restart | logs   the systemd user service that runs `node run`
  *   doctor                      what this node has and lacks: runtime, service, agents and their sign-ins, tools
+ *   profiles [new | api | color | rm …]   the agents' profiles (docs/profiles-v0.md), what the Mac's Settings › Agents
+ *                               does: `new <agent> "<name>" [--api] [--base-url u] [--model m]`, `api <agent> <profile>
+ *                               [--base-url u] [--model m] [--key]` (a key asked for, never echoed, sealed by this
+ *                               node's gate), `color`, `rm`; with --on, listing only (keeper/profiles.ts)
  *   console [--open]            a one-time link that signs a browser on this machine into the web console
  */
 
@@ -53,6 +57,7 @@ import { layout, readSettings, writeSettings } from "./keeper/plan.js";
 import { qrLines } from "./keeper/qr.js";
 import { homes, runningKeeper, runNode } from "./keeper/run.js";
 import { service } from "./keeper/systemd.js";
+import { profilesCommand, readKey, sealWithGate } from "./keeper/profiles.js";
 
 const cfg = defaultConfig();
 // A node without the Mac app keeps its ports in node.json (keeper/plan.ts); the commands find its service there too.
@@ -98,6 +103,12 @@ const { values, positionals } = parseArgs({
     "one-way": { type: "boolean", default: false },
     both: { type: "boolean", default: false },
     "token-file": { type: "string" },
+    // profiles (keeper/profiles.ts)
+    api: { type: "boolean", default: false },
+    "base-url": { type: "string" },
+    model: { type: "string" },
+    key: { type: "boolean", default: false },
+    force: { type: "boolean", default: false },
     // Added by `secret-gate browser` for a Playwright MCP of its own; the bridge has no files of its own to put there.
     "output-dir": { type: "string" },
   },
@@ -166,7 +177,7 @@ async function watchInteractive(id: string): Promise<void> {
   }
 }
 
-const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | console; --on <node>";
+const USAGE = "usage: serve | engine | task | tasks | show | watch | approve | cancel | handoff | threads | thread | archive | reopen | rmthread | approvals | quota | preview | log | mcp | skills | health | context init | route | reroute | browser-mcp | pair | devices | nodes [add|remove] | node [run|name|restart] | service | doctor | profiles [new|api|color|rm] | console; --on <node>";
 
 const ago = (ts: number | null): string => {
   if (ts === null) return "never";
@@ -351,6 +362,16 @@ async function main(): Promise<number> {
     }
     case "service": return service(a1, layout());
     case "doctor": return doctor();
+    case "profiles": {
+      const gate = { bin: layout().gate, home: homes().gateHome };
+      return profilesCommand(positionals.slice(1), { api: values.api, baseUrl: values["base-url"], model: values.model, key: values.key, force: values.force, json: values.json, remote: Boolean(values.on) }, {
+        client, readKey: (prompt) => readKey(prompt), print: (line) => console.log(line),
+        seal: (host, value) => {
+          if (!existsSync(gate.bin)) throw new Error(`no secret-gate at ${gate.bin}: the key is sealed by this node's gate`);
+          return sealWithGate(gate, host, value);
+        },
+      });
+    }
     case "console": {
       const { path } = await here.consoleLink();
       const url = `${values.server}${path}`;

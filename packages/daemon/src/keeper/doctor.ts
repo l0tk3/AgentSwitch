@@ -2,7 +2,7 @@
  *  node without one. Every line is one thing: found or not, and what to do when not. Nothing is changed. */
 
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import { which } from "../util/which.js";
 import { homes, probeDaemon, probeGate, runningKeeper } from "./run.js";
 import { AGENT_BINS, layout, loginShellPath, mergedPath, portsOf, readSettings } from "./plan.js";
 import { lingers, unitPath } from "./systemd.js";
+import { HOLDER_BINARY, SLICE } from "../terminals/held.js";
 
 const run = promisify(execFile);
 type Mark = "ok" | "no" | "warn";
@@ -37,6 +38,7 @@ export async function doctor(env: NodeJS.ProcessEnv = process.env): Promise<numb
   catch (e) { say("no", "node-pty", `does not load: ${(e as Error).message.split("\n")[0]} — the terminals need it`); }
   say(existsSync(l.gate) ? "ok" : "no", "secret-gate", existsSync(l.gate) ? l.gate : `not at ${l.gate}`);
   say(l.runtime ? "ok" : "warn", "installed", l.runtime ?? "running from a checkout");
+  say(existsSync(HOLDER_BINARY) ? "ok" : "warn", "pty-hold", existsSync(HOLDER_BINARY) ? "terminals outlive a restart of the service" : `not at ${HOLDER_BINARY}: terminals end with the service (npm run build:native)`);
 
   section("service");
   let ports = { local: 4711, opencode: 4712, remote: 4713, gate: 8080 };
@@ -45,6 +47,8 @@ export async function doctor(env: NodeJS.ProcessEnv = process.env): Promise<numb
   say(keeper ? "ok" : "no", "keeper", keeper ? `pid ${keeper}` : "not running: agentswitch service start (or agentswitch node run)");
   say(await probeGate(ports.gate) ? "ok" : "no", "gate", `127.0.0.1:${ports.gate}; keys in ${gateHome}`);
   say(await probeDaemon(ports.local) ? "ok" : "no", "daemon", `127.0.0.1:${ports.local}; home ${asHome}`);
+  const held = (() => { try { return readdirSync(join(asHome, "terminals")).filter((d) => existsSync(join(asHome, "terminals", d, "meta.json"))).length; } catch { return 0; } })();
+  say("ok", "terminals", held ? `${held} held, in ${SLICE}` : "none held now");
   const unit = unitPath(env);
   say(existsSync(unit) ? "ok" : "warn", "systemd", existsSync(unit) ? unit : "no user service: agentswitch service install");
   say(lingers() ? "ok" : "warn", "linger", lingers() ? "the service runs with nobody logged in" : `stops at logout: loginctl enable-linger ${env.USER ?? ""}`);

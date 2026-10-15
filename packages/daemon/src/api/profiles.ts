@@ -14,7 +14,9 @@ import { parseBody, type ApiDeps } from "./shared.js";
 
 const Agent = z.enum(PROFILE_AGENTS);
 /** How a profile that pays by a key reaches its model: the key (a ciphertext), another address, a model's name. */
-const Api = z.object({ key: z.string().max(4000).optional(), baseUrl: z.string().max(300).nullable().optional(), model: z.string().max(120).nullable().optional() });
+const Api = z.object({ key: z.string().max(4000).optional(), baseUrl: z.string().max(300).nullable().optional(), model: z.string().max(120).nullable().optional(),
+  /** Keep a model the address does not list (a relay that serves more than it lists). */
+  force: z.boolean().optional() });
 const failed = (err: unknown): { status: 400 | 404 | 409; error: string } =>
   err instanceof ProfileError ? { status: err.code === "not_found" ? 404 : err.code === "conflict" ? 409 : 400, error: err.message } : { status: 400, error: (err as Error).message };
 
@@ -47,7 +49,7 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
       if (body.data.kind === "api") {
         if (!body.data.api?.key) return c.json({ error: "a profile that pays by a key needs the key" }, 400);
         if (!deps.apiKeys) return c.json({ error: "this service cannot keep an API key" }, 503);
-        const profile = await deps.apiKeys.create(body.data.agent, body.data.name, { key: body.data.api.key.trim(), baseUrl: body.data.api.baseUrl?.trim() || undefined, model: body.data.api.model?.trim() || undefined });
+        const profile = await deps.apiKeys.create(body.data.agent, body.data.name, { key: body.data.api.key.trim(), baseUrl: body.data.api.baseUrl?.trim() || undefined, model: body.data.api.model?.trim() || undefined }, body.data.api.force === true);
         return c.json(made(profile.id), 201);
       }
       const profile = store.create(body.data.agent, body.data.name, body.data.kind);
@@ -68,7 +70,7 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
     const body = await parseBody(c, Api.extend({ key: z.string().max(4000).nullable().default(null) }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     if (!deps.apiKeys) return c.json({ error: "this service cannot keep an API key" }, 503);
-    try { await deps.apiKeys.set(agent.data, c.req.param("id"), { key: body.data.key?.trim() || null, baseUrl: body.data.baseUrl?.trim() || undefined, model: body.data.model?.trim() || undefined }); }
+    try { await deps.apiKeys.set(agent.data, c.req.param("id"), { key: body.data.key?.trim() || null, baseUrl: body.data.baseUrl?.trim() || undefined, model: body.data.model?.trim() || undefined }, body.data.force === true); }
     catch (err) {
       if (err instanceof ApiKeyError) return c.json({ error: err.message }, 400);
       const f = failed(err); return c.json({ error: f.error }, f.status);
