@@ -110,6 +110,10 @@
 >   - **换终端时刷新**（2026-10-02，用户反馈 Mac 上切换终端没有扫描线效果）：原生画面换到另一个终端、第一次从快照画出时，屏幕自上而下刷出、一条扫描线在前，比网页和页间切换快：9 步、0.18 秒（ui-v0 §7.4）。还没刷到的部分是终端配色的底色，扫描线用前景色（90%）。只盖屏幕（垫在网页下面、原生画面上面的一层，不接收鼠标），权限卡片等浮层照常在上面；重画、改尺寸、重连不刷；主窗口正在放页间切换的刷新时（如在 Dispatch 按 ⌘1–9）让给它，不叠两层；“减少动态效果”时不放。浏览器里的网页终端照旧是自己的 0.26 秒。
 >   - **输入法的未上屏文字**（2026-09-30，用户拿 iTerm 对比：拼音 `zhong` 在 iTerm 里就在光标处、带下划线，候选框对齐；这里前面多一个方块光标，候选框偏开）：SwiftTerm 把未上屏的文字放在一个浮起来的文本框里（自带内边距、半透明圆角底），方块光标照旧显示；`firstRect` 总是返回光标的格子，候选框不跟着字走。相关状态是 SwiftTerm 的私有成员，子类改不干净，所以把 SwiftTerm 1.18.0 的库原样放进 `packages/mac-app/Vendor/SwiftTerm`（手机仍用上游包，它的画面不接键盘），在那里改：未上屏的文字按终端自己的画法画在光标所在的格子上（宽字符占两格、居中，同一基线，盖住下面的格子），整段细下划线、正在转换的那一段粗下划线，输入法的插入点是一条细竖线；输入期间方块光标隐藏，结束后恢复；`firstRect` 返回输入法问的那个字符所在的格子（候选框落在它下面），`selectedRange` 在输入期间返回输入法自己的选区。改动见 `Vendor/SwiftTerm/PATCHES.md`。探针实测：`zhong` 画在光标格上、下划线、细光标在末尾，第 5 个字符的位置 = 起点 + 5 格；`中文` 占 4 格，第 1 个字符之后 = 起点 + 2 格；结束后选区回到光标。
 >   - **拖放**（2026-09-30，用户：往终端里拖文件没反应）：SwiftTerm 的 Mac 视图不接拖放，上面透明的网页又先接住了拖动，所以原来拖进来什么都不发生。现在网页视图把落在画面区域（浮层以外）的拖放转给原生画面，其余照旧给网页：文件按 iTerm 的样子输入路径——空格和 shell 特殊字符前加反斜杠，几个文件用空格隔开，程序开了 bracketed paste 时作为一次粘贴（Claude Code 把图片路径变成 `[Image #n]`，实测文件名带空格的图片也能）；拖进来的文字、网页链接原样粘贴。拖放算主动操作，尺寸归这个窗口。规则在 `AgentSwitchMacCore/TerminalDrop.swift`，测试 `TerminalDropTests`。
+>     - 2026-10-15 改：拖到**另一个节点**的终端上的文件不再拒收（原来提示“请拖到简略视图的回复框”）。这台 Mac 上的路径在那边没有意义，所以把文件发过去：先 `POST /uploads`，再 `POST /terminals/:id/attach`，由那个节点粘贴文件在它那边的路径，和手机发文件同一条路。文件夹和超过 50 MB 的文件不发，在输出下面用一行说明。
+>   - **粘贴图片**（2026-10-15，用户：无法远程 paste image）：SwiftTerm 的 ⌘V 只粘贴剪贴板里的文字，所以剪贴板里只有图片（截图、从预览复制的图）时什么都不发生。按 Ctrl+V 是让 agent 自己去读剪贴板，而远程终端里的 agent 读到的是那个节点的剪贴板。现在按 ⌘V 时，剪贴板里**只有图片没有文字**，就把图片存成 PNG 发给终端所在的节点（本机也一样），走上一条的 `/uploads` + `/attach`，由它粘贴路径，Claude Code 会显示成 `[Image #n]`。剪贴板里是**文件**（在访达里复制的）而终端在另一个节点上时，把文件发过去。其余情况照旧粘贴文字，包括在本机复制的文件（访达同时放了文件名作文字）。文件的路径排在 ⌘V 之前已经打的字后面。**Ctrl+V 不改**，照旧交给程序（用户 2026-10-15：先不更改 ctrl+v 原始的功能）。规则在 `AgentSwitchMacCore/TerminalDrop.swift` 的 `TerminalPaste`，测试 `TerminalPasteTests`。
+>   - **换终端时回到底部**（2026-10-15，用户：当 A session 向上滚动而非处于最下方时，切到 B 也会发现向上滚动且滚动了更大的范围）：一块屏幕换到另一个终端时，复用同一个 SwiftTerm 画面，先清空，再画新终端的快照。SwiftTerm 清空时不会重置“用户往上翻过”这个标记（`userScrolling`）；清空后视口在新缓冲区的顶端，而这个标记让视口不跟着输出往下走，所以画完快照后 B 停在它历史记录的顶端附近。这和远程无关，本机也会出现。在 vendored 的 SwiftTerm 里改：清空时把这个标记一并清掉（`Vendor/SwiftTerm/PATCHES.md`“A reset follows the bottom again”，测试 `ResetScrollTests`）。网页终端（xterm.js）清空时本来就会重置，不受影响。手机用的是上游的 SwiftTerm，没有改。
+>   - **在编辑器中打开**（2026-10-15，用户：考虑能添加机器的 ssh 别名，这样当 mac 也能通过 ssh 连接到远程工作站时，可以 app 端加一个按钮，直接调用 vscode remote 跳到当前工作目录）：窗口顶栏多一个 `</>` 按钮（Classic 外观里是代码图标，对当前这块的终端；2026-10-15 补，用户：似乎没有vscode 或者 yazi 图标——原来只放在每块的标题栏里，而只有一块时没有标题栏），分屏后每块的标题栏也有一个，列表里终端的右键菜单多一项 `Open in VS Code`，都是用编辑器打开 agent **当前**所在的文件夹（`workdir`，没有就用启动时的文件夹）。本机终端打开 `vscode://file/<路径>`；另一个节点上的终端打开 `vscode://vscode-remote/ssh-remote+<SSH Host>/<路径>`，由编辑器的 Remote - SSH 连过去。SSH Host 在 设置 › Nodes 每个节点的行里填，例如 `~/.ssh/config` 里的 Host，也可以写 `user@地址`。它只保存在这台 Mac 上（`node.sshHost.<节点 id>`），不同步给别处，因为只有这台 Mac 的 ssh 认得它；不再使用这个节点时一起删掉。没填就点按钮时，页脚提示去哪里填。编辑器在 设置 › General › Terminals 里选（用户 2026-10-15：可以做成可选项），默认 Visual Studio Code，也可以选 Cursor、Windsurf、VSCodium，它们认同样的链接。规则在 `AgentSwitchMacCore/Terminals/EditorLink.swift`，测试 `EditorLinkTests`（路径里的空格、`#`、`?`、中文都会转义；Host 里只允许 ssh 认的字符，不能以 `-` 开头）。手机和网页终端没有做。
 >   - **列表的筛选**（2026-10-11，用户贴搜索框：这里要加上筛选某个agent的会话 和筛选活跃会话的功能）：搜索框下面一行。左边是列表里出现的各 agent 的标记，点一个只看它的终端和会话，再点一次回到全部；右边 `Active`，只看活跃的：还在运行的终端，加上服务认为正在被写的会话（在别的程序里开着的那种；服务的 `active`，90 秒内有更新）。两样可以同时开；搜索在筛选后的结果里找。留下的文件夹位置和名字不变，筛完什么都不剩的文件夹不显示，文件夹上的数量是筛选后的；一条不剩时写“没有符合筛选条件的会话。”。筛选和折叠的文件夹一样记着。列表里只有一种 agent 时不列标记。Mac 的原生列表做了；网页列表和 iPhone 没做。演示页 `terminal.html` 同加（在那里也真的筛）。
 >     - 验证：规则有单元测试（`TerminalTreeTests`）；`-designPreviewOnly terminals` 多出 `terminals-filter`、`terminals-filter-active`、`terminals-filter-none` 三张，两种外观都看过；演示页在共用浏览器里点过。没有在装上的应用里点过。
 >   - **Control+回车是程序自己的键**（2026-10-11，用户：我的 ctrl+enter 打开的是这东西，立即发送的快捷键被吃了——按下去弹出的是列表里那一行的右键菜单 `Rename / Open in New Window / Close`）：macOS 15 起 ⌃↩ 是系统的“显示上下文菜单”键（系统设置 › 键盘 › 键盘快捷键里可改）。AppKit 在分发按键时先拿它去对这个快捷键（`NSApplication sendEvent:` → `routeKeyEquivalent` → `_NSKeyboardUIHandleSymbolicHotKeyEvent`），对上了就向键盘所在的视图发 `showContextMenuForSelection:`，按键本身不再送达；终端画面没有自己的菜单，这个动作顺着往上传，SwiftUI 就把选中那一行的菜单弹了出来。现在两处改：画面的按键监视（在 AppKit 分发之前）把只带 Control 的回车和小键盘 Enter 直接交给 SwiftTerm，由它按程序要的方式发（开了 kitty 键盘协议发 `CSI 13;5u`，否则发换行 `0a`）；画面自己接下 `showContextMenuForSelection:` 不再上传，把当时的按键交给程序（快捷键被改成别的键时走这一条）。单独窗口里的终端用的是同一个画面，一并生效。
@@ -240,7 +244,7 @@ SessionHost
   - 进行中 / 等你 / 空闲来自 hook 或伴随进程（§3）；两者都没有时按“最近 N 秒有输出”估计进行中，其余为空闲。估计时不把“对刚发过去的东西的回应”算作工作（2026-09-29，用户：闲置状态经常判定为工作中）：全屏的 agent 在等待时也会重画——回显你敲的字、鼠标在屏幕上移动、焦点变化、改尺寸、服务请求的重画——所以写入、改尺寸、重画之后 600 毫秒内的输出不会把空闲的终端变成进行中（已在进行中的照旧保持）。
   - 伴随进程（`Companion`，2026-09-29）：和程序一起启动、替它报状态和权限请求，先于程序启动，可以改程序的启动参数；启动失败就按原计划启动程序，状态靠估计。终端从创建那一刻就在列表里（`pid` 为空），伴随进程启动期间第二次续接同一会话会找到它；期间被删除则不再启动程序。目前只有 OpenCode 用（§3）。
   - 已结束：进程退出，保留最后屏幕与退出码，直到你删除。
-- 服务重启（含 Mac 应用换新版）时伪终端随之结束。v0 不保存终端列表，重启后列表为空；agent 自己的会话记录仍在，出现在会话列表里，可“继续”（§5）。（原计划标“已中断”，未实现。）让终端熬过重启的提案见 §10（2026-10-14，catop）。Mac 的终端窗口在页面收到 401 或网页进程退出时自动重新登录。
+- 服务重启（含 Mac 应用换新版）时伪终端随之结束。v0 不保存终端列表，重启后列表为空；agent 自己的会话记录仍在，出现在会话列表里，可“继续”（§5）。（原计划标“已中断”，未实现。）让终端熬过重启的提案见 §10（2026-10-14，catop）。**Linux 节点上已经不断**（2026-10-15，§10“实现”）：每个终端的程序由自己的持有进程拿着，服务重启后接回，列表、屏幕、hook、浏览器工具照旧；Mac 上等 ⌘Q 的两种选择做好后再开。Mac 的终端窗口在页面收到 401 或网页进程退出时自动重新登录。
 - 打包：`node-pty` 是原生模块，Mac 应用的运行时要带 darwin-arm64 的预编译产物，`build-app.sh` 加检查。
 
 ## 3. hook：状态与权限
@@ -375,7 +379,7 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 
 ## 10. 提案：服务重启时终端不断
 
-> 作者：catop（2026-10-14）。状态：方向已定（§9 第 5 条），待实现。
+> 作者：catop（2026-10-14）。状态：方向已定（§9 第 5 条）；第一、二步在 Linux 节点上已做（2026-10-15，见本节末“实现”），Mac 上等 ⌘Q 的确认框。
 
 **已定（2026-10-14，用户）。**
 
@@ -414,3 +418,16 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - 浏览器桥：断开后不退出，带同一会话令牌重连几次；会话令牌今天就存在 `browser/sessions/<id>.token`，daemon 重启后要能认回来。
 - 不在范围内：调度的执行器（Agent SDK、Codex app-server、OpenCode serve）仍随服务结束，任务照旧标“已中断”；那要另一套设计。
 - 测试：单元测试用 §8 的假 agent——启动 → 杀 daemon（不杀持有进程）→ 新 daemon 连回 → 屏幕一致、输入可达、序号连续；持有进程被杀 → 终端标为已结束；协议版本不符 → 标为已结束并说明。实机：Linux 上从节点自己的终端里跑一次 `install.sh`，终端不断。
+
+**实现（2026-10-15，catop；Linux 节点上默认开，Mac 上默认关）。** 照上面“已定”与第二步做，几处具体的：
+
+- 持有进程：`packages/daemon/native/pty-hold.c`，约 400 行，macOS 与 Linux 同一份源码（`forkpty`、Unix 套接字、按字节偏移的环形缓冲，每终端 2 MB），编出来 30 KB 左右；`npm run build` 用本机的 C 编译器编它（`native/build.sh` → `native/build/pty-hold`），`build-runtime.sh` 与 `build-app.sh` 把它带进运行时。启动参数和环境（含 hook 令牌）走 stdin，不上命令行。协议：类型一字节 + 四字节长度的帧，`HELLO`（版本、从哪个偏移起、令牌）→ `WELCOME`，之后 `INPUT`、`RESIZE`、`SIGNAL`、`DATA`（带偏移）、`EXIT`、`COLLECT`；版本 1，只增不改。令牌对了才顶替已连着的 daemon（错的连接踢不掉它）。程序在没有 daemon 时结束，持有进程留着退出码等一天。
+- daemon 一侧：`src/terminals/held.ts`（`startHeld`、`attachHeld`、`HeldPty`，用起来和 node-pty 的一样，多一个 `detach`）。终端主机开终端时交给持有进程（起不来就退回 node-pty，日志里一行）；终端的描述写在 `terminals/<id>/meta.json`（0600：有 hook 令牌）。服务停时被持有的终端只是放手（`closeAll`），下一个 daemon 在本地端口开始监听后接回（`restore`）：同一个 id、同一个 pid，持有进程把缓冲里的输出再发一遍，半秒后让程序重画一次屏幕。持有进程已经不在的，忘掉。
+- Linux 上每个持有进程在自己的 scope 里（`systemd-run --user --scope`，`agentswitch-terminals.slice`），不在 `agentswitch.service` 里：服务重启、更新都碰不到它；`agentswitch service stop`、`uninstall` 连这个 slice 一起停。keeper 给 daemon `AGENTSWITCH_HOLD_TERMINALS=1`（`node.json` 写 `"holdTerminals": false` 关掉）。
+- 一起接回的：hook 令牌（`meta.json`）；hook、取 key、浏览器桥的命令经运行时的 `current`（`AGENTSWITCH_RUNTIME_LINK`），换版删掉旧运行时也不失效，`install.sh` 不删还有持有进程在用的那份；配置代理的转发口按原来的端口和密码重新监听（`ExitPool.address` 的 `pin`）；浏览器会话按原来的 id 和令牌认回（`BrowserAgents.adopt`），桥断开后不退出，退避重连两分钟，连上后自己把 agent 当初的 `initialize` 再发一遍（回答不给 agent），其间的调用立刻得到“服务正在重启”的错误；会话被撤销（401）就不再试。
+- 四种 agent 都覆盖：Claude Code、pi、默认的 Codex 只有程序本身；OpenCode 终端的 `serve --stdio` 和 `AGENTSWITCH_CODEX_TERMINAL=server` 时 Codex 的 `app-server` 各自也在一个持有进程里（`…-serve.scope`），`meta.json` 里记着它们的地址与口令，接回后 companion 照旧轮询、改模型。
+- 第一步：`install.sh` 重启前只等 Dispatch 进行中的任务（`queued`、`routing`、`running`、`waiting_approval`），最多 30 分钟（`AGENTSWITCH_UPDATE_WAIT`），每分钟说一次在等什么；`--now` 不等；到点仍忙就把 `current` 切回去，不重启。终端不等。从被持有的终端里跑 `install.sh`，它已不在服务的 cgroup 里，直接在原地重启、查健康、该回退就回退，终端不断。
+- `doctor` 多两行：`pty-hold` 在不在、现在持有几个终端。
+- 验证：单元测试（`tests/heldTerminals.test.ts`，真的持有进程加假 agent：放手再接回后屏幕、hook 令牌、输入都在；daemon 不在时的输出不丢；其间结束的以退出码出现；持有进程没了就忘掉；删除终端连持有进程一起结束；起不来的程序当场说原因；错令牌踢不掉已连的 daemon。`tests/browserBridge.test.ts`：同一端口换一个 daemon，桥自己连回、重新握手、调用照常）。实机（工作站，一次性节点，真的 `systemd-run` scope）：Claude Code 走 API key 配置加配置自己的代理、OpenCode 带它的 serve，各开一个终端；`node restart` 只重启 daemon、以及整个 keeper 停了再起，两次都“2 个接回”，pid 不变，Claude Code 在重启后照常回答（hook 状态 working → idle、取 key、转发口原端口 46113 都通），OpenCode 的 serve 照常应答，两个浏览器桥各自重连上新的 daemon；删除终端后 scope 一并消失。
+- 没做 / 没验证：Mac（`build-app.sh` 已带上持有进程，CI 在 macOS 上编它；开不开等 ⌘Q 的 `Quit` / `Keep Running`，`TerminalHost.endHeld` 就是 `Quit` 要的那一步）；协议升到 2 的那次换版要先说一句（今天只有 1）；每个 scope 的 `MemoryMax`（scope 已经各自一个，设不设、设多少待定）；真的 `install.sh` 换版（从被持有的终端里跑）还没在工作站上走过——这次部署就是第一次。
+

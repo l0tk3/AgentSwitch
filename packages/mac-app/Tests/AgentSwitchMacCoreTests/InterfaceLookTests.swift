@@ -63,6 +63,8 @@ final class InterfaceLookTests: XCTestCase {
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarNew), "plus")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSettings), "slider.horizontal.3")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSplitRight), "rectangle.righthalf.inset.filled", "the half a split adds, filled in")
+        XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarCode), "chevron.left.forwardslash.chevron.right", "the code editor")
+        XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarYazi), "rectangle.split.3x1", "yazi beside the terminal")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.toolbarSplitDown), "rectangle.bottomhalf.inset.filled")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.railTerminals), "terminal")
         XCTAssertEqual(PixelArt.symbol(for: PixelArt.railBrowser), "globe")

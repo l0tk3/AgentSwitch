@@ -1,6 +1,6 @@
 /** What this node lets the nodes and phones paired with it do beyond the remote list's own rules (docs/mesh-v0.md §10):
  *  keystrokes as they are into a terminal; reading this node's files, and how much of them each device may read
- *  (docs/files-v0.md §7.5). Set on the node itself, like everything a node decides about itself; kept in
+ *  (docs/files-v0.md §7.5); tool terminals (docs/yazi-v0.md §3). Set on the node itself, like everything a node decides about itself; kept in
  *  `$AGENTSWITCH_HOME/mesh.json`. */
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -19,9 +19,12 @@ export type MeshSettings = {
   readonly changes: boolean;
   /** Each device's reach, by its id; a device not here has `DEFAULT_SCOPE`. */
   readonly scopes: Readonly<Record<string, FileScope>>;
+  /** A paired node (not a phone) may open a tool terminal (yazi) beside a terminal here, and see and use the ones open
+   *  (docs/yazi-v0.md §3). Off by default: yazi runs shell commands, and nothing asks first. */
+  readonly tools: boolean;
 };
 
-export const DEFAULT_MESH: MeshSettings = { keyboard: true, files: true, changes: true, scopes: {} };
+export const DEFAULT_MESH: MeshSettings = { keyboard: true, files: true, changes: true, scopes: {}, tools: false };
 const FILE = "mesh.json";
 const MODES: readonly ScopeMode[] = ["home", "all", "folders", "none"];
 
@@ -45,7 +48,7 @@ export function loadMesh(home: string): MeshSettings {
   let settings = DEFAULT_MESH;
   if (existsSync(path)) {
     try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as { keyboard?: unknown; files?: unknown; changes?: unknown; scopes?: unknown };
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as { keyboard?: unknown; files?: unknown; changes?: unknown; scopes?: unknown; tools?: unknown };
       const scopes: Record<string, FileScope> = {};
       if (parsed.scopes && typeof parsed.scopes === "object") {
         for (const [id, raw] of Object.entries(parsed.scopes as Record<string, unknown>)) { const s = scopeFrom(raw); if (s) scopes[id] = s; }
@@ -55,6 +58,7 @@ export function loadMesh(home: string): MeshSettings {
         files: typeof parsed.files === "boolean" ? parsed.files : DEFAULT_MESH.files,
         changes: typeof parsed.changes === "boolean" ? parsed.changes : DEFAULT_MESH.changes,
         scopes,
+        tools: typeof parsed.tools === "boolean" ? parsed.tools : DEFAULT_MESH.tools,
       };
     } catch { /* an unreadable file is the default */ }
   }

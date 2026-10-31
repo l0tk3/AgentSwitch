@@ -92,6 +92,45 @@ final class TerminalsPageRulesTests: XCTestCase {
         XCTAssertEqual(all[11], "└─ less")
     }
 
+    /// yazi beside a terminal (docs/yazi-v0.md): no folder's own, not counted, no ⌘ number; a step under its agent
+    /// terminal, after its sub-agents.
+    func testAToolTerminalIsListedUnderItsAgentTerminalAfterItsSubagents() {
+        let yazi = TerminalInfo(id: "y1", harness: "yazi", cwd: "/Users/u/Work/api/src", name: "src", status: "idle", createdAt: 30, parent: "t1")
+        let agents = tree.terminals
+        let all = agents + [yazi]
+        let folders = TerminalTree.build(terminals: all, sessions: [])
+        XCTAssertEqual(TerminalTree.order(folders).map(\.id), ["t1", "t2"])
+        XCTAssertFalse(folders.contains { $0.cwd == "/Users/u/Work/api/src" })
+        let order = TerminalListRows.order(all.filter { !$0.isTool })
+        XCTAssertEqual(lines(TerminalListRows.build(folders, order: order, tools: all.filter(\.isTool))), [
+            "api/ open live 2! sessions 0",
+            "├─ t1 #1", "│\u{a0}├─ sub 找入口", "│\u{a0}├─ sub 看测试", "│\u{a0}└─ y1 #-", "└─ t2 #2",
+        ])
+        // Under the last terminal of a folder, the branch below it is blank.
+        let late = TerminalInfo(id: "y2", harness: "yazi", cwd: "/Users/u/Work/api", name: "api", status: "idle", createdAt: 40, parent: "t2")
+        XCTAssertEqual(lines(TerminalListRows.build(TerminalTree.build(terminals: agents + [late], sessions: []), order: order, tools: [late])).suffix(2),
+                       ["└─ t2 #2", "\u{a0}\u{a0}└─ y2 #-"])
+    }
+
+    func testATerminalSaysWhetherItIsATool() throws {
+        let data = Data(#"{"id":"y1","harness":"yazi","cwd":"/w","name":"w","status":"idle","parent":"t1"}"#.utf8)
+        let yazi = try JSONDecoder().decode(TerminalInfo.self, from: data)
+        XCTAssertEqual(yazi.parent, "t1")
+        XCTAssertTrue(yazi.isTool)
+        let older = try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex","cwd":"/w","name":"w","status":"idle"}"#.utf8))
+        XCTAssertNil(older.parent)
+        XCTAssertFalse(older.isTool)
+    }
+
+    func testTheToolsSwitchIsLeftOutWhenTheServiceDoesNotKnowIt() throws {
+        let sent = try JSONSerialization.jsonObject(with: JSONEncoder().encode(MeshSettings(keyboard: false))) as? [String: Any]
+        XCTAssertNil(sent?["tools"])
+        let on = try JSONSerialization.jsonObject(with: JSONEncoder().encode(MeshSettings(keyboard: true, tools: true))) as? [String: Any]
+        XCTAssertEqual(on?["tools"] as? Bool, true)
+        XCTAssertNil(try JSONDecoder().decode(MeshSettings.self, from: Data(#"{"keyboard":true}"#.utf8)).tools)
+        XCTAssertEqual(try JSONDecoder().decode(MeshSettings.self, from: Data(#"{"keyboard":true,"tools":false}"#.utf8)).tools, false)
+    }
+
     func testAFoldedFolderShowsOnlyItsLineMarkedWhenItHoldsTheTerminalOnScreen() {
         let (folders, _) = tree
         let rows = TerminalListRows.build(folders, collapsed: ["/Users/u/Work/api"], current: "t2")

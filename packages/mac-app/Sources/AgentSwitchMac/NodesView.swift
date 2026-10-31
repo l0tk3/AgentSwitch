@@ -10,6 +10,7 @@ struct NodesView: View {
     @Environment(SettingsNavigation.self) private var navigation
     @State private var linking = false
     @State private var removing: NodeRow?
+    @State private var askingTools = false
 
     private var store: NodesStore { model.nodes }
     private var rows: [NodeRow] { NodeRows.build(nodes: store.nodes, devices: model.devices) }
@@ -28,10 +29,16 @@ struct NodesView: View {
                 // Changing them is a step past reading them: off while reading is (docs/files-v0.md §12.5).
                 Toggle("Paired Nodes May Change Files", isOn: Binding(get: { (store.mesh?.files ?? true) && (store.mesh?.changes ?? true) }, set: { on in Task { await store.setChanges(on, model) } }))
                     .disabled(store.mesh == nil || !(store.mesh?.files ?? true))
+                // yazi beside a terminal (docs/yazi-v0.md §3); a service that does not know the switch says nothing of it: no row.
+                if let tools = store.mesh?.tools {
+                    Toggle("Paired Nodes May Open yazi", isOn: Binding(get: { tools }, set: { on in
+                        if on { askingTools = true } else { Task { await store.setTools(false, model) } }
+                    }))
+                }
             } header: {
                 SectionLabel("This Mac")
             } footer: {
-                Footer("Allow Pairing：手机和其他节点能否连接这台 Mac。Paired Nodes May Type：其他节点能否用键盘直接在这台 Mac 的终端里输入；关闭后它们只能使用回复框和指定按键。Paired Nodes May Read Files：手机和其他节点能否在文件栏中浏览这台 Mac 的文件，各自的范围在下面每一行的 Files 中设置。Paired Nodes May Change Files：它们能否在读得到的范围内新建、改名、移到废纸篓，以及从手机传文件进来；AgentSwitch 自己的文件夹不会被改动。")
+                Footer("Allow Pairing：手机和其他节点能否连接这台 Mac。Paired Nodes May Type：其他节点能否用键盘直接在这台 Mac 的终端里输入；关闭后它们只能使用回复框和指定按键。Paired Nodes May Read Files：手机和其他节点能否在文件栏中浏览这台 Mac 的文件，各自的范围在下面每一行的 Files 中设置。Paired Nodes May Change Files：它们能否在读得到的范围内新建、改名、移到废纸篓，以及从手机传文件进来；AgentSwitch 自己的文件夹不会被改动。Paired Nodes May Open yazi：其他节点能否在这台 Mac 的终端旁边打开 yazi；yazi 能执行 shell 命令且不经审批，默认关闭；手机始终不能。")
             }
             Section {
                 if rows.isEmpty {
@@ -47,7 +54,7 @@ struct NodesView: View {
             } header: {
                 SectionLabel("Nodes")
             } footer: {
-                Footer("每一行是一个已配对的节点或手机，两个方向各有一个开关。关闭立即生效；重新打开需要再次配对该方向。Files：它在文件栏中能浏览和附加这台 Mac 的哪些文件。范围只限制其他设备在文件栏中能浏览和附加的文件。配对的设备仍可在终端中让 agent 读取其他位置。")
+                Footer("每一行是一个已配对的节点或手机，两个方向各有一个开关。关闭立即生效；重新打开需要再次配对该方向。Files：它在文件栏中能浏览和附加这台 Mac 的哪些文件。范围只限制其他设备在文件栏中能浏览和附加的文件。配对的设备仍可在终端中让 agent 读取其他位置。SSH Host：这台 Mac 用 ssh 连接该节点时用的主机名（例如 ~/.ssh/config 里的 Host），终端的 Open in VS Code 通过它用 Remote - SSH 打开文件夹；只保存在这台 Mac 上。")
             }
             Section {
                 HStack(spacing: 8) {
@@ -74,6 +81,11 @@ struct NodesView: View {
             while !Task.isCancelled { try? await Task.sleep(for: .seconds(3)); await store.refreshIfDue(model) }
         }
         .sheet(isPresented: $linking) { PairWithLinkSheet().environment(model) }
+        .confirmationDialog("允许配对的节点打开 yazi？", isPresented: $askingTools) {
+            Button("Turn On", role: .destructive) { Task { await store.setTools(true, model) } }
+        } message: {
+            Text("配对的节点将能在这台 Mac 的终端旁边打开 yazi，并用它执行 shell 命令，不经过任何人审批。")
+        }
         .confirmationDialog("移除「\(removing?.name ?? "")」？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Remove", role: .destructive) { if let row = removing { Task { await remove(row) } } }
         } message: {
@@ -137,6 +149,7 @@ private struct NodeRowView: View {
                 direction("This Mac Uses It", on: row.uses, set: setUses)
             }
             direction("It Uses This Mac", on: row.usedBy, set: setUsedBy)
+            if let node = row.node { SSHHostField(node: node.id) }
             // What of this Mac's files it may read (docs/files-v0.md §7.5): a row only while it uses this Mac.
             if let device = row.device, device.files != nil {
                 FilesScopeRows(scope: device.files ?? .home, busy: busy, set: setScope)
@@ -163,6 +176,27 @@ private struct NodeRowView: View {
         case .linux: "server.rack"
         case .mac: "desktopcomputer"
         }
+    }
+}
+
+/// `SSH Host                                  [dellarch      ]`: what this Mac's ssh knows the node by, for opening a
+/// terminal's folder in the code editor over SSH (docs/terminal-v0.md §1 Mac "在编辑器中打开"). Kept on this Mac alone.
+private struct SSHHostField: View {
+    @AppStorage private var host: String
+
+    init(node: String) { _host = AppStorage(wrappedValue: "", EditorLink.sshHostKey(node: node)) }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("SSH Host").font(.callout).foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            if !host.isEmpty, !EditorLink.validHost(host.trimmingCharacters(in: .whitespaces)) {
+                Text("Invalid").font(.caption).foregroundStyle(Color.attention)
+            }
+            TextField("SSH Host", text: $host, prompt: Text("Host in ~/.ssh/config"))
+                .labelsHidden().textFieldStyle(.roundedBorder).font(.callout.monospaced()).frame(width: 180)
+        }
+        .padding(.leading, 34)
     }
 }
 

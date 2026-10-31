@@ -2,7 +2,7 @@
  *  daemon, each with the environment the Mac app gives it (mac-app `ChildEnvironment`, `RuntimePlan`). Pure apart from
  *  reading files and asking the login shell for its PATH. */
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -25,6 +25,11 @@ export type NodeSettings = {
   readonly router?: "opencode" | "echo";
   /** The addresses to offer instead of the ones found (`AGENTSWITCH_LAN`, remote/address.ts). */
   readonly lan?: string;
+  /** Terminals outlive a restart of the service, each on a holder of its own (docs/terminal-v0.md §10); on unless false. */
+  readonly holdTerminals?: boolean;
+  /** The language `agentswitch config` speaks (docs/tui-v0.md §5.2): `en`, `zh-Hans`, `zh-Hant`, `ja`, `es`. Kept here
+   *  because the service's own environment says `C.UTF-8`. */
+  readonly language?: string;
 };
 
 export const SETTINGS_FILE = "node.json";
@@ -113,6 +118,9 @@ export function plan(input: { env: NodeJS.ProcessEnv; home: string; gateHome: st
     ...(remote && settings.name?.trim() ? { AGENTSWITCH_REMOTE_NAME: settings.name.trim() } : {}),
     ...(settings.lan?.trim() ? { AGENTSWITCH_LAN: settings.lan.trim() } : {}),
     AGENTSWITCH_EXECUTORS: settings.executors === "echo" ? "echo" : "real",
+    AGENTSWITCH_HOLD_TERMINALS: settings.holdTerminals === false ? "0" : "1",
+    // A terminal outliving this runtime runs its hooks and its browser bridge through `current` (daemon.ts `stable`).
+    ...(l.runtime ? { AGENTSWITCH_RUNTIME_LINK: join(dirname(l.runtime), "current") } : {}),
     ...(settings.router === "echo" ? { AGENTSWITCH_ROUTER: "echo" } : {}),
     SECRET_GATE_HOME: gateHome,
     SECRET_GATE_BIN: l.gate,
@@ -135,18 +143,27 @@ export function mergedPath(shellPath: string | null, home: string, nodeBin: stri
 const BEGIN = "__AGENTSWITCH_PATH_BEGIN__", END = "__AGENTSWITCH_PATH_END__";
 const SHELL_TIMEOUT_MS = 5_000;
 
-/** What `PATH` the user's interactive login shell sets (a systemd user service has none of it), or null. */
+/** What `PATH` the user's interactive login shell sets (a systemd user service has none of it), or null. The shell
+ *  runs in a session of its own, without the terminal: an interactive shell given a terminal takes it over for job
+ *  control and leaves its own group in front when it ends, so whatever asked from that terminal (`agentswitch config`'s
+ *  Environment page, through doctor) is stopped the next time it reads a key ("suspended (tty input)"). */
 export function loginShellPath(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
   let shell = env.SHELL;
   try { shell ||= userInfo().shell ?? undefined; } catch { /* no passwd entry */ }
   shell ||= "/bin/sh";
   const home = env.HOME ?? homedir();
   return new Promise((done) => {
-    execFile(shell!, ["-lic", `printf '%s%s%s' '${BEGIN}' "$PATH" '${END}'`],
-      { env: { HOME: home, USER: env.USER ?? "", TERM: "dumb", PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, timeout: SHELL_TIMEOUT_MS, encoding: "utf8", cwd: home },
-      (_err, stdout) => {
-        const s = String(stdout ?? ""), i = s.lastIndexOf(BEGIN), j = s.lastIndexOf(END);
-        done(i >= 0 && j > i ? s.slice(i + BEGIN.length, j) || null : null);
-      }).stdin?.end();
+    const child = spawn(shell!, ["-lic", `printf '%s%s%s' '${BEGIN}' "$PATH" '${END}'`],
+      { env: { HOME: home, USER: env.USER ?? "", TERM: "dumb", PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, cwd: home, detached: true, stdio: ["ignore", "pipe", "ignore"] });
+    let s = "";
+    const timer = setTimeout(() => { try { process.kill(-child.pid!, "SIGKILL"); } catch { /* gone */ } }, SHELL_TIMEOUT_MS);
+    child.stdout!.setEncoding("utf8").on("data", (d: string) => { s += d; });
+    const finish = () => {
+      clearTimeout(timer);
+      const i = s.lastIndexOf(BEGIN), j = s.lastIndexOf(END);
+      done(i >= 0 && j > i ? s.slice(i + BEGIN.length, j) || null : null);
+    };
+    child.on("error", finish);
+    child.on("close", finish);
   });
 }

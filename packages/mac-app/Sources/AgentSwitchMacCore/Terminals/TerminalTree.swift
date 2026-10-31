@@ -36,6 +36,8 @@ public enum TerminalTree {
     }
 
     public static func build(terminals: [TerminalInfo], sessions: [SessionSummary], git: [String: FolderGit] = [:]) -> [Folder] {
+        // A tool terminal (yazi) is no folder's own: it is listed under its agent terminal (TerminalListRows.build).
+        let terminals = terminals.filter { !$0.isTool }
         // A session a running terminal writes (or was forked from) is not listed again; an ended terminal no longer
         // holds its session, so it can be resumed from the list.
         // A new Codex terminal says its record's id only after its first turn: until then, a Codex record made in its

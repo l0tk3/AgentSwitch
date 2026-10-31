@@ -223,13 +223,14 @@ final class TerminalsModel {
     var current: TerminalInfo? { creating ? nil : terminal(TerminalPanes.pane(layout, focusPane)?.term) }
     /// The pane in focus's screen and terminal model.
     var focused: TerminalPaneState? { panes[focusPane] }
-    var order: [String] { TerminalListRows.order(terminals) }
+    /// ⌘1–9 go to agent terminals only: a tool terminal is reached under its agent terminal.
+    var order: [String] { TerminalListRows.order(terminals.filter { !$0.isTool }) }
     func here(_ id: String) -> Bool { !detached.contains(id) }
 
     var tree: [TerminalTree.Folder] { TerminalTree.build(terminals: terminals, sessions: sessions, git: gits) }
 
     /// The agents the list's filter offers.
-    var filterAgents: [String] { TerminalListFilter.agents(terminals: terminals, sessions: sessions, chosen: filter.agent) }
+    var filterAgents: [String] { TerminalListFilter.agents(terminals: terminals.filter { !$0.isTool }, sessions: sessions, chosen: filter.agent) }
     /// The list has a line of filters: something to filter, or a filter to take off.
     var filters: Bool { filter.isOn || !terminals.isEmpty || !sessions.isEmpty }
 
@@ -239,7 +240,8 @@ final class TerminalsModel {
         if filter.isOn, shown.isEmpty { return [.note(TerminalListRows.noneKept)] }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else {
-            return TerminalListRows.build(shown, git: gits, collapsed: collapsed, expanded: expanded, current: current?.id, order: order)
+            return TerminalListRows.build(shown, git: gits, collapsed: collapsed, expanded: expanded, current: current?.id, order: order,
+                                          tools: terminals.filter(\.isTool))
         }
         let words = saidFor == q.lowercased() ? said : [:]
         return TerminalListRows.found(TerminalSearch.run(shown, query: q, said: words), query: q, order: order)
@@ -384,7 +386,8 @@ final class TerminalsModel {
         for pane in all {
             let state = panes[pane.id] ?? makePane(pane.id)
             let shown = terminal(pane.term).flatMap { here($0.id) ? $0 : nil }
-            state.show(shown, git: shown.flatMap { gits[$0.workdir] }, simple: shown.map { simpleViews.contains($0.id) } ?? false)
+            // A tool terminal (yazi) has no record: always its screen.
+            state.show(shown, git: shown.flatMap { gits[$0.workdir] }, simple: shown.map { !$0.isTool && simpleViews.contains($0.id) } ?? false)
         }
         for (id, state) in panes where !all.contains(where: { $0.id == id }) {
             state.stop()
@@ -507,7 +510,7 @@ final class TerminalsModel {
     }
 
     func toggleSimple(pane: Int? = nil) {
-        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term else { return }
+        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term, terminal(id)?.isTool != true else { return }
         setSimple(!simpleViews.contains(id), pane: pane)
     }
 

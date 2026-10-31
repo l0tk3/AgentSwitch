@@ -265,6 +265,29 @@ struct PaneHeader: View {
                 Text(ClassicWords.word("[!] Approval", in: look)).font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Color.waiting)
             }
             if let info { AgentSprite(harness: info.harness).opacity(0.75) }
+            // yazi beside it, in a pane to the right (docs/yazi-v0.md): its three columns, not the Files column's folder.
+            if let info, !info.isTool, info.running {
+                Button { model.openYazi(info, pane: pane) } label: {
+                    Image(systemName: "rectangle.split.3x1").font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Look.ink2)
+                        .frame(width: 22, height: 20).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open yazi Beside")
+            }
+            // Its folder in the code editor (docs/terminal-v0.md §1 Mac "在编辑器中打开").
+            if let info {
+                Button { model.openInEditor(info) } label: {
+                    Group {
+                        if look.isClassic { Image(systemName: "chevron.left.forwardslash.chevron.right").font(.system(size: 10, weight: .medium)) }
+                        else { Text("</>").font(.system(size: 10.5, weight: .bold, design: .monospaced)) }
+                    }
+                    .foregroundStyle(Look.ink2)
+                    .frame(width: 22, height: 20).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open in \(CodeEditor.load(.standard).short)")
+            }
             // The Files column at this pane's folder (docs/files-v0.md §0), as the bar's icon is for the pane in focus.
             if info != nil {
                 let shows = model.filesShow(pane: pane)
@@ -282,7 +305,7 @@ struct PaneHeader: View {
                 .help(shows ? "Hide Files ⌘⇧F" : "Show in Files ⌘⇧F")
             }
             // The other view of the same session (docs/simple-view-v0.md §1): each pane has its own.
-            if info != nil, let state {
+            if let info, !info.isTool, let state {
                 Button { model.focus(pane: pane); model.toggleSimple(pane: pane) } label: {
                     Group {
                         if look.isClassic { Image(systemName: state.simple ? "terminal" : "text.alignleft").font(.system(size: 10.5, weight: .medium)) }

@@ -20,6 +20,7 @@ import { AppServerClient, type Json } from "../harness/appserver.js";
 import { spawnOwned, terminateProcess } from "../harness/processes.js";
 import { connectWsLines, type WsLines } from "../harness/wsLines.js";
 import type { Companion, CompanionLink } from "./host.js";
+import { attachHeldServer, startHeldServer, type HoldPlace, type Holding, type ServerProcess } from "./held.js";
 
 /** The TUI's token is in its environment under this name (`--remote-auth-token-env`), never on a command line. */
 export const CODEX_REMOTE_TOKEN_ENV = "AGENTSWITCH_CODEX_REMOTE_TOKEN";
@@ -61,7 +62,15 @@ export function splitCodexArgs(args: readonly string[]): { server: string[]; tui
   return { server, tui };
 }
 
-export type CodexServer = { readonly child: ChildProcess; readonly url: string; readonly token: string };
+/** The terminal's server: a child of this process (`child`), or one on a holder of its own (`proc`, a held terminal's). */
+export type CodexServer = { readonly child?: ChildProcess; readonly proc?: ServerProcess; readonly url: string; readonly token: string };
+/** Where a held terminal's server runs on: its holder's socket and the unit it is started in. */
+export type CodexHeld = { readonly holding: Holding; readonly socket: string; readonly unit: string };
+
+/** A process this one spawned, as a `ServerProcess`. */
+function childServer(child: ChildProcess): ServerProcess {
+  return { onExit: (cb) => { child.once("exit", cb); }, stop: (g) => terminateProcess(child, g), detach: () => undefined };
+}
 export type CodexCompanionOptions = {
   readonly binary: string;
   readonly cwd: string;
@@ -72,7 +81,11 @@ export type CodexCompanionOptions = {
   /** The terminal's own folder of the service: the token file goes there. */
   readonly dir: string;
   /** Starts the server (tests pass a fake). */
-  readonly serve?: (o: { binary: string; flags: readonly string[]; cwd: string; env: Record<string, string>; dir: string }) => Promise<CodexServer>;
+  readonly serve?: (o: { binary: string; flags: readonly string[]; cwd: string; env: Record<string, string>; dir: string; held?: CodexHeld }) => Promise<CodexServer>;
+  /** The terminal is held (docs/terminal-v0.md §10): its server runs on a holder of its own too. */
+  readonly held?: CodexHeld;
+  /** A held terminal taken up again: its server still runs there (`keep`). */
+  readonly restored?: { readonly url: string; readonly token: string; readonly place: HoldPlace };
   /** How long a change waits for the TUI's thread (tests: none). */
   readonly threadWaitMs?: number;
   /** This terminal was started with Codex's Daybreak switch on offer (its feature enabled, docs/simple-view-v0.md
@@ -89,32 +102,43 @@ const freePort = () => new Promise<number>((ok, fail) => {
 
 /** Spawns the server and waits until it answers its readiness check. Rejects, and reaps it, when it exits first or
  *  does not get ready in time. */
-export async function startCodexServer(o: { binary: string; flags: readonly string[]; cwd: string; env: Record<string, string>; dir: string; startTimeoutMs?: number }): Promise<CodexServer> {
+export async function startCodexServer(o: { binary: string; flags: readonly string[]; cwd: string; env: Record<string, string>; dir: string; held?: CodexHeld; startTimeoutMs?: number }): Promise<CodexServer> {
   const port = await freePort();
   const token = randomBytes(32).toString("base64url");
   mkdirSync(o.dir, { recursive: true, mode: 0o700 });
   const tokenFile = join(o.dir, "codex-server-token");
   writeFileSync(tokenFile, token, { mode: 0o600 });
   const url = `ws://127.0.0.1:${port}`;
-  const child = spawnOwned(o.binary, [...o.flags, "app-server", "--listen", url, "--ws-auth", "capability-token", "--ws-token-file", tokenFile], { cwd: o.cwd, env: o.env, stdio: ["ignore", "ignore", "pipe"] });
+  const args = [...o.flags, "app-server", "--listen", url, "--ws-auth", "capability-token", "--ws-token-file", tokenFile];
   let stderr = "";
-  child.stderr!.on("data", (d: Buffer) => { stderr = (stderr + d.toString()).slice(-2_000); });
+  let gone = false;
+  let proc: ServerProcess;
+  if (o.held) {
+    // On a holder of its own: it outlives the service with the TUI that is its client. Its token file stays with it.
+    proc = await startHeldServer(o.held.holding, { socket: o.held.socket, token: randomBytes(24).toString("base64url") }, { file: o.binary, args, cwd: o.cwd, env: o.env }, o.held.unit,
+      (text) => { stderr = (stderr + text).slice(-2_000); });
+  } else {
+    const child = spawnOwned(o.binary, args, { cwd: o.cwd, env: o.env, stdio: ["ignore", "ignore", "pipe"] });
+    child.stderr!.on("data", (d: Buffer) => { stderr = (stderr + d.toString()).slice(-2_000); });
+    proc = childServer(child);
+  }
+  proc.onExit(() => { gone = true; });
   const end = Date.now() + (o.startTimeoutMs ?? START_TIMEOUT_MS);
   try {
     for (;;) {
-      if (child.exitCode !== null || child.signalCode !== null) throw new Error(`codex app-server exited before it was ready: ${stderr.trim().slice(-200)}`);
+      if (gone) throw new Error(`codex app-server exited before it was ready: ${stderr.trim().slice(-200)}`);
       const ready = await fetch(`http://127.0.0.1:${port}/readyz`, { signal: AbortSignal.timeout(1_000) }).then((r) => r.ok, () => false);
       if (ready) break;
       if (Date.now() > end) throw new Error(`codex app-server was not ready within ${o.startTimeoutMs ?? START_TIMEOUT_MS} ms: ${stderr.trim().slice(-200)}`);
       await new Promise((r) => setTimeout(r, 150));
     }
   } catch (err) {
-    await terminateProcess(child, 500);
+    await proc.stop(500);
     rmSync(tokenFile, { force: true });
     throw err;
   }
-  child.once("exit", () => rmSync(tokenFile, { force: true }));
-  return { child, url, token };
+  proc.onExit(() => rmSync(tokenFile, { force: true }));
+  return { proc, url, token };
 }
 
 export class CodexCompanion implements Companion {
@@ -123,6 +147,7 @@ export class CodexCompanion implements Companion {
   /** Present only where the switch is on offer: `Companion.daybreak` is how the host knows there is one. */
   readonly daybreak?: (session?: string | null) => Promise<boolean>;
   private server: CodexServer | null = null;
+  private proc: ServerProcess | null = null;
   private stopped = false;
   private client: { rpc: AppServerClient; ws: WsLines } | null = null;
   /** The thread this client follows for what is written, and what it does with what it is told. */
@@ -132,6 +157,33 @@ export class CodexCompanion implements Companion {
 
   constructor(private readonly o: CodexCompanionOptions) {
     if (o.daybreak) this.daybreak = (session) => this.daybreakNow(session ?? null);
+    if (o.restored) {
+      const { url, token, place } = o.restored;
+      this.server = { url, token };
+      const later = attachHeldServer(place).catch(() => null);
+      this.proc = { place, onExit: (cb) => { void later.then((p) => (p ? p.onExit(cb) : cb())); }, stop: async (g) => { await (await later)?.stop(g); }, detach: () => { void later.then((p) => p?.detach()); } };
+    }
+  }
+
+  /** A held terminal's companion again, from what it kept (`keep`); null for what is not one. */
+  static restore(kept: Record<string, unknown>, log?: (line: string) => void): CodexCompanion | null {
+    const { url, token, place, cwd, dir, daybreak } = kept as { url?: unknown; token?: unknown; place?: HoldPlace; cwd?: unknown; dir?: unknown; daybreak?: unknown };
+    if (typeof url !== "string" || typeof token !== "string" || typeof cwd !== "string" || typeof dir !== "string" || !place?.socket) return null;
+    return new CodexCompanion({ binary: "", cwd, env: {}, args: [], dir, restored: { url, token, place }, daybreak: daybreak === true, ...(log ? { log } : {}) });
+  }
+
+  keep(): Record<string, unknown> | null {
+    const place = this.proc?.place;
+    return place && this.server ? { kind: "codex", url: this.server.url, token: this.server.token, place, cwd: this.o.cwd, dir: this.o.dir, daybreak: this.o.daybreak === true } : null;
+  }
+
+  /** The service stops; the terminal is held: its server runs on, with the TUI its client. */
+  detach(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.client?.ws.close();
+    this.client = null;
+    this.proc?.detach();
   }
 
   /** Which thread the TUI is on, and what the server says of it: the one the terminal follows (its hooks named it),
@@ -167,13 +219,14 @@ export class CodexCompanion implements Companion {
     const log = this.o.log ?? ((l: string) => console.error(l));
     const { server: flags, tui } = splitCodexArgs(this.o.args);
     try {
-      this.server = await (this.o.serve ?? startCodexServer)({ binary: this.o.binary, flags, cwd: this.o.cwd, env: this.o.env, dir: this.o.dir });
+      this.server = await (this.o.serve ?? startCodexServer)({ binary: this.o.binary, flags, cwd: this.o.cwd, env: this.o.env, dir: this.o.dir, ...(this.o.held ? { held: this.o.held } : {}) });
+      this.proc = this.server.proc ?? (this.server.child ? childServer(this.server.child) : null);
     } catch (err) {
       log(`codex terminal: its server did not start, the TUI runs on its own: ${(err as Error).message}`);
       return null;
     }
-    if (this.stopped) { void terminateProcess(this.server.child, STOP_GRACE_MS); return null; }
-    this.server.child.once("exit", () => { if (!this.stopped) log("codex terminal: its server exited"); });
+    if (this.stopped) { void this.proc?.stop(STOP_GRACE_MS); return null; }
+    this.proc?.onExit(() => { if (!this.stopped) log("codex terminal: its server exited"); });
     return { args: [...tui, "--remote", this.server.url, "--remote-auth-token-env", CODEX_REMOTE_TOKEN_ENV], env: { ...this.o.env, [CODEX_REMOTE_TOKEN_ENV]: this.server.token } };
   }
 
@@ -215,7 +268,7 @@ export class CodexCompanion implements Companion {
     if (this.following) clearTimeout(this.following);
     this.client?.ws.close();
     this.client = null;
-    if (this.server) void terminateProcess(this.server.child, STOP_GRACE_MS);
+    if (this.proc) void this.proc.stop(STOP_GRACE_MS);
   }
 
   /** A second client on the terminal's server, kept while it answers. */

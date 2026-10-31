@@ -117,14 +117,18 @@ public struct MeshSettings: Codable, Equatable, Sendable {
     /// Paired devices may change them where they may read them: new folders and files, renames, the Trash, files sent
     /// from a phone (docs/files-v0.md §12.5).
     public var changes: Bool
+    /// A paired node (not a phone) may open a tool terminal (yazi) beside a terminal here (docs/yazi-v0.md §3, mesh.json
+    /// `tools`); nil from a service that does not know it, and left out of what is sent then.
+    public var tools: Bool?
 
-    public init(keyboard: Bool = true, files: Bool = true, changes: Bool = true) {
+    public init(keyboard: Bool = true, files: Bool = true, changes: Bool = true, tools: Bool? = nil) {
         self.keyboard = keyboard
         self.files = files
         self.changes = changes
+        self.tools = tools
     }
 
-    private enum Keys: String, CodingKey { case keyboard, files, changes }
+    private enum Keys: String, CodingKey { case keyboard, files, changes, tools }
 
     /// A service from before the Files column says nothing of files, one from before §12 nothing of changes: on, as a
     /// new one is.
@@ -133,6 +137,7 @@ public struct MeshSettings: Codable, Equatable, Sendable {
         keyboard = (try? c.decode(Bool.self, forKey: .keyboard)) ?? true
         files = (try? c.decode(Bool.self, forKey: .files)) ?? true
         changes = (try? c.decode(Bool.self, forKey: .changes)) ?? true
+        tools = (try? c.decodeIfPresent(Bool.self, forKey: .tools)) ?? nil
     }
 }
 

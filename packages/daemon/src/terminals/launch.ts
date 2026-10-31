@@ -16,7 +16,8 @@ import { withoutCredentialRepair } from "../executors/gate.js";
 import { CODEX_FILE_STORE } from "./signIn.js";
 import { protectedDeny } from "../executors/opencodeShared.js";
 import { rootSpellings, type ProtectedPaths } from "../executors/protected.js";
-import type { LaunchPlan, LaunchRequest, Launcher, TerminalHarness } from "./host.js";
+import type { Companion, LaunchPlan, LaunchRequest, Launcher, TerminalHarness, TerminalHostOptions, TerminalTool } from "./host.js";
+import type { Holding } from "./held.js";
 
 /** The hook command's script next to this module: hookClient.js in dist/, hookClient.ts under tsx (node strips its types). */
 const EXT = import.meta.url.endsWith(".ts") ? "ts" : "js";
@@ -61,8 +62,13 @@ export type LauncherOptions = {
    *  terminal `id`, made when it starts (a session of its own). It is the `browser` MCP server as it is: a terminal is
    *  not behind the credential gate (docs/profiles-v0.md §8, 2026-10-08), so its agent sees a page as the page is.
    *  Codex, Claude Code and OpenCode; absent or null: no browser tool. */
-  readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; /** The profile's own browser rather than the shared one (docs/profiles-v0.md §5.1). */ readonly browserKey?: string }) => readonly string[] | null;
+  readonly browser?: (req: { readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; /** The profile's own browser rather than the shared one (docs/profiles-v0.md §5.1). */ readonly browserKey?: string }) => BridgeCommand | null;
+  /** Terminals that outlive the service (docs/terminal-v0.md §10): companions' servers run on held ptys too. */
+  readonly holding?: Holding | null;
 };
+
+/** The bridge's command line; with the session it was made for, which a held terminal keeps for the next daemon. */
+export type BridgeCommand = readonly string[] & { readonly minted?: { readonly session: string; readonly token: string; readonly key?: string } };
 
 /** The agents that take MCP servers, and so the browser tool. */
 export const BROWSER_HARNESSES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode"]);
@@ -129,6 +135,21 @@ export const CODEX_KEY_PROVIDER = "agentswitch";
 /** Codex started on a profile that pays by a key (docs/profiles-v0.md §3.6): a provider of this terminal's own — the
  *  address, and a command Codex runs for the key (the hook program's `key`, which asks this service) — chosen over
  *  whatever the folder it runs in is signed in to. Seen on Codex 0.163 (scripts/api_key_probe.ts). */
+/** The model provider the user's own Codex runs under: `model_provider` at the top of their `config.toml`
+ *  (`$CODEX_HOME`, else `~/.codex`), else OpenAI's — never AgentSwitch's own, which only a key profile's terminal
+ *  defines. */
+export function codexOwnProvider(env: NodeJS.ProcessEnv): string {
+  const file = join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "config.toml");
+  let text = "";
+  try { text = readFileSync(file, "utf8"); } catch { return "openai"; }
+  for (const line of text.split("\n")) {
+    if (/^\s*\[/.test(line)) break;
+    const named = /^\s*model_provider\s*=\s*"([^"]+)"/.exec(line)?.[1];
+    if (named) return named === CODEX_KEY_PROVIDER ? "openai" : named;
+  }
+  return "openai";
+}
+
 export function codexKeyProviderArgs(node: string, script: string, api: { readonly name: string; readonly baseUrl?: string }): string[] {
   const provider = `{ name = ${JSON.stringify(api.name)}, base_url = ${JSON.stringify(api.baseUrl ?? OPENAI_API)}, wire_api = "responses", auth = { command = ${JSON.stringify(node)}, args = ${JSON.stringify([script, "key"])} } }`;
   return ["-c", `model_provider=${JSON.stringify(CODEX_KEY_PROVIDER)}`, "-c", `model_providers.${CODEX_KEY_PROVIDER}=${provider}`];
@@ -223,11 +244,31 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
   };
 }
 
+/** A tool terminal's program (docs/yazi-v0.md): the tool opened on the folder, with the service's environment and the
+ *  terminal's id. No hook, no proxy, no profile, no browser: it is not an agent. */
+export function toolLauncher(opts: { readonly binaries: Partial<Record<TerminalTool, string>>; readonly env?: NodeJS.ProcessEnv }): NonNullable<TerminalHostOptions["toolLauncher"]> {
+  return ({ id, tool, cwd }) => {
+    const file = opts.binaries[tool];
+    if (!file) throw new Error(`${tool} is not installed on this node`);
+    const env: Record<string, string> = {
+      ...withoutParentSession(withoutCredentialRepair(opts.env ?? process.env)),
+      TERM: "xterm-256color",
+      COLORTERM: "truecolor",
+      AGENTSWITCH_TERMINAL_ID: id,
+    };
+    return { file, args: [cwd], env, hooks: false };
+  };
+}
+
 export function agentLauncher(opts: LauncherOptions): Launcher {
   const node = opts.node ?? process.execPath;
   const script = opts.hookScript ?? HOOK_SCRIPT;
   const hookCommand = hookCommandOf(opts);
-  return (req: LaunchRequest): LaunchPlan => {
+  // A held terminal's companion server is held too, next to the terminal's own holder (docs/terminal-v0.md §10).
+  const heldServer = (dir: string, id: string) => (opts.holding ? { held: { holding: opts.holding, socket: join(dir, "serve.sock"), unit: `agentswitch-term-${id}-serve` } } : {});
+  // The browser session made for the plan being made (a launch is synchronous).
+  let minted: BridgeCommand["minted"] | null = null;
+  const plans = (req: LaunchRequest): LaunchPlan => {
     const file = opts.binaries[req.harness];
     if (!file) throw new Error(`${req.harness} is not installed on this Mac`);
     const dir = join(opts.stateDir, req.id);
@@ -248,6 +289,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     const proxied = req.proxy ? proxyEnv(req.proxy) : null;
     if (proxied) Object.assign(env, proxied);
     const bridge = opts.browser && BROWSER_HARNESSES.has(req.harness) ? opts.browser({ id: req.id, harness: req.harness, cwd: req.cwd, ...(req.browserKey ? { browserKey: req.browserKey } : {}) }) : null;
+    minted = bridge?.minted ?? null;
     // A profile with a browser of its own: a web address the agent asks the system to open — its sign-in page — is
     // opened there, not in the user's own browser, which leaves this Mac another way (§5.1).
     if (req.browserKey) Object.assign(env, openInProfileBrowser(dir, env.PATH ?? ""));
@@ -290,6 +332,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (req.configHome) env.CODEX_HOME = req.configHome;
         // `notify` runs a program with the event JSON as its last argument when a turn ends.
         const args = [...(req.configHome ? [...CODEX_FILE_STORE, "-c", 'model_provider="openai"'] : []), "-c", `notify=${JSON.stringify([node, script, "codex"])}`];
+        // The Mac's own Codex going on with a thread a key profile's ran last: under the user's own provider.
+        if (req.ownProvider && !req.api && !req.configHome) args.push("-c", `model_provider=${JSON.stringify(codexOwnProvider(env))}`);
         const hooked = opts.codexHooks?.(req.configHome) ?? false;
         if (hooked) args.push(...codexHookArgs(hookCommand, QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S));
         // Codex's own "needs you" notifications, as terminal notifications (OSC 9) whether or not its window has focus:
@@ -322,7 +366,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
           return { file: "/bin/sh", args: ["-c", CODEX_SIGN_IN, "agentswitch-codex-sign-in", file, ...args], hooks: hooked,
             env: { ...env, ...(req.browserKey ? { AGENTSWITCH_SIGN_IN_PAGE: CODEX_DEVICE_PAGE } : {}) } };
         }
-        const companion = opts.codexServer ? new CodexCompanion({ binary: file, cwd: req.cwd, env, args, dir, daybreak }) : undefined;
+        const companion = opts.codexServer ? new CodexCompanion({ binary: file, cwd: req.cwd, env, args, dir, daybreak, ...heldServer(dir, req.id) }) : undefined;
         return { file, args, env, hooks: hooked, ...(companion ? { companion } : {}) };
       }
       case "opencode": {
@@ -351,7 +395,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (named) own = { ...own, OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...inlineConfig(own.OPENCODE_CONFIG_CONTENT), model: named }) };
         // A session gone on with keeps the model it was on, whatever the configuration names: the companion sets it there.
         const onto = req.resume && req.model ? { model: req.model, variant: named && named !== req.model ? named.slice(req.model.length + 1) : null } : null;
-        const companion = opts.opencodeServer ? new OpenCodeCompanion({ binary: file, cwd: req.cwd, env: own, args: rest, asks: req.mode === "manual", ...(onto ? { model: onto } : {}) }) : undefined;
+        const companion = opts.opencodeServer ? new OpenCodeCompanion({ binary: file, cwd: req.cwd, env: own, args: rest, asks: req.mode === "manual", ...(onto ? { model: onto } : {}), ...heldServer(dir, req.id) }) : undefined;
         return { file, args: ["--standalone", ...rest], env: own, hooks: false, ...(companion ? { companion } : {}) };
       }
       case "pi": {
@@ -366,6 +410,11 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         return { file, args, env, hooks: true };
       }
     }
+  };
+  return (req: LaunchRequest): LaunchPlan => {
+    minted = null;
+    const plan = plans(req);
+    return minted ? { ...plan, browser: minted } : plan;
   };
 }
 
@@ -416,4 +465,12 @@ export function opencodeTerminalConfig(prot: ProtectedPaths, env: NodeJS.Process
   const d = protectedDeny(prot, env);
   const denied = (rules: Record<string, string>) => Object.fromEntries(Object.entries(rules).filter(([, v]) => v === "deny"));
   return { $schema: "https://opencode.ai/config.json", permission: { read: denied(d.read), bash: denied(d.bash), edit: denied(d.edit), external_directory: denied(d.external) } };
+}
+
+/** A held terminal's companion again (docs/terminal-v0.md §10), from what it kept: its server still runs on its own
+ *  holder. Null for what this version does not know. */
+export function restoreCompanion(harness: TerminalHarness, kept: Record<string, unknown>, _holding: Holding | null): Companion | null {
+  if (harness === "opencode" && kept.kind === "opencode") return OpenCodeCompanion.restore(kept);
+  if (harness === "codex" && kept.kind === "codex") return CodexCompanion.restore(kept);
+  return null;
 }

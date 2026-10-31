@@ -10,7 +10,8 @@
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
     "types": ["node"],
-    "noEmit": true
+    "noEmit": true,
+    "jsx": "react-jsx"
   },
   "include": ["src", "tests", "scripts"]
 }

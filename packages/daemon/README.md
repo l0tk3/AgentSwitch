@@ -284,6 +284,15 @@ protected paths are refused each agent's own way (terminal-v0 §3): Claude Code'
 (控制台 › 终端, `ui/terminal.html`). `AGENTSWITCH_TERMINALS=0` turns it off; audit in `$AGENTSWITCH_HOME/terminals/audit.jsonl`.
 node-pty's spawn helper needs its execute bit (npm skips install scripts): the daemon sets it before the first spawn.
 
+Terminals that outlive the service (terminal-v0 §10, on with `AGENTSWITCH_HOLD_TERMINALS=1`, which the Linux node's
+keeper sets): each program runs on a pty held by `native/pty-hold` — a small C program, `npm run build` (or
+`npm run build:native`) compiles it with the system's C compiler into `native/build/` — started in a systemd scope of
+its own where there is one (`agentswitch-terminals.slice`). `src/terminals/held.ts` is the daemon's end; each held
+terminal is described in `$AGENTSWITCH_HOME/terminals/<id>/meta.json`, and a daemon that starts takes them up again
+(`TerminalHost.restore`): the same terminals, their output sent again by their holders, their hooks, browser bridge
+sessions and profile forwarders as their programs knew them. Without a holder (an unbuilt checkout, a socket path over
+100 bytes) terminals use node-pty in-process, as before.
+
 `npx tsx scripts/room_trial.ts <trial.json> <out dir>` tries docs/talk-v0.md with real agents (not a test: the real
 models, in the running service): it starts two terminals (`manual`), says the opening to the first and hands each
 answer to the other, headed `〔讨论 · <room>〕<name> 对你说：`, until one writes `[达成一致]`. It types only when the

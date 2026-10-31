@@ -42,6 +42,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let permissions: [TerminalRequest]
     /// Its sub-agents at work, a row each under it.
     public let subagents: [TerminalSubagent]
+    /// A tool terminal's agent terminal, the one it was opened beside (docs/yazi-v0.md); nil: an agent's own.
+    public let parent: String?
     /// The name of the profile it runs under (docs/profiles-v0.md); nil: the Mac's own (`Default`).
     public private(set) var profileName: String?
     /// That profile's colour (docs/profiles-v0.md §3.2): the lit dot this terminal is marked with while it runs.
@@ -52,14 +54,15 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, harness, cwd, workdir, model, effort, modeNow, suggestion, sets, daybreak, mode, name, customName, status, cols, rows, createdAt, exitCode, agentSessionId, resumedFrom, forked,
-             permissions, subagents, profile, device
+             permissions, subagents, profile, device, parent
     }
 
     public init(id: String, harness: String, cwd: String, workdir: String? = nil, model: String? = nil, mode: String? = nil,
                 name: String, customName: Bool = false, status: String, cols: Int? = nil, rows: Int? = nil, createdAt: Int64 = 0,
                 exitCode: Int? = nil, agentSessionId: String? = nil, resumedFrom: String? = nil, forked: Bool = false,
                 permissions: [TerminalRequest] = [], subagents: [TerminalSubagent] = [], effort: String? = nil, modeNow: String? = nil,
-                suggestion: String? = nil, sets: Bool? = nil, daybreak: Bool? = nil) {
+                suggestion: String? = nil, sets: Bool? = nil, daybreak: Bool? = nil, parent: String? = nil) {
+        self.parent = parent.flatMap { $0.isEmpty ? nil : $0 }
         self.sets = sets
         self.daybreak = daybreak
         self.suggestion = suggestion.flatMap { $0.isEmpty ? nil : $0 }
@@ -109,7 +112,8 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   modeNow: (try? c.decodeIfPresent(String.self, forKey: .modeNow)) ?? nil,
                   suggestion: (try? c.decodeIfPresent(String.self, forKey: .suggestion)) ?? nil,
                   sets: (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil,
-                  daybreak: (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil)
+                  daybreak: (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil,
+                  parent: (try? c.decodeIfPresent(String.self, forKey: .parent)) ?? nil)
         struct Profile: Decodable { let name: String; let exit: ProfileExit?; let color: String? }
         let profile = (try? c.decodeIfPresent(Profile.self, forKey: .profile)) ?? nil
         // A profile with a proxy of its own: where that proxy let traffic out when the terminal started goes with its
@@ -120,6 +124,10 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     }
 
     public var running: Bool { status != "exited" }
+    /// The programs a tool terminal runs (docs/yazi-v0.md).
+    public static let tools: Set<String> = ["yazi"]
+    /// A tool terminal (yazi beside an agent's): no record, no simple view, listed under its agent terminal.
+    public var isTool: Bool { parent != nil || Self.tools.contains(harness) }
     public var isRunning: Bool { running }
 
     /// The same terminal as one that runs under a profile (what the service says of it when it does): the profile's

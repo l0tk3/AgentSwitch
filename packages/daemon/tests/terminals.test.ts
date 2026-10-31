@@ -1650,7 +1650,7 @@ describe("terminals over HTTP", () => {
     expect((await daemon.api.request(`/files?path=${encodeURIComponent(tmpdir())}`, {}, phone)).status).toBe(200);
     expect((await daemon.api.request(`/files/stat?path=${encodeURIComponent(home)}`, {}, phone)).status).toBe(403);
     // Off on this node: neither.
-    expect(await (await daemon.app.request("/settings/mesh", json("PUT", { files: false }))).json()).toEqual({ keyboard: true, files: false, changes: true });
+    expect(await (await daemon.app.request("/settings/mesh", json("PUT", { files: false }))).json()).toEqual({ keyboard: true, files: false, changes: true, tools: false });
     const off = await give();
     expect(off.status).toBe(403);
     expect(await off.json()).toMatchObject({ code: "files-off" });
@@ -1685,7 +1685,7 @@ describe("terminals over HTTP", () => {
     await until(() => text(events).includes("got: keys from afar"));
     // Set on the node itself: the local listener's route, which the remote list does not name.
     const set = await daemon.app.request("/settings/mesh", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ keyboard: false }) });
-    expect(await set.json()).toEqual({ keyboard: false, files: true, changes: true });
+    expect(await set.json()).toEqual({ keyboard: false, files: true, changes: true, tools: false });
     expect(remoteAllowed("PUT", "/settings/mesh")).toBe(false);
     const refused = await req(`/terminals/${id}/write`, { data: "x" });
     expect(refused.status).toBe(403);

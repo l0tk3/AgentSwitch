@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { collectOut, listTree, resolveInside, sweepDir } from "../src/files/artifacts.js";
 import { ATTACH_DIR, contentType, isImage, OUT_DIR, safeName } from "../src/files/names.js";
 import { attachmentsNote } from "../src/files/notes.js";
-import { Uploads } from "../src/files/uploads.js";
+import { moveFile, Uploads } from "../src/files/uploads.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "agentswitch-files-"));
 
@@ -49,6 +49,23 @@ describe("uploads", () => {
     utimesSync(join(u.dir, a.id), old, old);
     expect(sweepDir(u.dir, 86400_000)).toEqual([a.id]);
     expect(existsSync(join(u.dir, a.id))).toBe(false);
+  });
+});
+
+describe("moving a file", () => {
+  it("copies it across file systems where a rename cannot (EXDEV), never over a file already there", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-move-"));
+    const exdev = () => { throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" }); };
+    writeFileSync(join(dir, "a.png"), "picture");
+    moveFile(join(dir, "a.png"), join(dir, "b.png"), exdev);
+    expect(readFileSync(join(dir, "b.png"), "utf8")).toBe("picture");
+    expect(existsSync(join(dir, "a.png"))).toBe(false);
+    writeFileSync(join(dir, "c.png"), "other");
+    expect(() => moveFile(join(dir, "c.png"), join(dir, "b.png"), exdev)).toThrow(/EEXIST/);
+    expect(readFileSync(join(dir, "b.png"), "utf8")).toBe("picture");
+    // Any other failure is said as it is.
+    expect(() => moveFile(join(dir, "c.png"), join(dir, "d.png"), () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); })).toThrow("EACCES");
+    expect(existsSync(join(dir, "c.png"))).toBe(true);
   });
 });
 

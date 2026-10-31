@@ -307,6 +307,16 @@ export class BrowserAgents {
     return { id, token, tokenFile };
   }
 
+  /** A session a terminal that outlived the last daemon was given (docs/terminal-v0.md §10), made again with its id and
+   *  its token: the agent's bridge connects again with them. */
+  adopt(id: string, token: string, owner: TabOwner): void {
+    if (!/^[\w-]{1,64}$/.test(id) || !token) return;
+    const tokenFile = join(this.sessionsDir, `${id}.token`);
+    mkdirSync(this.sessionsDir, { recursive: true, mode: 0o700 });
+    writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+    this.sessions.set(id, { id, owner, gate: false, digest: digest(token), tokenFile, connections: new Map(), queue: Promise.resolve() });
+  }
+
   /** True when `token` is session `id`'s own and the session is live. */
   verify(id: string, token: string): boolean {
     return this.session(id, token) !== null;

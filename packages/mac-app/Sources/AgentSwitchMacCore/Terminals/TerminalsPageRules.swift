@@ -98,8 +98,11 @@ public enum TerminalListRows {
 
     /// The tree as rows: a folder's line, its terminals (each with its sub-agents), its first sessions (`expanded`: all
     /// of them), then the folders under it a step further in. A folded folder shows only its line.
+    /// `tools`: the tool terminals (yazi, docs/yazi-v0.md), each listed a step under its agent terminal after its
+    /// sub-agents.
     public static func build(_ tree: [TerminalTree.Folder], git: [String: FolderGit] = [:], collapsed: Set<String> = [], expanded: Set<String> = [],
-                             current: String? = nil, order: [String] = []) -> [TerminalListRow] {
+                             current: String? = nil, order: [String] = [], tools: [TerminalInfo] = []) -> [TerminalListRow] {
+        let toolsOf = Dictionary(grouping: tools.filter { $0.parent != nil }, by: { $0.parent! })
         var out: [TerminalListRow] = []
         func add(_ folder: TerminalTree.Folder, depth: Int) {
             let closed = collapsed.contains(folder.cwd)
@@ -118,7 +121,8 @@ public enum TerminalListRows {
             for terminal in folder.terminals {
                 let branch = twig()
                 out.append(.terminal(terminal, twig: branch, depth: depth, index: order.firstIndex(of: terminal.id)))
-                out.append(contentsOf: subagents(of: terminal, under: branch, depth: depth))
+                out.append(contentsOf: subagents(of: terminal, under: branch, depth: depth, then: toolsOf[terminal.id]?.count ?? 0))
+                out.append(contentsOf: Self.tools(toolsOf[terminal.id] ?? [], under: branch, depth: depth))
             }
             for session in shown { out.append(.session(session, twig: twig(), depth: depth)) }
             if more { out.append(.more(cwd: folder.cwd, twig: twig(), depth: depth, hidden: folder.sessions.count - shown.count, all: everything)) }
@@ -128,12 +132,22 @@ public enum TerminalListRows {
         return out.isEmpty ? [.note(noSessions)] : out
     }
 
-    /// A terminal's sub-agents at work, a step under it; none once it has ended.
-    static func subagents(of terminal: TerminalInfo, under twig: String, depth: Int) -> [TerminalListRow] {
+    /// A terminal's sub-agents at work, a step under it; none once it has ended. `then`: rows that follow them on the
+    /// same branch (its tool terminals), so the last sub-agent is not the branch's end.
+    static func subagents(of terminal: TerminalInfo, under twig: String, depth: Int, then: Int = 0) -> [TerminalListRow] {
         guard terminal.running else { return [] }
         let stem = twig == "└─" ? "\u{a0}\u{a0}" : "│\u{a0}"
         return terminal.subagents.enumerated().map { index, agent in
-            .subagent(agent, terminal: terminal.id, twig: stem + (index == terminal.subagents.count - 1 ? "└─" : "├─"), depth: depth)
+            .subagent(agent, terminal: terminal.id, twig: stem + (index == terminal.subagents.count - 1 && then == 0 ? "└─" : "├─"), depth: depth)
+        }
+    }
+
+    /// A terminal's tool terminals, a step under it, the last at the branch's end.
+    static func tools(_ tools: [TerminalInfo], under twig: String, depth: Int) -> [TerminalListRow] {
+        let stem = twig == "└─" ? "\u{a0}\u{a0}" : "│\u{a0}"
+        let sorted = tools.sorted { $0.createdAt < $1.createdAt }
+        return sorted.enumerated().map { index, tool in
+            .terminal(tool, twig: stem + (index == sorted.count - 1 ? "└─" : "├─"), depth: depth, index: nil)
         }
     }
 

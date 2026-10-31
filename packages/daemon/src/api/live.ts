@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { parseEvidence } from "../core/questions.js";
 import type { Store } from "../engine/store.js";
 import type { Approval, Task, TaskEvent, TaskStatus } from "../engine/types.js";
-import { permissionTarget, type TerminalHost, type TerminalInfo } from "../terminals/host.js";
+import { isTool, permissionTarget, type TerminalHost, type TerminalInfo } from "../terminals/host.js";
 import { speakable } from "../threads/speakable.js";
 import { modelName } from "../util/modelName.js";
 import { withoutLegend } from "../assistant/register.js";
@@ -155,7 +155,8 @@ export function liveSnapshot(store: Store, terminals: TerminalHost | undefined, 
   for (const a of store.pendingApprovals()) if (!pending.has(a.taskId)) pending.set(a.taskId, a);
   const tasks = store.unfinishedTasks().filter((t) => ACTIVE.has(t.status)).map((t) => taskRow(store, t, pending.get(t.id)));
   // A terminal at work counts as a task in progress does (2026-09-30); an idle or ended one does not.
-  const all = terminals?.list() ?? [];
+  // A tool terminal (yazi) is no work of an agent's.
+  const all = (terminals?.list() ?? []).filter((t) => !isTool(t.harness));
   const busy = all.filter((t) => waitsForYou(t) || t.status === "working").map(terminalRow);
   const rows = [...tasks, ...busy].sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.startedAt - a.startedAt);
   const waiting = rows.filter((r) => r.needsYou).length;
@@ -438,6 +439,7 @@ function ended(store: Store, now: number): LiveEnd[] {
 function terminalEnds(terminals: TerminalHost | undefined, now: number): LiveEnd[] {
   const out: LiveEnd[] = [];
   for (const t of terminals?.list() ?? []) {
+    if (isTool(t.harness)) continue;
     const turn = terminals?.lastTurn(t.id);
     if (!turn || turn.at < now - ENDED_MS) continue;
     const said = turn.line ? (turn.ok ? speakable(readable(turn.line)) : readable(turn.line)) : "";

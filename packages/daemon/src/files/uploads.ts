@@ -1,7 +1,7 @@
 /** Upload staging: each upload gets its own directory under $AGENTSWITCH_HOME/uploads/<id>/<name>,
  *  then `moveInto` relocates the chosen ones into a task's <cwd>/in/. Stale staging dirs are swept. */
 
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { extname, join } from "node:path";
 import { ATTACH_DIR, contentType, safeName } from "./names.js";
@@ -53,7 +53,7 @@ export class Uploads {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return found.map(({ id, name, size }) => {
       const target = freeName(dir, name.replace(/\s+/g, "-"));
-      renameSync(join(this.dir, id, name), join(dir, target));
+      moveFile(join(this.dir, id, name), join(dir, target));
       rmSync(join(this.dir, id), { recursive: true, force: true });
       return { name: target, path: join(dir, target), size, type: contentType(target) };
     });
@@ -66,9 +66,23 @@ export class Uploads {
     mkdirSync(dest, { recursive: true });
     return found.map(({ id, name, size }) => {
       const target = freeName(dest, name);
-      renameSync(join(this.dir, id, name), join(dest, target));
+      moveFile(join(this.dir, id, name), join(dest, target));
       rmSync(join(this.dir, id), { recursive: true, force: true });
       return { name: target, path: `${ATTACH_DIR}/${target}`, size, type: contentType(target) };
     });
+  }
+}
+
+/** A file moved, also to another file system: a terminal's attachments go to the system's temporary folder, which on
+ *  Linux is often its own (tmpfs), where a rename from the uploads folder fails with EXDEV (2026-10-15, user: 文件未能
+ *  粘贴：EXDEV: cross-device link not permitted). There it is copied (never over a file already there) and the staged one
+ *  removed. */
+export function moveFile(from: string, to: string, rename: (a: string, b: string) => void = renameSync): void {
+  try {
+    rename(from, to);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+    copyFileSync(from, to, constants.COPYFILE_EXCL);
+    rmSync(from, { force: true });
   }
 }

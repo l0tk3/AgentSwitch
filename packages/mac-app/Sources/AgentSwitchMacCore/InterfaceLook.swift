@@ -84,6 +84,7 @@ public extension PixelArt {
         (square, "circle.fill"), (hollow, "circle"), (lock, "lock"),
         (terminalWindow, "terminal"), (railTerminals, "terminal"), (railBrowser, "globe"),
         (toolbarList, "sidebar.left"), (toolbarNew, "plus"), (toolbarSettings, "slider.horizontal.3"), (toolbarRecord, "text.alignleft"), (toolbarFiles, "folder"),
+        (toolbarCode, "chevron.left.forwardslash.chevron.right"), (toolbarYazi, "rectangle.split.3x1"),
         // The window with the half a split adds filled in, as the system's own tiling icons are drawn (2026-10-04,
         // user, of a box with a line through it: 太违和了，感觉还是按照像素的逻辑画的……画的更加现代一些).
         (toolbarSplitRight, "rectangle.righthalf.inset.filled"), (toolbarSplitDown, "rectangle.bottomhalf.inset.filled"),

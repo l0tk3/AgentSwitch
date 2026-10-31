@@ -381,6 +381,14 @@ extension DaemonClient {
         return try decode(Reply.self, try await call("POST", "/terminals", body: try JSONEncoder().encode(body))).terminal
     }
 
+    /// `POST /terminals/:id/tool`: `tool` (yazi) beside terminal `id`, in the folder its agent works in now; the one
+    /// already open there when there is one (docs/yazi-v0.md).
+    public func openTool(beside id: String, tool: String = "yazi", cols: Int? = nil, rows: Int? = nil) async throws -> TerminalInfo {
+        struct Body: Encodable { let tool: String; let cols: Int?; let rows: Int? }
+        struct Reply: Decodable { let terminal: TerminalInfo }
+        return try decode(Reply.self, try await call("POST", "/terminals/\(Self.segment(id))/tool", body: try JSONEncoder().encode(Body(tool: tool, cols: cols, rows: rows)))).terminal
+    }
+
     /// `POST /terminals/resume`: a new terminal on the session, the one already open here, the program that has it
     /// open (409), or its folder gone (422) — each an outcome, not an error.
     public func resumeTerminal(_ body: ResumeTerminalRequest) async throws -> ResumeOutcome {

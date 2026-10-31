@@ -474,6 +474,10 @@ final class TerminalHead {
     /// The terminal's own name and the folder's path, under the pointer.
     var help = ""
     var status: String?
+    /// The terminal on screen is a tool terminal (yazi, docs/yazi-v0.md): nothing to open beside it, no simple view.
+    var tool = false
+    /// It still runs: yazi can be opened beside it.
+    var running = false
     var mark: PixelArt.MarkState = .off
     var tag = ""
     var context: TerminalContext?

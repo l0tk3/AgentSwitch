@@ -125,7 +125,7 @@ Linux 无头节点就是少一个窗口的 Mac 节点：能被别的节点用，
 | `agentswitch devices`、`devices revoke <设备>` | 列出设备（在不在线、上次见到），吊销 | `GET` / `DELETE /devices` |
 | `agentswitch node`、`node name "<名称>"` | 名称、端口、指纹、地址；起名 | `GET /remote/info`；起名是新的设置（今天只有环境变量 `AGENTSWITCH_REMOTE_NAME`；10-04 那台机器回退出来的是一长串带机器型号的主机名） |
 | `agentswitch doctor` | 环境检查：四个 agent 找到没有、版本、登录没有；`node-pty`、凭据网关、Tailscale、浏览器要的系统库 | 应用里的环境检查搬到服务这边 |
-| `agentswitch profiles …` | 列出、新建、删除、改颜色；`profiles login <配置>` 就在当前这个 SSH 窗口里起那个 agent 的登录 | `/profiles…`（建删只在本机，正好） |
+| `agentswitch profiles …` | 列出、新建、删除、改颜色；`profiles login <配置>` 就在当前这个 SSH 窗口里起那个 agent 的登录。——**已做**（2026-10-15，协作者：在 mac 远端如何管理 dellarch 上的 profile，比如模型地址）：`profiles`、`new`（`--api`、`--base-url`、`--model`）、`api`（改地址、模型，`--key` 换 key；地址换到另一站点时一并要新 key）、`color`、`rm`（`daemon/src/keeper/profiles.ts`）。key 不回显地输入或从管道读，由本节点的网关为地址所在的站点封成密文（`secret-gate enc --batch`，同 Mac），服务只收到密文。`--on` 只能列出。`login` 没做：在它名下开终端就从登录开始。从 Mac 远程用：开一个这台节点的终端，在里面跑 | `/profiles…`（建删只在本机，正好） |
 | `agentswitch policy …`、`models …`、`keys …` | 审批策略（已有）、路由与默认模型、网关密钥对 | 已有的本地接口与 `secret-gate keys` |
 | `agentswitch mcp`、`skills`、`context` | 调度用的 MCP、skill 注册表与环境说明。今天只能看（`context init` 除外），写入要补 | Mac 上在设置的 Dispatch 那一组；这些路由不对远程开放，无头节点上只能在这里改 |
 | `agentswitch service …`、`update`、`uninstall`、`logs` | §4.2 | — |

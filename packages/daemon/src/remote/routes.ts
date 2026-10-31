@@ -81,6 +81,8 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/terminals/:id/commands"],
   ["POST", "/terminals/:id/input"],
   ["POST", "/terminals/:id/attach"],
+  // A tool terminal beside a terminal (docs/yazi-v0.md §3): refused unless this node lets paired nodes open them.
+  ["POST", "/terminals/:id/tool"],
   ["POST", "/terminals/:id/keys"],
   // Keystrokes as they are, for another node's real terminal screen; refused unless this node allows it
   // (docs/mesh-v0.md §10, `GET /settings/mesh`).

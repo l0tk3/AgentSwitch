@@ -2,6 +2,14 @@
 
 import type { EngineStatus, EngineUpdateRequest } from "./browser/engine/kit.js";
 import type { Approval, Task, TaskEvent } from "./engine/types.js";
+import type { AgentProfiles, Profile, ProfileAgent, ProfileKind } from "./profiles/store.js";
+import type { ModelProbe } from "./profiles/apiKeys.js";
+import type { ModelSettings } from "./router/modelOverlay.js";
+import type { DiscoveredSkill, McpServer, Skill } from "./extensions/types.js";
+import type { PlatformMemory } from "./threads/platformMemory.js";
+
+/** An MCP server as sent: what the service fills in when left out (args, env, headers, enabled, harnesses, approval, note) may be. */
+export type McpServerInput = Pick<McpServer, "name" | "kind"> & Partial<Omit<McpServer, "name" | "kind">>;
 import type { Thread, ThreadState } from "./threads/types.js";
 
 /** Rows the CLI lists by default. */
@@ -31,7 +39,10 @@ export class Client {
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await this.fetchImpl(`${this.base}${path}`, { method, headers: { "content-type": "application/json", ...this.auth() }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
     const text = await res.text();
-    const data = text ? (JSON.parse(text) as T & { error?: string }) : ({} as T & { error?: string });
+    // A service older than the call answers a route it does not have in plain text (`404 Not Found`).
+    let data: T & { error?: string };
+    try { data = text ? (JSON.parse(text) as T & { error?: string }) : ({} as T & { error?: string }); }
+    catch { throw new Error(res.ok ? `${method} ${path}: not JSON` : `HTTP ${res.status}${text.trim() ? `: ${text.trim().slice(0, 200)}` : ""}`); }
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
     return data;
   }
@@ -49,6 +60,27 @@ export class Client {
   consoleLink() { return this.call<{ path: string }>("POST", "/local/console-link", {}); }
   devices() { return this.call<{ id: string; name: string; platform: string; lastSeenAt: number | null; revokedAt: number | null; online: boolean }[]>("GET", "/devices"); }
   revokeDevice(id: string) { return this.call<{ ok: true }>("DELETE", `/devices/${encodeURIComponent(id)}`); }
+  /** docs/profiles-v0.md: every agent's profiles; one made (an API key a ciphertext, §3.6), changed, removed. */
+  profiles() { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("GET", "/profiles"); }
+  /** The models an address offers for a key (a ciphertext just sealed for it, or the one `profile` keeps), or what it said instead. */
+  profileModels(agent: ProfileAgent, ask: { baseUrl?: string; key?: string; profile?: string }) { return this.call<ModelProbe>("POST", "/profiles/models", { agent, ...ask }); }
+  createProfile(agent: ProfileAgent, name: string, kind: ProfileKind, api?: { key: string; baseUrl?: string; model?: string; force?: boolean }) {
+    return this.call<{ profile: Profile; agents: Record<ProfileAgent, AgentProfiles> }>("POST", "/profiles", { agent, name, kind, ...(api ? { api } : {}) });
+  }
+  setProfileApi(agent: ProfileAgent, id: string, api: { key: string | null; baseUrl: string | null; model: string | null; force?: boolean }) {
+    return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("PUT", `/profiles/${agent}/${encodeURIComponent(id)}/api`, api);
+  }
+  setProfileColor(agent: ProfileAgent, id: string, color: string) { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("PUT", `/profiles/${agent}/${encodeURIComponent(id)}/color`, { color }); }
+  /** A profile's own proxy (§4: its password a ciphertext sealed for the proxy's host:port; `keepPassword` keeps the one
+   *  kept) set or, with `server` null, taken away; checked at once, `problem` saying when it let nothing out. */
+  setProfileProxy(agent: ProfileAgent, id: string, proxy: { server: string | null; username?: string; password?: string; keepPassword?: boolean }) {
+    return this.call<{ agents: Record<ProfileAgent, AgentProfiles>; problem?: string }>("PUT", `/profiles/${agent}/${encodeURIComponent(id)}/proxy`, proxy);
+  }
+  checkProfile(agent: ProfileAgent, id: string) { return this.call<{ agents: Record<ProfileAgent, AgentProfiles>; problem?: string }>("POST", `/profiles/${agent}/${encodeURIComponent(id)}/check`, {}); }
+  /** A claude.ai session key (§3.4), a ciphertext sealed for claude.ai; null forgets it. */
+  setProfileSessionKey(agent: ProfileAgent, id: string, key: string | null) { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("PUT", `/profiles/${agent}/${encodeURIComponent(id)}/session-key`, { key }); }
+  setProfileTelemetry(agent: ProfileAgent, id: string, on: boolean) { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("PUT", `/profiles/${agent}/${encodeURIComponent(id)}/telemetry`, { on }); }
+  removeProfile(agent: ProfileAgent, id: string) { return this.call<{ agents: Record<ProfileAgent, AgentProfiles> }>("DELETE", `/profiles/${agent}/${encodeURIComponent(id)}`); }
   /** docs/browser-v0.md §7: the browser engine as installed; `check` asks what could be. */
   browserEngine(opts: { check?: boolean; prerelease?: boolean } = {}) {
     return this.call<EngineStatus>("GET", `/browser/engine${opts.check ? `?check=1${opts.prerelease ? "&prerelease=1" : ""}` : ""}`);
@@ -68,8 +100,17 @@ export class Client {
   tasks(limit = CLIENT_LIST_LIMIT) { return this.call<Task[]>("GET", `/tasks?limit=${limit}`); }
   task(id: string) { return this.call<Task & { approvals: Approval[] }>("GET", `/tasks/${id}`); }
   answer(taskId: string, approvalId: string, text: string) { return this.call<{ ok: true }>("POST", `/tasks/${taskId}/answer`, { approval_id: approvalId, text }); }
+  /** The dispatch model and the default executor and model as they will be after the next start (app-v0 §2). */
+  modelSettings() { return this.call<ModelSettings & { restartRequired: boolean }>("GET", "/settings/models"); }
+  saveModelSettings(update: { router?: { model: string }; default?: { harness: string; model: string } }) { return this.call<{ restartRequired: boolean }>("PUT", "/settings/models", update); }
+  workdir() { return this.call<{ path: string; default: string; problem: string | null }>("GET", "/settings/workdir"); }
+  setWorkdir(path: string) { return this.call<{ path: string; default: string; problem: string | null }>("PUT", "/settings/workdir", { path }); }
+  /** What paired nodes may do here (docs/mesh-v0.md): type into this node's terminals; open tool terminals beside them
+   *  (docs/yazi-v0.md §3; absent from an older service). */
+  mesh() { return this.call<{ keyboard: boolean; files?: boolean; changes?: boolean; tools?: boolean }>("GET", "/settings/mesh"); }
+  setMesh(mesh: { keyboard?: boolean; tools?: boolean }) { return this.call<{ keyboard: boolean; files?: boolean; changes?: boolean; tools?: boolean }>("PUT", "/settings/mesh", mesh); }
   policy() { return this.call<{ policy: { mode: string; human: string[] }; categories: { id: string; title: string }[] }>("GET", "/approvals/policy"); }
-  setPolicy(policy: { mode: "manual" | "auto" | "scoped"; human?: string[] }) { return this.call<{ policy: unknown }>("PUT", "/approvals/policy", policy); }
+  setPolicy(policy: { mode: "manual" | "auto" | "scoped" | "skip"; human?: string[] }) { return this.call<{ policy: unknown }>("PUT", "/approvals/policy", policy); }
   approve(taskId: string, approvalId: string, decision: "allow" | "deny") { return this.call<{ ok: true }>("POST", `/tasks/${taskId}/approve`, { approval_id: approvalId, decision }); }
   cancel(id: string) { return this.call<Task>("POST", `/tasks/${id}/cancel`); }
   deleteTask(id: string) { return this.call<{ ok: true }>("DELETE", `/tasks/${id}`); }
@@ -81,11 +122,23 @@ export class Client {
   context() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/context"); }
   memory() { return this.call<{ path: string; text: string; warnings: string[] }>("GET", "/memory"); }
   putMemory(text: string) { return this.call<{ path: string; warnings: string[] }>("PUT", "/memory", { text }); }
+  /** CONTEXT.md saved: what looks like a credential is sealed first (`sealed`), lines that may not stay are said (`warnings`). */
+  putContext(text: string) { return this.call<{ path: string; warnings: string[]; sealed: { label: string }[] }>("PUT", "/context", { text }); }
+  /** What dispatch learned of platforms (docs/threads-v0.md), and one forgotten. */
+  platformMemory() { return this.call<{ records: PlatformMemory[] }>("GET", "/platform-memory"); }
+  forgetPlatformMemory(id: string) { return this.call<{ ok: true }>("DELETE", `/platform-memory/${encodeURIComponent(id)}`); }
+  putMcp(server: McpServerInput) { return this.call<McpServer>("PUT", `/mcp/${encodeURIComponent(server.name)}`, server); }
+  removeMcp(name: string) { return this.call<{ ok: true }>("DELETE", `/mcp/${encodeURIComponent(name)}`); }
+  skill(name: string) { return this.call<Skill & { content: string }>("GET", `/skills/${encodeURIComponent(name)}`); }
+  putSkill(name: string, body: { content?: string; enabled?: boolean; harnesses?: string[] }) { return this.call<Skill>("PUT", `/skills/${encodeURIComponent(name)}`, body); }
+  removeSkill(name: string) { return this.call<{ ok: true }>("DELETE", `/skills/${encodeURIComponent(name)}`); }
+  discoverSkills() { return this.call<DiscoveredSkill[]>("GET", "/skills/discover"); }
+  importSkill(path: string) { return this.call<Skill>("POST", "/skills/import", { path }); }
   records() { return this.call<unknown[]>("GET", "/records"); }
   files(taskId: string) { return this.call<{ root: "artifacts" | "cwd" | null; files: { path: string; size: number; mtime: number }[] }>("GET", `/tasks/${taskId}/files`); }
   contextExample() { return this.call<{ text: string }>("GET", "/context/example"); }
-  mcp() { return this.call<unknown[]>("GET", "/mcp"); }
-  skills() { return this.call<unknown[]>("GET", "/skills"); }
+  mcp() { return this.call<McpServer[]>("GET", "/mcp"); }
+  skills() { return this.call<Skill[]>("GET", "/skills"); }
 
   /** Follow a task's SSE stream; calls onEvent for each event, resolves when the task ends. */
   async watch(id: string, onEvent: (ev: TaskEvent) => void | Promise<void>, after = 0): Promise<void> {

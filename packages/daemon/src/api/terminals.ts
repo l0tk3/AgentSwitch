@@ -15,7 +15,7 @@ import type { TerminalAudit } from "../terminals/audit.js";
 import { attachable } from "../files/browse.js";
 import { viewerFor } from "./browse.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
-import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost, CLAUDE_MODES } from "../terminals/host.js";
+import { checkPicks, isTool, TERMINAL_TOOLS, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost, CLAUDE_MODES } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
@@ -27,6 +27,7 @@ import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { GitStatus } from "../terminals/gitStatus.js";
+import { CODEX_KEY_PROVIDER } from "../terminals/launch.js";
 import type { SentReply, TerminalInfo } from "../terminals/host.js";
 import { subagentDoing } from "./live.js";
 import { modelSettings } from "../router/modelOverlay.js";
@@ -76,6 +77,8 @@ const MAX_INPUT = 20_000;
 const GIT_FOLDERS = 60;
 const Attach = z.object({ uploads: z.array(z.string().min(1).max(64)).min(1).max(10) });
 const Size = { cols: z.number().int().min(20).max(500), rows: z.number().int().min(5).max(300) };
+const TERMINAL_ID = /^[0-9a-f]{8}$/;
+const Tool = z.object({ tool: z.enum(TERMINAL_TOOLS), cols: Size.cols.optional(), rows: Size.rows.optional() });
 /** A model id goes to the agent as `--model <id>`: never one that could read as a flag. */
 const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not a model id");
 /** A session id goes after `--resume` / `resume` / `--session`: likewise never one that could read as a flag. */
@@ -149,7 +152,7 @@ export function holdsReply(items: readonly RecordItem[], reply: SentReply): bool
 /** The terminal's record changed: the replies sent to it that the record now holds are no longer shown beside it. */
 function confirmSent(host: TerminalHost, sessions: SessionMonitor, id: string): void {
   const t = host.get(id);
-  if (!t?.sent.length || !t.agentSessionId) return;
+  if (!t?.sent.length || !t.agentSessionId || isTool(t.harness)) return;
   try {
     const items = sessions.record(t.harness, t.agentSessionId, { limit: 40 }, true)?.record.items ?? [];
     const held = t.sent.filter((reply) => holdsReply(items, reply)).map((reply) => reply.id);
@@ -166,7 +169,7 @@ export function watchRecord(host: TerminalHost, sessions: SessionMonitor, id: st
   const look = () => {
     const t = host.get(id);
     const session = t?.agentSessionId;
-    if (!t || !session || t.harness === "opencode") return;
+    if (!t || !session || t.harness === "opencode" || isTool(t.harness)) return;
     if (of !== session) { of = session; path = null; last = null; looked = 0; told = false; named = null; }
     if (!path) {
       // Where its hooks said it writes: there now, it is looked for at once (once for each file named).
@@ -210,6 +213,26 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (err instanceof TerminalError) return c.json({ error: err.message }, STATUS[err.code]);
     throw err;
   };
+
+  // Tool terminals (docs/yazi-v0.md §3): yazi runs shell commands and nothing asks first. This node's own screens have
+  // them; a paired node only while this node lets it (mesh.json `tools`); a phone never. To anyone else they do not
+  // exist: not listed, and every route of one answers 404 — its stream would show whatever it previews.
+  const toolsFor = (c: Context): boolean => {
+    const remote = remoteCaller(c.env);
+    if (!remote) return true;
+    if (!(deps.remoteTools?.() ?? false)) return false;
+    const platform = deps.store.getDevice(remote.deviceId)?.platform;
+    return platform === "macos" || platform === "linux";
+  };
+  const hidden = async (c: Context, next: () => Promise<void>) => {
+    // A terminal's id (TerminalHost: 8 hex digits), not one of the routes beside them (`/terminals/open`, `style` …).
+    const id = c.req.param("id") ?? "";
+    const info = TERMINAL_ID.test(id) ? host.get(id) : null;
+    if (info && isTool(info.harness) && !toolsFor(c)) return c.json({ error: "not found" }, 404);
+    await next();
+  };
+  app.use("/terminals/:id", hidden);
+  app.use("/terminals/:id/*", hidden);
 
   // Git at a glance for the tree's folders (docs/terminal-v0.md §5): the folders of the terminals and of the sessions
   // the tree lists, never a path a caller names. Folders not in a repository are left out.
@@ -321,7 +344,10 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       models: Object.fromEntries(Object.entries(models).map(([a, list]) => [a, Object.fromEntries(list.flatMap((m) => (m.efforts ? [[m.id, m.efforts]] : [])))])),
     };
   };
-  app.get("/terminals", (c) => c.json({ terminals: host.list().map(shown), agents, ...listing() }));
+  app.get("/terminals", (c) => {
+    const tools = toolsFor(c);
+    return c.json({ terminals: host.list().filter((x) => tools || !isTool(x.harness)).map(shown), agents, ...listing() });
+  });
   app.get("/terminals/style", (c) => c.json(t.style()));
 
   const start = async (c: Context, resume: boolean) => {
@@ -370,7 +396,14 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     // The profile it starts under (docs/profiles-v0.md §3.3): the one named. Not named — a conversation goes on under
     // the one it last ran under (the Mac's own when none is known, or that one is gone); a new terminal starts under
     // the one last chosen for a new terminal. `Default` is the Mac's own: nothing is set for it.
-    const recorded = resumed ? deps.profiles?.sessionProfile(resumed.harness, resumed.agentSessionId) ?? DEFAULT_PROFILE : null;
+    // A Codex thread says which model provider it went on with last (sessions/codex.ts): AgentSwitch's own one is a
+    // profile's that pays by a key (§3.6). With nothing noted of which (the note was lost, 2026-10-24), it goes on under
+    // the only such profile there is; and should it go on under one that pays by no key, Codex is told the user's own
+    // provider — else it will not start, the thread's naming one only that kind of terminal defines.
+    const provider = resumed?.harness === "codex" ? deps.sessions?.codexProvider(resumed.agentSessionId) ?? null : null;
+    const noted = resumed ? deps.profiles?.sessionProfile(resumed.harness, resumed.agentSessionId) ?? null : null;
+    const keyed = provider === CODEX_KEY_PROVIDER && !noted ? (deps.profiles?.all().codex.profiles ?? []).filter((p) => p.kind === "api") : [];
+    const recorded = resumed ? noted ?? (keyed.length === 1 ? keyed[0]!.id : DEFAULT_PROFILE) : null;
     const wanted = body.data.profile ?? recorded ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
     const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     // What of the Mac's own set-up came since the profile was made is linked into its folder (Codex's, §6.2).
@@ -416,6 +449,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     try {
       const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(signIn ? { signIn: true as const } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(forks ? { fork: forks } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
+        ...(provider === CODEX_KEY_PROVIDER && !paid ? { ownProvider: true as const } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
       // What a new terminal was started under is what the next one is offered first.
@@ -430,6 +464,21 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   app.get("/terminals/:id", (c) => {
     const info = host.get(c.req.param("id"));
     return info ? c.json({ terminal: shown(info) }) : c.json({ error: "not found" }, 404);
+  });
+
+  // A tool terminal beside this one (docs/yazi-v0.md): yazi in the folder its agent works in now; the one already open
+  // there when there is one. Refused where tool terminals are not this caller's (`toolsFor`).
+  app.post("/terminals/:id/tool", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseBody(c, Tool);
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    if (!toolsFor(c)) return c.json({ error: "this node does not let paired devices open tool terminals (Paired Nodes May Open yazi)" }, 403);
+    try {
+      const before = host.list().filter((x) => x.parent === id).map((x) => x.id);
+      const info = await host.spawnTool(id, body.data.tool, { ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
+      if (!before.includes(info.id)) audit.record({ terminal: info.id, action: "tool", via: via(c), detail: { tool: body.data.tool, parent: id } });
+      return c.json({ terminal: shown(info) });
+    } catch (err) { return failed(c, err); }
   });
 
   // The user's own name for a terminal; null or "" goes back to the derived one.
@@ -794,7 +843,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       // (docs/simple-view-v0.md §4). Claude Code keeps the picture in its own record.
       if (info.harness === "codex") deps.sessions?.keepPicturesIn(attachDir(id));
       rmSync(attachDir(id), { recursive: true, force: true });
-      const removed = own ? deleteTranscript(info.harness, own) : [];
+      const removed = own && !isTool(info.harness) ? deleteTranscript(info.harness, own) : [];
       audit.record({ terminal: id, action: "delete", via: via(c), detail: { transcript: removed.length } });
       return c.json({ ok: true, transcriptFiles: removed.length });
     } catch (err) { return failed(c, err); }

@@ -15,7 +15,8 @@ import { SessionMonitor, type SessionSources } from "../src/sessions/monitor.js"
 import { SessionSearch } from "../src/sessions/search.js";
 import { maskSecrets, type SessionSummary } from "../src/sessions/types.js";
 import { claudeFacts, claudeMode } from "../src/sessions/claude.js";
-import { codexMode } from "../src/sessions/codex.js";
+import { codexMode, codexProviderOf } from "../src/sessions/codex.js";
+import { codexFileOf } from "../src/sessions/monitor.js";
 import { existsSync } from "node:fs";
 
 const NOW = Date.parse("2026-09-27T10:00:00Z");
@@ -371,6 +372,68 @@ describe("Codex threads", () => {
     expect(codex.map((s) => s.id).sort()).toEqual(["fork1", "x1"]);
     expect(codex.find((s) => s.id === "fork1")?.forkedFrom).toBe("x1");
     expect(codex.find((s) => s.id === "x1")?.forkedFrom).toBeUndefined();
+  });
+});
+
+describe("a Codex thread kept in pages (Codex 0.162; 2026-10-24, one thread listed four times)", () => {
+  const ID = "01a1496e-376f-73f3-a23c-4b2f88103f7b";
+  /** The thread's first record and two pages after it, each from where the one before ended; the newest says the
+   *  provider it went on with, early on and then a long way back from its end. */
+  function paged() {
+    const f = fixture();
+    const write = (day: string, name: string, at: string, asked: string, said: string, provider: string | null, padding = 0) => {
+      const dir = join(f.sources.codexSessions, "2026", "09", day);
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, name);
+      writeFileSync(file, [
+        line({ timestamp: at, type: "session_meta", payload: { id: ID, cwd: "/Users/u/code/paper", originator: "codex-tui", source: "cli", model_provider: "openai" } }),
+        ...(provider ? [line({ timestamp: at, type: "event_msg", payload: { type: "thread_settings_applied", thread_settings: { model_provider_id: provider, model: "gpt-6-astra" } } })] : []),
+        line({ timestamp: at, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: asked }] } }),
+        ...Array.from({ length: padding }, () => line({ timestamp: at, type: "event_msg", payload: { type: "token_count", info: "x".repeat(1000) } })),
+        line({ timestamp: at, type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: said }] } }),
+      ].join("\n") + "\n");
+      utimesSync(file, new Date(at), new Date(at));
+      return file;
+    };
+    const first = write("25", `rollout-2026-09-25T09-00-00-${ID}.jsonl`, "2026-09-25T09:00:00Z", "看一下 paper 的 intro", "好的。", null);
+    const middle = write("26", `rollout-2026-09-26T09-00-00-${ID}_01a14987-e51c-72b3-9675-93fa9e416b2a.jsonl`, "2026-09-26T09:00:00Z", "继续改第二节", "改好了。", "openai");
+    const newest = write("27", `rollout-2026-09-27T09-00-00-${ID}_01a15e66-a0ed-7743-8df2-39e560f90faf.jsonl`, "2026-09-27T09:30:00Z", "图里改成小写", "已改为小写。", "agentswitch", 40);
+    return { ...f, first, middle, newest };
+  }
+
+  it("is one session: asked first on its earliest page, the rest from its newest, which is the file read", () => {
+    const { sources, newest } = paged();
+    const monitor = new SessionMonitor(sources, () => NOW);
+    const threads = monitor.list().filter((s) => s.id === ID);
+    expect(threads).toHaveLength(1);
+    expect(threads[0]).toMatchObject({ title: "看一下 paper 的 intro", lastText: "已改为小写。", updatedAt: Date.parse("2026-09-27T09:30:00Z"), startedAt: expect.any(Number) });
+    expect(monitor.source("codex", ID)).toBe(newest);
+    expect(monitor.read("codex", ID)?.messages.map((m) => m.text)).toEqual(["图里改成小写", "已改为小写。"]);
+    // Looked for by its id alone (a terminal of ours), the newest page too.
+    expect(new SessionMonitor(sources, () => NOW).locate("codex", ID)).toBe(newest);
+  });
+
+  it("is deleted whole, every page", async () => {
+    const { sources, first, middle, newest } = paged();
+    const gone = await new SessionMonitor(sources, () => NOW).remove("codex", ID);
+    expect(gone.removed.sort()).toEqual([first, middle, newest].sort());
+    expect([first, middle, newest].some(existsSync)).toBe(false);
+  });
+
+  it("says the provider it went on with last, however far back from the end that is said", () => {
+    const { sources, first, newest } = paged();
+    expect(codexProviderOf(newest, 4096)).toBe("agentswitch");
+    expect(codexProviderOf(first)).toBe("openai");
+    expect(new SessionMonitor(sources, () => NOW).codexProvider(ID)).toBe("agentswitch");
+    expect(new SessionMonitor(sources, () => NOW).codexProvider("not-there")).toBeNull();
+  });
+
+  it("knows its files by name, pages included, and no other thread's", () => {
+    expect(codexFileOf(`rollout-2026-10-17T18-35-22-${ID}.jsonl`, ID)).toBe(true);
+    expect(codexFileOf(`rollout-2026-10-21T20-19-06-${ID}_01a15e66-a0ed-7743-8df2-39e560f90faf.jsonl`, ID)).toBe(true);
+    expect(codexFileOf(`rollout-2026-10-21T20-19-06-${ID}_not-a-page.jsonl`, ID)).toBe(false);
+    expect(codexFileOf(`rollout-2026-10-21T20-19-06-x${ID}.jsonl`, ID)).toBe(false);
+    expect(codexFileOf(`rollout-2026-10-21T20-15-09-01a15e63-0066-7711-9914-4ab41b422021.jsonl`, ID)).toBe(false);
   });
 });
 

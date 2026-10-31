@@ -101,10 +101,13 @@ build_daemon() {
     find node_modules/node-pty -name spawn-helper -type f -exec chmod 755 {} +
   )
   [ -f "$src/dist/cli.js" ] || die "daemon build produced no dist/cli.js"
-  mkdir -p "$RUNTIME/daemon"
+  # The terminals' holder (docs/terminal-v0.md §10), compiled by `npm run build`; used once the app holds terminals.
+  [ -x "$src/native/build/pty-hold" ] || die "daemon build produced no native/build/pty-hold"
+  mkdir -p "$RUNTIME/daemon/native"
   for item in dist package.json node_modules config ui; do
     rsync -a --delete "$src/$item" "$RUNTIME/daemon/"
   done
+  rsync -a --delete "$src/native/build" "$RUNTIME/daemon/native/"
   mkdir -p "$RUNTIME/secret-gate"
   cp "$REPO/packages/secret-gate/AGENTS.md" "$RUNTIME/secret-gate/AGENTS.md"
 }

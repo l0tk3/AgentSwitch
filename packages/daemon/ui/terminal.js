@@ -833,7 +833,7 @@ function renderPanes() {
         zoomed ? h("span", { class: "at" }, `Pane ${n} of ${all.length} · ⌘⇧↩`) : null,
         // A request waiting in a pane out of focus: its card shows once the pane has the focus.
         t && id !== focusPane && t.permissions?.length ? h("span", { class: "w" }, W("[!] Approval")) : null,
-        t && !making ? agentMark(t.harness) : null,
+        t && !making ? programMark(t) : null,
         zoomed ? null : h("button", { class: "x", title: "Close Pane", onclick: () => closePane(id) }, raw(glyph(X_ICON, 1, "x", 12))),
       ].filter(Boolean));
     }
@@ -1035,6 +1035,16 @@ function rowClick(e, what) {
 
 /** The terminal a session is already continued in, if any. */
 const openedAs = (s) => terminals.find((t) => t.status !== "exited" && (t.resumedFrom === s.id || t.agentSessionId === s.id)) ?? null;
+
+/** Files beside a terminal (docs/yazi-v0.md): yazi in the folder its agent works in now, in a pane to the right — the
+ *  pane it is in already, when it is open. Where the node says no (no yazi, a paired node it does not let), why. */
+async function openYazi(t) {
+  try {
+    const r = await api("POST", `/terminals/${t.id}/tool`, { tool: "yazi" });
+    await refresh();
+    if (PANES) openBeside({ term: r.terminal.id }); else select(r.terminal.id);
+  } catch (e) { notify(e.message); }
+}
 
 function openBeside(what) {
   const term = what.term ?? openedAs(what.session)?.id;
@@ -1261,7 +1271,7 @@ function sendDecision(id, requestId, decision) {
 // ---------- the sidebar: a directory tree ----------
 /** The folders with their terminals and sessions (lib/tree.js has the rules: a fixed order, each folder in the nearest
  *  folder above it that the list shows). */
-const folderTree = () => buildTree(terminals, sessions);
+const folderTree = () => buildTree(terminals.filter((t) => !t.parent), sessions);
 /** A folder folded by its path; `parent:<path>` is how a folder that only gathered others was kept before 2026-10-03. */
 const folded = (cwd) => collapsed.has(cwd) || collapsed.has(`parent:${cwd}`);
 
@@ -1287,15 +1297,19 @@ const twig = (tr, depth) => (classic()
   ? h("span", { class: "tr", style: `padding-left:${depth * 14}px` })
   : h("span", { class: "tr", style: `padding-left:${depth * 2}ch` }, tr));
 
+/** An agent's mark, or a tool terminal's program by name (yazi has no picture). */
+const programMark = (t) => (t.parent ? h("span", { class: "at" }, t.harness) : agentMark(t.harness));
+
 function terminalRow(t, tr, depth, name = t.name) {
   const index = terminalOrder.indexOf(t.id);
+  const numbered = index >= 0 && index < 9;
   const meta = t.status === "waiting" ? h("span", { class: classic() ? "w pill" : "w" }, W("Waiting"))
     : t.status === "exited" ? (t.exitCode ? h("span", { class: "x" }, `Exit ${t.exitCode}`) : W("Exited"))
-    : agentMark(t.harness);
-  return h("div", { class: `row term ${t.status} ${current?.id === t.id && !creating ? "sel" : ""}`, "data-id": t.id, title: `${AGENT[t.harness]}${index < 9 ? ` · ⌘${index + 1}` : ""}`,
+    : programMark(t);
+  return h("div", { class: `row term ${t.status} ${current?.id === t.id && !creating ? "sel" : ""}`, "data-id": t.id, title: `${AGENT[t.harness] ?? t.harness}${numbered ? ` · ⌘${index + 1}` : ""}`,
     onclick: (e) => rowClick(e, { term: t.id }), onpointerdown: (e) => startRowDrag(e, { term: t.id }),
     ondblclick: () => startRename(t.id), oncontextmenu: (e) => { e.preventDefault(); showMenu(e, t); } },
-    h("span", { class: "ix" }, index < 9 ? String(index + 1).padStart(2, "0") : ""),
+    h("span", { class: "ix" }, numbered ? String(index + 1).padStart(2, "0") : ""),
     twig(tr, depth),
     h("span", { class: "st" }, statusMark(t)),
     h("span", { class: `nm ${t.status === "exited" ? "dither" : ""}`, "data-rename": t.id }, name),
@@ -1304,16 +1318,20 @@ function terminalRow(t, tr, depth, name = t.name) {
 }
 
 /** A terminal's sub-agents at work, one level under it (docs/terminal-v0.md §1): what each was sent to do, its kind and
- *  what it is doing now. A click opens the terminal. */
+ *  what it is doing now. A click opens the terminal. After them its tool terminals (yazi, docs/yazi-v0.md), rows of
+ *  their own. */
 function subagentRows(t, tr, depth) {
   const subs = t.status === "exited" ? [] : t.subagents ?? [];
+  const tools = terminals.filter((x) => x.parent === t.id).sort((a, b) => a.createdAt - b.createdAt);
   const stem = tr === "└─" ? "\u00a0\u00a0" : "│\u00a0";
-  return subs.map((a, k) => h("div", { class: "row sub", title: [a.type, a.doing].filter(Boolean).join(" · "), onclick: () => select(t.id) },
+  const last = subs.length + tools.length - 1;
+  return [...subs.map((a, k) => h("div", { class: "row sub", title: [a.type, a.doing].filter(Boolean).join(" · "), onclick: () => select(t.id) },
     h("span", { class: "ix" }),
-    twig(`${stem}${k === subs.length - 1 ? "└─" : "├─"}`, classic() ? depth + 1 : depth),
+    twig(`${stem}${k === last ? "└─" : "├─"}`, classic() ? depth + 1 : depth),
     h("span", { class: "st" }, busyMark()),
     h("span", { class: "nm" }, a.name, a.doing ? h("i", {}, a.doing) : null),
-    h("span", { class: "mt" }, a.type)));
+    h("span", { class: "mt" }, a.type))),
+    ...tools.map((x, k) => terminalRow(x, `${stem}${subs.length + k === last ? "└─" : "├─"}`, classic() ? depth + 1 : depth))];
 }
 
 function sessionRow(s, tr, depth, name = s.title || "(Untitled)") {
@@ -1346,6 +1364,7 @@ function showMenu(e, t) {
     item("Rename", null, () => startRename(t.id)),
     move,
     item("Encrypt & Send…", "⌘⇧V", () => { select(t.id); openComposer(); }, { disabled: t.status === "exited" || out }),
+    !t.parent && t.status !== "exited" ? item("Open yazi Beside", null, () => openYazi(t)) : null,
     item("Close", "⌘W", () => closeTerminal(t), { danger: true })].filter(Boolean));
   $("menu").hidden = false;
   const r = $("menu").getBoundingClientRect();
@@ -1483,7 +1502,8 @@ const chevron = (closed) => (classic()
 
 function renderSidebar() {
   if (renaming) return;
-  terminalOrder = [...terminals].sort((a, b) => a.createdAt - b.createdAt).map((t) => t.id);
+  // A tool terminal (yazi beside an agent's, docs/yazi-v0.md) has no number: it is reached under its agent terminal.
+  terminalOrder = terminals.filter((t) => !t.parent).sort((a, b) => a.createdAt - b.createdAt).map((t) => t.id);
   const q = query.trim().toLowerCase();
   if (q) { $("groups").replaceChildren(...renderSearch(q)); return; }
   const toggle = (cwd) => {

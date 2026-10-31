@@ -15,7 +15,9 @@
  *  of the folder is shared with other OpenCodes and is not asked for this. */
 
 import type { PermissionRequest } from "../executors/opencodeServeMap.js";
-import { basicAuth, startStdioServe, stopStdioServe, type StdioServe, type StdioServeOptions } from "../harness/opencodeStdio.js";
+import { randomBytes } from "node:crypto";
+import { basicAuth, noteServePort, startStdioServe, stopStdioServe, type StdioServe, type StdioServeOptions } from "../harness/opencodeStdio.js";
+import { attachHeldServer, startHeldServer, type HoldPlace, type Holding, type ServerProcess } from "./held.js";
 import type { Companion, CompanionLink } from "./host.js";
 import { WritingFeed, WritingText, type Writing } from "../core/writing.js";
 import { followEventStream, openCodeWriting } from "../harness/opencodeEvents.js";
@@ -51,8 +53,30 @@ export type OpenCodeCompanionOptions = {
   readonly pollMs?: number;
   /** Starts the server (tests pass a fake). */
   readonly serve?: (o: StdioServeOptions) => Promise<StdioServe>;
+  /** The terminal is held (docs/terminal-v0.md §10): its server runs on a holder of its own too, at `socket`. */
+  readonly held?: { readonly holding: Holding; readonly socket: string; readonly unit: string };
+  /** A held terminal taken up again: its server still runs there (`keep`). */
+  readonly restored?: { readonly url: string; readonly password: string; readonly place: HoldPlace };
   readonly log?: (line: string) => void;
 };
+
+/** The terminal's server as the companion uses it. */
+type Serving = { readonly url: string; readonly password: string; stderrTail(): string; readonly proc: ServerProcess };
+/** Its address line, as `serve --stdio` writes it (startStdioServe): on a pty, each line ends in CR LF. */
+const URL_LINE = /^\s*(\{.*"url".*\})\s*$/m;
+const HELD_START_MS = 15_000;
+const STOP_GRACE = 1_500;
+
+/** A process this one spawned, as a `ServerProcess`. */
+function childServer(s: StdioServe): ServerProcess {
+  return { onExit: (cb) => { s.child.once("exit", cb); }, stop: (g) => stopStdioServe(s.child, g), detach: () => undefined };
+}
+
+/** A held server reached once something needs it (stopping it, hearing it end). */
+function laterServer(place: HoldPlace): ServerProcess {
+  const later = attachHeldServer(place).catch(() => null);
+  return { place, onExit: (cb) => { void later.then((p) => (p ? p.onExit(cb) : cb())); }, stop: async (g) => { await (await later)?.stop(g); }, detach: () => { void later.then((p) => p?.detach()); } };
+}
 
 /** A permission request as a card: the tool names the screens know where there is one. */
 export function openCodeAsk(req: PermissionRequest): { tool: string; input: Json } {
@@ -83,7 +107,7 @@ export class OpenCodeCompanion implements Companion {
   /** What the terminal was last told: its session, its sub-agents (their ids). */
   private told: string | null = null;
   private toldAgents = "";
-  private server: StdioServe | null = null;
+  private server: Serving | null = null;
   /** The event stream followed for what it writes. */
   private watching: AbortController | null = null;
   private link: CompanionLink | null = null;
@@ -101,18 +125,82 @@ export class OpenCodeCompanion implements Companion {
   constructor(private readonly o: OpenCodeCompanionOptions) {
     this.loc = `directory=${encodeURIComponent(o.cwd)}`;
     this.wanted = o.model && o.args.includes("--session") ? o.model : null;
+    if (o.restored) {
+      const { url, password, place } = o.restored;
+      this.server = { url, password, stderrTail: () => "", proc: laterServer(place) };
+      this.notePort(url);
+    }
+  }
+
+  /** A held terminal's companion again, from what it kept (`keep`); null for what is not one. */
+  static restore(kept: Record<string, unknown>, log?: (line: string) => void): OpenCodeCompanion | null {
+    const { url, password, place, cwd, asks } = kept as { url?: unknown; password?: unknown; place?: HoldPlace; cwd?: unknown; asks?: unknown };
+    if (typeof url !== "string" || typeof password !== "string" || typeof cwd !== "string" || !place?.socket) return null;
+    return new OpenCodeCompanion({ binary: "", cwd, env: {}, args: [], asks: asks === true, restored: { url, password, place }, ...(log ? { log } : {}) });
+  }
+
+  keep(): Record<string, unknown> | null {
+    const s = this.server;
+    return s?.proc.place ? { kind: "opencode", url: s.url, password: s.password, place: s.proc.place, cwd: this.o.cwd, asks: this.o.asks } : null;
+  }
+
+  /** The service stops; the terminal is held: no more looks, the server runs on. */
+  detach(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.watching?.abort();
+    for (const ctl of this.open.values()) ctl.abort();
+    this.open.clear();
+    this.server?.proc.detach();
+  }
+
+  private notePort(url: string): void {
+    const port = Number(new URL(url).port);
+    if (Number.isInteger(port) && port > 0) this.server?.proc.onExit(noteServePort(port));
+  }
+
+  /** `opencode serve --stdio` on a holder of its own: its stdin is the pty, which does not close when the service goes. */
+  private async startHeld(h: NonNullable<OpenCodeCompanionOptions["held"]>): Promise<Serving> {
+    const password = randomBytes(24).toString("base64url");
+    const { OPENCODE_SERVER_PASSWORD: _server, OPENCODE_PASSWORD: _own, ...base } = this.o.env;
+    let out = "";
+    let found: (url: string) => void = () => undefined;
+    const url = new Promise<string>((resolve) => { found = resolve; });
+    const proc = await startHeldServer(h.holding, { socket: h.socket, token: randomBytes(24).toString("base64url") },
+      { file: this.o.binary, args: ["serve", "--stdio", "--port", "0", "--hostname", "127.0.0.1"], cwd: this.o.cwd, env: { ...base, OPENCODE_PASSWORD: password } }, h.unit,
+      (text) => {
+        out = (out + text).slice(-8_000);
+        const m = URL_LINE.exec(out);
+        if (m) try { found(String((JSON.parse(m[1]!) as { url: unknown }).url)); } catch { /* not yet whole */ }
+      });
+    let timer: NodeJS.Timeout | undefined;
+    const ended = new Promise<never>((_, reject) => proc.onExit(() => reject(new Error(`opencode serve exited before it was ready: ${out.trim().slice(-200)}`))));
+    const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`opencode serve did not report its address within ${HELD_START_MS} ms: ${out.trim().slice(-200)}`)), HELD_START_MS); });
+    try {
+      const at = await Promise.race([url, ended, late]);
+      return { url: at, password, stderrTail: () => out.trim().slice(-300), proc };
+    } catch (err) {
+      await proc.stop(500);
+      throw err;
+    } finally { clearTimeout(timer); }
   }
 
   async start(): Promise<{ args: string[]; env: Record<string, string> } | null> {
     const log = this.o.log ?? ((l: string) => console.error(l));
     try {
-      this.server = await (this.o.serve ?? startStdioServe)({ binary: this.o.binary, cwd: this.o.cwd, env: this.o.env, port: 0 });
+      if (this.o.held) this.server = await this.startHeld(this.o.held);
+      else {
+        const s = await (this.o.serve ?? startStdioServe)({ binary: this.o.binary, cwd: this.o.cwd, env: this.o.env, port: 0 });
+        this.server = { url: s.url, password: s.password, stderrTail: s.stderrTail, proc: childServer(s) };
+      }
     } catch (err) {
       log(`opencode terminal: its server did not start, the TUI starts its own: ${(err as Error).message}`);
       return null;
     }
-    if (this.stopped) { void stopStdioServe(this.server.child); return null; }
-    this.server.child.once("exit", () => { if (!this.stopped) log(`opencode terminal: its server exited: ${this.server?.stderrTail() ?? ""}`); });
+    if (this.stopped) { void this.server.proc.stop(STOP_GRACE); return null; }
+    if (this.o.held) this.notePort(this.server.url);
+    this.server.proc.onExit(() => { if (!this.stopped) log(`opencode terminal: its server exited: ${this.server?.stderrTail() ?? ""}`); });
     const { OPENCODE_SERVER_PASSWORD: _server, OPENCODE_PASSWORD: _own, ...env } = this.o.env;
     return { args: ["--server", this.server.url, ...this.o.args], env: { ...env, OPENCODE_PASSWORD: this.server.password } };
   }
@@ -154,7 +242,7 @@ export class OpenCodeCompanion implements Companion {
     this.watching?.abort();
     for (const ctl of this.open.values()) ctl.abort();
     this.open.clear();
-    if (this.server) void stopStdioServe(this.server.child);
+    if (this.server) void this.server.proc.stop(STOP_GRACE);
   }
 
   private schedule(ms: number): void {
