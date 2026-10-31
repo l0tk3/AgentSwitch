@@ -2,6 +2,7 @@ import AgentSwitchMacCore
 import AppKit
 import OSLog
 import SwiftTerm
+import UniformTypeIdentifiers
 
 /// `log show --predicate 'subsystem == "com.agentswitch.mac" && category == "terminal-screen"'`
 private let screenLog = Logger(subsystem: "com.agentswitch.mac", category: "terminal-screen")
@@ -31,7 +32,8 @@ final class NativeTerminalView: TerminalView {
         if !shift {
             switch key {
             case "c": copy(self); return true
-            case "v": paste(self); return true
+            // A picture, or another node's terminal and this Mac's files: sent there (TerminalPaste); else text.
+            case "v": if owner?.pasteSent() != true { paste(self) }; return true
             case "a": selectAll(self); return true
             default: break
             }
@@ -340,9 +342,11 @@ final class TerminalScreenController: NSObject {
         let files = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
         let text: String
         if !files.isEmpty, client().isRemote {
-            // A path of this Mac's means nothing on another node: files go through the reply box, which sends them.
-            note("这个终端在另一个节点上：文件请拖到简略视图的回复框，它们会被发送过去。")
-            return false
+            // A path of this Mac's means nothing on another node: the files are sent there and their paths pasted
+            // (2026-10-15; before, the drop was refused and pointed at the reply box).
+            sendFiles(urls: files)
+            view.window?.makeFirstResponder(view)
+            return true
         } else if !files.isEmpty {
             // One that may hold a password is asked about before its path is typed (docs/files-v0.md §4).
             let picks = files.map { url in
@@ -364,6 +368,82 @@ final class TerminalScreenController: NSObject {
         typed(ArraySlice(Array(TerminalDrop.pasted(text, bracketed: view.getTerminal().bracketedPasteMode).utf8)))
         view.window?.makeFirstResponder(view)
         return true
+    }
+
+    /// ⌘V (docs/terminal-v0.md §1 Mac "粘贴图片"): true when the clipboard was sent to the terminal's node instead of
+    /// pasted as text — a picture alone, or this Mac's files on another node's terminal (TerminalPaste).
+    func pasteSent() -> Bool {
+        guard id != nil else { return false }
+        let board = NSPasteboard.general
+        let files = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let text = !(board.string(forType: .string) ?? "").isEmpty
+        let picture = board.canReadObject(forClasses: [NSImage.self], options: nil)
+        switch TerminalPaste.of(files: files.count, text: text, picture: picture, remote: client().isRemote) {
+        case .text:
+            return false
+        case .files:
+            sendFiles(urls: files)
+            return true
+        case .picture:
+            guard let png = DispatchModel.pastedImage(board) else { return false }
+            sendFiles([png])
+            return true
+        }
+    }
+
+    /// Files of this Mac sent to the terminal's node: read off the main thread, folders and what is too big left out
+    /// (said under the output).
+    private func sendFiles(urls: [URL]) {
+        Task { [weak self] in
+            let read = await Task.detached { () -> (files: [DispatchUploadFile], problems: [String]) in
+                var files: [DispatchUploadFile] = []
+                var problems: [String] = []
+                for url in urls {
+                    var folder: ObjCBool = false
+                    guard FileManager.default.fileExists(atPath: url.path, isDirectory: &folder) else { problems.append("\(url.lastPathComponent) 无法读取"); continue }
+                    if folder.boolValue { problems.append("\(url.lastPathComponent) 是文件夹，无法发送到另一个节点"); continue }
+                    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                    if size > DispatchUploadFile.maxFileBytes { problems.append("\(url.lastPathComponent) 超过 50 MB"); continue }
+                    guard let data = try? Data(contentsOf: url) else { problems.append("\(url.lastPathComponent) 无法读取"); continue }
+                    let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+                    let file = DispatchUploadFile(name: url.lastPathComponent, type: type, data: data)
+                    if let problem = DispatchUploadFile.problem(adding: file, to: files) { problems.append(problem); continue }
+                    files.append(file)
+                }
+                return (files, problems)
+            }.value
+            guard let self else { return }
+            if !read.problems.isEmpty { self.note(read.problems.joined(separator: "；")) }
+            if !read.files.isEmpty { self.sendFiles(read.files) }
+        }
+    }
+
+    /// At most this many files a paste (`POST /terminals/:id/attach`).
+    private static let attachMax = 10
+
+    /// `files` staged on the terminal's node, then their paths pasted into it after what was typed before (the
+    /// service moves them to the terminal's own folder of attachments). The size is this window's, as a drop's.
+    private func sendFiles(_ files: [DispatchUploadFile]) {
+        guard let id else { return }
+        userActed()
+        if files.count > Self.attachMax { note("每次最多粘贴 \(Self.attachMax) 个文件，其余的没有发送") }
+        let sent = Array(files.prefix(Self.attachMax))
+        let c = client()
+        Task { [weak self] in
+            do {
+                let staged = try await c.upload(sent)
+                guard let self, self.id == id else { return }
+                guard staged.count == sent.count else { throw DaemonError.unreachable("文件未能送达") }
+                let uploads = staged.map { $0.id }
+                if let data = self.writes.drain() { self.inOrder { try await $0.writeTerminal(id: id, data: data) } }
+                self.inOrder({ try await $0.attachToTerminal(id: id, uploads: uploads) }, failed: { [weak self] error in
+                    self?.note("文件未能粘贴：\((error as? DaemonError)?.reason ?? error.localizedDescription)")
+                })
+            } catch {
+                guard let self, self.id == id else { return }
+                self.note("文件未能发送：\((error as? DaemonError)?.reason ?? error.localizedDescription)")
+            }
+        }
     }
 
     /// Paths typed at the terminal's cursor as a drop types them (the Files column's `Add to Reply` on a terminal's
@@ -639,13 +719,18 @@ final class TerminalScreenController: NSObject {
         inOrder { try await $0.terminalKeys(id: id, [name]) }
     }
 
-    /// One request after another, in the order asked; `then` once this one is over, however it ended.
-    private func inOrder(_ send: @escaping @Sendable (DaemonClient) async throws -> Void, then: (@MainActor () -> Void)? = nil) {
+    /// One request after another, in the order asked; `then` once this one is over, however it ended; `failed` with
+    /// what went wrong.
+    private func inOrder(_ send: @escaping @Sendable (DaemonClient) async throws -> Void, then: (@MainActor () -> Void)? = nil,
+                         failed: (@MainActor (Error) -> Void)? = nil) {
         let before = sending
         let c = client()
         sending = Task {
             await before?.value
-            do { try await send(c) } catch { screenLog.error("send: \(error.localizedDescription, privacy: .public)") }
+            do { try await send(c) } catch {
+                screenLog.error("send: \(error.localizedDescription, privacy: .public)")
+                failed?(error)
+            }
             then?()
         }
     }

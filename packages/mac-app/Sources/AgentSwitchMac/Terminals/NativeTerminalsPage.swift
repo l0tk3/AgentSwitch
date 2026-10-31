@@ -70,6 +70,7 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
     /// A node is no longer used: what its page remembered goes with it.
     static func forget(node: String) {
         UserDefaults.standard.removePersistentDomain(forName: store(node: node))
+        UserDefaults.standard.removeObject(forKey: EditorLink.sshHostKey(node: node))
     }
 
     // MARK: what the window asks
@@ -85,6 +86,7 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
     func split(_ side: String) { model.split(side == "down" ? .bottom : .right) }
     func newTerminal() { model.showCreate() }
     func toggleView() { model.toggleSimple() }
+    func openInEditor() { if let terminal = model.current { model.openInEditor(terminal) } }
     func setDetached(_ ids: Set<String>) { model.setDetached(ids) }
     func detachShown() { if let id = model.current?.id { onDetach(id) } }
 

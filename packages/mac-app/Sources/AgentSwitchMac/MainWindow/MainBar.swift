@@ -18,6 +18,8 @@ struct MainBarActions {
     var detach: () -> Void = {}
     /// The Terminals bar's switch: the pane in focus as its session's record, or as the terminal again.
     var toggleView: () -> Void = {}
+    /// The Terminals bar's button for the terminal on screen's folder in the code editor.
+    var openInEditor: () -> Void = {}
     /// The bar's own traffic lights while the window is full screen.
     var closeWindow: () -> Void = {}
     var exitFullScreen: () -> Void = {}
@@ -229,6 +231,9 @@ struct MainBar: View {
                     case .terminals:
                         // The other view of the terminal in focus (docs/simple-view-v0.md §1): its record, or its screen.
                         if !head.name.isEmpty {
+                            // Its folder in the code editor (terminal-v0 §1 Mac "在编辑器中打开"): on the bar, which is there
+                            // with one pane too (the panes' own headers are not).
+                            ToolbarPixelButton(rows: PixelArt.toolbarCode, help: "Open in \(CodeEditor.load(.standard).short)", action: actions.openInEditor)
                             ToolbarPixelButton(rows: head.simple ? PixelArt.railTerminals : PixelArt.toolbarRecord,
                                                help: head.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E", action: actions.toggleView)
                         }

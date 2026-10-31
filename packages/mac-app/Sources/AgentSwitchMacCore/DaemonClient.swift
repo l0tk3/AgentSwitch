@@ -89,9 +89,13 @@ public struct DaemonClient: Sendable {
     public func onNode(_ id: String?, as device: String? = nil) -> DaemonClient {
         var copy = self
         copy.nodePrefix = id.map { "/nodes/\(Self.segment($0))" } ?? ""
+        copy.nodeId = id
         copy.screenOwner = id.map { id in device.flatMap { $0.isEmpty ? nil : $0 } ?? id }
         return copy
     }
+
+    /// The node whose routes these are (`onNode`); nil: this Mac's own.
+    public private(set) var nodeId: String?
 
     /// What this Mac's screens on the node's terminals and tabs are named after; nil on this Mac's own service.
     public private(set) var screenOwner: String?

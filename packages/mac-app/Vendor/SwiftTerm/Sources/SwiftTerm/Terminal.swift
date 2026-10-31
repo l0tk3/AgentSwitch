@@ -6332,6 +6332,10 @@ open class Terminal {
         options.cols = cols
         let savedCursorHidden = cursorHidden
         setup (isReset: true)
+        // AgentSwitch (PATCHES.md, "A reset follows the bottom again"): the buffers are new and their viewport is at the
+        // top, so a viewport the user had scrolled back no longer exists. Kept, the output fed after a reset would leave
+        // the viewport where the new buffer starts, ever further above the bottom.
+        userScrolling = false
         clearAllKittyImages()
         cursorHidden = savedCursorHidden
         refresh (startRow: 0, endRow: rows-1)

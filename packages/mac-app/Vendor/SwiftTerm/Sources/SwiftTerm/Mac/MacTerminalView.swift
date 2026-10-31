@@ -918,6 +918,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     open func bufferActivated(source: Terminal) {
+        // AgentSwitch (PATCHES.md, "A reset follows the bottom again"): the terminal's flag after a reset.
+        userScrolling = source.userScrolling
         updateScroller ()
     }
     
