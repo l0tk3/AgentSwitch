@@ -103,7 +103,7 @@ import { agentLauncher, hookCommandOf, HOOK_SCRIPT, PERMISSION_HOOK_TIMEOUT_S, Q
 import { holding } from "./terminals/held.js";
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
-import { TERMINAL_HARNESSES } from "./terminals/host.js";
+import { endLeftHeld, TERMINAL_HARNESSES } from "./terminals/host.js";
 import { BRIDGE_SCRIPT, bridgeCommand, terminalOwner, type AgentEngine } from "./browser/agents.js";
 import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
@@ -419,7 +419,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
           launched: async () => { const p = profileOfKey(key); if (p) await sessionKeys.launched(p.agent, p.id); } } }), exits,
         (key) => { const p = profileOfKey(key); return p && p.id !== DEFAULT_PROFILE && profiles.homeOf(p.agent, p.id) ? { proxy: profiles.proxyOf(p.agent, p.id) } : null; })
     : undefined;
-  const apiKeys = new ApiKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}) });
+  // An address asked for its models with a profile's key is asked the way the profile's agent would send it: through
+  // the forwarder of its proxy when it has one (docs/profiles-v0.md §4), straight out when it has none.
+  const apiKeys = new ApiKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
+    through: async (agent, id) => { const proxy = profiles.proxyOf(agent, id); return proxy ? exits.address(exitKey(agent, id), proxy) : null; } });
   const sessionKeys: SessionKeys = new SessionKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
     browser: (agent, id) => profileBrowsers?.get(`${agent}.${id}`)?.host ?? null });
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
@@ -472,7 +475,11 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
           const agent = PROFILE_AGENTS.find((a) => a === kept.harness);
           if (agent && kept.profile && kept.given.proxy) {
             const at = new URL(kept.given.proxy), key = exitKey(agent, kept.profile.id);
-            await exits.address(key, profiles.proxyOf(agent, kept.profile.id), { port: Number(at.port), password: decodeURIComponent(at.password) })
+            const proxy = profiles.proxyOf(agent, kept.profile.id);
+            // The profile's proxy was taken away while the terminal ran: its forwarder was dropped then, and nothing
+            // listens on its port now either — the terminal stays shut, not let out as this machine (§4).
+            if (!proxy) console.error(`terminals: ${kept.id}'s profile has no proxy any more; its forwarder on ${at.port} is not made again`);
+            else await exits.address(key, proxy, { port: Number(at.port), password: decodeURIComponent(at.password) })
               .catch((err: Error) => console.error(`terminals: ${kept.id}'s proxy forwarder did not come back on ${at.port}: ${err.message}`));
           }
           const b = kept.given.browser;
@@ -703,8 +710,10 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   const auth = new LocalAuth(ensureLocalToken(cfg.home));
   const server = listenLocal(daemon, cfg.port, (info) => {
     daemon.setLocalPort(info.port);
-    // Terminals the last daemon left to their holders (docs/terminal-v0.md §10): their hooks reach this port.
-    void daemon.terminals?.restore().then((n) => { if (n) console.error(`terminals: ${n} taken up again from their holders`); }, (err: Error) => console.error(`terminals: restore: ${err.message}`));
+    // Terminals the last daemon left to their holders (docs/terminal-v0.md §10): their hooks reach this port. A daemon
+    // that holds none ends them: a terminal nobody takes up is not left running on its own.
+    if (daemon.terminals && !daemon.terminals.holds) void endLeftHeld(join(cfg.home, "terminals")).then((n: number) => { if (n) console.error(`terminals: ${n} left held by the last daemon, ended`); });
+    else void daemon.terminals?.restore().then((n) => { if (n) console.error(`terminals: ${n} taken up again from their holders`); }, (err: Error) => console.error(`terminals: restore: ${err.message}`));
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   }, auth);
   void daemon.quota.refresh();

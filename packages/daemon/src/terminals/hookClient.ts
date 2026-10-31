@@ -27,6 +27,19 @@ const id = process.env.AGENTSWITCH_TERMINAL_ID;
 const token = process.env.AGENTSWITCH_TERMINAL_HOOK_TOKEN;
 /** Just under the longest hook timeout the service configures (the permission hook's). */
 const WAIT_MS = Number(process.env.AGENTSWITCH_TERMINAL_HOOK_WAIT_MS ?? 29 * 60_000);
+/** A terminal held outside the service (docs/terminal-v0.md §10): its program outlives a restart, so there are moments
+ *  with no service to answer. Then a tool call is refused rather than let through — the protected-path floor
+ *  (`PreToolUse`) holds in every mode only while something answers for it — and the agent is told to try again. The
+ *  same when the service answers that it does not know this terminal (a token no daemon took up). A terminal that
+ *  ends with the service never sees either. */
+const HELD = process.env.AGENTSWITCH_TERMINAL_HELD === "1";
+const REFUSED_WHILE_AWAY = "AgentSwitch 的服务此刻没有应答，这次工具调用未放行；请稍后再试一次。";
+
+/** What a tool call gets while the service is away, when the terminal is held: a refusal, else nothing. */
+function whileAway(event: string): string {
+  if (!HELD || event !== "PreToolUse") return "";
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: REFUSED_WHILE_AWAY } });
+}
 
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) return "";
@@ -48,11 +61,20 @@ async function main(): Promise<string> {
     event = String(payload.hook_event_name ?? "");
   }
   if (!event) return "";
-  const res = await post(`${url}/terminals/hook`, { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id }, JSON.stringify({ event, payload }));
-  if (res.status < 200 || res.status >= 300) return "";
+  let res: { status: number; text: string };
+  try { res = await post(`${url}/terminals/hook`, { "content-type": "application/json", authorization: `Bearer ${token}`, "x-agentswitch-terminal": id }, JSON.stringify({ event, payload })); }
+  catch (err) {
+    // Not reached at all: the service is restarting (or gone). A card that waited its time out is not that: the agent
+    // asks in its own terminal then, as before.
+    if ((err as Error).message === NO_ANSWER_IN_TIME) return "";
+    return whileAway(event);
+  }
+  if (res.status < 200 || res.status >= 300) return whileAway(event);
   const body = JSON.parse(res.text) as { output?: unknown };
   return body.output ? JSON.stringify(body.output) : "";
 }
+
+const NO_ANSWER_IN_TIME = "no answer in time";
 
 /** One POST to the service (plain HTTP on this Mac), waited for up to `WAIT_MS` and no less. */
 function post(to: string, headers: Record<string, string>, body: string): Promise<{ status: number; text: string }> {
@@ -63,7 +85,7 @@ function post(to: string, headers: Record<string, string>, body: string): Promis
       res.on("end", () => resolve({ status: res.statusCode ?? 0, text: Buffer.concat(parts).toString("utf8") }));
       res.on("error", reject);
     });
-    const timer = setTimeout(() => req.destroy(new Error("no answer in time")), WAIT_MS);
+    const timer = setTimeout(() => req.destroy(new Error(NO_ANSWER_IN_TIME)), WAIT_MS);
     req.on("close", () => clearTimeout(timer));
     req.on("error", reject);
     req.end(body);

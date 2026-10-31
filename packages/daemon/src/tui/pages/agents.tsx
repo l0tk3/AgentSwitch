@@ -13,7 +13,7 @@ import { VENDORS, vendorOf } from "../../profiles/vendors.js";
 import type { PageProps } from "../app.js";
 import type { Agents } from "../deps.js";
 import { agentName } from "../names.js";
-import { cleanSessionKey, proxySite, SESSION_KEY_SITE, splitProxy, validSessionKey } from "../text.js";
+import { cleanSessionKey, maskProxyPassword, proxySite, SESSION_KEY_SITE, splitProxy, validSessionKey } from "../text.js";
 import { Form, useLoaded, useUi, useWords, type Row, type Tone, type Ui } from "../ui.js";
 
 /** The longest name a profile has (profiles/store.ts). */
@@ -208,11 +208,11 @@ async function saveApi(t: Messages, ui: Ui, deps: PageProps["deps"], agent: Prof
   if (ok) await done(t.agents.saved);
 }
 
-/** A proxy typed (empty: none), its password asked for when the line has a user but no password and the one kept was
- *  for another user; the password sealed for the proxy's host:port. */
+/** A proxy typed (empty: none), its password — hidden on the screen as it is typed — asked for when the line has a user
+ *  but no password and the one kept was for another user; the password sealed for the proxy's host:port. */
 async function setProxy(t: Messages, ui: Ui, deps: PageProps["deps"], agent: ProfileAgent, p: Profile, done: (said: string, tone?: Tone) => Promise<void>): Promise<void> {
   const typed = await ui.ask({ title: t.agents.proxyTitle, hint: t.agents.proxyHint, initial: p.proxy ? (p.proxy.username ? p.proxy.server.replace("://", `://${encodeURIComponent(p.proxy.username)}@`) : p.proxy.server) : "",
-    check: (v) => (!v.trim() || proxySite(splitProxy(v).server) ? null : t.agents.proxyBad) });
+    mask: maskProxyPassword, check: (v) => (!v.trim() || proxySite(splitProxy(v).server) ? null : t.agents.proxyBad) });
   if (typed === null) return;
   if (!typed.trim()) {
     if (!p.proxy) return;

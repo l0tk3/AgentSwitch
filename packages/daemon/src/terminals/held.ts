@@ -95,10 +95,13 @@ export class HeldPty {
   private readonly decoder = new StringDecoder("utf8");
   private dataListener: ((data: string) => void) | null = null;
   private exitListener: ((e: HeldExit) => void) | null = null;
+  private lostListener: ((replaced: boolean) => void) | null = null;
   private waitingData: string[] = [];
   private exited: HeldExit | null = null;
   private exitTold = false;
   private detached = false;
+  /** The holder said another connection took this one's place: a newer daemon has the terminal. */
+  private replaced = false;
 
   constructor(private readonly sock: Socket) {}
 
@@ -110,6 +113,13 @@ export class HeldPty {
   onExit(cb: (e: HeldExit) => void): void {
     this.exitListener = cb;
     if (this.exited) this.tellExit();
+  }
+
+  /** The connection ended without the program's end: another daemon took the terminal up (`replaced`), or the holder
+   *  itself went. Without a listener that counts as the program ending (129, as a holder killed takes its pty and so
+   *  its program with it). With one, nothing is ended from here: the terminal may well be the other daemon's now. */
+  onLost(cb: (replaced: boolean) => void): void {
+    this.lostListener = cb;
   }
 
   write(data: string): void {
@@ -154,15 +164,21 @@ export class HeldPty {
       if (!text) return;
       if (this.dataListener) this.dataListener(text); else this.waitingData.push(text);
     } else if (type === T.exit && p.length >= 8) {
-      this.ended_(p.readInt32BE(0), p.readInt32BE(4));
+      // As node-pty reports an end: the code for one that exited, 0 with the signal for one a signal ended.
+      const code = p.readInt32BE(0), signal = p.readInt32BE(4);
+      this.ended_(signal ? 0 : code, signal);
       // Taken note of: the holder may go.
       this.send(frame(T.collect));
+    } else if (type === T.error) {
+      if (p.toString("utf8").startsWith("replaced")) this.replaced = true;
     }
   }
 
   /** @internal */ closed(): void {
+    if (this.detached || this.exited) return;
+    if (this.lostListener) { this.lostListener(this.replaced); return; }
     // The holder went without saying the program ended (it was killed): its pty closed, the program got SIGHUP.
-    if (!this.detached && !this.exited) this.ended_(129, 1);
+    this.ended_(129, 1);
   }
 
   private ended_(exitCode: number, signal: number): void {
@@ -255,6 +271,26 @@ export async function startHeld(h: Holding, place: HoldPlace, spec: HeldSpec, un
   child.unref();
   if (!said.startsWith("ready ")) throw new HoldError(said.replace(/^error /, ""));
   return attachHeld(place, 0);
+}
+
+/** Ends the program a holder at `place` holds — SIGHUP, SIGKILL after `graceMs` — and lets the holder go. For a
+ *  terminal no daemon takes up again (docs/terminal-v0.md §10): one left running on its own would have nobody to
+ *  answer its hooks, nobody to see it and nobody to end it. A holder that cannot be reached holds nothing any more.
+ *  Resolves once the program has ended, or after a bounded wait. */
+export async function endHeld(place: HoldPlace, graceMs = 3000): Promise<void> {
+  let pty: HeldPty;
+  try { pty = await attachHeld(place, Number.MAX_SAFE_INTEGER); } catch { return; }
+  pty.onData(() => undefined);
+  pty.onLost(() => undefined);
+  const gone = new Promise<void>((resolve) => pty.onExit(() => resolve()));
+  if (!pty.ended) {
+    pty.kill("SIGHUP");
+    const harder = setTimeout(() => pty.kill("SIGKILL"), graceMs);
+    await Promise.race([gone, new Promise<void>((resolve) => { setTimeout(resolve, graceMs * 2 + 1000).unref(); })]);
+    clearTimeout(harder);
+  }
+  // The end was collected as it came (`received`); the socket goes with this end.
+  pty.detach();
 }
 
 /** A companion's server (OpenCode's `serve`, Codex's `app-server`): a child of this process, or a holder's program

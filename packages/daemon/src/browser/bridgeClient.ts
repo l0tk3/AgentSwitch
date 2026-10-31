@@ -79,6 +79,9 @@ export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStrea
   const write = (line: string) => new Promise<void>((resolve) => { output.write(`${line}\n`, () => resolve()); });
   let greeting: string | null = null;     // the agent's initialize, as it sent it
   let dropAnswer = false;
+  // The agent's calls the daemon took and has not answered: answered with an error when the connection ends, so none
+  // waits its whole timeout out for an answer the next connection will never give.
+  const pending = new Map<string | number, Message>();
 
   /** One connection: its id once the daemon names it, and when it ends. "refused": the session is not (any more) one
   *  the daemon knows — revoked when the agent's program ended; null: not reached (yet). */
@@ -92,7 +95,7 @@ export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStrea
       return null;
     }
     if (!res.ok || !res.body) {
-      if (first || res.status === 401) log(`agentswitch browser: the daemon refused the connection (${res.status}${res.status === 401 ? ": the session ended or the token is wrong" : ""})`);
+      if (first) log(`agentswitch browser: the daemon refused the connection (${res.status}${res.status === 401 ? ": the session ended or the token is wrong" : ""})`);
       abort.abort();
       return res.status === 401 || res.status === 403 ? "refused" : null;
     }
@@ -114,6 +117,7 @@ export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStrea
             else if (event === "message" && body) {
               // The answer to the bridge's own greeting of a new connection is not the agent's.
               if (dropAnswer && body.includes(REINIT_ID)) { try { if ((JSON.parse(body) as Message).id === REINIT_ID) { dropAnswer = false; event = "message"; data = []; continue; } } catch { /* the agent's */ } }
+              if (pending.size) { try { const m = JSON.parse(body) as Message & { result?: unknown; error?: unknown }; if (m.id !== undefined && !m.method) pending.delete(m.id); } catch { /* not an answer */ } }
               await write(body);
             }
             event = "message";
@@ -148,9 +152,16 @@ export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStrea
     try {
       const r = await post(wire, line);
       if (!r.ok) await refused(`the daemon did not take the message (${r.status})`);
+      else if (message.id !== undefined && message.method) pending.set(message.id, message);
     } catch {
       await refused("the daemon did not answer");
     }
+  };
+  /** The calls in flight when the connection ended: each answered with why, once. */
+  const unanswered = async () => {
+    const left = [...pending.values()];
+    pending.clear();
+    for (const m of left) { const answer = undelivered(m, "the connection to the daemon ended before it answered; try again"); if (answer) await write(answer); }
   };
   lines.on("line", (line) => { if (line.trim()) sending = sending.then(() => send(line)); });
   let stdinOpen = true;
@@ -161,19 +172,24 @@ export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStrea
     if (ended === "stdin") { await sending; wire.abort.abort(); lines.close(); return 0; }
     // The daemon went: the service restarting. Connect again with the same session, for a while.
     wire = null;
+    await unanswered();
     const until = Date.now() + (timing.reconnectForMs ?? RECONNECT_FOR_MS);
     let step = 250;
+    // A refusal now may be the next daemon's, which takes the terminal's session up only once it has taken the
+    // terminal up (after it listens, one terminal at a time, each behind its forwarder's check): asked again, for as
+    // long as the daemon is waited for at all. A session ended on purpose (the terminal's program ended, or it was
+    // deleted) ends this program with its stdin before that; one revoked while the program lives is given up on when
+    // the wait is over.
     let refused = false;
-    while (!wire && !refused && stdinOpen && Date.now() < until) {
+    while (!wire && stdinOpen && Date.now() < until) {
       await new Promise((r) => setTimeout(r, step));
       step = Math.min(step * 2, timing.stepMs ?? RECONNECT_STEP_MS);
       const got = await connect(false);
-      if (got === "refused") refused = true; else wire = got;
+      refused = got === "refused";
+      if (got && got !== "refused") wire = got;
     }
     if (!stdinOpen) { lines.close(); return 0; }
-    // The session was ended on purpose (the terminal's program ended, or it was deleted): no other try.
-    if (refused) { gone = true; lines.close(); return 1; }
-    if (!wire) { gone = true; log("agentswitch browser: the daemon did not come back"); lines.close(); return 1; }
+    if (!wire) { gone = true; log(refused ? "agentswitch browser: the daemon no longer knows this session" : "agentswitch browser: the daemon did not come back"); lines.close(); return 1; }
     log("agentswitch browser: connected to the daemon again");
     // The new connection is greeted as the agent greeted the first; its answer is dropped.
     if (greeting) {

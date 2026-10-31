@@ -258,17 +258,29 @@ static int same(const unsigned char *a, size_t alen, const char *b) {
   return d == 0;
 }
 
+/* The client a newer connection takes the place of is told so, when no frame to it is half written (then it could not
+ * tell the notice from the frame): a daemon still there does not take the connection's end for the program's. */
+static void tell_replaced(void) {
+  static const char why[] = "replaced: a newer connection has this terminal";
+  unsigned char f[5 + sizeof why - 1];
+  if (client < 0 || !authed || cout_off != cout_len) return;
+  f[0] = ERROR; put32(f + 1, (uint32_t)(sizeof why - 1)); memcpy(f + 5, why, sizeof why - 1);
+  (void)!write(client, f, sizeof f);   /* best effort, without blocking: a daemon gone hears nothing */
+}
+
 /* The waiting connection's HELLO: right, and it becomes the client (the older one, a daemon gone or going, is let go). */
 static void on_hello(int type, const unsigned char *p, size_t n) {
   if (type != HELLO || n < 10) { refuse_pend("hello first"); return; }
   unsigned version = get16(p);
   if (version < 1) { refuse_pend("this holder speaks version 1 and up"); return; }
   if (!same(p + 10, n - 10, token)) { refuse_pend("wrong token"); return; }
+  tell_replaced();
   drop_client();
   client = pend; pend = -1; pend_len = 0;
   authed = 1;
   {
     cursor = get64(p + 2);
+    if (cursor > end_off) cursor = end_off;   /* "from the end" asked with any large offset */
     unsigned char w[2 + 4 + 2 + 2 + 8 + 8 + 1 + 4 + 4];
     put16(w, version < VERSION ? version : VERSION);
     put32(w + 2, (uint32_t)child);
@@ -406,14 +418,16 @@ int main(int argc, char **argv) {
   int n_args = atoi(ac);
   if (n_args < 1 || n_args > 4096) fail("argc out of range");
   char **args = calloc((size_t)n_args + 1, sizeof *args);
+  if (!args || !token) fail("out of memory");
   for (int i = 0; i < n_args; i++) { const char *a = field(); if (!a) fail("spec incomplete"); args[i] = (char *)a; }
   const char *ec = field();
   int n_env = ec ? atoi(ec) : -1;
   if (n_env < 0 || n_env > 65536) fail("envc out of range");
   char **envp = calloc((size_t)n_env + 1, sizeof *envp);
+  if (!envp) fail("out of memory");
   for (int i = 0; i < n_env; i++) { const char *e = field(); if (!e) fail("spec incomplete"); envp[i] = (char *)e; }
   ring = malloc(cap);
-  if (!ring || !args || !envp || !token) fail("out of memory");
+  if (!ring) fail("out of memory");
 
   /* The socket first: a holder nobody could reach is no use. */
   struct sockaddr_un addr = { .sun_family = AF_UNIX };
@@ -472,14 +486,19 @@ int main(int argc, char **argv) {
   for (;;) {
     struct pollfd fds[4];
     int nf = 0, i_listen = -1, i_master = -1, i_client = -1, i_pend = -1;
+    /* The pty is read as the daemon keeps up: with a daemon connected and a ring's worth of output not yet sent to
+     * it, the pty is left unread and the program waits on its write, as it would on node-pty's — nothing is dropped
+     * between them. With no daemon the ring keeps the last of the output, as designed. */
+    size_t room = cap > 2 * SEND_CHUNK ? cap - SEND_CHUNK : cap / 2;
+    int behind = client >= 0 && authed && end_off - cursor >= room;
     fds[nf] = (struct pollfd){ .fd = listen_fd, .events = POLLIN }; i_listen = nf++;
-    if (master >= 0) { fds[nf] = (struct pollfd){ .fd = master, .events = POLLIN | (inq_len ? POLLOUT : 0) }; i_master = nf++; }
+    if (master >= 0) { fds[nf] = (struct pollfd){ .fd = master, .events = (behind ? 0 : POLLIN) | (inq_len ? POLLOUT : 0) }; i_master = nf++; }
     if (client >= 0) { fds[nf] = (struct pollfd){ .fd = client, .events = POLLIN | (want_write() ? POLLOUT : 0) }; i_client = nf++; }
     if (pend >= 0) { fds[nf] = (struct pollfd){ .fd = pend, .events = POLLIN }; i_pend = nf++; }
     int pr = poll(fds, (nfds_t)nf, 1000);
     if (pr < 0 && errno != EINTR) finish(1);
     if (pr > 0) {
-      if (i_master >= 0 && fds[i_master].revents & (POLLIN | POLLHUP | POLLERR)) read_pty();
+      if (i_master >= 0 && fds[i_master].revents & ((behind ? 0 : POLLIN) | POLLHUP | POLLERR)) read_pty();
       if (i_master >= 0 && master >= 0 && fds[i_master].revents & POLLOUT) write_pty();
       if (i_client >= 0 && client >= 0 && fds[i_client].revents & (POLLIN | POLLHUP | POLLERR)) read_client();
       if (i_pend >= 0 && pend >= 0 && fds[i_pend].revents & (POLLIN | POLLHUP | POLLERR)) read_pend();

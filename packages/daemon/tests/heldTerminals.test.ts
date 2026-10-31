@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { attachHeld, HoldError, specBytes, startHeld, type Holding } from "../src/terminals/held.js";
-import { TerminalHost, type Launcher, type TerminalEvent } from "../src/terminals/host.js";
+import { endLeftHeld, TerminalHost, type Launcher, type TerminalEvent, type TerminalHostOptions } from "../src/terminals/host.js";
 import { HOOK_SCRIPT } from "../src/terminals/launch.js";
 
 const FAKE = resolve(import.meta.dirname, "fixtures", "fakeTerminalAgent.mjs");
@@ -46,8 +46,8 @@ const fakeLauncher: Launcher = (req) => ({
 });
 const shLauncher = (script: string): Launcher => () => ({ file: "sh", args: ["-c", script], env: { PATH: process.env.PATH ?? "/usr/bin:/bin", TERM: "xterm-256color" }, hooks: false });
 
-function host(launcher: Launcher = fakeLauncher): TerminalHost {
-  const h = new TerminalHost({ launcher, killGraceMs: 300, hold: { holding, dir } });
+function host(launcher: Launcher = fakeLauncher, hold: Partial<NonNullable<TerminalHostOptions["hold"]>> = {}): TerminalHost {
+  const h = new TerminalHost({ launcher, killGraceMs: 300, hold: { holding, dir, ...hold } });
   hosts.push(h);
   return h;
 }
@@ -168,6 +168,78 @@ describe.skipIf(!compiler)("terminals held across a restart", () => {
     const a = host(() => ({ file: "/nonexistent/agent", args: [], env: { PATH: "/usr/bin:/bin" }, hooks: false }));
     await expect(a.spawn({ harness: "pi", cwd: tmpdir() })).rejects.toThrow(/cannot start \/nonexistent\/agent/);
     expect(a.list()).toEqual([]);
+  });
+
+  // Review of §10 (2026-10-31): a terminal nobody takes up again is not left running on its own — unseen, its hooks
+  // unanswered, nobody to end it.
+  it("a terminal the next daemon cannot take up is ended, not left running", async () => {
+    const a = host();
+    const info = await a.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const meta = join(dir, info.id, "meta.json");
+    a.closeAll();
+    expect(alive(info.pid!)).toBe(true);
+    const b = host(fakeLauncher, { restoring: () => { throw new Error("its forwarder's port is taken"); } });
+    expect(await b.restore()).toBe(0);
+    expect(b.list()).toEqual([]);
+    await until(() => !alive(info.pid!));
+    expect(existsSync(meta)).toBe(false);
+  });
+
+  it("a daemon that holds none ends what the last one left to its holders", async () => {
+    const a = host();
+    const info = await a.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const meta = join(dir, info.id, "meta.json");
+    const kept = JSON.parse(readFileSync(meta, "utf8")) as { hold: { socket: string } };
+    a.closeAll();
+    const said: string[] = [];
+    expect(await endLeftHeld(dir, (l) => said.push(l))).toBe(1);
+    await until(() => !alive(info.pid!));
+    await until(() => !existsSync(kept.hold.socket));
+    expect(existsSync(meta)).toBe(false);
+    expect(said.join("\n")).toContain(`${info.id} was held`);
+    expect(await endLeftHeld(dir)).toBe(0);
+  });
+
+  it("a daemon still connected when the next takes its terminal up lets go of it: nothing ended, meta.json kept", async () => {
+    const a = host();
+    const info = await a.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const seen: TerminalEvent[] = [];
+    a.subscribe(info.id, null, (e) => seen.push(e));
+    await until(() => text(seen).includes("fake agent ready"));
+    const meta = join(dir, info.id, "meta.json");
+    // The next daemon, with the old one still there (a restart where it was slow to go).
+    const b = host();
+    expect(await b.restore()).toBe(1);
+    await until(() => seen.some((e) => e.type === "exit"));
+    // Over there it is let go of: shown ended, not as a failed turn; nothing of it ended.
+    expect(a.get(info.id)).toMatchObject({ status: "exited" });
+    expect(a.lastTurn(info.id)).toBeNull();
+    expect(existsSync(meta)).toBe(true);
+    expect(alive(info.pid!)).toBe(true);
+    const after: TerminalEvent[] = [];
+    b.subscribe(info.id, null, (e) => after.push(e));
+    b.write(info.id, "still here\r");
+    await until(() => text(after).includes("still here"));
+  });
+
+  it("a program a signal ended reports code 0 with the signal, as node-pty does", async () => {
+    const a = host(shLauncher("kill -TERM $$"));
+    const info = await a.spawn({ harness: "pi", cwd: tmpdir() });
+    const seen: TerminalEvent[] = [];
+    a.subscribe(info.id, null, (e) => seen.push(e));
+    const exit = await until(() => seen.find((e) => e.type === "exit"));
+    expect(exit).toMatchObject({ code: 0 });
+    expect(a.lastTurn(info.id)).toBeNull();
+  });
+
+  it("the hook program refuses a tool call while no service answers, only in a held terminal and only for PreToolUse", () => {
+    const run = (env: Record<string, string>, event: string) => spawnSync(process.execPath, [HOOK_SCRIPT], { input: JSON.stringify({ hook_event_name: event, tool_name: "Bash", tool_input: { command: "ls" } }),
+      env: { ...process.env, AGENTSWITCH_TERMINAL_URL: "http://127.0.0.1:9", AGENTSWITCH_TERMINAL_ID: "t1", AGENTSWITCH_TERMINAL_HOOK_TOKEN: "tok", ...env }, timeout: 15_000 });
+    const held = run({ AGENTSWITCH_TERMINAL_HELD: "1" }, "PreToolUse");
+    expect(held.status).toBe(0);
+    expect(JSON.parse(held.stdout.toString())).toMatchObject({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny" } });
+    expect(run({ AGENTSWITCH_TERMINAL_HELD: "1" }, "Stop").stdout.toString()).toBe("");
+    expect(run({}, "PreToolUse").stdout.toString()).toBe("");
   });
 });
 

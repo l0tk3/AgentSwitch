@@ -427,3 +427,17 @@ AgentSwitch 启动的会话，hook 通过**会话自己的配置**注入（命�
 - 验证：单元测试（`tests/heldTerminals.test.ts`，真的持有进程加假 agent：放手再接回后屏幕、hook 令牌、输入都在；daemon 不在时的输出不丢；其间结束的以退出码出现；持有进程没了就忘掉；删除终端连持有进程一起结束；起不来的程序当场说原因；错令牌踢不掉已连的 daemon。`tests/browserBridge.test.ts`：同一端口换一个 daemon，桥自己连回、重新握手、调用照常）。实机（工作站，一次性节点，真的 `systemd-run` scope）：Claude Code 走 API key 配置加配置自己的代理、OpenCode 带它的 serve，各开一个终端；`node restart` 只重启 daemon、以及整个 keeper 停了再起，两次都“2 个接回”，pid 不变，Claude Code 在重启后照常回答（hook 状态 working → idle、取 key、转发口原端口 46113 都通），OpenCode 的 serve 照常应答，两个浏览器桥各自重连上新的 daemon；删除终端后 scope 一并消失。
 - 没做 / 没验证：Mac（`build-app.sh` 已带上持有进程，CI 在 macOS 上编它；开不开等 ⌘Q 的 `Quit` / `Keep Running`，`TerminalHost.endHeld` 就是 `Quit` 要的那一步）；协议升到 2 的那次换版要先说一句（今天只有 1）；每个 scope 的 `MemoryMax`（scope 已经各自一个，设不设、设多少待定）；真的 `install.sh` 换版（从被持有的终端里跑）还没在工作站上走过——这次部署就是第一次。
 
+**复审与修正（2026-10-31，合并 PR #3、#4 时）。** 三个审查各自读了一遍，实现整体扎实（地址越界与未定义行为检查、三百次畸形输入都没报错；套接字 0600、令牌走 stdin、恒定时间比较），几处要改的一并改了：
+
+- `terminals/<id>/meta.json` 里有明文的 hook 令牌、转发口口令、浏览器会话令牌，而执行器禁读的表里没有 `terminals/`——调度任务读到它就能凭令牌 `POST /terminals/key` 取到明文 API key。现在 `terminals/` 对执行器和终端里的 agent 都禁读（`protected.ts` `TERMINALS_DIR`）。
+- 接不回的终端（接回出错、`holdTerminals` 关了、运行时里没有持有进程）原来只删 `meta.json` 就忘掉，程序照跑：没人看得见、hook 全失败且失败即放行、受保护路径的底线不再成立。现在结束它的程序和 companion 的服务（`endHeld`、`endLeftHeld`）。
+- 服务不在的那段时间（重启、换版），被持有终端的 hook 对 `PreToolUse` 一律拒绝而不是放行（`AGENTSWITCH_TERMINAL_HELD=1`，`hookClient.ts`），agent 得到“稍后再试”；卡片等到超时的仍照旧不答。
+- 配置的代理在终端运行期间被删掉，重启后 `restoring` 曾按原端口建一个不经代理的转发口，流量改从本机真实 IP 出去。现在不再建，终端保持不通。
+- 旧 daemon 还连着时新 daemon 接走终端，旧的把连接断开当成程序以 129 退出：删 `meta.json`、`SIGTERM` 新 daemon 正在用的 companion 服务、记一次失败的一轮。现在持有进程先告诉旧连接 `replaced`，daemon 一侧对没有 `EXIT` 的断开一律按放手处理（`HeldPty.onLost`、`TerminalHost.lost`）。
+- 持有进程对连着的 daemon 没有反压，输出洪水时 daemon 一侧丢字节（60 MB 丢 22.6 MB）。现在没发完的接近缓冲容量就停读伪终端，程序在写上等，与 node-pty 一样不丢（同一脚本：0 丢失）。
+- 信号结束的程序曾报 128+信号，node-pty 报 0：按 `^C` 也记成失败的一轮。现在一致。
+- 浏览器桥重连太早会收到新 daemon 的 401（它接回终端之后才认回会话），原来当作会话已撤销直接退出；现在在重连等待期内继续重试。断开时正在进行的调用原来永远等不到回答，现在立刻得到错误。
+- 模型核对（`apiKeys.ts`）：不跟随跳转（Node 的 fetch 会把 `x-api-key` 带去另一个主机）；已有配置的询问走它自己的代理的转发口；只拒明显写错的模型（列表里某一个的另一种写法），别名、带日期的名字、中转不列的照存——Mac 与 iPhone 的界面不带 `force`。
+- `BOUNDARY.md` 补“熬过重启的终端”一节，并改了会话令牌、转发口口令、API key 三条。
+- 仍待做：`install.sh` 切换 `current` 之后才等 Dispatch 的任务，其间被持有的终端用新运行时的 hook 程序对着旧 daemon（版本不符的窗口；等完再切更好）；`MemoryMax`；Mac 的 ⌘Q 两项选择。
+

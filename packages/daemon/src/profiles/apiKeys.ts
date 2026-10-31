@@ -7,6 +7,7 @@
  *  A terminal is not behind the credential gate (§8): the agent holds this key as it would one typed into its own
  *  settings. What the gate adds is that the key at rest is a ciphertext, and that it opens for one address only. */
 
+import { fetchVia, type ProxyWay } from "../util/viaProxy.js";
 import { API_HOME, apiSite, type Profile, type ProfileAgent, type ProfileApi, type ProfileKind } from "./store.js";
 
 /** The gate's answer for a ciphertext it may open for one of `sites` (browser/fill.ts `FillResolver`, as the service
@@ -32,12 +33,18 @@ export type ApiKeysOptions = {
   /** The gate's answer for a ciphertext; absent without the gate: no key can be kept or handed over. */
   readonly resolve?: KeyResolver | undefined;
   /** The models the address offers for this key (`listModels` by default); null when it would not say. */
-  readonly models?: (agent: ProfileAgent, baseUrl: string | undefined, key: string) => Promise<readonly string[] | null>;
+  readonly models?: (agent: ProfileAgent, baseUrl: string | undefined, key: string, via?: ProxyWay | null) => Promise<readonly string[] | null>;
   /** What the address says when asked for its models (`probeModels` by default). */
-  readonly probe?: (agent: ProfileAgent, baseUrl: string | undefined, key: string) => Promise<ModelProbe>;
+  readonly probe?: (agent: ProfileAgent, baseUrl: string | undefined, key: string, via?: ProxyWay | null) => Promise<ModelProbe>;
+  /** The way out of profile `id`'s own traffic (docs/profiles-v0.md §4): the forwarder of its proxy, through which its
+   *  address is asked for the models — as the agent under it sends the key; null for one with no proxy (asked straight
+   *  from here). Absent: always straight. A profile not made yet has no proxy yet: asked straight, once. */
+  readonly through?: (agent: ProfileAgent, id: string) => Promise<ProxyWay | null>;
 };
 
 const MODELS_TIMEOUT_MS = 8_000;
+/** The fetch an address is asked with: straight, or through a profile's forwarder. */
+const fetching = (via: ProxyWay | null | undefined): typeof fetch => (via ? (fetchVia(via, MODELS_TIMEOUT_MS) as unknown as typeof fetch) : fetch);
 
 /** What an address said when asked for its models with a key: the models; that it refused the key (401, 403); that it
  *  has no list (404, or an answer without one); another status; or that it could not be reached at all. */
@@ -51,13 +58,16 @@ export type ModelProbe =
 /** The models an address lists for a key — Anthropic's `GET /v1/models` (`x-api-key` and a bearer, as Claude Code sends
  *  the key), OpenAI's `GET <base>/models` — or what it said instead (the settings screen's model list and its
  *  connection test, `POST /profiles/models`). */
-export async function probeModels(agent: ProfileAgent, baseUrl: string | undefined, key: string, fetchImpl: typeof fetch = fetch): Promise<ModelProbe> {
+export async function probeModels(agent: ProfileAgent, baseUrl: string | undefined, key: string, via: ProxyWay | null | typeof fetch = null): Promise<ModelProbe> {
+  const fetchImpl = typeof via === "function" ? via : fetching(via);
   const base = (baseUrl ?? API_HOME[agent] ?? "").replace(/\/+$/, "");
   if (!base) return { unlisted: true };
   const url = agent === "claude-code" ? `${base}/v1/models?limit=1000` : `${base}/models`;
   const headers: Record<string, string> = agent === "claude-code" ? { "x-api-key": key, authorization: `Bearer ${key}`, "anthropic-version": "2023-06-01" } : { authorization: `Bearer ${key}` };
   let res: Response;
-  try { res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(MODELS_TIMEOUT_MS) }); }
+  // No redirect is followed: node's fetch keeps `x-api-key` across one to another host (Authorization it drops), and
+  // the key was sealed for this address alone. A 3xx is reported as the status it is.
+  try { res = await fetchImpl(url, { headers, redirect: "manual", signal: AbortSignal.timeout(MODELS_TIMEOUT_MS) }); }
   catch (err) { return { unreachable: (err as Error).message }; }
   if (res.status === 401 || res.status === 403) return { refused: res.status };
   if (res.status === 404) return { unlisted: true };
@@ -72,16 +82,24 @@ export async function probeModels(agent: ProfileAgent, baseUrl: string | undefin
 
 /** The models an address lists for a key, or null when it lists none (a relay without the route, an address that is
  *  down): then a model is not checked. */
-export async function listModels(agent: ProfileAgent, baseUrl: string | undefined, key: string, fetchImpl: typeof fetch = fetch): Promise<readonly string[] | null> {
-  const said = await probeModels(agent, baseUrl, key, fetchImpl);
+export async function listModels(agent: ProfileAgent, baseUrl: string | undefined, key: string, via: ProxyWay | null | typeof fetch = null): Promise<readonly string[] | null> {
+  const said = await probeModels(agent, baseUrl, key, via);
   return "models" in said ? said.models : null;
+}
+
+/** The model `offered` lists that `model` was likely meant to be — another spelling of it (`.` for `-`, a case), or
+ *  one a few characters off — or null when it is nothing like any of them (an alias such as `opus`, a dated name, one
+ *  a relay serves without listing). */
+export function nearModel(model: string, offered: readonly string[]): string | null {
+  const norm = (m: string) => m.toLowerCase().replace(/[._\s]/g, "-");
+  return offered.find((m) => norm(m) === norm(model))
+    ?? [...offered].sort((a, b) => distance(norm(a), norm(model)) - distance(norm(b), norm(model))).find((m) => distance(norm(m), norm(model)) <= 3)
+    ?? null;
 }
 
 /** What to say of `model` when `offered` does not list it: the one it was likely meant to be, and some others. */
 export function unknownModel(model: string, offered: readonly string[]): string {
-  const norm = (m: string) => m.toLowerCase().replace(/[._\s]/g, "-");
-  const near = offered.find((m) => norm(m) === norm(model))
-    ?? [...offered].sort((a, b) => distance(norm(a), norm(model)) - distance(norm(b), norm(model))).find((m) => distance(norm(m), norm(model)) <= 3);
+  const near = nearModel(model, offered);
   const some = offered.slice(0, 8).join("、");
   return `这个地址没有模型 ${model}${near ? `，是不是 ${near}` : ""}？它列出的有：${some}${offered.length > 8 ? " 等" : ""}。`;
 }
@@ -107,28 +125,35 @@ export class ApiKeys {
    *  made when the gate will not open it for that address. */
   async create(agent: ProfileAgent, name: string, api: ProfileApi, force = false): Promise<Profile> {
     const key = await this.open(agent, api.key, api.baseUrl);
-    if (!force) await this.offered(agent, api.baseUrl, key, api.model);
+    if (!force) await this.offered(agent, api.baseUrl, key, api.model, null);
     return this.o.store.create(agent, name, "api", api);
   }
 
-  /** A model the address does not list is refused, saying which it was likely meant to be (`force`: kept anyway — a
-   *  relay that serves more than it lists). Not checked when the address lists none. */
-  private async offered(agent: ProfileAgent, baseUrl: string | undefined, key: string, model: string | undefined): Promise<void> {
+  /** A model the address does not list is refused when it is plainly another spelling of one it lists, or a few
+   *  characters off one (`nearModel`), saying which; one nothing like any of them is kept — an alias (`opus`), a dated
+   *  name, one a relay serves without listing: the Mac's and the iPhone's screens send no `force`, and a check that
+   *  refuses what works is no help. `force`: kept whatever the list. Not checked when the address lists none. */
+  private async offered(agent: ProfileAgent, baseUrl: string | undefined, key: string, model: string | undefined, via: ProxyWay | null): Promise<void> {
     if (!model) return;
-    const list = await (this.o.models ?? listModels)(agent, baseUrl, key);
-    if (list && !list.includes(model)) throw new ApiKeyError(unknownModel(model, list));
+    const list = await (this.o.models ?? listModels)(agent, baseUrl, key, via);
+    if (list && !list.includes(model) && nearModel(model, list)) throw new ApiKeyError(unknownModel(model, list));
   }
 
   /** `id`'s address and model from now on, and its key when one is given (`key` null: the one it has — which opens
-   *  only while the address is on the site it was sealed for). */
+   *  only while the address is on the site it was sealed for). The model is checked against the address when it
+   *  changes, through the profile's own way out. */
   async set(agent: ProfileAgent, id: string, next: { readonly key: string | null; readonly baseUrl?: string | undefined; readonly model?: string | undefined }, force = false): Promise<void> {
     const kept = this.o.store.apiOf(agent, id);
     const key = next.key ?? kept?.key;
     if (!key) throw new ApiKeyError("这个配置还没有 API key。");
     if (!next.key && apiSite(agent, next.baseUrl) !== apiSite(agent, kept?.baseUrl)) throw new ApiKeyError("地址换到了另一个站点，原来的 API key 是为原站点加密的，请一并填入新的。");
     const plain = await this.open(agent, key, next.baseUrl);
-    if (!force) await this.offered(agent, next.baseUrl, plain, next.model);
+    if (!force && next.model && (next.model !== kept?.model || apiSite(agent, next.baseUrl) !== apiSite(agent, kept?.baseUrl))) await this.offered(agent, next.baseUrl, plain, next.model, await this.way(agent, id));
     this.o.store.setApi(agent, id, { key, baseUrl: next.baseUrl, model: next.model });
+  }
+
+  private async way(agent: ProfileAgent, id: string): Promise<ProxyWay | null> {
+    return (await this.o.through?.(agent, id)) ?? null;
   }
 
   /** What the address says when asked for its models with a key: `key` a ciphertext just sealed for it (a profile not
@@ -144,7 +169,7 @@ export class ApiKeys {
     }
     if (!sealed) throw new ApiKeyError("没有 API key。");
     const plain = await this.open(agent, sealed, ask.baseUrl);
-    return (this.o.probe ?? probeModels)(agent, ask.baseUrl, plain);
+    return (this.o.probe ?? probeModels)(agent, ask.baseUrl, plain, ask.profile ? await this.way(agent, ask.profile) : null);
   }
 
   /** The key itself, for the agent of a terminal under `id` to send. */

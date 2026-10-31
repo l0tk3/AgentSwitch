@@ -42,6 +42,28 @@ export function proxySite(server: string): string | null {
   return port > 0 && port < 65536 ? `${m[2]}:${port}` : null;
 }
 
+/** A proxy line as the screen shows it while it is typed: the password hidden, one `•` per character, so the line keeps
+ *  its length and the cursor its place; everything else as typed. The password is what `splitProxy` would take as one —
+ *  what follows the first `:` before the `@` of `scheme://user:pass@host:port`, or the third `:` of the sellers'
+ *  `host:port:user:pass`. Before the `@` is typed, what follows a name's `:` is hidden already, unless it reads as a port
+ *  (`host:8080`), so a password typed by hand is not shown until an `@` arrives. Pure. */
+export function maskProxyPassword(typed: string): string {
+  const hide = (from: number, to: number) => typed.slice(0, from) + "•".repeat(Math.max(0, to - from)) + typed.slice(to);
+  const end = typed.trimEnd().length;
+  const sold = /^\s*(?:\[[0-9a-fA-F:]+\]|[A-Za-z0-9.-]+):\d{1,5}:[^:\s]+:/.exec(typed);
+  if (sold) return hide(sold[0].length, end);
+  const start = /^\s*(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/)?/.exec(typed)![0].length;
+  const authority = typed.slice(start, end);
+  if (authority.startsWith("[")) return typed;        // an IPv6 host's own colons are no password
+  const at = authority.lastIndexOf("@");
+  const who = at >= 0 ? authority.slice(0, at) : authority;
+  const colon = who.indexOf(":");
+  if (colon < 0) return typed;
+  const word = who.slice(colon + 1);
+  if (at < 0 && (!word || /^\d{1,5}([:/]|$)/.test(word))) return typed;
+  return hide(start + colon + 1, start + who.length);
+}
+
 /** The site a claude.ai session key is sealed for. */
 export const SESSION_KEY_SITE = "claude.ai";
 

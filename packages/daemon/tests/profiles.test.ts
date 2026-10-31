@@ -15,7 +15,7 @@ import { ExitError, ExitPool } from "../src/browser/exits.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { markRemote } from "../src/core/caller.js";
 import { DEFAULT_PROFILE, ProfileError, ProfileStore } from "../src/profiles/store.js";
-import { ApiKeyError, ApiKeys, listModels, probeModels, unknownModel } from "../src/profiles/apiKeys.js";
+import { ApiKeyError, ApiKeys, listModels, nearModel, probeModels, unknownModel } from "../src/profiles/apiKeys.js";
 import { mountSessions } from "../src/api/sessions.js";
 import { mountTerminals } from "../src/api/terminals.js";
 import { TerminalHost, type LaunchRequest } from "../src/terminals/host.js";
@@ -652,30 +652,43 @@ describe("a profile that pays by a key (§3.6)", () => {
     await expect(new ApiKeys({ store, models: NO_LIST }).plain("codex", own.id)).rejects.toThrow(/网关/);
   });
 
-  it("refuses a model the address does not list, saying which it was likely meant to be; keeps it when forced, or when the address lists none", async () => {
+  it("refuses a model that is plainly another spelling of one the address lists, saying which; keeps an alias or an unlisted one, and anything when forced or when the address lists none", async () => {
     const { store } = world();
-    const asked: { agent: string; baseUrl: string | undefined; key: string }[] = [];
+    const asked: { agent: string; baseUrl: string | undefined; key: string; via: unknown }[] = [];
+    const way = { server: "http://127.0.0.1:1", username: "agentswitch", password: "pw" };
     const keys = new ApiKeys({ store, resolve: gate({ [OTHER]: { site: "https://relay.example/", value: "sk-relay-made-up" } }),
-      models: async (agent, baseUrl, key) => { asked.push({ agent, baseUrl, key }); return ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]; } });
+      models: async (agent, baseUrl, key, via) => { asked.push({ agent, baseUrl, key, via }); return ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]; },
+      // The profile's own way out (its proxy's forwarder), once it has one: a profile not made yet is asked straight.
+      through: async () => way });
     await expect(keys.create("claude-code", "R", { key: OTHER, baseUrl: "https://relay.example", model: "claude-opus-5.5" })).rejects.toThrow(/没有模型 claude-opus-5\.5，是不是 claude-opus-5-5/);
-    expect(asked).toEqual([{ agent: "claude-code", baseUrl: "https://relay.example", key: "sk-relay-made-up" }]);
+    expect(asked).toEqual([{ agent: "claude-code", baseUrl: "https://relay.example", key: "sk-relay-made-up", via: null }]);
     expect(store.all()["claude-code"].profiles.map((p) => p.name)).toEqual(["Default"]);
     const r = await keys.create("claude-code", "R", { key: OTHER, baseUrl: "https://relay.example", model: "claude-opus-5-5" });
-    await expect(keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "gpt-9" })).rejects.toThrow(/它列出的有：claude-opus-5-5/);
+    // A few characters off one listed: refused. Nothing like any of them (an alias, one a relay serves unlisted): kept,
+    // the screens having no `force` to send (2026-10-31).
+    asked.length = 0;
+    await expect(keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "claude-opus-55" })).rejects.toThrow(/它列出的有：claude-opus-5-5/);
+    expect(asked.map((a) => a.via)).toEqual([way]);
+    await keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "opus" });
+    expect(store.apiOf("claude-code", r.id)?.model).toBe("opus");
     await keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "claude-hidden" }, true);
     expect(store.apiOf("claude-code", r.id)?.model).toBe("claude-hidden");
-    // No model, nothing to ask; an address that lists none is not checked.
+    // The same model again (a key rotated): not asked again. No model, nothing to ask; an address that lists none is
+    // not checked.
     asked.length = 0;
+    await keys.set("claude-code", r.id, { key: OTHER, baseUrl: "https://relay.example", model: "claude-hidden" });
     await keys.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example" });
     expect(asked).toEqual([]);
     const quiet = new ApiKeys({ store, models: NO_LIST, resolve: gate({ [OTHER]: { site: "https://relay.example/", value: "sk-relay-made-up" } }) });
     await quiet.set("claude-code", r.id, { key: null, baseUrl: "https://relay.example", model: "anything" });
+    expect(nearModel("claude-sonnet-4-5", ["claude-sonnet-4-5-20250929"])).toBeNull();
+    expect(nearModel("Claude_Opus-5.5", ["claude-opus-5-5"])).toBe("claude-opus-5-5");
   });
 
   it("asks Anthropic's and OpenAI's own routes for the models, with the key as each agent sends it", async () => {
-    const calls: { url: string; headers: Record<string, string> }[] = [];
-    const fake = (async (url: string, init: { headers: Record<string, string> }) => {
-      calls.push({ url, headers: init.headers });
+    const calls: { url: string; headers: Record<string, string>; redirect: unknown }[] = [];
+    const fake = (async (url: string, init: { headers: Record<string, string>; redirect: unknown }) => {
+      calls.push({ url, headers: init.headers, redirect: init.redirect });
       return new Response(JSON.stringify({ data: [{ id: "m1" }, { id: "m2" }] }), { status: 200 });
     }) as unknown as typeof fetch;
     expect(await listModels("claude-code", "https://relay.example/", "k", fake)).toEqual(["m1", "m2"]);
@@ -683,6 +696,9 @@ describe("a profile that pays by a key (§3.6)", () => {
     expect(calls.map((c) => c.url)).toEqual(["https://relay.example/v1/models?limit=1000", "https://api.openai.com/v1/models"]);
     expect(calls[0]!.headers).toMatchObject({ "x-api-key": "k", authorization: "Bearer k", "anthropic-version": "2023-06-01" });
     expect(calls[1]!.headers).toEqual({ authorization: "Bearer k" });
+    // No redirect is followed (node keeps `x-api-key` across one to another host): a 3xx is the status it is.
+    expect(calls.map((c) => c.redirect)).toEqual(["manual", "manual"]);
+    expect(await probeModels("claude-code", "https://relay.example/", "k", (async () => new Response(null, { status: 302, headers: { location: "https://elsewhere.example/" } })) as unknown as typeof fetch)).toEqual({ status: 302 });
     const down = (async () => new Response("no", { status: 404 })) as unknown as typeof fetch;
     expect(await listModels("claude-code", undefined, "k", down)).toBeNull();
     expect(unknownModel("claude-opus-5.5", ["claude-opus-5-5"])).toContain("是不是 claude-opus-5-5");

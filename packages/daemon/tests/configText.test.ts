@@ -1,7 +1,10 @@
 /** What is typed into `agentswitch config`, read as the Mac's sheets read it (tui/text.ts). */
 
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { cleanSessionKey, portsFrom, proxySite, splitProxy, validSessionKey } from "../src/tui/text.js";
+import { cleanSessionKey, maskProxyPassword, portsFrom, proxySite, splitProxy, validSessionKey } from "../src/tui/text.js";
 import { vendorOf } from "../src/profiles/vendors.js";
 
 describe("what is typed", () => {
@@ -13,6 +16,25 @@ describe("what is typed", () => {
     expect(splitProxy("gate.example:7000:buyer:secret:with:colons")).toEqual({ server: "http://gate.example:7000", username: "buyer", password: "secret:with:colons" });
     expect(splitProxy("ftp://x:1")).toEqual({ server: "ftp://x:1", username: "", password: "" });
     expect(splitProxy("not a proxy")).toEqual({ server: "not a proxy", username: "", password: "" });
+  });
+
+  it("hides a proxy's password on the screen as it is typed, one dot a character, the rest of the line as typed", () => {
+    expect(maskProxyPassword("http://me:p%40ss@proxy.example:8080/")).toBe("http://me:••••••@proxy.example:8080/");    // the escape hidden as typed, not as read
+    expect(maskProxyPassword("me:pw@10.0.0.2:3128")).toBe("me:••@10.0.0.2:3128");
+    expect(maskProxyPassword("gate.example:7000:buyer:secret:with:colons")).toBe("gate.example:7000:buyer:••••••••••••••••••");
+    expect(maskProxyPassword("[::1]:7000:buyer:pw ")).toBe("[::1]:7000:buyer:•• ");
+    // Typed by hand: hidden from the first character after the name's colon, unless it reads as a port.
+    expect(maskProxyPassword("http://me:p4")).toBe("http://me:••");
+    expect(maskProxyPassword("http://me:")).toBe("http://me:");
+    expect(maskProxyPassword("http://proxy.example:8080")).toBe("http://proxy.example:8080");
+    expect(maskProxyPassword("gate.example:7000:buyer")).toBe("gate.example:7000:buyer");
+    // Nothing to hide: no password, an IPv6 host's own colons, a line that is not a proxy, the kept line shown to edit.
+    expect(maskProxyPassword("socks5://u@[2001:db8::1]:1080")).toBe("socks5://u@[2001:db8::1]:1080");
+    expect(maskProxyPassword("http://[2001:db8::1]:1080")).toBe("http://[2001:db8::1]:1080");
+    expect(maskProxyPassword("http://me@proxy.example:8080")).toBe("http://me@proxy.example:8080");
+    expect(maskProxyPassword("not a proxy")).toBe("not a proxy");
+    expect(maskProxyPassword("")).toBe("");
+    for (const line of ["http://me:p%40ss@proxy.example:8080/", "gate.example:7000:buyer:secret", "http://me:p4"]) expect(maskProxyPassword(line)).toHaveLength(line.length);
   });
 
   it("seals a proxy's password for its host and port; one not written scheme://host:port has no site", () => {
@@ -61,8 +83,18 @@ describe("the editor and the gate's key pairs", () => {
     const { editText, editorOf } = await import("../src/tui/editor.js");
     expect(editorOf({ VISUAL: "nvim", EDITOR: "nano" })).toBe("nvim");
     expect(editorOf({ EDITOR: " " })).toBe("vi");
-    const out = editText("hello\n", "CONTEXT.md", { ...process.env, VISUAL: "", EDITOR: "sed -i s/hello/bye/" });
-    expect(out).toBe("bye\n");
+    // An editor of our own, given a word as its argument, writes that word into the file it is opened on. (GNU sed's
+    // `-i` with no suffix is not BSD sed's: the Mac has no one-line editor both know.)
+    const dir = mkdtempSync(join(tmpdir(), "agentswitch-editor-"));
+    try {
+      const editor = join(dir, "fake-editor");
+      writeFileSync(editor, `#!/bin/sh\nprintf '%s\\n' "$1" > "$2"\n`);
+      chmodSync(editor, 0o755);
+      const out = editText("hello\n", "CONTEXT.md", { ...process.env, VISUAL: "", EDITOR: `"${editor}" bye` });
+      expect(out).toBe("bye\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
     expect(() => editText("x", "a.md", { ...process.env, VISUAL: "false", EDITOR: "" })).toThrow(/false exited 1/);
   });
 

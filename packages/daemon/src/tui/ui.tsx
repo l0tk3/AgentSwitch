@@ -24,6 +24,8 @@ export type PickRequest = { readonly title: string; readonly options: readonly O
   readonly filter?: boolean; readonly custom?: ((typed: string) => string) | undefined };
 export type AskRequest = { readonly title: string; readonly initial?: string | undefined; readonly hint?: string | undefined;
   /** Not shown as typed (a key, a password). */ readonly secret?: boolean;
+  /** Shown as this says instead of as typed (a proxy line with its password hidden): it must keep the length, since the
+   *  cursor is placed by it. */ readonly mask?: ((typed: string) => string) | undefined;
   /** Why what is typed will not do; null: it will. */ readonly check?: ((typed: string) => string | null) | undefined };
 export type ConfirmRequest = { readonly text: string; readonly yes: string; readonly danger?: boolean };
 
@@ -182,9 +184,10 @@ function Asker({ req, done }: { req: AskRequest; done: (v: string | null) => voi
     const why = req.check?.(v) ?? null;
     if (why) setProblem(why); else done(v);
   }, () => done(null));
-  const before = req.secret ? "•".repeat(Math.min(line.cursor, SECRET_DOTS)) : line.value.slice(0, line.cursor);
-  const under = req.secret ? "" : line.value.slice(line.cursor, line.cursor + 1);
-  const after = req.secret ? "" : line.value.slice(line.cursor + 1);
+  const shown = req.mask ? req.mask(line.value) : line.value;
+  const before = req.secret ? "•".repeat(Math.min(line.cursor, SECRET_DOTS)) : shown.slice(0, line.cursor);
+  const under = req.secret ? "" : shown.slice(line.cursor, line.cursor + 1);
+  const after = req.secret ? "" : shown.slice(line.cursor + 1);
   return (
     <Box flexDirection="column">
       <Text bold>{req.title}</Text>

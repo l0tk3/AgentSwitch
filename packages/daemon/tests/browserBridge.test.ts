@@ -65,7 +65,7 @@ async function until(get: () => boolean, ms: number): Promise<void> {
 }
 
 /** The bridge on in-memory stdio: write lines in, read lines out. */
-function bridge(opts: { url: string; session: string; token: string }) {
+function bridge(opts: { url: string; session: string; token: string }, timing: { reconnectForMs?: number; stepMs?: number } = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const lines: string[] = [];
@@ -82,7 +82,7 @@ function bridge(opts: { url: string; session: string; token: string }) {
     }
   });
   const errors: string[] = [];
-  const done = runBridge(opts, input, output, (l) => errors.push(l));
+  const done = runBridge(opts, input, output, (l) => errors.push(l), timing);
   const next = (): Promise<JsonRpcMessage> => new Promise((resolve) => {
     const line = lines.shift();
     if (line !== undefined) resolve(JSON.parse(line) as JsonRpcMessage); else waiting.push((l) => resolve(JSON.parse(l) as JsonRpcMessage));
@@ -137,11 +137,14 @@ describe("the bridge script", () => {
   it("exits 1 when the session is revoked (the agent's program ended), and refuses to start with a dead token", async () => {
     const { api, url } = await start();
     const s = api.agents.mint(CODEX);
-    const b = bridge({ url, session: s.id, token: s.token });
+    // Revoked while the program lives: asked again for the while a restarting daemon is given (the next daemon knows
+    // the session only once it has taken the terminal up), then given up on.
+    const b = bridge({ url, session: s.id, token: s.token }, { reconnectForMs: 800, stepMs: 100 });
     b.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
     await b.next();
     api.agents.revoke(s.id);
     expect(await b.done).toBe(1);
+    expect(b.errors.join("\n")).toContain("no longer knows this session");
     const again = bridge({ url, session: s.id, token: s.token });
     expect(await again.done).toBe(1);
     expect(again.errors.join("\n")).toContain("401");
@@ -159,9 +162,10 @@ describe("the bridge script", () => {
     await new Promise((r) => setTimeout(r, 100));
     b.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     expect((await b.next())).toMatchObject({ id: 2, error: { message: expect.stringMatching(/restarting|did not answer/) } });
-    // The next service, on the same port, takes the terminal's session up again with its token.
+    // The next service, on the same port, takes the terminal's session up again with its token — a moment after it
+    // listens, as it takes the terminals up after that: a 401 from it meanwhile is not the session's end (2026-10-31).
     const next = await start(first.port);
-    next.api.agents.adopt(s.id, s.token, CODEX);
+    setTimeout(() => next.api.agents.adopt(s.id, s.token, CODEX), 1200);
     await until(() => b.errors.some((e) => e.includes("connected to the daemon again")), 8000);
     await until(() => next.engines.length > 0, 4000);
     b.send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "browser_snapshot", arguments: {} } });

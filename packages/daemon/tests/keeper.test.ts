@@ -78,13 +78,15 @@ describe("asking the login shell for its PATH", () => {
   it("runs it in a session of its own, so an interactive shell cannot take the terminal from whoever asked", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agentswitch-shell-"));
     const shell = join(dir, "fake-shell");
-    // A shell that notes its session and runs the command it is given as `-lic <command>`.
-    writeFileSync(shell, `#!/bin/sh\nps -o sid= -p $$ | tr -d ' ' > "${dir}/sid"\nPATH=/from/login:$PATH\nexport PATH\neval "$2"\n`);
+    // A shell that notes its process group and runs the command it is given as `-lic <command>`. A session of its own
+    // (setsid) heads a group of its own; the group is what both Linux and macOS `ps` print (macOS has no `sid` keyword,
+    // and its `sess` is 0 for every process).
+    writeFileSync(shell, `#!/bin/sh\nps -o pgid= -p $$ | tr -d ' ' > "${dir}/pgid"\nPATH=/from/login:$PATH\nexport PATH\neval "$2"\n`);
     chmodSync(shell, 0o755);
     const path = await loginShellPath({ SHELL: shell, HOME: dir, USER: "u" });
     expect(path?.startsWith("/from/login:")).toBe(true);
-    const ours = execFileSync("ps", ["-o", "sid=", "-p", String(process.pid)]).toString().trim();
-    expect(readFileSync(join(dir, "sid"), "utf8").trim()).not.toBe(ours);
+    const ours = execFileSync("ps", ["-o", "pgid=", "-p", String(process.pid)]).toString().trim();
+    expect(readFileSync(join(dir, "pgid"), "utf8").trim()).not.toBe(ours);
   });
 });
 

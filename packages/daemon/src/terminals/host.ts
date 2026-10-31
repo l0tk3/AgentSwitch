@@ -12,7 +12,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
-import { attachHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
+import { attachHeld, endHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
 import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { screenView } from "./screenView.js";
 
@@ -326,7 +326,34 @@ type Pty = {
   onData(cb: (data: string) => void): unknown;
   onExit(cb: (e: { exitCode: number }) => void): unknown;
   detach?(): void;
+  /** A holder's: its connection ended without the program's end (held.ts `onLost`). */
+  onLost?(cb: (replaced: boolean) => void): void;
 };
+
+/** A kept terminal's program and its companion's server ended through their holders (`endHeld`). */
+async function endKept(kept: KeptTerminal): Promise<void> {
+  await endHeld(kept.hold).catch(() => undefined);
+  const companion = kept.companion?.place as HoldPlace | undefined;
+  if (companion?.socket && companion.token) await endHeld(companion).catch(() => undefined);
+}
+
+/** The terminals a daemon before this one left to their holders in `dir`, ended: this daemon holds none (holding
+ *  turned off, or no holder in this runtime), and a terminal nobody takes up is not left running on its own. Returns
+ *  how many were ended. */
+export async function endLeftHeld(dir: string, log: (line: string) => void = (line) => console.error(line)): Promise<number> {
+  let ids: string[];
+  try { ids = readdirSync(dir).filter((d) => existsSync(join(dir, d, "meta.json"))); } catch { return 0; }
+  let ended = 0;
+  for (const id of ids) {
+    const file = join(dir, id, "meta.json");
+    try {
+      const kept = JSON.parse(readFileSync(file, "utf8")) as KeptTerminal;
+      if (kept.v === 1 && kept.hold?.socket) { log(`terminals: ${id} was held for a daemon that would take it up; this one holds none, so its program is ended`); await endKept(kept); ended += 1; }
+    } catch { /* not a terminal of ours to take up: forgotten below */ }
+    rmSync(file, { force: true });
+  }
+  return ended;
+}
 
 /** A held terminal as `meta.json` keeps it: enough to list it again, to let its agent's hooks in, and to reach its
  *  holder. Its screen is not kept: the holder sends its output again. */
@@ -1022,7 +1049,8 @@ export class TerminalHost {
       const place: HoldPlace = { socket: join(hold.dir, s.id, "hold.sock"), token: randomBytes(24).toString("base64url") };
       try {
         mkdirSync(join(hold.dir, s.id), { recursive: true, mode: 0o700 });
-        const held = await startHeld(hold.holding, place, { file, args, cwd: s.cwd, env, cols: s.cols, rows: s.rows, ringBytes: hold.holding.ringBytes }, `agentswitch-term-${s.id}`);
+        // Told it is held: its hook program refuses a tool call while no service answers (hookClient.ts).
+        const held = await startHeld(hold.holding, place, { file, args, cwd: s.cwd, env: { ...env, AGENTSWITCH_TERMINAL_HELD: "1" }, cols: s.cols, rows: s.rows, ringBytes: hold.holding.ringBytes }, `agentswitch-term-${s.id}`);
         s.hold = place;
         return held;
       } catch (err) {
@@ -1040,6 +1068,7 @@ export class TerminalHost {
     s.proc = proc;
     proc.onData((data) => this.receive(s, data));
     proc.onExit(({ exitCode }) => this.exited(s, exitCode));
+    proc.onLost?.((replaced) => this.lost(s, replaced));
     s.companion?.attach({
       status: (status) => { if (status === "idle") this.turnEnded(s, true, null); this.setStatus(s, status); },
       ask: async (tool, input, signal) => (await this.ask(s, tool, input, signal))?.decision ?? null,
@@ -1074,6 +1103,9 @@ export class TerminalHost {
   /** The terminals a daemon before this one left to their holders, taken up again (docs/terminal-v0.md §10): listed
    *  as they were, their output sent again from the holder's buffer, their screens redrawn. One whose holder is gone
    *  is forgotten. Returns how many were taken up. */
+  /** Whether this host holds its terminals (and so takes up the last daemon's). */
+  get holds(): boolean { return this.opts.hold !== undefined; }
+
   async restore(): Promise<number> {
     const hold = this.opts.hold;
     if (!hold) return 0;
@@ -1090,7 +1122,10 @@ export class TerminalHost {
         await this.takeUp(kept);
         taken += 1;
       } catch (err) {
-        console.error(`terminals: ${id} was not taken up again (${(err as Error).message}); it is forgotten`);
+        // Not left running on its own: nobody would see it, answer its hooks or end it (its hook program refuses
+        // every tool call meanwhile, hookClient.ts).
+        console.error(`terminals: ${id} was not taken up again (${(err as Error).message}); its program is ended`);
+        await endKept(kept);
         rmSync(file, { force: true });
       }
     }
@@ -1725,6 +1760,23 @@ export class TerminalHost {
     if (s.idleTimer) clearTimeout(s.idleTimer);
     s.idleTimer = setTimeout(() => { if (s.status === "working") this.setStatus(s, "idle"); }, this.o.idleAfterMs);
     s.idleTimer.unref();
+  }
+
+  /** A held terminal's connection to its holder ended without its program's end: a newer daemon took the terminal up
+   *  (`replaced` — a restart where this daemon was still going), or the holder itself was killed. Either way the
+   *  terminal is not this daemon's to end: its `meta.json` stays (the other daemon's now, or the next one finds the
+   *  holder gone and forgets it), its companion's server is let go of, not stopped, and no failed turn is noted. */
+  private lost(s: Session, replaced: boolean): void {
+    console.error(`terminals: ${s.id} ${replaced ? "was taken up by a newer daemon" : "lost its holder"}; let go of here`);
+    for (const t of [s.idleTimer, s.killTimer, s.heldTimer, s.suggestTimer, s.compactTimer, s.choiceTimer, s.sentTimer, s.progressTimer, s.daybreakTimer]) if (t) clearTimeout(t);
+    if (s.held) { const rest = s.held; s.held = ""; this.output(s, rest); }
+    s.exitCode = 129;
+    s.companion?.detach?.();
+    for (const pid of [...s.pending.keys()]) this.settle(s, pid, null);
+    this.noSubagents(s);
+    this.setStatus(s, "exited");
+    s.emit({ type: "exit", code: 129 });
+    this.ended(s.id, false);
   }
 
   private exited(s: Session, code: number): void {
