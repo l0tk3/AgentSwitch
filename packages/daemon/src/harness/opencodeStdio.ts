@@ -41,6 +41,13 @@ export function stdioServePorts(): number[] {
   return [...livePorts];
 }
 
+/** A server this daemon did not spawn itself (a held terminal's, docs/terminal-v0.md §10) is one of its own ports too,
+ *  until the returned function says it is gone. */
+export function noteServePort(port: number): () => void {
+  livePorts.add(port);
+  return () => livePorts.delete(port);
+}
+
 const portOfUrl = (url: string): number | null => {
   try { const port = Number(new URL(url).port); return Number.isInteger(port) && port > 0 ? port : null; } catch { return null; }
 };

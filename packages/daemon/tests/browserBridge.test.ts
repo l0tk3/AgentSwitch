@@ -39,9 +39,10 @@ class EchoEngine implements EngineConnection {
 }
 
 const closers: (() => Promise<void> | void)[] = [];
+const stops: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const c of closers.splice(0)) await c(); });
 
-async function start() {
+async function start(onPort = 0) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-bridge-")));
   const engines: EchoEngine[] = [];
   const api = sharedBrowser({ home: root, userHome: root, driver: new FakeDriver(), ownPorts: () => [], protected: { roots: [], exempt: [] },
@@ -49,14 +50,22 @@ async function start() {
   const app = new Hono();
   mountBrowser(app, { browser: api, sseHeartbeatMs: 50 } as unknown as ApiDeps);
   const port = await new Promise<number>((resolve) => {
-    const server = listenLocal({ app }, 0, (info: AddressInfo) => resolve(info.port), new LocalAuth(LOCAL_TOKEN));
-    closers.push(async () => { await api.agents.shutdown(); server.close(); await api.host.shutdown(); });
+    const server = listenLocal({ app }, onPort, (info: AddressInfo) => resolve(info.port), new LocalAuth(LOCAL_TOKEN));
+    let closed = false;
+    const close = async () => { if (closed) return; closed = true; await api.agents.shutdown(); (server as { closeAllConnections?: () => void }).closeAllConnections?.(); server.close(); await api.host.shutdown(); };
+    closers.push(close);
+    stops.push(close);
   });
-  return { root, api, engines, url: `http://127.0.0.1:${port}` };
+  return { root, api, engines, url: `http://127.0.0.1:${port}`, port, stop: stops.at(-1)! };
+}
+
+async function until(get: () => boolean, ms: number): Promise<void> {
+  const end = Date.now() + ms;
+  while (!get()) { if (Date.now() > end) throw new Error("timed out"); await new Promise((r) => setTimeout(r, 20)); }
 }
 
 /** The bridge on in-memory stdio: write lines in, read lines out. */
-function bridge(opts: { url: string; session: string; token: string }) {
+function bridge(opts: { url: string; session: string; token: string }, timing: { reconnectForMs?: number; stepMs?: number } = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const lines: string[] = [];
@@ -73,7 +82,7 @@ function bridge(opts: { url: string; session: string; token: string }) {
     }
   });
   const errors: string[] = [];
-  const done = runBridge(opts, input, output, (l) => errors.push(l));
+  const done = runBridge(opts, input, output, (l) => errors.push(l), timing);
   const next = (): Promise<JsonRpcMessage> => new Promise((resolve) => {
     const line = lines.shift();
     if (line !== undefined) resolve(JSON.parse(line) as JsonRpcMessage); else waiting.push((l) => resolve(JSON.parse(l) as JsonRpcMessage));
@@ -128,14 +137,42 @@ describe("the bridge script", () => {
   it("exits 1 when the session is revoked (the agent's program ended), and refuses to start with a dead token", async () => {
     const { api, url } = await start();
     const s = api.agents.mint(CODEX);
-    const b = bridge({ url, session: s.id, token: s.token });
+    // Revoked while the program lives: asked again for the while a restarting daemon is given (the next daemon knows
+    // the session only once it has taken the terminal up), then given up on.
+    const b = bridge({ url, session: s.id, token: s.token }, { reconnectForMs: 800, stepMs: 100 });
     b.send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
     await b.next();
     api.agents.revoke(s.id);
     expect(await b.done).toBe(1);
+    expect(b.errors.join("\n")).toContain("no longer knows this session");
     const again = bridge({ url, session: s.id, token: s.token });
     expect(await again.done).toBe(1);
     expect(again.errors.join("\n")).toContain("401");
+  });
+
+  it("connects again when the service restarts, greets the new connection as the agent did, and goes on (terminal-v0 §10)", async () => {
+    const first = await start();
+    const s = first.api.agents.mint(CODEX);
+    const b = bridge({ url: first.url, session: s.id, token: s.token });
+    b.send({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "claude", version: "1" } } });
+    expect((await b.next()).id).toBe(1);
+    b.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+    // The service stops; a call the agent makes meanwhile is answered at once, with why.
+    await first.stop();
+    await new Promise((r) => setTimeout(r, 100));
+    b.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    expect((await b.next())).toMatchObject({ id: 2, error: { message: expect.stringMatching(/restarting|did not answer/) } });
+    // The next service, on the same port, takes the terminal's session up again with its token — a moment after it
+    // listens, as it takes the terminals up after that: a 401 from it meanwhile is not the session's end (2026-10-31).
+    const next = await start(first.port);
+    setTimeout(() => next.api.agents.adopt(s.id, s.token, CODEX), 1200);
+    await until(() => b.errors.some((e) => e.includes("connected to the daemon again")), 8000);
+    await until(() => next.engines.length > 0, 4000);
+    b.send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "browser_snapshot", arguments: {} } });
+    // The answer to the bridge's own greeting never reaches the agent: the next line is the call's.
+    expect(await b.next()).toMatchObject({ id: 3, result: { content: [{ text: "ran browser_snapshot" }] } });
+    b.input.end();
+    expect(await b.done).toBe(0);
   });
 
   it("reads its token from the file, takes the gate's --output-dir and uses nothing of it, and talks only to this Mac", () => {

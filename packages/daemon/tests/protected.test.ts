@@ -89,21 +89,25 @@ describe("read-denied paths (2026-09-24)", () => {
   // read them. Before this, Claude's Read/Glob/Grep/LS were allowed everywhere.
   it("defaultProtected read-denies the gate home, the browser profiles, the shared browser's agent files and the remote listener's key", () => {
     const p = defaultProtected({ HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg" });
-    expect(p.readDenied).toEqual(["/h/.sg", join(GATE_PUBLIC_DIR, "gate.sock"), "/h/.as/browser-profiles", "/h/.as/browser", "/h/.as/remote", "/h/.as/local-token", "/h/.as/nodes", "/h/.as/profiles"]);
+    expect(p.readDenied).toEqual(["/h/.sg", join(GATE_PUBLIC_DIR, "gate.sock"), "/h/.as/browser-profiles", "/h/.as/browser", "/h/.as/remote", "/h/.as/local-token", "/h/.as/nodes", "/h/.as/profiles", "/h/.as/terminals"]);
+    // A held terminal's meta.json: its hook token answers for its profile's API key (terminal-v0 §10, 2026-10-31).
+    expect(decideTool("Read", { file_path: "/h/.as/terminals/ab12/meta.json" }, "/w", new Set(), p).kind).toBe("deny");
     // The agents' session tokens and Playwright MCP's unredacted snapshots (docs/browser-v0.md §5 step 3).
     expect(decideTool("Read", { file_path: "/h/.as/browser/sessions/ab12.token" }, "/w", new Set(), p).kind).toBe("deny");
     expect(decideTool("Bash", { command: "cat /h/.as/browser/agents/ab12-cd34/page.yml" }, "/w", new Set(), p).kind).toBe("deny");
   });
 
-  it("AgentSwitch's own terminals keep only the credentials at rest closed: the gate's keys and socket (2026-09-30), the other nodes' tokens (2026-10-10)", () => {
+  it("AgentSwitch's own terminals keep only the credentials at rest closed: the gate's keys and socket (2026-09-30), the other nodes' tokens (2026-10-10), the other terminals' (2026-10-31)", () => {
     const env = { HOME: "/h", AGENTSWITCH_HOME: "/h/.as", SECRET_GATE_HOME: "/h/.sg" };
-    const closed = ["/h/.sg", join(GATE_PUBLIC_DIR, "gate.sock"), "/h/.as/nodes"];
+    const closed = ["/h/.sg", join(GATE_PUBLIC_DIR, "gate.sock"), "/h/.as/nodes", "/h/.as/terminals"];
     expect(terminalProtected(env)).toEqual({ roots: closed, exempt: [], readDenied: closed });
     const term = terminalProtected(env);
     const full = defaultProtected(env);
-    // Closed in a terminal too: what this node keeps of the other nodes (their tokens, the nodes key).
+    // Closed in a terminal too: what this node keeps of the other nodes (their tokens, the nodes key), and the other
+    // terminals' hook tokens (a held terminal's meta.json; an agent's own is in its environment).
     expect(decideTool("Read", { file_path: "/h/.as/nodes/peers.json" }, "/w", new Set(), term).kind).toBe("deny");
     expect(decideTool("Bash", { command: "cat /h/.as/nodes/key" }, "/w", new Set(), term).kind).toBe("deny");
+    expect(decideTool("Read", { file_path: "/h/.as/terminals/ab12/meta.json" }, "/w", new Set(), term).kind).toBe("deny");
     // Open in a terminal, as in any terminal: the local token, the remote key, the browser sessions, the daemon's files.
     for (const [tool, input] of [
       ["Read", { file_path: "/h/.as/local-token" }],

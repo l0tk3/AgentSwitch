@@ -59,50 +59,85 @@ function undelivered(message: Message, why: string): string | null {
   return JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: `AgentSwitch's shared browser: ${why}` } });
 }
 
-/** Runs until stdin ends (the agent stops the tool) or the daemon ends the connection; resolves with the exit code. */
-export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout,
-  log: (line: string) => void = (line) => process.stderr.write(`${line}\n`)): Promise<number> {
-  const headers = { authorization: `Bearer ${opts.token}`, [SESSION_HEADER]: opts.session };
-  const abort = new AbortController();
-  let res: Response;
-  try {
-    res = await fetch(`${opts.url}/browser/agent/mcp`, { headers: { ...headers, accept: "text/event-stream" }, signal: abort.signal });
-  } catch (err) {
-    log(`agentswitch browser: the daemon at ${opts.url} did not answer (${(err as Error).message})`);
-    return 1;
-  }
-  if (!res.ok || !res.body) {
-    log(`agentswitch browser: the daemon refused the connection (${res.status}${res.status === 401 ? ": the session ended or the token is wrong" : ""})`);
-    return 1;
-  }
-  let connection: string | null = null;
-  let markReady: () => void = () => undefined;
-  const ready = new Promise<void>((resolve) => { markReady = resolve; });
-  const write = (line: string) => new Promise<void>((resolve) => { output.write(`${line}\n`, () => resolve()); });
+/** How long the bridge keeps trying to reach the daemon again after its connection ended (a restart or an update of the
+ *  service, docs/terminal-v0.md §10), and how long it waits between tries at most. */
+const RECONNECT_FOR_MS = 120_000;
+const RECONNECT_STEP_MS = 4_000;
+/** The id the bridge's own `initialize` goes under when it greets a new connection for the agent (its answer is not
+ *  the agent's: dropped). */
+const REINIT_ID = "agentswitch-bridge-reinit";
 
-  // Daemon → agent.
-  const reading = (async () => {
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let event = "message";
-    let data: string[] = [];
-    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-      buffer += decoder.decode(chunk, { stream: true });
-      let nl: number;
-      while ((nl = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, nl).replace(/\r$/, "");
-        buffer = buffer.slice(nl + 1);
-        if (line === "") {
-          const body = data.join("\n");
-          if (event === "endpoint") { connection = (JSON.parse(body) as { connection: string }).connection; markReady(); }
-          else if (event === "message" && body) await write(body);
-          event = "message";
-          data = [];
-        } else if (line.startsWith("event:")) event = line.slice(6).trim();
-        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
-      }
+type Wire = { readonly connection: string; readonly ended: Promise<void>; readonly abort: AbortController };
+
+/** Runs until stdin ends (the agent stops the tool), or until the daemon is gone for good; resolves with the exit code.
+ *  When its connection ends — the service restarting — it connects again with the same session and greets the new
+ *  connection as the agent greeted the first (its `initialize`, sent again; the answer dropped), so the agent's
+ *  browser tool goes on working. What the agent asks meanwhile is answered with an error at once. */
+export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout,
+  log: (line: string) => void = (line) => process.stderr.write(`${line}\n`), timing: { reconnectForMs?: number; stepMs?: number } = {}): Promise<number> {
+  const headers = { authorization: `Bearer ${opts.token}`, [SESSION_HEADER]: opts.session };
+  const write = (line: string) => new Promise<void>((resolve) => { output.write(`${line}\n`, () => resolve()); });
+  let greeting: string | null = null;     // the agent's initialize, as it sent it
+  let dropAnswer = false;
+  // The agent's calls the daemon took and has not answered: answered with an error when the connection ends, so none
+  // waits its whole timeout out for an answer the next connection will never give.
+  const pending = new Map<string | number, Message>();
+
+  /** One connection: its id once the daemon names it, and when it ends. "refused": the session is not (any more) one
+  *  the daemon knows — revoked when the agent's program ended; null: not reached (yet). */
+  const connect = async (first: boolean): Promise<Wire | "refused" | null> => {
+    const abort = new AbortController();
+    let res: Response;
+    try {
+      res = await fetch(`${opts.url}/browser/agent/mcp`, { headers: { ...headers, accept: "text/event-stream" }, signal: abort.signal });
+    } catch (err) {
+      if (first) log(`agentswitch browser: the daemon at ${opts.url} did not answer (${(err as Error).message})`);
+      return null;
     }
-  })().catch(() => undefined);
+    if (!res.ok || !res.body) {
+      if (first) log(`agentswitch browser: the daemon refused the connection (${res.status}${res.status === 401 ? ": the session ended or the token is wrong" : ""})`);
+      abort.abort();
+      return res.status === 401 || res.status === 403 ? "refused" : null;
+    }
+    let named: (id: string | null) => void = () => undefined;
+    const name = new Promise<string | null>((resolve) => { named = resolve; });
+    const ended = (async () => {
+      const decoder = new TextDecoder();
+      let buffer = "", event = "message";
+      let data: string[] = [];
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let nl: number;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl).replace(/\r$/, "");
+          buffer = buffer.slice(nl + 1);
+          if (line === "") {
+            const body = data.join("\n");
+            if (event === "endpoint") named((JSON.parse(body) as { connection: string }).connection);
+            else if (event === "message" && body) {
+              // The answer to the bridge's own greeting of a new connection is not the agent's.
+              if (dropAnswer && body.includes(REINIT_ID)) { try { if ((JSON.parse(body) as Message).id === REINIT_ID) { dropAnswer = false; event = "message"; data = []; continue; } } catch { /* the agent's */ } }
+              if (pending.size) { try { const m = JSON.parse(body) as Message & { result?: unknown; error?: unknown }; if (m.id !== undefined && !m.method) pending.delete(m.id); } catch { /* not an answer */ } }
+              await write(body);
+            }
+            event = "message";
+            data = [];
+          } else if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        }
+      }
+    })().catch(() => undefined).finally(() => named(null));
+    const connection = await name;
+    if (!connection) { abort.abort(); return null; }
+    return { connection, ended, abort };
+  };
+
+  const post = (wire: Wire, line: string) => fetch(`${opts.url}/browser/agent/mcp/${wire.connection}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: line });
+
+  const firstWire = await connect(true);
+  if (!firstWire || firstWire === "refused") return 1;
+  let wire: Wire | null = firstWire;
+  let gone = false;
 
   // Agent → daemon, one message at a time, in order.
   const lines = createInterface({ input, crlfDelay: Infinity });
@@ -110,24 +145,62 @@ export async function runBridge(opts: BridgeOptions, input: NodeJS.ReadableStrea
   const send = async (line: string) => {
     let message: Message;
     try { message = JSON.parse(line) as Message; } catch { return; }
-    await Promise.race([ready, reading]);
+    if (message.method === "initialize") greeting = line;
     const refused = async (why: string) => { const answer = undelivered(message, why); if (answer) await write(answer); };
-    if (!connection) { await refused("the connection to the daemon ended"); return; }
+    if (!wire) { await refused(gone ? "the connection to the daemon ended" : "AgentSwitch's service is restarting; try again in a moment"); return; }
     if (line.length > MAX_MESSAGE_CHARS) { await refused("the message is too large"); return; }
     try {
-      const r = await fetch(`${opts.url}/browser/agent/mcp/${connection}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: line });
+      const r = await post(wire, line);
       if (!r.ok) await refused(`the daemon did not take the message (${r.status})`);
+      else if (message.id !== undefined && message.method) pending.set(message.id, message);
     } catch {
       await refused("the daemon did not answer");
     }
   };
+  /** The calls in flight when the connection ended: each answered with why, once. */
+  const unanswered = async () => {
+    const left = [...pending.values()];
+    pending.clear();
+    for (const m of left) { const answer = undelivered(m, "the connection to the daemon ended before it answered; try again"); if (answer) await write(answer); }
+  };
   lines.on("line", (line) => { if (line.trim()) sending = sending.then(() => send(line)); });
-  const stdinClosed = new Promise<"stdin">((resolve) => lines.on("close", () => resolve("stdin")));
-  const ended = await Promise.race([stdinClosed, reading.then(() => "daemon" as const)]);
-  if (ended === "stdin") await sending;
-  abort.abort();
-  lines.close();
-  return ended === "stdin" ? 0 : 1;
+  let stdinOpen = true;
+  const stdinClosed = new Promise<"stdin">((resolve) => lines.on("close", () => { stdinOpen = false; resolve("stdin"); }));
+
+  for (;;) {
+    const ended = await Promise.race([stdinClosed, wire.ended.then(() => "daemon" as const)]);
+    if (ended === "stdin") { await sending; wire.abort.abort(); lines.close(); return 0; }
+    // The daemon went: the service restarting. Connect again with the same session, for a while.
+    wire = null;
+    await unanswered();
+    const until = Date.now() + (timing.reconnectForMs ?? RECONNECT_FOR_MS);
+    let step = 250;
+    // A refusal now may be the next daemon's, which takes the terminal's session up only once it has taken the
+    // terminal up (after it listens, one terminal at a time, each behind its forwarder's check): asked again, for as
+    // long as the daemon is waited for at all. A session ended on purpose (the terminal's program ended, or it was
+    // deleted) ends this program with its stdin before that; one revoked while the program lives is given up on when
+    // the wait is over.
+    let refused = false;
+    while (!wire && stdinOpen && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, step));
+      step = Math.min(step * 2, timing.stepMs ?? RECONNECT_STEP_MS);
+      const got = await connect(false);
+      refused = got === "refused";
+      if (got && got !== "refused") wire = got;
+    }
+    if (!stdinOpen) { lines.close(); return 0; }
+    if (!wire) { gone = true; log(refused ? "agentswitch browser: the daemon no longer knows this session" : "agentswitch browser: the daemon did not come back"); lines.close(); return 1; }
+    log("agentswitch browser: connected to the daemon again");
+    // The new connection is greeted as the agent greeted the first; its answer is dropped.
+    if (greeting) {
+      try {
+        const again = { ...(JSON.parse(greeting) as Record<string, unknown>), id: REINIT_ID };
+        dropAnswer = true;
+        await post(wire, JSON.stringify(again));
+        await post(wire, JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }));
+      } catch { /* the next message finds out */ }
+    }
+  }
 }
 
 /** As a script: run with this process's arguments, then exit (stdout flushed first). */

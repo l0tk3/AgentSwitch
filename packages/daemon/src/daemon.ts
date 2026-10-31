@@ -13,7 +13,7 @@ import { cloneRoot, CloneSweeper } from "./executors/chromeClones.js";
 import { BROWSER_PROFILES_DIR } from "./executors/protected.js";
 import { serve as listen, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -98,19 +98,20 @@ import { KeptPictures } from "./sessions/pictures.js";
 import { openCodeDeleter, type OpenCodeDelete } from "./sessions/opencode.js";
 import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
 import { TerminalAudit } from "./terminals/audit.js";
-import { TerminalHost, type Launcher, type TerminalHarness } from "./terminals/host.js";
-import { agentLauncher, hookCommandOf, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S } from "./terminals/launch.js";
+import { TerminalHost, type KeptTerminal, type Launcher, type TerminalHarness } from "./terminals/host.js";
+import { agentLauncher, hookCommandOf, HOOK_SCRIPT, PERMISSION_HOOK_TIMEOUT_S, QUICK_HOOK_TIMEOUT_S, restoreCompanion } from "./terminals/launch.js";
+import { holding } from "./terminals/held.js";
 import { elsewhereCheck, type ElsewhereCheck } from "./terminals/elsewhere.js";
 import { readTerminalStyle, type TerminalStyle } from "./terminals/style.js";
-import { TERMINAL_HARNESSES } from "./terminals/host.js";
-import { bridgeCommand, terminalOwner, type AgentEngine } from "./browser/agents.js";
+import { endLeftHeld, TERMINAL_HARNESSES } from "./terminals/host.js";
+import { BRIDGE_SCRIPT, bridgeCommand, terminalOwner, type AgentEngine } from "./browser/agents.js";
 import type { BrowserDriver } from "./browser/driver.js";
 import { gateFill } from "./browser/fill.js";
 import { exitLookup } from "./browser/exit.js";
 import { ExitPool } from "./browser/exits.js";
 import { claudeSignedIn, codexSignedIn } from "./terminals/signIn.js";
 import { ProfileBrowsers } from "./browser/fleet.js";
-import { profileOfKey } from "./api/profiles.js";
+import { exitKey, profileOfKey } from "./api/profiles.js";
 import type { BrowserHost } from "./browser/host.js";
 import { sharedBrowser } from "./browser/setup.js";
 import { newEngineKit } from "./browser/engine/setup.js";
@@ -165,12 +166,27 @@ export type DaemonConfig = {
   readonly browserHost?: boolean;
   /** Camoufox with windows of its own (docs/browser-v0.md §7.2); off: headless. */
   readonly browserWindow?: boolean;
+  /** Terminals outlive the service on holders of their own (docs/terminal-v0.md §10). */
+  readonly holdTerminals?: boolean;
 };
 
 /** AGENTSWITCH_REMOTE_PORT as a TCP port (0 = any free one); unset, empty or not a port → the default. */
 export function remotePort(value: string | undefined): number {
   const n = value?.trim() ? Number(value) : NaN;
   return Number.isInteger(n) && n >= 0 && n <= MAX_PORT ? n : DEFAULT_REMOTE_PORT;
+}
+
+/** A held terminal's output its holder keeps for the next daemon: as much as a terminal's buffer (terminal-v0 §2). */
+const TERMINAL_RING_BYTES = 2 * 1024 * 1024;
+
+/** A path in this runtime spelled through its `current` link (`AGENTSWITCH_RUNTIME_LINK`, the Linux node's keeper sets
+ *  it), so that a command written into a terminal's settings still works after an update removes this runtime. */
+function stable(path: string, link: string | undefined = process.env.AGENTSWITCH_RUNTIME_LINK): string {
+  if (!link) return path;
+  try {
+    const root = realpathSync(link);
+    return path.startsWith(`${root}/`) ? join(link, path.slice(root.length + 1)) : path;
+  } catch { return path; }
 }
 
 export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
@@ -194,6 +210,9 @@ export function defaultConfig(env: NodeJS.ProcessEnv = process.env): DaemonConfi
     taskFolders: env.AGENTSWITCH_TASK_FOLDERS !== "0",
     watchSessions: env.AGENTSWITCH_SESSIONS !== "0",
     terminals: env.AGENTSWITCH_TERMINALS !== "0",
+    // docs/terminal-v0.md §10: each terminal's program on a pty its own holder holds, so that it outlives the service
+    // (the Linux node's keeper turns it on; node.json `"holdTerminals": false` turns it off).
+    holdTerminals: env.AGENTSWITCH_HOLD_TERMINALS === "1",
     browserHost: env.AGENTSWITCH_BROWSER_HOST !== "0",
     // docs/browser-v0.md §7.2: Camoufox's tabs have windows of their own on a Mac; `AGENTSWITCH_BROWSER_WINDOW=0`
     // (throw-away services, a Mac nobody sits at) and every other system keep it without one.
@@ -400,7 +419,10 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
           launched: async () => { const p = profileOfKey(key); if (p) await sessionKeys.launched(p.agent, p.id); } } }), exits,
         (key) => { const p = profileOfKey(key); return p && p.id !== DEFAULT_PROFILE && profiles.homeOf(p.agent, p.id) ? { proxy: profiles.proxyOf(p.agent, p.id) } : null; })
     : undefined;
-  const apiKeys = new ApiKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}) });
+  // An address asked for its models with a profile's key is asked the way the profile's agent would send it: through
+  // the forwarder of its proxy when it has one (docs/profiles-v0.md §4), straight out when it has none.
+  const apiKeys = new ApiKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
+    through: async (agent, id) => { const proxy = profiles.proxyOf(agent, id); return proxy ? exits.address(exitKey(agent, id), proxy) : null; } });
   const sessionKeys: SessionKeys = new SessionKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
     browser: (agent, id) => profileBrowsers?.get(`${agent}.${id}`)?.host ?? null });
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
@@ -413,18 +435,25 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ? (req: { id: string; harness: string; cwd: string; browserKey?: string }) => {
         // Under a profile with a browser of its own, the agent's browser tool is that browser's (§5.1).
         const own = req.browserKey ? profileBrowsers?.of(req.browserKey) ?? null : null, base = `http://127.0.0.1:${localPort}`;
-        return own ? bridgeCommand(own.agents.mint(terminalOwner(req.id, req.harness, req.cwd)), `${base}/profile-browser/${req.browserKey}`)
-          : bridgeCommand(agents.mint(terminalOwner(req.id, req.harness, req.cwd)), base);
+        const minted = (own?.agents ?? agents).mint(terminalOwner(req.id, req.harness, req.cwd));
+        const command = bridgeCommand(minted, own ? `${base}/profile-browser/${req.browserKey}` : base, stable(process.execPath), stable(BRIDGE_SCRIPT));
+        // A held terminal keeps the session for the next daemon, which takes it up again with the same token.
+        return Object.assign(command, { minted: { session: minted.id, token: minted.token, ...(own ? { key: req.browserKey! } : {}) } });
       }
     : undefined;
   // Terminals are used like any terminal: only the credentials at rest stay closed there (docs/terminal-v0.md §3).
   const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
+  // Terminals that outlive the service (docs/terminal-v0.md §10): each program on a holder of its own.
+  const held = cfg.holdTerminals && (cfg.terminals || overrides.terminalLauncher) ? holding({ ringBytes: TERMINAL_RING_BYTES }) : null;
+  if (cfg.holdTerminals && !held) console.error("terminals: no holder (native/build/pty-hold) — terminals end with the service");
   const terminalHost = cfg.terminals || overrides.terminalLauncher
     ? new TerminalHost({
       // Which profile each conversation runs under is kept, so it goes on under the same one (docs/profiles-v0.md §3.3).
       deviceOf: (harness, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); return agent ? profiles.deviceOf(agent, profile ?? DEFAULT_PROFILE) : null; },
       onSession: (harness, sessionId, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
+        // Through `current` where the runtime has one: a terminal that outlives this runtime runs the next one's hooks.
+        node: stable(process.execPath), hookScript: stable(HOOK_SCRIPT), holding: held,
         codexHooks: (home) => codexTrust(home)?.trusted ?? false, opencodeServer: true,
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
@@ -437,6 +466,27 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       // Whatever the permission mode.
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
       ...(agents ? { onExit: (id: string) => agents.end({ kind: "terminal", id }), onRemove: (id: string) => agents.end({ kind: "terminal", id }, true) } : {}),
+      ...(held ? { hold: {
+        holding: held,
+        dir: join(cfg.home, "terminals"),
+        // What this service made for a terminal before, made again as its program knows it: its profile's forwarder on
+        // the same port with the same password, its browser session with the same token.
+        restoring: async (kept: KeptTerminal) => {
+          const agent = PROFILE_AGENTS.find((a) => a === kept.harness);
+          if (agent && kept.profile && kept.given.proxy) {
+            const at = new URL(kept.given.proxy), key = exitKey(agent, kept.profile.id);
+            const proxy = profiles.proxyOf(agent, kept.profile.id);
+            // The profile's proxy was taken away while the terminal ran: its forwarder was dropped then, and nothing
+            // listens on its port now either — the terminal stays shut, not let out as this machine (§4).
+            if (!proxy) console.error(`terminals: ${kept.id}'s profile has no proxy any more; its forwarder on ${at.port} is not made again`);
+            else await exits.address(key, proxy, { port: Number(at.port), password: decodeURIComponent(at.password) })
+              .catch((err: Error) => console.error(`terminals: ${kept.id}'s proxy forwarder did not come back on ${at.port}: ${err.message}`));
+          }
+          const b = kept.given.browser;
+          if (b) (b.key ? profileBrowsers?.of(b.key)?.agents : agents)?.adopt(b.session, b.token, terminalOwner(kept.id, kept.harness, kept.cwd));
+        },
+        companion: (harness: TerminalHarness, kept: Record<string, unknown>) => restoreCompanion(harness, kept, held),
+      } } : {}),
     })
     : null;
   let style: TerminalStyle | null = null;
@@ -660,6 +710,10 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   const auth = new LocalAuth(ensureLocalToken(cfg.home));
   const server = listenLocal(daemon, cfg.port, (info) => {
     daemon.setLocalPort(info.port);
+    // Terminals the last daemon left to their holders (docs/terminal-v0.md §10): their hooks reach this port. A daemon
+    // that holds none ends them: a terminal nobody takes up is not left running on its own.
+    if (daemon.terminals && !daemon.terminals.holds) void endLeftHeld(join(cfg.home, "terminals")).then((n: number) => { if (n) console.error(`terminals: ${n} left held by the last daemon, ended`); });
+    else void daemon.terminals?.restore().then((n) => { if (n) console.error(`terminals: ${n} taken up again from their holders`); }, (err: Error) => console.error(`terminals: restore: ${err.message}`));
     console.error(`agentswitchd ${VERSION} listening on http://127.0.0.1:${info.port}  router=${cfg.router}${opencode ? " (resident serve)" : ""} executors=${cfg.executors} maxTasks=${cfg.maxTasks} home=${cfg.home}`);
   }, auth);
   void daemon.quota.refresh();

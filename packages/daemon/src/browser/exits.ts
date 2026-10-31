@@ -51,7 +51,7 @@ export class ExitPool {
   /** The forwarder for `key`'s proxy, listening: what a process under it is given as its proxy
    *  (`http://agentswitch:<a password made for this run>@127.0.0.1:<port>`). A proxy with a password is asked of the
    *  gate here; one that cannot be had is refused. */
-  async address(key: string, proxy: ProxySetting | null): Promise<ForwarderAddress> {
+  async address(key: string, proxy: ProxySetting | null, pin?: { readonly port: number; readonly password: string }): Promise<ForwarderAddress> {
     // Without a proxy of its own (a profile's browser, §5.5): the same forwarder with nothing behind it — what goes
     // through it leaves as this Mac does, and it keeps the forwarder's rules (AgentSwitch's own ports are refused).
     const setting = proxy ? JSON.stringify(checkedProxy(proxy)) : "direct";
@@ -61,13 +61,14 @@ export class ExitPool {
     // A proxy changed or saved again keeps the forwarder — its port and its password — and only what is behind it
     // changes: what already runs under the profile was given that address, and goes the new way at its next request
     // (2026-10-18: a new forwarder on another port left a running terminal with nowhere to send anything).
-    const forwarder = was?.forwarder ?? this.forwarder(key);
+    const forwarder = was?.forwarder ?? this.forwarder(key, pin);
     this.exits.set(key, { setting, upstream, forwarder });
     return forwarder.start();
   }
 
-  /** `key`'s forwarder: it sends on to the proxy `key` has now, and lets nothing out once `key` has none. */
-  private forwarder(key: string): Forwarder {
+  /** `key`'s forwarder: it sends on to the proxy `key` has now, and lets nothing out once `key` has none. `pin`: the
+   *  port and password a held terminal was given before the service restarted (terminal-v0 §10). */
+  private forwarder(key: string, pin?: { readonly port: number; readonly password: string }): Forwarder {
     const forwarder: Forwarder = new Forwarder({
       ownPorts: this.opts.ownPorts,
       upstream: () => {
@@ -75,6 +76,7 @@ export class ExitPool {
         if (exit?.forwarder !== forwarder) throw new Error("this profile's proxy was taken away");
         return exit.upstream;
       },
+      ...(pin ? { pin } : {}),
       ...(this.opts.log ? { log: this.opts.log } : {}),
     });
     return forwarder;

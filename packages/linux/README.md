@@ -25,13 +25,21 @@ agentswitch pair                        # a QR code for the iPhone, a link for a
 | state | `~/.agentswitch` (daemon), `~/.secret-gate` (the gate's keys) |
 | this node's settings | `~/.agentswitch/node.json` |
 
-Run `install.sh` again to update: the new runtime is built beside the old one, `current` is switched, the service
-restarted; if the daemon does not answer within a minute, `current` goes back. The two newest runtimes are kept.
+Run `install.sh` again to update (one at a time; an earlier build that was stopped is removed first): the new runtime is built beside the old one, `current` is switched, the service
+restarted; if the daemon does not answer within a minute, `current` goes back. The two newest runtimes are kept, and
+any older one a terminal still runs on.
 
-From one of the node's own terminals (an agent at work on AgentSwitch itself, driven from a Mac or a phone) the
-restart would end the script with that terminal; it says so and leaves the restart, the check and the way back to a
-unit of its own 10 seconds later (`AGENTSWITCH_UPDATE_DELAY`). The terminal ends with the restart, as every terminal
-does; resume the agent's conversation from the Sessions list.
+The terminals outlive the restart (`docs/terminal-v0.md` §10): each program is held by a small process of its own
+(`pty-hold`, in a scope of its own in `agentswitch-terminals.slice`, outside the service), and the next daemon takes
+it up again — the agent, its screen, its hooks and its browser tool go on. Dispatch's tasks do not outlive it: while
+one is in progress the update waits, up to 30 minutes, then goes back without restarting; `install.sh --now` does not
+wait. `agentswitch service stop` and `uninstall` end the terminals too; `restart` does not. `"holdTerminals": false` in
+node.json turns holding off.
+
+From a terminal that is not held (one opened before an update brought holding, or with holding off) the restart would
+end the script with that terminal; it says so and leaves the restart, the check and the way back to a unit of its own
+10 seconds later (`AGENTSWITCH_UPDATE_DELAY`). That terminal ends with the restart; resume the agent's conversation from
+the Sessions list.
 
 With nobody logged in systemd stops a user's services; `loginctl enable-linger $USER` keeps the node up.
 
@@ -79,6 +87,8 @@ Besides everything the daemon's CLI has (`task`, `tasks`, `watch`, `approve`, `p
 | `agentswitch node run` | the keeper in the foreground (what the service runs; for a container or tmux) |
 | `agentswitch service install \| uninstall \| status \| start \| stop \| restart \| logs` | the systemd user service |
 | `agentswitch doctor` | runtime, service, agents and their sign-ins, tools |
+| `agentswitch profiles` | the agents' profiles, as the Mac's Settings › Agents: `new <agent> "<name>"` (an account; `--api [--base-url u] [--model m]` pays by a key), `api <agent> <profile>` (address, model, `--key` a new key), `color`, `rm`. A key is asked for with nothing echoed (or piped in) and sealed by this node's gate for the address's site; only the ciphertext reaches the service |
+| `agentswitch config [page] [--lang l]` | this node's settings on a full screen, as the Mac's Settings window (docs/tui-v0.md): Agents (profiles; a key-paying one's vendor, address, model chosen from what the address lists, key, connection test; proxy, session key, telemetry, colour), Models (saved, the service restarted), Permissions, Keys (the gate's key pairs), Node (name, pairing, held terminals, ports, language, the work folder), Environment (doctor), Context (CONTEXT.md and MEMORY.md in `$EDITOR`, what dispatch learned), Extensions (MCP servers, skills). English, 简体中文, 繁體中文, 日本語, Español: `--lang`, else `AGENTSWITCH_LANG`, else the one kept in node.json (L on the screen), else the locale. With `--on <node>`, another node's, read only |
 | `agentswitch console [--open]` | a one-time link into the web console on this machine |
 | `agentswitch engine update --camoufox latest` | the shared browser's engine (needs `unzip` and Firefox's libraries) |
 

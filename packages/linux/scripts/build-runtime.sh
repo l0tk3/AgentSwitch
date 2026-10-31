@@ -3,7 +3,8 @@
 # parts as the Mac app's Contents/Resources/runtime (packages/mac-app/scripts/build-app.sh):
 #
 #   <out>/node/bin/node           Node.js (runtime-pins.sh), the only node the daemon and the keeper run on
-#   <out>/daemon/                 packages/daemon built (dist, config, ui, production node_modules, node-pty compiled here)
+#   <out>/daemon/                 packages/daemon built (dist, config, ui, production node_modules, node-pty compiled here,
+#                                 native/build/pty-hold: the terminals' holder)
 #   <out>/python/bin/secret-gate  CPython from python-build-standalone with secret-gate and its hash-pinned dependencies
 #   <out>/secret-gate/AGENTS.md   what every executor is told about ciphertexts
 #   <out>/VERSIONS
@@ -82,8 +83,11 @@ build_daemon() {
     [ -f node_modules/node-pty/build/Release/pty.node ] || die "node-pty was not compiled (make, a C++ compiler and python3 are needed)"
   )
   [ -f "$src/dist/cli.js" ] || die "daemon build produced no dist/cli.js"
-  mkdir -p "$OUT/daemon"
+  # The terminals' holder (docs/terminal-v0.md §10), compiled by `npm run build` with this machine's C compiler.
+  [ -x "$src/native/build/pty-hold" ] || die "daemon build produced no native/build/pty-hold (a C compiler is needed)"
+  mkdir -p "$OUT/daemon/native"
   for item in dist package.json node_modules config ui; do rsync -a "$src/$item" "$OUT/daemon/"; done
+  rsync -a "$src/native/build" "$OUT/daemon/native/"
   mkdir -p "$OUT/secret-gate"
   cp "$REPO/packages/secret-gate/AGENTS.md" "$OUT/secret-gate/AGENTS.md"
 }
@@ -156,6 +160,7 @@ smoke_runtime() {
   log "runtime self-check"
   "$OUT/node/bin/node" --version
   "$OUT/node/bin/node" -e "require('$OUT/daemon/node_modules/node-pty'); console.log('node-pty loads')"
+  [ -x "$OUT/daemon/native/build/pty-hold" ] && echo "pty-hold is there"
   "$OUT/node/bin/node" --no-warnings=ExperimentalWarning "$OUT/daemon/dist/cli.js" --help >/dev/null
   "$OUT/python/bin/secret-gate" --version
   "$OUT/python/bin/python$PY_MINOR" -I -B -c 'import secret_gate.cli, nacl, mitmproxy, mcp, httpx; print("python imports ok")'

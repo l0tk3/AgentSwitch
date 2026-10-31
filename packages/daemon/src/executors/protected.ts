@@ -46,8 +46,10 @@ function places(env: NodeJS.ProcessEnv): { home: string; gate: string; socket: s
  *  the whole table (`defaultProtected`). */
 export function terminalProtected(env: NodeJS.ProcessEnv = process.env): ProtectedPaths {
   const { home, gate, socket } = places(env);
-  // The other nodes' tokens are credentials at rest too: one of them runs commands on another machine.
-  const closed = [gate, socket, join(home, NODES_DIR)].map(canonicalPath);
+  // The other nodes' tokens are credentials at rest too: one of them runs commands on another machine. And the
+  // terminals' own folder: a held terminal's `meta.json` keeps its hook token, which answers for its profile's API key
+  // (2026-10-31, review of terminal-v0 §10) — an agent's own token is in its environment, the other terminals' are not.
+  const closed = [gate, socket, join(home, NODES_DIR), join(home, TERMINALS_DIR)].map(canonicalPath);
   return { roots: closed, exempt: [], readDenied: closed };
 }
 
@@ -58,9 +60,15 @@ export function defaultProtected(env: NodeJS.ProcessEnv = process.env): Protecte
     exempt: EXEMPT_UNDER_HOME.map((d) => canonicalPath(join(home, d))),
     // The local API's token too: an executor that read it could call the API to loosen its own approval policy. And the
     // profiles' folders: a Codex account profile keeps its ChatGPT sign-in there in a file (docs/profiles-v0.md §6.2).
-    readDenied: [gate, socket, join(home, BROWSER_PROFILES_DIR), join(home, BROWSER_STATE_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME), join(home, NODES_DIR), join(home, PROFILES_DIR)].map(canonicalPath),
+    readDenied: [gate, socket, join(home, BROWSER_PROFILES_DIR), join(home, BROWSER_STATE_DIR), join(home, "remote"), join(home, LOCAL_TOKEN_NAME), join(home, NODES_DIR), join(home, PROFILES_DIR), join(home, TERMINALS_DIR)].map(canonicalPath),
   };
 }
+
+/** Under `$AGENTSWITCH_HOME`: the terminals' state (terminals/launch.ts keeps the same name). A held terminal's
+ *  `meta.json` there (docs/terminal-v0.md §10) keeps its hook token — a bearer for `POST /terminals/key`, which answers
+ *  with the profile's plaintext API key — its browser session's token and its forwarder's password: credentials at
+ *  rest, which no executor reads. */
+export const TERMINALS_DIR = "terminals";
 
 /** Under `$AGENTSWITCH_HOME`: the other nodes this one uses, their tokens and the nodes key (nodes/book.ts keeps the
  *  same name; no agent reads it, in a terminal either). */

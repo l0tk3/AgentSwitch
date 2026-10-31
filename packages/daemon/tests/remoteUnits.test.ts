@@ -372,7 +372,7 @@ describe("remote route allowlist", () => {
       ["GET", "/settings/models"], ["GET", "/ui"], ["GET", "/"], ["HEAD", "/healthz"], ["GET", "/tasks/"], ["GET", "/tasks/a/b"], ["GET", "/tasks/a/files/"], ["POST", "/route/preview"],
       ["GET", "/platform-memory"], ["POST", "/tasks/a/delete"], ["PUT", "/projects"], ["POST", "/update"],
       // Proxies are a phone's to manage; making, removing and colouring a profile, what Clash Verge fetches, and a profile browser's identity are not.
-      ["POST", "/profiles"], ["DELETE", "/profiles/claude-code/abc"], ["PUT", "/profiles/claude-code/abc/color"], ["GET", "/clash/sub.yaml"], ["GET", "/clash/rules/as-claude.yaml"],
+      ["POST", "/profiles"], ["POST", "/profiles/models"], ["DELETE", "/profiles/claude-code/abc"], ["PUT", "/profiles/claude-code/abc/color"], ["GET", "/clash/sub.yaml"], ["GET", "/clash/rules/as-claude.yaml"],
       ["GET", "/clash/nodes/as-claude.yaml"], ["GET", "/clash/providers/abc.yaml"], ["GET", "/browser/engine"], ["GET", "/profile-browser/claude-code.abc/browser/identity"]] as const) expect(remoteAllowed(m, p), `${m} ${p}`).toBe(false);
   });
 });
