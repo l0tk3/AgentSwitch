@@ -700,6 +700,76 @@ describe("a profile that pays by a key (§3.6)", () => {
   });
 });
 
+describe("a Codex thread that last ran under a key profile, resumed (2026-10-24: Model provider `agentswitch` not found)", () => {
+  const SEALED = "enc:v1:" + "A".repeat(40);
+  const gate = (sealedFor: Record<string, { site: string; value: string }>) => async (token: string, sites: readonly string[]) => {
+    const kept = sealedFor[token];
+    if (!kept || !sites.includes(kept.site)) throw new Error("refused");
+    return { value: kept.value, label: "key" };
+  };
+  async function resumeWith(o: { profiles: number; asked?: string; noted?: boolean; provider?: string }) {
+    const { store } = world();
+    const keys = new ApiKeys({ store, resolve: gate({ [SEALED]: { site: "https://api.openai.com/", value: "sk-proj-made-up" } }) });
+    const made = [];
+    for (let i = 0; i < o.profiles; i++) made.push(await keys.create("codex", `Key ${i + 1}`, { key: SEALED }));
+    if (o.noted) store.noteSession("codex", "t1", made[1]!.id);
+    const asked: LaunchRequest[] = [];
+    const host = new TerminalHost({ launcher: (req) => { asked.push(req); return { file: "/bin/sh", args: ["-c", "/bin/sleep 30"], env: { PATH: "/usr/bin:/bin" }, hooks: false }; } });
+    closers.push(() => host.closeAll());
+    const app = new Hono();
+    const sessions = { codexProvider: (id: string) => (id === "t1" ? o.provider ?? "agentswitch" : null), find: () => null, list: () => [] };
+    mountTerminals(app, { profiles: store, apiKeys: keys, sessions, terminals: { host, audit: { record() { /* not looked at */ } }, agents: ["codex"], style: () => ({}), elsewhere: async () => null } } as unknown as ApiDeps);
+    const res = await app.request("/terminals/resume", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ harness: "codex", cwd: tmpdir(), agentSessionId: "t1", ...(o.asked ? { profile: o.asked === "first" ? made[0]!.id : o.asked } : {}) }) });
+    expect(res.status).toBe(201);
+    return { req: asked[0]!, made };
+  }
+
+  it("goes on under the only key profile there is when nothing noted which", async () => {
+    const { req, made } = await resumeWith({ profiles: 1 });
+    expect(req).toMatchObject({ resume: "t1", api: { name: "Key 1" } });
+    expect(req.ownProvider).toBeUndefined();
+    expect(made).toHaveLength(1);
+  });
+
+  it("goes on under the one noted, among several", async () => {
+    const { req } = await resumeWith({ profiles: 2, noted: true });
+    expect(req).toMatchObject({ api: { name: "Key 2" } });
+  });
+
+  it("under one that pays by no key — chosen, or none to tell among several — runs under the user's own provider", async () => {
+    for (const o of [{ profiles: 1, asked: "default" }, { profiles: 2 }]) {
+      const { req } = await resumeWith(o);
+      expect(req.api).toBeUndefined();
+      expect(req.ownProvider).toBe(true);
+    }
+  });
+
+  it("leaves a thread that ran under the account as it was", async () => {
+    const { req } = await resumeWith({ profiles: 1, provider: "openai" });
+    expect(req.api).toBeUndefined();
+    expect(req.ownProvider).toBeUndefined();
+    // Asked for under a key profile: that one.
+    expect((await resumeWith({ profiles: 1, provider: "openai", asked: "first" })).req).toMatchObject({ api: { name: "Key 1" } });
+  });
+
+  it("tells Codex the user's own provider: config.toml's, else OpenAI's, never AgentSwitch's own", () => {
+    const home = mkdtempSync(join(tmpdir(), "agentswitch-codex-home-"));
+    const launch = agentLauncher({ binaries: { codex: "/bin/codex" }, hookUrl: () => "http://127.0.0.1:9", stateDir: mkdtempSync(join(tmpdir(), "agentswitch-state-")), env: { HOME: "/nowhere", CODEX_HOME: home, PATH: "/usr/bin" } });
+    const args = (more: Partial<LaunchRequest>) => launch({ id: `c${Math.random().toString(36).slice(2, 8)}`, harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", resume: "t1", ...more }).args.join(" ");
+    expect(args({ ownProvider: true })).toContain('model_provider="openai"');
+    writeFileSync(join(home, "config.toml"), 'model = "gpt-6-astra"\nmodel_provider = "azure"\n\n[model_providers.azure]\nname = "Azure"\n');
+    expect(args({ ownProvider: true })).toContain('model_provider="azure"');
+    writeFileSync(join(home, "config.toml"), '[profiles.x]\nmodel_provider = "elsewhere"\n');
+    expect(args({ ownProvider: true })).toContain('model_provider="openai"');
+    writeFileSync(join(home, "config.toml"), 'model_provider = "agentswitch"\n');
+    expect(args({ ownProvider: true })).toContain('model_provider="openai"');
+    // Without it, as before; and a key profile's own provider is never replaced.
+    expect(args({})).not.toContain("model_provider");
+    expect(args({ ownProvider: true, api: { name: "Key" } })).not.toContain('model_provider="openai"');
+  });
+});
+
 /** A ChatGPT sign-in as Codex keeps it in `auth.json`: an identity token (a JWT; only its middle part is read) and the
  *  rest, made up. */
 const codexAuth = (email: string) => JSON.stringify({ auth_mode: "chatgpt", OPENAI_API_KEY: null, last_refresh: "2026-10-20T00:00:00Z",

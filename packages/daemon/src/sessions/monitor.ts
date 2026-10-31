@@ -9,7 +9,7 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeFacts, claudeMessages } from "./claude.js";
-import { codexFacts, codexMessages } from "./codex.js";
+import { codexFacts, codexMessages, codexProviderOf } from "./codex.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
 import type { KeptPictures } from "./pictures.js";
@@ -69,7 +69,7 @@ export class SessionMonitor {
     const now = this.now();
     const fromFiles = [
       ...this.scan(jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir)), "claude-code", now),
-      ...this.scan(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), "codex", now),
+      ...this.codexThreads(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), now),
       ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
     ];
     const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", s, now));
@@ -78,6 +78,36 @@ export class SessionMonitor {
       .filter((s): s is SessionSummary => s !== null && !this.isExcluded(s.cwd) && !own.has(s.id) && !!(s.title || s.lastText) && s.title !== RATE_LIMIT_PROBE_PROMPT)
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, limit);
+  }
+
+  /** Codex's threads, one each. A long thread is kept in pages (Codex 0.162: `rollout-…-<thread>_<page>.jsonl`, each
+   *  from where the one before ended, the same thread's id in each), which read as so many sessions of the same id —
+   *  four of one thread in the list, the record and its deletion on its first page alone (2026-10-24). It is listed
+   *  once: what was asked first from its earliest page, all the rest from its newest, which is the file read. */
+  private codexThreads(refs: FileRef[], now: number): (SessionSummary | null)[] {
+    const summaries = this.scan(refs, "codex", now);
+    const by = new Map<string, { newest: SessionSummary; newestPath: string; first: SessionSummary }>();
+    summaries.forEach((summary, i) => {
+      if (!summary) return;
+      const path = refs[i]!.path;
+      const had = by.get(summary.id);
+      if (!had) { by.set(summary.id, { newest: summary, newestPath: path, first: summary }); return; }
+      if (summary.updatedAt > had.newest.updatedAt) { had.newest = summary; had.newestPath = path; }
+      if (summary.startedAt < had.first.startedAt) had.first = summary;
+    });
+    return [...by.values()].map(({ newest, newestPath, first }) => {
+      this.files.set(`codex:${newest.id}`, newestPath);
+      return first === newest ? newest : { ...newest, title: first.title || newest.title, startedAt: first.startedAt };
+    });
+  }
+
+  /** The model provider a Codex thread went on with last (its newest page's `thread_settings_applied`, else what it
+   *  began with); null when it is not found or says none. A thread that ran under a profile that pays by a key says
+   *  AgentSwitch's own (`agentswitch`), which only a terminal of that kind defines (terminals/launch.ts). */
+  codexProvider(id: string): string | null {
+    const path = this.locate("codex", id);
+    if (!path) return null;
+    try { return codexProviderOf(path); } catch { return null; }
   }
 
   /** Where a listed session is kept: its file (Claude Code, Codex, pi) or OpenCode's database; null for one not listed. */
@@ -164,6 +194,8 @@ export class SessionMonitor {
     const known = this.files.get(key);
     if (known && existsSync(known)) return known;
     let found: string | null = null;
+    // A Codex thread in pages: the newest page.
+    let foundAt = -1;
     if (harness === "claude-code") {
       for (const dir of safeDirs(this.sources.claudeProjects)) {
         const file = join(this.sources.claudeProjects, dir, `${id}.jsonl`);
@@ -172,10 +204,12 @@ export class SessionMonitor {
     } else if (harness === "codex") {
       const walk = (dir: string, left: number) => {
         for (const name of safeDirs(dir, true)) {
-          if (found) return;
           const path = join(dir, name);
           if (left > 0) walk(path, left - 1);
-          else if (name.startsWith("rollout-") && name.endsWith(`-${id}.jsonl`)) found = path;
+          else if (codexFileOf(name, id)) {
+            const at = (() => { try { return statSync(path).mtimeMs; } catch { return -1; } })();
+            if (at > foundAt) { found = path; foundAt = at; }
+          }
         }
       };
       walk(this.sources.codexSessions, 3);
@@ -274,7 +308,7 @@ export class SessionMonitor {
         for (const name of safeDirs(dir, true)) {
           const path = join(dir, name);
           if (left > 0) walk(path, left - 1);
-          else if (name.startsWith("rollout-") && name.endsWith(`-${id}.jsonl`)) drop(path);
+          else if (codexFileOf(name, id)) drop(path);
         }
       };
       walk(this.sources.codexSessions, 3);
@@ -330,6 +364,15 @@ function claudeKey(path: string): string {
 
 /** `*.jsonl` files `depth` directories below `root`, the newest `limit` modified within `MAX_AGE_MS`; top-level
  *  directories `skip` names are not entered. */
+/** A file of Codex thread `id`: its record (`rollout-<time>-<id>.jsonl`) or one of its pages (`…-<id>_<page>.jsonl`). */
+export function codexFileOf(name: string, id: string): boolean {
+  if (!name.startsWith("rollout-") || !name.endsWith(".jsonl")) return false;
+  const stem = name.slice(0, -".jsonl".length);
+  if (stem.endsWith(`-${id}`)) return true;
+  const at = stem.lastIndexOf(`-${id}_`);
+  return at > 0 && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(stem.slice(at + id.length + 2));
+}
+
 function jsonlFiles(root: string, depth: number, now: number, limit: number, skip: (dir: string) => boolean = () => false): FileRef[] {
   const found: FileRef[] = [];
   const walk = (dir: string, left: number) => {

@@ -27,6 +27,7 @@ import { folderFiles, matchFiles } from "../terminals/files.js";
 import { CLICK, droppedPath, KEY_NAMES, type KeyName, keySequence, replyBytes } from "../terminals/keys.js";
 import { deleteTranscript } from "../terminals/transcripts.js";
 import { GitStatus } from "../terminals/gitStatus.js";
+import { CODEX_KEY_PROVIDER } from "../terminals/launch.js";
 import type { SentReply, TerminalInfo } from "../terminals/host.js";
 import { subagentDoing } from "./live.js";
 import { modelSettings } from "../router/modelOverlay.js";
@@ -370,7 +371,14 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     // The profile it starts under (docs/profiles-v0.md §3.3): the one named. Not named — a conversation goes on under
     // the one it last ran under (the Mac's own when none is known, or that one is gone); a new terminal starts under
     // the one last chosen for a new terminal. `Default` is the Mac's own: nothing is set for it.
-    const recorded = resumed ? deps.profiles?.sessionProfile(resumed.harness, resumed.agentSessionId) ?? DEFAULT_PROFILE : null;
+    // A Codex thread says which model provider it went on with last (sessions/codex.ts): AgentSwitch's own one is a
+    // profile's that pays by a key (§3.6). With nothing noted of which (the note was lost, 2026-10-24), it goes on under
+    // the only such profile there is; and should it go on under one that pays by no key, Codex is told the user's own
+    // provider — else it will not start, the thread's naming one only that kind of terminal defines.
+    const provider = resumed?.harness === "codex" ? deps.sessions?.codexProvider(resumed.agentSessionId) ?? null : null;
+    const noted = resumed ? deps.profiles?.sessionProfile(resumed.harness, resumed.agentSessionId) ?? null : null;
+    const keyed = provider === CODEX_KEY_PROVIDER && !noted ? (deps.profiles?.all().codex.profiles ?? []).filter((p) => p.kind === "api") : [];
+    const recorded = resumed ? noted ?? (keyed.length === 1 ? keyed[0]!.id : DEFAULT_PROFILE) : null;
     const wanted = body.data.profile ?? recorded ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
     const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     // What of the Mac's own set-up came since the profile was made is linked into its folder (Codex's, §6.2).
@@ -416,6 +424,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     try {
       const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(signIn ? { signIn: true as const } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(forks ? { fork: forks } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),
+        ...(provider === CODEX_KEY_PROVIDER && !paid ? { ownProvider: true as const } : {}),
         allowBypass: true,
         ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
       // What a new terminal was started under is what the next one is offered first.

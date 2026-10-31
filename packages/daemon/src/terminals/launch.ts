@@ -129,6 +129,21 @@ export const CODEX_KEY_PROVIDER = "agentswitch";
 /** Codex started on a profile that pays by a key (docs/profiles-v0.md §3.6): a provider of this terminal's own — the
  *  address, and a command Codex runs for the key (the hook program's `key`, which asks this service) — chosen over
  *  whatever the folder it runs in is signed in to. Seen on Codex 0.163 (scripts/api_key_probe.ts). */
+/** The model provider the user's own Codex runs under: `model_provider` at the top of their `config.toml`
+ *  (`$CODEX_HOME`, else `~/.codex`), else OpenAI's — never AgentSwitch's own, which only a key profile's terminal
+ *  defines. */
+export function codexOwnProvider(env: NodeJS.ProcessEnv): string {
+  const file = join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "config.toml");
+  let text = "";
+  try { text = readFileSync(file, "utf8"); } catch { return "openai"; }
+  for (const line of text.split("\n")) {
+    if (/^\s*\[/.test(line)) break;
+    const named = /^\s*model_provider\s*=\s*"([^"]+)"/.exec(line)?.[1];
+    if (named) return named === CODEX_KEY_PROVIDER ? "openai" : named;
+  }
+  return "openai";
+}
+
 export function codexKeyProviderArgs(node: string, script: string, api: { readonly name: string; readonly baseUrl?: string }): string[] {
   const provider = `{ name = ${JSON.stringify(api.name)}, base_url = ${JSON.stringify(api.baseUrl ?? OPENAI_API)}, wire_api = "responses", auth = { command = ${JSON.stringify(node)}, args = ${JSON.stringify([script, "key"])} } }`;
   return ["-c", `model_provider=${JSON.stringify(CODEX_KEY_PROVIDER)}`, "-c", `model_providers.${CODEX_KEY_PROVIDER}=${provider}`];
@@ -290,6 +305,8 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (req.configHome) env.CODEX_HOME = req.configHome;
         // `notify` runs a program with the event JSON as its last argument when a turn ends.
         const args = [...(req.configHome ? [...CODEX_FILE_STORE, "-c", 'model_provider="openai"'] : []), "-c", `notify=${JSON.stringify([node, script, "codex"])}`];
+        // The Mac's own Codex going on with a thread a key profile's ran last: under the user's own provider.
+        if (req.ownProvider && !req.api && !req.configHome) args.push("-c", `model_provider=${JSON.stringify(codexOwnProvider(env))}`);
         const hooked = opts.codexHooks?.(req.configHome) ?? false;
         if (hooked) args.push(...codexHookArgs(hookCommand, QUICK_HOOK_TIMEOUT_S, PERMISSION_HOOK_TIMEOUT_S));
         // Codex's own "needs you" notifications, as terminal notifications (OSC 9) whether or not its window has focus:
