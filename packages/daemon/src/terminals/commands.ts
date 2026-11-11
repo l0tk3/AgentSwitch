@@ -214,6 +214,57 @@ const PI: Builtin = [
   ["trust", "Save project trust decision for future sessions"],
 ];
 
+/** Grok Build 1.0.77, read 2026-11-11 from its own guide (`~/.grok/docs/user-guide/04-slash-commands.md`): the
+ *  commands an ordinary interactive session shows. Aliases (clear → new, exit → quit, status → session-info, undo →
+ *  rewind, …) and those a feature or a render mode must turn on are left out. */
+const GROK: Builtin = [
+  ["always-approve", "Toggle always-approve mode: run tools without asking"],
+  ["auto", "Toggle auto mode: fewer prompts, with a safety check"],
+  ["btw", "Send an aside to the agent without interrupting the current task"],
+  ["compact", "Compress conversation history to reclaim context-window space"],
+  ["config-agents", "View and manage agent definitions"],
+  ["context", "Show how the context window is used"],
+  ["context-window", "Set the context window for the current model"],
+  ["copy", "Copy the most recent response to the clipboard"],
+  ["dashboard", "Open the Agent Dashboard: every session in one place"],
+  ["deep-research", "Kick off a background research workflow"],
+  ["delete", "Delete the current session's history"],
+  ["docs", "Browse the built-in guides"],
+  ["doctor", "Check the session for terminal, clipboard, color and input issues"],
+  ["effort", "Set reasoning effort on the current model"],
+  ["export", "Export the conversation to a file or the clipboard"],
+  ["feedback", "Report an issue or send feedback"],
+  ["fork", "Branch the current session into a new agent, keeping history"],
+  ["goal", "Set, manage, or check an autonomous goal"],
+  ["history", "Search this session's prompts"],
+  ["home", "Leave the current session and return to the welcome screen"],
+  ["hooks", "View loaded hooks, add or remove custom ones"],
+  ["imagine", "Generate an image from a text description"],
+  ["login", "Log in or re-authenticate without leaving the session"],
+  ["logout", "Log out and return to the login screen"],
+  ["loop", "Run a prompt on a recurring interval"],
+  ["mcps", "Manage MCP servers"],
+  ["memory", "Browse, view, and manage saved memories"],
+  ["model", "Switch models"],
+  ["new", "Start a fresh session and clear the current conversation"],
+  ["personas", "Create, edit, and delete personas"],
+  ["plan", "Enter plan mode"],
+  ["plugins", "View installed plugins and install new ones"],
+  ["quit", "Quit Grok"],
+  ["release-notes", "View release notes for the current version"],
+  ["remember", "Save a note to global memory now"],
+  ["rename", "Rename the current session"],
+  ["resume", "Reload a previous session"],
+  ["rewind", "Roll the conversation back to an earlier turn"],
+  ["session-info", "Show session details: model, turn count, context usage"],
+  ["settings", "View and change configuration"],
+  ["skills", "View installed skills"],
+  ["theme", "Switch the color theme"],
+  ["usage", "View credit usage or manage billing"],
+  ["view-plan", "Open a preview of the current saved plan"],
+  ["workflow", "Launch a saved workflow, or manage a running one"],
+];
+
 /** Per call: files read, folders listed, folder entries looked at. */
 type Scan = { files: number; dirs: number; entries: number };
 const LIMITS = { files: 300, dirs: 200, entries: 5000 } as const;
@@ -233,6 +284,7 @@ const AGENTS = new Map<string, { readonly builtin: Builtin; readonly custom: Cus
   ["codex", { builtin: CODEX, custom: codexCustom }],
   ["opencode", { builtin: OPENCODE, custom: opencodeCustom }],
   ["pi", { builtin: PI, custom: piCustom }],
+  ["grok", { builtin: GROK, custom: grokCustom }],
 ]);
 
 /** Project commands first, then the user's, then built-in; each alphabetical, one per name (project beats user beats
@@ -402,6 +454,26 @@ function piCustom(cwd: string | null, home: string | null, scan: Scan): SlashCom
     for (const dir of upward(cwd, home)) out.push(...skills(join(dir, ".agents", "skills"), "project"));
   }
   if (agent && home) out.push(...prompts(join(agent, "prompts"), "user"), ...skills(join(agent, "skills"), "user"), ...skills(join(home, ".agents", "skills"), "user"));
+  return out;
+}
+
+// ── Grok ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** From Grok 1.0.77's guide (08-skills.md): skills are `<name>/SKILL.md` under `.grok/skills` and `.agents/skills` in
+ *  each folder from the terminal's up to the repository root and under the home folder, named after the front
+ *  matter's `name` (else the folder), hidden by `user-invocable: false`; flat `.md` files in `.grok/commands` there are
+ *  commands named by the file. Grok also takes Claude Code's skills and commands (`.claude/…`) unless told not to, its
+ *  bundled skills and its plugins': not read here — the list it shows itself is the whole one. */
+function grokCustom(cwd: string | null, home: string | null, scan: Scan): SlashCommand[] {
+  const commands = (dir: string, source: Source) => markdown(dir, scan, 1).flatMap(({ file, parts }) => fromFile(stem(parts[0] ?? ""), file, source, scan));
+  const skills = (dir: string, source: Source) => skillFolders(dir, scan, 1).flatMap(({ file, parts }): SlashCommand[] => {
+    const own = readDoc(file, scan)?.meta["name"];
+    return fromFile(typeof own === "string" && own.trim() ? own.trim() : parts[parts.length - 1] ?? "", file, source, scan, invocable);
+  });
+  const out: SlashCommand[] = [];
+  const add = (dir: string, source: Source) => out.push(...skills(join(dir, ".grok", "skills"), source), ...commands(join(dir, ".grok", "commands"), source), ...skills(join(dir, ".agents", "skills"), source));
+  for (const dir of cwd ? upward(cwd, home) : []) add(dir, "project");
+  if (home) add(home, "user");
   return out;
 }
 

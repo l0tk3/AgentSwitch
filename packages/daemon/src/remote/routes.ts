@@ -73,6 +73,12 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/sessions/:harness/:id/images/:item/:n"],
   ["GET", "/sessions/:harness/:id/steps/:item/:n"],
   ["GET", "/sessions/:harness/:id/steps/:item/:n/images/:k"],
+  // A session's sub-agents and what each did (docs/simple-view-v0.md §5.22): part of the same session's record, read
+  // by whoever may read that.
+  ["GET", "/sessions/:harness/:id/subagents"],
+  ["GET", "/sessions/:harness/:id/subagents/:agent/record"],
+  ["GET", "/sessions/:harness/:id/subagents/:agent/steps/:item/:n"],
+  ["GET", "/sessions/:harness/:id/subagents/:agent/steps/:item/:n/images/:k"],
   ["GET", "/sessions/search"],
   ["DELETE", "/sessions/:harness/:id"],
   ["POST", "/sessions/delete"],

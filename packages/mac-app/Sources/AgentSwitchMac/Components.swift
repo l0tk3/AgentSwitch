@@ -18,9 +18,7 @@ extension Color {
     static let brand = signal
     /// Status colors, only ever for status and never alone (always with a shape or a word). In the classic look work
     /// under way is the accent's colour, as the system's own progress is.
-    static let busy = Color(nsColor: NSColor(name: "AgentSwitchBusy") { appearance in
-        InterfaceLook.current.isClassic ? .controlAccentColor : .rgb(appearance.isDark ? 0x2EE6FF : 0x0086A8)
-    })
+    static let busy = Color(nsColor: .busy)
     static let waiting = Color(nsColor: .dynamic(light: 0xC27400, dark: 0xFFB000, classicLight: 0xFF9500, classicDark: 0xFF9F0A, name: "AgentSwitchWaiting"))
     static let ok = Color(nsColor: .dynamic(light: 0x3F8F00, dark: 0x9BE22D, classicLight: 0x34C759, classicDark: 0x30D158, name: "AgentSwitchOK"))
     static let failed = Color(nsColor: .dynamic(light: 0xD7261B, dark: 0xFF4A3D, classicLight: 0xFF3B30, classicDark: 0xFF453A, name: "AgentSwitchFailed"))
@@ -41,6 +39,11 @@ extension NSAppearance {
 }
 
 extension NSColor {
+    /// `Color.busy`, for what AppKit draws (the spinner's layer, LayerMotion.swift).
+    static let busy = NSColor(name: "AgentSwitchBusy") { appearance in
+        InterfaceLook.current.isClassic ? .controlAccentColor : .rgb(appearance.isDark ? 0x2EE6FF : 0x0086A8)
+    }
+
     static func rgb(_ hex: UInt32) -> NSColor {
         NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }

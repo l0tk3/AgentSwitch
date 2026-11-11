@@ -36,7 +36,7 @@ final class PixelArtTests: XCTestCase {
     func testSprites() {
         XCTAssertEqual(PixelArt.sprite(PixelArt.square).count, 16)
         XCTAssertEqual(PixelArt.sprite(PixelArt.hollow).count, 12)
-        XCTAssertEqual(Set(PixelArt.agents.keys), ["claude-code", "codex", "opencode", "pi"])
+        XCTAssertEqual(Set(PixelArt.agents.keys), ["claude-code", "codex", "opencode", "pi", "grok"])
         XCTAssertTrue(PixelArt.agents.values.allSatisfy { $0.count == 5 && $0.allSatisfy { $0.count == 5 } })
         // the terminals tab is not Codex's >_ (one icon, one meaning)
         XCTAssertNotEqual(PixelArt.terminalWindow, PixelArt.agents["codex"])

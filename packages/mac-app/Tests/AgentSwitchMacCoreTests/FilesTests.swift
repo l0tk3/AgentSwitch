@@ -136,6 +136,7 @@ final class FilesTests: XCTestCase {
         XCTAssertNil(FilesSensitive.reason("/Users/you/.ssh/id_ed25519.pub", home: home))
         XCTAssertNil(FilesSensitive.reason("/Users/you/.ssh/config", home: home))
         XCTAssertEqual(FilesSensitive.reason("/Users/you/.codex/auth.json", home: home), "login")
+        XCTAssertEqual(FilesSensitive.reason("/Users/you/.grok/auth.json", home: home), "login")
         XCTAssertEqual(FilesSensitive.reason("/Users/you/.aws/credentials", home: home), "cloud")
         XCTAssertEqual(FilesSensitive.reason("/srv/tls/server.pem", home: home), "key")
         XCTAssertEqual(FilesSensitive.reason("/any/id_rsa", home: home), "key")

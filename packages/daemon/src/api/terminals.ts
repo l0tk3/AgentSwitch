@@ -15,11 +15,11 @@ import type { TerminalAudit } from "../terminals/audit.js";
 import { attachable } from "../files/browse.js";
 import { viewerFor } from "./browse.js";
 import type { ElsewhereCheck } from "../terminals/elsewhere.js";
-import { checkPicks, MAX_OTHER, PERMISSION_MODES, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost, CLAUDE_MODES } from "../terminals/host.js";
+import { checkPicks, MAX_OTHER, PERMISSION_MODES, SHELL, TERMINAL_HARNESSES, TerminalError, type QuestionPick, type TerminalEvent, type TerminalHarness, type TerminalHost, CLAUDE_MODES } from "../terminals/host.js";
 import type { TerminalStyle } from "../terminals/style.js";
 import { LEFTOVER_GRACE_MS, type Leftovers } from "../terminals/leftovers.js";
 import type { ModelOffer, Offers } from "../router/modelOffers.js";
-import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
+import { CLAUDE_EFFORTS, EFFORT, effortsFor, GROK_EFFORTS, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
 import { BrowserError, YOU } from "../browser/types.js";
 import { DEFAULT_PROFILE } from "../profiles/store.js";
@@ -85,6 +85,8 @@ const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not
 const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a session id");
 const Effort = z.string().regex(EFFORT, "not a level");
 const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), profile: z.string().regex(/^[a-z0-9]{6,16}$|^default$/).optional(), model: ModelId.optional(), effort: Effort.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
+/** A shell (docs/terminal-v0.md §0, 2026-11-10): a folder and a size; it has nothing else to choose. */
+const NewShell = z.object({ cwd: z.string().min(1).max(4096), cols: Size.cols.optional(), rows: Size.rows.optional() });
 const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
 /** `attachments`: a reply's files, each where its placeholder stands in `text` (terminal-v0 §4): one staged with
  *  POST /uploads (`upload`, a phone's, or a picture pasted on the Mac with no file behind it), or one already on this
@@ -122,8 +124,8 @@ const Raw = z.object({ data: z.string().min(1).max(MAX_INPUT) });
 
 const STATUS: Record<TerminalError["code"], 400 | 403 | 404 | 409> = { not_found: 404, exited: 409, unavailable: 400, forbidden: 403, invalid: 400, busy: 409 };
 /** Agents that can go on with a session, and those that can fork one (docs/terminal-v0.md §5). */
-const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode", "pi"]);
-const FORKS: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "pi"]);
+const RESUMES: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "opencode", "pi", "grok"]);
+const FORKS: ReadonlySet<TerminalHarness> = new Set(["claude-code", "codex", "pi", "grok"]);
 /** Events a stalled screen may fall behind by before its stream is ended (it reconnects to a fresh snapshot). */
 const MAX_QUEUED = 5_000;
 
@@ -154,7 +156,7 @@ export function holdsReply(items: readonly RecordItem[], reply: SentReply): bool
 /** The terminal's record changed: the replies sent to it that the record now holds are no longer shown beside it. */
 function confirmSent(host: TerminalHost, sessions: SessionMonitor, id: string): void {
   const t = host.get(id);
-  if (!t?.sent.length || !t.agentSessionId) return;
+  if (!t?.sent.length || !t.agentSessionId || t.harness === SHELL) return;
   try {
     const items = sessions.record(t.harness, t.agentSessionId, { limit: 40 }, true)?.record.items ?? [];
     const held = t.sent.filter((reply) => holdsReply(items, reply)).map((reply) => reply.id);
@@ -171,7 +173,7 @@ export function watchRecord(host: TerminalHost, sessions: SessionMonitor, id: st
   const look = () => {
     const t = host.get(id);
     const session = t?.agentSessionId;
-    if (!t || !session || t.harness === "opencode") return;
+    if (!t || !session || t.harness === "opencode" || t.harness === SHELL) return;
     if (of !== session) { of = session; path = null; last = null; looked = 0; told = false; named = null; }
     if (!path) {
       // Where its hooks said it writes: there now, it is looked for at once (once for each file named).
@@ -216,6 +218,20 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     throw err;
   };
 
+  // A shell is this Mac's own (docs/terminal-v0.md §0, 2026-11-10; the principle was: only agents, no shell — a paired
+  // device must not be able to open one): to a paired device or another node there is none. Not in the list, none to
+  // start (`POST /terminals/shell` is not on the remote allowlist and refuses a remote caller itself), and none to
+  // read, type into, name or end — every route of one terminal answers as if there were no such terminal.
+  const listed = (c: Context): TerminalInfo[] => (remoteCaller(c.env) ? host.list().filter((x) => x.harness !== SHELL) : host.list());
+  const hidden = (c: Context): boolean => remoteCaller(c.env) !== null && host.get(c.req.param("id") ?? "")?.harness === SHELL;
+  app.use("/terminals/:id", async (c, next) => (hidden(c) ? c.json({ error: "not found" }, 404) : next()));
+  app.use("/terminals/:id/*", async (c, next) => (hidden(c) ? c.json({ error: "not found" }, 404) : next()));
+  // What only an agent takes: a shell has no model, no way of asking, no level, no commands of its own, and nothing it
+  // asks. (Typing, keys, its size, its name, its end are any terminal's.)
+  const AGENT_ONLY = /^\/terminals\/[^/]+\/(model|mode|effort|daybreak|commands|choices|permissions\/[^/]+)$/;
+  app.use("/terminals/:id/*", async (c, next) => (AGENT_ONLY.test(c.req.path) && host.get(c.req.param("id") ?? "")?.harness === SHELL
+    ? c.json({ error: "a shell is no agent: it has none of this" }, 400) : next()));
+
   // Git at a glance for the tree's folders (docs/terminal-v0.md §5): the folders of the terminals and of the sessions
   // the tree lists, never a path a caller names. Folders not in a repository are left out.
   const git = t.git ?? new GitStatus();
@@ -223,7 +239,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
   app.get("/folders/git", async (c) => {
     // The terminals' folders, where their agents work now (the window's title), the sessions' folders.
     const recent = [...new Set((deps.sessions?.list() ?? []).map((x) => x.cwd))].slice(0, GIT_FOLDERS);
-    const folders = [...host.list().flatMap((x) => [x.cwd, x.workdir]), ...recent];
+    const folders = [...listed(c).flatMap((x) => [x.cwd, x.workdir]), ...recent];
     return c.json({ folders: await git.summaries(folders.filter((f) => isAbsolute(f))) });
   });
 
@@ -326,7 +342,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       models: Object.fromEntries(Object.entries(models).map(([a, list]) => [a, Object.fromEntries(list.flatMap((m) => (m.efforts ? [[m.id, m.efforts]] : [])))])),
     };
   };
-  app.get("/terminals", (c) => c.json({ terminals: host.list().map(shown), agents, ...listing() }));
+  // `shell`: this service opens shells, and the caller may (the Mac itself): its new-terminal panel offers one.
+  app.get("/terminals", (c) => c.json({ terminals: listed(c).map(shown), agents, ...(remoteCaller(c.env) ? {} : { shell: true }), ...listing() }));
   app.get("/terminals/style", (c) => c.json(t.style()));
 
   // What the terminals left running (docs/terminal-v0.md §11): seen and ended from this machine only — a process list
@@ -447,6 +464,22 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     } catch (err) { return failed(c, err); }
   };
   app.post("/terminals", (c) => start(c, false));
+  // The user's own shell in a folder (docs/terminal-v0.md §0, 2026-11-10): from this Mac only.
+  app.post("/terminals/shell", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "a shell is opened on the Mac itself" }, 403);
+    const body = await parseBody(c, NewShell);
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    const typed = expandCwd(body.data.cwd);
+    if (!isAbsolute(typed)) return c.json({ error: "cwd must be an absolute path" }, 400);
+    const cwd = diskSpelling(resolve(typed));
+    const problem = checkTerminalCwd(cwd);
+    if (problem) return c.json({ error: problem }, 400);
+    try {
+      const info = await host.spawn({ harness: SHELL, cwd, ...(body.data.cols ? { cols: body.data.cols } : {}), ...(body.data.rows ? { rows: body.data.rows } : {}) });
+      audit.record({ terminal: info.id, action: "create", via: via(c), detail: { harness: info.harness, cwd } });
+      return c.json({ terminal: info }, 201);
+    } catch (err) { return failed(c, err); }
+  });
   app.post("/terminals/resume", (c) => start(c, true));
 
   app.get("/terminals/:id", (c) => {
@@ -561,9 +594,9 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     const info = host.get(id);
     if (!info) return c.json({ error: "not found" }, 404);
-    // Each agent's own levels: Claude Code's, pi's thinking levels. OpenCode's are its model's variants and Codex's its
-    // model's reasoning efforts, which their own servers know: checked there.
-    const levels: readonly string[] | null = info.harness === "opencode" || info.harness === "codex" ? null : info.harness === "pi" ? PI_THINKING : CLAUDE_EFFORTS;
+    // Each agent's own levels: Claude Code's, pi's thinking levels, Grok's reasoning efforts. OpenCode's are its model's
+    // variants and Codex's its model's reasoning efforts, which their own servers know: checked there.
+    const levels: readonly string[] | null = info.harness === "opencode" || info.harness === "codex" ? null : info.harness === "pi" ? PI_THINKING : info.harness === "grok" ? GROK_EFFORTS : CLAUDE_EFFORTS;
     if (levels && !levels.includes(body.data.effort)) return c.json({ error: `effort: one of ${levels.join(", ")}` }, 400);
     try { await host.askEffort(id, body.data.effort); } catch (err) { return failed(c, err); }
     audit.record({ terminal: id, action: "effort", via: via(c), detail: { effort: body.data.effort } });
@@ -820,7 +853,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       // (docs/simple-view-v0.md §4). Claude Code keeps the picture in its own record.
       if (info.harness === "codex") deps.sessions?.keepPicturesIn(attachDir(id));
       rmSync(attachDir(id), { recursive: true, force: true });
-      const removed = own ? deleteTranscript(info.harness, own) : [];
+      const removed = own && info.harness !== SHELL ? deleteTranscript(info.harness, own) : [];
       audit.record({ terminal: id, action: "delete", via: via(c), detail: { transcript: removed.length } });
       return c.json({ ok: true, transcriptFiles: removed.length });
     } catch (err) { return failed(c, err); }

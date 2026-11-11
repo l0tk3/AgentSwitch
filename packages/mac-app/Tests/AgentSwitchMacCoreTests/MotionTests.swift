@@ -37,6 +37,22 @@ final class MotionTests: XCTestCase {
         XCTAssertEqual([Motion.spinner, Motion.blink, Motion.run], [0.09, 0.55, 0.14])
     }
 
+    /// A clock of our own (`Stepped`, 2026-11-10) waits for the next step's moment and takes it for the step it is.
+    func testTheNextStepIsWaitedForOnceAndIsThatStep() {
+        for every in [Motion.blink, 1.0, Motion.spinner] {
+            let step = 1_234_567
+            let on = Motion.moment(of: step, every: every)
+            XCTAssertEqual(Motion.step(at: on, every: every), step, "a step's own moment is that step")
+            // On a step, a little after it, a hair before the next: the next one, never the one just taken.
+            for into in [0, every * 0.3, every - 0.000_05] {
+                let next = Motion.next(after: on.addingTimeInterval(into), every: every)
+                XCTAssertEqual(next, Motion.moment(of: step + 1, every: every), "\(into) s into a step of \(every) s")
+                XCTAssertEqual(Motion.step(at: next, every: every), step + 1)
+                XCTAssertGreaterThan(next, on.addingTimeInterval(into))
+            }
+        }
+    }
+
     func testOnlyBusyAndWaitingMarksMove() {
         XCTAssertEqual(PixelArt.MarkState.busy.motionInterval, 0.14)
         XCTAssertEqual(PixelArt.MarkState.waiting.motionInterval, 0.55)

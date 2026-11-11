@@ -133,7 +133,8 @@ extension View {
     func flickers(while active: Bool) -> some View { modifier(BusyFlicker(active: active)) }
 
     /// Blinks in two steps (`Motion.blink`), as the waiting square does; still out of sight and under Reduce Motion.
-    func blinks(_ on: Bool) -> some View { modifier(Blinking(on: on)) }
+    /// What blinks is of one colour, `color`.
+    func blinks(_ on: Bool, color: Color = .waiting, held: Int? = nil) -> some View { modifier(Blinking(on: on, color: color, held: held)) }
 }
 
 private struct BusyFlicker: ViewModifier {
@@ -156,14 +157,26 @@ private struct BusyFlicker: ViewModifier {
 
 private struct Blinking: ViewModifier {
     let on: Bool
+    /// The colour of what blinks: all of it one colour.
+    let color: Color
+    /// The probes: that step, still, by the layer.
+    var held: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.onScreen) private var onScreen
     @Environment(\.interfaceLook) private var look
 
     func body(content: Content) -> some View {
-        if on, !reduceMotion, onScreen, !look.isClassic {
-            TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { timeline in
-                content.opacity(Motion.step(at: timeline.date, every: Motion.blink) % 2 == 1 ? 0.25 : 1)
+        if let held {
+            content.hidden().overlay { Blink(color: NSColor(color), held: held).mask { content }.allowsHitTesting(false) }
+        } else if on, !reduceMotion, onScreen, !look.isClassic {
+            if Motion.timelines {
+                TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { timeline in
+                    content.opacity(Motion.step(at: timeline.date, every: Motion.blink) % 2 == 1 ? BlinkView.dim : 1)
+                }
+            } else {
+                // Cut from a light that blinks — a layer's, which Core Animation changes (LayerMotion.swift, 2026-11-10):
+                // the words keep their place, and nothing is drawn again for them.
+                content.hidden().overlay { Blink(color: NSColor(color)).mask { content }.allowsHitTesting(false) }
             }
         } else {
             content

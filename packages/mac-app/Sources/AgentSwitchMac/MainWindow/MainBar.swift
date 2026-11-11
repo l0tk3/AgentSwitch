@@ -228,7 +228,7 @@ struct MainBar: View {
                     switch state.page {
                     case .terminals:
                         // The other view of the terminal in focus (docs/simple-view-v0.md §1): its record, or its screen.
-                        if !head.name.isEmpty {
+                        if !head.name.isEmpty, head.views {
                             ToolbarPixelButton(rows: head.simple ? PixelArt.railTerminals : PixelArt.toolbarRecord,
                                                help: head.simple ? "Terminal View ⌘⇧E" : "Simple View ⌘⇧E", action: actions.toggleView)
                         }
@@ -421,11 +421,14 @@ private extension Color {
 }
 
 /// Waiting for you, as everywhere: an amber square that blinks in two steps over 1.1 s; still under Reduce Motion, and
-/// while not seen (ui-v0 §7.4, 2026-10-03).
+/// while not seen (ui-v0 §7.4, 2026-10-03). Blinking, it is a layer whose picture Core Animation changes (`Blink`,
+/// LayerMotion.swift; 2026-11-10): the app draws nothing again for it. `held` (the probes): that step, still, by the
+/// same layer.
 struct BlinkingSquare: View {
     var color: Color = .waiting
     /// The cell: 2 pt (an 8 pt square) in a line, 1 pt as a mark off an icon (the rail).
     var pixel: CGFloat = 2
+    var held: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.onScreen) private var onScreen
     @Environment(\.interfaceLook) private var look
@@ -440,21 +443,32 @@ struct BlinkingSquare: View {
 
     private var blinking: some View {
         Group {
-            if reduceMotion {
-                square(dim: false)
-            } else if onScreen {
+            if let held {
+                layered(held: held)
+            } else if reduceMotion {
+                Self.square(dim: false, color: color, pixel: pixel)
+            } else if onScreen, Motion.timelines {
                 TimelineView(.periodic(from: Motion.epoch, by: Motion.blink)) { timeline in
-                    square(dim: Motion.step(at: timeline.date, every: Motion.blink) % 2 == 1)
+                    Self.square(dim: Motion.step(at: timeline.date, every: Motion.blink) % 2 == 1, color: color, pixel: pixel)
                 }
+            } else if onScreen {
+                layered(held: nil)
             } else {
-                square(dim: Motion.step(at: Date(), every: Motion.blink) % 2 == 1)
+                Self.square(dim: Motion.step(at: Date(), every: Motion.blink) % 2 == 1, color: color, pixel: pixel)
             }
         }
         .frame(width: 4 * pixel, height: 4 * pixel)
     }
 
-    private func square(dim: Bool) -> some View {
-        PixelSprite(rows: PixelArt.square, pixel: pixel, color: color).opacity(dim ? 0.25 : 1)
+    /// The square as a layer: seen, never touched (a click on it is its row's), and nothing to read out — as the
+    /// square SwiftUI draws is.
+    private func layered(held: Int?) -> some View {
+        Blink(color: NSColor(color), edge: max(1, pixel / 2), held: held).allowsHitTesting(false).accessibilityHidden(true)
+    }
+
+    /// A step drawn by SwiftUI: what the square is while it is still, and what its layer's pictures are drawn to match.
+    static func square(dim: Bool, color: Color = .waiting, pixel: CGFloat = 2) -> some View {
+        PixelSprite(rows: PixelArt.square, pixel: pixel, color: color).opacity(dim ? BlinkView.dim : 1)
     }
 }
 

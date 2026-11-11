@@ -146,7 +146,9 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
 
     /// The status bar's words for it (MainStatus.swift): agent and model, mode, grid; the lock acts while it runs.
     public var context: TerminalContext {
-        var context = TerminalContext(harness: harness, model: model, mode: mode, cols: cols, rows: rows, away: nil, running: running)
+        // A shell is a terminal and nothing else: no model, and no way of asking to say.
+        let agent = TerminalKind.isAgent(harness)
+        var context = TerminalContext(harness: harness, model: agent ? model : nil, mode: agent ? mode : nil, cols: cols, rows: rows, away: nil, running: running)
         context.profile = profileName
         context.profileColor = profileColor
         context.device = device

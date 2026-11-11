@@ -45,6 +45,8 @@ final class TerminalsModel {
     @ObservationIgnored private var sessionsVersion: String?
     private(set) var gits: [String: FolderGit] = [:]
     private(set) var agents: [String] = []
+    /// The service opens shells for this Mac (docs/terminal-v0.md §0, 2026-11-10): the new-terminal panel offers one.
+    private(set) var shellOffered = false
     private(set) var models: [String: [TerminalModelOption]] = [:]
     private(set) var modelDefaults: [String: String] = [:]
     /// Per agent, the thinking levels of its default model (no model picked), and the one that is its default.
@@ -317,6 +319,7 @@ final class TerminalsModel {
         let gone = simpleViews.subtracting(list.terminals.map(\.id))
         if settled, !gone.isEmpty { simpleViews.subtract(gone) }
         if agents != list.agents { agents = list.agents }
+        if shellOffered != list.shell { shellOffered = list.shell }
         if models != list.models { models = list.models }
         if modelDefaults != list.defaults { modelDefaults = list.defaults }
         if efforts != list.efforts { efforts = list.efforts }
@@ -391,13 +394,15 @@ final class TerminalsModel {
         // A terminal that landed in a pane waiting as the simple view is shown as its record.
         if !simplePanes.isEmpty {
             let settled = SimplePanes.settle(waiting: simplePanes, panes: all.map { pane in (pane.id, terminal(pane.term).flatMap { here($0.id) ? $0.id : nil }) })
-            if !settled.terminals.isSubset(of: simpleViews) { simpleViews.formUnion(settled.terminals) }
+            // (An agent's: a shell has no record, and is its screen wherever it lands.)
+            let records = settled.terminals.filter { id in terminal(id).map { TerminalKind.isAgent($0.harness) } ?? true }
+            if !records.isSubset(of: simpleViews) { simpleViews.formUnion(records) }
             if settled.waiting != simplePanes { simplePanes = settled.waiting }
         }
         for pane in all {
             let state = panes[pane.id] ?? makePane(pane.id)
             let shown = terminal(pane.term).flatMap { here($0.id) ? $0 : nil }
-            state.show(shown, git: shown.flatMap { gits[$0.workdir] }, simple: shown.map { simpleViews.contains($0.id) } ?? false)
+            state.show(shown, git: shown.flatMap { gits[$0.workdir] }, simple: shown.map { simpleViews.contains($0.id) && TerminalKind.isAgent($0.harness) } ?? false)
         }
         for (id, state) in panes where !all.contains(where: { $0.id == id }) {
             state.stop()
@@ -513,7 +518,9 @@ final class TerminalsModel {
 
     /// The terminal of `pane` (the one in focus) as its record, or as the terminal again.
     func setSimple(_ on: Bool, pane: Int? = nil) {
-        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term, terminal(id) != nil, simpleViews.contains(id) != on else { return }
+        // A shell has no record to show: it is its screen.
+        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term, let terminal = terminal(id), simpleViews.contains(id) != on,
+              !on || TerminalKind.isAgent(terminal.harness) else { return }
         if on { simpleViews.insert(id) } else { simpleViews.remove(id) }
         syncPanes()
         onFocusScreen(pane ?? focusPane)
@@ -547,10 +554,10 @@ final class TerminalsModel {
     #if DEBUG
     /// The design preview's: the page from made-up work, without a service.
     func stage(terminals: [TerminalInfo], sessions: [SessionSummary], gits: [String: FolderGit], agents: [String], models: [String: [TerminalModelOption]] = [:],
-               efforts: [String: [String]] = [:]) {
+               efforts: [String: [String]] = [:], shell: Bool = true) {
         self.sessions = sessions
         self.gits = gits
-        take(TerminalList(terminals: terminals, agents: agents, models: models, efforts: efforts))
+        take(TerminalList(terminals: terminals, agents: agents, models: models, efforts: efforts, shell: shell))
     }
     #endif
 }

@@ -210,7 +210,7 @@ private struct FilterLine: View {
                 FilterMark(on: model.filter.agent == agent, help: "\(HarnessName.display(agent)) Only") {
                     model.filter = model.filter.choosing(agent)
                 } label: { on in
-                    PixelSprite(rows: PixelArt.agents[agent] ?? PixelArt.agents["pi"]!, pixel: 2, color: on ? Look.ink : Look.ink2, strength: on ? 1 : 0.6, shadow: false)
+                    PixelSprite(rows: KindArt.rows(agent), pixel: KindArt.pixel(agent, agents: 2), color: on ? Look.ink : Look.ink2, strength: on ? 1 : 0.6, shadow: false)
                 }
             }
             Spacer(minLength: 6)
@@ -539,6 +539,11 @@ private struct TerminalRow: View {
     private var menu: some View {
         Button("Rename") { model.startRename(terminal.id) }
         Button("Show in Files") { model.files?.show(folder: terminal.workdir) }
+        // What its session's sub-agents did, in the card over its pane (docs/simple-view-v0.md §5.22): also the ones
+        // that have ended, whose rows are gone from the list.
+        if !out, SubagentDisplay.hasRecords(terminal.harness), terminal.agentSessionId != nil {
+            Button("Show Sub-Agents") { model.showSubagents(of: terminal.id) }
+        }
         if out {
             Button("Move Back Here") { model.onAttach(terminal.id) }
         } else {
@@ -568,7 +573,10 @@ struct PaneNumber: View {
     }
 }
 
-/// A terminal's sub-agent at work, a step under it: what it was sent to do, what it is doing now, its kind.
+/// A terminal's sub-agent at work, a step under it: what it was sent to do, what it is doing now, its kind. A click
+/// shows its terminal and — for an agent that keeps what each sub-agent did — its card over the terminal's pane
+/// (docs/simple-view-v0.md §5.22): the row whose card is shown is written in the list's own ink, and under the pointer
+/// says what the click does.
 private struct SubagentRow: View {
     let agent: TerminalSubagent
     let terminal: String
@@ -577,21 +585,30 @@ private struct SubagentRow: View {
     let model: TerminalsModel
     @Environment(\.interfaceLook) private var look
 
+    /// Its record can be shown: its terminal's agent keeps one.
+    private var opens: Bool { model.terminal(terminal).map { SubagentDisplay.hasRecords($0.harness) && $0.agentSessionId != nil && model.here($0.id) } ?? false }
+    private var shown: Bool { model.subagentShown(agent.id, terminal: terminal) }
+
     var body: some View {
         RowFrame(twig: twig, depth: look.isClassic ? depth + 1 : depth) {
             BrailleSpinner(size: 12).foregroundStyle(Color.busy)
         } name: {
             HStack(spacing: look.isClassic ? 8 : ListLook.ch) {
-                Text(agent.name).foregroundStyle(Look.ink2)
+                Text(agent.name).foregroundStyle(shown ? Look.ink : Look.ink2)
                 if !agent.doing.isEmpty { Text(agent.doing).foregroundStyle(Look.faint) }
             }
-            .font(look.isClassic ? .system(size: 13) : .system(size: 12.5, design: .monospaced))
+            .font(look.isClassic ? .system(size: 13, weight: shown ? .medium : .regular) : .system(size: 12.5, weight: shown ? .bold : .regular, design: .monospaced))
         } meta: {
             Text(agent.type).font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint)
         } actions: {
-            Text(agent.type).font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint)
+            if opens {
+                // Not a button of its own: the whole row is the click.
+                Text(shown ? "Close" : "Open").font(.system(size: 11.5, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.ink2)
+            } else {
+                Text(agent.type).font(.system(size: 11, design: look.isClassic ? .default : .monospaced)).foregroundStyle(Look.faint)
+            }
         }
-        .onTapGesture { model.select(terminal) }
+        .onTapGesture { model.openSubagent(agent, terminal: terminal) }
         .help([agent.type, agent.doing].filter { !$0.isEmpty }.joined(separator: " · "))
     }
 }

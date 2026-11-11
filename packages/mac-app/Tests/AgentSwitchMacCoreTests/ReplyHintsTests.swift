@@ -37,6 +37,9 @@ final class ReplyHintsTests: XCTestCase {
         XCTAssertEqual(shell.word, "Shell")
         XCTAssertNil(ask("好！"))
         XCTAssertNil(ask("!ls", "echo"))
+        // Grok's prompt has a shell mode too (`!` on an empty prompt, its guide says).
+        guard case .mark(let grok)? = ask("!ls", "grok") else { return XCTFail("no mark for Grok") }
+        XCTAssertEqual(grok.sign, "!")
         guard case .mark(let skills)? = ask("$", "codex") else { return XCTFail("no mark") }
         XCTAssertEqual(skills.word, "Skills")
         XCTAssertNil(ask("$", "claude-code"))

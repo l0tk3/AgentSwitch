@@ -140,6 +140,45 @@ extension TerminalsModel {
         resume(session)
     }
 
+    // MARK: a sub-agent's card
+
+    /// A sub-agent's row clicked (docs/simple-view-v0.md §5.22): its terminal on screen, as before — and, where the
+    /// agent keeps what each of its sub-agents did (Claude Code), the card with that over the terminal's pane; the
+    /// row of the card already shown puts it away. A terminal out in a window of its own comes forward, and no more.
+    func openSubagent(_ agent: TerminalSubagent, terminal id: String) {
+        guard let info = terminal(id) else { return }
+        select(id)
+        guard here(id), SubagentDisplay.hasRecords(info.harness), let session = info.agentSessionId,
+              let pane = TerminalPanes.paneShowing(layout, id), let state = panes[pane.id] else { return }
+        state.toggleSubagent(SubagentTarget(harness: info.harness, session: session, agent: agent.id), name: agent.name, type: agent.type)
+    }
+
+    /// The card over the pane that shows terminal `id` is this sub-agent's: its row is marked.
+    func subagentShown(_ agent: String, terminal id: String) -> Bool {
+        guard let pane = TerminalPanes.paneShowing(layout, id), let card = panes[pane.id]?.subagent else { return false }
+        return card.target.agent == agent
+    }
+
+    /// A terminal's menu, `Show Sub-Agents`: the card over its pane with one of its session's sub-agents — the latest
+    /// still at work, else the latest — whose own menu goes to the others. This is the way to one that has ended
+    /// while the pane shows the terminal's screen: its row left the list when it did, and a screen has no step to
+    /// click. A session that sent none is said so.
+    func showSubagents(of id: String) {
+        guard let info = terminal(id), here(id), SubagentDisplay.hasRecords(info.harness), let session = info.agentSessionId else { return }
+        let c = client()
+        Task {
+            let all: [SubagentSummary]
+            do { all = try await c.sessionSubagents(harness: info.harness, id: session) }
+            catch DaemonError.notSupported { return say(SubagentDisplay.unsupported) }
+            catch { return say(Self.reason(error)) }
+            guard let pick = all.last(where: { !$0.done }) ?? all.last else { return say(SubagentDisplay.noneSent) }
+            select(id)
+            guard let pane = TerminalPanes.paneShowing(layout, id), let state = panes[pane.id] else { return }
+            let target = SubagentTarget(harness: info.harness, session: session, agent: pick.id)
+            if state.subagent?.target != target { state.toggleSubagent(target, name: pick.name, type: pick.type) }
+        }
+    }
+
     func toggleFolder(_ cwd: String) {
         collapsed = collapsed.contains(cwd) ? collapsed.subtracting([cwd]) : collapsed.union([cwd])
     }
@@ -186,7 +225,8 @@ extension TerminalsModel {
     func showCreate(folder: String? = nil) {
         creating = true
         createError = ""
-        if !agents.contains(pickedAgent), let first = agents.first { pickedAgent = first }
+        // What was picked last, while it can still be had: an agent installed, a shell the service opens.
+        if !(pickedShell ? shellOffered : agents.contains(pickedAgent)), let first = agents.first { pickedAgent = first }
         if !TerminalListText.modes.contains(where: { $0.id == pickedMode }) { pickedMode = "manual" }
         if let folder { folderText = TerminalTree.tilde(folder) } else if folderText.isEmpty { folderText = "~" }
         // The profiles to choose between, as they are now; the panel offers the one last chosen until another is.
@@ -199,6 +239,9 @@ extension TerminalsModel {
         guard let all = try? await client().profiles() else { return }
         if profiles != all { profiles = all }
     }
+
+    /// The panel has a shell picked, not an agent: a folder is all there is to choose.
+    var pickedShell: Bool { pickedAgent == TerminalKind.shell }
 
     /// The profile the panel has chosen for the agent picked: nil when the agent has only the Mac's own.
     var pickedProfile: AgentProfile? {
@@ -227,14 +270,19 @@ extension TerminalsModel {
         createError = ""
         let agent = pickedAgent
         let model = pickedModel
-        let body = NewTerminalRequest(harness: agent, cwd: cwd, model: model, effort: pickedEffort, mode: pickedMode, cols: gridHere?.cols, rows: gridHere?.rows, profile: pickedProfile?.id)
+        let shell = pickedShell
+        let grid = gridHere
+        let body = NewTerminalRequest(harness: agent, cwd: cwd, model: model, effort: pickedEffort, mode: pickedMode, cols: grid?.cols, rows: grid?.rows, profile: pickedProfile?.id)
         let c = client()
         Task {
             defer { starting = false }
             do {
-                let made = try await c.createTerminal(body)
+                // A shell is a folder and a size: it has no model, no profile, no way of asking.
+                let made = shell ? try await c.createShell(cwd: cwd, cols: grid?.cols, rows: grid?.rows) : try await c.createTerminal(body)
                 defaults?.set(cwd, forKey: Keys.folder)
                 unfold(made.cwd)
+                // What was just made is in the list: a list of another agent's alone would not show it.
+                if let chosen = filter.agent, chosen != made.harness { filter = TerminalListFilter(agent: nil, active: filter.active) }
                 await refresh()
                 select(made.id, loading: "Starting \(TerminalListText.agentName(agent))")
             } catch {
@@ -350,7 +398,8 @@ extension TerminalsModel {
                 // Only a record this terminal started can go with it; one it went on writing is the user's own session.
                 let own = terminal.agentSessionId != nil && terminal.harness == "claude-code" && (terminal.resumedFrom == nil || terminal.forked)
                 let answer = await ask(TerminalSheet(title: "关闭「\(terminal.name)」？",
-                                                     body: "将结束 \(TerminalListText.agentName(terminal.harness)) 进程。会话记录保留，可稍后继续。",
+                                                     body: TerminalKind.isAgent(terminal.harness) ? "将结束 \(TerminalListText.agentName(terminal.harness)) 进程。会话记录保留，可稍后继续。"
+                                                                                                  : "将结束这个 Shell，以及其中仍在运行的程序。",
                                                      confirm: "Close", destructive: true, check: own ? "同时删除会话记录（无法恢复）" : nil))
                 guard answer.ok else { return onFocusScreen(focusPane) }
                 record = answer.checked

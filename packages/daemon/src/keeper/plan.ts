@@ -95,7 +95,7 @@ function base(env: NodeJS.ProcessEnv): Record<string, string> {
 }
 
 /** The agents the daemon drives, by the variable it reads for each (daemon.ts `terminalBinaries`). */
-export const AGENT_BINS = { CLAUDE_BIN: "claude", CODEX_BIN: "codex", OPENCODE_BIN: "opencode", PI_BIN: "pi" } as const;
+export const AGENT_BINS = { CLAUDE_BIN: "claude", CODEX_BIN: "codex", OPENCODE_BIN: "opencode", PI_BIN: "pi", GROK_BIN: "grok" } as const;
 
 export function agentBins(path: string): Record<string, string> {
   const out: Record<string, string> = {};

@@ -15,7 +15,7 @@ final class RecordStepStore {
 
     func detail(_ source: RecordSource, work: String, n: Int, key: String) async -> RecordStepDetail? {
         if let detail = held[key] { return detail }
-        guard let detail = await source.client().sessionStep(harness: source.harness, id: source.session, work: work, n: n) else { return nil }
+        guard let detail = await source.step(work: work, n: n) else { return nil }
         if held.count > 400 { held.removeAll() }
         held[key] = detail
         return detail
@@ -38,6 +38,9 @@ struct RecordStepLine: View {
     var opened = false
     /// The reader is opening or closing it (the record's length changes by their doing).
     var own: () -> Void = {}
+    /// A step that sent a sub-agent off shows what that one did (docs/simple-view-v0.md §5.22): its id and what it
+    /// was sent to do. Absent: the step is its line and no more.
+    var openAgent: ((_ id: String, _ name: String) -> Void)? = nil
     @State private var whole = false
     @State private var detail: RecordStepDetail?
     @Environment(\.interfaceLook) private var look
@@ -52,7 +55,10 @@ struct RecordStepLine: View {
     var body: some View {
         let shown = whole || opened
         VStack(alignment: .leading, spacing: 4) {
-            if opens {
+            if step.kind == .agent, let agent = step.agent, let openAgent {
+                Button { openAgent(agent, step.text) } label: { head(open: false, goes: true).contentShape(Rectangle()) }.buttonStyle(.plain)
+                    .help("Show What This Sub-Agent Did")
+            } else if opens {
                 Button { own(); whole.toggle() } label: { head(open: shown).contentShape(Rectangle()) }.buttonStyle(.plain)
             } else {
                 head(open: false)
@@ -81,7 +87,8 @@ struct RecordStepLine: View {
         }
     }
 
-    private func head(open: Bool) -> some View {
+    /// `goes`: the line opens something of its own elsewhere (a sub-agent's card): `›`, as a row that opens a task has.
+    private func head(open: Bool, goes: Bool = false) -> some View {
         let file = RecordDisplay.namesFile(step)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             // The classic look puts a small picture of the kind before the line; the pixel look's word is its mark.
@@ -93,14 +100,16 @@ struct RecordStepLine: View {
                 .layoutPriority(1)
             if let note = step.note {
                 Text(note).font(.system(size: Look.size(12.5, look))).foregroundStyle(Look.ink.opacity(0.85)).lineLimit(2)
-            } else if opens, isCommand {
+            } else if (opens && isCommand) || goes {
+                // A line that is pressed is not also text to select: the press would be the selection's.
                 Text(step.text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2).lineLimit(verbose ? 6 : 2).truncationMode(.tail)
             } else {
                 // A file by the end of its path (its name); a command or a query from its start.
                 Text(step.text).font(.system(size: Look.size(11.5, look), design: .monospaced)).foregroundStyle(Look.ink2)
                     .lineLimit(verbose ? 6 : file ? 1 : 2).truncationMode(file ? .head : .tail).textSelection(.enabled)
             }
-            if opens { RecordFold(open: open) }
+            if goes { LookGlyph(glyph: "›", symbol: "chevron.right", size: Look.size(11.5, look)).foregroundStyle(Look.faint) }
+            else if opens { RecordFold(open: open) }
             Spacer(minLength: 0)
             if step.added != nil || step.removed != nil { RecordDiffStat(added: step.added ?? 0, removed: step.removed ?? 0, plain: true) }
         }

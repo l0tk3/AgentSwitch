@@ -33,6 +33,7 @@ public enum ModelName {
         case "codex": return "Codex"
         case "opencode": return "OpenCode"
         case "pi": return "pi"
+        case "grok": return "Grok"
         case "echo": return "Echo"
         default: return capitalized(id)
         }

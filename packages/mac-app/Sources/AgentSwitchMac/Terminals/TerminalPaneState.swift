@@ -24,6 +24,9 @@ final class TerminalPaneState: Identifiable {
     @ObservationIgnored let record = PaneRecord()
     /// Files that may hold a password, waiting for a yes before they go to the agent (docs/files-v0.md §4).
     private(set) var asking: FilesAsk?
+    /// The sub-agent card over the pane (docs/simple-view-v0.md §5.22): one of its terminal's session's sub-agents and
+    /// what it did; nil while none is shown. It goes with the terminal: another terminal in the pane has none.
+    private(set) var subagent: SubagentCardModel?
     @ObservationIgnored private var loadingTask: Task<Void, Never>?
     /// The screen was clicked: the pane takes the focus.
     @ObservationIgnored var onClick: () -> Void = {}
@@ -83,6 +86,23 @@ final class TerminalPaneState: Identifiable {
         if simple { record.attach(picks: picks) } else { screen.type(paths: picks.map(\.path)) }
     }
 
+    /// A sub-agent's row, line or step was clicked (docs/simple-view-v0.md §5.22): its card over this pane — put away
+    /// again when it is the one shown (the click that opened it closes it), and showing another one of the same
+    /// session in place of the first.
+    func toggleSubagent(_ target: SubagentTarget, name: String, type: String) {
+        guard session != nil else { return }
+        if let card = subagent, card.target == target { subagent = nil; return }
+        if let card = subagent, card.target.harness == target.harness, card.target.session == target.session {
+            card.show(agent: target.agent, name: name, type: type)
+        } else {
+            subagent = SubagentCardModel(target: target, name: name, type: type, client: client)
+        }
+    }
+
+    func closeSubagent() {
+        if subagent != nil { subagent = nil }
+    }
+
     /// The terminal the pane shows (nil: none), with what the list knows of it now; `simple`: as its record.
     func show(_ terminal: TerminalInfo?, git: FolderGit?, simple: Bool = false) {
         guard let terminal else {
@@ -121,6 +141,7 @@ final class TerminalPaneState: Identifiable {
 
     private func leave() {
         asking = nil
+        subagent = nil
         session?.stop()
         session = nil
         say(nil)

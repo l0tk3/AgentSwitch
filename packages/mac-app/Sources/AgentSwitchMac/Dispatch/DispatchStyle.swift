@@ -208,13 +208,24 @@ struct TaskMark: View {
     }
 }
 
+/// The picture that stands for what a terminal runs: an agent's own mark, or — a shell is no agent and has none of its
+/// own (docs/terminal-v0.md §0, 2026-11-10) — the framed terminal, at the cell that gives it about an agent's size.
+enum KindArt {
+    static func rows(_ harness: String) -> [String] {
+        harness == TerminalKind.shell ? PixelArt.terminalWindow : PixelArt.agents[harness] ?? PixelArt.agents["pi"]!
+    }
+
+    /// The cell for it where an agent's 5 × 5 has `pixel`: the terminal is 9 × 7.
+    static func pixel(_ harness: String, agents pixel: CGFloat) -> CGFloat { harness == TerminalKind.shell ? max(1, pixel - 1) : pixel }
+}
+
 /// An agent's 5 × 5 sprite (ui-v0 §7.3), its name on hover.
 struct AgentSprite: View {
     let harness: String?
 
     var body: some View {
         if let harness {
-            PixelSprite(rows: PixelArt.agents[harness] ?? PixelArt.agents["pi"]!, pixel: 2, color: Look.ink2, strength: 0.8, shadow: false)
+            PixelSprite(rows: KindArt.rows(harness), pixel: KindArt.pixel(harness, agents: 2), color: Look.ink2, strength: 0.8, shadow: false)
                 .help(HarnessName.display(harness))
         }
     }

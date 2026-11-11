@@ -27,10 +27,11 @@ public enum LiveArt {
         "codex": [".....", "#....", ".#...", "#.###", "....."],
         "opencode": ["##.##", "#...#", "#...#", "#...#", "##.##"],
         "pi": ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"],
+        "grok": [".##.#", "#..#.", "#.#.#", ".#..#", "#.##."],
     ]
 
     /// A terminal row names its agent as the app shows it (ModelName.harness): the harness for that name.
     public static func harness(named name: String) -> String? {
-        ["Claude Code": "claude-code", "Codex": "codex", "OpenCode": "opencode", "pi": "pi"][name]
+        ["Claude Code": "claude-code", "Codex": "codex", "OpenCode": "opencode", "pi": "pi", "Grok": "grok"][name]
     }
 }

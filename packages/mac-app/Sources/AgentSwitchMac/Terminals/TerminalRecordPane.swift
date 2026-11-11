@@ -45,6 +45,13 @@ struct TerminalRecordPane: View {
         let requests = state.session?.requests ?? []
         let source = record.sessionId.map { RecordSource(harness: record.agent, session: $0, client: model.client) }
         let files = RecordDisplay.changedFiles(record.items)
+        // A sub-agent's line or the step that sent one shows what it did, in its card over the pane (docs/simple-view-v0.md
+        // §5.22): for the session the record is of, where its agent keeps that (Claude Code).
+        let cards: ((String, String, String) -> Void)? = record.sessionId.flatMap { session in
+            guard SubagentDisplay.hasRecords(record.agent) else { return nil }
+            let harness = record.agent
+            return { id, name, type in state.toggleSubagent(SubagentTarget(harness: harness, session: session, agent: id), name: name, type: type) }
+        }
         GeometryReader { geo in
             // With room for both, the task list and the changed files stand beside the record (nothing to put there:
             // no side, the column alone).
@@ -82,8 +89,8 @@ struct TerminalRecordPane: View {
                                     } else {
                                         // A terminal seconds old with no session yet is still starting: said so, as a
                                         // record being read is (2026-10-08, user: cc进入的时候会有转圈加载的画面，codex没有).
-                                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                                            let starting = !record.hasSession && (info.map { context.date.timeIntervalSince1970 * 1000 - Double($0.createdAt) < RecordDisplay.startingMs } ?? false)
+                                        Stepped(every: 1) { at in
+                                            let starting = !record.hasSession && (info.map { at.timeIntervalSince1970 * 1000 - Double($0.createdAt) < RecordDisplay.startingMs } ?? false)
                                             if starting {
                                                 VStack(spacing: 8) {
                                                     BrailleSpinner().foregroundStyle(Look.ink2)
@@ -99,14 +106,16 @@ struct TerminalRecordPane: View {
                                 }
                                 ForEach(record.shown(working: working)) { item in
                                     RecordRow(item: item, verbose: record.verbose, running: working && item.id == record.items.last?.id && item.kind == .work, source: source,
-                                              own: { place.own = Date() }, showFile: { model.files?.show(file: $0.path) }) {
+                                              own: { place.own = Date() }, showFile: { model.files?.show(file: $0.path) },
+                                              openAgent: cards.map { show in { id, name in show(id, name, "") } }) {
                                         if let session = record.sessionId { changes = ChangesRequest(harness: record.agent, session: session, work: item.id) }
                                     }
                                 }
                                 // What it is writing now (docs/simple-view-v0.md §5.14), as its answer will read.
                                 if let writing = record.writing { RecordWriting(writing: writing) }
                                 if working, requests.isEmpty {
-                                    RecordNowLine(activity: record.activity, subagents: record.subagents, since: record.activitySince, progress: record.progress)
+                                    RecordNowLine(activity: record.activity, subagents: record.subagents, since: record.activitySince, progress: record.progress,
+                                                  shown: state.subagent?.target.agent, open: cards.map { show in { agent in show(agent.id, agent.name, agent.type) } })
                                 }
                                 if let session = state.session {
                                     ForEach(requests) { request in
@@ -280,6 +289,8 @@ private struct RecordRow: View {
     let own: () -> Void
     /// An answer's file (docs/simple-view-v0.md §5.16): the Files column at it.
     let showFile: (RecordFile) -> Void
+    /// A step that sent a sub-agent off shows what that one did (§5.22); absent where the agent keeps no such record.
+    var openAgent: ((_ id: String, _ name: String) -> Void)? = nil
     let showChanges: () -> Void
     @State private var open = false
     @State private var whole = false
@@ -372,7 +383,8 @@ private struct RecordRow: View {
             }
             if shown {
                 ForEach(steps, id: \.offset) { index, step in
-                    RecordStepLine(step: step, verbose: verbose, source: source, work: item.id, index: index, opened: PaneRecord.previewOpenStep == "\(item.id)/\(index)", own: own)
+                    RecordStepLine(step: step, verbose: verbose, source: source, work: item.id, index: index, opened: PaneRecord.previewOpenStep == "\(item.id)/\(index)", own: own,
+                                   openAgent: openAgent)
                 }
             }
         }
@@ -422,6 +434,10 @@ private struct RecordNowLine: View {
     /// How far the turn has come, as the agent's own screen counts it: the number moves while it thinks, which a
     /// clock alone does not say (2026-10-08, user: working 建议加上token数量，不然都不知道是不是卡死了).
     var progress: TurnProgress? = nil
+    /// The sub-agent whose card is over the pane, and what a click on a sub-agent's line does (docs/simple-view-v0.md
+    /// §5.22): its card with what it is doing. Absent where the agent keeps no such record: the lines are only read.
+    var shown: String? = nil
+    var open: ((TerminalSubagent) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -452,27 +468,42 @@ private struct RecordNowLine: View {
                         .contentTransition(.numericText())
                 }
                 if let since {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(RecordDisplay.clock(Int(context.date.timeIntervalSince(since)))).mono(Look.size(10.5, look)).foregroundStyle(Look.faint).monospacedDigit()
+                    Stepped(every: 1) { at in
+                        Text(RecordDisplay.clock(Int(at.timeIntervalSince(since)))).mono(Look.size(10.5, look)).foregroundStyle(Look.faint).monospacedDigit()
                     }
                 }
             }
             ForEach(subagents) { agent in
-                HStack(spacing: 7) {
-                    if look.isClassic {
-                        Image(systemName: RecordDisplay.symbol(.agent)).font(.system(size: 11.5)).foregroundStyle(Look.ink2).frame(width: 16, alignment: .center)
-                    }
-                    HStack(spacing: 7) {
-                        Text(agent.name).mono(Look.size(11.5, look), weight: .medium).lineLimit(1)
-                        Text(agent.doing).font(.system(size: Look.size(11.5, look), design: .monospaced)).lineLimit(1)
-                    }
-                    .foregroundStyle(Look.ink2)
-                    .shimmer()
-                    Spacer(minLength: 0)
+                if let open {
+                    Button { open(agent) } label: { line(agent, goes: true).contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
+                        .help(shown == agent.id ? "Hide What This Sub-Agent Does" : "Show What This Sub-Agent Does")
+                } else {
+                    line(agent, goes: false)
                 }
-                .padding(.leading, 17)
             }
         }
+    }
+
+    /// One sub-agent: what it was sent to do and what it is doing now; `›` where a click shows its card (in the
+    /// line's own ink on the one whose card is shown).
+    private func line(_ agent: TerminalSubagent, goes: Bool) -> some View {
+        HStack(spacing: 7) {
+            if look.isClassic {
+                Image(systemName: RecordDisplay.symbol(.agent)).font(.system(size: 11.5)).foregroundStyle(Look.ink2).frame(width: 16, alignment: .center)
+            }
+            HStack(spacing: 7) {
+                Text(agent.name).mono(Look.size(11.5, look), weight: .medium).lineLimit(1)
+                Text(agent.doing).font(.system(size: Look.size(11.5, look), design: .monospaced)).lineLimit(1)
+            }
+            .foregroundStyle(Look.ink2)
+            .shimmer()
+            if goes {
+                LookGlyph(glyph: "›", symbol: "chevron.right", size: Look.size(11.5, look)).foregroundStyle(shown == agent.id ? Look.ink : Look.faint)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 17)
     }
 }
 
@@ -811,7 +842,7 @@ private struct RecordDock: View {
                 .popover(isPresented: $choosingEffort, arrowEdge: .top) {
                     EffortPicker(word: TerminalEffort.word(harness), levels: levels, level: effort,
                                  enabled: !record.changing,
-                                 note: harness == "claude-code" ? "会记成这个模型的默认；Max 只用于这一次。" : nil,
+                                 note: harness == "claude-code" ? "会记成这个模型的默认；Max 只用于这一次。" : harness == "grok" ? "Grok 会把它记成新会话的默认。" : nil,
                                  choose: { record.setEffort($0) })
                         .frame(width: 150)
                         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -885,7 +916,8 @@ private struct RecordDock: View {
         }
         let older = options.filter(\.older)
         return options.filter { !$0.older }.map(entry) + (older.isEmpty ? [] : [.separator, MenuEntry(title: "Older", symbol: "clock", children: older.map(entry))])
-            + (harness == "claude-code" ? [.separator, MenuEntry(title: "Claude Code 会把它记成新会话的默认模型", enabled: false)] : [])
+            + (harness == "claude-code" ? [.separator, MenuEntry(title: "Claude Code 会把它记成新会话的默认模型", enabled: false)]
+                : harness == "grok" ? [.separator, MenuEntry(title: "Grok 会把它记成新会话的默认模型", enabled: false)] : [])
     }
 }
 

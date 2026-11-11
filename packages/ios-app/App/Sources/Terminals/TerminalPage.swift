@@ -646,7 +646,7 @@ struct TerminalPage: View {
             case .ended:
                 Button("终端已结束") {}.disabled(true)
             case .models(let options):
-                Section(page.harness == "claude-code" ? "Model · Claude Code 会把它记成新会话的默认模型" : "Model") {
+                Section(page.harness == "claude-code" ? "Model · Claude Code 会把它记成新会话的默认模型" : page.harness == "grok" ? "Model · Grok 会把它记成新会话的默认模型" : "Model") {
                     ForEach(options.filter { !$0.older }) { option in modelButton(option) }
                     let older = options.filter(\.older)
                     if !older.isEmpty { Menu("Older", systemImage: "clock") { ForEach(older) { option in modelButton(option) } } }

@@ -1,5 +1,5 @@
-/** Watching the Mac's coding sessions (docs/control-v0.md §3): newest first across Claude Code, Codex, OpenCode and pi,
- *  each file parsed again only when it changed. Sessions that ran in a temporary folder or in AgentSwitch's own data
+/** Watching the Mac's coding sessions (docs/control-v0.md §3): newest first across Claude Code, Codex, OpenCode, pi and
+ *  Grok, each file parsed again only when it changed. Sessions that ran in a temporary folder or in AgentSwitch's own data
  *  directory are left out (probes, tests, AgentSwitch's executors). Read-only, except `remove`: the user deleting a
  *  session's record (docs/terminal-v0.md §5). */
 
@@ -11,10 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeFacts, claudeMessages } from "./claude.js";
 import { codexFacts, codexMessages } from "./codex.js";
+import { GROK_RECORD, grokChildren, grokFacts, grokHome, grokMessages } from "./grok.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
 import type { KeptPictures } from "./pictures.js";
-import { MAX_RECORD_LIMIT, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, type FileDiff, type RecordImage, type SessionRecord, type StepDetail } from "./record.js";
+import { fileRev, MAX_RECORD_LIMIT, readChanges, readImage, readRecord, readStep, readStepImage, recordFromMessages, type FileDiff, type RecordImage, type SessionRecord, type StepDetail } from "./record.js";
+import { listSubagents, subagentFile, subagentOf, type SubagentSummary } from "./subagents.js";
 import { ACTIVE_MS, MESSAGE_CHARS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
@@ -23,6 +25,8 @@ export type SessionSources = {
   readonly opencodeDb: string;       // ~/.local/share/opencode/opencode.db
   /** ~/.pi/agent/sessions; absent: pi's sessions are not read. */
   readonly piSessions?: string;
+  /** ~/.grok/sessions; absent: Grok's sessions are not read. */
+  readonly grokSessions?: string;
   /** Deleting an OpenCode session (its own command); absent: OpenCode's sessions cannot be deleted here. */
   readonly openCodeDelete?: OpenCodeDelete;
   /** Folders whose sessions are not the user's own (prefix match). */
@@ -55,6 +59,7 @@ export function defaultSessionSources(dataHome: string, env: NodeJS.ProcessEnv =
     codexSessions: join(home, ".codex", "sessions"),
     opencodeDb: join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "opencode", "opencode.db"),
     piSessions: join(piAgentDir(env), "sessions"),
+    grokSessions: join(grokHome(env) ?? join(home, ".grok"), "sessions"),
     excluded: [tmpdir(), "/tmp/", "/private/tmp/", "/private/var/folders/", "/var/folders/", dataHome],
   };
 }
@@ -98,6 +103,8 @@ export class SessionMonitor {
       ...this.scan([...claude, ...forced.filter((r) => !have.has(r.path))], "claude-code", now),
       ...this.scan(jsonlFiles(this.sources.codexSessions, 3, now, this.scanFiles), "codex", now),
       ...(this.sources.piSessions ? this.scan(jsonlFiles(this.sources.piSessions, 1, now, this.scanFiles), "pi", now) : []),
+      // Grok: a folder a session, two below its sessions folder; the conversation in it stands for the session.
+      ...(this.sources.grokSessions ? this.scan(jsonlFiles(this.sources.grokSessions, 2, now, this.scanFiles, () => false, () => false, GROK_RECORD), "grok", now) : []),
     ];
     // OpenCode's title is its own, kept in its own store: nothing of ours stands in for it.
     const opencode = openCodeSessions(this.sources.opencodeDb, this.scanFiles).map((s) => this.summary("opencode", { ...s, named: true }, now));
@@ -117,7 +124,8 @@ export class SessionMonitor {
     return given ? { ...s, title: oneLine(given, TITLE_CHARS) } : s;
   }
 
-  /** Where a listed session is kept: its file (Claude Code, Codex, pi) or OpenCode's database; null for one not listed. */
+  /** Where a listed session is kept: its file (Claude Code, Codex, pi; Grok's conversation in its folder) or OpenCode's
+   *  database; null for one not listed. */
   source(harness: SessionHarness, id: string): string | null {
     return harness === "opencode" ? this.sources.opencodeDb : this.files.get(`${harness}:${id}`) ?? null;
   }
@@ -134,7 +142,7 @@ export class SessionMonitor {
     if (harness === "opencode") { const messages = openCodeMessages(this.sources.opencodeDb, id, limit, chars); return messages && { session, messages }; }
     const path = this.files.get(`${harness}:${id}`);
     if (!path) return null;
-    return { session, messages: harness === "claude-code" ? claudeMessages(path, limit, chars) : harness === "pi" ? piMessages(path, limit, chars) : codexMessages(path, limit, chars) };
+    return { session, messages: messagesOf(harness, path, limit, chars) };
   }
 
   /** A session's record for the simple view (docs/simple-view-v0.md §2): Claude Code's and Codex's from their files,
@@ -149,8 +157,11 @@ export class SessionMonitor {
     }
     // Whole: the record keeps TEXT_CHARS of each, as the step-by-step reader does. Clipped at MESSAGE_CHARS, an
     // answer of OpenCode's or pi's ended in "…（共 2822 字）" with no way to read the rest (2026-10-14, user: what is this).
-    const coarse = this.read(harness, id, MAX_RECORD_LIMIT, Infinity);
-    return coarse && { session, record: recordFromMessages(coarse.messages, `u${session.updatedAt.toString(36)}`) };
+    // From the file that was opened, which a terminal of ours has though the list leaves its session out (a scratch
+    // folder, nothing said yet): read through the list alone, such a terminal's simple view had no record (pi's and
+    // Grok's; found with scripts/grok_terminal_probe.ts, 2026-11-11). OpenCode's are all in its one database.
+    const messages = harness === "opencode" ? this.read(harness, id, MAX_RECORD_LIMIT, Infinity)?.messages : path ? messagesOf(harness, path, MAX_RECORD_LIMIT, Infinity) : null;
+    return messages ? { session, record: recordFromMessages(messages, `u${session.updatedAt.toString(36)}`) } : null;
   }
 
   /** One step of a run of work, whole: its command as written and all it printed. */
@@ -174,6 +185,61 @@ export class SessionMonitor {
     try { return readImage(harness, found.path, item, n, this.sources.pictures?.sent); } catch { return null; }
   }
 
+  // -------------------------------------------------------------------------------------------------------------------
+  // a session's sub-agents (sessions/subagents.ts; docs/simple-view-v0.md §5.22)
+  // -------------------------------------------------------------------------------------------------------------------
+
+  /** The sub-agents a session sent off, in the order they started. Null for a session that may not be read here (not
+   *  listed, not a terminal of ours); none for an agent whose sub-agents are not kept as files of their own (only
+   *  Claude Code's are). */
+  subagents(harness: SessionHarness, id: string, ours = false): SubagentSummary[] | null {
+    const found = this.open(harness, id, ours);
+    if (!found) return null;
+    return found.path && harness === "claude-code" ? listSubagents(found.path) : [];
+  }
+
+  /** Sub-agent `agent` of a session: what Claude Code says of it, its file, and the session it is of. */
+  private side(harness: SessionHarness, id: string, agent: string, ours: boolean): { session: SessionSummary; about: SubagentSummary; file: string } | null {
+    if (harness !== "claude-code") return null;
+    const found = this.open(harness, id, ours);
+    if (!found?.path) return null;
+    const about = subagentOf(found.path, agent), file = subagentFile(found.path, agent);
+    return about && file ? { session: found.session, about, file } : null;
+  }
+
+  /** The version of a sub-agent's record: its file's, and whether it has ended (Claude Code marks that beside the
+   *  file, after its last line). Null when there is no such sub-agent. A screen that shows the record asks with the
+   *  version it has (`subagentRecord`), every second or so while the sub-agent works: nothing is read for the same one. */
+  subagentVersion(harness: SessionHarness, id: string, agent: string, ours = false): string | null {
+    const side = this.side(harness, id, agent, ours);
+    try { return side && `${fileRev(side.file).rev}${side.about.done ? "-done" : ""}`; } catch { return null; }
+  }
+
+  /** A sub-agent's record: what it was sent to do, its work step by step, what it handed back — read as a session's
+   *  record is, from its own file. `rev` is `subagentVersion`'s. */
+  subagentRecord(harness: SessionHarness, id: string, agent: string, o: { limit?: number; before?: number } = {}, ours = false): { session: SessionSummary; agent: SubagentSummary; record: SessionRecord } | null {
+    const side = this.side(harness, id, agent, ours);
+    if (!side) return null;
+    try {
+      const record = readRecord("claude-code", side.file, { ...o, cwd: side.session.cwd, side: true });
+      return record && { session: side.session, agent: side.about, record: { ...record, rev: `${record.rev}${side.about.done ? "-done" : ""}` } };
+    } catch { return null; }
+  }
+
+  /** One step of a sub-agent's run of work, whole. */
+  subagentStep(harness: SessionHarness, id: string, agent: string, work: string, n: number, ours = false): StepDetail | null {
+    const side = this.side(harness, id, agent, ours);
+    if (!side) return null;
+    try { return readStep("claude-code", side.file, { work, n, cwd: side.session.cwd, side: true }); } catch { return null; }
+  }
+
+  /** A picture a step of a sub-agent's brought back. */
+  subagentStepImage(harness: SessionHarness, id: string, agent: string, work: string, n: number, k: number, ours = false): RecordImage | null {
+    const side = this.side(harness, id, agent, ours);
+    if (!side) return null;
+    try { return readStepImage("claude-code", side.file, { work, n, k, cwd: side.session.cwd, side: true }); } catch { return null; }
+  }
+
   /** A session and where it is kept. `ours`: it is the session of a terminal of ours, read wherever it runs — the list
    *  leaves out scratch folders (a terminal started under /tmp) and sessions with nothing said yet, and such a
    *  terminal's simple view had no record to show (found with a live probe, 2026-10-07). Anyone else's unlisted session
@@ -187,14 +253,14 @@ export class SessionMonitor {
     try {
       const st = statSync(path);
       if (harness === "codex") this.sources.pictures?.noticed(path, st.size, st.mtimeMs);
-      const facts = harness === "claude-code" ? claudeFacts(path, st.mtimeMs) : harness === "pi" ? piFacts(path, st.mtimeMs) : codexFacts(path, st.mtimeMs);
+      const facts = factsOf(harness, path, st.mtimeMs);
       return facts ? { session: this.summary(harness, { startedAt: st.birthtimeMs || st.ctimeMs, ...facts }, this.now()), path } : null;
     } catch { return null; }
   }
 
   /** Where the session of a terminal of ours is kept, listed or not: its file as the list knows it, else looked for by
-   *  its id (Claude Code's `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`, pi's `<time>_<id>.jsonl`). Null for
-   *  OpenCode (one database for all) and for a session with no file yet. */
+   *  its id (Claude Code's `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`, pi's `<time>_<id>.jsonl`, Grok's
+   *  `<folder>/<id>/updates.jsonl`). Null for OpenCode (one database for all) and for a session with no file yet. */
   locate(harness: SessionHarness, id: string): string | null {
     if (harness === "opencode" || !SESSION_ID.test(id)) return null;
     const key = `${harness}:${id}`;
@@ -216,6 +282,11 @@ export class SessionMonitor {
         }
       };
       walk(this.sources.codexSessions, 3);
+    } else if (harness === "grok") {
+      for (const dir of this.sources.grokSessions ? safeDirs(this.sources.grokSessions) : []) {
+        const file = join(this.sources.grokSessions!, dir, id, GROK_RECORD);
+        if (existsSync(file)) { found = file; break; }
+      }
     } else if (this.sources.piSessions) {
       for (const dir of safeDirs(this.sources.piSessions)) {
         const name = safeDirs(join(this.sources.piSessions, dir), true).find((n) => n.endsWith(`_${id}.jsonl`));
@@ -249,7 +320,7 @@ export class SessionMonitor {
     return readChanges(harness, found.path, { ...(work !== undefined ? { work } : {}), cwd: found.session.cwd });
   }
 
-  private scan(refs: FileRef[], harness: "claude-code" | "codex" | "pi", now: number): (SessionSummary | null)[] {
+  private scan(refs: FileRef[], harness: "claude-code" | "codex" | "pi" | "grok", now: number): (SessionSummary | null)[] {
     return refs.map((ref) => {
       // Codex names a picture by its file's place: what the record grew by is read for them while they are there.
       if (harness === "codex") this.sources.pictures?.noticed(ref.path, ref.size, ref.mtime);
@@ -257,8 +328,8 @@ export class SessionMonitor {
       if (hit && hit.mtime === ref.mtime && hit.size === ref.size) return hit.summary && { ...hit.summary, active: now - hit.summary.updatedAt < ACTIVE_MS };
       let summary: SessionSummary | null = null;
       try {
-        const facts = harness === "claude-code" ? claudeFacts(ref.path, ref.mtime) : harness === "pi" ? piFacts(ref.path, ref.mtime) : codexFacts(ref.path, ref.mtime);
-        // When it began: what the record says (pi), else when its file was made.
+        const facts = factsOf(harness, ref.path, ref.mtime);
+        // When it began: what the record says (pi, Grok), else when its file was made.
         summary = facts ? this.summary(harness, { startedAt: ref.born, ...facts }, now) : null;
       } catch { summary = null; }
       this.cache.set(ref.path, { mtime: ref.mtime, size: ref.size, summary });
@@ -282,8 +353,9 @@ export class SessionMonitor {
   private get scanFiles(): number { return this.sources.scanFiles ?? SCAN_FILES; }
 
   /** Deletes the agent's own record of a session (docs/terminal-v0.md §5, the user's own management): Claude Code's
-   *  `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`, pi's `<time>_<id>.jsonl`; OpenCode's through its own
-   *  command (its database, the session's children with it). Nothing else is touched. The file the list read comes
+   *  `<project>/<id>.jsonl`, Codex's `rollout-…-<id>.jsonl`, pi's `<time>_<id>.jsonl`; Grok's folder for the session
+   *  (`<folder>/<id>/`, which holds that session and nothing else) and those of the sub-agents it sent off; OpenCode's
+   *  through its own command (its database, the session's children with it). Nothing else is touched. The file the list read comes
    *  first (it may sit where the id alone does not say); one that cannot be removed is reported, not thrown, so what did
    *  go is still known. */
   async remove(harness: SessionHarness, id: string): Promise<{ removed: string[]; failed: string[] }> {
@@ -299,6 +371,21 @@ export class SessionMonitor {
       if (removed.includes(file) || failed.includes(file) || !existsSync(file)) return;
       try { rmSync(file); removed.push(file); } catch { failed.push(file); }
     };
+    if (harness === "grok") {
+      // A folder a session: gone whole. Only one named for the session, under the sessions folder.
+      const root = this.sources.grokSessions;
+      const gone = (dir: string) => {
+        if (removed.includes(dir) || failed.includes(dir) || !existsSync(join(dir, GROK_RECORD))) return;
+        try { rmSync(dir, { recursive: true }); removed.push(dir); } catch { failed.push(dir); }
+      };
+      const folders = (session: string): string[] => (root ? safeDirs(root).map((group) => join(root, group, session)).filter((dir) => existsSync(dir)) : []);
+      for (const dir of folders(id)) {
+        for (const child of grokChildren(dir, (d) => safeDirs(d))) for (const sub of folders(child)) gone(sub);
+        gone(dir);
+      }
+      if (removed.length) this.files.delete(`${harness}:${id}`);
+      return { removed, failed };
+    }
     const listed = this.files.get(`${harness}:${id}`);
     if (listed) drop(listed);
     if (harness === "claude-code") {
@@ -378,11 +465,22 @@ function claudeKey(path: string): string {
   return path.replace(/[^A-Za-z0-9]/g, "-");
 }
 
+/** A session's messages from the file it is kept in, by its agent's own reader. */
+function messagesOf(harness: SessionHarness, path: string, limit: number, chars: number): SessionMessage[] {
+  return harness === "claude-code" ? claudeMessages(path, limit, chars) : harness === "pi" ? piMessages(path, limit, chars) : harness === "grok" ? grokMessages(path, limit, chars) : codexMessages(path, limit, chars);
+}
+
+/** What the list shows of a session kept in a file, by its agent's own reader. */
+function factsOf(harness: SessionHarness, path: string, mtime: number) {
+  return harness === "claude-code" ? claudeFacts(path, mtime) : harness === "pi" ? piFacts(path, mtime) : harness === "grok" ? grokFacts(path, mtime) : codexFacts(path, mtime);
+}
+
 /** `*.jsonl` files `depth` directories below `root`, the newest `limit` modified within `MAX_AGE_MS`; top-level
  *  directories `skip` names are not entered. */
 /** `skip`: a folder right under `root` that is passed over — but for the records in it that `keep` names (by their
- *  file's name without `.jsonl`). */
-function jsonlFiles(root: string, depth: number, now: number, limit: number, skip: (dir: string) => boolean = () => false, keep: (id: string) => boolean = () => false): FileRef[] {
+ *  file's name without `.jsonl`). `named`: only files of that name are taken (Grok keeps every session in a file of
+ *  the same name, in a folder of its own). */
+function jsonlFiles(root: string, depth: number, now: number, limit: number, skip: (dir: string) => boolean = () => false, keep: (id: string) => boolean = () => false, named?: string): FileRef[] {
   const found: FileRef[] = [];
   const walk = (dir: string, left: number, only: boolean) => {
     let names: string[];
@@ -390,7 +488,7 @@ function jsonlFiles(root: string, depth: number, now: number, limit: number, ski
     for (const name of names) {
       const path = join(dir, name);
       if (left > 0) { walk(path, left - 1, only || (dir === root && skip(name))); continue; }
-      if (!name.endsWith(".jsonl") || (only && !keep(name.slice(0, -6)))) continue;
+      if (!name.endsWith(".jsonl") || (named !== undefined && name !== named) || (only && !keep(name.slice(0, -6)))) continue;
       try {
         const st = statSync(path);
         if (st.isFile() && now - st.mtimeMs < MAX_AGE_MS) found.push({ path, mtime: st.mtimeMs, size: st.size, born: st.birthtimeMs || st.ctimeMs });

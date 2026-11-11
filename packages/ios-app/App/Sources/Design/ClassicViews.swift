@@ -110,7 +110,8 @@ struct ClassicMarkView: View {
     }
 }
 
-/// The agents' marks as lines, each from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π.
+/// The agents' marks as lines, each from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π,
+/// Grok's ring with the stroke that runs out of it.
 enum ClassicAgent {
     static func draw(_ harness: String, _ context: inout GraphicsContext, in rect: CGRect, color: Color) {
         let s = min(rect.width, rect.height)
@@ -131,6 +132,12 @@ enum ClassicAgent {
         case "opencode":
             path.move(to: p(0.38, 0.1)); path.addLine(to: p(0.14, 0.1)); path.addLine(to: p(0.14, 0.9)); path.addLine(to: p(0.38, 0.9))
             path.move(to: p(0.62, 0.1)); path.addLine(to: p(0.86, 0.1)); path.addLine(to: p(0.86, 0.9)); path.addLine(to: p(0.62, 0.9))
+        case "grok":
+            // The ring, open where the stroke leaves it at the upper right (angles run with the clock here, from the
+            // right); the stroke from the middle out past it; its tail below the ring at the lower left.
+            path.addArc(center: p(0.5, 0.5), radius: s * 0.3, startAngle: .degrees(-20), endAngle: .degrees(290), clockwise: false)
+            path.move(to: p(0.5, 0.5)); path.addLine(to: p(0.9, 0.1))
+            path.move(to: p(0.1, 0.9)); path.addLine(to: p(0.29, 0.71))
         default:
             path.move(to: p(0.1, 0.24)); path.addLine(to: p(0.9, 0.24))
             path.move(to: p(0.34, 0.24)); path.addLine(to: p(0.3, 0.86))

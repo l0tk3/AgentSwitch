@@ -9,7 +9,7 @@ public enum FilesSensitive {
     private static let homeFiles: [(String, String)] = [
         (".aws/credentials", "cloud"), (".netrc", "login"), (".git-credentials", "login"), (".npmrc", "login"), (".pypirc", "login"),
         (".docker/config.json", "login"), (".kube/config", "cloud"), (".config/gh/hosts.yml", "login"),
-        (".codex/auth.json", "login"), (".claude/.credentials.json", "login"), (".local/share/opencode/auth.json", "login"), (".pi/agent/auth.json", "login"),
+        (".codex/auth.json", "login"), (".claude/.credentials.json", "login"), (".local/share/opencode/auth.json", "login"), (".pi/agent/auth.json", "login"), (".grok/auth.json", "login"),
     ]
 
     /// Why `path` may hold a password or a key, or nil. `home`: the user's home folder.

@@ -93,6 +93,12 @@ async function handle(line) {
   if (line === "retry") { process.stdout.write("\x1b[2J\x1b[H✻ Working…\r\n  ⎿  API Error (Connection error.) · Retrying in 5 seconds… (attempt 2/10)\r\n"); return; }
   if (line === "retry3") { process.stdout.write("\x1b[2J\x1b[H✻ Working…\r\n  ⎿  API Error (Connection error.) · Retrying in 9 seconds… (attempt 3/10)\r\n"); return; }
   if (line === "reached") { process.stdout.write("\x1b[2J\x1b[H✻ Working…\r\n"); return; }
+  // Any agent: its window's title set to what follows (Grok says in its title what it does and that it waits).
+  if (line.startsWith("title ")) { process.stdout.write(`\x1b]0;${line.slice(6)}\x07titled\r\n`); return; }
+  // Grok's question before a tool (1.0.77): numbered rows with a round mark, the filled one where the selection is.
+  if (line === "grokperm") { perm = 2; drawPerm(); return; }
+  // Grok's question about a folder it does not trust: two rows, each taken by the key at its end; Enter takes the first.
+  if (line === "groktrust") { folder = true; drawFolder(); return; }
   // Claude Code while it works: its line with a clock and the tokens so far, on a row it redraws (`working 1.3k`).
   if (line.startsWith("working ")) { process.stdout.write(`\r\x1b[2K✻ Pondering… (12s · ↓ ${line.slice(8)} tokens · thought for 2s)`); return; }
   // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.
@@ -125,6 +131,21 @@ function drawTrust() {
   process.stdout.write("\x1b[2J\x1b[H" + "─".repeat(60) + "\r\n Accessing workspace:\r\n\r\n /tmp/somewhere\r\n\r\n Quick safety check: Is this a project you created or one you trust?\r\n\r\n Security guide\r\n\r\n"
     + TRUST.map((row, i) => ` ${i === trust ? "❯" : " "} ${row}`).join("\r\n") + "\r\n\r\n Enter to confirm · Esc to cancel\r\n");
 }
+// Grok's question before a tool (`grokperm`): where its mark stands, or null when it is not up.
+let perm = null;
+const PERM = ["Yes, and don't ask again for anything (always-approve mode)", "Always allow: rm probe-file.txt", "Yes, proceed", "No, reject (type to add feedback)", "Never allow: rm probe-file.txt"];
+function drawPerm() {
+  process.stdout.write("\x1b[2J\x1b[H   ◆ Remove probe-file.txt as requested… 1.5s\r\n  ┃\r\n  ┃  ›  Remove probe-file.txt as requested\r\n  ┃  │ rm probe-file.txt\r\n  ┃  ← → narrow scope  ·  e edit pattern\r\n  ┃\r\n"
+    + PERM.map((row, i) => `  ┃  ${i + 1} (${i === perm ? "●" : "○"}) ${row}`).join("\r\n") + "\r\n  ┃\r\n  1/5:select  │  Tab:next option  │  ←/→:scope  │  e:edit pattern  │  Ctrl+o:always-approve  │  Ctrl+c:cancel\r\n");
+}
+// Grok's folder question (`groktrust`): up or not.
+let folder = false;
+function drawFolder() {
+  const mid = (s) => " ".repeat(Math.max(0, Math.floor((100 - s.length) / 2))) + s;
+  process.stdout.write("\x1b[2J\x1b[H\r\n" + mid("⠀⠀⣼⡟⠁⠀⠀⠀⢀⡴⠻⣿⡀⠀") + "\r\n" + mid("⠀⠀⣿⡇⠀⠀⠀⠔⠁⠀⠀⣿⡇⠀") + "\r\n\r\n\r\n" + mid("Do you trust the contents of this directory?") + "\r\n" + mid("/tmp/somewhere") + "\r\n\r\n"
+    + mid("Grok Build may run or modify contents in this directory,") + "\r\n" + mid("posing security risks.") + "\r\n\r\n"
+    + " ".repeat(40) + "Yes, proceed                 y\r\n" + " ".repeat(40) + "No, quit                     n\r\n\r\n\r\n" + " ".repeat(80) + "Grok Build  1.0.77\r\n");
+}
 // Its own list of commands (`FAKE_SLASH=1`): `/` typed into the empty input pops it up, three rows at a time; the
 // arrow keys walk it, a backspace takes the `/` out.
 const SLASH = [["model", "choose what model and reasoning effort to use"], ["daybreak", "turn Daybreak on or off"], ["new", "start a new chat"], ["compact", "summarize the conversation"],
@@ -143,6 +164,26 @@ process.stdin.on("data", (d) => {
       if (slash === null) break;
       if (key === "\x7f") { slash = null; process.stdout.write("\x1b[2J\x1b[H› \x1b[2mAsk anything\x1b[22m\r\n"); }
       else { slash = (slash + (key.endsWith("B") ? 1 : SLASH.length - 1)) % SLASH.length; drawSlash(); }
+    }
+    return;
+  }
+  if (folder) {
+    // A key takes a row; Enter the first; anything else it does not hear.
+    for (const key of String(d)) {
+      if (key !== "y" && key !== "n" && key !== "\r" && key !== "\n") continue;
+      folder = false;
+      process.stdout.write(`\x1b[2J\x1b[Hfolder: ${key === "n" ? "No, quit" : "Yes, proceed"}\r\n`);
+      break;
+    }
+    return;
+  }
+  if (perm !== null) {
+    // The arrow keys move the mark and Enter takes the row; a row's number takes it at once.
+    for (const key of String(d).match(/\x1b[\[O][AB]|\r|\n|[1-5]/g) ?? []) {
+      if (perm === null) break;
+      if (/[1-5]/.test(key)) perm = Number(key) - 1;
+      if (key === "\r" || key === "\n" || /[1-5]/.test(key)) { process.stdout.write(`\x1b[2J\x1b[Hpermission: ${PERM[perm]}\r\n`); perm = null; }
+      else { perm = Math.max(0, Math.min(PERM.length - 1, perm + (key.endsWith("B") ? 1 : -1))); drawPerm(); }
     }
     return;
   }

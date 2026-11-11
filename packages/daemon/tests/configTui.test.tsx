@@ -24,6 +24,7 @@ function world() {
     codex: { current: "default", creatable: true, kinds: ["api"], profiles: [p("default", "Default")] },
     opencode: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
     pi: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
+    grok: { current: "default", creatable: false, kinds: [], profiles: [p("default", "Default")] },
   };
   const models: ModelSettings = { router: { model: "opencode/r1", options: ["opencode/r1", "opencode/r2"] }, default: { harness: "claude-code", model: "opus" },
     harnesses: { "claude-code": { models: ["opus", "sonnet"], default_model: "opus" }, codex: { models: ["gpt-a", "gpt-b"], default_model: "gpt-b" } }, restartRequired: false };

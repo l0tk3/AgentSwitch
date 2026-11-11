@@ -20,6 +20,17 @@ public enum Motion {
         Int((date.timeIntervalSince(epoch) / interval + 1e-6).rounded(.down))
     }
 
+    /// The moment of a motion's step number `step`.
+    public static func moment(of step: Int, every interval: TimeInterval) -> Date {
+        epoch.addingTimeInterval(Double(step) * interval)
+    }
+
+    /// The first step's moment after `date`: what a clock of our own waits for where a timeline would cost too much
+    /// (`Stepped`, 2026-11-10). Never `date` itself: a step just taken is not waited for again.
+    public static func next(after date: Date, every interval: TimeInterval) -> Date {
+        moment(of: step(at: date, every: interval) + 1, every: interval)
+    }
+
     /// Where a view is, as AppKit says it: it is seen while its window is on screen — ordered in, not minimised, not
     /// covered entirely by other windows (which is also what an app hidden, another Space or a sleeping display give) —
     /// and neither it nor a view around it is hidden (another page of the main window, a closed panel's content).

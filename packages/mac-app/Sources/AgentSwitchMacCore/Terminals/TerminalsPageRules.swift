@@ -179,13 +179,24 @@ public enum TerminalListRows {
     }
 }
 
+/// What a terminal runs besides the agents (docs/terminal-v0.md §0, 2026-11-10; user: 似乎没有打开终端的地方): the user's
+/// own shell, in the place of an agent's name (`TerminalInfo.harness`). It is no agent: no session and no record of
+/// one, no model, no way of asking, nothing it waits for — it is a terminal and nothing else, and the service opens
+/// one only for the Mac it runs on.
+public enum TerminalKind {
+    public static let shell = "shell"
+    public static let shellName = "Shell"
+    /// `harness` is an agent's: what has a record, a model, requests.
+    public static func isAgent(_ harness: String) -> Bool { harness != shell }
+}
+
 /// The page's short words.
 public enum TerminalListText {
-    public static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi")]
-    /// The agents whose sessions can be gone on with (pi's since 2026-10-11, docs/terminal-v0.md §5).
-    public static let resumable: Set<String> = ["claude-code", "codex", "opencode", "pi"]
-    /// The agents the service can tell are open elsewhere (not OpenCode's or pi's).
-    public static let checked: Set<String> = ["claude-code", "codex"]
+    public static let agents: [(id: String, name: String)] = [("claude-code", "Claude Code"), ("codex", "Codex"), ("opencode", "OpenCode"), ("pi", "pi"), ("grok", "Grok")]
+    /// The agents whose sessions can be gone on with (pi's since 2026-10-11, Grok's since 2026-11-11, docs/terminal-v0.md §5).
+    public static let resumable: Set<String> = ["claude-code", "codex", "opencode", "pi", "grok"]
+    /// The agents the service can tell are open elsewhere (not OpenCode's or pi's; Grok lists what it has open).
+    public static let checked: Set<String> = ["claude-code", "codex", "grok"]
     /// What is asked before going on with a session the service cannot tell is open elsewhere, when it was written
     /// lately: it goes on in the same record (OpenCode cannot fork one).
     public static func mayBeOpen(_ harness: String) -> String {
@@ -222,7 +233,9 @@ public enum TerminalListText {
     /// How the agent asks before acting: the id the service takes and its name on the panel.
     public static let modes: [(id: String, name: String)] = [("manual", "Ask Each"), ("auto", "Auto"), ("bypass", "Bypass")]
 
-    public static func agentName(_ harness: String) -> String { agents.first { $0.id == harness }?.name ?? harness }
+    public static func agentName(_ harness: String) -> String {
+        agents.first { $0.id == harness }?.name ?? (harness == TerminalKind.shell ? TerminalKind.shellName : harness)
+    }
 
     /// A terminal's status as it is shown; the service's own word for one this page does not know.
     public static func status(_ status: String) -> String {

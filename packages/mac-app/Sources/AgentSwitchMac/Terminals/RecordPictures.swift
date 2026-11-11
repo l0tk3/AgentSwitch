@@ -10,19 +10,37 @@ import SwiftUI
 struct RecordSource {
     let harness: String
     let session: String
+    /// The record is one of the session's sub-agents' (docs/simple-view-v0.md §5.22), by its id: its steps are asked
+    /// for there. Nil: the session's own.
+    var agent: String? = nil
     let client: () -> DaemonClient
 
-    func key(_ item: String, _ n: Int) -> String { "\(harness)/\(session)/\(item)/\(n)" }
+    /// The session's record, or (`agent`) one of its sub-agents'.
+    private var place: String { agent.map { "\(harness)/\(session)/@\($0)" } ?? "\(harness)/\(session)" }
+    private var target: SubagentTarget? { agent.map { SubagentTarget(harness: harness, session: session, agent: $0) } }
+
+    func key(_ item: String, _ n: Int) -> String { "\(place)/\(item)/\(n)" }
 
     /// The `n`-th picture of `item`: one sent with a message, or — `step` given — one the step of that place in a run
     /// of work brought back.
-    func key(_ item: String, step: Int?, _ n: Int) -> String { step.map { "\(harness)/\(session)/\(item)/s\($0)/\(n)" } ?? key(item, n) }
+    func key(_ item: String, step: Int?, _ n: Int) -> String { step.map { "\(place)/\(item)/s\($0)/\(n)" } ?? key(item, n) }
 
     @MainActor
     func picture(_ item: String, step: Int?, _ n: Int) async throws -> Data {
         let client = client(), harness = harness, session = session
-        if let step { return try await client.sessionStepImage(harness: harness, id: session, work: item, n: step, k: n) }
+        if let step {
+            if let target { return try await client.subagentStepImage(target, work: item, n: step, k: n) }
+            return try await client.sessionStepImage(harness: harness, id: session, work: item, n: step, k: n)
+        }
         return try await client.sessionImage(harness: harness, id: session, item: item, n: n)
+    }
+
+    /// The `n`-th step of the run of work `work`, whole.
+    @MainActor
+    func step(work: String, n: Int) async -> RecordStepDetail? {
+        let client = client()
+        if let target { return await client.subagentStep(target, work: work, n: n) }
+        return await client.sessionStep(harness: harness, id: session, work: work, n: n)
     }
 }
 

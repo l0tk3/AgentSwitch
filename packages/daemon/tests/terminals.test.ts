@@ -258,6 +258,51 @@ describe("terminal host", () => {
     expect(claudeHookSettings("hook").hooks).toMatchObject({ SubagentStart: expect.any(Array), SubagentStop: expect.any(Array) });
   });
 
+  it("names a sub-agent by what Claude Code wrote of it beside its file: one not seen starting no longer comes back as its kind (2026-11-10)", async () => {
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "claude-code", cwd: tmpdir() });
+    const token = (host as unknown as { sessions: Map<string, { hookToken: string }> }).sessions.get(info.id)!.hookToken;
+    const hook = (event: string, payload: Record<string, unknown>) => host.hook(info.id, token, { event, payload });
+    // The session's file, and beside it the folder Claude Code keeps its sub-agents in (sessions/subagents.ts).
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "agentswitch-subagents-")));
+    const file = join(project, "s1.jsonl");
+    writeFileSync(file, "");
+    const kept = join(project, "s1", "subagents");
+    mkdirSync(kept, { recursive: true });
+    const keeps = (id: string, meta: object | null) => {
+      writeFileSync(join(kept, `agent-${id}.jsonl`), "{}\n");
+      if (meta) writeFileSync(join(kept, `agent-${id}.meta.json`), JSON.stringify(meta));
+    };
+    keeps("a7", { agentType: "general-purpose", description: "查一下  连接池\n的上限", requestShape: "background" });
+    await hook("SessionStart", { session_id: "s1", transcript_path: file });
+    // A background one works on after the turn that sent it ended (`Stop` forgets it): it comes back with its next
+    // tool call, named as it was — by its kind before, `general-purpose`.
+    const before = Date.now();
+    await hook("PreToolUse", { session_id: "s1", agent_id: "a7", agent_type: "general-purpose", tool_name: "Read", tool_input: { file_path: "/w/pool.ts" } });
+    expect(host.get(info.id)!.subagents).toMatchObject([{ id: "a7", type: "general-purpose", name: "查一下 连接池 的上限" }]);
+    // Its clock is its own start (when its file was made), not when it was taken in.
+    expect(host.get(info.id)!.subagents[0]!.since).toBeLessThanOrEqual(before);
+    // One Claude Code wrote nothing of is named as before: by its kind.
+    keeps("a8", null);
+    await hook("PreToolUse", { agent_id: "a8", agent_type: "Explore", tool_name: "Read", tool_input: { file_path: "/w/a.ts" } });
+    expect(host.get(info.id)!.subagents.map((a) => [a.id, a.name])).toEqual([["a7", "查一下 连接池 的上限"], ["a8", "Explore"]]);
+    await hook("Stop", { last_assistant_message: "好了" });
+    // Two of one kind sent together: each is the one Claude Code says it is, in whatever order they start — by their
+    // kind alone the first to start took the first call's words.
+    await hook("PreToolUse", { tool_name: "Agent", tool_input: { description: "甲", subagent_type: "Explore", prompt: "…" } });
+    await hook("PreToolUse", { tool_name: "Agent", tool_input: { description: "乙", subagent_type: "Explore", prompt: "…" } });
+    keeps("b1", { agentType: "Explore", description: "甲" });
+    keeps("b2", { agentType: "Explore", description: "乙" });
+    await hook("SubagentStart", { agent_id: "b2", agent_type: "Explore" });
+    await hook("SubagentStart", { agent_id: "b1", agent_type: "Explore" });
+    expect(host.get(info.id)!.subagents.map((a) => [a.id, a.name])).toEqual([["b2", "乙"], ["b1", "甲"]]);
+    // Another session (`/clear`): its file is another, and nothing of the first one's folder names its sub-agents.
+    await hook("SessionStart", { session_id: "s2" });
+    await hook("PreToolUse", { session_id: "s2", agent_id: "a7", agent_type: "general-purpose", tool_name: "Read", tool_input: { file_path: "/w/pool.ts" } });
+    expect(host.get(info.id)!.subagents.map((a) => [a.id, a.name])).toEqual([["a7", "general-purpose"]]);
+  });
+
   it("a screen that (re)connects gets every request waiting, whole: one answered while it was away is gone", async () => {
     const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true) });
     closers.push(() => host.closeAll());
@@ -1319,9 +1364,9 @@ describe("terminals over HTTP", () => {
     expect((await call("POST", "/terminals", { harness: "claude-code", cwd: "relative/dir" })).status).toBe(400);
 
     const listed0 = await call("GET", "/terminals");
-    expect(listed0.json).toMatchObject({ terminals: [], agents: ["claude-code", "codex", "opencode", "pi"] });
-    // Each agent's models for the new terminal's menu, as people say them; pi has no catalog.
-    expect(Object.keys(listed0.json.models)).toEqual(["claude-code", "codex", "opencode", "pi"]);
+    expect(listed0.json).toMatchObject({ terminals: [], agents: ["claude-code", "codex", "opencode", "pi", "grok"] });
+    // Each agent's models for the new terminal's menu, as people say them; pi has no catalog, nor Grok (it is asked).
+    expect(Object.keys(listed0.json.models)).toEqual(["claude-code", "codex", "opencode", "pi", "grok"]);
     expect(listed0.json.models.pi).toEqual([]);
     for (const m of Object.values(listed0.json.models).flat() as { id: string; name: string }[]) expect(m.name.length).toBeGreaterThan(0);
     // A model id goes to the agent as `--model <id>`: nothing that reads as a flag.

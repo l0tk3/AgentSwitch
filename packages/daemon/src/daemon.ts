@@ -88,6 +88,7 @@ import { listenRemote, type RemoteListener } from "./remote/server.js";
 import type { TargetRef } from "./core/target.js";
 import { mergeLogged } from "./router/discovery.js";
 import { CodexHookTrust, codexHookArgs } from "./terminals/codexHooks.js";
+import { ensureGrokHooks, grokHome } from "./terminals/grokHooks.js";
 import { ModelOffers } from "./router/modelOffers.js";
 import { OpenCodeServer, serveRouter, DEFAULT_OPENCODE_PORT } from "./router/routers/opencodeServe.js";
 import type { PlannerFactory } from "./engine/engine.js";
@@ -309,7 +310,10 @@ export function terminalBinaries(targets: Pick<Targets, "harnesses">, opencodeBi
   if (claude) out["claude-code"] = claude;
   if (codex) out.codex = codex;
   if (opencode) out.opencode = opencode;
+  // Grok as chosen there (`GROK_BIN`), else where it is found, else where its installer puts it.
+  const grok = first(env.GROK_BIN, resolveCommand(undefined, "grok", env.PATH), join(home, ".local", "bin", "grok"), join(home, ".grok", "bin", "grok"));
   if (pi) out.pi = pi;
+  if (grok) out.grok = grok;
   return out;
 }
 
@@ -476,6 +480,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         // Through `current` where the runtime has one: a terminal that outlives this runtime runs the next one's hooks.
         node: stable(process.execPath), hookScript: stable(HOOK_SCRIPT), holding: held,
         codexHooks: (home) => codexTrust(home)?.trusted ?? false, opencodeServer: true,
+        // Grok's hooks are a file of ours in its own folder (terminals/grokHooks.ts), looked for — and written again
+        // where it is gone — as each Grok terminal starts.
+        grokHooks: () => ensureGrokHooks(grokHome(), QUICK_HOOK_TIMEOUT_S),
         // Codex on its own, as its command line starts it (2026-10-08, user: 你直接改回命令行吧). Through an app-server of
         // the terminal's own a screen could set its model and effort (codexTerminal.ts), but a session made that way is
         // marked as an app's, not the command line's (`codex app-server` says so itself, with no option), and Codex's
@@ -712,7 +719,8 @@ export async function serve(cfg: DaemonConfig): Promise<{ daemon: Daemon; close:
   if (cfg.executors === "real") await checkGateProxy(defaultGate());
   if (cfg.executors === "real") warmBrowserMcp(defaultGate());
   const yaml = loadTargets(cfg.targetsPath);
-  const modelOffers = cfg.executors === "real" ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()) }) : undefined;
+  const grokBinary = cfg.terminals ? terminalBinaries(yaml, cfg.opencodeBinary).grok : undefined;
+  const modelOffers = cfg.executors === "real" ? new ModelOffers({ codexBinary: codexBinary(yaml), ...withClaude(claudeBinary()), ...(grokBinary ? { grokBinary, grokHome: grokHome() } : {}) }) : undefined;
   const targets = modelOffers ? mergeLogged(yaml, await modelOffers.refresh()) : yaml;
   const stopOffers = modelOffers?.start();
   let opencode: OpenCodeServer | undefined;

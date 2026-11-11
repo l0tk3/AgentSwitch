@@ -119,6 +119,14 @@ enum DesignPreview {
                     try await RecordTurnProbe.run(into: directory)
                     exit(0)
                 }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "motion" {
+                    try await MotionProbe.run(into: directory)
+                    exit(0)
+                }
+                if UserDefaults.standard.string(forKey: "designPreviewOnly") == "terminals-cpu" {
+                    try await TerminalsCPUProbe.run(into: directory)
+                    exit(0)
+                }
                 if UserDefaults.standard.string(forKey: "designPreviewOnly") == "terminals" {
                     try await TerminalsPagePreview.render(into: directory)
                     FileHandle.standardError.write(Data("design preview (the Terminals page) written to \(directory.path)\n".utf8))

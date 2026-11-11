@@ -148,7 +148,7 @@ const TAIL = 40;
 const ACTIVE: ReadonlySet<TaskStatus> = new Set(["queued", "routing", "running", "waiting_approval"]);
 const ENDS = ["done", "partial", "blocked", "failed"] as const satisfies readonly TaskStatus[];
 const TOKEN = /enc:(?:v1|ref):[A-Za-z0-9_=-]{8,}/g;
-const HARNESS: Readonly<Record<string, string>> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", echo: "Echo" };
+const HARNESS: Readonly<Record<string, string>> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", grok: "Grok", echo: "Echo" };
 
 export function liveSnapshot(store: Store, terminals: TerminalHost | undefined, now: number): LiveSnapshot {
   const pending = new Map<string, Approval>();

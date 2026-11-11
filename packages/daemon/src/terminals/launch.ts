@@ -3,20 +3,22 @@
  *  executors', and the hooks go into this terminal's own settings — the user's global agent configuration is never
  *  touched, so agents they start in iTerm are unaffected. */
 
-import { effortArgs } from "../harness/efforts.js";
+import { EFFORT, effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
+import { GROK_HOOK_NODE, GROK_HOOK_SCRIPT } from "./grokHooks.js";
 import { CodexCompanion } from "./codexTerminal.js";
 import { CODEX_DAYBREAK_FEATURE } from "../harness/codexFeatures.js";
 import { OpenCodeCompanion } from "./opencodeTerminal.js";
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { which } from "../util/which.js";
 import { fileURLToPath } from "node:url";
 import { withoutCredentialRepair } from "../executors/gate.js";
 import { CODEX_FILE_STORE } from "./signIn.js";
 import { protectedDeny } from "../executors/opencodeShared.js";
 import { rootSpellings, type ProtectedPaths } from "../executors/protected.js";
-import type { Companion, LaunchPlan, LaunchRequest, Launcher, TerminalHarness } from "./host.js";
+import { SHELL, type Companion, type LaunchPlan, type LaunchRequest, type Launcher, type TerminalHarness } from "./host.js";
 import type { Holding } from "./held.js";
 
 /** The hook command's script next to this module: hookClient.js in dist/, hookClient.ts under tsx (node strips its types). */
@@ -32,6 +34,8 @@ export const QUICK_HOOK_TIMEOUT_S = 10;
 export type LauncherOptions = {
   /** Agent executables; a missing one cannot be started. */
   readonly binaries: Partial<Record<TerminalHarness, string>>;
+  /** The program a shell terminal runs; absent: the user's own shell (`userShell`). */
+  readonly shell?: string;
   /** The service's local URL the hook command calls (http://127.0.0.1:<port>). */
   readonly hookUrl: () => string;
   /** Per-terminal files (settings, MCP config) go under here: `<dir>/<id>/`. The managed executors may not read it. */
@@ -47,6 +51,10 @@ export type LauncherOptions = {
    *  trusts them (codexHooks.ts) — in the folder it runs in: a profile's (`home`) or the Mac's own; until then it goes
    *  without and its status is guessed. */
   readonly codexHooks?: (home?: string) => boolean;
+  /** Grok gets AgentSwitch's hooks (status, the protected-path check, its sub-agents) where AgentSwitch's hook file
+   *  is in the folder Grok keeps its own in (grokHooks.ts `ensureGrokHooks`); else it goes without and its status is
+   *  read from its window title and its output. */
+  readonly grokHooks?: () => boolean;
   /** OpenCode's TUI attaches to a private server the service starts and watches (status, permission requests;
    *  opencodeTerminal.ts); without it, or when that server does not start, it runs `--standalone` and its status is
    *  guessed. */
@@ -229,6 +237,22 @@ export function claudeHookSettings(command: string, prot?: ProtectedPaths): Reco
   };
 }
 
+/** The user's shell: the one their account names, else the environment's, else zsh (a Mac's own since 10.15) — and
+ *  where there is none (a Linux node), bash, then `sh`, which is everywhere. */
+export function userShell(env: Record<string, string | undefined>): string {
+  let named: string | null = null;
+  try { named = userInfo().shell; } catch { /* no such user (a container): the environment's */ }
+  for (const file of [named, env.SHELL, "/bin/zsh", "/bin/bash"]) if (file && isAbsolute(file) && existsSync(file)) return file;
+  return "/bin/sh";
+}
+
+/** With a locale that reads UTF-8 where the environment names none (a service started outside a login session): a
+ *  shell without one cannot take what is typed in Chinese, and lists such file names as question marks. `LC_CTYPE`
+ *  alone, as a terminal app sets it when it knows no more: the language of messages stays the system's. */
+export function withTextLocale(env: Record<string, string>): Record<string, string> {
+  return env.LANG || env.LC_ALL || env.LC_CTYPE ? env : { ...env, LC_CTYPE: "UTF-8" };
+}
+
 export function agentLauncher(opts: LauncherOptions): Launcher {
   const node = opts.node ?? process.execPath;
   const script = opts.hookScript ?? HOOK_SCRIPT;
@@ -238,6 +262,14 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
   // The browser session made for the plan being made (a launch is synchronous).
   let minted: BridgeCommand["minted"] | null = null;
   const plans = (req: LaunchRequest): LaunchPlan => {
+    // The user's own shell (docs/terminal-v0.md §0, 2026-11-10), as a terminal app starts it: a login shell in the
+    // folder, with the service's environment. It is no agent: none of this terminal's hook variables (what runs in it
+    // cannot speak for it), nothing written for it, and its status is not guessed from what it prints — `hooks`, of
+    // which it has none, so it is idle until it ends.
+    if (req.harness === SHELL) {
+      const env = { ...withoutParentSession(withoutCredentialRepair(opts.env ?? process.env)), TERM: "xterm-256color", COLORTERM: "truecolor" };
+      return { file: opts.shell ?? userShell(env), args: ["-l"], env: withTextLocale(env), hooks: true };
+    }
     const file = opts.binaries[req.harness];
     if (!file) throw new Error(`${req.harness} is not installed on this Mac`);
     const dir = join(opts.stateDir, req.id);
@@ -376,6 +408,33 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         if (req.resume) args.push(req.fork ? "--fork" : "--session", req.resume);
         return { file, args, env, hooks: true };
       }
+      case "grok": {
+        // Its hooks are a file in its own folder (grokHooks.ts), the same for every terminal and for none: what makes
+        // them this terminal's is its environment — the three variables above, and the program to run.
+        const hooked = opts.grokHooks?.() ?? false;
+        if (hooked) { env[GROK_HOOK_NODE] = node; env[GROK_HOOK_SCRIPT] = script; }
+        const args: string[] = [];
+        // The model and the level are configuration of this one start (`GROK_CONFIG`, which Grok lays over its
+        // config.toml for the process), not flags: started with `--model` or `--reasoning-effort`, Grok writes them
+        // into the user's config.toml as what every later session of theirs starts on (measured 2026-11-11 with
+        // 1.0.77: `--model grok-4.6` left `default = "grok-4.6"` there; the overlay left the file as it was).
+        const level = req.effort && EFFORT.test(req.effort) ? req.effort : undefined;
+        if (req.model || level) {
+          const had = inlineConfig(env.GROK_CONFIG);
+          const models = { ...(had.models && typeof had.models === "object" && !Array.isArray(had.models) ? had.models as Record<string, unknown> : {}),
+            ...(req.model ? { default: req.model } : {}), ...(level ? { default_reasoning_effort: level } : {}) };
+          env.GROK_CONFIG = JSON.stringify({ ...had, models });
+        }
+        // How it asks, in its own words: every time (`default`), its automatic mode, or not at all. Stated, not left
+        // to its config.toml (which may say never to ask).
+        args.push("--permission-mode", req.mode === "bypass" ? "bypassPermissions" : req.mode === "auto" ? "auto" : "default");
+        // The protected paths, refused by its own rules in every mode — also for the commands it runs that name them
+        // — whether or not the service answers its hook (which then lets the call through).
+        args.push(...grokDenyArgs(opts.protected));
+        // The same session goes on (docs/terminal-v0.md §5); a fork is a new session with the whole history.
+        if (req.resume) args.push("--resume", req.resume, ...(req.fork ? ["--fork-session"] : []));
+        return { file, args, env, hooks: hooked };
+      }
     }
   };
   return (req: LaunchRequest): LaunchPlan => {
@@ -417,7 +476,19 @@ export function codexPermissions(base: ":read-only" | ":workspace", prot?: Prote
   return ["-c", 'default_permissions="agentswitch"', "-c", `permissions.agentswitch=${profile}`];
 }
 
-/** OpenCode's inline configuration (OPENCODE_CONFIG_CONTENT) as an object; nothing where it is not one. */
+/** Grok's own deny rules for the protected paths, as flags of one start (`--deny 'Read(<path>/**)'`): what may not be
+ *  read, and what may not be changed. Its rules take an absolute path as it is written; a folder's rule covers the
+ *  folder and all under it. */
+export function grokDenyArgs(prot?: ProtectedPaths): string[] {
+  if (!prot) return [];
+  // (Claude Code writes such a path with `//` in front; Grok takes that for part of the name.)
+  const rule = (tool: string, path: string) => [`${tool}(${path})`, `${tool}(${path}/**)`];
+  const rules = [...new Set([...(prot.readDenied ?? []).flatMap(rootSpellings).flatMap((p) => rule("Read", p)), ...prot.roots.flatMap(rootSpellings).flatMap((p) => rule("Edit", p))])];
+  return rules.flatMap((r) => ["--deny", r]);
+}
+
+/** An agent's inline configuration (OpenCode's OPENCODE_CONFIG_CONTENT, Grok's GROK_CONFIG) as an object; nothing
+ *  where it is not one. */
 function inlineConfig(text: string | undefined): Record<string, unknown> {
   if (!text) return {};
   try {

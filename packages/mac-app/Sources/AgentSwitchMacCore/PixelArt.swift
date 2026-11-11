@@ -107,12 +107,14 @@ public enum PixelArt {
     public static let square = ["####", "####", "####", "####"]
     public static let hollow = ["####", "#..#", "#..#", "####"]
     public static let lock = [".###.", "#...#", "#####", "##.##", "#####"]
-    /// Each agent's mark, from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π.
+    /// Each agent's mark, from its own logo: Claude Code's spark, Codex's >_, OpenCode's brackets, pi's π, Grok's
+    /// ring with a stroke through it.
     public static let agents: [String: [String]] = [
         "claude-code": ["#.#.#", ".###.", "#####", ".###.", "#.#.#"],
         "codex": [".....", "#....", ".#...", "#.###", "....."],
         "opencode": ["##.##", "#...#", "#...#", "#...#", "##.##"],
         "pi": ["#####", ".#.#.", ".#.#.", ".#.#.", ".#..#"],
+        "grok": [".##.#", "#..#.", "#.#.#", ".#..#", "#.##."],
     ]
     /// The menu bar panel's actions (2026-10-07, user: 剩下的几个都加上图标), in 1 pt cells: pairing as the code that is
     /// scanned, restarting as two arrows round, quitting as the power mark. Settings, Dispatch and Terminals use the

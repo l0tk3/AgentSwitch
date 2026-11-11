@@ -188,6 +188,8 @@ final class NativeTerminalsPage: NSObject, TerminalsPage {
         if head.tag != mark.tag { head.tag = mark.tag }
         let simple = model.focusedSimple
         if head.simple != simple { head.simple = simple }
+        let views = terminal.map { TerminalKind.isAgent($0.harness) } ?? true
+        if head.views != views { head.views = views }
         let light = model.focusedLight
         if head.light != light { head.light = light }
         var context = terminal == nil ? nil : session?.context

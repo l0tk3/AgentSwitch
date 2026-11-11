@@ -323,7 +323,7 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; }
 .create { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--term); overflow-y: auto; z-index: 1; }
 .create-card { width: min(560px, 100%); }
 /* In a pane (two or more on the page): the form in the room that pane has — no wordmark, the agents two to a row
-   where four do not fit, and the whole of it within reach when the pane is lower than the form. */
+   where five do not fit, and the whole of it within reach when the pane is lower than the form. */
 .create.in-pane { display: flex; padding: 14px 16px; container-type: inline-size; }
 .create.in-pane .create-card { margin: auto; }
 .create.in-pane .wordmark { display: none; }
@@ -338,7 +338,8 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; }
 .wordmark .noise .on { color: var(--ink); font-weight: 400; }
 .wordmark .noise .off { color: var(--ink4); font-weight: 400; }
 .label { display: block; font-size: 11px; letter-spacing: .16em; color: var(--ink3); margin: 16px 0 8px; }
-.agents { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+/* Five agents in a row since Grok came (2026-11-11), set a little closer than four were. */
+.agents { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .agent { border: 1px solid var(--ink4); padding: 10px 10px 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; text-align: left; }
 .agent:hover { border-color: var(--ink2); }
 .agent.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }

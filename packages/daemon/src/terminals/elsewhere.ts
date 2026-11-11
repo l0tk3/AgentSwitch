@@ -1,7 +1,8 @@
 /** Is an agent's session open in another program right now (docs/terminal-v0.md §5)? "Continue" goes on in the same
  *  session — one record, and whoever opens it next sees what was said — so only one program may write it at a time.
  *  Codex locks a conversation while a process writes it (`~/.codex/thread-writer-locks/<id>.lock`); Claude Code has no
- *  lock, but lists each running session in `~/.claude/sessions/<pid>.json` and removes the file when it exits. */
+ *  lock, but lists each running session in `~/.claude/sessions/<pid>.json` and removes the file when it exits; Grok
+ *  lists the sessions that are open, each with the process that has it, in `~/.grok/active_sessions.json`. */
 
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -26,6 +27,8 @@ export type Proc = { readonly ppid: number; readonly comm: string };
 
 export type ElsewhereOptions = {
   readonly home?: string;
+  /** Grok's own folder (default: `GROK_HOME`, else `~/.grok`). */
+  readonly grokHome?: string;
   /** The pids holding a file open (lsof). */
   readonly holders?: (file: string) => Promise<number[]>;
   /** Every process: pid → parent and executable path (ps). */
@@ -87,6 +90,20 @@ export function claudeRunning(dir: string, sessionId: string): number[] {
   return pids;
 }
 
+/** The pids Grok lists as having `sessionId` open (`active_sessions.json`: `[{ session_id, pid, … }]`). */
+export function grokRunning(file: string, sessionId: string): number[] {
+  try {
+    const listed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    if (!Array.isArray(listed)) return [];
+    return listed.flatMap((e) => {
+      const entry = (e && typeof e === "object" ? e : {}) as { session_id?: unknown; pid?: unknown };
+      return entry.session_id === sessionId && Number.isInteger(entry.pid) ? [entry.pid as number] : [];
+    });
+  } catch {
+    return [];   // none yet, or being written
+  }
+}
+
 /** `pid` and its parents, nearest first. */
 function ancestry(table: Map<number, Proc>, pid: number): number[] {
   const chain: number[] = [];
@@ -99,6 +116,7 @@ const bundleOf = (comm: string): string | null => /^(.*?\.app)\//.exec(comm)?.[1
 
 export function elsewhereCheck(opts: ElsewhereOptions = {}): ElsewhereCheck {
   const home = opts.home ?? homedir();
+  const grok = opts.grokHome ?? (process.env.GROK_HOME?.trim() || join(home, ".grok"));
   const holders = opts.holders ?? lsofHolders;
   const processes = opts.processes ?? psTable;
   const alive = opts.alive ?? isAlive;
@@ -110,6 +128,8 @@ export function elsewhereCheck(opts: ElsewhereOptions = {}): ElsewhereCheck {
     } else if (harness === "codex") {
       const lock = join(home, ".codex", "thread-writer-locks", `${sessionId}.lock`);
       pids = existsSync(lock) ? await holders(lock).catch(() => []) : [];
+    } else if (harness === "grok") {
+      pids = grokRunning(join(grok, "active_sessions.json"), sessionId).filter(alive);
     } else {
       return null;   // OpenCode, pi: nothing to look at (the page asks when the session was active lately)
     }
@@ -118,8 +138,9 @@ export function elsewhereCheck(opts: ElsewhereOptions = {}): ElsewhereCheck {
     const mine = new Set(ours);
     for (const pid of pids) {
       const proc = table.get(pid);
-      // A Claude Code entry whose pid now belongs to some other program is left over from a crash.
+      // A Claude Code entry whose pid now belongs to some other program is left over from a crash; so a Grok one.
       if (harness === "claude-code" && proc && !/claude|node|bun/i.test(proc.comm)) continue;
+      if (harness === "grok" && proc && !/grok/i.test(proc.comm)) continue;
       const chain = ancestry(table, pid);
       if (chain.some((p) => mine.has(p))) continue;   // one of AgentSwitch's own terminals
       // The app it runs in: the first parent inside an .app (the agent's own executable may be in one, like Codex's).

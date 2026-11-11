@@ -247,6 +247,14 @@ final class TerminalsPageRulesTests: XCTestCase {
         XCTAssertEqual(TerminalListText.resumable.subtracting(TerminalListText.checked), ["opencode", "pi"])
         XCTAssertTrue(TerminalListText.mayBeOpen("opencode").contains("OpenCode 不支持分叉"))
         XCTAssertEqual(TerminalListText.mayBeOpen("pi"), "此会话可能正在其他终端中运行，继续将写入同一会话。")
+        // Grok (2026-11-11, user: 能否增加对Grok的支持): the fifth agent of the panel, under its own name; its sessions go
+        // on, and the service can tell where one is open (Grok lists what it has open), so nothing is asked first.
+        XCTAssertEqual(TerminalListText.agents.map(\.id), ["claude-code", "codex", "opencode", "pi", "grok"])
+        XCTAssertEqual(TerminalListText.agents.last?.name, "Grok")
+        XCTAssertTrue(TerminalListText.resumable.contains("grok"))
+        XCTAssertTrue(TerminalListText.checked.contains("grok"))
+        // Its level goes under its own word for it (`/effort`).
+        XCTAssertEqual(TerminalEffort.word("grok"), "Effort")
     }
 
     // 2026-10-13, user, of an empty pane's `[ Resume 「…」 ]` drawn across the whole window: 又是什么bug.

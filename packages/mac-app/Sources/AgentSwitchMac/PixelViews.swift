@@ -173,10 +173,16 @@ struct ProfileDot: View {
 
 /// In progress, everywhere the same (web page, Mac, phone): ⠋⠙⠹…; a still first frame under Reduce Motion. It turns
 /// only while seen, every spinner on the same beat (ui-v0 §7.4, 2026-10-03).
+///
+/// Turning, it is a layer whose picture Core Animation changes (`SteppedGlyph`, LayerMotion.swift; ui-v0 §7.4,
+/// 2026-11-10), laid over the glyph as text — hidden, there for its place and size: a timeline stepping it had the
+/// whole window laid out again at every frame for as long as one spinner was on screen. `held` (the probes): that
+/// frame, still, by the same layer.
 struct BrailleSpinner: View {
     static let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     /// The glyph's size: 12 in a line of words, smaller as a mark off an icon (the rail).
     var size: CGFloat = 12
+    var held: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.onScreen) private var onScreen
     @Environment(\.interfaceLook) private var look
@@ -191,22 +197,33 @@ struct BrailleSpinner: View {
 
     private var braille: some View {
         Group {
-            if reduceMotion {
+            if let held {
+                layered(held: held)
+            } else if reduceMotion {
                 glyph(0)
+            } else if onScreen, Motion.timelines {
+                TimelineView(.periodic(from: Motion.epoch, by: Motion.spinner)) { timeline in glyph(Motion.step(at: timeline.date, every: Motion.spinner)) }
             } else if onScreen {
-                TimelineView(.periodic(from: Motion.epoch, by: Motion.spinner)) { timeline in
-                    glyph(Motion.step(at: timeline.date, every: Motion.spinner))
-                }
+                layered(held: nil)
             } else {
                 glyph(Motion.step(at: Date(), every: Motion.spinner))
             }
         }
         .frame(width: (size * 2 / 3).rounded())
+        .accessibilityElement()
         .accessibilityLabel("Busy")
     }
 
-    private func glyph(_ step: Int) -> some View {
-        Text(Self.frames[step % Self.frames.count]).font(.system(size: size, design: .monospaced)).foregroundStyle(Color.busy)
+    private func layered(held: Int?) -> some View {
+        // Seen, never touched: a click on it is its row's or its button's, as it was while it was text.
+        glyph(0).hidden().overlay { SteppedGlyph(glyphs: Self.frames, size: size, color: .busy, step: Motion.spinner, held: held).allowsHitTesting(false) }
+    }
+
+    private func glyph(_ step: Int) -> some View { Self.text(step, size: size) }
+
+    /// A frame as text: what the spinner is while it is still, and what its layer's pictures are drawn to match.
+    static func text(_ step: Int, size: CGFloat) -> some View {
+        Text(frames[step % frames.count]).font(.system(size: size, design: .monospaced)).foregroundStyle(Color.busy)
     }
 }
 

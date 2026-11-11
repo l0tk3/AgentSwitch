@@ -63,15 +63,17 @@ const AGENTS = [
   { id: "codex", name: "Codex" },
   { id: "opencode", name: "OpenCode" },
   { id: "pi", name: "pi" },
+  { id: "grok", name: "Grok" },
 ];
-const AGENT = Object.fromEntries(AGENTS.map((a) => [a.id, a.name]));
-const RESUMABLE = new Set(["claude-code", "codex", "opencode", "pi"]);
+// With a shell, which this page lists and shows but does not start (docs/terminal-v0.md §0, 2026-11-10): it is no agent.
+const AGENT = { ...Object.fromEntries(AGENTS.map((a) => [a.id, a.name])), shell: "Shell" };
+const RESUMABLE = new Set(["claude-code", "codex", "opencode", "pi", "grok"]);
 /** Sessions whose record can be deleted here (OpenCode keeps them in its database). */
 // Every agent's sessions can be deleted (docs/terminal-v0.md §5; OpenCode and pi since 2026-10-01).
-const DELETABLE = new Set(["claude-code", "codex", "opencode", "pi"]);
-/** "Continue" goes on in the same session, one program at a time; the service sees where Claude Code and Codex
+const DELETABLE = new Set(["claude-code", "codex", "opencode", "pi", "grok"]);
+/** "Continue" goes on in the same session, one program at a time; the service sees where Claude Code, Codex and Grok
  *  sessions are open (terminal-v0 §5), not OpenCode's or pi's. */
-const CHECKED = new Set(["claude-code", "codex"]);
+const CHECKED = new Set(["claude-code", "codex", "grok"]);
 /** How the agent asks before acting (terminal-v0 §3); the protected paths stay closed in all three. */
 const MODES = [
   { id: "manual", name: "Ask Each" },

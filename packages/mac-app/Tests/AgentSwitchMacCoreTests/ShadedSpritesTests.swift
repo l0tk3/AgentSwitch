@@ -8,8 +8,8 @@ final class ShadedSpritesTests: XCTestCase {
     /// The same number as the phone's ShadedSpritesTests and the daemon's uiShaded.test.ts: the three copies of the
     /// pictures are one set. A picture changed here changes it; change the other two copies with it.
     func testThePicturesAreTheOnesTheOtherCopiesHave() {
-        XCTAssertEqual(ShadedSprite.digest, 4_248_886_859)
-        XCTAssertEqual(all.count, 15)
+        XCTAssertEqual(ShadedSprite.digest, 3_628_782_494)
+        XCTAssertEqual(all.count, 16)
         XCTAssertEqual(Set(all.map(\.name)).count, all.count)
     }
 
@@ -19,7 +19,7 @@ final class ShadedSpritesTests: XCTestCase {
             XCTAssertTrue(sprite.rows.allSatisfy { $0.count == sprite.width }, "\(name): every row is as long as the first")
             XCTAssertLessThanOrEqual(sprite.width, 16, name)
             XCTAssertLessThanOrEqual(sprite.height, 16, name)
-            XCTAssertEqual(name.hasSuffix("code") || name == "codex" || name == "pi", ShadedSprite.agents[name] != nil, name)
+            XCTAssertEqual(name.hasSuffix("code") || name == "codex" || name == "pi" || name == "grok", ShadedSprite.agents[name] != nil, name)
             for tone in Set(sprite.rows.joined()) where tone != "." {
                 XCTAssertNotNil(ShadedSprite.color(tone, dark: true), "\(name): \(tone) is a tone")
                 XCTAssertNotNil(ShadedSprite.color(tone, dark: false), "\(name): \(tone) is a tone on a light ground")

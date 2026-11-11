@@ -520,7 +520,7 @@ struct TerminalsTab: View {
 
     /// Sessions whose record the Mac can delete: every agent's (docs/terminal-v0.md §5; OpenCode, through its own command,
     /// and pi since 2026-10-01, user: opencode、pi 都加上删除支持).
-    static let deletable: Set<String> = ["claude-code", "codex", "opencode", "pi"]
+    static let deletable: Set<String> = ["claude-code", "codex", "opencode", "pi", "grok"]
 
     /// The row is wiped out while the Mac deletes the record; it comes back if that fails.
     private func deleteSession(_ s: SessionSummary) async {
@@ -571,8 +571,8 @@ struct TerminalsTab: View {
         }
     }
 
-    /// The agents whose sessions can be gone on with (pi's since 2026-10-11, docs/terminal-v0.md §5).
-    static let resumable: Set<String> = ["claude-code", "codex", "opencode", "pi"]
+    /// The agents whose sessions can be gone on with (pi's since 2026-10-11, Grok's since 2026-11-11, docs/terminal-v0.md §5).
+    static let resumable: Set<String> = ["claude-code", "codex", "opencode", "pi", "grok"]
 
     /// `new`, or a terminal (from the Live Activity) in place of the page open now; one closed since is not found.
     private func openRequested() {

@@ -2,7 +2,7 @@
  *  with (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), so the Mac's own `~/.claude` and `~/.codex` are never rewritten and the
  *  agents' own apps and other terminals are untouched. Every agent has `Default` — the Mac's own, with no folder here —
  *  and a current profile that new terminals start under. Claude Code first (step 2); Codex has the ones that pay by a
- *  key (§3.6) and, since 2026-10-20, the ones that sign in with a ChatGPT account (§6.2); OpenCode and pi have
+ *  key (§3.6) and, since 2026-10-20, the ones that sign in with a ChatGPT account (§6.2); OpenCode, pi and Grok have
  *  `Default` alone for now.
  *
  *  A profile's folder holds what is the account's and the device's (Claude Code's `.claude.json` with identifiers it
@@ -16,7 +16,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, sym
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const PROFILE_AGENTS = ["claude-code", "codex", "opencode", "pi"] as const;
+export const PROFILE_AGENTS = ["claude-code", "codex", "opencode", "pi", "grok"] as const;
 export type ProfileAgent = (typeof PROFILE_AGENTS)[number];
 export type ProfileKind = "subscription" | "api";
 export const DEFAULT_PROFILE = "default";

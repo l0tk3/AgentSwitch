@@ -77,8 +77,11 @@ enum RecordCPUProbe {
         }.joined(separator: "\n")
     }
 
-    /// The app's time and the window server's over `seconds`, `tick` every 150 ms meanwhile, in percent of one core.
-    private static func measure(_ host: NSView, tick: () -> Void) async throws -> String {
+    /// The app's time and the window server's over `seconds`, `tick` every 150 ms meanwhile, in percent of one core;
+    /// and how many times a second the window's SwiftUI was laid out (2026-11-10: a count, where the percentages move
+    /// with whatever else the Mac is doing — and the thing itself: every one of them is the whole window's update).
+    static func measure(_ host: NSView, tick: () -> Void) async throws -> String {
+        let layouts = LayoutCount(of: host)
         let server = windowServer()
         let app0 = ownTime(), server0 = server.flatMap(time(of:)), start = CFAbsoluteTimeGetCurrent()
         while CFAbsoluteTimeGetCurrent() - start < seconds {
@@ -89,7 +92,7 @@ enum RecordCPUProbe {
         let app = (ownTime() - app0) / wall * 100
         let server1 = server.flatMap(time(of:))
         let ws = server0.flatMap { a in server1.map { ($0 - a) / wall * 100 } }
-        return String(format: "app %.1f%%, WindowServer %@", app, ws.map { String(format: "%.1f%%", $0) } ?? "?")
+        return String(format: "app %.1f%%, WindowServer %@, laid out %.1f/s", app, ws.map { String(format: "%.1f%%", $0) } ?? "?", Double(layouts.count) / wall)
     }
 
     private static func ownTime() -> Double {

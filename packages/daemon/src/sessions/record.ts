@@ -28,6 +28,10 @@ export type RecordStep = {
   readonly removed?: number;
   /** Pictures the step brought back (a picture file read, a screenshot taken): how many, each read by its place. */
   readonly images?: number;
+  /** The sub-agent the step sent off, by its id, once the record says which (Claude Code names it in the call's
+   *  result — at once for one sent to the background, at its end for one waited on): what it did is a record of its
+   *  own (sessions/subagents.ts), which a screen opens by this. */
+  readonly agent?: string;
 };
 
 export type RecordItem =
@@ -121,6 +125,7 @@ type Step = { kind: StepKind; text: string; tool?: string; note?: string; out?: 
   /** A command and what it printed, whole: for the one step a screen opens (`readStep`), never in the record. */
   cmd?: string; printed?: string;
   images?: number;
+  agent?: string;
   /** Where the step's pictures are, never in the record: the line its result is on and the result's id (Claude Code
    *  keeps them there), or the file it looked at (Codex). */
   shots?: { at: number; id: string } | { file: string } };
@@ -274,9 +279,18 @@ function claudeStep(name: string, input: Json, cwd: string): Step {
   }
 }
 
-/** What a tool's result adds to its step: a command's output, an edit's patch, a failure. */
+/** A sub-agent's id as Claude Code writes it (`a0e1a9b7b96ac0c4f`): letters and digits, never a path. */
+export const AGENT_ID = /^[A-Za-z0-9_-]{1,80}$/;
+/** The call a Claude Code sub-agent ends with (2.1.319): what it found, handed back to the agent that sent it. In the
+ *  sub-agent's own record that is its answer, not a tool it used. */
+const HANDBACK = "SubagentHandback";
+
+/** What a tool's result adds to its step: a command's output, an edit's patch, a failure; for a sub-agent sent off,
+ *  which one it was. */
 function claudeResult(step: Step, part: Json, result: unknown, cwd: string): void {
   const r = obj(result);
+  // `agentId`: there for one sent to the background (`async_launched`) and for one that has ended (2.1.319).
+  if (step.kind === "agent" && AGENT_ID.test(str(r.agentId))) step.agent = str(r.agentId);
   const said = Array.isArray(part.content) ? part.content.map((p) => str(obj(p).text)).join("\n") : str(part.content);
   if (part.is_error === true) { step.failed = true; step.out = tail(typeof result === "string" ? result : said); return; }
   if (step.kind === "run") {
@@ -326,13 +340,16 @@ export function peerMessage(origin: Json, said: string): { from: string; text: s
   return text ? { from, text } : null;
 }
 
-function claudeBuild(lines: readonly Line[]): Builder {
+/** `side`: the lines are a sub-agent's own file (`<session>/subagents/agent-<id>.jsonl`, every line of it marked
+ *  `isSidechain`): what it was sent to do reads as what was said to it, and the report it hands back as its answer. In
+ *  a session's own file such lines are a sub-agent's (older Claude Code wrote them there) and are left out. */
+function claudeBuild(lines: readonly Line[], side = false): Builder {
   const b = new Builder();
   const waiting = new Map<string, Step>();
   let queue: { at: number; ts: number; text: string }[] = [];
   for (const { at, value: line } of lines) {
     if (str(line.permissionMode)) b.mode = str(line.permissionMode);
-    if (line.isSidechain) continue;
+    if (line.isSidechain && !side) continue;
     const ts = time(line.timestamp);
     const cwd = str(line.cwd);
     if (line.type === "queue-operation") {
@@ -387,7 +404,9 @@ function claudeBuild(lines: readonly Line[]): Builder {
       const text = unwrapPastes(ps.map((p) => (p.type === "text" ? str(p.text) : "")).join("\n")).trim();
       if (text.startsWith("[Request interrupted")) { b.note(at, ts, "Interrupted"); continue; }
       const images = ps.filter((p) => p.type === "image").length;
-      if (isTypedText(text) || (images && !text)) b.user(at, ts, text, images);
+      // What a sub-agent was sent to do is another agent's words, whatever they begin with (a tag of its own is not
+      // the harness's).
+      if ((side ? !!text : isTypedText(text)) || (images && !text)) b.user(at, ts, text, images);
       continue;
     }
     if (line.type !== "assistant") continue;
@@ -405,6 +424,8 @@ function claudeBuild(lines: readonly Line[]): Builder {
       else if (part.type === "thinking" && str(part.thinking).trim()) b.answer(at, ts, str(part.thinking).trim(), true);
       else if (part.type === "tool_use") {
         const input = obj(part.input);
+        // A sub-agent's report back: its answer.
+        if (side && part.name === HANDBACK) { if (str(input.message).trim()) b.answer(at, ts, str(input.message).trim()); continue; }
         const step = b.step(at, ts, claudeStep(str(part.name), input, cwd));
         if (str(part.id)) waiting.set(str(part.id), step);
         if (part.name === "TodoWrite" && Array.isArray(input.todos)) {
@@ -623,14 +644,15 @@ export function fileRev(path: string): { rev: string; size: number } {
   return { rev: `${st.size.toString(36)}-${Math.round(st.mtimeMs).toString(36)}`, size: st.size };
 }
 
-function build(harness: RecordHarness, lines: readonly Line[], cwd: string): Builder | null {
-  if (harness === "claude-code") return claudeBuild(lines);
+/** `side`: the file is a Claude Code sub-agent's own (`claudeBuild`). */
+function build(harness: RecordHarness, lines: readonly Line[], cwd: string, side = false): Builder | null {
+  if (harness === "claude-code") return claudeBuild(lines, side);
   return hasItems(lines) ? codexBuild(lines, cwd) : null;
 }
 
 /** The last `limit` items before `before` (the file's end without it). Null when the file holds no record this reads
- *  (an older Codex rollout): the caller falls back to the coarse messages. */
-export function readRecord(harness: RecordHarness, path: string, o: { limit?: number; before?: number; cwd?: string } = {}): SessionRecord | null {
+ *  (an older Codex rollout): the caller falls back to the coarse messages. `side`: the file is a sub-agent's own. */
+export function readRecord(harness: RecordHarness, path: string, o: { limit?: number; before?: number; cwd?: string; side?: boolean } = {}): SessionRecord | null {
   const { rev, size } = fileRev(path);
   const limit = Math.max(1, Math.min(o.limit ?? RECORD_LIMIT, MAX_RECORD_LIMIT));
   const end = Math.max(0, Math.min(o.before ?? size, size));
@@ -640,7 +662,7 @@ export function readRecord(harness: RecordHarness, path: string, o: { limit?: nu
     const start = Math.max(0, end - window);
     const read = readLines(path, start, end);
     from = read.from;
-    built = build(harness, read.lines, o.cwd ?? "");
+    built = build(harness, read.lines, o.cwd ?? "", o.side);
     // One more than asked for: the first may be a run of work the window cut in two.
     if (start === 0 || (built && built.items.length > limit)) break;
     // A rollout with no items in its last megabytes has none earlier either.
@@ -708,7 +730,7 @@ export type StepDetail = { readonly kind: StepKind; readonly text: string; reado
 
 /** The `n`-th step of the run of work `work`, with its command whole (its lines kept) and all it printed — the record
  *  itself carries one line and the end of the output. Null: no such run, no such step. */
-export function readStep(harness: RecordHarness, path: string, o: { work: string; n: number; cwd?: string }): StepDetail | null {
+export function readStep(harness: RecordHarness, path: string, o: { work: string; n: number; cwd?: string; side?: boolean }): StepDetail | null {
   const step = stepOf(harness, path, o);
   if (!step) return null;
   const text = (step.cmd ?? step.text).replace(/\r\n?/g, "\n").trim();
@@ -721,11 +743,11 @@ export function readStep(harness: RecordHarness, path: string, o: { work: string
   };
 }
 
-function stepOf(harness: RecordHarness, path: string, o: { work: string; n: number; cwd?: string }): Step | null {
+function stepOf(harness: RecordHarness, path: string, o: { work: string; n: number; cwd?: string; side?: boolean }): Step | null {
   const { size } = fileRev(path);
   const at = Number(o.work.split(".")[0]);
   if (!Number.isInteger(at) || at < 0 || at >= size || !Number.isInteger(o.n) || o.n < 0) return null;
-  const built = build(harness, readLines(path, at, Math.min(size, at + WINDOWS[1]!)).lines.filter((l) => l.at >= at), o.cwd ?? "");
+  const built = build(harness, readLines(path, at, Math.min(size, at + WINDOWS[1]!)).lines.filter((l) => l.at >= at), o.cwd ?? "", o.side);
   const all = built?.items ?? [];
   const hit = all[ids(all).indexOf(o.work)];
   if (!hit || hit.type !== "work" || hit.at !== at) return null;
@@ -787,7 +809,7 @@ export function codexPictureFiles(line: Json): { sent: string[]; seen: string[] 
 /** The `k`-th picture a step brought back (2026-10-07, user: 这种readpng能不能展开后看到真的png内容呢): of the `n`-th step of
  *  the run of work `work`. Claude Code keeps it in the line of the tool's result; for Codex the file it looked at is
  *  read, if it is still there and a picture by its name. Null: no such step, no such picture, or one too large. */
-export function readStepImage(harness: RecordHarness, path: string, o: { work: string; n: number; k: number; cwd?: string }, file: PictureReader = pictureFile): RecordImage | null {
+export function readStepImage(harness: RecordHarness, path: string, o: { work: string; n: number; k: number; cwd?: string; side?: boolean }, file: PictureReader = pictureFile): RecordImage | null {
   if (!Number.isInteger(o.k) || o.k < 0) return null;
   const shots = stepOf(harness, path, o)?.shots;
   if (!shots) return null;

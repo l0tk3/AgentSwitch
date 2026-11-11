@@ -4,6 +4,8 @@ import SwiftUI
 
 // The new-terminal panel (docs/terminal-v0.md §1; demo `terminal.html`): the agent, its model, the folder, how it asks
 // before acting; `[ Start ↩ ]`. It fills the pane in focus — among several panes without the wordmark, set closer.
+// After the agents, where the service opens one, a shell (§0, 2026-11-10; user: 似乎没有打开终端的地方): the user's own,
+// on this Mac — a folder is all it has to choose.
 // And the page's question box (closing a running terminal, deleting a session, a session open elsewhere, a session
 // whose folder is gone): a sentence, maybe a box to tick or a folder to pick, and the action as a word.
 
@@ -19,20 +21,26 @@ struct TerminalCreatePanel: View {
                 if !compact { Wordmark().padding(.bottom, 20) }
                 PanelLabel("New Terminal").padding(.bottom, 8)
                 agents
-                // Whose sign-in it runs under, where the agent has more than the Mac's own (docs/profiles-v0.md §3.3).
-                if model.pickedProfile != nil {
-                    PanelLabel("Profile").padding(.top, 16).padding(.bottom, 8)
-                    profileMenu
+                // A shell has none of an agent's choices, and nothing is said in their place (2026-11-10, user, of the
+                // sentence that stood here: 这里的描述可以去掉): its folder comes next.
+                if !model.pickedShell {
+                    // Whose sign-in it runs under, where the agent has more than the Mac's own (docs/profiles-v0.md §3.3).
+                    if model.pickedProfile != nil {
+                        PanelLabel("Profile").padding(.top, 16).padding(.bottom, 8)
+                        profileMenu
+                    }
+                    PanelLabel("Model").padding(.top, 16).padding(.bottom, 8)
+                    modelMenu
+                    // How hard it thinks, under the agent's own word and with the levels the model picked takes; nothing
+                    // where there is nothing to choose (a model with no levels, OpenCode before a model is picked).
+                    if !model.effortLevels.isEmpty { effort.padding(.top, 16) }
                 }
-                PanelLabel("Model").padding(.top, 16).padding(.bottom, 8)
-                modelMenu
-                // How hard it thinks, under the agent's own word and with the levels the model picked takes; nothing
-                // where there is nothing to choose (a model with no levels, OpenCode before a model is picked).
-                if !model.effortLevels.isEmpty { effort.padding(.top, 16) }
                 PanelLabel("Folder").padding(.top, 16).padding(.bottom, 8)
                 folder
-                PanelLabel("Permissions").padding(.top, 16).padding(.bottom, 8)
-                modes
+                if !model.pickedShell {
+                    PanelLabel("Permissions").padding(.top, 16).padding(.bottom, 8)
+                    modes
+                }
                 foot.padding(.top, 24)
             }
             .frame(maxWidth: 560, alignment: .leading)
@@ -47,15 +55,33 @@ struct TerminalCreatePanel: View {
 
     // MARK: the agent
 
-    /// The four agents side by side; in a narrow pane two rows of two.
+    /// What can be started: the agents, and after them a shell where the service opens one for this Mac.
+    private var choices: [(id: String, name: String)] {
+        TerminalListText.agents + (model.shellOffered ? [(id: TerminalKind.shell, name: TerminalKind.shellName)] : [])
+    }
+
+    /// The choices side by side; in a narrow pane rows of two. Five in a row are set a little closer than four were:
+    /// the longest name (`Claude Code`) still has its room. Six — Grok came (2026-11-11, user: 能否增加对Grok的支持),
+    /// and with the shell that is one more than the panel's width holds at that size — stand in two rows of three,
+    /// each tile as wide as the fields under them divide.
     private var agents: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { ForEach(TerminalListText.agents, id: \.id) { tile($0.id, $0.name).frame(minWidth: 104) } }
-            VStack(spacing: 10) {
-                ForEach([0, 2], id: \.self) { first in
-                    HStack(spacing: 10) {
-                        ForEach(TerminalListText.agents[first..<min(first + 2, TerminalListText.agents.count)], id: \.id) { tile($0.id, $0.name) }
-                    }
+        let all = choices
+        let five = all.count > 4
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: five ? 8 : 10) { ForEach(all, id: \.id) { tile($0.id, $0.name, inset: five ? 8 : 10).frame(minWidth: five ? 100 : 104) } }
+            rows(of: all.count > 5 ? 3 : 2, all, minWidth: all.count > 5 ? 104 : nil)
+            rows(of: 2, all, minWidth: nil)
+        }
+    }
+
+    /// The choices `n` to a row; a row short of that keeps the tiles' width. `minWidth`: what a tile needs for the
+    /// rows to count as fitting (the last resort has none: it always fits).
+    private func rows(of n: Int, _ all: [(id: String, name: String)], minWidth: CGFloat?) -> some View {
+        VStack(spacing: 10) {
+            ForEach(Array(stride(from: 0, to: all.count, by: n)), id: \.self) { first in
+                HStack(spacing: 10) {
+                    ForEach(all[first..<min(first + n, all.count)], id: \.id) { tile($0.id, $0.name).frame(minWidth: minWidth) }
+                    ForEach(0..<max(0, first + n - all.count), id: \.self) { _ in Color.clear.frame(minWidth: minWidth, maxWidth: .infinity, maxHeight: Self.tileHeight) }
                 }
             }
         }
@@ -64,14 +90,14 @@ struct TerminalCreatePanel: View {
     /// An agent's tile, whether or not the agent is installed.
     private static let tileHeight: CGFloat = 68
 
-    private func tile(_ id: String, _ name: String) -> some View {
-        let installed = model.agents.contains(id)
+    private func tile(_ id: String, _ name: String, inset: CGFloat = 10) -> some View {
+        let installed = id == TerminalKind.shell ? model.shellOffered : model.agents.contains(id)
         let on = model.pickedAgent == id
         return Button { model.pickedAgent = id } label: {
             // Every tile is one size: `Not Installed` goes under the name within it (a line more made that tile taller
             // than the rest; user: notinstalled框太大了 排版崩了 应该和其他的一样大).
             VStack(alignment: .leading, spacing: installed ? 10 : 6) {
-                PixelSprite(rows: PixelArt.agents[id] ?? PixelArt.agents["pi"]!, pixel: 3, color: Look.ink, strength: on ? 1 : 0.75, shadow: !look.isClassic)
+                PixelSprite(rows: KindArt.rows(id), pixel: KindArt.pixel(id, agents: 3), color: Look.ink, strength: on ? 1 : 0.75, shadow: !look.isClassic)
                     .frame(height: 16, alignment: .leading)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name).font(look.isClassic ? .system(size: 13, weight: on ? .semibold : .regular) : .system(size: 12.5, design: .monospaced)).lineLimit(1)
@@ -82,7 +108,7 @@ struct TerminalCreatePanel: View {
                 }
             }
             .foregroundStyle(installed ? Look.ink : Look.faint)
-            .padding(EdgeInsets(top: 10, leading: 10, bottom: 8, trailing: 10))
+            .padding(EdgeInsets(top: 10, leading: inset, bottom: 8, trailing: inset))
             .frame(maxWidth: .infinity, minHeight: Self.tileHeight, maxHeight: Self.tileHeight, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0).fill(on && look.isClassic ? Color.signal.opacity(0.14) : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: look.isClassic ? 9 : 0)

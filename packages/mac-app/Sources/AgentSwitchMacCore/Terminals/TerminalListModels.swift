@@ -189,7 +189,7 @@ public enum TerminalDaybreak {
 /// the same rules in its Kit): each agent's own word for it, and the levels the service lists for the model chosen.
 public enum TerminalEffort {
     /// The agent's own word, as the control's label: Claude Code's effort, Codex's reasoning, OpenCode's variant of a
-    /// model, pi's thinking.
+    /// model, pi's thinking, Grok's effort (its `/effort`).
     public static func word(_ harness: String) -> String {
         switch harness {
         case "codex": "Reasoning"
@@ -247,10 +247,14 @@ public struct TerminalList: Decodable, Sendable, Equatable {
     public let effortDefaults: [String: String]
     /// Per agent with a Daybreak switch (Codex), how its new sessions start; an agent without one is not named.
     public let daybreak: [String: Bool]
+    /// The service opens shells, and for this caller (docs/terminal-v0.md §0, 2026-11-10): the Mac it runs on. A
+    /// service that does not say so (an older one, another node's) opens none.
+    public let shell: Bool
 
     public init(terminals: [TerminalInfo], agents: [String], models: [String: [TerminalModelOption]] = [:], defaults: [String: String] = [:],
-                efforts: [String: [String]] = [:], effortDefaults: [String: String] = [:], daybreak: [String: Bool] = [:]) {
+                efforts: [String: [String]] = [:], effortDefaults: [String: String] = [:], daybreak: [String: Bool] = [:], shell: Bool = false) {
         self.daybreak = daybreak
+        self.shell = shell
         self.terminals = terminals
         self.agents = agents
         self.models = models
@@ -259,7 +263,7 @@ public struct TerminalList: Decodable, Sendable, Equatable {
         self.effortDefaults = effortDefaults
     }
 
-    private enum CodingKeys: String, CodingKey { case terminals, agents, models, defaults, efforts, effortDefaults, daybreak }
+    private enum CodingKeys: String, CodingKey { case terminals, agents, models, defaults, efforts, effortDefaults, daybreak, shell }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -270,6 +274,7 @@ public struct TerminalList: Decodable, Sendable, Equatable {
         efforts = (try? c.decodeIfPresent([String: [String]].self, forKey: .efforts)) ?? [:]
         effortDefaults = (try? c.decodeIfPresent([String: String].self, forKey: .effortDefaults)) ?? [:]
         daybreak = (try? c.decodeIfPresent([String: Bool].self, forKey: .daybreak)) ?? [:]
+        shell = (try? c.decodeIfPresent(Bool.self, forKey: .shell)) ?? false
     }
 }
 
@@ -398,6 +403,14 @@ extension DaemonClient {
     public func createTerminal(_ body: NewTerminalRequest) async throws -> TerminalInfo {
         struct Reply: Decodable { let terminal: TerminalInfo }
         return try decode(Reply.self, try await call("POST", "/terminals", body: try JSONEncoder().encode(body))).terminal
+    }
+
+    /// `POST /terminals/shell`: the user's own shell in a folder, on the Mac the service runs on (docs/terminal-v0.md
+    /// §0, 2026-11-10).
+    public func createShell(cwd: String, cols: Int? = nil, rows: Int? = nil) async throws -> TerminalInfo {
+        struct Body: Encodable { let cwd: String; let cols: Int?; let rows: Int? }
+        struct Reply: Decodable { let terminal: TerminalInfo }
+        return try decode(Reply.self, try await call("POST", "/terminals/shell", body: try JSONEncoder().encode(Body(cwd: cwd, cols: cols, rows: rows)))).terminal
     }
 
     /// `POST /terminals/resume`: a new terminal on the session, the one already open here, the program that has it

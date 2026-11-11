@@ -91,9 +91,11 @@ export const ICONS = {
   codex: '<path d="M3.75 5.5 7.5 9l-3.75 3.5M9.75 12.75h4.5"/>',
   opencode: '<path d="M6.75 3.75h-3v10.5h3M11.25 3.75h3v10.5h-3"/>',
   pi: '<path d="M3.75 5.25h10.5M6.5 5.25v8M11.5 5.25v6.25a1.75 1.75 0 0 0 1.75 1.75"/>',
+  // A ring, open where the stroke leaves it at the upper right; the stroke from the middle out past it; its tail.
+  grok: '<path d="M10.85 3.93A5.4 5.4 0 1 0 14.07 7.15M9 9l6.5-6.5M2.5 15.5l2.68-2.68"/>',
 };
 /** Each agent's mark as a line drawing (its own logo's shape, one colour). */
-export const AGENT_ICON = { "claude-code": "claude", codex: "codex", opencode: "opencode", pi: "pi" };
+export const AGENT_ICON = { "claude-code": "claude", codex: "codex", opencode: "opencode", pi: "pi", grok: "grok" };
 
 /** A line icon in the text's colour; nothing for a name it does not have. */
 export function icon(name, size = 16) {

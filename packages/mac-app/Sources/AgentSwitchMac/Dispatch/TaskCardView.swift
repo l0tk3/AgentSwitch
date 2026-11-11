@@ -128,7 +128,7 @@ struct TaskClock: View {
 
     var body: some View {
         if card.task.status.isActive && onScreen {
-            TimelineView(.periodic(from: .now, by: 1)) { context in Text(card.clock(now: context.date)) }
+            Stepped(every: 1) { at in Text(card.clock(now: at)) }
                 .foregroundStyle(Look.faint)
         } else {
             Text(card.clock()).foregroundStyle(Look.faint)

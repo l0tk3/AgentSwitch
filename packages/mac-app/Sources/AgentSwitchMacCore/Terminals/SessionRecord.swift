@@ -25,10 +25,14 @@ public struct RecordStep: Decodable, Sendable, Hashable {
     public let removed: Int?
     /// Pictures the step brought back (a picture file read, a screenshot taken): how many.
     public let images: Int
+    /// The sub-agent the step sent off, by its id, once the record says which: what it did is a record of its own,
+    /// opened by this (`Subagents.swift`). Nil for any other step, and from a service that does not say.
+    public let agent: String?
 
     public init(kind: Kind, text: String, tool: String? = nil, note: String? = nil, out: String? = nil, failed: Bool = false, added: Int? = nil, removed: Int? = nil,
-                images: Int = 0) {
+                images: Int = 0, agent: String? = nil) {
         self.images = max(0, images)
+        self.agent = agent
         self.kind = kind
         self.text = text
         self.tool = tool
@@ -39,11 +43,12 @@ public struct RecordStep: Decodable, Sendable, Hashable {
         self.removed = removed
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed, images }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, note, out, failed, added, removed, images, agent }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         images = max(0, (try? c.decodeIfPresent(Int.self, forKey: .images)) ?? 0)
+        agent = (try? c.decodeIfPresent(String.self, forKey: .agent)).flatMap { $0.isEmpty ? nil : $0 }
         let raw = (try? c.decode(String.self, forKey: .kind)) ?? ""
         kind = Kind(rawValue: raw) ?? .tool
         text = (try? c.decode(String.self, forKey: .text)) ?? ""
@@ -895,11 +900,11 @@ public enum RecordDisplay {
     }
 
     /// The agents whose model and level a screen can set at once: their own prompt takes a command that does (Claude
-    /// Code's `/model <id>` and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`), or their own
-    /// server does, the one the terminal's TUI is attached to (OpenCode's `POST /api/session/:id/model`, Codex's
-    /// `thread/settings/update`). All four now; a terminal says itself when it cannot (`TerminalInfo.sets`: a Codex or
-    /// an OpenCode started without its server).
-    public static func setsDirectly(_ harness: String) -> Bool { ["claude-code", "pi", "opencode", "codex"].contains(harness) }
+    /// Code's `/model <id>` and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`, Grok's
+    /// `/model <id>` and `/effort <level>`), or their own server does, the one the terminal's TUI is attached to
+    /// (OpenCode's `POST /api/session/:id/model`, Codex's `thread/settings/update`). All five now; a terminal says
+    /// itself when it cannot (`TerminalInfo.sets`: a Codex or an OpenCode started without its server).
+    public static func setsDirectly(_ harness: String) -> Bool { ["claude-code", "pi", "opencode", "codex", "grok"].contains(harness) }
 
     /// Why the service did not make a change, in the page's words where it is one of the reasons it gives.
     public static func refusal(_ reason: String) -> String? {
@@ -928,6 +933,7 @@ public enum RecordDisplay {
         case "codex": "Codex"
         case "opencode": "OpenCode"
         case "pi": "pi"
+        case "grok": "Grok"
         default: harness
         }
     }

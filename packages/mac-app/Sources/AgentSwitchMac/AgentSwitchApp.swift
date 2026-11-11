@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// a running service (TerminalProbe.swift, DispatchProbe.swift, BrowserProbe.swift).
     static var probeOnly: Bool {
         #if DEBUG
-        return TerminalProbe.directory != nil || DispatchProbe.directory != nil || BrowserProbe.directory != nil || PerfProbe.directory != nil || NodesProbe.directory != nil || FilesProbe.directory != nil
+        return TerminalProbe.directory != nil || DispatchProbe.directory != nil || BrowserProbe.directory != nil || PerfProbe.directory != nil || ShellProbe.directory != nil || NodesProbe.directory != nil || FilesProbe.directory != nil
         #else
         return false
         #endif
@@ -143,6 +143,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let dir = PerfProbe.directory {
             NSApp.setActivationPolicy(.accessory)
             PerfProbe.run(main, model: model, into: dir)
+            return
+        }
+        if let dir = ShellProbe.directory {
+            NSApp.setActivationPolicy(.accessory)
+            wireWindows()
+            ShellProbe.run(main, model: model, into: dir)
             return
         }
         #endif

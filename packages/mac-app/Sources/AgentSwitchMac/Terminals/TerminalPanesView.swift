@@ -200,6 +200,20 @@ struct TerminalPaneView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                         .padding(16)
                 }
+                // The sub-agent card (docs/simple-view-v0.md §5.22): a small view by the pane's edge, over its screen or
+                // its record alike. At the top; at the foot while a request's card floats there (a terminal's screen
+                // in focus), so that neither covers the other.
+                if let state, let session = state.session, let card = state.subagent, !making {
+                    GeometryReader { geometry in
+                        let size = SubagentDisplay.size(pane: (Double(geometry.size.width), Double(geometry.size.height)), tall: card.tall)
+                        let low = !record && focused && !session.requests.isEmpty
+                        SubagentCard(card: card, live: record ? state.record.subagents : (session.info?.subagents ?? []),
+                                     terminalRuns: session.info?.running ?? false) { state.closeSubagent() }
+                            .frame(width: size.width, height: size.height)
+                            .padding(SubagentDisplay.margin)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: low ? .bottomTrailing : .topTrailing)
+                    }
+                }
             }
         }
         // A terminal's pane is the terminal's dark block whatever the window around it (a record beside it may be light).
@@ -281,8 +295,8 @@ struct PaneHeader: View {
                 .buttonStyle(.plain)
                 .help(shows ? "Hide Files ⌘⇧F" : "Show in Files ⌘⇧F")
             }
-            // The other view of the same session (docs/simple-view-v0.md §1): each pane has its own.
-            if info != nil, let state {
+            // The other view of the same session (docs/simple-view-v0.md §1): each pane has its own. A shell has none.
+            if let info, TerminalKind.isAgent(info.harness), let state {
                 Button { model.focus(pane: pane); model.toggleSimple(pane: pane) } label: {
                     Group {
                         if look.isClassic { Image(systemName: state.simple ? "terminal" : "text.alignleft").font(.system(size: 10.5, weight: .medium)) }

@@ -11,7 +11,7 @@ export const SESSIONS_READ = 500;
 export const FOLDERS_SHOWN = 20;
 const TITLE_CHARS = 50;
 
-const NAMES: Record<SessionHarness, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi" };
+const NAMES: Record<SessionHarness, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", grok: "Grok" };
 
 type Folder = { readonly cwd: string; readonly sessions: readonly SessionSummary[] };
 

@@ -5,7 +5,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import type { SessionMonitor } from "../sessions/monitor.js";
 import type { SessionHarness } from "../sessions/types.js";
-import { MAX_RECORD_LIMIT, RECORD_LIMIT } from "../sessions/record.js";
+import { AGENT_ID, MAX_RECORD_LIMIT, RECORD_LIMIT } from "../sessions/record.js";
 import { PROFILE_AGENTS } from "../profiles/store.js";
 import { SessionSearch } from "../sessions/search.js";
 import { join } from "node:path";
@@ -14,7 +14,7 @@ import { TerminalAudit } from "../terminals/audit.js";
 import { limitParam, parseBody, versionedJson, type ApiDeps } from "./shared.js";
 import { typedFolder } from "../sessions/shownFolders.js";
 
-const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode", "pi"]);
+const HARNESSES: ReadonlySet<string> = new Set<SessionHarness>(["claude-code", "codex", "opencode", "pi", "grok"]);
 /** Agents that keep no register of a running session and no writer lock (docs/terminal-v0.md §5): a session written in
  *  the last 90 seconds may be open in another program. */
 const UNSEEN: ReadonlySet<string> = new Set<SessionHarness>(["opencode", "pi"]);
@@ -123,6 +123,54 @@ export function mountSessions(app: Hono, deps: ApiDeps): void {
     const item = c.req.param("item"), n = c.req.param("n");
     if (!/^\d{1,15}(\.\d{1,4})?$/.test(item) || !/^\d{1,2}$/.test(n)) return c.json({ error: "no such picture" }, 400);
     const picture = monitor.image(harness as SessionHarness, c.req.param("id"), item, Number(n), ours(c.req.param("id")));
+    if (!picture) return c.json({ error: "no such picture" }, 404);
+    return c.body(new Uint8Array(picture.data), 200, { "Content-Type": picture.type, "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" });
+  });
+  // A session's sub-agents (docs/simple-view-v0.md §5.22; sessions/subagents.ts): the ones Claude Code keeps a file of
+  // their own for, in the order they started — each its id, its kind, what it was sent to do, whether it has ended.
+  // None for an agent that keeps none. Read as the session's own record is: a listed session, or a terminal's of ours.
+  app.get("/sessions/:harness/:id/subagents", (c) => {
+    const harness = c.req.param("harness");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    const subagents = monitor.subagents(harness as SessionHarness, c.req.param("id"), ours(c.req.param("id")));
+    return subagents ? versionedJson(c, { subagents }) : c.json({ error: "no such session" }, 404);
+  });
+  // One sub-agent's record: what it was sent to do, its work step by step, what it handed back — the shape of a
+  // session's record, with `agent` (what the list says of it). A screen showing it asks again every second or so while
+  // the sub-agent works, with the version it has (`If-None-Match`): for the same one nothing is read (a 304 by the
+  // file's size and time, not by reading and hashing it as `versionedJson` does).
+  app.get("/sessions/:harness/:id/subagents/:agent/record", (c) => {
+    const harness = c.req.param("harness"), id = c.req.param("id"), agent = c.req.param("agent");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    if (!AGENT_ID.test(agent)) return c.json({ error: "no such sub-agent" }, 404);
+    const before = c.req.query("before");
+    if (before !== undefined && !/^\d{1,15}$/.test(before)) return c.json({ error: "before: a page's cursor" }, 400);
+    const mine = ours(id);
+    const asked = c.req.header("if-none-match");
+    if (asked && before === undefined) {
+      const version = monitor.subagentVersion(harness as SessionHarness, id, agent, mine);
+      if (version && asked === `"${version}"`) return c.body(null, 304, { ETag: asked });
+    }
+    const found = monitor.subagentRecord(harness as SessionHarness, id, agent, { limit: limitParam(c, RECORD_LIMIT, MAX_RECORD_LIMIT), ...(before !== undefined ? { before: Number(before) } : {}) }, mine);
+    if (!found) return c.json({ error: "no such sub-agent" }, 404);
+    // An earlier page is not the record's latest: it carries no version to ask again with.
+    return c.json({ session: found.session, agent: found.agent, ...found.record }, 200, before === undefined ? { ETag: `"${found.record.rev}"` } : {});
+  });
+  // One step of a sub-agent's run of work, whole, and a picture such a step brought back: as a session's own.
+  app.get("/sessions/:harness/:id/subagents/:agent/steps/:item/:n", (c) => {
+    const harness = c.req.param("harness"), agent = c.req.param("agent");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    const item = c.req.param("item"), n = c.req.param("n");
+    if (!AGENT_ID.test(agent) || !/^\d{1,15}(\.\d{1,4})?$/.test(item) || !/^\d{1,4}$/.test(n)) return c.json({ error: "no such step" }, 400);
+    const step = monitor.subagentStep(harness as SessionHarness, c.req.param("id"), agent, item, Number(n), ours(c.req.param("id")));
+    return step ? c.json(step) : c.json({ error: "no such step" }, 404);
+  });
+  app.get("/sessions/:harness/:id/subagents/:agent/steps/:item/:n/images/:k", (c) => {
+    const harness = c.req.param("harness"), agent = c.req.param("agent");
+    if (!HARNESSES.has(harness)) return c.json({ error: "unknown harness" }, 404);
+    const item = c.req.param("item"), n = c.req.param("n"), k = c.req.param("k");
+    if (!AGENT_ID.test(agent) || !/^\d{1,15}(\.\d{1,4})?$/.test(item) || !/^\d{1,4}$/.test(n) || !/^\d{1,2}$/.test(k)) return c.json({ error: "no such picture" }, 400);
+    const picture = monitor.subagentStepImage(harness as SessionHarness, c.req.param("id"), agent, item, Number(n), Number(k), ours(c.req.param("id")));
     if (!picture) return c.json({ error: "no such picture" }, 404);
     return c.body(new Uint8Array(picture.data), 200, { "Content-Type": picture.type, "Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff" });
   });

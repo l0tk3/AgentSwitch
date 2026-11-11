@@ -9,6 +9,7 @@ import SwiftUI
 /// - `terminals-list`: one pane, the list with terminals at work, waiting and ended, sub-agents, earlier sessions, git;
 /// - `terminals-panes`: three panes — the second in focus with a request's card, the third empty;
 /// - `terminals-create`, `terminals-create-pane`: the new-terminal panel alone, and in a pane among several;
+///   `terminals-create-grok`: with Grok picked;
 /// - `terminals-sheet-light`, `terminals-create-light`, `terminals-rename-light`: the question box, the new-terminal
 ///   panel and a name being changed on the light page; `terminals-pane-was`: an empty pane and the long-titled session
 ///   it would go on with;
@@ -26,6 +27,11 @@ import SwiftUI
 ///   being written with a picture and a file in its floating box.
 ///   `terminals-record-compact-light`: while it compacts its context. `terminals-record-working-light`: at work with
 ///   no tool, the word alone. `terminals-record-daybreak-light`: Codex with its Daybreak switch.
+/// - `terminals-subagent`, `terminals-subagent-tall`, `terminals-subagent-request`, `terminals-subagent-light`,
+///   `terminals-subagent-missing-light`: the sub-agent card (docs/simple-view-v0.md §5.22) — over a terminal's screen
+///   while the sub-agent works, the run still going with its latest steps; tall, a run opened whole; at the pane's
+///   foot while a request's card floats at its top; over a record in the system's light, the sub-agent ended with
+///   what it handed back; and with no record to show.
 @MainActor
 enum TerminalsPagePreview {
     static let size = NSSize(width: 1235, height: 764)
@@ -64,6 +70,32 @@ enum TerminalsPagePreview {
             model.split(.right)
             model.showCreate(folder: project)
             model.createError = "文件夹不存在：~/Desktop/WorkSpace/Projects/Nowhere"
+        }
+        // A shell (docs/terminal-v0.md §0, 2026-11-10): picked in the panel — a folder is all it has to choose —, in a
+        // pane among several (two rows of two and one), and in the list beside the agents' terminals, with a filter of
+        // its own.
+        try await shot(to: file("terminals-create-shell")) { model in
+            model.showCreate(folder: project)
+            model.pickedAgent = TerminalKind.shell
+        }
+        // Grok picked (2026-11-11): its own models and its own levels, under its own word for them.
+        try await shot(to: file("terminals-create-grok")) { model in
+            model.showCreate(folder: project)
+            model.pickedAgent = "grok"
+        }
+        try await shot(to: file("terminals-create-shell-pane")) { model in
+            model.split(.right)
+            model.showCreate(folder: project)
+            model.pickedAgent = TerminalKind.shell
+        }
+        for light in [false, true] {
+            try await shot(to: file("terminals-shell\(light ? "-light" : "")"), light: light) { model in
+                if light { stageRecord(model, working: false) }
+                model.take(TerminalList(terminals: model.terminals + [TerminalInfo(id: "t7", harness: TerminalKind.shell, cwd: project, name: "Shell", status: "idle", cols: 104, rows: 33, createdAt: 60),
+                                                                 TerminalInfo(id: "t8", harness: TerminalKind.shell, cwd: project, name: "npm run dev", status: "exited", createdAt: 55, exitCode: 0)],
+                                        agents: model.agents, models: model.models, efforts: model.efforts, shell: true))
+                model.select("t7")
+            }
         }
         try await shot(to: file("terminals-search")) { $0.query = "登录" }
         try await shot(to: file("terminals-filter")) { $0.filter = TerminalListFilter(agent: "claude-code") }
@@ -195,6 +227,28 @@ enum TerminalsPagePreview {
             model.focused?.record.stageDraft("!git status", files: [])
             model.focused?.record.stageHints([], mark: ReplyHints.Mark(sign: "!", word: "Shell", says: "这一行作为命令在它的 shell 里运行，输出进入对话。"))
         }
+        // The sub-agent card (docs/simple-view-v0.md §5.22): a small view by the pane's edge with what one of the
+        // session's sub-agents is doing — over the terminal's screen while it works, tall with a run opened whole, at
+        // the foot while a request's card floats at the top, over a record with the sub-agent ended, and with nothing
+        // to show.
+        try await shot(to: file("terminals-subagent")) { model in stageSubagent(model, done: false) }
+        try await shot(to: file("terminals-subagent-tall")) { model in stageSubagent(model, done: false, tall: true, open: "200") }
+        try await shot(to: file("terminals-subagent-request")) { model in
+            stageSubagent(model, done: false)
+            model.focused?.session?.received(event: "permission", data: #"{"request":{"id":"r1","tool":"Bash","summary":"Bash: npm test -- --run tests/login.test.ts"}}"#)
+        }
+        try await shot(to: file("terminals-subagent-light"), light: true) { model in
+            stageRecord(model, working: true)
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+            stageSubagent(model, done: true)
+        }
+        try await shot(to: file("terminals-subagent-missing-light"), light: true) { model in
+            stageRecord(model, working: false)
+            PaneRecord.previewOpenStep = nil
+            model.focused?.record.stageDraft("", files: [])
+            stageSubagent(model, done: false, problem: SubagentDisplay.unsupported)
+        }
         // The side asked for (`Show Side Pane`): the context's fill, the task list and the changed files beside the
         // record, one file open on its diff. The preview's own setting, put back after.
         UserDefaults.standard.set(true, forKey: "terminals.recordSide")
@@ -250,6 +304,43 @@ enum TerminalsPagePreview {
         // not taken yet.
         progress: working && bare ? TurnProgress(tokens: 3300) : nil,
         sent: working && bare ? [SentReply(id: "s1", text: "顺便把测试也跑一遍", at: Int64(Date().timeIntervalSince1970 * 1000))] : [])
+    }
+
+    /// Terminal `t1`'s sub-agent `a1` in its card, with a made-up record: at work on its second run (`done` false), or
+    /// ended with what it handed back. `open`: a run of work opened whole; `problem`: no record, and why.
+    static func stageSubagent(_ model: TerminalsModel, done: Bool, tall: Bool = false, open: String? = nil, problem: String? = nil) {
+        guard let pane = model.panes.values.first(where: { $0.session?.id == "t1" }) else { return }
+        let ago = { (seconds: Int64) in Int64(Date().timeIntervalSince1970 * 1000) - seconds * 1000 }
+        pane.toggleSubagent(SubagentTarget(harness: "claude-code", session: "preview", agent: "a1"), name: "找登录入口", type: "Explore")
+        guard let card = pane.subagent else { return }
+        card.tall = tall
+        if let problem { return card.stage(problem: problem) }
+        let items = [
+            RecordItem(id: "0", kind: .user, at: ago(131), text: "找出登录后的跳转是在哪里决定的：先看 `packages/daemon/ui/login.js` 怎么读 `next` 参数，再看服务端有没有校验它。只读，不要改文件；最后给出文件和行号。"),
+            RecordItem(id: "100", kind: .answer, at: ago(128), text: "先看登录页的脚本，再找服务端对 `next` 的处理。"),
+            RecordItem(id: "200", kind: .work, at: ago(126), seconds: 64, steps: [
+                RecordStep(kind: .read, text: "packages/daemon/ui/login.js"),
+                RecordStep(kind: .search, text: "next="),
+                RecordStep(kind: .read, text: "packages/daemon/src/api/ui.ts"),
+                RecordStep(kind: .run, text: "git log --oneline -5 -- packages/daemon/ui/login.js", note: "See when the redirect was last touched", out: "a41c9e2 login: keep the query on the way back"),
+            ]),
+            RecordItem(id: "300", kind: .answer, at: ago(60), text: "`login.js` 第 41 行直接用查询里的 `next`，没有检查是不是站内地址。再确认服务端这一侧。"),
+            RecordItem(id: "400", kind: .work, at: ago(58), seconds: done ? 52 : 56, steps: [
+                RecordStep(kind: .search, text: "redirect("),
+                RecordStep(kind: .read, text: "packages/daemon/src/api/localAuth.ts"),
+                RecordStep(kind: .read, text: "packages/daemon/src/api/app.ts"),
+                RecordStep(kind: .run, text: "rg -n \"next\" packages/daemon/src/api", note: "Every place the server reads next", out: "packages/daemon/src/api/ui.ts:31:  const next = c.req.query(\"next\") ?? \"/ui/\";"),
+                RecordStep(kind: .read, text: "packages/daemon/tests/localAuth.test.ts"),
+                RecordStep(kind: .agent, text: "核对测试覆盖", agent: "a9"),
+            ]),
+        ] + (done ? [RecordItem(id: "500", kind: .answer, at: ago(6), text: "**跳转在两处决定**\n\n- `packages/daemon/ui/login.js:41`：登录成功后直接跳到查询里的 `next`，没有检查是不是站内地址。\n- `packages/daemon/src/api/ui.ts:31`：服务端读同一个参数，缺省是 `/ui/`，同样没有校验。\n\n现有测试只覆盖缺省值（`tests/localAuth.test.ts`）。")] : [])
+        card.stage(agent: SubagentSummary(id: "a1", type: "Explore", name: "找登录入口", startedAt: ago(131), updatedAt: ago(done ? 6 : 2), done: done), items: items,
+                   usage: RecordUsage(model: "claude-haiku-5-5", used: 52_000),
+                   // The session's sub-agents in the order they began: one that ended earlier, this one, one more at work.
+                   others: [SubagentSummary(id: "a0", type: "Explore", name: "读设计稿", startedAt: ago(900), updatedAt: ago(700), done: true),
+                            SubagentSummary(id: "a1", type: "Explore", name: "找登录入口", startedAt: ago(131), updatedAt: ago(2), done: done),
+                            SubagentSummary(id: "a2", type: "general-purpose", name: "跑测试", startedAt: ago(120), updatedAt: ago(3))],
+                   folds: open.map { [$0: true] } ?? [:])
     }
 
     private static let command = "cd packages/mac-app && swift test --filter AgentsTests 2>&1 \\\n  | grep -E \"error:|Executed [0-9]+ tests\" | tail -2   # the totals\ngit status --short"
@@ -336,12 +427,17 @@ enum TerminalsPagePreview {
         let gits = [project: FolderGit(branch: "main", changed: 42, ahead: 2), "\(project)/packages/secret-gate": FolderGit(branch: "main", changed: 5),
                     "\(home)/Desktop/WorkSpace/Projects/MailLab": FolderGit(branch: "main")]
         let five = ["low", "medium", "high", "xhigh", "max"]
+        let grok = ["low", "medium", "high", "xhigh"]
         let models = ["claude-code": [TerminalModelOption(id: "opus", name: "Opus 5.5", efforts: five), TerminalModelOption(id: "sonnet", name: "Sonnet 5.5", efforts: five),
                                       TerminalModelOption(id: "opus-4", name: "Opus 4.5", older: true, efforts: ["low", "medium", "high", "max"])],
                       // Codex's, each with its place under Daybreak (docs/simple-view-v0.md §5.8).
                       "codex": [TerminalModelOption(id: "gpt-6.1-sol", name: "GPT-6.1-Sol", efforts: five, daybreak: "never"), TerminalModelOption(id: "gpt-6-sol", name: "GPT-6-Sol", efforts: five, daybreak: "also"),
-                                TerminalModelOption(id: "gpt-6-luna", name: "GPT-6-Luna", efforts: five, daybreak: "also"), TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", efforts: five, daybreak: "only")]]
-        model.stage(terminals: terminals, sessions: sessions, gits: gits, agents: ["claude-code", "codex", "opencode"], models: models, efforts: ["claude-code": five])
+                                TerminalModelOption(id: "gpt-6-luna", name: "GPT-6-Luna", efforts: five, daybreak: "also"), TerminalModelOption(id: "gpt-daybreak-blue-latest", name: "Daybreak Blue", efforts: five, daybreak: "only")],
+                      // Grok's, as it lists them (the older ones folded away, as the others').
+                      "grok": [TerminalModelOption(id: "grok-4.7", name: "Grok 4.7", efforts: grok), TerminalModelOption(id: "grok-4.7-build-fast", name: "Grok 4.7 Fast", efforts: grok),
+                               TerminalModelOption(id: "grok-4.6", name: "Grok 4.6", older: true, efforts: grok), TerminalModelOption(id: "grok-4.5", name: "Grok 4.5", older: true, efforts: ["low", "medium", "high"])]]
+        // pi is the one that is not installed here: its tile says so.
+        model.stage(terminals: terminals, sessions: sessions, gits: gits, agents: ["claude-code", "codex", "opencode", "grok"], models: models, efforts: ["claude-code": five, "grok": grok])
         model.area = CGSize(width: size.width - 291, height: size.height)
         return model
     }

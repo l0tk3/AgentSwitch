@@ -1,6 +1,6 @@
 /** Terminal sessions the service holds (docs/terminal-v0.md): each one an agent CLI in a pseudo-terminal of its own,
  *  mirrored into a headless terminal so a screen that connects gets the current picture first, then the output as it
- *  comes. Status comes from the agent's hooks where it has them (Claude Code, Codex, pi's extension) or from a
+ *  comes. Status comes from the agent's hooks where it has them (Claude Code, Codex, Grok, pi's extension) or from a
  *  companion beside it (OpenCode's own server), else from output activity. Permission requests from a hook wait here until a screen answers (or the wait runs out and the agent asks
  *  in the terminal). */
 
@@ -12,14 +12,21 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import headless from "@xterm/headless";
 import serialize from "@xterm/addon-serialize";
 import * as pty from "node-pty";
+import { subagentOf } from "../sessions/subagents.js";
+import { grokCall, grokTitle } from "./grokHooks.js";
 import { attachHeld, endHeld, HoldError, startHeld, type HoldPlace, type Holding } from "./held.js";
 import { keySequence, replyBytes, type KeyContext } from "./keys.js";
 import { choicesOnScreen, type ScreenChoices } from "./screenChoices.js";
 import { troubleOnScreen } from "./screenTrouble.js";
 import { screenView } from "./screenView.js";
 
-export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
+export const TERMINAL_HARNESSES = ["claude-code", "codex", "opencode", "pi", "grok"] as const;
 export type TerminalHarness = (typeof TERMINAL_HARNESSES)[number];
+/** What a terminal runs: one of the agents, or the user's own shell (docs/terminal-v0.md §0, 2026-11-10; user: 似乎没有
+ *  打开终端的地方). A shell is this Mac's own: only a local caller starts one, and a paired device neither sees one nor
+ *  reaches one (api/terminals.ts). It is no agent: no session, no model, no hooks, nothing it asks. */
+export const SHELL = "shell";
+export type TerminalKind = TerminalHarness | typeof SHELL;
 /** How the agent asks before acting: every time, its own automatic mode, or not at all (bypass). The protected paths
  *  stay closed in every mode (the PreToolUse floor). */
 export const PERMISSION_MODES = ["manual", "auto", "bypass"] as const;
@@ -48,7 +55,7 @@ export type PermissionReply = { readonly decision: PermissionDecision; readonly 
 
 export type TerminalInfo = {
   readonly id: string;
-  readonly harness: TerminalHarness;
+  readonly harness: TerminalKind;
   readonly cwd: string;
   /** Where the agent works now: the `cwd` its hook calls carry (it changes as the agent `cd`s), else `cwd`. */
   readonly workdir: string;
@@ -177,7 +184,7 @@ export type TerminalEvent =
 
 /** What a launcher gets: the new terminal's id and hook token go into the agent's env. */
 export type LaunchRequest = {
-  readonly id: string; readonly harness: TerminalHarness; readonly cwd: string; readonly model?: string; readonly resume?: string;
+  readonly id: string; readonly harness: TerminalKind; readonly cwd: string; readonly model?: string; readonly resume?: string;
   /** How hard it thinks, in the agent's own word for the level (harness/efforts.ts); absent: the agent's default. */
   readonly effort?: string;
   /** Continue `resume` as a new session with its history, instead of the same session. */
@@ -368,7 +375,7 @@ export async function endLeftHeld(dir: string, log: (line: string) => void = (li
 export type KeptTerminal = {
   readonly v: 1;
   readonly id: string;
-  readonly harness: TerminalHarness;
+  readonly harness: TerminalKind;
   readonly cwd: string;
   readonly model: string | null;
   readonly mode: PermissionMode;
@@ -409,9 +416,10 @@ const DEFAULT_BUFFER_BYTES = 2 * 1024 * 1024;
 /** How long output counts as the program answering what was just sent (echo, a mouse move, a resize), not work. */
 const ECHO_MS = 600;
 /** The agents whose own prompt takes a command that sets the model or the level at once — Claude Code's `/model <id>`
- *  and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>` — so a screen can change them. Codex and
- *  OpenCode choose in pickers of their own (docs/simple-view-v0.md §5.4). */
-const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi"]);   // OpenCode: through its companion's server (`Companion.setModel`)
+ *  and `/effort <level>`, pi's `/model <provider/id>` and `/thinking <level>`, Grok's `/model <id>` and
+ *  `/effort <level>` — so a screen can change them. Codex and OpenCode choose in pickers of their own
+ *  (docs/simple-view-v0.md §5.4). */
+const DIRECT: ReadonlySet<string> = new Set(["claude-code", "pi", "grok"]);   // OpenCode: through its companion's server (`Companion.setModel`)
 /** The screen is read for a suggestion once nothing has been drawn for this long. */
 const SUGGEST_MS = 200;
 /** What a terminal is doing while its agent compacts its context: the tool its `activity` names. */
@@ -446,7 +454,7 @@ const TITLE_GLYPHS = /^[\s✳✶✷✸✹✺✻✼✽✢✣✤✥*·•●○◐
 /** Codex puts this in front of its title while something waits for you (`!` and `.` alternating): left out of the name,
  *  which would otherwise blink. Status comes from its notifications instead (OSC 9, launch.ts CODEX_ATTENTION). */
 const ACTION_REQUIRED = /^\[ [!.] \] Action Required(?:\s*\|\s*)?/;
-const AGENT_LABELS: Record<TerminalHarness, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi" };
+const AGENT_LABELS: Record<TerminalKind, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", pi: "pi", grok: "Grok", shell: "Shell" };
 
 /** The title without the agent's status glyphs and markers. */
 export function cleanTitle(raw: string): string {
@@ -455,17 +463,19 @@ export function cleanTitle(raw: string): string {
 
 
 /** A title worth showing: not the agent's own name, a bare program name or a shell's `user@host: dir`. */
-export function meaningfulTitle(title: string, harness: TerminalHarness): string | null {
+export function meaningfulTitle(title: string, harness: TerminalKind): string | null {
   const t = cleanTitle(title);
   if (!t) return null;
   const low = t.toLowerCase();
-  if ([harness, AGENT_LABELS[harness].toLowerCase(), "claude", "node", "zsh", "bash"].includes(low)) return null;
+  if ([harness, AGENT_LABELS[harness].toLowerCase(), "claude", "node", "zsh", "bash", "-zsh", "-bash", "fish", "sh"].includes(low)) return null;
   if (/^[\w.-]+@[\w.-]+:/.test(t) || /^[~/]/.test(t)) return null;
   return t;
 }
 
 /** The name the screens show (see TerminalInfo.name); `given` is the title of the session a terminal continues. */
-export function terminalName(custom: string | null, title: string, harness: TerminalHarness, cwd: string, given: string | null = null): string {
+export function terminalName(custom: string | null, title: string, harness: TerminalKind, cwd: string, given: string | null = null): string {
+  // A shell is listed under its folder already: it is called what it is, until it is given a name or names what runs.
+  if (harness === SHELL) return custom ?? meaningfulTitle(title, harness) ?? AGENT_LABELS[harness];
   return custom ?? meaningfulTitle(title, harness) ?? given ?? (basename(cwd) || AGENT_LABELS[harness]);
 }
 /** What is being written is cut at this many characters (an answer is seldom longer; a screen shows its end). */
@@ -879,7 +889,7 @@ class Session {
   kitty: number[] = [];
   heldTimer: NodeJS.Timeout | null = null;
 
-  constructor(readonly id: string, readonly harness: TerminalHarness, readonly cwd: string, readonly model: string | null, readonly mode: PermissionMode, readonly hookToken: string,
+  constructor(readonly id: string, readonly harness: TerminalKind, readonly cwd: string, readonly model: string | null, readonly mode: PermissionMode, readonly hookToken: string,
     readonly createdAt: number, public cols: number, public rows: number, scrollback: number) {
     this.term = new headless.Terminal({ cols, rows, scrollback, allowProposedApi: true });
     this.ser = new serialize.SerializeAddon();
@@ -943,7 +953,7 @@ export class TerminalHost {
 
   /** Starts an agent. The terminal is listed from the moment it is made (a second resume of the same session finds it),
    *  while a companion starts; the program follows. */
-  async spawn(req: { harness: TerminalHarness; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number; profile?: { id: string; name: string; /** Absent: it runs in the Mac's own folder. */ home?: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string; color?: string; api?: { baseUrl?: string; model?: string }; telemetryOff?: true }; signIn?: true }): Promise<TerminalInfo> {
+  async spawn(req: { harness: TerminalKind; cwd: string; model?: string; effort?: string; resume?: string; fork?: boolean; name?: string; mode?: PermissionMode; allowBypass?: boolean; cols?: number; rows?: number; profile?: { id: string; name: string; /** Absent: it runs in the Mac's own folder. */ home?: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string; color?: string; api?: { baseUrl?: string; model?: string }; telemetryOff?: true }; signIn?: true }): Promise<TerminalInfo> {
     if (!this.helperChecked) { ensureSpawnHelper(); this.helperChecked = true; }
     const id = randomUUID().slice(0, 8);
     const hookToken = randomBytes(24).toString("base64url");
@@ -963,19 +973,11 @@ export class TerminalHost {
     s.resumedFrom = req.resume ?? null;
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
     // Continued in place, the agent writes the session it was given (its hooks say the same once they run).
-    if (req.resume && !s.forked) { s.agentSessionId = req.resume; this.opts.onSession?.(s.harness, req.resume, s.profile?.id ?? null); }
+    if (req.resume && !s.forked && s.harness !== SHELL) { s.agentSessionId = req.resume; this.opts.onSession?.(s.harness, req.resume, s.profile?.id ?? null); }
     s.givenName = req.name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     // Codex's notifications (OSC 9) are only those for what waits for you (launch.ts CODEX_ATTENTION).
     if (req.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
-    s.term.onTitleChange((t) => {
-      const title = cleanTitle(t);
-      if (title === s.title) return;
-      const before = this.nameOf(s);
-      s.title = title;
-      const after = this.nameOf(s);
-      if (after !== before) s.emit({ type: "name", name: after });
-      this.titled(s);
-    });
+    s.term.onTitleChange((t) => this.titleSet(s, t));
     this.sessions.set(id, s);
     let { args, env } = plan;
     if (plan.companion) {
@@ -1120,17 +1122,9 @@ export class TerminalHost {
     s.profile = kept.profile; s.browserKey = kept.browserKey; s.given = kept.given; s.hold = kept.hold;
     s.device = this.device(s);
     if (kept.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
-    s.term.onTitleChange((t) => {
-      const title = cleanTitle(t);
-      if (title === s.title) return;
-      const before = this.nameOf(s);
-      s.title = title;
-      const after = this.nameOf(s);
-      if (after !== before) s.emit({ type: "name", name: after });
-      this.titled(s);
-    });
-    if (kept.agentSessionId) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
-    if (kept.companion && hold.companion) s.companion = hold.companion(kept.harness, kept.companion, kept);
+    s.term.onTitleChange((t) => this.titleSet(s, t));
+    if (kept.agentSessionId && s.harness !== SHELL) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
+    if (kept.companion && hold.companion && kept.harness !== SHELL) s.companion = hold.companion(kept.harness, kept.companion, kept);
     this.sessions.set(kept.id, s);
     this.wire(s, held);
     // The holder sends what it kept; once that is in, the program draws its screen whole again.
@@ -1159,6 +1153,27 @@ export class TerminalHost {
     s.emit({ type: "name", name: this.nameOf(s) });
     this.persist(s);
     return this.info(s);
+  }
+
+  /** The program set its window's title: the name the screens show follows it. Grok's also says what it is doing — a
+   *  spinner and the step in front of the session's own title, which alone is the name — and, for as long as
+   *  something on its screen waits for an answer, `⚠ Action Required`: that is the terminal waiting for you, and its
+   *  going is the answer given there, which no hook says (grokHooks.ts). */
+  private titleSet(s: Session, raw: string): void {
+    const grok = s.harness === "grok" ? grokTitle(raw) : null;
+    const title = grok ? grok.title.slice(0, MAX_TITLE) : cleanTitle(raw);
+    if (title !== s.title) {
+      const before = this.nameOf(s);
+      s.title = title;
+      const after = this.nameOf(s);
+      if (after !== before) s.emit({ type: "name", name: after });
+      this.titled(s);
+    }
+    if (!grok || s.status === "exited" || grok.attention === s.attention) return;
+    s.attention = grok.attention;
+    if (grok.attention) this.setStatus(s, "waiting");
+    // Answered on its own screen: it goes on with the turn, or (refused, cancelled) the turn is over.
+    else if (s.status === "waiting" && !s.pending.size) { if (grok.working) this.busy(s); else this.setStatus(s, "idle"); }
   }
 
   /** Bytes typed into the terminal, as they are. */
@@ -1263,7 +1278,9 @@ export class TerminalHost {
     this.write(id, replyBytes(`/model ${model}`, this.bracketedPaste(id), true));
     // pi says nothing of its model to the service: the one asked for is taken as the one it is on (its own line
     // says "Model: …"; an id it does not know leaves it where it was, and the screens list only its own ids).
-    if (s.harness === "pi" && s.modelNow !== model) { s.modelNow = model; s.emit({ type: "model", model }); }
+    // Nor does Grok (it has no hook for a change of model): the same. Grok keeps the choice as what its later sessions
+    // start on, as Claude Code does; so its `/effort`.
+    if ((s.harness === "pi" || s.harness === "grok") && s.modelNow !== model) { s.modelNow = model; s.emit({ type: "model", model }); }
   }
 
   /** A screen asks the agent in terminal `id` to think at another level: Claude Code's own command (`/effort <level>`),
@@ -1281,6 +1298,14 @@ export class TerminalHost {
       // be a message to it, so only while it rests. The level it is at now is what a screen reads as its level.
       if (s.status !== "idle") throw new TerminalError("busy", "the agent is at work");
       this.write(id, replyBytes(`/thinking ${effort}`, this.bracketedPaste(id), true));
+      s.effort = effort;
+      return;
+    }
+    if (s.harness === "grok") {
+      // Grok's `/effort <level>` sets it for the model it is on. While it works, what is typed waits in its queue as
+      // the next message would: only while it rests. It says nothing of its level to the service either.
+      if (s.status !== "idle") throw new TerminalError("busy", "the agent is at work");
+      this.write(id, replyBytes(`/effort ${effort}`, this.bracketedPaste(id), true));
       s.effort = effort;
       return;
     }
@@ -1394,7 +1419,9 @@ export class TerminalHost {
 
   /** The list its screen shows now to choose from, if any. */
   private choicesNow(s: Session): ScreenChoices | null {
-    return s.status === "exited" ? null : choicesOnScreen(this.screenAll(s), s.term.cols);
+    // A shell's screen is whatever runs in it, never a question of the terminal's own: a list read off it would hold
+    // back a reply to a terminal that has no session yet (docs/simple-view-v0.md §5.17) — and a shell never has one.
+    return s.status === "exited" || s.harness === SHELL ? null : choicesOnScreen(this.screenAll(s), s.term.cols, s.harness);
   }
 
   /** A screen asks the Claude Code in terminal `id` to ask in another way (docs/simple-view-v0.md §5.4 “换模式”). It
@@ -1434,7 +1461,7 @@ export class TerminalHost {
    *  null: the Mac's own. */
   profileOf(id: string, token: string): { readonly harness: TerminalHarness; readonly profile: string | null } {
     const s = this.sessions.get(id);
-    if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
+    if (!s || !same(token, s.hookToken) || s.harness === SHELL) throw new TerminalError("forbidden", "unknown terminal or hook token");
     return { harness: s.harness, profile: s.profile?.id ?? null };
   }
 
@@ -1446,9 +1473,14 @@ export class TerminalHost {
 
   /** A hook call from the agent in terminal `id`, proven by its hook token. Permission requests wait for a screen, or
    *  until `signal` aborts: the hook command went away, which happens when the request was answered in the terminal. */
-  async hook(id: string, token: string, call: HookCall, signal?: AbortSignal): Promise<HookAnswer> {
+  async hook(id: string, token: string, said: HookCall, signal?: AbortSignal): Promise<HookAnswer> {
     const s = this.sessions.get(id);
-    if (!s || !same(token, s.hookToken)) throw new TerminalError("forbidden", "unknown terminal or hook token");
+    // A shell has no hooks (its token is given to nothing): whatever runs in one cannot speak for it.
+    if (!s || !same(token, s.hookToken) || s.harness === SHELL) throw new TerminalError("forbidden", "unknown terminal or hook token");
+    // Grok's hooks are Claude Code's, in its own words for its tools and with its sub-agents as sessions of their
+    // own: read here in the terms the rest of this reads (grokHooks.ts). Some of what it says the terminal does not follow.
+    const call = s.harness === "grok" ? grokCall(said) : said;
+    if (!call) return null;
     const p = call.payload;
     if (typeof p.session_id === "string" && p.session_id) {
       this.reported(s, p.session_id);
@@ -1456,7 +1488,8 @@ export class TerminalHost {
       // The file it writes the session to, which a new session has only once its first message is in: the record's
       // watch looks at it often. Only a file named for that session (it is a hint; the watch finds it by its id).
       const file = p.transcript_path;
-      if (typeof file === "string" && isAbsolute(file) && file.length < 4096 && basename(file).includes(p.session_id)) s.recordFile = file;
+      // (Grok keeps a session in a folder named for it: `<id>/updates.jsonl`.)
+      if (typeof file === "string" && isAbsolute(file) && file.length < 4096 && (basename(file).includes(p.session_id) || basename(dirname(file)) === p.session_id)) s.recordFile = file;
     }
     // How it asks now: Claude Code says it with every call.
     if (typeof p.permission_mode === "string" && /^[A-Za-z]{2,40}$/.test(p.permission_mode)) this.modeIs(s, p.permission_mode);
@@ -1480,8 +1513,9 @@ export class TerminalHost {
     // It was compacting its context (docs/simple-view-v0.md §5.7): anything the main agent says means that is over —
     // the SessionStart that follows a compaction, or it going on with its turn. (Sub-agents stop meanwhile: not that.)
     if (s.compactFrom && !agentId) { this.compacts(s, false); s.compactEndedAt = this.o.now(); }
-    // The agent goes on: what waited for you on its screen was answered.
-    if (call.event !== "SessionStart" && s.attention) { s.attention = false; if (s.status === "waiting" && !s.pending.size) this.setStatus(s, "working"); }
+    // The agent goes on: what waited for you on its screen was answered. (Not Grok's: its title says for how long
+    // its screen waits, `titled` — a sub-agent of its goes on working beside a question that still stands.)
+    if (call.event !== "SessionStart" && s.attention && s.harness !== "grok") { s.attention = false; if (s.status === "waiting" && !s.pending.size) this.setStatus(s, "working"); }
     switch (call.event) {
       // A request answered in the terminal itself leaves its hook waiting here (Claude Code does not end it): what the
       // agent does next tells us — the tool ran (PostToolUse), the turn ended (Stop), or the user typed on (UserPromptSubmit).
@@ -1532,8 +1566,24 @@ export class TerminalHost {
           ? same.find((x) => x.call === call) ?? same.find((x) => !x.call && JSON.stringify(x.ask.input) === input)
           : same.find((x) => JSON.stringify(x.ask.input) === input) ?? (same.length === 1 ? same[0] : undefined);
         if (exact) this.settle(s, exact.ask.id, null, "working");
+        // Grok asks on its own screen only: the tool it asked about has run, so that was answered (where its title
+        // does not say so, grokHooks.ts) and the turn goes on.
+        if (s.harness === "grok" && !agentId && s.status === "waiting" && !s.pending.size && !s.attention) this.setStatus(s, "working");
         return null;
       }
+      // Grok: a tool call was refused — by its rules, or by you on its screen. Nothing of it waits any more; whether
+      // the turn goes on (it tries another way) or ends, its next word says.
+      case "PermissionDenied": {
+        if (typeof p.tool_use_id === "string") s.calls.delete(p.tool_use_id);
+        if (!agentId && s.status === "waiting" && !s.pending.size && !s.attention) this.setStatus(s, "working");
+        return null;
+      }
+      // Grok: the turn ended without an answer — you stopped it, refused what it asked, or it gave up (`reason`).
+      // It rests; that is no result to tell of.
+      case "StopCancelled": this.settleAll(s, "idle"); s.calls.clear(); this.noSubagents(s); this.workDone(s); this.setStatus(s, "idle"); return null;
+      // Grok says when it compacts its context and when that is over (Claude Code's is read off its screen).
+      case "PreCompact": if (!agentId) this.compacts(s, true); return null;
+      case "PostCompact": return null;   // over: said above, as anything the main agent says after one
       case "Notification": {
         const kind = String(p.notification_type ?? "");
         if (kind === "permission_prompt" || s.pending.size) this.setStatus(s, "waiting");
@@ -1593,6 +1643,7 @@ export class TerminalHost {
   /** The agent says which session it writes. A new terminal's or a fork's first one is its own; a later one (`/resume`
    *  typed inside it) is followed, never owned, so closing the terminal cannot delete a record it did not start. */
   private reported(s: Session, sessionId: string): void {
+    if (s.harness === SHELL) return;
     // A profile that had never run had no device of its own when the terminal started; it has one by now.
     s.device ??= this.device(s);
     if (s.agentSessionId !== sessionId) {
@@ -2030,7 +2081,7 @@ export class TerminalHost {
    *  changes — the one standing when a terminal begins another session (`/clear`) was the session's before. */
   private titled(s: Session): void {
     const title = meaningfulTitle(s.title, s.harness);
-    if (title && s.agentSessionId) this.opts.onTitle?.(s.harness, s.agentSessionId, title);
+    if (title && s.agentSessionId && s.harness !== SHELL) this.opts.onTitle?.(s.harness, s.agentSessionId, title);
   }
 
   /** Its screen is read for the line that says it is trying to reach its service again (`troubleOnScreen`): a notice
@@ -2045,11 +2096,14 @@ export class TerminalHost {
   }
 
   /** A screen takes row `pick` (from 0) of the list on the agent's screen, which must still read `label` there: the
-   *  selection is moved to it with the arrow keys and entered. TerminalError "busy" when the list is gone or changed. */
+   *  selection is moved to it with the arrow keys and entered — or, in a list taken by keys, its key is pressed.
+   *  TerminalError "busy" when the list is gone or changed. */
   choose(id: string, pick: number, label: string): void {
     const s = this.need(id);
     const now = this.choicesNow(s);
     if (!now || now.options[pick]?.label !== label) throw new TerminalError("busy", "its screen no longer shows that choice");
+    const key = now.options[pick]!.key;
+    if (key) { this.write(id, key); return; }
     const ctx = this.keyContext(id);
     const step = keySequence(pick > now.selected ? "down" : "up", ctx);
     this.write(id, step.repeat(Math.abs(pick - now.selected)) + "\r");
@@ -2104,14 +2158,21 @@ export class TerminalHost {
     this.doing(s);
   }
 
-  /** A sub-agent at work: named by what the Agent tool call that started it was sent to do (the oldest waiting one of
-   *  its kind, else the oldest), else by its kind. */
+  /** A sub-agent at work: named by what Claude Code itself wrote of it beside its file (sessions/subagents.ts: what
+   *  this very one was sent to do, and when it began), else by what the Agent tool call that started it was sent to do
+   *  (the oldest waiting one of its kind, else the oldest), else by its kind. One not seen starting — taken in by a
+   *  tool call of its own, as a background one is that works on after the turn that sent it ended — has only the
+   *  first to go by: it came back named by its kind (`general-purpose`), its clock starting over (2026-11-10). */
   private subagentStarted(s: Session, id: string, type: string): void {
     const now = this.o.now();
     s.launches = s.launches.filter((l) => now - l.at < LAUNCH_MS);
-    const i = Math.max(s.launches.findIndex((l) => l.type === type), s.launches.length ? 0 : -1);
+    const kept = s.harness === "claude-code" && s.recordFile ? subagentOf(s.recordFile, id) : null;
+    const said = kept?.name.slice(0, MAX_NAME) ?? "";
+    // The call that sent it: the one that says the same, where Claude Code says what it was sent to do.
+    const same = said ? s.launches.findIndex((l) => l.name === said) : -1;
+    const i = same >= 0 ? same : Math.max(s.launches.findIndex((l) => l.type === type), s.launches.length ? 0 : -1);
     const [launch] = i >= 0 ? s.launches.splice(i, 1) : [];
-    s.subagents.set(id, { id, type: type || launch?.type || "agent", name: launch?.name || type || "agent", activity: null, since: now });
+    s.subagents.set(id, { id, type: type || kept?.type || launch?.type || "agent", name: said || launch?.name || type || "agent", activity: null, since: kept ? Math.min(kept.startedAt, now) : now });
     this.doing(s);
   }
 
@@ -2181,6 +2242,7 @@ export class TerminalHost {
   }
 
   private device(s: Session): string | null {
+    if (s.harness === SHELL) return null;
     try { return this.opts.deviceOf?.(s.harness, s.profile?.id ?? null) ?? null; } catch { return null; }
   }
 
