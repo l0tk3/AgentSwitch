@@ -1,0 +1,5 @@
+{"id":"t_q1","createdAt":1790000000000,"updatedAt":1790000001000,"status":"waiting_approval","task":"登录后台导出报表","cwd":"/tmp/w","pin":{"harness":"opencode","model":"deepseek-flash"},"needsBrowser":true,"ephemeral":false,"parentId":null,"attachments":[],"threadId":null,"exclude":[],"handoffFrom":null,"approvalPolicy":null,"harness":null,"model":null,"effort":null,"brief":null,"decision":null,"attempts":[],"routerAsks":1,"result":null,"error":null,"routeLogId":null,"rating":null,"spoken":null,"blockCause":null,
+ "approvals":[
+  {"id":"ap_1","taskId":"t_q1","createdAt":1790000000500,"kind":"question","action":"用哪个账号？","evidence":"{\"source\":\"router\",\"questions\":[{\"id\":\"clarify\",\"header\":\"路由器\",\"text\":\"用哪个账号？\",\"options\":[],\"multi\":false,\"secret\":false}]}","status":"pending","resolvedAt":null,"answer":null},
+  {"id":"ap_2","taskId":"t_q1","createdAt":1790000000600,"kind":"approval","action":"bash: rm -rf build","evidence":"{\"command\":\"rm -rf build\"}","status":"pending","resolvedAt":null,"answer":null}
+ ]}

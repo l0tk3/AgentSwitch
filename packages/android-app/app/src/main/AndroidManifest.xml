@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The Mac is reached over the local network or Tailscale, by https pinned to the paired certificate. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The connection chooses its address again when the phone's networks change. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- A terminal that waits for you, or whose turn ended, is said in a notification (Android 13 and later ask). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Following the Mac from behind while something is in progress (platform/FollowService.kt): a foreground service
+         of the connected-device kind, which asks for one of a few network permissions to be declared — this one is
+         granted at install and nothing here changes the network — and the processor kept awake between askings. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Settings › Security: the app unlocked with the phone's own fingerprint, face or PIN. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- The QR scanner of the pairing flow. A phone without a camera can still paste the link. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
+    <application
+        android:name=".AgentSwitchApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="AgentSwitch"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AgentSwitch">
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|fontScale|locale|layoutDirection"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- The Mac app's pairing link, tapped or scanned by another app: agentswitch://pair?p=… -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="agentswitch" />
+            </intent-filter>
+        </activity>
+        <!-- A downloaded task file is opened by the phone's own viewer: it is handed a content:// address of the app's
+             cache folder for tasks' files (xml/file_paths.xml) and nothing else. -->
+        <service
+            android:name=".platform.FollowService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>
