@@ -198,6 +198,12 @@ extension DaemonClient {
         _ = try await call("POST", "/terminals/\(Self.segment(id))/write", body: try JSONEncoder().encode(["data": data]))
     }
 
+    /// Files staged with `upload` moved to the terminal's own folder of attachments and their paths pasted into it, not
+    /// entered (a file dropped on a terminal; Claude Code turns a picture's path into [Image #n]).
+    public func attachToTerminal(id: String, uploads: [String]) async throws {
+        _ = try await call("POST", "/terminals/\(Self.segment(id))/attach", body: try JSONEncoder().encode(["uploads": uploads]))
+    }
+
     /// Named keys the service encodes as the program asked (Shift+Enter).
     public func terminalKeys(id: String, _ keys: [String]) async throws {
         _ = try await call("POST", "/terminals/\(Self.segment(id))/keys", body: try JSONEncoder().encode(["keys": keys]))

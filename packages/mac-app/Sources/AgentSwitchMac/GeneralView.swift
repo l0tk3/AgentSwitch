@@ -21,6 +21,7 @@ struct GeneralView: View {
     @AppStorage(SleepGuard.enabledKey) private var keepAwake = true
     /// The interface's look (docs/ui-v0.md §8), this Mac's own; every window follows it at once (`followsWindow`).
     @AppStorage(InterfaceLook.key) private var appearance = InterfaceLook.pixel.rawValue
+    @AppStorage(CodeEditor.key) private var editor = CodeEditor.vscode.rawValue
 
     private var draft: PortSettings? {
         guard let l = Int(local), let r = Int(remote), let g = Int(gate), let o = Int(opencode) else { return nil }
@@ -52,6 +53,16 @@ struct GeneralView: View {
                 SectionLabel("Appearance")
             } footer: {
                 Footer("Appearance 只换外观：图标、字体、按钮和提示的写法。功能、位置和快捷键不变。Pixel 是像素与字符的样子；Classic 是常见应用的样子。Text Size 调整对话里文字的大小：消息、步骤、代码和回复框；侧栏、按钮和终端画面不变。")
+            }
+
+            Section {
+                Picker("Open Folders In", selection: $editor) {
+                    ForEach(CodeEditor.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
+                }
+            } header: {
+                SectionLabel("Terminals")
+            } footer: {
+                Footer("终端的 Open in 按钮（每块的标题栏、列表里终端的右键菜单）用它打开 agent 当前的文件夹。另一个节点上的终端通过 Remote - SSH 打开，要先在 Nodes 里填写那个节点的 SSH Host。")
             }
 
             Section {

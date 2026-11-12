@@ -340,6 +340,20 @@ extension TerminalsModel {
         }
     }
 
+    /// The folder the terminal's agent works in now, opened in the code editor chosen in Settings › General
+    /// (docs/terminal-v0.md §1 Mac "在编辑器中打开"): as it is on this Mac, over SSH on another node by the Host given for
+    /// it in Settings › Nodes.
+    func openInEditor(_ terminal: TerminalInfo) {
+        let c = client()
+        let editor = CodeEditor.load(.standard)
+        let path = terminal.workdir.isEmpty ? terminal.cwd : terminal.workdir
+        let host = c.nodeId.flatMap { UserDefaults.standard.string(forKey: EditorLink.sshHostKey(node: $0)) }
+        guard let url = EditorLink.url(editor: editor, path: path, remote: c.isRemote, sshHost: host) else {
+            return say(c.isRemote ? "要在 \(editor.short) 中打开另一个节点上的文件夹，请先在 设置 › Nodes 里填写这个节点的 SSH Host。" : "这个终端没有可以打开的文件夹。")
+        }
+        if !NSWorkspace.shared.open(url) { say("无法打开 \(editor.label)：这台 Mac 上似乎没有安装它。") }
+    }
+
     /// Closing a terminal ends its program and takes it off the list; the agent's own record stays, so the session can
     /// be continued later. An ended one goes at once; a running one asks first.
     func close(_ terminal: TerminalInfo) {

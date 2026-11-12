@@ -77,6 +77,20 @@ on average. Each row's line already counts its changes (`BufferLine.generation`,
   where the view asks, pixel for pixel the screen drawn whole after each of 1600 pieces of mixed output (text, erasing,
   scrolling, regions, the other screen, palette and default colours, reverse video).
 
+## A reset follows the bottom again (2026-10-15)
+
+docs/terminal-v0.md §1 Mac. A pane shows another terminal in the same screen: the screen is reset
+(`resetToInitialState()`) and the other terminal's snapshot fed. `Terminal.userScrolling` (set by the view when the user
+scrolls back, and keeping the viewport where it is while output comes) outlived the reset, which puts the new buffer's
+viewport at its top: after scrolling back in one terminal, the next one shown stayed at the top of its snapshot, further
+up than the first had been (user, 2026-10-15: 当A session 向上滚动而非处于最下方时，切到B 也会发现向上滚动且滚动了更大的范围).
+
+- `Terminal.swift`, `resetToInitialState()`: `userScrolling = false` after the buffers are set up again.
+- `Mac/MacTerminalView.swift`, `bufferActivated(source:)`: the view's own `userScrolling` takes the terminal's (a reset
+  calls it).
+- `Tests/AgentSwitchPatchTests/ResetScrollTests.swift`: output after a reset follows the bottom though the viewport had
+  been scrolled back; without a reset a scrolled-back viewport stays.
+
 To take a newer SwiftTerm: replace `Sources/SwiftTerm` with its library sources, then apply the changes above again (or
 drop them once upstream draws marked text inline and joins rows more strictly, draws these cells from its colour
 cache, and sends only changed rows to be drawn).

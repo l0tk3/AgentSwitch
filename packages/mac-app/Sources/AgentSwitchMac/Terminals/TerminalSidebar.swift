@@ -544,6 +544,7 @@ private struct TerminalRow: View {
         } else {
             Button("Open in New Window") { model.onDetach(terminal.id) }
         }
+        Button("Open in \(CodeEditor.load(.standard).short)") { model.openInEditor(terminal) }
         Divider()
         Button("Close", role: .destructive) { model.close(terminal) }
             .keyboardShortcut("w", modifiers: .command)
