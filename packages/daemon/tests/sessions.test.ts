@@ -125,11 +125,13 @@ describe("the Mac's coding sessions", () => {
   it("shows the folders the user says to show, a temporary one too with what is under it, and hides the ones they say to hide (2026-11-11)", () => {
     const { sources, data, repo } = fixture();
     const folders = new ShownFoldersStore(data);
-    const monitor = new SessionMonitor({ ...sources, excluded: [...sources.excluded, "/private/tmp/"], folders: () => folders.get() }, () => NOW);
-    // A folder that is not there is the same folder by either of macOS's names for it.
-    const under = join(sources.claudeProjects, "-private-tmp-probe-sub");
+    // A folder that is not there is the same folder by either of macOS's names for it. Elsewhere `/private/tmp` is
+    // another folder (seen on CI, Linux, 2026-11-11: the session under it was not listed), so there one name is used.
+    const TMP = process.platform === "darwin" ? "/private/tmp" : "/tmp";
+    const monitor = new SessionMonitor({ ...sources, excluded: [...sources.excluded, `${TMP}/`], folders: () => folders.get() }, () => NOW);
+    const under = join(sources.claudeProjects, `${TMP.replaceAll("/", "-")}-probe-sub`);
     mkdirSync(under, { recursive: true });
-    writeFileSync(join(under, "p2.jsonl"), line({ type: "user", cwd: "/private/tmp/probe/sub", message: { role: "user", content: "under it" }, timestamp: "2026-09-27T09:59:05Z" }) + "\n");
+    writeFileSync(join(under, "p2.jsonl"), line({ type: "user", cwd: `${TMP}/probe/sub`, message: { role: "user", content: "under it" }, timestamp: "2026-09-27T09:59:05Z" }) + "\n");
     const ids = () => monitor.list().map((s) => s.id).sort();
     expect(ids()).toEqual(["c1", "o1", "x1"]);
     expect(folders.show("/tmp/probe")).toEqual({ shown: [canonicalFolder("/tmp/probe")], hidden: [] });
@@ -137,17 +139,17 @@ describe("the Mac's coding sessions", () => {
     // Hidden: the folder and what is under it, whatever else is said of it; nothing is deleted.
     folders.hide(repo);
     expect(ids()).toEqual(["o1", "p1", "p2", "x1"]);
-    folders.hide("/private/tmp/probe/sub");
+    folders.hide(`${TMP}/probe/sub`);
     expect(ids()).toEqual(["o1", "p1", "x1"]);
     // Showing a folder again takes back what hid it or anything under it; kept across a restart, the user's alone.
-    folders.show("/private/tmp/probe");
+    folders.show(`${TMP}/probe`);
     expect(new ShownFoldersStore(data).get()).toEqual({ shown: [canonicalFolder("/tmp/probe")], hidden: [repo] });
     expect(ids()).toEqual(["o1", "p1", "p2", "x1"]);
     expect(statSync(join(data, "sessions", "folders.json")).mode & 0o777).toBe(0o600);
     expect(folders.forget(repo).hidden).toEqual([]);
     expect(ids()).toEqual(["c1", "o1", "p1", "p2", "x1"]);
     // What is typed: `~`, either name of a folder, and nothing that is not a whole path.
-    expect([typedFolder("~/x", "/Users/u"), typedFolder(" /tmp/a/ ") === canonicalFolder("/private/tmp/a"), typedFolder("relative/x"), folderWithin("/tmp/probe/sub", "/private/tmp/probe"), folderWithin("/tmp/probe2", "/tmp/probe")])
+    expect([typedFolder("~/x", "/Users/u"), typedFolder(" /tmp/a/ ") === canonicalFolder(`${TMP}/a`), typedFolder("relative/x"), folderWithin("/tmp/probe/sub", `${TMP}/probe`), folderWithin("/tmp/probe2", "/tmp/probe")])
       .toEqual(["/Users/u/x", true, null, true, false]);
   });
 
