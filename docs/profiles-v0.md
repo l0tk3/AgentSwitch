@@ -176,6 +176,12 @@ Codex
 - **key 怎么到 agent 手里**：两家都有“运行一条命令取 key”的口子，用的就是它，**key 不进 agent 的启动参数、环境变量和任何文件**：
   - Claude Code：启动那层设置里写 `apiKeyHelper`（终端自己的 hook 程序加 `key`），地址不是 Anthropic 自己的时再加 `env.ANTHROPIC_BASE_URL`。它把取到的值同时作为 `x-api-key` 与 `Authorization: Bearer` 发出。
   - Codex：启动时用 `-c` 给一个只属于这个终端的供应商（`model_provider="agentswitch"`，`model_providers.agentswitch = { name, base_url, wire_api = "responses", auth = { command, args } }`），命令同上。它作为 `Authorization: Bearer` 发出。
+    - **对话记住了供应商**（2026-10-24，catop：resume codex 会话出现 `Model provider agentswitch not found`）：Codex 把对话每次用的供应商写进它的记录（0.162 起是 `thread_settings_applied` 里的 `model_provider_id`），恢复时沿用。在 key 配置下跑过的对话，记录里是 `agentswitch`；之后在不付 key 的终端里恢复（`Default`，或者"这段对话上次在哪个配置"的记录丢了，按 `Default` 开），Codex 找不到这个供应商，根本起不来。现在恢复 Codex 对话时，服务先读它最后用的供应商（从最新一页的末尾往前找，可能在几 MB 之前）：
+      - 记录是 `agentswitch`、而服务没记下它上次的配置时，Codex 只有一个 key 配置就用那个；
+      - 最后在不付 key 的终端里恢复（选了 `Resume As` › `Default`，或者有几个 key 配置分不出是哪个）时，用 `-c model_provider=` 告诉 Codex 用你自己的供应商：`config.toml` 顶上写的那个，没写就是 OpenAI 的，不会是 `agentswitch`。对话就此回到账号付费。
+      - 实测：把出错的那段对话复制到临时的 `CODEX_HOME`，带上 `-c model_provider="openai"` 后 Codex 0.162.1 照常恢复，显示原来的对话。为了不往原对话里写东西，没有在真的 `~/.codex` 上试。
+      - 这段对话上次的配置记录是怎么丢的，没有查清：服务从 10-16 起一直在运行，记录只会在同一段对话以 `Default` 启动时删掉；最可能是 10-21 有一次以 `Default` 恢复它（同样起不来），随后又 `Resume As` 回到 key 配置。审计里没有记配置，看不出来。
+    - **Codex 把长对话分成几页存**（0.162，`rollout-<时间>-<对话 id>_<页 id>.jsonl`，每页从上一页结束处接着写，`session_meta` 里是同一个对话 id）：原来每一页都被当成一段对话，一段对话在列表里出现四次；按 id 找文件只认第一页（`-<id>.jsonl`），所以简略视图显示的是最早那页，删除也只删了第一页。现在同一个对话只列一次：标题取最早一页的第一个问题，其余（最后的回答、时间、模型、读哪个文件）取最新的一页；按 id 找文件时页文件也算，取最新的；删除时每一页都删。
   - 那条命令拿终端自己的 hook 令牌向本机服务要（`POST /terminals/key`，不在配对设备的名单上）；服务按终端所在的配置取出密文、向网关要值、交给它。要不到（网关没开、配置删了）命令就失败并在 stderr 说明，agent 报没有 key，不会发一个空的出去。key 换了之后，已经开着的终端下一次取就是新的；地址与模型是启动时定的，开着的终端不变。
 - **各自的家目录**：
   - Claude Code：和订阅登录的配置一样有自己的目录（自己的设备标识，不沾 `Default` 的登录）。
