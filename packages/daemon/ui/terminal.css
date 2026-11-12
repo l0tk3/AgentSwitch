@@ -22,12 +22,13 @@
   --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
   --band: 44px;
   --side-w: 290px;
+  --files-w: 0px;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
-  display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: var(--band) minmax(0, 1fr); overflow: hidden;
+  display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr) var(--files-w); grid-template-rows: var(--band) minmax(0, 1fr); overflow: hidden;
   background: var(--term); color: var(--ink); font: 12.5px/1.5 var(--mono); -webkit-font-smoothing: antialiased;
   user-select: none; -webkit-user-select: none;
 }
@@ -409,6 +410,62 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; }
 .sheet-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .sheet-foot .btn { padding: 2px 10px; }
 
+/* ---------- the Files column (docs/files-v0.md §14): a browser's own, right of the screen; a tree, a path, a preview ---------- */
+.band-new.lit { color: var(--signal); }
+.files { grid-column: 3; grid-row: 2; position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--term); font-size: 12.5px; line-height: 20px; }
+.files::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: repeating-linear-gradient(var(--ink3) 0 1px, transparent 1px 3px); pointer-events: none; }
+.files-grip { position: absolute; top: 0; bottom: 0; left: -3px; width: 7px; z-index: 2; cursor: col-resize; }
+.files-grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; }
+.files-grip:hover::after { background: var(--ink2); }
+body.files-dragging, body.files-dragging * { cursor: col-resize !important; }
+body.files-dragging .files-grip::after { background: var(--signal); }
+body.files-dragging .screen { pointer-events: none; }
+.files-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 8px 8px 2px 12px; }
+.files-title { font-size: 11px; letter-spacing: .16em; color: var(--ink3); }
+.files-btn { flex: none; color: var(--ink2); padding: 0 5px; font-size: 11.5px; line-height: 18px; white-space: nowrap; text-decoration: none; }
+.files-btn:hover { background: var(--ink); color: var(--term); }
+.files-btn.on { color: var(--signal); }
+.files-btn.on:hover { color: var(--term); }
+.files-path { flex: none; display: flex; flex-wrap: wrap; align-items: center; padding: 2px 8px 6px 12px; color: var(--ink3); }
+.files-path button { color: var(--ink2); padding: 0 2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-path button:hover { background: var(--ink); color: var(--term); }
+.files-path button.here { color: var(--ink); font-weight: 700; }
+.files-path .sep { color: var(--ink4); }
+.files-list { flex: 1 1 55%; min-height: 80px; overflow-y: auto; outline: none; padding-bottom: 8px; }
+.files-list::-webkit-scrollbar { width: 0; }
+.frow { position: relative; display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; align-items: center; padding: 0 10px 0 calc(10px + var(--depth, 0) * 2ch); white-space: nowrap; }
+.frow:hover { background: var(--hover); }
+.frow .tw { color: var(--ink2); }
+.frow .nm { overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--ink2); }
+.frow.dir .nm { color: var(--ink); }
+.frow.dim .nm, .frow.hid .nm, .frow.locked .nm, .frow.more .nm { color: var(--ink3); }
+.frow .mt { color: var(--ink3); font-size: 11px; padding-left: 10px; }
+.frow.sel { background: var(--sel); }
+.files-list:focus .frow.sel { background: var(--ink); }
+.files-list:focus .frow.sel .nm, .files-list:focus .frow.sel .tw, .files-list:focus .frow.sel .mt { color: var(--term); }
+.frow.sel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--signal); }
+.files-note, .files-say { padding: 6px 12px; color: var(--ink3); font-family: var(--ui); font-size: 12px; user-select: text; -webkit-user-select: text; }
+.files-preview { flex: 1 1 45%; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.files-preview::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: repeating-linear-gradient(90deg, var(--ink3) 0 1px, transparent 1px 3px); }
+.files-about { flex: none; display: flex; align-items: center; gap: 6px; padding: 7px 8px 0 12px; }
+.files-about .nm { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.files-facts { flex: none; padding: 0 12px 4px; color: var(--ink3); font-size: 11px; }
+.files-text { flex: 1; min-height: 0; overflow: auto; }
+.files-text pre { margin: 0; padding: 4px 12px 10px; font: 12px/1.5 var(--mono); color: var(--ink); white-space: pre; tab-size: 4; user-select: text; -webkit-user-select: text; }
+.files-picture { flex: 1; min-height: 0; display: grid; place-items: center; padding: 8px 12px 12px; overflow: hidden; }
+.files-picture img { max-width: 100%; max-height: 100%; object-fit: contain; image-rendering: auto; }
+.classic .files { font-family: var(--ui); font-size: 13px; background: var(--side); }
+.classic .files::before { background: var(--ink4); }
+.classic .files-preview::before { background: var(--ink4); }
+.classic .files-title { letter-spacing: 0; font-size: 11px; font-weight: 600; }
+.classic .files-btn { border-radius: 5px; }
+.classic .files-btn:hover, .classic .files-path button:hover { background: rgba(127, 127, 127, .16); color: var(--ink); }
+.classic .files-path button { border-radius: 4px; }
+.classic .frow { height: 24px; border-radius: 5px; margin: 0 6px; padding-left: calc(6px + var(--depth, 0) * 14px); }
+.classic .frow.sel::before { display: none; }
+.classic .files-list:focus .frow.sel { background: var(--signal); }
+.classic .files-list:focus .frow.sel .nm, .classic .files-list:focus .frow.sel .tw, .classic .files-list:focus .frow.sel .mt { color: #fff; }
+
 /* ---------- the phone and other narrow screens: the list slides over, the key bar and composer are always there ---------- */
 .keys { display: none; }
 @media (max-width: 760px), (pointer: coarse) {
@@ -416,6 +473,7 @@ body.pane-dragging, body.pane-dragging * { cursor: grabbing !important; }
   .main { grid-column: 1; }
   .side { position: fixed; inset: var(--band) auto 0 0; width: min(310px, 86vw); z-index: 5; transform: translateX(-100%); transition: transform .2s steps(6); }
   body.list-open .side { transform: none; }
+  .files { position: fixed; inset: var(--band) 0 0 0; z-index: 6; }
   .keys { position: relative; display: flex; gap: 6px; overflow-x: auto; padding: 8px 10px; }
   .keys::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: linear-gradient(var(--ink4), var(--ink4)); }
   .keys button { flex: none; min-width: 40px; height: 30px; background: #2e2e30; color: var(--ink); box-shadow: 0 2px 0 #0f0f10, inset 0 1px 0 #3d3d40; }

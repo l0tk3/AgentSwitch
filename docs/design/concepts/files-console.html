@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentSwitch Files · Web Console</title>
+<style>
+/* The web console's Files column (docs/files-v0.md §14, 2026-11-12; user: 能不能直接扩展现有的文件栏功能 支持到linux的网页
+   控制台). A still picture for review, as the page draws it (packages/daemon/ui/lib/filesColumn.js, terminal.css): the
+   terminal page of a node with no window of its own, its list on the left, the screen, and the column on the right — a
+   path, a tree, the preview of the file selected. The paths are made up. Read only: nothing here runs a command. */
+:root {
+  --term: #0b0b0c; --ink: #e9e6df; --ink2: #8d8a84; --ink3: #4d4b48; --ink4: #262524; --sel: rgba(255, 255, 255, .07);
+  --signal: #ff2e88; --green: #9be22d;
+  --mono: ui-monospace, "SF Mono", Menlo, "PingFang SC", monospace;
+  --ui: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 24px; background: #1b1b1d; color: #d8d4cc; font: 13px/1.6 var(--ui); }
+h1 { font: 600 15px var(--ui); margin: 0 0 4px; }
+p { margin: 0 0 16px; color: #a09c95; max-width: 900px; }
+.win { display: grid; grid-template-columns: 240px minmax(0, 1fr) 340px; grid-template-rows: 44px 520px; max-width: 1180px; background: var(--term); color: var(--ink); font: 12.5px/20px var(--mono); border: 1px solid #000; }
+.top { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 10px; border-bottom: 1px solid var(--ink4); color: var(--ink2); }
+.top .grow { flex: 1; }
+.top .lit { color: var(--signal); }
+.side { border-right: 1px dotted var(--ink3); padding: 10px 0; }
+.side .find { margin: 0 10px 8px; padding: 2px 6px; border: 1px solid var(--ink4); color: var(--ink3); }
+.side .find b { color: var(--signal); }
+.side .row { padding: 0 12px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side .row.sel { background: var(--sel); color: var(--ink); box-shadow: inset 3px 0 0 var(--signal); }
+.side .row i { font-style: normal; color: var(--green); }
+.screen { padding: 12px 16px; color: var(--ink2); white-space: pre; overflow: hidden; }
+.screen b { color: var(--ink); font-weight: 400; }
+.files { position: relative; display: flex; flex-direction: column; min-height: 0; border-left: 1px dotted var(--ink3); }
+.head { display: flex; align-items: center; gap: 4px; padding: 8px 8px 2px 12px; }
+.head .t { font-size: 11px; letter-spacing: .16em; color: var(--ink3); }
+.head .grow { flex: 1; }
+.head .b { color: var(--ink2); padding: 0 5px; font-size: 11.5px; }
+.head .b.on { color: var(--signal); }
+.path { padding: 2px 8px 6px 12px; color: var(--ink2); }
+.path i { font-style: normal; color: var(--ink4); }
+.path b { color: var(--ink); }
+.list { flex: 1 1 55%; overflow: hidden; }
+.frow { display: grid; grid-template-columns: 2ch minmax(0, 1fr) auto; padding: 0 10px 0 calc(10px + var(--d, 0) * 2ch); white-space: nowrap; }
+.frow .tw { color: var(--ink2); }
+.frow .nm { color: var(--ink2); overflow: hidden; text-overflow: ellipsis; }
+.frow.dir .nm { color: var(--ink); }
+.frow.dim .nm { color: var(--ink3); }
+.frow .mt { color: var(--ink3); font-size: 11px; padding-left: 10px; }
+.frow.sel { background: var(--ink); box-shadow: inset 3px 0 0 var(--signal); }
+.frow.sel .nm, .frow.sel .tw, .frow.sel .mt { color: var(--term); }
+.preview { flex: 1 1 45%; border-top: 1px dotted var(--ink3); display: flex; flex-direction: column; min-height: 0; }
+.about { display: flex; align-items: center; padding: 7px 8px 0 12px; }
+.about b { flex: 1; }
+.about span { color: var(--ink2); font-size: 11.5px; }
+.facts { padding: 0 12px 4px; color: var(--ink3); font-size: 11px; }
+.preview pre { margin: 0; padding: 4px 12px; font: 12px/1.5 var(--mono); color: var(--ink); overflow: hidden; }
+table { border-collapse: collapse; margin-top: 18px; font: 12.5px var(--ui); color: #b5b1aa; }
+td { padding: 3px 18px 3px 0; vertical-align: top; }
+td:first-child { font-family: var(--mono); color: #d8d4cc; white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1>Files · 网页控制台</h1>
+<p>没有窗口的节点（Linux）在本机浏览器里打开的终端页。顶栏的文件夹图标、终端行右键的 <code>Open Files Beside</code>、<code>⌘⇧F</code>
+都打开右边这一栏，停在这个终端当前所在的文件夹。只看、预览、下载；不改文件，也没有任何执行命令的入口。</p>
+
+<div class="win">
+  <div class="top"><span>▤</span><span class="grow"></span><span>Dispatch</span><span class="lit" title="Hide Files ⌘⇧F">▱</span><span title="New Terminal ⌘T">✚</span></div>
+  <div class="side">
+    <div class="find"><b>/</b> Search</div>
+    <div class="row">▾ report-site</div>
+    <div class="row sel">&nbsp;&nbsp;<i>■</i> 首页改版</div>
+    <div class="row">&nbsp;&nbsp;◷ 修复导航栏&nbsp;&nbsp;2h</div>
+    <div class="row">▸ notes</div>
+  </div>
+  <div class="screen"><b>&gt; 把首页的三张图换成新的，然后截一张图给我看</b>
+
+● 已替换 public/hero-1.png、hero-2.png、hero-3.png
+● 截图保存为 out/home.png
+
+<b>&gt; </b>▌</div>
+  <div class="files">
+    <div class="head"><span class="t">// FILES</span><span class="grow"></span><span class="b">Date Modified</span><span class="b on">.*</span><span class="b">×</span></div>
+    <div class="path">~<i> / </i>work<i> / </i><b>report-site</b></div>
+    <div class="list">
+      <div class="frow dir"><span class="tw">▾</span><span class="nm">out</span><span class="mt"></span></div>
+      <div class="frow sel" style="--d:1"><span class="tw"></span><span class="nm">home.png</span><span class="mt">Now</span></div>
+      <div class="frow dir"><span class="tw">▸</span><span class="nm">public</span><span class="mt"></span></div>
+      <div class="frow dir"><span class="tw">▸</span><span class="nm">src</span><span class="mt"></span></div>
+      <div class="frow dir dim"><span class="tw">▸</span><span class="nm">.git</span><span class="mt"></span></div>
+      <div class="frow dir dim"><span class="tw">▸</span><span class="nm">node_modules</span><span class="mt"></span></div>
+      <div class="frow"><span class="tw"></span><span class="nm">README.md</span><span class="mt">3m</span></div>
+      <div class="frow"><span class="tw"></span><span class="nm">package.json</span><span class="mt">2d</span></div>
+      <div class="frow dim"><span class="tw"></span><span class="nm">.env</span><span class="mt">9d</span></div>
+    </div>
+    <div class="preview">
+      <div class="about"><b>README.md</b><span>[ Download ]</span></div>
+      <div class="facts">Text · 1.2 KB · 38 Lines · 3m</div>
+<pre># report-site
+
+季度报告的静态站点。
+
+    npm install
+    npm run dev</pre>
+    </div>
+  </div>
+</div>
+
+<table>
+  <tr><td>↑ ↓</td><td>上一行、下一行；<code>Home</code> / <code>End</code> 到头、到尾</td></tr>
+  <tr><td>→ ←</td><td>展开文件夹；收起，或到上一层</td></tr>
+  <tr><td>↩ · ⌘↓</td><td>进入选中的文件夹（双击也是）</td></tr>
+  <tr><td>⌘↑</td><td>到上一层文件夹</td></tr>
+  <tr><td>字母</td><td>跳到以它开头的文件</td></tr>
+  <tr><td>esc</td><td>键盘回到终端</td></tr>
+  <tr><td>⌘⇧F</td><td>打开、关闭这一栏</td></tr>
+</table>
+</body>
+</html>

@@ -12,6 +12,7 @@ import { flicker as pixelFlicker, glitch as pixelGlitch, reducedMotion, revealWo
 import { key, SHADED, shaded, shadedMark, TONE_COLORS } from "/ui/lib/shaded.js";
 import { accentOf, age, AGENT_ICON, bracket, dot, help as helpIn, icon, label as labelIn, lookOf, mark as classicMark, spinner, word as wordIn } from "/ui/lib/look.js";
 import { everyFolder, everySession, everyTerminal, folderOf, folderTree as buildTree, foldersAbove, slashed, tilde } from "/ui/lib/tree.js";
+import { filesColumn } from "/ui/lib/filesColumn.js";
 import { GAP, MAX_PANES, MIN_H, MIN_W, close as closeIn, drop as dropIn, neighbor, paneOf, paneShowing, panesOf, place, ratioAt, resize as resizeIn, restore as restoreLayout,
   settle, show as showIn, single, split as splitIn, zoneOf } from "/ui/lib/panes.js";
 
@@ -217,13 +218,32 @@ let side = (() => {
 })();
 /** Room for the screen stays (the Mac window is at least 800 wide). */
 const sideWidth = (x) => Math.round(Math.max(SIDE.min, Math.min(x, 560, innerWidth - 420)));
-/** The band's two buttons, drawn and said as the look has them. */
+/** The Mac bar's Files icon (AgentSwitchMacCore/PixelArt.swift `toolbarFiles`). */
+const FILES_ICON = [
+  ".#####...........", "#.....#..........", "#......#########.", "#...............#", "#...............#", "#...............#",
+  "#...............#", "#...............#", "#...............#", "#...............#", "#...............#", ".###############.",
+];
+// The Files column (docs/files-v0.md §14): a browser's own — a node with no window has no other; the Mac window has
+// its native column beside this page. Made further down, once the page's helpers are (`files`).
+let files = null;
+/** The folder the terminal on screen works in now: where the column opens. */
+const folderHere = () => (current && !creating ? current.workdir || current.cwd : null);
+function toggleFiles(folder = folderHere()) {
+  if (!files) return;
+  files.toggle(folder);
+  drawBandButtons();
+}
+/** The band's buttons, drawn and said as the look has them. */
 function drawBandButtons() {
   // A browser's (the Mac window has them in its own bar): the window with its sidebar, the plus with some thickness.
   $("newBtn").innerHTML = picture("new", "plus", 17);
   $("newBtn").title = tip("New Terminal ⌘T");
   $("sideBtn").innerHTML = picture("list", "sidebar", 18);
   $("sideBtn").title = tip("List ⌘B");
+  // The Files column's (the Mac window has its own column and its own button): a folder, as the Mac's bar draws it.
+  $("filesBtn").innerHTML = classic() ? icon("folder", 17) : sprite(FILES_ICON, { px: 1 });
+  $("filesBtn").title = tip(files?.open ? "Hide Files ⌘⇧F" : "Show in Files ⌘⇧F");
+  $("filesBtn").classList.toggle("lit", files?.open === true);
 }
 drawBandButtons();
 function renderSideBtn() {
@@ -1344,6 +1364,8 @@ function showMenu(e, t) {
     : item("Open in New Window", null, () => native.postMessage({ type: "detach", id: t.id }));
   $("menu").replaceChildren(...[
     item("Rename", null, () => startRename(t.id)),
+    // The Files column at the folder this terminal works in (a browser's; the Mac window has `Show in Files`).
+    files ? item("Open Files Beside", null, () => { files.show(t.workdir || t.cwd); drawBandButtons(); }) : null,
     move,
     item("Encrypt & Send…", "⌘⇧V", () => { select(t.id); openComposer(); }, { disabled: t.status === "exited" || out }),
     item("Close", "⌘W", () => closeTerminal(t), { danger: true })].filter(Boolean));
@@ -1840,6 +1862,7 @@ function shortcut(e) {
   if (key === "t" && !e.shiftKey) return () => showCreate();
   if (key === "b" && !e.shiftKey) return toggleList;
   if (key === "f" && !e.shiftKey) return focusSearch;
+  if (key === "f" && e.shiftKey && files) return () => toggleFiles();
   if (key === "w" && !e.shiftKey && current && !creating) return () => closeTerminal(current);
   if (key === "v" && e.shiftKey) return () => openComposer();
   // The panes, as iTerm2 and Warp have them: ⌘D beside, ⌘⇧D below, ⌘⌥ arrows to the next pane, ⌘⇧↩ the pane alone.
@@ -1888,6 +1911,7 @@ function drawLook() {
   document.documentElement.classList.toggle("classic", classic());
   applyChrome(style);
   drawBandButtons();
+  files?.redraw();
   $("sealLock").innerHTML = picture("lockSmall", "lock", 14);
   $("composerLock").innerHTML = picture("lockSmall", "lock", 14);
   for (const el of document.querySelectorAll("[data-label]")) el.textContent = label(`// ${el.dataset.label}`);
@@ -1899,6 +1923,11 @@ function drawLook() {
   const spin = $("loading").firstElementChild;
   spin.className = classic() ? "" : "spin";
   if (classic()) spin.innerHTML = spinner(14); else spin.textContent = SPIN[0];
+}
+if (!IN_MAC_APP) {
+  files = filesColumn({ el: $("files"), h, tip, onLayout: drawBandButtons, onLeave: () => { drawBandButtons(); if (current && !creating) focusScreen(); } });
+  $("filesBtn").hidden = false;
+  $("filesBtn").addEventListener("click", () => toggleFiles());
 }
 drawLook();
 /** The look changed (the Mac window's setting): everything is drawn again in it. The cards over the screen come back
