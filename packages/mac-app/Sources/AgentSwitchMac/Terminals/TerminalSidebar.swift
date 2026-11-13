@@ -146,12 +146,15 @@ private struct FoldersButton: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Show a Folder").mono(12, weight: .semibold).foregroundStyle(Look.ink)
             HStack(spacing: 8) {
-                TextField("/tmp/demo or ~/Desktop/demo", text: $path)
+                TextField(model.client().isRemote ? "/tmp/demo or ~/demo" : "/tmp/demo or ~/Desktop/demo", text: $path)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12.5, design: .monospaced))
                     .frame(width: 280)
                     .onSubmit(show)
-                Button("Choose…", action: choose)
+                // The system's panel shows this Mac's folders: on another node the folder is typed (2026-11-13, user:
+                // 当我在连接远程节点的时候点这个地方弹出来的是我本机的文件夹？ — a folder picked there was this Mac's path,
+                // sent to the node as one of its own).
+                if !model.client().isRemote { Button("Choose…", action: choose) }
                 Button("Show", action: show).keyboardShortcut(.defaultAction).disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             Text("这个目录和它下面各级目录里的会话都会列出来，临时目录也一样。").font(.system(size: 11.5)).foregroundStyle(Look.ink2)
