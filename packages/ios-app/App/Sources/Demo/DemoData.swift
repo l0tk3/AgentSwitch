@@ -391,6 +391,16 @@ enum DemoData {
         ["found": true, "running": true, "version": "v1.19.31", "mode": "rule", "tun": true,
          "source": ["kind": "link", "name": "Mine", "host": "sub.example.net", "updatedAt": ago(5400), "nodes": 42,
                     "providers": [], "traffic": ["used": 13_207_024_435.0, "total": 107_374_182_400.0, "expire": 1_793_456_000_000.0]],
+         "together": true,
+         "subscriptions": [["id": "0", "kind": "link", "name": "Mine", "host": "sub.example.net", "updatedAt": ago(5400), "nodes": 7, "providers": [], "hours": 24,
+                            "traffic": ["used": 13_207_024_435.0, "total": 107_374_182_400.0, "expire": 1_793_456_000_000.0]],
+                           ["id": "3f9a12c0", "kind": "file", "name": "spare.yaml", "updatedAt": ago(260_000), "nodes": 4, "providers": [], "hours": 0]],
+         "table": [["name": "🇯🇵 日本家宽-01", "sub": "0", "type": "vless", "off": false], ["name": "🇯🇵 日本家宽-02", "sub": "0", "type": "vless", "off": false],
+                   ["name": "🇯🇵 日本-03", "sub": "0", "type": "trojan", "off": false], ["name": "🇺🇸 美国家宽-01", "sub": "0", "type": "vless", "off": false],
+                   ["name": "🇺🇸 美国-02", "sub": "0", "type": "vless", "off": false], ["name": "🇸🇬 新加坡-01", "sub": "0", "type": "ss", "off": false],
+                   ["name": "🇸🇬 新加坡-02", "sub": "0", "type": "ss", "off": false], ["name": "🇬🇧 英国-01", "sub": "3f9a12c0", "type": "hysteria2", "off": false],
+                   ["name": "🇩🇪 德国-01", "sub": "3f9a12c0", "type": "hysteria2", "off": false], ["name": "🇰🇷 韩国-01", "sub": "3f9a12c0", "type": "ss", "off": false],
+                   ["name": "🇯🇵 日本-03 · spare.yaml", "sub": "3f9a12c0", "type": "ss", "off": true]],
          "nodes": ["🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇯🇵 日本-03", "🇺🇸 美国家宽-01", "🇺🇸 美国-02", "🇸🇬 新加坡-01", "🇸🇬 新加坡-02", "🇬🇧 英国-01", "🇩🇪 德国-01", "🇰🇷 韩国-01"],
          "profiles": [["uid": "Lbw7BJYzpand", "name": "mine.yaml", "type": "local"], ["uid": "Ro3yUVdr9kT1", "name": "Other", "type": "remote"]],
          "settings": ["claude": ["nodes": ["🇯🇵 日本家宽-01", "🇯🇵 日本家宽-02", "🇺🇸 美国家宽-01"]], "openai": ["nodes": ["🇺🇸 美国家宽-01", "🇸🇬 新加坡-01"]],
@@ -453,7 +463,7 @@ enum DemoData {
     /// Where 设置 opens for a demo screen.
     static func settingsPath(_ screen: String?) -> [SettingsRoute] {
         switch screen {
-        case "clash", "clashservice", "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource": return [.clash]
+        case "clash", "clashservice", "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource", "clashsubscription", "clashallnodes": return [.clash]
         case "proxybrowser": return [.proxy(.browser)]
         case "proxyprofile": return proxies.owned.first.map { [.proxy(.profile(agent: $0.agent, profile: $0.profile))] } ?? []
         case "mac", "offlinemac": return [.mac]

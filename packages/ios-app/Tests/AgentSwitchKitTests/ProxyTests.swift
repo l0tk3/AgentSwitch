@@ -70,6 +70,53 @@ final class ProxyTests: XCTestCase {
         XCTAssertTrue(again.ownRules)
     }
 
+    /// Several subscriptions (docs/clash-v0.md §10): read as the Mac lists them, and each call as the service takes it.
+    func testSeveralSubscriptionsAreReadAndChanged() async throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(Self.clash.utf8)) as? [String: Any])
+        let old = try JSONDecoder().decode(ClashView.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertFalse(old.keepsSeveral)
+        XCTAssertNil(old.table)
+        object["together"] = true
+        object["subscriptions"] = [["id": "0", "kind": "link", "name": "Main", "host": "sub.example", "updatedAt": 1, "nodes": 2, "providers": [], "hours": 24],
+                                   ["id": "3f9a12c0", "kind": "file", "name": "spare.yaml", "updatedAt": 2, "nodes": 1, "providers": [], "hours": 0, "error": "没有取到"]]
+        object["table"] = [["name": "A", "sub": "0", "type": "vless", "off": false], ["name": "b", "sub": "0", "type": "ss", "off": true], ["name": "A · spare.yaml", "sub": "3f9a12c0", "type": "trojan", "off": false]]
+        let answer = try JSONSerialization.data(withJSONObject: object)
+        let view = try JSONDecoder().decode(ClashView.self, from: answer)
+        XCTAssertTrue(view.keepsSeveral && view.ownRules)
+        XCTAssertEqual(view.subscriptions?.map(\.origin), ["sub.example", "File"])
+        XCTAssertEqual(view.subscriptions?.map(\.hours), [24, 0])
+        let table = try XCTUnwrap(view.table)
+        XCTAssertEqual(ClashText.filtered(table, subscription: "3f9a12c0", search: "").map(\.name), ["A · spare.yaml"])
+        XCTAssertEqual(ClashText.filtered(table, subscription: nil, search: "B").map(\.name), ["b"])
+        XCTAssertEqual([ClashText.nodeCount(shown: 3, off: 1), ClashText.nodeCount(shown: 1, off: 0)], ["3 Nodes · 1 Off", "1 Node"])
+
+        let transport = FakeTransport { req, _ in
+            if req.url?.path == "/clash/delays" { return (Data(#"{"delays":{"A":96,"b":null}}"#.utf8), httpResponse(req.url)) }
+            return (answer, httpResponse(req.url))
+        }
+        let api = AgentSwitchAPI(endpoints: FixedEndpoint(lan), transport: transport, token: "tok")
+        _ = try await api.addClashSubscription(link: "https://sub.example/a?token=s")
+        _ = try await api.addClashSubscription(yaml: "proxies: []", name: "spare.yaml")
+        _ = try await api.addClashSubscription(verge: "Lbw7BJYzpand")
+        _ = try await api.editClashSubscription("3f9a12c0", name: "Spare")
+        _ = try await api.editClashSubscription("0", hours: 6)
+        _ = try await api.updateClashSubscription("0")
+        _ = try await api.removeClashSubscription("3f9a12c0")
+        _ = try await api.setClashNode("A · spare.yaml", off: true)
+        let delays = try await api.clashDelays()
+        XCTAssertEqual(delays["A"], .some(96))
+        XCTAssertEqual(delays["b"], .some(nil))
+        XCTAssertEqual(transport.requests.map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" },
+                       ["POST /clash/subscriptions", "POST /clash/subscriptions", "POST /clash/subscriptions", "PATCH /clash/subscriptions/3f9a12c0", "PATCH /clash/subscriptions/0",
+                        "POST /clash/subscriptions/0/update", "DELETE /clash/subscriptions/3f9a12c0", "POST /clash/node", "POST /clash/delays"])
+        func body(_ n: Int) throws -> NSDictionary { try XCTUnwrap(transport.requests[n].httpBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? NSDictionary }) }
+        XCTAssertEqual(try body(0), ["link": "https://sub.example/a?token=s"])
+        XCTAssertEqual(try body(3), ["name": "Spare"])   // only what is said goes
+        XCTAssertEqual(try body(4), ["hours": 6])
+        XCTAssertEqual(try body(7), ["name": "A · spare.yaml", "off": true])
+        XCTAssertEqual(try body(8), ["service": "any", "scope": "all"])
+    }
+
     func testClashCallsAreWhatTheServiceTakes() async throws {
         let transport = FakeTransport { req, _ in
             if req.url?.path == "/clash/delays" { return (Data(#"{"delays":{"a":428,"b":null}}"#.utf8), httpResponse(req.url)) }

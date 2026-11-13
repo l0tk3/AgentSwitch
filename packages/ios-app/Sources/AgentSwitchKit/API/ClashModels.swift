@@ -175,6 +175,35 @@ public struct ClashSource: Decodable, Equatable, Sendable {
     public let traffic: ClashTraffic?
 }
 
+/// One of the subscriptions worked from (docs/clash-v0.md §10): a link or a file with its own name and its own
+/// interval.
+public struct ClashSubscription: Decodable, Equatable, Sendable, Identifiable {
+    public let id: String
+    /// `link` or `file`.
+    public let kind: String
+    public let name: String
+    public let host: String?
+    public let updatedAt: Double
+    public let nodes: Int
+    public let providers: [ClashSourceProvider]
+    public let error: String?
+    public let traffic: ClashTraffic?
+    /// Fetched again after this many hours; 0: only when asked.
+    public let hours: Int
+
+    /// Where it comes from, in a word: a link's host, `File` for a file.
+    public var origin: String { kind == "link" ? (host ?? name) : "File" }
+}
+
+/// A node in the table of them all: its name as Clash has it, the subscription it is of, whether it is switched off.
+public struct ClashNode: Decodable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let sub: String
+    public let type: String
+    public let off: Bool
+    public var id: String { name }
+}
+
 public struct ClashServiceState: Decodable, Equatable, Sendable {
     /// Its two groups by the names they have in Clash.
     public let group: String
@@ -280,8 +309,19 @@ public struct ClashView: Decodable, Equatable, Sendable {
     public let version: String?
     public let tun: Bool?
     public let source: ClashSource?
-    /// Every node of the subscription, by name.
+    /// Every node that can be used, by name.
     public let nodes: [String]
+    /// Each subscription, every node of them with the ones switched off, and whether there are several (§10). nil
+    /// from a Mac that knows of one subscription alone (not yet updated).
+    public let subscriptions: [ClashSubscription]?
+    public let table: [ClashNode]?
+    public let together: Bool?
+
+    /// The Mac keeps several subscriptions (§10); one that does not has the one, replaced or removed.
+    public var keepsSeveral: Bool { subscriptions != nil }
+
+    /// The groups and the rules are AgentSwitch's alone: asked for, or there are several subscriptions.
+    public var ownRules: Bool { settings.ownRules || together == true }
     /// Clash Verge's own subscriptions, to import one.
     public let profiles: [ClashProfile]
     public let settings: ClashSettings
@@ -306,7 +346,7 @@ public struct ClashView: Decodable, Equatable, Sendable {
         guard found else { return ["Mac 上没有找到 Clash Verge。"] }
         guard running else { return ["Mac 上的 Clash Verge 没有在运行：在 Mac 上打开它。"] }
         var steps: [String] = []
-        if source == nil { steps.append("先在下面给一个订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
+        if source == nil { steps.append("先在下面添加一份订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
         else if !active { steps.append("在 Mac 的 Clash Verge 里添加并切换到 AgentSwitch 订阅（Mac 上 AgentSwitch 的 Clash 页有一键添加）。") }
         else if !upToDate { steps.append("订阅的正文变了（分组、规则集或 DNS）：在 Mac 的 Clash Verge 里更新一次 AgentSwitch 订阅，或者等它自己来取（每小时一次）。") }
         if tun == false { steps.append("打开 Mac 上 Clash Verge 的 TUN 模式。") }
@@ -345,6 +385,21 @@ public enum ClashText {
 
     /// `1 h`, `24 h`; `Off` for never.
     public static func interval(hours: Int) -> String { hours == 0 ? "Off" : "\(hours) h" }
+
+    /// `42 Nodes`, `1 Node`.
+    public static func nodes(_ count: Int) -> String { count == 1 ? "1 Node" : "\(count) Nodes" }
+
+    /// What the table of nodes shows: one subscription's alone where one is picked (nil: all), and those whose name has
+    /// what is searched for, whatever its case.
+    public static func filtered(_ table: [ClashNode], subscription: String?, search: String) -> [ClashNode] {
+        let wanted = search.trimmingCharacters(in: .whitespaces)
+        return table.filter { node in
+            (subscription == nil || node.sub == subscription) && (wanted.isEmpty || node.name.range(of: wanted, options: [.caseInsensitive, .diacriticInsensitive]) != nil)
+        }
+    }
+
+    /// `47 Nodes`, and how many are switched off when any is: `47 Nodes · 3 Off`.
+    public static func nodeCount(shown: Int, off: Int) -> String { nodes(shown) + (off > 0 ? " · \(off) Off" : "") }
 
     /// `169 Rules`, `1 Rule`.
     public static func rules(_ count: Int) -> String { count == 1 ? "1 Rule" : "\(count) Rules" }

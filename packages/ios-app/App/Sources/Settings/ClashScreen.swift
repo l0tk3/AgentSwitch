@@ -16,6 +16,9 @@ final class ClashModel {
     var testing: Set<ClashService> = []
     var checked: [ClashCheckRow]?
     var checking = false
+    /// How long every node took when all were tried, whatever they are used for; and that they are being tried.
+    var allDelays: [String: Int?] = [:]
+    var testingAll = false
     @ObservationIgnored var api: AgentSwitchAPI?
     @ObservationIgnored var failed: (Error) -> Void = { _ in }
 
@@ -24,6 +27,7 @@ final class ClashModel {
             #if DEBUG
             view = DemoData.clash
             delays = DemoData.clashDelays
+            allDelays = DemoData.clashDelays[.claude] ?? [:]
             checked = DemoData.clashChecked
             loaded = true
             #endif
@@ -76,6 +80,15 @@ final class ClashModel {
         }
     }
 
+    func testAll() {
+        guard let api, !testingAll else { return }
+        testingAll = true
+        Task {
+            do { allDelays = try await api.clashDelays(); error = nil } catch { say(error) }
+            testingAll = false
+        }
+    }
+
     func check() {
         guard let api, !checking else { return }
         checking = true
@@ -118,6 +131,8 @@ struct ClashScreen: View {
     #if DEBUG
     @State private var demoNodes = false
     @State private var demoText = false
+    @State private var demoSubscription = false
+    @State private var demoAllNodes = false
     #endif
 
     var body: some View {
@@ -126,7 +141,8 @@ struct ClashScreen: View {
             if let error = clash.error { Section { ErrorText(message: Binding(get: { clash.error }, set: { clash.error = $0 })).id(error) } }
             if let view = clash.view {
                 status(view)
-                subscription(view)
+                // A Mac that keeps several subscriptions (§10) lists them; one that does not has its one, as before.
+                if view.keepsSeveral { subscriptions(view) } else { subscription(view) }
                 if view.source != nil {
                     ForEach(ClashService.allCases, id: \.self) { ClashServiceSection(clash: clash, view: view, service: $0) }
                     rules(view)
@@ -151,6 +167,8 @@ struct ClashScreen: View {
         #if DEBUG
         .navigationDestination(isPresented: $demoNodes) { ClashNodesScreen(clash: clash, service: .claude) }
         .navigationDestination(isPresented: $demoText) { ClashTextScreen(clash: clash, template: .domestic) }
+        .navigationDestination(isPresented: $demoSubscription) { ClashSubscriptionScreen(clash: clash, id: clash.view?.subscriptions?.first?.id ?? "") }
+        .navigationDestination(isPresented: $demoAllNodes) { ClashAllNodesScreen(clash: clash) }
         #endif
         }
         .refreshable { await clash.load() }
@@ -174,6 +192,8 @@ struct ClashScreen: View {
         case "clashnodes": demoNodes = true
         case "clashtext": demoText = true
         case "clashsource": adding = true
+        case "clashsubscription": demoSubscription = true
+        case "clashallnodes": demoAllNodes = true
         default: break
         }
     }
@@ -225,14 +245,39 @@ struct ClashScreen: View {
         }
     }
 
+    /// Every subscription a row that opens it, one to add another, and the table of all their nodes (§10).
+    private func subscriptions(_ view: ClashView) -> some View {
+        Section {
+            ForEach(view.subscriptions ?? []) { subscription in
+                NavigationLink { ClashSubscriptionScreen(clash: clash, id: subscription.id) } label: {
+                    LabeledContent {
+                        Text(subscription.error == nil ? ClashText.nodes(subscription.nodes) : "Not Updated").mono(13).foregroundStyle(subscription.error == nil ? Color.secondary : Theme.waiting)
+                    } label: { Text(subscription.name).lineLimit(1) }
+                }
+            }
+            Button("Add Subscription…") { adding = true }.disabled(clash.fetching)
+            if let table = view.table, !table.isEmpty {
+                NavigationLink { ClashAllNodesScreen(clash: clash) } label: {
+                    LabeledContent("All Nodes") { Text(ClashText.nodeCount(shown: table.count, off: table.filter(\.off).count)).mono(13) }
+                }
+            }
+        } header: {
+            SectionLabel("Subscriptions")
+        } footer: {
+            Text((view.subscriptions ?? []).count > 1 ? "有多份订阅时，所有节点合在一起，分组和规则都由 AgentSwitch 生成。链接由 Mac 保管，这里只显示它的主机名。"
+                 : "AgentSwitch 从订阅出发，加上给 Claude 和 OpenAI 单独的分组，再交给 Clash Verge。可以再加几份，节点合在一起用。链接由 Mac 保管，这里只显示它的主机名。")
+        }
+    }
+
     // MARK: rules and DNS
 
     private func rules(_ view: ClashView) -> some View {
         Section {
-            Toggle("Only My Rules", isOn: Binding(get: { view.settings.ownRules }, set: { on in clash.change { $0.ownRules = on } }))
+            // With several subscriptions the groups and rules are AgentSwitch's alone (§10): on, and not to be turned off.
+            Toggle("Only My Rules", isOn: Binding(get: { view.ownRules }, set: { on in clash.change { $0.ownRules = on } })).disabled(view.together == true)
             ForEach(ClashTemplate.allCases, id: \.self) { template in
                 // The domestic template is on while only these rules are: without it everything at home goes by Manual.
-                let held = template == .domestic && view.settings.ownRules
+                let held = template == .domestic && view.ownRules
                 Toggle(isOn: Binding(get: { held || view.settings.templates[template].on }, set: { on in clash.change { $0.templates[template].on = on } })) {
                     Text(template.title)
                 }
@@ -248,7 +293,7 @@ struct ClashScreen: View {
             if view.dns.on, view.dns.overridden {
                 Text("Clash Verge 自己的“DNS 覆写”开着：内核用的是它那一份，这里的 DNS 不起作用。").font(.footnote).foregroundStyle(Theme.waiting)
             }
-            if let group = view.defaultGroup, !view.settings.ownRules {
+            if let group = view.defaultGroup, !view.ownRules {
                 Toggle("Rename \(group) to Manual", isOn: Binding(get: { view.settings.renameDefault }, set: { on in clash.change { $0.renameDefault = on } }))
             }
         } header: {
@@ -473,6 +518,133 @@ private struct ClashNodesScreen: View {
     }
 }
 
+/// One subscription (docs/clash-v0.md §10): where it comes from, what it holds, when it was fetched and how often it
+/// is fetched again; renamed and removed from here.
+private struct ClashSubscriptionScreen: View {
+    let clash: ClashModel
+    let id: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var renaming = false
+    @State private var name = ""
+    @State private var confirmRemove = false
+
+    private var subscription: ClashSubscription? { clash.view?.subscriptions?.first { $0.id == id } }
+
+    var body: some View {
+        Form {
+            if let subscription {
+                Section {
+                    LabeledContent("From") { Text(subscription.origin).mono(13).lineLimit(1) }
+                    LabeledContent("Nodes") { Text("\(subscription.nodes)").mono(13) }
+                    if let traffic = subscription.traffic { LabeledContent("Traffic") { Text(ClashText.traffic(traffic)).mono(13) } }
+                    LabeledContent("Updated") { Text(Date(timeIntervalSince1970: subscription.updatedAt / 1000).relative).mono(13) }
+                    if let error = subscription.error { Text("上次更新没有成功，用的还是之前那一份：\(error)").font(.footnote).foregroundStyle(Theme.waiting) }
+                    ForEach(subscription.providers.filter { $0.error != nil }, id: \.name) { provider in
+                        Text("节点集 \(provider.name) 没有取到：\(provider.error ?? "")").font(.footnote).foregroundStyle(Theme.waiting)
+                    }
+                    Picker("Auto Update", selection: Binding(get: { subscription.hours }, set: { hours in clash.run { try await $0.editClashSubscription(id, hours: hours) } })) {
+                        ForEach(ClashSettings.updateHours, id: \.self) { Text(ClashText.interval(hours: $0)).tag($0) }
+                    }
+                    HStack {
+                        Button("Update Now") { clash.fetch { try await $0.updateClashSubscription(id) } }.disabled(clash.fetching || subscription.kind != "link" && subscription.providers.isEmpty)
+                        Spacer()
+                        if clash.fetching { ProgressView() }
+                    }
+                }
+                Section {
+                    Button("Rename…") { name = subscription.name; renaming = true }
+                    Button("Remove", role: .destructive) { confirmRemove = true }.disabled(clash.fetching)
+                } footer: {
+                    Text("移除后，它的节点从 Clash 的分组里拿掉；为 Claude、OpenAI 选的节点里属于它的也一并去掉。")
+                }
+            }
+        }
+        .navigationTitle(subscription?.name ?? "Subscription")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Rename Subscription", isPresented: $renaming) {
+            TextField("Name", text: $name)
+            Button("Rename") {
+                let next = name.trimmingCharacters(in: .whitespaces)
+                if !next.isEmpty, next != subscription?.name { clash.run { try await $0.editClashSubscription(id, name: next) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("移除这份订阅？", isPresented: $confirmRemove, titleVisibility: .visible) {
+            Button("Remove", role: .destructive) {
+                clash.run { try await $0.removeClashSubscription(id) }
+                dismiss()
+            }
+        }
+    }
+}
+
+/// Every node of every subscription (docs/clash-v0.md §10): the subscription each is of, how long it takes to answer,
+/// and a mark that leaves it out of everything when it is cleared. One subscription's alone from the menu.
+private struct ClashAllNodesScreen: View {
+    let clash: ClashModel
+    @Environment(\.interfaceLook) private var look
+    @State private var query = ""
+    /// The subscription shown alone; nil: all of them.
+    @State private var only: String?
+
+    private var subscriptions: [ClashSubscription] { clash.view?.subscriptions ?? [] }
+    private var table: [ClashNode] { clash.view?.table ?? [] }
+    private var shown: [ClashNode] { ClashText.filtered(table, subscription: subscriptions.contains { $0.id == only } ? only : nil, search: query) }
+    /// A node can be left out: the groups are AgentSwitch's (with one subscription that takes `Only My Rules`).
+    private var canLeaveOut: Bool { clash.view?.ownRules ?? false }
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(shown) { node in
+                    Button { clash.run { try await $0.setClashNode(node.name, off: !node.off) } } label: {
+                        HStack(spacing: Theme.Space.s) {
+                            if look.isClassic {
+                                Image(systemName: node.off ? "square" : "checkmark.square.fill").font(.system(size: 17)).foregroundStyle(node.off ? Color.secondary : Theme.signal)
+                            } else {
+                                Text(node.off ? "[ ]" : "[x]").mono(13).foregroundStyle(node.off ? Color.secondary : Theme.ink)
+                            }
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(node.name).lineLimit(1).foregroundStyle(node.off ? Color.secondary : Theme.ink)
+                                Text(([subscriptions.count > 1 ? subscriptions.first { $0.id == node.sub }?.name : nil, node.type].compactMap { $0 }).joined(separator: " · "))
+                                    .mono(11).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer(minLength: Theme.Space.s)
+                            let delay = ClashText.delay(clash.allDelays[node.name])
+                            Text(delay).mono(12).foregroundStyle(delay == "Timeout" ? Theme.waiting : Color.secondary)
+                        }
+                    }
+                    .disabled(!canLeaveOut && !node.off)
+                }
+            } header: {
+                SectionLabel(ClashText.nodeCount(shown: shown.count, off: table.filter(\.off).count))
+            } footer: {
+                Text(canLeaveOut ? "点一行停用或恢复这个节点。停用的节点不进任何分组，也不会被 Claude、OpenAI 用到。"
+                                 : "停用单个节点需要先打开 Only My Rules：订阅自带的分组里去不掉单个节点。")
+            }
+        }
+        .searchable(text: $query, prompt: "Search")
+        .navigationTitle("All Nodes")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if clash.testingAll { ProgressView() } else { Button("Test All") { clash.testAll() }.disabled(clash.view?.running != true) }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if subscriptions.count > 1 {
+                    Menu {
+                        Picker("Subscription", selection: $only) {
+                            Text("All Subscriptions").tag(String?.none)
+                            ForEach(subscriptions) { Text($0.name).tag(String?.some($0.id)) }
+                        }
+                    } label: { Image(systemName: only == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") }
+                    .accessibilityLabel("Subscription")
+                }
+            }
+        }
+    }
+}
+
 /// A template's text, edited: a rule template's rules, a line each (docs/clash-v0.md §7.7), or the DNS template's
 /// text (§7.8, `template` nil). What the Mac says is wrong with it is shown; the page stays open on it.
 private struct ClashTextScreen: View {
@@ -563,6 +735,9 @@ private struct ClashSourceSheet: View {
     @State private var picking = false
     @State private var problem: String?
 
+    /// The Mac keeps several subscriptions (§10): this one is added; else it takes the place of the one there is.
+    private var several: Bool { clash.view?.keepsSeveral ?? false }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -570,17 +745,20 @@ private struct ClashSourceSheet: View {
                 Section {
                     TextField("Link", text: $link, prompt: Text("https://…"), axis: .vertical)
                         .code(13).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL).lineLimit(1...4)
-                    Button("Use Link") { use { try await $0.setClashSource(link: link.trimmingCharacters(in: .whitespacesAndNewlines)) } }
+                    Button(several ? "Add Link" : "Use Link") {
+                        let link = link.trimmingCharacters(in: .whitespacesAndNewlines), several = several
+                        use { several ? try await $0.addClashSubscription(link: link) : try await $0.setClashSource(link: link) }
+                    }
                         .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).count < 8)
                 } header: {
                     SectionLabel("Link")
                 } footer: {
-                    Text("Mac 现在就去取一次，之后按 Auto Update 的间隔再取。链接经这条加密的连接发给 Mac，由它保管，不留在这台 iPhone 上。")
+                    Text("Mac 现在就去取一次，之后按这份订阅自己的 Auto Update 间隔再取。链接经这条加密的连接发给 Mac，由它保管，不留在这台 iPhone 上。")
                 }
                 if let profiles = clash.view?.profiles, !profiles.isEmpty {
                     Section {
                         ForEach(profiles) { profile in
-                            Button { use { try await $0.setClashSource(verge: profile.uid) } } label: {
+                            Button { let several = several; use { several ? try await $0.addClashSubscription(verge: profile.uid) : try await $0.setClashSource(verge: profile.uid) } } label: {
                                 LabeledContent(profile.name) { Text(profile.type).mono(12) }
                             }
                             .foregroundStyle(Theme.ink)
@@ -622,6 +800,7 @@ private struct ClashSourceSheet: View {
             return
         }
         let name = url.lastPathComponent
-        use { try await $0.setClashSource(yaml: yaml, name: name) }
+        let several = several
+        use { several ? try await $0.addClashSubscription(yaml: yaml, name: name) : try await $0.setClashSource(yaml: yaml, name: name) }
     }
 }

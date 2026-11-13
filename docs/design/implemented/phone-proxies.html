@@ -126,8 +126,9 @@ function draw() {
       + card("Alerts & Voice", [row("Sound", null), row("Haptics", null)])),
     phone("CLASH", "Clash",
       card("Status", [row("Clash Verge", "Running", { vcls: "ok" }), row("Core", "v1.19.31"), row("TUN", "On")])
-      + card("Subscription", [row("From", "sub.example.net"), row("Nodes", "42"), row("Traffic", "12.3 / 100 GB · Expires 2026/10/31"), row("Updated", "Today 14:47"),
-        row("Auto Update", "24 h ⌃"), row("Update Now", null), row("Replace…", null), row("Remove", null, { cls: "red" })], "换一个订阅会忘掉为 Claude 和 OpenAI 选过的节点。")
+      // Several subscriptions (docs/clash-v0.md §10): a row each that opens it, one to add another, the table of all their nodes.
+      + card("Subscriptions", [row("Mine", "7 Nodes", { chev: true }), row("spare.yaml", "4 Nodes", { chev: true }), row("Add Subscription…", null), row("All Nodes", "11 Nodes · 1 Off", { chev: true })],
+        "有多份订阅时，所有节点合在一起，分组和规则都由 AgentSwitch 生成。链接由 Mac 保管，这里只显示它的主机名。")
       + service("claude", "Claude") + service("openai", "OpenAI")),
     phone("CLASH · RULES, DIRECT, CHECK", "Clash",
       card("Rules", [sw("Only My Rules", "own"), sw("Domestic & Local Direct", "domestic"), row("Edit", "169 Rules", { chev: true }), sw("Block Ads & Trackers", "block"), row("Edit", "27 Rules", { chev: true }),

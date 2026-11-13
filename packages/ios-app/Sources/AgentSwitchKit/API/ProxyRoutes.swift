@@ -61,6 +61,47 @@ extension AgentSwitchAPI {
     /// The DNS template's text as it is in use.
     public func clashDNS() async throws -> ClashDNSText { try await get(["clash", "dns"]) }
 
+    // MARK: several subscriptions (docs/clash-v0.md §10)
+
+    /// One more subscription to work from: a link (kept by the Mac), a file's text, or one of Clash Verge's own.
+    public func addClashSubscription(link: String) async throws -> ClashView {
+        try await send("POST", ["clash", "subscriptions"], body: ["link": link], timeout: ClashText.fetchTimeout)
+    }
+
+    public func addClashSubscription(yaml: String, name: String) async throws -> ClashView {
+        try await send("POST", ["clash", "subscriptions"], body: ["yaml": yaml, "name": name], timeout: ClashText.fetchTimeout)
+    }
+
+    public func addClashSubscription(verge uid: String) async throws -> ClashView {
+        try await send("POST", ["clash", "subscriptions"], body: ["verge": uid], timeout: ClashText.fetchTimeout)
+    }
+
+    /// A subscription's name, or how often it is fetched again.
+    public func editClashSubscription(_ id: String, name: String? = nil, hours: Int? = nil) async throws -> ClashView {
+        try await send("PATCH", ["clash", "subscriptions", id], body: ClashSubscriptionEdit(name: name, hours: hours), timeout: 20)
+    }
+
+    public func removeClashSubscription(_ id: String) async throws -> ClashView {
+        try await perform("DELETE", ["clash", "subscriptions", id], query: [], body: nil, timeout: 20)
+    }
+
+    /// One subscription fetched again now.
+    public func updateClashSubscription(_ id: String) async throws -> ClashView {
+        try await perform("POST", ["clash", "subscriptions", id, "update"], query: [], body: nil, timeout: ClashText.fetchTimeout)
+    }
+
+    /// A node is left out of everything from now on, or is back.
+    public func setClashNode(_ name: String, off: Bool) async throws -> ClashView {
+        try await send("POST", ["clash", "node"], body: ClashNodeOff(name: name, off: off), timeout: 20)
+    }
+
+    /// How long every node takes to answer, in ms (nil: no answer), whatever it is used for.
+    public func clashDelays() async throws -> [String: Int?] {
+        struct Answer: Decodable { let delays: [String: Int?] }
+        let answer: Answer = try await send("POST", ["clash", "delays"], body: ["service": "any", "scope": "all"], timeout: 30)
+        return answer.delays
+    }
+
     // MARK: a profile's own proxy
 
     /// `proxy` nil: none from now on. Returns every agent's profiles again, and what to say when the proxy was kept
@@ -96,6 +137,17 @@ extension AgentSwitchAPI {
 public struct ProfileProxyReply: Decodable, Sendable {
     public let agents: [String: ProfileChoices]
     public let problem: String?
+}
+
+/// What is changed of a subscription: only what is said goes.
+struct ClashSubscriptionEdit: Encodable {
+    let name: String?
+    let hours: Int?
+}
+
+struct ClashNodeOff: Encodable {
+    let name: String
+    let off: Bool
 }
 
 struct ClashSelection: Encodable {

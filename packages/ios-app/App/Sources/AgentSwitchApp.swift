@@ -31,7 +31,7 @@ struct AgentSwitchApp: App {
             let model = AppModel.demo(offline: screen == "offline" || screen == "offlinemac")
             switch screen {
             case "settings", "mac", "offlinemac", "tasks", "search", "sessions", "transcript", "transcriptfiles",
-                 "proxies", "clash", "clashservice", "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource", "proxybrowser", "proxyprofile": model.tab = .settings
+                 "proxies", "clash", "clashservice", "clashrules", "clashcheck", "clashnodes", "clashtext", "clashsource", "clashsubscription", "clashallnodes", "proxybrowser", "proxyprofile": model.tab = .settings
             case "task": model.tab = .tasks; model.openTaskRequest = "t2"
             case "done": model.tab = .tasks; model.openTaskRequest = "t3"
             case "running": model.tab = .tasks; model.openTaskRequest = "t1"
