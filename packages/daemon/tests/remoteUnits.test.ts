@@ -348,7 +348,7 @@ describe("remote route allowlist", () => {
       "POST /browser/tabs/:id/navigate", "POST /browser/tabs/:id/take", "POST /browser/tabs/:id/release", "POST /browser/tabs/:id/viewport", "POST /browser/tabs/:id/fill", "GET /browser/servers", "GET /browser/speed",
       "GET /browsers", "GET /profile-browser/:key/browser/tabs", "POST /profile-browser/:key/browser/tabs", "GET /profile-browser/:key/browser/tabs/:id", "DELETE /profile-browser/:key/browser/tabs/:id", "GET /profile-browser/:key/browser/tabs/:id/stream", "POST /profile-browser/:key/browser/tabs/:id/input", "POST /profile-browser/:key/browser/tabs/:id/navigate", "POST /profile-browser/:key/browser/tabs/:id/take", "POST /profile-browser/:key/browser/tabs/:id/release", "POST /profile-browser/:key/browser/tabs/:id/viewport", "POST /profile-browser/:key/browser/tabs/:id/fill", "GET /profile-browser/:key/browser/servers", "GET /profile-browser/:key/browser/speed",
       "GET /browser/identity", "PUT /browser/identity", "POST /browser/identity/restart",
-      "GET /clash", "PUT /clash/settings", "GET /clash/templates/:name", "GET /clash/dns", "POST /clash/check", "POST /clash/source", "DELETE /clash/source", "POST /clash/update", "POST /clash/select", "POST /clash/delays",
+      "GET /clash", "PUT /clash/settings", "GET /clash/templates/:name", "GET /clash/dns", "POST /clash/check", "POST /clash/source", "DELETE /clash/source", "POST /clash/update", "POST /clash/subscriptions", "PATCH /clash/subscriptions/:id", "DELETE /clash/subscriptions/:id", "POST /clash/subscriptions/:id/update", "POST /clash/node", "POST /clash/select", "POST /clash/delays",
       "GET /approvals/policy", "GET /settings/workdir", "GET /update", "POST /update/install", "GET /live",
     ]);
   });

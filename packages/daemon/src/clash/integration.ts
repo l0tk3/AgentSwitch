@@ -9,7 +9,8 @@ import { appliedConfig, buildConfig, chosen, CLASH_SERVICES, CLASH_TEMPLATES, DE
 import { rulesFrom } from "./rules.js";
 import { observe, type CheckDeps, type Observed } from "./check.js";
 import { ClashController, type ClashStatus } from "./controller.js";
-import { ClashSourceError, type ClashSource, type SourceInfo } from "./source.js";
+import { ClashSourceError, type SourceInfo } from "./source.js";
+import { type ClashSources, type NodeRow, type SourceFrom, type Subscription } from "./sources.js";
 import { cleanSettings, type ClashStore } from "./store.js";
 import { vergeOwnDns, vergeProfileLink, vergeProfileText, vergeProfiles, vergeRuntime, vergeSocket, type VergeProfile } from "./verge.js";
 
@@ -31,6 +32,12 @@ export type ClashView = {
   readonly source: (SourceInfo & { readonly traffic?: { readonly used: number; readonly total: number; readonly expire: number | null } }) | null;
   /** Every node of it, by name. */
   readonly nodes: readonly string[];
+  /** Each subscription worked from, in their order (§10); `source` is them as one, for an app that knows of one. */
+  readonly subscriptions: readonly (Subscription & { readonly traffic?: { readonly used: number; readonly total: number; readonly expire: number | null } })[];
+  /** Every node of every subscription, the ones switched off too, each with the subscription it is of. */
+  readonly table: readonly NodeRow[];
+  /** There are several subscriptions: the groups and rules are AgentSwitch's whatever `ownRules` says. */
+  readonly together: boolean;
   /** Clash Verge's own subscriptions, to import one (AgentSwitch's own left out). */
   readonly profiles: readonly VergeProfile[];
   readonly settings: ClashSettings;
@@ -56,6 +63,9 @@ export type ClashView = {
 /** One line of the routing check (§7.9): a kind of traffic, the name tried for it, what it should do and what the
  *  core did with it. `expect` null: nothing is asked of it here (a template that is off), it is shown for what it is;
  *  `ok` null likewise. */
+/** Where a subscription comes from: a link, a file's text, or one of Clash Verge's (copied in). */
+export type ClashFrom = { readonly link: string; readonly name?: string | undefined } | { readonly yaml: string; readonly name: string } | { readonly verge: string };
+
 export type ClashCheckRow = {
   readonly id: string; readonly title: string; readonly host: string;
   readonly expect: { readonly kind: "group"; readonly group: string } | { readonly kind: "direct" } | { readonly kind: "reject" } | null;
@@ -67,7 +77,7 @@ export class ClashRefused extends Error {}
 
 export type ClashOptions = {
   readonly store: ClashStore;
-  readonly source: ClashSource;
+  readonly source: ClashSources;
   /** Where this service listens on this Mac (`http://127.0.0.1:<port>`). */
   readonly base: () => string;
   /** Clash Verge's folder, and the socket of its core (tests give their own). */
@@ -82,6 +92,8 @@ export type ClashOptions = {
 };
 
 const DELAY_MS = 5_000, HTTPS = 443;
+/** What a node is tried against when no service is meant: as `自动选择` tries them. */
+const ANY_PROBE = "https://www.gstatic.com/generate_204";
 /** A text the core was given is not given again sooner than this (Clash Verge may have put its own copy back). */
 const APPLY_AGAIN_MS = 10 * 60_000;
 
@@ -120,7 +132,9 @@ export class ClashIntegration {
     // An app from before §7.11 says nothing of `ownRules`, one from before §7.12 nothing of `applyNow`: as they were.
     const was = this.o.store.settings(), said = next && typeof next === "object" ? next as object : {};
     const keep = { ...("ownRules" in said ? {} : { ownRules: was.ownRules }), ...("applyNow" in said ? {} : { applyNow: was.applyNow }) };
-    this.o.store.save(cleanSettings({ ...said, ...keep }));
+    const saved = this.o.store.save(cleanSettings({ ...said, ...keep }));
+    // The one interval an app from before §10 sets is every subscription's.
+    if (saved.autoUpdateHours !== was.autoUpdateHours) this.o.source.setAllHours(saved.autoUpdateHours);
     const status = await this.status();
     await this.push(status, false);
     await this.apply();
@@ -129,7 +143,7 @@ export class ClashIntegration {
 
   /** A template's rules as they are in use, for editing: the user's own if it was edited, else the built-in ones. */
   template(template: ClashTemplate): { readonly rules: readonly string[]; readonly custom: boolean } {
-    const settings = this.o.store.settings();
+    const settings = this.settings();
     return { rules: templateRules(template, settings), custom: settings.templates[template].rules !== null };
   }
 
@@ -139,27 +153,85 @@ export class ClashIntegration {
     return { text: dnsText(settings), custom: settings.dns.text !== null };
   }
 
-  /** Work from this from now on: a link, a file's text, or one of Clash Verge's subscriptions (copied in). */
-  async setSource(from: { readonly link: string } | { readonly yaml: string; readonly name: string } | { readonly verge: string }): Promise<ClashView> {
-    if ("link" in from) await this.o.source.setLink(from.link);
-    else if ("yaml" in from) await this.o.source.setFile(from.yaml, from.name);
-    else {
-      const profile = vergeProfiles(this.o.dir)?.profiles.find((p) => p.uid === from.verge);
-      const link = vergeProfileLink(from.verge, this.o.dir), text = vergeProfileText(from.verge, this.o.dir);
-      if (!profile || (link === null && text === null)) throw new ClashRefused("Clash Verge 里没有这个订阅");
-      if (link !== null) await this.o.source.setLink(link, profile.name); else await this.o.source.setFile(text!, profile.name);
-    }
+  /** Work from this and nothing else from now on (an app from before §10, which knows of one subscription): it
+   *  takes the place of the only one there is. With several there, it says no. */
+  async setSource(from: ClashFrom): Promise<ClashView> {
+    const before = this.o.source.list();
+    if (before.length > 1) throw new ClashRefused("现在有多份订阅，请在新版应用里添加或移除");
+    await this.o.source.add(this.resolved(from));
+    for (const old of before) this.o.source.remove(old.id);
     this.forgetNodes();
+    return this.changed();
+  }
+
+  async removeSource(): Promise<ClashView> {
+    const before = this.o.source.list();
+    if (before.length > 1) throw new ClashRefused("现在有多份订阅，请在新版应用里添加或移除");
+    for (const old of before) this.o.source.remove(old.id);
+    this.forgetNodes();
+    return this.view();
+  }
+
+  /** One more subscription to work from (§10). */
+  async addSubscription(from: ClashFrom): Promise<ClashView> {
+    await this.o.source.add(this.resolved(from));
+    return this.changed();
+  }
+
+  /** A subscription is gone; what was chosen among its nodes is forgotten with it. */
+  async removeSubscription(id: string): Promise<ClashView> {
+    const gone = new Set(this.o.source.remove(id));
+    const settings = this.o.store.settings(), left = (names: readonly string[]) => names.filter((n) => !gone.has(n));
+    if (gone.size) this.o.store.save({ ...settings, claude: { nodes: left(settings.claude.nodes) }, openai: { nodes: left(settings.openai.nodes) } });
+    return this.changed();
+  }
+
+  /** A subscription's name, how often it is fetched again. */
+  async editSubscription(id: string, change: { readonly name?: string; readonly hours?: number }): Promise<ClashView> {
+    if (!this.o.source.list().some((s) => s.id === id)) throw new ClashRefused("没有这份订阅");
+    if (change.name !== undefined) {
+      // A node told apart by its subscription's name is called by the new one: what was chosen follows it.
+      const before = this.o.source.rows();
+      this.o.source.rename(id, change.name);
+      const now = new Map(this.o.source.rows().flatMap((row, i) => (before[i] && before[i]!.name !== row.name ? [[before[i]!.name, row.name] as const] : [])));
+      const settings = this.o.store.settings(), follow = (names: readonly string[]) => names.map((n) => now.get(n) ?? n);
+      if (now.size) this.o.store.save({ ...settings, claude: { nodes: follow(settings.claude.nodes) }, openai: { nodes: follow(settings.openai.nodes) } });
+    }
+    if (change.hours !== undefined) this.o.source.setHours(id, change.hours);
+    return this.changed();
+  }
+
+  /** A node is left out of everything from now on, or is back (§10). The subscription's own groups cannot leave one
+   *  out: with one subscription this takes `Only My Rules`. */
+  async setNodeOff(name: string, off: boolean): Promise<ClashView> {
+    if (off && !this.settings().ownRules) throw new ClashRefused("停用节点需要先打开 Only My Rules：订阅自带的分组里去不掉单个节点");
+    if (!this.o.source.setOff(name, off)) throw new ClashRefused("没有这个节点");
+    return this.changed();
+  }
+
+  private resolved(from: ClashFrom): SourceFrom {
+    if (!("verge" in from)) return from;
+    const profile = vergeProfiles(this.o.dir)?.profiles.find((p) => p.uid === from.verge);
+    const link = vergeProfileLink(from.verge, this.o.dir), text = vergeProfileText(from.verge, this.o.dir);
+    if (!profile || (link === null && text === null)) throw new ClashRefused("Clash Verge 里没有这个订阅");
+    return link !== null ? { link, name: profile.name } : { yaml: text!, name: profile.name };
+  }
+
+  /** What the subscriptions are changed: the core takes what it can at once. */
+  private async changed(): Promise<ClashView> {
     await this.push(await this.status(), true);
     await this.apply();
     return this.shown(await this.status());
   }
 
-  async removeSource(): Promise<ClashView> {
-    this.o.source.remove();
-    this.forgetNodes();
-    return this.view();
+  /** The settings as they count: with several subscriptions the groups and rules are AgentSwitch's (§10). */
+  private settings(): ClashSettings {
+    const settings = this.o.store.settings();
+    return this.o.source.several() && !settings.ownRules ? { ...settings, ownRules: true } : settings;
   }
+
+  private nodes() { return this.o.source.nodes(this.settings().ownRules); }
+  private document(): Record<string, unknown> | null { return this.o.source.document(this.settings().ownRules); }
 
   /** The nodes chosen were chosen in the subscription that was there: with another in its place, or none, they are
    *  forgotten — a node of the same name in another subscription is not the same node (user, 2026-10-08: 还是别记住
@@ -176,7 +248,7 @@ export class ClashIntegration {
     if (!controller || !status) throw new ClashRefused("Clash Verge 没有在运行");
     const port = this.o.check?.port ?? status.proxyPort;
     if (!port) throw new ClashRefused("Clash 没有开代理端口，没法从这里发连接去试");
-    const settings = this.o.store.settings(), enabled = this.enabled(), document = this.o.source.document() ?? {};
+    const settings = this.settings(), enabled = this.enabled(), document = this.document() ?? {};
     const deps: CheckDeps = { port, connections: () => controller.connections(), ...this.o.check };
     const has = (template: ClashTemplate, rule: string): boolean => templateOn(template, settings) && templateRules(template, settings).includes(rule);
     const service = (s: ClashService, host: string) => ({ id: s, title: s === "claude" ? "Claude" : "OpenAI", host, far: true,
@@ -207,8 +279,9 @@ export class ClashIntegration {
   }
 
   /** The subscription fetched again now, and the core told to take what came. */
-  async update(): Promise<ClashView> {
-    await this.refresh();
+  async update(id?: string): Promise<ClashView> {
+    if (id !== undefined && !this.o.source.list().some((s) => s.id === id)) throw new ClashRefused("没有这份订阅");
+    await this.refresh(id);
     return this.view();
   }
 
@@ -224,25 +297,29 @@ export class ClashIntegration {
 
   /** How long each node takes to reach a service, in ms (null: no answer): the chosen ones, or every node of the
    *  subscription. Asked of the running core, through whichever of its node sets has the node. */
-  async delays(service: ClashService, scope: "chosen" | "all"): Promise<Record<string, number | null>> {
+  async delays(service: ClashService | "any", scope: "chosen" | "all"): Promise<Record<string, number | null>> {
+    if (service === "any") return this.delaysOf(this.nodes().map((n) => n.name), null, ANY_PROBE);
+    const names = scope === "all" ? this.nodes().map((n) => n.name) : chosen(service, this.settings(), this.nodes()).map((n) => n.name);
+    return this.delaysOf(names, SERVICE[service].set, SERVICE[service].probe);
+  }
+
+  private async delaysOf(names: readonly string[], own: string | null, probe: string): Promise<Record<string, number | null>> {
     const controller = this.controller(), status = await this.status();
     if (!controller || !status) throw new ClashRefused("Clash Verge 没有在运行");
-    const names = scope === "all" ? this.o.source.nodes().map((n) => n.name) : chosen(service, this.o.store.settings(), this.o.source.nodes()).map((n) => n.name);
-    const own = SERVICE[service].set;
-    const setOf = (node: string): string | null => (status.nodeSets[own]?.includes(node) ? own : Object.keys(status.nodeSets).find((set) => status.nodeSets[set]!.includes(node)) ?? null);
+    const setOf = (node: string): string | null => (own && status.nodeSets[own]?.includes(node) ? own : Object.keys(status.nodeSets).find((set) => status.nodeSets[set]!.includes(node)) ?? null);
     const out: Record<string, number | null> = {};
     await Promise.all(names.map(async (node) => {
       const set = setOf(node);
-      out[node] = set ? await controller.delay(set, node, SERVICE[service].probe, DELAY_MS) : null;
+      out[node] = set ? await controller.delay(set, node, probe, DELAY_MS) : null;
     }));
     return out;
   }
 
   /** Once a minute: the subscription fetched again when its interval has passed. */
   async tick(): Promise<void> {
-    if (this.o.source.due(this.o.store.settings().autoUpdateHours)) await this.refresh().catch(() => undefined);
+    if (await this.due().catch(() => false)) return;
     // Clash Verge may have put the copy it holds back (it reloads on its own): the one made now is loaded again.
-    else await this.apply();
+    await this.apply();
   }
 
   // ---- what Clash Verge and its core fetch
@@ -259,11 +336,11 @@ export class ClashIntegration {
     return { text: made.text, headers: { "profile-update-interval": String(VERGE_UPDATE_HOURS), ...(info?.userinfo ? { "subscription-userinfo": info.userinfo } : {}) } };
   }
 
-  ruleSet(name: string): string | null { return ruleSet(name, this.o.store.settings(), this.o.source.nodes()); }
+  ruleSet(name: string): string | null { return ruleSet(name, this.settings(), this.nodes()); }
 
   nodeSet(name: string): string | null {
     const service = CLASH_SERVICES.find((s) => SERVICE[s].set === name);
-    return service ? nodeSet(service, this.o.store.settings(), this.o.source.nodes()) : null;
+    return service ? nodeSet(service, this.settings(), this.nodes()) : null;
   }
 
   provider(slug: string): { readonly text: string; readonly userinfo?: string } | null { return this.o.source.provider(slug); }
@@ -272,11 +349,11 @@ export class ClashIntegration {
 
   /** What would be handed over now; null without a subscription to work from. */
   private build(): { readonly config: Record<string, unknown>; readonly text: string; readonly hash: string } | null {
-    const info = this.o.source.info(), settings = this.o.store.settings(), base = `${this.o.base()}/clash`, token = this.token();
+    const info = this.o.source.info(), settings = this.settings(), base = `${this.o.base()}/clash`, token = this.token();
     if (!info) return null;
-    const key = JSON.stringify([info.updatedAt, info.providers.map((p) => p.updatedAt), info.nodes, settings, base, token]);
+    const key = JSON.stringify([this.o.source.stamp(), info.updatedAt, info.providers.map((p) => p.updatedAt), info.nodes, settings, base, token]);
     if (this.made?.key !== key) {
-      const config = buildConfig(this.o.source.document()!, this.o.source.nodes(), this.o.source.held(), settings, base, token);
+      const config = buildConfig(this.document()!, this.nodes(), this.o.source.held(settings.ownRules), settings, base, token);
       const text = stringify(config, { lineWidth: 0 });
       this.made = { key, config, text, hash: createHash("sha256").update(text).digest("hex").slice(0, 16) };
     }
@@ -293,15 +370,29 @@ export class ClashIntegration {
   }
 
   private enabled(): Record<ClashService, boolean> {
-    const settings = this.o.store.settings(), nodes = this.o.source.nodes();
+    const settings = this.settings(), nodes = this.nodes();
     return { claude: chosen("claude", settings, nodes).length > 0, openai: chosen("openai", settings, nodes).length > 0 };
   }
 
-  private async refresh(): Promise<void> {
+  /** The subscriptions whose interval has passed fetched again, and the core told; whether any was. */
+  private async due(): Promise<boolean> {
+    if (this.updating) return false;
+    let any = false;
+    this.updating = (async () => {
+      try {
+        any = await this.o.source.refreshDue();
+        if (any) { await this.push(await this.status(), true); await this.apply(); }
+      } finally { this.updating = null; }
+    })();
+    await this.updating;
+    return any;
+  }
+
+  private async refresh(id?: string): Promise<void> {
     // One fetch at a time: the timer and the button may ask together.
     this.updating ??= (async () => {
       try {
-        await this.o.source.refresh();
+        await this.o.source.refresh(id);
         await this.push(await this.status(), true);
         await this.apply();
       } finally { this.updating = null; }
@@ -320,7 +411,7 @@ export class ClashIntegration {
       ...RULE_SETS.filter((name) => name in status.ruleSets).map((name) => quiet(controller.refreshRuleSet(name))),
       // A service with no node left has nothing to hand over: the core keeps the set it had until its groups go.
       ...CLASH_SERVICES.filter((s) => SERVICE[s].set in status.nodeSets && this.nodeSet(SERVICE[s].set) !== null).map((s) => quiet(controller.refreshNodeSet(SERVICE[s].set))),
-      ...(fetched ? this.o.source.held().filter((name) => name in status.nodeSets).map((name) => quiet(controller.refreshNodeSet(name))) : []),
+      ...(fetched ? this.o.source.held(this.settings().ownRules).filter((name) => name in status.nodeSets).map((name) => quiet(controller.refreshNodeSet(name))) : []),
     ]);
   }
 
@@ -355,8 +446,8 @@ export class ClashIntegration {
 
   private shown(status: ClashStatus | null): ClashView {
     const profiles = vergeProfiles(this.o.dir);
-    const settings = this.o.store.settings(), nodes = this.o.source.nodes(), info = this.o.source.info();
-    const document = this.o.source.document() ?? {};
+    const settings = this.settings(), nodes = this.nodes(), info = this.o.source.info();
+    const document = this.document() ?? {};
     const enabled = this.enabled();
     const base = this.o.base();
     // The groups of what would be handed over now: the core has to have each by its name. And what Clash Verge
@@ -378,8 +469,11 @@ export class ClashIntegration {
       ...(status ? { version: status.version, mode: status.mode, tun: status.tun } : {}),
       source: info ? { ...info, ...(traffic ? { traffic } : {}) } : null,
       nodes: nodes.map((n) => n.name),
+      subscriptions: this.o.source.list().map((s) => { const used = s.userinfo ? parseTraffic(s.userinfo) : null; return { ...s, ...(used ? { traffic: used } : {}) }; }),
+      table: this.o.source.rows(), together: this.o.source.several(),
       profiles: (profiles?.profiles ?? []).filter((p) => p.from !== base),
-      settings, services: { claude: service("claude"), openai: service("openai") },
+      // As kept: with several subscriptions `together` says the rules are AgentSwitch's, whatever `ownRules` is.
+      settings: this.o.store.settings(), services: { claude: service("claude"), openai: service("openai") },
       templates: Object.fromEntries(CLASH_TEMPLATES.map((t) => [t, { on: templateOn(t, settings), custom: settings.templates[t].rules !== null, count: templateRules(t, settings).length }])) as ClashView["templates"],
       defaultGroup: info ? defaultGroup(document, settings) : null,
       dns: { on: settings.dns.on, custom: settings.dns.text !== null, overridden: vergeOwnDns(this.o.dir) },

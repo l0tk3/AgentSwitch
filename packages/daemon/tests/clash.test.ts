@@ -18,6 +18,7 @@ import { observe, parseTrace } from "../src/clash/check.js";
 import { ClashController } from "../src/clash/controller.js";
 import { ClashIntegration, parseTraffic } from "../src/clash/integration.js";
 import { ClashSource, ClashSourceError, providerSlug, type Fetched, type SourceNode } from "../src/clash/source.js";
+import { ClashSources } from "../src/clash/sources.js";
 import { ClashStore } from "../src/clash/store.js";
 import { vergeOwnDns, vergeProfileLink, vergeProfileText, vergeProfiles } from "../src/clash/verge.js";
 import { markRemote } from "../src/core/caller.js";
@@ -638,7 +639,7 @@ describe("Clash Integration over HTTP", () => {
     const routes: Parameters<typeof proxyPort>[1] = {};
     const port = await proxyPort(running.state, routes);
     const proxyPorts = new Map<string, number>();
-    const clash = new ClashIntegration({ proxyPorts: () => proxyPorts, store: new ClashStore(at), source: new ClashSource(at, upstream.fetcher, () => t), dir, socket: () => running.socket, base: () => "http://127.0.0.1:4711", now: () => t,
+    const clash = new ClashIntegration({ proxyPorts: () => proxyPorts, store: new ClashStore(at), source: new ClashSources(at, upstream.fetcher, () => t, undefined, () => new ClashStore(at).settings().autoUpdateHours), dir, socket: () => running.socket, base: () => "http://127.0.0.1:4711", now: () => t,
       check: { port, listMs: 500, trace: async (_s, host) => ({ ip: host === "claude.ai" ? "203.0.113.9" : "198.51.100.4", loc: host === "claude.ai" ? "JP" : "US" }) } });
     const app = new Hono();
     mountClash(app, { clash } as unknown as ApiDeps);
@@ -1012,5 +1013,196 @@ describe("Clash Integration over HTTP", () => {
     expect(parseTraffic("upload=1; download=2; total=100; expire=1893456000")).toEqual({ used: 3, total: 100, expire: 1893456000000 });
     expect(parseTraffic("upload=0;download=5;total=10")).toEqual({ used: 5, total: 10, expire: null });
     expect(parseTraffic("nonsense")).toBeNull();
+  });
+});
+
+describe("several subscriptions (§10)", () => {
+  const A = "https://a.example/sub?token=secret-a", B = "https://b.example/sub?token=secret-b";
+  /** The second service: one node by a name the first has too, one that is dialled through another, a group of its own. */
+  const OTHER = `proxies:
+  - ${JSON.stringify(node("HK 01", "other.example"))}
+  - ${JSON.stringify(node("US 09", "other.example"))}
+  - ${JSON.stringify({ ...node("Relay", "relay.example"), "dialer-proxy": "US 09" })}
+  - ${JSON.stringify({ ...node("Lost", "lost.example"), "dialer-proxy": "Theirs" })}
+proxy-groups:
+  - { name: Theirs, type: select, proxies: [US 09] }
+rules: [ "MATCH,Theirs" ]
+`;
+  function several() {
+    let t = 1_000, plain = PLAIN;
+    const up = service({ [A]: () => ({ body: plain, headers: { "subscription-userinfo": "upload=1; download=2; total=100" } }), [B]: { body: OTHER } });
+    const at = home();
+    const sources = new ClashSources(at, up.fetcher, () => t, undefined, () => 6);
+    return { at, sources, asked: up.asked, clock: { add(ms: number) { t += ms; } }, set plain(v: string) { plain = v; }, again: () => new ClashSources(at, up.fetcher, () => t) };
+  }
+
+  it("keeps each in a folder of its own, the first where the only one always was, and is as before with one", async () => {
+    const { at, sources, again } = several();
+    expect([sources.list(), sources.info(), sources.document(true), sources.nodes(true)]).toEqual([[], null, null, []]);
+    const first = await sources.add({ link: A });
+    expect(first).toBe("0");
+    expect(statSync(join(at, "clash", "source", "meta.json")).mode & 0o777).toBe(0o600);
+    expect(sources.list()).toMatchObject([{ id: "0", name: "a.example", kind: "link", nodes: 2, hours: 24 }]);
+    // One: its text as it is, its groups and rules its own, whichever way the rules are asked for.
+    expect(sources.together(false) || sources.together(true)).toBe(false);
+    expect(sources.document(true)).toEqual(parse(PLAIN));
+    expect(sources.info()).toMatchObject({ name: "a.example", nodes: 2 });
+    const second = await sources.add({ yaml: OTHER, name: "Other" });
+    expect(second).toMatch(/^[0-9a-f]{8}$/);
+    expect(statSync(join(at, "clash", "sources", second, "main.yaml")).mode & 0o777).toBe(0o600);
+    expect(sources.list().map((s) => [s.name, s.kind, s.hours])).toEqual([["a.example", "link", 24], ["Other", "file", 0]]);
+    // What is kept is read the same by a service started anew.
+    expect(again().list().map((s) => s.id)).toEqual(["0", second]);
+    expect(JSON.stringify(readFileSync(join(at, "clash", "sources.json"), "utf8"))).not.toContain("secret");
+  });
+
+  it("starts from the one subscription of before, with its interval", async () => {
+    const { at, sources } = several();
+    await sources.add({ link: A });
+    const { rmSync } = await import("node:fs");
+    rmSync(join(at, "clash", "sources.json"));
+    const later = new ClashSources(at, undefined, undefined, undefined, () => 6);
+    expect(later.list()).toMatchObject([{ id: "0", hours: 6 }]);
+  });
+
+  it("puts them together: a node set each, a name taken twice told apart, and nothing of their routing", async () => {
+    const { sources } = several();
+    await sources.add({ link: A });
+    const b = await sources.add({ yaml: OTHER, name: "Other" });
+    expect(sources.together(false)).toBe(true);
+    expect(sources.rows()).toEqual([
+      { name: "HK 01", sub: "0", type: "vless", off: false }, { name: "SG 01", sub: "0", type: "vless", off: false },
+      { name: "HK 01 · Other", sub: b, type: "vless", off: false }, { name: "US 09", sub: b, type: "vless", off: false },
+      { name: "Relay", sub: b, type: "vless", off: false }, { name: "Lost", sub: b, type: "vless", off: false }]);
+    expect(sources.info()).toMatchObject({ name: "2 Subscriptions", nodes: 6, userinfo: "upload=1; download=2; total=100" });
+    const nodes = sources.nodes(true);
+    expect(nodes.map((n) => [n.name, n.from])).toEqual([["HK 01", "as-sub-0"], ["SG 01", "as-sub-0"], ["HK 01 · Other", `as-sub-${b}`], ["US 09", `as-sub-${b}`], ["Relay", `as-sub-${b}`], ["Lost", `as-sub-${b}`]]);
+    // Its own name inside, the server that was its own; dialled through a node by that node's name here, through a group no more.
+    expect(nodes[2]!.definition).toMatchObject({ name: "HK 01 · Other", server: "other.example" });
+    expect([nodes[4]!.definition["dialer-proxy"], "dialer-proxy" in nodes[5]!.definition]).toEqual(["US 09", false]);
+    const document = sources.document(true)!;
+    expect(Object.keys(document).sort()).toEqual(["proxy-groups", "proxy-providers"]);
+    expect(Object.keys(document["proxy-providers"] as object)).toEqual(["as-sub-0", `as-sub-${b}`]);
+    expect(sources.held(true)).toEqual(["as-sub-0", `as-sub-${b}`]);
+    const set = parse(sources.provider(providerSlug(`as-sub-${b}`))!.text) as { proxies: { name: string }[] };
+    expect(set.proxies.map((p) => p.name)).toEqual(["HK 01 · Other", "US 09", "Relay", "Lost"]);
+    expect(sources.provider(providerSlug("as-sub-0"))!.userinfo).toBe("upload=1; download=2; total=100");
+    expect(sources.provider(providerSlug("as-sub-ffffffff"))).toBeNull();
+
+    // Handed over: AgentSwitch's groups over both sets, its rules alone, each set fetched from this Mac.
+    const made = parse(buildSubscription(document, nodes, sources.held(true), settings({ ownRules: true, claude: { nodes: ["HK 01 · Other", "SG 01"] } }), "http://127.0.0.1:4711/clash", "tok")) as any;
+    expect(made.proxies).toBeUndefined();
+    expect(made["proxy-groups"].map((g: any) => g.name)).toEqual(["Claude", "Claude自动选择", "Manual", "自动选择"]);
+    expect(made["proxy-groups"][2]).toEqual({ name: "Manual", type: "select", proxies: ["自动选择"], use: ["as-sub-0", `as-sub-${b}`] });
+    expect(made["proxy-providers"]["as-sub-0"]).toMatchObject({ type: "http", url: `http://127.0.0.1:4711/clash/providers/${providerSlug("as-sub-0")}.yaml?k=tok`, proxy: "DIRECT" });
+    expect(made.rules.at(-1)).toBe("MATCH,Manual");
+    expect(JSON.stringify(made)).not.toContain("Theirs");
+    expect((parse(nodeSet("claude", settings({ claude: { nodes: ["HK 01 · Other", "SG 01"] } }), nodes)!) as any).proxies.map((p: any) => [p.name, p.server])).toEqual([["HK 01 · Other", "other.example"], ["SG 01", "n.example"]]);
+  });
+
+  it("leaves a node switched off out of everything, and a subscription with none left out of the sets", async () => {
+    const { sources, again } = several();
+    await sources.add({ link: A });
+    const b = await sources.add({ yaml: OTHER, name: "Other" });
+    expect([sources.setOff("HK 01 · Other", true), sources.setOff("SG 01", true), sources.setOff("HK 01", true), sources.setOff("Nope", true)]).toEqual([true, true, true, false]);
+    expect(sources.rows().filter((r) => r.off).map((r) => r.name)).toEqual(["HK 01", "SG 01", "HK 01 · Other"]);
+    expect(sources.nodes(true).map((n) => n.name)).toEqual(["US 09", "Relay", "Lost"]);
+    expect([Object.keys(sources.document(true)!["proxy-providers"] as object), sources.held(true)]).toEqual([[`as-sub-${b}`], [`as-sub-${b}`]]);
+    expect(sources.provider(providerSlug("as-sub-0"))).toBeNull();
+    // Kept by the subscription's own name for it: the same node after a start, and back when asked.
+    expect(again().rows().filter((r) => r.off).length).toBe(3);
+    expect(sources.setOff("HK 01", false)).toBe(true);
+    expect(sources.nodes(true).map((n) => n.name)).toEqual(["HK 01", "US 09", "Relay", "Lost"]);
+  });
+
+  it("with one subscription leaves a node out only where the rules are AgentSwitch's", async () => {
+    const { sources } = several();
+    await sources.add({ link: A });
+    sources.setOff("SG 01", true);
+    expect([sources.together(false), sources.together(true)]).toEqual([false, true]);
+    expect(sources.nodes(false).map((n) => n.name)).toEqual(["HK 01", "SG 01"]);
+    expect(sources.nodes(true).map((n) => [n.name, n.from])).toEqual([["HK 01", "as-sub-0"]]);
+    expect(sources.document(false)).toEqual(parse(PLAIN));
+  });
+
+  it("fetches each again by its own interval, renames one, and forgets one with what was switched off in it", async () => {
+    const s = several();
+    await s.sources.add({ link: A, name: "First" });
+    const b = await s.sources.add({ link: B });
+    s.sources.setHours("0", 1);
+    s.sources.setHours(b, 7);   // not an interval there is: as it was
+    expect(s.sources.list().map((x) => [x.name, x.hours])).toEqual([["First", 1], ["b.example", 24]]);
+    const before = s.asked.length;
+    expect(await s.sources.refreshDue()).toBe(false);
+    s.clock.add(2 * 3_600_000);
+    s.plain = PLAIN.replace("SG 01", "JP 01").replace("SG 01", "JP 01");
+    expect(await s.sources.refreshDue()).toBe(true);
+    expect(s.asked.slice(before).map((a) => a.split(" ")[1])).toEqual([A]);
+    expect(s.sources.rows().map((r) => r.name)).toEqual(["HK 01", "JP 01", "HK 01 · b.example", "US 09", "Relay", "Lost"]);
+    s.sources.rename(b, "  Second  ");
+    expect(s.sources.rows()[2]!.name).toBe("HK 01 · Second");
+    await s.sources.refresh(b);
+    expect(s.asked.at(-1)).toContain(B);
+    s.sources.setAllHours(12);
+    expect(s.sources.list().map((x) => x.hours)).toEqual([12, 12]);
+    s.sources.setOff("US 09", true);
+    expect(s.sources.remove(b)).toEqual(["HK 01 · Second", "US 09", "Relay", "Lost"]);
+    expect([s.sources.several(), s.sources.rows().length, s.sources.remove("nope")]).toEqual([false, 2, []]);
+    expect(readFileSync(join(s.at, "clash", "sources.json"), "utf8")).not.toContain("US 09");
+    // What cannot be fetched is not kept.
+    await expect(s.sources.add({ link: "https://gone.example/x" })).rejects.toThrow(ClashSourceError);
+    expect(s.sources.list().length).toBe(1);
+  });
+
+  it("over HTTP: adds, edits and removes them; the rules are AgentSwitch's while there are several; an app that knows of one is told", async () => {
+    let t = 1_000;
+    const up = service({ [A]: { body: PLAIN }, [B]: { body: OTHER } });
+    const at = home(), store = new ClashStore(at);
+    const clash = new ClashIntegration({ store, source: new ClashSources(at, up.fetcher, () => t, undefined, () => store.settings().autoUpdateHours), dir: join(at, "no-verge"), socket: () => null, base: () => "http://127.0.0.1:4711", now: () => t });
+    const app = new Hono();
+    mountClash(app, { clash } as unknown as ApiDeps);
+    const call = async (method: string, path: string, json?: unknown) => {
+      const res = await app.request(path, { method, ...(json ? { headers: { "content-type": "application/json" }, body: JSON.stringify(json) } : {}) });
+      const text = await res.text();
+      let parsed: any = null; try { parsed = JSON.parse(text); } catch { /* yaml */ }
+      return { status: res.status, text, json: parsed };
+    };
+    const one = (await call("POST", "/clash/subscriptions", { link: A, name: "First" })).json;
+    expect([one.subscriptions.map((s: any) => [s.id, s.name, s.nodes]), one.together, one.source.name, one.nodes]).toEqual([[["0", "First", 2]], false, "First", ["HK 01", "SG 01"]]);
+    // With one, a node is left out only under AgentSwitch's rules.
+    expect((await call("POST", "/clash/node", { name: "SG 01", off: true })).json.error).toContain("Only My Rules");
+    const two = (await call("POST", "/clash/subscriptions", { yaml: OTHER, name: "Other" })).json;
+    const b = two.subscriptions[1].id as string;
+    expect([two.together, two.settings.ownRules, two.source.name, two.nodes.length, two.table.length, two.templates.domestic.on]).toEqual([true, false, "2 Subscriptions", 6, 6, true]);
+    const k = clash.token();
+    const sub = parse((await call("GET", `/clash/sub.yaml?k=${k}`)).text) as any;
+    expect([sub["proxy-groups"].map((g: any) => g.name), sub.rules.at(-1), Object.keys(sub["proxy-providers"])]).toEqual([["Manual", "自动选择"], "MATCH,Manual", ["as-sub-0", `as-sub-${b}`]]);
+    expect((parse((await call("GET", `/clash/providers/${providerSlug(`as-sub-${b}`)}.yaml?k=${k}`)).text) as any).proxies.length).toBe(4);
+    expect((await call("GET", `/clash/providers/${providerSlug(`as-sub-${b}`)}.yaml?k=wrong`)).status).toBe(404);
+    // A node of either can be chosen for a service; one switched off is in neither.
+    await call("PUT", "/clash/settings", { claude: { nodes: ["HK 01 · Other", "SG 01"] }, openai: { nodes: [] }, direct: [], autoUpdateHours: 24,
+      templates: { domestic: { on: false, rules: null }, block: { on: false, rules: null } }, renameDefault: false, dns: { on: false, text: null }, ownRules: false, applyNow: false });
+    expect((parse((await call("GET", `/clash/nodes/as-claude.yaml?k=${k}`)).text) as any).proxies.map((p: any) => p.name)).toEqual(["HK 01 · Other", "SG 01"]);
+    const off = (await call("POST", "/clash/node", { name: "SG 01", off: true })).json;
+    expect([off.table.find((r: any) => r.name === "SG 01").off, off.nodes.includes("SG 01"), off.services.claude.missing]).toEqual([true, false, ["SG 01"]]);
+    expect((parse((await call("GET", `/clash/nodes/as-claude.yaml?k=${k}`)).text) as any).proxies.map((p: any) => p.name)).toEqual(["HK 01 · Other"]);
+    // Its name and its interval; one that is not there.
+    const edited = (await call("PATCH", `/clash/subscriptions/${b}`, { name: "Second", hours: 6 })).json;
+    expect(edited.subscriptions[1]).toMatchObject({ name: "Second", hours: 6 });
+    expect(edited.settings.claude.nodes).toEqual(["HK 01 · Second", "SG 01"]);   // what was chosen follows the name
+    expect([(await call("PATCH", "/clash/subscriptions/ffff", { name: "x" })).status, (await call("PATCH", `/clash/subscriptions/${b}`, { hours: 5 })).status, (await call("POST", "/clash/subscriptions/ffff/update")).status]).toEqual([400, 400, 400]);
+    const asked = up.asked.length;
+    await call("POST", "/clash/subscriptions/0/update");
+    expect(up.asked.slice(asked).map((a) => a.split(" ")[1])).toEqual([A]);
+    // An app from before this replaces the only subscription; with several it is told to be a newer one.
+    expect((await call("POST", "/clash/source", { link: B })).json.error).toContain("多份订阅");
+    expect((await call("DELETE", "/clash/source")).json.error).toContain("多份订阅");
+    // Removed: what was chosen among its nodes goes with it, and the one left is as it was alone.
+    const left = (await call("DELETE", `/clash/subscriptions/${b}`)).json;
+    expect([left.subscriptions.length, left.together, left.settings.claude.nodes, left.source.name]).toEqual([1, false, ["SG 01"], "First"]);
+    expect((parse((await call("GET", `/clash/sub.yaml?k=${k}`)).text) as any).rules.at(-1)).toBe("MATCH,Proxy");
+    const replaced = (await call("POST", "/clash/source", { link: B })).json;
+    expect([replaced.subscriptions.map((s: any) => s.name), replaced.settings.claude.nodes]).toEqual([["b.example"], []]);
+    expect((await call("DELETE", "/clash/source")).json.subscriptions).toEqual([]);
   });
 });

@@ -24,7 +24,7 @@ import { SessionKeys } from "./browser/sessionKey.js";
 import { ApiKeys } from "./profiles/apiKeys.js";
 import { proxyPlace } from "./browser/identity.js";
 import { ClashIntegration } from "./clash/integration.js";
-import { ClashSource } from "./clash/source.js";
+import { ClashSources } from "./clash/sources.js";
 import { ClashStore } from "./clash/store.js";
 import { SessionTitles } from "./sessions/titles.js";
 import { ShownFoldersStore } from "./sessions/shownFolders.js";
@@ -550,7 +550,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   sweepThreads(store, Date.now(), engine);
   forgetDeletedTasks(conversation, store);
   const routeDeps = () => ({ targets, router, quota: quota.map(), context: loadContext(contextPath), memory: loadMemory(memoryPath), platformMemory: (task: string) => platformExperience(platformMemoryPath, task, loadContext(contextPath).text), records: store.recordsSince(Date.now() - RECORD_WINDOW_MS), extensions: extensionsSummary(), threads: engine.threadBriefs() });
-  const clash = new ClashIntegration({ store: new ClashStore(cfg.home), source: new ClashSource(cfg.home), base: () => `http://127.0.0.1:${localPort}`,
+  const clashStore = new ClashStore(cfg.home);
+  const clash = new ClashIntegration({ store: clashStore, source: new ClashSources(cfg.home, undefined, undefined, undefined, () => clashStore.settings().autoUpdateHours), base: () => `http://127.0.0.1:${localPort}`,
     // A profile's proxy server is tried on its own port by the routing check (docs/clash-v0.md §7.9).
     proxyPorts: () => new Map(Object.values(profiles.all()).flatMap((a) => a.profiles).flatMap((p) => { const place = p.proxy ? proxyPlace(p.proxy.server) : null; return place ? [[place.host.toLowerCase(), place.port] as const] : []; })) });
   // The nodes are made after the API (they need the remote listener): what they heard is asked through this.

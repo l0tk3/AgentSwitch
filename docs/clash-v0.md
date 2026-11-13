@@ -439,3 +439,46 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 - 代码：服务 `src/api/clash.ts`（去掉“只在 Mac”的判断，加 `shown()` 给手机去掉 `install`）；Kit `API/ClashModels.swift`（与 Mac 的 `ClashIntegration.swift` 同一套模型，待办的话按“在 Mac 上”改写）、`API/ProxyRoutes.swift`；应用 `Settings/ClashScreen.swift`、`Settings/ProxiesSection.swift`。演示页 `docs/design/implemented/phone-proxies.html`。
 - 测试：服务 `tests/clash.test.ts`（手机读得到页面、`install` 为空、页面里没有 `sub.yaml`；检查、模版、DNS 手机都读得到）、`tests/remoteUnits.test.ts`（白名单逐条；四类本机地址仍不在其中）；Kit `ProxyTests`（页面按服务给的样子读出来、设置回写时 `null` 照写、各接口的方法与正文、旧 Mac 回 403 / 404 时当作没有）。
 - 看过的：模拟器里的演示（`-uiDemoScreen proxies|clash|clashservice|clashrules|clashcheck|clashnodes|clashtext|clashsource`，像素外观全部、经典外观两张）。**没走过的**：真机连着真服务点一遍（换节点、测速、更新订阅、换订阅）；这要先把这一版装到 Mac 上。
+
+## 10. 多份订阅合在一起（2026-11-13）
+
+用户：agentswitch里的代理里需要加一个代理聚合功能，比如加入多个订阅链接、多个订阅链接配多个订阅文件啥的，然后统一管理他们的节点。问过三件事之后：多份订阅的分组和规则直接听 AgentSwitch 的；每份订阅一个分组没有必要，剩下的按建议来；（来源可以是链接也可以是 yaml 文件，各自任意多份，每份单独有名字、更新间隔、流量和到期、`Update Now`、`Remove…`）理解是正确的；开始做吧。
+
+### 10.1 是什么
+
+- **订阅可以有多份**（最多 16 份）：每份是一条链接、一份 yaml 文件，或从 Clash Verge 里抄来的一份。每份有自己的名字、自己的更新间隔（文件默认不自动更新，链接默认 24 小时）、自己的流量与到期、`Update Now`、`Rename…`、`Remove…`。
+- **只有一份时和以前完全一样**：它的分组和规则原样保留，`Only My Rules` 照旧是个开关（§7.11）。存放的位置也没动，升级后不用做任何事。
+- **有两份及以上时，分组和规则全部由 AgentSwitch 生成**，就是 §7.11 的那一套（`Claude`、`Claude自动选择`、`OpenAI`、`OpenAI自动选择`、`Manual`、`自动选择`，七条规则），不取任何一份订阅自带的分组和规则。页面上 `Only My Rules` 显示为开着、不能关；存着的那个开关值不动，回到一份时恢复原样。
+- **节点合在一起**：`Manual` 和 `自动选择` 里是所有订阅的全部节点；为 Claude、OpenAI 选节点时可以跨订阅挑。没有“每份订阅一个分组”。
+- **重名**：节点用它自己的名字；名字已经被排在前面的订阅用了的，后面那个在名字后加上订阅名（`HK 01 · 订阅名`），还重就再加序号。给订阅改名时，已经为 Claude / OpenAI 选中的这类节点跟着改名。
+- **节点总表**：所有订阅的节点在一处，标明来自哪份，可以按订阅筛选、搜索、测延迟（探测 `https://www.gstatic.com/generate_204`）、**停用单个节点**。停用的节点不进任何分组，也不能被 Claude / OpenAI 用；已经选中的会标成 `Gone`。
+  - 只有一份订阅时，停用要先开 `Only My Rules`：订阅自带的分组里去不掉单个节点。没开时服务拒绝并说明原因。
+- **移除一份订阅**：它的节点里被 Claude / OpenAI 选中的一并忘掉（§7.1 的老规矩：别的订阅里同名的节点不是同一个）；别的订阅选中的不动。
+
+### 10.2 交给 Clash Verge 的那一份
+
+合在一起时（有多份，或只有一份但有节点被停用且规则是 AgentSwitch 的）：
+
+- **每份订阅是一个节点集** `as-sub-<编号>`，由 AgentSwitch 在本机提供（`/clash/providers/…`，和原来转交订阅自带节点集的是同一类地址）：这份订阅自己列的节点加上它的节点集里的节点，改过名的用新名字，停用的不在里面。一个节点都不剩的订阅不出节点集（内核不收空的）。
+- 正文里没有 `proxies`；`Manual`、`自动选择` 用 `use:` 引用这些节点集。所以订阅更新、停用节点之后，AgentSwitch 让内核把对应的节点集重读一遍就生效，不用等 Clash Verge 来取；只有节点集增减（加、删订阅）才要它取一次或由 `Apply Changes at Once` 载入。
+- 第一份订阅里路由以外的部分（`dns:` 等）照旧带上，DNS 模版开着时照旧替换；它提到被去掉的分组的地方照 §7.11 处理。
+- 节点的 `dialer-proxy`：指向同一份订阅里另一个节点的，换成那个节点现在的名字；指向别的（分组、被停用的节点）就去掉，直接连。
+
+### 10.3 存在哪
+
+- `clash/sources.json`：有哪几份、顺序、各自的间隔、每份里被停用的节点名。里面没有链接，也没有节点的地址和口令。
+- 第一份订阅仍在 `clash/source/`（原来唯一的那个位置）；其余在 `clash/sources/<编号>/`，文件与权限同 §7.1。没有 `sources.json` 而 `clash/source/` 里有订阅时，就是升级前的那一份，间隔取原来的 `Auto Update`。
+
+### 10.4 接口
+
+- `GET /clash` 多了 `subscriptions`（每份：`id`、名字、来源主机或文件、节点数、流量、更新时间、间隔、出错的话一句）、`table`（每个节点：名字、属于哪份、类型、是否停用）、`together`（有多份）。原有的 `source`、`nodes` 还在：一份时不变，多份时 `source` 是一行汇总（`2 Subscriptions`）。
+- `POST /clash/subscriptions`（加一份）、`PATCH /clash/subscriptions/:id`（名字、间隔）、`DELETE /clash/subscriptions/:id`、`POST /clash/subscriptions/:id/update`、`POST /clash/node {name, off}`；`POST /clash/delays` 的 `service` 可以是 `any`（节点总表用）。五条新的都在手机的白名单里（§9）。
+- **旧版应用**（只认一份订阅的 `POST` / `DELETE /clash/source`）：只有一份或没有时照旧是“换掉”“移除”；有多份时拒绝，回一句“现在有多份订阅，请在新版应用里添加或移除”。它改 `Auto Update` 时，改的是每一份的间隔。
+
+### 10.5 做了的与没验证的
+
+- 服务：`src/clash/sources.ts`（新）、`source.ts`（可以放在自己的文件夹里、改名）、`integration.ts`、`api/clash.ts`、`remote/routes.ts`。`build.ts` 没有改：合在一起的那份走的就是 §7.11 的路。
+- 测试：`tests/clash.test.ts` 的 `several subscriptions (§10)` 七条；原有的 43 条没有改动、全过。
+- 真跑（2026-11-13）：临时目录里两份订阅（有重名、有停用、有 `dialer-proxy`）生成的配置，交给本机 Clash Verge 自带的内核 `-t`，通过。
+- **没验证的**：在用户正在运行的 Clash Verge 上真的加第二份订阅并切过去；用户现有那份订阅（带 `tgyun` 节点集）与另一份合并后的实际效果；重名规则与添加顺序有关——移除排在前面的订阅后，后面那份里原来带后缀的节点会变回原名，已选中的会显示为 `Gone`，要重新选。
+

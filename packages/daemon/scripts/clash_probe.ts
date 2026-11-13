@@ -28,7 +28,8 @@ import { LocalAuth } from "../src/api/localAuth.js";
 import type { ApiDeps } from "../src/api/shared.js";
 import { ClashController } from "../src/clash/controller.js";
 import { ClashIntegration } from "../src/clash/integration.js";
-import { ClashSource, linkedProviders } from "../src/clash/source.js";
+import { linkedProviders } from "../src/clash/source.js";
+import { ClashSources } from "../src/clash/sources.js";
 import { ClashStore } from "../src/clash/store.js";
 import { vergeDir, vergeProfiles, vergeSocket } from "../src/clash/verge.js";
 import { listenLocal } from "../src/daemon.js";
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
   let server: ReturnType<typeof listenLocal> | null = null;
   try {
     let port = 0;
-    const clash = new ClashIntegration({ store: new ClashStore(work), source: new ClashSource(work, undefined, undefined, () => `clash.meta/${before.version}`),
+    const clash = new ClashIntegration({ store: new ClashStore(work), source: new ClashSources(work, undefined, undefined, () => `clash.meta/${before.version}`),
       base: () => `http://127.0.0.1:${port}`, socket: () => socket });
     const app = new Hono();
     mountClash(app, { clash } as unknown as ApiDeps);
@@ -134,7 +135,7 @@ async function main(): Promise<void> {
     if (link) {
       const second = mkdtempSync(join(tmpdir(), "as-clash-probe2-"));
       try {
-        const raw = new ClashIntegration({ store: new ClashStore(second), source: new ClashSource(second, undefined, undefined, () => `clash.meta/${before.version}`), base: () => `http://127.0.0.1:${port}`, socket: () => null });
+        const raw = new ClashIntegration({ store: new ClashStore(second), source: new ClashSources(second, undefined, undefined, () => `clash.meta/${before.version}`), base: () => `http://127.0.0.1:${port}`, socket: () => null });
         const got2 = await raw.setSource({ link });
         say(`11) the service's own link taken in: ${got2.nodes.length} nodes, default group ${JSON.stringify(got2.defaultGroup)}`);
         const theirs = (parse(raw.subscription()!.text) as Record<string, any>).dns;
@@ -152,7 +153,7 @@ async function main(): Promise<void> {
     }
     // The routing check on the user's own running core: a connection of each kind through its proxy port, and what it
     // made of each. Whatever subscription it runs, the same kinds are tried; what should happen is what these settings ask.
-    const live = new ClashIntegration({ store: new ClashStore(work), source: new ClashSource(work), base: () => `http://127.0.0.1:${port}`, socket: () => real });
+    const live = new ClashIntegration({ store: new ClashStore(work), source: new ClashSources(work), base: () => `http://127.0.0.1:${port}`, socket: () => real });
     await live.saveSettings({ claude: { nodes: claude }, openai: { nodes: openai }, direct: [], autoUpdateHours: 24, renameDefault: false, templates: { domestic: { on: true, rules: null }, block: { on: true, rules: null } }, dns: { on: false, text: null } });
     const t0 = Date.now();
     const checked = await live.check();

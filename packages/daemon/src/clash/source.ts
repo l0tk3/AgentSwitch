@@ -51,8 +51,9 @@ export class ClashSource {
   private loaded: Loaded | null | undefined;
 
   constructor(home: string, private readonly fetcher: Fetcher = fetchText, private readonly now: () => number = Date.now,
-              /** Who the fetches say they are. */ private readonly agent: () => string = () => "clash.meta/v1.19.0") {
-    this.dir = join(home, "clash", "source");
+              /** Who the fetches say they are. */ private readonly agent: () => string = () => "clash.meta/v1.19.0",
+              /** Its folder, where it is one of several (sources.ts); else the one there has always been. */ dir?: string) {
+    this.dir = dir ?? join(home, "clash", "source");
   }
 
   info(): SourceInfo | null {
@@ -91,7 +92,7 @@ export class ClashSource {
   }
 
   /** Work from this link from now on: fetched now, and its node sets with it. */
-  async setLink(url: string, name?: string): Promise<SourceInfo> {
+  async setLink(url: string, name?: string | undefined): Promise<SourceInfo> {
     const target = web(url);
     if (!target) throw new ClashSourceError("这不是一条 http(s) 链接");
     const got = await this.get(target);
@@ -110,6 +111,17 @@ export class ClashSource {
     rmSync(this.dir, { recursive: true, force: true });
     this.loaded = null;
   }
+
+  /** It is called this from now on; nothing is fetched. */
+  rename(name: string): void {
+    const l = this.load(), next = name.trim().slice(0, 80);
+    if (!l || !next) return;
+    this.write(join(this.dir, "meta.json"), JSON.stringify({ ...l.meta, name: next }, null, 2));
+    this.loaded = undefined;
+  }
+
+  /** When it was last fetched; null: there is none. */
+  updatedAt(): number | null { return this.load()?.meta.updatedAt ?? null; }
 
   /** The link fetched again, and every node set. A fetch that fails leaves what was kept and says so. */
   async refresh(): Promise<SourceInfo | null> {

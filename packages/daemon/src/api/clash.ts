@@ -32,8 +32,17 @@ const Source = z.union([
   z.object({ yaml: z.string().min(1).max(8_000_000), name: z.string().max(200) }).strict(),
   z.object({ verge: z.string().regex(/^[A-Za-z0-9]{6,32}$/) }).strict(),
 ]);
+/** One more subscription (§10): as `Source`, a link with the name to call it by if one is given. */
+const Subscription = z.union([
+  z.object({ link: z.string().min(8).max(4000), name: z.string().max(80).optional() }).strict(),
+  z.object({ yaml: z.string().min(1).max(8_000_000), name: z.string().max(200) }).strict(),
+  z.object({ verge: z.string().regex(/^[A-Za-z0-9]{6,32}$/) }).strict(),
+]);
+const SubscriptionEdit = z.object({ name: z.string().min(1).max(80).optional(), hours: z.number().refine((n) => (UPDATE_HOURS as readonly number[]).includes(n)).optional() }).strict();
+const NodeOff = z.object({ name: z.string().min(1).max(400), off: z.boolean() }).strict();
+const SUBSCRIPTION_ID = /^[0-9a-f]{1,16}$/;
 const Select = z.object({ service: z.enum(CLASH_SERVICES), node: z.string().min(1).max(200).nullable() });
-const Delays = z.object({ service: z.enum(CLASH_SERVICES), scope: z.enum(["chosen", "all"]) });
+const Delays = z.object({ service: z.enum([...CLASH_SERVICES, "any"]), scope: z.enum(["chosen", "all"]) });
 /** A YAML answer's headers, made anew each time: the listener writes into the object it is given (a length), and a
  *  shared one answered the second request with `v is not iterable` (seen with the real listener, 2026-10-08). */
 const yaml = (more: Record<string, string> = {}): Record<string, string> => ({ "content-type": "text/yaml; charset=utf-8", ...more });
@@ -74,9 +83,38 @@ export function mountClash(app: Hono<any>, deps: ApiDeps): void {
     return body.ok ? page(c, () => clash.setSource(body.data)) : c.json({ error: body.error }, 400);
   });
 
-  app.delete("/clash/source", async (c) => c.json(shown(c, await clash.removeSource())));
+  app.delete("/clash/source", (c) => page(c, () => clash.removeSource()));
 
   app.post("/clash/update", (c) => page(c, () => clash.update()));
+
+  // ---- several subscriptions (§10)
+
+  app.post("/clash/subscriptions", async (c) => {
+    const body = await parseBody(c, Subscription);
+    return body.ok ? page(c, () => clash.addSubscription(body.data)) : c.json({ error: body.error }, 400);
+  });
+
+  app.patch("/clash/subscriptions/:id", async (c) => {
+    const id = c.req.param("id"), body = await parseBody(c, SubscriptionEdit);
+    if (!SUBSCRIPTION_ID.test(id)) return c.notFound();
+    return body.ok ? page(c, () => clash.editSubscription(id, { ...(body.data.name !== undefined ? { name: body.data.name } : {}), ...(body.data.hours !== undefined ? { hours: body.data.hours } : {}) })) : c.json({ error: body.error }, 400);
+  });
+
+  app.delete("/clash/subscriptions/:id", (c) => {
+    const id = c.req.param("id");
+    return SUBSCRIPTION_ID.test(id) ? page(c, () => clash.removeSubscription(id)) : Promise.resolve(c.notFound());
+  });
+
+  app.post("/clash/subscriptions/:id/update", (c) => {
+    const id = c.req.param("id");
+    return SUBSCRIPTION_ID.test(id) ? page(c, () => clash.update(id)) : Promise.resolve(c.notFound());
+  });
+
+  // A node left out of everything, or back.
+  app.post("/clash/node", async (c) => {
+    const body = await parseBody(c, NodeOff);
+    return body.ok ? page(c, () => clash.setNodeOff(body.data.name, body.data.off)) : c.json({ error: body.error }, 400);
+  });
 
   app.post("/clash/select", async (c) => {
     const body = await parseBody(c, Select);
