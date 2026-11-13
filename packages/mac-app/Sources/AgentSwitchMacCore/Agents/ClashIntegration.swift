@@ -180,6 +180,56 @@ public struct ClashSource: Decodable, Equatable, Sendable {
     public let traffic: ClashTraffic?
 }
 
+/// One of the subscriptions worked from (docs/clash-v0.md §10): a link or a file with its own name and its own
+/// interval.
+public struct ClashSubscription: Decodable, Equatable, Sendable, Identifiable {
+    public let id: String
+    /// `link` or `file`.
+    public let kind: String
+    public let name: String
+    public let host: String?
+    public let updatedAt: Double
+    public let nodes: Int
+    public let providers: [ClashSourceProvider]
+    public let error: String?
+    public let traffic: ClashTraffic?
+    /// Fetched again after this many hours; 0: only when asked.
+    public let hours: Int
+
+    public init(id: String, kind: String, name: String, host: String? = nil, updatedAt: Double, nodes: Int, providers: [ClashSourceProvider] = [],
+                error: String? = nil, traffic: ClashTraffic? = nil, hours: Int) {
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.host = host
+        self.updatedAt = updatedAt
+        self.nodes = nodes
+        self.providers = providers
+        self.error = error
+        self.traffic = traffic
+        self.hours = hours
+    }
+
+    /// Where it comes from, in a word: a link's host, `File` for a file.
+    public var origin: String { kind == "link" ? (host ?? name) : "File" }
+}
+
+/// A node in the table of them all: its name as Clash has it, the subscription it is of, whether it is switched off.
+public struct ClashNode: Decodable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let sub: String
+    public let type: String
+    public let off: Bool
+    public var id: String { name }
+
+    public init(name: String, sub: String, type: String, off: Bool) {
+        self.name = name
+        self.sub = sub
+        self.type = type
+        self.off = off
+    }
+}
+
 public struct ClashServiceState: Decodable, Equatable, Sendable {
     /// Its two groups by the names they have in Clash.
     public let group: String
@@ -285,8 +335,13 @@ public struct ClashView: Decodable, Equatable, Sendable {
     public let version: String?
     public let tun: Bool?
     public let source: ClashSource?
-    /// Every node of the subscription, by name.
+    /// Every node that can be used, by name.
     public let nodes: [String]
+    /// Each subscription, every node of them with the ones switched off, and whether there are several (§10). nil
+    /// from a service that knows of one subscription alone (another node not yet updated).
+    public let subscriptions: [ClashSubscription]?
+    public let table: [ClashNode]?
+    public let together: Bool?
     /// Clash Verge's own subscriptions, to import one.
     public let profiles: [ClashProfile]
     public let settings: ClashSettings
@@ -308,6 +363,21 @@ public struct ClashView: Decodable, Equatable, Sendable {
 
     public func state(_ service: ClashService) -> ClashServiceState? { services[service.rawValue] }
 
+    /// The service keeps several subscriptions (§10); one that does not has the one, replaced or removed.
+    public var keepsSeveral: Bool { subscriptions != nil }
+
+    /// The subscriptions to show: as the service lists them, or the only one of a service that knows of one (its id
+    /// is empty: there is nothing to call it by).
+    public var listed: [ClashSubscription] {
+        if let subscriptions { return subscriptions }
+        guard let source else { return [] }
+        return [ClashSubscription(id: "", kind: source.kind, name: source.name, host: source.host, updatedAt: source.updatedAt, nodes: source.nodes,
+                                  providers: source.providers, error: source.error, traffic: source.traffic, hours: settings.autoUpdateHours)]
+    }
+
+    /// The groups and the rules are AgentSwitch's alone: asked for, or there are several subscriptions.
+    public var ownRules: Bool { settings.ownRules || together == true }
+
     public func state(_ template: ClashTemplate) -> ClashTemplateState? { templates[template.rawValue] }
 
     /// What is still to do, in order; empty when nothing is.
@@ -315,7 +385,7 @@ public struct ClashView: Decodable, Equatable, Sendable {
         guard found else { return ["这台 Mac 上没有找到 Clash Verge。"] }
         guard running else { return ["Clash Verge 没有在运行：打开它。"] }
         var steps: [String] = []
-        if source == nil { steps.append("先给一个订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
+        if source == nil { steps.append("先添加一份订阅：一条链接、一个文件，或者从 Clash Verge 导入。") }
         else if !active { steps.append("在 Clash Verge 里添加并切换到 AgentSwitch 订阅。") }
         else if !upToDate {
             if let applyProblem { steps.append("内核没有接受新的订阅：\(applyProblem)") }
@@ -357,6 +427,18 @@ public enum ClashText {
 
     /// `42 Nodes`, `1 Node`.
     public static func nodes(_ count: Int) -> String { count == 1 ? "1 Node" : "\(count) Nodes" }
+
+    /// What the table of nodes shows: one subscription's alone where one is picked (nil: all), and those whose name has
+    /// what is searched for, whatever its case.
+    public static func filtered(_ table: [ClashNode], subscription: String?, search: String) -> [ClashNode] {
+        let wanted = search.trimmingCharacters(in: .whitespaces)
+        return table.filter { node in
+            (subscription == nil || node.sub == subscription) && (wanted.isEmpty || node.name.range(of: wanted, options: [.caseInsensitive, .diacriticInsensitive]) != nil)
+        }
+    }
+
+    /// `47 Nodes`, and how many are switched off when any is: `47 Nodes · 3 Off`.
+    public static func nodeCount(shown: Int, off: Int) -> String { nodes(shown) + (off > 0 ? " · \(off) Off" : "") }
 
     /// `169 Rules`, `1 Rule`.
     public static func rules(_ count: Int) -> String { count == 1 ? "1 Rule" : "\(count) Rules" }
@@ -409,6 +491,44 @@ extension DaemonClient {
     public func selectClash(_ service: ClashService, node: String?) async throws -> ClashView {
         let body: [String: Any] = ["service": service.rawValue, "node": node ?? NSNull()]
         return try decode(ClashView.self, try await call("POST", "/clash/select", body: try JSONSerialization.data(withJSONObject: body), timeout: 20))
+    }
+
+    /// One more subscription to work from (docs/clash-v0.md §10): a link, a file's text, or one of Clash Verge's.
+    public func addClashSubscription(link: String) async throws -> ClashView { try await clashSubscription(["link": link]) }
+    public func addClashSubscription(yaml: String, name: String) async throws -> ClashView { try await clashSubscription(["yaml": yaml, "name": name]) }
+    public func addClashSubscription(verge uid: String) async throws -> ClashView { try await clashSubscription(["verge": uid]) }
+
+    /// A subscription's name, or how often it is fetched again.
+    public func editClashSubscription(_ id: String, name: String? = nil, hours: Int? = nil) async throws -> ClashView {
+        var body: [String: Any] = [:]
+        if let name { body["name"] = name }
+        if let hours { body["hours"] = hours }
+        return try decode(ClashView.self, try await call("PATCH", "/clash/subscriptions/\(id)", body: try JSONSerialization.data(withJSONObject: body), timeout: 20))
+    }
+
+    public func removeClashSubscription(_ id: String) async throws -> ClashView {
+        try decode(ClashView.self, try await call("DELETE", "/clash/subscriptions/\(id)", timeout: 20))
+    }
+
+    /// One subscription fetched again now.
+    public func updateClashSubscription(_ id: String) async throws -> ClashView {
+        try decode(ClashView.self, try await call("POST", "/clash/subscriptions/\(id)/update", timeout: ClashText.fetchTimeout))
+    }
+
+    /// A node is left out of everything from now on, or is back.
+    public func setClashNode(_ name: String, off: Bool) async throws -> ClashView {
+        try decode(ClashView.self, try await call("POST", "/clash/node", body: try JSONSerialization.data(withJSONObject: ["name": name, "off": off]), timeout: 20))
+    }
+
+    /// How long every node takes to answer, in ms (nil: no answer), whatever it is used for.
+    public func clashDelays() async throws -> [String: Int?] {
+        struct Answer: Decodable { let delays: [String: Int?] }
+        let body = try JSONSerialization.data(withJSONObject: ["service": "any", "scope": "all"])
+        return try decode(Answer.self, try await call("POST", "/clash/delays", body: body, timeout: 30)).delays
+    }
+
+    private func clashSubscription(_ body: [String: String]) async throws -> ClashView {
+        try decode(ClashView.self, try await call("POST", "/clash/subscriptions", body: try JSONSerialization.data(withJSONObject: body), timeout: ClashText.fetchTimeout))
     }
 
     /// How long each node takes to reach the service, in ms (nil: no answer): the chosen ones, or every node.

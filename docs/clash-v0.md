@@ -479,6 +479,7 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 
 - 服务：`src/clash/sources.ts`（新）、`source.ts`（可以放在自己的文件夹里、改名）、`integration.ts`、`api/clash.ts`、`remote/routes.ts`。`build.ts` 没有改：合在一起的那份走的就是 §7.11 的路。
 - 测试：`tests/clash.test.ts` 的 `several subscriptions (§10)` 七条；原有的 43 条没有改动、全过。
+- Mac（`ClashPageParts.swift`、`ClashIntegrationView.swift`、`ClashIntegration.swift`）：`Subscriptions` 一组里每份订阅一张卡片（顶上是名字、节点数与流量；`From`、`Updated` 与 `Update Now`、`Auto Update`、`Rename…`、`Remove…`），再是 `Add Subscription`（链接、`Choose File…`、`Import from Clash Verge`）和 `Clash Verge`（它上次来取的时间、`Apply Changes at Once`、改名 `Manual`）；新的一组 `Nodes` 是节点总表（按订阅筛选、搜索、`Test All`，每行一个勾：去掉就是停用；来自哪份、类型、延迟）；多份时 `Only My Rules` 开着、不能关。看别的节点而它的服务还只认一份订阅时，页面照旧是一份（`Replace Subscription`）。测试 `ClashIntegrationTests` 一条；设计预览 `-designPreviewOnly clash` 画的是两份订阅的样子，看过。
 - 真跑（2026-11-13）：临时目录里两份订阅（有重名、有停用、有 `dialer-proxy`）生成的配置，交给本机 Clash Verge 自带的内核 `-t`，通过。
 - **没验证的**：在用户正在运行的 Clash Verge 上真的加第二份订阅并切过去；用户现有那份订阅（带 `tgyun` 节点集）与另一份合并后的实际效果；重名规则与添加顺序有关——移除排在前面的订阅后，后面那份里原来带后缀的节点会变回原名，已选中的会显示为 `Gone`，要重新选。
 

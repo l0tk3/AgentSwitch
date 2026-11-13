@@ -116,4 +116,31 @@ final class ClashIntegrationTests: XCTestCase {
         XCTAssertEqual(ClashText.traffic(ClashTraffic(used: 13_207_024_435, total: 107_374_182_400, expire: 1_798_675_200_000), calendar: utc), "12.3 / 100 GB · Expires 2026/12/31")
         XCTAssertEqual(ClashText.traffic(ClashTraffic(used: 0, total: 53_687_091_200, expire: nil)), "0 / 50 GB")
     }
+
+    /// Several subscriptions (docs/clash-v0.md §10): each as the service lists it, every node with the one it is of;
+    /// a service that knows of one alone has that one shown, with the interval its settings say.
+    func testSeveralSubscriptionsAreReadAndOneAloneIsShownAsOne() throws {
+        let base = #""found":true,"running":true,"version":"v1.19.31","tun":true,"active":true,"upToDate":true"#
+        let old = try view(base)
+        XCTAssertFalse(old.keepsSeveral)
+        XCTAssertFalse(old.ownRules)
+        XCTAssertEqual(old.listed.map { [$0.id, $0.name, $0.origin, String($0.hours), String($0.nodes)] }, [["", "tgyun_config.yaml", "File", "6", "42"]])
+        XCTAssertNil(old.table)
+
+        let several = try view(base + #","together":true,"subscriptions":[{"id":"0","kind":"link","name":"Main","host":"sub.example","updatedAt":1,"nodes":2,"providers":[],"hours":24,"traffic":{"used":1073741824,"total":10737418240,"expire":null}},{"id":"3f9a12c0","kind":"file","name":"spare.yaml","updatedAt":2,"nodes":1,"providers":[],"hours":0,"error":"没有取到"}],"table":[{"name":"A","sub":"0","type":"vless","off":false},{"name":"b","sub":"0","type":"ss","off":true},{"name":"A · spare.yaml","sub":"3f9a12c0","type":"trojan","off":false}]"#)
+        XCTAssertTrue(several.keepsSeveral)
+        XCTAssertTrue(several.ownRules)   // whatever the kept switch says
+        XCTAssertFalse(several.settings.ownRules)
+        XCTAssertEqual(several.listed.map(\.origin), ["sub.example", "File"])
+        XCTAssertEqual(several.listed.map(\.hours), [24, 0])
+        XCTAssertEqual(several.listed[1].error, "没有取到")
+        XCTAssertEqual(several.listed[0].traffic.map { ClashText.traffic($0) }, "1 / 10 GB")
+        let table = try XCTUnwrap(several.table)
+        XCTAssertEqual(table.filter(\.off).map(\.name), ["b"])
+        XCTAssertEqual(ClashText.filtered(table, subscription: nil, search: " ").map(\.name), ["A", "b", "A · spare.yaml"])
+        XCTAssertEqual(ClashText.filtered(table, subscription: "3f9a12c0", search: "").map(\.name), ["A · spare.yaml"])
+        XCTAssertEqual(ClashText.filtered(table, subscription: nil, search: "B").map(\.name), ["b"])
+        XCTAssertEqual(ClashText.filtered(table, subscription: "0", search: "spare").map(\.name), [])
+        XCTAssertEqual([ClashText.nodeCount(shown: 3, off: 1), ClashText.nodeCount(shown: 1, off: 0)], ["3 Nodes · 1 Off", "1 Node"])
+    }
 }

@@ -34,8 +34,15 @@ struct ClashActions {
     var useLink: (String) -> Void = { _ in }
     var chooseFile: () -> Void = {}
     var importFrom: (String) -> Void = { _ in }
-    var update: () -> Void = {}
-    var remove: () -> Void = {}
+    /// A subscription, by its id ("": the only one of a service that knows of one), is fetched again, removed,
+    /// renamed, given another interval.
+    var update: (String) -> Void = { _ in }
+    var remove: (String) -> Void = { _ in }
+    var rename: (String, String) -> Void = { _, _ in }
+    var setHours: (String, Int) -> Void = { _, _ in }
+    /// A node is left out of everything, or is back; every node is tried.
+    var setNodeOff: (String, Bool) -> Void = { _, _ in }
+    var testAll: () -> Void = {}
     var select: (ClashService, String?) -> Void = { _, _ in }
     var test: (ClashService, Bool) -> Void = { _, _ in }
     /// A template's rules are to be edited: they are fetched, then its sheet opens.
@@ -84,6 +91,9 @@ struct ClashIntegrationView: View {
     @State private var fetching = false
     @State private var delays: [ClashService: [String: Int?]] = [:]
     @State private var testing: Set<ClashService> = []
+    /// How long every node took when all were tried, whatever they are used for; and that they are being tried.
+    @State private var allDelays: [String: Int?] = [:]
+    @State private var testingAll = false
     @State private var editing: ClashEditing?
     /// The last routing check's lines; nil: none run yet.
     @State private var checked: [ClashCheckRow]?
@@ -98,8 +108,16 @@ struct ClashIntegrationView: View {
                     if view.found {
                         // The subscription first: where the nodes come from and how they are kept up to date (2026-11-11,
                         // user: 代理链接更新相关的东西应该放在最上面; at the foot before).
-                        ClashGroup("Subscription") { ClashSubscriptionCard(view: view, fetching: fetching, actions: actions) }
+                        ClashGroup(view.keepsSeveral ? "Subscriptions" : "Subscription") {
+                            ForEach(view.listed) { ClashSubscriptionCard(subscription: $0, view: view, fetching: fetching, actions: actions) }
+                            ClashAddCard(view: view, fetching: fetching, actions: actions)
+                            if view.source != nil { ClashDeliveryCard(view: view, actions: actions) }
+                        }
                         if view.source != nil {
+                            // Every node of every subscription in one place (§10).
+                            if view.table != nil {
+                                ClashGroup("Nodes") { ClashNodesCard(view: view, delays: allDelays.isEmpty ? demoDelays(.claude) : allDelays, testing: testingAll, actions: actions) }
+                            }
                             ClashGroup("Separate Proxies") {
                                 ForEach(ClashService.allCases, id: \.self) { service in
                                     ClashServiceCard(service: service, view: view, delays: delays[service] ?? demoDelays(service), testing: testing.contains(service), actions: actions)
@@ -154,16 +172,42 @@ struct ClashIntegrationView: View {
     private var actions: ClashActions {
         ClashActions(
             save: { next in run { try await $0.saveClash(next) } },
-            useLink: { link in fetch { try await $0.setClashSource(link: link) } },
+            // A service that knows of one subscription alone (another node not yet updated) has the one replaced.
+            useLink: { link in fetch { several ? try await $0.addClashSubscription(link: link) : try await $0.setClashSource(link: link) } },
             chooseFile: chooseFile,
-            importFrom: { uid in fetch { try await $0.setClashSource(verge: uid) } },
-            update: { fetch { try await $0.updateClash() } },
-            remove: { run { try await $0.removeClashSource() } },
+            importFrom: { uid in fetch { several ? try await $0.addClashSubscription(verge: uid) : try await $0.setClashSource(verge: uid) } },
+            update: { id in fetch { several ? try await $0.updateClashSubscription(id) : try await $0.updateClash() } },
+            remove: { id in run { several ? try await $0.removeClashSubscription(id) : try await $0.removeClashSource() } },
+            rename: { id, name in run { try await $0.editClashSubscription(id, name: name) } },
+            setHours: setHours,
+            setNodeOff: { name, off in run { try await $0.setClashNode(name, off: off) } },
+            testAll: testAll,
             select: { service, node in run { try await $0.selectClash(service, node: node) } },
             test: test,
             edit: edit,
             editDNS: editDNS,
             check: check)
+    }
+
+    /// The service keeps several subscriptions (§10).
+    private var several: Bool { view?.keepsSeveral ?? false }
+
+    private func setHours(_ id: String, _ hours: Int) {
+        if several { run { try await $0.editClashSubscription(id, hours: hours) }; return }
+        guard var next = view?.settings else { return }
+        next.autoUpdateHours = hours
+        run { try await $0.saveClash(next) }
+    }
+
+    private func testAll() {
+        guard !testingAll else { return }
+        testingAll = true
+        let client = client
+        Task {
+            do { allDelays = try await client.clashDelays(); error = nil }
+            catch { self.error = said(error) }
+            testingAll = false
+        }
     }
 
     private func check() {
@@ -261,7 +305,8 @@ struct ClashIntegrationView: View {
             error = "这个文件读不了，或者太大了。"
             return
         }
-        fetch { try await $0.setClashSource(yaml: text, name: url.lastPathComponent) }
+        let name = url.lastPathComponent, several = several
+        fetch { several ? try await $0.addClashSubscription(yaml: text, name: name) : try await $0.setClashSource(yaml: text, name: name) }
     }
 
     private func said(_ error: Error) -> String { (error as? DaemonError)?.reason ?? error.localizedDescription }
@@ -329,6 +374,14 @@ extension ClashView {
      "source":{"kind":"link","name":"sub.example.com","host":"sub.example.com","updatedAt":1791462000000,"nodes":42,
                "providers":[],"traffic":{"used":13207024435,"total":107374182400,"expire":1798675200000}},
      "nodes":["JP Tokyo 01","JP Tokyo 02","SG Singapore 01","US Los Angeles 01","US Seattle 02","HK Hong Kong 03"],
+     "together":true,
+     "subscriptions":[{"id":"0","kind":"link","name":"Main","host":"sub.example.com","updatedAt":1791462000000,"nodes":4,"providers":[],"hours":24,
+                       "traffic":{"used":13207024435,"total":107374182400,"expire":1798675200000}},
+                      {"id":"3f9a12c0","kind":"file","name":"spare.yaml","updatedAt":1791202800000,"nodes":3,"providers":[],"hours":0}],
+     "table":[{"name":"JP Tokyo 01","sub":"0","type":"vless","off":false},{"name":"JP Tokyo 02","sub":"0","type":"vless","off":false},
+              {"name":"SG Singapore 01","sub":"0","type":"trojan","off":false},{"name":"US Los Angeles 01","sub":"0","type":"vless","off":false},
+              {"name":"US Seattle 02","sub":"3f9a12c0","type":"hysteria2","off":false},{"name":"HK Hong Kong 03","sub":"3f9a12c0","type":"ss","off":false},
+              {"name":"JP Tokyo 01 · spare.yaml","sub":"3f9a12c0","type":"ss","off":true}],
      "profiles":[{"uid":"Lbw7BJYzpand","name":"my-subscription.yaml","type":"local"}],
      "settings":{"claude":{"nodes":["JP Tokyo 01","SG Singapore 01","US Seattle 02"]},"openai":{"nodes":["US Los Angeles 01","JP Tokyo 02"]},
                  "direct":["203.0.113.7"],"autoUpdateHours":24,"renameDefault":true,"dns":{"on":true,"text":null},

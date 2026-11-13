@@ -2,7 +2,7 @@ import AgentSwitchMacCore
 import SwiftUI
 
 // The Clash page's parts (docs/clash-v0.md §7.13): two levels and no more. A group has a heading that stands by itself
-// (`Subscription`, `Separate Proxies`, `Rules`, `Routing Check`); under it one card or several, and a card that is one
+// (`Subscriptions`, `Nodes`, `Separate Proxies`, `Rules`, `Routing Check`); under it one card or several, and a card that is one
 // of several says what it is in a band at its head (`Claude`, `OpenAI`, `Go Direct`). A system form before, where
 // every block had the same small title and a paragraph under it (2026-11-11, user: 每个板块分级不太明显，容易混淆;
 // 还有一堆这东西，没人会读). What a paragraph said is now a state's own line where the state is, or nothing.
@@ -188,21 +188,91 @@ struct ClashStatusLines: View {
     }
 }
 
-// MARK: - the subscription
+// MARK: - the subscriptions
 
+/// One subscription (docs/clash-v0.md §10): where it comes from, when it was fetched, how often it is fetched again;
+/// renamed and removed from here. Its name and what it holds are in the band at its head.
 struct ClashSubscriptionCard: View {
+    let subscription: ClashSubscription
+    let view: ClashView
+    let fetching: Bool
+    let actions: ClashActions
+    @State private var removing = false
+    @State private var renaming = false
+    @State private var name = ""
+
+    var body: some View {
+        ClashCard(title: subscription.name) {
+            Text(([ClashText.nodes(subscription.nodes)] + [subscription.traffic.map { ClashText.traffic($0) }].compactMap { $0 }).joined(separator: " · "))
+                .font(.system(size: 12)).monospacedDigit().foregroundStyle(Look.ink2).lineLimit(1)
+        } content: {
+            ClashFact(name: "From") { Text(subscription.origin).lineLimit(1) }
+            HStack(spacing: 10) {
+                Text("Updated")
+                Spacer(minLength: 8)
+                if fetching { ProgressView().controlSize(.small) }
+                Text(TimeText.moment(Date(timeIntervalSince1970: subscription.updatedAt / 1000))).foregroundStyle(Look.ink2)
+                ClashButton("Update Now") { actions.update(subscription.id) }.disabled(fetching)
+            }
+            .clashRow()
+            if let error = subscription.error { ClashNote(text: "上次没有取到：\(error)。现在用的是之前那一份。").clashRow() }
+            ForEach(subscription.providers.filter { $0.error != nil }, id: \.name) { set in
+                ClashNote(text: "节点集 \(set.name) 没有取到：\(set.error ?? "")。").clashRow()
+            }
+            HStack {
+                Text("Auto Update")
+                Spacer(minLength: 8)
+                Picker("", selection: Binding(get: { subscription.hours }, set: { actions.setHours(subscription.id, $0) })) {
+                    ForEach(ClashSettings.updateHours, id: \.self) { hours in Text(ClashText.interval(hours: hours)).tag(hours) }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            .clashRow()
+            HStack(spacing: 14) {
+                // A service that knows of one subscription alone has no name to give it.
+                if view.keepsSeveral { ClashButton("Rename…") { name = subscription.name; renaming = true } }
+                Spacer()
+                ClashButton("Remove…", role: .destructive) { removing = true }
+            }
+            .disabled(fetching)
+            .clashRow()
+        }
+        .confirmationDialog("Remove “\(subscription.name)” from AgentSwitch?", isPresented: $removing) {
+            Button("Remove", role: .destructive) { actions.remove(subscription.id) }
+        } message: {
+            Text(view.listed.count > 1 ? "它的节点会从 Clash 的分组里拿掉；为 Claude、OpenAI 选的节点里属于它的也一并去掉。"
+                 : "Clash Verge 会继续用它上次取到的那一份，直到你在那里切走或删掉 AgentSwitch 订阅。")
+        }
+        .alert("Rename Subscription", isPresented: $renaming) {
+            TextField("Name", text: $name)
+            Button("Rename") {
+                let next = name.trimmingCharacters(in: .whitespaces)
+                if !next.isEmpty, next != subscription.name { actions.rename(subscription.id, next) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+}
+
+/// One more subscription: a link, a file, or one of Clash Verge's own. With a service that knows of one subscription
+/// alone, what is given takes the place of the one there is.
+struct ClashAddCard: View {
     let view: ClashView
     let fetching: Bool
     let actions: ClashActions
     @State private var link = ""
-    @State private var removing = false
+
+    private var first: Bool { view.source == nil }
 
     var body: some View {
-        ClashCard {
-            if let source = view.source { kept(source) }
+        ClashCard(title: first ? nil : (view.keepsSeveral ? "Add Subscription" : "Replace Subscription")) {
+            if fetching { ProgressView().controlSize(.small) }
+        } content: {
             HStack(spacing: 10) {
-                ClashField(prompt: view.source == nil ? "Subscription Link" : "Another Link", text: $link, submit: use)
-                ClashButton("Use", role: view.source == nil ? .primary : .normal, action: use).disabled(fetching || link.trimmingCharacters(in: .whitespaces).isEmpty)
+                ClashField(prompt: "Subscription Link", text: $link, submit: use)
+                ClashButton(first || view.keepsSeveral ? "Add" : "Use", role: first ? .primary : .normal, action: use).disabled(fetching || link.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .clashRow()
             HStack(spacing: 14) {
@@ -215,65 +285,11 @@ struct ClashSubscriptionCard: View {
                 .fixedSize()
                 .disabled(view.profiles.isEmpty)
                 Spacer()
-                if fetching && view.source == nil { ProgressView().controlSize(.small) }
-                if view.source != nil { ClashButton("Remove…", role: .destructive) { removing = true } }
+                if fetching && first { ProgressView().controlSize(.small) }
             }
             .disabled(fetching)
             .clashRow()
         }
-        .confirmationDialog("Remove the subscription from AgentSwitch?", isPresented: $removing) {
-            Button("Remove", role: .destructive, action: actions.remove)
-        } message: {
-            Text("Clash Verge 会继续用它上次取到的那一份，直到你在那里切走或删掉 AgentSwitch 订阅。")
-        }
-    }
-
-    @ViewBuilder private func kept(_ source: ClashSource) -> some View {
-        HStack(spacing: 8) {
-            Text(ClashText.origin(source)).fontWeight(.semibold).lineLimit(1)
-            Spacer(minLength: 8)
-            Text(([ClashText.nodes(source.nodes)] + [source.traffic.map { ClashText.traffic($0) }].compactMap { $0 }).joined(separator: " · "))
-                .monospacedDigit().foregroundStyle(Look.ink2).lineLimit(1)
-        }
-        .clashRow()
-        HStack(spacing: 10) {
-            Text("Updated")
-            Spacer(minLength: 8)
-            if fetching { ProgressView().controlSize(.small) }
-            Text(TimeText.moment(Date(timeIntervalSince1970: source.updatedAt / 1000))).foregroundStyle(Look.ink2)
-            ClashButton("Update Now", action: actions.update).disabled(fetching)
-        }
-        .clashRow()
-        if let error = source.error { ClashNote(text: "上次没有取到：\(error)。现在用的是之前那一份。").clashRow() }
-        ForEach(source.providers.filter { $0.error != nil }, id: \.name) { set in
-            ClashNote(text: "节点集 \(set.name) 没有取到：\(set.error ?? "")。").clashRow()
-        }
-        if let fetched = view.fetchedAt {
-            ClashFact(name: "Clash Verge Fetched") { Text(TimeText.moment(Date(timeIntervalSince1970: fetched / 1000))) }
-        }
-        HStack {
-            Text("Auto Update")
-            Spacer(minLength: 8)
-            Picker("", selection: setting(\.autoUpdateHours)) {
-                ForEach(ClashSettings.updateHours, id: \.self) { hours in Text(ClashText.interval(hours: hours)).tag(hours) }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .fixedSize()
-        }
-        .clashRow()
-        ClashSwitch(title: "Apply Changes at Once", detail: "订阅有改动时由 AgentSwitch 直接让内核载入，不等 Clash Verge 每小时来取", isOn: setting(\.applyNow))
-        if let group = view.defaultGroup, !view.settings.ownRules {
-            ClashSwitch(title: "Rename “\(group)” to Manual", detail: nil, isOn: setting(\.renameDefault))
-        }
-    }
-
-    private func setting<Value>(_ path: WritableKeyPath<ClashSettings, Value>) -> Binding<Value> {
-        Binding(get: { view.settings[keyPath: path] }, set: { value in
-            var next = view.settings
-            next[keyPath: path] = value
-            actions.save(next)
-        })
     }
 
     private func use() {
@@ -281,6 +297,99 @@ struct ClashSubscriptionCard: View {
         guard !text.isEmpty, !fetching else { return }
         link = ""
         actions.useLink(text)
+    }
+}
+
+/// How what is made of the subscriptions reaches Clash Verge: when it last fetched it, whether AgentSwitch loads a
+/// change itself, the default group's name.
+struct ClashDeliveryCard: View {
+    let view: ClashView
+    let actions: ClashActions
+
+    var body: some View {
+        ClashCard(title: "Clash Verge") {
+            if let fetched = view.fetchedAt {
+                ClashFact(name: "Clash Verge Fetched") { Text(TimeText.moment(Date(timeIntervalSince1970: fetched / 1000))) }
+            }
+            ClashSwitch(title: "Apply Changes at Once", detail: "订阅有改动时由 AgentSwitch 直接让内核载入，不等 Clash Verge 每小时来取", isOn: setting(\.applyNow))
+            if let group = view.defaultGroup, !view.ownRules {
+                ClashSwitch(title: "Rename “\(group)” to Manual", detail: nil, isOn: setting(\.renameDefault))
+            }
+        }
+    }
+
+    private func setting(_ path: WritableKeyPath<ClashSettings, Bool>) -> Binding<Bool> {
+        Binding(get: { view.settings[keyPath: path] }, set: { value in
+            var next = view.settings
+            next[keyPath: path] = value
+            actions.save(next)
+        })
+    }
+}
+
+// MARK: - every node
+
+/// Every node of every subscription in one table (docs/clash-v0.md §10): which subscription each is of, how long it
+/// takes to answer, and a box that leaves it out of everything when it is cleared.
+struct ClashNodesCard: View {
+    let view: ClashView
+    let delays: [String: Int?]
+    let testing: Bool
+    let actions: ClashActions
+    /// The subscription shown alone; "": all of them.
+    @State private var only = ""
+    @State private var search = ""
+
+    private var table: [ClashNode] { view.table ?? [] }
+    private var names: [String: String] { Dictionary(uniqueKeysWithValues: view.listed.map { ($0.id, $0.name) }) }
+    private var several: Bool { view.listed.count > 1 }
+    private var shown: [ClashNode] { ClashText.filtered(table, subscription: only.isEmpty || names[only] == nil ? nil : only, search: search) }
+
+    var body: some View {
+        ClashCard {
+            HStack(spacing: 10) {
+                if several {
+                    Picker("", selection: $only) {
+                        Text("All Subscriptions").tag("")
+                        ForEach(view.listed) { Text($0.name).tag($0.id) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                }
+                ClashField(prompt: "Search", text: $search, submit: {})
+                Text(ClashText.nodeCount(shown: shown.count, off: table.filter(\.off).count)).font(.system(size: 12)).monospacedDigit().foregroundStyle(Look.ink2).fixedSize()
+                if testing { ProgressView().controlSize(.small) }
+                ClashButton("Test All", action: actions.testAll).disabled(testing || !view.running)
+            }
+            .clashRow()
+            if !view.ownRules, !several {
+                Text("停用单个节点需要先打开 Only My Rules：订阅自带的分组里去不掉单个节点。").font(.system(size: 12)).foregroundStyle(Look.ink2).clashRow()
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(shown) { node in
+                        HStack(spacing: 8) {
+                            Button { actions.setNodeOff(node.name, !node.off) } label: {
+                                Image(systemName: node.off ? "square" : "checkmark.square.fill").foregroundStyle(node.off ? Look.ink2 : Color.signal)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!view.ownRules && !node.off)
+                            .help(node.off ? "Use This Node" : "Leave This Node Out")
+                            Text(node.name).lineLimit(1).foregroundStyle(node.off ? Look.faint : Look.ink)
+                            Spacer(minLength: 8)
+                            if several { Text(names[node.sub] ?? "").font(.system(size: 12)).foregroundStyle(Look.ink2).lineLimit(1) }
+                            Text(node.type).mono(11.5).foregroundStyle(Look.faint).frame(width: 78, alignment: .trailing)
+                            let delay = ClashText.delay(delays[node.name])
+                            Text(delay).monospacedDigit().foregroundStyle(delay == "Timeout" ? Color.waiting : Look.ink2).frame(width: 64, alignment: .trailing)
+                        }
+                        .clashRow()
+                    }
+                }
+            }
+            .frame(height: min(CGFloat(max(shown.count, 1)) * 38, 342))
+            if shown.isEmpty { Text(table.isEmpty ? "No Nodes" : "No Matches").font(.system(size: 12)).foregroundStyle(Look.ink2).clashRow() }
+        }
     }
 }
 
@@ -448,10 +557,15 @@ struct ClashRulesCard: View {
 
     var body: some View {
         ClashCard {
-            ClashSwitch(title: "Only My Rules", detail: view.settings.ownRules ? "订阅的分组和规则都不用了，只留它的节点" : "订阅自己的分组和规则排在这些后面", isOn: setting(\.ownRules))
+            // With several subscriptions the groups and rules are AgentSwitch's alone (§10): on, and not to be turned off.
+            if view.together == true {
+                ClashSwitch(title: "Only My Rules", detail: "有多份订阅时，分组和规则都由 AgentSwitch 生成", isOn: .constant(true), held: true)
+            } else {
+                ClashSwitch(title: "Only My Rules", detail: view.settings.ownRules ? "订阅的分组和规则都不用了，只留它的节点" : "订阅自己的分组和规则排在这些后面", isOn: setting(\.ownRules))
+            }
             ForEach(ClashTemplate.allCases, id: \.self) { template in
                 // The domestic template is on while only these rules are: without it everything at home goes by Manual.
-                let held = template == .domestic && view.settings.ownRules
+                let held = template == .domestic && view.ownRules
                 ClashSwitch(title: template.title, detail: detail(template), isOn: Binding(get: { held || view.settings.templates[template].on }, set: { on in
                     var next = view.settings
                     next.templates[template].on = on
