@@ -953,6 +953,10 @@ describe("a Codex profile that signs in with a ChatGPT account (§6.2)", () => {
     const plain = launch({ id: "x2", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok" });
     expect(plain.env.CODEX_HOME).toBeUndefined();
     expect(plain.args.join(" ")).not.toMatch(/cli_auth_credentials_store|model_provider/);
+    // What is selected on its screen goes to whoever is looking: Codex tells the terminal only where it takes itself to be over SSH.
+    expect(plain.env.SSH_TTY).toBe("/dev/tty");
+    const others = agentLauncher({ binaries: { "claude-code": "/bin/claude" }, hookUrl: () => "http://127.0.0.1:4711", stateDir, env: { PATH: "/usr/bin", HOME: "/Users/u" } });
+    expect(others({ id: "x4", harness: "claude-code", cwd: "/tmp", mode: "manual", hookToken: "tok" }).env.SSH_TTY).toBeUndefined();
     // One that pays by a key runs in the Mac's own folder, on a provider of its own.
     const keyed = launch({ id: "x3", harness: "codex", cwd: "/tmp", mode: "manual", hookToken: "tok", api: { name: "Key" } });
     expect(keyed.env.CODEX_HOME).toBeUndefined();

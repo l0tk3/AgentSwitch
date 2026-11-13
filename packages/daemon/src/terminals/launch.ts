@@ -314,6 +314,10 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         // A profile that signs in with an account (docs/profiles-v0.md §6.2): a folder of its own, its sign-in kept in
         // a file there, and OpenAI's own provider whatever the user's config.toml (linked in) names.
         if (req.configHome) env.CODEX_HOME = req.configHome;
+        // What is selected on Codex's screen goes to whoever is looking (docs/terminal-v0.md §1 "Codex 里选中的字"):
+        // Codex writes the clipboard of the machine it runs on and tells the terminal (OSC 52) only where it takes
+        // itself to be reached over SSH — which, seen from another node or a phone, it is.
+        env.SSH_TTY ??= "/dev/tty";
         // `notify` runs a program with the event JSON as its last argument when a turn ends.
         const args = [...(req.configHome ? [...CODEX_FILE_STORE, "-c", 'model_provider="openai"'] : []), "-c", `notify=${JSON.stringify([node, script, "codex"])}`];
         // The Mac's own Codex going on with a thread a key profile's ran last: under the user's own provider.
