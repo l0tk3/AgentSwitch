@@ -104,41 +104,46 @@ struct NewTerminalSheet: View {
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         SectionLabel("Folder")
-                        HStack(spacing: 8) {
-                            if look.isClassic {
-                                Image(systemName: "folder").font(.system(size: 14)).foregroundStyle(Theme.inkDim)
-                            } else {
-                                Text("❯").mono(14).foregroundStyle(Theme.signal)
-                            }
-                            // A folder is a path: code in both looks.
-                            TextField("~/project", text: $folder)
-                                .code(14)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-                                .focused($typingFolder)
-                                // The prompt's block caret after the text while it is not being typed in (the system's
-                                // caret then takes over).
-                                .overlay(alignment: .leading) {
-                                    if !typingFolder && !look.isClassic {
-                                        HStack(spacing: 1) {
-                                            Text(folder.isEmpty ? "" : folder).code(14).hidden()
-                                            BlockCaret(width: 8, height: 17)
-                                        }
-                                        .allowsHitTesting(false)
-                                    }
+                        if let workspace = isolatedWorkspace {
+                            Text(workspace).code(12).textSelection(.enabled)
+                            Text("隔离 Profile 使用此独立工作目录；项目文件需自行放入。").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            HStack(spacing: 8) {
+                                if look.isClassic {
+                                    Image(systemName: "folder").font(.system(size: 14)).foregroundStyle(Theme.inkDim)
+                                } else {
+                                    Text("❯").mono(14).foregroundStyle(Theme.signal)
                                 }
-                                .clipped()
-                        }
-                        .padding(.vertical, look.isClassic ? 10 : 8)
-                        .padding(.horizontal, look.isClassic ? 12 : 0)
-                        // A prompt line with a rule under it; a round field in the classic look.
-                        .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
-                        .overlay(alignment: .bottom) { if !look.isClassic { Theme.line.frame(height: 1) } }
-                        ForEach(store.recentFolders.map(MacPath.tilde), id: \.self) { f in
-                            Button { folder = f } label: {
-                                Text(f).code(12).foregroundStyle(folder == f ? Theme.ink : .secondary).lineLimit(1).truncationMode(.middle)
+                                // A folder is a path: code in both looks.
+                                TextField("~/project", text: $folder)
+                                    .code(14)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                                    .focused($typingFolder)
+                                    // The prompt's block caret after the text while it is not being typed in (the system's
+                                    // caret then takes over).
+                                    .overlay(alignment: .leading) {
+                                        if !typingFolder && !look.isClassic {
+                                            HStack(spacing: 1) {
+                                                Text(folder.isEmpty ? "" : folder).code(14).hidden()
+                                                BlockCaret(width: 8, height: 17)
+                                            }
+                                            .allowsHitTesting(false)
+                                        }
+                                    }
+                                    .clipped()
                             }
-                            .buttonStyle(.plain)
+                            .padding(.vertical, look.isClassic ? 10 : 8)
+                            .padding(.horizontal, look.isClassic ? 12 : 0)
+                            // A prompt line with a rule under it; a round field in the classic look.
+                            .grounded(look.isClassic ? Theme.panel : Color.clear, radius: 10)
+                            .overlay(alignment: .bottom) { if !look.isClassic { Theme.line.frame(height: 1) } }
+                            ForEach(store.recentFolders.map(MacPath.tilde), id: \.self) { f in
+                                Button { folder = f } label: {
+                                    Text(f).code(12).foregroundStyle(folder == f ? Theme.ink : .secondary).lineLimit(1).truncationMode(.middle)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -178,7 +183,7 @@ struct NewTerminalSheet: View {
                         }
                     }
                         .buttonStyle(SquareButtonStyle(prominent: true))
-                        .disabled(starting || !installed.contains(agent) || folder.trimmingCharacters(in: .whitespaces).isEmpty || model.api == nil)
+                        .disabled(starting || !installed.contains(agent) || (isolatedWorkspace ?? folder).trimmingCharacters(in: .whitespaces).isEmpty || model.api == nil)
                 }
                 .padding(Theme.Space.l)
             }
@@ -250,12 +255,16 @@ struct NewTerminalSheet: View {
         return (choices.profiles.first { $0.id == profileId } ?? choices.offered)?.id
     }
 
+    private var isolatedWorkspace: String? {
+        model.terminals.profiles[agent]?.profiles.first { $0.id == chosenProfile }?.workspace
+    }
+
     private func start() async {
         guard let api = model.api else { return }
         starting = true
         defer { starting = false }
         do {
-            let terminal = try await api.createTerminal(NewTerminalRequest(harness: agent, cwd: folder.trimmingCharacters(in: .whitespaces),
+            let terminal = try await api.createTerminal(NewTerminalRequest(harness: agent, cwd: (isolatedWorkspace ?? folder).trimmingCharacters(in: .whitespaces),
                                                                            model: modelId.isEmpty ? nil : modelId,
                                                                            effort: effortId.isEmpty ? nil : effortId, mode: mode, profile: chosenProfile))
             dismiss()

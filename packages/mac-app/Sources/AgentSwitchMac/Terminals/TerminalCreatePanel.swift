@@ -31,7 +31,11 @@ struct TerminalCreatePanel: View {
                 // where there is nothing to choose (a model with no levels, OpenCode before a model is picked).
                 if !model.effortLevels.isEmpty { effort.padding(.top, 16) }
                 PanelLabel("Folder").padding(.top, 16).padding(.bottom, 8)
-                folder
+                if let workspace = model.pickedProfile?.workspace {
+                    Text(workspace).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                    Text("隔离 Profile 使用此独立工作目录；项目文件需自行放入。")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else { folder }
                 PanelLabel("Permissions").padding(.top, 16).padding(.bottom, 8)
                 modes
                 foot.padding(.top, 24)

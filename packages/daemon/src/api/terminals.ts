@@ -4,7 +4,7 @@
 
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { existsSync, rmSync, statSync } from "node:fs";
+import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { diskSpelling, keptDiskSpelling } from "../core/paths.js";
@@ -22,6 +22,7 @@ import type { ModelOffer, Offers } from "../router/modelOffers.js";
 import { CLAUDE_EFFORTS, EFFORT, effortsFor, PI_THINKING, type EffortOffers } from "../harness/efforts.js";
 import { slashCommands, withCommand } from "../terminals/commands.js";
 import { BrowserError, YOU } from "../browser/types.js";
+import { transferClaudeContext } from "../profiles/context.js";
 import { DEFAULT_PROFILE } from "../profiles/store.js";
 import { browserExitProblem, exitFor } from "./profiles.js";
 import { folderFiles, matchFiles } from "../terminals/files.js";
@@ -64,7 +65,7 @@ export type Terminals = {
   /** The tree's git status (default: `git status` itself, gitStatus.ts). */
   readonly git?: GitStatus;
   /** Whether `harness` is signed in, in the folder a profile gives it (signIn.ts); null or absent: not known. */
-  readonly signedIn?: (harness: TerminalHarness, configHome: string) => Promise<boolean | null>;
+  readonly signedIn?: (harness: TerminalHarness, configHome: string, isolated?: boolean) => Promise<boolean | null>;
 };
 
 /** A terminal as the screens list it: each sub-agent with what it is doing in words (`doing`, as the Live Activity). */
@@ -86,7 +87,7 @@ const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not
 const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a session id");
 const Effort = z.string().regex(EFFORT, "not a level");
 const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), profile: z.string().regex(/^[a-z0-9]{6,16}$|^default$/).optional(), model: ModelId.optional(), effort: Effort.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
-const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional(), switchFrom: z.string().min(1).max(80).optional() });
+const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional(), allowContextTransfer: z.boolean().optional(), switchFrom: z.string().min(1).max(80).optional() });
 /** `attachments`: a reply's files, each where its placeholder stands in `text` (terminal-v0 §4): one staged with
  *  POST /uploads (`upload`, a phone's, or a picture pasted on the Mac with no file behind it), or one already on this
  *  Mac by where it is (`path`, the Mac app's: a file dragged into its reply box is not copied, its path is typed as a
@@ -361,11 +362,35 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     }
     // `~/proj/` and `~/proj` are one folder; so are `~/proj` and `~/Proj` on a Mac's disk, which the agent then records
     // and the list shows by the disk's own spelling.
-    const cwd = diskSpelling(resolve(typed));
+    let cwd = diskSpelling(resolve(typed));
 
     const resumed = resume ? (body.data as z.infer<typeof ResumeTerminal>) : null;
-    const agentSessionId = resumed?.agentSessionId;
+    let agentSessionId = resumed?.agentSessionId;
     const fork = Boolean(resumed?.fork);
+    const provider = resumed?.harness === "codex" ? deps.sessions?.codexProvider(resumed.agentSessionId) ?? null : null;
+    const noted = resumed ? deps.profiles?.sessionProfile(resumed.harness, resumed.agentSessionId) ?? null : null;
+    const keyed = provider === CODEX_KEY_PROVIDER && !noted ? (deps.profiles?.all().codex.profiles ?? []).filter((p) => p.kind === "api") : [];
+    const recorded = resumed ? noted ?? (keyed.length === 1 ? keyed[0]!.id : DEFAULT_PROFILE) : null;
+    const wanted = body.data.profile ?? recorded ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
+    const profileHome = deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
+    const target = deps.profiles?.all()[body.data.harness].profiles.find((p) => p.id === wanted);
+    if (wanted !== DEFAULT_PROFILE && !target) return c.json({ error: "no such profile" }, resumed?.switchFrom ? 404 : 400);
+    const previousProfile = resumed?.switchFrom ? host.get(resumed.switchFrom)?.profile?.id ?? DEFAULT_PROFILE : recorded;
+    const sourceProfile = deps.profiles?.all()[body.data.harness].profiles.find((p) => p.id === previousProfile);
+    const crossing = Boolean(resumed && previousProfile !== wanted);
+    if (crossing && !resumed?.allowContextTransfer) return c.json({ error: "跨 Profile 继续会传递旧上下文，请确认后重试。", contextTransferRequired: true }, 409);
+    if (target?.isolated && target.workspace) {
+      // New terminals start in the dedicated workspace. Resumes retain subfolders only inside that workspace.
+      let root: string;
+      try { root = realpathSync(target.workspace); }
+      catch { return c.json({ error: "Profile 的独立工作目录已不存在，请先恢复该目录。" }, 409); }
+      let here: string | null = null;
+      try { here = realpathSync(cwd); } catch { /* use the dedicated workspace */ }
+      cwd = here && (here === root || here.startsWith(root + "/")) ? here : root;
+    }
+    const transfer = crossing && body.data.harness === "claude-code" && (target?.isolated || sourceProfile?.isolated);
+    const transcript = transfer && agentSessionId ? deps.sessions?.locate("claude-code", agentSessionId) : null;
+    if (transfer && !transcript) return c.json({ error: "找不到要传递的会话记录；旧终端保持运行。" }, 409);
     if (resumed?.switchFrom) {
       const previous = host.get(resumed.switchFrom);
       if (!previous || previous.harness !== resumed.harness || previous.agentSessionId !== agentSessionId || fork || !resumed.profile)
@@ -380,6 +405,12 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       if ("refused" in way) return c.json({ error: way.refused }, way.status);
       await host.stopped(previous.id);
       if (host.get(previous.id)?.status !== "exited") return c.json({ error: "旧进程尚未退出，请稍后重试。" }, 409);
+    }
+    if (transfer && transcript) {
+      try {
+        agentSessionId = transferClaudeContext(transcript, deps.profiles!.claudeProjectsOf(wanted), cwd);
+        deps.profiles!.noteSession("claude-code", agentSessionId, wanted);
+      } catch { return c.json({ error: "无法复制会话上下文；原记录未修改。" }, 409); }
     }
     if (resumed && !RESUMES.has(resumed.harness)) return c.json({ error: `${resumed.harness} cannot continue a session` }, 400);
     if (fork && !FORKS.has(body.data.harness)) return c.json({ error: `${body.data.harness} cannot fork a session` }, 400);
@@ -412,12 +443,6 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     // profile's that pays by a key (§3.6). With nothing noted of which (the note was lost, 2026-10-24), it goes on under
     // the only such profile there is; and should it go on under one that pays by no key, Codex is told the user's own
     // provider — else it will not start, the thread's naming one only that kind of terminal defines.
-    const provider = resumed?.harness === "codex" ? deps.sessions?.codexProvider(resumed.agentSessionId) ?? null : null;
-    const noted = resumed ? deps.profiles?.sessionProfile(resumed.harness, resumed.agentSessionId) ?? null : null;
-    const keyed = provider === CODEX_KEY_PROVIDER && !noted ? (deps.profiles?.all().codex.profiles ?? []).filter((p) => p.kind === "api") : [];
-    const recorded = resumed ? noted ?? (keyed.length === 1 ? keyed[0]!.id : DEFAULT_PROFILE) : null;
-    const wanted = body.data.profile ?? recorded ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
-    const profileHome = deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     // What of the Mac's own set-up came since the profile was made is linked into its folder (Codex's, §6.2).
     if (profileHome) deps.profiles?.keepLinked(body.data.harness, wanted);
     // The agent made ready (Codex: its hooks trusted in the folder it runs in, a few seconds at most); the start goes
@@ -440,8 +465,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     if (wanted !== DEFAULT_PROFILE && !profileHome && !paid) return c.json({ error: "no such profile" }, 400);
     const color = wanted !== DEFAULT_PROFILE ? deps.profiles!.colorOf(body.data.harness, wanted) : null;
     const quiet = wanted !== DEFAULT_PROFILE && deps.profiles!.telemetryOff(body.data.harness, wanted);
-    let profile: { id: string; name: string; home?: string; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string; color?: string; api?: { baseUrl?: string; model?: string }; telemetryOff?: true } | null =
-      wanted !== DEFAULT_PROFILE ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, ...(profileHome ? { home: profileHome } : {}), ...(color ? { color } : {}), ...(quiet ? { telemetryOff: true as const } : {}),
+    let profile: { id: string; name: string; home?: string; isolated?: true; proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string; color?: string; api?: { baseUrl?: string; model?: string }; telemetryOff?: true } | null =
+      wanted !== DEFAULT_PROFILE ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, ...(target?.isolated ? { isolated: true as const } : {}), ...(profileHome ? { home: profileHome } : {}), ...(color ? { color } : {}), ...(quiet ? { telemetryOff: true as const } : {}),
         ...(paid ? { api: { ...(paid.baseUrl ? { baseUrl: paid.baseUrl } : {}), ...(paid.model ? { model: paid.model } : {}) } } : {}) } : null;
     // A profile with a proxy of its own: before anything is started under it, the proxy is asked where it lets
     if (!profile && (profileHome || deps.profiles?.proxyOf(body.data.harness, wanted) || deps.profiles?.sessionKeyOf(body.data.harness, wanted)))
@@ -459,7 +484,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     // answer. Asked of the agent itself; when it does not say, nothing is assumed.
     // Only one that signs in with an account: one that pays by a key has nobody to sign in.
     const account = profile && deps.profiles!.kindOf(body.data.harness, wanted) === "subscription";
-    const signIn = Boolean(profile?.home && account && (await t.signedIn?.(body.data.harness, profile.home).catch(() => null)) === false);
+    const signIn = Boolean(profile?.home && account && (await t.signedIn?.(body.data.harness, profile.home, profile.isolated).catch(() => null)) === false);
     try {
       const info = await host.spawn({ harness: body.data.harness, cwd, ...(profile ? { profile } : {}), ...(signIn ? { signIn: true as const } : {}), ...(body.data.model ? { model: body.data.model } : {}), ...(body.data.effort ? { effort: body.data.effort } : {}), ...(agentSessionId ? { resume: agentSessionId, ...(forks ? { fork: forks } : {}) } : {}),
         ...(resumed?.title ? { name: resumed.title } : {}), ...(body.data.mode ? { mode: body.data.mode } : {}),

@@ -301,6 +301,7 @@ public struct NewTerminalRequest: Encodable, Sendable, Equatable {
 
 /// `POST /terminals/resume`: go on with a session (the same record), or `fork` a new one with its history.
 public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
+    public let allowContextTransfer: Bool?
     public let harness: String
     public let cwd: String
     public let agentSessionId: String
@@ -313,7 +314,8 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let profile: String?
 
     public init(harness: String, cwd: String, agentSessionId: String, title: String? = nil, mode: String? = nil, fork: Bool? = nil,
-                cols: Int? = nil, rows: Int? = nil, profile: String? = nil, switchFrom: String? = nil) {
+                cols: Int? = nil, rows: Int? = nil, profile: String? = nil, switchFrom: String? = nil, allowContextTransfer: Bool? = nil) {
+        self.allowContextTransfer = allowContextTransfer
         self.switchFrom = switchFrom
         self.profile = profile
         self.harness = harness
@@ -330,12 +332,12 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let switchFrom: String?
 
     public func continuing(in folder: String) -> ResumeTerminalRequest {
-        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile, switchFrom: switchFrom)
+        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile, switchFrom: switchFrom, allowContextTransfer: allowContextTransfer)
     }
 
     /// The same as a fork: a new session with the whole history, the first left as it is.
     public func forking() -> ResumeTerminalRequest {
-        ResumeTerminalRequest(harness: harness, cwd: cwd, agentSessionId: agentSessionId, title: title, mode: mode, fork: true, cols: cols, rows: rows, profile: profile)
+        ResumeTerminalRequest(harness: harness, cwd: cwd, agentSessionId: agentSessionId, title: title, mode: mode, fork: true, cols: cols, rows: rows, profile: profile, allowContextTransfer: allowContextTransfer)
     }
 }
 

@@ -45,6 +45,7 @@ struct TerminalsTab: View {
     @State private var bypassResume: SessionSummary?
     /// The profile named for a session being continued (`Resume As`), by the session's id.
     @State private var resumeAs: [String: String] = [:]
+    @State private var contextTransfer: (session: SessionSummary, profile: String)?
     @State private var continueTarget: (terminal: TerminalInfo, profile: ProfileChoice)?
     /// Why continuing or deleting a session failed: a box over whatever page is open.
     @State private var failure: String?
@@ -137,7 +138,14 @@ struct TerminalsTab: View {
                     Button("Continue") { Task { await continueAs(target.terminal, profile: target.profile) } }
                 }
             } message: {
-                Text("将结束当前进程并以所选配置续接同一会话，正在执行的操作会中断。原会话若为 Bypass，将以 Auto 恢复。")
+                Text("会传递旧上下文，包括消息、代码、路径和工具输出。涉及隔离 Profile 时复制成新会话，原记录保留，工作文件不会复制。当前进程将结束，正在执行的操作会中断。原会话若为 Bypass，将以 Auto 恢复。")
+            }
+            .confirmationDialog("传递旧上下文？", isPresented: Binding(get: { contextTransfer != nil }, set: { if !$0 { contextTransfer = nil } })) {
+                if let target = contextTransfer {
+                    Button("Continue") { Task { await resume(target.session, as: target.profile, confirmed: true) } }
+                }
+            } message: {
+                Text("会传递旧上下文，包括消息、代码、路径和工具输出。涉及隔离 Profile 时复制成新会话，原记录保留，工作文件不会复制。")
             }
             // The words said in sessions, once typing pauses; an answer to an older query is not kept.
             .task(id: query) {
@@ -618,7 +626,7 @@ struct TerminalsTab: View {
         defer { opening = nil }
         do {
             let request = ResumeTerminalRequest(harness: terminal.harness, cwd: terminal.cwd, agentSessionId: session,
-                title: terminal.name, mode: terminal.mode == "bypass" ? "auto" : terminal.mode, profile: profile.id, switchFrom: terminal.id)
+                title: terminal.name, mode: terminal.mode == "bypass" ? "auto" : terminal.mode, profile: profile.id, switchFrom: terminal.id, allowContextTransfer: true)
             switch try await api.resumeTerminal(request) {
             case .started(let next), .existing(let next):
                 model.terminals.remove(terminal.id)
@@ -630,18 +638,21 @@ struct TerminalsTab: View {
         } catch { failure = error.localizedDescription }
     }
 
-    private func resume(_ s: SessionSummary, as profile: String? = nil, fork: Bool = false, mode chosen: String? = nil, in folder: String? = nil, after picking: MovedFolder? = nil) async {
+    private func resume(_ s: SessionSummary, as profile: String? = nil, fork: Bool = false, mode chosen: String? = nil, in folder: String? = nil, after picking: MovedFolder? = nil, confirmed: Bool = false) async {
         guard let api = model.api else { return }
         // `Resume As`: the profile named is kept through the questions that may come in between (its mode, a fork,
         // another folder), each of which comes back here; asked afresh, what was named before is let go.
-        if chosen == nil, !fork, folder == nil { resumeAs[s.id] = profile }
+        if chosen == nil, !fork, folder == nil {
+            if let profile, !confirmed { contextTransfer = (s, profile); return }
+            resumeAs[s.id] = profile
+        }
         let named = resumeAs[s.id]
         if s.mode == "bypass" && chosen == nil { bypassResume = s; return }
         opening = s.id
         defer { opening = nil }
         let mode = chosen ?? s.mode
         let request = ResumeTerminalRequest(harness: s.harness, cwd: s.cwd, agentSessionId: s.sessionId,
-                                            title: s.title.isEmpty ? nil : s.title, mode: mode, fork: fork ? true : nil, profile: named)
+                                            title: s.title.isEmpty ? nil : s.title, mode: mode, fork: fork ? true : nil, profile: named, allowContextTransfer: named != nil ? true : nil)
         do {
             switch try await api.resumeTerminal(folder.map(request.continuing) ?? request) {
             case .started(let t), .existing(let t):

@@ -253,7 +253,7 @@ private struct ProfileDialogs: ViewModifier {
             .confirmationDialog("删除这个配置？", isPresented: removing) {
                 Button("Delete \(removingName)", role: .destructive, action: remove)
             } message: {
-                Text("它的登录（或保存的 API key）和它自己的目录会被删除；会话记录是共用的，会留着。")
+                Text("它的登录、API key 和专属目录会被删除。隔离 Profile 的会话、记忆、技能副本和工作目录也会删除，请先备份需要保留的文件。旧版共享的会话不受影响。")
             }
     }
 }
@@ -455,6 +455,7 @@ struct ProfileNewSheet: View {
     @State private var busy = false
     /// Claude Code's telemetry under it (docs/profiles-v0.md §3.7); on, as Claude Code has it.
     @State private var telemetry = true
+    @State private var sharedSkills = ""
 
     init(agent: AgentCLI, kinds: [String], done: @escaping ([String: AgentProfiles]) -> Void) {
         self.agent = agent
@@ -482,11 +483,16 @@ struct ProfileNewSheet: View {
                 }
                 if byKey { ApiKeyFields(agent: agent, draft: $draft, kept: false) }
                 if agent == .claude {
+                    TextField("Copy Skills", text: $sharedSkills, prompt: Text("技能目录名，用逗号分隔；留空不共享"))
                     Toggle("Telemetry", isOn: $telemetry)
                         .help("关掉后，在它名下开的终端里设 DISABLE_TELEMETRY=1，Claude Code 不再上报使用统计。之后可在配置那一行的右键菜单里改。")
                 }
             }
             .formStyle(.columns)
+            if agent == .claude {
+                Text("独立保存配置、MCP、插件、会话、记忆和浏览器数据，并使用独立工作目录。只复制你填写的 ~/.claude/skills 下的技能，副本只读；不会同步后续修改。已有项目文件需自行放入工作目录。这不是系统沙箱。")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Text(byKey ? ApiKeyWords.about(agent) : ProfileNewWords.account(agent))
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let said = (byKey ? draft.problem(agent: agent.rawValue) : nil) ?? problem { Text(said).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
@@ -504,15 +510,16 @@ struct ProfileNewSheet: View {
     private func create() {
         let client = profileClient, agent = agent.rawValue, draft = draft, byKey = byKey, telemetry = telemetry
         let name = draft.name.trimmingCharacters(in: .whitespaces)
+        let skills = sharedSkills.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         busy = true
         problem = nil
         Task {
             do {
                 if byKey, let site = draft.site(agent: agent) {
                     let ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey), on: profileNodeID)
-                    done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: telemetry))
+                    done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: telemetry, sharedSkills: skills))
                 } else {
-                    done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry))
+                    done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry, sharedSkills: skills))
                 }
                 dismiss()
             } catch { problem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
@@ -676,7 +683,7 @@ struct ProfilesSection: View {
                     }
                     // The device Claude Code says it is under it (docs/profiles-v0.md §3.5), once it has run there.
                     Text(profile.name).lineLimit(1).truncationMode(.middle).help(profile.device.map(DeviceID.help) ?? profile.name)
-                    Text(ProfileWords.who(profile) + (profile.telemetryOff ? " · Telemetry Off" : "")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Text(ProfileWords.who(profile) + (profile.isolated == true ? " · Isolated" : "") + (profile.telemetryOff ? " · Telemetry Off" : "")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
                     Text(profile.proxy == nil && profileNodeID != nil ? "This Node" : profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)

@@ -20,7 +20,7 @@ const CIPHERTEXT = /^enc:v1:[A-Za-z0-9_=-]{16,}$/;
 export type ApiKeyStore = {
   apiOf(agent: ProfileAgent, id: string): ProfileApi | null;
   setApi(agent: ProfileAgent, id: string, api: ProfileApi): void;
-  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi): Profile;
+  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi, isolation?: { skills: readonly string[] }): Profile;
 };
 
 export class ApiKeyError extends Error {}
@@ -123,10 +123,10 @@ export class ApiKeys {
 
   /** A new profile that pays by `api.key`, a ciphertext sealed for where the key is sent. Refused before anything is
    *  made when the gate will not open it for that address. */
-  async create(agent: ProfileAgent, name: string, api: ProfileApi, force = false): Promise<Profile> {
+  async create(agent: ProfileAgent, name: string, api: ProfileApi, force = false, isolation?: { skills: readonly string[] }): Promise<Profile> {
     const key = await this.open(agent, api.key, api.baseUrl);
     if (!force) await this.offered(agent, api.baseUrl, key, api.model, null);
-    return this.o.store.create(agent, name, "api", api);
+    return this.o.store.create(agent, name, "api", api, isolation);
   }
 
   /** A model the address does not list is refused when it is plainly another spelling of one it lists, or a few

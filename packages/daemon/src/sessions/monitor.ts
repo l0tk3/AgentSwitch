@@ -18,6 +18,7 @@ import { MAX_RECORD_LIMIT, readChanges, readImage, readRecord, readStep, readSte
 import { ACTIVE_MS, MESSAGE_CHARS, oneLine, TITLE_CHARS, type SessionHarness, type SessionMessage, type SessionMode, type SessionSummary } from "./types.js";
 
 export type SessionSources = {
+  readonly claudeProfileProjects?: () => readonly string[];
   readonly claudeProjects: string;   // ~/.claude/projects
   readonly codexSessions: string;    // ~/.codex/sessions
   readonly opencodeDb: string;       // ~/.local/share/opencode/opencode.db
@@ -92,7 +93,7 @@ export class SessionMonitor {
     // newest of everything else — an old session in it is not crowded out by the rest.
     const shownKeys = said.shown.flatMap(folderNames).map(claudeKey);
     const shownDir = (dir: string): boolean => shownKeys.some((key) => dir === key || dir.startsWith(`${key}-`));
-    const claude = jsonlFiles(this.sources.claudeProjects, 1, now, this.scanFiles, (dir) => this.isExcludedKey(dir) && !shownDir(dir), (id) => this.sources.ranHere?.("claude-code", id) ?? false);
+    const claude = [this.sources.claudeProjects, ...(this.sources.claudeProfileProjects?.() ?? [])].flatMap((root) => jsonlFiles(root, 1, now, this.scanFiles, (dir) => root === this.sources.claudeProjects && this.isExcludedKey(dir) && !shownDir(dir), (id) => this.sources.ranHere?.("claude-code", id) ?? false));
     const forced = shownKeys.length ? jsonlFiles(this.sources.claudeProjects, 1, now, SHOWN_FILES, (dir) => !shownDir(dir)) : [];
     const have = new Set(claude.map((r) => r.path));
     const fromFiles = [
@@ -237,8 +238,8 @@ export class SessionMonitor {
     // A Codex thread in pages: the newest page.
     let foundAt = -1;
     if (harness === "claude-code") {
-      for (const dir of safeDirs(this.sources.claudeProjects)) {
-        const file = join(this.sources.claudeProjects, dir, `${id}.jsonl`);
+      for (const root of [this.sources.claudeProjects, ...(this.sources.claudeProfileProjects?.() ?? [])]) for (const dir of safeDirs(root)) {
+        const file = join(root, dir, `${id}.jsonl`);
         if (existsSync(file)) { found = file; break; }
       }
     } else if (harness === "codex") {
@@ -339,8 +340,8 @@ export class SessionMonitor {
     const listed = this.files.get(`${harness}:${id}`);
     if (listed) drop(listed);
     if (harness === "claude-code") {
-      for (const dir of safeDirs(this.sources.claudeProjects)) {
-        const file = join(this.sources.claudeProjects, dir, `${id}.jsonl`);
+      for (const root of [this.sources.claudeProjects, ...(this.sources.claudeProfileProjects?.() ?? [])]) for (const dir of safeDirs(root)) {
+        const file = join(root, dir, `${id}.jsonl`);
         if (existsSync(file)) drop(file);
       }
     } else if (harness === "codex") {

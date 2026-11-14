@@ -182,6 +182,7 @@ public enum ProfileColor: String, CaseIterable, Sendable, Hashable {
 /// One of an agent's profiles, as much as choosing between them takes (docs/profiles-v0.md §3.3): its name, who is
 /// signed in to it, its colour. The Mac's own is `default`.
 public struct ProfileChoice: Decodable, Sendable, Hashable, Identifiable {
+    public let workspace: String?
     public let id: String
     public let name: String
     /// Who is signed in, as the agent's own files say; nil: nobody yet (or the Mac does not say).
@@ -194,7 +195,8 @@ public struct ProfileChoice: Decodable, Sendable, Hashable, Identifiable {
     /// It pays by a key (`kind` is `api`): nobody signs in to it.
     public let paysByKey: Bool
 
-    public init(id: String, name: String, account: String? = nil, color: ProfileColor? = nil, proxy: ProxySetting? = nil, exit: ProxyExit? = nil, paysByKey: Bool = false) {
+    public init(id: String, name: String, account: String? = nil, color: ProfileColor? = nil, proxy: ProxySetting? = nil, exit: ProxyExit? = nil, paysByKey: Bool = false, workspace: String? = nil) {
+        self.workspace = workspace
         self.paysByKey = paysByKey
         self.id = id
         self.name = name
@@ -204,10 +206,11 @@ public struct ProfileChoice: Decodable, Sendable, Hashable, Identifiable {
         self.exit = exit
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, account, color, proxy, exit, kind }
+    private enum CodingKeys: String, CodingKey { case id, name, account, color, proxy, exit, kind, workspace }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        workspace = try c.decodeIfPresent(String.self, forKey: .workspace)
         id = try c.decode(String.self, forKey: .id)
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? id
         account = (try? c.decodeIfPresent(String.self, forKey: .account)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
@@ -567,6 +570,7 @@ public struct NewTerminalRequest: Encodable, Sendable, Equatable {
 
 /// `POST /terminals/resume`: go on with a session (the same record), or `fork` a new one with its history.
 public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
+    public let allowContextTransfer: Bool?
     public let harness: String
     public let cwd: String
     public let agentSessionId: String
@@ -579,7 +583,8 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let profile: String?
 
     public init(harness: String, cwd: String, agentSessionId: String, title: String? = nil, mode: String? = nil, fork: Bool? = nil,
-                cols: Int? = nil, rows: Int? = nil, profile: String? = nil, switchFrom: String? = nil) {
+                cols: Int? = nil, rows: Int? = nil, profile: String? = nil, switchFrom: String? = nil, allowContextTransfer: Bool? = nil) {
+        self.allowContextTransfer = allowContextTransfer
         self.switchFrom = switchFrom
         self.profile = profile
         self.harness = harness
@@ -596,7 +601,7 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let switchFrom: String?
 
     public func continuing(in folder: String) -> ResumeTerminalRequest {
-        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile, switchFrom: switchFrom)
+        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile, switchFrom: switchFrom, allowContextTransfer: allowContextTransfer)
     }
 }
 

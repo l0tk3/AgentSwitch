@@ -1,5 +1,22 @@
 # profiles-v0：配置——每个 agent 的多套登录，各带自己的出口与浏览器
 
+## 2026-11-14：新建 Claude Profile 的隔离规则
+
+本节覆盖下文旧版「设置与会话链接共用」的描述。`POST /profiles` 创建的 Claude 订阅/API Profile 默认使用隔离目录；已有 Profile、Default 和 Codex 不自动迁移。
+
+- 凭据：非 Default Claude 启动时清除继承的 Anthropic/Claude 与云供应商认证变量。隔离 Profile 只保留基础进程环境变量，再注入当前 Profile 的配置、代理和终端通信变量；私有 `HOME` 与 XDG 目录避免读取系统用户的工具配置。独立 settings 中由用户明确添加的配置仍生效。
+- 配置：`home/settings.json`、`home/.claude.json` 从空对象开始，MCP、插件、指令均不链接到本机配置。启动使用 `--setting-sources user`，不自动加载工作项目中的 settings。系统管理员管理的策略仍由 Claude 自己执行。
+- 会话：projects、history、plans、todos、file-history、memory 保存在该 Profile 的目录。AgentSwitch 的历史列表汇总这些目录，但 Claude 本身不共享它们。
+- 文件：新终端进入 `profiles/claude-code/<id>/workspace`；已有项目文件需用户自行复制或检出。创建界面的 Copy Skills 接受 `~/.claude/skills` 下的目录名（逗号分隔），只复制明确填写的技能，拒绝符号链接与特殊文件，副本去掉写权限。后续不会自动同步源技能。
+- 浏览器：按 Profile 使用独立持久化目录、Cookie 和缓存；包括无代理的隔离 Profile。独立浏览器不可用时拒绝启动，不退回共享浏览器。
+
+跨 Profile 的 Resume As / Continue As 必须确认「会传递旧上下文」，API 请求携带 `allowContextTransfer: true`。跨越隔离边界时只复制所选主会话 transcript，并分配新会话 ID、更新工作目录字段；原记录保留，不复制身份、设置、记忆、其他会话或工作文件。消息内原有路径、代码、工具输出不会被脱敏；引用的附件和子代理文件不自动搬运。
+
+删除隔离 Profile 会删除它自己的工作文件与历史，界面会明确提示。旧 Profile 的共享记录仍保留。
+
+这是配置、目录和启动环境隔离，不是 OS 沙箱或网络防火墙。同一系统用户的进程仍可能通过绝对路径读取其他文件，或自行 chmod 修改只读副本；相同账号、出口 IP 与内容也可能被服务端关联。此变更不会安装应用、切换运行版本或修改已有 Profile 数据。
+
+
 2026-11-14：Profiles 设置页增加 Node 选择，管理本机或已配对节点的 Profile、API Key、Session Key、代理、Codex auth.json、颜色和遥测，并在目标节点检查健康。凭据以目标节点 /gate/pubkey 返回的公钥加密，不使用本机公钥；auth.json 通过已配对的 TLS 通道写入目标目录。切换节点重新创建页面状态，错误不会回退到本机。身份重置仍只允许本机。旧节点需先更新 daemon 才支持新增管理接口。
 
 2026-11-14：Codex Default 同样支持独立代理与浏览器。每个 Codex Profile 可粘贴导入 auth.json；Default 写入 ~/.codex/auth.json，其他配置写入自己的 home，原子替换且权限为 0600。导入取代该配置原有 API Key 设置，后续终端强制使用文件凭据；不修改共享 config.toml。仅本机可导入，有该配置的终端运行时拒绝替换。构建新版本后必须等用户明确允许才能安装、切换。

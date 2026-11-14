@@ -487,7 +487,7 @@ esac
     // Asked of those that sign in with an account, each in its own folder; never of the Mac's own or of one with a key.
     expect(questions).toEqual([fresh.id, work.id, unsure.id].map((id) => store.homeOf("claude-code", id)));
     // A session continued under it starts at the sign-in too: it could not go on otherwise.
-    expect((await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: "0f8fad5b-d9cb-469f-a165-70867728950e", profile: fresh.id })).status).toBe(201);
+    expect((await call("POST", "/terminals/resume", { allowContextTransfer: true, harness: "claude-code", cwd: root, agentSessionId: "0f8fad5b-d9cb-469f-a165-70867728950e", profile: fresh.id })).status).toBe(201);
     expect(asked.at(-1)).toMatchObject({ resume: "0f8fad5b-d9cb-469f-a165-70867728950e", signIn: true });
   });
 
@@ -511,9 +511,9 @@ esac
     const { store, call, root, host, asked } = served(async () => true);
     const target = store.create("claude-code", "Other", "subscription");
     const session = "session-continue-as";
-    const started = await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: session });
+    const started = await call("POST", "/terminals/resume", { allowContextTransfer: true, harness: "claude-code", cwd: root, agentSessionId: session });
     const id = started.json.terminal.id;
-    const request = { harness: "claude-code", cwd: root, agentSessionId: session, switchFrom: id, profile: target.id };
+    const request = { allowContextTransfer: true, harness: "claude-code", cwd: root, agentSessionId: session, switchFrom: id, profile: target.id };
     expect((await call("POST", "/terminals/resume", { ...request, profile: "nosuch0000" })).status).toBe(404);
     expect(host.get(id)?.status).not.toBe("exited");
     expect((await call("POST", "/terminals/resume", { ...request, agentSessionId: "wrong" })).status).toBe(409);
@@ -557,7 +557,7 @@ esac
     const a = store.create("claude-code", "A", "subscription"), b = store.create("claude-code", "B", "subscription");
     const home = (id: string) => store.homeOf("claude-code", id);
     const fresh = async (profile?: string) => { const r = await call("POST", "/terminals", { harness: "claude-code", cwd: root, ...(profile ? { profile } : {}) }); expect(r.status).toBe(201); return r.json.terminal.id as string; };
-    const resume = async (session: string, profile?: string) => { const r = await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: session, ...(profile ? { profile } : {}) }); expect(r.status).toBe(201); return r.json.terminal.id as string; };
+    const resume = async (session: string, profile?: string) => { const r = await call("POST", "/terminals/resume", { allowContextTransfer: true, harness: "claude-code", cwd: root, agentSessionId: session, ...(profile ? { profile } : {}) }); expect(r.status).toBe(201); return r.json.terminal.id as string; };
     const s1 = "11111111-d9cb-469f-a165-70867728950e", s2 = "22222222-d9cb-469f-a165-70867728950e", s3 = "33333333-d9cb-469f-a165-70867728950e";
 
     // A new terminal: under the one named, which is what the next one is offered first; not named, under that one.
@@ -608,7 +608,7 @@ esac
     expect(asked.at(-1)!.configHome).toBeUndefined();
     // A profile that is not there is not started under, new or continued.
     expect((await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: "nosuch0000" })).status).toBe(400);
-    expect((await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: s2, profile: "nosuch0000" })).status).toBe(400);
+    expect((await call("POST", "/terminals/resume", { allowContextTransfer: true, harness: "claude-code", cwd: root, agentSessionId: s2, profile: "nosuch0000" })).status).toBe(400);
   });
 
   it("is said with each conversation in the list, when it is not the Mac's own", async () => {
@@ -891,7 +891,7 @@ describe("a Codex thread that last ran under a key profile, resumed (2026-10-24:
     const sessions = { codexProvider: (id: string) => (id === "t1" ? o.provider ?? "agentswitch" : null), find: () => null, list: () => [] };
     mountTerminals(app, { profiles: store, apiKeys: keys, sessions, terminals: { host, audit: { record() { /* not looked at */ } }, agents: ["codex"], style: () => ({}), elsewhere: async () => null } } as unknown as ApiDeps);
     const res = await app.request("/terminals/resume", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ harness: "codex", cwd: tmpdir(), agentSessionId: "t1", ...(o.asked ? { profile: o.asked === "first" ? made[0]!.id : o.asked } : {}) }) });
+      body: JSON.stringify({ allowContextTransfer: true, harness: "codex", cwd: tmpdir(), agentSessionId: "t1", ...(o.asked ? { profile: o.asked === "first" ? made[0]!.id : o.asked } : {}) }) });
     expect(res.status).toBe(201);
     return { req: asked[0]!, made };
   }

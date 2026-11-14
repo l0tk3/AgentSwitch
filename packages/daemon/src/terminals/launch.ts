@@ -3,6 +3,7 @@
  *  executors', and the hooks go into this terminal's own settings — the user's global agent configuration is never
  *  touched, so agents they start in iTerm are unaffected. */
 
+import { profileEnvironment } from "./profileEnvironment.js";
 import { effortArgs } from "../harness/efforts.js";
 import { codexHookArgs } from "./codexHooks.js";
 import { CodexCompanion } from "./codexTerminal.js";
@@ -261,7 +262,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
     // three variables — no proxy and no certificate of the credential gate, none of its tools (docs/profiles-v0.md §8,
     // 2026-10-08: the gate stays in Dispatch). What stays closed is the credentials at rest (`protected`).
     const env: Record<string, string> = {
-      ...withoutParentSession(withoutCredentialRepair(opts.env ?? process.env)),
+      ...profileEnvironment(withoutParentSession(withoutCredentialRepair(opts.env ?? process.env)), req),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       AGENTSWITCH_TERMINAL_ID: req.id,
@@ -292,7 +293,7 @@ export function agentLauncher(opts: LauncherOptions): Launcher {
         Object.assign(env, quiet);
         const own = { ...proxied, ...quiet, ...(req.api?.baseUrl ? { ANTHROPIC_BASE_URL: req.api.baseUrl } : {}) };
         writeFileSync(settings, JSON.stringify({ ...claudeHookSettings(hookCommand, opts.protected), ...keyed, ...(Object.keys(own).length ? { env: own } : {}) }, null, 2), { mode: 0o600 });
-        const args = ["--settings", settings];
+        const args = ["--settings", settings, ...(req.isolated ? ["--setting-sources", "user"] : [])];
         if (browser) {
           const mcp = join(dir, "mcp.json");
           writeFileSync(mcp, JSON.stringify({ mcpServers: { [BROWSER_SERVER]: { type: "stdio", ...browser } } }, null, 2), { mode: 0o600 });

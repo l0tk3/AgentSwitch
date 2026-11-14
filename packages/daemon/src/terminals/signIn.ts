@@ -3,17 +3,19 @@
  *  Claude Code is asked itself (`claude auth status`); it knows where it keeps a sign-in (the keychain, by folder).
  *  So is Codex (`codex login status`), told to keep its sign-in in the folder's own file (§6.2). */
 
+import { profileEnvironment } from "./profileEnvironment.js";
 import { execFile } from "node:child_process";
 
-export type SignInCheck = (binary: string, configHome: string) => Promise<boolean | null>;
+export type SignInCheck = (binary: string, configHome: string, isolated?: boolean) => Promise<boolean | null>;
 
 const TIMEOUT_MS = 6_000;
 
 /** True or false as Claude Code says; null when it does not say (an older one, it took too long): nothing is assumed. */
-export const claudeSignedIn: SignInCheck = (binary, configHome) => new Promise((resolve) => {
+export const claudeSignedIn: SignInCheck = (binary, configHome, isolated) => new Promise((resolve) => {
   // Asked as the terminal's agent will be started: its own folder, and no session of another Claude Code around it.
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^CLAUDE_?CODE|^CLAUDECODE$|^CLAUDE_CONFIG_DIR$/.test(k)));
-  execFile(binary, ["auth", "status"], { env: { ...env, CLAUDE_CONFIG_DIR: configHome }, timeout: TIMEOUT_MS, maxBuffer: 64 * 1024 }, (_err, stdout) => {
+  const source = Object.fromEntries(Object.entries(process.env).filter((pair): pair is [string, string] => pair[1] !== undefined));
+  const env = profileEnvironment(source, { harness: "claude-code", configHome, ...(isolated ? { isolated: true } : {}) });
+  execFile(binary, [...(isolated ? ["--setting-sources", "user"] : []), "auth", "status"], { env: { ...env, CLAUDE_CONFIG_DIR: configHome }, timeout: TIMEOUT_MS, maxBuffer: 64 * 1024 }, (_err, stdout) => {
     // It answers in JSON, and exits 1 when nobody is signed in: what it printed is the answer either way.
     try {
       const said = (JSON.parse(String(stdout)) as { loggedIn?: unknown }).loggedIn;

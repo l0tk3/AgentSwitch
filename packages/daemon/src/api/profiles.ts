@@ -61,9 +61,10 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
 
   app.post("/profiles", async (c) => {
     const body = await parseBody(c, z.object({ agent: Agent, name: z.string().min(1).max(80), kind: z.enum(["subscription", "api"]).default("subscription"), api: Api.optional(),
-      /** false: Claude Code's telemetry off under it from the start (§3.7). */ telemetry: z.boolean().optional() }));
+      /** false: Claude Code's telemetry off under it from the start (§3.7). */ telemetry: z.boolean().optional(), sharedSkills: z.array(z.string().min(1).max(100)).max(100).default([]) }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     if (body.data.telemetry === false && body.data.agent !== "claude-code") return c.json({ error: "only Claude Code's telemetry can be turned off" }, 400);
+    const isolation = body.data.agent === "claude-code" ? { skills: body.data.sharedSkills } : undefined;
     // As made, with its telemetry as asked.
     const made = (id: string) => {
       if (body.data.telemetry === false) store.setTelemetry(body.data.agent, id, false);
@@ -74,10 +75,10 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
       if (body.data.kind === "api") {
         if (!body.data.api?.key) return c.json({ error: "a profile that pays by a key needs the key" }, 400);
         if (!deps.apiKeys) return c.json({ error: "this service cannot keep an API key" }, 503);
-        const profile = await deps.apiKeys.create(body.data.agent, body.data.name, { key: body.data.api.key.trim(), baseUrl: body.data.api.baseUrl?.trim() || undefined, model: body.data.api.model?.trim() || undefined }, body.data.api.force === true);
+        const profile = await deps.apiKeys.create(body.data.agent, body.data.name, { key: body.data.api.key.trim(), baseUrl: body.data.api.baseUrl?.trim() || undefined, model: body.data.api.model?.trim() || undefined }, body.data.api.force === true, isolation);
         return c.json(made(profile.id), 201);
       }
-      const profile = store.create(body.data.agent, body.data.name, body.data.kind);
+      const profile = store.create(body.data.agent, body.data.name, body.data.kind, undefined, isolation);
       return c.json(made(profile.id), 201);
     } catch (err) {
       if (err instanceof ApiKeyError) return c.json({ error: err.message }, 400);
@@ -256,10 +257,12 @@ export async function exitFor(deps: Pick<ApiDeps, "profiles" | "exits" | "profil
                               now: () => number = Date.now): Promise<{ proxy?: string; exit?: { ip: string; place: string | null }; browserKey?: string } | { refused: string; status: 502 | 503 }> {
   const proxy = deps.profiles?.proxyOf(agent, id) ?? null;
   const key = exitKey(agent, id);
+  const isolated = deps.profiles?.all()[agent].profiles.find((p) => p.id === id)?.isolated;
+  if (isolated && !deps.profileBrowsers?.of(key)) return { refused: `配置 ${name} 需要独立浏览器，但当前节点未启用浏览器服务。`, status: 503 };
   // No proxy of its own: it leaves as this Mac does. It has a browser of its own all the same (§5.5) — its sign-in
   // is not to land in a browser where somebody else is signed in — where that browser shows a window on this Mac
   // (one nobody can see is no place to sign in: then things stay as they were, the system's browser).
-  if (!proxy) return deps.profileBrowsers?.of(key)?.visible() ? { browserKey: key } : {};
+  if (!proxy) return isolated || deps.profileBrowsers?.of(key)?.visible() ? { browserKey: key } : {};
   if (!deps.exits) return { refused: `配置 ${name} 有自己的代理，这个服务用不了它。`, status: 503 };
   try {
     const exit = await deps.exits.check(key, proxy);

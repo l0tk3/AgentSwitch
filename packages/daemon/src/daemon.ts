@@ -454,6 +454,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ? (req: { id: string; harness: string; cwd: string; browserKey?: string }) => {
         // Under a profile with a browser of its own, the agent's browser tool is that browser's (§5.1).
         const own = req.browserKey ? profileBrowsers?.of(req.browserKey) ?? null : null, base = `http://127.0.0.1:${localPort}`;
+        if (req.browserKey && !own) throw new Error("profile browser is unavailable; refusing to use the shared browser");
         const minted = (own?.agents ?? agents).mint(terminalOwner(req.id, req.harness, req.cwd));
         const command = bridgeCommand(minted, own ? `${base}/profile-browser/${req.browserKey}` : base, stable(process.execPath), stable(BRIDGE_SCRIPT));
         // A held terminal keeps the session for the next daemon, which takes it up again with the same token.
@@ -538,7 +539,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     audit: new TerminalAudit(join(cfg.home, "terminals", "audit.jsonl")),
     agents: overrides.terminalLauncher ? [...TERMINAL_HARNESSES] : TERMINAL_HARNESSES.filter((h) => agentBinaries[h]),
     // Claude Code and Codex say themselves whether they are signed in, in a profile's folder (terminals/signIn.ts).
-    signedIn: (harness: TerminalHarness, home: string) => (harness === "claude-code" && agentBinaries["claude-code"] ? claudeSignedIn(agentBinaries["claude-code"], home)
+    signedIn: (harness: TerminalHarness, home: string, isolated?: boolean) => (harness === "claude-code" && agentBinaries["claude-code"] ? claudeSignedIn(agentBinaries["claude-code"], home, isolated)
       : harness === "codex" && agentBinaries.codex ? codexSignedIn(agentBinaries.codex, home) : Promise.resolve(null)),
     style: () => (style ??= readTerminalStyle()),
     elsewhere: overrides.terminalElsewhere ?? (overrides.terminalLauncher ? async () => null : elsewhereCheck()),
@@ -552,9 +553,9 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const opencodeBin = overrides.terminalLauncher || !cfg.opencodeBinary ? undefined : agentBinaries.opencode ?? terminalBinaries(targets, cfg.opencodeBinary).opencode;
   const openCodeDelete = overrides.openCodeDelete ?? (opencodeBin ? openCodeDeleter(opencodeBin, sessionSources.opencodeDb) : undefined);
   const sessions = cfg.watchSessions ? new SessionMonitor({
-    ...sessionSources, ...(openCodeDelete ? { openCodeDelete } : {}),
+    ...sessionSources, claudeProfileProjects: () => profiles.claudeProjectRoots(), ...(openCodeDelete ? { openCodeDelete } : {}),
     ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
-    agentTitle: (harness, id) => sessionTitles.get(harness, id), customTitle: (harness, id) => sessionTitles.custom(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id), folders: () => sessionFolders.get(),
+    agentTitle: (harness, id) => sessionTitles.get(harness, id), customTitle: (harness, id) => sessionTitles.custom(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id) || profiles.sessionProfile(harness, id) !== null, folders: () => sessionFolders.get(),
   }) : undefined;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
   const conversation = new AssistantLog(join(cfg.home, "assistant.db"));

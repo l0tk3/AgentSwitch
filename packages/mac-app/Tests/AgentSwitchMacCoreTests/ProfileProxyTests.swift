@@ -107,8 +107,10 @@ final class ProfileProxyTests: XCTestCase {
         // picked later keep.
         let plain = ResumeTerminalRequest(harness: "claude-code", cwd: "/w", agentSessionId: "s1")
         XCTAssertNil(try sent(plain)["profile"])
-        let named = ResumeTerminalRequest(harness: "claude-code", cwd: "/w", agentSessionId: "s1", profile: "default")
+        let named = ResumeTerminalRequest(harness: "claude-code", cwd: "/w", agentSessionId: "s1", profile: "default", allowContextTransfer: true)
         XCTAssertEqual(try sent(named)["profile"] as? String, "default")
+        XCTAssertEqual(named.forking().allowContextTransfer, true)
+        XCTAssertEqual(named.continuing(in: "/elsewhere").allowContextTransfer, true)
         XCTAssertEqual(named.forking().profile, "default")
         XCTAssertEqual(named.forking().fork, true)
         XCTAssertEqual(named.continuing(in: "/elsewhere").profile, "default")

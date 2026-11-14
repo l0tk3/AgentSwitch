@@ -5,14 +5,12 @@
  *  key (§3.6) and, since 2026-10-20, the ones that sign in with a ChatGPT account (§6.2); OpenCode and pi have
  *  `Default` alone for now.
  *
- *  A profile's folder holds what is the account's and the device's (Claude Code's `.claude.json` with identifiers it
- *  makes itself on first run; Codex's `auth.json`, `installation_id` and its own databases; the credentials); what is
- *  the user's — instructions, skills, commands, settings — and the sessions are the Mac's own, linked in, so any profile
- *  continues any session and nothing is set up twice. Of the Mac's `.claude.json` only what names no account is carried
- *  over once (trusted folders, MCP servers, the theme); Codex keeps all of that in `config.toml`, which is linked. */
+ *  New Claude profiles created through the API use private configuration, history and workspaces. Skills are
+ *  explicit read-only copies. Existing profiles retain their legacy links; Codex still uses its existing sharing
+ *  rules. No account identity is copied into a new profile. See docs/profiles-v0.md for the isolation boundary. */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -52,6 +50,8 @@ export type ProfileExit = { readonly ip: string; readonly place: string | null; 
 export const PROFILE_COLORS = ["violet", "sand", "mint", "orchid", "olive", "slate"] as const;
 export type ProfileColor = (typeof PROFILE_COLORS)[number];
 export type Profile = { readonly id: string; readonly name: string; readonly kind: ProfileKind; readonly createdAt: number;
+  readonly isolated?: true;
+  readonly workspace?: string;
   /** Its colour: the dot its terminals are marked with. `Default` has none. */
   readonly color?: ProfileColor;
   /** Who is signed in, as the agent's own files say (absent: nobody yet, or the agent does not say). */
@@ -72,6 +72,7 @@ export type AgentProfiles = { readonly current: string; readonly profiles: reado
   /** The ways a new profile of this agent can sign in; empty where none can be made. */ readonly kinds: readonly ProfileKind[] };
 
 type Stored = { current?: string; profiles?: { id: string; name: string; kind: ProfileKind; createdAt: number; color?: ProfileColor; proxy?: ProfileProxy; exit?: ProfileExit; api?: ProfileApi;
+  isolated?: true;
   /** A claude.ai session key, a ciphertext of the gate's (§3.4), and whether the browser has yet to be given it. */
   sessionKey?: string; sessionKeyDue?: boolean;
   /** `false`: Claude Code's telemetry is off under it (§3.7). */
@@ -334,7 +335,17 @@ export class ProfileStore {
   }
 
   /** A new profile. One that pays by a key is made with the key (a ciphertext the caller has had the gate open once). */
-  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi): Profile {
+  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi, isolation?: { skills: readonly string[] }): Profile {
+    if (isolation && agent !== "claude-code") throw new ProfileError("invalid", "isolation is currently available for Claude Code");
+    const skills = isolation?.skills ?? [];
+    if (skills.length) {
+      const root = join(this.userHome, ".claude", "skills");
+      if (!existsSync(root) || lstatSync(root).isSymbolicLink()) throw new ProfileError("invalid", "skills directory is missing or is a link");
+    }
+    for (const name of skills) {
+      if (!/^[\w.-]+$/.test(name) || name === "." || name === "..") throw new ProfileError("invalid", "invalid skill name");
+      checkSkill(join(this.userHome, ".claude", "skills", name));
+    }
     if (!PROFILE_KINDS[agent]?.includes(kind)) throw new ProfileError("invalid", PROFILE_KINDS[agent] ? `a ${agent} profile cannot sign in that way yet` : "this agent has `Default` alone so far");
     if ((kind === "api") !== Boolean(api)) throw new ProfileError("invalid", kind === "api" ? "a profile that pays by a key needs the key" : "only a profile that pays by a key has one");
     const checked = api ? checkedApi(agent, api) : null;
@@ -347,14 +358,31 @@ export class ProfileStore {
     // A colour no other profile of this agent has, while there is one left; then they come round again.
     const taken = new Set((file.agents?.[agent]?.profiles ?? []).map((p) => p.color));
     const color = PROFILE_COLORS.find((c) => !taken.has(c)) ?? PROFILE_COLORS[known.length % PROFILE_COLORS.length]!;
-    const profile = { id: randomBytes(5).toString("hex"), name: said, kind, createdAt: this.now(), color };
+    const profile = { id: randomBytes(5).toString("hex"), name: said, kind, createdAt: this.now(), color, ...(isolation ? { isolated: true as const } : {}) };
     // Claude Code's and Codex's sign-in and identifiers are a folder's; Codex paying by a key runs in the Mac's own
     // folder, the key and the address given when it starts (§3.6).
-    if (agent === "claude-code") this.claudeHome(join(this.dir, agent, profile.id, "home"));
+    if (agent === "claude-code") {
+      const root = join(this.dir, agent, profile.id);
+      try {
+        if (isolation) {
+          for (const dir of ["workspace", "system-home", "home", ...[...CLAUDE_SESSIONS, "skills", "plugins", "agents", "commands"].map((s) => `home/${s}`)]) mkdirSync(join(root, dir), { recursive: true, mode: 0o700 });
+          for (const file of [".claude.json", "settings.json"]) writeFileSync(join(root, "home", file), "{}\n", { mode: 0o600 });
+          for (const name of skills) copySkill(join(this.userHome, ".claude", "skills", name), join(root, "home", "skills", name));
+        } else this.claudeHome(join(root, "home"));
+      } catch (error) { writableDirectories(root); rmSync(root, { recursive: true, force: true }); throw error; }
+    }
     if (agent === "codex" && kind === "subscription") this.codexHome(join(this.dir, agent, profile.id, "home"));
     const stored = file.agents?.[agent] ?? {};
     this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: [...(stored.profiles ?? []), { ...profile, ...(checked ? { api: checked } : {}) }] } } });
-    return { ...profile, ...(checked ? { api: told(checked) } : {}) };
+    return this.of(agent, this.read()).profiles.find((p) => p.id === profile.id)!;
+  }
+
+  claudeProjectsOf(id: string): string {
+    return join(this.homeOf("claude-code", id) ?? join(this.userHome, ".claude"), "projects");
+  }
+
+  claudeProjectRoots(): string[] {
+    return this.all()["claude-code"].profiles.filter((p) => p.isolated).map((p) => join(this.dir, "claude-code", p.id, "home", "projects"));
   }
 
   /** Removes a profile and its folder (the sessions, linked, stay where they are). `Default` cannot go; the current one
@@ -364,7 +392,9 @@ export class ProfileStore {
     const stored = file.agents?.[agent];
     if (id === DEFAULT_PROFILE || !stored?.profiles?.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
     this.write({ ...file, agents: { ...file.agents, [agent]: { current: stored.current === id ? DEFAULT_PROFILE : stored.current, profiles: stored.profiles.filter((p) => p.id !== id) } } });
-    rmSync(join(this.dir, agent, id), { recursive: true, force: true });
+    const root = join(this.dir, agent, id);
+    if (stored.profiles.find((p) => p.id === id)?.isolated) writableDirectories(root);
+    rmSync(root, { recursive: true, force: true });
   }
 
   /** Every profile folder of `agent` except `keep`'s: what a terminal under one profile is not to read. */
@@ -379,6 +409,7 @@ export class ProfileStore {
     // A proxy's password, a ciphertext, is not for the screens: they are told only that it has one.
     // Nor is a session key: only that there is one. Nor the key a profile pays by: only where it is sent.
     const own: Profile[] = (stored.profiles ?? []).map(({ proxy, sessionKey, sessionKeyDue: _due, api, ...p }) => ({ ...p,
+      ...(p.isolated ? { workspace: join(this.dir, agent, p.id, "workspace") } : {}),
       ...(api ? { api: told(api) } : {}),
       ...(sessionKey ? { sessionKey: true as const } : {}),
       ...(proxy ? { proxy: { server: proxy.server, ...(proxy.username ? { username: proxy.username } : {}), sealed: Boolean(proxy.password) } } : {}),
@@ -457,6 +488,31 @@ export class ProfileStore {
     const tmp = `${this.file}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
     renameSync(tmp, this.file);
+  }
+}
+
+function writableDirectories(path: string): void {
+  if (!existsSync(path) || lstatSync(path).isSymbolicLink() || !lstatSync(path).isDirectory()) return;
+  chmodSync(path, 0o700);
+  for (const name of readdirSync(path)) writableDirectories(join(path, name));
+}
+
+/** Only ordinary files/directories are shared, never links to other account data. */
+function checkSkill(path: string): void {
+  let stat;
+  try { stat = lstatSync(path); } catch { throw new ProfileError("invalid", "selected skill does not exist"); }
+  if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) throw new ProfileError("invalid", "shared skills must not contain links or special files");
+  if (stat.isDirectory()) for (const name of readdirSync(path)) checkSkill(join(path, name));
+}
+function copySkill(source: string, target: string): void {
+  checkSkill(source);
+  if (lstatSync(source).isDirectory()) {
+    mkdirSync(target, { mode: 0o700 });
+    for (const name of readdirSync(source)) copySkill(join(source, name), join(target, name));
+    chmodSync(target, 0o555);
+  } else {
+    copyFileSync(source, target);
+    chmodSync(target, (lstatSync(source).mode & 0o111) ? 0o555 : 0o444);
   }
 }
 

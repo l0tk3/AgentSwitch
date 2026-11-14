@@ -220,7 +220,7 @@ extension TerminalsModel {
 
     func start() {
         guard creating, !starting else { return }
-        let cwd = folderText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cwd = pickedProfile?.workspace ?? folderText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cwd.isEmpty else { createError = "请填写文件夹。"; return }
         starting = true
         createError = ""
@@ -248,7 +248,7 @@ extension TerminalsModel {
         guard let session = terminal.agentSessionId, opening == nil else { return }
         let c = client()
         Task {
-            let answer = await ask(TerminalSheet(title: "以 \(profile.name) 继续？", body: "将结束当前 Claude/Codex 进程，以所选配置续接同一段会话。正在执行的操作会中断。", confirm: "Continue"))
+            let answer = await ask(TerminalSheet(title: "以 \(profile.name) 继续？", body: "会传递旧上下文，包括原会话里的消息、代码、路径和工具输出。涉及隔离 Profile 时会复制成新会话，原记录保留，工作文件不会复制。当前进程将结束，正在执行的操作会中断。", confirm: "Continue"))
             guard answer.ok, opening == nil else { return }
             select(terminal.id)
             let previousLayout = layout
@@ -258,7 +258,7 @@ extension TerminalsModel {
             do {
                 let request = ResumeTerminalRequest(harness: terminal.harness, cwd: terminal.cwd, agentSessionId: session,
                     title: terminal.name, mode: terminal.resumeMode, cols: gridHere?.cols, rows: gridHere?.rows,
-                    profile: profile.id, switchFrom: terminal.id)
+                    profile: profile.id, switchFrom: terminal.id, allowContextTransfer: true)
                 switch try await c.resumeTerminal(request) {
                 case .started(let next), .existing(let next):
                     await refresh()
@@ -286,6 +286,10 @@ extension TerminalsModel {
         let name = TerminalListText.brief(session.title)
         let c = client()
         Task {
+            if profile != nil {
+                let answer = await ask(TerminalSheet(title: "以所选 Profile 继续？", body: "会传递旧上下文，包括消息、代码、路径和工具输出。涉及隔离 Profile 时会复制成新会话，原记录保留；工作文件不会复制。", confirm: "Continue"))
+                guard answer.ok else { return }
+            }
             if !TerminalListText.checked.contains(session.harness), session.active {
                 let answer = await ask(TerminalSheet(title: "继续「\(name)」？", body: TerminalListText.mayBeOpen(session.harness), confirm: "Resume"))
                 guard answer.ok else { return }
@@ -301,7 +305,7 @@ extension TerminalsModel {
                 let picked = TerminalListText.modes.contains { $0.id == pickedMode } ? pickedMode : nil
                 var body = ResumeTerminalRequest(harness: session.harness, cwd: session.cwd, agentSessionId: session.sessionId,
                                                  title: session.title.isEmpty ? nil : session.title, mode: session.mode ?? picked,
-                                                 cols: gridHere?.cols, rows: gridHere?.rows, profile: profile)
+                                                 cols: gridHere?.cols, rows: gridHere?.rows, profile: profile, allowContextTransfer: profile != nil ? true : nil)
                 var first: (cwd: String, alike: [String], near: String?)?
                 while true {
                     switch try await c.resumeTerminal(body) {
