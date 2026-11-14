@@ -25,6 +25,15 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
 
   app.get("/profiles", (c) => c.json({ agents: store.all() }));
 
+  app.post("/profiles/claude-code/default/reset-identity", (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "identity is reset on the Mac" }, 403);
+    if (deps.terminals?.host.list().some((t) => t.harness === "claude-code" && (!t.profile || t.profile.id === "default") && t.status !== "exited"))
+      return c.json({ error: "请先结束使用 Default 的 Claude 终端，再重置身份信息。" }, 409);
+    try { store.resetDefaultIdentity(); }
+    catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+    return c.json({ agents: store.all() });
+  });
+
   app.post("/profiles/current", async (c) => {
     const body = await parseBody(c, z.object({ agent: Agent, id: z.string().min(1).max(40) }));
     if (!body.ok) return c.json({ error: body.error }, 400);

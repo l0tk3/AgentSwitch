@@ -54,16 +54,16 @@ describe("app updates", () => {
     expect(updateState(app)?.staged).toBeNull();
   });
 
-  it("the daemon that starts after a switch tells the conversation how it went, once", async () => {
+  it("successful updates are acknowledged without adding conversation messages", async () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-update-"));
     writeFileSync(join(home, UPDATE_RESULT_FILE), JSON.stringify({ ok: true, reverted: false, from: "A", to: "2026-09-25T03:00:00Z", at: 1, reason: "" }));
     const first = daemon(undefined, home);
-    expect((await first.conversation()).map((m) => [m.kind, m.text])).toEqual([["notice", `新版本已安装（构建于 ${localTime("2026-09-25T03:00:00Z")}），服务运行正常。`]]);
+    expect(await first.conversation()).toEqual([]);
     expect(existsSync(join(home, UPDATE_RESULT_FILE))).toBe(false);
     expect((await first.call("GET", "/update")).body.last).toMatchObject({ ok: true });   // still readable, marked told
     first.d.close();
     const again = daemon(undefined, home);
-    expect(await again.conversation()).toHaveLength(1);
+    expect(await again.conversation()).toHaveLength(0);
   });
 
   it("an install that never started (a Mac permission missing) is told on the reporter's next tick", async () => {
@@ -75,16 +75,16 @@ describe("app updates", () => {
     expect((await f.conversation()).map((m) => m.text)).toEqual(["新版本安装失败。原因：macOS 在等你在 Mac 上允许"]);
   });
 
-  it("installs told one after another leave one line: the latest; what was said between them, and an install that failed, stay (2026-10-07)", () => {
+  it("removes successful update notices across conversation boundaries and retains failures", () => {
     const home = mkdtempSync(join(tmpdir(), "agentswitch-update-"));
     const log = new AssistantLog(join(home, "assistant.db"));
     const say = (text: string, role: "assistant" | "user" = "assistant", kind: "notice" | "reply" = "notice") =>
       log.append({ role, text, kind, taskIds: [], clientId: null, replyTo: null } as Parameters<AssistantLog["append"]>[0]).seq;
     const ok = (at: string) => updateLine({ ok: true, reverted: false, from: "A", to: at, at: 1, reason: "" });
     say(ok("2026-10-06T13:32:00Z"));
+    say("新版本已装好（构建于 今天 21:05），服务正常。");
     say("把 iOS 端打包装到手机上", "user", "reply");
     const kept = [
-      say(ok("2026-10-07T04:26:00Z")),   // followed by something else: it stays where it was said
       say("新版本安装失败。原因：macOS 在等你在 Mac 上允许"),
     ];
     const run = [say(ok("2026-10-07T05:05:00Z")), say(ok("2026-10-07T05:26:00Z")), say(ok("2026-10-07T05:40:00Z"))];
@@ -93,7 +93,7 @@ describe("app updates", () => {
     announceUpdate(home, log);
     const now = log.recent(50);
     expect(now.map((m) => m.text)).toEqual([
-      ok("2026-10-06T13:32:00Z"), "把 iOS 端打包装到手机上", ok("2026-10-07T04:26:00Z"), "新版本安装失败。原因：macOS 在等你在 Mac 上允许", ok("2026-10-07T05:55:00Z"),
+      "把 iOS 端打包装到手机上", "新版本安装失败。原因：macOS 在等你在 Mac 上允许",
     ]);
     expect(now.map((m) => m.seq)).toEqual(expect.arrayContaining(kept));
     for (const seq of run) expect(now.some((m) => m.seq === seq)).toBe(false);
@@ -102,7 +102,7 @@ describe("app updates", () => {
     expect(tidyUpdateNotices(log)).toBe(1);
     expect(tidyUpdateNotices(log)).toBe(0);
     announceUpdate(home, log);
-    expect(log.recent(50).at(-1)!.text).toBe(ok("2026-10-07T06:10:00Z"));
+    expect(log.recent(50).at(-1)!.text).toBe("新版本安装失败。原因：macOS 在等你在 Mac 上允许");
   });
 
   it("a switch that fell back says so, with the reason", () => {

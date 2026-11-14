@@ -116,7 +116,7 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
   app.get("/browsers", (c) => {
     const all: Record<string, import("../profiles/store.js").AgentProfiles> = deps.profiles?.all() ?? {};
     // Every profile but the Mac's own has a browser of its own (§5.5), with or without a proxy.
-    const own = Object.entries(all).flatMap(([agent, list]) => list.profiles.filter((p) => p.id !== DEFAULT_PROFILE).map((p) => {
+    const own = Object.entries(all).flatMap(([agent, list]) => list.profiles.filter((p) => p.id !== DEFAULT_PROFILE || (agent === "claude-code" && (p.proxy || p.sessionKey))).map((p) => {
       const key = `${agent}.${p.id}`;
       return { key, name: p.name, agent, ...(p.color ? { color: p.color } : {}), ...(p.exit ? { exit: { ip: p.exit.ip, place: p.exit.place } } : {}), running: fleet.get(key)?.host.running ?? false };
     }));

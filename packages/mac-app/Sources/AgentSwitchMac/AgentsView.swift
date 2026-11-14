@@ -174,6 +174,7 @@ struct AgentsView: View {
                             proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) },
                             sessionKey: { profile in keying = ProfileProxyTarget(agent: agent, profile: profile) },
                             apiKey: { profile in paying = ProfileProxyTarget(agent: agent, profile: profile) },
+                            resetIdentity: { change(.claude) { try await $0.resetDefaultClaudeIdentity() } },
                             telemetry: { profile, on in change(agent) { try await $0.setProfileTelemetry(agent: agent.rawValue, id: profile.id, on: on) } },
                             color: { profile, color in change(agent) { try await $0.setProfileColor(agent: agent.rawValue, id: profile.id, color: color) } })
         }
@@ -543,6 +544,8 @@ struct ProfilesSection: View {
     let proxy: (AgentProfile) -> Void
     var sessionKey: ((AgentProfile) -> Void)? = nil
     var apiKey: ((AgentProfile) -> Void)? = nil
+    var resetIdentity: (() -> Void)? = nil
+    @State private var resettingIdentity = false
     /// Claude Code's telemetry under a profile turned on or off (docs/profiles-v0.md §3.7).
     var telemetry: ((AgentProfile, Bool) -> Void)? = nil
     let color: (AgentProfile, ProfileColor) -> Void
@@ -579,7 +582,7 @@ struct ProfilesSection: View {
                     Spacer()
                     // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
                     Text(profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)
-                    if !profile.isDefault {
+                    if !profile.isDefault || agent == .claude {
                         // Claude Code's profiles only: the key signs its own browser in to claude.ai (§3.4).
                         if profile.paysByKey, let apiKey {
                             Button("API Key…") { apiKey(profile) }.controlSize(.small)
@@ -590,7 +593,11 @@ struct ProfilesSection: View {
                                 .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
                         }
                         Button("Proxy…") { proxy(profile) }.controlSize(.small)
-                        Button("Delete…") { remove(profile) }.controlSize(.small)
+                        if profile.isDefault {
+                            Button("Reset Identity…") { resettingIdentity = true }.controlSize(.small)
+                        } else {
+                            Button("Delete…") { remove(profile) }.controlSize(.small)
+                        }
                     }
                 }
                 .contextMenu {
@@ -608,6 +615,11 @@ struct ProfilesSection: View {
             if profiles.creatable {
                 Footer("每个配置是一份单独的登录，放在它自己的目录里，不改这台 Mac 原有的那一份。用哪个配置在开终端的地方选：新建终端的面板里有一行 Profile，默认是上次用的；恢复一段对话默认回到它上次所在的配置，要换就用右键菜单里的 Resume As。新建之后在它名下开一个终端，没登录的配置会直接从登录开始。每个配置有一个颜色（名字前的圆点，点它可以换）：在它名下运行的终端，列表和底栏里带着同色的亮点。配置可以有自己的代理（Proxy…）：在它名下开终端之前，先经这个代理查一次通不通、从哪里出去，不通就不开；查到的出口写在终端底栏的配置名后面。每个配置还有它自己的浏览器——一个单独的浏览器窗口，登录态和指纹都是它自己的，agent 的浏览器工具和登录页都在里面；有代理的配置，浏览器和 agent 从同一个代理出去。")
             }
+        }
+        .confirmationDialog("重置 Default 的身份信息？", isPresented: $resettingIdentity) {
+            Button("Reset Identity", role: .destructive) { resetIdentity?() }
+        } message: {
+            Text("仅删除 ~/.claude.json 的 userID、machineID 和 oauthAccount，保留其他配置和历史记录。请先退出使用 Default 的 Claude Code。此操作不会清除登录凭据，账号资料可能在下次启动时重新写入。")
         }
     }
 }

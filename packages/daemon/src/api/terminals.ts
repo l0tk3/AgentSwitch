@@ -429,6 +429,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       wanted !== DEFAULT_PROFILE ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, ...(profileHome ? { home: profileHome } : {}), ...(color ? { color } : {}), ...(quiet ? { telemetryOff: true as const } : {}),
         ...(paid ? { api: { ...(paid.baseUrl ? { baseUrl: paid.baseUrl } : {}), ...(paid.model ? { model: paid.model } : {}) } } : {}) } : null;
     // A profile with a proxy of its own: before anything is started under it, the proxy is asked where it lets
+    if (!profile && body.data.harness === "claude-code" && (deps.profiles?.proxyOf("claude-code", wanted) || deps.profiles?.sessionKeyOf("claude-code", wanted)))
+      profile = { id: wanted, name: "Default" };
     // traffic out. One that does not answer starts nothing — the agent is not let out another way (§4).
     if (profile) {
       const way = await exitFor(deps, body.data.harness, wanted, profile.name);
@@ -436,7 +438,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       profile = { ...profile, ...way };
       // A browser of its own goes with a folder of its own: without one the shared browser, and the system's for a
       // page the agent asks to have opened.
-      if (!profile.home) delete profile.browserKey;
+      if (!profile.home && !(body.data.harness === "claude-code" && wanted === DEFAULT_PROFILE)) delete profile.browserKey;
     }
     // A profile nobody is signed in to starts at its sign-in (docs/profiles-v0.md §3.1), not at a prompt that cannot
     // answer. Asked of the agent itself; when it does not say, nothing is assumed.

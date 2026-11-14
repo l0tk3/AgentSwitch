@@ -9,7 +9,7 @@ import { TERMINAL, type Approval, type Task, type TaskEvent } from "../engine/ty
 import { takeUnannounced, type UpdateResult } from "../files/appUpdate.js";
 import { localTime } from "../util/localTime.js";
 import { modelName } from "../util/modelName.js";
-import type { AssistantLog } from "./log.js";
+import { KEPT_MESSAGES, type AssistantLog } from "./log.js";
 import { withoutLegend } from "./register.js";
 
 /** The spoken script comes with the summary, seconds after the end; past this the report goes without it. */
@@ -164,25 +164,22 @@ function latestWords(events: readonly TaskEvent[]): string | null {
 /** What the last install came to, once, in the conversation: the daemon that starts after it tells it. */
 export function announceUpdate(home: string, log: AssistantLog): void {
   const result = takeUnannounced(home);
-  if (result) log.append({ role: "assistant", text: updateLine(result), kind: "notice", taskIds: [], clientId: null, replyTo: null });
+  if (result && !result.ok) log.append({ role: "assistant", text: updateLine(result), kind: "notice", taskIds: [], clientId: null, replyTo: null });
   tidyUpdateNotices(log);
 }
 
-/** An install that went well says the same every time, and a day of them filled the Dispatch page with one line eight
- *  times over (2026-10-07, user, with the phone's screenshot: 这个页面处理一下，你看看是不是不太协调). Of installs told one
- *  after another with nothing said between, only the latest stays: it is the one that says which version runs. An
- *  install that failed or fell back is never one of these and stays. Returns the lines taken out. */
+/** Remove historical successful-install notices, including the older wording. Task messages, replies, failures
+ *  and rollbacks stay. Successful updates no longer add conversation messages. Returns the lines taken out. */
 export function tidyUpdateNotices(log: AssistantLog, look = TIDY_LOOK): number {
   const recent = log.recent(look);
-  const told = (i: number): boolean => { const m = recent[i]; return m !== undefined && m.role === "assistant" && m.kind === "notice" && UPDATED_OK.test(m.text); };
-  const gone = recent.flatMap((m, i) => (told(i) && told(i + 1) ? [m.seq] : []));
+  const gone = recent.filter((m) => m.role === "assistant" && m.kind === "notice" && m.taskIds.length === 0 && m.replyTo === null && UPDATED_OK.test(m.text)).map((m) => m.seq);
   return gone.length ? log.remove(gone) : 0;
 }
 
 /** `updateLine` for an install that went well, whatever its time. */
-const UPDATED_OK = /^新版本已安装（构建于 [^）]+），服务运行正常。$/;
+const UPDATED_OK = /^新版本已(?:安装|装好)（构建于 [^）]+），服务(?:运行)?正常。$/;
 /** How far back a start looks for such a run. */
-const TIDY_LOOK = 300;
+const TIDY_LOOK = KEPT_MESSAGES;
 
 export function updateLine(r: UpdateResult): string {
   if (r.ok) return `新版本已安装（构建于 ${localTime(r.to)}），服务运行正常。`;

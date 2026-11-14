@@ -50,6 +50,20 @@ const pool = (resolve?: ConstructorParameters<typeof ExitPool>[0]["resolve"]) =>
   return p;
 };
 
+it("Default identity reset preserves every other config field and rejects invalid JSON", async () => {
+  const { store, userHome } = world();
+  const path = join(userHome, ".claude.json");
+  const before = JSON.parse(readFileSync(path, "utf8"));
+  store.resetDefaultIdentity();
+  const { userID, machineID, oauthAccount, ...kept } = before;
+  expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(kept);
+  store.resetDefaultIdentity();
+  expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(kept);
+  writeFileSync(path, "broken json");
+  expect(() => store.resetDefaultIdentity()).toThrow();
+  expect(readFileSync(path, "utf8")).toBe("broken json");
+});
+
 function world() {
   const root = mkdtempSync(join(tmpdir(), "agentswitch-profiles-"));
   const userHome = join(root, "user"), home = join(root, "as");
@@ -137,7 +151,8 @@ describe("a profile's own proxy", () => {
     expect(store.all()["claude-code"].profiles[1]!.exit).toBeUndefined();
     store.setProxy("claude-code", work.id, null);
     expect(store.all()["claude-code"].profiles[1]!.proxy).toBeUndefined();
-    expect(() => store.setProxy("claude-code", DEFAULT_PROFILE, { server: "http://x:1" })).toThrow(ProfileError);
+    store.setProxy("claude-code", DEFAULT_PROFILE, { server: "http://x:1" });
+    expect(store.all()["claude-code"].profiles[0]?.proxy?.server).toBe("http://x:1");
     expect(() => store.setExit("claude-code", "nope12", null)).toThrow(ProfileError);
   });
 
@@ -415,7 +430,7 @@ esac
     const app = new Hono();
     const questions: string[] = [];
     const prepared: [string, string | null][] = [];
-    mountTerminals(app, { profiles: w.store, terminals: { host, audit: { record() { /* not looked at */ } }, agents: ["claude-code", "codex"], style: () => ({}), elsewhere: async () => null,
+    mountTerminals(app, { profiles: w.store, exits: pool(), profileBrowsers: { of: () => ({ visible: () => true }) }, terminals: { host, audit: { record() { /* not looked at */ } }, agents: ["claude-code", "codex"], style: () => ({}), elsewhere: async () => null,
       prepare: async (harness: string, home?: string) => { prepared.push([harness, home ?? null]); },
       signedIn: (harness: string, home: string) => { questions.push(home); return signedIn(harness, home); } } } as unknown as ApiDeps);
     mountProfiles(app, { profiles: w.store, terminals: { host } } as unknown as ApiDeps);
@@ -444,6 +459,22 @@ esac
     // A session continued under it starts at the sign-in too: it could not go on otherwise.
     expect((await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: "0f8fad5b-d9cb-469f-a165-70867728950e", profile: fresh.id })).status).toBe(201);
     expect(asked.at(-1)).toMatchObject({ resume: "0f8fad5b-d9cb-469f-a165-70867728950e", signIn: true });
+  });
+
+  it("Default with a session key receives its own browser without changing its Claude home; reset refuses a live terminal", async () => {
+    const { store, call, root, userHome, asked } = served(async () => true);
+    const before = readFileSync(join(userHome, ".claude.json"), "utf8");
+    expect((await call("POST", "/profiles/claude-code/default/reset-identity", undefined, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    store.setSessionKey("claude-code", "default", "enc:v1:" + "A".repeat(40));
+    expect((await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: "default" })).status).toBe(201);
+    expect(asked.at(-1)?.browserKey).toBe("claude-code.default");
+    expect(asked.at(-1)?.configHome).toBeUndefined();
+    const far = await upstream();
+    store.setProxy("claude-code", "default", { server: far.server });
+    expect((await call("POST", "/terminals", { harness: "claude-code", cwd: root, profile: "default" })).status).toBe(201);
+    expect(asked.at(-1)?.browserKey).toBe("claude-code.default");
+    expect((await call("POST", "/profiles/claude-code/default/reset-identity")).status).toBe(409);
+    expect(readFileSync(join(userHome, ".claude.json"), "utf8")).toBe(before);
   });
 
   it("is Codex's too: asked in its folder, started at the sign-in, its folder linked and its hooks made ready first", async () => {

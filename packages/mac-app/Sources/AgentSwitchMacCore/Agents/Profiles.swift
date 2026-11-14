@@ -306,4 +306,8 @@ extension DaemonClient {
     public func deleteProfile(agent: String, id: String) async throws -> [String: AgentProfiles] {
         try decode(ProfilesReply.self, try await call("DELETE", "/profiles/\(Self.segment(agent))/\(Self.segment(id))")).agents
     }
+
+    public func resetDefaultClaudeIdentity() async throws -> [String: AgentProfiles] {
+        try decode(ProfilesReply.self, try await call("POST", "/profiles/claude-code/default/reset-identity")).agents
+    }
 }

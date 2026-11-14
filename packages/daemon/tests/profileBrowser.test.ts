@@ -148,8 +148,9 @@ describe("a profile's own browser", () => {
     const { fleet, shared } = world();
     const key = "claude-code.abc123def0";
     const app = new Hono();
+    let defaultProxy = false;
     const profiles = { all: () => ({ "claude-code": { current: "default", creatable: true, profiles: [
-      { id: "default", name: "Default", kind: "subscription", createdAt: 0 },
+      { id: "default", name: "Default", kind: "subscription", createdAt: 0, ...(defaultProxy ? { proxy: { server: "http://proxy.example:8080" } } : {}) },
       { id: "abc123def0", name: "cwork1", kind: "subscription", createdAt: 1, proxy: { server: "http://proxy.example:8080", sealed: true }, exit: { ip: "203.0.113.9", place: "Tokyo", timezone: "Asia/Tokyo", checkedAt: 2 } },
       { id: "plain00000", name: "Plain", kind: "subscription", createdAt: 3 }] }, codex: { current: "default", creatable: false, profiles: [{ id: "default", name: "Default", kind: "subscription", createdAt: 0 }] } }) };
     const deps = { browser: shared, profileBrowsers: fleet, profiles, sseHeartbeatMs: 20 } as unknown as ApiDeps;
@@ -163,6 +164,9 @@ describe("a profile's own browser", () => {
       { key: "claude-code.plain00000", name: "Plain", agent: "claude-code", running: false }]);
     // A paired phone is told too, and may look into a profile's browser as it may into the shared one.
     expect((await app.request("/browsers", {}, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
+    defaultProxy = true;
+    expect((await (await app.request("/browsers")).json()).browsers).toContainEqual({ key: "claude-code.default", name: "Default", agent: "claude-code", running: false });
+    defaultProxy = false;
     // Asked for by its address it is there (made, not started): an empty list, as the shared one's before its first tab.
     expect(await (await app.request(`/profile-browser/${key}/browser/tabs`)).json()).toMatchObject({ running: false, groups: [] });
     expect((await app.request(`/profile-browser/${key}/browser/tabs`, {}, markRemote({}, { deviceId: "phone" }))).status).toBe(200);

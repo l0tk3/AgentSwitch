@@ -106,7 +106,8 @@ describe("a profile's session key", () => {
     await expect(keys.set("claude-code", profile.id, KEY)).rejects.toThrow(/密文/);
     expect(stored().sessionKey).toBeUndefined();
     // Not for the Mac's own, nor for a profile that is not there.
-    await expect(keys.set("claude-code", "default", SEALED)).rejects.toThrow(/no such profile/);
+    await keys.set("claude-code", "default", SEALED);
+    expect(store.sessionKeyOf("claude-code", "default")?.sealed).toBe(SEALED);
     // Without the gate nothing can be kept.
     await expect(new SessionKeys({ store, browser: () => null }).set("claude-code", profile.id, SEALED)).rejects.toThrow(/凭据网关不可用/);
     await browser.host.open({ kind: "you", id: "you", label: "You" }, "https://example.com/");
@@ -136,7 +137,7 @@ describe("a profile's session key", () => {
     expect((await call("PUT", at, { key: KEY })).status).toBe(400);
     expect((await call("PUT", at, { key: SEALED_API })).json.error).toMatch(/sk-ant-sid/);
     expect((await call("PUT", "/profiles/claude-code/nosuchprofile/session-key", { key: SEALED })).status).toBe(404);
-    expect((await call("PUT", "/profiles/claude-code/default/session-key", { key: SEALED })).status).toBe(404);
+    expect((await call("PUT", "/profiles/claude-code/default/session-key", { key: SEALED })).status).toBe(200);
     const set = await call("PUT", at, { key: SEALED });
     expect(set.status).toBe(200);
     expect(set.json.agents["claude-code"].profiles[1].sessionKey).toBe(true);

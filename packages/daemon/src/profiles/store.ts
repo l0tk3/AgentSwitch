@@ -219,11 +219,13 @@ export class ProfileStore {
 
   /** Claude Code's telemetry under `id` from the next terminal on: on (as Claude Code has it) or off. */
   setTelemetry(agent: ProfileAgent, id: string, on: boolean): void {
+    if (id === DEFAULT_PROFILE) throw new ProfileError("not_found", "no such profile");
     if (agent !== "claude-code") throw new ProfileError("invalid", "only Claude Code's telemetry can be turned off");
     this.change(agent, id, ({ telemetry: _was, ...p }) => (on ? p : { ...p, telemetry: false }));
   }
 
   setColor(agent: ProfileAgent, id: string, color: ProfileColor): void {
+    if (id === DEFAULT_PROFILE) throw new ProfileError("not_found", "no such profile");
     if (!PROFILE_COLORS.includes(color)) throw new ProfileError("invalid", "no such colour");
     this.change(agent, id, (p) => ({ ...p, color }));
   }
@@ -235,6 +237,7 @@ export class ProfileStore {
 
   /** `id`'s proxy from now on (null: none); what was known of the old one's exit goes with it. */
   setProxy(agent: ProfileAgent, id: string, proxy: ProfileProxy | null): void {
+    this.ensureDefault(agent, id);
     this.change(agent, id, (p) => { const { proxy: _old, exit: _was, ...rest } = p; return proxy ? { ...rest, proxy } : rest; });
   }
 
@@ -247,6 +250,7 @@ export class ProfileStore {
 
   /** `id`'s session key from now on (null: forgotten). A new one is due to its browser. */
   setSessionKey(agent: ProfileAgent, id: string, sealed: string | null): void {
+    this.ensureDefault(agent, id);
     this.change(agent, id, (p) => { const { sessionKey: _old, sessionKeyDue: _was, ...rest } = p; return sealed ? { ...rest, sessionKey: sealed, sessionKeyDue: true } : rest; });
   }
 
@@ -268,7 +272,7 @@ export class ProfileStore {
   private change(agent: ProfileAgent, id: string, edit: (p: NonNullable<Stored["profiles"]>[number]) => NonNullable<Stored["profiles"]>[number]): void {
     const file = this.read();
     const stored = file.agents?.[agent];
-    if (id === DEFAULT_PROFILE || !stored?.profiles?.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
+    if (!stored?.profiles?.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
     this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: stored.profiles.map((p) => (p.id === id ? edit(p) : p)) } } });
   }
 
@@ -276,6 +280,31 @@ export class ProfileStore {
     const file = this.read();
     if (!this.of(agent, file).profiles.some((p) => p.id === id)) throw new ProfileError("not_found", "no such profile");
     this.write({ ...file, agents: { ...file.agents, [agent]: { ...file.agents?.[agent], current: id } } });
+  }
+
+  private ensureDefault(agent: ProfileAgent, id: string): void {
+    if (id !== DEFAULT_PROFILE) return;
+    if (agent !== "claude-code") throw new ProfileError("invalid", "only Claude Code Default supports this setting");
+    const file = this.read(), stored = file.agents?.[agent] ?? {};
+    if (stored.profiles?.some((p) => p.id === id)) return;
+    this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: [
+      ...(stored.profiles ?? []), { id, name: "Default", kind: "subscription", createdAt: 0 },
+    ] } } });
+  }
+
+  resetDefaultIdentity(): void {
+    const path = join(this.userHome, ".claude.json");
+    if (!existsSync(path)) return;
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new ProfileError("invalid", "Claude config must be an object");
+    delete value.userID;
+    delete value.machineID;
+    delete value.oauthAccount;
+    const tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify(value, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+      renameSync(tmp, path);
+    } finally { rmSync(tmp, { force: true }); }
   }
 
   /** A new profile. One that pays by a key is made with the key (a ciphertext the caller has had the gate open once). */
@@ -327,8 +356,8 @@ export class ProfileStore {
       ...(api ? { api: told(api) } : {}),
       ...(sessionKey ? { sessionKey: true as const } : {}),
       ...(proxy ? { proxy: { server: proxy.server, ...(proxy.username ? { username: proxy.username } : {}), sealed: Boolean(proxy.password) } } : {}),
-      ...this.account(agent, join(this.dir, agent, p.id, "home")) }));
-    const profiles: Profile[] = [{ id: DEFAULT_PROFILE, name: "Default", kind: "subscription", createdAt: 0, ...this.account(agent, null) }, ...own];
+      ...this.account(agent, p.id === DEFAULT_PROFILE ? null : join(this.dir, agent, p.id, "home")) }));
+    const profiles: Profile[] = [own.find((p) => p.id === DEFAULT_PROFILE) ?? { id: DEFAULT_PROFILE, name: "Default", kind: "subscription", createdAt: 0, ...this.account(agent, null) }, ...own.filter((p) => p.id !== DEFAULT_PROFILE)];
     return { current: profiles.some((p) => p.id === stored.current) ? stored.current! : DEFAULT_PROFILE, profiles, creatable: Boolean(PROFILE_KINDS[agent]), kinds: PROFILE_KINDS[agent] ?? [] };
   }
 
