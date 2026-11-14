@@ -1,5 +1,7 @@
 # profiles-v0：配置——每个 agent 的多套登录，各带自己的出口与浏览器
 
+2026-11-14：设置拆分为 Agents（CLI 安装、版本、更新）和 Profiles（账号、代理、密钥、身份重置）。Profiles 每行提供 Check Health，结果保存在服务内存中并标明检查时间。订阅配置使用自己的登录目录和代理查询用量；Claude 使用现有轻量 rate-limit 探测，可能消耗少量额度，Codex 查询 account/rateLimits/read。API 配置经自己的代理请求模型列表，无生成请求；缺少模型列表标为 Unknown，不能据此认定健康。检查不自动轮询；同一配置并发请求合并，错误输出不包含凭据或供应商响应正文。
+
 2026-11-14：Claude Code 的 Default 行增加 Proxy、Session Key 和 Reset Identity。代理与 session key 密文保存在 AgentSwitch 的配置库；Default 继续使用原来的 Claude 家目录。配置代理或 session key 后，终端使用独立的 `claude-code.default` 浏览器，隔离登录态与指纹，并随 Default 的代理出网，浏览器列表也显示它。Reset Identity 仅移除 `~/.claude.json` 的 `userID`、`machineID`、`oauthAccount`，保留所有其他字段；仅本机可操作，有 Default 终端运行时拒绝。它不删除登录凭据，账号资料可能再次写回。
 
 2026-10-07 用户：接下来要构思一下账号切换相关的问题。2026-10-08 用户：安全网关功能可以只留在dispatch里，感觉正常session里用不到，代理留着后面用；然后要集成类似于cc switch的功能，几个agent分开管理，要做到可以一键切换不同设备指纹的另一套配置，可以先做cc 的，然后可以指定每个profile的代理，http代理；然后不同的profile绑定不同的camufox 浏览器指纹，如果指定代理那对应的camufox也跟着走对应的代理；右下角加一个浏览器小图标点击可以打开对应浏览器；但是这样设计的话 其他agent和浏览器对应的关系、浏览器页面展示什么 切换配置是否影响官方app使用 其他agent的配置切换怎么设计还没想好，你帮我完善一下想法。

@@ -4,14 +4,14 @@ import SwiftUI
 
 /// The settings window's pages; the raw value is what `-openSettings <page>` takes.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case pairing, nodes, models, permissions, keys, agents, environment, general
+    case pairing, nodes, models, permissions, keys, agents, profiles, environment, general
     /// The Dispatch group (docs/dispatch-v0.md §3): what the web console's side column and the phone's settings had.
     case context, extensions, log, history
 
     var id: String { rawValue }
 
     /// The sidebar's first block, without a header.
-    static let app: [SettingsTab] = [.pairing, .nodes, .models, .permissions, .keys, .agents, .environment, .general]
+    static let app: [SettingsTab] = [.pairing, .nodes, .models, .permissions, .keys, .agents, .profiles, .environment, .general]
     /// The sidebar's `Dispatch` group; the main window's settings button opens its first page.
     static let dispatch: [SettingsTab] = [.context, .extensions, .log, .history]
 
@@ -23,6 +23,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .permissions: return "Permissions"
         case .keys: return "Keys"
         case .agents: return "Agents"
+        case .profiles: return "Profiles"
         case .environment: return "Environment"
         case .general: return "General"
         case .context: return "Context"
@@ -40,6 +41,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .permissions: return "checkmark.shield"
         case .keys: return "key"
         case .agents: return "shippingbox"
+        case .profiles: return "person.crop.rectangle.stack"
         case .environment: return "checklist"
         case .general: return "gearshape"
         case .context: return "doc.text"
@@ -306,6 +308,7 @@ struct SettingsView: View {
         case .permissions: PermissionsView()
         case .keys: KeysView()
         case .agents: AgentsView()
+        case .profiles: AgentsView(profilesOnly: true)
         case .environment: EnvironmentView()
         case .general: GeneralView()
         case .context: ContextSettingsPage()

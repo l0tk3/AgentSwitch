@@ -45,6 +45,7 @@ export type ApiDeps = {
   readonly sessionKeys?: import("../browser/sessionKey.js").SessionKeys;
   /** The keys profiles pay by (docs/profiles-v0.md §3.6). */
   readonly apiKeys?: import("../profiles/apiKeys.js").ApiKeys;
+  readonly profileHealth?: import("../profiles/health.js").ProfileHealthChecks;
   readonly store: Store;
   readonly bus: Bus;
   readonly engine: Engine;

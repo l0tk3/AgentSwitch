@@ -24,6 +24,15 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   if (!store) return;
 
   app.get("/profiles", (c) => c.json({ agents: store.all() }));
+  app.get("/profiles/health", (c) => c.json({ health: deps.profileHealth?.current() ?? {} }));
+  app.post("/profiles/:agent/:id/health", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "profile health is checked on the Mac" }, 403);
+    const agent = Agent.safeParse(c.req.param("agent"));
+    if (!agent.success) return c.json({ error: "no such agent" }, 404);
+    if (!deps.profileHealth) return c.json({ error: "health checks unavailable" }, 503);
+    try { return c.json(await deps.profileHealth.check(agent.data, c.req.param("id"))); }
+    catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+  });
 
   app.post("/profiles/claude-code/default/reset-identity", (c) => {
     if (remoteCaller(c.env)) return c.json({ error: "identity is reset on the Mac" }, 403);

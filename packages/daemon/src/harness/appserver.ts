@@ -90,10 +90,10 @@ export class AppServerClient {
  *  Server→client requests are answered with accept; proxy variables never reach the child. One deadline covers the whole
  *  exchange. A JSON-RPC error rejects at once; every other failure (spawn or stdin error, exit, deadline, abort) is
  *  reported by the process-level handlers, so an exit keeps its code and stderr tail. */
-export function appServerRequest(binary: string, method: string, params: Json, timeoutMs: number, env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal): Promise<Json> {
+export function appServerRequest(binary: string, method: string, params: Json, timeoutMs: number, env: NodeJS.ProcessEnv = process.env, signal?: AbortSignal, preserveProxy = false, args: readonly string[] = []): Promise<Json> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(signal.reason ?? new Error("cancelled")); return; }
-    const child = spawn(binary, ["app-server"], { env: stripProxy(env), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(binary, [...args, "app-server"], { env: preserveProxy ? env : stripProxy(env), stdio: ["pipe", "pipe", "pipe"] });
     const client = new AppServerClient(child.stdin, child.stdout, async () => ({ decision: "accept" }), () => undefined);
     let settled = false;
     const finish = (fn: () => void) => {

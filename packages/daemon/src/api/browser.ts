@@ -129,7 +129,7 @@ export function mountProfileBrowsers(app: Hono, deps: ApiDeps): void {
     if (!at || !browser) return c.json({ error: "no such browser" }, 404);
     // Its proxy is the profile's, set where the profile is: not something this browser's own identity keeps.
     if (c.req.method === "PUT" && at[2] === "/browser/identity" && "proxy" in ((await c.req.raw.clone().json().catch(() => ({}))) as object)) {
-      return c.json({ error: "这个浏览器的代理跟着它的配置：在 Settings › Agents 里这个配置的 Proxy… 里改。" }, 409);
+      return c.json({ error: "这个浏览器的代理跟着它的配置：在 Settings › Profiles 里这个配置的 Proxy… 里改。" }, 409);
     }
     // The first tab starts the browser: before that its proxy is asked where it lets traffic out, as before a
     // terminal starts — one that does not answer opens nothing.

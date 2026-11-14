@@ -28,12 +28,12 @@ export function parseRateLimits(result: Json): { remaining: number | null; detai
   };
 }
 
-export function codexQuota(opts: { binary: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }): QuotaProvider {
+export function codexQuota(opts: { binary: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; preserveProxy?: boolean; args?: readonly string[] }): QuotaProvider {
   return {
     harness: "codex",
     async read(_force, signal) {
       try {
-        const result = await appServerRequest(opts.binary, "account/rateLimits/read", {}, opts.timeoutMs ?? APP_SERVER_REQUEST_TIMEOUT_MS, opts.env, signal);
+        const result = await appServerRequest(opts.binary, "account/rateLimits/read", {}, opts.timeoutMs ?? APP_SERVER_REQUEST_TIMEOUT_MS, opts.env, signal, opts.preserveProxy, opts.args);
         return { ...parseRateLimits(result), source: "codex app-server account/rateLimits/read", error: null };
       } catch (err) {
         return { remaining: null, detail: {}, source: "codex app-server", error: (err as Error).message };

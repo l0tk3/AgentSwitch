@@ -7,10 +7,13 @@ import SwiftUI
 /// each: installing and updating the vendor's own, a beta or a pinned version; deleting any of them but ChatGPT App's
 /// (asked first); clearing the old versions a vendor keeps.
 struct AgentsView: View {
+    var profilesOnly = false
     @Environment(AppModel.self) private var model
     @State private var confirmRestart = false
     /// Each agent's profiles, as the service has them; what went wrong with the last change, by agent.
     @State private var profiles: [String: AgentProfiles] = [:]
+    @State private var health: [String: ProfileHealth] = [:]
+    @State private var checkingHealth: Set<String> = []
     @State private var profileError: [String: String] = [:]
     /// The agent a new profile is being named for; the name; the profile asked to be removed.
     @State private var naming: AgentCLI?
@@ -28,6 +31,7 @@ struct AgentsView: View {
 
     var body: some View {
         Form {
+            if !profilesOnly {
             Section {
                 LabeledContent("Updates") {
                     HStack(spacing: 6) {
@@ -53,12 +57,15 @@ struct AgentsView: View {
                 }
             }
 
+            }
             ForEach(model.agents) { report in
+                if !profilesOnly {
                 AgentSection(report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
                              restart: { confirmRestart = true })
-                profilesSection(report.agent)
+                } else { profilesSection(report.agent) }
             }
 
+            if !profilesOnly {
             Section {
                 LabeledContent("Beta & Pinned") {
                     HStack(spacing: 8) {
@@ -81,18 +88,27 @@ struct AgentsView: View {
             } footer: {
                 Footer("Stable 由各家的官方安装程序安装在官方位置，与自行安装的完全相同：删除 AgentSwitch 后仍可使用并照常更新。Beta 与 Pinned 存放在上面的版本库中，可随时整个删除，不影响 Stable。")
             }
+            } else {
+                Section {
+                    Text("Check Health 检查这个配置的连接状态。订阅配置读取用量；Claude 会发出一次轻量探测，可能消耗少量额度。API 配置只请求模型列表，不生成内容。结果是上次检查的快照，可随时重新检查。")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.refreshAgents(force: true); model.checkAgentUpdates(force: true) } label: { Label("Check Now", systemImage: "arrow.clockwise") }
+                Button {
+                    if profilesOnly { Task { profiles = (try? await model.client.profiles()) ?? profiles; health = (try? await model.client.profileHealthStates()) ?? health } }
+                    else { model.refreshAgents(force: true); model.checkAgentUpdates(force: true) }
+                } label: { Label(profilesOnly ? "Refresh" : "Check Now", systemImage: "arrow.clockwise") }
                     .help("Check Now")
                     .disabled(model.agentsChecking)
             }
         }
         .task {
             model.refreshAgents()
-            model.checkAgentUpdates()
+            if !profilesOnly { model.checkAgentUpdates() }
         }
         .sheet(item: $naming) { agent in
             ProfileNewSheet(agent: agent, kinds: profiles[agent.rawValue]?.newKinds ?? ["subscription"]) { profiles = $0 }
@@ -102,7 +118,7 @@ struct AgentsView: View {
         }
         .modifier(ProfileDialogs(removing: removingShown, removingName: removing?.profile.name ?? "",
                                  remove: { if let target = removing { delete(target.agent, target.profile) } }))
-        .task { profiles = (try? await model.client.profiles()) ?? profiles }
+        .task { if profilesOnly { profiles = (try? await model.client.profiles()) ?? profiles; health = (try? await model.client.profileHealthStates()) ?? health } }
         .sheet(item: $keying) { target in
             ProfileSessionKeySheet(agent: target.agent, profile: target.profile) { profiles = $0 }
         }
@@ -175,6 +191,16 @@ struct AgentsView: View {
                             sessionKey: { profile in keying = ProfileProxyTarget(agent: agent, profile: profile) },
                             apiKey: { profile in paying = ProfileProxyTarget(agent: agent, profile: profile) },
                             resetIdentity: { change(.claude) { try await $0.resetDefaultClaudeIdentity() } },
+                            health: health, checkingHealth: checkingHealth,
+                            checkHealth: { profile in
+                                let key = "\(agent.rawValue).\(profile.id)"
+                                guard checkingHealth.insert(key).inserted else { return }
+                                Task {
+                                    defer { checkingHealth.remove(key) }
+                                    do { health[key] = try await model.client.checkProfileHealth(agent: agent.rawValue, id: profile.id); profileError[agent.rawValue] = nil }
+                                    catch { profileError[agent.rawValue] = error.localizedDescription }
+                                }
+                            },
                             telemetry: { profile, on in change(agent) { try await $0.setProfileTelemetry(agent: agent.rawValue, id: profile.id, on: on) } },
                             color: { profile, color in change(agent) { try await $0.setProfileColor(agent: agent.rawValue, id: profile.id, color: color) } })
         }
@@ -545,6 +571,9 @@ struct ProfilesSection: View {
     var sessionKey: ((AgentProfile) -> Void)? = nil
     var apiKey: ((AgentProfile) -> Void)? = nil
     var resetIdentity: (() -> Void)? = nil
+    var health: [String: ProfileHealth] = [:]
+    var checkingHealth: Set<String> = []
+    var checkHealth: ((AgentProfile) -> Void)? = nil
     @State private var resettingIdentity = false
     /// Claude Code's telemetry under a profile turned on or off (docs/profiles-v0.md §3.7).
     var telemetry: ((AgentProfile, Bool) -> Void)? = nil
@@ -553,6 +582,7 @@ struct ProfilesSection: View {
     var body: some View {
         Section {
             ForEach(profiles.profiles) { profile in
+                VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
                     // No "current" one to pick here (docs/profiles-v0.md §3.3): a profile is chosen where a terminal
                     // is made or a conversation continued.
@@ -577,7 +607,7 @@ struct ProfilesSection: View {
                         Color.clear.frame(width: 16, height: 16)
                     }
                     // The device Claude Code says it is under it (docs/profiles-v0.md §3.5), once it has run there.
-                    Text(profile.name).help(profile.device.map(DeviceID.help) ?? "")
+                    Text(profile.name).lineLimit(1).truncationMode(.middle).help(profile.device.map(DeviceID.help) ?? profile.name)
                     Text(ProfileWords.who(profile) + (profile.telemetryOff ? " · Telemetry Off" : "")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
@@ -605,6 +635,23 @@ struct ProfilesSection: View {
                     if agent == .claude, !profile.isDefault, let telemetry {
                         Toggle("Telemetry", isOn: Binding(get: { !profile.telemetryOff }, set: { telemetry(profile, $0) }))
                     }
+                }
+                if let checkHealth {
+                    let key = "\(agent.rawValue).\(profile.id)"
+                    HStack(alignment: .top, spacing: 10) {
+                        Button(checkingHealth.contains(key) ? "Checking…" : "Check Health") { checkHealth(profile) }
+                            .controlSize(.small).disabled(checkingHealth.contains(key))
+                        if let result = health[key] {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("\(result.title) · \(result.message)").foregroundStyle(result.status == "healthy" ? Color.green : result.status == "unhealthy" ? Color.red : Color.secondary)
+                                ForEach(result.windows, id: \.label) { window in
+                                    Text(window.summary)
+                                }
+                                Text("检查于 " + Date(timeIntervalSince1970: result.checkedAt / 1000).formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary)
+                            }.font(.caption).textSelection(.enabled)
+                        } else { Text("Not Checked").font(.caption).foregroundStyle(.secondary) }
+                    }.padding(.leading, 26)
+                }
                 }
             }
             if profiles.creatable { Button("New Profile…", action: add) }

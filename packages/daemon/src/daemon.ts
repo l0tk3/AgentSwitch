@@ -20,6 +20,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import { DEFAULT_PROFILE, PROFILE_AGENTS, ProfileStore } from "./profiles/store.js";
+import { ProfileHealthChecks } from "./profiles/health.js";
+import { subscriptionHealth } from "./profiles/healthProviders.js";
 import { SessionKeys } from "./browser/sessionKey.js";
 import { ApiKeys } from "./profiles/apiKeys.js";
 import { proxyPlace } from "./browser/identity.js";
@@ -436,6 +438,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     through: async (agent, id) => { const proxy = profiles.proxyOf(agent, id); return proxy ? exits.address(exitKey(agent, id), proxy) : null; } });
   const sessionKeys: SessionKeys = new SessionKeys({ store: profiles, ...(gate ? { resolve: gateFill(gate) } : {}),
     browser: (agent, id) => profileBrowsers?.get(`${agent}.${id}`)?.host ?? null });
+  const profileHealth = new ProfileHealthChecks(profiles, apiKeys, subscriptionHealth(profiles, exits, agentBinaries));
   // A new engine is switched to with the browser stopped, which then comes back with its tabs (docs/browser-v0.md §7.2 第 6 条).
   // The profiles' own browsers run on the same copy: stopped with it, back with their tabs after.
   if (browser && engineKit) {
@@ -575,7 +578,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     // A folder a terminal runs in is asked about before it is renamed or moved (docs/files-v0.md §12.2).
     running: () => (terminalHost?.list() ?? []).filter((t) => t.status !== "exited").map((t) => ({ id: t.id, name: t.name, workdir: t.workdir })),
   };
-  const apiDeps: ApiDeps = { sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
+  const apiDeps: ApiDeps = { profileHealth, sessionFolders, liveElsewhere: () => nodesMade?.lives() ?? [], remoteKeyboard: () => loadMesh(cfg.home).keyboard, fileAccess, exits, profiles, sessionKeys, apiKeys, ...(profileBrowsers ? { profileBrowsers } : {}), clash, ...(browser ? { browser } : {}), ...(engineKit ? { engineKit } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(sessions ? { sessions } : {}), ...(terminals ? { terminals } : {}), ...(sealer ? { sealer } : {}), store, bus, engine, targets, quota, routingLog, routeDeps, contextPath, memoryPath, platformMemoryPath, policyPath, workRoot, cwdRules: defaultCwdRules(process.env, cfg.home), home: cfg.home, ...(cfg.appBundle ? { appBundle: cfg.appBundle } : {}), uploads, artifactsDir, extensions, version: VERSION, models: { path: modelsPath, base: baseTargets }, ...(overrides.sseHeartbeatMs ? { sseHeartbeatMs: overrides.sseHeartbeatMs } : {}) };
   // assistant-v0 §1.1: the router as the user's assistant, on the router model (a text-only agent); echo mode has none
   // and every message becomes a task. Task creation is POST /tasks's second half (admitSealed).
   const assistantRouter = overrides.assistant ?? (summarizer ? oracle("assistant") : undefined);

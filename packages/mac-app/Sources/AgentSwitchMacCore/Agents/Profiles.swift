@@ -1,5 +1,40 @@
 import Foundation
 
+public struct ProfileHealth: Decodable, Sendable {
+    public struct Window: Decodable, Sendable {
+        public let label: String
+        public let usedPercent: Double
+        public let resetsAt: Double?
+        public var summary: String {
+            let used = String(format: "%.0f", usedPercent)
+            let reset = resetsAt.map { " · 重置 " + Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .shortened) } ?? ""
+            return "\(label) · 已用 \(used)%\(reset)"
+        }
+    }
+    public let status: String
+    public let checkedAt: Double
+    public let message: String
+    public let windows: [Window]
+    public var title: String {
+        switch status {
+        case "healthy": "Healthy"
+        case "warning": "Limited"
+        case "unhealthy": "Unhealthy"
+        default: "Unknown"
+        }
+    }
+}
+
+extension DaemonClient {
+    public func profileHealthStates() async throws -> [String: ProfileHealth] {
+        struct Reply: Decodable { let health: [String: ProfileHealth] }
+        return try decode(Reply.self, try await call("GET", "/profiles/health")).health
+    }
+    public func checkProfileHealth(agent: String, id: String) async throws -> ProfileHealth {
+        try decode(ProfileHealth.self, try await call("POST", "/profiles/\(Self.segment(agent))/\(Self.segment(id))/health", timeout: 45))
+    }
+}
+
 /// Profiles (docs/profiles-v0.md §3): several sign-ins per agent, each started with a folder of its own; `Default` is
 /// the Mac's own. The service keeps them (`GET /profiles`).
 /// Where a profile's own proxy let traffic out when it was last checked (docs/profiles-v0.md §4).

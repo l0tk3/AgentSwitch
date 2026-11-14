@@ -74,9 +74,10 @@ enum DesignPreview {
                         AgentProfile(id: "abc123def2", name: "lab", account: "lab@example.com", color: "mint"),
                         AgentProfile(id: "abc123def3", name: "relay", kind: "api", color: "orchid", api: ProfileApiInfo(baseUrl: "https://relay.example/api", model: "claude-made-up")),
                     ], creatable: true, kinds: ["subscription", "api"])
+                    let healthy = try JSONDecoder().decode(ProfileHealth.self, from: Data(#"{"status":"healthy","checkedAt":1794630000000,"message":"已连接，订阅用量读取成功。","windows":[{"label":"5h","usedPercent":23,"resetsAt":1794640000},{"label":"7d","usedPercent":61,"resetsAt":1794700000}]}"#.utf8))
                     for (name, appearance) in [("profiles-rows", dark), ("profiles-rows-light", NSAppearance(named: .aqua))] {
-                        try await renderSheet(Form { ProfilesSection(agent: .claude, profiles: list, error: nil, add: {}, remove: { _ in }, proxy: { _ in }, sessionKey: { _ in }, apiKey: { _ in }, color: { _, _ in }) }
-                            .formStyle(.grouped).frame(width: 640), model: model, appearance: appearance, to: directory.appendingPathComponent("\(name).png"))
+                        try await renderSheet(Form { ProfilesSection(agent: .claude, profiles: list, error: nil, add: {}, remove: { _ in }, proxy: { _ in }, sessionKey: { _ in }, apiKey: { _ in }, health: ["claude-code.abc123def0": healthy], checkHealth: { _ in }, color: { _, _ in }) }
+                            .formStyle(.grouped).frame(width: 900), model: model, appearance: appearance, to: directory.appendingPathComponent("\(name).png"))
                     }
                     // A new profile (§3.6): one that pays by a key, where both ways are offered and where the key is the only one;
                     // and the sheet that changes a kept one.
