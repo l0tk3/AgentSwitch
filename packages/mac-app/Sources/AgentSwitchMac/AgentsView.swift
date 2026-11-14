@@ -9,7 +9,10 @@ import SwiftUI
 struct AgentsView: View {
     var profilesOnly = false
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @State private var confirmRestart = false
+    @State private var loadError: String?
     /// Each agent's profiles, as the service has them; what went wrong with the last change, by agent.
     @State private var profiles: [String: AgentProfiles] = [:]
     @State private var health: [String: ProfileHealth] = [:]
@@ -32,6 +35,7 @@ struct AgentsView: View {
 
     var body: some View {
         Form {
+            if let loadError { Text(loadError).foregroundStyle(.red) }
             if !profilesOnly {
             Section {
                 LabeledContent("Updates") {
@@ -59,11 +63,13 @@ struct AgentsView: View {
             }
 
             }
+            if profilesOnly {
+                ForEach(AgentCLI.allCases) { agent in profilesSection(agent) }
+            } else {
             ForEach(model.agents) { report in
-                if !profilesOnly {
                 AgentSection(report: report, delete: { deleting = $0 }, clean: { cleaning = report.agent }, pin: { pinning = report.agent },
                              restart: { confirmRestart = true })
-                } else { profilesSection(report.agent) }
+            }
             }
 
             if !profilesOnly {
@@ -100,7 +106,7 @@ struct AgentsView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    if profilesOnly { Task { profiles = (try? await model.client.profiles()) ?? profiles; health = (try? await model.client.profileHealthStates()) ?? health } }
+                    if profilesOnly { Task { await loadProfiles() } }
                     else { model.refreshAgents(force: true); model.checkAgentUpdates(force: true) }
                 } label: { Label(profilesOnly ? "Refresh" : "Check Now", systemImage: "arrow.clockwise") }
                     .help("Check Now")
@@ -119,7 +125,7 @@ struct AgentsView: View {
         }
         .modifier(ProfileDialogs(removing: removingShown, removingName: removing?.profile.name ?? "",
                                  remove: { if let target = removing { delete(target.agent, target.profile) } }))
-        .task { if profilesOnly { profiles = (try? await model.client.profiles()) ?? profiles; health = (try? await model.client.profileHealthStates()) ?? health } }
+        .task { if profilesOnly { await loadProfiles() } }
         .sheet(item: $keying) { target in
             ProfileSessionKeySheet(agent: target.agent, profile: target.profile) { profiles = $0 }
         }
@@ -148,6 +154,18 @@ struct AgentsView: View {
             PinSheet(agent: agent) { version in
                 model.installAgent(agent, .pinned, version: version, row: AgentInstall.pinnedKey(version))
             }
+        }
+    }
+
+    private func loadProfiles() async {
+        do {
+            profiles = try await profileClient.profiles()
+            health = (try? await profileClient.profileHealthStates()) ?? [:]
+            loadError = nil
+        } catch {
+            profiles = [:]
+            health = [:]
+            loadError = "无法读取所选节点的配置：\(error.localizedDescription)。请确认节点在线且已更新到支持远程 Profile 管理的版本。"
         }
     }
 
@@ -194,14 +212,14 @@ struct AgentsView: View {
                             proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) },
                             sessionKey: { profile in keying = ProfileProxyTarget(agent: agent, profile: profile) },
                             apiKey: { profile in paying = ProfileProxyTarget(agent: agent, profile: profile) },
-                            resetIdentity: { change(.claude) { try await $0.resetDefaultClaudeIdentity() } },
+                            resetIdentity: profileNodeID == nil ? { change(.claude) { try await $0.resetDefaultClaudeIdentity() } } : nil,
                             authJSON: { importingAuth = $0 }, health: health, checkingHealth: checkingHealth,
                             checkHealth: { profile in
                                 let key = "\(agent.rawValue).\(profile.id)"
                                 guard checkingHealth.insert(key).inserted else { return }
                                 Task {
                                     defer { checkingHealth.remove(key) }
-                                    do { health[key] = try await model.client.checkProfileHealth(agent: agent.rawValue, id: profile.id); profileError[agent.rawValue] = nil }
+                                    do { health[key] = try await profileClient.checkProfileHealth(agent: agent.rawValue, id: profile.id); profileError[agent.rawValue] = nil }
                                     catch { profileError[agent.rawValue] = error.localizedDescription }
                                 }
                             },
@@ -215,7 +233,7 @@ struct AgentsView: View {
 
     /// One change to an agent's profiles, and what the service has afterwards (or why it did not take it).
     private func change(_ agent: AgentCLI, _ call: @escaping (DaemonClient) async throws -> [String: AgentProfiles]) {
-        let client = model.client
+        let client = profileClient
         Task {
             do { profiles = try await call(client); profileError[agent.rawValue] = nil }
             catch { profileError[agent.rawValue] = (error as? DaemonError)?.reason ?? error.localizedDescription }
@@ -242,6 +260,8 @@ private struct ProfileDialogs: ViewModifier {
 
 struct CodexAuthSheet: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
     let profile: AgentProfile
     let done: ([String: AgentProfiles]) -> Void
@@ -265,7 +285,7 @@ struct CodexAuthSheet: View {
                     busy = true
                     Task {
                         defer { busy = false }
-                        do { let result = try await model.client.setCodexAuth(id: profile.id, content: content); content = ""; done(result); dismiss() }
+                        do { let result = try await profileClient.setCodexAuth(id: profile.id, content: content); content = ""; done(result); dismiss() }
                         catch { problem = error.localizedDescription }
                     }
                 }.keyboardShortcut(.defaultAction).disabled(busy || content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -286,6 +306,8 @@ struct ProfileProxyTarget: Identifiable {
 /// traffic out is shown, or why it let nothing out (it is kept all the same: it may be down for now).
 struct ProfileProxySheet: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
     let agent: AgentCLI
     let profile: AgentProfile
@@ -338,7 +360,7 @@ struct ProfileProxySheet: View {
     /// The proxy set (nil: none) and checked. With a problem the sheet stays, saying it; without, the exit is shown and
     /// the sheet stays for it to be read (nil closes).
     private func apply(_ draft: BrowserProxyDraft?) {
-        let client = model.client, gate = model.gateCLI, agent = agent.rawValue, id = profile.id, current = profile.proxy
+        let client = profileClient, agent = agent.rawValue, id = profile.id, current = profile.proxy
         busy = true
         problem = nil
         Task {
@@ -346,7 +368,7 @@ struct ProfileProxySheet: View {
                 var request: BrowserProxyRequest?
                 if let draft, let site = BrowserIdentityText.proxySite(draft.server) {
                     var ciphertext: String?
-                    if !draft.password.isEmpty { ciphertext = try await gate.seal(GateSealRequest(label: "profile/proxy", sites: site, value: draft.password)) }
+                    if !draft.password.isEmpty { ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/proxy", sites: site, value: draft.password), on: profileNodeID) }
                     request = draft.request(ciphertext: ciphertext, current: current)
                 }
                 let reply = try await client.setProfileProxy(agent: agent, id: id, proxy: request)
@@ -365,6 +387,8 @@ struct ProfileProxySheet: View {
 /// is sent, kept by the service as a ciphertext, and put into the profile's own browser as claude.ai's sign-in cookie.
 struct ProfileSessionKeySheet: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
     let agent: AgentCLI
     let profile: AgentProfile
@@ -398,13 +422,13 @@ struct ProfileSessionKeySheet: View {
     /// The key sealed and kept (nil: forgotten). The sheet closes when the service has taken it; it stays, saying why,
     /// when it has not.
     private func apply(_ value: String?) {
-        let client = model.client, gate = model.gateCLI, agent = agent.rawValue, id = profile.id
+        let client = profileClient, agent = agent.rawValue, id = profile.id
         busy = true
         problem = nil
         Task {
             do {
                 var ciphertext: String?
-                if let value { ciphertext = try await gate.seal(GateSealRequest(label: "profile/session-key", sites: SessionKeyText.site, value: value)) }
+                if let value { ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/session-key", sites: SessionKeyText.site, value: value), on: profileNodeID) }
                 done(try await client.setProfileSessionKey(agent: agent, id: id, ciphertext: ciphertext))
                 key = ""
                 dismiss()
@@ -419,6 +443,8 @@ struct ProfileSessionKeySheet: View {
 /// is sent. Only the ways the service offers for this agent are shown.
 struct ProfileNewSheet: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
     let agent: AgentCLI
     let kinds: [String]
@@ -476,14 +502,14 @@ struct ProfileNewSheet: View {
     }
 
     private func create() {
-        let client = model.client, gate = model.gateCLI, agent = agent.rawValue, draft = draft, byKey = byKey, telemetry = telemetry
+        let client = profileClient, agent = agent.rawValue, draft = draft, byKey = byKey, telemetry = telemetry
         let name = draft.name.trimmingCharacters(in: .whitespaces)
         busy = true
         problem = nil
         Task {
             do {
                 if byKey, let site = draft.site(agent: agent) {
-                    let ciphertext = try await gate.seal(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey))
+                    let ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey), on: profileNodeID)
                     done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: telemetry))
                 } else {
                     done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry))
@@ -499,6 +525,8 @@ struct ProfileNewSheet: View {
 /// is never shown: left empty, the one it has is kept.
 struct ProfileKeySheet: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     @Environment(\.dismiss) private var dismiss
     let agent: AgentCLI
     let profile: AgentProfile
@@ -536,14 +564,14 @@ struct ProfileKeySheet: View {
     }
 
     private func save() {
-        let client = model.client, gate = model.gateCLI, agent = agent.rawValue, id = profile.id, draft = draft
+        let client = profileClient, agent = agent.rawValue, id = profile.id, draft = draft
         busy = true
         problem = nil
         Task {
             do {
                 var ciphertext: String?
                 if !draft.cleanKey.isEmpty, let site = draft.site(agent: agent) {
-                    ciphertext = try await gate.seal(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey))
+                    ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey), on: profileNodeID)
                 }
                 done(try await client.setProfileApi(agent: agent, id: id, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel))
                 dismiss()
@@ -600,6 +628,7 @@ enum ProfileSwatch {
 
 /// One agent's profiles: a row each, the current one marked; a new one, and one removed (not `Default`).
 struct ProfilesSection: View {
+    @Environment(\.profileNodeID) private var profileNodeID
     let agent: AgentCLI
     let profiles: AgentProfiles
     let error: String?
@@ -650,7 +679,7 @@ struct ProfilesSection: View {
                     Text(ProfileWords.who(profile) + (profile.telemetryOff ? " · Telemetry Off" : "")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
-                    Text(profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)
+                    Text(profile.proxy == nil && profileNodeID != nil ? "This Node" : profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)
                     if !profile.isDefault || agent == .claude || agent == .codex {
                         if agent == .codex, let authJSON {
                             Button("auth.json…") { authJSON(profile) }.controlSize(.small)
@@ -665,7 +694,7 @@ struct ProfilesSection: View {
                                 .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
                         }
                         Button("Proxy…") { proxy(profile) }.controlSize(.small)
-                        if profile.isDefault && agent == .claude {
+                        if profile.isDefault && agent == .claude, resetIdentity != nil {
                             Button("Reset Identity…") { resettingIdentity = true }.controlSize(.small)
                         } else if !profile.isDefault {
                             Button("Delete…") { remove(profile) }.controlSize(.small)
@@ -715,6 +744,8 @@ struct ProfilesSection: View {
 
 private struct AgentSection: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     let report: AgentReport
     let delete: (AgentInstall) -> Void
     let clean: () -> Void
@@ -899,6 +930,8 @@ private struct MissingRow: View {
 /// log of what it did.
 private struct JobProgress: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.profileNodeID) private var profileNodeID
+    private var profileClient: DaemonClient { model.client(on: profileNodeID) }
     let job: AgentJob
 
     var body: some View {

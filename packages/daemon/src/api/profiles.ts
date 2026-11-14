@@ -26,7 +26,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
 
   app.get("/profiles", (c) => c.json({ agents: store.all() }));
   app.put("/profiles/codex/:id/auth", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "auth.json is imported on the Mac" }, 403);
     const body = await parseBody(c, z.object({ content: z.string().min(2).max(131072) }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     const id = c.req.param("id");
@@ -37,7 +36,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   });
   app.get("/profiles/health", (c) => c.json({ health: deps.profileHealth?.current() ?? {} }));
   app.post("/profiles/:agent/:id/health", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "profile health is checked on the Mac" }, 403);
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     if (!deps.profileHealth) return c.json({ error: "health checks unavailable" }, 503);
@@ -62,7 +60,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   });
 
   app.post("/profiles", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "profiles are made on the Mac" }, 403);
     const body = await parseBody(c, z.object({ agent: Agent, name: z.string().min(1).max(80), kind: z.enum(["subscription", "api"]).default("subscription"), api: Api.optional(),
       /** false: Claude Code's telemetry off under it from the start (§3.7). */ telemetry: z.boolean().optional() }));
     if (!body.ok) return c.json({ error: body.error }, 400);
@@ -92,7 +89,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   // list and its connection test. The key is a ciphertext just sealed for the address, or the one a profile keeps;
   // nothing is kept. On this node only, as making and changing a profile is.
   app.post("/profiles/models", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "a profile's models are asked for on the node itself" }, 403);
     const body = await parseBody(c, z.object({ agent: Agent, baseUrl: z.string().max(300).nullable().optional(), key: z.string().max(4000).optional(), profile: z.string().min(1).max(40).optional() }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     if (!deps.apiKeys) return c.json({ error: "this service cannot keep an API key" }, 503);
@@ -110,7 +106,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   // the address; null keeps the one it has. Terminals already open keep what they started with, but for the key:
   // they ask for it each time they need it.
   app.put("/profiles/:agent/:id/api", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "a profile's key is set on the Mac" }, 403);
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const body = await parseBody(c, Api.extend({ key: z.string().max(4000).nullable().default(null) }));
@@ -157,7 +152,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   // that site's sign-in cookie; null forgets it. It is asked of the gate at once, and one that is not a session key
   // is refused.
   app.put("/profiles/:agent/:id/session-key", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "a profile's session key is set on the Mac" }, 403);
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const body = await parseBody(c, z.object({ key: z.string().max(4000).nullable() }));
@@ -173,7 +167,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
 
   // Claude Code's telemetry under a profile (§3.7): on or off for the terminals started under it from now on.
   app.put("/profiles/:agent/:id/telemetry", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "a profile's telemetry is set on the Mac" }, 403);
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const body = await parseBody(c, z.object({ on: z.boolean() }));
@@ -184,7 +177,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
 
   // A profile's colour (§3.2): the dot its terminals are marked with on every screen.
   app.put("/profiles/:agent/:id/color", async (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "a profile's colour is set on the Mac" }, 403);
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const body = await parseBody(c, z.object({ color: z.enum(PROFILE_COLORS) }));
@@ -206,7 +198,6 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   });
 
   app.delete("/profiles/:agent/:id", (c) => {
-    if (remoteCaller(c.env)) return c.json({ error: "profiles are removed on the Mac" }, 403);
     const agent = Agent.safeParse(c.req.param("agent"));
     if (!agent.success) return c.json({ error: "no such agent" }, 404);
     const id = c.req.param("id");

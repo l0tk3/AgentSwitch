@@ -99,9 +99,18 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["POST", "/terminals/:id/daybreak"],
   ["POST", "/terminals/:id/choices"],
   ["GET", "/profiles"],
+  ["GET", "/profiles/health"],
+  ["POST", "/profiles"],
+  ["POST", "/profiles/models"],
+  ["DELETE", "/profiles/:agent/:id"],
+  ["PUT", "/profiles/:agent/:id/api"],
+  ["PUT", "/profiles/:agent/:id/session-key"],
+  ["PUT", "/profiles/:agent/:id/telemetry"],
+  ["PUT", "/profiles/:agent/:id/color"],
+  ["PUT", "/profiles/codex/:id/auth"],
+  ["POST", "/profiles/:agent/:id/health"],
   ["POST", "/profiles/current"],
-  // A profile's own proxy, set and asked where it lets traffic out (docs/profiles-v0.md §4.2). Making a profile,
-  // removing one, signing in and its colour stay on the Mac.
+  // Profile management is available to authenticated paired devices; identity reset stays local.
   ["PUT", "/profiles/:agent/:id/proxy"],
   ["POST", "/profiles/:agent/:id/check"],
   ["POST", "/terminals/:id/mode"],
@@ -165,6 +174,10 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/approvals/policy"],
   ["GET", "/settings/workdir"],
   ["GET", "/update"],
+  ["GET", "/update/release"],
+  ["POST", "/update/release/check"],
+  ["POST", "/update/release/prepare"],
+  ["POST", "/update/release/install"],
   ["POST", "/update/install"],
   // What is at work and what waits for the user here, as this node's own Live Activity counts it: another node's
   // screens show it beside their own (docs/mesh-v0.md §5).

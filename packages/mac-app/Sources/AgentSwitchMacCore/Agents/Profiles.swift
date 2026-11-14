@@ -26,6 +26,9 @@ public struct ProfileHealth: Decodable, Sendable {
 }
 
 extension DaemonClient {
+    public func profileGateKey() async throws -> PairingPayload.Gate {
+        try decode(PairingPayload.Gate.self, try await call("GET", "/gate/pubkey"))
+    }
     public func setCodexAuth(id: String, content: String) async throws -> [String: AgentProfiles] {
         try decode(ProfilesReply.self, try await call("PUT", "/profiles/codex/\(Self.segment(id))/auth", body: try JSONEncoder().encode(["content": content]))).agents
     }

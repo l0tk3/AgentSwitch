@@ -3,6 +3,37 @@ import XCTest
 
 /// docs/mesh-v0.md §5.2: a client whose routes are another node's, and the rows of Settings › Nodes.
 final class NodesTests: XCTestCase {
+    func testProfileSecretsUseTheTargetsPublicKeyWithoutPuttingTheSecretInArguments() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("node-gate-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let executable = dir.appendingPathComponent("gate")
+        let script = """
+        #!/bin/sh
+        test "$#" = 4 && test "$1" = enc && test "$2" = --batch && test "$3" = --pubkey && test "$4" = remote-public-key || exit 2
+        input=$(cat)
+        case "$input" in *test-secret*) printf '[{"token":"enc:v1:test"}]';; *) exit 3;; esac
+        """
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let cli = GateCLI(executable: executable, environment: ["PATH": "/usr/bin:/bin"])
+        let token = try await cli.seal(GateSealRequest(label: "profile/test", sites: "example.com", value: "test-secret"), publicKey: "remote-public-key")
+        XCTAssertEqual(token, "enc:v1:test")
+    }
+
+    func testProfileAndUpdateRequestsTargetTheSelectedNode() async throws {
+        let transport = StubTransport { _ in (200, "{}") }
+        let client = DaemonClient(port: 1, transport: transport).onNode("remote123")
+        _ = try? await client.profiles()
+        _ = try? await client.profileGateKey()
+        _ = try? await client.setCodexAuth(id: "default", content: "{}")
+        _ = try? await client.nodeReleaseUpdate("prepare", version: "0.3.0")
+        _ = try? await client.nodeReleaseUpdate("install", version: "0.3.0")
+        let requests = transport.requests
+        XCTAssertEqual(requests.map { $0.url!.path }, ["/nodes/remote123/profiles", "/nodes/remote123/gate/pubkey", "/nodes/remote123/profiles/codex/default/auth", "/nodes/remote123/update/release/prepare", "/nodes/remote123/update/release/install"])
+        XCTAssertEqual(requests.map { $0.httpMethod }, ["GET", "GET", "PUT", "POST", "POST"])
+    }
+
     func testAClientOnANodeAsksEveryRouteThroughThisMacsService() async throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("nodes-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: home.appendingPathComponent("nodes"), withIntermediateDirectories: true)

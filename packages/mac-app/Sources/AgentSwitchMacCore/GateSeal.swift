@@ -69,12 +69,13 @@ public struct GateSealRequest: Sendable, Equatable {
 
 extension GateCLI {
     /// Seals `request` for the gate's current keypair. Exit 1 is a per-entry refusal, whose reason is in the output.
-    public func seal(_ request: GateSealRequest) async throws -> String {
+    public func seal(_ request: GateSealRequest, publicKey: String? = nil) async throws -> String {
         if let problem = request.problem { throw CommandError(problem) }
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw CommandError("未找到内置 secret-gate：\(executable.path)")
         }
-        let result = try await ProcessRunner.run(executable, ["enc", "--batch"], environment: environment,
+        let args = ["enc", "--batch"] + (publicKey.map { ["--pubkey", $0] } ?? [])
+        let result = try await ProcessRunner.run(executable, args, environment: environment,
                                                  stdin: try request.batchInput(), timeout: GateCLI.timeout)
         guard !result.timedOut, result.status == 0 || result.status == 1 else {
             let text = result.stderrText.trimmingCharacters(in: .whitespacesAndNewlines)

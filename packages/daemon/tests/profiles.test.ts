@@ -98,12 +98,12 @@ describe("the profile store", () => {
     expect(() => store.setCodexAuth("../../outside", auth)).toThrow();
   });
 
-  it("only accepts auth.json imports from the local Mac", async () => {
+  it("accepts auth.json imports locally and from paired nodes", async () => {
     const { store } = world();
     const app = new Hono<any>();
     mountProfiles(app, { profiles: store } as ApiDeps);
     const send = (remote: boolean) => app.request("/profiles/codex/default/auth", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: JSON.stringify({ OPENAI_API_KEY: "secret-value" }) }) }, remote ? markRemote({}, { deviceId: "phone" }) : {});
-    expect((await send(true)).status).toBe(403);
+    expect((await send(true)).status).toBe(200);
     const reply = await send(false);
     expect(reply.status).toBe(200);
     expect(await reply.text()).not.toContain("secret-value");
@@ -376,7 +376,7 @@ describe("profiles over HTTP", () => {
     expect((await call("POST", `/profiles/claude-code/${id}/check`)).status).toBe(404);
   });
 
-  it("lists, makes, makes current and removes; a paired device may look and switch, not make or remove", async () => {
+  it("lists, makes, makes current and removes for paired devices too", async () => {
     const { call } = served();
     expect((await call("GET", "/profiles")).json.agents["claude-code"].profiles).toHaveLength(1);
     const made = await call("POST", "/profiles", { agent: "claude-code", name: "Work" });
@@ -385,12 +385,12 @@ describe("profiles over HTTP", () => {
     expect((await call("POST", "/profiles", { agent: "claude-code", name: "Work" })).status).toBe(409);
     expect((await call("POST", "/profiles", { agent: "opencode", name: "Team" })).status).toBe(400);
     const phone = markRemote({}, { deviceId: "phone" });
-    expect((await call("POST", "/profiles", { agent: "claude-code", name: "Other" }, phone)).status).toBe(403);
-    expect((await call("DELETE", `/profiles/claude-code/${id}`, undefined, phone)).status).toBe(403);
+    expect((await call("POST", "/profiles", { agent: "claude-code", name: "Other" }, phone)).status).toBe(201);
+    expect((await call("DELETE", "/profiles/claude-code/missing", undefined, phone)).status).toBe(404);
     const switched = await call("POST", "/profiles/current", { agent: "claude-code", id }, phone);
     expect(switched.json.agents["claude-code"].current).toBe(id);
     expect((await call("POST", "/profiles/current", { agent: "claude-code", id: "nope12" })).status).toBe(404);
-    expect((await call("DELETE", `/profiles/claude-code/${id}`)).json.agents["claude-code"]).toMatchObject({ current: "default" });
+    expect((await call("DELETE", `/profiles/claude-code/${id}`, undefined, phone)).json.agents["claude-code"]).toMatchObject({ current: "default" });
     expect((await call("DELETE", `/profiles/claude-code/${id}`)).status).toBe(404);
   });
 });
@@ -657,7 +657,7 @@ esac
     expect((await call("PUT", "/profiles/claude-code/default/telemetry", { on: false })).status).toBe(404);
     expect((await call("PUT", `/profiles/claude-code/${loud.id}/telemetry`, { on: "no" })).status).toBe(400);
     expect((await call("POST", "/profiles", { agent: "codex", name: "K", kind: "api", api: { key: "enc:v1:x" }, telemetry: false })).status).toBe(400);
-    expect((await call("PUT", `/profiles/claude-code/${loud.id}/telemetry`, { on: true }, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await call("PUT", `/profiles/claude-code/${loud.id}/telemetry`, { on: true }, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
   });
 
   it("starts Claude Code with DISABLE_TELEMETRY under a profile that has it off: in its environment and its settings", () => {
@@ -817,7 +817,7 @@ describe("a profile that pays by a key (§3.6)", () => {
     expect((await post({ agent: "claude-code", key: SEALED, baseUrl: "https://relay.example" })).status).toBe(400);
     expect((await post({ agent: "claude-code", baseUrl: "ftp://x", key: SEALED })).status).toBe(400);
     expect((await post({ agent: "claude-code" })).status).toBe(400);
-    expect((await post({ agent: "claude-code", key: SEALED }, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await post({ agent: "claude-code", key: SEALED }, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
     expect(JSON.stringify(store.all())).not.toContain("m1");
   });
 

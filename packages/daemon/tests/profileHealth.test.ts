@@ -45,11 +45,11 @@ describe("per-profile health", () => {
     expect(seen).toEqual([["claude-code", "sub123"]]);
     expect(() => health.check("claude-code", "missing")).toThrow("no such profile");
   });
-  it("checks locally and refuses remote requests", async () => {
+  it("checks locally and for authenticated paired devices", async () => {
     const { health, store } = setup();
     const app = new Hono();
     mountProfiles(app, { profiles: store, profileHealth: health } as ApiDeps);
-    expect((await app.request("/profiles/claude-code/sub123/health", { method: "POST" }, markRemote({}, { deviceId: "phone" }))).status).toBe(403);
+    expect((await app.request("/profiles/claude-code/sub123/health", { method: "POST" }, markRemote({}, { deviceId: "phone" }))).status).toBe(200);
     const response = await app.request("/profiles/claude-code/sub123/health", { method: "POST" });
     expect(response.status).toBe(200);
     expect((await response.json()).windows).toHaveLength(1);

@@ -1,5 +1,7 @@
 # profiles-v0：配置——每个 agent 的多套登录，各带自己的出口与浏览器
 
+2026-11-14：Profiles 设置页增加 Node 选择，管理本机或已配对节点的 Profile、API Key、Session Key、代理、Codex auth.json、颜色和遥测，并在目标节点检查健康。凭据以目标节点 /gate/pubkey 返回的公钥加密，不使用本机公钥；auth.json 通过已配对的 TLS 通道写入目标目录。切换节点重新创建页面状态，错误不会回退到本机。身份重置仍只允许本机。旧节点需先更新 daemon 才支持新增管理接口。
+
 2026-11-14：Codex Default 同样支持独立代理与浏览器。每个 Codex Profile 可粘贴导入 auth.json；Default 写入 ~/.codex/auth.json，其他配置写入自己的 home，原子替换且权限为 0600。导入取代该配置原有 API Key 设置，后续终端强制使用文件凭据；不修改共享 config.toml。仅本机可导入，有该配置的终端运行时拒绝替换。构建新版本后必须等用户明确允许才能安装、切换。
 
 2026-11-14：设置拆分为 Agents（CLI 安装、版本、更新）和 Profiles（账号、代理、密钥、身份重置）。Profiles 每行提供 Check Health，结果保存在服务内存中并标明检查时间。订阅配置使用自己的登录目录和代理查询用量；Claude 使用现有轻量 rate-limit 探测，可能消耗少量额度，Codex 查询 account/rateLimits/read。API 配置经自己的代理请求模型列表，无生成请求；缺少模型列表标为 Unknown，不能据此认定健康。检查不自动轮询；同一配置并发请求合并，错误输出不包含凭据或供应商响应正文。

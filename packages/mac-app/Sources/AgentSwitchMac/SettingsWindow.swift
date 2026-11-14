@@ -308,7 +308,7 @@ struct SettingsView: View {
         case .permissions: PermissionsView()
         case .keys: KeysView()
         case .agents: AgentsView()
-        case .profiles: AgentsView(profilesOnly: true)
+        case .profiles: ProfilesSettingsView()
         case .environment: EnvironmentView()
         case .general: GeneralView()
         case .context: ContextSettingsPage()

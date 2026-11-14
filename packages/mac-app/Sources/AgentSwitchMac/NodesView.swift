@@ -113,6 +113,7 @@ struct NodesView: View {
 ///         `This Mac Uses It                                    (on)`
 ///         `It Uses This Mac                                    (on)`
 private struct NodeRowView: View {
+    @State private var updating = false
     let row: NodeRow
     let busy: Bool
     /// `Paired Nodes May Read Files`: off, the scope stays as it is and cannot be changed.
@@ -137,7 +138,14 @@ private struct NodeRowView: View {
                 direction("This Mac Uses It", on: row.uses, set: setUses)
             }
             direction("It Uses This Mac", on: row.usedBy, set: setUsedBy)
-            if let node = row.node { SSHHostField(node: node.id) }
+            if let node = row.node {
+                SSHHostField(node: node.id)
+                HStack {
+                    Spacer()
+                    Button("Update Node…") { updating = true }.disabled(node.state != .online)
+                }
+                .sheet(isPresented: $updating) { NodeUpdateSheet(node: node) }
+            }
             // What of this Mac's files it may read (docs/files-v0.md §7.5): a row only while it uses this Mac.
             if let device = row.device, device.files != nil {
                 FilesScopeRows(scope: device.files ?? .home, busy: busy, set: setScope)

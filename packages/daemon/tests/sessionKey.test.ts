@@ -122,7 +122,7 @@ describe("a profile's session key", () => {
     expect(driver.browser.cookies.size).toBe(0);
   });
 
-  it("is set over HTTP on the Mac only, and never sent back", async () => {
+  it("is set over HTTP locally or by a paired device, and never sent back", async () => {
     const { store, profile, keys, stored } = world();
     const app = new Hono();
     mountProfiles(app, { profiles: store, sessionKeys: keys } as unknown as ApiDeps);
@@ -133,7 +133,7 @@ describe("a profile's session key", () => {
     };
     const at = `/profiles/claude-code/${profile.id}/session-key`;
     const remote = markRemote({}, { deviceId: "phone" });
-    expect((await call("PUT", at, { key: SEALED }, remote)).status).toBe(403);
+    expect((await call("PUT", at, { key: SEALED }, remote)).status).toBe(200);
     expect((await call("PUT", at, { key: KEY })).status).toBe(400);
     expect((await call("PUT", at, { key: SEALED_API })).json.error).toMatch(/sk-ant-sid/);
     expect((await call("PUT", "/profiles/claude-code/nosuchprofile/session-key", { key: SEALED })).status).toBe(404);
