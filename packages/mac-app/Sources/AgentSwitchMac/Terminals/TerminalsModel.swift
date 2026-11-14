@@ -2,6 +2,24 @@ import AgentSwitchMacCore
 import AppKit
 import SwiftUI
 
+/// One preference for every window and node. Weak members do not keep closed windows alive.
+@MainActor
+private enum GlobalTerminalView {
+    static let key = "terminals.globalSimple"
+    static let members = NSHashTable<TerminalsModel>.weakObjects()
+    static var simple: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: key) == nil {
+            defaults.set(!(defaults.stringArray(forKey: "terminals.simple") ?? []).isEmpty, forKey: key)
+        }
+        return defaults.bool(forKey: key)
+    }
+    static func set(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: key)
+        for model in members.allObjects { model.applySimple(on) }
+    }
+}
+
 /// A row of the list as something to open: a terminal, or an earlier session to go on with.
 enum TerminalRowItem: Equatable {
     case terminal(String)
@@ -66,12 +84,10 @@ final class TerminalsModel {
     @ObservationIgnored var area = CGSize(width: 900, height: 600)
     /// A line between panes is being dragged: each pane says its grid.
     var sizing = false
-    /// The terminals shown as their session's record here (docs/simple-view-v0.md §1). The Mac opens a terminal as the
-    /// terminal; one switched to the record stays so until switched back, or until it is gone.
-    private(set) var simpleViews: Set<String> { didSet { defaults?.set(simpleViews.sorted(), forKey: Keys.simple) } }
-    /// Panes that wait as the simple view: split off a pane that showed a record, and nothing in them yet. What lands
-    /// in one is shown as its record (`SimplePanes`).
-    var simplePanes: Set<Int> { didSet { defaults?.set(simplePanes.sorted(), forKey: Keys.simplePanes) } }
+    /// Mirrored from the app-wide preference; previews without defaults remain isolated.
+    private(set) var simpleMode = false
+    /// Empty panes follow the same global appearance as newly opened sessions.
+    var simplePanes: Set<Int> { simpleMode ? Set(paneList.filter { $0.term == nil }.map(\.id)) : [] }
 
     // MARK: the list
     var sideClosed: Bool { didSet { defaults?.set(sideClosed, forKey: Keys.sideClosed) } }
@@ -209,8 +225,7 @@ final class TerminalsModel {
         pickedAgent = defaults?.string(forKey: Keys.agent) ?? "claude-code"
         pickedModels = defaults?.dictionary(forKey: Keys.models) as? [String: String] ?? [:]
         pickedEfforts = defaults?.dictionary(forKey: Keys.efforts) as? [String: String] ?? [:]
-        simpleViews = Set(defaults?.stringArray(forKey: Keys.simple) ?? [])
-        simplePanes = Set((defaults?.array(forKey: Keys.simplePanes) as? [Int]) ?? [])
+        simpleMode = defaults == nil ? false : GlobalTerminalView.simple
         pickedMode = defaults?.string(forKey: Keys.mode) ?? ""
         folderText = defaults?.string(forKey: Keys.folder) ?? ""
         if let root = TerminalPanes.restore(defaults?.data(forKey: Keys.panes)) {
@@ -218,6 +233,7 @@ final class TerminalsModel {
             let focus = defaults?.integer(forKey: Keys.focus) ?? 0
             focusPane = TerminalPanes.pane(root, focus) != nil ? focus : TerminalPanes.panes(of: root)[0].id
         }
+        if defaults != nil { GlobalTerminalView.members.add(self) }
     }
 
     // MARK: what is on screen
@@ -313,9 +329,6 @@ final class TerminalsModel {
             }
         }
         if terminals != list.terminals { terminals = list.terminals }
-        // A terminal that is gone leaves nothing behind.
-        let gone = simpleViews.subtracting(list.terminals.map(\.id))
-        if settled, !gone.isEmpty { simpleViews.subtract(gone) }
         if agents != list.agents { agents = list.agents }
         if models != list.models { models = list.models }
         if modelDefaults != list.defaults { modelDefaults = list.defaults }
@@ -388,16 +401,10 @@ final class TerminalsModel {
     /// them their hold on the size).
     func syncPanes() {
         let all = paneList
-        // A terminal that landed in a pane waiting as the simple view is shown as its record.
-        if !simplePanes.isEmpty {
-            let settled = SimplePanes.settle(waiting: simplePanes, panes: all.map { pane in (pane.id, terminal(pane.term).flatMap { here($0.id) ? $0.id : nil }) })
-            if !settled.terminals.isSubset(of: simpleViews) { simpleViews.formUnion(settled.terminals) }
-            if settled.waiting != simplePanes { simplePanes = settled.waiting }
-        }
         for pane in all {
             let state = panes[pane.id] ?? makePane(pane.id)
             let shown = terminal(pane.term).flatMap { here($0.id) ? $0 : nil }
-            state.show(shown, git: shown.flatMap { gits[$0.workdir] }, simple: shown.map { simpleViews.contains($0.id) } ?? false)
+            state.show(shown, git: shown.flatMap { gits[$0.workdir] }, simple: simpleMode)
         }
         for (id, state) in panes where !all.contains(where: { $0.id == id }) {
             state.stop()
@@ -511,17 +518,20 @@ final class TerminalsModel {
     /// The window takes that look with the pane in focus.
     var focusedLight: Bool { isLight(pane: focusPane) }
 
-    /// The terminal of `pane` (the one in focus) as its record, or as the terminal again.
+    /// Switch every window; only the originating pane receives keyboard focus.
     func setSimple(_ on: Bool, pane: Int? = nil) {
-        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term, terminal(id) != nil, simpleViews.contains(id) != on else { return }
-        if on { simpleViews.insert(id) } else { simpleViews.remove(id) }
-        syncPanes()
+        if defaults == nil { applySimple(on) } else { GlobalTerminalView.set(on) }
         onFocusScreen(pane ?? focusPane)
     }
 
+    fileprivate func applySimple(_ on: Bool) {
+        guard simpleMode != on else { return }
+        simpleMode = on
+        syncPanes()
+    }
+
     func toggleSimple(pane: Int? = nil) {
-        guard let id = TerminalPanes.pane(layout, pane ?? focusPane)?.term else { return }
-        setSimple(!simpleViews.contains(id), pane: pane)
+        setSimple(!simpleMode, pane: pane)
     }
 
     /// The model picked for a new terminal of the agent picked, when the agent still lists it.
