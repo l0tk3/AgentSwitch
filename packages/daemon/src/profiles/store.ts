@@ -185,6 +185,7 @@ export class ProfileStore {
   /** The folder the agent is started with for `id`; null for `Default` (the Mac's own), for one that has none (Codex's
    *  that pay by a key, which run in the Mac's own) and for one that is not there. */
   homeOf(agent: ProfileAgent, id: string): string | null {
+    if (agent === "codex" && id === DEFAULT_PROFILE && existsSync(join(this.dir, "codex", "default", "auth-file"))) return join(this.userHome, ".codex");
     if (id === DEFAULT_PROFILE || !/^[a-z0-9]{6,16}$/.test(id)) return null;
     const home = join(this.dir, agent, id, "home");
     return this.read().agents?.[agent]?.profiles?.some((p) => p.id === id) && existsSync(home) ? home : null;
@@ -193,6 +194,7 @@ export class ProfileStore {
   /** Before an agent starts under `id`: what of the Mac's own has come since the profile was made (an `AGENTS.md`, a
    *  `config.toml`) is linked in too, unless the profile has one of its own by now. Codex's alone. */
   keepLinked(agent: ProfileAgent, id: string): void {
+    if (id === DEFAULT_PROFILE) return;
     const home = this.homeOf(agent, id);
     if (home && agent === "codex") this.codexHome(home);
   }
@@ -284,12 +286,36 @@ export class ProfileStore {
 
   private ensureDefault(agent: ProfileAgent, id: string): void {
     if (id !== DEFAULT_PROFILE) return;
-    if (agent !== "claude-code") throw new ProfileError("invalid", "only Claude Code Default supports this setting");
+    if (agent !== "claude-code" && agent !== "codex") throw new ProfileError("invalid", "this Default profile does not support this setting");
     const file = this.read(), stored = file.agents?.[agent] ?? {};
     if (stored.profiles?.some((p) => p.id === id)) return;
     this.write({ ...file, agents: { ...file.agents, [agent]: { ...stored, profiles: [
       ...(stored.profiles ?? []), { id, name: "Default", kind: "subscription", createdAt: 0 },
     ] } } });
+  }
+
+  setCodexAuth(id: string, source: string): void {
+    if (!this.nameOf("codex", id)) throw new ProfileError("not_found", "no such profile");
+    let auth: any;
+    try { auth = JSON.parse(source); } catch { throw new ProfileError("invalid", "auth.json 不是有效的 JSON。"); }
+    const token = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+    if (!auth || typeof auth !== "object" || Array.isArray(auth) || !(token(auth.OPENAI_API_KEY) ||
+      (token(auth.tokens?.access_token) && token(auth.tokens?.refresh_token) && token(auth.tokens?.id_token))))
+      throw new ProfileError("invalid", "auth.json 需要 OPENAI_API_KEY 或完整的登录 tokens。");
+    const home = id === DEFAULT_PROFILE ? join(this.userHome, ".codex") : join(this.dir, "codex", id, "home");
+    if (id === DEFAULT_PROFILE) mkdirSync(home, { recursive: true }); else this.codexHome(home);
+    const path = join(home, "auth.json"), tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify(auth, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+      renameSync(tmp, path);
+    } finally { rmSync(tmp, { force: true }); }
+    this.ensureDefault("codex", id);
+    this.change("codex", id, (p) => { const { api: _api, ...rest } = p; return { ...rest, kind: "subscription" }; });
+    if (id === DEFAULT_PROFILE) {
+      const dir = join(this.dir, "codex", "default");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "auth-file"), "1\n", { mode: 0o600 });
+    }
   }
 
   resetDefaultIdentity(): void {

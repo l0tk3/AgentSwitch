@@ -430,7 +430,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
           zone: () => { const p = profileOfKey(key); return p ? profiles.all()[p.agent].profiles.find((x) => x.id === p.id)?.exit?.timezone ?? null : null; },
           // Its sign-in to claude.ai, when the profile keeps a session key (docs/profiles-v0.md §3.4).
           launched: async () => { const p = profileOfKey(key); if (p) await sessionKeys.launched(p.agent, p.id); } } }), exits,
-        (key) => { const p = profileOfKey(key); return p && ((p.agent === "claude-code" && p.id === DEFAULT_PROFILE) || profiles.homeOf(p.agent, p.id)) ? { proxy: profiles.proxyOf(p.agent, p.id) } : null; })
+        (key) => { const p = profileOfKey(key); return p && ((["claude-code", "codex"].includes(p.agent) && p.id === DEFAULT_PROFILE) || profiles.homeOf(p.agent, p.id)) ? { proxy: profiles.proxyOf(p.agent, p.id) } : null; })
     : undefined;
   // An address asked for its models with a profile's key is asked the way the profile's agent would send it: through
   // the forwarder of its proxy when it has one (docs/profiles-v0.md §4), straight out when it has none.

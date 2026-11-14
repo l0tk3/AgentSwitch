@@ -79,6 +79,36 @@ function world() {
 }
 
 describe("the profile store", () => {
+  it("keeps Codex Default proxy and imported credentials separate from another profile", () => {
+    const { store, userHome } = world();
+    store.setProxy("codex", "default", { server: "http://127.0.0.1:8080" });
+    expect(store.proxyOf("codex", "default")?.server).toBe("http://127.0.0.1:8080");
+    const own = store.create("codex", "second", "subscription");
+    const auth = JSON.stringify({ tokens: { access_token: "access", refresh_token: "refresh", id_token: "identity" } });
+    store.setCodexAuth("default", auth);
+    store.setCodexAuth(own.id, JSON.stringify({ OPENAI_API_KEY: "own-key" }));
+    expect(store.homeOf("codex", "default")).toBe(join(userHome, ".codex"));
+    expect(JSON.parse(readFileSync(join(userHome, ".codex", "auth.json"), "utf8"))).toEqual(JSON.parse(auth));
+    const file = join(store.homeOf("codex", own.id)!, "auth.json");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ OPENAI_API_KEY: "own-key" });
+    expect(lstatSync(file).mode & 0o777).toBe(0o600);
+    expect(store.proxyOf("codex", own.id)).toBeNull();
+    expect(() => store.setCodexAuth("default", "{}" )).toThrow();
+    expect(readFileSync(join(userHome, ".codex", "auth.json"), "utf8")).toContain("refresh");
+    expect(() => store.setCodexAuth("../../outside", auth)).toThrow();
+  });
+
+  it("only accepts auth.json imports from the local Mac", async () => {
+    const { store } = world();
+    const app = new Hono<any>();
+    mountProfiles(app, { profiles: store } as ApiDeps);
+    const send = (remote: boolean) => app.request("/profiles/codex/default/auth", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: JSON.stringify({ OPENAI_API_KEY: "secret-value" }) }) }, remote ? markRemote({}, { deviceId: "phone" }) : {});
+    expect((await send(true)).status).toBe(403);
+    const reply = await send(false);
+    expect(reply.status).toBe(200);
+    expect(await reply.text()).not.toContain("secret-value");
+  });
+
   it("has Default for every agent, the Mac's own; a new Claude Code profile is a folder with links and no account", () => {
     const { userHome, home, store } = world();
     expect(store.all()["claude-code"]).toEqual({ current: DEFAULT_PROFILE, creatable: true, kinds: ["subscription", "api"], profiles: [{ id: "default", name: "Default", kind: "subscription", createdAt: 0, account: "me@example.com" }] });

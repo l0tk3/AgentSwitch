@@ -20,6 +20,7 @@ struct AgentsView: View {
     @State private var removing: (agent: AgentCLI, profile: AgentProfile)?
     /// The profile whose own proxy is being set (docs/profiles-v0.md §4).
     @State private var proxying: ProfileProxyTarget?
+    @State private var importingAuth: AgentProfile?
     @State private var keying: ProfileProxyTarget?
     @State private var paying: ProfileProxyTarget?
     /// The install asked to be deleted, until answered.
@@ -122,6 +123,9 @@ struct AgentsView: View {
         .sheet(item: $keying) { target in
             ProfileSessionKeySheet(agent: target.agent, profile: target.profile) { profiles = $0 }
         }
+        .sheet(item: $importingAuth) { profile in
+            CodexAuthSheet(profile: profile) { profiles = $0 }
+        }
         .sheet(item: $proxying) { target in
             ProfileProxySheet(agent: target.agent, profile: target.profile) { agents in profiles = agents }
         }
@@ -191,7 +195,7 @@ struct AgentsView: View {
                             sessionKey: { profile in keying = ProfileProxyTarget(agent: agent, profile: profile) },
                             apiKey: { profile in paying = ProfileProxyTarget(agent: agent, profile: profile) },
                             resetIdentity: { change(.claude) { try await $0.resetDefaultClaudeIdentity() } },
-                            health: health, checkingHealth: checkingHealth,
+                            authJSON: { importingAuth = $0 }, health: health, checkingHealth: checkingHealth,
                             checkHealth: { profile in
                                 let key = "\(agent.rawValue).\(profile.id)"
                                 guard checkingHealth.insert(key).inserted else { return }
@@ -233,6 +237,40 @@ private struct ProfileDialogs: ViewModifier {
             } message: {
                 Text("它的登录（或保存的 API key）和它自己的目录会被删除；会话记录是共用的，会留着。")
             }
+    }
+}
+
+struct CodexAuthSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let profile: AgentProfile
+    let done: ([String: AgentProfiles]) -> Void
+    @State private var content = ""
+    @State private var problem: String?
+    @State private var busy = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("auth.json · \(profile.name)").font(.headline)
+            Text(profile.isDefault ? "替换 ~/.codex/auth.json。新终端将使用文件中的登录信息。" : "替换这个 Profile 独立目录里的 auth.json。导入后使用文件中的登录信息，替代原有 API Key 配置。")
+                .font(.callout).foregroundStyle(.secondary)
+            TextEditor(text: $content).font(.system(.body, design: .monospaced))
+                .frame(height: 230).border(Color.secondary.opacity(0.3))
+                .accessibilityLabel("auth.json content")
+            if let problem { Text(problem).foregroundStyle(.red).font(.callout) }
+            HStack {
+                Button("Cancel") { content = ""; dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                Spacer()
+                Button(busy ? "Saving…" : "Save") {
+                    busy = true
+                    Task {
+                        defer { busy = false }
+                        do { let result = try await model.client.setCodexAuth(id: profile.id, content: content); content = ""; done(result); dismiss() }
+                        catch { problem = error.localizedDescription }
+                    }
+                }.keyboardShortcut(.defaultAction).disabled(busy || content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(20).frame(width: 580)
     }
 }
 
@@ -571,6 +609,7 @@ struct ProfilesSection: View {
     var sessionKey: ((AgentProfile) -> Void)? = nil
     var apiKey: ((AgentProfile) -> Void)? = nil
     var resetIdentity: (() -> Void)? = nil
+    var authJSON: ((AgentProfile) -> Void)? = nil
     var health: [String: ProfileHealth] = [:]
     var checkingHealth: Set<String> = []
     var checkHealth: ((AgentProfile) -> Void)? = nil
@@ -612,7 +651,10 @@ struct ProfilesSection: View {
                     Spacer()
                     // Where what runs under it leaves from: this Mac, or where its own proxy lets traffic out.
                     Text(profile.way).font(.callout).monospacedDigit().foregroundStyle(profile.proxy == nil ? .tertiary : .secondary).lineLimit(1)
-                    if !profile.isDefault || agent == .claude {
+                    if !profile.isDefault || agent == .claude || agent == .codex {
+                        if agent == .codex, let authJSON {
+                            Button("auth.json…") { authJSON(profile) }.controlSize(.small)
+                        }
                         // Claude Code's profiles only: the key signs its own browser in to claude.ai (§3.4).
                         if profile.paysByKey, let apiKey {
                             Button("API Key…") { apiKey(profile) }.controlSize(.small)
@@ -623,9 +665,9 @@ struct ProfilesSection: View {
                                 .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
                         }
                         Button("Proxy…") { proxy(profile) }.controlSize(.small)
-                        if profile.isDefault {
+                        if profile.isDefault && agent == .claude {
                             Button("Reset Identity…") { resettingIdentity = true }.controlSize(.small)
-                        } else {
+                        } else if !profile.isDefault {
                             Button("Delete…") { remove(profile) }.controlSize(.small)
                         }
                     }

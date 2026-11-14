@@ -26,6 +26,9 @@ public struct ProfileHealth: Decodable, Sendable {
 }
 
 extension DaemonClient {
+    public func setCodexAuth(id: String, content: String) async throws -> [String: AgentProfiles] {
+        try decode(ProfilesReply.self, try await call("PUT", "/profiles/codex/\(Self.segment(id))/auth", body: try JSONEncoder().encode(["content": content]))).agents
+    }
     public func profileHealthStates() async throws -> [String: ProfileHealth] {
         struct Reply: Decodable { let health: [String: ProfileHealth] }
         return try decode(Reply.self, try await call("GET", "/profiles/health")).health

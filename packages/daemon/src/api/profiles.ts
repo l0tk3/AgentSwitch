@@ -3,6 +3,7 @@
  *  as from the Mac) and that proxy's exit checked — from a paired device too. */
 
 import type { Hono } from "hono";
+import { DEFAULT_PROFILE } from "../profiles/store.js";
 import { z } from "zod";
 import { checkedProxy, ExitError, ExitPool } from "../browser/exits.js";
 import { remoteCaller } from "../core/caller.js";
@@ -24,6 +25,16 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   if (!store) return;
 
   app.get("/profiles", (c) => c.json({ agents: store.all() }));
+  app.put("/profiles/codex/:id/auth", async (c) => {
+    if (remoteCaller(c.env)) return c.json({ error: "auth.json is imported on the Mac" }, 403);
+    const body = await parseBody(c, z.object({ content: z.string().min(2).max(131072) }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    const id = c.req.param("id");
+    if (deps.terminals?.host.list().some((t) => t.harness === "codex" && (t.profile?.id ?? DEFAULT_PROFILE) === id && t.status !== "exited"))
+      return c.json({ error: "请先结束使用这个 Profile 的 Codex 终端，再替换登录信息。" }, 409);
+    try { store.setCodexAuth(id, body.data.content); return c.json({ agents: store.all() }); }
+    catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+  });
   app.get("/profiles/health", (c) => c.json({ health: deps.profileHealth?.current() ?? {} }));
   app.post("/profiles/:agent/:id/health", async (c) => {
     if (remoteCaller(c.env)) return c.json({ error: "profile health is checked on the Mac" }, 403);

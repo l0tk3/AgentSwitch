@@ -417,7 +417,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const keyed = provider === CODEX_KEY_PROVIDER && !noted ? (deps.profiles?.all().codex.profiles ?? []).filter((p) => p.kind === "api") : [];
     const recorded = resumed ? noted ?? (keyed.length === 1 ? keyed[0]!.id : DEFAULT_PROFILE) : null;
     const wanted = body.data.profile ?? recorded ?? deps.profiles?.current(body.data.harness) ?? DEFAULT_PROFILE;
-    const profileHome = wanted === DEFAULT_PROFILE ? null : deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
+    const profileHome = deps.profiles?.homeOf(body.data.harness, wanted) ?? null;
     // What of the Mac's own set-up came since the profile was made is linked into its folder (Codex's, §6.2).
     if (profileHome) deps.profiles?.keepLinked(body.data.harness, wanted);
     // The agent made ready (Codex: its hooks trusted in the folder it runs in, a few seconds at most); the start goes
@@ -444,8 +444,8 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       wanted !== DEFAULT_PROFILE ? { id: wanted, name: deps.profiles!.nameOf(body.data.harness, wanted) ?? wanted, ...(profileHome ? { home: profileHome } : {}), ...(color ? { color } : {}), ...(quiet ? { telemetryOff: true as const } : {}),
         ...(paid ? { api: { ...(paid.baseUrl ? { baseUrl: paid.baseUrl } : {}), ...(paid.model ? { model: paid.model } : {}) } } : {}) } : null;
     // A profile with a proxy of its own: before anything is started under it, the proxy is asked where it lets
-    if (!profile && body.data.harness === "claude-code" && (deps.profiles?.proxyOf("claude-code", wanted) || deps.profiles?.sessionKeyOf("claude-code", wanted)))
-      profile = { id: wanted, name: "Default" };
+    if (!profile && (profileHome || deps.profiles?.proxyOf(body.data.harness, wanted) || deps.profiles?.sessionKeyOf(body.data.harness, wanted)))
+      profile = { id: wanted, name: "Default", ...(profileHome ? { home: profileHome } : {}) };
     // traffic out. One that does not answer starts nothing — the agent is not let out another way (§4).
     if (profile) {
       const way = await exitFor(deps, body.data.harness, wanted, profile.name);
@@ -453,7 +453,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       profile = { ...profile, ...way };
       // A browser of its own goes with a folder of its own: without one the shared browser, and the system's for a
       // page the agent asks to have opened.
-      if (!profile.home && !(body.data.harness === "claude-code" && wanted === DEFAULT_PROFILE)) delete profile.browserKey;
+      if (!profile.home && wanted !== DEFAULT_PROFILE) delete profile.browserKey;
     }
     // A profile nobody is signed in to starts at its sign-in (docs/profiles-v0.md §3.1), not at a prompt that cannot
     // answer. Asked of the agent itself; when it does not say, nothing is assumed.
