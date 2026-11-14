@@ -1,0 +1,109 @@
+name: Publish verified build
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: CI run containing the successful builds
+        required: true
+        type: string
+      tag:
+        description: Existing version tag (for example v0.2.0)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: publish-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Verify source builds and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_RUN: ${{ inputs.run_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > run.json
+          test "$(jq -r .path run.json)" = ".github/workflows/ci.yml"
+          test "$(jq -r .event run.json)" = "push"
+          test "$(jq -r .head_branch run.json)" = "$RELEASE_TAG"
+          test "$(jq -r .head_sha run.json)" = "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)"
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/jobs?per_page=100" > jobs.json
+          jq -e '
+            [.jobs[] | select(.name != "Publish GitHub Release")] as $jobs |
+            ($jobs | length == 7) and all($jobs[]; .conclusion == "success")
+          ' jobs.json
+      - uses: actions/download-artifact@v8
+        with:
+          name: AgentSwitch-mac-arm64.zip
+          path: release
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          skip-decompress: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: agentswitch-runtime-linux-x86_64.tar.gz
+          path: release
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          skip-decompress: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: agentswitch-runtime-linux-aarch64.tar.gz
+          path: release
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          skip-decompress: true
+      - name: Verify packages and publish
+        working-directory: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Expected a version tag such as v0.1.0 or v0.1.0-beta.1' >&2
+            exit 1
+          fi
+          assets=(AgentSwitch-mac-arm64.zip agentswitch-runtime-linux-x86_64.tar.gz agentswitch-runtime-linux-aarch64.tar.gz)
+          for asset in "${assets[@]}"; do test -s "$asset"; done
+          unzip -tq AgentSwitch-mac-arm64.zip
+          tar -tzf agentswitch-runtime-linux-x86_64.tar.gz > /dev/null
+          tar -tzf agentswitch-runtime-linux-aarch64.tar.gz > /dev/null
+          sha256sum "${assets[@]}" > SHA256SUMS.txt
+          cat > release-notes.md <<'NOTES'
+          Packages built and tested from this version tag:
+          - macOS Apple Silicon: AgentSwitch-mac-arm64.zip (ad-hoc signed, not notarized).
+          - Linux: self-contained runtimes for x86_64 and aarch64.
+          - SHA256SUMS.txt: SHA-256 checksums for all three packages.
+
+          iOS simulator compilation is checked, but this release does not include an IPA or Android APK.
+          Downloading or publishing this release does not update an existing installation automatically.
+          NOTES
+          if draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [[ "$draft" != true ]]; then
+              echo "Release $RELEASE_TAG is already published; leaving its assets unchanged."
+              exit 0
+            fi
+          else
+            options=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then options+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "AgentSwitch $RELEASE_TAG" \
+              --generate-notes --notes-file release-notes.md "${options[@]}"
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" SHA256SUMS.txt --clobber
+          gh release edit "$RELEASE_TAG" --draft=false
+
