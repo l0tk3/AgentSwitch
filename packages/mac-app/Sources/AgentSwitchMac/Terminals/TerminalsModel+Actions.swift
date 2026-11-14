@@ -257,7 +257,7 @@ extension TerminalsModel {
             defer { opening = nil }
             do {
                 let request = ResumeTerminalRequest(harness: terminal.harness, cwd: terminal.cwd, agentSessionId: session,
-                    title: terminal.name, mode: terminal.modeNow ?? terminal.mode, cols: gridHere?.cols, rows: gridHere?.rows,
+                    title: terminal.name, mode: terminal.resumeMode, cols: gridHere?.cols, rows: gridHere?.rows,
                     profile: profile.id, switchFrom: terminal.id)
                 switch try await c.resumeTerminal(request) {
                 case .started(let next), .existing(let next):

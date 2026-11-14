@@ -4,6 +4,22 @@ import XCTest
 /// A terminal in a window of its own (docs/dispatch-v0.md §1 单独的窗口; docs/terminal-v0.md §1, 2026-10-05): what the
 /// window reads of its terminal, the requests it answers, and the words it says.
 final class TerminalWindowTests: XCTestCase {
+    func testContinueAsUsesAPIModesInsteadOfNativeClaudeModes() throws {
+        for (native, expected) in [("default", "manual"), ("acceptEdits", "manual"), ("plan", "manual"),
+                                   ("dontAsk", "manual"), ("auto", "auto"), ("bypassPermissions", "bypass"), ("unknown", "manual")] {
+            let data = try JSONSerialization.data(withJSONObject: ["id": "t1", "harness": "claude-code", "mode": "bypass", "modeNow": native])
+            let terminal = try JSONDecoder().decode(TerminalInfo.self, from: data)
+            let request = ResumeTerminalRequest(harness: terminal.harness, cwd: "/tmp", agentSessionId: "s1", mode: terminal.resumeMode, profile: "default", switchFrom: terminal.id)
+            let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+            XCTAssertEqual(encoded["mode"] as? String, expected)
+        }
+        for mode in ["manual", "auto", "bypass", "invalid", ""] {
+            let data = try JSONSerialization.data(withJSONObject: ["id": "t2", "harness": "codex", "mode": mode])
+            let terminal = try JSONDecoder().decode(TerminalInfo.self, from: data)
+            XCTAssertEqual(terminal.resumeMode, ["manual", "auto", "bypass"].contains(mode) ? mode : "manual")
+        }
+    }
+
     private static let question = #"{"question":"跳转目标不是同源地址时怎么办？","header":"Redirect","multiSelect":false,"options":[{"label":"回首页","description":"丢掉 next"},{"label":"报错","description":""}]}"#
     private static let several = #"{"question":"哪些页面要改？","header":"Pages","multiSelect":true,"options":[{"label":"登录"},{"label":"注册"}]}"#
     private static let words = #"{"question":"分支叫什么？","header":"","multiSelect":false,"options":[]}"#

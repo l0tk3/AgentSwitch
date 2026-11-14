@@ -25,6 +25,18 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     /// Codex's Daybreak switch for the session it is on (docs/simple-view-v0.md §5.8); nil: this terminal has none.
     public let daybreak: Bool?
     public let mode: String?
+    /// Resume API uses AgentSwitch modes, not the agent-native words in modeNow.
+    public var resumeMode: String {
+        if harness == "claude-code", let modeNow {
+            switch modeNow {
+            case "bypassPermissions", "bypass": return "bypass"
+            case "auto": return "auto"
+            case "default", "manual", "plan", "acceptEdits", "dontAsk": return "manual"
+            default: return "manual"
+            }
+        }
+        return mode.flatMap { ["manual", "auto", "bypass"].contains($0) ? $0 : nil } ?? "manual"
+    }
     /// The list's name for it: the user's own (`customName`), else the agent's title, else the folder's.
     public let name: String
     public let customName: Bool
