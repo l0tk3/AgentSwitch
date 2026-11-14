@@ -187,14 +187,17 @@ jobs:
         with:
           name: AgentSwitch-mac-arm64.zip
           path: release
+          skip-decompress: true
       - uses: actions/download-artifact@v8
         with:
           name: agentswitch-runtime-linux-x86_64.tar.gz
           path: release
+          skip-decompress: true
       - uses: actions/download-artifact@v8
         with:
           name: agentswitch-runtime-linux-aarch64.tar.gz
           path: release
+          skip-decompress: true
       - name: Verify packages and publish
         working-directory: release
         env:
