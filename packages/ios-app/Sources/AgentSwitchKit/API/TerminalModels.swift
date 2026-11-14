@@ -244,20 +244,23 @@ public struct ProfileChoices: Decodable, Sendable, Hashable {
 
 /// The profile a terminal runs under, when it is not the Mac's own (docs/profiles-v0.md §3): its name and its colour.
 public struct TerminalProfile: Decodable, Sendable, Hashable {
+    public let id: String?
     public let name: String
     /// Nil: it has none, or one this app does not know yet.
     public let color: ProfileColor?
 
-    public init(name: String, color: ProfileColor? = nil) {
+    public init(name: String, color: ProfileColor? = nil, id: String? = nil) {
+        self.id = id
         self.name = name
         self.color = color
     }
 
-    private enum CodingKeys: String, CodingKey { case name, color }
+    private enum CodingKeys: String, CodingKey { case id, name, color }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
+        id = try? c.decodeIfPresent(String.self, forKey: .id)
         color = (try? c.decodeIfPresent(String.self, forKey: .color)).flatMap { $0 }.flatMap(ProfileColor.init(rawValue:))
     }
 }
@@ -576,7 +579,8 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let profile: String?
 
     public init(harness: String, cwd: String, agentSessionId: String, title: String? = nil, mode: String? = nil, fork: Bool? = nil,
-                cols: Int? = nil, rows: Int? = nil, profile: String? = nil) {
+                cols: Int? = nil, rows: Int? = nil, profile: String? = nil, switchFrom: String? = nil) {
+        self.switchFrom = switchFrom
         self.profile = profile
         self.harness = harness
         self.cwd = cwd
@@ -589,8 +593,10 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     }
 
     /// The same, going on in `folder` (the session's own folder is gone).
+    public let switchFrom: String?
+
     public func continuing(in folder: String) -> ResumeTerminalRequest {
-        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile)
+        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile, switchFrom: switchFrom)
     }
 }
 

@@ -472,6 +472,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       deviceOf: (harness, profile) => { const agent = PROFILE_AGENTS.find((a) => a === harness); return agent ? profiles.deviceOf(agent, profile ?? DEFAULT_PROFILE) : null; },
       onSession: (harness, sessionId, profile) => { sessionTitles.seen(harness, sessionId); const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },
       onTitle: (harness, sessionId, title) => sessionTitles.note(harness, sessionId, title),
+      customTitle: (harness, sessionId) => sessionTitles.custom(harness, sessionId),
+      onRename: (harness, sessionId, title) => sessionTitles.rename(harness, sessionId, title),
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
         // Through `current` where the runtime has one: a terminal that outlives this runtime runs the next one's hooks.
         node: stable(process.execPath), hookScript: stable(HOOK_SCRIPT), holding: held,
@@ -486,7 +488,16 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
         ...(terminalBrowser ? { browser: terminalBrowser } : {}) }),
       // Whatever the permission mode.
       floor: (tool, input, cwd) => { const d = decideTool(tool, input, canonical(cwd), new Set(), termProt); return d.kind === "deny" ? d.reason : null; },
-      ...(agents ? { onExit: (id: string) => agents.end({ kind: "terminal", id }), onRemove: (id: string) => agents.end({ kind: "terminal", id }, true) } : {}),
+      ...(agents ? {
+        onExit: (id: string) => {
+          agents.end({ kind: "terminal", id });
+          for (const key of profileBrowsers?.keys() ?? []) profileBrowsers?.get(key)?.agents.end({ kind: "terminal", id });
+        },
+        onRemove: (id: string) => {
+          agents.end({ kind: "terminal", id }, true);
+          for (const key of profileBrowsers?.keys() ?? []) profileBrowsers?.get(key)?.agents.end({ kind: "terminal", id }, true);
+        },
+      } : {}),
       // What its program leaves running is ended after a grace (docs/terminal-v0.md §11).
       onLeft: (id: string) => leftovers?.ended(id),
       ...(held ? { hold: {
@@ -540,7 +551,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const sessions = cfg.watchSessions ? new SessionMonitor({
     ...sessionSources, ...(openCodeDelete ? { openCodeDelete } : {}),
     ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
-    agentTitle: (harness, id) => sessionTitles.get(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id), folders: () => sessionFolders.get(),
+    agentTitle: (harness, id) => sessionTitles.get(harness, id), customTitle: (harness, id) => sessionTitles.custom(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id), folders: () => sessionFolders.get(),
   }) : undefined;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
   const conversation = new AssistantLog(join(cfg.home, "assistant.db"));

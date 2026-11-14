@@ -164,6 +164,22 @@ describe("terminal host", () => {
     expect(host.get(info.id)).toBeNull();
   });
 
+  it("a manually named session keeps its title when its terminal is replaced", async () => {
+    const names = new Map<string, string>();
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", false),
+      customTitle: (_h, id) => names.get(id) ?? null,
+      onRename: (_h, id, title) => { if (title) names.set(id, title); else names.delete(id); } });
+    closers.push(() => host.closeAll());
+    const first = await host.spawn({ harness: "claude-code", cwd: tmpdir(), resume: "named-session" });
+    host.rename(first.id, "Keep this title");
+    await host.stopped(first.id);
+    host.remove(first.id);
+    const next = await host.spawn({ harness: "claude-code", cwd: tmpdir(), resume: "named-session" });
+    expect(next).toMatchObject({ name: "Keep this title", customName: true });
+    host.rename(next.id, null);
+    expect(names.has("named-session")).toBe(false);
+  });
+
   it("waits while Codex says something on its screen waits for you (its notification: an app's form is no hook)", async () => {
     for (const hooks of [false, true]) {
       let token = "";

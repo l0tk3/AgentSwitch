@@ -86,7 +86,7 @@ const ModelId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,199}$/, "not
 const SessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/, "not a session id");
 const Effort = z.string().regex(EFFORT, "not a level");
 const NewTerminal = z.object({ harness: z.enum(TERMINAL_HARNESSES), cwd: z.string().min(1).max(4096), profile: z.string().regex(/^[a-z0-9]{6,16}$|^default$/).optional(), model: ModelId.optional(), effort: Effort.optional(), mode: z.enum(PERMISSION_MODES).optional(), cols: Size.cols.optional(), rows: Size.rows.optional() });
-const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional() });
+const ResumeTerminal = NewTerminal.extend({ agentSessionId: SessionId, title: z.string().max(300).optional(), fork: z.boolean().optional(), switchFrom: z.string().min(1).max(80).optional() });
 /** `attachments`: a reply's files, each where its placeholder stands in `text` (terminal-v0 §4): one staged with
  *  POST /uploads (`upload`, a phone's, or a picture pasted on the Mac with no file behind it), or one already on this
  *  Mac by where it is (`path`, the Mac app's: a file dragged into its reply box is not copied, its path is typed as a
@@ -347,7 +347,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     return c.json({ ended: ended.map((p) => p.pid) });
   });
 
-  const start = async (c: Context, resume: boolean) => {
+  const startUnlocked = async (c: Context, resume: boolean) => {
     const body = resume ? await parseBody(c, ResumeTerminal) : await parseBody(c, NewTerminal);
     if (!body.ok) return c.json({ error: body.error }, 400);
     const typed = expandCwd(body.data.cwd);
@@ -366,6 +366,21 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const resumed = resume ? (body.data as z.infer<typeof ResumeTerminal>) : null;
     const agentSessionId = resumed?.agentSessionId;
     const fork = Boolean(resumed?.fork);
+    if (resumed?.switchFrom) {
+      const previous = host.get(resumed.switchFrom);
+      if (!previous || previous.harness !== resumed.harness || previous.agentSessionId !== agentSessionId || fork || !resumed.profile)
+        return c.json({ error: "the terminal and session must match, with a target profile and no fork" }, 409);
+      if (previous.harness !== "claude-code" && previous.harness !== "codex") return c.json({ error: "this agent cannot switch profiles" }, 400);
+      if (!deps.profiles?.all()[previous.harness].profiles.some((p) => p.id === resumed.profile)) return c.json({ error: "no such profile" }, 404);
+      if ((previous.profile?.id ?? DEFAULT_PROFILE) === resumed.profile) return c.json({ terminal: previous, existing: true });
+      const problem = checkTerminalCwd(cwd);
+      if (problem) return c.json({ error: problem }, 400);
+      // Validate the target's exit before interrupting the old process.
+      const way = await exitFor(deps, previous.harness, resumed.profile, deps.profiles.nameOf(previous.harness, resumed.profile) ?? resumed.profile);
+      if ("refused" in way) return c.json({ error: way.refused }, way.status);
+      await host.stopped(previous.id);
+      if (host.get(previous.id)?.status !== "exited") return c.json({ error: "旧进程尚未退出，请稍后重试。" }, 409);
+    }
     if (resumed && !RESUMES.has(resumed.harness)) return c.json({ error: `${resumed.harness} cannot continue a session` }, 400);
     if (fork && !FORKS.has(body.data.harness)) return c.json({ error: `${body.data.harness} cannot fork a session` }, 400);
     const openHere = () => host.list().find((x) => x.status !== "exited" && x.harness === body.data.harness && x.agentSessionId === agentSessionId);
@@ -454,8 +469,19 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
       // What a new terminal was started under is what the next one is offered first.
       if (!resume && body.data.profile) { try { deps.profiles?.setCurrent(body.data.harness, body.data.profile); } catch { /* it started all the same */ } }
       audit.record({ terminal: info.id, action: resume ? "resume" : "create", via: via(c), detail: { harness: info.harness, cwd, model: info.model, effort: info.effort, mode: info.mode, ...(resume ? { fork: forks } : {}), ...(movedFrom ? { movedFrom } : {}) } });
+      if (resumed?.switchFrom) host.remove(resumed.switchFrom);
       return c.json({ terminal: info }, 201);
     } catch (err) { return failed(c, err); }
+  };
+  // Serialize starts of a given session, including the stop/continue interval of Continue As.
+  const starting = new Set<string>();
+  const start = async (c: Context, resume: boolean) => {
+    const request = (await c.req.raw.clone().json().catch(() => ({})) ?? {}) as { harness?: string; agentSessionId?: string };
+    const key = resume ? `${request.harness}:${request.agentSessionId}` : null;
+    if (key && starting.has(key)) return c.json({ error: "此会话正在恢复或切换配置，请稍后重试。" }, 409);
+    if (key) starting.add(key);
+    try { return await startUnlocked(c, resume); }
+    finally { if (key) starting.delete(key); }
   };
   app.post("/terminals", (c) => start(c, false));
   app.post("/terminals/resume", (c) => start(c, true));

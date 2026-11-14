@@ -35,6 +35,7 @@ export type SessionSources = {
   readonly ownFolders?: () => readonly string[];
   /** The title a session's agent gave it while it ran in a terminal here (sessions/titles.ts); null: none known. */
   readonly agentTitle?: (harness: SessionHarness, id: string) => string | null;
+  readonly customTitle?: (harness: SessionHarness, id: string) => string | null;
   /** The session ran in a terminal the user started here: it is listed whatever its folder — a temporary one too.
    *  Sessions in `/tmp` and the like are left out as probes' and executors'; one the user began there in AgentSwitch
    *  was on the list only while its terminal ran, and gone after a restart (2026-11-11, user: 我在agentswitch里在/tmp
@@ -112,6 +113,8 @@ export class SessionMonitor {
   /** `s` by the title its agent gave it, where the user gave it no name in the agent and one is known. Read each time
    *  the list is: the title changes while the record's file does not. */
   private titled(s: SessionSummary): SessionSummary {
+    const custom = this.sources.customTitle?.(s.harness, s.id);
+    if (custom) return { ...s, title: oneLine(custom, TITLE_CHARS) };
     if (s.named) return s;
     const given = this.sources.agentTitle?.(s.harness, s.id);
     return given ? { ...s, title: oneLine(given, TITLE_CHARS) } : s;

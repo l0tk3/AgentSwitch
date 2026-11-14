@@ -420,10 +420,10 @@ final class RecordTests: XCTestCase {
         let terminal = { (profile: String) throws -> TerminalInfo in
             try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"claude-code","cwd":"/w","name":"a","status":"idle","createdAt":1,"profile":\#(profile)}"#.utf8))
         }
-        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":"Tokyo"},"color":"violet"}"#).profile, TerminalProfile(name: "cwork1", color: .violet))
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","exit":{"ip":"203.0.113.9","place":"Tokyo"},"color":"violet"}"#).profile, TerminalProfile(name: "cwork1", color: .violet, id: "abc123def0"))
         // No colour, or one this app does not know yet: the profile all the same, without a dot.
-        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1"}"#).profile, TerminalProfile(name: "cwork1"))
-        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"plaid"}"#).profile, TerminalProfile(name: "cwork1"))
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1"}"#).profile, TerminalProfile(name: "cwork1", id: "abc123def0"))
+        XCTAssertEqual(try terminal(#"{"id":"abc123def0","name":"cwork1","color":"plaid"}"#).profile, TerminalProfile(name: "cwork1", id: "abc123def0"))
         // The Mac's own, and a Mac that does not say.
         XCTAssertNil(try terminal("null").profile)
         XCTAssertNil(try JSONDecoder().decode(TerminalInfo.self, from: Data(#"{"id":"t1","harness":"codex"}"#.utf8)).profile)

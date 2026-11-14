@@ -477,6 +477,25 @@ esac
     expect(readFileSync(join(userHome, ".claude.json"), "utf8")).toBe(before);
   });
 
+  it("Continue As validates before stopping, then resumes one writer under the requested profile", async () => {
+    const { store, call, root, host, asked } = served(async () => true);
+    const target = store.create("claude-code", "Other", "subscription");
+    const session = "session-continue-as";
+    const started = await call("POST", "/terminals/resume", { harness: "claude-code", cwd: root, agentSessionId: session });
+    const id = started.json.terminal.id;
+    const request = { harness: "claude-code", cwd: root, agentSessionId: session, switchFrom: id, profile: target.id };
+    expect((await call("POST", "/terminals/resume", { ...request, profile: "nosuch0000" })).status).toBe(404);
+    expect(host.get(id)?.status).not.toBe("exited");
+    expect((await call("POST", "/terminals/resume", { ...request, agentSessionId: "wrong" })).status).toBe(409);
+    const result = await call("POST", "/terminals/resume", request);
+    expect(result.status).toBe(201);
+    expect(result.json.terminal.profile.id).toBe(target.id);
+    expect(result.json.terminal.agentSessionId).toBe(session);
+    expect(host.get(id)).toBeNull();
+    expect(asked.at(-1)?.configHome).toBe(store.homeOf("claude-code", target.id));
+    expect(host.list().filter((t) => t.agentSessionId === session && t.status !== "exited")).toHaveLength(1);
+  });
+
   it("is Codex's too: asked in its folder, started at the sign-in, its folder linked and its hooks made ready first", async () => {
     const said = new Map<string, boolean | null>();
     const { store, userHome, asked, questions, prepared, call, root } = served(async (_h, home) => said.get(home) ?? null);

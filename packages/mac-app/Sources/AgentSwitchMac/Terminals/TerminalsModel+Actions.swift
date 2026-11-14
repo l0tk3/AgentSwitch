@@ -245,12 +245,45 @@ extension TerminalsModel {
 
     // MARK: going on with a session
 
+    func continueAs(_ terminal: TerminalInfo, profile: AgentProfile) {
+        guard let session = terminal.agentSessionId, opening == nil else { return }
+        let c = client()
+        Task {
+            let answer = await ask(TerminalSheet(title: "以 \(profile.name) 继续？", body: "将结束当前 Claude/Codex 进程，以所选配置续接同一段会话。正在执行的操作会中断。", confirm: "Continue"))
+            guard answer.ok, opening == nil else { return }
+            select(terminal.id)
+            let previousLayout = layout
+            let previousPane = focusPane
+            opening = session
+            defer { opening = nil }
+            do {
+                let request = ResumeTerminalRequest(harness: terminal.harness, cwd: terminal.cwd, agentSessionId: session,
+                    title: terminal.name, mode: terminal.modeNow ?? terminal.mode, cols: gridHere?.cols, rows: gridHere?.rows,
+                    profile: profile.id, switchFrom: terminal.id)
+                switch try await c.resumeTerminal(request) {
+                case .started(let next), .existing(let next):
+                    await refresh()
+                    focusPane = previousPane
+                    setLayout(TerminalPanes.show(previousLayout, previousPane, next.id))
+                    select(next.id)
+                case .elsewhere: say("会话正在其他程序中运行，请先退出后再续接。")
+                case .folderGone: say("会话文件夹已不存在，请从历史会话选择新目录后恢复。")
+                }
+            } catch { say("切换配置失败：\(Self.reason(error))") }
+        }
+    }
+
     /// Continues a session in the pane in focus. Open here already: that terminal. Open in another program: asked
     /// whether to fork (one writer at a time). Its folder gone: asked where to go on (docs/terminal-v0.md §5).
     /// `profile`: `Resume As` — under that one; nil: under the one it last ran under.
     func resume(_ session: SessionSummary, as profile: String? = nil) {
         guard TerminalListText.resumable.contains(session.harness), opening == nil else { return }
-        if let open = openedAs(session) { return select(open.id) }
+        if let open = openedAs(session) {
+            if let profile, profile != (open.profileId ?? "default"), let target = profiles[session.harness]?.profiles.first(where: { $0.id == profile }) {
+                return continueAs(open, profile: target)
+            }
+            return select(open.id)
+        }
         let name = TerminalListText.brief(session.title)
         let c = client()
         Task {

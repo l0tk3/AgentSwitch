@@ -44,6 +44,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
     public let subagents: [TerminalSubagent]
     /// The name of the profile it runs under (docs/profiles-v0.md); nil: the Mac's own (`Default`).
     public private(set) var profileName: String?
+    public private(set) var profileId: String?
     /// That profile's colour (docs/profiles-v0.md §3.2): the lit dot this terminal is marked with while it runs.
     public private(set) var profileColor: ProfileColor?
     /// The device Claude Code says it is in this terminal (docs/profiles-v0.md §3.5): its own id for the folder it runs
@@ -110,8 +111,9 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                   suggestion: (try? c.decodeIfPresent(String.self, forKey: .suggestion)) ?? nil,
                   sets: (try? c.decodeIfPresent(Bool.self, forKey: .sets)) ?? nil,
                   daybreak: (try? c.decodeIfPresent(Bool.self, forKey: .daybreak)) ?? nil)
-        struct Profile: Decodable { let name: String; let exit: ProfileExit?; let color: String? }
+        struct Profile: Decodable { let id: String?; let name: String; let exit: ProfileExit?; let color: String? }
         let profile = (try? c.decodeIfPresent(Profile.self, forKey: .profile)) ?? nil
+        profileId = profile?.id
         // A profile with a proxy of its own: where that proxy let traffic out when the terminal started goes with its
         // name wherever the name is shown (docs/profiles-v0.md §4: 代理标注在底栏).
         profileName = profile.map { [$0.name, $0.exit?.text].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ") }
@@ -139,6 +141,7 @@ public struct TerminalInfo: Decodable, Equatable, Sendable, Identifiable {
                      exitCode: exitCode ?? self.exitCode, agentSessionId: agentSessionId, resumedFrom: resumedFrom, forked: forked,
                      permissions: permissions, subagents: subagents, effort: effort, modeNow: modeNow, suggestion: suggestion, sets: sets, daybreak: daybreak)
         copy.profileName = profileName
+        copy.profileId = profileId
         copy.profileColor = profileColor
         copy.device = device
         return copy

@@ -398,6 +398,8 @@ private struct RowFrame<Mark: View, Name: View, Meta: View, Actions: View>: View
     let depth: Int
     var selected = false
     var dimmed = false
+    var selectRow: (() -> Void)? = nil
+    var renameRow: (() -> Void)? = nil
     @ViewBuilder let mark: Mark
     @ViewBuilder let name: Name
     @ViewBuilder let meta: Meta
@@ -405,7 +407,7 @@ private struct RowFrame<Mark: View, Name: View, Meta: View, Actions: View>: View
     @State private var hovering = false
     @Environment(\.interfaceLook) private var look
 
-    var body: some View {
+    private var rowLabel: some View {
         HStack(spacing: 0) {
             if look.isClassic {
                 Color.clear.frame(width: CGFloat(depth) * 14 + 27 - 8)
@@ -421,6 +423,15 @@ private struct RowFrame<Mark: View, Name: View, Meta: View, Actions: View>: View
             Color.clear.frame(width: look.isClassic ? 24 : 2.4 * ListLook.ch, height: 1)
                 .overlay(alignment: look.isClassic ? .center : .leading) { mark }
             name.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if let selectRow {
+                rowLabel.onTapGesture(count: 2) { renameRow?() }.onTapGesture(perform: selectRow)
+            } else { rowLabel }
             // What the row says of itself, or does, keeps its width: the name gives way.
             Group { if hovering { actions } else { meta } }
                 .fixedSize()
@@ -450,7 +461,9 @@ private struct TerminalRow: View {
     private var out: Bool { !model.here(terminal.id) }
 
     var body: some View {
-        RowFrame(index: index, twig: twig, depth: depth, selected: selected) {
+        RowFrame(index: index, twig: twig, depth: depth, selected: selected,
+                 selectRow: { model.open(.terminal(terminal.id), beside: model.clickFlags.contains(.command)) },
+                 renameRow: { model.startRename(terminal.id) }) {
             statusMark
         } name: {
             if model.renaming == terminal.id { renameField } else {
@@ -478,8 +491,6 @@ private struct TerminalRow: View {
             .buttonStyle(.plain)
             .help(look.isClassic ? "Close (⌘W)" : "Close ⌘W")
         }
-        .onTapGesture(count: 2) { model.startRename(terminal.id) }
-        .simultaneousGesture(TapGesture().onEnded { model.open(.terminal(terminal.id), beside: model.clickFlags.contains(.command)) })
         .onDrag {
             guard !out else { return NSItemProvider() }
             model.dragging = .terminal(terminal.id)
@@ -545,6 +556,14 @@ private struct TerminalRow: View {
     @ViewBuilder
     private var menu: some View {
         Button("Rename") { model.startRename(terminal.id) }
+        if ["claude-code", "codex"].contains(terminal.harness), terminal.agentSessionId != nil,
+           let choices = model.profiles[terminal.harness], choices.several {
+            Menu("Continue As") {
+                ForEach(choices.profiles.filter { $0.id != (terminal.profileId ?? "default") }) { profile in
+                    Button(ProfileWords.line(profile)) { model.continueAs(terminal, profile: profile) }
+                }
+            }
+        }
         Button("Show in Files") { model.files?.show(folder: terminal.workdir) }
         if out {
             Button("Move Back Here") { model.onAttach(terminal.id) }

@@ -12,7 +12,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** `title` "": the session ran in a terminal here and its agent gave it no title worth showing. */
-type Kept = { readonly title: string; readonly at: number };
+type Kept = { readonly title: string; readonly at: number; readonly custom?: string };
 /** The newest so many are kept. */
 const MAX_KEPT = 3000;
 const MAX_TITLE = 200;
@@ -27,6 +27,16 @@ export class SessionTitles {
 
   /** The title the agent gave session `id` last; null: none known. */
   get(harness: string, id: string): string | null { return this.all().get(`${harness}:${id}`)?.title || null; }
+
+  custom(harness: string, id: string): string | null { return this.all().get(`${harness}:${id}`)?.custom || null; }
+
+  rename(harness: string, id: string, name: string | null): void {
+    if (!id) return;
+    const key = `${harness}:${id}`, previous = this.all().get(key);
+    this.all().set(key, { title: previous?.title ?? "", at: this.now(), ...(name ? { custom: name.slice(0, MAX_TITLE) } : {}) });
+    this.later();
+    this.flush();
+  }
 
   /** Session `id` ran in a terminal the user started here (it is theirs wherever its folder is: sessions/monitor.ts). */
   ran(harness: string, id: string): boolean { return this.all().has(`${harness}:${id}`); }
@@ -45,8 +55,9 @@ export class SessionTitles {
     if (!id || !text) return;
     const all = this.all(), key = `${harness}:${id}`;
     if (all.get(key)?.title === text) return;
+    const custom = all.get(key)?.custom;
     all.delete(key);   // the newest last
-    all.set(key, { title: text, at: this.now() });
+    all.set(key, { title: text, at: this.now(), ...(custom ? { custom } : {}) });
     this.later();
   }
 
@@ -78,8 +89,8 @@ export class SessionTitles {
     if (this.kept) return this.kept;
     const kept = new Map<string, Kept>();
     try {
-      const doc = JSON.parse(readFileSync(this.file, "utf8")) as Record<string, { title?: unknown; at?: unknown }>;
-      for (const [key, value] of Object.entries(doc)) if (typeof value?.title === "string") kept.set(key, { title: value.title.slice(0, MAX_TITLE), at: Number(value.at) || 0 });
+      const doc = JSON.parse(readFileSync(this.file, "utf8")) as Record<string, { title?: unknown; at?: unknown; custom?: unknown }>;
+      for (const [key, value] of Object.entries(doc)) if (typeof value?.title === "string") kept.set(key, { title: value.title.slice(0, MAX_TITLE), at: Number(value.at) || 0, ...(typeof value.custom === "string" ? { custom: value.custom.slice(0, MAX_TITLE) } : {}) });
     } catch { /* none kept yet, or not readable: begun again */ }
     return (this.kept = kept);
   }

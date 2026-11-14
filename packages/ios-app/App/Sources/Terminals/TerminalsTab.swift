@@ -45,6 +45,7 @@ struct TerminalsTab: View {
     @State private var bypassResume: SessionSummary?
     /// The profile named for a session being continued (`Resume As`), by the session's id.
     @State private var resumeAs: [String: String] = [:]
+    @State private var continueTarget: (terminal: TerminalInfo, profile: ProfileChoice)?
     /// Why continuing or deleting a session failed: a box over whatever page is open.
     @State private var failure: String?
     /// A session to continue whose folder is gone: a folder is picked for it (docs/terminal-v0.md §5).
@@ -131,6 +132,13 @@ struct TerminalsTab: View {
                 }
             }
             .refreshable { await model.refreshTerminals(sessions: true) }
+            .confirmationDialog("以 \(continueTarget?.profile.name ?? "") 继续？", isPresented: Binding(get: { continueTarget != nil }, set: { if !$0 { continueTarget = nil } })) {
+                if let target = continueTarget {
+                    Button("Continue") { Task { await continueAs(target.terminal, profile: target.profile) } }
+                }
+            } message: {
+                Text("将结束当前进程并以所选配置续接同一会话，正在执行的操作会中断。原会话若为 Bypass，将以 Auto 恢复。")
+            }
             // The words said in sessions, once typing pauses; an answer to an older query is not kept.
             .task(id: query) {
                 let q = query.trimmingCharacters(in: .whitespaces)
@@ -332,7 +340,17 @@ struct TerminalsTab: View {
                     Button { path.append(TerminalRoute.terminal(t)) } label: { terminalRow(t, last: i == rows - 1, depth: depth) }
                         .buttonStyle(.plain)
                         // Its folder on the Files tab (docs/files-v0.md §5).
-                        .contextMenu { Button("Show in Files", systemImage: "folder") { model.showInFiles(t.workdir) } }
+                        .contextMenu {
+                            Button("Show in Files", systemImage: "folder") { model.showInFiles(t.workdir) }
+                            if ["claude-code", "codex"].contains(t.harness), t.agentSessionId != nil,
+                               let choices = model.terminals.profiles[t.harness], choices.several {
+                                Menu("Continue As") {
+                                    ForEach(choices.profiles.filter { $0.id != (t.profile?.id ?? "default") }) { p in
+                                        Button(p.name) { continueTarget = (t, p) }
+                                    }
+                                }
+                            }
+                        }
                         .modifier(stepIn(at + 1 + i, within: within))
                     // Its sub-agents, one level under it; a tap opens the terminal.
                     if t.isRunning {
@@ -594,6 +612,24 @@ struct TerminalsTab: View {
     /// Continue a session in place (one record, one writer): the terminal that has it already, a new one, or — open in
     /// another program — the choice to fork. It goes on in the mode it last had; bypass is asked about first. Its folder
     /// gone, a folder is picked and it goes on `in` that one (`after` the box it was picked in).
+    private func continueAs(_ terminal: TerminalInfo, profile: ProfileChoice) async {
+        guard let api = model.api, let session = terminal.agentSessionId, opening == nil else { return }
+        opening = session
+        defer { opening = nil }
+        do {
+            let request = ResumeTerminalRequest(harness: terminal.harness, cwd: terminal.cwd, agentSessionId: session,
+                title: terminal.name, mode: terminal.mode == "bypass" ? "auto" : terminal.mode, profile: profile.id, switchFrom: terminal.id)
+            switch try await api.resumeTerminal(request) {
+            case .started(let next), .existing(let next):
+                model.terminals.remove(terminal.id)
+                model.terminals.add(next)
+                path.append(TerminalRoute.terminal(next))
+            case .elsewhere: failure = "会话正在其他程序中运行，请先退出。"
+            case .folderGone: failure = "会话文件夹已不存在，请从历史会话选择目录后恢复。"
+            }
+        } catch { failure = error.localizedDescription }
+    }
+
     private func resume(_ s: SessionSummary, as profile: String? = nil, fork: Bool = false, mode chosen: String? = nil, in folder: String? = nil, after picking: MovedFolder? = nil) async {
         guard let api = model.api else { return }
         // `Resume As`: the profile named is kept through the questions that may come in between (its mode, a fork,

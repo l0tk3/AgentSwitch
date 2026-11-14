@@ -305,6 +305,8 @@ export type TerminalHostOptions = {
   readonly onSession?: (harness: TerminalHarness, sessionId: string, profile: string | null) => void;
   /** The agent of a terminal gave the session it writes a title worth showing (sessions/titles.ts). */
   readonly onTitle?: (harness: TerminalHarness, sessionId: string, title: string) => void;
+  readonly customTitle?: (harness: TerminalHarness, sessionId: string) => string | null;
+  readonly onRename?: (harness: TerminalHarness, sessionId: string, title: string | null) => void;
   /** The device the agent says it is under a profile (null: the Mac's own), as its own files have it (§3.5). */
   readonly deviceOf?: (harness: TerminalHarness, profile: string | null) => string | null;
   /** The terminal is forgotten (deleted, or its start failed): what it left goes too (its browser tabs). */
@@ -924,7 +926,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "deviceOf" | "hold">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "deviceOf" | "hold">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -969,6 +971,7 @@ export class TerminalHost {
     s.forked = Boolean(req.resume && req.fork && req.harness !== "opencode");
     // Continued in place, the agent writes the session it was given (its hooks say the same once they run).
     if (req.resume && !s.forked) { s.agentSessionId = req.resume; this.opts.onSession?.(s.harness, req.resume, s.profile?.id ?? null); }
+    if (s.agentSessionId) s.customName = this.opts.customTitle?.(s.harness, s.agentSessionId) ?? null;
     s.givenName = req.name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     // Codex's notifications (OSC 9) are only those for what waits for you (launch.ts CODEX_ATTENTION).
     if (req.harness === "codex") s.term.parser.registerOscHandler(9, () => { s.attention = true; this.setStatus(s, "waiting"); return true; });
@@ -1135,6 +1138,7 @@ export class TerminalHost {
       this.titled(s);
     });
     if (kept.agentSessionId) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
+    if (s.agentSessionId && s.customName) this.opts.onRename?.(s.harness, s.agentSessionId, s.customName);
     if (kept.companion && hold.companion) s.companion = hold.companion(kept.harness, kept.companion, kept);
     this.sessions.set(kept.id, s);
     this.wire(s, held);
@@ -1161,6 +1165,7 @@ export class TerminalHost {
     const s = this.need(id);
     const cleaned = name?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null;
     s.customName = cleaned;
+    if (s.agentSessionId) this.opts.onRename?.(s.harness, s.agentSessionId, cleaned);
     s.emit({ type: "name", name: this.nameOf(s) });
     this.persist(s);
     return this.info(s);
@@ -1601,6 +1606,8 @@ export class TerminalHost {
     // A profile that had never run had no device of its own when the terminal started; it has one by now.
     s.device ??= this.device(s);
     if (s.agentSessionId !== sessionId) {
+      if (!s.agentSessionId && s.customName) this.opts.onRename?.(s.harness, sessionId, s.customName);
+      else s.customName = this.opts.customTitle?.(s.harness, sessionId) ?? null;
       this.opts.onSession?.(s.harness, sessionId, s.profile?.id ?? null);
       s.recordFile = null;
       // What its screen said to commands belongs with the record it was said beside, not a new one (`/clear`).

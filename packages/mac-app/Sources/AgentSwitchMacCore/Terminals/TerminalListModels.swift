@@ -313,7 +313,8 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     public let profile: String?
 
     public init(harness: String, cwd: String, agentSessionId: String, title: String? = nil, mode: String? = nil, fork: Bool? = nil,
-                cols: Int? = nil, rows: Int? = nil, profile: String? = nil) {
+                cols: Int? = nil, rows: Int? = nil, profile: String? = nil, switchFrom: String? = nil) {
+        self.switchFrom = switchFrom
         self.profile = profile
         self.harness = harness
         self.cwd = cwd
@@ -326,8 +327,10 @@ public struct ResumeTerminalRequest: Encodable, Sendable, Equatable {
     }
 
     /// The same, going on in `folder` (the session's own folder is gone).
+    public let switchFrom: String?
+
     public func continuing(in folder: String) -> ResumeTerminalRequest {
-        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile)
+        ResumeTerminalRequest(harness: harness, cwd: folder, agentSessionId: agentSessionId, title: title, mode: mode, fork: fork, cols: cols, rows: rows, profile: profile, switchFrom: switchFrom)
     }
 
     /// The same as a fork: a new session with the whole history, the first left as it is.

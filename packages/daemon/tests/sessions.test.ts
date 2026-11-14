@@ -104,6 +104,20 @@ describe("the Mac's coding sessions", () => {
     expect(by().x1).toBe("跑一下测试");
   });
 
+  it("keeps a manual title across restarts and automatic titles, and can clear it", () => {
+    const { sources, data } = fixture();
+    const titles = new SessionTitles(data, () => NOW);
+    titles.rename("claude-code", "c1", "My session");
+    titles.note("claude-code", "c1", "Automatic title");
+    titles.flush();
+    const reloaded = new SessionTitles(data);
+    expect(reloaded.custom("claude-code", "c1")).toBe("My session");
+    const monitor = new SessionMonitor({ ...sources, customTitle: (h, id) => reloaded.custom(h, id), agentTitle: (h, id) => reloaded.get(h, id) }, () => NOW);
+    expect(monitor.list().find((s) => s.id === "c1")?.title).toBe("My session");
+    reloaded.rename("claude-code", "c1", null);
+    expect(monitor.list().find((s) => s.id === "c1")?.title).toBe("Automatic title");
+  });
+
   it("lists a session in a temporary folder that ran in a terminal here, and no other there (2026-11-11)", () => {
     const { sources, data } = fixture();
     const titles = new SessionTitles(data, () => NOW);
