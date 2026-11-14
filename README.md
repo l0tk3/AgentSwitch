@@ -10,6 +10,13 @@ its own CLI had made it: you can stop using AgentSwitch at any point and carry o
 Early stage, one person's project. The design notes in `docs/` are in Chinese and most are marked as drafts; start
 with `docs/design-v0.md`.
 
+CI keeps Mac and Linux build artifacts for seven days. To publish a permanent GitHub Release, push a version tag
+such as `v0.1.0` (`git tag v0.1.0` then `git push origin v0.1.0`). All CI tests and builds must pass before publishing.
+Tags such as `v0.1.0-beta.1` create prereleases. Releases contain the Apple Silicon Mac app ZIP, Linux x86_64 and
+aarch64 runtime tarballs, and `SHA256SUMS.txt`. The Mac app is ad-hoc signed, not notarized; no IPA or APK is published.
+A failed upload leaves a draft that can be completed by rerunning the job; rerunning a published release leaves it
+unchanged. Publishing never installs or switches the app on your machine.
+
 <p align="center">
   <img src="docs/readme/mac-terminals.jpg" width="100%" alt="The Terminals page on the Mac: a folder tree of sessions on the left, one session shown as a conversation on the right">
 </p>
