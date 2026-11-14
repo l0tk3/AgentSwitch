@@ -81,7 +81,7 @@ describe("production build", () => {
         });
         child.on("exit", (code) => { clearTimeout(timer); fail(new Error(`daemon exited ${code}:\n${log}`)); });
       });
-      expect(await httpJson(`http://127.0.0.1:${ports.local}/healthz`)).toMatchObject({ ok: true, version: "0.1.0" });
+      expect(await httpJson(`http://127.0.0.1:${ports.local}/healthz`)).toMatchObject({ ok: true, version: JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")).version });
       // The local API wants the token the daemon wrote on start-up (api/localAuth.ts); without it, 401.
       expect(await httpJson(`http://127.0.0.1:${ports.local}/remote/info`)).toMatchObject({ error: expect.stringContaining("token") });
       const token = readFileSync(join(home, "local-token"), "utf8").trim();

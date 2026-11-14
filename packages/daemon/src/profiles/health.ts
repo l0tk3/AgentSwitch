@@ -1,7 +1,7 @@
 import type { ProfileAgent, ProfileStore } from "./store.js";
 import { ProfileError } from "./store.js";
 import type { ApiKeys } from "./apiKeys.js";
-import type { Window } from "../quota/windows.js";
+type Window = { readonly label: string; readonly usedPercent: number; readonly resetsAt: number | null };
 
 export type ProfileHealth = { status: "healthy" | "warning" | "unhealthy" | "unknown"; checkedAt: number; message: string; windows: Window[] };
 export class ProfileHealthChecks {

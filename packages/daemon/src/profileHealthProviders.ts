@@ -1,13 +1,13 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ExitPool } from "../browser/exits.js";
-import { probeRateLimits } from "../executors/claude.js";
-import { codexQuota } from "../quota/codex.js";
-import { RateLimitCache, type Window } from "../quota/windows.js";
-import { proxyEnv } from "../terminals/launch.js";
-import { CODEX_FILE_STORE } from "../terminals/signIn.js";
-import type { ProfileAgent, ProfileStore } from "./store.js";
-import type { ProfileHealth } from "./health.js";
+import { ExitPool } from "./browser/exits.js";
+import { probeRateLimits } from "./executors/claude.js";
+import { codexQuota } from "./quota/codex.js";
+import { RateLimitCache, type Window } from "./quota/windows.js";
+import { proxyEnv } from "./terminals/launch.js";
+import { CODEX_FILE_STORE } from "./terminals/signIn.js";
+import type { ProfileAgent, ProfileStore } from "./profiles/store.js";
+import type { ProfileHealth } from "./profiles/health.js";
 
 export function subscriptionHealth(store: ProfileStore, exits: ExitPool, binaries: Partial<Record<string, string>>) {
   return async (agent: ProfileAgent, id: string, signal: AbortSignal): Promise<Omit<ProfileHealth, "checkedAt">> => {

@@ -30,6 +30,7 @@ struct GeneralView: View {
 
     var body: some View {
         Form {
+            ReleaseUpdateSection()
             Section {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(InterfaceLook.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }

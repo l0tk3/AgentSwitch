@@ -10,6 +10,10 @@ its own CLI had made it: you can stop using AgentSwitch at any point and carry o
 Early stage, one person's project. The design notes in `docs/` are in Chinese and most are marked as drafts; start
 with `docs/design-v0.md`.
 
+The product version is recorded in `VERSION`. Keep the Mac/iOS project versions, daemon package/lockfile and daemon
+reported version in sync; CI checks these and the release tag with `node packages/daemon/scripts/check-version.mjs`.
+Settings → General → App Updates checks the latest stable GitHub Release on request, without installing anything.
+
 CI keeps Mac and Linux build artifacts for seven days. To publish a permanent GitHub Release, push a version tag
 such as `v0.1.0` (`git tag v0.1.0` then `git push origin v0.1.0`). All CI tests and builds must pass before publishing.
 Tags such as `v0.1.0-beta.1` create prereleases. Releases contain the Apple Silicon Mac app ZIP, Linux x86_64 and

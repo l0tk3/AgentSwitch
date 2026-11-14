@@ -1,0 +1,17 @@
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const root = new URL('../../../', import.meta.url);
+const read = (path) => readFileSync(new URL(path, root), 'utf8');
+const version = read('VERSION').trim();
+assert.match(version, /^\d+\.\d+\.\d+$/);
+const json = (path) => JSON.parse(read(path));
+assert.equal(json('packages/daemon/package.json').version, version, 'daemon package version');
+const lock = json('packages/daemon/package-lock.json');
+assert.equal(lock.version, version, 'lockfile version');
+assert.equal(lock.packages[''].version, version, 'lockfile root version');
+assert.equal(read('packages/daemon/src/daemon.ts').match(/export const VERSION = "([^"]+)"/)?.[1], version, 'daemon reported version');
+assert.equal(read('packages/mac-app/project.yml').match(/CFBundleShortVersionString: "([^"]+)"/)?.[1], version, 'Mac version');
+assert.equal(read('packages/ios-app/project.yml').match(/MARKETING_VERSION: "([^"]+)"/)?.[1], version, 'iOS version');
+const tag = process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : undefined;
+if (tag) assert.ok(tag === `v${version}` || tag.startsWith(`v${version}-`), 'release tag must match VERSION');
+console.log(`AgentSwitch ${version}: versions match${tag ? ` (${tag})` : ''}`);

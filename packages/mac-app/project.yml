@@ -42,8 +42,8 @@ targets:
       properties:
         CFBundleDisplayName: AgentSwitch
         CFBundleName: AgentSwitch
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "0.2.0"
+        CFBundleVersion: "2"
         LSMinimumSystemVersion: "14.0"
         LSApplicationCategoryType: public.app-category.developer-tools
         CFBundleIconFile: AppIcon

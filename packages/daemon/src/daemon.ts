@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import { DEFAULT_PROFILE, PROFILE_AGENTS, ProfileStore } from "./profiles/store.js";
 import { ProfileHealthChecks } from "./profiles/health.js";
-import { subscriptionHealth } from "./profiles/healthProviders.js";
+import { subscriptionHealth } from "./profileHealthProviders.js";
 import { SessionKeys } from "./browser/sessionKey.js";
 import { ApiKeys } from "./profiles/apiKeys.js";
 import { proxyPlace } from "./browser/identity.js";
@@ -122,7 +122,7 @@ import { sharedBrowser } from "./browser/setup.js";
 import { newEngineKit } from "./browser/engine/setup.js";
 import { stdioServePorts } from "./harness/opencodeStdio.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 export const DEFAULT_PORT = 4711;
 /** Expired archived threads are deleted at start-up and then this often. */
 const THREAD_SWEEP_INTERVAL_MS = 3600_000;

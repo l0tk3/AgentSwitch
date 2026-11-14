@@ -8,7 +8,7 @@ import type { TLSSocket } from "node:tls";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildDaemon, startRemote, type Daemon, type DaemonConfig } from "../src/daemon.js";
+import { VERSION, buildDaemon, startRemote, type Daemon, type DaemonConfig } from "../src/daemon.js";
 import { QuotaService } from "../src/quota/index.js";
 import { createRemoteApp, PAIR_FAILED, UNAUTHORIZED } from "../src/remote/app.js";
 import { Presence, registerDevice } from "../src/remote/devices.js";
@@ -432,7 +432,7 @@ describe("remote app, in process", () => {
     expect(pairing.status).toBe(409);
     expect(await (await d.app.request("/devices")).json()).toEqual([]);
     // the API itself is unchanged on the local listener
-    expect(await (await d.app.request("/healthz")).json()).toMatchObject({ ok: true, version: "0.1.0" });
+    expect(await (await d.app.request("/healthz")).json()).toMatchObject({ ok: true, version: VERSION });
     expect((await d.app.request("/ui")).status).toBe(200);
     d.close();
   });

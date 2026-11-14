@@ -46,6 +46,8 @@ jobs:
         working-directory: packages/secret-gate
         run: python -m venv .venv && .venv/bin/pip install --quiet -c ../mac-app/scripts/python-constraints.txt -e '.[dev]'
       - run: npm ci --no-audit --no-fund
+      - name: Check release versions
+        run: node scripts/check-version.mjs
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
