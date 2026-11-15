@@ -253,7 +253,7 @@ private struct ProfileDialogs: ViewModifier {
             .confirmationDialog("删除这个配置？", isPresented: removing) {
                 Button("Delete \(removingName)", role: .destructive, action: remove)
             } message: {
-                Text("它的登录、API key 和专属目录会被删除。隔离 Profile 的会话、记忆、技能副本和工作目录也会删除，请先备份需要保留的文件。旧版共享的会话不受影响。")
+                Text("它的登录、API key 和专属目录会被删除，包含其中的会话、记忆、技能副本和文件；请先备份需要保留的内容。你选择的外部项目目录、旧版共享的会话不受影响。")
             }
     }
 }
@@ -455,7 +455,10 @@ struct ProfileNewSheet: View {
     @State private var busy = false
     /// Claude Code's telemetry under it (docs/profiles-v0.md §3.7); on, as Claude Code has it.
     @State private var telemetry = true
-    @State private var sharedSkills = ""
+    @State private var copies = ClaudeProfileCopies()
+    @State private var copyOptions: ClaudeProfileCopyOptions?
+    @State private var copyProblem: String?
+    @State private var loadingCopies = false
 
     init(agent: AgentCLI, kinds: [String], done: @escaping ([String: AgentProfiles]) -> Void) {
         self.agent = agent
@@ -466,7 +469,8 @@ struct ProfileNewSheet: View {
 
     private var byKey: Bool { kind == "api" }
     private var ready: Bool {
-        byKey ? draft.canSave(agent: agent.rawValue, new: true) : !draft.name.trimmingCharacters(in: .whitespaces).isEmpty
+        if agent == .claude && copyOptions == nil { return false }
+        return byKey ? draft.canSave(agent: agent.rawValue, new: true) : !draft.name.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
@@ -483,14 +487,14 @@ struct ProfileNewSheet: View {
                 }
                 if byKey { ApiKeyFields(agent: agent, draft: $draft, kept: false) }
                 if agent == .claude {
-                    TextField("Copy Skills", text: $sharedSkills, prompt: Text("技能目录名，用逗号分隔；留空不共享"))
                     Toggle("Telemetry", isOn: $telemetry)
                         .help("关掉后，在它名下开的终端里设 DISABLE_TELEMETRY=1，Claude Code 不再上报使用统计。之后可在配置那一行的右键菜单里改。")
                 }
             }
             .formStyle(.columns)
             if agent == .claude {
-                Text("独立保存配置、MCP、插件、会话、记忆和浏览器数据，并使用独立工作目录。只复制你填写的 ~/.claude/skills 下的技能，副本只读；不会同步后续修改。已有项目文件需自行放入工作目录。这不是系统沙箱。")
+                copyChoices
+                Text("工作目录在新建终端时自由选择。配置、会话和浏览器数据保持独立；只复制勾选的内容，不会跟随 Default 同步。技能、指令与 Agents 副本只读。")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Text(byKey ? ApiKeyWords.about(agent) : ProfileNewWords.account(agent))
@@ -504,22 +508,81 @@ struct ProfileNewSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 540)
+        .task { if agent == .claude { await loadCopies() } }
+    }
+
+    private var copyChoices: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("从 Default 复制（可选）").font(.headline)
+            if loadingCopies { ProgressView().controlSize(.small) }
+            if let copyProblem {
+                Text(copyProblem).font(.caption).foregroundStyle(.red)
+                Button("重试") { Task { await loadCopies() } }.disabled(loadingCopies)
+            }
+            if let options = copyOptions {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        copyGroup("Skills", names: options.skills, selection: $copies.skills)
+                        copyGroup("MCP", names: options.mcpServers, selection: $copies.mcpServers)
+                        copyGroup("Commands", names: options.commands, selection: $copies.commands)
+                        copyGroup("Agents", names: options.agents, selection: $copies.agents)
+                        Toggle("CLAUDE.md（全局指令）", isOn: $copies.instructions).disabled(!options.instructions)
+                        Toggle("模型与界面偏好", isOn: $copies.preferences).disabled(!options.preferences)
+                            .help("复制模型、思考等级、语言、输出风格等偏好；不复制环境变量、认证信息或 hooks。")
+                    }.toggleStyle(.checkbox).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(height: 210)
+                if !copies.mcpServers.isEmpty {
+                    Text("MCP 将复制所选服务的完整配置，可能包含该服务的凭据。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func copyGroup(_ title: String, names: [String], selection: Binding<[String]>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("\(title)（\(names.count)）", isOn: Binding(
+                get: { !names.isEmpty && names.allSatisfy { selection.wrappedValue.contains($0) } },
+                set: { selection.wrappedValue = $0 ? names : [] }
+            )).disabled(names.isEmpty)
+            if !names.isEmpty {
+                DisclosureGroup("选择具体项目（已选 \(selection.wrappedValue.count)）") {
+                    ForEach(names, id: \.self) { name in
+                        Toggle(name, isOn: Binding(
+                            get: { selection.wrappedValue.contains(name) },
+                            set: { on in
+                                selection.wrappedValue.removeAll { $0 == name }
+                                if on { selection.wrappedValue.append(name) }
+                            }
+                        ))
+                    }
+                }.padding(.leading, 20)
+            }
+        }
+    }
+
+    private func loadCopies() async {
+        loadingCopies = true
+        copyProblem = nil
+        defer { loadingCopies = false }
+        do { copyOptions = try await profileClient.claudeProfileCopyOptions() }
+        catch { copyProblem = "无法读取此节点 Default 的可复制内容：" + ((error as? DaemonError)?.reason ?? error.localizedDescription) }
     }
 
     private func create() {
         let client = profileClient, agent = agent.rawValue, draft = draft, byKey = byKey, telemetry = telemetry
         let name = draft.name.trimmingCharacters(in: .whitespaces)
-        let skills = sharedSkills.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let selection = agent == "claude-code" ? copies : nil
         busy = true
         problem = nil
         Task {
             do {
                 if byKey, let site = draft.site(agent: agent) {
                     let ciphertext = try await model.sealProfile(GateSealRequest(label: "profile/api-key", sites: site, value: draft.cleanKey), on: profileNodeID)
-                    done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: telemetry, sharedSkills: skills))
+                    done(try await client.createKeyProfile(agent: agent, name: name, ciphertext: ciphertext, baseUrl: draft.cleanBaseUrl, model: draft.cleanModel, telemetry: telemetry, copyFromDefault: selection))
                 } else {
-                    done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry, sharedSkills: skills))
+                    done(try await client.createProfile(agent: agent, name: name, telemetry: telemetry, copyFromDefault: selection))
                 }
                 dismiss()
             } catch { problem = (error as? DaemonError)?.reason ?? (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }

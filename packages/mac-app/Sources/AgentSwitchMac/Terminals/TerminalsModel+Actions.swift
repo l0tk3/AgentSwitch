@@ -220,7 +220,7 @@ extension TerminalsModel {
 
     func start() {
         guard creating, !starting else { return }
-        let cwd = pickedProfile?.workspace ?? folderText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cwd = folderText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cwd.isEmpty else { createError = "请填写文件夹。"; return }
         starting = true
         createError = ""

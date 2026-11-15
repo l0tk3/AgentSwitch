@@ -1,18 +1,19 @@
 # profiles-v0：配置——每个 agent 的多套登录，各带自己的出口与浏览器
 
-## 2026-11-14：新建 Claude Profile 的隔离规则
+## 2026-11-15：Claude Profile 隔离与可选复制
 
 本节覆盖下文旧版「设置与会话链接共用」的描述。`POST /profiles` 创建的 Claude 订阅/API Profile 默认使用隔离目录；已有 Profile、Default 和 Codex 不自动迁移。
 
 - 凭据：非 Default Claude 启动时清除继承的 Anthropic/Claude 与云供应商认证变量。隔离 Profile 只保留基础进程环境变量，再注入当前 Profile 的配置、代理和终端通信变量；私有 `HOME` 与 XDG 目录避免读取系统用户的工具配置。独立 settings 中由用户明确添加的配置仍生效。
-- 配置：`home/settings.json`、`home/.claude.json` 从空对象开始，MCP、插件、指令均不链接到本机配置。启动使用 `--setting-sources user`，不自动加载工作项目中的 settings。系统管理员管理的策略仍由 Claude 自己执行。
+- 配置：`home/settings.json`、`home/.claude.json` 从空对象开始，MCP、插件、指令均不链接到本机配置；创建时可勾选从 Default 复制配置。启动使用 `--setting-sources user`，不自动加载工作项目中的 settings。系统管理员管理的策略仍由 Claude 自己执行。
 - 会话：projects、history、plans、todos、file-history、memory 保存在该 Profile 的目录。AgentSwitch 的历史列表汇总这些目录，但 Claude 本身不共享它们。
-- 文件：新终端进入 `profiles/claude-code/<id>/workspace`；已有项目文件需用户自行复制或检出。创建界面的 Copy Skills 接受 `~/.claude/skills` 下的目录名（逗号分隔），只复制明确填写的技能，拒绝符号链接与特殊文件，副本去掉写权限。后续不会自动同步源技能。
+- 文件：所有 Profile 与 Default 一样在新建终端时自由选择项目目录；服务端不再覆盖 cwd，也不要求把项目搬进专属 workspace。旧 workspace 中的文件原样保留。配置、会话、记忆的目录仍独立。
+- 复制：创建界面自动读取目标节点 Default 的可复制内容，Skills、MCP、Commands、Agents 可整组勾选或逐项勾选，CLAUDE.md、模型与界面偏好可单独勾选。默认均不勾选，不需要手写路径。`GET /profiles/claude-code/copy-options` 只返回名称/可用性，不返回凭据或内容；`POST /profiles` 的 `copyFromDefault` 指定所选内容。技能/指令/Agents 为只读副本，拒绝符号链接和特殊文件；MCP 复制被选服务的完整配置（界面提示可能包含凭据），偏好只复制白名单字段，不带 env、hooks、身份或登录。副本不会与 Default 同步。原 sharedSkills 请求仍兼容。
 - 浏览器：按 Profile 使用独立持久化目录、Cookie 和缓存；包括无代理的隔离 Profile。独立浏览器不可用时拒绝启动，不退回共享浏览器。
 
 跨 Profile 的 Resume As / Continue As 必须确认「会传递旧上下文」，API 请求携带 `allowContextTransfer: true`。跨越隔离边界时只复制所选主会话 transcript，并分配新会话 ID、更新工作目录字段；原记录保留，不复制身份、设置、记忆、其他会话或工作文件。消息内原有路径、代码、工具输出不会被脱敏；引用的附件和子代理文件不自动搬运。
 
-删除隔离 Profile 会删除它自己的工作文件与历史，界面会明确提示。旧 Profile 的共享记录仍保留。
+删除隔离 Profile 会删除它自己目录内的历史和文件，界面会明确提示；用户选择的外部项目目录不删除。旧 Profile 的共享记录仍保留。
 
 这是配置、目录和启动环境隔离，不是 OS 沙箱或网络防火墙。同一系统用户的进程仍可能通过绝对路径读取其他文件，或自行 chmod 修改只读副本；相同账号、出口 IP 与内容也可能被服务端关联。此变更不会安装应用、切换运行版本或修改已有 Profile 数据。
 

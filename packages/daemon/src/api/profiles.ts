@@ -13,6 +13,8 @@ import { ApiKeyError } from "../profiles/apiKeys.js";
 import { parseBody, type ApiDeps } from "./shared.js";
 
 const Agent = z.enum(PROFILE_AGENTS);
+const CopyNames = z.array(z.string().min(1).max(200)).max(200);
+const Copies = z.object({ skills: CopyNames.optional(), mcpServers: CopyNames.optional(), commands: CopyNames.optional(), agents: CopyNames.optional(), instructions: z.boolean().optional(), preferences: z.boolean().optional() });
 /** How a profile that pays by a key reaches its model: the key (a ciphertext), another address, a model's name. */
 const Api = z.object({ key: z.string().max(4000).optional(), baseUrl: z.string().max(300).nullable().optional(), model: z.string().max(120).nullable().optional(),
   /** Keep a model the address does not list (a relay that serves more than it lists). */
@@ -24,6 +26,7 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   const store = deps.profiles;
   if (!store) return;
 
+  app.get("/profiles/claude-code/copy-options", (c) => c.json(store.copyOptions()));
   app.get("/profiles", (c) => c.json({ agents: store.all() }));
   app.put("/profiles/codex/:id/auth", async (c) => {
     const body = await parseBody(c, z.object({ content: z.string().min(2).max(131072) }));
@@ -61,10 +64,10 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
 
   app.post("/profiles", async (c) => {
     const body = await parseBody(c, z.object({ agent: Agent, name: z.string().min(1).max(80), kind: z.enum(["subscription", "api"]).default("subscription"), api: Api.optional(),
-      /** false: Claude Code's telemetry off under it from the start (§3.7). */ telemetry: z.boolean().optional(), sharedSkills: z.array(z.string().min(1).max(100)).max(100).default([]) }));
+      /** false: Claude Code's telemetry off under it from the start (§3.7). */ telemetry: z.boolean().optional(), sharedSkills: z.array(z.string().min(1).max(100)).max(100).default([]), copyFromDefault: Copies.optional() }));
     if (!body.ok) return c.json({ error: body.error }, 400);
     if (body.data.telemetry === false && body.data.agent !== "claude-code") return c.json({ error: "only Claude Code's telemetry can be turned off" }, 400);
-    const isolation = body.data.agent === "claude-code" ? { skills: body.data.sharedSkills } : undefined;
+    const isolation = body.data.agent === "claude-code" ? { ...body.data.copyFromDefault, skills: body.data.copyFromDefault?.skills ?? body.data.sharedSkills } : undefined;
     // As made, with its telemetry as asked.
     const made = (id: string) => {
       if (body.data.telemetry === false) store.setTelemetry(body.data.agent, id, false);

@@ -4,7 +4,7 @@
 
 import type { Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { existsSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { diskSpelling, keptDiskSpelling } from "../core/paths.js";
@@ -362,7 +362,7 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     }
     // `~/proj/` and `~/proj` are one folder; so are `~/proj` and `~/Proj` on a Mac's disk, which the agent then records
     // and the list shows by the disk's own spelling.
-    let cwd = diskSpelling(resolve(typed));
+    const cwd = diskSpelling(resolve(typed));
 
     const resumed = resume ? (body.data as z.infer<typeof ResumeTerminal>) : null;
     let agentSessionId = resumed?.agentSessionId;
@@ -379,15 +379,6 @@ export function mountTerminals(app: Hono, deps: ApiDeps): void {
     const sourceProfile = deps.profiles?.all()[body.data.harness].profiles.find((p) => p.id === previousProfile);
     const crossing = Boolean(resumed && previousProfile !== wanted);
     if (crossing && !resumed?.allowContextTransfer) return c.json({ error: "跨 Profile 继续会传递旧上下文，请确认后重试。", contextTransferRequired: true }, 409);
-    if (target?.isolated && target.workspace) {
-      // New terminals start in the dedicated workspace. Resumes retain subfolders only inside that workspace.
-      let root: string;
-      try { root = realpathSync(target.workspace); }
-      catch { return c.json({ error: "Profile 的独立工作目录已不存在，请先恢复该目录。" }, 409); }
-      let here: string | null = null;
-      try { here = realpathSync(cwd); } catch { /* use the dedicated workspace */ }
-      cwd = here && (here === root || here.startsWith(root + "/")) ? here : root;
-    }
     const transfer = crossing && body.data.harness === "claude-code" && (target?.isolated || sourceProfile?.isolated);
     const transcript = transfer && agentSessionId ? deps.sessions?.locate("claude-code", agentSessionId) : null;
     if (transfer && !transcript) return c.json({ error: "找不到要传递的会话记录；旧终端保持运行。" }, 409);

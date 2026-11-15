@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -52,6 +52,7 @@ it("new profiles from the API have private configuration, history and explicitly
   expect(response.status).toBe(201);
   const { profile } = await response.json();
   expect(profile.isolated).toBe(true);
+  expect(profile.workspace).toBeUndefined();
   const home = w.store.homeOf("claude-code", profile.id)!;
   expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({});
   expect(JSON.parse(readFileSync(join(home, "settings.json"), "utf8"))).toEqual({});
@@ -73,10 +74,41 @@ it("rejects skill traversal and links before creating any profile", () => {
   expect(w.store.all()["claude-code"].profiles).toHaveLength(1);
 });
 
+it("lists copy checkboxes without credentials and copies only selected configuration", async () => {
+  const w = world(), app = new Hono();
+  for (const folder of ["commands", "agents"]) {
+    mkdirSync(join(w.userHome, ".claude", folder));
+    writeFileSync(join(w.userHome, ".claude", folder, "chosen.md"), "chosen instructions");
+    writeFileSync(join(w.userHome, ".claude", folder, "other.md"), "not selected");
+  }
+  writeFileSync(join(w.userHome, ".claude", "CLAUDE.md"), "global instructions");
+  writeFileSync(join(w.userHome, ".claude", "settings.json"), JSON.stringify({ model: "my-model", language: "zh", env: { ANTHROPIC_API_KEY: "never-copy" }, hooks: { bad: [] }, apiKeyHelper: "never-copy" }));
+  writeFileSync(join(w.userHome, ".claude.json"), JSON.stringify({ userID: "never-copy", oauthAccount: { emailAddress: "never-copy" }, mcpServers: { chosen: { type: "http", url: "https://private.example", headers: { Authorization: "service-secret" } }, other: { command: "never-copy" } } }));
+  mountProfiles(app, { profiles: w.store } as unknown as ApiDeps);
+  const response = await app.request("/profiles/claude-code/copy-options");
+  const text = await response.text();
+  expect(text).not.toMatch(/service-secret|never-copy|private\.example/);
+  expect(JSON.parse(text)).toMatchObject({ mcpServers: ["chosen", "other"], commands: ["chosen.md", "other.md"], instructions: true, preferences: true });
+  const made = await app.request("/profiles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent: "claude-code", name: "Selected", copyFromDefault: { skills: ["chosen"], mcpServers: ["chosen"], commands: ["chosen.md"], agents: [], instructions: true, preferences: true } }) });
+  expect(made.status).toBe(201);
+  const id = (await made.json()).profile.id;
+  const home = w.store.homeOf("claude-code", id)!;
+  expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { chosen: { type: "http", url: "https://private.example", headers: { Authorization: "service-secret" } } } });
+  expect(JSON.parse(readFileSync(join(home, "settings.json"), "utf8"))).toEqual({ model: "my-model", language: "zh" });
+  expect(readdirSync(join(home, "commands"))).toEqual(["chosen.md"]);
+  expect(readdirSync(join(home, "agents"))).toEqual([]);
+  expect(readFileSync(join(home, "CLAUDE.md"), "utf8")).toBe("global instructions");
+  expect(lstatSync(join(home, "commands", "chosen.md")).mode & 0o222).toBe(0);
+  writeFileSync(join(w.userHome, ".claude.json"), "{}");
+  expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers).toHaveProperty("chosen");
+  expect(() => w.store.create("claude-code", "Invalid", "subscription", undefined, { mcpServers: ["missing"] })).toThrow();
+  expect(w.store.all()["claude-code"].profiles).toHaveLength(2);
+});
+
 it("clears inherited credentials and endpoint selectors before applying the profile proxy and settings", () => {
   const w = world(), p = w.store.create("claude-code", "A", "subscription", undefined, { skills: [] });
   const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude" }, hookUrl: () => "http://127.0.0.1:1", stateDir: join(w.root, "launch"), env: { PATH: "/usr/bin:/bin", HOME: w.userHome, ANTHROPIC_API_KEY: "bad", ANTHROPIC_AUTH_TOKEN: "bad", ANTHROPIC_BASE_URL: "https://wrong.test", CLAUDE_CODE_OAUTH_TOKEN: "bad", CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "other", HTTPS_PROXY: "http://other:1", NODE_OPTIONS: "--require other", BASH_ENV: "/other.rc", UNKNOWN_VENDOR_TOKEN: "bad" } });
-  const plan = launch({ id: "one", harness: "claude-code", hookToken: "test", mode: "manual", cwd: p.workspace!, configHome: w.store.homeOf("claude-code", p.id)!, isolated: true, proxy: "http://127.0.0.1:2345", api: { name: "A", baseUrl: "https://chosen.test" }, browserKey: "claude-code." + p.id });
+  const plan = launch({ id: "one", harness: "claude-code", hookToken: "test", mode: "manual", cwd: w.root, configHome: w.store.homeOf("claude-code", p.id)!, isolated: true, proxy: "http://127.0.0.1:2345", api: { name: "A", baseUrl: "https://chosen.test" }, browserKey: "claude-code." + p.id });
   expect(plan.env).not.toHaveProperty("ANTHROPIC_API_KEY");
   for (const key of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "AWS_PROFILE", "BASH_ENV", "NODE_OPTIONS", "UNKNOWN_VENDOR_TOKEN"]) expect(plan.env).not.toHaveProperty(key);
   expect(plan.env.HOME).not.toBe(w.userHome);
@@ -91,19 +123,19 @@ it("copies only one transcript with a fresh id, discovers it and deletes it inde
   const w = world(), target = w.store.create("claude-code", "Private", "subscription", undefined, { skills: [] });
   const source = transcript(join(w.userHome, ".claude", "projects"), w.root);
   const before = readFileSync(source, "utf8");
-  const id = transferClaudeContext(source, w.store.claudeProjectsOf(target.id), target.workspace!);
+  const id = transferClaudeContext(source, w.store.claudeProjectsOf(target.id), w.root);
   expect(id).not.toBe(session);
   const sessions = monitor(w);
   const located = sessions.locate("claude-code", id)!;
   expect(located).toContain(target.id);
-  expect(JSON.parse(readFileSync(located, "utf8"))).toMatchObject({ sessionId: id, cwd: target.workspace, message: { content: "old context" } });
+  expect(JSON.parse(readFileSync(located, "utf8"))).toMatchObject({ sessionId: id, cwd: w.root, message: { content: "old context" } });
   expect(sessions.list().some((s) => s.id === id)).toBe(true);
   expect((await sessions.remove("claude-code", id)).failed).toEqual([]);
   expect(existsSync(located)).toBe(false);
   expect(readFileSync(source, "utf8")).toBe(before);
 });
 
-it("starts inside the private workspace and requires consent before stopping and transferring a session", async () => {
+it("keeps the user-selected project directory and requires consent before transferring a session", async () => {
   const w = world(), target = w.store.create("claude-code", "Private", "subscription", undefined, { skills: [] });
   const source = transcript(join(w.userHome, ".claude", "projects"), w.root), sessions = monitor(w);
   const asked: LaunchRequest[] = [];
@@ -112,13 +144,17 @@ it("starts inside the private workspace and requires consent before stopping and
   const app = new Hono();
   mountTerminals(app, { profiles: w.store, sessions, profileBrowsers: { of: () => ({ visible: () => false }) }, terminals: { host, audit: { record() {} }, agents: ["claude-code"], style: () => ({}), elsewhere: async () => null } } as unknown as ApiDeps);
   const post = (path: string, body: object) => app.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  expect((await post("/terminals", { harness: "claude-code", cwd: join(w.root, "missing"), profile: target.id })).status).toBe(400);
+  const fresh = await post("/terminals", { harness: "claude-code", cwd: w.root, profile: target.id });
+  expect(fresh.status).toBe(201);
+  expect(asked.at(-1)?.cwd).toBe(w.root);
   const original = await (await post("/terminals/resume", { harness: "claude-code", cwd: w.root, agentSessionId: session })).json();
   const body = { harness: "claude-code", cwd: w.root, agentSessionId: session, profile: target.id, switchFrom: original.terminal.id };
   expect((await post("/terminals/resume", body)).status).toBe(409);
   expect(host.get(original.terminal.id)?.status).not.toBe("exited");
   const response = await post("/terminals/resume", { ...body, allowContextTransfer: true });
   expect(response.status).toBe(201);
-  expect(asked.at(-1)).toMatchObject({ isolated: true, cwd: realpathSync(target.workspace!), browserKey: "claude-code." + target.id });
+  expect(asked.at(-1)).toMatchObject({ isolated: true, cwd: w.root, browserKey: "claude-code." + target.id });
   expect(asked.at(-1)!.resume).not.toBe(session);
   expect(existsSync(source)).toBe(true);
   expect(host.get(original.terminal.id)).toBeNull();

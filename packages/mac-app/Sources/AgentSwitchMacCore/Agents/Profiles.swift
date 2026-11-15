@@ -155,6 +155,25 @@ public struct ApiKeyDraft: Equatable, Sendable {
     }
 }
 
+public struct ClaudeProfileCopyOptions: Decodable, Sendable {
+    public let skills: [String]
+    public let mcpServers: [String]
+    public let commands: [String]
+    public let agents: [String]
+    public let instructions: Bool
+    public let preferences: Bool
+}
+
+public struct ClaudeProfileCopies: Encodable, Sendable, Equatable {
+    public var skills: [String] = []
+    public var mcpServers: [String] = []
+    public var commands: [String] = []
+    public var agents: [String] = []
+    public var instructions = false
+    public var preferences = false
+    public init() {}
+}
+
 public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
     public let id: String
     public let name: String
@@ -289,18 +308,22 @@ extension DaemonClient {
         try decode(ProfilesReply.self, try await call("POST", "/profiles/current", body: try JSONEncoder().encode(["agent": agent, "id": id]))).agents
     }
 
+    public func claudeProfileCopyOptions() async throws -> ClaudeProfileCopyOptions {
+        try decode(ClaudeProfileCopyOptions.self, try await call("GET", "/profiles/claude-code/copy-options"))
+    }
+
     /// `telemetry`: false to have Claude Code's telemetry off under it from the start (docs/profiles-v0.md §3.7).
-    public func createProfile(agent: String, name: String, kind: String = "subscription", telemetry: Bool = true, sharedSkills: [String] = []) async throws -> [String: AgentProfiles] {
-        struct Body: Encodable { let agent: String; let name: String; let kind: String; let telemetry: Bool?; let sharedSkills: [String] }
-        return try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(Body(agent: agent, name: name, kind: kind, telemetry: telemetry ? nil : false, sharedSkills: sharedSkills)))).agents
+    public func createProfile(agent: String, name: String, kind: String = "subscription", telemetry: Bool = true, sharedSkills: [String] = [], copyFromDefault: ClaudeProfileCopies? = nil) async throws -> [String: AgentProfiles] {
+        struct Body: Encodable { let agent: String; let name: String; let kind: String; let telemetry: Bool?; let sharedSkills: [String]; let copyFromDefault: ClaudeProfileCopies? }
+        return try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(Body(agent: agent, name: name, kind: kind, telemetry: telemetry ? nil : false, sharedSkills: sharedSkills, copyFromDefault: copyFromDefault)))).agents
     }
 
     private struct ApiBody: Encodable { let key: String?; let baseUrl: String?; let model: String? }
 
     /// A new profile that pays by a key (§3.6): `ciphertext` is the key sealed for the site it is sent to.
-    public func createKeyProfile(agent: String, name: String, ciphertext: String, baseUrl: String?, model: String?, telemetry: Bool = true, sharedSkills: [String] = []) async throws -> [String: AgentProfiles] {
-        struct Body: Encodable { let agent: String; let name: String; let kind = "api"; let api: ApiBody; let telemetry: Bool?; let sharedSkills: [String] }
-        return try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(Body(agent: agent, name: name, api: ApiBody(key: ciphertext, baseUrl: baseUrl, model: model), telemetry: telemetry ? nil : false, sharedSkills: sharedSkills)))).agents
+    public func createKeyProfile(agent: String, name: String, ciphertext: String, baseUrl: String?, model: String?, telemetry: Bool = true, sharedSkills: [String] = [], copyFromDefault: ClaudeProfileCopies? = nil) async throws -> [String: AgentProfiles] {
+        struct Body: Encodable { let agent: String; let name: String; let kind = "api"; let api: ApiBody; let telemetry: Bool?; let sharedSkills: [String]; let copyFromDefault: ClaudeProfileCopies? }
+        return try decode(ProfilesReply.self, try await call("POST", "/profiles", body: try JSONEncoder().encode(Body(agent: agent, name: name, api: ApiBody(key: ciphertext, baseUrl: baseUrl, model: model), telemetry: telemetry ? nil : false, sharedSkills: sharedSkills, copyFromDefault: copyFromDefault)))).agents
     }
 
     /// Claude Code's telemetry under a profile, for the terminals started under it from now on (§3.7).

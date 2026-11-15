@@ -1,3 +1,4 @@
+import type { ClaudeCopies } from "./claudeCopies.js";
 /** The key a profile pays by (docs/profiles-v0.md §3.6): kept as a ciphertext of the gate's, sealed for the address it
  *  is sent to, and handed to the agent of a terminal under that profile when it asks — Claude Code through its
  *  `apiKeyHelper`, Codex through its provider's `auth` command (terminals/launch.ts, terminals/hookClient.ts `key`). It
@@ -20,7 +21,7 @@ const CIPHERTEXT = /^enc:v1:[A-Za-z0-9_=-]{16,}$/;
 export type ApiKeyStore = {
   apiOf(agent: ProfileAgent, id: string): ProfileApi | null;
   setApi(agent: ProfileAgent, id: string, api: ProfileApi): void;
-  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi, isolation?: { skills: readonly string[] }): Profile;
+  create(agent: ProfileAgent, name: string, kind: ProfileKind, api?: ProfileApi, isolation?: ClaudeCopies): Profile;
 };
 
 export class ApiKeyError extends Error {}
@@ -123,7 +124,7 @@ export class ApiKeys {
 
   /** A new profile that pays by `api.key`, a ciphertext sealed for where the key is sent. Refused before anything is
    *  made when the gate will not open it for that address. */
-  async create(agent: ProfileAgent, name: string, api: ProfileApi, force = false, isolation?: { skills: readonly string[] }): Promise<Profile> {
+  async create(agent: ProfileAgent, name: string, api: ProfileApi, force = false, isolation?: ClaudeCopies): Promise<Profile> {
     const key = await this.open(agent, api.key, api.baseUrl);
     if (!force) await this.offered(agent, api.baseUrl, key, api.model, null);
     return this.o.store.create(agent, name, "api", api, isolation);
