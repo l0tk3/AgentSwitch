@@ -25,6 +25,7 @@ struct AgentsView: View {
     @State private var proxying: ProfileProxyTarget?
     @State private var importingAuth: AgentProfile?
     @State private var keying: ProfileProxyTarget?
+    @State private var copying: AgentProfile?
     @State private var paying: ProfileProxyTarget?
     /// The install asked to be deleted, until answered.
     @State private var deleting: AgentInstall?
@@ -129,6 +130,7 @@ struct AgentsView: View {
         .sheet(item: $keying) { target in
             ProfileSessionKeySheet(agent: target.agent, profile: target.profile) { profiles = $0 }
         }
+        .sheet(item: $copying) { profile in ProfileCopiesSheet(profile: profile) }
         .sheet(item: $importingAuth) { profile in
             CodexAuthSheet(profile: profile) { profiles = $0 }
         }
@@ -211,6 +213,7 @@ struct AgentsView: View {
                             remove: { profile in removing = (agent, profile) },
                             proxy: { profile in proxying = ProfileProxyTarget(agent: agent, profile: profile) },
                             sessionKey: { profile in keying = ProfileProxyTarget(agent: agent, profile: profile) },
+                            copies: { profile in copying = profile },
                             apiKey: { profile in paying = ProfileProxyTarget(agent: agent, profile: profile) },
                             resetIdentity: profileNodeID == nil ? { change(.claude) { try await $0.resetDefaultClaudeIdentity() } } : nil,
                             authJSON: { importingAuth = $0 }, health: health, checkingHealth: checkingHealth,
@@ -494,7 +497,7 @@ struct ProfileNewSheet: View {
             .formStyle(.columns)
             if agent == .claude {
                 copyChoices
-                Text("工作目录在新建终端时自由选择。配置、会话和浏览器数据保持独立；只复制勾选的内容，不会跟随 Default 同步。技能、指令与 Agents 副本只读。")
+                Text("勾选的内容各复制一份到这个配置里，之后不随 Default 变化，也可以在配置那一行的 Copies… 里再改。没有勾选的不带过去；登录、会话和浏览器数据始终是它自己的。")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Text(byKey ? ApiKeyWords.about(agent) : ProfileNewWords.account(agent))
@@ -514,50 +517,15 @@ struct ProfileNewSheet: View {
 
     private var copyChoices: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("从 Default 复制（可选）").font(.headline)
-            if loadingCopies { ProgressView().controlSize(.small) }
-            if let copyProblem {
-                Text(copyProblem).font(.caption).foregroundStyle(.red)
-                Button("重试") { Task { await loadCopies() } }.disabled(loadingCopies)
-            }
+            Text("Copy from Default").font(.callout.weight(.semibold))
             if let options = copyOptions {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        copyGroup("Skills", names: options.skills, selection: $copies.skills)
-                        copyGroup("MCP", names: options.mcpServers, selection: $copies.mcpServers)
-                        copyGroup("Commands", names: options.commands, selection: $copies.commands)
-                        copyGroup("Agents", names: options.agents, selection: $copies.agents)
-                        Toggle("CLAUDE.md（全局指令）", isOn: $copies.instructions).disabled(!options.instructions)
-                        Toggle("模型与界面偏好", isOn: $copies.preferences).disabled(!options.preferences)
-                            .help("复制模型、思考等级、语言、输出风格等偏好；不复制环境变量、认证信息或 hooks。")
-                    }.toggleStyle(.checkbox).frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(height: 210)
-                if !copies.mcpServers.isEmpty {
-                    Text("MCP 将复制所选服务的完整配置，可能包含该服务的凭据。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func copyGroup(_ title: String, names: [String], selection: Binding<[String]>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle("\(title)（\(names.count)）", isOn: Binding(
-                get: { !names.isEmpty && names.allSatisfy { selection.wrappedValue.contains($0) } },
-                set: { selection.wrappedValue = $0 ? names : [] }
-            )).disabled(names.isEmpty)
-            if !names.isEmpty {
-                DisclosureGroup("选择具体项目（已选 \(selection.wrappedValue.count)）") {
-                    ForEach(names, id: \.self) { name in
-                        Toggle(name, isOn: Binding(
-                            get: { selection.wrappedValue.contains(name) },
-                            set: { on in
-                                selection.wrappedValue.removeAll { $0 == name }
-                                if on { selection.wrappedValue.append(name) }
-                            }
-                        ))
-                    }
-                }.padding(.leading, 20)
+                ProfileCopyChoices(options: options, selection: $copies)
+                if !copies.mcpServers.isEmpty { ProfileCopyMCPNote() }
+            } else if let copyProblem {
+                Text(copyProblem).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Button("Retry") { Task { await loadCopies() } }.disabled(loadingCopies)
+            } else {
+                ProgressView().controlSize(.small)
             }
         }
     }
@@ -567,7 +535,7 @@ struct ProfileNewSheet: View {
         copyProblem = nil
         defer { loadingCopies = false }
         do { copyOptions = try await profileClient.claudeProfileCopyOptions() }
-        catch { copyProblem = "无法读取此节点 Default 的可复制内容：" + ((error as? DaemonError)?.reason ?? error.localizedDescription) }
+        catch { copyProblem = "读不到 Default 里可以复制的内容：" + ((error as? DaemonError)?.reason ?? error.localizedDescription) }
     }
 
     private func create() {
@@ -706,6 +674,8 @@ struct ProfilesSection: View {
     let remove: (AgentProfile) -> Void
     let proxy: (AgentProfile) -> Void
     var sessionKey: ((AgentProfile) -> Void)? = nil
+    /// What a profile of its own holds of `Default`'s, changed (§3.8).
+    var copies: ((AgentProfile) -> Void)? = nil
     var apiKey: ((AgentProfile) -> Void)? = nil
     var resetIdentity: (() -> Void)? = nil
     var authJSON: ((AgentProfile) -> Void)? = nil
@@ -762,6 +732,10 @@ struct ProfilesSection: View {
                         if agent == .claude, !profile.paysByKey, let sessionKey {
                             Button("Session Key…") { sessionKey(profile) }.controlSize(.small)
                                 .help(profile.hasSessionKey ? "已保存一个 session key。" : "")
+                        }
+                        if agent == .claude, profile.isolated == true, let copies {
+                            Button("Copies…") { copies(profile) }.controlSize(.small)
+                                .help("这个配置从 Default 复制了哪些技能、插件、MCP 与设置。")
                         }
                         Button("Proxy…") { proxy(profile) }.controlSize(.small)
                         if profile.isDefault && agent == .claude, resetIdentity != nil {

@@ -234,6 +234,34 @@ Codex
 - **接口**：`POST /profiles` 多一个 `telemetry: false`；`PUT /profiles/:agent/:id/telemetry` `{ on }`；只在 Mac 上，只限 Claude Code。`GET /profiles` 里关掉的配置带 `telemetry: false`。
 - **没做**：iPhone 上显示与切换；其它 agent 的同类开关。
 
+### 3.8 从 Default 复制：加上插件与状态栏，建好以后也能改（2026-11-15）
+
+来由（用户）：像是 Claudehud 这种应该算什么？插件吗？那新建 profile 的时候能把插件也做成可选择复制的吗？；这个页面写的太蠢了，按照设计规范重新规范一下；profile 新建完成后应该也可以选择这些选项才行，加一个编辑选项。
+
+**claude-hud 是两样东西**：一个插件（`claude-hud@claude-hud`），加上 `settings.json` 里的 `statusLine`——状态栏的命令从插件的缓存目录里找到它的程序来画。只带其中一样，状态栏不会出现。所以可复制的内容多了两类：
+
+- **Plugins**：Default 里已装的插件，按 `名字@marketplace` 逐个勾。只列用户范围的安装（某个项目自己装的不算），且文件在 `plugins/cache/` 里、它的 marketplace 在 `plugins/known_marketplaces.json` 里有记录的。
+- **Status Line**：`settings.json` 的 `statusLine` 原样复制。这台 Mac 上 claude-hud 的命令按 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` 找插件，所以到了配置自己的目录里照常能用。
+
+**插件怎么复制**（Claude Code 2.1.325 实测）：
+
+| 做法 | `claude plugin list` 的结果 |
+| --- | --- |
+| 只复制缓存目录，写 `installed_plugins.json` 与 `enabledPlugins` | `✘ failed to load — Marketplace claude-hud not found` |
+| 再带上 marketplace 的目录与 `known_marketplaces.json` 里它那一条 | `✔ enabled` |
+
+所以一个插件带过去的是：`plugins/cache/<marketplace>/<插件>/<版本>/`、`installed_plugins.json` 里它那一条（`installPath` 改成配置自己的目录）、它的 marketplace 目录与 `known_marketplaces.json` 那一条（`installLocation` 同样改写）、`settings.json` 的 `enabledPlugins`，以及 Default 在 `extraKnownMarketplaces` 里为这个 marketplace 写的来源。用新代码把 claude-hud 与 document-skills 复制进一个空目录：两个都 `✔ enabled`，状态栏的命令能画出来，复制出的记录里没有一处指回 `~/.claude`。插件的副本是配置自己的，可写（Claude Code 会就地更新它），这一点与技能的只读副本不同。插件自己存的数据（`plugins/data/`、`plugins/claude-hud/config.json` 之类）不复制。
+
+**建好以后改**：配置那一行多一个 `Copies…`（只有自己有一份配置的 Claude Code 配置才有；与 Default 链接共用的旧配置没有）。同一张列表，按这个配置现在有的打勾：
+
+- 新勾上的，按 Default **现在**的样子复制一份；取消勾选的，从这个配置里删掉。Default 不动。
+- 服务只动请求里点名的：`PUT /profiles/claude-code/:id/copies` 收 `{ add, remove }`，`remove` 里没写的一概不碰——配置自己后来加的 MCP、自己的设置都留着。配置里有而 Default 没有的项也列出来（标 `Not in Default`），取消勾选即删除，之后不能从 Default 复制回来。
+- `GET /profiles/claude-code/:id/copies` 给 `{ options, held }`，仍然只有名字。整个请求先验完再动手：`add` 里有 Default 没有的、`remove` 里有配置没有的，一样都不写。
+- 对之后在它名下新开的终端生效；已开着的终端不受影响。
+- 配对的设备和别的节点也能调这两个接口，与新建配置时的复制同一个范围。
+
+**界面**（Mac，`ProfileCopyChoices`，新建与 `Copies…` 共用；预览 `-designPreviewOnly profiles` 的 `profile-copies*.png`）：一个框里每类一行，`▸ [–] Skills  2 of 8`——方框勾全部（只勾了一部分时是横线），`▸` 展开逐项勾，右边是已选数量；Default 里没有的类写 `None`、不可勾。展开的项统一左对齐、缩进一级（原先的版本里它们居中了）。`Instructions`、`Preferences`、`Status Line` 三个各是一行。短词用英文标题式大写，说明是整句中文，一处只说一遍。iPhone 上新建配置还没有这张列表。
+
 ## 4. 出口（代理）
 
 - 出口属于身份：配置自己的身份有自己的出口；用这台 Mac 的配置，出口就是这台 Mac 的。

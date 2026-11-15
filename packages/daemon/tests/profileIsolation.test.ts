@@ -105,6 +105,78 @@ it("lists copy checkboxes without credentials and copies only selected configura
   expect(w.store.all()["claude-code"].profiles).toHaveLength(2);
 });
 
+/** `Default` with one plugin installed the way Claude Code 2.1.325 records it, and a status line that draws through it. */
+function withPlugin(userHome: string) {
+  const plugins = join(userHome, ".claude", "plugins"), at = join(plugins, "cache", "hud", "hud", "1.0.0"), market = join(plugins, "marketplaces", "hud");
+  mkdirSync(join(at, "dist"), { recursive: true });
+  mkdirSync(join(market, ".git"), { recursive: true });
+  writeFileSync(join(at, "dist", "index.js"), "draw()");
+  writeFileSync(join(market, "marketplace.json"), "{}");
+  writeFileSync(join(plugins, "installed_plugins.json"), JSON.stringify({ version: 2, plugins: {
+    "hud@hud": [{ scope: "user", installPath: at, version: "1.0.0" }],
+    "elsewhere@hud": [{ scope: "user", installPath: "/etc", version: "1" }],
+    "lost@gone": [{ scope: "user", installPath: at, version: "1" }] } }));
+  writeFileSync(join(plugins, "known_marketplaces.json"), JSON.stringify({ hud: { source: { source: "github", repo: "x/hud" }, installLocation: market } }));
+  writeFileSync(join(userHome, ".claude", "settings.json"), JSON.stringify({ model: "my-model", env: { ANTHROPIC_API_KEY: "never-copy" }, hooks: { bad: [] },
+    enabledPlugins: { "hud@hud": true }, extraKnownMarketplaces: { hud: { source: { source: "github", repo: "x/hud" } } }, statusLine: { type: "command", command: "draw" } }));
+  return { at, market };
+}
+
+it("copies a plugin with its marketplace and the status line, each only when ticked (2026-11-15)", () => {
+  const w = world();
+  withPlugin(w.userHome);
+  // Only a plugin whose files are in the cache and whose marketplace is known can be copied.
+  expect(w.store.copyOptions()).toMatchObject({ plugins: ["hud@hud"], statusLine: true });
+  const none = w.store.create("claude-code", "None", "subscription", undefined, { skills: [] });
+  expect(readdirSync(join(w.store.homeOf("claude-code", none.id)!, "plugins"))).toEqual([]);
+  expect(() => w.store.create("claude-code", "Bad", "subscription", undefined, { plugins: ["elsewhere@hud"] })).toThrow();
+  const p = w.store.create("claude-code", "Hud", "subscription", undefined, { plugins: ["hud@hud"], statusLine: true });
+  const home = w.store.homeOf("claude-code", p.id)!, own = join(home, "plugins", "cache", "hud", "hud", "1.0.0");
+  // Its own copy, where its own record says it is; nothing of it points back into Default's folder.
+  expect(readFileSync(join(own, "dist", "index.js"), "utf8")).toBe("draw()");
+  expect(JSON.parse(readFileSync(join(home, "plugins", "installed_plugins.json"), "utf8"))).toEqual({ version: 2, plugins: { "hud@hud": [{ scope: "user", installPath: own, version: "1.0.0" }] } });
+  expect(JSON.parse(readFileSync(join(home, "plugins", "known_marketplaces.json"), "utf8"))).toEqual({ hud: { source: { source: "github", repo: "x/hud" }, installLocation: join(home, "plugins", "marketplaces", "hud") } });
+  expect(existsSync(join(home, "plugins", "marketplaces", "hud", ".git"))).toBe(true);
+  expect(JSON.parse(readFileSync(join(home, "settings.json"), "utf8"))).toEqual({ statusLine: { type: "command", command: "draw" }, enabledPlugins: { "hud@hud": true }, extraKnownMarketplaces: { hud: { source: { source: "github", repo: "x/hud" } } } });
+  // The plugin's copy is the profile's to update: writable, unlike a copied skill.
+  expect(lstatSync(join(own, "dist", "index.js")).mode & 0o200).toBe(0o200);
+});
+
+it("a profile's copies are changed after it was made: what is named is added or removed, the rest is left (2026-11-15)", async () => {
+  const w = world(), app = new Hono();
+  withPlugin(w.userHome);
+  writeFileSync(join(w.userHome, ".claude", "CLAUDE.md"), "global instructions");
+  mountProfiles(app, { profiles: w.store } as unknown as ApiDeps);
+  const p = w.store.create("claude-code", "Later", "subscription", undefined, { skills: ["chosen"] });
+  const home = w.store.homeOf("claude-code", p.id)!;
+  // What the profile got some other way: an MCP server it added itself, a setting of its own.
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ userID: "its-own", mcpServers: { mine: { command: "x" } } }));
+  writeFileSync(join(home, "settings.json"), JSON.stringify({ env: { OWN: "1" } }));
+  const got = await (await app.request(`/profiles/claude-code/${p.id}/copies`)).text();
+  expect(got).not.toMatch(/never-copy|other-account/);
+  expect(JSON.parse(got)).toMatchObject({ options: { skills: ["chosen", "other"], plugins: ["hud@hud"], mcpServers: ["old"] }, held: { skills: ["chosen"], plugins: [], mcpServers: ["mine"], statusLine: false, instructions: false, preferences: false } });
+  const put = (body: unknown) => app.request(`/profiles/claude-code/${p.id}/copies`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const changed = await put({ add: { skills: ["other"], plugins: ["hud@hud"], mcpServers: ["old"], instructions: true, preferences: true, statusLine: true }, remove: { skills: ["chosen"] } });
+  expect(changed.status).toBe(200);
+  expect((await changed.json()).held).toEqual({ skills: ["other"], commands: [], agents: [], mcpServers: ["mine", "old"], plugins: ["hud@hud"], instructions: true, preferences: true, statusLine: true });
+  expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ userID: "its-own", mcpServers: { mine: { command: "x" }, old: { command: "other-account" } } });
+  expect(JSON.parse(readFileSync(join(home, "settings.json"), "utf8"))).toMatchObject({ env: { OWN: "1" }, model: "my-model", statusLine: { command: "draw" }, enabledPlugins: { "hud@hud": true } });
+  // Taken back: each goes, and only it.
+  expect((await put({ remove: { skills: ["other"], plugins: ["hud@hud"], mcpServers: ["old"], instructions: true, preferences: true, statusLine: true } })).status).toBe(200);
+  expect(w.store.copiesOf(p.id).held).toEqual({ skills: [], commands: [], agents: [], mcpServers: ["mine"], plugins: [], instructions: false, preferences: false, statusLine: false });
+  expect(JSON.parse(readFileSync(join(home, "settings.json"), "utf8"))).toMatchObject({ env: { OWN: "1" }, enabledPlugins: {} });
+  expect(JSON.parse(readFileSync(join(home, "settings.json"), "utf8"))).not.toHaveProperty("model");
+  expect(existsSync(join(home, "plugins", "cache", "hud", "hud", "1.0.0"))).toBe(false);
+  expect(existsSync(join(w.userHome, ".claude", "plugins", "cache", "hud", "hud", "1.0.0", "dist", "index.js"))).toBe(true);
+  // Nothing is written when any of it is wrong; a profile linked to Default's configuration has none of its own.
+  expect((await put({ add: { skills: ["chosen"] }, remove: { skills: ["../.."] } })).status).toBe(400);
+  expect((await put({ add: { plugins: ["lost@gone"] } })).status).toBe(400);
+  expect(w.store.copiesOf(p.id).held.skills).toEqual([]);
+  const linked = w.store.create("claude-code", "Linked", "subscription");
+  expect((await app.request(`/profiles/claude-code/${linked.id}/copies`)).status).toBe(400);
+  expect((await app.request("/profiles/claude-code/nobody00/copies")).status).toBe(404);
+});
+
 it("clears inherited credentials and endpoint selectors before applying the profile proxy and settings", () => {
   const w = world(), p = w.store.create("claude-code", "A", "subscription", undefined, { skills: [] });
   const launch = agentLauncher({ binaries: { "claude-code": "/bin/claude" }, hookUrl: () => "http://127.0.0.1:1", stateDir: join(w.root, "launch"), env: { PATH: "/usr/bin:/bin", HOME: w.userHome, ANTHROPIC_API_KEY: "bad", ANTHROPIC_AUTH_TOKEN: "bad", ANTHROPIC_BASE_URL: "https://wrong.test", CLAUDE_CODE_OAUTH_TOKEN: "bad", CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "other", HTTPS_PROXY: "http://other:1", NODE_OPTIONS: "--require other", BASH_ENV: "/other.rc", UNKNOWN_VENDOR_TOKEN: "bad" } });

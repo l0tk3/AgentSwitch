@@ -66,6 +66,9 @@ enum DesignPreview {
                     let down = AgentProfile(id: "abc123def0", name: "cwork1", proxy: BrowserProxy(server: "socks5://10.0.0.2:1080"))
                     try await renderSheet(ProfileProxySheet(agent: .claude, profile: down, problem: "经这个代理连不出去（the proxy answered 502）。") { _ in }, model: model, appearance: dark,
                                           to: directory.appendingPathComponent("profile-proxy-down.png"))
+                    // What a profile takes from `Default` (§3.8): the list, by kind and by item.
+                    try await renderSheet(ProfileCopiesDemo(), model: model, appearance: dark, to: directory.appendingPathComponent("profile-copies.png"))
+                    try await renderSheet(ProfileCopiesDemo(), model: model, appearance: NSAppearance(named: .aqua), to: directory.appendingPathComponent("profile-copies-light.png"))
                     // The profiles' rows (§3.2): each with its colour before its name, `Default` with none.
                     let list = AgentProfiles(current: "abc123def0", profiles: [
                         AgentProfile(id: "default", name: "Default", account: "me@example.com"),

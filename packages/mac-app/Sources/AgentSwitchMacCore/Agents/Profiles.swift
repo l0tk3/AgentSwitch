@@ -155,23 +155,88 @@ public struct ApiKeyDraft: Equatable, Sendable {
     }
 }
 
-public struct ClaudeProfileCopyOptions: Decodable, Sendable {
+/// What can be copied from `Default` into a Claude Code profile of its own, or what such a profile holds
+/// (docs/profiles-v0.md §3.8): names only. A node that does not know plugins or the status line yet says neither.
+public struct ClaudeProfileCopyOptions: Decodable, Sendable, Equatable {
     public let skills: [String]
     public let mcpServers: [String]
     public let commands: [String]
     public let agents: [String]
+    /// Installed plugins, by their key (`name@marketplace`).
+    public let plugins: [String]
     public let instructions: Bool
     public let preferences: Bool
+    public let statusLine: Bool
+
+    public init(skills: [String] = [], mcpServers: [String] = [], commands: [String] = [], agents: [String] = [], plugins: [String] = [], instructions: Bool = false, preferences: Bool = false, statusLine: Bool = false) {
+        self.skills = skills; self.mcpServers = mcpServers; self.commands = commands; self.agents = agents; self.plugins = plugins
+        self.instructions = instructions; self.preferences = preferences; self.statusLine = statusLine
+    }
+
+    private enum Keys: String, CodingKey { case skills, mcpServers, commands, agents, plugins, instructions, preferences, statusLine }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        func list(_ key: Keys) -> [String] { (try? c.decode([String].self, forKey: key)) ?? [] }
+        func flag(_ key: Keys) -> Bool { (try? c.decode(Bool.self, forKey: key)) ?? false }
+        self.init(skills: list(.skills), mcpServers: list(.mcpServers), commands: list(.commands), agents: list(.agents), plugins: list(.plugins),
+                  instructions: flag(.instructions), preferences: flag(.preferences), statusLine: flag(.statusLine))
+    }
+
+    /// The same as a selection: everything it holds, ticked.
+    public var all: ClaudeProfileCopies {
+        var copies = ClaudeProfileCopies()
+        copies.skills = skills; copies.mcpServers = mcpServers; copies.commands = commands; copies.agents = agents; copies.plugins = plugins
+        copies.instructions = instructions; copies.preferences = preferences; copies.statusLine = statusLine
+        return copies
+    }
 }
 
-public struct ClaudeProfileCopies: Encodable, Sendable, Equatable {
+/// `GET`/`PUT /profiles/claude-code/:id/copies`: what `Default` offers beside what the profile holds.
+public struct ClaudeProfileCopyState: Decodable, Sendable, Equatable {
+    public let options: ClaudeProfileCopyOptions
+    public let held: ClaudeProfileCopyOptions
+}
+
+public struct ClaudeProfileCopies: Codable, Sendable, Equatable {
     public var skills: [String] = []
     public var mcpServers: [String] = []
     public var commands: [String] = []
     public var agents: [String] = []
+    public var plugins: [String] = []
     public var instructions = false
     public var preferences = false
+    public var statusLine = false
     public init() {}
+
+    /// The lists, by kind: one place that names them all.
+    public static var lists: [WritableKeyPath<ClaudeProfileCopies, [String]>] { [\.skills, \.mcpServers, \.commands, \.agents, \.plugins] }
+    public static var flags: [WritableKeyPath<ClaudeProfileCopies, Bool>] { [\.instructions, \.preferences, \.statusLine] }
+
+    public var isEmpty: Bool { Self.lists.allSatisfy { self[keyPath: $0].isEmpty } && Self.flags.allSatisfy { !self[keyPath: $0] } }
+
+    /// What turns `held` into `self`: what to copy from `Default`, and what the profile gives up.
+    public func change(from held: ClaudeProfileCopies) -> (add: ClaudeProfileCopies, remove: ClaudeProfileCopies) {
+        var add = ClaudeProfileCopies(), remove = ClaudeProfileCopies()
+        for list in Self.lists {
+            let now = Set(self[keyPath: list]), before = Set(held[keyPath: list])
+            add[keyPath: list] = self[keyPath: list].filter { !before.contains($0) }
+            remove[keyPath: list] = held[keyPath: list].filter { !now.contains($0) }
+        }
+        for flag in Self.flags {
+            add[keyPath: flag] = self[keyPath: flag] && !held[keyPath: flag]
+            remove[keyPath: flag] = !self[keyPath: flag] && held[keyPath: flag]
+        }
+        return (add, remove)
+    }
+}
+
+/// A plugin's key as it is read: its name, and the marketplace it came from.
+public enum PluginKey {
+    public static func parts(_ key: String) -> (name: String, market: String?) {
+        guard let at = key.lastIndex(of: "@"), at != key.startIndex else { return (key, nil) }
+        return (String(key[..<at]), String(key[key.index(after: at)...]))
+    }
 }
 
 public struct AgentProfile: Decodable, Equatable, Sendable, Identifiable {
@@ -310,6 +375,17 @@ extension DaemonClient {
 
     public func claudeProfileCopyOptions() async throws -> ClaudeProfileCopyOptions {
         try decode(ClaudeProfileCopyOptions.self, try await call("GET", "/profiles/claude-code/copy-options"))
+    }
+
+    /// What `Default` offers and what the profile holds; only a profile with its own configuration has an answer.
+    public func claudeProfileCopies(id: String) async throws -> ClaudeProfileCopyState {
+        try decode(ClaudeProfileCopyState.self, try await call("GET", "/profiles/claude-code/\(Self.segment(id))/copies"))
+    }
+
+    /// More copied from `Default` (`add`), and what is named given up (`remove`); what the profile holds afterwards.
+    public func changeClaudeProfileCopies(id: String, add: ClaudeProfileCopies, remove: ClaudeProfileCopies) async throws -> ClaudeProfileCopyState {
+        struct Body: Encodable { let add: ClaudeProfileCopies; let remove: ClaudeProfileCopies }
+        return try decode(ClaudeProfileCopyState.self, try await call("PUT", "/profiles/claude-code/\(Self.segment(id))/copies", body: try JSONEncoder().encode(Body(add: add, remove: remove)), timeout: 60))
     }
 
     /// `telemetry`: false to have Claude Code's telemetry off under it from the start (docs/profiles-v0.md §3.7).

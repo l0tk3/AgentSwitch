@@ -101,6 +101,8 @@ export const REMOTE_ROUTES: readonly (readonly [Method, string])[] = [
   ["GET", "/profiles"],
   ["GET", "/profiles/health"],
   ["GET", "/profiles/claude-code/copy-options"],
+  ["GET", "/profiles/claude-code/:id/copies"],
+  ["PUT", "/profiles/claude-code/:id/copies"],
   ["POST", "/profiles"],
   ["POST", "/profiles/models"],
   ["DELETE", "/profiles/:agent/:id"],

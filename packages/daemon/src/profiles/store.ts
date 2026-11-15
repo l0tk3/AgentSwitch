@@ -9,7 +9,7 @@
  *  explicit read-only copies. Existing profiles retain their legacy links; Codex still uses its existing sharing
  *  rules. No account identity is copied into a new profile. See docs/profiles-v0.md for the isolation boundary. */
 
-import { claudeCopyOptions, prepareClaudeCopies, type ClaudeCopies } from "./claudeCopies.js";
+import { changeClaudeCopies, claudeCopyOptions, claudeCopyState, prepareClaudeCopies, type ClaudeCopies, type ClaudeCopyList } from "./claudeCopies.js";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -371,6 +371,27 @@ export class ProfileStore {
   }
 
   copyOptions() { return claudeCopyOptions(this.userHome); }
+
+  /** The folder of a Claude Code profile that has its own configuration (not one linked to `Default`'s). */
+  private ownClaudeHome(id: string): string {
+    const home = this.homeOf("claude-code", id);
+    if (!home) throw new ProfileError("not_found", "no such profile");
+    if (!this.all()["claude-code"].profiles.find((p) => p.id === id)?.isolated) throw new ProfileError("invalid", "this profile shares Default's configuration; there is nothing of its own to change");
+    return home;
+  }
+
+  /** What `Default` offers and what the profile holds (§3.8). */
+  copiesOf(id: string): { options: ClaudeCopyList; held: ClaudeCopyList } {
+    const home = this.ownClaudeHome(id);
+    return { options: claudeCopyOptions(this.userHome), held: claudeCopyState(this.userHome, home) };
+  }
+
+  /** More taken from `Default`, and what is named given up; for the terminals started under it from now on. */
+  changeCopies(id: string, change: { add?: ClaudeCopies | undefined; remove?: ClaudeCopies | undefined }): { options: ClaudeCopyList; held: ClaudeCopyList } {
+    const home = this.ownClaudeHome(id);
+    try { changeClaudeCopies(this.userHome, home, change); } catch (error) { throw error instanceof ProfileError ? error : new ProfileError("invalid", (error as Error).message); }
+    return this.copiesOf(id);
+  }
 
   claudeProjectsOf(id: string): string {
     return join(this.homeOf("claude-code", id) ?? join(this.userHome, ".claude"), "projects");

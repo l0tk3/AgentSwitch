@@ -14,7 +14,7 @@ import { parseBody, type ApiDeps } from "./shared.js";
 
 const Agent = z.enum(PROFILE_AGENTS);
 const CopyNames = z.array(z.string().min(1).max(200)).max(200);
-const Copies = z.object({ skills: CopyNames.optional(), mcpServers: CopyNames.optional(), commands: CopyNames.optional(), agents: CopyNames.optional(), instructions: z.boolean().optional(), preferences: z.boolean().optional() });
+const Copies = z.object({ skills: CopyNames.optional(), mcpServers: CopyNames.optional(), commands: CopyNames.optional(), agents: CopyNames.optional(), plugins: CopyNames.optional(), instructions: z.boolean().optional(), preferences: z.boolean().optional(), statusLine: z.boolean().optional() });
 /** How a profile that pays by a key reaches its model: the key (a ciphertext), another address, a model's name. */
 const Api = z.object({ key: z.string().max(4000).optional(), baseUrl: z.string().max(300).nullable().optional(), model: z.string().max(120).nullable().optional(),
   /** Keep a model the address does not list (a relay that serves more than it lists). */
@@ -27,6 +27,15 @@ export function mountProfiles(app: Hono<any>, deps: ApiDeps): void {
   if (!store) return;
 
   app.get("/profiles/claude-code/copy-options", (c) => c.json(store.copyOptions()));
+  // What a profile of its own holds beside what `Default` offers, and changing it after it was made (§3.8).
+  app.get("/profiles/claude-code/:id/copies", (c) => {
+    try { return c.json(store.copiesOf(c.req.param("id"))); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+  });
+  app.put("/profiles/claude-code/:id/copies", async (c) => {
+    const body = await parseBody(c, z.object({ add: Copies.optional(), remove: Copies.optional() }));
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try { return c.json(store.changeCopies(c.req.param("id"), body.data)); } catch (err) { const f = failed(err); return c.json({ error: f.error }, f.status); }
+  });
   app.get("/profiles", (c) => c.json({ agents: store.all() }));
   app.put("/profiles/codex/:id/auth", async (c) => {
     const body = await parseBody(c, z.object({ content: z.string().min(2).max(131072) }));
