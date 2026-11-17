@@ -1914,6 +1914,13 @@ describe("terminal pieces", () => {
     expect(terminalName("发布前检查", "✻ 修复登录页", "claude-code", "/x")).toBe("发布前检查");
     expect(terminalName(null, "✳ Claude Code", "claude-code", "/x/proj", "接着上次的重构")).toBe("接着上次的重构");
     expect(terminalName(null, "✻ 新任务", "claude-code", "/x/proj", "接着上次的重构")).toBe("新任务");
+    // An agent that gives its window no title (Codex) is called what the list of sessions calls its session, not
+    // its folder's name like every other terminal there (2026-11-17, user: 这几个会话名字怎么一样？).
+    expect(terminalName(null, "", "codex", "/x/MailLab", null, "读取一下项目现状")).toBe("读取一下项目现状");
+    expect(terminalName(null, "", "codex", "/x/MailLab", null, null)).toBe("MailLab");
+    expect(terminalName(null, "", "codex", "/x/MailLab", "接着上次的重构", "读取一下项目现状")).toBe("接着上次的重构");
+    expect(terminalName(null, "✻ 新任务", "claude-code", "/x/MailLab", null, "读取一下项目现状")).toBe("新任务");
+    expect(terminalName("自己起的", "", "codex", "/x/MailLab", null, "读取一下项目现状")).toBe("自己起的");
   });
 
   it("takes the iTerm2 profile's font, spacing and dark colors", () => {

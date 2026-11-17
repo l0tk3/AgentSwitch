@@ -307,6 +307,8 @@ export type TerminalHostOptions = {
   /** The agent of a terminal gave the session it writes a title worth showing (sessions/titles.ts). */
   readonly onTitle?: (harness: TerminalHarness, sessionId: string, title: string) => void;
   readonly customTitle?: (harness: TerminalHarness, sessionId: string) => string | null;
+  /** What the list of sessions calls this one (its first message, cut short); null while it has none. */
+  readonly saidTitle?: (harness: TerminalHarness, sessionId: string) => string | null;
   readonly onRename?: (harness: TerminalHarness, sessionId: string, title: string | null) => void;
   /** The device the agent says it is under a profile (null: the Mac's own), as its own files have it (§3.5). */
   readonly deviceOf?: (harness: TerminalHarness, profile: string | null) => string | null;
@@ -472,8 +474,11 @@ export function meaningfulTitle(title: string, harness: TerminalHarness): string
 }
 
 /** The name the screens show (see TerminalInfo.name); `given` is the title of the session a terminal continues. */
-export function terminalName(custom: string | null, title: string, harness: TerminalHarness, cwd: string, given: string | null = null): string {
-  return custom ?? meaningfulTitle(title, harness) ?? given ?? (basename(cwd) || AGENT_LABELS[harness]);
+/** `said`: what the list of sessions calls the one it writes (its first message), for an agent that gives its window
+ *  no title (Codex): without it two terminals in one folder were both the folder's name (2026-11-17, user: 这几个会话
+ *  名字怎么一样？). */
+export function terminalName(custom: string | null, title: string, harness: TerminalHarness, cwd: string, given: string | null = null, said: string | null = null): string {
+  return custom ?? meaningfulTitle(title, harness) ?? given ?? said ?? (basename(cwd) || AGENT_LABELS[harness]);
 }
 /** What is being written is cut at this many characters (an answer is seldom longer; a screen shows its end). */
 const MAX_WRITING = 60_000;
@@ -832,6 +837,8 @@ class Session {
   forked = false;
   /** The continued session's title, the name until the agent sets a title of its own. */
   givenName: string | null = null;
+  /** The title of the session it writes as the list has it (`saidTitle`), once there is one. */
+  saidName: string | null = null;
   exitCode: number | null = null;
   agentSessionId: string | null = null;
   /** Where its hooks said the session is written (`transcript_path`); null when they did not, or for another session. */
@@ -927,7 +934,7 @@ export class TerminalHost {
   private readonly workListeners = new Set<(cwd: string) => void>();
   /** Each program's own commands, by its kind and path, as read off a terminal running it. */
   private readonly learned = new Map<string, readonly ListedCommand[]>();
-  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "deviceOf" | "hold">> & { now: () => number };
+  private readonly o: Required<Omit<TerminalHostOptions, "launcher" | "now" | "floor" | "onExit" | "onRemove" | "onLeft" | "onSession" | "onTitle" | "onRename" | "customTitle" | "saidTitle" | "deviceOf" | "hold">> & { now: () => number };
   private helperChecked = false;
 
   constructor(private readonly opts: TerminalHostOptions) {
@@ -1140,6 +1147,7 @@ export class TerminalHost {
     });
     if (kept.agentSessionId) { s.agentSessionId = kept.agentSessionId; this.opts.onSession?.(s.harness, kept.agentSessionId, s.profile?.id ?? null); }
     if (s.agentSessionId && s.customName) this.opts.onRename?.(s.harness, s.agentSessionId, s.customName);
+    this.said(s);
     if (kept.companion && hold.companion) s.companion = hold.companion(kept.harness, kept.companion, kept);
     this.sessions.set(kept.id, s);
     this.wire(s, held);
@@ -2088,6 +2096,7 @@ export class TerminalHost {
       s.emit({ type: "notices", notices: [...s.notices] });
     }
     s.emit({ type: "status", status });
+    if (status === "idle" || status === "working") this.said(s);
     this.sentRests(s);
     this.suggests(s);
     this.doing(s);
@@ -2190,7 +2199,20 @@ export class TerminalHost {
   }
 
   private nameOf(s: Session): string {
-    return terminalName(s.customName, s.title, s.harness, s.cwd, s.givenName);
+    return terminalName(s.customName, s.title, s.harness, s.cwd, s.givenName, s.saidName);
+  }
+
+  /** The session it writes has a title in the list now (its first message was written down): asked when it starts
+   *  and stops working until there is one — a first message does not change. */
+  private said(s: Session): void {
+    if (s.saidName || !s.agentSessionId || !this.opts.saidTitle) return;
+    let title: string | null = null;
+    try { title = this.opts.saidTitle(s.harness, s.agentSessionId)?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null; } catch { return; }
+    if (!title) return;
+    const before = this.nameOf(s);
+    s.saidName = title;
+    const after = this.nameOf(s);
+    if (after !== before) s.emit({ type: "name", name: after });
   }
 
   private device(s: Session): string | null {

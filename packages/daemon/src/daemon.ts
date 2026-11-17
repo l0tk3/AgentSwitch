@@ -98,6 +98,7 @@ import { codexTextRouter } from "./router/routers/codex.js";
 import { DEFAULT_EXECUTOR_TIMEOUT_MS, QUOTA_TTL_MS } from "./core/limits.js";
 import { loadWorkdir } from "./files/workdir.js";
 import { defaultSessionSources, SessionMonitor, type SessionSources } from "./sessions/monitor.js";
+import type { SessionHarness } from "./sessions/types.js";
 import { KeptPictures } from "./sessions/pictures.js";
 import { openCodeDeleter, type OpenCodeDelete } from "./sessions/opencode.js";
 import { broadFolders, sessionsNear, SESSIONS_READ } from "./sessions/folders.js";
@@ -465,6 +466,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
   const termProt = terminalProtected({ ...process.env, AGENTSWITCH_HOME: cfg.home });
   // The titles agents give their sessions while they run in a terminal here, kept for the list of sessions.
   const sessionTitles = new SessionTitles(cfg.home);
+  let saidTitle: (harness: string, sessionId: string) => string | null = () => null;
   const sessionFolders = new ShownFoldersStore(cfg.home);
   // Terminals that outlive the service (docs/terminal-v0.md §10): each program on a holder of its own.
   const held = cfg.holdTerminals && (cfg.terminals || overrides.terminalLauncher) ? holding({ ringBytes: TERMINAL_RING_BYTES }) : null;
@@ -477,6 +479,8 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
       onSession: (harness, sessionId, profile) => { sessionTitles.seen(harness, sessionId); const agent = PROFILE_AGENTS.find((a) => a === harness); if (agent) profiles.noteSession(agent, sessionId, profile); },
       onTitle: (harness, sessionId, title) => sessionTitles.note(harness, sessionId, title),
       customTitle: (harness, sessionId) => sessionTitles.custom(harness, sessionId),
+      // The list of sessions is made after the terminals: asked through it once it is there.
+      saidTitle: (harness, sessionId) => saidTitle(harness, sessionId),
       onRename: (harness, sessionId, title) => sessionTitles.rename(harness, sessionId, title),
       launcher: overrides.terminalLauncher ?? agentLauncher({ binaries: agentBinaries, hookUrl: () => `http://127.0.0.1:${localPort}`, stateDir: join(cfg.home, "terminals"), protected: termProt,
         // Through `current` where the runtime has one: a terminal that outlives this runtime runs the next one's hooks.
@@ -557,6 +561,7 @@ export function buildDaemon(cfg: DaemonConfig, overrides: BuildOverrides = {}): 
     ownIds: () => store.harnessSessionIds(), ownFolders: () => (taskFolderRoot ? [taskFolderRoot()] : []),
     agentTitle: (harness, id) => sessionTitles.get(harness, id), customTitle: (harness, id) => sessionTitles.custom(harness, id), ranHere: (harness, id) => sessionTitles.ran(harness, id) || profiles.sessionProfile(harness, id) !== null, folders: () => sessionFolders.get(),
   }) : undefined;
+  if (sessions) saidTitle = (harness, id) => sessions.find(harness as SessionHarness, id)?.title || null;
   const nearSessions = sessions ? (cwd: string) => sessionsNear(sessions.list(SESSIONS_READ), cwd, Date.now(), broadFolders()) : undefined;
   const conversation = new AssistantLog(join(cfg.home, "assistant.db"));
   const engine = new Engine({ conversation, ...(openCodeDelete ? { deleteSessions: executorSessionsDeleter(openCodeDelete) } : {}), ...(taskFolderRoot ? { taskFolderRoot } : {}), ...(nearSessions ? { sessionsNear: nearSessions } : {}), store, bus, executors: wiredExecutors, targets, router, questionRouter, quota: () => quota.map(), contextPath, cleanupPaths: { ...defaultCleanupPaths(), workRoot }, routingLog, artifactsDir, protected: prot, ...(browserSlots ? { browserSlots } : {}), ...(clones ? { afterBrowserRun: () => clones.schedule() } : {}), memoryPath, platformMemoryPath, extensionsSummary, maxConcurrentTasks: cfg.maxTasks, policyPath, ...(summarizer ? { summarizer } : {}), ...(supervisor ? { supervisor } : {}), ...(planner ? { planner } : {}) });
