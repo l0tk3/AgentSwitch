@@ -2,7 +2,7 @@
  *  cwd, where it was started); turns are `response_item` messages (role user / assistant) and tool calls. The first user
  *  items are the harness's own context blocks, not what the user typed. */
 
-import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { headLines, isTypedText, obj, str, tailLines, time, type Json } from "./jsonl.js";
 import { clipText, MESSAGE_CHARS, type SessionMessage, type SessionMode } from "./types.js";
 import { movedFolder } from "./moved.js";
@@ -130,4 +130,29 @@ export function codexProviderOf(path: string, chunk = 512 * 1024): string | null
   } finally { closeSync(fd); }
   const meta = obj(headLines(path).map(obj).find((l) => l.type === "session_meta")?.payload);
   return str(meta.model_provider) || null;
+}
+
+let names: { path: string; mtime: number; size: number; by: Map<string, string> } | null = null;
+
+/** The name Codex keeps for thread `id` (`thread/name/set`: the desktop app's own naming, `/rename`), or null. Codex
+ *  writes each one as a line of `session_index.jsonl` beside its sessions, `{id, thread_name, updated_at}`, a thread's
+ *  newest line last. Read again when the file changed. */
+export function codexThreadName(indexPath: string, id: string): string | null {
+  let st;
+  try { st = statSync(indexPath); } catch { return null; }
+  if (!names || names.path !== indexPath || names.mtime !== st.mtimeMs || names.size !== st.size) {
+    const by = new Map<string, string>();
+    try {
+      for (const line of readFileSync(indexPath, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const row = obj(JSON.parse(line));
+          const name = str(row.thread_name).trim();
+          if (str(row.id)) { if (name) by.set(str(row.id), name); else by.delete(str(row.id)); }
+        } catch { /* a line half written */ }
+      }
+    } catch { return null; }
+    names = { path: indexPath, mtime: st.mtimeMs, size: st.size, by };
+  }
+  return names.by.get(id) ?? null;
 }

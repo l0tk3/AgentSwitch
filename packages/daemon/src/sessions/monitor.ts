@@ -8,9 +8,9 @@ import { keptDiskSpelling } from "../core/paths.js";
 import { RATE_LIMIT_PROBE_PROMPT } from "../core/probes.js";
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { claudeFacts, claudeMessages } from "./claude.js";
-import { codexFacts, codexMessages, codexProviderOf } from "./codex.js";
+import { codexFacts, codexMessages, codexProviderOf, codexThreadName } from "./codex.js";
 import { openCodeMessages, openCodeSessions, type OpenCodeDelete } from "./opencode.js";
 import { piFacts, piMessages } from "./pi.js";
 import type { KeptPictures } from "./pictures.js";
@@ -117,6 +117,9 @@ export class SessionMonitor {
     const custom = this.sources.customTitle?.(s.harness, s.id);
     if (custom) return { ...s, title: oneLine(custom, TITLE_CHARS) };
     if (s.named) return s;
+    // Codex's own name for the thread, kept beside its sessions and not in the record.
+    const named = s.harness === "codex" ? codexThreadName(join(dirname(this.sources.codexSessions), "session_index.jsonl"), s.id) : null;
+    if (named) return { ...s, title: oneLine(named, TITLE_CHARS), named: true };
     const given = this.sources.agentTitle?.(s.harness, s.id);
     return given ? { ...s, title: oneLine(given, TITLE_CHARS) } : s;
   }

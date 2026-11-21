@@ -54,14 +54,19 @@ export function claudeFacts(path: string, mtime: number): ClaudeFacts | null {
   const relocated = movedFolder(began, str(last.find((l) => l.type === "relocated")?.relocatedCwd));
   const cwd = relocated !== began ? relocated : currentFolder(began, last.map((l) => str(l.cwd)).find(Boolean));
   const custom = str(tail.findLast((l) => l.type === "custom-title")?.customTitle);
-  const title = custom || (head.map(userText).find((t) => t !== null) ?? "");
+  // The name Claude Code gave the session itself (`{type: "ai-title", aiTitle}`, written again as the session goes
+  // on): the newest read. It is the session's name as `claude --resume` lists it; the first message stood here instead
+  // (2026-11-21, user: 应该按照官方的这种设计来).
+  const isAi = (l: Json) => l.type === "ai-title" && !!str(l.aiTitle).trim();
+  const ai = str((tail.findLast(isAi) ?? head.findLast(isAi))?.aiTitle).trim();
+  const title = custom || ai || (head.map(userText).find((t) => t !== null) ?? "");
   const lastText = last.map(assistantText).find((t) => t !== null) ?? "";
   const stamped = last.find((l) => l.timestamp);
   const branch = last.map((l) => str(l.gitBranch)).find(Boolean);
   const model = last.map((l) => str(obj(l.message).model)).find((m) => m && !m.startsWith("<"));
   const mode = claudeMode(last.map((l) => str(l.permissionMode)).find(Boolean) ?? "");
   return {
-    id: basename(path, ".jsonl"), cwd, title, ...(custom ? { named: true as const } : {}), lastText, updatedAt: Math.max(time(stamped?.timestamp), mtime),
+    id: basename(path, ".jsonl"), cwd, title, ...(custom || ai ? { named: true as const } : {}), lastText, updatedAt: Math.max(time(stamped?.timestamp), mtime),
     ...(branch ? { branch } : {}), ...(model ? { model } : {}), ...(mode ? { mode } : {}),
   };
 }

@@ -2211,10 +2211,11 @@ export class TerminalHost {
   /** The session it writes has a title in the list now (its first message was written down): asked when it starts
    *  and stops working until there is one — a first message does not change. */
   private said(s: Session): void {
-    if (s.saidName || !s.agentSessionId || !this.opts.saidTitle) return;
+    if (!s.agentSessionId || !this.opts.saidTitle) return;
     let title: string | null = null;
     try { title = this.opts.saidTitle(s.harness, s.agentSessionId)?.replace(/\s+/g, " ").trim().slice(0, MAX_NAME) || null; } catch { return; }
-    if (!title) return;
+    // Asked again each time: the agent names its session after the first message was written down, and again later.
+    if (!title || title === s.saidName) return;
     const before = this.nameOf(s);
     s.saidName = title;
     const after = this.nameOf(s);

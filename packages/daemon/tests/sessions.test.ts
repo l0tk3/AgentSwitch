@@ -118,6 +118,27 @@ describe("the Mac's coding sessions", () => {
     expect(monitor.list().find((s) => s.id === "c1")?.title).toBe("Automatic title");
   });
 
+  it("calls a session by the name its agent keeps for it: Claude Code's ai-title, Codex's thread name (2026-11-21)", () => {
+    const { sources, data } = fixture();
+    const titles = new SessionTitles(data, () => NOW);
+    titles.note("claude-code", "c1", "A window title");
+    titles.note("codex", "x1", "A window title");
+    const monitor = new SessionMonitor({ ...sources, customTitle: (h, id) => titles.custom(h, id), agentTitle: (h, id) => titles.get(h, id) }, () => NOW);
+    const by = () => Object.fromEntries(monitor.list().map((s) => [s.id, s.title]));
+    expect(by()).toMatchObject({ c1: "A window title", x1: "A window title" });
+    // Claude Code writes its name into the record, again as the session goes on: the newest.
+    const claudeFile = join(sources.claudeProjects, "-Users-u-code-site", "c1.jsonl");
+    appendFileSync(claudeFile, line({ type: "ai-title", aiTitle: "Fix login page", sessionId: "c1" }) + "\n" + line({ type: "ai-title", aiTitle: "Fix the login form", sessionId: "c1" }) + "\n");
+    // Codex keeps its own beside its sessions, a thread's newest line last.
+    const index = join(dirname(sources.codexSessions), "session_index.jsonl");
+    writeFileSync(index, line({ id: "x1", thread_name: "Run tests", updated_at: "2026-09-26T12:02:00Z" }) + "\n" + line({ id: "other", thread_name: "Other" }) + "\n" + line({ id: "x1", thread_name: "Run the tests", updated_at: "2026-09-26T12:03:00Z" }) + "\n{half");
+    expect(by()).toMatchObject({ c1: "Fix the login form", x1: "Run the tests" });
+    expect(monitor.find("codex", "x1")?.named).toBe(true);
+    // The user's own name for it here still comes first.
+    titles.rename("codex", "x1", "Mine");
+    expect(by().x1).toBe("Mine");
+  });
+
   it("does not give back a kept title that is only the agent's own name (2026-11-21)", () => {
     const { data } = fixture();
     const titles = new SessionTitles(data, () => NOW);
