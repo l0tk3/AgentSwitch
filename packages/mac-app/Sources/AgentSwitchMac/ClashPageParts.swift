@@ -459,7 +459,10 @@ struct ClashServiceCard: View {
                              pick: { actions.select(service, node) }, move: { by in move(node, by: by) }, remove: { change { $0.removeAll { $0 == node } } })
                     .clashRow()
             }
-            if allGone { ClashNote(text: "选的节点在现在这个订阅里都没有了，重新选几个。").clashRow() }
+            if !nodes.isEmpty {
+                ClashNote(text: "此服务只走所选节点；不支持的 UDP 会被拒绝，不会转到默认出口。浏览器通常会回退 TCP。").clashRow()
+            }
+            if allGone { ClashNote(text: "选的节点在现在这个订阅里都没有了，此服务流量将被拒绝，请重新选择节点。").clashRow() }
             HStack(spacing: 14) {
                 Menu {
                     Button("Test All Nodes") { actions.test(service, true) }

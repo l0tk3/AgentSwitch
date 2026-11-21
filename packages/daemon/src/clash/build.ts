@@ -128,13 +128,13 @@ export function nodeSet(service: ClashService, settings: ClashSettings, nodes: r
   return list.length ? stringify({ proxies: list.map((n) => n.definition) }, { lineWidth: 0 }) : null;
 }
 
-/** A rule set's text, as the core fetches it. A service with no nodes and a template that is off have an empty one:
+/** A rule set's text, as the core fetches it. A service with no selected nodes and a template that is off have an empty one:
  *  that traffic goes as the subscription's own rules say. */
-export function ruleSet(name: string, settings: ClashSettings, nodes: readonly SourceNode[]): string | null {
+export function ruleSet(name: string, settings: ClashSettings, _nodes: readonly SourceNode[]): string | null {
   const service = CLASH_SERVICES.find((s) => SERVICE[s].set === name);
   const of = (template: ClashTemplate): readonly string[] => (templateOn(template, settings) ? templateRules(template, settings) : []);
   const payload = name === DIRECT_SET ? settings.direct.flatMap(directRule)
-    : service ? (chosen(service, settings, nodes).length ? SERVICE[service].domains : [])
+    : service ? (settings[service].nodes.length ? SERVICE[service].domains : [])
     : name === DOMESTIC_SET ? of("domestic").filter((r) => !looksUp(r))
     : name === DOMESTIC_LOOKUP_SET ? of("domestic").filter(looksUp)
     : name === BLOCK_SET ? of("block") : null;
@@ -172,8 +172,14 @@ export function buildConfig(document: Record<string, unknown>, nodes: readonly S
   const sets: Record<string, unknown> = {};
   const decides: Partial<Record<ClashService, string>> = {};
   for (const service of CLASH_SERVICES) {
-    if (!chosen(service, settings, nodes).length) continue;
+    if (!settings[service].nodes.length) continue;
     const { set, probe } = SERVICE[service];
+    if (!chosen(service, settings, nodes).length) {
+      // A subscription losing every selected node must not silently change the service's exit.
+      decides[service] = "REJECT";
+      first.push(`RULE-SET,${set},REJECT`);
+      continue;
+    }
     const names = groupNames(config, service, settings);
     decides[service] = names.group;
     const made: Record<string, unknown>[] = [
@@ -188,7 +194,9 @@ export function buildConfig(document: Record<string, unknown>, nodes: readonly S
     }
     sets[set] = { type: "http", url: at(`nodes/${set}.yaml`), path: `./proxy_providers/${set}.yaml`, interval: 86400, proxy: "DIRECT",
       "health-check": { enable: true, url: probe, interval: PROBE_SECONDS } };
-    first.push(`RULE-SET,${set},${names.group}`);
+    // Mihomo skips a proxy without UDP support and keeps matching. Catch that same traffic before
+    // it reaches domestic, subscription or MATCH rules; UDP-capable nodes still use the first rule.
+    first.push(`RULE-SET,${set},${names.group}`, `RULE-SET,${set},REJECT`);
   }
   // The domestic template's names and processes: decided without a lookup (`no-resolve`: an address rule in it
   // matches an address as given, never a name's). To the subscription's own group for what goes direct where it has
@@ -218,10 +226,12 @@ export function buildConfig(document: Record<string, unknown>, nodes: readonly S
   // where they stand: its lists are often longer than AgentSwitch's (sign-in, the human check, voice), and what they
   // caught went out by the subscription's own group (`🤖 AI`) — one service by two ways out (2026-10-16, user: 代理的
   // 分组现在怎么带上了上游订阅的分组？两个不会打架吗).
-  const theirs = (Array.isArray(config.rules) ? config.rules : []).map((rule) => {
+  const theirs = (Array.isArray(config.rules) ? config.rules : []).flatMap((rule) => {
     const service = ruleService(rule, config);
     const group = service && decides[service];
-    return group ? target(rule as string, group) : rule;
+    if (!group) return [rule];
+    const routed = target(rule as string, group);
+    return group === "REJECT" ? [routed] : [routed, target(rule as string, "REJECT")];
   });
   // Blocking after everything of the subscription's that claims a kind of traffic, before the broad rules it ends on
   // (the lists of everything abroad, `GEOIP`, `MATCH`): there it meets what is left. What needs a lookup as late as it

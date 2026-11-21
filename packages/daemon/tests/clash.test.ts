@@ -76,6 +76,36 @@ describe("the subscription AgentSwitch makes", () => {
   const made = (source: string, nodes: SourceNode[], held: string[], chosen: Partial<ClashSettings>) =>
     parse(buildSubscription(parse(source) as Record<string, unknown>, nodes, held, settings(chosen), "http://127.0.0.1:4711/clash", "tok")) as Record<string, any>;
 
+  it("keeps an adjacent rejection for managed services regardless of UDP support or subscription routing", () => {
+    for (const udp of [false, true, undefined]) for (const ownRules of [false, true]) {
+      const nodes = NODES.map((n) => ({ ...n, definition: { ...n.definition, ...(udp === undefined ? {} : { udp }) } }));
+      const selected = settings({ ownRules, claude: { nodes: [nodes[0]!.name] }, openai: { nodes: [nodes[1]!.name] } });
+      const out = made(PLAIN, nodes, [], selected);
+      for (const [service, group] of [["claude", "Claude"], ["openai", "OpenAI"]]) {
+        const route = out.rules.indexOf(`RULE-SET,as-${service},${group}`);
+        expect(route).toBeGreaterThan(0);
+        expect(out.rules[route + 1]).toBe(`RULE-SET,as-${service},REJECT`);
+        expect(route).toBeLessThan(out.rules.findIndex((r: string) => r.startsWith("MATCH,")));
+        const served = parse(nodeSet(service as "claude" | "openai", selected, nodes)!).proxies[0];
+        expect(served.udp).toBe(udp); // Never claim server UDP support by rewriting imported nodes.
+      }
+      expect(out.rules[0]).toBe("RULE-SET,as-direct,DIRECT"); // Explicit user exceptions retain precedence.
+      expect(out.rules.some((r: string) => r === "NETWORK,UDP,REJECT")).toBe(false);
+    }
+  });
+
+  it("rejects services whose selected nodes vanished but leaves unassigned services alone", () => {
+    for (const ownRules of [false, true]) {
+      const chosen = settings({ ownRules, claude: { nodes: ["gone"] } });
+      const out = made(PLAIN, NODES, [], chosen);
+      expect(out.rules).toContain("RULE-SET,as-claude,REJECT");
+      expect(out.rules).not.toContain("RULE-SET,as-openai,REJECT");
+      expect(out["proxy-providers"]?.["as-claude"]).toBeUndefined();
+      expect(parse(ruleSet("as-claude", chosen, NODES)!).payload).toContain("DOMAIN-SUFFIX,claude.ai");
+      expect(parse(ruleSet("as-openai", chosen, NODES)!).payload).toEqual(["DOMAIN,agentswitch-nothing.invalid"]);
+    }
+  });
+
   it("takes the place of the groups the subscription has by those names, and serves their nodes as a set", () => {
     const out = made(OWN, NODES, ["tgyun"], { claude: { nodes: ["🇯🇵 日本家宽-02", "🇯🇵 日本家宽-01"] } });
     expect(out["mixed-port"]).toBe(7897);
@@ -88,7 +118,7 @@ describe("the subscription AgentSwitch makes", () => {
     // Its rules first, so they win over the subscription's own for the same traffic.
     // The templates' rule sets are always named: what a name decides in front; blocking and what needs a lookup
     // after the subscription's own rules, before the one it ends on.
-    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-claude,Claude", "RULE-SET,as-domestic,DIRECT,no-resolve",
+    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-claude,Claude", "RULE-SET,as-claude,REJECT", "RULE-SET,as-domestic,DIRECT,no-resolve",
       "DOMAIN-KEYWORD,anthropic,Claude", "DOMAIN-KEYWORD,openai,OpenAI", "RULE-SET,as-block,REJECT", "RULE-SET,as-domestic-ip,DIRECT", "MATCH,Manual"]);
     expect(Object.keys(out["proxy-providers"])).toEqual(["tgyun", "as-claude"]);
     expect(out["proxy-providers"]["as-claude"]).toEqual({ type: "http", url: "http://127.0.0.1:4711/clash/nodes/as-claude.yaml?k=tok", path: "./proxy_providers/as-claude.yaml",
@@ -108,7 +138,7 @@ describe("the subscription AgentSwitch makes", () => {
     const out = made(PLAIN, plain, [], { claude: { nodes: ["SG 01"] }, openai: { nodes: ["HK 01", "SG 01"] } });
     expect(out["proxy-groups"].map((g: { name: string }) => g.name)).toEqual(["Claude", "Claude自动选择", "OpenAI", "OpenAI自动选择", "Proxy"]);
     expect(out["proxy-groups"][3]).toEqual({ name: "OpenAI自动选择", type: "fallback", use: ["as-openai"], url: "https://api.openai.com/", interval: 180 });
-    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-claude,Claude", "RULE-SET,as-openai,OpenAI", "RULE-SET,as-domestic,DIRECT,no-resolve",
+    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-claude,Claude", "RULE-SET,as-claude,REJECT", "RULE-SET,as-openai,OpenAI", "RULE-SET,as-openai,REJECT", "RULE-SET,as-domestic,DIRECT,no-resolve",
       "DOMAIN-SUFFIX,claude.ai,Proxy", "RULE-SET,as-block,REJECT", "RULE-SET,as-domestic-ip,DIRECT", "MATCH,Proxy"]);
     expect(out.proxies).toHaveLength(2);
     expect(Object.keys(out["proxy-providers"])).toEqual(["as-claude", "as-openai"]);
@@ -157,14 +187,14 @@ rules:
 `;
     const plain: SourceNode[] = ["HK 01", "SG 01"].map((name) => ({ name, from: null, definition: node(name) }));
     const out = made(source, plain, [], { openai: { nodes: ["SG 01"] } });
-    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-openai,OpenAI", "RULE-SET,as-domestic,DIRECT,no-resolve",
-      "RULE-SET,openai,OpenAI", "RULE-SET,claude,🤖 AI", "RULE-SET,gemini,🤖 AI", "RULE-SET,gpt,OpenAI,no-resolve", "RULE-SET,every-ai,🤖 AI",
-      "GEOSITE,openai,OpenAI", "GEOSITE,category-ai-!cn,🤖 AI", "AND,((RULE-SET,openai),(NETWORK,UDP)),REJECT", "DOMAIN-SUFFIX,openai.com,🤖 AI",
+    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-openai,OpenAI", "RULE-SET,as-openai,REJECT", "RULE-SET,as-domestic,DIRECT,no-resolve",
+      "RULE-SET,openai,OpenAI", "RULE-SET,openai,REJECT", "RULE-SET,claude,🤖 AI", "RULE-SET,gemini,🤖 AI", "RULE-SET,gpt,OpenAI,no-resolve", "RULE-SET,gpt,REJECT,no-resolve", "RULE-SET,every-ai,🤖 AI",
+      "GEOSITE,openai,OpenAI", "GEOSITE,openai,REJECT", "GEOSITE,category-ai-!cn,🤖 AI", "AND,((RULE-SET,openai),(NETWORK,UDP)),REJECT", "DOMAIN-SUFFIX,openai.com,🤖 AI",
       "RULE-SET,as-block,REJECT", "RULE-SET,as-domestic-ip,DIRECT", "MATCH,Proxy"]);
     // Its group stays, for what AgentSwitch does not decide (Gemini, and Claude while it has no nodes here).
     expect(out["proxy-groups"].map((g: { name: string }) => g.name)).toContain("🤖 AI");
     const both = made(source, plain, [], { openai: { nodes: ["SG 01"] }, claude: { nodes: ["HK 01"] } });
-    expect(both.rules.filter((r: string) => r.startsWith("RULE-SET,claude,"))).toEqual(["RULE-SET,claude,Claude"]);
+    expect(both.rules.filter((r: string) => r.startsWith("RULE-SET,claude,"))).toEqual(["RULE-SET,claude,Claude", "RULE-SET,claude,REJECT"]);
     // Nothing chosen: the subscription's rules as written.
     expect(made(source, plain, [], {}).rules.filter((r: string) => !r.includes(",as-"))).toEqual((parse(source) as { rules: string[] }).rules);
   });
@@ -367,7 +397,7 @@ describe("only AgentSwitch's rules (§7.11)", () => {
     expect(out["proxy-groups"][2]).toEqual({ name: "Manual", type: "select", proxies: ["自动选择", "HK 01", "SG 01", "🇯🇵 日本家宽-02"] });
     expect(out["proxy-groups"][3]).toMatchObject({ type: "url-test", proxies: ["HK 01", "SG 01", "🇯🇵 日本家宽-02"] });
     expect(Object.keys(out["rule-providers"]).sort()).toEqual([...RULE_SETS].sort());
-    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-claude,Claude", "RULE-SET,as-domestic,DIRECT,no-resolve",
+    expect(out.rules).toEqual(["RULE-SET,as-direct,DIRECT", "RULE-SET,as-claude,Claude", "RULE-SET,as-claude,REJECT", "RULE-SET,as-domestic,DIRECT,no-resolve",
       "RULE-SET,as-block,REJECT", "RULE-SET,as-domestic-ip,DIRECT", "MATCH,Manual"]);
     // Nothing anywhere still names a group that is gone.
     expect(JSON.stringify(out)).not.toMatch(/🌐 代理|🎬 奈飞|🎯 直连|🔄 自动选择/);

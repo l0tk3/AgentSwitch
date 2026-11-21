@@ -484,3 +484,10 @@ Clash Verge 没有给外面“更新这个订阅”的入口：它认的链接�
 - iPhone（Kit `ClashModels.swift`、`ProxyRoutes.swift`；`Settings/ClashScreen.swift`）：`Subscriptions` 一段里每份订阅一行（右边节点数，上次没取到时是琥珀色的 `Not Updated`），点进去是它自己的一页（`From`、`Nodes`、`Traffic`、`Updated`、`Auto Update`、`Update Now`、`Rename…`、`Remove`）；`Add Subscription…`（原来的那张表，现在是加一份）；`All Nodes` 进节点总表（可搜，右上 `Test All` 和按订阅筛选的菜单；每行行首的 `[x]` / `[ ]` 点一下停用或恢复，名字下面是来自哪份和类型）。多份时 `Only My Rules` 开着、不能关。Mac 还是旧版（只认一份订阅）时，这一段照旧是原来的 `Subscription`。测试 `ProxyTests` 一条；模拟器里的演示看过三张（`-uiDemoScreen clash|clashsubscription|clashallnodes`）；演示页 `phone-proxies.html` 的订阅一段改成了多份的样子。
 - **没验证的**：Mac 与 iPhone 的新页面连着真服务点一遍（加、改名、移除、停用、测延迟）；经典外观；在用户正在运行的 Clash Verge 上真的加第二份订阅并切过去；用户现有那份订阅（带 `tgyun` 节点集）与另一份合并后的实际效果；重名规则与添加顺序有关——移除排在前面的订阅后，后面那份里原来带后缀的节点会变回原名，已选中的会显示为 `Gone`，要重新选。
 
+
+## 11. 服务出口不向默认组回退（2026-11-21）
+
+为 Claude / OpenAI 选择节点后，每条接管的服务规则后紧跟同条件的 `REJECT`。Mihomo 遇到不支持 UDP 的节点会继续匹配后面的规则；现在这些流量会被拒绝，不再落到 `Manual`、直连或订阅的其他出口。支持 UDP 的节点仍走前一条规则，节点原有的 `udp` / `xudp` 设置不改写；浏览器通常会从 QUIC 回退到 TCP。
+
+订阅中接管的服务专用 `RULE-SET` / `GEOSITE` 规则也有相邻保护，保留 `no-resolve` 等标志。所选节点因订阅更新全部消失时，保留服务匹配并拒绝流量，等待重新选择；主动清空选择则恢复订阅规则。用户显式配置的 `Go Direct` 仍优先，组内备用节点切换保留。此保护依赖流量命中服务规则及内核处于规则模式，不是系统级网络隔离。
+
