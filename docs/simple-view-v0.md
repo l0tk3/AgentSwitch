@@ -250,6 +250,7 @@
   - 服务的测试：按真实屏幕造的行（算的几种、只是提到它的几种、窄屏截断的计时）；假 agent 画出同一行——歇着时出现即进行中且在做 `Compact`、`SessionStart {source: "compact"}` 立刻回到空闲且那一行还在屏幕上时不闪、没有 hook 时那一行消失即空闲、一轮中途前后都是进行中且子代理还在、辅助子代理停下不算结束、别的 agent 的屏幕不读；记录的那一行与用量。
   - `packages/daemon/scripts/claude_compact_probe.ts`（打真模型的脚本，不进测试；Haiku，几句很小的话）用服务自己的代码对真的 Claude Code 2.1.292 跑：`/compact` 发出 0.4 秒后服务报进行中、在做 `Compact`（屏幕上是 `✢ Compacting conversation… (0s)`）；18 秒后 `SessionStart(compact)` 到，回到空闲，中间没有别的状态变化；终端里只有它自己的一行 `Compacted (ctrl+o to see full summary)`；记录末尾是 `/compact`、`Compacted · 39k → 4k`，用量 3661。再压缩一次、1.5 秒后按 `esc`：0.2 秒后回到空闲，主 agent 没有任何 hook；之后再说一句话照常。`PROBE_HOOKS=compact` 是加上那两个 hook 的对照。
   - 两端的样子：Mac 的 `-designPreviewOnly terminals` 多一张 `terminals-record-compact-light`（两种外观都看过）；手机的演示屏 `simplecompact` 在模拟器里看过像素外观；演示页在浏览器里看过。**没验证**：装好的应用连着你真的会话压缩一次（“应用 → 服务 → 真的 Claude Code”这一整条没有连起来跑；各段分别跑过）；一轮中途的自动压缩在真的 Claude Code 上（只用假 agent 走过，真的要把上下文填满才会发生）；手机的经典外观。
+- **Codex 也一样（2026-11-21）**：用户：如果compacting啥的的话简略模式啥都没有 看上去像是卡了。Codex 压缩时把自己的工作行换成 `• Compacting context (12s • esc to interrupt)`，下面一行 `└ Making room to continue.`（它自己 0.169 的界面快照），之前只读 Claude Code 的那一行。现在 Codex 的终端同样读屏幕：这一行在，终端就是在做 `Compact`；没了就回到之前的状态。没有对真的 Codex 跑过，行的样子取自它公开的快照。
 
 ### 5.8 Codex 的 Daybreak 开关
 
@@ -302,6 +303,10 @@
 - **它自己屏幕上的列表**（`/model`、是否信任文件夹等）：服务读终端屏幕末尾的编号行（`choicesOnScreen`：编号从 1 连续、恰好一行带选中标记；只有一行时要求下面有“enter select · esc back”这样的提示行；回答里的编号列表没有标记，不算），告诉记录的屏幕（事件 `choices`，终端条目里 `choices`）。简略视图出同一张卡片，当前选中的那行编号是亮的。点一行 = `POST /terminals/:id/choices {pick, label}`：服务再读一次屏幕，那一行还在才动手——用方向键把选中移过去再回车，和在终端里一样；屏幕已经变了回 409。
   - 所以在简略视图里换 Codex 的模型：回复框里发 `/model`，卡片列出模型，点一个；它接着列思考强度，再点一个。
   - 行的样子对照过 Codex 0.162 自己的界面快照（模型列表、只有一行的强度列表）；**还没在真的 Codex、真的 Claude Code 上点过**。
+- **两处读错（2026-11-21）**：用户：当前codex的选项并不会在简略模式蹦出来让我选择；如果我发送1. 2. 3.这样的东西 简略模式会把我发送的当作选择表单。
+  - 你发出的话在记录里站在你自己的输入记号后面，`› 1. …` / `  2. …`，逐行和一个列表一样。分别在列表下面：列表下面是说明怎么选的那一行（`enter to submit answer`、`Press enter to confirm or esc to go back`、`Esc to cancel`），消息下面是对话或输入框的页脚。现在编号行要有这一行才算列表；没有这一行的（框里的提问）只在它完整、且是屏幕上最后的东西时才算。
+  - Codex 的提问选项多于它的位置时只画选中项附近的几行（`2.` `3.` `› 4.`，下面 `option 4/5 | …`），之前要求从 1 开始，读不出来。现在有说明行时不要求从 1 开始；选的时候本来就是移动选中项再回车，没画出来的行不需要。
+  - 没有对真的 Codex 跑过：行的样子取自它公开的 0.169 界面快照，测试按那些行写。
 
 ### 5.12 命令的回应、回复框里没发出的话、手机的文字大小（2026-10-08）
 

@@ -15,7 +15,7 @@ import { remoteAllowed } from "../src/remote/routes.js";
 import { markRemote } from "../src/core/caller.js";
 import { registerDevice } from "../src/remote/devices.js";
 import { folderFiles, matchFiles } from "../src/terminals/files.js";
-import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, workingOnScreen, choicesOnScreen, printedSince, commandRows, inputEmpty, screenRows, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
+import { answerText, askQuestions, checkPicks, cleanTitle, meaningfulTitle, permissionSummary, piTool, safeCut, TerminalHost, terminalName, type Launcher, type TerminalEvent, compactingOnScreen, codexCompactingOnScreen, workingOnScreen, choicesOnScreen, printedSince, commandRows, inputEmpty, screenRows, modeOnScreen, suggestionOnScreen, type ScreenRow } from "../src/terminals/host.js";
 import { DEFAULT_STYLE, parseItermFont, styleFromItermProfile } from "../src/terminals/style.js";
 import { keySequence, replyBytes } from "../src/terminals/keys.js";
 import type { Sealer } from "../src/secrets/sealer.js";
@@ -458,6 +458,27 @@ describe("terminal host", () => {
     // A narrow screen cuts the clock short.
     expect(compactingOnScreen(["✻ Compacting conversation… (1m 5s · ↓ 3.3k tok"])).toBe(true);
     expect(compactingOnScreen([])).toBe(false);
+  });
+
+  it("reads Codex's compacting line, and shows a Codex terminal at work on Compact while it stands (2026-11-21)", async () => {
+    expect(codexCompactingOnScreen(["• Compacting context (12s • esc to interrupt)", "  └ Making room to continue.", "", "› Ask Codex to do anything"])).toBe(true);
+    expect(codexCompactingOnScreen(["• Compacting context"])).toBe(true);
+    expect(codexCompactingOnScreen(["• Context compacted · 14s"])).toBe(false);
+    expect(codexCompactingOnScreen(["• Working (3s • esc to interrupt)"])).toBe(false);
+    expect(codexCompactingOnScreen(["• Its screen says:", "  • Compacting context (1s • esc to interrupt)"])).toBe(false);
+    expect(codexCompactingOnScreen(["› Compacting context"])).toBe(false);
+    const host = new TerminalHost({ launcher: fakeLauncher(() => "http://127.0.0.1:9", true), compactLookMs: 40 });
+    closers.push(() => host.closeAll());
+    const info = await host.spawn({ harness: "codex", cwd: tmpdir() });
+    const now = () => { const t = host.get(info.id)!; return [t.status, t.activity?.tool ?? null]; };
+    await until(() => host.get(info.id)!.title === "fake agent");
+    const before = now()[0];
+    host.write(info.id, "codex compacting\r");
+    await until(() => now()[0] === "working" && now()[1] === "Compact");
+    // Its line is gone: what it was before.
+    host.write(info.id, "compacted\r");
+    await until(() => now()[1] === null);
+    expect(now()[0]).toBe(before === "working" ? "working" : "idle");
   });
 
   it("reads the turn's tokens off Claude Code's working line (rows seen on 2.1.293, 2026-10-08)", () => {

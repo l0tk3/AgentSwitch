@@ -571,6 +571,15 @@ export function compactingOnScreen(lines: readonly string[]): boolean {
   return lines.some((line) => /^[·✢✳✶✻✽*]\s+Compacting conversation(?:…|\.{3})?(?:\s+\([^)]*\)?)?\s*$/u.test(line));
 }
 
+/** Codex's line while it compacts: its working line with other words, `• Compacting context (12s • esc to interrupt)`
+ *  over `└ Making room to continue.` (its own snapshots, 0.169). At the row's start, as Claude Code's: an answer that
+ *  quotes it is indented under its bullet or has words before it. Nothing said so, and a screen that shows the record
+ *  showed nothing at all for as long as it took (2026-11-21, user: 如果compacting啥的的话简略模式啥都没有 看上去像
+ *  是卡了). */
+export function codexCompactingOnScreen(lines: readonly string[]): boolean {
+  return lines.some((line) => /^[•◦·⠀-⣿]\s+Compacting context(?:\s+\(.*)?\s*$/u.test(line));
+}
+
 /** One of an agent's own commands, as its own list of them names and describes it. */
 export type ListedCommand = { readonly name: string; readonly description: string };
 
@@ -1888,11 +1897,12 @@ export class TerminalHost {
    *  without Claude Code printing the hook's command into the terminal afterwards, and none says one was cancelled
    *  or failed; the line on its screen says both (docs/simple-view-v0.md §5.7). */
   private compactLooks(s: Session): void {
-    if (s.harness !== "claude-code" || !s.hooks || s.compactTimer || s.status === "exited") return;
+    if ((s.harness !== "claude-code" && s.harness !== "codex") || !s.hooks || s.compactTimer || s.status === "exited") return;
     s.compactTimer = setTimeout(() => {
       s.compactTimer = null;
       if (!this.sessions.has(s.id) || s.status === "exited") return;
-      const on = compactingOnScreen(this.screenTail(s.id, s.rows));
+      const rows = this.screenTail(s.id, s.rows);
+      const on = s.harness === "codex" ? codexCompactingOnScreen(rows) : compactingOnScreen(rows);
       if (on === (s.compactFrom !== null)) return;
       // A hook has just said it is over: the line may stay a moment longer.
       if (on && this.o.now() - s.compactEndedAt < COMPACT_GRACE_MS) return;

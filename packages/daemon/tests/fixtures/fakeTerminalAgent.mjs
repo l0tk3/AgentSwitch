@@ -96,6 +96,7 @@ async function handle(line) {
   // Claude Code while it works: its line with a clock and the tokens so far, on a row it redraws (`working 1.3k`).
   if (line.startsWith("working ")) { process.stdout.write(`\r\x1b[2K✻ Pondering… (12s · ↓ ${line.slice(8)} tokens · thought for 2s)`); return; }
   // Claude Code while it compacts its context: its own line with a clock, on a row it redraws; gone when done.
+  if (line === "codex compacting") { process.stdout.write("\r\x1b[2K• Compacting context (1s • esc to interrupt)"); return; }
   if (line === "compacting") { process.stdout.write("\r\x1b[2K✻ Compacting conversation… (1s)"); return; }
   // (What was typed to say so was echoed onto that row: it is the one above by now.)
   if (line === "compacted") { process.stdout.write("\x1b[1A\r\x1b[2K  ⎿  Compacted (ctrl+o to see full summary)\r\n"); return; }

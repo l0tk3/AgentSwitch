@@ -30,6 +30,10 @@ const TAKE_HINT = /\benter\b.*\b(select|confirm|continue|choose|submit)|\besc\b.
 const RULE_ROW = /^[\s─━═╭╮╰╯┌┐└┘├┤│|]*[─━═]{3,}[\s─━═╭╮╰╯┌┐└┘├┤│|]*$/u;
 /** A row of the conversation, not of the question: an agent's bullet, a prompt mark, a spinner. */
 const TALK_ROW = /^\s*(?:[│|]\s*)?[•⏺●›❯>⎿└·✢✳✶✻✽]\s/u;
+/** Something the agent said or did: its bullet. Between a list's rows and a hint, the rows were a message. */
+const SAID_ROW = /^\s*(?:[│|]\s*)?[•⏺●]\s/u;
+/** How many rows under a list its hint is looked for in: the rest of a wrapped row, a field for notes. */
+const MAX_UNDER = 10;
 const MAX_CHOICES = 40;
 const MAX_TITLE = 300;
 const MAX_TEXT = 1500;
@@ -53,9 +57,18 @@ export function choicesOnScreen(lines: readonly string[], cols?: number): Screen
 
 type Found = { readonly first: number; readonly options: ScreenChoices["options"]; readonly selected: number };
 
-/** Rows numbered 1, 2, 3… in order (a row between two of them that has no number continues the one above), exactly
- *  one with the selection's mark before its number. Numbered lines in an answer have no such mark: not a list to
- *  choose from. Blank rows are not counted: a list may be drawn with room between its rows. */
+/** Rows numbered in order (a row between two of them that has no number continues the one above), exactly one with
+ *  the selection's mark before its number, and under them the line that says how to take one. Blank rows are not
+ *  counted: a list may be drawn with room between its rows.
+ *
+ *  The line under them is what tells a list from what you sent: a message of yours that begins `1. …` stands in the
+ *  record after your own prompt mark, `› 1. …` / `  2. …`, row for row what a list looks like, and was offered as one
+ *  (2026-11-21, user: 如果我发送1. 2. 3.这样的东西 简略模式会把我发送的当作选择表单). After a message comes the
+ *  conversation, after a list its hint.
+ *
+ *  The rows need not begin at 1: a list longer than its room shows the rows around the selection (Codex's question
+ *  with five options draws `2.` `3.` `› 4.` over `option 4/5 | …`), and was read as no list at all (same day: 当前
+ *  codex的选项并不会在简略模式蹦出来). A row is taken by moving the selection, so the rows not shown are not needed. */
 function numbered(all: readonly string[]): Found | null {
   const at = all.map((_, i) => i).filter((i) => all[i]!.trim());
   const lines = at.map((i) => all[i]!);
@@ -66,13 +79,24 @@ function numbered(all: readonly string[]): Found | null {
   for (let i = end; i >= 0 && end - i < 4 * MAX_CHOICES; i--) {
     const m = CHOICE_ROW.exec(lines[i]!);
     if (!m) continue;
-    rows.unshift({ at: i, n: Number(m[2]), marked: !!m[1], text: m[3]! });
-    if (Number(m[2]) === 1) break;
+    const n = Number(m[2]);
+    if (rows.length && n !== rows[0]!.n - 1) break;
+    rows.unshift({ at: i, n, marked: !!m[1], text: m[3]! });
+    if (n === 1) break;
   }
-  if (!rows.length || rows.length > MAX_CHOICES || rows.some((r, i) => r.n !== i + 1) || rows.filter((r) => r.marked).length !== 1) return null;
-  // A single row is a list only where the screen says under it how to take it (Codex: `enter select · esc back`);
-  // by itself it may be what you typed after your own prompt mark.
-  if (rows.length === 1 && !lines.slice(end + 1, end + 5).some((l) => TAKE_HINT.test(l))) return null;
+  if (!rows.length || rows.length > MAX_CHOICES || rows.filter((r) => r.marked).length !== 1) return null;
+  const under = lines.slice(end + 1, end + 1 + MAX_UNDER);
+  const hint = under.findIndex((l) => TAKE_HINT.test(l));
+  if (hint >= 0) {
+    if (under.slice(0, hint).some((l) => SAID_ROW.test(l))) return null;
+  } else {
+    // No hint (a question in a box of its own): a list only when it is whole and the last thing on the screen —
+    // under it nothing but the rest of its last row, which stands further in than the numbers, and the box's edge.
+    // Under a message come the conversation or the input's own footer, at the margin.
+    const numbers = lines[end]!.search(/\d{1,2}[.)]\s/);
+    if (rows[0]!.n !== 1 || rows.length < 2) return null;
+    if (lines.slice(end + 1).some((l) => !RULE_ROW.test(l) && l.search(/[^\s│|]/u) <= numbers)) return null;
+  }
   const options = rows.map((r) => {
     const [label, ...rest] = r.text.split(/\s{2,}/);
     const detail = rest.join(" ").trim();
