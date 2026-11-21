@@ -1907,6 +1907,12 @@ describe("terminal pieces", () => {
     expect(cleanTitle("[ . ] Action Required")).toBe("");
     expect(meaningfulTitle("✳ Claude Code", "claude-code")).toBeNull();
     expect(meaningfulTitle("codex", "codex")).toBeNull();
+    expect(meaningfulTitle("| Codex", "codex")).toBeNull();
+    expect(meaningfulTitle("⠋ | Codex", "codex")).toBeNull();
+    expect(meaningfulTitle("[ ! ] Action Required | Codex", "codex")).toBeNull();
+    expect(meaningfulTitle("查看进程 | Codex", "codex")).toBe("查看进程 | Codex");
+    expect(meaningfulTitle("a | b", "codex")).toBe("a | b");
+    expect(terminalName(null, "| Codex", "codex", "/tmp/proj", null, "第一条消息")).toBe("第一条消息");
     expect(meaningfulTitle("me@mac: ~/proj", "claude-code")).toBeNull();
     expect(meaningfulTitle("✻ 修复登录页的样式", "claude-code")).toBe("修复登录页的样式");
     expect(terminalName(null, "✳ Claude Code", "claude-code", "/Users/me/Projects/AgentSwitch")).toBe("AgentSwitch");

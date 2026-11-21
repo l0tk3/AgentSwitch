@@ -4,6 +4,7 @@
  *  companion beside it (OpenCode's own server), else from output activity. Permission requests from a hook wait here until a screen answers (or the wait runs out and the agent asks
  *  in the terminal). */
 
+import { worthShowing } from "../sessions/titles.js";
 import type { Writing } from "../core/writing.js";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -465,12 +466,7 @@ export function cleanTitle(raw: string): string {
 
 /** A title worth showing: not the agent's own name, a bare program name or a shell's `user@host: dir`. */
 export function meaningfulTitle(title: string, harness: TerminalHarness): string | null {
-  const t = cleanTitle(title);
-  if (!t) return null;
-  const low = t.toLowerCase();
-  if ([harness, AGENT_LABELS[harness].toLowerCase(), "claude", "node", "zsh", "bash"].includes(low)) return null;
-  if (/^[\w.-]+@[\w.-]+:/.test(t) || /^[~/]/.test(t)) return null;
-  return t;
+  return worthShowing(cleanTitle(title), harness);
 }
 
 /** The name the screens show (see TerminalInfo.name); `given` is the title of the session a terminal continues. */

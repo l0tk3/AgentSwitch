@@ -18,6 +18,23 @@ const MAX_KEPT = 3000;
 const MAX_TITLE = 200;
 const WRITE_AFTER_MS = 1500;
 
+const AGENT_NAMES: Readonly<Record<string, string>> = { "claude-code": "claude code", codex: "codex", opencode: "opencode", pi: "pi" };
+
+/** A title worth showing, glyphs already off it (terminals/host.ts cleanTitle): not the agent's own name, a bare
+ *  program name or a shell's `user@host: dir`. */
+export function worthShowing(title: string, harness: string): string | null {
+  const t = title.trim();
+  if (!t) return null;
+  const own = [harness, AGENT_NAMES[harness] ?? harness, "claude", "node", "zsh", "bash"];
+  if (own.includes(t.toLowerCase())) return null;
+  // Codex's title is "<what the thread is about> | Codex"; before it knows what that is, and with `terminal_title`
+  // set to leave it out, the title is "| Codex": its own name and nothing else. Kept as a session's title, that hid
+  // the first message for good (2026-11-21, user: 即使已经聊了很多，列表仍可能一直显示它).
+  if (t.includes("|") && t.split("|").every((part) => !part.trim() || own.includes(part.trim().toLowerCase()))) return null;
+  if (/^[\w.-]+@[\w.-]+:/.test(t) || /^[~/]/.test(t)) return null;
+  return t;
+}
+
 export class SessionTitles {
   private readonly file: string;
   private kept: Map<string, Kept> | null = null;
@@ -26,7 +43,12 @@ export class SessionTitles {
   constructor(home: string, private readonly now: () => number = Date.now) { this.file = join(home, "sessions", "titles.json"); }
 
   /** The title the agent gave session `id` last; null: none known. */
-  get(harness: string, id: string): string | null { return this.all().get(`${harness}:${id}`)?.title || null; }
+  /** One kept before the rule knew it for the agent's own name ("| Codex") is not given back: the session's row
+   *  falls back to its first message, as it does for a session with no title. */
+  get(harness: string, id: string): string | null {
+    const title = this.all().get(`${harness}:${id}`)?.title;
+    return title ? worthShowing(title, harness) : null;
+  }
 
   custom(harness: string, id: string): string | null { return this.all().get(`${harness}:${id}`)?.custom || null; }
 

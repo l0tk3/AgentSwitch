@@ -118,6 +118,18 @@ describe("the Mac's coding sessions", () => {
     expect(monitor.list().find((s) => s.id === "c1")?.title).toBe("Automatic title");
   });
 
+  it("does not give back a kept title that is only the agent's own name (2026-11-21)", () => {
+    const { data } = fixture();
+    const titles = new SessionTitles(data, () => NOW);
+    titles.note("codex", "x1", "| Codex");
+    titles.note("codex", "x2", "查看进程 | Codex");
+    titles.flush();
+    const reloaded = new SessionTitles(data);
+    expect(reloaded.get("codex", "x1")).toBeNull();
+    expect(reloaded.ran("codex", "x1")).toBe(true);
+    expect(reloaded.get("codex", "x2")).toBe("查看进程 | Codex");
+  });
+
   it("lists a session in a temporary folder that ran in a terminal here, and no other there (2026-11-11)", () => {
     const { sources, data } = fixture();
     const titles = new SessionTitles(data, () => NOW);
