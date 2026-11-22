@@ -9,11 +9,23 @@ enum TestSupport {
     /// The monorepo's dev install of secret-gate; integration tests skip without it.
     static let devGate = repoRoot.appendingPathComponent("packages/secret-gate/.venv/bin/secret-gate")
 
+    /// A folder of this test run's own. All of them are under one folder that is removed when the test process ends
+    /// (they used to stay: over a thousand `asm-…` folders were found in one Mac's temporary folder).
     static func tempDir(_ name: String = "t") -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("asm-\(name)-\(UUID().uuidString.prefix(8))")
+        let url = runFolder.appendingPathComponent("\(name)-\(UUID().uuidString.prefix(8))")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
+
+    /// Short, as unix socket paths under it must stay under 104 bytes.
+    private static let runFolder: URL = {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("asm-\(UUID().uuidString.prefix(8))")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        runFolderPath = strdup(url.path)
+        atexit { if let path = TestSupport.runFolderPath { try? FileManager.default.removeItem(atPath: String(cString: path)) } }
+        return url
+    }()
+    nonisolated(unsafe) private static var runFolderPath: UnsafeMutablePointer<CChar>?
 
     static var searchPath: String {
         LoginShellPath.merge(shellPath: ProcessInfo.processInfo.environment["PATH"], home: NSHomeDirectory())

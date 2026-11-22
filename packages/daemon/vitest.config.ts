@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.{ts,tsx}"],
     // Any real Codex a test reaches writes to a throwaway home, never the user's ~/.codex (its config holds hook trust).
+    // Every temporary folder of a run under one folder, removed with the run (tests/globalSetup.ts).
+    globalSetup: ["tests/globalSetup.ts"],
     setupFiles: ["tests/setup.ts"],
     coverage: {
       provider: "v8",
