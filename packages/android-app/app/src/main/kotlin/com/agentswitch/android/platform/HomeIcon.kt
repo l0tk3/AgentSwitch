@@ -13,6 +13,15 @@ import com.agentswitch.kit.design.InterfaceLook
  * Asked for as the app leaves the screen, not at the tap: a launcher that sees the name it opened the app by switched
  * off may close the app under the user's finger. Nothing is changed when the right one is already on.
  */
+/** The status bar's mark follows the look too (2026-11-23, user: 切换成 classic 之后状态栏图标还是 pixel 的): asked
+ *  each time a notification is made, from what the settings keep — a notification is made with no page on screen. */
+object StatusIcon {
+    fun of(context: Context): Int {
+        val kept = context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE).getString(InterfaceLook.key, null)
+        return if (InterfaceLook.load(kept).isClassic) com.agentswitch.android.R.drawable.ic_stat_terminal_classic else com.agentswitch.android.R.drawable.ic_stat_terminal
+    }
+}
+
 object HomeIcon {
     private const val PIXEL = "com.agentswitch.android.LauncherPixel"
     private const val CLASSIC = "com.agentswitch.android.LauncherClassic"

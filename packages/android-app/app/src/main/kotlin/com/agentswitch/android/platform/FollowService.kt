@@ -133,7 +133,7 @@ class Follower(context: Context, private val settings: AppSettings, private val 
         else Intent(context, MainActivity::class.java)
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val builder = Notification.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_terminal)
+            .setSmallIcon(StatusIcon.of(context))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)

@@ -32,9 +32,22 @@ class MainActivity : ComponentActivity() {
     /** The system's question about notifications (Android 13 and later), put when the app first has reason to. */
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /** The screen's fastest refresh at the size it is on now (2026-11-23, user: 上下滑动的时候没高刷). Some phones
+     *  (Xiaomi's, for one) keep an app they do not know at 60 Hz unless it asks: a window may name the mode it wants. */
+    private fun fastestDisplay() {
+        try {
+            val display = if (android.os.Build.VERSION.SDK_INT >= 30) display else @Suppress("DEPRECATION") windowManager.defaultDisplay
+            val now = display?.mode ?: return
+            val best = display.supportedModes.filter { it.physicalWidth == now.physicalWidth && it.physicalHeight == now.physicalHeight }.maxByOrNull { it.refreshRate } ?: return
+            if (best.refreshRate <= now.refreshRate + 1f && best.modeId == now.modeId) return
+            window.attributes = window.attributes.also { it.preferredDisplayModeId = best.modeId }
+        } catch (_: Exception) { /* the system's own choice stands */ }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(SystemBarStyle.auto(0, 0), SystemBarStyle.auto(0, 0))
+        fastestDisplay()
         // Debug screens with nothing behind them (the iPhone's `-uiDemoScreen`): the shared parts, a terminal's screen.
         val screen = if (BuildConfig.DEBUG) intent.getStringExtra("uiDemoScreen") else null
         if (screen == "design" || screen == "terminalscreen" || screen == "selfcheck") {
