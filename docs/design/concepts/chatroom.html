@@ -67,6 +67,9 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .s-classic .st.waiting i { animation: pulse 1.9s ease-out infinite; }
 .s-classic .st.busy svg { width: 11px; height: 11px; animation: cspin .8s steps(8) infinite; color: var(--ink2); }
 .st.idle { color: var(--green); } .st.waiting { color: var(--amber); } .st.failed { color: var(--red); } .st.exited { color: var(--ink3); }
+.st.held { color: var(--ink2); } .st.reconnecting { color: var(--ink2) !important; }
+.s-pixel .st.held i { box-shadow: none; background: repeating-conic-gradient(currentColor 0% 25%, transparent 0% 50%) 0 0 / 4px 4px; }
+.s-classic .st.held i { opacity: .45; }
 @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .25; } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px transparent; } }
 @keyframes cspin { to { transform: rotate(360deg); } }
@@ -215,7 +218,7 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 /* where a message stands with each one it was sent to */
 .rc { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: 11.5px; color: var(--ink3); }
 .rc span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.rc .Queued { color: var(--ink2); } .rc .Delivered { color: var(--ink2); } .rc .Handled { color: var(--ink3); } .rc .Failed { color: var(--red); }
+.rc .Queued { color: var(--ink2); } .rc .Delivered { color: var(--ink2); } .rc .Handled { color: var(--ink3); } .rc .Failed, .rc .Refused { color: var(--red); }
 .s-pixel .rc { font-family: var(--mono); }
 .rc .tick { font-family: var(--mono); }
 .empty { display: grid; place-items: center; align-content: center; gap: 10px; height: 100%; text-align: center; color: var(--ink2); font: 13px/1.7 var(--ui); padding: 0 40px; }
@@ -260,6 +263,12 @@ input, textarea { font: inherit; color: inherit; background: none; border: 0; ou
 .card dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 14px; margin: 10px 0 12px; font-size: 12px; }
 .card dt { color: var(--ink3); } .card dd { margin: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.sw { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 0; margin-bottom: 10px; border-top: 1px solid var(--ink4); border-bottom: 1px solid var(--ink4); font-size: 12.5px; color: var(--ink); }
+.sw.off { color: var(--ink3); }
+.s-pixel .sw .knob { font-family: var(--mono); color: var(--ink2); } .s-pixel .sw.on .knob { color: var(--ink); }
+.s-classic .sw .knob { width: 30px; height: 18px; border-radius: 9px; background: var(--raise); position: relative; box-shadow: inset 0 0 0 .5px var(--ink4); }
+.s-classic .sw .knob::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 .5px 1.5px rgba(0,0,0,.3); transition: left .15s; }
+.s-classic .sw.on .knob { background: var(--green); } .s-classic .sw.on .knob::after { left: 14px; }
 
 /* ---------- a new room ---------- */
 .sheet { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 560px; max-height: 86%; display: flex; flex-direction: column; }
@@ -361,7 +370,8 @@ button svg { pointer-events: none; }
 <li><b>谁发给谁看得见</b>：正文里的 <code>@名字</code> 是收件人；被引用的那条显示在消息上方；带 <code>@</code> 的消息下面一行是每个收件人的投递状态。</li>
 <li><b>投递状态</b>：<code>Sent</code>（写进房间）· <code>Queued</code>（对方在忙，这一轮结束再送）· <code>Delivered</code>（交到手上）；对方处理完这一行就消失。对方已结束时是 <code>Ended</code>，红色。</li>
 <li><b>发给你、还没看的</b>：行左侧一条琥珀色——琥珀只表示“等你处理”。看过（切到这个房间）就没有了。</li>
-<li><b>成员的状态</b>用终端的那一套：像素外观 Busy · Waiting · Idle · Exited（转圈、键、空心键），经典外观 Working · Needs You · Ready · Ended（转圈、圆点、空心圆）。</li>
+<li><b>成员的状态</b>：平常四个用终端的那一套（像素 Busy · Waiting · Idle · Exited，经典 Working · Needs You · Ready · Ended）。出了事的六个各有一个词：<code>Reconnecting</code>（连不上、在重试）· <code>Limited</code>（额度或限速）· <code>Signed Out</code>（登录失效）· <code>Blocked</code>（被安全措施拦下）· <code>Error</code> · <code>Offline</code>（节点连不上）。要你动手的是琥珀，出了错的是红，自己会好的不上色。点名字，名片上写着这个状态下发给它的消息会怎样。</li>
+<li><b>Chatroom Kit 与“拉会话”</b>：进房间的会话都带着 Kit（发、读、看成员）。名片上有一个开关 <code>Can Add Sessions</code>，开了的才能建房间、拉会话、读配置和会话的清单；被别的会话拉起来的会话这个开关是灰的。这里 daemon 开着。</li>
 <li><b>多轮没有你</b>：两个 agent 之间连续往返到 6 次，提醒你一声（顶上一条、房间列表里一个标记、手机上一条通知），不打断它们。要停由你点 <code>Pause</code>；暂停时消息照写，不投递。</li>
 <li><b>一行只写谁和什么时候</b>：agent 是名字旁的图，模型、节点、目录在名片里；投递状态只在还没送到或送不到时出现，都处理完了就不写。</li>
 <li><b>置顶笔记</b>：房间名下面那一段，所有成员能读能改（第一版的“临时协作区域”）。</li>
@@ -436,13 +446,21 @@ const pix = (name, px = 2) => P.sprite(PX[name], { px });
 const icon = (name, { px = 2, size } = {}) => (classic() ? ci(name, size) : pix(name, px));
 const agentMark = (a, px = 2) => (classic() ? ci(a) : P.sprite(P.AGENT_PX[a], { px }));
 const BRAILLE = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/** A member's state as a mark (docs/chatroom-v0.md §6.1). Amber is what needs the user's hands (waiting, signed out),
+ *  red what went wrong (blocked, error); what mends itself has no colour — a spinner while it tries again, a dithered
+ *  key while it only waits (limited, offline). Never the colour alone: the word stands beside it. */
 function state(st) {
-  const cls = { busy: "busy", waiting: "waiting", idle: "idle", exited: "exited", failed: "failed" }[st];
-  if (st === "busy") return classic() ? `<span class="st busy">${ci("spin")}</span>` : `<span class="st busy" data-spin>⠋</span>`;
+  if (st === "busy" || st === "reconnecting") return classic() ? `<span class="st busy ${st}">${ci("spin")}</span>` : `<span class="st busy ${st}" data-spin>⠋</span>`;
+  const cls = { waiting: "waiting", signedout: "waiting", idle: "idle", exited: "exited", blocked: "failed", error: "failed", limited: "held", offline: "held" }[st];
   return `<span class="st ${cls}"><i></i></span>`;
 }
-const WORD = { busy: ["Busy", "Working"], waiting: ["Waiting", "Needs You"], idle: ["Idle", "Ready"], exited: ["Exited", "Ended"] };
+const WORD = { busy: ["Busy", "Working"], waiting: ["Waiting", "Needs You"], idle: ["Idle", "Ready"], exited: ["Exited", "Ended"],
+  reconnecting: ["Reconnecting", "Reconnecting"], limited: ["Limited", "Limited"], signedout: ["Signed Out", "Signed Out"], blocked: ["Blocked", "Blocked"], error: ["Error", "Error"], offline: ["Offline", "Offline"] };
 const word = (st) => WORD[st][classic() ? 1 : 0];
+/** What becomes of a message sent to a member in this state: handed over, kept until it can be, or not at all. */
+const STATE_SAYS = { reconnecting: "连不上它的服务，正在重试。发给它的消息先留着，连上之后交给它。", limited: "额度用完或被限速。发给它的消息留到恢复之后。", signedout: "登录失效，需要你重新登录。发给它的消息交不了。",
+  blocked: "这一轮被模型的安全措施拦下了。发给它的那一条它没能处理。", error: "这一轮出错结束。发给它的消息会再试一次。", offline: "它所在的节点连不上。发给它的消息留到节点回来。" };
+const TAKES = { idle: "now", busy: "queue", waiting: "queue", reconnecting: "hold", limited: "hold", offline: "hold", error: "hold", exited: "never", signedout: "never", blocked: "refuse" };
 const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 const GALLERY = ["daemon", "mac-app", "ios-app", "android", "docs", "review", "dayhub", "web", "api", "gate", "router", "infra", "deploy", "tests", "lint", "design", "search", "billing",
@@ -451,18 +469,21 @@ const GALLERY = ["daemon", "mac-app", "ios-app", "android", "docs", "review", "d
 // ---------- made-up data ----------
 const SEATS = {
   you: { id: "you", name: "you", you: true },
-  daemon: { id: "daemon", name: "daemon", agent: "cc", model: "Fable 5.2", profile: "Work", color: "violet", node: "This Mac", dir: "~/Projects/AgentSwitch/packages/daemon", mode: "Bypass", st: "busy", by: "you" },
+  daemon: { id: "daemon", name: "daemon", agent: "cc", model: "Fable 5.2", profile: "Work", color: "violet", node: "This Mac", dir: "~/Projects/AgentSwitch/packages/daemon", mode: "Bypass", st: "busy", by: "you", adds: true },
   "mac-app": { id: "mac-app", name: "mac-app", agent: "cc", model: "Opus 5.5", profile: "Default", color: null, node: "This Mac", dir: "~/Projects/AgentSwitch/packages/mac-app", mode: "Auto", st: "idle", by: "you" },
   "ios-app": { id: "ios-app", name: "ios-app", agent: "codex", model: "GPT-6 Luna", profile: "Team", color: "mint", node: "Mac Mini", dir: "~/Projects/AgentSwitch/packages/ios-app", mode: "Ask", st: "waiting", by: "you" },
-  android: { id: "android", name: "android", agent: "codex", model: "GPT-6 Luna", profile: "Team", color: "mint", node: "Mac Mini", dir: "~/Projects/AgentSwitch/packages/android-app", mode: "Auto", st: "idle", by: "@daemon", started: true },
+  android: { id: "android", name: "android", agent: "codex", model: "GPT-6 Luna", profile: "Team", color: "mint", node: "Mac Mini", dir: "~/Projects/AgentSwitch/packages/android-app", mode: "Auto", st: "limited", note: "Until 21:00", by: "@daemon", started: true },
+  web: { id: "web", name: "web", agent: "cc", model: "Sonnet 5.5", profile: "Personal", color: "sand", node: "This Mac", dir: "~/Projects/AgentSwitch/packages/daemon/ui", mode: "Auto", st: "signedout", by: "you" },
+  gate: { id: "gate", name: "gate", agent: "oc", model: "DeepSeek Flash", profile: "Default", color: null, node: "Mac Mini", dir: "~/Projects/AgentSwitch/packages/secret-gate", mode: "Auto", st: "reconnecting", note: "4/10", by: "you" },
+  infra: { id: "infra", name: "infra", agent: "pi", model: "DeepSeek Flash", profile: "Default", color: null, node: "Linux Box", dir: "~/srv/agentswitch", mode: "Auto", st: "offline", by: "you" },
   docs: { id: "docs", name: "docs", agent: "oc", model: "DeepSeek Flash", profile: "Default", color: null, node: "This Mac", dir: "~/Projects/AgentSwitch/docs", mode: "Edits", st: "exited", by: "you" },
-  review: { id: "review", name: "review", agent: "cc", model: "Sonnet 5.5", profile: "Personal", color: "sand", node: "This Mac", dir: "~/Projects/DayHub", mode: "Plan", st: "idle", by: "you" },
+  review: { id: "review", name: "review", agent: "cc", model: "Sonnet 5.5", profile: "Personal", color: "sand", node: "This Mac", dir: "~/Projects/DayHub", mode: "Plan", st: "blocked", by: "you" },
   dayhub: { id: "dayhub", name: "dayhub", agent: "pi", model: "Opus 5.5", profile: "Default", color: null, node: "Mac Mini", dir: "~/Projects/DayHub", mode: "Auto", st: "busy", by: "you" },
 };
 const seed = () => ({
   login: { id: "login", name: "手机订阅接口", topic: "给手机的 Clash 订阅：服务端、三端页面", paused: null, limit: 6, trips: 2,
     note: "接口：GET /clash/phone.yaml?k=…（4714）\n视图里多一个 phone: { on, listening, links, problem }\n待办：安卓页的 Add to Clash · 文档 §12",
-    seats: ["you", "daemon", "mac-app", "ios-app", "android", "docs"],
+    seats: ["you", "daemon", "mac-app", "ios-app", "android", "docs", "web", "gate", "infra"],
     msgs: [
       { day: "Today" },
       { n: 31, from: "you", t: "19:02", text: "@daemon 给手机的订阅地址做出来，局域网和 Tailscale 都开。@mac-app 你等它的接口定了再画页面。", to: { daemon: "Handled", "mac-app": "Handled" } },
@@ -472,6 +493,7 @@ const seed = () => ({
       { ev: "@daemon 启动了 @android" },
       { n: 35, from: "daemon", t: "19:31", text: "@android 安卓的 Clash 页照 iPhone 的 This iPhone 一节加一段，入口叫 Add to Clash。接口同上。", to: { android: "Handled" }, file: "packages/ios-app/App/Sources/Settings/ClashScreen.swift" },
       { n: 36, from: "android", t: "19:44", reply: 35, text: "加好了。手机上没有能接 `clash://` 的 app 时改为复制地址，这一点和 iPhone 不同。@daemon", to: { daemon: "Queued" } },
+      { n: 361, from: "daemon", t: "19:45", text: "@web 网页控制台的 Clash 页也加一个 Phones 卡片。@gate 订阅里的口令不要进日志，你看一眼。", to: { web: "Failed", gate: "Queued" } },
       { n: 37, from: "ios-app", t: "19:46", text: "@you 要不要在 iPhone 上也加一个 Copy Link？现在只有长按才能复制。", to: { you: "Delivered" }, forme: true },
       { n: 38, from: "you", t: "19:47", text: "@docs 把这一节写进 clash-v0。", to: { docs: "Failed" } },
     ] },
@@ -531,14 +553,16 @@ function avatar(seat) {
 function rich(text) {
   return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/@([a-z][\w-]*)/g, (m, id) => (SEATS[id] || id === "all" ? `<span class="at${id === "you" ? " me" : ""}" data-card="${id}">@${id}</span>` : m));
 }
-const TICK = { Sent: "·", Queued: "…", Delivered: "✓", Failed: "×" };
+const TICK = { Sent: "·", Queued: "…", Delivered: "✓", Failed: "×", Refused: "×" };
 function receipts(m) {
   if (!m.to) return "";
   // Said only while it matters: a message everyone has taken says nothing; one on its way, or one that could not be
   // handed over, says to whom.
   const open = Object.entries(m.to).filter(([, st]) => st !== "Handled");
   if (!open.length) return "";
-  return `<div class="rc">${open.map(([id, st]) => `<span class="${st}"><span class="tick">${TICK[st]}</span>${id === "you" ? "You" : id} · ${st === "Failed" ? "Ended" : st}</span>`).join("")}</div>`;
+  // One that waits says what for; one that could not be handed over says why — the member's own state, in its word.
+  const why = (id, st) => (st === "Failed" || (st === "Queued" && TAKES[SEATS[id]?.st] === "hold") ? word(SEATS[id].st) : st === "Refused" ? "Blocked" : st);
+  return `<div class="rc">${open.map(([id, st]) => `<span class="${st}"><span class="tick">${TICK[st]}</span>${id === "you" ? "You" : id} · ${why(id, st)}</span>`).join("")}</div>`;
 }
 function message(m, prev, r, narrow) {
   if (m.day) return `<div class="day">${m.day}</div>`;
@@ -589,14 +613,16 @@ function memberRows(r) {
   const by = {};
   for (const id of r.seats) if (id !== "you") (by[SEATS[id].node] ||= []).push(SEATS[id]);
   return Object.entries(by).map(([node, seats]) => `<div class="grp"><span class="label">${node}</span></div>${seats.map((s) =>
-    `<button class="mb" data-card="${s.id}"><span class="av sm" style="--c: var(--f${faceColor(s.name)})">${face(s.name, 3)}<span class="on">${state(s.st)}</span></span><span class="grow"><span class="nm cut">@${s.name}</span><div class="sub cut">${s.model} · ${word(s.st)}${s.started ? " · Started by " + s.by : ""}</div></span><span class="mk" title="${AG[s.agent]}">${agentMark(s.agent)}</span>${spot(s)}</button>`).join("")}`).join("");
+    `<button class="mb" data-card="${s.id}"><span class="av sm" style="--c: var(--f${faceColor(s.name)})">${face(s.name, 3)}<span class="on">${state(s.st)}</span></span><span class="grow"><span class="nm cut">@${s.name}</span><div class="sub cut">${word(s.st)}${s.note ? " · " + s.note : ""}${s.adds ? " · Can Add" : ""}</div></span><span class="mk" title="${AG[s.agent]}">${agentMark(s.agent)}</span>${spot(s)}</button>`).join("")}`).join("");
 }
 function card(id, style) {
   const s = SEATS[id];
   if (!s || s.you) return "";
   return `<div class="float card" style="${style}"><h3><span class="av" style="--c: var(--f${faceColor(s.name)})">${face(s.name)}</span><span class="grow">@${s.name}</span>${state(s.st)}${spot(s)}</h3>
     <dl><dt>Agent</dt><dd>${AG[s.agent]}</dd><dt>Model</dt><dd>${s.model}</dd><dt>Profile</dt><dd>${s.profile}</dd><dt>Node</dt><dd>${s.node}</dd>
-    <dt>Folder</dt><dd class="mono" title="${s.dir}">${s.dir}</dd><dt>Mode</dt><dd>${s.mode}</dd><dt>State</dt><dd>${word(s.st)}</dd><dt>Seated By</dt><dd>${s.by === "you" ? "You" : s.by}</dd></dl>
+    <dt>Folder</dt><dd class="mono" title="${s.dir}">${s.dir}</dd><dt>Mode</dt><dd>${s.mode}</dd><dt>State</dt><dd>${word(s.st)}${s.note ? " · " + s.note : ""}</dd><dt>Seated By</dt><dd>${s.by === "you" ? "You" : s.by}</dd></dl>
+    <button class="sw${s.adds ? " on" : ""}${s.started ? " off" : ""}" data-adds="${s.id}"${s.started ? " disabled" : ""}><span class="grow">Can Add Sessions</span><span class="knob">${classic() ? "" : s.adds ? "[x]" : "[ ]"}</span></button>
+    ${s.started ? `<div class="foot" style="margin:-6px 0 10px">由别的会话拉起来的会话不能再拉人。</div>` : STATE_SAYS[s.st] ? `<div class="foot" style="margin:-6px 0 10px">${STATE_SAYS[s.st]}</div>` : ""}
     <div class="acts"><button class="btn" data-mention="${s.id}">Mention</button><button class="btn" data-act="closecard">Open Terminal</button><button class="btn danger" data-act="closecard">Remove</button></div></div>`;
 }
 function roomRow(r, i) {
@@ -745,9 +771,11 @@ function post(r, from, text, { reply = null, answer = true } = {}) {
   if (r.paused || !m.to) return m;
   for (const id of Object.keys(m.to)) {
     if (id === "you") { later(300, () => { m.to.you = "Delivered"; render(true); }); continue; }
-    const seat = SEATS[id];
-    if (seat.st === "exited") { later(350, () => { m.to[id] = "Failed"; render(true); }); continue; }
-    const busy = seat.st === "busy" || seat.st === "waiting";
+    const seat = SEATS[id], takes = TAKES[seat.st];
+    if (takes === "never") { later(350, () => { m.to[id] = "Failed"; render(true); }); continue; }
+    if (takes === "hold") { later(350, () => { m.to[id] = "Queued"; render(true); }); continue; }      // kept until it is back
+    if (takes === "refuse") { later(350, () => { m.to[id] = "Delivered"; render(true); }); later(1800, () => { m.to[id] = "Refused"; render(true); }); continue; }
+    const busy = takes === "queue";
     later(350, () => { m.to[id] = busy ? "Queued" : "Delivered"; render(true); });
     later(busy ? 2600 : 900, () => { m.to[id] = "Delivered"; const was = seat.st; seat.st = "busy"; seat.was = was; render(true); });
     later(busy ? 5200 : 3200, () => {
@@ -796,6 +824,7 @@ document.addEventListener("click", (e) => {
     S.phoneMembers = false;
     return render(true);
   }
+  if (t.dataset.adds) { SEATS[t.dataset.adds].adds = !SEATS[t.dataset.adds].adds; return render(true); }
   if (t.dataset.tab) { S.sheet.tab = t.dataset.tab; return render(true); }
   if (t.dataset.choice) { S.sheet[t.dataset.choice] = t.dataset.v; return render(true); }
   if (t.dataset.seat) { const s = S.sheet.seats, i = s.indexOf(t.dataset.seat); if (i >= 0) s.splice(i, 1); else s.push(t.dataset.seat); return render(true); }
