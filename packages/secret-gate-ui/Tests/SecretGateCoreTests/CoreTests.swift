@@ -149,6 +149,7 @@ final class EncryptedAccountTests: XCTestCase {
 final class RowStoreTests: XCTestCase {
     func testRoundTripKeepsEverythingButTheValue() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("sgui-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
         let store = RowStore(url: dir.appendingPathComponent("rows.json"))
         let a = TokenEntry(label: "fin/pass", hosts: "a.example:8600", kind: .secret, uses: [.http, .exec], value: "SECRET", note: "财务", account: "lotke", encryptAccount: false)
         let b = TokenEntry(label: "mail/totp", hosts: "", kind: .totp, uses: [.otp], value: "S", note: "邮件")

@@ -1,7 +1,7 @@
 import XCTest
 @testable import SecretGateCore
 
-/// Drives the real Python CLI through the Swift bridge against a throw-away gate home.
+/// Drives the real Python CLI through the Swift bridge against a throw-away gate home (never the installed gate service).
 /// Skipped when the venv CLI is not built on this machine.
 final class GateCLIIntegrationTests: XCTestCase {
     func testKeysAndBatchRoundTrip() throws {
@@ -9,6 +9,13 @@ final class GateCLIIntegrationTests: XCTestCase {
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: exe.path), "secret-gate CLI not present")
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("sg-ui-test-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
+        // The throw-away home alone is not enough where the gate service is installed: the CLI is then a client of
+        // the service (its socket in the public directory) whatever SECRET_GATE_HOME says, and this test made its
+        // keypairs in the user's real gate and switched the current one (2026-11-15: `work` and `home` on one Mac).
+        // The public directory is pointed at the throw-away home too, where there is no socket.
+        let publicBefore = ProcessInfo.processInfo.environment["SECRET_GATE_PUBLIC"]
+        setenv("SECRET_GATE_PUBLIC", home.appendingPathComponent("gate-public").path, 1)
+        defer { if let publicBefore { setenv("SECRET_GATE_PUBLIC", publicBefore, 1) } else { unsetenv("SECRET_GATE_PUBLIC") } }
         let cli = GateCLI(executable: exe, home: home)
 
         XCTAssertEqual(try cli.listKeys(), [])
