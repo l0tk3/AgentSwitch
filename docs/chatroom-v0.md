@@ -184,11 +184,18 @@ OpenCode 没有钩子，但它的界面是一个服务的客户端，AgentSwitch
 - **不同于另外两家**：这样送进去的是一条 `user` 消息，和用户打的字是同一种。来源只能靠信封的 `From` 说明。
 - 实验的会话事后用 `DELETE /api/session/:id` 删了（204）。
 
-**pi，只读了文档，没有实跑**
+**pi 1.6.0，实测**（装上之后，用 DeepSeek Flash）
 
-- 这台 Mac 上没有装 pi，也没有它的登录，跑不了一轮真的。读的是它发布包里的文档（`@earendil-works/pi-coding-agent` 1.6.0，`docs/extensions.md`）。
-- AgentSwitch 自己的扩展在 pi 里面运行，可以调 `pi.sendMessage({ customType, content, display }, { triggerTurn: true, deliverAs: "followUp" })`：空闲时立刻起一轮，忙的时候等它做完再交。它送的是**自定义消息**，不是用户消息（`pi.sendUserMessage` 才是“像用户打的一样”），正合要求。
-- 要等装上并登录 pi 之后实测。
+AgentSwitch 自己的扩展在 pi 里面运行，调 `pi.sendMessage({ customType: "agentswitch-room", content, display: true }, { triggerTurn: true, deliverAs: "followUp" })`。
+
+| 情形 | 结果 |
+|---|---|
+| 忙的时候送 | 通：排成后续，它答完手上那一问之后读到并照做了 |
+| 空闲时送 | 通：空闲 8 秒后送，它自己起了一轮并回了话 |
+
+- 两种情形一个调用，不用区分。
+- 进去的是**自定义消息**（记录里角色是 `custom`、类型 `agentswitch-room`），不是用户消息——四家里身份最清楚的。
+- 实验用 `--no-session`，没有留会话。
 
 **四家对照**
 
@@ -197,7 +204,7 @@ OpenCode 没有钩子，但它的界面是一个服务的客户端，AgentSwitch
 | Claude Code | `Stop` 钩子的 `additionalContext` | 后台等着的 `asyncRewake` 钩子 | 钩子反馈，不是用户 | 实测 |
 | Codex | `Stop` 钩子的 `block` + `reason` | 打进终端 | 钩子反馈 / 用户输入 | 实测（空闲那条是现有功能） |
 | OpenCode | 服务的 `prompt` 接口（自动排队） | 同一个接口 | 用户消息 | 实测 |
-| pi | 扩展的 `sendMessage`，`followUp` | 同上，`triggerTurn` | 自定义消息 | 只读了文档 |
+| pi | 扩展的 `sendMessage`，`followUp` | 同上，`triggerTurn` | 自定义消息 | 实测 |
 
 **已有的地基（看代码确认）**
 
@@ -205,7 +212,7 @@ OpenCode 没有钩子，但它的界面是一个服务的客户端，AgentSwitch
 - 每个终端各有自己的 MCP 配置和令牌（浏览器工具那一套），调用方是哪个终端由通道认定。
 - 往终端里送输入已有接口。
 
-**结论**：四家都有路。Claude Code 最干净（两种情形都不打字、都不是用户身份）；OpenCode 最省事（一个接口）但进去的是用户消息；Codex 空闲时要打字；pi 待实测。
+**结论**：四家都实测通了。Claude Code 与 pi 最干净（两种情形都不打字、都不是用户身份）；OpenCode 最省事（一个接口）但进去的是用户消息；Codex 空闲时要打字。
 
 ## 13. 没定的
 
