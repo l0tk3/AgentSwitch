@@ -380,8 +380,6 @@ struct DemoTransport: HTTPTransport {
                 "link": try PairingLink.make(payload)]
     }
 }
-#endif
-
 
 extension DemoData {
     /// The profiles of the Add-Ons page's demo: `Default`, two with a folder all their own, one that shares `Default`'s.
@@ -429,3 +427,4 @@ extension DemoData {
         ]]
     }
 }
+#endif
