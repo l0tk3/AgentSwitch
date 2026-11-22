@@ -187,7 +187,7 @@ struct FolderPage: View {
                 }
             }
         }
-        if first, !session.inTab, !session.selecting {
+        if first, !session.inTab || session.closes, !session.selecting {
             ToolbarItem(placement: .cancellationAction) {
                 Button { dismiss() } label: { if look.isClassic { Text("Done") } else { Text("Done").mono(15) } }
                     .tint(look.isClassic ? Theme.signal : Theme.ink)

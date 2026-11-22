@@ -183,6 +183,8 @@ final class FilesSession {
     }
 
     let mode: Mode
+    /// The Files page itself is a sheet (from the Terminals page's top bar): its first page has `Done`.
+    var closes = false
     /// The first page's folder; nil, where the Mac starts this phone.
     var root: String?
     var stack: [FilesRoute] = []

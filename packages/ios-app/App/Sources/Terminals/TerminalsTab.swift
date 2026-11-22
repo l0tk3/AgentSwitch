@@ -111,6 +111,15 @@ struct TerminalsTab: View {
                         }
                     }
                 }
+                // The Mac's files, up from the foot (docs/chatroom-v0.md §10, 2026-11-22: Files left the tab bar).
+                if !selecting {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { model.filesShown = true } label: {
+                            if look.isClassic { Image(systemName: "folder") } else { PixelSprite(rows: RoomArt.files, pixel: 2, color: Theme.ink) }
+                        }
+                        .accessibilityLabel("Files")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     if selecting {
                         let chosen = pickedSessions(folders)

@@ -19,7 +19,7 @@ struct AgentSwitchApp: App {
         // browserzoomwatch|linkedpage|proxies|clash|clashservice|clashrules|clashcheck|clashnodes|clashtext|clashsource|
         // proxybrowser|proxyprofile|files|fileshome|filesopen|filespreview|filespreviewlong|filesimage|filesselect|fileschoose|filessensitive|
         // filesscoped|filessheet|filesreply|filesnew|filesnameerror|filestrash|filestrashbusy|filesselectbar|filesshare|filesupload|
-        // filesclash|filesgone|transcriptfiles|terminalpath`.
+        // filesclash|filesgone|transcriptfiles|terminalpath|rooms|room|roompaused|roommembers|roomcard|roomnew|roomadd`.
         if let hosts = UserDefaults.standard.string(forKey: "tlsProbe"), let pin = UserDefaults.standard.string(forKey: "tlsProbePin") {
             TLSProbe.run(hosts: hosts.split(separator: ",").map(String.init), pin: pin)
         }
@@ -57,10 +57,10 @@ struct AgentSwitchApp: App {
             // The Files tab (docs/files-v0.md §5) on the made-up disk (DemoFiles): its pages in FilesTab.demo.
             case "files", "filesopen", "filespreview", "filespreviewlong", "filesimage", "filesselect", "fileschoose", "filessensitive",
                  "filesnew", "filesnameerror", "filestrash", "filestrashbusy", "filesselectbar", "filesshare", "filesupload", "filesclash":
-                model.tab = .files; model.files.openRequest = DemoFiles.project
-            case "fileshome", "filesscoped": model.tab = .files; model.files.openRequest = DemoFiles.home
+                model.tab = .terminals; model.filesShown = true; model.files.openRequest = DemoFiles.project
+            case "fileshome", "filesscoped": model.tab = .terminals; model.filesShown = true; model.files.openRequest = DemoFiles.home
             // `Show in Files` for a session whose folder is gone: its nearest level still there (files-v0 §12.4).
-            case "filesgone": model.tab = .files; model.files.openRequest = "\(DemoFiles.project)/packages/gone"
+            case "filesgone": model.tab = .terminals; model.filesShown = true; model.files.openRequest = "\(DemoFiles.project)/packages/gone"
             // `+` › Files on Mac over the terminal; the Mac's files in its reply box.
             case "filessheet": model.tab = .terminals; model.openTerminalRequest = "a1b2c3d4"
             case "filesreply":
@@ -69,6 +69,9 @@ struct AgentSwitchApp: App {
                 ReplyDrafts.shared.text["a1b2c3d4"] = "对照一下 "
                 model.files.handoff = .init(terminal: "a1b2c3d4", picks: [MacPick(path: "\(DemoFiles.project)/src/app.ts", isFolder: false),
                                                                           MacPick(path: "\(DemoFiles.project)/.env", isFolder: false, sensitive: true)])
+            // Chat Room (docs/chatroom-v0.md): the list, a room, its members, a member's card, a new room.
+            case "rooms", "roomnew": model.tab = .rooms
+            case "room", "roompaused", "roommembers", "roomcard", "roomadd": model.tab = .rooms; model.openRoomRequest = DemoRooms.roomId
             case let s? where s.hasPrefix("browser"): model.tab = .browser; model.openBrowserRequest = DemoBrowser.openRequest(s)
             // A link tapped on a terminal's screen: its page over the terminal, `Done` back to it.
             case "linkedpage":

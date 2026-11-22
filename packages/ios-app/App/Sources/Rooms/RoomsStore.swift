@@ -1,0 +1,153 @@
+import AgentSwitchKit
+import Foundation
+import Observation
+import SwiftUI
+
+/// The Rooms tab's data (docs/chatroom-v0.md §10): the rooms on the Mac shown. Read with the version the list has, so
+/// an unchanged one costs nothing; often while the tab is on screen, now and then from the other tabs (the tab's
+/// badge), seldom from a Mac that has no Chat Room.
+@MainActor
+@Observable
+final class RoomsStore {
+    private(set) var list: RoomList?
+    /// The Mac shown is from before Chat Room.
+    private(set) var unsupported = false
+    /// The last read failed (kept list shown); cleared by the next good one.
+    var error: String?
+    @ObservationIgnored private var etag: String?
+    /// Bumped by `reset` (another Mac): a read that started before it is dropped.
+    @ObservationIgnored private var generation = 0
+
+    static let pollInterval: Duration = .seconds(3)
+    static let backgroundInterval: Duration = .seconds(20)
+    static let unsupportedInterval: Duration = .seconds(60)
+
+    var rooms: [RoomSummary] { list?.rooms ?? [] }
+    /// Messages not seen yet: the tab's badge.
+    var unread: Int { list?.unread ?? 0 }
+
+    func refresh(_ api: AgentSwitchAPI?) async {
+        guard let api else { return }
+        let asked = generation
+        do {
+            let fresh = try await api.rooms(etag: etag)
+            guard asked == generation else { return }
+            if let fresh { list = fresh.list; etag = fresh.etag }
+            unsupported = false
+            error = nil
+        } catch is RoomsUnsupported {
+            guard asked == generation else { return }
+            unsupported = true
+            list = RoomList(rooms: [])
+            etag = nil
+            error = nil
+        } catch {
+            if asked == generation { self.error = error.localizedDescription }
+        }
+    }
+
+    func reset() {
+        generation += 1
+        list = nil
+        etag = nil
+        unsupported = false
+        error = nil
+    }
+
+    #if DEBUG
+    /// The sample screens' rooms.
+    func show(_ list: RoomList) { self.list = list }
+    #endif
+}
+
+/// One room's page: the room as the Mac last gave it, what is being written, and what the user does in it.
+@MainActor
+@Observable
+final class RoomPageModel {
+    let id: String
+    private(set) var detail: RoomDetail?
+    /// The room was deleted (here or elsewhere): the page closes.
+    private(set) var gone = false
+    var error: String?
+    var draft = ""
+    /// The message being answered.
+    var replyTo: Int?
+    private(set) var sending = false
+    /// What the user had seen when the page opened: later messages that name the user are marked until it closes.
+    private(set) var seenAtOpen: Int?
+    @ObservationIgnored private var etag: String?
+    @ObservationIgnored private var marking = false
+
+    static let pollInterval: Duration = .seconds(2)
+
+    init(id: String, detail: RoomDetail? = nil) {
+        self.id = id
+        self.detail = detail
+        seenAtOpen = detail?.room.readSeq
+    }
+
+    var canSend: Bool { !sending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    func refresh(_ api: AgentSwitchAPI?) async {
+        guard let api, !gone else { return }
+        do {
+            if let fresh = try await api.room(id, etag: etag) { take(fresh.room); etag = fresh.etag }
+            error = nil
+            await markRead(api)
+        } catch APIError.http(let status, _) where status == 404 {
+            gone = true
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func take(_ fresh: RoomDetail) {
+        if seenAtOpen == nil { seenAtOpen = fresh.room.readSeq }
+        detail = fresh
+    }
+
+    /// While the room is on screen, what is in it is seen.
+    private func markRead(_ api: AgentSwitchAPI) async {
+        guard let room = detail?.room, room.lastSeq > room.readSeq, !marking else { return }
+        marking = true
+        defer { marking = false }
+        _ = try? await api.markRoomRead(id, upTo: room.lastSeq)
+    }
+
+    /// The user's words go; the box is emptied once the Mac has them, and the room is read again at once.
+    func send(_ api: AgentSwitchAPI?) async {
+        guard let api, canSend else { return }
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        sending = true
+        defer { sending = false }
+        do {
+            try await api.say(text, in: id, replyTo: replyTo)
+            draft = ""
+            replyTo = nil
+            etag = nil
+            await refresh(api)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    /// Something done to the room or one of its seats, then the room read again; false and why when the Mac refuses.
+    @discardableResult
+    func run(_ api: AgentSwitchAPI?, _ work: (AgentSwitchAPI) async throws -> Void) async -> Bool {
+        guard let api else { return false }
+        do {
+            try await work(api)
+            etag = nil
+            await refresh(api)
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
+
+    func delete(_ api: AgentSwitchAPI?) async {
+        guard let api else { return }
+        do { try await api.deleteRoom(id); gone = true } catch { self.error = error.localizedDescription }
+    }
+}

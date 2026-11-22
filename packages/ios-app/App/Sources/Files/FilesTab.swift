@@ -2,11 +2,14 @@ import AgentSwitchKit
 import AgentSwitchLive
 import SwiftUI
 
-/// The `Files` tab (docs/files-v0.md §5; 2026-10-16, user: 开一个标签页吧): the Mac's files, opened where it was last on
+/// The `Files` page (docs/files-v0.md §5; 2026-10-16, user: 开一个标签页吧; since 2026-11-22 a sheet from the Terminals
+/// page's top bar, docs/chatroom-v0.md §10: its place in the tab bar is Rooms'): the Mac's files, opened where it was last on
 /// this Mac (the first time, the Mac's home folder), or at a terminal's folder from its row (`Show in Files`). Nobody
 /// to give to here: `Add to Reply…` asks which terminal, then opens that terminal's page with the files in its reply
 /// box.
 struct FilesTab: View {
+    /// It is up as a sheet: its first page has `Done`.
+    var inSheet = false
     @Environment(AppModel.self) private var model
     @State private var session = FilesSession(mode: .tab, root: nil)
     @State private var started = false
@@ -18,7 +21,7 @@ struct FilesTab: View {
         .sheet(isPresented: Binding(get: { session.choosing != nil }, set: { if !$0 { session.choosing = nil } })) {
             TerminalChooser(picks: session.choosing ?? [], session: session).followsLook()
         }
-        .onAppear { start() }
+        .onAppear { session.closes = inSheet; start() }
         .onChange(of: model.files.openRequest) { start() }
         // Another Mac: where the tab was on that one.
         .onChange(of: model.profile?.fingerprint) {

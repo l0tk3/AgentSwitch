@@ -103,10 +103,13 @@ struct MainTabs: View {
             HomeView()
                 .tabItem { Label { Text("Dispatch") } icon: { look.isClassic ? Image(uiImage: TabIcons.classicTasks) : Image(uiImage: TabIcons.shaded(.dispatch, on: model.tab == .tasks, dark: scheme == .dark)) } }
                 .tag(MainTab.tasks)
-            // The Mac's files (docs/files-v0.md §5): after the terminals, which are what its files are given to.
-            FilesTab()
-                .tabItem { Label { Text("Files") } icon: { look.isClassic ? Image(systemName: "folder") : Image(uiImage: TabIcons.shaded(.folder, on: model.tab == .files, dark: scheme == .dark)) } }
-                .tag(MainTab.files)
+            // Chat Room (docs/chatroom-v0.md §10; 2026-11-22, user: iPhone/安卓上的file图标放到terminal顶栏，做成弹出式的……
+            // 空出来的放这个chatroom): Files left the bar for the Terminals page's top bar, where it comes up as a sheet.
+            // The badge: messages not seen yet.
+            RoomsTab()
+                .tabItem { Label { Text("Rooms") } icon: { look.isClassic ? Image(systemName: "text.bubble") : Image(uiImage: TabIcons.shaded(.rooms, on: model.tab == .rooms, dark: scheme == .dark)) } }
+                .badge(model.rooms.unread)
+                .tag(MainTab.rooms)
             BrowserTab()
                 .tabItem { Label { Text("Browser") } icon: { look.isClassic ? Image(systemName: "globe") : Image(uiImage: TabIcons.shaded(.browser, on: model.tab == .browser, dark: scheme == .dark)) } }
                 .badge(model.browser.waiting)
@@ -122,6 +125,18 @@ struct MainTabs: View {
         // empty strip with one round button in its corner (2026-10-07, user's screenshot). Apple moves an accessory in
         // line with the small bar; a reply box cannot be one (it grows, and must rise with the keyboard).
         .minimizesTabBarOnScroll(model.tab != .tasks)
+        // The Mac's files (docs/files-v0.md §5), up from the foot over whatever tab is shown: `Done` or a swipe down
+        // puts it away.
+        .sheet(isPresented: $model.filesShown) { FilesTab(inSheet: true).followsLook() }
+        // The rooms, from every tab (the badge); often while the Rooms tab is on screen, seldom from a Mac without them.
+        .task(id: Watch(endpoint: model.connection.endpoint, tab: model.tab)) {
+            while !Task.isCancelled {
+                await model.rooms.refresh(model.api)
+                let every = model.rooms.unsupported ? RoomsStore.unsupportedInterval
+                    : model.tab == .rooms ? RoomsStore.pollInterval : RoomsStore.backgroundInterval
+                try? await Task.sleep(for: every)
+            }
+        }
         .task(id: model.connection.endpoint) {
             while !Task.isCancelled {
                 await model.refreshTerminals()

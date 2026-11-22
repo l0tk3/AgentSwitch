@@ -6,7 +6,7 @@ import UIKit
 /// The entries (docs/terminal-v0.md §1, browser-v0 §1): tasks (Dispatch, the conversation), terminals (manual), and
 /// the browser on the Mac.
 enum MainTab: Hashable {
-    case tasks, terminals, files, browser, settings
+    case tasks, terminals, rooms, browser, settings
 }
 
 enum HomeSheet: String, Identifiable {
@@ -104,8 +104,15 @@ final class AppModel {
     var openTerminalRequest: String?
     /// The Browser tab (the Mac's tabs, its local servers, the addresses typed here).
     let browser = BrowserStore()
-    /// The Files tab across its visits (docs/files-v0.md §5).
+    /// The Files page across its visits (docs/files-v0.md §5).
     let files = FilesStore()
+    /// The Files page is up: a sheet from the Terminals page's top bar (docs/chatroom-v0.md §10, 2026-11-22: Files left
+    /// the tab bar for Rooms), over whatever tab is shown.
+    var filesShown = false
+    /// The Rooms tab (docs/chatroom-v0.md): the rooms on the Mac shown.
+    let rooms = RoomsStore()
+    /// A room to open on the Rooms tab (a demo screen, a terminal's room); the tab takes it.
+    var openRoomRequest: String?
     /// Where the Mac's files are read from: the API, or the demo screens' made-up disk.
     var fileSource: (any MacFileSource)? { api ?? demoFiles }
     /// The demo screens' made-up disk (`-uiDemo YES`); nil otherwise.
@@ -230,6 +237,7 @@ final class AppModel {
         terminalDone = TerminalDoneTracker()
         terminals.reset()
         browser.reset()
+        rooms.reset()
         targets = nil
         quota = nil
         pin = nil
@@ -408,16 +416,17 @@ final class AppModel {
         openTaskRequest = id
     }
 
-    /// A folder on the Files tab (a terminal row's `Show in Files`).
+    /// A folder on the Files page (a terminal row's `Show in Files`): the sheet comes up at it.
     func showInFiles(_ path: String) {
         sheet = nil
         files.openRequest = path
-        tab = .files
+        filesShown = true
     }
 
     /// From a Live Activity: the terminals tab opens the terminal.
     func openTerminal(_ id: String) {
         sheet = nil
+        filesShown = false
         tab = .terminals
         openTerminalRequest = id
     }
@@ -812,6 +821,7 @@ extension AppModel {
             ProfileChoice(id: "abc123def1", name: "side", color: .sand)])] : [:]
         // `terminalsconnecting`: the first connection still being made, nothing read yet (the Terminals tab's one line).
         if screen != "terminalsconnecting" { model.terminals.setDemo(DemoData.terminalList, sessions: DemoData.sessions, git: DemoData.git, profiles: profiles) }
+        model.rooms.show(DemoRooms.list)
         model.browser.setDemo(DemoBrowser.list, servers: DemoBrowser.servers, recent: DemoBrowser.recent, zoom: DemoBrowser.zoom,
                               browsers: UserDefaults.standard.string(forKey: "uiDemoScreen") == "browserprofiles"
                                 ? [.shared, BrowserChoice(key: "claude-code.abc123def0", name: "cwork1", exit: .init(ip: "203.0.113.9", place: "Tokyo"), running: true)] : nil)
