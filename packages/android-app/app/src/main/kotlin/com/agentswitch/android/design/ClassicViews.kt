@@ -228,6 +228,28 @@ private fun DrawScope.drawSymbol(name: String, frame: Rect, color: Color) {
             for (x in listOf(0.24f, 0.41f, 0.59f, 0.76f)) drawCircle(color, line * 0.75f, p(x, 0.42f))
             drawLine(color, p(0.3f, 0.6f), p(0.7f, 0.6f), line, cap = StrokeCap.Round)
         }
+        // Chat Room's (docs/chatroom-v0.md §10): a speech bubble, two people, a reply's arrow.
+        "bubble.left" -> {
+            val bubble = Path().apply {
+                addRoundRect(RoundRect(Rect(p(0.08f, 0.14f), p(0.92f, 0.72f)), CornerRadius(0.16f * box)))
+                moveTo(p(0.24f, 0.72f).x, p(0.24f, 0.72f).y); lineTo(p(0.2f, 0.92f).x, p(0.2f, 0.92f).y); lineTo(p(0.42f, 0.72f).x, p(0.42f, 0.72f).y)
+            }
+            drawPath(bubble, color, style = stroke)
+        }
+        "person.2" -> {
+            drawCircle(color, box * 0.13f, p(0.36f, 0.32f), style = stroke)
+            drawArc(color, 180f, 180f, false, p(0.12f, 0.56f), Size(box * 0.48f, box * 0.56f), style = stroke)
+            drawCircle(color, box * 0.1f, p(0.72f, 0.38f), style = stroke)
+            drawArc(color, 200f, 160f, false, p(0.56f, 0.58f), Size(box * 0.36f, box * 0.46f), style = stroke)
+        }
+        "arrowshape.turn.up.left" -> {
+            val arrow = Path().apply {
+                moveTo(p(0.4f, 0.2f).x, p(0.4f, 0.2f).y); lineTo(p(0.12f, 0.45f).x, p(0.12f, 0.45f).y); lineTo(p(0.4f, 0.7f).x, p(0.4f, 0.7f).y)
+                moveTo(p(0.12f, 0.45f).x, p(0.12f, 0.45f).y); lineTo(p(0.62f, 0.45f).x, p(0.62f, 0.45f).y)
+                cubicTo(p(0.84f, 0.45f).x, p(0.84f, 0.45f).y, p(0.88f, 0.62f).x, p(0.88f, 0.62f).y, p(0.88f, 0.84f).x, p(0.88f, 0.84f).y)
+            }
+            drawPath(arrow, color, style = stroke)
+        }
         else -> drawCircle(color, box * 0.3f, frame.center)
     }
 }

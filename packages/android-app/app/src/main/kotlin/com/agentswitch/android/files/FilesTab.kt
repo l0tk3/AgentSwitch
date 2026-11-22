@@ -1,5 +1,10 @@
 package com.agentswitch.android.files
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -58,13 +63,14 @@ import com.agentswitch.kit.design.PixelArt
 import kotlinx.coroutines.launch
 
 /**
- * The `Files` tab (docs/files-v0.md §5; 2026-10-16, user: 开一个标签页吧): the Mac's files, opened where it was last on
+ * Files (docs/files-v0.md §5), a sheet from the Terminals page's top bar since 2026-11-22 (docs/chatroom-v0.md §10, user:
+ * iPhone/安卓上的file图标放到terminal顶栏，做成弹出式的; it was a tab before): the Mac's files, opened where it was last on
  * this Mac (the first time, the Mac's home folder), or at a terminal's folder from its row (`Show in Files`,
  * `AppModel.openFilesRequest`: taken and cleared here). Nobody to give to here: `Add to Reply…` asks which terminal,
  * then opens that terminal's page with the files in its reply box.
  */
 @Composable
-fun FilesTab() {
+fun FilesSheet(onClose: () -> Unit) {
     val model = LocalAppModel.current
     val settings = LocalSettings.current
     val scope = rememberCoroutineScope()
@@ -152,8 +158,22 @@ fun FilesTab() {
         session.stack = emptyList()
     }
 
-    Box(Modifier.fillMaxSize().background(Theme.base)) {
-        if (started) FilesBrowser(session, onPick = { })
+    Column(Modifier.fillMaxSize().background(Theme.base)) {
+        // A swipe down on the sheet's top edge sends it back, as its `Done` does.
+        var pulled by remember { mutableStateOf(0f) }
+        Box(
+            Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).height(14.dp)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { pulled = 0f },
+                        onDragEnd = { if (pulled > 60.dp.toPx()) onClose() },
+                    ) { _, dy -> pulled += dy }
+                },
+            contentAlignment = Alignment.Center,
+        ) { Box(Modifier.size(width = 36.dp, height = 4.dp).background(Theme.inkDim, RoundedCornerShape(2.dp))) }
+        Box(Modifier.weight(1f).fillMaxWidth().consumeWindowInsets(WindowInsets.statusBars)) {
+            if (started) FilesBrowser(session, onPick = { }, onClose = onClose)
+        }
     }
 }
 

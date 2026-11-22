@@ -40,7 +40,8 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 
 /** The entries side by side (docs/terminal-v0.md §1, browser-v0 §1): terminals first, the app opens on them. */
-enum class MainTab { Terminals, Tasks, Files, Browser, Settings }
+/** The tabs (docs/chatroom-v0.md §10, 2026-11-22): Files left the bar for a sheet from the Terminals page's top bar; its place is Rooms'. */
+enum class MainTab { Terminals, Tasks, Rooms, Browser, Settings }
 
 sealed class GateKeyStatus {
     data object Unknown : GateKeyStatus()
@@ -135,6 +136,15 @@ class AppModel(
     /** A folder to show on the Files tab (a terminal row's `Show in Files`); the tab takes it. */
     var openFilesRequest: String? by mutableStateOf(null)
 
+    /** Files is asked for (the Terminals page's top bar, `Show in Files`): the tabs' root raises its sheet and clears this. */
+    var filesShown: Boolean by mutableStateOf(false)
+
+    /** Chat Room's rooms on the Mac shown (docs/chatroom-v0.md). */
+    val rooms = com.agentswitch.android.rooms.RoomsStore()
+
+    /** A room to open on the Rooms tab (one just made); the tab takes it. */
+    var openRoomRequest: String? by mutableStateOf(null)
+
     private var manager: ConnectionManager? = null
 
     /** Bumped whenever the current Mac changes: an answer that arrives later from the one before is dropped. */
@@ -167,7 +177,7 @@ class AppModel(
     var demoFiles: com.agentswitch.kit.api.MacFileSource? = null
     val fileSource: com.agentswitch.kit.api.MacFileSource? get() = api?.asMacFileSource() ?: demoFiles
 
-    init { onReset { files.reset(); browser.reset(); linkedPage = null; openBrowserRequest = null } }
+    init { onReset { files.reset(); browser.reset(); rooms.reset(); linkedPage = null; openBrowserRequest = null; openRoomRequest = null } }
 
     /** The Dispatch half: tasks, conversation, input box, ciphertexts (after `refreshers` and `resetters`, which it joins). */
     val dispatch = DispatchStore(this, store, dispatchServices)
@@ -357,10 +367,11 @@ class AppModel(
         openTerminalRequest = id
     }
 
-    /** A folder on the Files tab (a terminal row's `Show in Files`). */
+    /** A folder in Files (a terminal row's `Show in Files`): the sheet rises over the Terminals page. */
     fun showInFiles(path: String) {
         openFilesRequest = path
-        tab = MainTab.Files
+        tab = MainTab.Terminals
+        filesShown = true
     }
 
     /**

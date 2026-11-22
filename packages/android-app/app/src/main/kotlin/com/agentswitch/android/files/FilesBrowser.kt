@@ -215,7 +215,7 @@ private fun FolderPage(
         if (first && demoScreen == "filesopen") { delay(400); folder.toggle("${DemoFiles.project}/src", model.fileSource, hiddenNow) }
     }
     LaunchedEffect(level?.path) {
-        if (session.inTab && level != null) model.files.remember(level.path, model.profile?.fingerprint)
+        if (session.keepsPlace && level != null) model.files.remember(level.path, model.profile?.fingerprint)
         level?.home?.let { model.files.home = it }
     }
     // Changed from this phone just now (made, renamed, moved, landed): read again at once.
@@ -305,7 +305,7 @@ private fun FolderPage(
             subtitle = {
                 if (session.selecting && session.asksTerminal) Text("${session.picked.size} Selected", color = Theme.secondaryInk, style = mono(11), maxLines = 1)
                 // The tab's first page switches Macs; a folder further in, or a sheet over a terminal, only says which.
-                else MacLine(switches = first && session.inTab)
+                else MacLine(switches = first && session.keepsPlace)
             },
             leading = {
                 if (!first) BarBack({ session.stack = session.stack.dropLast(1) })

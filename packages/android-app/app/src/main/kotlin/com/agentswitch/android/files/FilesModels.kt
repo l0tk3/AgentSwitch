@@ -476,7 +476,11 @@ class FilesSession(val mode: Mode, root: String?) {
         val names: List<String> get() = picks.filter { it.sensitive }.map { it.name }
     }
 
-    val inTab: Boolean get() = mode == Mode.Tab
+    /** Under the tab bar. Never now: Files is a sheet over the Terminals page (docs/chatroom-v0.md §10, 2026-11-22), so it keeps clear of the system's bar itself and has a `Done`. */
+    val inTab: Boolean get() = false
+
+    /** The Files page itself (not one opened over a terminal): where it was is kept for the next time, and its bar switches Macs. */
+    val keepsPlace: Boolean get() = mode == Mode.Tab
 
     /** Nobody to give to yet: `Add to Reply…` asks which terminal (the Files tab, or over a page with no reply box). */
     val asksTerminal: Boolean get() = mode == Mode.Tab || mode == Mode.Over

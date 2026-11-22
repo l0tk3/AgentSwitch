@@ -1,0 +1,398 @@
+package com.agentswitch.android.rooms
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.agentswitch.android.LocalAppModel
+import com.agentswitch.android.LocalNav
+import com.agentswitch.android.design.BarBack
+import com.agentswitch.android.design.BarWord
+import com.agentswitch.android.design.FormPage
+import com.agentswitch.android.design.FormRow
+import com.agentswitch.android.design.FormSection
+import com.agentswitch.android.design.HairRule
+import com.agentswitch.android.design.LocalLook
+import com.agentswitch.android.design.PixelBox
+import com.agentswitch.android.design.PixelBoxEffect
+import com.agentswitch.android.design.PlainField
+import com.agentswitch.android.design.Theme
+import com.agentswitch.android.design.code
+import com.agentswitch.android.design.lookWord
+import com.agentswitch.android.design.mono
+import com.agentswitch.android.design.plain
+import com.agentswitch.android.terminals.LookSymbol
+import com.agentswitch.android.terminals.LookSymbolIcon
+import com.agentswitch.android.terminals.ProfileDot
+import com.agentswitch.android.terminals.TerminalStatusMark
+import com.agentswitch.kit.api.RoomSeat
+import com.agentswitch.kit.api.SeatState
+import com.agentswitch.kit.api.TerminalInfo
+import com.agentswitch.kit.api.TerminalStatus
+import com.agentswitch.kit.api.createRoom
+import com.agentswitch.kit.api.seat
+import com.agentswitch.kit.api.setRoomNotes
+import com.agentswitch.kit.api.setSeat
+import com.agentswitch.kit.api.unseat
+import com.agentswitch.kit.api.updateRoom
+import com.agentswitch.kit.feed.ModelName
+import com.agentswitch.kit.support.PathDisplay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
+// What comes up over a room (docs/chatroom-v0.md §10): its members and a member's card, the sessions to bring in (and
+// a new room's name with them), its name and topic, and its pinned notes. The iPhone's `RoomSheets.swift`.
+
+private val agentInk @Composable get() = if (LocalLook.current.isClassic) Theme.signal else Theme.ink
+
+/**
+ * The members, by the node they run on: face with the state at its corner, `@name`, the state's word, the agent's
+ * mark, the profile's dot. A tap opens the card. `Add` brings in sessions that run on the Mac. `opening`: a member
+ * whose card is shown first (a tap on a face or a name in the timeline).
+ */
+@Composable
+fun RoomMembersSheet(model: RoomPageModel, opening: String?, add: () -> Unit, mention: (String) -> Unit) {
+    val app = LocalAppModel.current
+    val nav = LocalNav.current
+    val classic = LocalLook.current.isClassic
+    var card by remember { mutableStateOf(opening) }
+    val shown = card
+    if (shown != null) {
+        BackHandler { card = null }
+        SeatCardPage(model, shown, back = { card = null }, mention = { nav.pop(); mention(it) }, close = { nav.pop() })
+        return
+    }
+    val seats = model.detail?.sessions ?: emptyList()
+    // The Mac shown first, then the other nodes by name.
+    val nodes = seats.groupBy { it.card?.node ?: "" }.toSortedMap()
+    FormPage(
+        "Members",
+        leading = { BarWord("Done", { nav.pop() }, color = agentInk) },
+        trailing = {
+            if (classic) Text("+", Modifier.clickable(role = Role.Button, onClickLabel = "Add") { nav.pop(); add() }.padding(horizontal = 12.dp, vertical = 6.dp), color = Theme.signal, style = plain(26, FontWeight.Light))
+            else BarWord("Add", { nav.pop(); add() })
+        },
+    ) {
+        if (seats.isEmpty()) Text("房间里还没有会话。点 Add 把正在运行的会话拉进来。", Modifier.padding(Theme.Space.l), color = Theme.secondaryInk, style = plain(15))
+        for ((node, of) in nodes) {
+            FormSection(node.ifEmpty { app.profile?.name ?: "Mac" }) {
+                of.forEachIndexed { i, seat -> FormRow(first = i == 0, onClick = { card = seat.handle }) { MemberRow(seat) } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.MemberRow(seat: RoomSeat) {
+    val classic = LocalLook.current.isClassic
+    val look = LocalLook.current
+    Box {
+        RoomFaceView(seat.face, side = 26.dp)
+        SeatStateMark(
+            seat.state,
+            Modifier.align(Alignment.BottomEnd).offset(x = 5.dp, y = 5.dp).size(12.dp).background(Theme.raised, if (classic) RoundedCornerShape(6.dp) else androidx.compose.ui.graphics.RectangleShape),
+        )
+    }
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("@${seat.handle}", color = Theme.ink, style = if (classic) plain(15, FontWeight.SemiBold) else mono(15, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row {
+            Text(seat.state?.word(look) ?: "—", color = seat.state.wordColor(), style = mono(11), maxLines = 1)
+            if (seat.canAdd) Text(" · Can Add", color = Theme.secondaryInk, style = mono(11), maxLines = 1)
+            // It can neither speak here nor be woken until it is resumed (§6): for the user to do.
+            if (seat.noKit) Text(" · No Kit", color = Theme.waiting, style = mono(11), maxLines = 1)
+        }
+    }
+    seat.card?.agent?.takeIf { it.isNotEmpty() }?.let { RoomAgentMark(it) }
+    seat.card?.color?.let { ProfileDot(it) }
+}
+
+/**
+ * A member's card (§1 名片): its agent, model, profile, node, folder, how it asks, its state and who seated it; the
+ * Chatroom Kit's one switch (§6), off for good for a session another session started; and what can be done with it.
+ */
+@Composable
+private fun SeatCardPage(model: RoomPageModel, handle: String, back: () -> Unit, mention: (String) -> Unit, close: () -> Unit) {
+    val app = LocalAppModel.current
+    val nav = LocalNav.current
+    val look = LocalLook.current
+    val classic = look.isClassic
+    val scope = rememberCoroutineScope()
+    val seat = model.detail?.seat(handle)
+    var busy by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    FormPage("@$handle", leading = { BarBack(back, "Members") }) {
+        if (seat == null) {
+            Text("这个成员已不在房间里。", Modifier.padding(Theme.Space.l), color = Theme.secondaryInk, style = plain(15))
+            return@FormPage
+        }
+        FormSection {
+            FormRow(first = true) {
+                RoomFaceView(seat.face, side = 36.dp)
+                Text("@${seat.handle}", Modifier.weight(1f), color = Theme.ink, style = if (classic) plain(17, FontWeight.SemiBold) else mono(17, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                SeatStateMark(seat.state)
+                seat.card?.color?.let { ProfileDot(it) }
+            }
+            model.error?.let { FormRow { Text(it, Modifier.weight(1f), color = Theme.failed, style = plain(13)) } }
+        }
+        val gone = seat.left != null
+        FormSection(footer = (if (!gone) seat.state?.says else null) ?: if (seat.noKit) "这个会话启动时还没有 Chatroom Kit：恢复一次之后，它才能在房间里说话、被消息叫醒。" else null) {
+            var first = true
+            @Composable fun line(label: String, value: String, mono: Boolean = false, color: Color = Theme.secondaryInk) {
+                FormRow(first = first) {
+                    Text(label, color = Theme.ink, style = plain(16), maxLines = 1)
+                    Text(value, Modifier.weight(1f), color = color, style = if (mono) code(13) else plain(16), textAlign = TextAlign.End, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                }
+                first = false
+            }
+            seat.card?.let { c ->
+                line("Agent", RoomArt.agentName(c.agent))
+                line("Model", c.model?.let(ModelName::display) ?: "Default")
+                line("Profile", c.profile ?: "Default")
+                line("Node", c.node ?: app.profile?.name ?: "Mac")
+                line("Folder", PathDisplay.short(c.cwd), mono = true)
+                c.mode?.let { line("Mode", lookWord(it)) }
+            }
+            line("State", if (gone) "Left" else seat.state?.word(look) ?: "—", color = if (gone) Theme.secondaryInk else seat.state.wordColor())
+            if (seat.noKit) line("Kit", "No Kit", color = Theme.waiting)
+            line("Seated By", RoomWords.who(seat.addedBy))
+        }
+        if (!gone) {
+            FormSection(footer = if (seat.byAgent) "由别的会话拉起来的会话不能再拉人。" else "打开后，这个会话可以新建房间、拉会话进来，并读取拉人要用的清单。") {
+                val can = !seat.byAgent && !busy
+                fun set(on: Boolean) { scope.launch { busy = true; model.run(app.api) { it.setSeat(handle, model.id, on) }; busy = false } }
+                FormRow(Modifier.alpha(if (can) 1f else 0.4f), first = true, onClick = if (can) ({ set(!seat.canAdd) }) else null) {
+                    Text("Can Add Sessions", Modifier.weight(1f), color = Theme.ink, style = plain(16))
+                    Switch(checked = seat.canAdd, onCheckedChange = if (can) ({ on: Boolean -> set(on) }) else null, enabled = can)
+                }
+            }
+            FormSection {
+                FormRow(first = true, onClick = { mention(handle) }) { Text("Mention", color = Theme.ink, style = plain(16)) }
+                val terminal = seat.terminal
+                if (terminal != null && app.terminals.terminals.any { it.id == terminal }) {
+                    FormRow(onClick = { close(); nav.popToRoot(); app.openTerminal(terminal) }) { Text("Open Terminal", color = Theme.ink, style = plain(16)) }
+                }
+                FormRow(Modifier.alpha(if (busy) 0.4f else 1f), onClick = if (busy) null else ({ confirmRemove = true })) { Text("Remove", color = Theme.failed, style = plain(16)) }
+            }
+        }
+    }
+    PixelBoxEffect(confirmRemove, { confirmRemove = false }) {
+        PixelBox(
+            head = "Remove", tone = PixelBox.Tone.Red, message = "把 @$handle 移出房间？它的会话不受影响；还没交到它手上的消息不再投递。",
+            actions = listOf(PixelBox.Action("Remove", PixelBox.Action.Role.Destructive) {
+                scope.launch {
+                    busy = true
+                    val done = model.run(app.api) { it.unseat(handle, model.id) }
+                    busy = false
+                    if (done) back()
+                }
+            }),
+        )
+    }
+}
+
+/** What the sessions sheet is for: a new room (a name and a topic first), or more sessions for a room there is. */
+sealed class RoomSessionsPurpose {
+    data object Create : RoomSessionsPurpose()
+    data class Add(val room: String, val seated: Set<String>) : RoomSessionsPurpose()
+}
+
+/**
+ * The sessions running on the Mac shown, to seat: with a name and a topic first for a new room (`New`), or the ones
+ * not seated yet for a room there is (`Add Sessions`). One that has ended can not be seated and is not listed.
+ * `onDone`: the room's id, once made or added to.
+ */
+@Composable
+fun RoomSessionsSheet(purpose: RoomSessionsPurpose, onDone: (String) -> Unit = {}) {
+    val app = LocalAppModel.current
+    val nav = LocalNav.current
+    val scope = rememberCoroutineScope()
+    val creating = purpose is RoomSessionsPurpose.Create
+    var name by remember { mutableStateOf("") }
+    var topic by remember { mutableStateOf("") }
+    var picked by remember { mutableStateOf(setOf<String>()) }
+    var working by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val seated = (purpose as? RoomSessionsPurpose.Add)?.seated ?: emptySet()
+    val terminals = app.terminals.terminals.filter { it.isRunning && it.id !in seated }.sortedByDescending { maxOf(it.lastOutputAt, it.createdAt) }
+    val ready = !working && (if (creating) name.isNotBlank() else picked.isNotEmpty())
+
+    LaunchedEffect(Unit) { app.refreshTerminals() }
+
+    fun go() {
+        val api = app.api ?: run { error = "未连接 Mac。"; return }
+        scope.launch {
+            working = true
+            try {
+                when (purpose) {
+                    is RoomSessionsPurpose.Create -> {
+                        val made = api.createRoom(name.trim(), topic.trim(), terminals.map { it.id }.filter { it in picked })
+                        app.rooms.refresh(api)
+                        // The room is made; a session that could not be seated is said, not lost.
+                        if (made.problems.isNotEmpty()) app.banner = made.problems.joinToString("\n")
+                        nav.pop()
+                        onDone(made.room.id)
+                        app.openRoomRequest = made.room.id
+                    }
+                    is RoomSessionsPurpose.Add -> {
+                        val problems = ArrayList<String>()
+                        for (id in terminals.map { it.id }.filter { it in picked }) {
+                            try { api.seat(id, purpose.room); picked = picked - id } catch (e: CancellationException) { throw e } catch (e: Exception) { problems += e.message ?: e.javaClass.simpleName }
+                        }
+                        onDone(purpose.room)
+                        if (problems.isEmpty()) nav.pop() else error = problems.joinToString("\n")
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = e.message ?: e.javaClass.simpleName
+            } finally {
+                working = false
+            }
+        }
+    }
+
+    FormPage(
+        if (creating) "New Room" else "Add Sessions",
+        leading = { BarWord("Cancel", { nav.pop() }, color = agentInk) },
+        trailing = { BarWord(if (creating) "Create" else if (picked.size > 1) "Add ${picked.size}" else "Add", { go() }, enabled = ready, color = agentInk) },
+    ) {
+        if (creating) RoomNameFields(name, { name = it }, topic, { topic = it })
+        FormSection("Running Sessions", footer = "进了房间的会话可以收发房间消息；只有 @ 才唤醒它。") {
+            if (terminals.isEmpty()) {
+                FormRow(first = true) {
+                    Text(if (creating) "没有开着的终端。可以先建房间，之后再拉会话。" else "没有可以拉进来的会话：开着的终端都已在房间里。", Modifier.weight(1f), color = Theme.secondaryInk, style = plain(15))
+                }
+            }
+            terminals.forEachIndexed { i, t ->
+                FormRow(first = i == 0, onClick = { picked = if (t.id in picked) picked - t.id else picked + t.id }) { SessionRow(t, t.id in picked) }
+            }
+        }
+        error?.let { Text(it, Modifier.padding(horizontal = Theme.Space.l, vertical = Theme.Space.m), color = Theme.failed, style = plain(13)) }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.SessionRow(t: TerminalInfo, on: Boolean) {
+    if (LocalLook.current.isClassic) LookSymbolIcon(if (on) LookSymbol.CheckCircleFill else LookSymbol.Circle, side = 20.dp, color = if (on) Theme.signal else Theme.inkDim)
+    else Text(if (on) "[x]" else "[ ]", color = if (on) Theme.ink else Theme.inkDim, style = mono(14))
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(t.name, color = Theme.ink, style = plain(15, FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(PathDisplay.short(t.workdir), color = Theme.secondaryInk, style = code(11), maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+    }
+    RoomAgentMark(t.harness)
+    t.profile?.color?.let { ProfileDot(it) }
+    TerminalStatusMark(if (t.permissions.isEmpty()) t.status else TerminalStatus.Waiting)
+}
+
+/** A room's name and its topic, as two rows of one group. */
+@Composable
+private fun RoomNameFields(name: String, onName: (String) -> Unit, topic: String, onTopic: (String) -> Unit) {
+    FormSection("Room") {
+        FormRow(first = true) {
+            PlainField(name, onName, Modifier.weight(1f), placeholder = "Name", keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
+        }
+        FormRow {
+            PlainField(topic, onTopic, Modifier.weight(1f).heightIn(max = 80.dp), placeholder = "一句话，进来的成员先读到", singleLine = false)
+        }
+    }
+}
+
+/** A room's name and its topic. */
+@Composable
+fun RoomEditSheet(model: RoomPageModel) {
+    val app = LocalAppModel.current
+    val nav = LocalNav.current
+    val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf(model.detail?.room?.name ?: "") }
+    var topic by remember { mutableStateOf(model.detail?.room?.topic ?: "") }
+    var working by remember { mutableStateOf(false) }
+    FormPage(
+        "Rename Room",
+        leading = { BarWord("Cancel", { nav.pop() }, color = agentInk) },
+        trailing = {
+            BarWord("Save", {
+                scope.launch {
+                    working = true
+                    val done = model.run(app.api) { it.updateRoom(model.id, name = name.trim(), topic = topic.trim()) }
+                    working = false
+                    if (done) nav.pop()
+                }
+            }, enabled = !working && name.isNotBlank(), color = agentInk)
+        },
+    ) {
+        RoomNameFields(name, { name = it }, topic, { topic = it })
+        model.error?.let { Text(it, Modifier.padding(horizontal = Theme.Space.l, vertical = Theme.Space.m), color = Theme.failed, style = plain(13)) }
+    }
+}
+
+/**
+ * The room's pinned notes (§9): one text every member reads and writes — what was agreed. Read here, and written whole
+ * with `Save`; a session writes them with its own tool, so what is shown is what the Mac had when the sheet opened.
+ */
+@Composable
+fun RoomNotesSheet(model: RoomPageModel) {
+    val app = LocalAppModel.current
+    val nav = LocalNav.current
+    val scope = rememberCoroutineScope()
+    val had = remember { model.detail?.notes }
+    var text by remember { mutableStateOf(had?.text ?: "") }
+    var working by remember { mutableStateOf(false) }
+    val changed = text.trimEnd() != (had?.text ?: "")
+    FormPage(
+        "Notes",
+        leading = { BarWord(if (changed) "Cancel" else "Done", { nav.pop() }, color = agentInk) },
+        trailing = {
+            BarWord("Save", {
+                scope.launch {
+                    working = true
+                    val done = model.run(app.api) { it.setRoomNotes(model.id, text) }
+                    working = false
+                    if (done) nav.pop()
+                }
+            }, enabled = changed && !working, color = agentInk)
+        },
+    ) {
+        FormSection(
+            "Pinned Notes",
+            footer = (had?.let { "上次由 ${if (it.by == RoomSeat.you) "你" else "@${it.by}"} 写于 ${RoomWords.day(it.at)} ${RoomWords.time(it.at)}。" } ?: "还没有置顶笔记。") +
+                "所有成员都能读、能改：约定、接口、待办写在这里。保存会整份替换。",
+        ) {
+            FormRow(first = true) {
+                PlainField(text, { text = it }, Modifier.weight(1f).heightIn(min = 160.dp), placeholder = "约定、接口、待办…", style = plain(15), singleLine = false)
+            }
+        }
+        model.error?.let { Text(it, Modifier.padding(horizontal = Theme.Space.l, vertical = Theme.Space.m), color = Theme.failed, style = plain(13)) }
+    }
+}

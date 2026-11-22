@@ -117,10 +117,10 @@ object Demo {
             // The Dispatch page itself (the app opens on the terminals).
             screen == "home" || screen == "offline" || screen == "keptfiles" -> model.tab = MainTab.Tasks
             // The Files tab (docs/files-v0.md §5) on the made-up disk (DemoFiles): its pages in the Files screens.
-            screen in filesProjectScreens -> { model.tab = MainTab.Files; model.openFilesRequest = DemoFiles.project }
-            screen == "fileshome" || screen == "filesscoped" -> { model.tab = MainTab.Files; model.openFilesRequest = DemoFiles.home }
+            screen in filesProjectScreens -> { model.tab = MainTab.Terminals; model.filesShown = true; model.openFilesRequest = DemoFiles.project }
+            screen == "fileshome" || screen == "filesscoped" -> { model.tab = MainTab.Terminals; model.filesShown = true; model.openFilesRequest = DemoFiles.home }
             // `Show in Files` for a session whose folder is gone: its nearest level still there (files-v0 §12.4).
-            screen == "filesgone" -> { model.tab = MainTab.Files; model.openFilesRequest = "${DemoFiles.project}/packages/gone" }
+            screen == "filesgone" -> { model.tab = MainTab.Terminals; model.filesShown = true; model.openFilesRequest = "${DemoFiles.project}/packages/gone" }
             // The Mac's files in its reply box, as the Files tab hands them over, to a reply begun before (kept as a draft is).
             // A link tapped on a terminal's screen: its page over the terminal, `Done` back to it.
             screen == "linkedpage" -> {
@@ -138,7 +138,7 @@ object Demo {
             // One terminal's page, in the view its name says.
             screen in terminalPageScreens || screen.startsWith("simple") -> { model.tab = MainTab.Terminals; model.openTerminalRequest = "a1b2c3d4" }
             screen.startsWith("terminal") || screen.startsWith("newterminal") -> model.tab = MainTab.Terminals
-            screen.startsWith("files") -> model.tab = MainTab.Files
+            screen.startsWith("files") -> { model.tab = MainTab.Terminals; model.filesShown = true }
             screen.startsWith("browser") -> { model.tab = MainTab.Browser; model.openBrowserRequest = DemoBrowser.openRequest(screen) }
         }
     }

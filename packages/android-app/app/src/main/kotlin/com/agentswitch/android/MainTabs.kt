@@ -41,7 +41,10 @@ import com.agentswitch.android.browser.BrowserStore
 import com.agentswitch.android.design.HairRule
 import com.agentswitch.android.browser.BrowserTab
 import com.agentswitch.android.dispatch.HomeView
-import com.agentswitch.android.files.FilesTab
+import com.agentswitch.android.files.FilesSheet
+import com.agentswitch.android.rooms.RoomsStore
+import com.agentswitch.android.rooms.RoomsTab
+import com.agentswitch.android.rooms.rooms
 import com.agentswitch.android.design.LocalLook
 import com.agentswitch.android.design.ClassicIcon
 import com.agentswitch.android.design.ClassicIconKind
@@ -57,8 +60,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 
 /**
- * The entries side by side (docs/terminal-v0.md §1, browser-v0 §1): `Terminals`, `Dispatch` (the conversation),
- * `Files`, `Browser` and `Settings`; their icons are the shaded pictures (docs/ui-v0.md §9: tones of the ink, no hue),
+ * The entries side by side (docs/terminal-v0.md §1, browser-v0 §1, chatroom-v0 §10): `Terminals`, `Dispatch` (the
+ * conversation), `Rooms`, `Browser` and `Settings` — Files is a sheet from the Terminals page's top bar; their icons are the shaded pictures (docs/ui-v0.md §9: tones of the ink, no hue),
  * whole for the tab in use, fainter for the others.
  *
  * No push: while the app is open the Mac is followed from every tab.
@@ -93,6 +96,24 @@ fun MainTabs() {
             )
         }
     }
+    // The Mac's rooms, from every tab: the badge counts what is not seen yet; more often on the Rooms tab, rarely when
+    // the Mac has no Chat Room. Sent with the version the list has, so an unchanged one costs nothing.
+    WhileStarted(Pair(model.connection.endpoint, model.tab)) {
+        while (true) {
+            model.rooms.refresh(model.api)
+            delay(
+                if (model.rooms.unsupported) RoomsStore.unsupportedIntervalMs
+                else if (model.tab == MainTab.Rooms) RoomsStore.pollIntervalMs else RoomsStore.backgroundIntervalMs,
+            )
+        }
+    }
+    // Files, asked for from the Terminals page's top bar or a row's `Show in Files`: a sheet from the bottom.
+    val nav = LocalNav.current
+    LaunchedEffect(model.filesShown) {
+        if (!model.filesShown) return@LaunchedEffect
+        model.filesShown = false
+        nav.present("files") { FilesSheet { nav.dismiss("files") } }
+    }
     val barHidden = remember { mutableStateOf(false) }
     CompositionLocalProvider(LocalTabBarHidden provides barHidden) {
     Column(Modifier.fillMaxSize().background(Theme.base)) {
@@ -107,7 +128,7 @@ fun MainTabs() {
                         when (tab) {
                             MainTab.Terminals -> TerminalsTab()
                             MainTab.Tasks -> HomeView()
-                            MainTab.Files -> FilesTab()
+                            MainTab.Rooms -> RoomsTab()
                             MainTab.Browser -> BrowserTab()
                             MainTab.Settings -> SettingsTab()
                         }
@@ -115,10 +136,7 @@ fun MainTabs() {
                 }
             }
         }
-        // The Files tab takes the bar away while selecting and on a file's page (the iPhone's
-        // `.toolbar(.hidden, for: .tabBar)`): what is left is the room of the system's own bar.
-        if (model.tab == MainTab.Files && barHidden.value) Spacer(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars))
-        else TabBar(model.tab, badges = mapOf(MainTab.Terminals to model.terminals.waiting, MainTab.Browser to model.browser.waiting)) { model.tab = it }
+        TabBar(model.tab, badges = mapOf(MainTab.Terminals to model.terminals.waiting, MainTab.Rooms to model.rooms.unread, MainTab.Browser to model.browser.waiting)) { model.tab = it }
     }
     }
 }
@@ -133,7 +151,7 @@ private class TabItem(val tab: MainTab, val word: String, val picture: ShadedSpr
 private val tabItems = listOf(
     TabItem(MainTab.Terminals, "Terminals", ShadedSprite.terminals, ClassicIconKind.Symbol("terminal")),
     TabItem(MainTab.Tasks, "Dispatch", ShadedSprite.dispatch, ClassicIconKind.Lanes),
-    TabItem(MainTab.Files, "Files", ShadedSprite.folder, ClassicIconKind.Symbol("folder")),
+    TabItem(MainTab.Rooms, "Rooms", ShadedSprite.rooms, ClassicIconKind.Symbol("bubble.left")),
     TabItem(MainTab.Browser, "Browser", ShadedSprite.browser, ClassicIconKind.Symbol("globe")),
     TabItem(MainTab.Settings, "Settings", ShadedSprite.settings, ClassicIconKind.Symbol("gearshape")),
 )

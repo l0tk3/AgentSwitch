@@ -1,5 +1,8 @@
 package com.agentswitch.android.terminals
 
+import com.agentswitch.android.design.ClassicIcon
+import com.agentswitch.android.design.ClassicIconKind
+import com.agentswitch.android.rooms.RoomArt
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -640,10 +644,17 @@ fun TerminalsTab() {
             trailing = {
                 if (state.selecting) {
                     BarWord(if (chosen.isEmpty()) "Delete" else "Delete ${chosen.size}", { state.deletingMany = SessionBatch(chosen) }, enabled = chosen.isNotEmpty(), color = Theme.failed)
-                } else if (classic) {
-                    PlusButton(enabled = store.list != null) { state.newTerminal() }
                 } else {
-                    BarWord("New", { state.newTerminal() }, enabled = store.list != null)
+                    // Files (docs/chatroom-v0.md §10, 2026-11-22: it left the tab bar): a sheet from the bottom.
+                    Box(
+                        Modifier.heightIn(min = 44.dp).width(40.dp).clickable(role = Role.Button, onClickLabel = "Files") { model.filesShown = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (classic) ClassicIcon(ClassicIconKind.Symbol("folder"), 22.dp, 20.dp, Theme.signal)
+                        else PixelSprite(RoomArt.files, pixel = 2.dp, color = Theme.ink)
+                    }
+                    if (classic) PlusButton(enabled = store.list != null) { state.newTerminal() }
+                    else BarWord("New", { state.newTerminal() }, enabled = store.list != null)
                 }
             },
         )
