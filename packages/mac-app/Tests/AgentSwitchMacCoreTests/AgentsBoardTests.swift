@@ -37,5 +37,8 @@ final class AgentsBoardTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
         XCTAssertEqual(object, ["kind": "update", "agent": "codex", "key": "beta", "version": "0.173.0-alpha.4"])
         XCTAssertEqual(try JSONDecoder().decode(AgentsAction.self, from: Data(#"{"kind":"restart"}"#.utf8)), AgentsAction(.restart))
+        // The names the service lets through (api/agentsBoard.ts) are these, to the letter.
+        XCTAssertEqual(AgentCLI.allCases.map(\.rawValue), ["claude-code", "codex", "opencode", "pi"])
+        XCTAssertEqual(AgentSource.allCases.map(\.rawValue).sorted(), ["app", "beta", "other", "pinned", "stable"])
     }
 }

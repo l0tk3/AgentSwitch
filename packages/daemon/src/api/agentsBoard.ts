@@ -16,7 +16,9 @@ const MAX_ACTIONS = 32, MAX_BOARD = 1024 * 1024;
 
 const Action = z.object({
   kind: z.enum(["refresh", "check", "use", "install", "update", "delete", "clean", "cancel", "dismiss", "restart"]),
-  agent: z.enum(["claude", "codex", "opencode", "pi"]).optional(),
+  // As the Mac app names them (AgentCLI): Claude Code is `claude-code`, not `claude` (2026-11-22: every button of its
+  // group was refused).
+  agent: z.enum(["claude-code", "codex", "opencode", "pi"]).optional(),
   key: z.string().min(1).max(600).optional(),
   source: z.enum(["stable", "beta", "pinned", "app", "other"]).optional(),
   version: z.string().regex(/^[0-9A-Za-z.+_-]{1,64}$/).optional(),

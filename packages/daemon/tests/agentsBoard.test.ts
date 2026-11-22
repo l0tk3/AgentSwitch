@@ -36,7 +36,7 @@ describe("a node's Agents page for another node's screen", () => {
     expect((await call("POST", "/agents/actions", { kind: "restart" }, remote)).status).toBe(202);
     expect(await (await call("GET", "/agents/actions")).json()).toEqual({ actions: [{ kind: "update", agent: "codex", key: "beta", version: "0.173.0-alpha.4" }, { kind: "restart" }] });
     expect(await (await call("GET", "/agents/actions")).json()).toEqual({ actions: [] });
-    await call("POST", "/agents/actions", { kind: "clean", agent: "claude" }, remote);
+    await call("POST", "/agents/actions", { kind: "clean", agent: "claude-code" }, remote);
     pass(10_000);
     await call("PUT", "/agents/board", { agents: [] });
     pass(55_000);
@@ -46,6 +46,8 @@ describe("a node's Agents page for another node's screen", () => {
   it("refuses what is not one of the page's buttons, and keeps the app's side to this Mac", async () => {
     const { call, remote } = made();
     await call("PUT", "/agents/board", { agents: [] });
+    // The four agents by the names the Mac app sends.
+    for (const agent of ["claude-code", "codex", "opencode", "pi"]) expect((await call("POST", "/agents/actions", { kind: "clean", agent }, remote)).status).toBe(202);
     for (const bad of [{ kind: "run", agent: "codex" }, { kind: "install", agent: "bash" }, { kind: "update", agent: "codex", version: "1; rm -rf /" }, { kind: "use", extra: 1 }]) {
       expect((await call("POST", "/agents/actions", bad, remote)).status).toBe(400);
     }
