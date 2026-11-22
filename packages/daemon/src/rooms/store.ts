@@ -13,6 +13,8 @@ import { faceOf, type Face } from "./face.js";
 import { ALL, freeHandle, handleFrom, mentions, YOU } from "./names.js";
 
 export const MAX_ROOMS = 100, MAX_SEATS = 16, MAX_NAME = 60, MAX_TOPIC = 300, MAX_TEXT = 16_000;
+/** §9: the pinned notes, one text every member reads and writes; a message carries this many files at most. */
+export const MAX_NOTES = 20_000, MAX_FILES = 10;
 /** §7: the rounds between sessions the user is told of, and how many sessions one session may start. */
 export const ROUNDS_LIMIT = 6, MAX_STARTED = 4;
 
@@ -53,7 +55,12 @@ export type Message = {
   readonly replyTo?: number;
   readonly text: string;
   readonly at: number;
+  /** Files it comes with, by where they are on this node (§3 附件). */
+  readonly files?: readonly string[];
 };
+
+/** The room's pinned notes (§9): what the members agreed on — conventions, interfaces, what is left to do. */
+export type Notes = { readonly text: string; readonly at: number; readonly by: string };
 
 export type Room = {
   readonly id: string;
@@ -72,6 +79,7 @@ export type Room = {
   readonly roundsLimit: number;
   /** The message up to which the user has seen the rounds go by (`OK`): counted from there again. */
   readonly roundsFrom: number;
+  readonly notes: Notes | null;
   /** What has not arrived: message number → handle → where it is. */
   readonly receipts: Readonly<Record<string, Readonly<Record<string, Receipt>>>>;
 };
@@ -142,7 +150,7 @@ export class RoomStore {
     while (this.all().has(id)) id = randomBytes(5).toString("hex");
     const at = this.now();
     const you: Seat = { handle: YOU, kind: "user", face: null, joinedAt: at, addedBy: YOU, canAdd: true, byAgent: false };
-    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, receipts: {} };
+    const room: Room = { id, name, topic: clean(o.topic ?? "", MAX_TOPIC), createdAt: at, createdBy: o.by ?? YOU, paused: false, seats: [you], lastSeq: 0, readSeq: 0, roundsLimit: ROUNDS_LIMIT, roundsFrom: 0, notes: null, receipts: {} };
     this.save(room);
     return room;
   }
@@ -238,7 +246,17 @@ export class RoomStore {
 
   /** A seat says something. Who it is for: the `@names` in the text and those in `to`, each a seat of this room that
    *  has not left; the sender itself and names nobody has are left out. `@all` is the user's alone (§4). */
-  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number }): Message {
+  /** A member writes the pinned notes: the whole text, in place of what was there. */
+  setNotes(id: string, by: string, text: string): Room {
+    const room = this.get(id);
+    const seat = this.seatOf(room, by);
+    if (seat.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
+    const clean = text.replace(/\r\n?/g, "\n").trimEnd();
+    if (clean.length > MAX_NOTES) throw new RoomError(400, `置顶笔记太长（最多 ${MAX_NOTES} 字）`);
+    return this.save({ ...room, notes: clean ? { text: clean, at: this.now(), by: seat.handle } : null });
+  }
+
+  post(id: string, o: { readonly from: string; readonly text: string; readonly to?: readonly string[]; readonly replyTo?: number; readonly files?: readonly string[] }): Message {
     const room = this.get(id);
     const from = this.seatOf(room, o.from);
     if (from.left !== undefined) throw new RoomError(403, "这个席位已经离开房间");
@@ -246,6 +264,9 @@ export class RoomStore {
     if (!text) throw new RoomError(400, "消息是空的");
     if (text.length > MAX_TEXT) throw new RoomError(400, `消息太长（最多 ${MAX_TEXT} 字）`);
     if (o.replyTo !== undefined && !(Number.isInteger(o.replyTo) && o.replyTo >= 1 && o.replyTo <= room.lastSeq)) throw new RoomError(400, `没有 #${o.replyTo} 这条消息`);
+    const files = [...new Set((o.files ?? []).map((f) => f.trim()).filter(Boolean))];
+    if (files.length > MAX_FILES) throw new RoomError(400, `一条消息最多带 ${MAX_FILES} 个文件`);
+    if (files.some((f) => !f.startsWith("/") || f.length > 4096 || /[\n\r\0]/.test(f))) throw new RoomError(400, "文件要写它在这个节点上的完整路径");
     const named = [...mentions(text), ...(o.to ?? []).map((n) => n.replace(/^@/, "").toLowerCase())];
     const here = room.seats.filter((s) => s.left === undefined && s.handle !== from.handle);
     if (named.includes(ALL) && from.kind !== "user") throw new RoomError(403, "@all 只有用户能用，请逐个 @ 需要的成员");
@@ -253,7 +274,7 @@ export class RoomStore {
       ? here.filter((s) => s.kind === "session").map((s) => s.handle)
       : here.filter((s) => named.includes(s.handle)).map((s) => s.handle);
     // The file of messages is written first: after a crash between the two it may be one ahead of the room's count.
-    const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now() };
+    const message: Message = { seq: Math.max(room.lastSeq, this.messagesOf(id).at(-1)?.seq ?? 0) + 1, from: from.handle, to, ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }), text, at: this.now(), ...(files.length ? { files } : {}) };
     const waiting = to.filter((h) => h !== YOU);
     this.messagesOf(id).push(message);
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
@@ -371,6 +392,7 @@ function roomFrom(v: unknown): Room | null {
   if (!str(o.id) || !ID.test(o.id) || !str(o.name) || !Array.isArray(o.seats)) return null;
   const seats = o.seats.flatMap((s) => { const seat = seatFrom(s); return seat ? [seat] : []; });
   if (!seats.some((s) => s.kind === "user")) return null;
+  const n = o.notes as Record<string, unknown> | null | undefined;
   const receipts: Record<string, Record<string, Receipt>> = {};
   for (const [seq, of] of Object.entries((o.receipts ?? {}) as Record<string, unknown>)) {
     if (!/^\d+$/.test(seq) || !of || typeof of !== "object") continue;
@@ -381,6 +403,7 @@ function roomFrom(v: unknown): Room | null {
     id: o.id, name: o.name, topic: str(o.topic) ? o.topic : "", createdAt: num(o.createdAt) ? o.createdAt : 0, createdBy: str(o.createdBy) ? o.createdBy : YOU,
     paused: o.paused === true, seats, lastSeq: num(o.lastSeq) ? o.lastSeq : 0, readSeq: num(o.readSeq) ? o.readSeq : 0,
     roundsLimit: num(o.roundsLimit) ? o.roundsLimit : ROUNDS_LIMIT, roundsFrom: num(o.roundsFrom) ? o.roundsFrom : 0, receipts,
+    notes: n && str(n.text) && num(n.at) ? { text: n.text, at: n.at, by: str(n.by) ? n.by : YOU } : null,
   };
 }
 
@@ -388,5 +411,5 @@ function messageFrom(v: unknown): Message | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   if (!num(o.seq) || !str(o.from) || !str(o.text) || !num(o.at)) return null;
-  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at };
+  return { seq: o.seq, from: o.from, to: Array.isArray(o.to) ? o.to.filter(str) : [], ...(num(o.replyTo) ? { replyTo: o.replyTo } : {}), text: o.text, at: o.at, ...(Array.isArray(o.files) && o.files.some(str) ? { files: o.files.filter(str) } : {}) };
 }

@@ -160,6 +160,7 @@ export class RoomDelivery {
       `To: ${message.to.map((h) => (h === to.handle ? `@${h} (you)` : `@${h}`)).join(", ")}`,
       ...(message.replyTo === undefined ? [] : [`Reply to: #${message.replyTo}`]),
       hm(message.at),
+      ...(message.files?.length ? [`Files: ${message.files.join(", ")}`] : []),
       "",
       message.text,
     ];

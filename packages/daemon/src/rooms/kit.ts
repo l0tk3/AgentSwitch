@@ -38,6 +38,7 @@ const TOOLS: readonly KitTool[] = [
       properties: {
         text: { type: "string", description: "The message. @name addresses a member; @you is the user." },
         to: { type: "array", items: { type: "string" }, description: "Members to address, besides any @name in the text." },
+        files: { type: "array", items: { type: "string" }, description: "Files to point the others at, by absolute path on this machine (they are not copied; the others read them where they are)." },
         reply_to: { type: "integer", description: "The number of the message this answers (the #n in its envelope)." },
         room: ROOM_ARG,
       },
@@ -62,6 +63,11 @@ const TOOLS: readonly KitTool[] = [
     name: "room_members",
     description: "Who sits in an AgentSwitch Chat Room you sit in: each member's @name, agent, model, profile, folder, and its state now (whether a message to it would be taken now, later, or not at all).",
     inputSchema: { type: "object", properties: { room: ROOM_ARG } },
+  },
+  {
+    name: "room_notes",
+    description: "The pinned notes of an AgentSwitch Chat Room you sit in: one shared text all members read and write — what was agreed (conventions, interfaces, who does what, what is left). Without `text` this reads them. With `text` it replaces the whole notes with that text: read first, then write back everything that should stay plus your change. Use it for what must outlast the conversation, not for chatting.",
+    inputSchema: { type: "object", properties: { text: { type: "string", description: "The whole new notes. Omit to read." }, room: ROOM_ARG } },
   },
 ];
 
@@ -140,6 +146,7 @@ export class RoomKit {
       switch (name) {
         case "room_post": return { text: this.post(room, seat, args) };
         case "room_read": return { text: this.read(room, args) };
+        case "room_notes": return { text: this.notes(room, seat, args) };
         default: return { text: this.members(room, seat) };
       }
     } catch (err) {
@@ -243,7 +250,8 @@ export class RoomKit {
     const text = typeof args.text === "string" ? args.text : "";
     const to = Array.isArray(args.to) ? args.to.filter((v): v is string => typeof v === "string") : [];
     const replyTo = int(args.reply_to);
-    const message = this.o.store.post(room.id, { from: seat.handle, text, to, ...(replyTo === undefined ? {} : { replyTo }) });
+    const files = Array.isArray(args.files) ? args.files.filter((v): v is string => typeof v === "string") : [];
+    const message = this.o.store.post(room.id, { from: seat.handle, text, to, files, ...(replyTo === undefined ? {} : { replyTo }) });
     this.o.changed?.(room.id);
     this.o.delivery.look();
     const now = this.o.store.get(room.id);
@@ -257,6 +265,15 @@ export class RoomKit {
     return [`#${message.seq} sent in "${room.name}"${now.paused ? " (the user has paused this room: nothing is given until they resume it)" : ""}.`, ...lines, "Do not wait for a reply: one arrives as a room message when it is written."].join("\n");
   }
 
+  private notes(room: Room, seat: Seat, args: Record<string, unknown>): string {
+    if (typeof args.text === "string") {
+      const now = this.o.store.setNotes(room.id, seat.handle, args.text);
+      this.o.changed?.(room.id);
+      return now.notes ? `The pinned notes of "${room.name}" are now your text (${now.notes.text.length} characters).` : `The pinned notes of "${room.name}" are now empty.`;
+    }
+    return room.notes ? `Pinned notes of "${room.name}" (last written by @${room.notes.by}, ${hm(room.notes.at)}):\n\n${room.notes.text}` : `"${room.name}" has no pinned notes yet.`;
+  }
+
   private read(room: Room, args: Record<string, unknown>): string {
     const limit = Math.min(Math.max(int(args.limit) ?? 20, 1), 100);
     const after = int(args.after), from = str(args.from)?.replace(/^@/, "").toLowerCase(), search = str(args.search)?.toLowerCase();
@@ -266,7 +283,7 @@ export class RoomKit {
     const total = found.length;
     found = after === undefined ? found.slice(-limit) : found.slice(0, limit);
     const head = `Room "${room.name}"${room.topic ? ` — ${room.topic}` : ""}. ${total ? `${found.length} of ${total} message${total === 1 ? "" : "s"}` : "No messages"}${after === undefined ? "" : ` after #${after}`}${from ? ` from @${from}` : ""}${search ? ` containing "${search}"` : ""}.`;
-    const lines = found.map((m) => `#${m.seq} ${hm(m.at)} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}`);
+    const lines = found.map((m) => `#${m.seq} ${hm(m.at)} @${m.from}${m.to.length ? ` → ${m.to.map((h) => `@${h}`).join(" ")}` : ""}${m.replyTo === undefined ? "" : ` (re #${m.replyTo})`}\n${m.text}${m.files?.length ? `\nFiles: ${m.files.join(", ")}` : ""}`);
     return [head, ...lines].join("\n\n");
   }
 

@@ -6,6 +6,7 @@
  *  The screens ask again and again: every list is under a version of its content (`versionedJson`), so an unchanged
  *  room costs nothing. */
 
+import { existsSync } from "node:fs";
 import type { Hono } from "hono";
 import { z } from "zod";
 import { MAX_NAME, MAX_TEXT, MAX_TOPIC, RoomError, type Message, type Room, type Seat, type SeatWas } from "../rooms/store.js";
@@ -57,7 +58,8 @@ const Create = z.object({ name: z.string().max(MAX_NAME * 4), topic: z.string().
 const Update = z.object({ name: z.string().max(MAX_NAME * 4).optional(), topic: z.string().max(MAX_TOPIC * 4).optional(), paused: z.boolean().optional(), roundsLimit: z.number().int().min(2).max(100).optional() }).strict();
 const AddSeat = z.object({ terminal: z.string().min(1).max(100), canAdd: z.boolean().optional() }).strict();
 const SetSeat = z.object({ canAdd: z.boolean() }).strict();
-const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional() }).strict();
+const Say = z.object({ text: z.string().max(MAX_TEXT * 2), replyTo: z.number().int().positive().optional(), files: z.array(z.string().min(1).max(4096)).max(10).optional() }).strict();
+const WriteNotes = z.object({ text: z.string().max(100_000) }).strict();
 const Read = z.object({ seq: z.number().int().nonnegative() }).strict();
 /** What a terminal's own programs ask (the Kit's tool server, the agent's waiting program). */
 const Asked = z.discriminatedUnion("op", [
@@ -113,7 +115,7 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
 
   const whole = (room: Room, messages: readonly Message[]) => ({
     room: { id: room.id, name: room.name, topic: room.topic, paused: room.paused, createdAt: room.createdAt, createdBy: room.createdBy, lastSeq: room.lastSeq, readSeq: room.readSeq, rounds: roundsOf(room), roundsLimit: room.roundsLimit },
-    seats: seatsOf(room), messages, receipts: room.receipts,
+    seats: seatsOf(room), messages, receipts: room.receipts, notes: room.notes,
   });
 
   const seat = (roomId: string, terminal: string, canAdd: boolean | undefined): Seat => {
@@ -188,7 +190,10 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     if (!body.ok) return c.json({ error: body.error }, 400);
     try {
       const id = c.req.param("id");
-      const message = rooms.post(id, { from: YOU, text: body.data.text, ...(body.data.replyTo === undefined ? {} : { replyTo: body.data.replyTo }) });
+      // A file is named by where it is on this node; one that is not there is not sent.
+      const gone = (body.data.files ?? []).find((f) => !existsSync(f));
+      if (gone) return c.json({ error: `文件不存在：${gone}` }, 400);
+      const message = rooms.post(id, { from: YOU, text: body.data.text, ...(body.data.files ? { files: body.data.files } : {}), ...(body.data.replyTo === undefined ? {} : { replyTo: body.data.replyTo }) });
       deps.roomsChanged?.(id);
       return c.json({ message, receipts: rooms.get(id).receipts[message.seq] ?? {} }, 201);
     } catch (err) { return refused(c, err); }
@@ -216,6 +221,13 @@ export function mountRooms(app: Hono, deps: ApiDeps): void {
     const until = Date.now() + (deps.roomWatchMs ?? WATCH_MS);
     while (kit.version(id) === asked.version && Date.now() < until && !c.req.raw.signal.aborted) await new Promise((r) => setTimeout(r, Math.min(WATCH_STEP_MS, deps.roomWatchMs ?? WATCH_STEP_MS)));
     return c.json({ version: kit.version(id) });
+  });
+
+  // The pinned notes (§9): the user writes the whole text, as a session does with its tool.
+  app.put("/rooms/:id/notes", async (c) => {
+    const body = await parseBody(c, WriteNotes);
+    if (!body.ok) return c.json({ error: body.error }, 400);
+    try { const room = rooms.setNotes(c.req.param("id"), YOU, body.data.text); deps.roomsChanged?.(room.id); return c.json({ notes: room.notes }); } catch (err) { return refused(c, err); }
   });
 
   // The user has seen the sessions' rounds go by (`OK`): counted from here again. Nothing was stopped.
